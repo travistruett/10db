@@ -1,4 +1,10 @@
 export { createClaudeAdapter } from './claude-adapter';
+export { createCodexAdapter } from './codex-adapter';
+export { patchPaths } from './codex-guard';
+export { spawnAppServer, type CodexChild } from './codex-rpc';
+export { guardSocketPath } from './codex-session';
+export { codexLoginStatus } from './codex-sign-in-check';
+export { createRoutedAdapter } from './routed-adapter';
 export {
   FAKE_ACCOUNT_EMAIL,
   FakeAdapter,
@@ -7,7 +13,7 @@ export {
 } from './fake-adapter';
 export { scriptedShapeBehaviour } from './fake-shape';
 export type { FakeShapeBehaviour, FakeShapeTurn } from './fake-shape';
-export { checkAccount, type SeenAccount } from './account-check';
+export { checkAccount, loginIdentity, type SeenAccount } from './account-check';
 export { AccountProbeError, CompletionError, SessionEndReason } from './types';
 export type {
   SessionAdapter,

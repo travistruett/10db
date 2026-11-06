@@ -42,6 +42,24 @@
         "warning"
       ]
     },
+    "codex": {
+      "type": "object",
+      "properties": {
+        "verifiedOn": {
+          "type": "string"
+        },
+        "warning": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "verifiedOn",
+        "warning"
+      ]
+    },
     "tools": {
       "type": "array",
       "items": {
@@ -51,6 +69,7 @@
             "type": "string",
             "enum": [
               "claude",
+              "codex",
               "git",
               "docker",
               "gh"
@@ -119,6 +138,7 @@
   "required": [
     "loginEnv",
     "claudeCode",
+    "codex",
     "tools"
   ]
 }

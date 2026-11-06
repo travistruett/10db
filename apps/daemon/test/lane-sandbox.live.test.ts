@@ -14,11 +14,12 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir, tmpdir, userInfo } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import {
   ClaimKind,
   mintId,
   PermissionChoice,
+  Provider,
   StepRole,
   ToolAccess,
   type AreaDef,
@@ -27,7 +28,7 @@ import {
 } from '@10db/contracts';
 import { createTestStore, seedProject, type AccountRow } from '@10db/db';
 import { HARNESS_PLUGIN_DIR } from '@10db/harness';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { buildSessionPrompt } from '../src/briefing';
 import { loadEnv } from '../src/env';
@@ -38,10 +39,14 @@ import { judgePreToolUse, protectedPaths } from '../src/guard';
 import { createInboxService, createPermissionBroker } from '../src/inbox';
 import { resolveSandboxRuntime } from '../src/paths';
 import { allowedToolsFor } from '../src/permissions';
+import { openSandboxRoots, sandboxDepsOf, type SandboxRoots } from '../src/daemon';
 import {
+  claimSandboxRoots,
+  claudeCodeTmpPath,
   createLaneSandbox,
   createLaneTempDir,
   fileAccessJudge,
+  laneTempRoot,
   removeLaneTempDir,
   type LaneSession,
   type StdioMcpServer,
@@ -52,6 +57,29 @@ import { isolatedGitEnv, seedWorkstream, TEST_REPO_CONFIG } from './fixtures';
 import { captureLogs } from './log-capture';
 
 const live = loadEnv(process.env).TENDB_LIVE_CLAUDE === '1';
+
+/**
+ * Marks the daemon's roots as a running daemon's while a describe's tests run, so a test daemon that
+ * starts meanwhile leaves their files alone. Taken before a test makes anything there: a claim
+ * removes every temp dir it finds unmarked.
+ */
+function claimRootsWhileRunning(): void {
+  let claim: ReturnType<typeof claimSandboxRoots> | null = null;
+  beforeAll(() => {
+    const roots = sandboxRoots();
+    claim = claimSandboxRoots([roots.temp, roots.codexLanes, roots.files]);
+  });
+  afterAll(() => {
+    claim?.release();
+  });
+}
+
+/** The daemon's own roots, made private as its start makes them, with every root lanes write. */
+function sandboxRoots(): SandboxRoots {
+  const roots = openSandboxRoots({}, homedir());
+  if (roots.refusal !== null) throw roots.refusal;
+  return roots;
+}
 
 /** A file holding a random token that must never reach the session. */
 interface Canary {
@@ -222,8 +250,13 @@ async function runLane(opts: {
   readonly hosts?: readonly string[];
   /** Approved repo stdio servers, launched under srt as the runner launches them. */
   readonly mcpServers?: Readonly<Record<string, StdioMcpServer>>;
-  /** Tools allowed without a card on top of the lane's own, such as a repo server's. */
+  /** Tools allowed on top of the lane's own, such as a repo server's. */
   readonly extraAllowedTools?: readonly string[];
+  /**
+   * Tools whose cards the builder answers Allow once; every other card is denied. The hook sends
+   * every repo MCP tool call to the broker, so a repo server's tool runs only through its card.
+   */
+  readonly allowCardsFor?: readonly string[];
   /** Runs the session in auto mode, the mode lanes switch to once these tests pass. */
   readonly autoMode?: true;
   /** The model; haiku unless given. Auto mode needs a model that supports it. */
@@ -267,6 +300,7 @@ async function runLane(opts: {
     updatedAt: new Date(0).toISOString(),
   };
   const seen = await adapter.probeAccount({
+    kind: defaultAccount.kind,
     cwd: opts.checkout,
     env: launcher.probe(defaultAccount).env,
   });
@@ -293,10 +327,12 @@ async function runLane(opts: {
     home: homedir(),
     loginConfigDir: launcher.loginConfigDir(),
   });
+  const roots = sandboxRoots();
   const laneSandbox = createLaneSandbox({
     home: homedir(),
     dataDir: opts.dataDir,
     loginConfigDir: launcher.loginConfigDir(),
+    ...sandboxDepsOf(roots),
     gitDirs: (repo) => createGit().gitDirs(repo),
     runtime: resolveSandboxRuntime(),
     worktreeRoot: join(opts.dataDir, 'worktrees'),
@@ -348,7 +384,14 @@ async function runLane(opts: {
         observer: {
           onWaitStart: (item) => {
             cards.push(item);
-            queueMicrotask(() => inbox.answer(item.id, { choice: PermissionChoice.Deny }));
+            const toolName = item.detail?.['toolName'];
+            const allowed =
+              typeof toolName === 'string' && (opts.allowCardsFor ?? []).includes(toolName);
+            queueMicrotask(() =>
+              inbox.answer(item.id, {
+                choice: allowed ? PermissionChoice.AllowOnce : PermissionChoice.Deny,
+              }),
+            );
           },
           onWaitEnd: () => undefined,
         },
@@ -549,10 +592,12 @@ function expectReadOnlyGitWorks(output: string): void {
 }
 
 describe.skipIf(!live)('lane sandbox, live', () => {
+  claimRootsWhileRunning();
   it('holds every canary in an ordinary checkout and keeps the git dir read-only', async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), '10db-live-')));
     const outside = realpathSync(mkdtempSync(join(tmpdir(), '10db-canary-')));
-    const otherLaneTmp = createLaneTempDir();
+    const { temp: tmpRoot } = sandboxRoots();
+    const otherLaneTmp = createLaneTempDir(tmpRoot);
     const shared = `/Users/Shared/10db-canary-${randomUUID()}`;
     // pnpm 12's fixed lock directory is shared with every lane and the builder's pnpm: never writable.
     // It is made here when missing, so the probe's write fails on the sandbox, not on a missing dir.
@@ -650,6 +695,12 @@ describe.skipIf(!live)('lane sandbox, live', () => {
         ].join('\n'),
       });
       report('ordinary-checkout', run, canaries);
+      // Each canary was there to read all run long, the other lane's temp dir's among them: a claim
+      // that swept it would make its row pass whatever the profile allowed.
+      for (const canary of canaries)
+        expect
+          .soft(readFileSync(canary.path, 'utf8'), `kept ${canary.label}`)
+          .toContain(canary.token);
 
       expect(run.events.at(-1)).toMatchObject({ type: 'ended', reason: 'stopped' });
       expect(run.probeOutput).toContain('CAT var-folders');
@@ -657,7 +708,11 @@ describe.skipIf(!live)('lane sandbox, live', () => {
         expect.soft(run.probeOutput, `cat ${canary.label}`).not.toContain(canary.token);
         expect.soft(run.transcript, `transcript ${canary.label}`).not.toContain(canary.token);
       }
-      expect.soft(probeLine(run.probeOutput, 'TMPDIR=')).toMatch(/^TMPDIR=\/private\/tmp\/10db-/);
+      // Bash's TMPDIR is Claude Code's own dir in the lane's temp dir, which it took.
+      expect
+        .soft(probeLine(run.probeOutput, 'TMPDIR='))
+        .toBe(`TMPDIR=${claudeCodeTmpPath(run.tmpDir)}`);
+      expect.soft(dirname(run.tmpDir)).toBe(laneTempRoot());
       expect.soft(probeLine(run.probeOutput, 'GH_TOKEN_COUNT=')).toBe('GH_TOKEN_COUNT=0');
       expectReadOnlyGitWorks(run.probeOutput);
       expect.soft(probeLine(run.probeOutput, 'OPTIONAL_LOCKS=')).toBe('OPTIONAL_LOCKS=0');
@@ -734,7 +789,7 @@ describe.skipIf(!live)('lane sandbox, live', () => {
       rmSync(shared, { force: true });
       rmSync(pnpmLock, { force: true });
       rmSync(tmpSibling, { force: true });
-      removeLaneTempDir(otherLaneTmp);
+      removeLaneTempDir(otherLaneTmp, tmpRoot);
     }
   }, 300_000);
 
@@ -824,6 +879,7 @@ describe.skipIf(!live)('lane sandbox, live', () => {
           },
         },
         extraAllowedTools: ['mcp__probe__check'],
+        allowCardsFor: ['mcp__probe__check'],
         prompt: [
           'This is a sandbox check. Call the MCP tool mcp__probe__check once, with no arguments, and nothing else.',
           'Then reply with the single word: done',
@@ -832,6 +888,8 @@ describe.skipIf(!live)('lane sandbox, live', () => {
       report('mcp-server', run, [canary]);
 
       expect(run.events.at(-1)).toMatchObject({ type: 'ended', reason: 'stopped' });
+      // A repo server's tool call is carded, and runs once the builder allows it.
+      expect(cardSummaries(run, 'mcp__probe__check')).toHaveLength(1);
       const check = run.calls.find((call) => call.name === 'mcp__probe__check');
       expect(check?.isError).toBe(false);
       expect(run.transcript).toContain(mark);
@@ -892,6 +950,7 @@ function expectAutoMode(run: LaneRun): void {
  * Auto mode needs a model that has it, so these run on sonnet.
  */
 describe.skipIf(!live)('lane sandbox in auto mode, live', () => {
+  claimRootsWhileRunning();
   const AUTO = { autoMode: true, model: 'sonnet' } as const;
 
   it('still hands 10db a hazard write, a hazard command however spelled and an edit an ask rule covers', async () => {
@@ -1279,6 +1338,7 @@ describe.skipIf(!live)('lane sandbox in auto mode, live', () => {
       // The real implement brief, as the runner builds it for a sandboxed lane, with the task that
       // asks for the change. Only 10db's own tools are missing from this session.
       const prompt = buildSessionPrompt({
+        provider: Provider.Claude,
         step: {
           index: 0,
           count: 2,

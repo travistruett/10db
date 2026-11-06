@@ -12,8 +12,8 @@ export interface SealedFileKind {
 }
 
 /**
- * Writes `content` to a new read-only file (mode 0400) beside the sandbox temp dirs and outside
- * every one of them, so no sandboxed command can write, replace or chmod it. Returns its path.
+ * Writes `content` to a new read-only file (mode 0400) in `root`, the files root, outside every
+ * sandbox temp dir, so no sandboxed command can write, replace or chmod it. Returns its path.
  */
 export function createSealedFile(root: string, kind: SealedFileKind, content: string): string {
   const file = join(root, `${kind.prefix}${randomBytes(6).toString('hex')}${kind.suffix}`);

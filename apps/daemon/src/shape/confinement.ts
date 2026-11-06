@@ -56,8 +56,11 @@ export interface ShapeAccess {
   readonly secretFiles?: readonly string[];
   /** The conversation's dropped files (§5.4). */
   readonly filesDir: string;
-  /** The sandbox temp root, where other sessions' directories and ledgers are. */
-  readonly tempRoot: string;
+  /**
+   * Every root 10db keeps sandboxes' temp dirs and files in: no Shape session reads there, even
+   * inside a checkout that holds one.
+   */
+  readonly sandboxRoots: readonly string[];
   /**
    * Present when the session runs in its read-only lane sandbox: its commands are judged by the
    * guard, as a lane's are. Absent, it runs no command and calls no MCP server but 10db's.
@@ -89,6 +92,8 @@ const SHAPE_TOOLS: ReadonlySet<string> = new Set(Object.values(ShapeToolName));
 const REVIEWER_TOOL: string = ShapeToolName.ReportFinding;
 
 const deny = (reason: string): GuardVerdict => ({ decision: 'deny', reason });
+/** A place no file is: a Shape session has no Claude Code config or temp dir of its own to read. */
+const NOWHERE = '/var/empty/10db-shape';
 const ask = (reason: string): GuardVerdict => ({ decision: 'ask', reason });
 const ALLOW: GuardVerdict = { decision: 'allow' };
 
@@ -182,9 +187,9 @@ function fileAccessContext(access: ShapeAccess): FileAccessContext {
     ...(access.secretFiles === undefined ? {} : { secretFiles: access.secretFiles }),
     readList: [access.filesDir],
     // Nothing of Claude Code's is readable: a large result is read back through a narrower search.
-    configDir: join(access.tempRoot, 'no-claude-config'),
+    configDir: join(NOWHERE, 'no-claude-config'),
     providerSessionId: null,
-    sandboxTemp: { root: access.tempRoot, own: join(access.tempRoot, 'no-own-temp-dir') },
+    sandboxTemp: { roots: access.sandboxRoots, own: join(NOWHERE, 'no-own-temp-dir') },
   };
 }
 

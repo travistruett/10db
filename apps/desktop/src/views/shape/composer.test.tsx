@@ -1,3 +1,4 @@
+import { BRAINSTORM_REFUSED_ON_CHATGPT } from '@10db/contracts';
 import { MantineProvider } from '@mantine/core';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { useState } from 'react';
@@ -9,7 +10,7 @@ import type { LateOutcome } from './late-outcome';
 const LATE_FAILURE = 'The daemon is restarting';
 
 /** A composer whose parent can hand it a late outcome and settle the send it started. */
-function mount(): {
+function mount(failure: string = LATE_FAILURE): {
   arrive: (draft: string) => void;
   settle: () => void;
 } {
@@ -18,7 +19,7 @@ function mount(): {
   function Host() {
     const [late, setLate] = useState<LateOutcome | null>(null);
     arrive = (draft) => {
-      setLate({ refused: [], failure: LATE_FAILURE, draft });
+      setLate({ refused: [], failure, draft });
     };
     return (
       <Composer
@@ -106,5 +107,24 @@ describe('the composer’s input and a late failed text', () => {
     arrive('ok');
 
     expect(input().value).toBe('ok\n\nlook at this');
+  });
+});
+
+describe('the composer’s alert', () => {
+  it.each([
+    ['a failure to reach Claude', LATE_FAILURE, "Couldn't reach Claude"],
+    [
+      'a conversation refused on a ChatGPT account',
+      BRAINSTORM_REFUSED_ON_CHATGPT,
+      'Not available on this account',
+    ],
+  ])('titles %s', (_name, failure, title) => {
+    const { arrive } = mount(failure);
+    arrive('a message');
+
+    const alert = screen.getByRole('alert');
+    expect(alert.textContent).toContain(title);
+    expect(alert.textContent).toContain(failure);
+    expect(screen.queryAllByRole('alert')).toHaveLength(1);
   });
 });

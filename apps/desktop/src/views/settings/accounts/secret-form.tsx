@@ -40,6 +40,7 @@ function secretLabel(kind: SupportedAccountKind): string {
     case AccountKind.Bedrock:
       return 'Bedrock bearer token';
     case AccountKind.ClaudeSubscription:
+    case AccountKind.CodexSignin:
       return 'Secret';
   }
 }

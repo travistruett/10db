@@ -27,6 +27,7 @@ beforeEach(() => {
     filesDir: '/files',
     log: silentLogger,
     mcp: { url: 'http://127.0.0.1:4317/mcp', toolTimeoutMs: 60_000 },
+    brainstormRefusal: () => null,
     launch: () => ({
       cwd: '/repo',
       model: 'opus',
@@ -43,7 +44,7 @@ beforeEach(() => {
         home: '/home',
         protectedReads: [],
         filesDir: '/files',
-        tempRoot: '/tmp/10db',
+        sandboxRoots: ['/tmp/10db'],
       },
     }),
   });

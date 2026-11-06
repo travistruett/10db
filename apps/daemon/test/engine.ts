@@ -36,7 +36,7 @@ import {
   transitionWorkstream,
   type Store,
 } from '@10db/db';
-import { readDefaultPersonas } from '@10db/harness';
+import { readDefaultPersonas, readSkillBody } from '@10db/harness';
 import {
   createAccountCardAnswers,
   createAccountLimits,
@@ -137,6 +137,7 @@ export async function createTestEngine(
       RunnerOptions,
       | 'afterSession'
       | 'logger'
+      | 'skillBody'
       | 'launcher'
       | 'laneSandbox'
       | 'identifyProcess'
@@ -149,6 +150,7 @@ export async function createTestEngine(
       | 'judge'
       | 'git'
       | 'worktreeRoot'
+      | 'codexLaneTempRoot'
     >
   > = {},
   setup: { readonly account?: AccountInput; readonly secret?: string } = {},
@@ -293,9 +295,11 @@ export async function createTestEngine(
     exportAwsCredentials: () => Promise.reject(new AwsCredentialsError('no AWS CLI in this test')),
     dataDir: data.path,
     worktreeRoot: join(data.path, 'worktrees'),
+    codexLaneTempRoot: join(data.path, 'lanes'),
     live,
     limits: { ...DEFAULT_RUNNER_LIMITS, gateTimeoutMs: 20_000 },
     mcpUrl: () => mcpUrl,
+    skillBody: (name) => readSkillBody(name),
     launcher: createLauncher({ base: { PATH: '/usr/bin:/bin' }, clientApp: 'test', keychain }),
     // A usage limit is recorded but pauses nothing, so a test sees the lane's own outcome.
     accounts: {

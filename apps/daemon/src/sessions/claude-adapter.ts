@@ -11,7 +11,7 @@ import {
   type SpawnedProcess,
   type SpawnOptions,
 } from '@anthropic-ai/claude-agent-sdk';
-import { AccountKind, Provider, type AccountRefusal } from '@10db/contracts';
+import { AccountKind, type AccountRefusal } from '@10db/contracts';
 import { z } from 'zod';
 import { systemClock, type Clock } from '../clock';
 import type { Logger } from '../log';
@@ -28,13 +28,13 @@ import {
 } from './account-check';
 import { createChannel } from './channel';
 import {
-  contextEvent,
   mapSdkMessage,
   toHookOutput,
   toPermissionResult,
   toSdkMcpServer,
   userMessage,
 } from './claude-mapping';
+import { contextEvent } from './context-event';
 import { startShapeSession } from './claude-shape';
 import { currentToolNames } from './mcp-tool-names';
 import { TENDB_MCP_SERVER } from './project-mcp';
@@ -597,10 +597,11 @@ function startSession(
         attempt.unanswered(stderrTail, unsent);
         return;
       }
-      const { why, printed } = noAccountWhy(START_WAITS_MS.slice(0, attempt.earlier.length + 1), [
-        ...attempt.earlier,
-        stderrTail,
-      ]);
+      const { why, printed } = noAccountWhy(
+        START_WAITS_MS.slice(0, attempt.earlier.length + 1),
+        [...attempt.earlier, stderrTail],
+        spec.account.kind,
+      );
       // A signed-out subscription may answer nothing: the account waits for its sign-in, the lane doesn't fail.
       const signedOut = missingAccountRefusal(spec.account, why, printed, signIn);
       if (signedOut)
@@ -1077,7 +1078,6 @@ async function complete(
 export function createClaudeAdapter(opts: ClaudeAdapterOptions): SessionAdapter {
   const runQuery: QueryFn = opts.query ?? ((params) => sdkQuery(params));
   return {
-    provider: Provider.Claude,
     start: (spec) =>
       (spec.sandbox ?? null) === null && opts.allowUnsandboxed !== true
         ? refusedSession(UNSANDBOXED_REFUSAL)

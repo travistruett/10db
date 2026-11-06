@@ -5,6 +5,7 @@ import {
   EventType,
   InvalidError,
   NotFoundError,
+  providerOf,
   ShapeMessageAuthor,
   ShapeMessageKind,
   ShapeOrigin,
@@ -28,6 +29,7 @@ import {
   type ShapeViewDto,
   type SessionId,
   type StartShapeInput,
+  type SupportedAccountKind,
 } from '@10db/contracts';
 import {
   countShapeFiles,
@@ -177,6 +179,8 @@ export interface ShapePrepareInput {
   readonly projectId: ProjectId;
   readonly shapeId: ShapeId;
   readonly sessionId: SessionId;
+  /** The kind of the account the session runs on, which names where its login is kept. */
+  readonly accountKind: SupportedAccountKind;
   /** The session's launch env, which the sandbox and the project's servers are built from. */
   readonly env: Readonly<Record<string, string>>;
   readonly resumeProviderSessionId: string | null;
@@ -216,6 +220,11 @@ export interface ShapeServiceDeps {
    * role's; throws when its account can't start a session.
    */
   launch(projectId: ProjectId, model: string | null): ShapeLaunch;
+  /**
+   * Why a project's account can't run a conversation, or null. Reads the project and its account row
+   * only, so asking costs no Keychain read.
+   */
+  brainstormRefusal(projectId: ProjectId): string | null;
   /** The models a conversation of the project may run on (§5.1); none offered without it. */
   readonly models?: (projectId: ProjectId) => ShapeModelsDto;
   /**
@@ -609,6 +618,15 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     } catch {
       return STRICTEST_LIMITS;
     }
+  };
+  /**
+   * Refuses a request for a project whose account can't run a conversation, so the builder is told when
+   * they ask instead of by a notice in a transcript that never reached Claude. Any other reason a launch
+   * can't be resolved is left to the start that follows.
+   */
+  const refuseChatGptAccount = (projectId: ProjectId): void => {
+    const why = deps.brainstormRefusal(projectId);
+    if (why !== null) throw new InvalidError(why);
   };
   /** The limits a conversation's pictures are held to: its live session's, or the next one's. */
   const limitsOf = (shapeId: ShapeId, rt: Runtime): PictureLimits =>
@@ -1017,7 +1035,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     const row = state.write((ctx) =>
       insertSession(ctx, {
         shapeId,
-        provider: adapter.provider,
+        provider: providerOf(launch.account.kind),
         model: launch.model,
         effort: launch.effort,
         mode: SessionMode.Managed,
@@ -1035,6 +1053,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
               projectId: shape.projectId,
               shapeId,
               sessionId: row.id,
+              accountKind: launch.account.kind,
               env: launch.env,
               resumeProviderSessionId: resumeId,
               signal: ending.signal,
@@ -1464,9 +1483,13 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
   };
 
   return {
-    create: (projectId, input) => state.write((ctx) => insertShape(ctx, projectId, input)),
+    create(projectId, input) {
+      refuseChatGptAccount(projectId);
+      return state.write((ctx) => insertShape(ctx, projectId, input));
+    },
 
     startFromTerminal(input) {
+      refuseChatGptAccount(input.projectId);
       const made: { id: ShapeId | null } = { id: null };
       try {
         return state.write((ctx) => {
@@ -1568,6 +1591,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     },
 
     send(shapeId, text) {
+      refuseChatGptAccount(getShape(state.db, shapeId).projectId);
       const rt = runtimeOf(shapeId);
       const message = say(shapeId, ShapeMessageAuthor.Builder, ShapeMessageKind.Text, text);
       const title = titleFrom(text);
@@ -1588,6 +1612,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     },
 
     propose(shapeId) {
+      refuseChatGptAccount(getShape(state.db, shapeId).projectId);
       const rt = runtimeOf(shapeId);
       if (rt.current?.kind === 'propose' || rt.queue.some((t) => t.kind === 'propose'))
         return { status: 'ignored' };
@@ -1612,6 +1637,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     },
 
     rehearse(shapeId, proposalIds) {
+      refuseChatGptAccount(getShape(state.db, shapeId).projectId);
       const rt = runtimeOf(shapeId);
       const tasks = unrehearsedTasks(state.db, shapeId, proposalIds);
       if (tasks.length === 0) return { status: 'nothing', tasks: 0 };
@@ -1667,6 +1693,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
 
     chooseModel(shapeId, model) {
       const { projectId } = getShape(state.db, shapeId);
+      refuseChatGptAccount(projectId);
       const offered = deps.models?.(projectId).offered ?? [];
       if (model !== null && !offered.includes(model))
         throw new InvalidError(

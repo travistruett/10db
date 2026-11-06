@@ -49,6 +49,8 @@ const DaemonEnv = z.object({
   TENDB_JUDGE: z.enum(['on', 'off']).optional(),
   // Test only: runs claude-adapter.live.test.ts against the real claude on the builder's subscription.
   TENDB_LIVE_CLAUDE: z.enum(['0', '1']).optional(),
+  // Test only: runs codex.live.test.ts against the real codex on a local fake model, signed in to nothing.
+  TENDB_LIVE_CODEX: z.enum(['0', '1']).optional(),
 });
 export type DaemonEnv = z.infer<typeof DaemonEnv>;
 

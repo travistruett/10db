@@ -91,6 +91,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
       updatedAt: new Date(0).toISOString(),
     };
     const seen = await adapter.probeAccount({
+      kind: account.kind,
       cwd: checkout,
       env: launcher.probe(account).env,
     });
@@ -100,7 +101,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
       home: homedir(),
       protectedReads: [],
       filesDir,
-      tempRoot: realpathSync(tmpdir()),
+      sandboxRoots: [realpathSync(tmpdir())],
     };
 
     const judged: Judged[] = [];
@@ -251,14 +252,18 @@ describe.skipIf(!live)('a Shape session, live', () => {
       createdAt: new Date(0).toISOString(),
       updatedAt: new Date(0).toISOString(),
     };
-    const seen = await adapter.probeAccount({ cwd: checkout, env: launcher.probe(account).env });
+    const seen = await adapter.probeAccount({
+      kind: account.kind,
+      cwd: checkout,
+      env: launcher.probe(account).env,
+    });
     const launch = launcher.session({ ...account, expectedIdentity: seen.email ?? null }, 'haiku');
     const access = {
       checkout,
       home: homedir(),
       protectedReads: [],
       filesDir,
-      tempRoot: realpathSync(tmpdir()),
+      sandboxRoots: [realpathSync(tmpdir())],
     };
 
     const judged: Judged[] = [];
@@ -362,6 +367,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
       updatedAt: new Date(0).toISOString(),
     };
     const seen = await adapter.probeAccount({
+      kind: defaultAccount.kind,
       cwd: checkout,
       env: launcher.probe(defaultAccount).env,
     });
@@ -374,7 +380,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
       home: homedir(),
       protectedReads: [],
       filesDir,
-      tempRoot: realpathSync(tmpdir()),
+      sandboxRoots: [realpathSync(tmpdir())],
     };
 
     const judged: Judged[] = [];
@@ -574,14 +580,18 @@ async function readInSession(
     createdAt: new Date(0).toISOString(),
     updatedAt: new Date(0).toISOString(),
   };
-  const seen = await adapter.probeAccount({ cwd: checkout, env: launcher.probe(account).env });
+  const seen = await adapter.probeAccount({
+    kind: account.kind,
+    cwd: checkout,
+    env: launcher.probe(account).env,
+  });
   const launch = launcher.session({ ...account, expectedIdentity: seen.email ?? null }, 'haiku');
   const access = {
     checkout,
     home: homedir(),
     protectedReads: [],
     filesDir,
-    tempRoot: realpathSync(tmpdir()),
+    sandboxRoots: [realpathSync(tmpdir())],
   };
 
   let providerSessionId = '';

@@ -25,10 +25,10 @@ export interface FileAccessContext {
   /** The id Claude Code knows the session by; null until a start or resume names it. */
   readonly providerSessionId: string | null;
   /**
-   * Where every sandbox's temp dirs and sealed files are, and this session's own temp dir. Everything
-   * else there is another session's or server's, so it is protected.
+   * The roots of every sandbox's temp dirs and files, and this session's own temp dir. Everything
+   * else in them is another session's or server's, or a file that holds a sandbox, so it is protected.
    */
-  readonly sandboxTemp: { readonly root: string; readonly own: string };
+  readonly sandboxTemp: { readonly roots: readonly string[]; readonly own: string };
   /**
    * Where the daemon makes every lane's copy. A path at or under it that is not in `checkout` is
    * never right (a lane builds paths from its own copy), so it is refused, not asked about.
@@ -274,7 +274,7 @@ function judgeRead(real: string, ctx: FileAccessContext, tree: boolean): ReadAcc
   if (isOwnToolResult(real, ctx)) return 'allowed';
   if ((ctx.secretFiles ?? []).some((file) => pathsEqual(real, file))) return 'protected';
   const ownTemp = spellings(ctx.sandboxTemp.own).some((dir) => isEqualOrUnder(real, dir));
-  const roots = [...ctx.protectedReads, ...(ownTemp ? [] : [ctx.sandboxTemp.root])].flatMap(
+  const roots = [...ctx.protectedReads, ...(ownTemp ? [] : ctx.sandboxTemp.roots)].flatMap(
     spellings,
   );
   if (roots.some((root) => isEqualOrUnder(real, root))) return 'protected';
@@ -371,9 +371,10 @@ function judgeWrite(real: string, ctx: FileAccessContext): WriteAccess {
   // Other sessions' temp dirs and the process ledgers are there: a ledger a lane wrote would name
   // what the next daemon start signals.
   const ownTemp = spellings(ctx.sandboxTemp.own).some((dir) => isEqualOrUnder(real, dir));
-  if (!ownTemp && spellings(ctx.sandboxTemp.root).some((root) => isEqualOrUnder(real, root))) {
-    return 'sandbox-temp';
-  }
+  const inRoot = ctx.sandboxTemp.roots
+    .flatMap(spellings)
+    .some((root) => isEqualOrUnder(real, root));
+  if (!ownTemp && inRoot) return 'sandbox-temp';
   return isClaudeProtected(real, ctx) ? 'claude-protected' : 'ok';
 }
 
@@ -461,7 +462,7 @@ export function fileAccessJudge(ctx: FileAccessContext): FileAccessJudge {
         }
         if (result.access === 'sandbox-temp') {
           return {
-            refuse: `${path} is in 10db's sandbox temp root, outside this session's temp dir; 10db never lets a lane write there.`,
+            refuse: `${path} is in one of 10db's sandbox roots, outside this session's temp dir; 10db never lets a lane write there.`,
           };
         }
         if (result.access === 'unresolvable') {

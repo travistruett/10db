@@ -7,6 +7,7 @@ import {
   accountDisplayName,
   BedrockSettings,
   needsSecret,
+  signsInWithLogin,
   type AccountDto,
   type AccountId,
   type AccountRefusal,
@@ -14,7 +15,7 @@ import {
   type ProjectDto,
 } from '@10db/contracts';
 import type { AccountRow, Json } from '@10db/db';
-import { signInCommand } from '../environment';
+import { signInCommand, signInCommandFor } from '../environment';
 import type { CapStatus } from './cap';
 import type { UsageReport } from './usage-reports';
 
@@ -45,9 +46,12 @@ function detail(
   };
 }
 
+/** The agent that runs the account's sessions, as a card names it. */
+const agentOf = (account: Pick<AccountRow, 'kind'>): string =>
+  account.kind === AccountKind.CodexSignin ? 'Codex' : 'Claude Code';
+
 function signInAgain(account: AccountRow): string {
-  if (account.kind === AccountKind.ClaudeSubscription)
-    return `Sign in again with: ${signInCommand(account.configDir)}`;
+  if (signsInWithLogin(account.kind)) return `Sign in again with: ${signInCommandFor(account)}`;
   if (account.kind === AccountKind.Bedrock) {
     const settings = BedrockSettings.safeParse(account.settings);
     if (settings.success && settings.data.awsProfile !== null)
@@ -64,11 +68,11 @@ export function fixFor(account: AccountRow, problem: AccountProblem): string {
     case AccountProblem.Unconfirmed:
       return `Confirm the identity ${account.label} runs as, or set it with PATCH /accounts/${account.id}.`;
     case AccountProblem.IdentityMismatch:
-      return account.kind === AccountKind.ClaudeSubscription
-        ? `If that is the right account, confirm it; otherwise ${signInAgain(account).toLowerCase()} and answer Resume.`
+      return signsInWithLogin(account.kind)
+        ? `If that is the right account, confirm it; otherwise sign in again with: ${signInCommandFor(account)} and answer Resume.`
         : `Check the account's key and its expected organization (PATCH /accounts/${account.id}), then answer Resume.`;
     case AccountProblem.WrongCredentials:
-      return "10db strips every other credential, so a newer Claude Code may read a different variable; the system check names the version 10db's checks were verified on.";
+      return `10db strips every other credential, so a newer ${agentOf(account)} may read a different variable; the system check names the version 10db's checks were verified on.`;
     case AccountProblem.SecretMissing:
     case AccountProblem.SecretChanged:
       return `Set the secret with PUT /accounts/${account.id}/secret; the account resumes when it is saved.`;
@@ -78,9 +82,9 @@ export function fixFor(account: AccountRow, problem: AccountProblem): string {
       return "Check the account's billing with its provider, then answer Resume.";
     case AccountProblem.StartTimeout:
       // Only a subscription is paused for this, but the card must not name a command that does not apply.
-      return account.kind === AccountKind.ClaudeSubscription
-        ? `Claude Code starts slowly when the Mac is under load, so answer Resume once the load settles. If the account is signed out after all, sign in with: ${signInCommand(account.configDir)} first.`
-        : 'Claude Code starts slowly when the Mac is under load, so answer Resume once the load settles.';
+      return signsInWithLogin(account.kind)
+        ? `${agentOf(account)} starts slowly when the Mac is under load, so answer Resume once the load settles. If the account is signed out after all, sign in with: ${signInCommandFor(account)} first.`
+        : `${agentOf(account)} starts slowly when the Mac is under load, so answer Resume once the load settles.`;
   }
 }
 
@@ -89,7 +93,7 @@ export const MOVE_BACK_CARD = 'available';
 
 /** What an account still needs before work can run on it; a move there waits until it has it. */
 function stillNeeds(account: AccountDto): string {
-  if (account.kind === AccountKind.ClaudeSubscription && account.expectedIdentity === null)
+  if (signsInWithLogin(account.kind) && account.expectedIdentity === null)
     return ' (needs sign-in)';
   if (needsSecret(account.kind, account.settings) && !account.secretSet) return ' (needs a secret)';
   return '';
@@ -311,14 +315,14 @@ export function capCard(account: AccountRow, cap: CapStatus): AccountCard {
 /** A refusal names what Claude Code reported in the body and the detail only; never in logs. */
 export function refusedCard(account: AccountRow, refusal: AccountRefusal): AccountCard {
   const seen =
-    refusal.seenIdentity === null ? '' : ` Claude Code reported ${refusal.seenIdentity}.`;
+    refusal.seenIdentity === null ? '' : ` ${agentOf(account)} reported ${refusal.seenIdentity}.`;
   return {
     title: `${account.label}: sessions refused`,
     body: `${refusal.message}.${seen} ${account.label}'s work waits until the account is fixed. ${fixFor(account, refusal.problem)}`,
     foldKey: accountFoldKey(account.id, AccountPauseReason.Refused, refusal.problem),
     detail: detail(account, AccountPauseReason.Refused, refusal.problem, refusal.seenIdentity),
     options: [
-      ...(account.kind === AccountKind.ClaudeSubscription && refusal.seenIdentity !== null
+      ...(signsInWithLogin(account.kind) && refusal.seenIdentity !== null
         ? [
             {
               label: AccountCardChoice.Confirm,
@@ -335,11 +339,16 @@ export function refusedCard(account: AccountRow, refusal: AccountRefusal): Accou
   };
 }
 
-/** For an account on its own directory: the builder confirms the email Claude Code reported (spec §5). */
+/**
+ * For an account on its own directory: the builder confirms the identity the agent reported (spec
+ * §5), a subscription's email, or a ChatGPT plan's email and workspace together.
+ */
 export function confirmCard(account: AccountRow, email: string): AccountCard {
+  const reported =
+    account.kind === AccountKind.CodexSignin ? 'this email and workspace' : 'this email';
   return {
     title: `Confirm the account ${account.label}`,
-    body: `Claude Code in ${account.configDir ?? "Claude Code's default directory"} is signed in as ${email}. Confirm it, and ${account.label}'s sessions run only while they report this email.`,
+    body: `${agentOf(account)} in ${account.configDir ?? `${agentOf(account)}'s default directory`} is signed in as ${email}. Confirm it, and ${account.label}'s sessions run only while they report ${reported}.`,
     foldKey: accountFoldKey(account.id, AccountProblem.Unconfirmed),
     detail: detail(account, null, AccountProblem.Unconfirmed, email),
     options: [
@@ -356,11 +365,11 @@ export function confirmCard(account: AccountRow, email: string): AccountCard {
 export function signInCard(account: AccountRow, why: string | null = null): AccountCard {
   const seen =
     why === null
-      ? `Claude Code is not signed in for ${account.label}`
+      ? `${agentOf(account)} is not signed in for ${account.label}`
       : `${why}, so ${account.label} may be signed out`;
   return {
     title: `Sign in the account ${account.label}`,
-    body: `${seen}. Its work waits; 10db tries again in a minute. Sign in with: ${signInCommand(account.configDir)}, then answer Check again to try now.`,
+    body: `${seen}. Its work waits; 10db tries again in a minute. Sign in with: ${signInCommandFor(account)}, then answer Check again to try now.`,
     foldKey: accountFoldKey(account.id, AccountProblem.SignedOut),
     detail: detail(account, null, AccountProblem.SignedOut, null),
     options: [checkAgain(account)],

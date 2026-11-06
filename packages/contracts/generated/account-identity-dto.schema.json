@@ -39,6 +39,12 @@
     "subscription": {
       "type": "boolean"
     },
+    "models": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "refusal": {
       "anyOf": [
         {
@@ -88,6 +94,7 @@
     "apiKeySource",
     "tokenSource",
     "subscription",
+    "models",
     "refusal"
   ]
 }

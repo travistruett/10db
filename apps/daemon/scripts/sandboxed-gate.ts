@@ -13,7 +13,8 @@ import { homedir, tmpdir } from 'node:os';
 import { createGit, resolveGit } from '../src/git';
 import { silentLogger } from '../src/log';
 import { resolveSandboxRuntime } from '../src/paths';
-import { createGateSandbox } from '../src/sandbox';
+import { openSandboxRoots, sandboxDepsOf } from '../src/daemon';
+import { claimSandboxRoots, createGateSandbox } from '../src/sandbox';
 import { createGateRunner } from '../src/verify';
 
 const args = process.argv.slice(2);
@@ -42,28 +43,45 @@ const env = Object.fromEntries(
   ),
 );
 const git = createGit({ bin: await resolveGit(), checkouts: () => [checkout] });
+// The daemon's own roots, made private as its start makes them, with every root lanes write.
+const roots = openSandboxRoots({}, homedir());
+if (roots.refusal !== null) throw roots.refusal;
+// Marked as a running daemon's for the run, so a daemon that starts meanwhile leaves its temp dir.
+const claim = claimSandboxRoots([roots.temp, roots.codexLanes, roots.files]);
 const gate = createGateRunner({
   sandbox: createGateSandbox({
     home: homedir(),
     dataDir: join(homedir(), 'Library', 'Application Support', '10db'),
     loginConfigDir: env['CLAUDE_CONFIG_DIR'] ?? null,
+    loginCodexHome: env['CODEX_HOME'] ?? null,
     gitDirs: (repo) => git.gitDirs(repo),
+    ...sandboxDepsOf(roots),
+    // What a sweep of pnpm's lock directory could not remove, on stderr.
+    log: {
+      warn: (fields, message) => {
+        process.stderr.write(`${message} ${JSON.stringify(fields)}\n`);
+      },
+    },
     runtime: resolveSandboxRuntime(),
   }),
   logger: silentLogger,
 });
-const result = await gate.run({
-  project: { repoPath: checkout, sandboxLoopback: options.includes('--loopback') },
-  command,
-  logPath,
-  timeoutMs: 3_600_000,
-  env,
-  rules: [
-    ...hosts.map((pattern) => ({ toolName: 'SandboxNetworkAccess', pattern })),
-    ...reads.map((pattern) => ({ toolName: 'Read', pattern })),
-  ],
-  checkouts: [checkout],
-});
+const result = await gate
+  .run({
+    project: { repoPath: checkout, sandboxLoopback: options.includes('--loopback') },
+    command,
+    logPath,
+    timeoutMs: 3_600_000,
+    env,
+    rules: [
+      ...hosts.map((pattern) => ({ toolName: 'SandboxNetworkAccess', pattern })),
+      ...reads.map((pattern) => ({ toolName: 'Read', pattern })),
+    ],
+    checkouts: [checkout],
+  })
+  .finally(() => {
+    claim.release();
+  });
 process.stdout.write(
   `${result.tail.slice(-1500)}\nexit ${String(result.exitCode)} in ${String(Math.round(result.durationMs / 1000))} s; log: ${result.logPath}\n`,
 );

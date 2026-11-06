@@ -38,6 +38,8 @@ import {
   type WorkstreamStep,
   MIGRATIONS_RENUMBERED_NOTICE_KEY,
   MIGRATIONS_UNCARRIED_NOTICE_KEY,
+  Provider,
+  providerOf,
 } from '@10db/contracts';
 import {
   activeClaims,
@@ -132,6 +134,7 @@ import type { StateStore } from '../events';
 import {
   AccountLaunchError,
   KeychainError,
+  sessionConfigDir,
   type AwsCredentialsExporter,
   type Launcher,
   type SessionLaunch,
@@ -253,6 +256,8 @@ export interface RunnerOptions {
   readonly live: LiveSessions;
   readonly limits: RunnerLimits;
   mcpUrl(): string;
+  /** A craft skill's text, for a session that has no plugin to load it from; null when there is none. */
+  skillBody(name: string): string | null;
   /** Builds each session's launch, and the env the gate runs in. */
   readonly launcher: Pick<Launcher, 'projectEnv' | 'session'>;
   /** Usage limits, refusals and the monthly cap, per account. */
@@ -268,6 +273,11 @@ export interface RunnerOptions {
   identifyProcess?(pid: number): Promise<string | null>;
   /** Runs every lane session under the lane sandbox; null (fake sessions and tests) runs none. */
   readonly laneSandbox: LaneSandbox | null;
+  /**
+   * Where a ChatGPT lane's temp dir is made (`codexLaneTempRoot` of the home, as the daemon made it
+   * private), apart from Claude lanes' and outside `/private/tmp`, which Codex opens to every lane.
+   */
+  readonly codexLaneTempRoot: string;
   /** Where the daemon makes lane copies: no prompt repeats a denied read of it outside the lane's copy. */
   readonly worktreeRoot: string;
   /**
@@ -1366,7 +1376,13 @@ export function createRunner(opts: RunnerOptions): Runner {
     const noticeBody = (key: string): string | null =>
       batchNotices.find((n) => n.key === key)?.body ?? null;
     const uncarried = batchNotices.find((n) => n.key === MIGRATIONS_UNCARRIED_NOTICE_KEY);
+    // Read before the briefing: the briefing follows the account this session runs on, which can
+    // differ from the last session's when the project moved. Reading has no side effects.
+    const account = getAccountRow(db, ctl.accountId);
+    const provider = providerOf(account.kind);
+    const skills = persona?.skills ?? [];
     const prompt = buildSessionPrompt({
+      provider,
       sandboxed: Boolean(opts.laneSandbox),
       denials: denialsToTell(),
       answeredCards: answeredCardsForTask(db, row.taskId),
@@ -1384,7 +1400,23 @@ export function createRunner(opts: RunnerOptions): Runner {
         role: step.role,
         personaName: step.personaName,
         instructions: persona?.instructions ?? null,
-        skills: persona?.skills ?? [],
+        skills,
+        // A Codex session has no plugin to load a skill from.
+        ...(provider === Provider.Codex
+          ? {
+              skillBodies: skills.flatMap((name) => {
+                const body = opts.skillBody(name);
+                if (body === null) {
+                  opts.logger.warn(
+                    { workstreamId: id, skill: name },
+                    'a skill has no text to brief a Codex session with',
+                  );
+                  return [];
+                }
+                return [body];
+              }),
+            }
+          : {}),
         tools: step.tools,
       },
       priorResults,
@@ -1398,7 +1430,6 @@ export function createRunner(opts: RunnerOptions): Runner {
           : null,
     });
     const { token, hash } = mintSessionToken();
-    const account = getAccountRow(db, ctl.accountId);
     const notReady = unready(account);
     if (notReady) return { kind: 'unready', refusal: notReady, providerSessionId: null };
     // Built first, so a missing or changed secret refuses the session before any session row exists.
@@ -1441,7 +1472,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         ? await opts.startGate.acquire(account.id)
         : () => undefined;
     // Where Claude Code keeps this account's sessions, and with them each one's saved tool results.
-    const configDir = launch.env['CLAUDE_CONFIG_DIR'] ?? join(homedir(), '.claude');
+    const configDir = sessionConfigDir(account.kind, launch.env, homedir());
     let laneSession: LaneSession | null = null;
     if (opts.laneSandbox) {
       try {
@@ -1453,6 +1484,8 @@ export function createRunner(opts: RunnerOptions): Runner {
           configDir,
           checkouts: allCheckouts(db),
           mcpServers: mcpServers.stdio,
+          provider,
+          ...(account.kind === AccountKind.CodexSignin ? { tempRoot: opts.codexLaneTempRoot } : {}),
         });
       } catch (error) {
         releaseStart();
@@ -1505,7 +1538,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       session = opts.state.write((ctx) => {
         const s = insertSession(ctx, {
           workstreamId: id,
-          provider: project.provider,
+          provider: providerOf(account.kind),
           model: row.model,
           effort: row.effort,
           mode: 'managed',

@@ -1,7 +1,15 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { AccountKind, mintId, type DaemonEvent, type SupportedAccountKind } from '@10db/contracts';
+import {
+  AccountKind,
+  BRAINSTORM_REFUSED_ON_CHATGPT,
+  mintId,
+  Provider,
+  providerOf,
+  type DaemonEvent,
+  type SupportedAccountKind,
+} from '@10db/contracts';
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { silentLogger } from '../log';
@@ -78,6 +86,8 @@ export function createServiceFixture(
       mcp: { url: 'http://127.0.0.1:4317/mcp', toolTimeoutMs: 60_000 },
       ...(opts.limitsFor === undefined ? {} : { limitsFor: opts.limitsFor }),
       ...(opts.screens === undefined ? {} : { screens: opts.screens }),
+      brainstormRefusal: () =>
+        providerOf(launched.kind) === Provider.Codex ? BRAINSTORM_REFUSED_ON_CHATGPT : null,
       launch: (_projectId, chosen) => {
         opts.onLaunch?.(chosen);
         return launchFor(chosen);
@@ -98,7 +108,7 @@ export function createServiceFixture(
       checkout: opts.checkout ?? '/repo',
       home: opts.home ?? '/home',
       protectedReads: [],
-      tempRoot: '/tmp/10db',
+      sandboxRoots: ['/tmp/10db'],
     },
   });
   let service = make();

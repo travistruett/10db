@@ -1,4 +1,4 @@
-import { mintId, type AccountProblem } from '@10db/contracts';
+import { mintId, type AccountProblem, type SupportedAccountKind } from '@10db/contracts';
 import type { AccountRow } from '@10db/db';
 import { describe, expect, it } from 'vitest';
 import { createMemoryKeychain } from '../../test/fixtures';
@@ -6,8 +6,11 @@ import {
   AccountLaunchError,
   BILLING_SWITCH_VARS,
   createLauncher,
+  codexSignInCommand,
   secretFingerprint,
+  sessionConfigDir,
   signInCommand,
+  signInCommandFor,
 } from './index';
 
 /** A login shell that exports every switch a builder might have in .zshrc. */
@@ -32,6 +35,11 @@ const BASE: Readonly<Record<string, string>> = {
   AWS_CONTAINER_CREDENTIALS_RELATIVE_URI: 'login-value',
   AWS_CONTAINER_AUTHORIZATION_TOKEN: 'login-value',
   AWS_ENDPOINT_URL_BEDROCK_RUNTIME: 'login-value',
+  OPENAI_API_KEY: 'sk-from-zshrc',
+  CODEX_API_KEY: 'codex-from-zshrc',
+  OPENAI_BASE_URL: 'https://openai-proxy.example',
+  CODEX_ACCESS_TOKEN: 'access-from-zshrc',
+  CODEX_HOME: '/h/b/.codex-other',
   CLAUDECODE: '1',
   GIT_DIR: '/elsewhere/.git',
   TENDB_DATA_DIR: '/data',
@@ -291,6 +299,91 @@ describe('a session launch', () => {
   });
 });
 
+describe('a ChatGPT sign-in launch', () => {
+  const CODEX_DIR = '/d/acc/codex';
+  const codexAccount = account({
+    kind: 'codex_signin',
+    label: 'ChatGPT Pro',
+    configDir: CODEX_DIR,
+    expectedIdentity: 'a@example.com · w1',
+    settings: { modelMap: { sonnet: 'gpt-5.6-sol' } },
+  });
+
+  it('runs on its own CODEX_HOME with the mapped model and none of the OpenAI credentials', () => {
+    const { env, model } = launcher().session(codexAccount, 'sonnet');
+    expect(model).toBe('gpt-5.6-sol');
+    expect(env['CODEX_HOME']).toBe(CODEX_DIR);
+    expect(env).not.toHaveProperty('CLAUDE_CONFIG_DIR');
+    for (const name of ['OPENAI_API_KEY', 'CODEX_API_KEY', 'OPENAI_BASE_URL', 'CODEX_ACCESS_TOKEN'])
+      expect(env).not.toHaveProperty(name);
+    expect(launcher().projectEnv()).toHaveProperty('OPENAI_API_KEY');
+  });
+
+  it('never inherits the login shell CODEX_HOME when it has no directory', () => {
+    const { env } = launcher().session({ ...codexAccount, configDir: null }, 'sonnet');
+    expect(env).not.toHaveProperty('CODEX_HOME');
+  });
+
+  it('signs in with the unmodified codex, one shell word even with spaces', () => {
+    expect(codexSignInCommand('/a b/codex')).toBe("CODEX_HOME='/a b/codex' codex login");
+  });
+
+  it.each<{ name: string; row: AccountRow; command: string }>([
+    {
+      name: 'a ChatGPT sign-in',
+      row: codexAccount,
+      command: `CODEX_HOME='${CODEX_DIR}' codex login`,
+    },
+    { name: 'a subscription', row: account({}), command: signInCommand(SUB_DIR) },
+  ])('picks the sign-in command of $name', ({ row, command }) => {
+    expect(signInCommandFor(row)).toBe(command);
+  });
+});
+
+describe('sessionConfigDir', () => {
+  it.each<{ name: string; kind: SupportedAccountKind; env: Record<string, string>; dir: string }>([
+    {
+      name: 'CODEX_HOME for a ChatGPT sign-in',
+      kind: 'codex_signin',
+      env: { CODEX_HOME: '/c', CLAUDE_CONFIG_DIR: '/d' },
+      dir: '/c',
+    },
+    {
+      name: "a ChatGPT sign-in's default directory",
+      kind: 'codex_signin',
+      env: {},
+      dir: '/h/b/.codex',
+    },
+    {
+      name: 'CLAUDE_CONFIG_DIR for a subscription, whatever CODEX_HOME holds',
+      kind: 'claude_subscription',
+      env: { CODEX_HOME: '/h/b/.codex-other', CLAUDE_CONFIG_DIR: '/d' },
+      dir: '/d',
+    },
+    {
+      name: "the default account's Claude directory, whatever CODEX_HOME holds",
+      kind: 'claude_subscription',
+      env: { CODEX_HOME: '/h/b/.codex-other' },
+      dir: '/h/b/.claude',
+    },
+    {
+      name: 'the default Claude directory for a gateway',
+      kind: 'gateway',
+      env: {},
+      dir: '/h/b/.claude',
+    },
+  ])('reads $name', ({ kind, env, dir }) => {
+    expect(sessionConfigDir(kind, env, '/h/b')).toBe(dir);
+  });
+
+  it('carries the login shell CODEX_HOME through a Claude launch without using it', () => {
+    const { env } = launcher().session(account({}), 'sonnet');
+    expect(sessionConfigDir('claude_subscription', env, '/h/b')).toBe(SUB_DIR);
+    const login = launcher().session(account({ configDir: null }), 'sonnet');
+    expect(sessionConfigDir('claude_subscription', login.env, '/h/b')).toBe('/h/b/.claude');
+  });
+});
+
 describe("the login shell's config directory", () => {
   it.each<[string, Record<string, string>, string | null, boolean]>([
     [
@@ -314,6 +407,22 @@ describe("the login shell's config directory", () => {
     // It names the variable, never the builder's value.
     if (warning) expect(warning).toContain('CLAUDE_CONFIG_DIR');
     expect(warning ?? '').not.toContain('.claude-other');
+  });
+});
+
+describe("the login shell's Codex home", () => {
+  it.each<[string, Record<string, string>, string | null]>([
+    ['an absolute directory', { CODEX_HOME: '/h/b/.codex-other' }, '/h/b/.codex-other'],
+    ['none set', {}, null],
+    ['an empty value', { CODEX_HOME: '' }, null],
+    ['a relative path', { CODEX_HOME: '.codex-other' }, null],
+  ])('%s', (_name, vars, dir) => {
+    const login = createLauncher({
+      base: { PATH: '/bin', ...vars },
+      clientApp: 'test',
+      keychain: createMemoryKeychain(),
+    });
+    expect(login.loginCodexHome()).toBe(dir);
   });
 });
 

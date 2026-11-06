@@ -34,7 +34,7 @@ import { SandboxTempDirError } from './temp-dir';
  * command there, which a job with no redirection of its own inherits. Its open paths are read
  * (`lsof`) once. Working in the checkout alone never makes a process the session's: in Your folder
  * mode, for local delivery and in a batch worktree, other lanes and the builder run their own jobs
- * there. The memory is a ledger file in the temp root, named for the daemon that keeps it and naming
+ * there. The memory is a ledger file in the files root, named for the daemon that keeps it and naming
  * that daemon's group, which neither a lane's commands nor its file tools may write, so a daemon
  * that restarts finds and stops what a dead one left, sparing the dead one's group as it did, even
  * while another daemon shares the root. A ledger whose processes could not be stopped is swept
@@ -514,7 +514,7 @@ export function createLaneProcessWatch(deps: LaneProcessWatchDeps): LaneProcessW
 }
 
 /**
- * What a ledger file is called: `10db-proc-<owner pid>-<12 hex>.json` in the sandbox temp root,
+ * What a ledger file is called: `10db-proc-<owner pid>-<12 hex>.json` in the files root,
  * named for the daemon whose session keeps it, as its mark (`10db-daemon-<pid>`) is.
  */
 const LEDGER_PREFIX = '10db-proc-';
@@ -537,7 +537,7 @@ const Ledger = z.object({
 });
 
 /**
- * Creates an empty ledger beside the lane temp dirs, outside every one of them, owned by the daemon
+ * Creates an empty ledger in `root`, the files root, outside every lane temp dir, owned by the daemon
  * `owner`, and returns its path.
  */
 export function createProcessLedger(root: string, owner: number = process.pid): string {
@@ -594,7 +594,7 @@ function ownFile(file: string, uid: number | undefined): boolean {
 }
 
 /**
- * Stops what lane sessions left running when their daemon died, from the ledgers in the temp root,
+ * Stops what lane sessions left running when their daemon died, from the ledgers in the files root,
  * and removes each ledger once its processes are gone. Run it at start, before any session, and
  * again while the daemon runs (`createLedgerSweep`). A ledger in `held` is a running session's of
  * this daemon, and one whose owner is another daemon that still runs (its pid is alive and its mark

@@ -29,6 +29,7 @@ const PUBLIC_RESEARCH = [
   'spike-13-sandbox.md',
   'spike-14-sandbox-policy.md',
   'spike-15-gh-ci-checks.md',
+  'spike-16-codex-app-server.md',
 ];
 
 /** The numbered log is closed: parallel branches collided on the next number. */

@@ -7,11 +7,17 @@ export {
   type LaneProfileInput,
 } from './profile';
 export { autoModeRules } from './auto-mode-rules';
-export { protectedReads } from './protected-reads';
+export { isEqualOrUnder, protectedReads } from './protected-reads';
 export { toolchainAccess } from './toolchain-reads';
 export { packageCacheEnv } from './package-cache';
 export { createLaneEnvFile, removeLaneEnvFile } from './env-file';
-export { claimSandboxTempRoot } from './stale-files';
+export {
+  claimSandboxRoots,
+  claimSandboxTempRoot,
+  sweepSystemTempDirs,
+  sweepSystemTempFiles,
+  type SweepReport,
+} from './stale-files';
 export {
   createLedgerSweep,
   reapLaneProcessLedgers,
@@ -20,12 +26,21 @@ export {
 } from './lane-processes';
 export { systemProcessTable } from './process-table';
 export {
+  claudeCodeTmpPath,
+  codexLaneTempRoot,
   createLaneTempDir,
-  LANE_TEMP_ROOT,
+  ensurePrivateRoot,
+  isLaneTempDirName,
+  keepSpotlightOut,
+  laneTempRoot,
   MAX_SANDBOX_TMP_BYTES,
   removeLaneTempDir,
   removeLaneTempDirAsync,
+  sandboxFilesRoot,
   SandboxTempDirError,
+  SYSTEM_TEMP_ROOTS,
+  tmutilExclusion,
+  type BackupExclusion,
 } from './temp-dir';
 export {
   expandHome,
@@ -55,3 +70,4 @@ export {
   type LaneSession,
   type LaneSessionInput,
 } from './lane-sandbox';
+export { singleQuoted } from './posix-quote';

@@ -1,4 +1,3 @@
-import { Provider } from '@10db/contracts';
 import { createChannel } from './channel';
 import {
   AccountProbeError,
@@ -16,7 +15,6 @@ export function createUnavailableAdapter(message: string): SessionAdapter {
     return channel;
   };
   return {
-    provider: Provider.Claude,
     probeAccount: () => Promise.reject(new AccountProbeError(message)),
     complete: () => Promise.reject(new CompletionError(message)),
     start() {

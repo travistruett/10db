@@ -66,6 +66,7 @@ beforeEach(() => {
     log: silentLogger,
     hold: drain,
     mcp: { url: 'http://127.0.0.1:4317/mcp', toolTimeoutMs: 60_000 },
+    brainstormRefusal: () => null,
     launch: () => ({
       cwd: '/repo',
       model: 'opus',
@@ -81,7 +82,7 @@ beforeEach(() => {
         checkout: '/repo',
         home: '/home',
         protectedReads: [],
-        tempRoot: '/tmp/10db',
+        sandboxRoots: ['/tmp/10db'],
       },
     }),
   });

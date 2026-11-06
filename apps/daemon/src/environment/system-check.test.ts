@@ -5,6 +5,7 @@ import { tempDir } from '../../test/fixtures';
 import { firstExecutable, installCandidates } from '../git';
 import {
   claudeCodeWarning,
+  codexWarning,
   findClaude,
   markGhRequired,
   probeVersion,
@@ -69,15 +70,24 @@ describe('systemCheck', () => {
     const version = (path: string) => `version of ${path} ${join(dir.path, 'bin')}`;
     const claudePath = prefixed('claude') ?? claude;
     const dockerPath = prefixed('docker') ?? docker;
+    const codexPath = prefixed('codex');
     expect(report).toEqual({
       loginEnv: { source: 'inherited', warning: 'The login shell timed out' },
       claudeCode: { verifiedOn: '2.1.302', warning: null },
+      codex: { verifiedOn: '0.154.0', warning: null },
       tools: [
         {
           name: 'claude',
           path: claudePath,
           version: version(claudePath),
           required: true,
+          signedIn: null,
+        },
+        {
+          name: 'codex',
+          path: codexPath,
+          version: codexPath === null ? null : version(codexPath),
+          required: false,
           signedIn: null,
         },
         {
@@ -137,6 +147,7 @@ describe('systemCheck', () => {
     it('reports the gh login on the gh row only', async () => {
       expect(signedIn(await run(() => Promise.resolve('octocat')))).toEqual([
         ['claude', null],
+        ['codex', null],
         ['git', null],
         ['docker', null],
         ['gh', 'octocat'],
@@ -203,6 +214,7 @@ describe('markGhRequired', () => {
     const check = {
       loginEnv: { source: 'login_shell' as const, warning: null },
       claudeCode: { verifiedOn: '2.1.302', warning: null },
+      codex: { verifiedOn: '0.154.0', warning: null },
       tools: [
         {
           name: 'git' as const,
@@ -238,5 +250,19 @@ describe('claudeCodeWarning', () => {
     const warning = claudeCodeWarning(version);
     expect(warning !== null).toBe(warns);
     if (warning) expect(warning).toContain('2.1.302');
+  });
+});
+
+describe('codexWarning', () => {
+  it.each<[string, string | null, boolean]>([
+    ['the verified version', 'codex-cli 0.154.0', false],
+    ['a newer version', 'codex-cli 0.155.0', true],
+    ['an older version', 'codex-cli 0.153.9', true],
+    ['output with no version', 'not a version', false],
+    ['no version at all', null, false],
+  ])('%s: warns %s', (_name, version, warns) => {
+    const warning = codexWarning(version);
+    expect(warning !== null).toBe(warns);
+    if (warning) expect(warning).toContain('0.154.0');
   });
 });

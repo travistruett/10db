@@ -1,6 +1,13 @@
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { mintId, ShapeOrigin, type ProjectId, type ShapeId } from '@10db/contracts';
+import {
+  AccountKind,
+  mintId,
+  ShapeOrigin,
+  type ProjectId,
+  type ShapeId,
+  type SupportedAccountKind,
+} from '@10db/contracts';
 import { createTestStore, insertShape, listInbox, recordMcpApproval, seedProject } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTempRepo, FAKE_SRT, SANDBOXED, type TempDir } from '../../test/fixtures';
@@ -32,6 +39,7 @@ beforeEach(() => {
   root = realpathSync(mkdtempSync('/tmp/sst-'));
   mkdirSync(join(root, 'home'));
   mkdirSync(join(root, 't'));
+  mkdirSync(join(root, 'run'));
   repo = createTempRepo();
   checkout = realpathSync(repo.path);
   const test = createTestStore();
@@ -51,6 +59,7 @@ const realSandbox = (): LaneSandbox =>
     dataDir: join(root, 'data'),
     loginConfigDir: null,
     tmpRoot: join(root, 't'),
+    filesRoot: join(root, 'run'),
     gitDirs: (path) => createGit().gitDirs(path),
     systemPrefixes: [],
     runtime: FAKE_SRT,
@@ -129,10 +138,15 @@ const launchEnv = (): Record<string, string> => ({
   ANTHROPIC_API_KEY: SECRET,
 });
 
-const inputFor = (owner: { projectId: ProjectId; shapeId: ShapeId }) => ({
+const inputFor = (
+  owner: { projectId: ProjectId; shapeId: ShapeId },
+  accountKind: SupportedAccountKind = AccountKind.AnthropicApiKey,
+  env: Record<string, string> = launchEnv(),
+) => ({
   ...owner,
   sessionId: mintId('Session'),
-  env: launchEnv(),
+  accountKind,
+  env,
   resumeProviderSessionId: null,
   signal: new AbortController().signal,
   observer: { onWaitStart: () => undefined, onWaitEnd: () => undefined },
@@ -280,5 +294,31 @@ describe.skipIf(SANDBOXED)('a Plan conversation’s prepared session', () => {
     expect(prepared.projectMcpServers).toEqual({});
     expect(prepared.note).toContain('the profile could not be built');
     await prepared.release();
+  });
+});
+
+describe('the config dir a Plan session’s sandbox is given', () => {
+  // Where the account keeps its login, by its kind, as a lane's session reads it (`sessionConfigDir`).
+  it.each<[string, SupportedAccountKind, string]>([
+    ['a Claude kind', AccountKind.ClaudeSubscription, '/accounts/claude'],
+    ['a Codex kind', AccountKind.CodexSignin, '/accounts/codex'],
+  ])('follows the account of %s', async (_name, kind, expected) => {
+    const owner = conversation({ mcpServers: {} });
+    const seen: string[] = [];
+    const { prepare } = preparer({
+      forSession: (input) => {
+        seen.push(input.configDir);
+        return Promise.reject(new Error('recorded'));
+      },
+    });
+    const prepared = await prepare(
+      inputFor(owner, kind, {
+        ...launchEnv(),
+        CLAUDE_CONFIG_DIR: '/accounts/claude',
+        CODEX_HOME: '/accounts/codex',
+      }),
+    );
+    await prepared.release();
+    expect(seen).toEqual([expected]);
   });
 });

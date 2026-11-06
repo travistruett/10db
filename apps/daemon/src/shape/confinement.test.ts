@@ -33,8 +33,13 @@ beforeEach(() => {
     join(root, 'shapes', 'shp_own', 'files'),
     join(root, 'shapes', 'shp_other', 'files'),
     join(root, 'tmp'),
+    // A registered folder that holds 10db's sandbox files and a ChatGPT lane's temp dir.
+    join(checkout, 'home', '.10db', 'run'),
+    join(checkout, 'home', '.10db', 'lanes', '10db-abcdef'),
   ])
     mkdirSync(dir, { recursive: true });
+  writeFileSync(join(checkout, 'home', '.10db', 'run', '10db-mcp-0123456789ab.sh'), "TOKEN='x'");
+  writeFileSync(join(checkout, 'home', '.10db', 'lanes', '10db-abcdef', 'notes.txt'), 'notes');
   writeFileSync(join(home, '.ssh', 'id_ed25519'), 'secret');
   writeFileSync(join(checkout, 'src', 'a.ts'), 'a');
   writeFileSync(join(dataDir, 'db.sqlite'), 'db');
@@ -48,7 +53,11 @@ beforeEach(() => {
     home,
     protectedReads: [dataDir, join(home, '.ssh')],
     filesDir: join(root, 'shapes', 'shp_own', 'files'),
-    tempRoot: join(root, 'tmp'),
+    sandboxRoots: [
+      join(root, 'tmp'),
+      join(checkout, 'home', '.10db', 'lanes'),
+      join(checkout, 'home', '.10db', 'run'),
+    ],
   };
 });
 afterEach(() => {
@@ -77,6 +86,14 @@ const REFUSED: readonly (readonly [string, () => ShapeCall])[] = [
   [
     'a Read of the 10db data directory',
     () => call('Read', { file_path: join(dataDir, 'db.sqlite') }),
+  ],
+  [
+    "a Read of an MCP server's sealed env file, in a files root inside the checkout",
+    () => call('Read', { file_path: path('checkout/home/.10db/run/10db-mcp-0123456789ab.sh') }),
+  ],
+  [
+    "a Read in a ChatGPT lane's temp dir, in a lanes root inside the checkout",
+    () => call('Read', { file_path: path('checkout/home/.10db/lanes/10db-abcdef/notes.txt') }),
   ],
   ['a Read outside the checkout', () => call('Read', { file_path: path('outside/notes.txt') })],
   // A lane reads the system's documentation without a card; that allowance stops at lanes.
@@ -457,9 +474,9 @@ describe('judgeShapeCall in the read-only sandbox', () => {
           protectedReads: access.protectedReads,
           readList: [],
           systemDocRoots: [],
-          configDir: join(access.tempRoot, 'no-claude-config'),
+          configDir: join(root, 'tmp', 'no-claude-config'),
           providerSessionId: null,
-          sandboxTemp: { root: access.tempRoot, own: join(access.tempRoot, '10db-ownabc') },
+          sandboxTemp: { roots: access.sandboxRoots, own: join(root, 'tmp', '10db-ownabc') },
         }),
       },
     };

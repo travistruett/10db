@@ -5,6 +5,7 @@ import {
   AccountPauseReason,
   AccountProblem,
   AccountSecretInput,
+  signsInWithLogin,
   ConflictError,
   InvalidError,
   type AccountConfig,
@@ -32,7 +33,7 @@ import {
   AccountLaunchError,
   KeychainError,
   secretFingerprint,
-  signInCommand,
+  signInCommandFor,
   type Keychain,
   type Launcher,
 } from '../environment';
@@ -40,6 +41,7 @@ import type { StateStore } from '../events';
 import {
   AccountProbeError,
   checkAccount,
+  loginIdentity,
   type SeenAccount,
   type SessionAdapter,
 } from '../sessions';
@@ -83,6 +85,7 @@ const nothingSeen = (id: AccountId): Omit<AccountIdentityDto, 'refusal'> => ({
   apiKeySource: null,
   tokenSource: null,
   subscription: false,
+  models: [],
 });
 
 export function createAccountService(deps: {
@@ -105,12 +108,8 @@ export function createAccountService(deps: {
     deps.onSaved();
   };
   const signInOf = (account: AccountDto): AccountSignInDto | null =>
-    account.kind === AccountKind.ClaudeSubscription
-      ? {
-          accountId: account.id,
-          configDir: account.configDir,
-          command: signInCommand(account.configDir),
-        }
+    signsInWithLogin(account.kind)
+      ? { accountId: account.id, configDir: account.configDir, command: signInCommandFor(account) }
       : null;
 
   const pauses = (): AccountPauseDto[] =>
@@ -162,7 +161,8 @@ export function createAccountService(deps: {
     create(input) {
       const account = deps.state.write((ctx) => {
         const created = insertAccount(ctx, input, {
-          configDirFor: (id) => join(root, id, 'claude'),
+          configDirFor: (id) =>
+            join(root, id, input.kind === AccountKind.CodexSignin ? 'codex' : 'claude'),
         });
         // Every created account, keyed kinds too, gets one. Inside the transaction: a directory that
         // can't be made leaves no row behind.
@@ -198,7 +198,9 @@ export function createAccountService(deps: {
     signIn(id) {
       const signIn = signInOf(getAccount(db, id));
       if (!signIn)
-        throw new InvalidError('Only a Claude subscription account signs in with claude /login');
+        throw new InvalidError(
+          'Only a Claude subscription or a ChatGPT plan account signs in with a login command',
+        );
       return signIn;
     },
     async identity(id) {
@@ -222,7 +224,11 @@ export function createAccountService(deps: {
             ? await deps.startGate.acquire(id)
             : () => undefined;
         try {
-          seen = await deps.adapter.probeAccount({ cwd: deps.dataDir, env: launch.env });
+          seen = await deps.adapter.probeAccount({
+            kind: row.kind,
+            cwd: deps.dataDir,
+            env: launch.env,
+          });
         } finally {
           release();
         }
@@ -234,11 +240,11 @@ export function createAccountService(deps: {
         );
       }
       const unconfirmed =
-        row.kind === AccountKind.ClaudeSubscription && row.expectedIdentity === null
+        signsInWithLogin(row.kind) && row.expectedIdentity === null
           ? {
               problem: AccountProblem.Unconfirmed,
               message: `Account "${row.label}" has no confirmed identity yet`,
-              seenIdentity: seen.email ?? null,
+              seenIdentity: loginIdentity(row.kind, seen) ?? null,
             }
           : null;
       return {
@@ -249,6 +255,7 @@ export function createAccountService(deps: {
         apiKeySource: seen.apiKeySource ?? null,
         tokenSource: seen.tokenSource ?? null,
         subscription: Boolean(seen.subscriptionType),
+        models: [...(seen.models ?? [])],
         refusal: checkAccount(launch.expect, seen) ?? unconfirmed,
       };
     },

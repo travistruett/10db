@@ -22,14 +22,17 @@ export async function sandboxedMcpServer(
   try {
     const home = join(root, 'h');
     const tmpRoot = join(root, 't');
+    const filesRoot = join(root, 'r');
     mkdirSync(home);
     mkdirSync(tmpRoot);
+    mkdirSync(filesRoot);
     const git = createGit();
     const session = await createLaneSandbox({
       home,
       dataDir: join(home, 'data'),
       loginConfigDir: null,
       tmpRoot,
+      filesRoot,
       gitDirs: (path) => git.gitDirs(path),
       systemPrefixes: [],
       runtime: FAKE_SRT,

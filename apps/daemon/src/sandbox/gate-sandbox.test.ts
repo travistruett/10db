@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import {
   chmodSync,
   existsSync,
@@ -20,12 +21,15 @@ import { createGit } from '../git';
 import {
   createGateSandbox,
   DOCKER_REFUSAL,
+  isLaneTempDirName,
+  keepSpotlightOut,
   SandboxProfileError,
   SYSTEM_READS,
   type GateRun,
   type GateRunInput,
   type GateSandbox,
 } from './index';
+import { sweepPnpmLockDir, UNLOCK_PASSES } from './pnpm-lock-dir';
 import { childListingGrant, listingGrant } from './profile';
 import { isEqualOrUnder } from './protected-reads';
 
@@ -36,9 +40,19 @@ let root: string;
 let home: string;
 let dataDir: string;
 let tmpRoot: string;
+let filesRoot: string;
+let lanesRoot: string;
 let pnpmLockDir: string;
 let repo: TempDir;
 let checkout: string;
+
+/** What the sandbox told the log, by message and fields. */
+let warnings: { fields: Record<string, unknown>; message: string }[] = [];
+const log = {
+  warn: (fields: object, message: string): void => {
+    warnings.push({ fields: { ...fields }, message });
+  },
+};
 
 function sandbox(): GateSandbox {
   return createGateSandbox({
@@ -46,11 +60,14 @@ function sandbox(): GateSandbox {
     dataDir,
     loginConfigDir: join(home, '.claude-work'),
     tmpRoot,
+    filesRoot,
+    codexLaneTempRoot: lanesRoot,
     pnpmLockDir,
     gitDirs: (path) => git.gitDirs(path),
     // Hermetic: the machine's own install prefixes add no deny.
     systemPrefixes: [],
     runtime: RUNTIME,
+    log,
   });
 }
 
@@ -120,14 +137,19 @@ function runInner(run: GateRun): {
 }
 
 beforeEach(() => {
+  warnings = [];
   // A short root: the temp directory's whole path must fit the sandbox's socket path limit.
   root = realpathSync(mkdtempSync('/tmp/sbg-'));
   home = join(root, 'home');
   dataDir = join(home, 'Library', 'Application Support', '10db');
   tmpRoot = join(root, 't');
+  filesRoot = join(root, 'run');
+  lanesRoot = join(root, 'lanes');
   pnpmLockDir = join(root, 'pnpm-locks');
   mkdirSync(home);
   mkdirSync(tmpRoot);
+  mkdirSync(filesRoot);
+  mkdirSync(lanesRoot);
   repo = createTempRepo();
   checkout = realpathSync(repo.path);
 });
@@ -170,9 +192,21 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
   it("writes only the checkout and the run's own temp dir, never git state or srt's shared temp", async () => {
     const other = createTempRepo();
     try {
-      await withRun(input({ checkouts: [repo.path, other.path] }), (run) => {
+      // A read-list entry over every sandbox root opens none of them.
+      const rules = [{ toolName: 'Read', pattern: root }];
+      await withRun(input({ checkouts: [repo.path, other.path], rules }), (run) => {
         const { filesystem } = settingsOf(run);
         expect(filesystem['allowWrite']).toEqual([run.tmpDir, checkout]);
+        expect(filesystem['denyRead']).toEqual(
+          expect.arrayContaining([tmpRoot, lanesRoot, filesRoot]),
+        );
+        expect(filesystem['allowRead']).toContain(run.tmpDir);
+        expect(filesystem['allowRead']).not.toContain(root);
+        // The run's own settings file is read by srt before the sandbox starts, never inside it.
+        const settingsFile = run.args[run.args.indexOf('--settings') + 1] ?? '';
+        expect(
+          (filesystem['allowRead'] ?? []).filter((open) => isEqualOrUnder(settingsFile, open)),
+        ).toEqual([]);
         const otherCheckout = realpathSync(other.path);
         expect(filesystem['denyWrite']).toEqual(
           expect.arrayContaining([
@@ -219,7 +253,11 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
           envFile,
         ]),
       );
-      expect(allowRead).toEqual(expect.arrayContaining([...SYSTEM_READS, checkout, run.tmpDir]));
+      // A built-in read that holds a sandbox root is left out (on Linux the roots lie under `/tmp`).
+      const builtIn = SYSTEM_READS.filter(
+        (path) => ![tmpRoot, lanesRoot, filesRoot].some((held) => isEqualOrUnder(held, path)),
+      );
+      expect(allowRead).toEqual(expect.arrayContaining([...builtIn, checkout, run.tmpDir]));
       // This home lies in the test's temp dir, which on Linux is under the system read `/tmp` (macOS
       // resolves it to `/private/tmp`). A real home never is, so only the rest must keep it closed.
       const systemCover: readonly string[] = SYSTEM_READS.filter((path) =>
@@ -373,6 +411,7 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
     await expect(sandbox().forRun(input({ env }))).rejects.toThrow(/LANG/);
     await expect(sandbox().forRun(input({ env }))).rejects.not.toThrow(/secret/);
     expect(readdirSync(tmpRoot)).toEqual([]);
+    expect(readdirSync(filesRoot)).toEqual([]);
   });
 
   // srt exits 0 when its own child dies by TERM or INT, so that child must never be the command.
@@ -398,10 +437,11 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
     });
   });
 
-  it('seals the settings file outside the temp dir, and removes both on dispose', async () => {
+  it('seals the settings file in the files root, outside every temp dir, and removes both on dispose', async () => {
     const run = await sandbox().forRun(input());
     const file = run.args[2] ?? '';
-    expect(dirname(file)).toBe(tmpRoot);
+    expect(dirname(file)).toBe(filesRoot);
+    expect(dirname(run.tmpDir)).toBe(tmpRoot);
     expect(statSync(file).mode & 0o777).toBe(0o400);
     expect(existsSync(run.tmpDir)).toBe(true);
     await run.dispose();
@@ -409,6 +449,7 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
     expect(existsSync(file)).toBe(false);
     expect(existsSync(run.tmpDir)).toBe(false);
     expect(readdirSync(tmpRoot)).toEqual([]);
+    expect(readdirSync(filesRoot)).toEqual([]);
   });
 
   it.each([
@@ -430,6 +471,14 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
         return { node: join(tmpRoot, 'node') };
       },
     ],
+    [
+      'node',
+      'linked from another root lanes write',
+      (): Partial<typeof RUNTIME> => {
+        symlinkSync(process.execPath, join(lanesRoot, 'node'));
+        return { node: join(lanesRoot, 'node') };
+      },
+    ],
   ])("refuses srt's %s %s: a project could swap it", async (_what, _where, place) => {
     const runtime = { ...RUNTIME, ...place() };
     const pending = createGateSandbox({
@@ -437,12 +486,17 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
       dataDir,
       loginConfigDir: null,
       tmpRoot,
+      filesRoot,
+      laneWritableRoots: [lanesRoot],
       gitDirs: (path) => git.gitDirs(path),
       systemPrefixes: [],
       runtime,
+      log,
     }).forRun(input());
     await expect(pending).rejects.toThrow(SandboxProfileError);
-    expect(readdirSync(tmpRoot).filter((name) => name.startsWith('10db-'))).toEqual([]);
+    // No temp dir is left beside the link a row plants there.
+    expect(readdirSync(tmpRoot).filter(isLaneTempDirName)).toEqual([]);
+    expect(readdirSync(filesRoot)).toEqual([]);
   });
 
   it('removes the temp dir without blocking the event loop', async () => {
@@ -467,7 +521,23 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
     execFileSync('ln', ['-s', dirname(checkout), join(checkout, '.env')]);
     await expect(sandbox().forRun(input())).rejects.toThrow(SandboxProfileError);
     expect(readdirSync(tmpRoot)).toEqual([]);
+    expect(readdirSync(filesRoot)).toEqual([]);
   });
+  it('is never built without a log, so whatever a sweep leaves is told', () => {
+    const build = (): GateSandbox =>
+      // @ts-expect-error `log` is required: the daemon and `scripts/sandboxed-gate.ts` pass theirs.
+      createGateSandbox({
+        home,
+        dataDir,
+        loginConfigDir: null,
+        tmpRoot,
+        filesRoot,
+        gitDirs: (path) => git.gitDirs(path),
+        runtime: RUNTIME,
+      });
+    expect(build).toBeTypeOf('function');
+  });
+
   describe('a run that installs packages', () => {
     it("opens pnpm's store lock directory, which pnpm puts in the system temp dir whatever TMPDIR says", async () => {
       await withRun(input({ packageInstall: true }), (run) => {
@@ -499,9 +569,16 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
       const target = join(root, 'target');
       writeFileSync(target, 'x');
       execFileSync('ln', [target, join(pnpmLockDir, 'hard.lock')]);
+      // A directory a run planted, with a file, a link out and a locked directory in it.
+      mkdirSync(join(pnpmLockDir, 'planted', 'locked'), { recursive: true });
+      writeFileSync(join(pnpmLockDir, 'planted', 'f'), 'x');
+      symlinkSync(outside, join(pnpmLockDir, 'planted', 'out'));
+      chmodSync(join(pnpmLockDir, 'planted', 'locked'), 0o000);
       await run.dispose();
       expect(existsSync(pnpmLockDir)).toBe(false);
-      expect(readdirSync(root).filter((name) => name.includes('.sweep-'))).toEqual([]);
+      expect(readdirSync(root).filter((name) => name.includes('sweep'))).toEqual([]);
+      expect(readdirSync(tmpRoot)).toEqual([]);
+      expect(readdirSync(filesRoot)).toEqual([]);
       expect(readdirSync(outside)).toEqual(['keep']);
       expect(readFileSync(target, 'utf8')).toBe('x');
     });
@@ -530,12 +607,165 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
       expect(readdirSync(victim).sort()).toEqual(['file', 'sub']);
     });
 
-    it('throws a typed error when an entry cannot be removed, after trying the rest', async () => {
-      const run = await sandbox().forRun(input({ packageInstall: true }));
-      mkdirSync(join(pnpmLockDir, 'a', 'b'), { recursive: true });
-      writeFileSync(join(pnpmLockDir, 'a', 'b', 'x'), '');
-      await expect(run.dispose()).rejects.toThrow(SandboxProfileError);
+    /** Writes `name` in `dir`, making `dir` first, and returns its path. */
+    const writeIn = (dir: string, name: string, text = 'x'): string => {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, name), text);
+      return join(dir, name);
+    };
+    /** A file's user flags and ACL, as `stat` and `ls -le` show them. */
+    const metadata = (path: string): { readonly flags: string; readonly acl: string } => ({
+      flags: execFileSync('/usr/bin/stat', ['-f', '%Sf', path], { encoding: 'utf8' }).trim(),
+      acl: execFileSync('/bin/ls', ['-led', path], { encoding: 'utf8' })
+        .split('\n')
+        .slice(1)
+        .join('\n')
+        .trim(),
+    });
+    /** Undoes what a test set on a file, so the test can remove it. */
+    const unlock = (path: string): void => {
+      execFileSync('/usr/bin/chflags', ['nouchg,nouappnd', path]);
+      execFileSync('/bin/chmod', ['-N', path]);
+    };
+
+    // macOS's user flags and ACLs: they keep their owner from removing what a directory holds.
+    it.skipIf(process.platform !== 'darwin')(
+      'clears the user flags and ACLs a run set on directories in the lock directory, and removes what they held',
+      async () => {
+        const run = await sandbox().forRun(input({ packageInstall: true }));
+        for (const name of ['appended', 'immutable', 'acl']) writeIn(join(pnpmLockDir, name), 'x');
+        execFileSync('/usr/bin/chflags', ['uappnd', join(pnpmLockDir, 'appended')]);
+        execFileSync('/usr/bin/chflags', ['uchg', join(pnpmLockDir, 'immutable')]);
+        execFileSync('/bin/chmod', ['+a', 'everyone deny delete_child', join(pnpmLockDir, 'acl')]);
+        await run.dispose();
+        expect(existsSync(pnpmLockDir)).toBe(false);
+        expect(readdirSync(root).filter((name) => name.includes('sweep'))).toEqual([]);
+        expect(readdirSync(tmpRoot)).toEqual([]);
+        expect(warnings).toEqual([]);
+      },
+    );
+
+    it.skipIf(process.platform !== 'darwin')(
+      "never changes a file's flags or ACL: one it can't remove is left, logged, with both as they were",
+      async () => {
+        const run = await sandbox().forRun(input({ packageInstall: true }));
+        const stuck = join(pnpmLockDir, 'stuck.lock');
+        writeFileSync(stuck, '');
+        execFileSync('/bin/chmod', ['+a', 'everyone deny write', stuck]);
+        execFileSync('/usr/bin/chflags', ['uchg', stuck]);
+        const before = metadata(stuck);
+        expect(before.flags).toContain('uchg');
+        expect(before.acl).toContain('deny write');
+        await run.dispose();
+        const [moved, ...more] = readdirSync(tmpRoot);
+        expect(more).toEqual([]);
+        const left = join(tmpRoot, moved ?? '', 'stuck.lock');
+        try {
+          expect(metadata(left)).toEqual(before);
+          expect(warnings.map((w) => w.fields['path'])).toEqual([join(tmpRoot, moved ?? '')]);
+        } finally {
+          if (existsSync(left)) unlock(left);
+        }
+      },
+    );
+
+    it.skipIf(process.platform !== 'darwin')(
+      'leaves the flags and ACL of a file that a second link in the lock directory names',
+      async () => {
+        const run = await sandbox().forRun(input({ packageInstall: true }));
+        const outside = join(root, 'outside');
+        mkdirSync(outside);
+        const withAcl = writeIn(outside, 'acl.txt', 'keep');
+        const immutable = writeIn(outside, 'immutable.txt', 'keep');
+        execFileSync('ln', [withAcl, join(pnpmLockDir, 'acl.lock')]);
+        execFileSync('ln', [immutable, join(pnpmLockDir, 'immutable.lock')]);
+        // Set after the links: macOS links no immutable file.
+        execFileSync('/bin/chmod', ['+a', 'everyone deny write', withAcl]);
+        execFileSync('/usr/bin/chflags', ['uchg', immutable]);
+        const before = { withAcl: metadata(withAcl), immutable: metadata(immutable) };
+        try {
+          await run.dispose();
+          expect({ withAcl: metadata(withAcl), immutable: metadata(immutable) }).toEqual(before);
+          // The second name of an immutable file can't be unlinked: its tree is left and logged.
+          expect(warnings).toHaveLength(1);
+        } finally {
+          unlock(withAcl);
+          unlock(immutable);
+          for (const name of readdirSync(tmpRoot)) {
+            const lock = join(tmpRoot, name, 'immutable.lock');
+            if (existsSync(lock)) unlock(lock);
+          }
+        }
+      },
+    );
+
+    it("logs what it can't remove in the temp root, closed to every sandbox, and lets every later run go on", async () => {
+      // A tree locked deeper than two runs' sweeps open, as a run could leave the lock directory:
+      // each run sweeps twice, and each sweep opens `UNLOCK_PASSES` levels.
+      const leftover = join(tmpRoot, `pnpm-sweep-${randomUUID()}`);
+      const levels = Array.from({ length: 2 * 2 * UNLOCK_PASSES + 4 }, (_, n) =>
+        join(leftover, ...Array.from({ length: n + 1 }, () => 'd')),
+      );
+      mkdirSync(levels.at(-1) ?? leftover, { recursive: true });
+      writeFileSync(join(levels.at(-1) ?? leftover, 'f'), '');
+      for (const level of [...levels].reverse()) chmodSync(level, 0o000);
+      try {
+        for (const attempt of [1, 2]) {
+          const run = await sandbox().forRun(input({ packageInstall: true }));
+          expect(run.commandEnv['TMPDIR'], `run ${String(attempt)}`).toBe(run.tmpDir);
+          await run.dispose();
+        }
+        expect(existsSync(leftover)).toBe(true);
+        expect(warnings.length).toBeGreaterThan(0);
+        expect(warnings.every((w) => w.fields['path'] === leftover)).toBe(true);
+        expect(warnings[0]?.message).toContain("pnpm's lock directory");
+      } finally {
+        if (existsSync(leftover)) execFileSync('/bin/chmod', ['-R', 'u+rwx', leftover]);
+      }
+    });
+
+    it('walks a lock directory of many directories off the event loop', async () => {
+      mkdirSync(pnpmLockDir, { mode: 0o700 });
+      for (let n = 0; n < 200; n += 1) {
+        mkdirSync(join(pnpmLockDir, `d${String(n)}`, 'locked'), { recursive: true });
+        chmodSync(join(pnpmLockDir, `d${String(n)}`, 'locked'), 0o000);
+      }
+      // The root's Spotlight marker is no moved tree.
+      keepSpotlightOut(tmpRoot);
+      let ticked = false;
+      const sweeping = sweepPnpmLockDir(pnpmLockDir, tmpRoot);
+      setImmediate(() => {
+        ticked = true;
+      });
+      await sweeping;
+      expect(ticked).toBe(true);
       expect(existsSync(pnpmLockDir)).toBe(false);
+      expect(readdirSync(tmpRoot)).toEqual(['.metadata_never_index']);
+    });
+
+    it("walks nothing when the lock directory can't be moved into the temp root", async () => {
+      const outside = join(root, 'outside');
+      mkdirSync(outside);
+      writeFileSync(join(outside, 'keep'), 'k');
+      mkdirSync(pnpmLockDir, { mode: 0o700 });
+      symlinkSync(outside, join(pnpmLockDir, 'abc.lock'));
+      writeFileSync(join(pnpmLockDir, 'all-stores.lock'), '');
+      const pending = createGateSandbox({
+        home,
+        dataDir,
+        loginConfigDir: null,
+        tmpRoot: join(root, 'no-temp-root'),
+        filesRoot,
+        pnpmLockDir,
+        gitDirs: (path) => git.gitDirs(path),
+        systemPrefixes: [],
+        runtime: RUNTIME,
+        log,
+      }).forRun(input({ packageInstall: true }));
+      await expect(pending).rejects.toThrow(SandboxProfileError);
+      expect(readdirSync(pnpmLockDir).sort()).toEqual(['abc.lock', 'all-stores.lock']);
+      expect(readdirSync(outside)).toEqual(['keep']);
+      expect(readdirSync(filesRoot)).toEqual([]);
     });
 
     it.each([

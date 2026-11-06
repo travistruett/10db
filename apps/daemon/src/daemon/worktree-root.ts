@@ -52,16 +52,17 @@ export function worktreeRootFor(base: string, dataDir: string): string {
 }
 
 /**
- * Refuses a root at or under a checkout, the data dir or the lane temp root, by real path even
- * before it exists: a lane could write into the root there, or the daemon's own files would lie in
- * a place it hands to git as a worktree. Refuses one under a file too.
+ * Refuses a root at or under a checkout, the data dir or a sandbox root, by real path even before it
+ * exists: a lane could write into the root there, or the daemon's own files would lie in a place it
+ * hands to git as a worktree. Refuses one under a file too.
  */
 export function assertWorktreeRootAllowed(
   root: string,
   forbidden: {
     readonly checkouts: readonly string[];
     readonly dataDir: string;
-    readonly tempRoot: string | null;
+    /** Every root lanes write or 10db keeps their sandbox files in; none with no sandbox. */
+    readonly sandboxRoots: readonly string[];
   },
 ): void {
   asRootError(root, () => {
@@ -78,9 +79,7 @@ function assertAllowed(
   const places = [
     ...forbidden.checkouts.map((path) => ({ kind: 'a registered checkout', path })),
     { kind: 'the data directory', path: forbidden.dataDir },
-    ...(forbidden.tempRoot === null
-      ? []
-      : [{ kind: 'the sandbox temp root', path: forbidden.tempRoot }]),
+    ...forbidden.sandboxRoots.map((path) => ({ kind: 'a sandbox root', path })),
   ];
   for (const { kind, path } of places) {
     const realPlace = realPathOf(path);

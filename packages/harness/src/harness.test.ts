@@ -15,6 +15,7 @@ import {
   listSkills,
   MAX_SKILL_BYTES,
   readPluginManifest,
+  readSkillBody,
   SKILL_NAMES,
   SkillManifestError,
 } from './index';
@@ -110,6 +111,42 @@ describe('listSkills on a malformed plugin dir', () => {
     const dir = mkdtempSync(join(tmpdir(), 'harness-skills-'));
     dirs.push(dir);
     expect(listSkills(dir)).toEqual([]);
+  });
+});
+
+describe('readSkillBody', () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it.each(SKILL_NAMES)('gives %s without its frontmatter', (name) => {
+    const body = readSkillBody(name);
+    expect(body).not.toBeNull();
+    expect(body).not.toMatch(/^---/);
+    expect(body).not.toContain(`name: ${name}`);
+    expect(body?.length).toBeGreaterThan(100);
+  });
+
+  it('reads from the directory it is given', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'harness-body-'));
+    dirs.push(dir);
+    mkdirSync(join(dir, 'skills', 'planning'), { recursive: true });
+    writeFileSync(
+      join(dir, 'skills', 'planning', 'SKILL.md'),
+      '---\nname: planning\ndescription: Use when x\n---\n\n# Plan\nStep one.\n',
+    );
+    expect(readSkillBody('planning', dir)).toBe('# Plan\nStep one.');
+  });
+
+  it.each([
+    ['a name that is not a craft skill', 'drafts'],
+    ['a path out of the skills directory', '../personas/planner'],
+    ['a craft skill the directory lacks', 'handoff'],
+  ])('gives null for %s', (_name, name) => {
+    const dir = mkdtempSync(join(tmpdir(), 'harness-body-'));
+    dirs.push(dir);
+    expect(readSkillBody(name, dir)).toBeNull();
   });
 });
 

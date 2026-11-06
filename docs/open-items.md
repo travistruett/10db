@@ -112,7 +112,9 @@
 - [ ] Accounts: the Factory view shows a paused workstream's account and pause reason; today the inbox card says why.
 - [ ] Accounts: an account card folds per project, so an account two projects share can raise one card in each.
 - [ ] Accounts: OS-level isolation (one macOS user per subscription account), if two-subscription Keychain separation fails (accounts spec §10).
-- [ ] Accounts: Codex accounts (`openai_api_key`, `codex_signin`) with the Codex adapter.
+- [x] Accounts: `codex_signin` accounts with the Codex adapter (`decisions/2026-11-05-chatgpt-plan-through-the-codex-app-server.md`).
+- [ ] Accounts: `openai_api_key` accounts on the Codex adapter.
+- [ ] Accounts: run the first Ampsio lane by hand on a ChatGPT plan account (sign in, confirm the identity, fill in the Model map, start one small `quick` task) and check the real hard-limit and token-refresh behaviour.
 - [ ] Accounts: the manual live checks, two subscriptions in parallel, an API-key or Bedrock account, a project moved mid-step and back, and the rate-limit events on a Max plan (plan 09 Task 14).
 - [ ] Accounts: spike carrying a cut-off conversation to the account a project moved to (`forkSession` and `getSessionMessages` on a per-account config directory, a subscription transcript resumed on Bedrock, thinking blocks, token cost). If it passes, a small follow-up plan resumes that conversation after a move instead of starting fresh from the handoff (accounts spec §11).
 - [ ] Accounts: the Accounts screen shows each project's fallback, the account it moved from and when 10db will ask to move it back.

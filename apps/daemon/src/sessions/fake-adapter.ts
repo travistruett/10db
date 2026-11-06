@@ -5,7 +5,6 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import {
   AccountKind,
   AccountProblem,
-  Provider,
   type AccountId,
   type AccountRefusal,
   type SessionId,
@@ -76,6 +75,13 @@ function expectedSeen(expect: AccountExpectation): SeenAccount {
         apiKeySource: 'none',
         tokenSource: 'ANTHROPIC_AUTH_TOKEN',
       };
+    case AccountKind.CodexSignin:
+      return {
+        ...NOTHING_SEEN,
+        email: expect.identity ?? FAKE_ACCOUNT_EMAIL,
+        subscriptionType: 'pro',
+        apiProvider: 'chatgpt',
+      };
   }
 }
 
@@ -138,7 +144,6 @@ export interface FakeObservation {
 
 /** Stands in for Claude Code at the adapter boundary; scripts drive every event. */
 export class FakeAdapter implements SessionAdapter {
-  readonly provider = Provider.Claude;
   readonly observations: FakeObservation[] = [];
   /** Every message the runner sent a session, in order. */
   readonly sent: { sessionId: SessionId; text: string }[] = [];

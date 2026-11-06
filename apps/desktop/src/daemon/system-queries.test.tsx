@@ -9,6 +9,7 @@ const check = (signedIn: string | null) =>
   SystemCheckDto.parse({
     loginEnv: { source: 'login_shell', warning: null },
     claudeCode: { verifiedOn: '2.1.302', warning: null },
+    codex: { verifiedOn: '0.154.0', warning: null },
     tools: [{ name: 'gh', path: '/usr/bin/gh', version: 'gh 2.0.0', required: false, signedIn }],
   });
 

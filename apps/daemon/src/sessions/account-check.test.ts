@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { AccountExpectation } from '../environment';
 import {
   checkAccount,
+  codexIdentity,
   checkInitCredentials,
   credentialProblem,
   missingAccountRefusal,
@@ -28,6 +29,12 @@ const expect_ = (
   kind,
   identity,
 });
+const CHATGPT: Partial<SeenAccount> = {
+  email: 'a@b.c',
+  organization: 'w1',
+  subscriptionType: 'pro',
+  apiProvider: 'chatgpt',
+};
 const SUB: Partial<SeenAccount> = {
   email: 'a@example.com',
   subscriptionType: 'Claude Max',
@@ -172,6 +179,47 @@ describe('checkAccount', () => {
     if (refusal) expect(refusal.message).toContain('Company A');
   });
 
+  it.each<{
+    name: string;
+    seen: Partial<SeenAccount>;
+    problem: AccountProblem | null;
+    seenIdentity?: string | null;
+  }>([
+    { name: 'the confirmed ChatGPT sign-in', seen: CHATGPT, problem: null },
+    {
+      name: 'the same email in another workspace',
+      seen: { ...CHATGPT, organization: 'w2' },
+      problem: 'identity_mismatch',
+      seenIdentity: 'a@b.c · w2',
+    },
+    {
+      name: 'another email in the same workspace',
+      seen: { ...CHATGPT, email: 'other@b.c' },
+      problem: 'identity_mismatch',
+      seenIdentity: 'other@b.c · w1',
+    },
+    {
+      name: 'a sign-in reporting no workspace',
+      seen: { ...CHATGPT, organization: undefined },
+      problem: 'identity_mismatch',
+      seenIdentity: 'a@b.c',
+    },
+    {
+      name: 'an API key where the sign-in should be',
+      seen: { apiKeySource: 'OPENAI_API_KEY', apiProvider: 'apikey' },
+      problem: 'wrong_credentials',
+    },
+    { name: 'nothing reported', seen: {}, problem: 'signed_out' },
+  ])('a ChatGPT sign-in expecting a@b.c · w1 meets $name', ({ seen, problem, seenIdentity }) => {
+    const refusal = checkAccount(expect_('codex_signin', 'a@b.c · w1'), { ...NONE, ...seen });
+    expect(refusal?.problem ?? null).toBe(problem);
+    if (seenIdentity !== undefined) expect(refusal?.seenIdentity ?? null).toBe(seenIdentity);
+    if (refusal) {
+      expect(refusal.message).toContain('Company A');
+      expect(refusal.message).not.toMatch(/Claude|claude/);
+    }
+  });
+
   it('re-checks the key source at init with the provider the preflight saw', () => {
     const expected = expect_('anthropic_api_key');
     const preflight: SeenAccount = {
@@ -201,6 +249,7 @@ describe('modelMatches', () => {
 describe('missingAccountRefusal', () => {
   it.each<[SupportedAccountKind, AccountProblem | null]>([
     ['claude_subscription', 'signed_out'],
+    ['codex_signin', 'signed_out'],
     ['anthropic_api_key', null],
     ['bedrock', null],
     ['gateway', null],
@@ -216,7 +265,7 @@ describe('missingAccountRefusal', () => {
 
 describe('noAccountWhy', () => {
   it('names one start by the wait alone, and says nothing was printed', () => {
-    expect(noAccountWhy(30_000, [''])).toEqual({
+    expect(noAccountWhy(30_000, [''], 'claude_subscription')).toEqual({
       why: 'Claude Code reported no account within 30 s',
       printed: 'Claude Code printed nothing',
     });
@@ -224,20 +273,26 @@ describe('noAccountWhy', () => {
 
   it('counts the starts and quotes what each printed, once for the same text', () => {
     expect(
-      noAccountWhy(30_000, [
-        'warming up\n  plugin cache locked',
-        '',
-        'warming up plugin cache locked',
-      ]),
+      noAccountWhy(
+        30_000,
+        ['warming up\n  plugin cache locked', '', 'warming up plugin cache locked'],
+        'claude_subscription',
+      ),
     ).toEqual({
       why: 'Claude Code reported no account within 30 s on each of 3 starts',
       printed: 'Claude Code printed: "warming up plugin cache locked"',
     });
-    expect(noAccountWhy(30_000, ['one', 'two']).printed).toBe('Claude Code printed: "one"; "two"');
+    expect(noAccountWhy(30_000, ['one', 'two'], 'claude_subscription').printed).toBe(
+      'Claude Code printed: "one"; "two"',
+    );
   });
 
   it('keeps the end of a long print on one line, without control characters or a final full stop', () => {
-    const { printed } = noAccountWhy(30_000, [`${'x'.repeat(1_000)}\u001b[31m\nfailed.\r\n`]);
+    const { printed } = noAccountWhy(
+      30_000,
+      [`${'x'.repeat(1_000)}\u001b[31m\nfailed.\r\n`],
+      'claude_subscription',
+    );
     expect(printed).toMatch(/^Claude Code printed: "…x+ failed"$/);
     expect(printed).not.toContain('\u001b');
     expect(printed.length).toBeLessThan(400);
@@ -300,13 +355,13 @@ describe('missingAccountRefusal with what claude auth status said', () => {
 
 describe('noAccountWhy with a wait that grows', () => {
   it('names each start by its wait when the waits differ', () => {
-    expect(noAccountWhy([30_000, 60_000, 120_000], ['', '', '']).why).toBe(
+    expect(noAccountWhy([30_000, 60_000, 120_000], ['', '', ''], 'claude_subscription').why).toBe(
       'Claude Code reported no account on each of 3 starts (waiting 30 s, 60 s and 120 s)',
     );
   });
 
   it('keeps the short wording when every start waited the same', () => {
-    expect(noAccountWhy([30_000, 30_000], ['', '']).why).toBe(
+    expect(noAccountWhy([30_000, 30_000], ['', ''], 'claude_subscription').why).toBe(
       'Claude Code reported no account within 30 s on each of 2 starts',
     );
   });
@@ -324,5 +379,35 @@ describe('credentialProblem', () => {
     [undefined, null],
   ])('%s → %s', (error, problem) => {
     expect(credentialProblem(error)).toBe(problem);
+  });
+});
+
+describe('codexIdentity', () => {
+  it('joins the email and the workspace', () => {
+    expect(codexIdentity('a@b.c', 'w1')).toBe('a@b.c · w1');
+  });
+});
+
+describe('missingAccountRefusal for a ChatGPT sign-in', () => {
+  it('names Codex and codex login status, never Claude Code', () => {
+    const refusal = missingAccountRefusal(
+      expect_('codex_signin'),
+      'Codex reported no account within 30 s',
+      'Codex printed nothing',
+      'signed_in',
+    );
+    expect(refusal?.problem).toBe('start_timeout');
+    expect(refusal?.message).toContain('codex login status');
+    expect(refusal?.message).not.toMatch(/Claude|claude/);
+  });
+});
+
+describe('noAccountWhy for a ChatGPT sign-in', () => {
+  it('names Codex in both parts, never Claude', () => {
+    const { why, printed } = noAccountWhy(30_000, ['', 'rollout locked'], 'codex_signin');
+    expect(why).toBe('Codex reported no account within 30 s on each of 2 starts');
+    expect(printed).toBe('Codex printed: "rollout locked"');
+    expect(noAccountWhy(30_000, [''], 'codex_signin').printed).toBe('Codex printed nothing');
+    expect(`${why} ${printed}`).not.toMatch(/Claude/);
   });
 });

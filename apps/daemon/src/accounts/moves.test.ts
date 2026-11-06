@@ -179,26 +179,42 @@ describe('moving a project', () => {
     expect(ticks).toBe(1);
   });
 
-  it('asks once the limit resets whether to move back, and moves back on Move back', () => {
-    runtime.rateLimited(plan, inMinutes(60), project.id);
-    // A move by PATCH while the account is paused for its usage limit is remembered too.
-    moves.move(project.id, second.id, { cause: MoveCause.Builder });
-    expect(getProject(state.db, project.id).movedFromAccountId).toBe(plan);
-    // The usage-limit card offered a move the builder has made another way.
-    expect(openCards()).toEqual([]);
+  it.each([
+    ['a Claude project from another Claude account', 'claude', 'claude'],
+    ['a ChatGPT project from a Claude account', 'chatgpt', 'claude'],
+    ['a Claude project from a ChatGPT account', 'claude', 'chatgpt'],
+  ] as const)(
+    'asks once the limit resets whether to move %s back, and moves back on Move back',
+    (_name, fromPlan, toPlan) => {
+      const chatgpt = seedAccount(store, { kind: 'codex_signin', label: 'ChatGPT plan' });
+      if (fromPlan === 'chatgpt') {
+        project = seedProject(store, { name: 'gpt', accountId: chatgpt.id });
+        plan = chatgpt.id;
+        seedWorkstream(store, { project });
+      }
+      const to = toPlan === 'chatgpt' ? chatgpt : second;
+      runtime.rateLimited(plan, inMinutes(60), project.id);
+      // A move by PATCH while the account is paused for its usage limit is remembered too.
+      moves.move(project.id, to.id, { cause: MoveCause.Builder });
+      expect(getProject(state.db, project.id).movedFromAccountId).toBe(plan);
+      // The usage-limit card offered a move the builder has made another way.
+      expect(openCards()).toEqual([]);
 
-    clock.advance(60 * 60_000);
-    const back = backCard();
-    expect(back.title).toBe('Claude plan is available again: move demo back?');
-    expect(back.body).toContain('that limit has reset');
-    expect(back.options.map((o) => o.label)).toEqual(['Move back', 'Stay']);
-    inbox.answer(back.id, { choice: AccountCardChoice.MoveBack });
-    expect(getProject(state.db, project.id)).toMatchObject({
-      accountId: plan,
-      movedFromAccountId: null,
-      moveBackAt: null,
-    });
-  });
+      clock.advance(60 * 60_000);
+      const back = backCard();
+      expect(back.title).toBe(
+        `${getAccount(state.db, plan).label} is available again: move ${project.name} back?`,
+      );
+      expect(back.body).toContain('that limit has reset');
+      expect(back.options.map((o) => o.label)).toEqual(['Move back', 'Stay']);
+      inbox.answer(back.id, { choice: AccountCardChoice.MoveBack });
+      expect(getProject(state.db, project.id)).toMatchObject({
+        accountId: plan,
+        movedFromAccountId: null,
+        moveBackAt: null,
+      });
+    },
+  );
 
   it('stays where it is on Stay, and forgets the move back', () => {
     runtime.rateLimited(plan, inMinutes(60), project.id);

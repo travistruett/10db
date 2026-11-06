@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { FAKE_SRT, SANDBOXED } from '../../test/fixtures';
 import { sandboxedMcpServer } from '../../test/sandboxed-mcp';
 import {
-  contextEvent,
   mapSdkMessage,
   resetsAtToDate,
   SUMMARY_CHARS,
@@ -211,24 +210,6 @@ describe('resetsAtToDate', () => {
   });
 });
 
-describe('contextEvent', () => {
-  it('computes the percentage from the token counts, whatever scale the SDK uses', () => {
-    expect(contextEvent({ totalTokens: 50_000, maxTokens: 200_000, percentage: 0.25 })).toEqual({
-      type: 'context',
-      percentage: 25,
-      totalTokens: 50_000,
-      maxTokens: 200_000,
-    });
-  });
-
-  it.each([
-    [0.4, 40],
-    [40, 40],
-  ])('falls back to percentage %s when maxTokens is 0', (percentage, expected) => {
-    expect(contextEvent({ totalTokens: 0, maxTokens: 0, percentage }).percentage).toBe(expected);
-  });
-});
-
 describe('toolBrief', () => {
   it.each([
     [{ command: 'git status' }, 'git status'],
@@ -349,7 +330,9 @@ describe('toSdkMcpServer', () => {
             '-i',
             'PATH=/usr/bin:/bin:/usr/sbin:/sbin',
             expect.stringMatching(/^HOME=\//),
-            expect.stringMatching(/^CLAUDE_CODE_TMPDIR=(?:\/private)?\/tmp\/sbx-[^/]+\/t\/10db-/),
+            expect.stringMatching(
+              /^CLAUDE_CODE_TMPDIR=(?:\/private)?\/tmp\/sbx-[^/]+\/t\/[A-Za-z0-9]{6}$/,
+            ),
             // srt's debug log says which host its proxy refused; the preload carries that out.
             'SRT_DEBUG=1',
             FAKE_SRT.node,

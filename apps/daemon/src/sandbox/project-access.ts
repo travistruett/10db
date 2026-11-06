@@ -33,6 +33,13 @@ export interface ProjectAccess {
    * be read-only too; the profile never opens it for writing anyway.
    */
   readonly otherCheckouts: readonly string[];
+  /** Every registered checkout and every root a lane can write, as written and resolved. */
+  readonly writableRoots: readonly string[];
+  /**
+   * Every root 10db keeps sandboxes' temp dirs and files in, closed to every sandbox's reads and
+   * writes but for its own temp dir and files there.
+   */
+  readonly sandboxRoots: readonly string[];
 }
 
 export interface ProjectAccessDeps {
@@ -40,8 +47,22 @@ export interface ProjectAccessDeps {
   readonly dataDir: string;
   /** The config dir of the login shell's own Claude Code sign-in, when it isn't the default. */
   readonly loginConfigDir: string | null;
+  /**
+   * The login shell's own `CODEX_HOME`, a personal ChatGPT login, when it isn't `~/.codex`: a protected
+   * read like that one. None by default.
+   */
+  readonly loginCodexHome?: string | null;
   /** Where sandbox temp dirs are made: PATH entries in it are dropped like a checkout's. */
   readonly tmpRoot: string;
+  /** Where ChatGPT lanes' temp dirs are made: lane-written and closed, as the temp root is. */
+  readonly codexLaneTempRoot?: string;
+  /** Where sealed files, env files and process ledgers are made: closed to every sandbox. */
+  readonly filesRoot: string;
+  /**
+   * The other roots lanes write, which count as the temp root does for PATH entries and srt: the
+   * system temp dirs Codex's base policy opens to every ChatGPT lane. None by default.
+   */
+  readonly laneWritableRoots?: readonly string[];
   /** The checkout's git dir and common dir, from `git/`. */
   readonly gitDirs: (
     repoPath: string,
@@ -175,9 +196,34 @@ async function otherCheckoutsGitState(
   return denies.flat();
 }
 
-/** Every registered checkout and the sandbox temp root, as written and resolved: what a project can write. */
-export function projectWritableRoots(checkouts: readonly string[], tmpRoot: string): string[] {
-  return [...checkouts, tmpRoot].flatMap((path) => {
+/** The temp root and every other root a lane writes. */
+export function laneRootsOf(
+  deps: Pick<ProjectAccessDeps, 'tmpRoot' | 'codexLaneTempRoot' | 'laneWritableRoots'>,
+): string[] {
+  return [
+    deps.tmpRoot,
+    ...(deps.codexLaneTempRoot === undefined ? [] : [deps.codexLaneTempRoot]),
+    ...(deps.laneWritableRoots ?? []),
+  ];
+}
+
+/** Every root 10db keeps sandboxes' temp dirs and files in: see `ProjectAccess.sandboxRoots`. */
+export function sandboxRootsOf(
+  deps: Pick<ProjectAccessDeps, 'tmpRoot' | 'codexLaneTempRoot' | 'filesRoot'>,
+): string[] {
+  return [
+    deps.tmpRoot,
+    ...(deps.codexLaneTempRoot === undefined ? [] : [deps.codexLaneTempRoot]),
+    deps.filesRoot,
+  ];
+}
+
+/** Every registered checkout and every root a lane writes, as written and resolved: what a project can write. */
+export function projectWritableRoots(
+  checkouts: readonly string[],
+  laneRoots: readonly string[],
+): string[] {
+  return [...checkouts, ...laneRoots].flatMap((path) => {
     try {
       return [path, realpathSync(path)];
     } catch {
@@ -204,11 +250,14 @@ export async function projectAccess(
       configDirs: [
         ...input.configDirs,
         ...(deps.loginConfigDir === null ? [] : [deps.loginConfigDir]),
+        ...(deps.loginCodexHome === undefined || deps.loginCodexHome === null
+          ? []
+          : [deps.loginCodexHome]),
       ],
     }),
     ...MISE_SYSTEM_DIRS,
   ];
-  const untrustedRoots = projectWritableRoots(input.checkouts, deps.tmpRoot);
+  const untrustedRoots = projectWritableRoots(input.checkouts, laneRootsOf(deps));
   const toolchain = toolchainAccess(deps.home, input.env, protectedList, {
     untrustedRoots,
     ...(deps.systemPrefixes === undefined ? {} : { systemPrefixes: deps.systemPrefixes }),
@@ -229,5 +278,7 @@ export async function projectAccess(
     // dir under any of them.
     gitState: [...new Set([join(checkout, '.git'), gitDir, commonDir, ...otherGitState])],
     otherCheckouts: others.filter((other) => !isEqualOrUnder(checkout, other)),
+    writableRoots: untrustedRoots,
+    sandboxRoots: sandboxRootsOf(deps),
   };
 }

@@ -9,7 +9,7 @@ import {
   rmSync,
   statSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { mintId } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -19,6 +19,7 @@ import { createGit } from '../git';
 import { REFUSED_MESSAGE } from './mcp-sandbox';
 import {
   createLaneSandbox,
+  isEqualOrUnder,
   SandboxProfileError,
   type LaneSession,
   type LaneSessionInput,
@@ -40,6 +41,7 @@ const projectId = mintId('Project');
 let root: string;
 let home: string;
 let tmpRoot: string;
+let filesRoot: string;
 let repo: TempDir;
 let checkout: string;
 
@@ -73,6 +75,7 @@ function forSession(
     dataDir: join(home, 'data'),
     loginConfigDir: null,
     tmpRoot,
+    filesRoot,
     gitDirs: (path) => git.gitDirs(path),
     systemPrefixes: [],
     runtime,
@@ -125,8 +128,10 @@ beforeEach(() => {
   root = realpathSync(mkdtempSync('/tmp/sbm-'));
   home = join(root, 'home');
   tmpRoot = join(root, 't');
+  filesRoot = join(root, 'run');
   mkdirSync(home);
   mkdirSync(tmpRoot);
+  mkdirSync(filesRoot);
   repo = createTempRepo();
   checkout = realpathSync(repo.path);
 });
@@ -179,8 +184,12 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
   it('puts no value on a command line: the approved variables travel in a sealed file', async () => {
     const session = await forSession();
     try {
-      const { server, envFile, tmp } = launchOf(session, 'docs');
+      const { server, envFile, settingsFile, tmp } = launchOf(session, 'docs');
       expect(JSON.stringify(server)).not.toContain('tok-1');
+      // Both sealed files are in the files root, outside every temp dir; the temp dir is the temp root's.
+      expect(dirname(envFile)).toBe(filesRoot);
+      expect(dirname(settingsFile)).toBe(filesRoot);
+      expect(dirname(tmp)).toBe(tmpRoot);
       expect(statSync(envFile).mode & 0o777).toBe(0o400);
       const text = readFileSync(envFile, 'utf8');
       const names = [...text.matchAll(/^export ([A-Za-z_][A-Za-z0-9_]*)=/gm)].map((m) => m[1]);
@@ -200,16 +209,33 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
   });
 
   it('writes only its own temp dir, never the checkout, and reads the env file it is given', async () => {
-    const session = await forSession();
+    // A read-list entry over every sandbox root opens none of them.
+    const session = await forSession({
+      rules: [
+        { toolName: 'SandboxNetworkAccess', pattern: 'registry.npmjs.org' },
+        { toolName: 'Read', pattern: root },
+      ],
+      mcpServers: { docs: SERVER, other: { ...SERVER, args: ['other.mjs'] } },
+    });
     try {
       const { settings, tmp, envFile } = launchOf(session, 'docs');
+      const other = launchOf(session, 'other');
       const { filesystem } = SrtFile.parse(settings);
       expect(filesystem.allowWrite).toEqual([tmp]);
       expect(filesystem.denyWrite).toEqual(
         expect.arrayContaining(['/tmp/claude', '/private/tmp/claude']),
       );
-      expect(filesystem.denyRead).toEqual(expect.arrayContaining(['/', join(home, '.claude')]));
+      expect(filesystem.denyRead).toEqual(
+        expect.arrayContaining(['/', join(home, '.claude'), tmpRoot, filesRoot]),
+      );
       expect(filesystem.allowRead).toEqual(expect.arrayContaining([checkout, tmp, envFile]));
+      expect(filesystem.allowRead).not.toContain(root);
+      // The other server's env file, its approved values, and the lane's are closed to this one.
+      for (const closed of [other.envFile, other.tmp, session.spec.env['CLAUDE_ENV_FILE'] ?? ''])
+        expect(
+          filesystem.allowRead.filter((open) => isEqualOrUnder(closed, open)),
+          closed,
+        ).toEqual([]);
       expect(settings).toMatchObject({ allowAppleEvents: false });
     } finally {
       session.dispose();
@@ -305,27 +331,23 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
       const { settingsFile, tmp, envFile, preload, refusalLog } = launchOf(session, 'docs');
       // Only the lane's own files, the started server's and the daemon's process ledger are left:
       // the failed one's are gone.
-      const left = readdirSync(tmpRoot);
+      expect(readdirSync(tmpRoot).sort()).toEqual(
+        [session.tmpDir, tmp].map((path) => path.slice(tmpRoot.length + 1)).sort(),
+      );
+      const files = readdirSync(filesRoot);
       expect(
-        left.filter((name) => /^10db-proc-[1-9][0-9]*-[0-9a-f]{12}\.json$/.test(name)),
+        files.filter((name) => /^10db-proc-[1-9][0-9]*-[0-9a-f]{12}\.json$/.test(name)),
       ).toHaveLength(1);
-      expect(left.filter((name) => !name.startsWith('10db-proc-')).sort()).toEqual(
-        [
-          session.tmpDir,
-          settingsFile,
-          tmp,
-          envFile,
-          preload,
-          refusalLog,
-          session.spec.env['CLAUDE_ENV_FILE'] ?? '',
-        ]
-          .map((path) => path.slice(tmpRoot.length + 1))
+      expect(files.filter((name) => !name.startsWith('10db-proc-')).sort()).toEqual(
+        [settingsFile, envFile, preload, refusalLog, session.spec.env['CLAUDE_ENV_FILE'] ?? '']
+          .map((path) => path.slice(filesRoot.length + 1))
           .sort(),
       );
     } finally {
       session.dispose();
     }
     expect(readdirSync(tmpRoot)).toEqual([]);
+    expect(readdirSync(filesRoot)).toEqual([]);
   });
 
   it('removes each server temp dir, settings file and env file on dispose', async () => {
@@ -380,6 +402,9 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
     const session = await forSession();
     try {
       const { preload, refusalLog } = launchOf(session, 'docs');
+      // Both are in the files root, outside every temp dir: no sandbox can swap the code srt's host runs.
+      expect(dirname(preload)).toBe(filesRoot);
+      expect(dirname(refusalLog)).toBe(filesRoot);
       expect(statSync(preload).mode & 0o777).toBe(0o400);
       expect(statSync(refusalLog).mode & 0o777).toBe(0o600);
       expect(readFileSync(refusalLog, 'utf8')).toBe('');
@@ -393,6 +418,7 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
       forSession({}, { node: process.execPath, cli: join(checkout, 'srt.mjs') }),
     ).rejects.toThrow(SandboxProfileError);
     expect(readdirSync(tmpRoot)).toEqual([]);
+    expect(readdirSync(filesRoot)).toEqual([]);
   });
 
   it('makes nothing and checks no srt when the repo has no stdio server', async () => {

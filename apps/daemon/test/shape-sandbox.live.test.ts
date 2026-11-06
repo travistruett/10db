@@ -5,6 +5,7 @@ import { mintId, PermissionChoice, ShapeOrigin } from '@10db/contracts';
 import { createTestStore, insertShape, seedProject, type AccountRow } from '@10db/db';
 import { HARNESS_PLUGIN_DIR } from '@10db/harness';
 import { describe, expect, it } from 'vitest';
+import { allSandboxRootsOf, openSandboxRoots, sandboxDepsOf } from '../src/daemon';
 import { createShapePreparer } from '../src/daemon/shape-session-tools';
 import { loadEnv } from '../src/env';
 import { captureLoginEnv, createLauncher, findClaude, systemKeychain } from '../src/environment';
@@ -14,7 +15,7 @@ import { protectedPaths } from '../src/guard';
 import { createInboxService } from '../src/inbox';
 import { createLogger, silentLogger } from '../src/log';
 import { resolveSandboxRuntime } from '../src/paths';
-import { createLaneSandbox } from '../src/sandbox';
+import { claimSandboxRoots, createLaneSandbox } from '../src/sandbox';
 import { createClaudeAdapter, type ShapeToolRequest } from '../src/sessions';
 import {
   judgeShapeCall,
@@ -78,7 +79,11 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
       createdAt: new Date(0).toISOString(),
       updatedAt: new Date(0).toISOString(),
     };
-    const seen = await adapter.probeAccount({ cwd: checkout, env: launcher.probe(account).env });
+    const seen = await adapter.probeAccount({
+      kind: account.kind,
+      cwd: checkout,
+      env: launcher.probe(account).env,
+    });
     const launch = launcher.session({ ...account, expectedIdentity: seen.email ?? null }, 'haiku');
 
     const test = createTestStore();
@@ -93,6 +98,11 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
       home: homedir(),
       loginConfigDir: launcher.loginConfigDir(),
     });
+    // The daemon's own roots, marked as a running daemon's so a test daemon that starts meanwhile
+    // leaves the session's files alone.
+    const roots = openSandboxRoots({}, homedir());
+    if (roots.refusal !== null) throw roots.refusal;
+    const claim = claimSandboxRoots([roots.temp, roots.codexLanes, roots.files]);
     const prepare = createShapePreparer({
       state,
       inbox,
@@ -102,6 +112,7 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
         home: homedir(),
         dataDir,
         loginConfigDir: launcher.loginConfigDir(),
+        ...sandboxDepsOf(roots),
         gitDirs: (path) => createGit().gitDirs(path),
         runtime: resolveSandboxRuntime(),
         worktreeRoot: join(dataDir, 'worktrees'),
@@ -115,6 +126,7 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
       projectId: project.id,
       shapeId: shape.id,
       sessionId: mintId('Session'),
+      accountKind: account.kind,
       env: launch.env,
       resumeProviderSessionId: null,
       signal: new AbortController().signal,
@@ -137,7 +149,7 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
       home: homedir(),
       protectedReads: guarded.map((p) => p.path),
       filesDir,
-      tempRoot: realpathSync(tmpdir()),
+      sandboxRoots: allSandboxRootsOf(roots),
       commands,
     };
     const toolset = shapeToolset(true);
@@ -192,6 +204,7 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
       }
     } finally {
       await prepared.release();
+      claim.release();
       test.close();
     }
     const bash = judged.filter((j) => j.req.toolName === 'Bash');

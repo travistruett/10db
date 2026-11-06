@@ -91,7 +91,9 @@ describe.skipIf(!SEATBELT)('toolchains under the gate sandbox (Seatbelt)', () =>
         loginConfigDir: null,
         gitDirs: (path) => git.gitDirs(path),
         tmpRoot: join(root, 't'),
+        filesRoot: join(root, 'r'),
         runtime: resolveSandboxRuntime(),
+        log: silentLogger,
       }),
       logger: silentLogger,
     });
@@ -134,6 +136,7 @@ describe.skipIf(!SEATBELT)('toolchains under the gate sandbox (Seatbelt)', () =>
     // A short root: the gate's temp dir must fit the socket path limit.
     root = realpathSync(mkdtempSync('/tmp/sbt-'));
     mkdirSync(join(root, 't'));
+    mkdirSync(join(root, 'r'));
     repo = createTempRepo();
     checkout = realpathSync(repo.path);
     // A builder's home with mise installs, state, downloads, a plugin and an age key.

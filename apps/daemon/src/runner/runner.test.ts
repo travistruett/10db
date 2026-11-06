@@ -67,6 +67,7 @@ import {
   transitionWorkstream,
   updateInboxItem,
 } from '@10db/db';
+import { readSkillBody } from '@10db/harness';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   BACKGROUND_DONE_NUDGE,
@@ -2717,42 +2718,195 @@ const moveTo = (accountId: AccountId) =>
 /** What the scheduler does once the new account isn't paused. */
 const requeue = (id: Parameters<typeof getWorkstream>[1]) =>
   engine.state.write((ctx) => transitionWorkstream(ctx, id, { to: 'QUEUED', fence: null }));
+/** Every spec the fake adapter is started with, in order. */
+const recordSpecs = (): SessionSpec[] => {
+  const specs: SessionSpec[] = [];
+  engine.adapter.seen = (spec) => {
+    specs.push(spec);
+    return {};
+  };
+  return specs;
+};
 
 describe('moving accounts', () => {
   const accountsOf = (id: Parameters<typeof getWorkstream>[1]) =>
     listSessions(engine.store.db, id).map((s) => s.accountId);
 
-  it('starts a fresh session from the handoff when the project moved off the account its conversation ran on', async () => {
+  /** A ChatGPT account's Model map: a Codex model ID for each alias the router names. */
+  const CODEX_MODELS: Readonly<Record<string, string>> = {
+    opus: 'gpt-6-astra',
+    sonnet: 'gpt-5.6-sol',
+    haiku: 'gpt-5.6-luna',
+    fable: 'gpt-6-astra',
+  };
+  const CHATGPT = {
+    kind: 'codex_signin',
+    label: 'ChatGPT plan',
+    settings: { modelMap: CODEX_MODELS },
+  } as const;
+  const CHATGPT_IDENTITY = 'chatgpt@example.com · ws-1';
+  type Plan = 'claude' | 'chatgpt';
+  /** An engine whose project starts on a plan of `home`'s agent, its identity confirmed. */
+  const engineOn = async (home: Plan, book: Parameters<typeof createTestEngine>[0]) => {
+    engine = await createTestEngine(book, {}, {}, home === 'chatgpt' ? { account: CHATGPT } : {});
+    if (home === 'chatgpt')
+      engine.state.write((ctx) =>
+        patchAccount(ctx, engine.project.accountId, { expectedIdentity: CHATGPT_IDENTITY }),
+      );
+    return engine;
+  };
+  /** Another confirmed account for the project to move to, of `plan`'s agent. */
+  const otherPlan = (plan: Plan): AccountId => {
+    if (plan === 'claude') return secondPlan().id;
+    const account = seedAccount(engine.store, CHATGPT);
+    engine.state.write((ctx) =>
+      patchAccount(ctx, account.id, { expectedIdentity: CHATGPT_IDENTITY }),
+    );
+    return account.id;
+  };
+  /** The model a session on a plan of `plan`'s agent is asked for, given its step's alias. */
+  const modelOn = (plan: Plan, alias: string): string =>
+    plan === 'chatgpt' ? (CODEX_MODELS[alias] ?? alias) : alias;
+  const providerOn = (plan: Plan): string => (plan === 'chatgpt' ? 'codex' : 'claude');
+
+  it.each([
+    ['another Claude account', 'claude', 'claude'],
+    ['a ChatGPT account after a Claude one', 'claude', 'chatgpt'],
+    ['a Claude account after a ChatGPT one', 'chatgpt', 'claude'],
+  ] as const)(
+    'runs the next session on %s from the handoff, with the step alias mapped',
+    async (_name, home, away) => {
+      await engineOn(home, {
+        Alpha: [
+          [
+            {
+              do: 'mcp',
+              tool: 'write_handoff',
+              args: handoffArgs('op-move-0001', 'Write the second file'),
+            },
+            { do: 'rate_limit', status: 'rejected', resetsInSeconds: 600 },
+          ],
+          [write('src/api/b.txt'), commit('op-move-0002', ['src/api/b.txt']), turn],
+        ],
+      });
+      const specs = recordSpecs();
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      expect(ws(workstream.id)).toMatchObject({
+        state: 'PAUSED_LIMIT',
+        nextAction: { kind: 'resume' },
+      });
+
+      const other = otherPlan(away);
+      moveTo(other);
+      requeue(workstream.id);
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      expect(ws(workstream.id).state).toBe('DONE');
+      expect(accountsOf(workstream.id)).toEqual([engine.project.accountId, other]);
+      expect(engine.adapter.prompts[1]).toMatchObject({ resume: null });
+      expect(engine.adapter.prompts[1]?.prompt).toContain('Next action: Write the second file');
+      // Each session asks its account's agent for the step's alias, through that account's Model map.
+      const sessions = listSessions(engine.store.db, workstream.id);
+      expect(specs.map((s) => s.model)).toEqual([
+        modelOn(home, sessions[0]?.model ?? ''),
+        modelOn(away, sessions[1]?.model ?? ''),
+      ]);
+      expect(sessions.map((s) => s.provider)).toEqual([providerOn(home), providerOn(away)]);
+    },
+  );
+
+  it.each([
+    ['a Claude lane back from a ChatGPT session', 'claude', 'chatgpt'],
+    ['a ChatGPT lane back from a Claude session', 'chatgpt', 'claude'],
+  ] as const)(
+    'does not resume a conversation from the other account: %s',
+    async (_name, home, away) => {
+      await engineOn(home, {
+        Alpha: [
+          [
+            { do: 'mcp', tool: 'write_handoff', args: handoffArgs('op-across-001', 'Write a') },
+            { do: 'rate_limit', status: 'rejected', resetsInSeconds: 600 },
+          ],
+          [
+            { do: 'mcp', tool: 'write_handoff', args: handoffArgs('op-across-002', 'Write b') },
+            { do: 'rate_limit', status: 'rejected', resetsInSeconds: 600 },
+          ],
+          [write('src/api/b.txt'), commit('op-across-003', ['src/api/b.txt']), turn],
+        ],
+      });
+      const homeAccount = engine.project.accountId;
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      moveTo(otherPlan(away));
+      requeue(workstream.id);
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      // The lane paused again, this time with a conversation on the other agent's account to resume.
+      const [first, across] = listSessions(engine.store.db, workstream.id);
+      expect(ws(workstream.id).nextAction).toMatchObject({
+        kind: 'resume',
+        providerSessionId: across?.providerSessionId,
+      });
+
+      moveTo(homeAccount);
+      requeue(workstream.id);
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      expect(ws(workstream.id).state).toBe('DONE');
+      expect(engine.adapter.prompts.map((p) => p.accountId)).toEqual([
+        homeAccount,
+        across?.accountId,
+        homeAccount,
+      ]);
+      // Back home, neither the other account's conversation nor the older one here is resumed.
+      expect(engine.adapter.prompts.map((p) => p.resume)).toEqual([null, null, null]);
+      expect(engine.adapter.prompts[2]?.prompt).toContain('Next action: Write b');
+      expect(first?.providerSessionId).not.toBe(across?.providerSessionId);
+    },
+  );
+
+  it('briefs for the account a lane moved to, session by session', async () => {
     engine = await createTestEngine({
       Alpha: [
         [
           {
             do: 'mcp',
             tool: 'write_handoff',
-            args: handoffArgs('op-move-0001', 'Write the second file'),
+            args: handoffArgs('op-brief-0000', 'Write the second file'),
           },
           { do: 'rate_limit', status: 'rejected', resetsInSeconds: 600 },
         ],
-        [write('src/api/b.txt'), commit('op-move-0002', ['src/api/b.txt']), turn],
+        [write('src/api/b.txt'), commit('op-brief-0001', ['src/api/b.txt']), turn],
       ],
     });
-    const { workstream } = engine.addTask('Alpha');
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'quick' });
     engine.launch(workstream.id);
     await engine.runner.idle();
-    expect(ws(workstream.id)).toMatchObject({
-      state: 'PAUSED_LIMIT',
-      nextAction: { kind: 'resume' },
-    });
+    expect(ws(workstream.id).state).toBe('PAUSED_LIMIT');
 
-    const second = secondPlan();
-    moveTo(second.id);
+    const chatgpt = seedAccount(engine.store, { kind: 'codex_signin', label: 'ChatGPT plan' });
+    engine.state.write((ctx) =>
+      patchAccount(ctx, chatgpt.id, { expectedIdentity: 'chatgpt@example.com' }),
+    );
+    moveTo(chatgpt.id);
     requeue(workstream.id);
     engine.launch(workstream.id);
     await engine.runner.idle();
     expect(ws(workstream.id).state).toBe('DONE');
-    expect(accountsOf(workstream.id)).toEqual([engine.project.accountId, second.id]);
-    expect(engine.adapter.prompts[1]).toMatchObject({ resume: null });
-    expect(engine.adapter.prompts[1]?.prompt).toContain('Next action: Write the second file');
+
+    const [claude, codex] = engine.adapter.prompts.map((p) => p.prompt);
+    expect(claude).toContain('Change files with the Edit or Write tool');
+    expect(claude).not.toContain('apply_patch');
+    expect(codex).toContain('Change files with apply_patch');
+    expect(codex).toContain('In this session, the Edit or Write tool means apply_patch.');
+    // The implementer's skills are in the briefing itself, as a Codex lane loads no plugin.
+    expect(codex).toContain(readSkillBody('test-first') ?? 'missing');
+    expect(claude).not.toContain(readSkillBody('test-first') ?? 'missing');
+    // The project's own provider is not what the briefing follows.
+    expect(getProject(engine.store.db, engine.project.id).provider).toBe(engine.project.provider);
   });
 
   it("brings the builder's answer to a fresh session after the project moved", async () => {
@@ -4439,7 +4593,7 @@ describe("a lane's settled read-only line", () => {
           readList: [],
           configDir: input.configDir,
           providerSessionId: null,
-          sandboxTemp: { root: root.path, own: root.path },
+          sandboxTemp: { roots: [root.path], own: root.path },
         },
         tmpDir: root.path,
         commandEnv: {},
@@ -4480,13 +4634,19 @@ describe("a lane's settled read-only line", () => {
 // The probe's temp root is a short path under the shared `/tmp`, which no sandbox can write.
 describe.skipIf(SANDBOXED)('lane sandbox', () => {
   const lanesGit = createGit();
-  /** A real lane sandbox over a short temp root and a temp home, recording each session it makes. */
+  /**
+   * A real lane sandbox over a short temp root, its own files root and Codex lanes root, and a temp
+   * home, recording each session it makes.
+   */
   interface SandboxProbe {
     readonly laneSandbox: LaneSandbox;
     readonly inputs: LaneSessionInput[];
     readonly sessions: LaneSession[];
     readonly home: string;
     readonly tmpRoot: string;
+    readonly filesRoot: string;
+    /** What the engine is given as `codexLaneTempRoot`. */
+    readonly codexLanes: string;
   }
   let probeRoot: string | null = null;
   afterEach(() => {
@@ -4497,13 +4657,16 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     probeRoot = realpathSync(mkdtempSync('/tmp/sbr-'));
     const home = join(probeRoot, 'h');
     const tmpRoot = join(probeRoot, 't');
-    mkdirSync(home);
-    mkdirSync(tmpRoot);
+    const filesRoot = join(probeRoot, 'r');
+    const codexLanes = join(probeRoot, 'l');
+    for (const dir of [home, tmpRoot, filesRoot, codexLanes]) mkdirSync(dir);
     const real = createLaneSandbox({
       home,
       dataDir: join(probeRoot, 'd'),
       loginConfigDir: null,
       tmpRoot,
+      filesRoot,
+      codexLaneTempRoot: codexLanes,
       gitDirs: (path) => lanesGit.gitDirs(path),
       runtime: FAKE_SRT,
       worktreeRoot: join(probeRoot, 'w'),
@@ -4525,16 +4688,9 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       sessions,
       home,
       tmpRoot,
+      filesRoot,
+      codexLanes,
     };
-  };
-  /** Every spec the fake adapter is started with. */
-  const recordSpecs = (): SessionSpec[] => {
-    const specs: SessionSpec[] = [];
-    engine.adapter.seen = (spec) => {
-      specs.push(spec);
-      return {};
-    };
-    return specs;
   };
   const hostCall = (host: string) => ({
     do: 'tool' as const,
@@ -4542,9 +4698,13 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     input: { host },
   });
 
-  it('runs the session under its profile in default mode, with checkout-scoped reads and the sandbox briefing', async () => {
+  it("runs the session under its profile in default mode, with checkout-scoped reads and the sandbox briefing, and keeps a Claude lane's temp dir under the lane temp root", async () => {
     const probe = sandboxProbe();
-    engine = await createTestEngine({ Alpha: [[turn]] }, {}, { laneSandbox: probe.laneSandbox });
+    engine = await createTestEngine(
+      { Alpha: [[turn]] },
+      {},
+      { laneSandbox: probe.laneSandbox, codexLaneTempRoot: probe.codexLanes },
+    );
     const specs = recordSpecs();
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
@@ -4566,9 +4726,91 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     });
     // The id Claude Code named at `started` is the one the file tools judge by.
     expect(laneSession?.fileAccess.providerSessionId).toBe(session?.providerSessionId);
-    // The session ended, so its temp dir is gone.
+    // Claude Code and srt run in a Claude lane's temp dir: it stays under the short temp root.
+    expect(probe.inputs[0]?.tempRoot).toBeUndefined();
+    expect(probe.inputs[0]?.provider).toBe('claude');
+    expect(dirname(laneSession?.tmpDir ?? '')).toBe(probe.tmpRoot);
+    // The session ended, so its temp dir and files are gone.
     expect(readdirSync(probe.tmpRoot)).toEqual([]);
+    expect(readdirSync(probe.filesRoot)).toEqual([]);
     expect(ws(workstream.id).state).toBe('DONE');
+  });
+
+  /** A subscription session starts only on an account whose identity was confirmed. */
+  const confirmIdentity = (): void => {
+    engine.state.write((ctx) =>
+      patchAccount(ctx, engine.project.accountId, { expectedIdentity: 'me@example.com' }),
+    );
+  };
+
+  it('builds a lane sandbox on the account home for a ChatGPT account, and makes its temp dir under the Codex lanes root', async () => {
+    const probe = sandboxProbe();
+    engine = await createTestEngine(
+      { Alpha: [[turn]] },
+      {},
+      { laneSandbox: probe.laneSandbox, codexLaneTempRoot: probe.codexLanes },
+      { account: { kind: 'codex_signin', label: 'ChatGPT plan' } },
+    );
+    confirmIdentity();
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+
+    const [seen] = probe.inputs;
+    expect(seen?.configDir).toBe(engine.store.db.select().from(schema.accounts).get()?.configDir);
+    expect(seen?.configDir).not.toBe(join(homedir(), '.claude'));
+    expect(seen?.env['CODEX_HOME']).toBe(seen?.configDir);
+    // A ChatGPT lane's temp dir is kept apart from Claude lanes', in the root the daemon names.
+    expect(seen?.tempRoot).toBe(probe.codexLanes);
+    expect(seen?.provider).toBe('codex');
+    expect(dirname(probe.sessions[0]?.tmpDir ?? '')).toBe(probe.codexLanes);
+    expect(readdirSync(probe.tmpRoot)).toEqual([]);
+    expect(readdirSync(probe.codexLanes)).toEqual([]);
+  });
+
+  it('warns once per skill a ChatGPT lane is briefed without, naming it', async () => {
+    const logs = captureLogs();
+    engine = await createTestEngine(
+      { Alpha: [[turn]] },
+      {},
+      {
+        logger: logs.logger,
+        skillBody: (name) => (name === 'handoff' ? null : readSkillBody(name)),
+      },
+      { account: { kind: 'codex_signin', label: 'ChatGPT plan' } },
+    );
+    confirmIdentity();
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'quick' });
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+
+    const warned = logs.lines().filter((l) => String(l['msg']).includes('skill'));
+    expect(warned).toHaveLength(1);
+    expect(warned[0]).toMatchObject({ level: 40, skill: 'handoff', workstreamId: workstream.id });
+    const prompt = engine.adapter.prompts[0]?.prompt ?? '';
+    expect(prompt).toContain(readSkillBody('test-first') ?? 'missing');
+    expect(prompt).not.toContain(readSkillBody('handoff') ?? 'missing');
+  });
+
+  it.each([
+    { kind: 'codex_signin' as const, provider: 'codex' },
+    { kind: 'claude_subscription' as const, provider: 'claude' },
+  ])('records the provider of the account a session runs on: $kind', async ({ kind, provider }) => {
+    engine = await createTestEngine(
+      { Alpha: [[turn]] },
+      {},
+      {},
+      { account: { kind, label: 'Plan' } },
+    );
+    confirmIdentity();
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(listSessions(engine.store.db, workstream.id).map((row) => row.provider)).toEqual([
+      provider,
+    ]);
+    // The project's own provider is left as it was.
+    expect(getProject(engine.store.db, engine.project.id).provider).toBe(engine.project.provider);
   });
 
   describe('the processes a session’s commands start', () => {

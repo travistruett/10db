@@ -11,6 +11,7 @@ import {
   type LaneProfileInput,
 } from './index';
 import { childListingGrant, listingGrant } from './profile';
+import { isEqualOrUnder } from './protected-reads';
 
 let root: string;
 let home: string;
@@ -35,6 +36,8 @@ function input(overrides: Partial<LaneProfileInput> = {}): LaneProfileInput {
     extraReads: [],
     extraWrites: [],
     denyWrites: [],
+    sandboxRoots: [],
+    ownFiles: [],
     loopback: false,
     deniedEnvNames: ['GH_TOKEN'],
     ...overrides,
@@ -97,6 +100,122 @@ describe('buildLaneProfile', () => {
     const { allowRead } = buildLaneProfile(input({ readList: [under, kept] })).filesystem;
     expect(allowRead).not.toContain(under);
     expect(allowRead).toContain(kept);
+  });
+
+  /** A lane's sandbox roots as it has them: its temp dir's root, another lanes' root, the files root. */
+  function withRoots(): LaneProfileInput & {
+    readonly tempRoot: string;
+    readonly lanes: string;
+    readonly files: string;
+    readonly envFile: string;
+  } {
+    const tempRoot = join(root, 'shared');
+    const files = join(home, '.10db', 'run');
+    const lanes = join(home, '.10db', 'lanes');
+    const envFile = join(files, '10db-env-0123456789ab.sh');
+    return {
+      ...input({
+        tmpDir: join(tempRoot, '10db-abcdef'),
+        sandboxRoots: [tempRoot, lanes, files],
+        ownFiles: [envFile],
+        extraReads: [envFile],
+        readList: [join(home, '.10db'), join(files, '10db-mcp-0123456789ab.sh'), lanes],
+      }),
+      tempRoot,
+      lanes,
+      files,
+      envFile,
+    };
+  }
+
+  it('closes every sandbox root but its own temp dir and files, whatever the read list holds', () => {
+    const given = withRoots();
+    const { allowRead, allowWrite, denyRead, denyWrite } = buildLaneProfile(given).filesystem;
+    expect(denyRead).toEqual(expect.arrayContaining([given.tempRoot, given.lanes, given.files]));
+    expect(allowRead).toEqual(expect.arrayContaining([given.tmpDir, given.envFile]));
+    expect(allowWrite).toEqual([given.tmpDir]);
+    // No read-list entry over, at or in a root survives: none opens another sandbox's files.
+    for (const listed of given.readList) expect(allowRead, listed).not.toContain(listed);
+    expect(denyWrite).toEqual([]);
+  });
+
+  it.each(SYSTEM_READS.map((entry) => [entry] as const))(
+    'leaves out the built-in read %s when a sandbox root lies under it, keeping the lane own temp dir and files',
+    (entry) => {
+      const tempRoot = join(entry, 'sbx-shared');
+      const files = join(entry, 'sbx-run');
+      const envFile = join(files, '10db-env-0123456789ab.sh');
+      const tmpDir = join(tempRoot, '10db-abcdef');
+      const { allowRead, denyRead } = buildLaneProfile(
+        input({
+          tmpDir,
+          sandboxRoots: [tempRoot, files],
+          ownFiles: [envFile],
+          extraReads: [envFile],
+        }),
+      ).filesystem;
+      expect(allowRead).not.toContain(entry);
+      expect(allowRead).toEqual(expect.arrayContaining([tmpDir, envFile]));
+      expect(denyRead).toEqual(expect.arrayContaining([tempRoot, files]));
+      // No remaining grant is a root or covers one, so nothing else opens another sandbox's files.
+      for (const granted of allowRead) {
+        for (const held of [tempRoot, files]) {
+          expect(
+            held === granted || held.startsWith(`${granted}/`),
+            `${granted} covers ${held}`,
+          ).toBe(false);
+        }
+      }
+    },
+  );
+
+  it.each<[string, () => LaneProfileInput]>([
+    // On Linux the test's temp dir lies under `/tmp`, a built-in read, so this row's roots do too.
+    ['roots in the test temp dir', withRoots],
+    // Roots no built-in read holds, on every platform.
+    ['roots no built-in read holds', () => input({ sandboxRoots: ['/10db-nowhere/shared'] })],
+  ])('keeps every built-in read that holds no sandbox root, with %s', (_name, make) => {
+    const given = make();
+    const { allowRead } = buildLaneProfile(given).filesystem;
+    const kept = SYSTEM_READS.filter(
+      (entry) => !given.sandboxRoots.some((sandboxRoot) => isEqualOrUnder(sandboxRoot, entry)),
+    );
+    expect(kept.length).toBeGreaterThan(0);
+    expect(allowRead).toEqual(expect.arrayContaining(kept));
+  });
+
+  it.each<
+    [
+      string,
+      (given: ReturnType<typeof withRoots>) => {
+        readonly writes: Partial<LaneProfileInput>;
+        readonly path: string;
+        readonly root: string;
+      },
+    ]
+  >([
+    // It holds `~/.10db`: other lanes' temp dirs and files there would be the lane's to write.
+    [
+      'the checkout holds the home',
+      (given) => ({ writes: { checkout: home }, path: home, root: given.lanes }),
+    ],
+    // It holds the root of the lane's own temp dir, and every other sandbox's temp dir beside it.
+    [
+      'an extra write holds the temp root',
+      (given) => ({ writes: { extraWrites: [root] }, path: root, root: given.tempRoot }),
+    ],
+    [
+      'an extra write is a sandbox root',
+      (given) => ({ writes: { extraWrites: [given.files] }, path: given.files, root: given.files }),
+    ],
+  ])('refuses the profile when %s, naming both paths', (_name, make) => {
+    const given = withRoots();
+    const { writes, path, root: held } = make(given);
+    const build = () => buildLaneProfile({ ...given, ...writes });
+    expect(build).toThrow(SandboxProfileError);
+    expect(build).toThrow(
+      `${path} holds ${held}, where 10db keeps every sandbox's temp dirs and files`,
+    );
   });
 
   it('appends extra reads and writes, and filters them like the read list', () => {
@@ -322,6 +441,8 @@ describe('protectedReads', () => {
       '/c',
       '/h/.claude',
       '/h/.claude.json',
+      '/h/.codex',
+      '/h/.agents',
       '/h/Library/Keychains',
       '/usr/bin/security',
     ]);

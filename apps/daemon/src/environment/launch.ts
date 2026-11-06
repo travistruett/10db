@@ -4,11 +4,13 @@ import {
   ApiKeySettings,
   BedrockSettings,
   GatewaySettings,
+  Provider,
+  providerOf,
   SubscriptionSettings,
   type AccountId,
   type SupportedAccountKind,
 } from '@10db/contracts';
-import { isAbsolute } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 import type { AccountRow } from '@10db/db';
 import { secretFingerprint, type Keychain } from './keychain';
 import { stripBillingSwitches } from './session-env';
@@ -31,6 +33,14 @@ const AWS_LOGIN_VARS: readonly string[] = [
   'AWS_CONTAINER_CREDENTIALS_RELATIVE_URI',
   'AWS_CONTAINER_AUTHORIZATION_TOKEN',
   'AWS_ENDPOINT_URL_BEDROCK_RUNTIME',
+];
+/** A ChatGPT sign-in session takes its credential from its own CODEX_HOME only, never from the login shell. */
+const CODEX_LOGIN_VARS: readonly string[] = [
+  'OPENAI_API_KEY',
+  'CODEX_API_KEY',
+  'OPENAI_BASE_URL',
+  'CODEX_ACCESS_TOKEN',
+  'CODEX_HOME',
 ];
 const CLIENT_APP_VAR = 'CLAUDE_AGENT_SDK_CLIENT_APP';
 
@@ -79,6 +89,11 @@ export interface Launcher {
   loginConfigDir(): string | null;
   /** Why the login shell's directory was ignored (it is relative), naming the variable and never its value; null otherwise. */
   loginConfigDirWarning(): string | null;
+  /**
+   * Where the login shell keeps a personal ChatGPT login when it moves `CODEX_HOME` off `~/.codex`: an
+   * absolute directory, or null. No session runs on it; every sandbox denies it, as it does `~/.codex`.
+   */
+  loginCodexHome(): string | null;
 }
 
 function quoted(text: string): string {
@@ -90,6 +105,50 @@ export function signInCommand(configDir: string | null): string {
   return configDir === null
     ? 'env -u CLAUDE_CONFIG_DIR claude /login'
     : `CLAUDE_CONFIG_DIR=${quoted(configDir)} claude /login`;
+}
+
+/** Signs a ChatGPT plan in with the unmodified `codex`; the path is one shell word even with spaces. */
+export function codexSignInCommand(home: string): string {
+  return `CODEX_HOME=${quoted(home)} codex login`;
+}
+
+/** The sign-in command of an account that signs in with a login. */
+export function signInCommandFor(account: {
+  readonly kind: SupportedAccountKind;
+  readonly configDir: string | null;
+}): string {
+  if (account.kind !== AccountKind.CodexSignin) return signInCommand(account.configDir);
+  return account.configDir === null
+    ? 'env -u CODEX_HOME codex login'
+    : codexSignInCommand(account.configDir);
+}
+
+/**
+ * The directory a session's agent keeps its login in: CODEX_HOME for a Codex kind (default `~/.codex`),
+ * CLAUDE_CONFIG_DIR for a Claude kind (default `~/.claude`). A Claude kind ignores CODEX_HOME.
+ */
+export function sessionConfigDir(
+  kind: SupportedAccountKind,
+  env: Readonly<Record<string, string>>,
+  home: string,
+): string {
+  return providerOf(kind) === Provider.Codex
+    ? (env['CODEX_HOME'] ?? join(home, '.codex'))
+    : (env['CLAUDE_CONFIG_DIR'] ?? join(home, '.claude'));
+}
+
+/** The login env minus what the kind takes from its account only. */
+function withoutVars(
+  login: Readonly<Record<string, string>>,
+  kind: SupportedAccountKind,
+): Record<string, string> {
+  const dropped =
+    kind === AccountKind.Bedrock
+      ? AWS_LOGIN_VARS
+      : kind === AccountKind.CodexSignin
+        ? CODEX_LOGIN_VARS
+        : [];
+  return Object.fromEntries(Object.entries(login).filter(([name]) => !dropped.includes(name)));
 }
 
 /** The aliases Claude Code resolves through an `ANTHROPIC_DEFAULT_<ALIAS>_MODEL` variable. */
@@ -142,16 +201,14 @@ export function createLauncher(opts: {
   } {
     const login = projectEnv();
     const env: Record<string, string> = {
-      ...(account.kind === AccountKind.Bedrock
-        ? Object.fromEntries(
-            Object.entries(login).filter(([name]) => !AWS_LOGIN_VARS.includes(name)),
-          )
-        : login),
+      ...withoutVars(login, account.kind),
       [CLIENT_APP_VAR]: opts.clientApp,
     };
     // Every kind runs on its own directory, so a keyed session never meets the default account's saved login;
     // null is Claude Code's default directory, which only the default account uses.
-    if (account.configDir !== null) env['CLAUDE_CONFIG_DIR'] = account.configDir;
+    if (account.configDir !== null)
+      env[account.kind === AccountKind.CodexSignin ? 'CODEX_HOME' : 'CLAUDE_CONFIG_DIR'] =
+        account.configDir;
     switch (account.kind) {
       case AccountKind.ClaudeSubscription: {
         const settings = SubscriptionSettings.parse(account.settings);
@@ -174,6 +231,10 @@ export function createLauncher(opts: {
         const settings = GatewaySettings.parse(account.settings);
         env['ANTHROPIC_BASE_URL'] = settings.baseUrl;
         env['ANTHROPIC_AUTH_TOKEN'] = secretOf(account);
+        return { env, modelMap: settings.modelMap ?? {} };
+      }
+      case AccountKind.CodexSignin: {
+        const settings = SubscriptionSettings.parse(account.settings);
         return { env, modelMap: settings.modelMap ?? {} };
       }
     }
@@ -202,6 +263,11 @@ export function createLauncher(opts: {
     },
     loginConfigDir() {
       const dir = opts.base['CLAUDE_CONFIG_DIR'];
+      // A relative path depends on the shell's working directory, so it names no one directory.
+      return dir !== undefined && isAbsolute(dir) ? dir : null;
+    },
+    loginCodexHome() {
+      const dir = opts.base['CODEX_HOME'];
       // A relative path depends on the shell's working directory, so it names no one directory.
       return dir !== undefined && isAbsolute(dir) ? dir : null;
     },

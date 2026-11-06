@@ -1,5 +1,5 @@
 import { realpathSync } from 'node:fs';
-import type { PermissionRuleDto, ProjectDto } from '@10db/contracts';
+import { Provider, type PermissionRuleDto, type ProjectDto } from '@10db/contracts';
 import type { Clock } from '../clock';
 import { prepareCommandEnv, withoutTempDirPaths } from './command-env';
 import { deniedEnvNames } from './env-allowlist';
@@ -12,8 +12,8 @@ import {
   type SandboxedMcpServer,
   type StdioMcpServer,
 } from './mcp-sandbox';
-import { buildLaneProfile, type LaneSandboxSettings } from './profile';
-import { projectAccess, type ProjectAccessDeps } from './project-access';
+import { buildLaneProfile, readListOverSandboxRoots, type LaneSandboxSettings } from './profile';
+import { laneRootsOf, projectAccess, type ProjectAccessDeps } from './project-access';
 import {
   createLaneProcessWatch,
   createLedgerSweep,
@@ -26,9 +26,15 @@ import {
 } from './lane-processes';
 import { cachedProcessTable, systemOpenPaths, systemProcessTable } from './process-table';
 import { isEqualOrUnder } from './protected-reads';
-import type { SandboxRuntime } from './srt-launch';
+import { allowlisted, type SandboxRuntime } from './srt-launch';
 import { autoModeRules, type AutoModeSettings } from './auto-mode-rules';
-import { createLaneTempDir, LANE_TEMP_ROOT, removeAll, removeLaneTempDir } from './temp-dir';
+import {
+  createLaneTempDir,
+  laneTempRoot,
+  MAX_SANDBOX_TMP_BYTES,
+  removeAll,
+  removeLaneTempDir,
+} from './temp-dir';
 
 /**
  * Tools a lane never needs: 10db makes its worktrees, and nothing a lane starts may outlive it. The
@@ -48,8 +54,16 @@ const LANE_DISALLOWED_TOOLS: readonly string[] = [
 /** What a sandboxed session hands Claude Code on top of its ordinary options. */
 export interface LaneSandboxSpec {
   readonly settings: LaneSandboxSettings;
+  /** The checkout's real path, which the profile builds on and does not list as writable. */
+  readonly checkout: string;
   /** Merged over the session's env. */
   readonly env: Readonly<Record<string, string>>;
+  /**
+   * A command's whole environment, for an agent that starts commands from nothing: the allowlisted
+   * names of the session env, the temp dir and every variable the sandbox sets. `LaneSession.commandEnv`
+   * alone holds no `PATH`, `HOME` or `TMPDIR`, because a Claude Code lane inherits those.
+   */
+  readonly shellEnv: Readonly<Record<string, string>>;
   readonly disallowedTools: readonly string[];
   /** Permission rules that make Claude Code ask before the call, whatever the allow rules say. */
   readonly askRules: readonly string[];
@@ -106,6 +120,13 @@ export interface LaneSessionInput {
   readonly checkouts: readonly string[];
   /** The repo's approved stdio MCP servers, expanded: each runs under srt, never as written. */
   readonly mcpServers: Readonly<Record<string, StdioMcpServer>>;
+  /** The root this session's temp dir is made in; the temp root by default. */
+  readonly tempRoot?: string;
+  /**
+   * The agent the session runs, Claude's by default. Only a Codex session's temp dir may be longer
+   * than `MAX_SANDBOX_TMP_BYTES`: no Claude Code or srt runs in it.
+   */
+  readonly provider?: Provider;
   /**
    * A session that changes nothing in the checkout, a Plan conversation's: its commands write only
    * its own temp dir, the checkout as a whole being denied over the write Claude Code opens itself.
@@ -123,7 +144,7 @@ export interface SandboxLog {
 }
 
 export interface LaneSandboxDeps extends Omit<ProjectAccessDeps, 'tmpRoot'> {
-  /** Where temp dirs are made; tests pass a short temp root. */
+  /** Where temp dirs are made, `laneTempRoot()` by default; tests pass a short temp root. */
   readonly tmpRoot?: string;
   /** srt, which runs the repo's stdio MCP servers. */
   readonly runtime: SandboxRuntime;
@@ -155,18 +176,24 @@ const WATCH_FAILURES: Readonly<Record<LaneProcessFailure, string>> = {
     'the open files of launchd’s children could not be read for a lane session, so a job its command handed off at once may not be found',
 };
 
+/** Where one session's files go: its temp dir's root, and the root of its env file and ledger. */
+interface SessionRoots {
+  readonly temp: string;
+  readonly files: string;
+}
+
 /** Removes a session's env file and temp dir; see `removeAll`. */
-function removeLaneFiles(envFile: string | null, tmpDir: string, tmpRoot: string): void {
+function removeLaneFiles(envFile: string | null, tmpDir: string, roots: SessionRoots): void {
   removeAll([
     ...(envFile === null
       ? []
       : [
           () => {
-            removeLaneEnvFile(envFile, tmpRoot);
+            removeLaneEnvFile(envFile, roots.files);
           },
         ]),
     () => {
-      removeLaneTempDir(tmpDir, tmpRoot);
+      removeLaneTempDir(tmpDir, roots.temp);
     },
   ]);
 }
@@ -180,23 +207,37 @@ function realPathOr(path: string): string {
   }
 }
 
+/** The longest a session's temp dir path may be, by the agent that runs in it. */
+function tempDirLimit(provider: Provider): number | null {
+  switch (provider) {
+    case Provider.Claude:
+      return MAX_SANDBOX_TMP_BYTES;
+    case Provider.Codex:
+      return null;
+  }
+}
+
 /** Claude Code's spelling of an absolute path in a permission rule: `//` stands for the root. */
 const ruleScope = (path: string): string => `/${path}`;
 
 /** Builds each lane session's sandbox: one profile, one temp dir and one file-tool context. */
 export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
-  const tmpRoot = deps.tmpRoot ?? LANE_TEMP_ROOT;
+  const tmpRoot = deps.tmpRoot ?? laneTempRoot();
+  const { filesRoot } = deps;
   // Every session samples together: one `ps` serves them all.
   const processDeps: LaneProcessSetup = deps.processes ?? {
     table: systemProcessTable,
     sampleTable: cachedProcessTable(systemProcessTable, 500),
     openPaths: systemOpenPaths,
   };
-  const ledgers = deps.ledgers ?? createLedgerSweep(tmpRoot, processDeps);
+  const ledgers = deps.ledgers ?? createLedgerSweep(filesRoot, processDeps);
   return {
     async forSession(input) {
+      const roots: SessionRoots = { temp: input.tempRoot ?? tmpRoot, files: filesRoot };
+      // The session's own root is one lanes write, whether or not the daemon listed it.
+      const laneRoots = [...new Set([...laneRootsOf({ ...deps, tmpRoot }), roots.temp])];
       const access = await projectAccess(
-        { ...deps, tmpRoot },
+        { ...deps, tmpRoot, laneWritableRoots: laneRoots },
         {
           project: input.project,
           env: input.env,
@@ -208,7 +249,15 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
       const { checkout, toolchain, readList } = access;
       const protectedList = access.protectedReads;
       const secretFiles = [...access.checkoutSecrets, ...toolchain.secretFiles];
-      const tmpDir = createLaneTempDir(tmpRoot);
+      const tmpDir = createLaneTempDir(roots.temp, tempDirLimit(input.provider ?? Provider.Claude));
+      // The session's own temp dir root is closed to every other sandbox too.
+      const sandboxRoots = [...new Set([...access.sandboxRoots, roots.temp])];
+      // Once per session, though the lane's profile and each repo server's leave each one out.
+      for (const entry of readListOverSandboxRoots(readList, sandboxRoots))
+        deps.log?.warn(
+          { projectId: input.project.id, entry },
+          "a read list entry holds a root where 10db keeps sandboxes' files, so the lane's profile leaves it out and the lane can't read it",
+        );
       let envFile: string | null = null;
       let ledger: string | null = null;
       let mcp: McpSandboxes | null = null;
@@ -216,7 +265,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
         // Outside every lane-writable dir: it names the processes to stop after a daemon restart.
         // Named for this daemon, so a later one leaves it alone while this one runs, and held, so
         // this one's sweep does too until the session is gone.
-        ledger = createProcessLedger(tmpRoot, processDeps.ownPid ?? process.pid);
+        ledger = createProcessLedger(filesRoot, processDeps.ownPid ?? process.pid);
         ledgers.hold(ledger);
         const told = new Set<LaneProcessFailure>();
         // A job a command hands to launchd at once is named by a path it holds in the lane's own
@@ -244,7 +293,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
         const commandEnv = prepareCommandEnv(tmpDir, deps.home, input.env);
         // Claude Code strips some of these from a sandboxed command's env; the shell sets every one
         // of them again from this file before each command.
-        envFile = createLaneEnvFile(commandEnv, tmpRoot);
+        envFile = createLaneEnvFile(commandEnv, filesRoot);
         // The file carries every variable; the session env, which Claude Code and its own git run
         // with outside the sandbox, leaves out those that name a path the lane can write.
         const env: Record<string, string> = {
@@ -265,7 +314,8 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           allowedDomains: access.hosts,
           readList,
           // A linked worktree's common dir is read for the git a lane runs, never written.
-          // The env file is read to set up each command's shell, in case that happens in the sandbox.
+          // The env file is read to set up each command's shell, in case that happens in the sandbox;
+          // the files root lies in no protected read, so the grant stays.
           extraReads: [envFile, ...access.gitReads],
           // Claude Code opens the checkout for writing itself.
           extraWrites: [],
@@ -276,6 +326,8 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
             ...access.gitState,
             ...access.otherCheckouts,
           ],
+          sandboxRoots,
+          ownFiles: [envFile],
           loopback: input.project.sandboxLoopback,
           deniedEnvNames: deniedEnvNames({ ...input.env, ...env }),
         });
@@ -288,6 +340,8 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           access,
           home: deps.home,
           tmpRoot,
+          filesRoot,
+          sandboxRoots,
           runtime: deps.runtime,
           env: input.env,
           checkouts: input.checkouts,
@@ -298,7 +352,9 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
         const claudeProtected = claudeProtectedPaths(checkout);
         const spec: LaneSandboxSpec = {
           settings,
+          checkout,
           env,
+          shellEnv: { ...allowlisted(input.env), TMPDIR: tmpDir, ...commandEnv },
           disallowedTools: [
             ...LANE_DISALLOWED_TOOLS,
             ...deniedToFileTools.flatMap((path) => [
@@ -328,7 +384,12 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           readList,
           systemDocRoots: SYSTEM_DOC_ROOTS,
           configDir: input.configDir,
-          sandboxTemp: { root: tmpRoot, own: tmpDir },
+          // Every root lanes write and the files root: another lane's temp dir, in either lanes'
+          // root, and a file that holds a sandbox are never a lane's to read or write.
+          sandboxTemp: {
+            roots: [...laneRoots, filesRoot],
+            own: tmpDir,
+          },
           worktreeRoot: deps.worktreeRoot,
           get providerSessionId() {
             return providerSessionId;
@@ -358,7 +419,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
                 ownMcp.dispose();
               },
               () => {
-                removeLaneFiles(ownEnvFile, tmpDir, tmpRoot);
+                removeLaneFiles(ownEnvFile, tmpDir, roots);
               },
               () => {
                 // Processes it could not stop stay named: the sweep tries them again while the
@@ -366,7 +427,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
                 const kept = watch.pending();
                 ledgers.release(ownLedger);
                 if (kept) ledgers.later();
-                else removeProcessLedger(ownLedger, tmpRoot);
+                else removeProcessLedger(ownLedger, filesRoot);
               },
             ]);
           },
@@ -383,7 +444,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
                   },
                 ]),
             () => {
-              removeLaneFiles(envFile, tmpDir, tmpRoot);
+              removeLaneFiles(envFile, tmpDir, roots);
             },
             ...(ledger === null
               ? []
@@ -391,7 +452,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
                   () => {
                     if (ledger === null) return;
                     ledgers.release(ledger);
-                    removeProcessLedger(ledger, tmpRoot);
+                    removeProcessLedger(ledger, filesRoot);
                   },
                 ]),
           ]);

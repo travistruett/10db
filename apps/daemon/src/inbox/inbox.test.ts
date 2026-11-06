@@ -1540,7 +1540,7 @@ describe('permission broker in a sandboxed lane', () => {
       systemDocRoots: SYSTEM_DOC_ROOTS,
       configDir,
       providerSessionId: 'own-id',
-      sandboxTemp: { root: join(root, 't'), own: join(root, 't', '10db-ownabc') },
+      sandboxTemp: { roots: [join(root, 't')], own: join(root, 't', '10db-ownabc') },
     };
     mkdirSync(join(root, 't', '10db-ownabc'), { recursive: true });
     mkdirSync(join(root, 't', '10db-othabc'));

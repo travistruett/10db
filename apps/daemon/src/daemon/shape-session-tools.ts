@@ -1,11 +1,10 @@
 import { lookup as dnsLookup } from 'node:dns/promises';
 import { BlockList, isIPv6 } from 'node:net';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
 import type { ProjectDto } from '@10db/contracts';
 import { getProject, listPermissionRules } from '@10db/db';
 import { allCheckouts } from '../delivery';
-import type { AwsCredentialsExporter } from '../environment';
+import { sessionConfigDir, type AwsCredentialsExporter } from '../environment';
 import type { StateStore } from '../events';
 import type { Git } from '../git';
 import type { ProtectedPath } from '../guard';
@@ -164,7 +163,7 @@ export function createShapePreparer(deps: {
         // A conversation has no workstream: only the project's own rules hold.
         rules: listPermissionRules(state.db, project.id, null),
         resumeProviderSessionId: input.resumeProviderSessionId,
-        configDir: input.env['CLAUDE_CONFIG_DIR'] ?? join(homedir(), '.claude'),
+        configDir: sessionConfigDir(input.accountKind, input.env, homedir()),
         checkouts: allCheckouts(state.db),
         mcpServers: servers.stdio,
         readOnly: true,

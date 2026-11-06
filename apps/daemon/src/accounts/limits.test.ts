@@ -1,6 +1,7 @@
 import {
   ACCOUNT_CARD_DETAIL,
   AccountCardChoice,
+  AccountPauseReason,
   ConflictError,
   type AccountDto,
   type AccountId,
@@ -12,7 +13,9 @@ import {
 import {
   createTestStore,
   findOpenByFoldKey,
+  getAccount,
   getProject,
+  listAccounts,
   listInbox,
   patchAccount,
   recordAccountSecret,
@@ -31,6 +34,7 @@ import {
   createAccountLimits,
   createAccountMoves,
   createAccountPauses,
+  createAccountRuntime,
   createMoveBack,
   createUsageReports,
   MOVE_BACK_CARD,
@@ -132,28 +136,110 @@ function busy(project: ProjectDto): ProjectDto {
   return project;
 }
 
+/** A ChatGPT account whose sign-in is confirmed, so it is ready to take a project. */
+function chatgptPlan(): AccountDto {
+  const account = seedAccount(store, { kind: 'codex_signin', label: 'ChatGPT plan' });
+  state.write((ctx) =>
+    patchAccount(ctx, account.id, { expectedIdentity: 'chatgpt@example.com · ws-1' }),
+  );
+  return account;
+}
+
 describe('usage thresholds', () => {
-  it('hands off and moves a project with a fallback once its threshold is crossed', () => {
-    const project = busy(seedProject(store, { fallbackAccountId: second.id }));
+  it.each([
+    ['a Claude project falls back to another Claude account', 'claude', 'claude'],
+    ['a ChatGPT project falls back to a Claude account', 'chatgpt', 'claude'],
+    ['a Claude project falls back to a ChatGPT account', 'claude', 'chatgpt'],
+  ] as const)('%s at its threshold, handing off', (_name, fromPlan, toPlan) => {
+    const chatgpt = chatgptPlan();
+    const to = toPlan === 'chatgpt' ? chatgpt : second;
+    const project = busy(
+      seedProject(store, {
+        fallbackAccountId: to.id,
+        ...(fromPlan === 'chatgpt' ? { accountId: chatgpt.id } : {}),
+      }),
+    );
     const plan = project.accountId;
+    const from = getAccount(state.db, plan);
     limits.usageReported(plan, report(0.9));
     expect(handOffs).toEqual([]);
     limits.usageReported(plan, report(0.96));
     expect(handOffs).toEqual([{ projectId: project.id, accountId: plan }]);
     expect(getProject(state.db, project.id)).toMatchObject({
-      accountId: second.id,
+      accountId: to.id,
       movedFromAccountId: plan,
       moveBackAt: inMinutes(120).toISOString(),
     });
     const [moved] = openCards();
     expect(moved?.title).toBe(
-      'demo moved to Second plan: Claude plan is at 96% of its 5-hour limit',
+      `demo moved to ${to.label}: ${from.label} is at 96% of its 5-hour limit`,
     );
     expect(moved?.options.map((o) => o.label)).toEqual(['Move back', 'Stay']);
     expect(moved?.detail?.[ACCOUNT_CARD_DETAIL]).toMatchObject({
       accountId: plan,
       usage: { limitType: 'five_hour', utilization: 0.96 },
     });
+    // The way back is armed: once the limit resets, 10db asks to move the project back.
+    clock.advance(120 * 60_000);
+    const back = findOpenByFoldKey(state.db, project.id, accountFoldKey(plan, MOVE_BACK_CARD));
+    expect(back?.title).toBe(`${from.label} is available again: move demo back?`);
+  });
+
+  it('offers a ChatGPT project with no fallback every other account on the card', () => {
+    const chatgpt = chatgptPlan();
+    const project = busy(seedProject(store, { accountId: chatgpt.id }));
+    // The default account the store seeds beside the project: a Claude plan.
+    const claude = listAccounts(state.db).find((a) => a.label === 'Claude plan');
+    if (!claude) throw new Error('no default Claude account');
+    limits.usageReported(chatgpt.id, report(0.96));
+    const [asked] = openCards();
+    if (!asked) throw new Error('no card asked');
+    expect(asked.title).toBe(
+      'ChatGPT plan is at 96% of its 5-hour limit: hand off and move demo to another account?',
+    );
+    expect(asked.options.map((o) => o.label)).toEqual([
+      'Move to Claude plan · builder@example.com',
+      'Move to Second plan · second@example.com',
+      'Later',
+    ]);
+    inbox.answer(asked.id, { choice: 'Move to Claude plan · builder@example.com' });
+    expect(handOffs).toEqual([{ projectId: project.id, accountId: chatgpt.id }]);
+    expect(getProject(state.db, project.id)).toMatchObject({
+      accountId: claude.id,
+      movedFromAccountId: chatgpt.id,
+    });
+  });
+
+  it('pauses a ChatGPT project with no fallback at the hard limit', () => {
+    const runtime = createAccountRuntime({
+      state,
+      clock,
+      inbox,
+      pauses,
+      defaultPauseMs: DEFAULT_PAUSE_MS,
+    });
+    const chatgpt = chatgptPlan();
+    const project = busy(seedProject(store, { accountId: chatgpt.id }));
+    // As the runner does at a rejected report: the limits first, then the pause.
+    limits.usageReported(chatgpt.id, { ...report(null, 'rejected'), resetsAt: inMinutes(60) });
+    runtime.rateLimited(chatgpt.id, inMinutes(60), project.id);
+    expect(handOffs).toEqual([]);
+    expect(getProject(state.db, project.id).accountId).toBe(chatgpt.id);
+    expect(pauses.pausedFor(chatgpt.id)).toMatchObject({
+      reason: 'usage_limit',
+      until: inMinutes(60),
+    });
+    const limit = findOpenByFoldKey(
+      state.db,
+      project.id,
+      accountFoldKey(chatgpt.id, AccountPauseReason.UsageLimit),
+    );
+    expect(limit?.title).toBe('ChatGPT plan usage limit reached');
+    expect(limit?.options.map((o) => o.label)).toEqual([
+      'Continue on Claude plan · builder@example.com',
+      'Continue on Second plan · second@example.com',
+      'Later',
+    ]);
   });
 
   it('moves the project back when the builder answers Move back on the card that says it moved', () => {

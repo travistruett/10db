@@ -18,6 +18,8 @@ export function homeProtectedReads(home: string): string[] {
   return [
     join(home, '.claude'),
     join(home, '.claude.json'),
+    join(home, '.codex'),
+    join(home, '.agents'),
     join(home, 'Library', 'Keychains'),
     // Denying the tool doesn't stop it running under srt (the gate); the denied Keychains dir is the
     // barrier, and this deny only refuses reading the binary where the engine honours it.

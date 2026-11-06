@@ -62,7 +62,7 @@ for (const level of ['error', 'warn']) {
 `;
 }
 
-/** Makes the log, empty and writable by the user only, beside the sandbox temp dirs and outside every one. */
+/** Makes the log, empty and writable by the user only, in `root` (the files root), outside every temp dir. */
 export function createRefusalLog(root: string): string {
   const file = join(
     root,

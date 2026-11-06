@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { mintId } from '@10db/contracts';
+import { mintId, Provider } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   createTempRepo,
@@ -27,12 +27,16 @@ import { projectAtCheckout } from '../delivery';
 import { SECRET_VARIABLES } from '../environment';
 import { createGit } from '../git';
 import {
+  codexLaneTempRoot,
   createLaneSandbox,
   fileAccessJudge,
+  MAX_SANDBOX_TMP_BYTES,
   readAccess,
+  sandboxFilesRoot,
   SandboxProfileError,
   SandboxTempDirError,
   SYSTEM_READS,
+  writeAccess,
   type LaneProcessSetup,
   type LaneSandbox,
   type LaneSessionInput,
@@ -49,17 +53,33 @@ let root: string;
 let home: string;
 let dataDir: string;
 let tmpRoot: string;
+let filesRoot: string;
+let lanesRoot: string;
 let repo: TempDir;
 let checkout: string;
 
 function sandbox(
-  overrides: { loginConfigDir?: string | null; gitDirs?: LaneSandboxDeps['gitDirs'] } = {},
+  overrides: {
+    loginConfigDir?: string | null;
+    loginCodexHome?: string | null;
+    log?: LaneSandboxDeps['log'];
+    gitDirs?: LaneSandboxDeps['gitDirs'];
+    laneWritableRoots?: readonly string[];
+    codexLaneTempRoot?: string;
+  } = {},
 ): LaneSandbox {
   return createLaneSandbox({
     home,
     dataDir,
     loginConfigDir: overrides.loginConfigDir ?? null,
+    ...(overrides.loginCodexHome === undefined ? {} : { loginCodexHome: overrides.loginCodexHome }),
+    ...(overrides.log === undefined ? {} : { log: overrides.log }),
     tmpRoot,
+    filesRoot,
+    codexLaneTempRoot: overrides.codexLaneTempRoot ?? lanesRoot,
+    ...(overrides.laneWritableRoots === undefined
+      ? {}
+      : { laneWritableRoots: overrides.laneWritableRoots }),
     gitDirs: overrides.gitDirs ?? ((path) => git.gitDirs(path)),
     // Hermetic: the machine's own install prefixes add no deny.
     systemPrefixes: [],
@@ -86,6 +106,9 @@ function input(overrides: Partial<LaneSessionInput> = {}): LaneSessionInput {
   };
 }
 
+/** What the session left in the temp root and the files root. */
+const left = (): string[] => [...readdirSync(tmpRoot), ...readdirSync(filesRoot)];
+
 const writeIn = (base: string, rel: string, text = 'x'): string => {
   const path = join(base, rel);
   mkdirSync(dirname(path), { recursive: true });
@@ -99,8 +122,12 @@ beforeEach(() => {
   home = join(root, 'home');
   dataDir = join(home, 'Library', 'Application Support', '10db');
   tmpRoot = join(root, 't');
+  // Where the daemon keeps it: under the home, beside its protected reads and in none of them.
+  filesRoot = sandboxFilesRoot(home);
+  lanesRoot = codexLaneTempRoot(home);
   mkdirSync(home);
   mkdirSync(tmpRoot);
+  mkdirSync(filesRoot, { recursive: true });
   repo = createTempRepo();
   checkout = realpathSync(repo.path);
 });
@@ -170,21 +197,74 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
           { toolName: 'SandboxNetworkAccess', pattern: 'registry.npmjs.org' },
           { toolName: 'SandboxNetworkAccess', pattern: 'github.com' },
           { toolName: 'Read', pattern: shared },
+          // Over every sandbox's files: it opens none of them, so it is left out of the profile.
+          { toolName: 'Read', pattern: join(home, '.10db') },
           { toolName: 'Bash', pattern: 'pnpm test' },
           { toolName: 'Read', pattern: null },
         ],
       }),
     );
+    const other = await sandbox().forSession(input());
     try {
       expect(session.spec.settings.network.allowedDomains).toEqual([
         'registry.npmjs.org',
         'github.com',
       ]);
-      expect(session.spec.settings.filesystem.allowRead).toContain(shared);
-      expect(session.fileAccess.readList).toEqual([shared]);
+      const { allowRead } = session.spec.settings.filesystem;
+      expect(allowRead).toContain(shared);
+      expect(allowRead).not.toContain(join(home, '.10db'));
+      // Another lane's env file, holding its variables, and its temp dir stay closed; its own open.
+      for (const closed of [other.spec.env['CLAUDE_ENV_FILE'] ?? '', other.tmpDir])
+        expect(
+          allowRead.filter((open) => isEqualOrUnder(closed, open)),
+          closed,
+        ).toEqual([]);
+      expect(allowRead).toEqual(
+        expect.arrayContaining([session.tmpDir, session.spec.env['CLAUDE_ENV_FILE'] ?? '']),
+      );
+      expect(session.fileAccess.readList).toEqual([shared, join(home, '.10db')]);
+    } finally {
+      session.dispose();
+      other.dispose();
+    }
+  });
+
+  it('logs each read-list entry it leaves out over a sandbox root, once per session, naming it', async () => {
+    const shared = join(root, 'shared');
+    mkdirSync(shared);
+    const warned: { fields: object; message: string }[] = [];
+    const log = {
+      warn: (fields: object, message: string) => {
+        warned.push({ fields, message });
+      },
+    };
+    const lanes = sandbox({ log });
+    const rules = [
+      { toolName: 'Read', pattern: shared },
+      { toolName: 'Read', pattern: join(home, '.10db') },
+      { toolName: 'Read', pattern: home },
+    ];
+    const session = await lanes.forSession(
+      input({
+        rules,
+        // A server's profile leaves the same entries out, and says nothing more.
+        mcpServers: { probe: { command: '/usr/bin/true', args: [], env: {}, hosts: [] } },
+      }),
+    );
+    try {
+      expect(session.spec.settings.filesystem.allowRead).not.toContain(home);
+      const dropped = warned.filter((w) => w.message.includes('read list'));
+      expect(dropped.map((w) => w.fields)).toEqual([
+        { projectId, entry: join(home, '.10db') },
+        { projectId, entry: home },
+      ]);
     } finally {
       session.dispose();
     }
+    // The next session says it again.
+    const next = await lanes.forSession(input({ rules }));
+    next.dispose();
+    expect(warned.filter((w) => w.message.includes('read list'))).toHaveLength(4);
   });
 
   it('leaves out a stored rule the sandbox could not parse, instead of refusing the lane', async () => {
@@ -430,6 +510,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     );
     try {
       expect(session.spec.settings.filesystem.allowRead).toContain(checkout);
+      expect(session.spec.checkout).toBe(checkout);
       expect(session.spec.settings.filesystem.denyRead).toContain(env);
       expect(session.spec.askRules).toContain(`Edit(/${join(checkout, '.mcp.json')})`);
     } finally {
@@ -454,8 +535,8 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         TENDB_SANDBOX: '1',
         CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',
         CLAUDE_ENV_FILE: join(
-          tmpRoot,
-          readdirSync(tmpRoot).find((name) => name.startsWith('10db-env-')) ?? '',
+          filesRoot,
+          readdirSync(filesRoot).find((name) => name.startsWith('10db-env-')) ?? '',
         ),
       });
       expect(session.commandEnv).toEqual({
@@ -481,6 +562,19 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         TENDB_SANDBOX: '1',
       });
       expect(session.spec.settings.filesystem.allowWrite).toEqual([session.tmpDir]);
+      // An agent that starts commands from nothing gets the whole environment: the allowlisted
+      // names of the session env, the temp dir, and everything the sandbox sets.
+      expect(session.spec.shellEnv).toMatchObject(session.commandEnv);
+      expect(session.spec.shellEnv).toMatchObject({
+        PATH: '/usr/bin:/bin',
+        HOME: home,
+        TMPDIR: session.tmpDir,
+      });
+      expect(session.spec.shellEnv).toHaveProperty('GIT_CONFIG_GLOBAL', '/dev/null');
+      expect(session.spec.shellEnv).not.toHaveProperty('ANTHROPIC_API_KEY');
+      expect(session.spec.shellEnv).not.toHaveProperty('CLAUDE_ENV_FILE');
+      expect(session.commandEnv).not.toHaveProperty('PATH');
+      expect(session.commandEnv).not.toHaveProperty('TMPDIR');
     } finally {
       session.dispose();
     }
@@ -556,12 +650,18 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     const env = { PATH: `${bin}:/usr/bin`, HOME: home };
     const trusted = await sandbox().forSession(input({ env, checkouts: [repo.path] }));
     const untrusted = await sandbox().forSession(input({ env, checkouts: [repo.path, other] }));
+    // Another place lanes write, as a ChatGPT lane writes its temp root and the system temp dir.
+    const laneWritten = await sandbox({ laneWritableRoots: [other] }).forSession(
+      input({ env, checkouts: [repo.path] }),
+    );
     try {
       expect(trusted.spec.settings.filesystem.allowRead).toContain(join(bin, 'tool'));
       expect(untrusted.spec.settings.filesystem.allowRead).not.toContain(join(bin, 'tool'));
+      expect(laneWritten.spec.settings.filesystem.allowRead).not.toContain(join(bin, 'tool'));
     } finally {
       trusted.dispose();
       untrusted.dispose();
+      laneWritten.dispose();
     }
   });
 
@@ -716,6 +816,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       dataDir,
       loginConfigDir: null,
       tmpRoot,
+      filesRoot,
       gitDirs: (path) => git.gitDirs(path),
       systemPrefixes: [],
       runtime: FAKE_SRT,
@@ -753,6 +854,29 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     }
   });
 
+  it("protects the login shell's own Codex home, a personal ChatGPT login off ~/.codex", async () => {
+    const codexHome = join(home, 'elsewhere', 'codex-personal');
+    mkdirSync(codexHome, { recursive: true });
+    writeFileSync(join(codexHome, 'auth.json'), '{}');
+    const session = await sandbox({ loginCodexHome: codexHome }).forSession(input());
+    try {
+      expect(session.spec.settings.filesystem.denyRead).toContain(codexHome);
+      expect(readAccess(join(codexHome, 'auth.json'), session.fileAccess).access).toBe('protected');
+    } finally {
+      session.dispose();
+    }
+    // A ChatGPT lane's too, whose read list is the same profile's.
+    mkdirSync(lanesRoot, { recursive: true });
+    const codex = await sandbox({ loginCodexHome: codexHome }).forSession(
+      input({ provider: Provider.Codex, tempRoot: lanesRoot }),
+    );
+    try {
+      expect(codex.spec.settings.filesystem.denyRead).toContain(codexHome);
+    } finally {
+      codex.dispose();
+    }
+  });
+
   it('starts at the resumed provider session, and follows the one Claude Code names', async () => {
     const session = await sandbox().forSession(input({ resumeProviderSessionId: 'prov-old' }));
     try {
@@ -769,7 +893,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     const session = await sandbox().forSession(input());
     try {
       const file = session.spec.env['CLAUDE_ENV_FILE'] ?? '';
-      expect(dirname(file)).toBe(tmpRoot);
+      expect(dirname(file)).toBe(filesRoot);
       // Claude Code strips variables such as CARGO_HOME from a sandboxed command's env; the shell
       // sources this file before each command. Its own `CLAUDE_*` settings are not for commands.
       const out = execFileSync('/bin/sh', [], {
@@ -856,7 +980,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     await expect(
       sandbox().forSession(input({ env: { PATH: '/usr/bin', 'A=B': 'x' } })),
     ).rejects.toThrow(SandboxProfileError);
-    expect(readdirSync(tmpRoot)).toEqual([]);
+    expect(left()).toEqual([]);
   });
 
   it('removes the temp dir on dispose, and a second dispose does nothing', async () => {
@@ -876,7 +1000,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       const file = writeIn(checkout, name);
       await expect(sandbox().forSession(input())).rejects.toThrow(SandboxProfileError);
       await expect(sandbox().forSession(input())).rejects.toThrow(file);
-      expect(readdirSync(tmpRoot)).toEqual([]);
+      expect(left()).toEqual([]);
     },
   );
 
@@ -914,7 +1038,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         await expect(sandbox().forSession(input())).rejects.toThrow(
           "a directory in the checkout can't be listed: apps/locked",
         );
-        expect(readdirSync(tmpRoot)).toEqual([]);
+        expect(left()).toEqual([]);
       } finally {
         chmodSync(locked, 0o700);
       }
@@ -985,7 +1109,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     await expect(sandbox().forSession(input())).rejects.toThrow(
       /a \.env\* link in the checkout leads to .*, which holds .* every lane command needs/,
     );
-    expect(readdirSync(tmpRoot)).toEqual([]);
+    expect(left()).toEqual([]);
   });
 
   it("opens an nvm install's own dirs but never its etc, and denies npm's builtin npmrc", async () => {
@@ -1026,7 +1150,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     await expect(sandbox().forSession(input())).rejects.toThrow(
       /a \.env\* link in the checkout leads to .*real-cargo-bin, which holds .* every lane command needs/,
     );
-    expect(readdirSync(tmpRoot)).toEqual([]);
+    expect(left()).toEqual([]);
   });
 
   it.each<[string, () => string]>([
@@ -1044,7 +1168,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     await expect(sandbox().forSession(input())).rejects.toThrow(
       /a \.env\* link in the checkout leads to .*, a directory inside .* that lane commands read/,
     );
-    expect(readdirSync(tmpRoot)).toEqual([]);
+    expect(left()).toEqual([]);
   });
 
   // macOS reaches `/private/etc` through the `/etc` link; Linux has no such link.
@@ -1117,7 +1241,77 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       first.dispose();
       second.dispose();
     }
-    expect(readdirSync(tmpRoot)).toEqual([]);
+    expect(left()).toEqual([]);
+  });
+
+  it('puts the env file and the ledger in the files root and the temp dir in the temp root', async () => {
+    const session = await sandbox().forSession(input());
+    try {
+      expect(dirname(session.tmpDir)).toBe(tmpRoot);
+      expect(readdirSync(tmpRoot)).toEqual([session.tmpDir.slice(tmpRoot.length + 1)]);
+      const envFile = session.spec.env['CLAUDE_ENV_FILE'] ?? '';
+      expect(dirname(envFile)).toBe(filesRoot);
+      const [env = '', ledger = '', ...more] = readdirSync(filesRoot).sort();
+      expect(join(filesRoot, env)).toBe(envFile);
+      expect(ledger).toMatch(/^10db-proc-[1-9][0-9]*-[0-9a-f]{12}\.json$/);
+      expect(more).toEqual([]);
+      // Every sandbox root is closed but for the session's own temp dir and env file, which the
+      // shell reads through their own grants.
+      const { allowRead, denyRead } = session.spec.settings.filesystem;
+      expect(denyRead).toEqual(expect.arrayContaining([tmpRoot, lanesRoot, filesRoot]));
+      expect(allowRead).toEqual(expect.arrayContaining([session.tmpDir, envFile]));
+      // The file tools refuse both roots but the session's own temp dir: a ledger a lane wrote
+      // would name what the next start signals.
+      expect(readAccess(envFile, session.fileAccess).access).toBe('protected');
+      expect(writeAccess(join(filesRoot, ledger), session.fileAccess).access).toBe('sandbox-temp');
+      expect(writeAccess(join(filesRoot, 'new.json'), session.fileAccess).access).toBe(
+        'sandbox-temp',
+      );
+      expect(writeAccess(join(session.tmpDir, 'scratch'), session.fileAccess).access).toBe('ok');
+    } finally {
+      session.dispose();
+    }
+    expect(left()).toEqual([]);
+  });
+
+  it("makes a ChatGPT session's temp dir in its own tempRoot when one is given, of any length", async () => {
+    // No Claude Code or srt runs in a ChatGPT lane's temp dir, so the socket path limit is not its.
+    const lanes = join(home, '.10db', 'lanes', 'longer-than-the-socket-path-limit');
+    mkdirSync(lanes, { recursive: true });
+    const lanesSandbox = sandbox({ codexLaneTempRoot: lanes });
+    // A Claude session given the same root keeps the limit.
+    await expect(lanesSandbox.forSession(input({ tempRoot: lanes }))).rejects.toThrow(
+      `The lane temp directory path is over ${String(MAX_SANDBOX_TMP_BYTES)} bytes`,
+    );
+    const session = await lanesSandbox.forSession(
+      input({ tempRoot: lanes, provider: Provider.Codex }),
+    );
+    try {
+      expect(dirname(session.tmpDir)).toBe(lanes);
+      expect(Buffer.byteLength(session.tmpDir)).toBeGreaterThan(MAX_SANDBOX_TMP_BYTES);
+      expect(session.spec.shellEnv['TMPDIR']).toBe(session.tmpDir);
+      expect(session.spec.settings.filesystem.allowWrite).toEqual([session.tmpDir]);
+      expect(readdirSync(tmpRoot)).toEqual([]);
+      expect(dirname(session.spec.env['CLAUDE_ENV_FILE'] ?? '')).toBe(filesRoot);
+      // Each lane's file tools refuse the other's temp dir, in either root.
+      const other = await lanesSandbox.forSession(input());
+      try {
+        expect(dirname(other.tmpDir)).toBe(tmpRoot);
+        expect(writeAccess(join(other.tmpDir, 'x'), session.fileAccess).access).toBe(
+          'sandbox-temp',
+        );
+        expect(writeAccess(join(session.tmpDir, 'x'), other.fileAccess).access).toBe(
+          'sandbox-temp',
+        );
+        expect(readAccess(join(session.tmpDir, 'x'), other.fileAccess).access).toBe('protected');
+      } finally {
+        other.dispose();
+      }
+    } finally {
+      session.dispose();
+    }
+    expect(readdirSync(lanes)).toEqual([]);
+    expect(left()).toEqual([]);
   });
 });
 
@@ -1137,6 +1331,7 @@ describe.skipIf(SANDBOXED)('a lane session’s processes', () => {
       dataDir,
       loginConfigDir: null,
       tmpRoot,
+      filesRoot,
       gitDirs: (path) => git.gitDirs(path),
       systemPrefixes: [],
       runtime: FAKE_SRT,
@@ -1165,7 +1360,7 @@ describe.skipIf(SANDBOXED)('a lane session’s processes', () => {
   }
   /** Lets what a timer started finish: everything it awaits is already settled. */
   const settle = () => new Promise((r) => setImmediate(r));
-  const ledgers = () => readdirSync(tmpRoot).filter((n) => n.startsWith('10db-proc-'));
+  const ledgers = () => readdirSync(filesRoot).filter((n) => n.startsWith('10db-proc-'));
   beforeEach(() => {
     rows = [
       { pid: 100, ppid: 1, pgid: 100, startedAt: T },
@@ -1208,11 +1403,11 @@ describe.skipIf(SANDBOXED)('a lane session’s processes', () => {
     tableFails = true;
     await expect(session.endProcesses()).rejects.toThrow('ps failed');
     session.dispose();
-    const left = readdirSync(tmpRoot).filter((n) => n.startsWith('10db-proc-'));
-    expect(left).toHaveLength(1);
+    const kept = ledgers();
+    expect(kept).toHaveLength(1);
     // Named for the daemon that kept it, so a later daemon knows whether its owner still runs.
-    expect(left[0]).toMatch(/^10db-proc-100-[0-9a-f]{12}\.json$/);
-    const ledger = JSON.parse(readFileSync(join(tmpRoot, left[0] ?? ''), 'utf8')) as {
+    expect(kept[0]).toMatch(/^10db-proc-100-[0-9a-f]{12}\.json$/);
+    const ledger = JSON.parse(readFileSync(join(filesRoot, kept[0] ?? ''), 'utf8')) as {
       members: { pid: number }[];
     };
     expect(ledger.members.map((m) => m.pid).sort()).toEqual([200, 300, 301]);
@@ -1265,7 +1460,7 @@ describe.skipIf(SANDBOXED)('a lane session’s processes', () => {
     clock.advance(30_000);
     await settle();
     expect(rows.map((r) => r.pid)).toEqual([100]);
-    expect(readdirSync(tmpRoot)).toEqual([]);
+    expect(left()).toEqual([]);
   });
 
   it('never sweeps the ledger of a session that still runs', async () => {
@@ -1306,19 +1501,19 @@ describe.skipIf(SANDBOXED)('a lane session’s processes', () => {
     }
   });
 
-  it('keeps a ledger in the temp root while the session lives, and removes it with the rest', async () => {
+  it('keeps a ledger in the files root while the session lives, and removes it with the rest', async () => {
     const session = await withProcesses().forSession(input());
-    expect(readdirSync(tmpRoot).filter((n) => n.startsWith('10db-proc-'))).toHaveLength(1);
+    expect(ledgers()).toHaveLength(1);
     session.dispose();
-    expect(readdirSync(tmpRoot)).toEqual([]);
+    expect(left()).toEqual([]);
   });
 
   it('writes the ledger a later daemon uses to stop what a dead one left', async () => {
     const session = await withProcesses().forSession(input());
     try {
       await session.trackProcesses({ pid: 200, startedAt: T });
-      const name = readdirSync(tmpRoot).find((n) => n.startsWith('10db-proc-')) ?? '';
-      const ledger = JSON.parse(readFileSync(join(tmpRoot, name), 'utf8')) as {
+      const [name = ''] = ledgers();
+      const ledger = JSON.parse(readFileSync(join(filesRoot, name), 'utf8')) as {
         members: { pid: number }[];
       };
       expect(ledger.members.map((m) => m.pid).sort()).toEqual([200, 300, 301]);

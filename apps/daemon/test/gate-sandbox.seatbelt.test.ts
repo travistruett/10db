@@ -8,7 +8,15 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createGit } from '../src/git';
 import { silentLogger } from '../src/log';
 import { resolveSandboxRuntime } from '../src/paths';
-import { createGateSandbox, DOCKER_REFUSAL } from '../src/sandbox';
+import {
+  claimSandboxTempRoot,
+  createGateSandbox,
+  createLaneTempDir,
+  DOCKER_REFUSAL,
+  ensurePrivateRoot,
+  laneTempRoot,
+  removeLaneTempDir,
+} from '../src/sandbox';
 import {
   createGateRunner,
   type GateRequest,
@@ -37,6 +45,11 @@ describe.skipIf(!SEATBELT)('the gate under the sandbox (Seatbelt)', () => {
   const canary = join(homedir(), `.10db-gate-canary-${token}`);
   const homeProbe = join(homedir(), `.10db-gate-write-${token}`);
   let root: string;
+  /** The daemon's own temp root, where the gate's temp dir is made beside another sandbox's. */
+  let tmpRoot: string;
+  let otherTemp: string;
+  let claim: ReturnType<typeof claimSandboxTempRoot>;
+  let filesCanary: string;
   let repo: TempDir;
   let checkout: string;
   let agent: Server;
@@ -46,9 +59,17 @@ describe.skipIf(!SEATBELT)('the gate under the sandbox (Seatbelt)', () => {
 
   beforeAll(async () => {
     writeFileSync(canary, `canary-${token}\n`);
-    // A short root: the gate's temp dir must fit the socket path limit.
     root = realpathSync(mkdtempSync('/tmp/sbs-'));
-    mkdirSync(join(root, 't'));
+    // The daemon's root, as its start makes it: srt runs the gate at `/Users/Shared/10db-<uid>`.
+    tmpRoot = ensurePrivateRoot(laneTempRoot());
+    // Marked as a running daemon's while the tests run, so a test daemon that starts meanwhile, the
+    // bundle test's, leaves the temp dirs here alone.
+    claim = claimSandboxTempRoot(tmpRoot);
+    otherTemp = createLaneTempDir(tmpRoot);
+    writeFileSync(join(otherTemp, 'canary'), `canary-${token}\n`);
+    mkdirSync(join(root, 'r'));
+    filesCanary = join(root, 'r', '10db-mcp-0123456789ab.sh');
+    writeFileSync(filesCanary, `export TOKEN='canary-${token}'\n`);
     const git = createGit();
     gate = createGateRunner({
       sandbox: createGateSandbox({
@@ -56,7 +77,10 @@ describe.skipIf(!SEATBELT)('the gate under the sandbox (Seatbelt)', () => {
         dataDir: join(homedir(), 'Library', 'Application Support', '10db'),
         loginConfigDir: null,
         gitDirs: (path) => git.gitDirs(path),
-        tmpRoot: join(root, 't'),
+        tmpRoot,
+        filesRoot: join(root, 'r'),
+        codexLaneTempRoot: join(root, 'l'),
+        log: silentLogger,
         pnpmLockDir: join(root, 'pnpm-locks'),
         runtime: resolveSandboxRuntime(),
       }),
@@ -95,6 +119,8 @@ describe.skipIf(!SEATBELT)('the gate under the sandbox (Seatbelt)', () => {
   });
 
   afterAll(() => {
+    removeLaneTempDir(otherTemp, tmpRoot);
+    claim.release();
     agent.close();
     web.close();
     repo.cleanup();
@@ -169,9 +195,16 @@ describe.skipIf(!SEATBELT)('the gate under the sandbox (Seatbelt)', () => {
       'other-host': 'curl -fsS -m 10 https://example.com',
       'direct-address': "curl -fsS -m 10 --noproxy '*' https://1.1.1.1",
       'loopback-off': connect(String(webPort)),
+      // Another sandbox's temp dir beside the gate's, and a sealed file in the files root.
+      'other-temp-read': `cat '${join(otherTemp, 'canary')}'`,
+      'other-temp-write': `touch '${join(otherTemp, 'planted')}'`,
+      'temp-root-listing': `ls '${tmpRoot}'`,
+      'files-root-read': `cat '${filesCanary}'`,
       // Controls: the probes can succeed, and the sandbox's own variables arrive as set.
       'write-checkout': 'touch inside && rm inside',
-      'write-temp': 'touch "$TMPDIR/inside"',
+      'write-temp': 'touch "$TMPDIR/inside" && cat "$TMPDIR/inside" && ls "$TMPDIR"',
+      // Its own temp dir, named by six characters alone, in the root.
+      'temp-under-root': `case "$TMPDIR" in '${tmpRoot}'/${'[A-Za-z0-9]'.repeat(6)}) true ;; *) false ;; esac`,
       'own-env':
         'test "$GIT_CONFIG_GLOBAL" = /dev/null && test "$GIT_OPTIONAL_LOCKS" = 0 && ' +
         'test "$TENDB_SANDBOX" = 1 && test "$CARGO_HOME" = "$TMPDIR/cache/cargo" && ' +
@@ -193,8 +226,13 @@ describe.skipIf(!SEATBELT)('the gate under the sandbox (Seatbelt)', () => {
       'other-host': 'denied',
       'direct-address': 'denied',
       'loopback-off': 'denied',
+      'other-temp-read': 'denied',
+      'other-temp-write': 'denied',
+      'temp-root-listing': 'denied',
+      'files-root-read': 'denied',
       'write-checkout': 'ok',
       'write-temp': 'ok',
+      'temp-under-root': 'ok',
       'own-env': 'ok',
     });
   }, 120_000);

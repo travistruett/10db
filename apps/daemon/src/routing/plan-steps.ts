@@ -73,7 +73,6 @@ function routedStep(
   if (pin && persona) {
     const pinned = input.profiles.find(
       (p) =>
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Provider has one member today; the comparison is what keeps routing correct when another is added.
         p.provider === input.project.provider && p.model === pin.model && p.effort === pin.effort,
     );
     return {

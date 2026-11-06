@@ -181,6 +181,14 @@ export interface LaneProfileInput {
   extraWrites: readonly string[];
   /** Exact paths no command may write, even where Claude Code opens their directory for writing. */
   denyWrites: readonly string[];
+  /**
+   * Every root 10db keeps sandboxes' temp dirs and files in. Closed to reads but for this sandbox's
+   * own temp dir and `ownFiles`, so no read list or toolchain opens another's; a profile whose
+   * checkout or extra write holds one is refused.
+   */
+  sandboxRoots: readonly string[];
+  /** This sandbox's own files in a sandbox root that its commands read, such as its env file. */
+  ownFiles: readonly string[];
   loopback: boolean;
   deniedEnvNames: readonly string[];
   /** Mach services the profile opens beyond FSEvents; none for a lane's own commands. */
@@ -238,6 +246,24 @@ function refuseSecretsOverNeeds(
 }
 
 /**
+ * A writable path at or over a sandbox root would let the lane write every other sandbox's temp dirs
+ * and files there, and would hold the deny that closes them, so the session is refused, naming both.
+ */
+function refuseWritesOverSandboxRoots(
+  writable: readonly string[],
+  sandboxRoots: readonly string[],
+): void {
+  for (const path of writable.flatMap(spellings)) {
+    const held = sandboxRoots.flatMap(spellings).find((root) => isEqualOrUnder(root, path));
+    if (held !== undefined)
+      throw new SandboxProfileError(
+        'sandboxRoots',
+        `${path} holds ${held}, where 10db keeps every sandbox's temp dirs and files; a lane may never write there, so register a project that doesn't hold it`,
+      );
+  }
+}
+
+/**
  * A toolchain secret that holds what lane commands read would leave a lane that fails with no reason
  * given. `toolchainAccess` already keeps such paths out of the toolchain reads, so this can only meet
  * the checkout, the temp dir or an extra read, and refuses the session naming both.
@@ -257,6 +283,23 @@ function refuseToolchainSecretsOverNeeds(
   }
 }
 
+/** Whether a readable path is, or holds, a sandbox root. */
+function holdsSandboxRoot(path: string, sandboxRoots: readonly string[]): boolean {
+  return sandboxRoots.some((root) => isEqualOrUnder(root, path));
+}
+
+/**
+ * The read-list entries that are, or hold, a sandbox root. Such an entry opens none of the root and is
+ * left out of a profile, as is any built-in read that holds one: srt applies a deny that lies inside a
+ * directory it opens after every grant, so the sandbox's own files there would close.
+ */
+export function readListOverSandboxRoots(
+  readList: readonly string[],
+  sandboxRoots: readonly string[],
+): string[] {
+  return readList.filter((path) => holdsSandboxRoot(path, sandboxRoots));
+}
+
 /** Builds the lane's sandbox settings from one input and validates them before they reach Claude Code. */
 export function buildLaneProfile(input: LaneProfileInput): LaneSandboxSettings {
   let checkout: string;
@@ -268,10 +311,19 @@ export function buildLaneProfile(input: LaneProfileInput): LaneSandboxSettings {
   const laneReads = [input.tmpDir, checkout, ...input.toolchainReads, ...input.extraReads];
   refuseSecretsOverNeeds(input.secretFiles, laneReads, input.toolchainReads);
   refuseToolchainSecretsOverNeeds(input.toolchainSecrets, laneReads);
+  refuseWritesOverSandboxRoots([checkout, ...input.extraWrites], input.sandboxRoots);
   const needed = [...SYSTEM_READS, ...laneReads];
   const denied = [...input.protectedReads, ...input.secretFiles, ...input.toolchainSecrets];
-  const isAllowed = (path: string): boolean => !denied.some((root) => isEqualOrUnder(path, root));
-  const readable = [...needed, ...input.readList].filter(isAllowed);
+  const own = [input.tmpDir, ...input.ownFiles];
+  const inSandboxRoot = (path: string): boolean =>
+    input.sandboxRoots.some((root) => isEqualOrUnder(path, root)) &&
+    !own.some((mine) => isEqualOrUnder(path, mine));
+  const isAllowed = (path: string): boolean =>
+    !denied.some((root) => isEqualOrUnder(path, root)) && !inSandboxRoot(path);
+  // A built-in read is left out the same way (`/tmp` on Linux, where the roots lie under it).
+  const readable = [...needed, ...input.readList]
+    .filter(isAllowed)
+    .filter((path) => !holdsSandboxRoot(path, input.sandboxRoots));
   const writable = [input.tmpDir, ...input.extraWrites].filter(isAllowed);
   refusePatterns(readable);
   // A listing of a dir that is, or lies under, a denied path opens nothing the deny keeps shut.
@@ -286,7 +338,13 @@ export function buildLaneProfile(input: LaneProfileInput): LaneSandboxSettings {
     allowAppleEvents: false,
     autoAllowBashIfSandboxed: false,
     filesystem: {
-      denyRead: ['/', ...input.protectedReads, ...input.secretFiles, ...input.toolchainSecrets],
+      denyRead: [
+        '/',
+        ...input.protectedReads,
+        ...input.sandboxRoots,
+        ...input.secretFiles,
+        ...input.toolchainSecrets,
+      ],
       allowRead: [...readable, ...listings],
       allowWrite: writable,
       denyWrite: [...input.denyWrites],

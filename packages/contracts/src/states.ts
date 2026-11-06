@@ -42,7 +42,7 @@ export type InboxState = ValueOf<typeof InboxState>;
 export const ClaimKind = { Area: 'area', Hazard: 'hazard' } as const;
 export type ClaimKind = ValueOf<typeof ClaimKind>;
 
-export const Provider = { Claude: 'claude' } as const;
+export const Provider = { Claude: 'claude', Codex: 'codex' } as const;
 export type Provider = ValueOf<typeof Provider>;
 
 export const Effort = {

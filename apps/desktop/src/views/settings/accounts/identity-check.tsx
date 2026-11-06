@@ -1,6 +1,7 @@
 import {
   AccountKind,
   AccountProblem,
+  signsInWithLogin,
   type AccountDto,
   type AccountIdentityDto,
 } from '@10db/contracts';
@@ -21,7 +22,7 @@ interface Offer {
  */
 function identityOffer(account: AccountDto, result: AccountIdentityDto): Offer | null {
   const { refusal } = result;
-  if (account.kind === AccountKind.ClaudeSubscription) {
+  if (signsInWithLogin(account.kind)) {
     if (refusal?.seenIdentity == null) return null;
     if (refusal.problem === AccountProblem.Unconfirmed)
       return {
@@ -64,13 +65,13 @@ function refusalColor(problem: AccountProblem): 'yellow' | 'red' {
 }
 
 /**
- * Runs the identity probe on a click, never on its own: it starts Claude Code. Confirming records
+ * Runs the identity probe on a click, never on its own: it starts Claude Code or Codex. Confirming records
  * exactly what the probe saw for this account.
  */
 export function IdentityCheck({ account }: { readonly account: AccountDto }) {
   const check = useCheckAccountIdentity();
   const patch = usePatchAccount(account.id);
-  const isSubscription = account.kind === AccountKind.ClaudeSubscription;
+  const isSubscription = signsInWithLogin(account.kind);
   // The result belongs to the account it was read for.
   const result = check.data?.accountId === account.id ? check.data : null;
   const offer = result === null ? null : identityOffer(account, result);
@@ -90,7 +91,8 @@ export function IdentityCheck({ account }: { readonly account: AccountDto }) {
       </Button>
       {check.isPending ? (
         <Text size="sm" c="dimmed">
-          Starting Claude Code to read the account…
+          Starting {account.kind === AccountKind.CodexSignin ? 'Codex' : 'Claude Code'} to read the
+          account…
         </Text>
       ) : null}
       {check.isError ? (
@@ -103,6 +105,16 @@ export function IdentityCheck({ account }: { readonly account: AccountDto }) {
           {result.email === null ? null : <Text size="sm">Signed in as {result.email}</Text>}
           {result.organization === null ? null : (
             <Text size="sm">Organization: {result.organization}</Text>
+          )}
+          {result.models.length === 0 ? null : (
+            <Stack gap={2}>
+              <Text size="sm">Models this account offers</Text>
+              {result.models.map((model) => (
+                <Text key={model} size="sm" c="dimmed">
+                  {model}
+                </Text>
+              ))}
+            </Stack>
           )}
           {refusal === null ? null : (
             <Alert color={refusalColor(refusal.problem)} role="alert">

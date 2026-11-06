@@ -8,6 +8,7 @@ import {
   realpathSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { execFileSync, spawn } from 'node:child_process';
@@ -17,6 +18,7 @@ import {
   BenchmarkStatusDto,
   BoardColumnDto,
   EventsHead,
+  FolderInspectResult,
   InboxItemDto,
   KeepAwakeStatus,
   McpServerStatusDto,
@@ -358,13 +360,29 @@ describe('startDaemon', () => {
     }
   });
 
+  /**
+   * The sandbox's roots under one short base: the temp root, the Codex lanes root, the files root,
+   * and two stand-ins for the system temp dirs a ChatGPT lane writes. The daemon makes the first three.
+   */
+  function sandboxRoots(base: string) {
+    return {
+      tmpRoot: join(base, 't'),
+      codexLaneTempRoot: join(base, 'l'),
+      filesRoot: join(base, 'r'),
+      systemTempRoots: [join(base, 'sys'), join(base, 'vartmp')],
+    };
+  }
+
   // Its temp root is a short path under the shared `/tmp`, which no sandbox can write.
   it.skipIf(SANDBOXED)(
     'runs lanes and gates under the sandbox, built from its own data dir, home and git, when it is on',
     async () => {
       const repo = createTempRepo();
-      // A short root: the lane temp directory's whole path must fit the sandbox's limit.
-      const tmpRoot = realpathSync(mkdtempSync('/tmp/sbd-'));
+      // A short base: the lane temp directory's whole path must fit the sandbox's limit.
+      const base = realpathSync(mkdtempSync('/tmp/sbd-'));
+      const roots = sandboxRoots(base);
+      const { tmpRoot, filesRoot, codexLaneTempRoot } = roots;
+      for (const dir of roots.systemTempRoots) mkdirSync(dir);
       try {
         const adapter = new FakeAdapter({ Alpha: [[{ do: 'turn_complete' }]] });
         const specs: SessionSpec[] = [];
@@ -377,10 +395,13 @@ describe('startDaemon', () => {
           port: 0,
           adapter,
           logLevel: 'warn',
-          sandbox: { tmpRoot, runtime: FAKE_SRT },
+          sandbox: { ...roots, runtime: FAKE_SRT },
           ...QUIET,
         });
         daemon = running;
+        // Each root it puts files in is made private to this user before any is put there.
+        for (const root of [tmpRoot, codexLaneTempRoot, filesRoot])
+          expect(statSync(root).mode & 0o777, root).toBe(0o700);
         const api = apiClient(running.url, running.token);
         const project = await api.post('/projects', ProjectDto, {
           name: 'demo',
@@ -409,7 +430,7 @@ describe('startDaemon', () => {
         const laneTmp = sandbox?.env['CLAUDE_CODE_TMPDIR'] ?? '';
         // The caches in the lane's temp dir are for the sandboxed shell alone (its env file).
         expect(sandbox?.env['npm_config_cache']).toBeUndefined();
-        expect(sandbox?.env['CLAUDE_ENV_FILE']).toBeDefined();
+        expect(dirname(sandbox?.env['CLAUDE_ENV_FILE'] ?? '')).toBe(filesRoot);
         expect(dirname(laneTmp)).toBe(tmpRoot);
         // The gate ran under srt, with the project's network: no hosts, and nothing off the list.
         const gateLogs = join(dir.path, 'logs', 'gate');
@@ -417,41 +438,227 @@ describe('startDaemon', () => {
         expect(gateLog).toContain('fake srt: no sandbox; network {"allowedDomains":[]');
         expect(gateLog).toContain('"strictAllowlist":true');
         // The session and the gate ended, so their temp dirs and files are gone; the daemon's mark stays
-        // until it stops.
-        expect(readdirSync(tmpRoot)).toEqual([`10db-daemon-${String(process.pid)}`]);
+        // in each root it claimed until it stops, and none is left in a system temp dir.
+        // Each root also keeps the marker that keeps Spotlight out of it.
+        const mark = `10db-daemon-${String(process.pid)}`;
+        for (const root of [tmpRoot, codexLaneTempRoot, filesRoot])
+          expect(readdirSync(root).sort(), root).toEqual(['.metadata_never_index', mark].sort());
+        for (const dir of roots.systemTempRoots) expect(readdirSync(dir), dir).toEqual([]);
         await running.stop();
-        expect(readdirSync(tmpRoot)).toEqual([]);
+        for (const root of [tmpRoot, codexLaneTempRoot, filesRoot])
+          expect(readdirSync(root), root).toEqual(['.metadata_never_index']);
       } finally {
         repo.cleanup();
-        rmSync(tmpRoot, { recursive: true, force: true });
+        rmSync(base, { recursive: true, force: true });
+      }
+    },
+  );
+
+  // Same short base as above.
+  it.skipIf(SANDBOXED)(
+    'asks Time Machine to skip each root it claims, logs a root it could not and runs on, and stops asking at stop()',
+    async () => {
+      const base = realpathSync(mkdtempSync('/tmp/sbd-'));
+      const roots = sandboxRoots(base);
+      const asked: string[] = [];
+      let stopped = false;
+      try {
+        daemon = await startDaemon({
+          dataDir: dir.path,
+          port: 0,
+          adapter: new FakeAdapter({}),
+          logLevel: 'warn',
+          sandbox: {
+            ...roots,
+            runtime: FAKE_SRT,
+            backups: (root, signal) => {
+              asked.push(root);
+              if (root === realpathSync(roots.filesRoot))
+                return Promise.reject(new Error('tmutil failed'));
+              // One that never ends by itself: the stop ends it.
+              return new Promise((_resolve, reject) => {
+                signal.addEventListener('abort', () => {
+                  stopped = true;
+                  reject(new Error('aborted'));
+                });
+              });
+            },
+          },
+          ...QUIET,
+        });
+        const running = daemon;
+        await waitFor(() => asked.length === 3);
+        expect(asked.sort()).toEqual(
+          [roots.tmpRoot, roots.codexLaneTempRoot, roots.filesRoot]
+            .map((r) => realpathSync(r))
+            .sort(),
+        );
+        const logPath = join(dir.path, 'logs', 'daemon.log');
+        await waitFor(
+          () => existsSync(logPath) && readFileSync(logPath, 'utf8').includes('Time Machine'),
+        );
+        expect(readFileSync(logPath, 'utf8')).toContain(realpathSync(roots.filesRoot));
+        // The daemon runs on.
+        const health = await fetch(`${running.url}/health`);
+        expect(health.ok).toBe(true);
+        await running.stop();
+        daemon = null;
+        expect(stopped).toBe(true);
+      } finally {
+        await daemon?.stop();
+        daemon = null;
+        rmSync(base, { recursive: true, force: true });
+      }
+    },
+  );
+
+  // Same short base as above.
+  it.skipIf(SANDBOXED)(
+    'refuses every lane session and gate, and claims no root, when a sandbox root is refused',
+    async () => {
+      const repo = createTempRepo();
+      const base = realpathSync(mkdtempSync('/tmp/sbd-'));
+      const roots = sandboxRoots(base);
+      // A link where the files root goes: what is made there would land wherever it leads.
+      const elsewhere = join(base, 'elsewhere');
+      mkdirSync(elsewhere);
+      writeFileSync(join(elsewhere, '10db-env-0123456789ab.sh'), '', { mode: 0o400 });
+      symlinkSync(elsewhere, roots.filesRoot);
+      try {
+        const adapter = new FakeAdapter({ Alpha: [[{ do: 'turn_complete' }]] });
+        const running = await startDaemon({
+          dataDir: dir.path,
+          port: 0,
+          adapter,
+          logLevel: 'warn',
+          sandbox: { ...roots, runtime: FAKE_SRT },
+          ...QUIET,
+        });
+        daemon = running;
+        const api = apiClient(running.url, running.token);
+        const project = await api.post('/projects', ProjectDto, {
+          name: 'demo',
+          repoPath: repo.path,
+          gateCommand: 'true',
+          flowId: await quickFlowId(api),
+          areas: [{ name: 'src', globs: ['src/**'] }],
+        });
+        const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
+          title: 'Alpha',
+          acceptanceCriteria: ['it works'],
+          areas: ['src'],
+        });
+        await api.post(`/tasks/${task.id}/start`, z.unknown());
+        const failed = await waitForAsync(async () =>
+          (await api.get('/workstreams?active=false', z.array(WorkstreamDto))).find(
+            (w) => w.taskId === task.id && w.state === 'FAILED',
+          ),
+        );
+        expect(failed.failureReason).toMatch(/^The lane sandbox could not start: /);
+        expect(failed.failureReason).toContain(roots.filesRoot);
+        expect(adapter.prompts).toEqual([]);
+        // Nothing was claimed or swept through the link.
+        expect(readdirSync(elsewhere)).toEqual(['10db-env-0123456789ab.sh']);
+      } finally {
+        await daemon?.stop();
+        daemon = null;
+        repo.cleanup();
+        rmSync(base, { recursive: true, force: true });
+      }
+    },
+  );
+
+  // Same short base as above.
+  it.skipIf(SANDBOXED)(
+    'counts every system temp dir a ChatGPT lane writes as a sandbox root: no project is made there',
+    async () => {
+      const base = realpathSync(mkdtempSync('/tmp/sbd-'));
+      // Outside `/private/tmp`, so only what the daemon is given counts.
+      const system = tempDir('sys');
+      const roots = {
+        ...sandboxRoots(base),
+        systemTempRoots: [join(system.path, 'tmp'), join(system.path, 'var-tmp')],
+      };
+      try {
+        for (const dir of roots.systemTempRoots) mkdirSync(join(dir, 'repo'), { recursive: true });
+        const running = await startDaemon({
+          dataDir: dir.path,
+          port: 0,
+          adapter: new FakeAdapter({}),
+          logLevel: 'warn',
+          sandbox: { ...roots, runtime: FAKE_SRT },
+          ...QUIET,
+        });
+        daemon = running;
+        const api = apiClient(running.url, running.token);
+        for (const dir of roots.systemTempRoots)
+          expect(
+            await api.post('/folders/inspect', FolderInspectResult, { path: join(dir, 'repo') }),
+            dir,
+          ).toMatchObject({ ok: false, reason: 'protected_path' });
+      } finally {
+        await daemon?.stop();
+        daemon = null;
+        rmSync(base, { recursive: true, force: true });
+        system.cleanup();
       }
     },
   );
 
   // Its temp root is a short path under the shared `/tmp`, which no sandbox can write.
   it.skipIf(SANDBOXED)(
-    'removes the temp dirs and sealed files a crashed daemon left in its sandbox temp root before any session starts',
+    'removes the temp dirs and sealed files a crashed daemon left in its sandbox roots, and its sealed files and ledgers in a system temp dir, before any session starts, and its temp dirs there once it listens',
     async () => {
-      const tmpRoot = realpathSync(mkdtempSync('/tmp/sbd-'));
+      const base = realpathSync(mkdtempSync('/tmp/sbd-'));
+      const roots = sandboxRoots(base);
+      const { tmpRoot, filesRoot } = roots;
+      const [systemTemp = ''] = roots.systemTempRoots;
+      let planted: ReturnType<typeof spawn> | null = null;
       try {
-        mkdirSync(join(tmpRoot, '10db-a1B2c3', 'cache'), { recursive: true });
-        for (const name of ['10db-env-0123456789ab.sh', '10db-mcp-0123456789ab.json', 'other.txt'])
-          writeFileSync(join(tmpRoot, name), '', { mode: 0o400 });
+        for (const root of [tmpRoot, filesRoot, ...roots.systemTempRoots]) mkdirSync(root);
+        mkdirSync(join(tmpRoot, 'a1B2c3', 'cache'), { recursive: true });
+        mkdirSync(join(systemTemp, '10db-a1B2c3', 'cache'), { recursive: true });
+        for (const root of [filesRoot, systemTemp])
+          for (const name of [
+            '10db-env-0123456789ab.sh',
+            '10db-mcp-0123456789ab.json',
+            'other.txt',
+          ])
+            writeFileSync(join(root, name), '', { mode: 0o400 });
+        // A ledger there is never read: a ChatGPT lane can write there.
+        writeFileSync(join(systemTemp, '10db-proc-4321-0123456789ab.json'), '{}');
+        // A mark a ChatGPT lane could plant there, naming a running process that is no daemon.
+        planted = spawn(process.execPath, ['-e', 'setInterval(() => undefined, 1000)'], {
+          stdio: 'ignore',
+        });
+        const plantedMark = `10db-daemon-${String(planted.pid ?? 0)}`;
+        writeFileSync(join(systemTemp, plantedMark), '', { mode: 0o400 });
         daemon = await startDaemon({
           dataDir: dir.path,
           port: 0,
           adapter: new FakeAdapter({}),
           logLevel: 'warn',
-          sandbox: { tmpRoot, runtime: FAKE_SRT },
+          sandbox: { ...roots, runtime: FAKE_SRT },
           ...QUIET,
         });
-        expect(readdirSync(tmpRoot).sort()).toEqual(
-          [`10db-daemon-${String(process.pid)}`, 'other.txt'].sort(),
+        const mark = `10db-daemon-${String(process.pid)}`;
+        // The claim leaves the Spotlight marker each root is given.
+        expect(readdirSync(tmpRoot).sort()).toEqual(['.metadata_never_index', mark].sort());
+        expect(readdirSync(filesRoot).sort()).toEqual(
+          ['.metadata_never_index', mark, 'other.txt'].sort(),
         );
+        // Its sealed files and ledgers there went before any session could start, whatever the mark.
+        expect(readdirSync(systemTemp).sort()).toEqual(
+          ['10db-a1B2c3', plantedMark, 'other.txt'].sort(),
+        );
+        // Its temp dirs there go off the event loop, once the daemon listens.
+        await waitFor(() => !readdirSync(systemTemp).includes('10db-a1B2c3'));
+        expect(readdirSync(systemTemp).sort()).toEqual([plantedMark, 'other.txt'].sort());
       } finally {
+        planted?.kill('SIGKILL');
         await daemon?.stop();
         daemon = null;
-        rmSync(tmpRoot, { recursive: true, force: true });
+        rmSync(base, { recursive: true, force: true });
       }
     },
   );
@@ -460,7 +667,11 @@ describe('startDaemon', () => {
   it.skipIf(SANDBOXED)(
     'stops the processes a dead daemon’s lane sessions left, from their ledgers, before any session starts, even while another daemon shares the root',
     async () => {
-      const tmpRoot = realpathSync(mkdtempSync('/tmp/sbd-'));
+      const base = realpathSync(mkdtempSync('/tmp/sbd-'));
+      const roots = sandboxRoots(base);
+      // The ledgers are in the files root.
+      const { filesRoot } = roots;
+      mkdirSync(filesRoot);
       const T = 'Thu Oct 30 12:00:00 2026';
       // Another daemon, on another data dir, still running with a lane session of its own.
       const other = spawn(process.execPath, ['-e', 'setInterval(() => undefined, 1000)'], {
@@ -480,13 +691,13 @@ describe('startDaemon', () => {
         { pid: 7004, ppid: 1, pgid: 7004, startedAt: T },
       ];
       try {
-        writeFileSync(join(tmpRoot, `10db-daemon-${String(otherPid)}`), '', { mode: 0o400 });
-        const live = join(tmpRoot, `10db-proc-${String(otherPid)}-00000000000a.json`);
+        writeFileSync(join(filesRoot, `10db-daemon-${String(otherPid)}`), '', { mode: 0o400 });
+        const live = join(filesRoot, `10db-proc-${String(otherPid)}-00000000000a.json`);
         writeFileSync(
           live,
           JSON.stringify({ version: 1, members: [{ pid: 7004, pgid: 7004, startedAt: T }] }),
         );
-        const ledger = join(tmpRoot, `10db-proc-${String(deadPid)}-0123456789ab.json`);
+        const ledger = join(filesRoot, `10db-proc-${String(deadPid)}-0123456789ab.json`);
         writeFileSync(
           ledger,
           JSON.stringify({
@@ -503,7 +714,7 @@ describe('startDaemon', () => {
           adapter: new FakeAdapter({}),
           logLevel: 'warn',
           sandbox: {
-            tmpRoot,
+            ...roots,
             runtime: FAKE_SRT,
             processes: {
               table: () => Promise.resolve(rows.map((r) => ({ ...r }))),
@@ -517,8 +728,9 @@ describe('startDaemon', () => {
           ...QUIET,
         });
         expect(rows.map((r) => r.pid)).toEqual([process.pid, 7003, 7004]);
-        expect(readdirSync(tmpRoot).sort()).toEqual(
+        expect(readdirSync(filesRoot).sort()).toEqual(
           [
+            '.metadata_never_index',
             `10db-daemon-${String(otherPid)}`,
             `10db-daemon-${String(process.pid)}`,
             `10db-proc-${String(otherPid)}-00000000000a.json`,
@@ -528,7 +740,7 @@ describe('startDaemon', () => {
         await daemon?.stop();
         daemon = null;
         other.kill('SIGKILL');
-        rmSync(tmpRoot, { recursive: true, force: true });
+        rmSync(base, { recursive: true, force: true });
       }
     },
   );
@@ -537,7 +749,9 @@ describe('startDaemon', () => {
   it.skipIf(SANDBOXED)(
     'tries again while it runs to stop what a dead daemon’s lane sessions left, when it could not read the machine at start',
     async () => {
-      const tmpRoot = realpathSync(mkdtempSync('/tmp/sbd-'));
+      const base = realpathSync(mkdtempSync('/tmp/sbd-'));
+      const roots = sandboxRoots(base);
+      mkdirSync(roots.filesRoot);
       const T = 'Thu Oct 30 12:00:00 2026';
       const dead = spawn(process.execPath, ['-e', ''], { stdio: 'ignore' });
       const deadPid = dead.pid ?? 0;
@@ -546,7 +760,7 @@ describe('startDaemon', () => {
         { pid: process.pid, ppid: 1, pgid: process.pid, startedAt: T },
         { pid: 7001, ppid: 1, pgid: 7001, startedAt: T },
       ];
-      const ledger = join(tmpRoot, `10db-proc-${String(deadPid)}-0123456789ab.json`);
+      const ledger = join(roots.filesRoot, `10db-proc-${String(deadPid)}-0123456789ab.json`);
       // An overloaded Mac: `ps` can't fork as the daemon starts, and can again later.
       let readable = false;
       const timers = new ManualClock();
@@ -565,7 +779,7 @@ describe('startDaemon', () => {
           adapter: new FakeAdapter({}),
           logLevel: 'warn',
           sandbox: {
-            tmpRoot,
+            ...roots,
             runtime: FAKE_SRT,
             processes: {
               table: () =>
@@ -590,7 +804,7 @@ describe('startDaemon', () => {
       } finally {
         await daemon?.stop();
         daemon = null;
-        rmSync(tmpRoot, { recursive: true, force: true });
+        rmSync(base, { recursive: true, force: true });
       }
     },
   );
@@ -790,6 +1004,7 @@ describe('startDaemon', () => {
     const check: SystemCheckDto = {
       loginEnv: { source: 'login_shell', warning: null },
       claudeCode: { verifiedOn: '2.1.302', warning: null },
+      codex: { verifiedOn: '0.154.0', warning: null },
       tools: [
         {
           name: 'git',
@@ -1022,6 +1237,7 @@ describe('startDaemon', () => {
         systemCheck: async (_resolved, ghLogin) => ({
           loginEnv: { source: 'login_shell', warning: null },
           claudeCode: { verifiedOn: '2.1.302', warning: null },
+          codex: { verifiedOn: '0.154.0', warning: null },
           tools: [
             {
               name: 'gh',

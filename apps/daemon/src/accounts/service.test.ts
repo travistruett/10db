@@ -1,3 +1,5 @@
+import { statSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   AccountInput,
   AccountKind,
@@ -88,6 +90,57 @@ describe('identity', () => {
     await service.identity(account.id);
     expect(adapter.probes).toHaveLength(1);
     held();
+  });
+});
+
+describe('a ChatGPT account', () => {
+  const create = () =>
+    service.create(AccountInput.parse({ kind: AccountKind.CodexSignin, label: 'ChatGPT plan' }));
+
+  it('gives a codex_signin account a home named codex, mode 700, and its sign-in steps', () => {
+    const { account, signIn } = create();
+    expect(account.configDir).toBe(join(dir.path, 'accounts', account.id, 'codex'));
+    expect(statSync(account.configDir ?? '').mode & 0o777).toBe(0o700);
+    expect(signIn?.configDir).toBe(account.configDir);
+    expect(signIn?.command).toContain('CODEX_HOME=');
+    expect(signIn?.command).toContain('codex login');
+    expect(signIn?.command).not.toContain('claude');
+    expect(service.signIn(account.id).command).toBe(signIn?.command);
+  });
+
+  it('probes as a codex_signin account without waiting on the Claude start gate, and reports the models', async () => {
+    const { account } = create();
+    adapter.probeSeen = {
+      ...adapter.probeSeen,
+      email: 'me@example.com',
+      organization: 'ws-1',
+      subscriptionType: 'pro',
+      apiProvider: 'chatgpt',
+      models: ['gpt-6-astra'],
+    };
+    const held = await gate.acquire(account.id);
+    const identity = await service.identity(account.id);
+    held();
+    expect(adapter.probes[0]?.kind).toBe(AccountKind.CodexSignin);
+    expect(adapter.probes[0]?.env['CODEX_HOME']).toBe(account.configDir);
+    expect(identity).toMatchObject({
+      email: 'me@example.com',
+      organization: 'ws-1',
+      apiProvider: 'chatgpt',
+      subscription: true,
+      models: ['gpt-6-astra'],
+      refusal: {
+        problem: 'unconfirmed',
+        seenIdentity: 'me@example.com · ws-1',
+      },
+    });
+  });
+
+  it('reports no models for a Claude account', async () => {
+    const { account } = service.create(
+      AccountInput.parse({ kind: AccountKind.ClaudeSubscription, label: 'A' }),
+    );
+    expect((await service.identity(account.id)).models).toEqual([]);
   });
 });
 

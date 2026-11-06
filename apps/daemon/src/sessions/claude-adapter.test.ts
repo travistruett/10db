@@ -317,7 +317,9 @@ const laneSandbox: LaneSandboxSpec = {
     },
     credentials: { envVars: [{ name: 'GH_TOKEN', mode: 'deny' }] },
   },
+  checkout: '/repo',
   env: { CLAUDE_CODE_TMPDIR: '/private/tmp/10db-x', GIT_CONFIG_GLOBAL: '/dev/null' },
+  shellEnv: {},
   disallowedTools: ['Read(//h/.claude.json)', 'Read(//repo/.env)'],
   autoMode: autoModeRules('make gate'),
   askRules: ['Edit(//repo/.mcp.json)', 'Write(//repo/.mcp.json)'],
@@ -2601,6 +2603,7 @@ describe('probeAccount', () => {
       allowUnsandboxed: true,
     });
     const seen = await adapter.probeAccount({
+      kind: 'claude_subscription',
       cwd: '/data',
       env: { PATH: '/bin', CLAUDE_CONFIG_DIR: '/data/accounts/a/claude' },
     });
@@ -2634,7 +2637,7 @@ describe('probeAccount', () => {
       allowUnsandboxed: true,
       clock,
     });
-    const probe = adapter.probeAccount({ cwd: '/data', env: {} });
+    const probe = adapter.probeAccount({ kind: 'claude_subscription', cwd: '/data', env: {} });
     clock.advance(15_000);
     await expect(probe).rejects.toThrow(AccountProbeError);
   });

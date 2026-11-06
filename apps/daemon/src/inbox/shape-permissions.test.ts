@@ -59,7 +59,7 @@ beforeEach(() => {
     systemDocRoots: SYSTEM_DOC_ROOTS,
     configDir: join(home, '.claude'),
     providerSessionId: null,
-    sandboxTemp: { root: join(root, 't'), own: join(root, 't', '10db-ownabc') },
+    sandboxTemp: { roots: [join(root, 't')], own: join(root, 't', '10db-ownabc') },
   };
   waits = [];
 });

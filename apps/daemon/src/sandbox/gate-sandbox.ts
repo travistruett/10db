@@ -5,8 +5,18 @@ import { prepareCommandEnv } from './command-env';
 import { shellAssignments } from './env-file';
 import { singleQuoted } from './posix-quote';
 import { buildLaneProfile } from './profile';
-import { projectAccess, projectWritableRoots, type ProjectAccessDeps } from './project-access';
-import { defaultPnpmLockDir, openPnpmLockDir, sweepPnpmLockDir } from './pnpm-lock-dir';
+import {
+  laneRootsOf,
+  projectAccess,
+  projectWritableRoots,
+  type ProjectAccessDeps,
+} from './project-access';
+import {
+  defaultPnpmLockDir,
+  openPnpmLockDir,
+  sweepPnpmLockDir,
+  type SweepLog,
+} from './pnpm-lock-dir';
 import { createSealedFile, removeSealedFile, type SealedFileKind } from './sealed-file';
 import {
   allowlisted,
@@ -18,7 +28,7 @@ import {
 import { srtSettings } from './srt-settings';
 import {
   createLaneTempDir,
-  LANE_TEMP_ROOT,
+  laneTempRoot,
   removeLaneTempDirAsync,
   SandboxTempDirError,
 } from './temp-dir';
@@ -83,10 +93,12 @@ export interface GateSandbox {
 }
 
 export interface GateSandboxDeps extends Omit<ProjectAccessDeps, 'tmpRoot'> {
-  /** Where temp dirs are made; tests pass a short temp root. */
+  /** Where temp dirs are made, `laneTempRoot()` by default; tests pass a short temp root. */
   readonly tmpRoot?: string;
   /** Where pnpm keeps its store locks; tests pass a directory of their own. */
   readonly pnpmLockDir?: string;
+  /** Told what a sweep of pnpm's lock directory could not remove; required, so none is lost. */
+  readonly log: SweepLog;
   readonly runtime: SandboxRuntime;
 }
 
@@ -108,10 +120,14 @@ function writeDockerShim(binDir: string, marker: string): void {
  * inside the sandbox, so nothing outside it acts on what the gate's env or PATH name.
  */
 export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
-  const tmpRoot = deps.tmpRoot ?? LANE_TEMP_ROOT;
+  const tmpRoot = deps.tmpRoot ?? laneTempRoot();
+  const { filesRoot } = deps;
   return {
     async forRun(input) {
-      checkRuntime(deps.runtime, projectWritableRoots(input.checkouts, tmpRoot));
+      checkRuntime(
+        deps.runtime,
+        projectWritableRoots(input.checkouts, laneRootsOf({ ...deps, tmpRoot })),
+      );
       const access = await projectAccess(
         { ...deps, tmpRoot },
         {
@@ -127,7 +143,7 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
         input.packageInstall === true ? (deps.pnpmLockDir ?? defaultPnpmLockDir()) : null;
       // What an earlier run or a crash left is not trusted either.
       if (lockPath !== null) {
-        sweepPnpmLockDir(lockPath);
+        await sweepPnpmLockDir(lockPath, tmpRoot, deps.log);
         openPnpmLockDir(lockPath);
       }
       const tmpDir = createLaneTempDir(tmpRoot);
@@ -144,14 +160,14 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
         };
         if (settingsFile !== null) {
           try {
-            removeSealedFile(settingsFile, tmpRoot, SETTINGS_FILE);
+            removeSealedFile(settingsFile, filesRoot, SETTINGS_FILE);
           } catch (error) {
             record(error);
           }
         }
         if (lockPath !== null) {
           try {
-            sweepPnpmLockDir(lockPath);
+            await sweepPnpmLockDir(lockPath, tmpRoot, deps.log);
           } catch (error) {
             record(error);
           }
@@ -185,6 +201,9 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
           // srt opens nothing for writing by itself, unlike Claude Code, which opens the checkout.
           extraWrites: [checkout, ...(lockPath === null ? [] : [lockPath])],
           denyWrites: [...access.gitState, ...access.otherCheckouts, ...SRT_SHARED_TEMP],
+          // srt reads the settings file before the sandbox starts; the command reads no file here.
+          sandboxRoots: access.sandboxRoots,
+          ownFiles: [],
           loopback: input.project.sandboxLoopback,
           deniedEnvNames: [],
         });
@@ -202,7 +221,7 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
           '; exit $?',
         ].join(' ');
         settingsFile = createSealedFile(
-          tmpRoot,
+          filesRoot,
           SETTINGS_FILE,
           JSON.stringify(srtSettings(profile), null, 2),
         );

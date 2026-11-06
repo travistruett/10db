@@ -4,7 +4,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   CAP_RAISE_DETAIL,
   capCard,
+  confirmCard,
   credentialsCard,
+  fixFor,
   recordedCard,
   refusedCard,
   secretCard,
@@ -123,5 +125,88 @@ describe('the cards that used to hold nothing', () => {
       toUsd: 70,
     });
     expect(card.body).toContain('Raise cap to $70');
+  });
+});
+
+describe('the cards for a ChatGPT account', () => {
+  function codexAccount() {
+    const test = createTestStore();
+    close = test.close;
+    const row = getAccountRow(
+      test.store.db,
+      seedAccount(test.store, { kind: 'codex_signin', label: 'ChatGPT plan' }).id,
+    );
+    // The seeded home is named for Claude; a created ChatGPT account's is named codex.
+    return { ...row, configDir: '/h/accounts/a/codex' };
+  }
+
+  it('fixes a signed-out account with codex login and never names claude', () => {
+    const fix = fixFor(codexAccount(), AccountProblem.SignedOut);
+    expect(fix).toContain('codex login');
+    expect(fix).not.toContain('claude');
+  });
+
+  it.each([AccountProblem.WrongCredentials, AccountProblem.StartTimeout])(
+    'names Codex, not Claude Code, for %s',
+    (problem) => {
+      const fix = fixFor(codexAccount(), problem);
+      expect(fix).toContain('Codex');
+      expect(fix).not.toContain('Claude');
+    },
+  );
+
+  it('tells the builder to sign in with codex login', () => {
+    const card = signInCard(codexAccount());
+    expect(card.body).toContain('codex login');
+    expect(card.body).not.toContain('Claude Code');
+    expect(card.body).not.toContain('claude /login');
+  });
+
+  it('asks to confirm the email and the workspace, which together are its identity', () => {
+    const card = confirmCard(codexAccount(), 'me@example.com · ws-1');
+    expect(card.body).toContain(
+      'Codex in /h/accounts/a/codex is signed in as me@example.com · ws-1',
+    );
+    expect(card.body).toContain('sessions run only while they report this email and workspace.');
+  });
+
+  it('offers Confirm for a reported sign-in, as a subscription does', () => {
+    const card = refusedCard(codexAccount(), {
+      problem: AccountProblem.IdentityMismatch,
+      message: 'it differs',
+      seenIdentity: 'me@example.com · ws-1',
+    });
+    expect((card.options ?? []).map((o) => o.label)).toContain(AccountCardChoice.Confirm);
+  });
+});
+
+describe('the confirm card for a subscription', () => {
+  it('asks to confirm the email alone', () => {
+    const test = createTestStore();
+    close = test.close;
+    const row = getAccountRow(
+      test.store.db,
+      seedAccount(test.store, { kind: 'claude_subscription', label: 'Claude plan' }).id,
+    );
+    expect(confirmCard(row, 'me@example.com').body).toContain(
+      'sessions run only while they report this email.',
+    );
+  });
+});
+
+describe('the identity-mismatch fix', () => {
+  it.each([
+    ['codex_signin', 'CODEX_HOME='],
+    ['claude_subscription', 'CLAUDE_CONFIG_DIR='],
+  ] as const)('keeps the case of the sign-in command of a %s account', (kind, variable) => {
+    const test = createTestStore();
+    close = test.close;
+    const account = getAccountRow(
+      test.store.db,
+      seedAccount(test.store, { kind, label: 'Plan' }).id,
+    );
+    const fix = fixFor(account, AccountProblem.IdentityMismatch);
+    expect(fix).toContain(variable);
+    expect(fix).toContain('otherwise sign in again with:');
   });
 });

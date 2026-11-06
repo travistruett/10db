@@ -162,6 +162,7 @@ describe.skipIf(!SEATBELT)('a repo stdio MCP server under the sandbox (Seatbelt)
     // A short root: the server's temp dir must fit the socket path limit.
     root = realpathSync(mkdtempSync('/tmp/sbm-'));
     mkdirSync(join(root, 't'));
+    mkdirSync(join(root, 'r'));
     repo = createTempRepo();
     checkout = realpathSync(repo.path);
     writeFileSync(join(checkout, 'probe-server.mjs'), PROBE_SERVER);
@@ -179,6 +180,7 @@ describe.skipIf(!SEATBELT)('a repo stdio MCP server under the sandbox (Seatbelt)
       loginConfigDir: null,
       gitDirs: (path) => git.gitDirs(path),
       tmpRoot: join(root, 't'),
+      filesRoot: join(root, 'r'),
       runtime: resolveSandboxRuntime(),
       worktreeRoot: join(root, 'w'),
     }).forSession({

@@ -1,7 +1,7 @@
 import {
   accountDisplayName,
-  AccountKind,
   needsSecret,
+  signsInWithLogin,
   type AccountDto,
   type AccountId,
 } from '@10db/contracts';
@@ -38,7 +38,7 @@ function AccountDrawerBody({
       {account.archived ? null : <AccountPause account={account} />}
       <Stack gap="xs">
         <Title order={4}>Identity</Title>
-        {account.kind === AccountKind.ClaudeSubscription ? <SignInSteps account={account} /> : null}
+        {signsInWithLogin(account.kind) ? <SignInSteps account={account} /> : null}
         {needsSecret(account.kind, account.settings) ? <SecretForm account={account} /> : null}
         <IdentityCheck account={account} />
       </Stack>

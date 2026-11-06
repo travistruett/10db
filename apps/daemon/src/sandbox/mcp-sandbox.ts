@@ -10,7 +10,7 @@ import {
 } from './mcp-refusals';
 import { singleQuoted } from './posix-quote';
 import { buildLaneProfile, SandboxProfileError } from './profile';
-import { projectWritableRoots, type ProjectAccess } from './project-access';
+import type { ProjectAccess } from './project-access';
 import { createSealedFile, removeSealedFile, type SealedFileKind } from './sealed-file';
 import {
   allowlisted,
@@ -98,7 +98,12 @@ export class SandboxedMcpServer {
 export interface McpSandboxInput {
   readonly access: ProjectAccess;
   readonly home: string;
+  /** Where each server's temp dir is made. */
   readonly tmpRoot: string;
+  /** Where each server's sealed env and settings files are made, outside every temp dir. */
+  readonly filesRoot: string;
+  /** Every root closed to a server's sandbox but for its own temp dir and env file. */
+  readonly sandboxRoots: readonly string[];
   readonly runtime: SandboxRuntime;
   /** The session's launch env: only its allowlisted names reach a server. */
   readonly env: Readonly<Record<string, string>>;
@@ -146,7 +151,7 @@ function sandboxOne(
   input: McpSandboxInput,
   removals: (() => void)[],
 ): SandboxedMcpServer {
-  const { access, tmpRoot } = input;
+  const { access, tmpRoot, filesRoot } = input;
   const tmpDir = createLaneTempDir(tmpRoot);
   removals.push(() => {
     removeLaneTempDir(tmpDir, tmpRoot);
@@ -160,14 +165,14 @@ function sandboxOne(
     ...server.env,
   };
   const envFile = createSealedFile(
-    tmpRoot,
+    filesRoot,
     ENV_FILE,
     shellAssignments(commandEnv)
       .map((assignment) => `export ${assignment}\n`)
       .join(''),
   );
   removals.push(() => {
-    removeSealedFile(envFile, tmpRoot, ENV_FILE);
+    removeSealedFile(envFile, filesRoot, ENV_FILE);
   });
   const profile = buildLaneProfile({
     checkout: access.checkout,
@@ -183,6 +188,8 @@ function sandboxOne(
     extraReads: [envFile, ...access.gitReads],
     extraWrites: [],
     denyWrites: [...access.gitState, ...access.otherCheckouts, ...SRT_SHARED_TEMP],
+    sandboxRoots: input.sandboxRoots,
+    ownFiles: [envFile],
     // Never, whatever the project's switch: on localhost listen other sandboxes' proxies, and
     // through them the hosts an approval withholds.
     loopback: false,
@@ -192,16 +199,17 @@ function sandboxOne(
     machLookups: ['com.apple.SystemConfiguration.configd'],
   });
   const settingsFile = createSealedFile(
-    tmpRoot,
+    filesRoot,
     SETTINGS_FILE,
     JSON.stringify(srtSettings(profile), null, 2),
   );
   removals.push(() => {
-    removeSealedFile(settingsFile, tmpRoot, SETTINGS_FILE);
+    removeSealedFile(settingsFile, filesRoot, SETTINGS_FILE);
   });
   // srt's proxy says which host it refused only in its debug log; the preload carries that out to a
-  // log the daemon reads, so the daemon log names the server and the host.
-  const refusalLog = createRefusalLog(tmpRoot);
+  // log the daemon reads, so the daemon log names the server and the host. Both are in the files root
+  // with the server's other files: the preload is code srt's host runs outside every sandbox.
+  const refusalLog = createRefusalLog(filesRoot);
   removals.push(
     watchRefusals(
       refusalLog,
@@ -211,12 +219,12 @@ function sandboxOne(
       input.clock,
     ),
     () => {
-      removeSealedFile(refusalLog, tmpRoot, REFUSAL_LOG);
+      removeSealedFile(refusalLog, filesRoot, REFUSAL_LOG);
     },
   );
-  const preload = createSealedFile(tmpRoot, REFUSAL_PRELOAD, refusalPreload(refusalLog));
+  const preload = createSealedFile(filesRoot, REFUSAL_PRELOAD, refusalPreload(refusalLog));
   removals.push(() => {
-    removeSealedFile(preload, tmpRoot, REFUSAL_PRELOAD);
+    removeSealedFile(preload, filesRoot, REFUSAL_PRELOAD);
   });
   const inner = [
     'exec /usr/bin/env -i',
@@ -254,7 +262,7 @@ function sandboxOne(
 export function sandboxMcpServers(input: McpSandboxInput): McpSandboxes {
   const entries = Object.entries(input.servers);
   if (entries.length === 0) return { servers: {}, failures: [], dispose: () => undefined };
-  checkRuntime(input.runtime, projectWritableRoots(input.checkouts, input.tmpRoot));
+  checkRuntime(input.runtime, input.access.writableRoots);
   const removals: (() => void)[] = [];
   try {
     const servers: Record<string, SandboxedMcpServer> = {};

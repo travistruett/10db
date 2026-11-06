@@ -19,7 +19,6 @@ import {
 import { createChannel } from './channel';
 import type { QueryFn } from './claude-adapter';
 import {
-  contextEvent,
   mapSdkMessage,
   toHookOutput,
   toPermissionResult,
@@ -27,6 +26,7 @@ import {
   toShapeHookOutput,
   userMessage,
 } from './claude-mapping';
+import { contextEvent } from './context-event';
 import { currentToolNames } from './mcp-tool-names';
 import { TENDB_MCP_SERVER } from './project-mcp';
 import { settleWithin } from './settle-within';

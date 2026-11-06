@@ -28,7 +28,7 @@ function made(...parts: string[]): string {
 describe('assertWorktreeRootAllowed', () => {
   const rows: {
     name: string;
-    root: (ctx: { repo: string; data: string; tempRoot: string }) => string;
+    root: (ctx: { repo: string; data: string; tempRoot: string; filesRoot: string }) => string;
     ok: boolean;
   }[] = [
     { name: 'a root outside everything', root: () => join(base, 'wt', 'abcd1234'), ok: true },
@@ -41,6 +41,11 @@ describe('assertWorktreeRootAllowed', () => {
     { name: 'the data dir itself', root: (c) => c.data, ok: false },
     { name: 'under the data dir', root: (c) => join(c.data, 'wt'), ok: false },
     { name: 'under the lane temp root', root: (c) => join(c.tempRoot, 'wt'), ok: false },
+    {
+      name: 'under another sandbox root, the files root',
+      root: (c) => join(c.filesRoot, 'wt'),
+      ok: false,
+    },
     {
       name: 'reached through a link into a checkout',
       root: () => join(base, 'link-to-repo', 'wt'),
@@ -63,14 +68,15 @@ describe('assertWorktreeRootAllowed', () => {
     const repo = made('repo');
     const data = made('data');
     const tempRoot = made('lane-tmp');
+    const filesRoot = made('run');
     made('repo-two');
     writeFileSync(join(base, 'a-file'), '');
     symlinkSync(repo, join(base, 'link-to-repo'));
     const call = (): void => {
-      assertWorktreeRootAllowed(root({ repo, data, tempRoot }), {
+      assertWorktreeRootAllowed(root({ repo, data, tempRoot, filesRoot }), {
         checkouts: [repo],
         dataDir: data,
-        tempRoot,
+        sandboxRoots: [tempRoot, filesRoot],
       });
     };
     if (ok) expect(call).not.toThrow();
@@ -81,16 +87,20 @@ describe('assertWorktreeRootAllowed', () => {
     const repo = made('repo');
     const root = join(repo, 'wt');
     expect(() => {
-      assertWorktreeRootAllowed(root, { checkouts: [repo], dataDir: made('data'), tempRoot: null });
+      assertWorktreeRootAllowed(root, {
+        checkouts: [repo],
+        dataDir: made('data'),
+        sandboxRoots: [],
+      });
     }).toThrow(new RegExp(`checkout.*${repo}`));
   });
 
-  it('accepts a root when there is no sandbox temp root', () => {
+  it('accepts a root when there is no sandbox root', () => {
     expect(() => {
       assertWorktreeRootAllowed(join(base, 'wt'), {
         checkouts: [],
         dataDir: made('data'),
-        tempRoot: null,
+        sandboxRoots: [],
       });
     }).not.toThrow();
   });
