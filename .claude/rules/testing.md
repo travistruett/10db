@@ -7,6 +7,10 @@
 - **Real objects, mocks only at boundaries.** Use a real SQLite file in a temp directory, a real
   git repo in a temp directory, real HTTP via `app.request()`. Mock only the network, the clock
   and child processes you don't own (the fake Claude adapter is such a boundary).
+- **Extend before you add.** Before writing a test, find the tests that already cover the
+  behavior. Extend one or add a table row when one fits. A new test must say what it catches that
+  the others don't; in a step report, name the existing tests you checked. Reviewers may ask to
+  merge overlapping tests or fold them into a table, not only to add tests.
 - **Table-driven tests** for state machines, rules and parsers: one row per case, named.
 - **Test behavior, not implementation.** Assert on outputs, persisted rows and emitted events,
   not on which private function ran.

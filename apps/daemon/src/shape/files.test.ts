@@ -8,29 +8,30 @@ import {
   ShapeMessageKind,
   ShapeOrigin,
   StartShapeInput,
+  type SeeScreenInput,
   type ShapeFileDto,
+  type ShapeId,
 } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { pngImage } from '../../test/png';
-import {
-  createScreens,
-  INLINE_CONVERSATION_MAX_BYTES,
-  inlineBytesSpent,
-  type ScreenOutcome,
-} from '../screens';
+import { createScreens, inlineBytesSpent, type ScreenOutcome } from '../screens';
 import type { FakeShapeTurn } from '../sessions';
 import { jpegOfSize } from '../../test/jpeg';
+import { ROUND_LIMITS } from '../../test/picture-limits';
 import { pngOfSize } from '../../test/png';
 import { webpImage } from '../../test/webp';
 import { readImageSize } from '../screens';
 import { must } from './conversation-fixture';
 import { createServiceFixture, type ServiceFixture } from './service-fixture';
 
-// Shape spec §5.4 Dropped files and §5.6 Starting from a terminal.
+// Shape spec §5.4 Dropped files and §5.6 Starting from a terminal. These run on round, small limits
+// (`ROUND_LIMITS`) so that the budget can be filled with a few megabytes; `picture-limits.test.ts` checks the
+// figures of each account, and `account-limits.test.ts` what a conversation does on each.
+const INLINE_CONVERSATION_MAX_BYTES = ROUND_LIMITS.inlineMaxBytes;
 
 let f: ServiceFixture;
 beforeEach(() => {
-  f = createServiceFixture();
+  f = createServiceFixture({ limitsFor: () => ROUND_LIMITS });
 });
 afterEach(async () => {
   await f.close();
@@ -167,8 +168,8 @@ describe('a dropped image', () => {
   });
 });
 
-// The API refuses an image over about 5 MB and a request over 32 MB, and a resumed session resends every
-// earlier image, so a large image goes as a path to Read (which resizes) rather than as a block.
+// The API refuses an image over a per-image size and a request over the account's limit, and a resumed session
+// resends every earlier image, so a large image goes as a path to Read (which resizes) rather than as a block.
 describe('a large dropped image', () => {
   const MB = 1024 * 1024;
   const sized = (head: Buffer, bytes: number): Buffer =>
@@ -315,8 +316,6 @@ describe('a large dropped image', () => {
     expect(sent.reduce((a, b) => a + b, 0) * 2 * MB).toBeLessThanOrEqual(
       INLINE_CONVERSATION_MAX_BYTES,
     );
-    // base64 grows 4/3: what a resumed request carries stays well under the API's 32 MB.
-    expect((INLINE_CONVERSATION_MAX_BYTES * 4) / 3).toBeLessThan(28_000_000);
     expect(sent).toEqual([3, 3, 3, 0, 0]);
     expect(marked).toEqual([0, 0, 0, 3, 3]);
   });
@@ -332,7 +331,7 @@ describe('a large dropped image', () => {
     const turn = await nextTurn('One more');
     expect(turn.images).toEqual([]);
     expect(turn.message).toMatch(
-      /tiny\.png\) — left out to keep the conversation within the image limit; Read it/,
+      /tiny\.png\) — left out to keep the conversation within the image limit \(the round test limit\); Read it/,
     );
     expect(turn.message).not.toMatch(/too large/);
   });
@@ -354,7 +353,7 @@ describe('a large dropped image', () => {
     expect(spec.resumeProviderSessionId).not.toBeNull();
     expect(spec.images ?? []).toEqual([]);
     expect(spec.prompt).toMatch(
-      /tiny\.png\) — left out to keep the conversation within the image limit; Read it/,
+      /tiny\.png\) — left out to keep the conversation within the image limit \(the round test limit\); Read it/,
     );
   });
 
@@ -419,8 +418,8 @@ describe('a large dropped image', () => {
         },
       };
     };
-    const screensOf = (outcome: ScreenOutcome) =>
-      createScreens({
+    const screensOf = (outcome: ScreenOutcome) => {
+      const service = createScreens({
         state: f.state,
         filesDir: f.filesDir,
         broker: {
@@ -431,6 +430,10 @@ describe('a large dropped image', () => {
           tokenValid: () => false,
         },
       });
+      return {
+        see: (id: ShapeId, input: SeeScreenInput) => service.see(id, input, ROUND_LIMITS),
+      };
+    };
     const kept = (): string[] => {
       const dir = join(f.filesDir, shapeId(), 'screens');
       return existsSync(dir) ? readdirSync(dir) : [];
@@ -452,7 +455,7 @@ describe('a large dropped image', () => {
       const turn = await nextTurn('Both');
       expect(turn.images).toHaveLength(1);
       expect(turn.message).toMatch(
-        /over\.png\) — left out to keep the conversation within the image limit; Read it/,
+        /over\.png\) — left out to keep the conversation within the image limit \(the round test limit\); Read it/,
       );
       expect(turn.message).not.toMatch(/fits\.png\) — /);
     });
@@ -546,7 +549,7 @@ describe('a large dropped image', () => {
         // This session carries 6 MiB: the old screens would add 15.7 and 1.4 more to pass the 18.
         await screens.see(shapeId(), window);
         expect(kept()).toHaveLength(12);
-        expect(inlineBytesSpent(f.state, f.filesDir, shapeId())).toBeLessThanOrEqual(
+        expect(inlineBytesSpent(f.state, f.filesDir, shapeId(), ROUND_LIMITS)).toBeLessThanOrEqual(
           INLINE_CONVERSATION_MAX_BYTES,
         );
       });

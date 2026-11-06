@@ -2,31 +2,31 @@ import { statSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { expandHome } from '../sandbox';
 import {
-  PICTURE_POOL_BYTES,
   READ_CHARGE_MAX_BYTES,
-  READ_RESERVE_BYTES,
   largestReadMeasured,
+  poolBytes,
   readAllowance,
   readBytesSpent,
   readCountedLine,
   readMeasuredLine,
   readPictureCap,
   unmeasuredRead,
+  type PictureLimits,
   type ReadKind,
 } from '../screens';
 import type { ShapeAccess } from './confinement';
 
 // Shape spec §5.4. A picture or PDF Claude pulls in with `Read` comes back as a tool result, and a resumed
 // session resends every earlier tool result with each request, beside the pictures the daemon sends
-// itself (`screens/inline-budget.ts`). The two share one pool of 21 MiB, 28 MiB as base64, which leaves the
-// API's 32 MB request limit room for text. The daemon never sees a Read's result before it runs, so it
-// counts the Read in the PreToolUse hook and refuses the one that would pass what the inline pictures leave
-// of the pool; the PostToolUse hook then replaces the charge with the size the result really had.
+// itself (`screens/inline-budget.ts`). The two share one pool (`poolBytes`), sized from the request limit of the
+// account the session runs on (`screens/picture-limits.ts`), which leaves that limit room for text. The daemon
+// never sees a Read's result before it runs, so it counts the Read in the PreToolUse hook and refuses the one
+// that would pass what the inline pictures leave of the pool; the PostToolUse hook then replaces the charge
+// with the size the result really had.
 // Everything here counts Reads of pictures and of PDFs alike; a name that says "read" means either kind.
 
 export {
   READ_CHARGE_MAX_BYTES,
-  READ_RESERVE_BYTES,
   largestReadMeasured,
   readAllowance,
   readBytesSpent,
@@ -40,8 +40,8 @@ export {
  * What Reads may add to a request, in bytes before base64, once the live session carries `inlineSpent` bytes
  * of inline pictures: what they leave of the pool, never less than the reserve a full inline budget leaves.
  */
-export const readCeiling = (inlineSpent: number): number =>
-  Math.max(READ_RESERVE_BYTES, PICTURE_POOL_BYTES - inlineSpent);
+export const readCeiling = (inlineSpent: number, limits: PictureLimits): number =>
+  Math.max(limits.readReserveBytes, poolBytes(limits) - inlineSpent);
 
 /**
  * The bytes before base64 of the pictures and documents a Read's result carries: every `base64` string in
@@ -201,8 +201,12 @@ export const noticeName = (file: { readonly storedPath: string }): string =>
  * Reading the one that matters most first help; otherwise a new conversation, which starts its own pool, is the
  * only remedy offered.
  */
-export const unreadableImagesNotice = (names: readonly string[], readFirst: boolean): string =>
-  `Claude probably won't be able to Read ${names.join(', ')}: this conversation is out of room for pictures. ` +
+export const unreadableImagesNotice = (
+  names: readonly string[],
+  readFirst: boolean,
+  limits: PictureLimits,
+): string =>
+  `Claude probably won't be able to Read ${names.join(', ')}: this conversation is out of room for pictures under ${limits.limitText}. ` +
   (readFirst
     ? `Tell Claude which picture matters most so it Reads that one first, or send ` +
       `${names.length === 1 ? 'it' : 'them'} in a new conversation.`
@@ -215,9 +219,29 @@ export const unreadableImagesNotice = (names: readonly string[], readFirst: bool
  * states what happened, so it does not say "probably". The room left was under this image's charge, so
  * Reading it first is no remedy: only a new conversation is offered.
  */
-export const refusedImageNotice = (name: string): string =>
-  `Claude couldn't Read ${name}: this conversation is out of room for pictures. ` +
+export const refusedImageNotice = (name: string, limits: PictureLimits): string =>
+  `Claude couldn't Read ${name}: this conversation is out of room for pictures under ${limits.limitText}. ` +
   `Send it in a new conversation.`;
+
+const megabytes = (bytes: number): string => `${(bytes / 1_000_000).toFixed(1)} MB`;
+
+/**
+ * What the builder is told when a conversation's session is not resumed because the account it would run on now
+ * (a plan fallen back to Bedrock, say) takes less than the session has already been sent. A resumed session
+ * resends every earlier picture with each request, so resuming it would send a request over the limit and fail
+ * every later turn too. The session starts from the digest instead, which carries no picture.
+ */
+export const carriedNotice = (
+  accountLabel: string,
+  over: { readonly carried: number; readonly allowed: number; readonly reason: 'pool' | 'image' },
+  limits: PictureLimits,
+): string =>
+  `Continued in a fresh session on ${accountLabel}: ` +
+  (over.reason === 'image'
+    ? `a picture sent earlier is over the ${megabytes(over.allowed)} one image can be there, `
+    : `the pictures and PDF pages in this conversation (${megabytes(over.carried)}) are more than ` +
+      `${megabytes(over.allowed)}, what a resumed session can resend under ${limits.limitText}, `) +
+  `so Claude starts from the digest and no longer sees them. Send a picture again to show it.`;
 
 /** The line that corrects a Read's counted charge to what its result measured. */
 export { readMeasuredLine };
@@ -232,8 +256,9 @@ export function readRefusal(
   charge: number,
   spent: number,
   ceiling: number,
-  kind: ReadKind = 'picture',
-  allowance: number = READ_CHARGE_MAX_BYTES,
+  kind: ReadKind,
+  allowance: number,
+  limits: PictureLimits,
 ): string | null {
   if (spent + charge <= ceiling) return null;
   if (kind === 'PDF') {
@@ -244,13 +269,13 @@ export function readRefusal(
         : 'No room is left for more pages: work from what is already read';
     return (
       `The PDF ${path} can only be read by the page here, with \`pages\`, and this Read's pages would pass ` +
-      `the total of pictures and PDF pages a resumed session can carry under the API's 32 MB request limit. ` +
+      `the total of pictures and PDF pages a resumed session can carry under ${limits.limitText}. ` +
       `${next}, or ask the builder for its text.`
     );
   }
   return (
     `Too many pictures read in this conversation: ${path} would pass the total a resumed session can carry ` +
-    `under the API's 32 MB request limit. ` +
+    `under ${limits.limitText}. ` +
     (charge > allowance
       ? `Until a picture over 1 MiB has come back, each counts at its full file size: wait for the ones ` +
         `already asked for, or Read a smaller one first, then try again.`

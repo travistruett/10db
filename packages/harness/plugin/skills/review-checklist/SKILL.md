@@ -17,7 +17,8 @@ severe first. Skip praise.
 - **Scope:** no edits outside the task's claims and no unrelated refactors. Generated
   files are regenerated, not hand-edited.
 - **Tests:** real objects, no sleeps where a condition can be awaited, no assertions that
-  can never fail.
+  can never fail. Flag a new test that covers the same behavior as an existing one, and ask
+  to merge it or fold it into a table row, not only to add tests.
 - **Style:** names say what things are, comments say what and why, no dead code, no
   `utils` grab-bags, no new dependency without a reason.
 - **Secrets:** no tokens, keys or personal data in code, logs or fixtures.
