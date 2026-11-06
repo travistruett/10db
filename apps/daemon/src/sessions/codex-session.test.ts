@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -1206,6 +1206,43 @@ describe('codexThreadConfig', () => {
       inherit: 'none',
       set: { PATH: '/usr/bin', TMPDIR: '/tmp/lane-1' },
     });
+  });
+
+  it.each([
+    {
+      name: 'a denyWrite under a denied directory stays denied by its ancestor',
+      filesystem: { denyRead: ['/', '/w/lane/secret'], denyWrite: ['/w/lane/secret/sub'] },
+      absent: '/w/lane/secret/sub',
+    },
+  ])('does not reopen a denied directory: $name', ({ filesystem, absent }) => {
+    const { filesystem: result } = laneOf(
+      codexThreadConfig(specOf({ sandbox: sandboxWith({ filesystem }) })),
+    );
+    expect(result).not.toHaveProperty(absent);
+    expect(result).toMatchObject({ '/w/lane/secret': 'deny' });
+  });
+
+  it('drops a read entry that is a link whose target is not granted, and keeps one whose target is', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'lanelink-'));
+    try {
+      const target = join(dir, 'target');
+      const granted = join(dir, 'granted');
+      await mkdir(target);
+      await mkdir(granted);
+      const open = join(dir, 'open-link');
+      const closed = join(dir, 'closed-link');
+      await symlink(granted, open);
+      await symlink(target, closed);
+      const { filesystem } = laneOf(
+        codexThreadConfig(
+          specOf({ sandbox: sandboxWith({ filesystem: { allowRead: [granted, open, closed] } }) }),
+        ),
+      );
+      expect(filesystem).toMatchObject({ [granted]: 'read', [open]: 'read' });
+      expect(filesystem).not.toHaveProperty(closed);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it('passes an empty host list through, which blocks every host', () => {

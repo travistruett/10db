@@ -1,6 +1,10 @@
+import { lstatSync, realpathSync } from 'node:fs';
 import { isEqualOrUnder, type LaneSandboxSpec } from '../sandbox';
 
-/** What a path may do, strictest last: Codex lets `deny` beat `write` and `write` beat `read`. */
+/**
+ * What a path may do. On one path the map keeps deny over write over read; across paths Codex
+ * applies the most specific entry.
+ */
 type Access = 'read' | 'write' | 'deny';
 const STRICTNESS: Readonly<Record<Access, number>> = { read: 0, write: 1, deny: 2 };
 
@@ -9,6 +13,36 @@ const MINIMAL = ':minimal';
 
 /** A pattern the profile holds for Claude Code's sandbox, such as a listing grant; Codex has no match. */
 const isPattern = (path: string): boolean => path.includes('*') || path.includes('[');
+
+/** The real path of `path`, or `path` when it can't be resolved. */
+function realOrSelf(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+}
+
+function isLink(path: string): boolean {
+  try {
+    return lstatSync(path).isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True for a link whose real path no other read entry grants. Claude's sandbox opens only the link
+ * (`/tmp`, `/var`, `/etc`), where Codex follows it and grants the whole target tree.
+ */
+function opensMoreThanItself(path: string, grants: readonly string[]): boolean {
+  if (!isLink(path)) return false;
+  const real = realOrSelf(path);
+  // Another link grants nothing here: it would open the same tree.
+  return !grants.some(
+    (other) => other !== path && !isLink(other) && isEqualOrUnder(real, realOrSelf(other)),
+  );
+}
 
 /**
  * The lane profile's file system as Codex's `permissions.lane.filesystem`. Two entries on one path
@@ -22,14 +56,16 @@ function filesystemOf(sandbox: LaneSandboxSpec): Record<string, Access> {
     const held = entries.get(path);
     if (held === undefined || STRICTNESS[access] > STRICTNESS[held]) entries.set(path, access);
   };
-  for (const path of allowRead) if (!isPattern(path)) grant(path, 'read');
+  const grants = [...allowRead, sandbox.checkout, ...allowWrite].filter((path) => !isPattern(path));
+  for (const path of allowRead) {
+    if (!isPattern(path) && !opensMoreThanItself(path, grants)) grant(path, 'read');
+  }
   const writable = [sandbox.checkout, ...allowWrite];
   for (const path of writable) grant(path, 'write');
   for (const path of denyRead) if (path !== '/') grant(path, 'deny');
   for (const path of denyWrite) {
-    if (!writable.some((root) => isEqualOrUnder(path, root)) || entries.get(path) === 'deny') {
-      continue;
-    }
+    const denied = denyRead.some((root) => root !== '/' && isEqualOrUnder(path, root));
+    if (!writable.some((root) => isEqualOrUnder(path, root)) || denied) continue;
     entries.set(path, 'read');
   }
   return { [MINIMAL]: 'read', ...Object.fromEntries(entries) };
