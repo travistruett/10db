@@ -8,7 +8,7 @@ import {
   shapeFileRefusal,
   type ShapeId,
 } from '@10db/contracts';
-import { INLINE_CONVERSATION_MAX_BYTES, isImageName, tooBigAlone } from '../screens';
+import { isImageName, tooBigAlone, type PictureLimits } from '../screens';
 import type { ShapeImage } from '../sessions';
 
 // Shape spec §5.4. What a dropped file must be to reach the session, and where the daemon keeps it.
@@ -68,10 +68,11 @@ export function checkDroppedFile(file: {
   return { name, mediaType: kind };
 }
 
-// The API refuses an image over about 5 MB (base64) and a request over 32 MB, and a resumed session
-// resends every earlier image with each request, so one oversize image would end every later turn.
-// An image over a cap goes as a path, which `Read` takes in and resizes itself.
-const MIB = 1024 * 1024;
+// The API refuses an image over a per-image size (10 MB as base64 on the Claude API, 5 MB on Bedrock), over
+// 8000 px a side (less once a request holds more than 20 images) and a request over the account's limit, and a
+// resumed session resends every earlier image with each request, so one oversize image would end every later
+// turn. An image over a cap goes as a path, which `Read` takes in and resizes itself. The caps are those of the
+// account the session runs on (`PictureLimits`).
 interface FileSize {
   readonly id: string;
   readonly name: string;
@@ -80,17 +81,19 @@ interface FileSize {
   readonly storedPath: string;
 }
 
-/** The most image bytes one message carries as content blocks. */
-export const INLINE_IMAGES_MAX_BYTES = 6 * MIB;
-
 /**
  * The ids of the image files among `files` that go as content blocks, in order: each within the per-image
  * caps (bytes and pixels), together within the per-message cap, and within what is left of the
  * conversation's cap after `spent` bytes sent earlier (`inlineBytesSpent`). Every other image goes as a path.
  */
-export function inlineImageIds(files: readonly FileSize[], spent = 0): Set<string> {
+export function inlineImageIds(
+  files: readonly FileSize[],
+  spent: number,
+  limits: PictureLimits,
+): Set<string> {
   const ids = new Set<string>();
-  for (const [id, verdict] of imageVerdicts(files, spent)) if (verdict === 'inline') ids.add(id);
+  for (const [id, verdict] of imageVerdicts(files, spent, limits))
+    if (verdict === 'inline') ids.add(id);
   return ids;
 }
 
@@ -98,24 +101,30 @@ export function inlineImageIds(files: readonly FileSize[], spent = 0): Set<strin
 export type PathReason = 'too-big' | 'message-full' | 'conversation-full';
 
 /** What the `[file]` line says of an image that goes as a path, before "; Read it". */
-export const PATH_REASON: Readonly<Record<PathReason, string>> = {
-  'too-big': 'too large to show inline',
-  'message-full': 'left out to keep this message within the image limit',
-  'conversation-full': 'left out to keep the conversation within the image limit',
+export const pathReasonText = (reason: PathReason, limits: PictureLimits): string => {
+  switch (reason) {
+    case 'too-big':
+      return 'too large to show inline';
+    case 'message-full':
+      return 'left out to keep this message within the image limit';
+    case 'conversation-full':
+      return `left out to keep the conversation within the image limit (${limits.limitText})`;
+  }
 };
 
 /** What becomes of each image among `files`: sent as a block, or as a path for this reason. */
 function imageVerdicts(
   files: readonly FileSize[],
   spent: number,
+  limits: PictureLimits,
 ): Map<string, 'inline' | PathReason> {
   const verdicts = new Map<string, 'inline' | PathReason>();
   let total = 0;
   for (const file of files) {
     if (!isImageName(file.name)) continue;
-    if (tooBigAlone(file)) verdicts.set(file.id, 'too-big');
-    else if (total + file.size > INLINE_IMAGES_MAX_BYTES) verdicts.set(file.id, 'message-full');
-    else if (spent + total + file.size > INLINE_CONVERSATION_MAX_BYTES)
+    if (tooBigAlone(file, limits)) verdicts.set(file.id, 'too-big');
+    else if (total + file.size > limits.messageMaxBytes) verdicts.set(file.id, 'message-full');
+    else if (spent + total + file.size > limits.inlineMaxBytes)
       verdicts.set(file.id, 'conversation-full');
     else {
       total += file.size;
@@ -134,14 +143,15 @@ function imageVerdicts(
 export function pathImageReasons(
   shown: readonly FileSize[],
   sent: readonly FileSize[],
-  spent = 0,
+  spent: number,
+  limits: PictureLimits,
 ): Map<string, PathReason> {
-  const verdicts = imageVerdicts(sent, spent);
+  const verdicts = imageVerdicts(sent, spent, limits);
   const reasons = new Map<string, PathReason>();
   for (const file of shown) {
     const kind = shapeFileKind(file.name);
     if (kind === null || !isShapeImage(kind)) continue;
-    if (tooBigAlone(file)) {
+    if (tooBigAlone(file, limits)) {
       reasons.set(file.id, 'too-big');
       continue;
     }

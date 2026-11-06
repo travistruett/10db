@@ -11,6 +11,7 @@ import {
   ShapeProposalState,
   shapeFileKind,
   SessionMode,
+  type AccountKind,
   type DecisionId,
   type PrincipleId,
   type Effort,
@@ -102,6 +103,7 @@ import {
   readCountedLine,
   readMeasuredLine,
   eachFitsAlone,
+  carriedNotice,
   readRefusal,
   refusedImageNotice,
   unmeasuredRead,
@@ -113,7 +115,7 @@ import {
   asImage,
   checkDroppedFile,
   inlineImageIds,
-  PATH_REASON,
+  pathReasonText,
   pathImageReasons,
   shapeFilesDir,
   storeFile,
@@ -141,8 +143,12 @@ import {
 import type { ShapeJev } from './jev';
 import {
   FRESH_START_LINE,
+  STRICTEST_LIMITS,
+  carriedTooMuch,
   inlineBytesSpent,
   inlinePictureBytes,
+  pictureLimitsFor,
+  type PictureLimits,
   type ScreenService,
 } from '../screens';
 import type { Hold } from '../verify';
@@ -231,6 +237,11 @@ export interface ShapeServiceDeps {
   readonly trackedFiles?: TrackedFiles;
   /** Draws the app's screens for `see_screen` (§5.5); the tool is not offered to a session without it. */
   readonly screens?: Pick<ScreenService, 'see'>;
+  /**
+   * The picture limits of an account kind (§5.4); `pictureLimitsFor` by default. A test gives smaller round
+   * figures to exercise the budget without dropping tens of megabytes.
+   */
+  readonly limitsFor?: (kind: AccountKind) => PictureLimits;
   /**
    * Holds new turns back, as a waiting update's drain does: while it holds, a queued turn waits
    * before it starts a session or sends to one. A turn already running finishes. A turn that waits
@@ -411,7 +422,14 @@ interface Intake {
   readonly missized: UntoldMissized;
   /** What Convert made as it stands now, null when nothing was converted. */
   readonly converted: string | null;
-  /** Inline image bytes the conversation's earlier turns spent, which a resumed session resends. */
+}
+
+/**
+ * What the pictures of a turn are held to: the limits of the account the session runs on, and the inline image
+ * bytes the conversation's earlier turns spent, which a resumed session resends.
+ */
+interface Budget {
+  readonly limits: PictureLimits;
   readonly spent: number;
 }
 
@@ -420,6 +438,10 @@ interface Intake {
 interface Unreadable {
   readonly files: readonly ShapeFileRow[];
   readonly readFirst: boolean;
+  /** The names of images the conversation's total left out of the message, which went to Claude as a path. */
+  readonly leftOut: readonly string[];
+  /** The limits the notices state. */
+  readonly limits: PictureLimits;
 }
 
 interface SentImages {
@@ -443,6 +465,8 @@ interface Live {
   track(pid: number): void;
   /** When the AWS credentials its servers were given expire (ISO), or null. */
   readonly expiresAt: string | null;
+  /** The picture limits of the account this session runs on, which it keeps even if the project's changes. */
+  readonly limits: PictureLimits;
   /** Why the daemon ended it, when it did; the session's exit reason otherwise comes from Claude Code. */
   endReason: string | null;
   /** Resolves when its events have ended: the session has ended and its row says so. */
@@ -566,11 +590,37 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
   const worldOfShape = (shapeId: ShapeId): ViewWorld =>
     worldOf(getShape(state.db, shapeId).projectId);
 
+  const limitsFor = deps.limitsFor ?? pictureLimitsFor;
+  /**
+   * The picture limits a conversation's next session would run under: those of the account the project's launch
+   * names now. A launch that can't be resolved (its account can't start a session) is held to the strictest,
+   * since the start that follows fails with the reason anyway.
+   */
+  const launchLimits = (shapeId: ShapeId): PictureLimits => {
+    try {
+      const shape = getShape(state.db, shapeId);
+      return limitsFor(deps.launch(shape.projectId, shape.model).account.kind);
+    } catch {
+      return STRICTEST_LIMITS;
+    }
+  };
+  /** The limits a conversation's pictures are held to: its live session's, or the next one's. */
+  const limitsOf = (shapeId: ShapeId, rt: Runtime): PictureLimits =>
+    rt.live?.limits ?? launchLimits(shapeId);
+
+  const { screens } = deps;
   const toolsFor: ShapeToolsFor = ({ shapeId }) =>
     createShapeToolHandlers(
       {
         state,
-        ...(deps.screens === undefined ? {} : { screens: deps.screens }),
+        // A screen is held to the limits of the account the session that asked for it runs on.
+        ...(screens === undefined
+          ? {}
+          : {
+              screens: {
+                see: (id, input) => screens.see(id, input, limitsOf(id, runtimeOf(id))),
+              },
+            }),
         world: worldOfShape,
         onProposal: (id, accepted) => {
           const rt = runtimeOf(id);
@@ -686,19 +736,20 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
   /** The lines that tell Claude what changed since it last heard: edits, mis-sized tasks, files. */
   const intakeText = (
     intake: Intake,
+    budget: Budget,
     shown: readonly ShapeFileRow[] = intake.files,
     sizes: readonly string[] = intake.missized.lines,
     converted: string | null = intake.converted,
   ): string => {
     // An image not sent as a block is named as a path, with the reason and the way to read it.
-    const byPath = pathImageReasons(shown, intake.files, intake.spent);
+    const byPath = pathImageReasons(shown, intake.files, budget.spent, budget.limits);
     return [
       ...intake.notes.map((note) => `[note] ${note}`),
       ...(converted === null ? [] : [`[note] ${converted}`]),
       ...(sizes.length === 0 ? [] : [`[note] ${sizes.join('\n')}`]),
       ...shown.map((file) => {
         const reason = byPath.get(file.id);
-        return `[file] ${file.storedPath} (${file.name})${reason === undefined ? '' : ` — ${PATH_REASON[reason]}; Read it`}`;
+        return `[file] ${file.storedPath} (${file.name})${reason === undefined ? '' : ` — ${pathReasonText(reason, budget.limits)}; Read it`}`;
       }),
     ].join('\n');
   };
@@ -713,31 +764,47 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
   const unreadableOf = (
     shapeId: ShapeId,
     intake: Intake,
+    limits: PictureLimits,
+    spent: number,
     shown: readonly ShapeFileRow[],
     sentInline: ReadonlySet<ShapeFileRow['id']>,
     fresh: boolean,
   ): Unreadable => {
-    const byPath = pathImageReasons(shown, intake.files, fresh ? 0 : intake.spent);
+    const byPath = pathImageReasons(shown, intake.files, fresh ? 0 : spent, limits);
+    // The builder is told which images the conversation's total left out, since Claude is told only a path.
+    const leftOut = shown
+      .filter((file) => byPath.get(file.id) === 'conversation-full')
+      .map(noticeName);
     const paths = shown.filter((file) => byPath.has(file.id));
-    if (paths.length === 0) return { files: [], readFirst: false };
+    if (paths.length === 0) return { files: [], readFirst: false, leftOut, limits };
     const inline =
-      (fresh ? 0 : inlinePictureBytes(state, deps.filesDir, shapeId)) +
+      (fresh ? 0 : inlinePictureBytes(state, deps.filesDir, shapeId, limits)) +
       intake.files.reduce((sum, file) => sum + (sentInline.has(file.id) ? file.size : 0), 0);
     const messages = fresh ? [] : listShapeMessages(state.db, shapeId);
-    const room = readCeiling(inline) - readBytesSpent(messages);
+    const room = readCeiling(inline, limits) - readBytesSpent(messages);
     const cap = readPictureCap(messages);
     const files = unreadableImages(paths, room, cap);
     // Reading one first only helps when the room left takes any one of them.
-    return { files, readFirst: eachFitsAlone(files, room, cap) };
+    return { files, readFirst: eachFitsAlone(files, room, cap), leftOut, limits };
   };
 
-  /** Writes the notice for the images `unreadableOf` found, if any. */
+  /** Writes the notices for the images `unreadableOf` found, if any. */
   const warnUnreadable = (shapeId: ShapeId, unreadable: Unreadable): void => {
+    if (unreadable.leftOut.length > 0)
+      notice(
+        shapeId,
+        `Left out of this message to keep the conversation within ${unreadable.limits.limitText}: ` +
+          `${unreadable.leftOut.join(', ')}. Claude has ${unreadable.leftOut.length === 1 ? 'its path' : 'their paths'} and can Read ${unreadable.leftOut.length === 1 ? 'it' : 'them'}.`,
+      );
     if (unreadable.files.length > 0)
       noticeUnreadable(
         shapeId,
         unreadable.files,
-        unreadableImagesNotice(unreadable.files.map(noticeName), unreadable.readFirst),
+        unreadableImagesNotice(
+          unreadable.files.map(noticeName),
+          unreadable.readFirst,
+          unreadable.limits,
+        ),
       );
   };
 
@@ -769,18 +836,19 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     shapeId: ShapeId,
     readPath: string,
     access: Pick<ShapeAccess, 'checkout' | 'home'>,
+    limits: PictureLimits,
   ): void => {
     const target = resolvePath(access.checkout, expandHome(readPath, access.home));
     const file = listShapeFiles(state.db, shapeId).find(
       (f) => resolvePath(f.storedPath) === target,
     );
     if (file?.unreadableToldAt === null)
-      noticeUnreadable(shapeId, [file], refusedImageNotice(noticeName(file)));
+      noticeUnreadable(shapeId, [file], refusedImageNotice(noticeName(file), limits));
   };
 
   /** The dropped images among the files that fit in a message, read from where the daemon keeps them. */
-  const imagesOf = (files: readonly ShapeFileRow[], spent: number): SentImages => {
-    const inline = inlineImageIds(files, spent);
+  const imagesOf = (files: readonly ShapeFileRow[], budget: Budget): SentImages => {
+    const inline = inlineImageIds(files, budget.spent, budget.limits);
     const sent: SentImages = { images: [], ids: [] };
     for (const file of files) {
       if (!inline.has(file.id)) continue;
@@ -809,7 +877,6 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     // What Convert made, as it stands as the turn starts. Whatever state the conversation is in: a
     // partial Convert or a re-plan round leaves it Proposed with converted rows.
     converted: convertedStateNote(state.db, shapeId),
-    spent: inlineBytesSpent(state, deps.filesDir, shapeId),
   });
 
   /**
@@ -850,7 +917,20 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       filesDir: shapeFilesDir(deps.filesDir, shapeId),
       ...(offered === undefined ? {} : { agentModels: offered }),
     };
-    const resumeId = getShapeSdkSessionId(state.db, shapeId);
+    const limits = limitsFor(launch.account.kind);
+    let resumeId = getShapeSdkSessionId(state.db, shapeId);
+    // A resumed session resends every earlier picture to the account that resumes it, which is not always the
+    // one that began it (a plan falling back to Bedrock): one that would resend more than this account takes
+    // is not resumed. It starts from the digest and carries no earlier picture, and the builder is told.
+    const tooMuch =
+      resumeId === null ? null : carriedTooMuch(state, deps.filesDir, shapeId, limits);
+    if (tooMuch !== null) {
+      resumeId = null;
+      state.write((ctx) => {
+        patchShape(ctx, shapeId, { sdkSessionId: null });
+      });
+      notice(shapeId, carriedNotice(launch.account.label, tooMuch, limits));
+    }
     const transcript = listShapeMessages(state.db, shapeId);
     const parts: string[] = [];
     // A session with nothing to resume, a new conversation's or one moved on at 70%, is told the
@@ -899,10 +979,14 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       files = listShapeFiles(state.db, shapeId);
     }
     // A fresh session resends no earlier block, so only a resumed one carries what the conversation spent.
-    const budgeted: Intake = resumeId === null ? { ...intake, spent: 0 } : intake;
+    const budget: Budget = {
+      limits,
+      spent: resumeId === null ? 0 : inlineBytesSpent(state, deps.filesDir, shapeId, limits),
+    };
     // The digest already names every mis-sized task and every converted row.
     const lines = intakeText(
-      budgeted,
+      intake,
+      budget,
       files,
       digested ? [] : intake.missized.lines,
       digested ? null : intake.converted,
@@ -910,9 +994,17 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     if (lines !== '') parts.push(lines);
     parts.push(turn.prompt);
     const prompt = parts.join('\n\n');
-    const { images, ids: inlineIds } = imagesOf(intake.files, budgeted.spent);
+    const { images, ids: inlineIds } = imagesOf(intake.files, budget);
     // Worked out now, from the state before this turn is marked told, and said once the session has started.
-    const unreadable = unreadableOf(shapeId, intake, files, new Set(inlineIds), resumeId === null);
+    const unreadable = unreadableOf(
+      shapeId,
+      intake,
+      limits,
+      budget.spent,
+      files,
+      new Set(inlineIds),
+      resumeId === null,
+    );
     const { token, hash } = mintSessionToken();
     const row = state.write((ctx) =>
       insertSession(ctx, {
@@ -1043,13 +1135,14 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
             charged.bytes,
             readBytesSpent(messages),
             // Reads get whatever the inline pictures leave of the pool they share.
-            readCeiling(inlinePictureBytes(state, deps.filesDir, shapeId)),
+            readCeiling(inlinePictureBytes(state, deps.filesDir, shapeId, limits), limits),
             charged.kind,
             allowance,
+            limits,
           );
           if (refusal !== null) {
             verdict = { decision: 'deny', reason: refusal };
-            if (charged.kind === 'picture') noticeRefusedImage(shapeId, readPath, access);
+            if (charged.kind === 'picture') noticeRefusedImage(shapeId, readPath, access, limits);
           } else
             say(
               shapeId,
@@ -1141,6 +1234,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         ready?.trackProcesses(pid);
       },
       expiresAt: ready?.credentialsExpireAt ?? null,
+      limits,
       endReason: null,
       done: Promise.resolve(),
     };
@@ -1216,9 +1310,23 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     try {
       if (rt.live === null) await start(shapeId, rt, turn, intake);
       else {
-        const lines = intakeText(intake);
-        const { images, ids } = imagesOf(intake.files, intake.spent);
-        const unreadable = unreadableOf(shapeId, intake, intake.files, new Set(ids), false);
+        // The live session keeps the account it started on, so its limits hold even if the project's changed.
+        const { limits } = rt.live;
+        const budget: Budget = {
+          limits,
+          spent: inlineBytesSpent(state, deps.filesDir, shapeId, limits),
+        };
+        const lines = intakeText(intake, budget);
+        const { images, ids } = imagesOf(intake.files, budget);
+        const unreadable = unreadableOf(
+          shapeId,
+          intake,
+          limits,
+          budget.spent,
+          intake.files,
+          new Set(ids),
+          false,
+        );
         rt.live.handle.send(lines === '' ? turn.prompt : `${lines}\n\n${turn.prompt}`, images);
         told(shapeId, intake.files, intake.missized, ids, false);
         warnUnreadable(shapeId, unreadable);

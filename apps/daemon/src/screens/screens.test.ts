@@ -2,6 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
+  AccountKind,
   InvalidError,
   mintId,
   ScreenMessageBody,
@@ -10,6 +11,7 @@ import {
   ShapeMessageKind,
   ShapeOrigin,
   type ScreenImageInput,
+  type SeeScreenInput,
   type ShapeId,
 } from '@10db/contracts';
 import {
@@ -25,6 +27,7 @@ import { pngImage as png } from '../../test/png';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { ToolImages } from '../mcp';
 import type { ScreenBroker, ScreenOutcome, ScreenSpec } from './broker';
+import { pictureLimitsFor } from './picture-limits';
 import { createScreens } from './screens';
 
 // Shape spec §5.5: see_screen. The service asks the window for a picture, checks it, keeps it with the
@@ -78,7 +81,15 @@ afterEach(() => {
   rmSync(filesDir, { recursive: true, force: true });
 });
 
-const screens = () => createScreens({ state, broker, filesDir });
+const screens = () => {
+  const service = createScreens({ state, broker, filesDir });
+  return {
+    ...service,
+    // These tests are not about the budget, so they run on a Claude plan's limits.
+    see: (shapeId: ShapeId, input: SeeScreenInput) =>
+      service.see(shapeId, input, pictureLimitsFor(AccountKind.ClaudeSubscription)),
+  };
+};
 const board = { screen: ScreenName.Board, width: 1200, height: 900 } as const;
 const rows = () => listShapeMessages(c.store.db, c.shape.id);
 

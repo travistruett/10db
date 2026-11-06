@@ -18,7 +18,8 @@ import type { StateStore } from '../events';
 import { ToolImages } from '../mcp';
 import type { ScreenBroker } from './broker';
 import { readImageHeader } from './image-check';
-import { INLINE_CONVERSATION_MAX_BYTES, inlineBytesSpent } from './inline-budget';
+import { inlineBytesSpent } from './inline-budget';
+import type { PictureLimits } from './picture-limits';
 
 // Shape spec §5.5: see_screen. Asks the app's window for a picture of one of its screens, checks the
 // picture, keeps it with the conversation (a file, and a transcript row that names it) and answers the
@@ -32,8 +33,11 @@ export interface ScreenDeps {
 }
 
 export interface ScreenService {
-  /** Draws a screen for a conversation's session. Throws an InvalidError saying why when it can't. */
-  see(shapeId: ShapeId, input: SeeScreenInput): Promise<ToolImages>;
+  /**
+   * Draws a screen for a conversation's session. Throws an InvalidError saying why when it can't. `limits` are
+   * those of the account the session runs on, which the picture is held to.
+   */
+  see(shapeId: ShapeId, input: SeeScreenInput, limits: PictureLimits): Promise<ToolImages>;
   /** A kept screenshot by the name the transcript row gave it; null for any other name. */
   image(
     shapeId: ShapeId,
@@ -101,7 +105,7 @@ export function createScreens(deps: ScreenDeps): ScreenService {
   };
 
   return {
-    async see(shapeId, input) {
+    async see(shapeId, input, limits) {
       const shape = getShape(deps.state.db, shapeId);
       const taken = listShapeMessages(deps.state.db, shapeId).filter(
         (m) => m.kind === ShapeMessageKind.Screen,
@@ -136,12 +140,12 @@ export function createScreens(deps: ScreenDeps): ScreenService {
       if ('problem' in result) return refuse(shapeId, result.problem);
       // Read after the await, with nothing awaited before the file is kept, so two calls can't both pass.
       if (
-        inlineBytesSpent(deps.state, deps.filesDir, shapeId) + result.bytes.length >
-        INLINE_CONVERSATION_MAX_BYTES
+        inlineBytesSpent(deps.state, deps.filesDir, shapeId, limits) + result.bytes.length >
+        limits.inlineMaxBytes
       )
         return refuse(
           shapeId,
-          'This conversation has no room for another picture: every picture stays in your context, and one request to Claude can only carry so many. Work from the ones you have, or ask the builder to start a new conversation.',
+          `This conversation has no room for another picture: every picture stays in your context, and a request can only carry so many under ${limits.limitText}. Work from the ones you have, or ask the builder to start a new conversation.`,
         );
 
       const dir = screensDir(shapeId);

@@ -332,17 +332,36 @@ else is refused on the input with the reason. Files are copied into the conversa
 data directory and kept as long as the conversation. Images reach the session as image content blocks; other
 files as a line naming the path, which the session reads with `Read`. **(spec's call: the limits)**
 
-The API refuses an image over about 5 MB, an image over 8000 px on a side however few bytes it takes, and a
-request over 32 MB, and a resumed session resends every earlier image, so one oversize block would end every
-later turn. An image over 2 MiB, over 2000 px on a side, past 6 MiB of images in one message, or past 18 MiB of
-pictures across the whole conversation (24 MiB as base64, leaving the 32 MB request about 6 MB), therefore goes
-as a path line, which `Read` resizes itself. The line says why: an image over 2 MiB or 2000 px is marked "too
+**The limits are those of the account the conversation runs on** (`screens/picture-limits.ts`), not one fixed
+request size. The API refuses a request over its size limit, an image over its per-image size, and an image over a
+pixel limit, and a resumed session resends every earlier image, so one oversize block would end every later turn.
+Each figure is from a live doc page, checked 2026-11-05:
+
+| Limit                                 | Claude plan or Claude API key                                           | Amazon Bedrock, and a gateway                                            | Doc page it came from                                                                                          |
+| ------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| Request size                          | 128 MB                                                                  | 20 MB                                                                    | `platform.claude.com/docs/en/api/overview` (Request size limits); `…/build-with-claude/claude-on-amazon-bedrock` |
+| One image, as base64                  | 10 MB, so **7 MiB** raw (9.8 MB as base64)                              | 5 MB (3.75 MB raw), so **3.5 MiB** raw (4.9 MB as base64)                | `…/build-with-claude/vision` (Image limits and costs)                                                          |
+| Pixels                                | 8000 px a side; **3000 px** a side is safe once a request has over 20 images | the same                                                            | `…/build-with-claude/vision`                                                                                   |
+| Images a request                      | 600                                                                     | 600                                                                      | `…/build-with-claude/vision`                                                                                   |
+| PDF pages a request                   | 600 (100 under a 1M context), inside the request size                  | the same; a PDF counts toward the over-20-images pixel rule              | `…/build-with-claude/pdf-support`                                                                              |
+| **Picture pool** (ours, from the above) | **84 MiB**: 72 MiB inline + 12 MiB Read reserve (117 MB as base64, 10.6 MB left for text) | **11 MiB**: 8 MiB inline + 3 MiB Read reserve (15.4 MB as base64, 4.6 MB left for text) | the request size, less about 4 MB for a 1M-token context's text and framing                       |
+| Images in one message (ours)          | 18 MiB                                                                  | 6 MiB                                                                    | not a doc limit: it keeps one turn from taking the whole conversation total                                    |
+
+A gateway forwards to a platform 10db can't see, so it is held to the smaller (Bedrock's) limits; an account kind
+10db can't place is too. The 32 MB the budget was first sized from is not a limit of any of these. The 3000 px
+is the figure the docs give as safe on every platform for a request with more than 20 images; it replaces the
+2000 px the budget used before. The 600-image limit is not counted: it takes 20 dropped images, 12 screens and
+over 560 Read pictures, and the pool is spent first. An image over its account's byte size or pixel limit, past the
+account's message cap, or past its conversation total (the pool's inline share), therefore goes
+as a path line, which `Read` resizes itself. The line says why: an image over the byte or pixel cap is marked "too
 large to show inline; Read it", while one within those caps that the message or conversation total left out is
 marked "left out to keep this message within the image limit; Read it" or "left out to keep the conversation
-within the image limit; Read it", so Claude is never told a small image is too large. The 2000 px is the
-API's limit once a request holds more than 20 images: a conversation's screens (up to 12, §5.5) and dropped
-images (up to 20) together can pass 20, so a Retina screenshot under 2 MiB sent as a block could fail that turn
-and every later one, and it is stricter than the 8000 px limit that holds for any request. The daemon reads the
+within the image limit (<the account's request limit>); Read it", so Claude is never told a small image is too
+large. The builder is told too: an image the conversation total left out gets a notice, `Left out of this message
+to keep the conversation within <the account's request limit>: <names>`, because the path line goes to Claude
+alone. The 3000 px matters because a conversation's screens (up to 12, §5.5) and dropped images (up to 20)
+together can pass 20 images, so a Retina screenshot sent as a block that was over it could fail that turn and every
+later one. The daemon reads the
 pixel size from the PNG IHDR, JPEG SOF or WebP header; an image whose size can't be read (cut short, or not what
 its name says) goes as a path too, since it would be sent blind. The conversation total is one budget for every
 picture a resumed request resends that the daemon sends itself: it counts each dropped image a turn of the live
@@ -350,18 +369,37 @@ session sent as a block (`shape_files.inline_sent`, written as the turn is sent)
 took (§5.5), and `see_screen` refuses a picture that would pass it. An image sent as a path, for its bytes or pixels or because
 the message or the total was full, counts for nothing, so Retina screenshots leave room for twelve screens. A
 conversation that existed before the column was added keeps the old count (every told image within both
-per-image caps), an upper bound. Twelve screens at their 1.5 MB most fit inside the total, so it only limits
-them beside dropped images. A session started fresh (from a digest) resends no earlier block, so it clears the
+per-image caps), an upper bound. Twelve screens at their 1.5 MB most (17 MiB) fit inside a Claude plan's total, so
+there it only limits them beside dropped images; on Bedrock they do not, and the total limits them alone. A session started fresh (from a digest) resends no earlier block, so it clears the
 mark on every file of the conversation: its first message and every later turn of that session count only the
 images that session sent. Screens count the same way: only those whose transcript row follows the latest digest,
 so the picture is not charged where it is not carried, and `see_screen` is not refused on a screen the digest
 told Claude to take again.
+
+**When the account changes between turns.** A resumed session resends every earlier picture to the account that
+resumes it, and a project's account can change between turns (a plan falling back to Bedrock). The limits that
+count are the resuming account's. A running session keeps the account it started on, and its limits, even if the
+project's account changes meanwhile; the next start reads the project's account again (`launch.account.kind`, the
+same launch the session is started with). That start does not resume the session when what it would resend is more
+than the new account takes: the dropped images a turn sent as blocks, the screens and the Reads, together more than
+the new account's pool, or any one sent image over the new account's per-image bytes or pixels (an image sent on the
+Claude API at 5 MiB is over Bedrock's 3.5 MiB). It starts from the digest instead (§5.5), as a context at 70% does,
+which carries no earlier picture, and the builder is told, in a notice, why and what it costs:
+`Continued in a fresh session on <account>: the pictures and PDF pages in this conversation (12.6 MB) are more than
+11.5 MB, what a resumed session can resend under Amazon Bedrock's 20 MB request limit, so Claude starts from the
+digest and no longer sees them. Send a picture again to show it.` A move to a larger account resumes, and says
+nothing. So no request goes out over the account it goes to. Not checked with a live fallback: the check is on the
+bytes the daemon counts, which is the same count the budget uses, and a Read result not yet measured is counted at
+its charge.
+
 A picture Claude pulls in with `Read` is a tool result the daemon never sees, and a resumed session resends it too,
-so the session's PreToolUse hook counts it (`shape/read-budget.ts`). Reads and inline pictures share one pool of
-21 MiB (the 18 MiB inline budget and a 3 MiB reserve; 28 MiB as base64 is about 29.4 MB, which leaves about 2.6 MB of
-the 32 MB for the conversation's text): Reads may use whatever the inline pictures leave of it, never less than the
-reserve, and Reads past the reserve are charged to the inline budget in turn, so a conversation with few inline
-pictures can Read many large ones and the sum still stays under the limit. The hook charges each of the session's own
+so the session's PreToolUse hook counts it (`shape/read-budget.ts`). Reads and inline pictures share one pool, the
+sum of the inline total and the Read reserve in the table above (84 MiB on a Claude plan or API key, 11 MiB on Bedrock;
+the rest of the request is left for the conversation's text): Reads may use whatever the inline pictures leave of it,
+never less than the reserve, and Reads past the reserve are charged to the inline budget in turn, so a conversation
+with few inline pictures can Read many large ones and the sum still stays under the limit. A Read refused for the
+pool says which request limit it is held to: `… the total a resumed session can carry under the Claude API's 128 MB
+request limit`, or `… under Amazon Bedrock's 20 MB request limit`. The hook charges each of the session's own
 Reads of a `.png`, `.jpg`, `.jpeg`, `.gif` or `.webp` file (a dropped image or one in the checkout) the file's size,
 since resizing does not make a picture larger than its file. Once the live session has measured a Read of a picture
 over 1 MiB, Claude Code's resizing is known, so the charge is capped at a 1 MiB allowance, or the largest Read measured
@@ -380,27 +418,29 @@ start: the latest digest, or the `Session · started fresh` line a start with no
 never spoke) writes when the transcript holds screens or Reads. So it survives a restart and a fresh session starts at
 zero. A subagent's Read is not counted: its result reaches the session as text.
 
-**How many path-sent images a session can Read.** An image over 1 MiB (a Retina screenshot over 2000 px is the usual
-one) is charged its file's size until the session has measured such a Read. So the first ones of a session fit by file
-size: **seven 3 MiB screenshots with no inline picture, and one once the 18 MiB inline budget is full**, and a file
-larger than what the pool leaves, such as a 5 MiB one with the inline budget full, can't be Read at all until a smaller
-one over 1 MiB has been. Once one has been measured, each is charged the 1 MiB allowance, or more if that Read came
-back larger, and a measurement replaces each charge as it returns: at the allowance a session can Read as many as whole
-MiB are left in the 21 MiB pool, **21 with no inline picture, and 3 once the inline budget is full**, one fewer for each
-MiB the inline pictures and earlier Reads have taken. Four dropped 2880 x 1800 PNGs of 1.2 MiB can all be Read in a
-conversation that has not filled the inline budget, in one message; with it full, two pass, and a third can be Read
-once those are measured, if each returned at most 1 MiB.
+**How many path-sent images a session can Read.** An image over 1 MiB (a screenshot over 3000 px, from a 5K display,
+is the usual one) is charged its file's size until the session has measured such a Read. So the first ones of a
+session fit by file size: with no inline picture, **28 3 MiB screenshots on a Claude plan or API key and 3 on
+Bedrock; with the inline budget full, 4 and 1**, and a file larger than what the pool leaves, such as a 5 MiB one on
+Bedrock with the inline budget full, can't be Read at all until a smaller one over 1 MiB has been. Once one has been
+measured, each is charged the 1 MiB allowance, or more if that Read came back larger, and a measurement replaces each
+charge as it returns: at the allowance a session can Read as many as whole MiB are left in the pool, **84 with no inline
+picture and 12 once the inline budget is full on a Claude plan or API key; 11 and 3 on Bedrock**, one fewer for each MiB
+the inline pictures and earlier Reads have taken. On Bedrock, four dropped 5120 x 2880 PNGs of 1.2 MiB can all be Read
+in a conversation that has not filled the inline budget, in one message; with it full, two pass, and a third can be
+Read once those are measured, if each returned at most 1 MiB.
 Those counts are what the charges give, not a promise: a measurement replaces the charge in either direction, a
 session that has measured a Read over 1 MiB can Read fewer (each later one is charged at that size), and
 what a resized Retina picture weighs is unmeasured (follow-up tsk_01a1a578-91d9-7591-beb2-36336144c589).
 
 Where a path image would be refused, the builder is told as the turn is sent, not when Claude's Read is refused: a
 notice (`Claude probably won't be able to Read <names>`) names the images that, charged in order against what the pool
-leaves the live session's Reads, do not fit. It says the conversation is out of room for pictures, and which remedy
+leaves the live session's Reads, do not fit. It says the conversation is out of room for pictures under the account's
+request limit (`… out of room for pictures under Amazon Bedrock's 20 MB request limit`), and which remedy
 works depends on the room left. When it takes every named image alone (each one's charge is at most the room, so
 whichever the builder picks, a Read of it first is let in), the notice says to tell Claude which picture matters most so
 it Reads that one first, or to send them in a new conversation, which starts its own pool. When the room is under the
-charge of any one named image, including no room at all (three Reads have taken the 3 MiB a full inline budget leaves),
+charge of any one named image, including no room at all (Reads have taken the reserve a full inline budget leaves),
 Reading one first would be refused too, so the notice offers only the new conversation. A smaller copy is not offered
 either way: it goes as a path too once the inline budget is full, and is refused unless the room still left takes its
 size, which the notice can't know. The notice is an estimate, for the same reason as the counts: it charges an image as
@@ -414,7 +454,7 @@ a turn that drops 3 and a Read of none, then a turn that drops 1, send no notice
 Read of the same file. (c) Order: it charges the images in message order, so when Claude Reads in another order the
 refused image can be one the notice didn't name. For these the hook that refuses a Read of a picture under the
 conversation's files directory also tells the builder: `Claude couldn't Read <name>: this conversation is out of room
-for pictures`, stated as fact, not "probably". The room left was under that image's charge, so it offers only a new
+for pictures under <the account's request limit>`, stated as fact, not "probably". The room left was under that image's charge, so it offers only a new
 conversation, not Reading it first. It is sent once for an image:
 none if an earlier notice of either kind already named that file. Notices name a file by what it is kept as, and
 `shape_files.unreadable_told_at` marks each one they name, because a display name is not an identity: every pasted
@@ -431,7 +471,10 @@ picture, whatever the file's size, and is recorded as `Read · <path> · PDF · 
 or with a value that isn't one number or one range (or names more than the 20 pages a Read can return), can't be
 bounded, so it is charged without limit and refused. The refusal says how many pages still fit (at most 20) and to name
 them, or that none do, and either way to ask the builder for the PDF's text. A conversation that Reads all 20 dropped
-PDFs stays under the request limit if a page picture is at most 1 MiB. **Not measured:** a live session has not shown what Read returns for a PDF. This ships unmeasured with
+PDFs stays under the request limit if a page picture is at most 1 MiB: the pool holds 84 such pages on a Claude plan or
+API key (inside the 100 pages a request takes under a 1M context) and 11 on Bedrock, and the refusal names the account's
+request limit (`… pages would pass the total of pictures and PDF pages a resumed session can carry under Amazon
+Bedrock's 20 MB request limit`). **Not measured:** a live session has not shown what Read returns for a PDF. This ships unmeasured with
 the builder's acceptance (inbox card inb_01a1a613-db5c-74d6-9bc8-f779db7f360d). The live run is follow-up task
 tsk_01a1a613-b481-766b-b60e-ec76fecb12ca, which runs beside the picture one below: two PDF cases in
 `test/shape-session.live.test.ts` print what a 3-page range of a 40-page text PDF and a whole 3-page PDF add to the
@@ -445,11 +488,11 @@ small one and a 4000 px one with a real session, finds the three pictures Claude
 and fails if one is missing or over the allowance (`TENDB_LIVE_CLAUDE=1`; it prints the sizes). It has not been run.
 The PostToolUse measurement corrects a Read after it has run, not before. Reads that Claude issues in one message
 all pass the PreToolUse hook before any result is measured, so what a Read is charged there must bound its result by
-itself. Until the session has measured a picture over 1 MiB, that bound is the file: seven Reads of 3 MiB pictures with
-14 MiB spent are not seven Reads at 1 MiB, which could carry 31.5 MiB (about 42 MB as base64, past the 32 MB limit) if
-each returned 2.5 MiB, but two Reads at 3 MiB, and the batch stays within the pool whatever each returns up to its
-file's size. Five are refused, and can be tried again at the measured size once the two have come back, if room is
-left. The cost is that the first
+itself. Until the session has measured a picture over 1 MiB, that bound is the file: on Bedrock, with 5 MiB spent, three
+Reads of 3 MiB pictures are not three Reads at 1 MiB, which could carry 7.5 MiB if each returned 2.5 MiB and take the
+11 MiB pool to 12.5 MiB (17.5 MB as base64, with no room left for text under Bedrock's 20 MB), but two Reads at 3 MiB, and
+the batch stays within the pool whatever each returns up to its file's size. The third is refused, and can be tried
+again at the measured size once the two have come back, if room is left. The cost is that the first
 batch fits fewer pictures, and a picture larger than what the pool leaves is refused until another over 1 MiB has been
 measured. A small picture's measurement does not lift this, since it says nothing of what a large one returns.
 Once the session has measured a large picture, the hook charges every later unmeasured picture at the largest size
@@ -533,8 +576,11 @@ not by the token.
   capture that runs past the 19 s a whole draw has from its start, a crashed view, a task outside the project, and a window that is closed or hidden are each a refusal with the reason (and a dimmed
   `see_screen · refused · …` line), never a blank image.
 - **Budget.** At most 12 screens a conversation, and fewer when dropped images took the room: screens share the
-  conversation's 18 MiB picture total (§5.4), and a picture that would pass it is refused with the reason and not
-  kept. Each is at most 1600 by 2000 px; the system prompt says to ask for
+  conversation's inline picture total (§5.4: 72 MiB on a Claude plan or API key, 8 MiB on Bedrock), and a picture
+  that would pass it is refused with the reason, which names the account's request limit, and not
+  kept. On Bedrock twelve screens at their 1.5 MB most (17 MiB) do not fit, so a Bedrock conversation holds
+  fewer, five at most with nothing else in it. Each is at most 1600 by 2000 px, well inside the 3000 px a side that is
+  safe past 20 images; the system prompt says to ask for
   the one screen and width needed and to describe what it shows before proposing a change to it. A fresh session
   (§5.3) is seeded with a digest line saying a screenshot was taken, of what, and to take it again; the picture is
   not carried over.
