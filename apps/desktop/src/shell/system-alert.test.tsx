@@ -76,14 +76,17 @@ describe('SystemAlert benchmark sync', () => {
 });
 
 describe('SystemAlert Codex version', () => {
-  it('shows the Codex version warning', async () => {
+  // The daemon warns on any version but the verified one, an older one too.
+  it('shows the Codex version warning, saying it differs rather than that it is newer', async () => {
+    const warning =
+      "Codex 0.153.9 is not 0.154.0, the version 10db's ChatGPT-plan checks were verified on.";
     server.use(
       http.get(daemonUrl('/system'), () =>
         HttpResponse.json(
           SystemCheckDto.parse({
             loginEnv: { source: 'login_shell', warning: null },
             claudeCode: { verifiedOn: '2.1.0', warning: null },
-            codex: { verifiedOn: '0.154.0', warning: 'Codex 0.200.0 is newer than 0.154.0.' },
+            codex: { verifiedOn: '0.154.0', warning },
             tools: [],
             benchmarkSync: null,
           }),
@@ -92,7 +95,12 @@ describe('SystemAlert Codex version', () => {
       ...baseHandlers(),
     );
     renderWithDaemon(<SystemAlert />);
-    expect(await screen.findByText("This Codex is newer than 10db's account checks")).toBeTruthy();
-    expect(screen.getByText('Codex 0.200.0 is newer than 0.154.0.')).toBeTruthy();
+    expect(
+      await screen.findByText(
+        "This Codex differs from the one 10db's account checks were verified on",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText(warning)).toBeTruthy();
+    expect(screen.queryByText(/newer/)).toBeNull();
   });
 });

@@ -52,7 +52,11 @@ export function SystemAlert() {
       )}
       {versionAlert}
       {codexWarning ? (
-        <Alert color="yellow" icon={icon} title="This Codex is newer than 10db's account checks">
+        <Alert
+          color="yellow"
+          icon={icon}
+          title="This Codex differs from the one 10db's account checks were verified on"
+        >
           {codexWarning}
         </Alert>
       ) : null}
