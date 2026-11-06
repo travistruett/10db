@@ -29,6 +29,9 @@ const ALLOWED_NAMES: ReadonlySet<string> = new Set([
   'TENDB_SANDBOX',
   'npm_config_cache',
   'npm_config_devdir',
+  'UV_CACHE_DIR',
+  'UV_TOOL_DIR',
+  'UV_PYTHON_INSTALL_DIR',
   'xcrun_db',
 ]);
 

@@ -253,6 +253,11 @@ export interface ApiServices {
   /** Interrupts the turn that is running; answering when nothing runs is a no-op. */
   stopShape(id: ShapeId): Promise<void>;
   /**
+   * Runs the conversation on `model` from its next turn, or on the `plan` role's with null. Throws
+   * InvalidError for a model the account doesn't offer and ConflictError while a turn runs.
+   */
+  chooseShapeModel(id: ShapeId, model: string | null): ShapeDto;
+  /**
    * Converts the selected proposals into goals, tasks and decisions and starts nothing. A refusal
    * lists every error and writes nothing. Throws ConflictError while a turn runs, unless the
    * caller asks to interrupt it.

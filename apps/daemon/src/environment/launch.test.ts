@@ -162,6 +162,36 @@ describe('a session launch', () => {
       model: 'us.anthropic.claude-sonnet-5-5-v1:0',
     },
     {
+      // A subagent named by alias (`model: 'fable'`) resolves through these, so it runs on the account's
+      // model as the session does, not on Claude Code's own default for the alias.
+      name: 'Bedrock mapping every alias, which a subagent resolves through Claude Code’s variables',
+      row: account({
+        kind: 'bedrock',
+        configDir: KEY_DIR,
+        expectedIdentity: null,
+        settings: {
+          region: 'us-east-1',
+          awsProfile: 'orgtools-admin',
+          modelMap: {
+            opus: 'us.anthropic.claude-opus-5-5',
+            sonnet: 'us.anthropic.claude-sonnet-5-5',
+            haiku: 'us.anthropic.claude-haiku-5-5',
+            fable: 'us.anthropic.claude-fable-5-1',
+          },
+        },
+      }),
+      alias: 'fable',
+      adds: {
+        AWS_PROFILE: 'orgtools-admin',
+        ANTHROPIC_DEFAULT_OPUS_MODEL: 'us.anthropic.claude-opus-5-5',
+        ANTHROPIC_DEFAULT_SONNET_MODEL: 'us.anthropic.claude-sonnet-5-5',
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: 'us.anthropic.claude-haiku-5-5',
+        ANTHROPIC_DEFAULT_FABLE_MODEL: 'us.anthropic.claude-fable-5-1',
+      },
+      absent: ['AWS_BEARER_TOKEN_BEDROCK'],
+      model: 'us.anthropic.claude-fable-5-1',
+    },
+    {
       name: 'Bedrock on a bearer token',
       row: keyed({ kind: 'bedrock', settings: { region: 'eu-central-1', awsProfile: null } }),
       alias: 'haiku',
@@ -189,7 +219,11 @@ describe('a session launch', () => {
         ANTHROPIC_AUTH_TOKEN: SECRET,
         CLAUDE_CONFIG_DIR: KEY_DIR,
       },
-      absent: ['ANTHROPIC_API_KEY'],
+      absent: [
+        'ANTHROPIC_API_KEY',
+        'ANTHROPIC_DEFAULT_OPUS_MODEL',
+        'ANTHROPIC_DEFAULT_FABLE_MODEL',
+      ],
       model: '~anthropic/claude-haiku-latest',
     },
   ])('$name', ({ row, alias, adds, absent, model }) => {

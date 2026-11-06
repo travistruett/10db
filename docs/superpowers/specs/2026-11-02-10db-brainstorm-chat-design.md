@@ -185,7 +185,10 @@ The card side of annotations (an indicator per kind on a task card) is the reada
 session, the runtime lanes use (factory-loop decision 5), with the SDK's typed messages rendered by 10db's UI
 (decision file above). It holds no lane, claim or area. It runs on the project's billing mode and the model and
 effort the `plan` role resolves to (`apps/daemon/src/routing/role-defaults.ts`: the strongest tier, high effort,
-or the project's own binding for the role). Its SDK process closes after 10 minutes idle and is resumed on the next
+or the project's own binding for the role). **Built:** the builder may pick another model for the conversation in
+its header (`shapes.model`, `PUT /shapes/:id/model`): any alias the project's account offers, Fable included even
+though routing leaves it off; the pick runs at the role's effort, is refused while a turn runs, and closes an idle
+session so the next turn resumes on it. Its SDK process closes after 10 minutes idle and is resumed on the next
 message. **(spec's call: 10 minutes)**
 
 **Accounts, limits and recovery (spec's call).** A Shape session is a `sessions` row like a lane's, so it uses the
@@ -210,27 +213,56 @@ outside the checkout its file-access judge answers `ask`, which raises a permiss
 guard trusts only the `10db` MCP server's tools (`mcp__10db__*`). The lane sandbox constrains Bash, Monitor and stdio
 MCP servers; it has no read-only mode.
 
-**Designed.** Read-only comes from the tool lists and the hook, not the sandbox:
+**Built** (`decisions/2026-11-05-plan-runs-commands-and-project-tools-through-the-lane-broker.md`, which amends
+the first design here: the session ran no command and loaded no project server). Read-only comes from the tool
+lists, the hook and a read-only lane sandbox:
 
 - `settingSources: []`, `strictMcpConfig`, and **no plugins** (not the harness plugin: its skills and personas are
-  for lanes) **(spec's call)**. No project `.mcp.json` server loads.
-- `tools` lists exactly `Read`, `Grep`, `Glob`, `Agent`, `WebSearch`, `WebFetch` and the Shape tools; the last two
-  are listed only so the researcher (below) can inherit them, and the hook refuses them in the main session.
-  `disallowedTools` names `Edit`, `Write`, `NotebookEdit`, `Bash` and `Monitor`. Permission mode `default` (not
-  lanes' auto); `canUseTool` denies by default. With no Bash, Monitor or MCP server process, the session runs no
-  command for a sandbox to hold.
+  for lanes) **(spec's call)**. The project's approved `.mcp.json` servers arrive over the control channel, as a
+  lane's do (`sessions/project-mcp.ts`, `inbox/project-mcp-reader.ts`), each stdio one under srt.
+- `tools` lists `Read`, `Grep`, `Glob`, `Agent`, `WebSearch`, `WebFetch` and the Shape tools, plus `Bash` when the
+  daemon has a lane sandbox; `WebSearch` and `WebFetch` are listed only so the researcher (below) can inherit
+  them, and the hook refuses them in the main session. `disallowedTools` names `Edit`, `Write`, `NotebookEdit`
+  and `Monitor` (and `Bash` with no sandbox). Permission mode `default` (not lanes' auto).
+- **Commands, in a read-only sandbox.** With a sandbox, `LaneSandbox.forSession({ readOnly: true })` builds the
+  lane profile with the whole checkout in `denyWrite`: a command writes only the session's temp dir, whatever a
+  card allows. The hook judges each `Bash` call, the session's and its code researchers', with the lanes' guard
+  (`judgePreToolUse` with no areas, hazards or claims): a refusal stays a refusal, a read-only command naming no
+  protected path runs at once, and any other answers `ask`. The daemon spawns the session's Claude Code and the
+  sandbox stops what runs under it when the session ends, as a lane's; the hook also refuses `run_in_background`, a
+  job in the background (`&`, `nohup`, `setsid`, `disown`) and `dangerouslyDisableSandbox`, and launches every
+  agent in the foreground.
+- **The lanes' broker.** `canUseTool` is `createPermissionBroker` owned by the conversation (`shapeId`, no
+  workstream): project rules only, every command that reaches it carded (`commandsAsk`), a host the sandbox meets
+  refused and carded once. A conversation's card has no target, names the conversation in its detail, never folds,
+  offers Allow once, Always allow in this project and Deny, and is withdrawn when its call is cancelled or the
+  session stops waiting on it. The conversation shows a line when a call waits on a card.
+- **Project tools.** The servers are resolved from the project env, never the session's own (which holds the
+  account's key), and a remote one on this Mac or its network is left out. A call to an approved server's tool
+  (`mcp__<server>__<tool>`, not 10db's) from the session answers `ask`, so each is carded unless the builder
+  allowed that tool always; from any agent it is refused. A session whose servers' AWS credentials are about to
+  expire gives way to a fresh one at its next turn. A `.mcp.json` or a sandbox that can't be built leaves the
+  session with less (no project server; no command), said in its first message.
+  Every command and project tool call shows as a dimmed line naming who made it. What a command or a server
+  returns is untrusted data, as a web page is; the prompts say so.
+- **Code research.** A fifth agent, `code-researcher`, has `Read`, `Grep`, `Glob` and, in the sandbox, `Bash`; no
+  web tool, no MCP server, no `Agent`. The session launches several at once to cover the repository, and may name
+  a model per call, one the project's account offers; with none the agent runs on the session's model.
 - Path confinement runs in the **PreToolUse hook** through `judgePreToolUse` with a Shape mode of the file-access
   judge that answers **deny** where lanes' answers `ask`, so nothing reaches the broker or raises a card. It runs
   for the session and its subagents alike, so calls Claude Code settles before `canUseTool` are still judged. A file
   tool is allowed only on real paths under the project's checkout or the conversation's files directory (§5.4). A
   symlink out, a protected path, and a `Grep` or `Glob` of a directory holding one are refused, with a dimmed line
   in the conversation.
-- `Agent` may launch only the three reviewer definitions (scope, engineering and rehearsal, §7) and the researcher
-  (below), passed as programmatic agents, each on the session's own model; the built-in
-  general-purpose type is not offered.
+- `Agent` may launch only the three reviewer definitions (scope, engineering and rehearsal, §7), the researcher
+  (below) and the code researcher, passed as programmatic agents, each on the session's own model unless the call
+  names another; the built-in general-purpose type is not offered.
 - **Research: a researcher agent that cannot read the project** (`decisions/2026-11-03-plan-researches-the-web-through-a-researcher.md`).
-  The session cannot touch the network; a fourth agent, `researcher`, has `WebSearch` and `WebFetch` and nothing
-  else (no file tool, no `Agent`, no 10db tool). The session gives it a question in words and gets text back with
+  The session reaches the open web only through it; a fourth agent, `researcher`, has `WebSearch` and `WebFetch`
+  and nothing else (no file tool, no `Agent`, no 10db tool). Since the session runs commands and calls project
+  servers, the split no longer keeps the code-holding agent off the network: its commands reach only the
+  project's allowed hosts and a server only its approved ones, each call carded or shown (the 2026-11-05
+  decision). The open web stays the researcher's. The session gives it a question in words and gets text back with
   the URLs it read. The split keeps the project's code off the network: the agent that reads the code never sends
   a request, and the agent that does holds nothing to send but the question. The hook enforces it:
   - `WebSearch` and `WebFetch` are allowed only with `agent_id` present and `agent_type` `researcher`; from the main
@@ -253,10 +285,10 @@ MCP servers; it has no read-only mode.
     researcher inherits the session's web tools on the real SDK.
 - **Seeing the app: a screenshot tool, never a browser** (`decisions/2026-11-03-plan-sees-the-app-through-screenshots-not-a-browser.md`).
   The session sees 10db's own screens through `see_screen` (§5.5), which answers a picture. It gets no browser
-  tool and no MCP server other than 10db's, so nothing it holds can click, type, scroll or run a command: a
-  browser would add a process that runs commands, and one click in the real app can Hold a task, answer a card
-  or start work. `playwright`, `browser` and any `mcp__` tool other than `mcp__10db__*` are refused by the
-  hook as they are now. Tests, red first: a browser tool call and a made-up click or key tool are each refused;
+  tool of its own: a browser would add a process that runs commands, and one click in the real app can Hold a
+  task, answer a card or start work. With no sandbox, `playwright`, `browser` and any `mcp__` tool other than
+  `mcp__10db__*` are refused by the hook. In the sandbox a project server's browser is allowed like any project
+  tool: under srt it never reaches loopback, so 10db's window is out of its reach, and each call is carded. Tests, red first: a browser tool call and a made-up click or key tool are each refused;
   `see_screen` is refused from the researcher and from each reviewer; the session's tool lists name no browser.
 - **Who is calling.** Subagents share the session's MCP connection, so the PreToolUse hook tells them apart: the
   SDK's hook input carries `agent_id` only inside a subagent, and `agent_type` names it. The hook refuses
@@ -1066,7 +1098,9 @@ Table-driven and red first (`.claude/rules/testing.md`), with the fake Claude ad
 - `apps/daemon/test/shape-session.live.test.ts`, outside `make gate` and run with `TENDB_LIVE_CLAUDE=1` after each
   Claude Code or SDK upgrade, as `lane-sandbox.live.test.ts` is: a real Shape session's `Edit`, `Bash` and a `Read`
   outside the checkout are refused, the main session's `report_finding` is denied through `agent_id`, and a
-  reviewer's `propose_plan` is denied.
+  reviewer's `propose_plan` is denied. `apps/daemon/test/shape-sandbox.live.test.ts`, run the same way: in the
+  read-only sandbox a read-only command runs unasked, a write is carded and, allowed, still leaves the checkout
+  unchanged, and a code researcher launched on a named model runs its own read-only command.
 - **The Shape eval:** the three reference transcripts (the design doc's assignment: the 2026-11-02 six-item list,
   one document-driven brainstorm, one single idea), each with what the builder actually filed, replayed through a
   live session and scored on splits, kinds, sizes and dependencies against what was filed. It runs on any change to

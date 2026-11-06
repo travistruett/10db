@@ -150,8 +150,20 @@ export const ShapeAttachmentDto = z.object({
 export type ShapeAttachmentDto = z.infer<typeof ShapeAttachmentDto>;
 
 /** Everything the Shape screen renders for one conversation. */
+/**
+ * The models a conversation may run on (Shape spec §5.1): the one the `plan` role picks, null when the
+ * account offers none, and every alias the project's account offers, the strongest last.
+ */
+export const ShapeModelsDto = z.object({
+  default: z.string().nullable(),
+  offered: z.array(z.string()),
+});
+export type ShapeModelsDto = z.infer<typeof ShapeModelsDto>;
+
 export const ShapeViewDto = z.object({
   shape: ShapeDto,
+  /** What the conversation's model picker offers; `shape.model` is the builder's pick. */
+  models: ShapeModelsDto.default({ default: null, offered: [] }),
   /** The transcript, oldest first. */
   messages: z.array(ShapeMessageDto),
   /** Every proposal row, tombstones and superseded ones included, in the order they were made. */

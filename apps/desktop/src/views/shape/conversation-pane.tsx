@@ -19,6 +19,7 @@ import { formatTokens } from '../factory/format-tokens';
 import { Composer } from './composer';
 import { addFiles } from './dropped-files';
 import { HistoryButton } from './history-button';
+import { ModelPicker } from './model-picker';
 import { leaveLate, takeLate, useLate } from './late-outcome';
 import { RecentConversations } from './recent-conversations';
 import { Transcript, type TranscriptProps } from './transcript';
@@ -194,7 +195,8 @@ export function ConversationPane({
           ) : null}
         </Group>
         {shapeId === null ? null : (
-          <Group gap="xs" wrap="nowrap">
+          <Group gap="xs" wrap="nowrap" align="flex-start">
+            {view === undefined ? null : <ModelPicker view={view} />}
             <Button
               component={Link}
               to="/shape"

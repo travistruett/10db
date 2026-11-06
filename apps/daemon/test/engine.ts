@@ -53,7 +53,12 @@ import {
   type UsageReport,
 } from '../src/accounts';
 import { ManualClock } from '../src/clock';
-import { createLauncher, secretFingerprint, type Keychain } from '../src/environment';
+import {
+  AwsCredentialsError,
+  createLauncher,
+  secretFingerprint,
+  type Keychain,
+} from '../src/environment';
 import { createEventBus, createStateStore, type StateStore } from '../src/events';
 import { createGit } from '../src/git';
 import type { Judge } from '../src/judge';
@@ -284,6 +289,8 @@ export async function createTestEngine(
     judge: offJudge,
     clock,
     logger: silentLogger,
+    // No test declares an AWS profile; one that did would have no CLI to ask.
+    exportAwsCredentials: () => Promise.reject(new AwsCredentialsError('no AWS CLI in this test')),
     dataDir: data.path,
     worktreeRoot: join(data.path, 'worktrees'),
     live,

@@ -21,6 +21,7 @@ export type ShapeApiServices = Pick<
   | 'sendShapeMessage'
   | 'proposeShape'
   | 'stopShape'
+  | 'chooseShapeModel'
   | 'convertShape'
   | 'removeDraftGoal'
   | 'withdrawShapeDecision'
@@ -61,6 +62,7 @@ export function createShapeServices(deps: {
     sendShapeMessage: (id, text) => shape.send(id, text),
     proposeShape: (id) => shape.propose(id),
     stopShape: (id) => shape.stop(id),
+    chooseShapeModel: (id, model) => shape.chooseModel(id, model),
     async convertShape(id, input) {
       const outcome = await shape.convert(
         id,

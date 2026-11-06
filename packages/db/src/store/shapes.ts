@@ -26,6 +26,7 @@ const toShapeDto = (row: ShapeRow): ShapeDto => ({
   origin: row.origin,
   proposeUnlocked: row.proposeUnlocked,
   round: row.round,
+  model: row.model,
   createdAt: row.createdAt,
   updatedAt: row.updatedAt,
 });
@@ -46,6 +47,7 @@ export function insertShape(
     sdkSessionId: null,
     proposeUnlocked: false,
     round: 0,
+    model: null,
     createdAt: ctx.now,
     updatedAt: ctx.now,
   };

@@ -69,6 +69,7 @@ function shapeOf(title: string): ShapeDto {
     origin: 'app',
     proposeUnlocked: false,
     round: 0,
+    model: null,
     createdAt: AT,
     updatedAt: AT,
   };

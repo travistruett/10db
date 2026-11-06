@@ -190,6 +190,20 @@ describe('ShapeDto and ShapeMessageDto', () => {
         updatedAt: AT,
       }).state,
     ).toBe('listening');
+    // A conversation from before the model picker reads as one on the plan role's model.
+    expect(
+      ShapeDto.parse({
+        id: shapeId,
+        projectId: mintId('Project'),
+        title: 'Density',
+        state: 'listening',
+        origin: 'app',
+        proposeUnlocked: false,
+        round: 0,
+        createdAt: AT,
+        updatedAt: AT,
+      }).model,
+    ).toBeNull();
     expect(
       ShapeMessageDto.parse({
         id: message,

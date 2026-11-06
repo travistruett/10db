@@ -28,6 +28,7 @@ import {
   listShapeQuestions,
   listShapes,
   markShapeLinksSizeTold,
+  patchShape,
   seedProject,
   shapeTokens,
   updateSessionUsage,
@@ -147,10 +148,19 @@ describe('the Shape tables', () => {
       origin: ShapeOrigin.App,
       proposeUnlocked: false,
       round: 0,
+      model: null,
     });
     expect(events.map((e) => e.type)).toEqual([EventType.ShapeChanged]);
     expect(getShape(store.db, shape.id)).toEqual(shape);
     expect(listShapes(store.db, project.id)).toEqual([shape]);
+  });
+
+  it('keeps the model the builder chose for a conversation, and forgets it for the default', () => {
+    const { value: shape } = newShape();
+    store.write((ctx) => patchShape(ctx, shape.id, { model: 'fable' }));
+    expect(getShape(store.db, shape.id).model).toBe('fable');
+    store.write((ctx) => patchShape(ctx, shape.id, { model: null }));
+    expect(getShape(store.db, shape.id).model).toBeNull();
   });
 
   it('keeps one proposal per key in a conversation', () => {

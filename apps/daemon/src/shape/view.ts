@@ -12,6 +12,7 @@ import {
   type ShapeFileDto,
   type ShapeFindingDto,
   type ShapeId,
+  type ShapeModelsDto,
   type ShapeTaskSizeDto,
   type ShapeTurnDto,
   type ShapeViewDto,
@@ -145,9 +146,12 @@ function proposalOf(
 export interface ViewWorld {
   /** The areas and hazards that hold a tracked file matching a one-way path (§7). */
   readonly oneWayNames: ReadonlySet<string>;
+  /** The models the conversation's picker offers (§5.1); none when no account is known. */
+  readonly models?: ShapeModelsDto;
 }
 
 const NO_WORLD: ViewWorld = { oneWayNames: new Set() };
+const NO_MODELS: ShapeModelsDto = { default: null, offered: [] };
 
 /** Each pending goal's, loose task's and addition's ceremony: what the rule forces, and what applies. */
 export function ceremonies(
@@ -235,6 +239,7 @@ export function buildShapeView(
   const marked = new Set(listRehearsals(db, shapeId).map((m) => `${m.taskKey}\0${m.hash}`));
   return {
     shape,
+    models: world.models ?? NO_MODELS,
     messages,
     proposals: listShapeProposals(db, shapeId).map((row) =>
       proposalOf(db, row, links, shape.round),

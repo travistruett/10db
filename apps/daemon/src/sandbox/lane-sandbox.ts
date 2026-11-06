@@ -105,6 +105,11 @@ export interface LaneSessionInput {
   readonly checkouts: readonly string[];
   /** The repo's approved stdio MCP servers, expanded: each runs under srt, never as written. */
   readonly mcpServers: Readonly<Record<string, StdioMcpServer>>;
+  /**
+   * A session that changes nothing in the checkout, a Plan conversation's: its commands write only
+   * its own temp dir, the checkout as a whole being denied over the write Claude Code opens itself.
+   */
+  readonly readOnly?: boolean;
 }
 
 export interface LaneSandbox {
@@ -263,7 +268,11 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           extraWrites: [],
           // Claude Code would otherwise open the checkout's git state with the checkout, and a
           // project nested in it.
-          denyWrites: [...access.gitState, ...access.otherCheckouts],
+          denyWrites: [
+            ...(input.readOnly === true ? [checkout] : []),
+            ...access.gitState,
+            ...access.otherCheckouts,
+          ],
           loopback: input.project.sandboxLoopback,
           deniedEnvNames: deniedEnvNames({ ...input.env, ...env }),
         });

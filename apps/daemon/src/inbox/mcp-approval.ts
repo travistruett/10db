@@ -77,11 +77,19 @@ function approvalBody(review: McpServerReview): string {
       `Runs: ${[...review.env.map(assignment), word(review.command ?? ''), ...review.args.map(word)].join(' ')}`,
     );
     if (review.env.length > 0) lines.push(`Sets: ${review.env.map(assignment).join(', ')}`);
+    const awsProfile = review.env.find((e) => e.name === 'AWS_PROFILE')?.value;
+    const granted = awsProfile !== undefined && awsProfile !== '' && !awsProfile.includes('${');
+    // The AWS grant is the one credential such a server gets.
+    const none = granted ? 'with no other credentials' : 'with no credentials';
+    if (granted)
+      lines.push(
+        `Gets short-lived AWS credentials for the profile ${word(awsProfile)}, exported by 10db when a session starts; it never reads ~/.aws.`,
+      );
     const replaced = review.env.map((e) => e.name).filter((n) => n === 'PATH' || n === 'HOME');
     lines.push(
       replaced.length > 0
-        ? `Its env block replaces ${replaced.join(' and ')}, so what it runs is looked up and started as shown above. Otherwise it gets the variables lane commands get, with no credentials.`
-        : 'It gets the variables lane commands get, with no credentials, plus what its env block sets.',
+        ? `Its env block replaces ${replaced.join(' and ')}, so what it runs is looked up and started as shown above. Otherwise it gets the variables lane commands get, ${none}.`
+        : `It gets the variables lane commands get, ${none}, plus what its env block sets.`,
       networkLine(review.hosts),
     );
   } else {
