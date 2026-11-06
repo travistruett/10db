@@ -50,10 +50,10 @@ export function sandboxFilesRoot(home: string): string {
 }
 
 /**
- * The system temp dir: where an earlier 10db kept every sandbox file, and which Codex's base policy
- * lets every ChatGPT lane read and write.
+ * The system temp dirs Codex's base policy lets every ChatGPT lane read and write: lane-writable to
+ * 10db, which makes nothing there and sweeps its own names from them at start.
  */
-export const SYSTEM_TEMP_ROOT = '/private/tmp';
+export const SYSTEM_TEMP_ROOTS: readonly string[] = ['/private/tmp', '/private/var/tmp'];
 
 /**
  * Makes `path` a private (mode 0700) directory of this user's, with its missing parents, and returns

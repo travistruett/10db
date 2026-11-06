@@ -18,7 +18,7 @@ const access: ShapeAccess = {
   home: '/nowhere/home',
   protectedReads: [],
   filesDir: '/nowhere/files',
-  tempRoot: '/nowhere/tmp',
+  sandboxRoots: ['/nowhere/tmp'],
 };
 
 describe('the tool lists of a Shape session', () => {

@@ -35,6 +35,8 @@ function input(overrides: Partial<LaneProfileInput> = {}): LaneProfileInput {
     extraReads: [],
     extraWrites: [],
     denyWrites: [],
+    sandboxRoots: [],
+    ownFiles: [],
     loopback: false,
     deniedEnvNames: ['GH_TOKEN'],
     ...overrides,
@@ -97,6 +99,35 @@ describe('buildLaneProfile', () => {
     const { allowRead } = buildLaneProfile(input({ readList: [under, kept] })).filesystem;
     expect(allowRead).not.toContain(under);
     expect(allowRead).toContain(kept);
+  });
+
+  it('closes every sandbox root but its own temp dir and files, whatever the read list holds', () => {
+    // The temp dir's root, the files root and another lanes' root, as a lane's sandbox has them.
+    const tempRoot = join(root, 'shared');
+    const files = join(home, '.10db', 'run');
+    const lanes = join(home, '.10db', 'lanes');
+    const tmpDir = join(tempRoot, '10db-abcdef');
+    const envFile = join(files, '10db-env-0123456789ab.sh');
+    const given = input({
+      tmpDir,
+      sandboxRoots: [tempRoot, lanes, files],
+      ownFiles: [envFile],
+      extraReads: [envFile],
+      readList: [join(home, '.10db'), join(files, '10db-mcp-0123456789ab.sh'), lanes],
+    });
+    const { allowRead, allowWrite, denyRead, denyWrite } = buildLaneProfile(given).filesystem;
+    expect(denyRead).toEqual(expect.arrayContaining([tempRoot, lanes, files]));
+    expect(allowRead).toEqual(expect.arrayContaining([tmpDir, envFile]));
+    expect(allowWrite).toEqual([tmpDir]);
+    // No read-list entry over, at or in a root survives: none opens another sandbox's files.
+    for (const listed of given.readList) expect(allowRead, listed).not.toContain(listed);
+    expect(denyWrite).toEqual([]);
+    // Under a checkout that holds the home, the roots there stay closed to writes too; the own temp
+    // dir's root is left to its grant.
+    expect(buildLaneProfile({ ...given, checkout: home }).filesystem.denyWrite).toEqual([
+      lanes,
+      files,
+    ]);
   });
 
   it('appends extra reads and writes, and filters them like the read list', () => {

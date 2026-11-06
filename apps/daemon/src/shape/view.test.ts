@@ -66,7 +66,7 @@ beforeEach(() => {
         checkout: '/repo',
         home: '/home',
         protectedReads: [],
-        tempRoot: '/tmp/10db',
+        sandboxRoots: ['/tmp/10db'],
       },
     }),
   });

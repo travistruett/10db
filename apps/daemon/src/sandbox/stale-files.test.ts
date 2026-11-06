@@ -13,7 +13,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { claimSandboxRoots, claimSandboxTempRoot } from './index';
+import { claimSandboxRoots, claimSandboxTempRoot, sweepSystemTempRoots } from './index';
 
 let base: string;
 let root: string;
@@ -165,43 +165,33 @@ describe('claimSandboxTempRoot', () => {
   });
 });
 
-describe('claimSandboxRoots', () => {
-  /** The roots a daemon claims, and the old one it only sweeps: `/private/tmp`, here injected. */
-  function roots(): { temp: string; lanes: string; files: string; old: string } {
+describe('claimSandboxRoots and sweepSystemTempRoots', () => {
+  /** The roots a daemon claims, and a system temp dir it only sweeps, here stand-ins. */
+  function roots(): { temp: string; lanes: string; files: string; systemTemp: string } {
     const made = {
       temp: join(base, 'shared'),
       lanes: join(base, 'lanes'),
       files: join(base, 'run'),
-      old: join(base, 'old-tmp'),
+      systemTemp: join(base, 'system-tmp'),
     };
     for (const dir of Object.values(made)) mkdirSync(dir);
     return made;
   }
 
-  it('sweeps stale temp dirs and sealed files from every root, and ledgers too from the old /private/tmp, marking only the roots it claims', async () => {
-    const { temp, lanes, files, old } = roots();
+  it('sweeps stale temp dirs and sealed files from every root it claims, leaves their ledgers for the reap, and marks each', () => {
+    const { temp, lanes, files } = roots();
     leaveStaleFiles(temp);
     mkdirSync(join(lanes, '10db-Qq1Ww2', 'cache'), { recursive: true });
     leaveStaleFiles(files);
     for (const name of LEDGERS) writeFileSync(join(files, name), '{"version":1,"members":[]}');
-    leaveStaleFiles(old);
-    for (const name of LEDGERS) writeFileSync(join(old, name), '{"version":1,"members":[]}');
-    const dead = await deadPid();
-    writeFileSync(join(old, `10db-daemon-${String(dead)}`), '', { mode: 0o400 });
-    const others = leaveOthers(old);
     const mark = `10db-daemon-${String(process.pid)}`;
-    const claim = claimSandboxRoots([temp, lanes, files], old, process.pid);
+    const claim = claimSandboxRoots([temp, lanes, files], process.pid);
     try {
-      // Six in each of three roots, one in the lanes root, and the old root's two ledger files.
-      expect(claim).toMatchObject({ removed: 21, failed: 0, sharedWith: null });
+      // Six in the temp root, one in the lanes root, six in the files root.
+      expect(claim).toMatchObject({ removed: 13, failed: 0, sharedWith: null });
       expect(readdirSync(temp)).toEqual([mark]);
       expect(readdirSync(lanes)).toEqual([mark]);
-      // The files root's ledgers are for the sweep that stops their processes.
       expect(readdirSync(files).sort()).toEqual([...LEDGERS, mark].sort());
-      // Nothing of 10db's is left where every ChatGPT lane can read and write, and no mark either:
-      // no sandbox file is made there any more, and its ledgers are never read.
-      expect(readdirSync(old).sort()).toEqual(others);
-      expect(readdirSync(outside)).toEqual(['keep.txt']);
     } finally {
       claim.release();
     }
@@ -209,21 +199,37 @@ describe('claimSandboxRoots', () => {
     expect(readdirSync(files).sort()).toEqual([...LEDGERS].sort());
   });
 
-  it('leaves the old root alone while an earlier daemon that still runs has marked it, and claims the others', () => {
-    const { temp, lanes, files, old } = roots();
-    leaveStaleFiles(temp);
-    leaveStaleFiles(old);
-    for (const name of LEDGERS) writeFileSync(join(old, name), '{"version":1,"members":[]}');
-    const earlier = liveProcess();
-    writeFileSync(join(old, `10db-daemon-${String(earlier)}`), '', { mode: 0o400 });
-    const before = readdirSync(old).sort();
-    const claim = claimSandboxRoots([temp, lanes, files], old, process.pid);
-    try {
-      expect(claim).toMatchObject({ removed: 6, sharedWith: earlier });
-      expect(readdirSync(old).sort()).toEqual(before);
-      expect(readdirSync(temp)).toEqual([`10db-daemon-${String(process.pid)}`]);
-    } finally {
-      claim.release();
-    }
+  it("sweeps 10db's stale entries from a system temp dir, its ledgers too and unread, marking nothing and never holding the event loop", async () => {
+    const { systemTemp } = roots();
+    leaveStaleFiles(systemTemp);
+    for (const name of LEDGERS) writeFileSync(join(systemTemp, name), '{"version":1,"members":[]}');
+    const dead = await deadPid();
+    writeFileSync(join(systemTemp, `10db-daemon-${String(dead)}`), '', { mode: 0o400 });
+    const others = leaveOthers(systemTemp);
+    let ticked = false;
+    const sweeping = sweepSystemTempRoots([systemTemp], process.pid);
+    setImmediate(() => {
+      ticked = true;
+    });
+    // Six stale entries and the two ledger files.
+    expect(await sweeping).toMatchObject({ removed: 8, failed: 0, sharedWith: null });
+    expect(ticked).toBe(true);
+    // Nothing of 10db's is left where every ChatGPT lane can read and write, and no mark either.
+    expect(readdirSync(systemTemp).sort()).toEqual(others);
+    expect(readdirSync(outside)).toEqual(['keep.txt']);
+  });
+
+  it('leaves a system temp dir alone while a daemon that still runs has marked it', async () => {
+    const { systemTemp } = roots();
+    leaveStaleFiles(systemTemp);
+    for (const name of LEDGERS) writeFileSync(join(systemTemp, name), '{"version":1,"members":[]}');
+    const running = liveProcess();
+    writeFileSync(join(systemTemp, `10db-daemon-${String(running)}`), '', { mode: 0o400 });
+    const before = readdirSync(systemTemp).sort();
+    expect(await sweepSystemTempRoots([systemTemp], process.pid)).toMatchObject({
+      removed: 0,
+      sharedWith: running,
+    });
+    expect(readdirSync(systemTemp).sort()).toEqual(before);
   });
 });

@@ -44,7 +44,7 @@ beforeEach(() => {
         home: '/home',
         protectedReads: [],
         filesDir: '/files',
-        tempRoot: '/tmp/10db',
+        sandboxRoots: ['/tmp/10db'],
       },
     }),
   });

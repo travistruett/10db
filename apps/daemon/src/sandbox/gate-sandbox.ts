@@ -90,8 +90,6 @@ export interface GateSandbox {
 export interface GateSandboxDeps extends Omit<ProjectAccessDeps, 'tmpRoot'> {
   /** Where temp dirs are made, `laneTempRoot()` by default; tests pass a short temp root. */
   readonly tmpRoot?: string;
-  /** Where each run's sealed settings file is made, outside every temp dir. */
-  readonly filesRoot: string;
   /** Where pnpm keeps its store locks; tests pass a directory of their own. */
   readonly pnpmLockDir?: string;
   readonly runtime: SandboxRuntime;
@@ -138,7 +136,7 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
         input.packageInstall === true ? (deps.pnpmLockDir ?? defaultPnpmLockDir()) : null;
       // What an earlier run or a crash left is not trusted either.
       if (lockPath !== null) {
-        sweepPnpmLockDir(lockPath);
+        sweepPnpmLockDir(lockPath, filesRoot);
         openPnpmLockDir(lockPath);
       }
       const tmpDir = createLaneTempDir(tmpRoot);
@@ -162,7 +160,7 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
         }
         if (lockPath !== null) {
           try {
-            sweepPnpmLockDir(lockPath);
+            sweepPnpmLockDir(lockPath, filesRoot);
           } catch (error) {
             record(error);
           }
@@ -196,6 +194,9 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
           // srt opens nothing for writing by itself, unlike Claude Code, which opens the checkout.
           extraWrites: [checkout, ...(lockPath === null ? [] : [lockPath])],
           denyWrites: [...access.gitState, ...access.otherCheckouts, ...SRT_SHARED_TEMP],
+          // srt reads the settings file before the sandbox starts; the command reads no file here.
+          sandboxRoots: access.sandboxRoots,
+          ownFiles: [],
           loopback: input.project.sandboxLoopback,
           deniedEnvNames: [],
         });

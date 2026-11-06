@@ -38,15 +38,17 @@ export function openPnpmLockDir(dir: string): void {
 /**
  * Removes pnpm's lock directory and all it holds. A run that could write there might have swapped the
  * directory for a link, or left links in it, for a later pnpm outside any sandbox to follow, and the
- * run's grant covers the directory's own path, so a swap can happen while this runs. So the path is
- * never looked into: it is first renamed, which moves a link rather than following it, to a name no
- * run can write beside or guess, and only that name is read. A link there is unlinked; a directory's
- * entries are unlinked or, for a directory, removed when empty, never followed or removed
- * recursively. Anything that could not be removed is thrown after the rest was tried.
+ * run's grant covers the directory's own path, so a swap can happen while this runs; every ChatGPT
+ * lane can write the system temp dir it lies in, too. So the path is never looked into: it is first
+ * renamed into `privateRoot` (the files root, which no sandbox writes), which moves a link rather
+ * than following it, and only the name it was moved to is read. When it can't be moved there,
+ * nothing is walked. A link there is unlinked; a directory's entries are unlinked or, for a
+ * directory, removed when empty, never followed or removed recursively. Anything that could not be
+ * removed is thrown after the rest was tried.
  */
-export function sweepPnpmLockDir(dir: string): void {
+export function sweepPnpmLockDir(dir: string, privateRoot: string): void {
   try {
-    sweep(dir);
+    sweep(dir, privateRoot);
   } catch (error) {
     throw new SandboxProfileError(
       'packageInstall',
@@ -59,12 +61,13 @@ function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
 
-function sweep(dir: string): void {
-  const aside = `${dir}.sweep-${randomUUID()}`;
+function sweep(dir: string, privateRoot: string): void {
+  const aside = join(privateRoot, `pnpm-sweep-${randomUUID()}`);
   try {
     renameSync(dir, aside);
   } catch (error) {
-    if (isMissing(error)) return;
+    // Nothing there is nothing to sweep; a rename that failed with something there walks nothing.
+    if (isMissing(error) && lstatSync(dir, { throwIfNoEntry: false }) === undefined) return;
     throw error;
   }
   const moved = lstatSync(aside);

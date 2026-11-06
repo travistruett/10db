@@ -94,6 +94,8 @@ export interface McpSandboxInput {
   readonly tmpRoot: string;
   /** Where each server's sealed env and settings files are made, outside every temp dir. */
   readonly filesRoot: string;
+  /** Every root closed to a server's sandbox but for its own temp dir and env file. */
+  readonly sandboxRoots: readonly string[];
   readonly runtime: SandboxRuntime;
   /** The session's launch env: only its allowlisted names reach a server. */
   readonly env: Readonly<Record<string, string>>;
@@ -164,6 +166,8 @@ function sandboxOne(
     extraReads: [envFile, ...access.gitReads],
     extraWrites: [],
     denyWrites: [...access.gitState, ...access.otherCheckouts, ...SRT_SHARED_TEMP],
+    sandboxRoots: input.sandboxRoots,
+    ownFiles: [envFile],
     // Never, whatever the project's switch: on localhost listen other sandboxes' proxies, and
     // through them the hosts an approval withholds.
     loopback: false,

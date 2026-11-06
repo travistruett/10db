@@ -49,6 +49,7 @@ function sandbox(): GateSandbox {
     loginConfigDir: join(home, '.claude-work'),
     tmpRoot,
     filesRoot,
+    codexLaneTempRoot: lanesRoot,
     pnpmLockDir,
     gitDirs: (path) => git.gitDirs(path),
     // Hermetic: the machine's own install prefixes add no deny.
@@ -177,9 +178,21 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
   it("writes only the checkout and the run's own temp dir, never git state or srt's shared temp", async () => {
     const other = createTempRepo();
     try {
-      await withRun(input({ checkouts: [repo.path, other.path] }), (run) => {
+      // A read-list entry over every sandbox root opens none of them.
+      const rules = [{ toolName: 'Read', pattern: root }];
+      await withRun(input({ checkouts: [repo.path, other.path], rules }), (run) => {
         const { filesystem } = settingsOf(run);
         expect(filesystem['allowWrite']).toEqual([run.tmpDir, checkout]);
+        expect(filesystem['denyRead']).toEqual(
+          expect.arrayContaining([tmpRoot, lanesRoot, filesRoot]),
+        );
+        expect(filesystem['allowRead']).toContain(run.tmpDir);
+        expect(filesystem['allowRead']).not.toContain(root);
+        // The run's own settings file is read by srt before the sandbox starts, never inside it.
+        const settingsFile = run.args[run.args.indexOf('--settings') + 1] ?? '';
+        expect(
+          (filesystem['allowRead'] ?? []).filter((open) => isEqualOrUnder(settingsFile, open)),
+        ).toEqual([]);
         const otherCheckout = realpathSync(other.path);
         expect(filesystem['denyWrite']).toEqual(
           expect.arrayContaining([
@@ -520,7 +533,8 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
       execFileSync('ln', [target, join(pnpmLockDir, 'hard.lock')]);
       await run.dispose();
       expect(existsSync(pnpmLockDir)).toBe(false);
-      expect(readdirSync(root).filter((name) => name.includes('.sweep-'))).toEqual([]);
+      expect(readdirSync(root).filter((name) => name.includes('sweep'))).toEqual([]);
+      expect(readdirSync(filesRoot)).toEqual([]);
       expect(readdirSync(outside)).toEqual(['keep']);
       expect(readFileSync(target, 'utf8')).toBe('x');
     });
@@ -555,6 +569,37 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
       writeFileSync(join(pnpmLockDir, 'a', 'b', 'x'), '');
       await expect(run.dispose()).rejects.toThrow(SandboxProfileError);
       expect(existsSync(pnpmLockDir)).toBe(false);
+      // The directory was walked in the files root, which no run can write, never beside its own
+      // path, which a ChatGPT lane can: what it holds was moved there first.
+      expect(readdirSync(root).filter((name) => name.includes('sweep'))).toEqual([]);
+      const [moved, ...more] = readdirSync(filesRoot);
+      expect(more).toEqual([]);
+      expect(moved).toMatch(/^pnpm-sweep-[0-9a-f-]{36}$/);
+      expect(readdirSync(join(filesRoot, moved ?? ''))).toEqual(['a']);
+    });
+
+    it("walks nothing when the lock directory can't be moved into the files root", async () => {
+      const outside = join(root, 'outside');
+      mkdirSync(outside);
+      writeFileSync(join(outside, 'keep'), 'k');
+      mkdirSync(pnpmLockDir, { mode: 0o700 });
+      symlinkSync(outside, join(pnpmLockDir, 'abc.lock'));
+      writeFileSync(join(pnpmLockDir, 'all-stores.lock'), '');
+      const pending = createGateSandbox({
+        home,
+        dataDir,
+        loginConfigDir: null,
+        tmpRoot,
+        filesRoot: join(root, 'no-files-root'),
+        pnpmLockDir,
+        gitDirs: (path) => git.gitDirs(path),
+        systemPrefixes: [],
+        runtime: RUNTIME,
+      }).forRun(input({ packageInstall: true }));
+      await expect(pending).rejects.toThrow(SandboxProfileError);
+      expect(readdirSync(pnpmLockDir).sort()).toEqual(['abc.lock', 'all-stores.lock']);
+      expect(readdirSync(outside)).toEqual(['keep']);
+      expect(readdirSync(tmpRoot)).toEqual([]);
     });
 
     it.each([

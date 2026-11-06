@@ -16,6 +16,7 @@ import { createTempRepo, FAKE_SRT, SANDBOXED, type TempDir } from '../../test/fi
 import { createGit } from '../git';
 import {
   createLaneSandbox,
+  isEqualOrUnder,
   SandboxProfileError,
   type LaneSession,
   type LaneSessionInput,
@@ -197,16 +198,33 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
   });
 
   it('writes only its own temp dir, never the checkout, and reads the env file it is given', async () => {
-    const session = await forSession();
+    // A read-list entry over every sandbox root opens none of them.
+    const session = await forSession({
+      rules: [
+        { toolName: 'SandboxNetworkAccess', pattern: 'registry.npmjs.org' },
+        { toolName: 'Read', pattern: root },
+      ],
+      mcpServers: { docs: SERVER, other: { ...SERVER, args: ['other.mjs'] } },
+    });
     try {
       const { settings, tmp, envFile } = launchOf(session, 'docs');
+      const other = launchOf(session, 'other');
       const { filesystem } = SrtFile.parse(settings);
       expect(filesystem.allowWrite).toEqual([tmp]);
       expect(filesystem.denyWrite).toEqual(
         expect.arrayContaining(['/tmp/claude', '/private/tmp/claude']),
       );
-      expect(filesystem.denyRead).toEqual(expect.arrayContaining(['/', join(home, '.claude')]));
+      expect(filesystem.denyRead).toEqual(
+        expect.arrayContaining(['/', join(home, '.claude'), tmpRoot, filesRoot]),
+      );
       expect(filesystem.allowRead).toEqual(expect.arrayContaining([checkout, tmp, envFile]));
+      expect(filesystem.allowRead).not.toContain(root);
+      // The other server's env file, its approved values, and the lane's are closed to this one.
+      for (const closed of [other.envFile, other.tmp, session.spec.env['CLAUDE_ENV_FILE'] ?? ''])
+        expect(
+          filesystem.allowRead.filter((open) => isEqualOrUnder(closed, open)),
+          closed,
+        ).toEqual([]);
       expect(settings).toMatchObject({ allowAppleEvents: false });
     } finally {
       session.dispose();

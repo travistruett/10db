@@ -181,6 +181,13 @@ export interface LaneProfileInput {
   extraWrites: readonly string[];
   /** Exact paths no command may write, even where Claude Code opens their directory for writing. */
   denyWrites: readonly string[];
+  /**
+   * Every root 10db keeps sandboxes' temp dirs and files in. Closed to reads and writes but for this
+   * sandbox's own temp dir and `ownFiles`, so no read list, toolchain or checkout opens another's.
+   */
+  sandboxRoots: readonly string[];
+  /** This sandbox's own files in a sandbox root that its commands read, such as its env file. */
+  ownFiles: readonly string[];
   loopback: boolean;
   deniedEnvNames: readonly string[];
 }
@@ -268,8 +275,18 @@ export function buildLaneProfile(input: LaneProfileInput): LaneSandboxSettings {
   refuseToolchainSecretsOverNeeds(input.toolchainSecrets, laneReads);
   const needed = [...SYSTEM_READS, ...laneReads];
   const denied = [...input.protectedReads, ...input.secretFiles, ...input.toolchainSecrets];
-  const isAllowed = (path: string): boolean => !denied.some((root) => isEqualOrUnder(path, root));
-  const readable = [...needed, ...input.readList].filter(isAllowed);
+  const own = [input.tmpDir, ...input.ownFiles];
+  const inSandboxRoot = (path: string): boolean =>
+    input.sandboxRoots.some((root) => isEqualOrUnder(path, root)) &&
+    !own.some((mine) => isEqualOrUnder(path, mine));
+  const isAllowed = (path: string): boolean =>
+    !denied.some((root) => isEqualOrUnder(path, root)) && !inSandboxRoot(path);
+  // A read-list entry over a sandbox root opens none of it, and is left out: srt applies a deny that
+  // lies inside a directory it opens after every grant, so this sandbox's own files there would close.
+  const readList = input.readList.filter(
+    (path) => !input.sandboxRoots.some((root) => isEqualOrUnder(root, path)),
+  );
+  const readable = [...needed, ...readList].filter(isAllowed);
   const writable = [input.tmpDir, ...input.extraWrites].filter(isAllowed);
   refusePatterns(readable);
   // A listing of a dir that is, or lies under, a denied path opens nothing the deny keeps shut.
@@ -284,10 +301,25 @@ export function buildLaneProfile(input: LaneProfileInput): LaneSandboxSettings {
     allowAppleEvents: false,
     autoAllowBashIfSandboxed: false,
     filesystem: {
-      denyRead: ['/', ...input.protectedReads, ...input.secretFiles, ...input.toolchainSecrets],
+      denyRead: [
+        '/',
+        ...input.protectedReads,
+        ...input.sandboxRoots,
+        ...input.secretFiles,
+        ...input.toolchainSecrets,
+      ],
       allowRead: [...readable, ...listings],
       allowWrite: writable,
-      denyWrite: [...input.denyWrites],
+      // A sandbox root under a writable path, such as a checkout that holds the home, stays closed
+      // to writes too; the one that holds this sandbox's own temp dir is left to its grant.
+      denyWrite: [
+        ...input.denyWrites,
+        ...input.sandboxRoots.filter(
+          (root) =>
+            !isEqualOrUnder(input.tmpDir, root) &&
+            [checkout, ...writable].some((path) => isEqualOrUnder(root, path)),
+        ),
+      ],
     },
     network: {
       allowedDomains: [...input.allowedDomains],

@@ -1,6 +1,7 @@
 import { lstatSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { removeLaneTempDir } from './temp-dir';
+import { removeLaneTempDir, removeLaneTempDirAsync } from './temp-dir';
 
 /** What `createLaneTempDir` makes: `mkdtemp`'s six characters after the prefix. */
 const TEMP_DIR = /^10db-[A-Za-z0-9]{6}$/;
@@ -11,8 +12,8 @@ const LEDGER_FILE = /^10db-proc-[1-9][0-9]*-[0-9a-f]{12}\.json(?:\.[0-9a-f]{12}\
 /** A running daemon's mark in a sandbox root, named by its pid. */
 const DAEMON_MARK = /^10db-daemon-([1-9][0-9]*)$/;
 
-/** What a sweep of one root did. */
-interface Sweep {
+/** What a sweep did. */
+export interface SweepReport {
   /** Stale entries removed. */
   readonly removed: number;
   /** Stale ones that could not be removed. */
@@ -21,7 +22,7 @@ interface Sweep {
   readonly sharedWith: number | null;
 }
 
-export interface TempRootClaim extends Sweep {
+export interface TempRootClaim extends SweepReport {
   /** Removes this daemon's mark. Run it once every session and gate has ended. */
   release(): void;
 }
@@ -59,14 +60,24 @@ function ownedKind(path: string, uid: number): 'dir' | 'file' | 'other' | null {
   }
 }
 
+/** A stale entry of 10db's in a root, by its own kind. */
+interface StaleEntry {
+  readonly path: string;
+  readonly kind: 'dir' | 'file';
+}
+
 /**
- * Removes the temp dirs and sealed files a crashed daemon left in `root`, and its process ledgers
- * too when `ledgers` is set, and the marks of daemons that no longer run. It runs before any session
- * or gate starts, so every such entry is stale, unless another live daemon (one with another data
- * dir) has marked the root: its sessions may be running, so nothing is removed. Only this user's
- * entries with 10db's exact names are touched, by their own kind: a link is never followed or removed.
+ * The temp dirs and sealed files a crashed daemon left in `root`, its process ledgers too when
+ * `ledgers` is set; the marks of daemons that are not running are removed. Every such entry is stale,
+ * unless another live daemon (one with another data dir) has marked the root: its sessions may be
+ * running, so nothing is named. Only this user's entries with 10db's exact names are named, by their
+ * own kind: a link never is.
  */
-function sweepRoot(root: string, pid: number, ledgers: boolean): Sweep {
+function staleIn(
+  root: string,
+  pid: number,
+  ledgers: boolean,
+): { readonly stale: StaleEntry[]; readonly sharedWith: number | null } {
   const uid = process.getuid?.();
   const names = listing(root);
   let sharedWith: number | null = null;
@@ -77,35 +88,35 @@ function sweepRoot(root: string, pid: number, ledgers: boolean): Sweep {
     if (marked !== pid && processAlive(marked)) sharedWith = marked;
     else rmSync(join(root, name), { force: true });
   }
-  let removed = 0;
-  let failed = 0;
-  if (sharedWith === null && uid !== undefined) {
-    for (const name of names) {
-      const path = join(root, name);
-      const kind = ownedKind(path, uid);
-      const stale =
-        (kind === 'dir' && TEMP_DIR.test(name)) ||
-        (kind === 'file' && (SEALED_FILE.test(name) || (ledgers && LEDGER_FILE.test(name))));
-      if (!stale) continue;
-      try {
-        if (kind === 'dir') removeLaneTempDir(path, root);
-        else rmSync(path, { force: true });
-        removed += 1;
-      } catch {
-        failed += 1;
-      }
-    }
-  }
-  return { removed, failed, sharedWith };
+  if (sharedWith !== null || uid === undefined) return { stale: [], sharedWith };
+  const stale = names.flatMap((name): StaleEntry[] => {
+    const path = join(root, name);
+    const kind = ownedKind(path, uid);
+    if (kind === 'dir' && TEMP_DIR.test(name)) return [{ path, kind }];
+    const file = SEALED_FILE.test(name) || (ledgers && LEDGER_FILE.test(name));
+    return kind === 'file' && file ? [{ path, kind }] : [];
+  });
+  return { stale, sharedWith };
 }
 
 /**
- * Takes a sandbox root for a starting daemon: sweeps the temp dirs and sealed files a crashed daemon
- * left there (see `sweepRoot`), then marks the root as in use by `pid`. Its process ledgers stay for
- * `reapLaneProcessLedgers`, which stops what they name.
+ * Takes a sandbox root for a starting daemon, before any session or gate starts: removes the temp
+ * dirs and sealed files a crashed daemon left there (see `staleIn`), then marks the root as in use by
+ * `pid`. Its process ledgers stay for `reapLaneProcessLedgers`, which stops what they name.
  */
 export function claimSandboxTempRoot(root: string, pid: number = process.pid): TempRootClaim {
-  const { removed, failed, sharedWith } = sweepRoot(root, pid, false);
+  const { stale, sharedWith } = staleIn(root, pid, false);
+  let removed = 0;
+  let failed = 0;
+  for (const entry of stale) {
+    try {
+      if (entry.kind === 'dir') removeLaneTempDir(entry.path, root);
+      else rmSync(entry.path, { force: true });
+      removed += 1;
+    } catch {
+      failed += 1;
+    }
+  }
   const mark = join(root, daemonMarkName(pid));
   let marked = false;
   try {
@@ -124,26 +135,48 @@ export function claimSandboxTempRoot(root: string, pid: number = process.pid): T
   };
 }
 
-/**
- * Claims each of `roots` (`claimSandboxTempRoot`), then sweeps `previous`, where an earlier 10db kept
- * every sandbox file (`SYSTEM_TEMP_ROOT`), by the same rules, its process ledgers included: Codex's
- * base policy lets every ChatGPT lane read and write there, so a sealed file left there would stay
- * readable to one, and a ledger there could be one a lane wrote, so it is removed and never read.
- * `previous` is not marked: nothing is made there any more.
- */
+/** Claims each of `roots` (see `claimSandboxTempRoot`); `release` removes every mark. */
 export function claimSandboxRoots(
   roots: readonly string[],
-  previous: string,
   pid: number = process.pid,
 ): TempRootClaim {
   const claims = roots.map((root) => claimSandboxTempRoot(root, pid));
-  const sweeps: Sweep[] = [...claims, sweepRoot(previous, pid, true)];
   return {
-    removed: sweeps.reduce((sum, sweep) => sum + sweep.removed, 0),
-    failed: sweeps.reduce((sum, sweep) => sum + sweep.failed, 0),
-    sharedWith: sweeps.find((sweep) => sweep.sharedWith !== null)?.sharedWith ?? null,
+    removed: claims.reduce((sum, claim) => sum + claim.removed, 0),
+    failed: claims.reduce((sum, claim) => sum + claim.failed, 0),
+    sharedWith: claims.find((claim) => claim.sharedWith !== null)?.sharedWith ?? null,
     release() {
       for (const claim of claims) claim.release();
     },
   };
+}
+
+/**
+ * Removes 10db's entries from the system temp dirs (`SYSTEM_TEMP_ROOTS`) by the claim's rules, their
+ * process ledgers too, never read, and marks nothing: every ChatGPT lane can read and write there, so
+ * a sealed file there would stay readable to one, and a ledger there could be one a lane wrote. 10db
+ * makes nothing there. The tools run as child processes the event loop doesn't wait on, so a lane
+ * that leaves many entries there delays no start.
+ */
+export async function sweepSystemTempRoots(
+  roots: readonly string[],
+  pid: number = process.pid,
+): Promise<SweepReport> {
+  let removed = 0;
+  let failed = 0;
+  let sharedWith: number | null = null;
+  for (const root of roots) {
+    const found = staleIn(root, pid, true);
+    sharedWith ??= found.sharedWith;
+    for (const entry of found.stale) {
+      try {
+        if (entry.kind === 'dir') await removeLaneTempDirAsync(entry.path, root);
+        else await rm(entry.path, { force: true });
+        removed += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+  }
+  return { removed, failed, sharedWith };
 }

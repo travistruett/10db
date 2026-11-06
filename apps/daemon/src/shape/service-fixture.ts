@@ -92,7 +92,7 @@ export function createServiceFixture(
           checkout: opts.checkout ?? '/repo',
           home: opts.home ?? '/home',
           protectedReads: [],
-          tempRoot: '/tmp/10db',
+          sandboxRoots: ['/tmp/10db'],
         },
       }),
     });

@@ -34,8 +34,11 @@ export interface ShapeAccess {
   readonly secretFiles?: readonly string[];
   /** The conversation's dropped files (§5.4). */
   readonly filesDir: string;
-  /** The lane temp root, where other sessions' temp dirs are. */
-  readonly tempRoot: string;
+  /**
+   * Every root 10db keeps sandboxes' temp dirs and files in: no Shape session reads there, even
+   * inside a checkout that holds one.
+   */
+  readonly sandboxRoots: readonly string[];
 }
 
 /** One tool call as the PreToolUse hook sees it; the SDK sets `agentId` only inside a subagent. */
@@ -54,6 +57,8 @@ const SHAPE_TOOLS: ReadonlySet<string> = new Set(Object.values(ShapeToolName));
 const REVIEWER_TOOL: string = ShapeToolName.ReportFinding;
 
 const deny = (reason: string): GuardVerdict => ({ decision: 'deny', reason });
+/** A place no file is: a Shape session has no Claude Code config or temp dir of its own to read. */
+const NOWHERE = '/var/empty/10db-shape';
 const ALLOW: GuardVerdict = { decision: 'allow' };
 
 function fileAccessContext(access: ShapeAccess): FileAccessContext {
@@ -64,9 +69,9 @@ function fileAccessContext(access: ShapeAccess): FileAccessContext {
     ...(access.secretFiles === undefined ? {} : { secretFiles: access.secretFiles }),
     readList: [access.filesDir],
     // Nothing of Claude Code's is readable: a large result is read back through a narrower search.
-    configDir: join(access.tempRoot, 'no-claude-config'),
+    configDir: join(NOWHERE, 'no-claude-config'),
     providerSessionId: null,
-    sandboxTemp: { roots: [access.tempRoot], own: join(access.tempRoot, 'no-own-temp-dir') },
+    sandboxTemp: { roots: access.sandboxRoots, own: join(NOWHERE, 'no-own-temp-dir') },
   };
 }
 

@@ -1551,6 +1551,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           configDir,
           checkouts: allCheckouts(db),
           mcpServers: mcpServers.stdio,
+          provider,
           ...(account.kind === AccountKind.CodexSignin ? { tempRoot: opts.codexLaneTempRoot } : {}),
         });
       } catch (error) {

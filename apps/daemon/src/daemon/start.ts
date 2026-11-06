@@ -146,12 +146,11 @@ import {
 import { resolveSandboxRuntime } from '../paths';
 import {
   claimSandboxRoots,
-  codexLaneTempRoot,
   createGateSandbox,
   createLaneSandbox,
   createLedgerSweep,
-  laneTempRoot,
   reapLaneProcessLedgers,
+  sweepSystemTempRoots,
   systemProcessTable,
   type LaneProcessSetup,
   type LedgerSweep,
@@ -192,9 +191,12 @@ import { removeRuntimeFiles, writeRuntimeFiles } from '../runtime-files';
 import { createAreaNamer } from './area-namer';
 import { createServices } from './services';
 import {
+  allSandboxRootsOf,
+  laneWrittenRootsOf,
+  namedSandboxRoots,
   openSandboxRoots,
-  refusedGateSandbox,
-  refusedLaneSandbox,
+  sandboxDepsOf,
+  sandboxesFor,
   type SandboxRootOptions,
 } from './sandbox-roots';
 import { assertWorktreeRootAllowed, DEFAULT_WORKTREE_BASE, worktreeRootFor } from './worktree-root';
@@ -209,8 +211,9 @@ export interface DaemonOptions {
    * The sandbox every lane and every gate runs under. Its roots (tests) move what it makes off the
    * machine's: `tmpRoot` the temp dirs of Claude lanes, gates and MCP servers (`laneTempRoot()`),
    * `codexLaneTempRoot` a ChatGPT lane's (`~/.10db/lanes`), `filesRoot` the sealed files, env files
-   * and process ledgers (`~/.10db/run`), and `previousTempRoot` where an earlier 10db kept them all
-   * (`/private/tmp`), swept at start. `runtime` (tests) replaces srt, which runs the gate. Required,
+   * and process ledgers (`~/.10db/run`), and `systemTempRoots` the system temp dirs every ChatGPT
+   * lane writes (`SYSTEM_TEMP_ROOTS`), swept once the daemon listens. `runtime` (tests) replaces srt,
+   * which runs the gate. Required,
    * so no caller can forget it: null runs lanes and gates unsandboxed, which only fake sessions and
    * tests ask for, and the Claude adapter refuses such a session. `processes` (tests) replaces how
    * lane processes are read and signalled, for the sessions and for the start-up sweep of a dead
@@ -393,13 +396,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // The sandbox's roots, made private before anything is put there. A refused one refuses every lane
   // session and gate, as a temp dir the sandbox can't make does.
   const sandboxRoots = opts.sandbox ? openSandboxRoots(opts.sandbox, homedir()) : null;
-  // The roots lanes write: Claude lanes', ChatGPT lanes', and the system temp dir, which Codex's base
-  // policy opens to every ChatGPT lane.
-  const laneWrittenRoots =
-    sandboxRoots === null
-      ? []
-      : [sandboxRoots.temp, sandboxRoots.codexLanes, sandboxRoots.previous];
-  const allSandboxRoots = sandboxRoots === null ? [] : [...laneWrittenRoots, sandboxRoots.files];
+  // The roots lanes write: Claude lanes', ChatGPT lanes', and the system temp dirs, which Codex's base
+  // policy opens to every ChatGPT lane. With no sandbox no lane runs, so none is.
+  const laneWrittenRoots = sandboxRoots === null ? [] : laneWrittenRootsOf(sandboxRoots);
+  const allSandboxRoots = sandboxRoots === null ? [] : allSandboxRootsOf(sandboxRoots);
   // Where this daemon's worktrees live, as a real path. A root that could hold lane-written files or
   // the daemon's own is refused before anything else starts.
   let worktreeRoot: string;
@@ -594,17 +594,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       'a sandbox root was refused, so no lane session or gate can start',
     );
   }
-  // Before any session or gate starts: what a crashed run left in the roots is stale, and so is what
-  // an earlier 10db left in the system temp dir. A refused root is neither swept nor claimed.
+  // Before any session or gate starts: what a crashed run left in the roots is stale. A refused root
+  // is neither swept nor claimed.
   const claimedRoots =
-    sandboxRoots === null
-      ? null
-      : claimSandboxRoots(
-          sandboxRoots.refusal === null
-            ? [sandboxRoots.temp, sandboxRoots.codexLanes, sandboxRoots.files]
-            : [],
-          sandboxRoots.previous,
-        );
+    sandboxRoots?.refusal === null
+      ? claimSandboxRoots([sandboxRoots.temp, sandboxRoots.codexLanes, sandboxRoots.files])
+      : null;
   if (
     claimedRoots &&
     (claimedRoots.removed > 0 || claimedRoots.failed > 0 || claimedRoots.sharedWith !== null)
@@ -665,24 +660,40 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       ledgerSweep.later();
     }
   }
-  // Shared by every gate: a task's, at its green run, and a batch's, at ship. One limiter caps them
-  // all, so the machine never runs more than `limits.gateSlots` at once.
-  const gateRunner = createGateRunner({
-    sandbox:
-      sandboxRoots && runtime
-        ? sandboxRoots.refusal
-          ? refusedGateSandbox(sandboxRoots.refusal)
-          : createGateSandbox({
+  // Every lane session and every gate runs in one of these; over a refused root both refuse.
+  const sandboxes =
+    opts.sandbox && sandboxRoots && runtime
+      ? sandboxesFor(sandboxRoots, {
+          lane: () =>
+            createLaneSandbox({
               home: homedir(),
               dataDir: opts.dataDir,
               loginConfigDir: launcher.loginConfigDir(),
               gitDirs: (repo) => git.gitDirs(repo),
-              tmpRoot: sandboxRoots.temp,
-              filesRoot: sandboxRoots.files,
-              laneWritableRoots: laneWrittenRoots,
+              ...sandboxDepsOf(sandboxRoots),
+              ...(opts.sandbox?.processes === undefined
+                ? {}
+                : { processes: opts.sandbox.processes }),
+              ...(ledgerSweep === null ? {} : { ledgers: ledgerSweep }),
+              log: logger.child({ component: 'sandbox' }),
               runtime,
-            })
-        : null,
+              worktreeRoot,
+            }),
+          gate: () =>
+            createGateSandbox({
+              home: homedir(),
+              dataDir: opts.dataDir,
+              loginConfigDir: launcher.loginConfigDir(),
+              gitDirs: (repo) => git.gitDirs(repo),
+              ...sandboxDepsOf(sandboxRoots),
+              runtime,
+            }),
+        })
+      : null;
+  // Shared by every gate: a task's, at its green run, and a batch's, at ship. One limiter caps them
+  // all, so the machine never runs more than `limits.gateSlots` at once.
+  const gateRunner = createGateRunner({
+    sandbox: sandboxes?.gate ?? null,
     logger: logger.child({ component: 'gate' }),
   });
   const gateSlots = createGateSlots(limits.gateSlots);
@@ -974,34 +985,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           checkout: project.repoPath,
           home: homedir(),
           protectedReads: guarded.map((p) => p.path),
-          tempRoot: sandboxRoots?.temp ?? laneTempRoot(),
+          sandboxRoots: allSandboxRootsOf(sandboxRoots ?? namedSandboxRoots({}, homedir())),
         },
       };
     },
   });
-  const laneSandbox =
-    opts.sandbox && sandboxRoots && runtime
-      ? sandboxRoots.refusal
-        ? refusedLaneSandbox(sandboxRoots.refusal)
-        : createLaneSandbox({
-            home: homedir(),
-            dataDir: opts.dataDir,
-            loginConfigDir: launcher.loginConfigDir(),
-            gitDirs: (repo) => git.gitDirs(repo),
-            tmpRoot: sandboxRoots.temp,
-            filesRoot: sandboxRoots.files,
-            laneWritableRoots: laneWrittenRoots,
-            ...(opts.sandbox.processes === undefined ? {} : { processes: opts.sandbox.processes }),
-            ...(ledgerSweep === null ? {} : { ledgers: ledgerSweep }),
-            log: logger.child({ component: 'sandbox' }),
-            runtime,
-            worktreeRoot,
-          })
-      : null;
+  const laneSandbox = sandboxes?.lane ?? null;
   const createdRunner = createRunner({
     protectedPaths: guarded,
     laneSandbox,
-    codexLaneTempRoot: sandboxRoots?.codexLanes ?? codexLaneTempRoot(homedir()),
+    codexLaneTempRoot: (sandboxRoots ?? namedSandboxRoots({}, homedir())).codexLanes,
     worktreeRoot,
     hold: startHold,
     laneTempDirs,
@@ -1404,6 +1397,20 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     token,
   );
+  // Once the daemon listens, off the event loop: a lane can leave any number of entries there.
+  const systemTempSwept = (
+    sandboxRoots === null
+      ? Promise.resolve()
+      : sweepSystemTempRoots(sandboxRoots.systemTemps).then((report) => {
+          if (report.removed === 0 && report.failed === 0 && report.sharedWith === null) return;
+          logger.info(
+            { removed: report.removed, failed: report.failed, sharedWith: report.sharedWith },
+            "swept 10db's entries from the system temp dirs",
+          );
+        })
+  ).catch((error: unknown) => {
+    logger.warn({ err: error }, "could not sweep 10db's entries from the system temp dirs");
+  });
 
   const nightly = scheduleNightlyBackup(
     clock,
@@ -1446,6 +1453,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       await prWatch.stop();
       retiredLandingsAbort.abort();
       await retiredLandings;
+      await systemTempSwept;
       // A gate that waits must not start because shutdown freed the slot of the one it killed.
       gateSlots.close();
       // Aborts a shipping gate and any git or gh child; the batch stays SHIPPING for recovery.

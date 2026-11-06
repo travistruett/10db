@@ -4666,7 +4666,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       loginConfigDir: null,
       tmpRoot,
       filesRoot,
-      laneWritableRoots: [codexLanes],
+      codexLaneTempRoot: codexLanes,
       gitDirs: (path) => lanesGit.gitDirs(path),
       runtime: FAKE_SRT,
       worktreeRoot: join(probeRoot, 'w'),
@@ -4728,6 +4728,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     expect(laneSession?.fileAccess.providerSessionId).toBe(session?.providerSessionId);
     // Claude Code and srt run in a Claude lane's temp dir: it stays under the short temp root.
     expect(probe.inputs[0]?.tempRoot).toBeUndefined();
+    expect(probe.inputs[0]?.provider).toBe('claude');
     expect(dirname(laneSession?.tmpDir ?? '')).toBe(probe.tmpRoot);
     // The session ended, so its temp dir and files are gone.
     expect(readdirSync(probe.tmpRoot)).toEqual([]);
@@ -4761,6 +4762,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     expect(seen?.env['CODEX_HOME']).toBe(seen?.configDir);
     // A ChatGPT lane's temp dir is kept apart from Claude lanes', in the root the daemon names.
     expect(seen?.tempRoot).toBe(probe.codexLanes);
+    expect(seen?.provider).toBe('codex');
     expect(dirname(probe.sessions[0]?.tmpDir ?? '')).toBe(probe.codexLanes);
     expect(readdirSync(probe.tmpRoot)).toEqual([]);
     expect(readdirSync(probe.codexLanes)).toEqual([]);

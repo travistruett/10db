@@ -12,7 +12,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { mintId } from '@10db/contracts';
+import { mintId, Provider } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   createTempRepo,
@@ -27,6 +27,7 @@ import { projectAtCheckout } from '../delivery';
 import { SECRET_VARIABLES } from '../environment';
 import { createGit } from '../git';
 import {
+  codexLaneTempRoot,
   createLaneSandbox,
   fileAccessJudge,
   MAX_SANDBOX_TMP_BYTES,
@@ -53,6 +54,7 @@ let home: string;
 let dataDir: string;
 let tmpRoot: string;
 let filesRoot: string;
+let lanesRoot: string;
 let repo: TempDir;
 let checkout: string;
 
@@ -61,6 +63,7 @@ function sandbox(
     loginConfigDir?: string | null;
     gitDirs?: LaneSandboxDeps['gitDirs'];
     laneWritableRoots?: readonly string[];
+    codexLaneTempRoot?: string;
   } = {},
 ): LaneSandbox {
   return createLaneSandbox({
@@ -69,6 +72,7 @@ function sandbox(
     loginConfigDir: overrides.loginConfigDir ?? null,
     tmpRoot,
     filesRoot,
+    codexLaneTempRoot: overrides.codexLaneTempRoot ?? lanesRoot,
     ...(overrides.laneWritableRoots === undefined
       ? {}
       : { laneWritableRoots: overrides.laneWritableRoots }),
@@ -116,6 +120,7 @@ beforeEach(() => {
   tmpRoot = join(root, 't');
   // Where the daemon keeps it: under the home, beside its protected reads and in none of them.
   filesRoot = sandboxFilesRoot(home);
+  lanesRoot = codexLaneTempRoot(home);
   mkdirSync(home);
   mkdirSync(tmpRoot);
   mkdirSync(filesRoot, { recursive: true });
@@ -188,20 +193,35 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
           { toolName: 'SandboxNetworkAccess', pattern: 'registry.npmjs.org' },
           { toolName: 'SandboxNetworkAccess', pattern: 'github.com' },
           { toolName: 'Read', pattern: shared },
+          // Over every sandbox's files: it opens none of them, so it is left out of the profile.
+          { toolName: 'Read', pattern: join(home, '.10db') },
           { toolName: 'Bash', pattern: 'pnpm test' },
           { toolName: 'Read', pattern: null },
         ],
       }),
     );
+    const other = await sandbox().forSession(input());
     try {
       expect(session.spec.settings.network.allowedDomains).toEqual([
         'registry.npmjs.org',
         'github.com',
       ]);
-      expect(session.spec.settings.filesystem.allowRead).toContain(shared);
-      expect(session.fileAccess.readList).toEqual([shared]);
+      const { allowRead } = session.spec.settings.filesystem;
+      expect(allowRead).toContain(shared);
+      expect(allowRead).not.toContain(join(home, '.10db'));
+      // Another lane's env file, holding its variables, and its temp dir stay closed; its own open.
+      for (const closed of [other.spec.env['CLAUDE_ENV_FILE'] ?? '', other.tmpDir])
+        expect(
+          allowRead.filter((open) => isEqualOrUnder(closed, open)),
+          closed,
+        ).toEqual([]);
+      expect(allowRead).toEqual(
+        expect.arrayContaining([session.tmpDir, session.spec.env['CLAUDE_ENV_FILE'] ?? '']),
+      );
+      expect(session.fileAccess.readList).toEqual([shared, join(home, '.10db')]);
     } finally {
       session.dispose();
+      other.dispose();
     }
   });
 
@@ -1155,8 +1175,11 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       expect(join(filesRoot, env)).toBe(envFile);
       expect(ledger).toMatch(/^10db-proc-[1-9][0-9]*-[0-9a-f]{12}\.json$/);
       expect(more).toEqual([]);
-      // The shell reads the env file through its own grant, which no protected read takes away.
-      expect(session.spec.settings.filesystem.allowRead).toContain(envFile);
+      // Every sandbox root is closed but for the session's own temp dir and env file, which the
+      // shell reads through their own grants.
+      const { allowRead, denyRead } = session.spec.settings.filesystem;
+      expect(denyRead).toEqual(expect.arrayContaining([tmpRoot, lanesRoot, filesRoot]));
+      expect(allowRead).toEqual(expect.arrayContaining([session.tmpDir, envFile]));
       // The file tools refuse both roots but the session's own temp dir: a ledger a lane wrote
       // would name what the next start signals.
       expect(readAccess(envFile, session.fileAccess).access).toBe('protected');
@@ -1171,12 +1194,18 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     expect(left()).toEqual([]);
   });
 
-  it("makes a session's temp dir in its own tempRoot when one is given, of any length", async () => {
-    // A ChatGPT lane's: no Claude Code or srt runs in it, so the socket path limit is not its.
+  it("makes a ChatGPT session's temp dir in its own tempRoot when one is given, of any length", async () => {
+    // No Claude Code or srt runs in a ChatGPT lane's temp dir, so the socket path limit is not its.
     const lanes = join(home, '.10db', 'lanes', 'longer-than-the-socket-path-limit');
     mkdirSync(lanes, { recursive: true });
-    const lanesSandbox = sandbox({ laneWritableRoots: [lanes] });
-    const session = await lanesSandbox.forSession(input({ tempRoot: lanes }));
+    const lanesSandbox = sandbox({ codexLaneTempRoot: lanes });
+    // A Claude session given the same root keeps the limit.
+    await expect(lanesSandbox.forSession(input({ tempRoot: lanes }))).rejects.toThrow(
+      `The lane temp directory path is over ${String(MAX_SANDBOX_TMP_BYTES)} bytes`,
+    );
+    const session = await lanesSandbox.forSession(
+      input({ tempRoot: lanes, provider: Provider.Codex }),
+    );
     try {
       expect(dirname(session.tmpDir)).toBe(lanes);
       expect(Buffer.byteLength(session.tmpDir)).toBeGreaterThan(MAX_SANDBOX_TMP_BYTES);

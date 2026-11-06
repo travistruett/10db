@@ -13,12 +13,8 @@ import { homedir, tmpdir } from 'node:os';
 import { createGit, resolveGit } from '../src/git';
 import { silentLogger } from '../src/log';
 import { resolveSandboxRuntime } from '../src/paths';
-import {
-  createGateSandbox,
-  ensurePrivateRoot,
-  laneTempRoot,
-  sandboxFilesRoot,
-} from '../src/sandbox';
+import { openSandboxRoots, sandboxDepsOf } from '../src/daemon';
+import { createGateSandbox } from '../src/sandbox';
 import { createGateRunner } from '../src/verify';
 
 const args = process.argv.slice(2);
@@ -47,15 +43,16 @@ const env = Object.fromEntries(
   ),
 );
 const git = createGit({ bin: await resolveGit(), checkouts: () => [checkout] });
+// The daemon's own roots, made private as its start makes them, with every root lanes write.
+const roots = openSandboxRoots({}, homedir());
+if (roots.refusal !== null) throw roots.refusal;
 const gate = createGateRunner({
   sandbox: createGateSandbox({
     home: homedir(),
     dataDir: join(homedir(), 'Library', 'Application Support', '10db'),
     loginConfigDir: env['CLAUDE_CONFIG_DIR'] ?? null,
     gitDirs: (repo) => git.gitDirs(repo),
-    // The daemon's own roots, made private as its start makes them.
-    tmpRoot: ensurePrivateRoot(laneTempRoot()),
-    filesRoot: ensurePrivateRoot(sandboxFilesRoot(homedir())),
+    ...sandboxDepsOf(roots),
     runtime: resolveSandboxRuntime(),
   }),
   logger: silentLogger,

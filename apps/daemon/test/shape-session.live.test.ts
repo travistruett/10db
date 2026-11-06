@@ -101,7 +101,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
       home: homedir(),
       protectedReads: [],
       filesDir,
-      tempRoot: realpathSync(tmpdir()),
+      sandboxRoots: [realpathSync(tmpdir())],
     };
 
     const judged: Judged[] = [];
@@ -260,7 +260,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
       home: homedir(),
       protectedReads: [],
       filesDir,
-      tempRoot: realpathSync(tmpdir()),
+      sandboxRoots: [realpathSync(tmpdir())],
     };
 
     const judged: Judged[] = [];
@@ -374,7 +374,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
       home: homedir(),
       protectedReads: [],
       filesDir,
-      tempRoot: realpathSync(tmpdir()),
+      sandboxRoots: [realpathSync(tmpdir())],
     };
 
     const judged: Judged[] = [];
@@ -582,7 +582,7 @@ async function readInSession(
     home: homedir(),
     protectedReads: [],
     filesDir,
-    tempRoot: realpathSync(tmpdir()),
+    sandboxRoots: [realpathSync(tmpdir())],
   };
 
   let providerSessionId = '';

@@ -19,7 +19,7 @@ import type { AddressInfo } from 'node:net';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { PassThrough, type Readable } from 'node:stream';
-import { mintId, type AccountId, type SessionId } from '@10db/contracts';
+import { mintId, Provider, type AccountId, type SessionId } from '@10db/contracts';
 import type { AccountRow } from '@10db/db';
 import { parse } from 'smol-toml';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -29,13 +29,10 @@ import { captureLoginEnv, createLauncher, findCodex, type Launcher } from '../sr
 import { createGit } from '../src/git';
 import { createLogger } from '../src/log';
 import { resolveSandboxRuntime } from '../src/paths';
+import { openSandboxRoots, sandboxDepsOf, type SandboxRoots } from '../src/daemon';
 import {
-  codexLaneTempRoot,
+  claimSandboxRoots,
   createLaneSandbox,
-  ensurePrivateRoot,
-  laneTempRoot,
-  sandboxFilesRoot,
-  SYSTEM_TEMP_ROOT,
   type LaneSandbox,
   type LaneSessionInput,
 } from '../src/sandbox';
@@ -397,7 +394,7 @@ interface World {
   readonly adapter: SessionAdapter;
   readonly laneSandbox: LaneSandbox;
   /** The daemon's roots, made as its start makes them: the lane temp root is the shared one. */
-  readonly roots: { readonly temp: string; readonly codexLanes: string; readonly files: string };
+  readonly roots: SandboxRoots;
   readonly account: AccountRow;
   /** Every call the guard was asked about, in order. */
   readonly calls: GuardCall[];
@@ -495,18 +492,19 @@ async function openWorldIn(root: string, opened: (() => Promise<void>)[]): Promi
       return withStandInAccount(child);
     },
   });
-  const roots = {
-    temp: ensurePrivateRoot(laneTempRoot()),
-    codexLanes: ensurePrivateRoot(codexLaneTempRoot(homedir())),
-    files: ensurePrivateRoot(sandboxFilesRoot(homedir())),
-  };
+  const roots = openSandboxRoots({}, homedir());
+  if (roots.refusal !== null) throw roots.refusal;
+  // Marked as a running daemon's, so a test daemon that starts meanwhile leaves the lanes' files alone.
+  const claim = claimSandboxRoots([roots.temp, roots.codexLanes, roots.files]);
+  opened.push(() => {
+    claim.release();
+    return Promise.resolve();
+  });
   const laneSandbox = createLaneSandbox({
     home: homedir(),
     dataDir,
     loginConfigDir: null,
-    tmpRoot: roots.temp,
-    filesRoot: roots.files,
-    laneWritableRoots: [roots.codexLanes, SYSTEM_TEMP_ROOT],
+    ...sandboxDepsOf(roots),
     gitDirs: (repo) => createGit().gitDirs(repo),
     runtime: resolveSandboxRuntime(),
     worktreeRoot: join(root, 'worktrees'),
@@ -584,7 +582,7 @@ function laneInput(
     configDir: world.codexHome,
     checkouts: [world.checkout, world.other],
     mcpServers: {},
-    ...(opts.claude === true ? {} : { tempRoot: world.roots.codexLanes }),
+    ...(opts.claude === true ? {} : { tempRoot: world.roots.codexLanes, provider: Provider.Codex }),
   };
 }
 
@@ -879,8 +877,9 @@ describe.skipIf(!live)(
       const claudeLane = await world.laneSandbox.forSession(
         laneInput(world, env, { claude: true }),
       );
-      const codexLane = await world.laneSandbox.forSession(laneInput(world, env));
+      let codexLane: Awaited<ReturnType<LaneSandbox['forSession']>> | null = null;
       try {
+        codexLane = await world.laneSandbox.forSession(laneInput(world, env));
         expect(dirname(claudeLane.tmpDir)).toBe(world.roots.temp);
         expect(dirname(codexLane.tmpDir)).toBe(world.roots.codexLanes);
         const secrets = {
@@ -935,7 +934,7 @@ describe.skipIf(!live)(
         expect(outputs[7]).toContain('own-written');
       } finally {
         claudeLane.dispose();
-        codexLane.dispose();
+        codexLane?.dispose();
       }
     });
 

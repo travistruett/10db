@@ -39,14 +39,14 @@ import { judgePreToolUse, protectedPaths } from '../src/guard';
 import { createInboxService, createPermissionBroker } from '../src/inbox';
 import { resolveSandboxRuntime } from '../src/paths';
 import { allowedToolsFor } from '../src/permissions';
+import { openSandboxRoots, sandboxDepsOf, type SandboxRoots } from '../src/daemon';
 import {
+  claimSandboxRoots,
   createLaneSandbox,
   createLaneTempDir,
-  ensurePrivateRoot,
   fileAccessJudge,
   laneTempRoot,
   removeLaneTempDir,
-  sandboxFilesRoot,
   type LaneSession,
   type StdioMcpServer,
 } from '../src/sandbox';
@@ -57,11 +57,12 @@ import { captureLogs } from './log-capture';
 
 const live = loadEnv(process.env).TENDB_LIVE_CLAUDE === '1';
 
-/** The daemon's own roots, made private as its start makes them. */
-const sandboxRoots = (): { readonly tmpRoot: string; readonly filesRoot: string } => ({
-  tmpRoot: ensurePrivateRoot(laneTempRoot()),
-  filesRoot: ensurePrivateRoot(sandboxFilesRoot(homedir())),
-});
+/** The daemon's own roots, made private as its start makes them, with every root lanes write. */
+function sandboxRoots(): SandboxRoots {
+  const roots = openSandboxRoots({}, homedir());
+  if (roots.refusal !== null) throw roots.refusal;
+  return roots;
+}
 
 /** A file holding a random token that must never reach the session. */
 interface Canary {
@@ -304,15 +305,18 @@ async function runLane(opts: {
     home: homedir(),
     loginConfigDir: launcher.loginConfigDir(),
   });
+  const roots = sandboxRoots();
   const laneSandbox = createLaneSandbox({
     home: homedir(),
     dataDir: opts.dataDir,
     loginConfigDir: launcher.loginConfigDir(),
-    ...sandboxRoots(),
+    ...sandboxDepsOf(roots),
     gitDirs: (repo) => createGit().gitDirs(repo),
     runtime: resolveSandboxRuntime(),
     worktreeRoot: join(opts.dataDir, 'worktrees'),
   });
+  // Marked as a running daemon's, so a test daemon that starts meanwhile leaves the lane's files alone.
+  const claim = claimSandboxRoots([roots.temp, roots.codexLanes, roots.files]);
   let laneSession: LaneSession | null = null;
   try {
     laneSession = await laneSandbox.forSession({
@@ -337,6 +341,7 @@ async function runLane(opts: {
     return await driveSession({ lane, project, workstreamId: workstream.id, envFile });
   } finally {
     laneSession?.dispose();
+    claim.release();
     test.close();
   }
 
@@ -564,7 +569,7 @@ describe.skipIf(!live)('lane sandbox, live', () => {
   it('holds every canary in an ordinary checkout and keeps the git dir read-only', async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), '10db-live-')));
     const outside = realpathSync(mkdtempSync(join(tmpdir(), '10db-canary-')));
-    const { tmpRoot } = sandboxRoots();
+    const { temp: tmpRoot } = sandboxRoots();
     const otherLaneTmp = createLaneTempDir(tmpRoot);
     const shared = `/Users/Shared/10db-canary-${randomUUID()}`;
     // pnpm 12's fixed lock directory is shared with every lane and the builder's pnpm: never writable.

@@ -1,5 +1,5 @@
 import { realpathSync } from 'node:fs';
-import type { PermissionRuleDto, ProjectDto } from '@10db/contracts';
+import { Provider, type PermissionRuleDto, type ProjectDto } from '@10db/contracts';
 import { prepareCommandEnv, withoutTempDirPaths } from './command-env';
 import { deniedEnvNames } from './env-allowlist';
 import { createLaneEnvFile, removeLaneEnvFile } from './env-file';
@@ -119,11 +119,13 @@ export interface LaneSessionInput {
   readonly checkouts: readonly string[];
   /** The repo's approved stdio MCP servers, expanded: each runs under srt, never as written. */
   readonly mcpServers: Readonly<Record<string, StdioMcpServer>>;
-  /**
-   * The root this session's temp dir is made in, for a session that runs no Claude Code or srt there
-   * (a ChatGPT lane's), so its path need not fit `MAX_SANDBOX_TMP_BYTES`. The temp root by default.
-   */
+  /** The root this session's temp dir is made in; the temp root by default. */
   readonly tempRoot?: string;
+  /**
+   * The agent the session runs, Claude's by default. Only a Codex session's temp dir may be longer
+   * than `MAX_SANDBOX_TMP_BYTES`: no Claude Code or srt runs in it.
+   */
+  readonly provider?: Provider;
 }
 
 export interface LaneSandbox {
@@ -138,8 +140,6 @@ export interface SandboxLog {
 export interface LaneSandboxDeps extends Omit<ProjectAccessDeps, 'tmpRoot'> {
   /** Where temp dirs are made, `laneTempRoot()` by default; tests pass a short temp root. */
   readonly tmpRoot?: string;
-  /** Where each session's env file and process ledger are made, and its servers' sealed files. */
-  readonly filesRoot: string;
   /** srt, which runs the repo's stdio MCP servers. */
   readonly runtime: SandboxRuntime;
   /** How a session's processes are read and stopped; tests pass fakes. The system's by default. */
@@ -199,6 +199,16 @@ function realPathOr(path: string): string {
   }
 }
 
+/** The longest a session's temp dir path may be, by the agent that runs in it. */
+function tempDirLimit(provider: Provider): number | null {
+  switch (provider) {
+    case Provider.Claude:
+      return MAX_SANDBOX_TMP_BYTES;
+    case Provider.Codex:
+      return null;
+  }
+}
+
 /** Claude Code's spelling of an absolute path in a permission rule: `//` stands for the root. */
 const ruleScope = (path: string): string => `/${path}`;
 
@@ -231,10 +241,9 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
       const { checkout, toolchain, readList } = access;
       const protectedList = access.protectedReads;
       const secretFiles = [...access.checkoutSecrets, ...toolchain.secretFiles];
-      const tmpDir = createLaneTempDir(
-        roots.temp,
-        input.tempRoot === undefined ? MAX_SANDBOX_TMP_BYTES : null,
-      );
+      const tmpDir = createLaneTempDir(roots.temp, tempDirLimit(input.provider ?? Provider.Claude));
+      // The session's own temp dir root is closed to every other sandbox too.
+      const sandboxRoots = [...new Set([...access.sandboxRoots, roots.temp])];
       let envFile: string | null = null;
       let ledger: string | null = null;
       let mcp: McpSandboxes | null = null;
@@ -299,6 +308,8 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           // Claude Code would otherwise open the checkout's git state with the checkout, and a
           // project nested in it.
           denyWrites: [...access.gitState, ...access.otherCheckouts],
+          sandboxRoots,
+          ownFiles: [envFile],
           loopback: input.project.sandboxLoopback,
           deniedEnvNames: deniedEnvNames({ ...input.env, ...env }),
         });
@@ -312,6 +323,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           home: deps.home,
           tmpRoot,
           filesRoot,
+          sandboxRoots,
           runtime: deps.runtime,
           env: input.env,
           checkouts: input.checkouts,

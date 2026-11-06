@@ -18,6 +18,7 @@ import {
   BenchmarkStatusDto,
   BoardColumnDto,
   EventsHead,
+  FolderInspectResult,
   InboxItemDto,
   KeepAwakeStatus,
   McpServerStatusDto,
@@ -360,15 +361,15 @@ describe('startDaemon', () => {
   });
 
   /**
-   * The sandbox's roots under one short base: the temp root, the Codex lanes root, the files root and
-   * the old root that stands in for `/private/tmp`. Missing ones are made by the daemon.
+   * The sandbox's roots under one short base: the temp root, the Codex lanes root, the files root,
+   * and two stand-ins for the system temp dirs a ChatGPT lane writes. The daemon makes the first three.
    */
   function sandboxRoots(base: string) {
     return {
       tmpRoot: join(base, 't'),
       codexLaneTempRoot: join(base, 'l'),
       filesRoot: join(base, 'r'),
-      previousTempRoot: join(base, 'old'),
+      systemTempRoots: [join(base, 'sys'), join(base, 'vartmp')],
     };
   }
 
@@ -381,7 +382,7 @@ describe('startDaemon', () => {
       const base = realpathSync(mkdtempSync('/tmp/sbd-'));
       const roots = sandboxRoots(base);
       const { tmpRoot, filesRoot, codexLaneTempRoot } = roots;
-      mkdirSync(roots.previousTempRoot);
+      for (const dir of roots.systemTempRoots) mkdirSync(dir);
       try {
         const adapter = new FakeAdapter({ Alpha: [[{ do: 'turn_complete' }]] });
         const specs: SessionSpec[] = [];
@@ -437,11 +438,11 @@ describe('startDaemon', () => {
         expect(gateLog).toContain('fake srt: no sandbox; network {"allowedDomains":[]');
         expect(gateLog).toContain('"strictAllowlist":true');
         // The session and the gate ended, so their temp dirs and files are gone; the daemon's mark stays
-        // in each root it claimed until it stops, and none is left in the old one.
+        // in each root it claimed until it stops, and none is left in a system temp dir.
         const mark = `10db-daemon-${String(process.pid)}`;
         for (const root of [tmpRoot, codexLaneTempRoot, filesRoot])
           expect(readdirSync(root), root).toEqual([mark]);
-        expect(readdirSync(roots.previousTempRoot)).toEqual([]);
+        for (const dir of roots.systemTempRoots) expect(readdirSync(dir), dir).toEqual([]);
         await running.stop();
         for (const root of [tmpRoot, codexLaneTempRoot, filesRoot])
           expect(readdirSync(root), root).toEqual([]);
@@ -508,18 +509,56 @@ describe('startDaemon', () => {
     },
   );
 
+  // Same short base as above.
+  it.skipIf(SANDBOXED)(
+    'counts every system temp dir a ChatGPT lane writes as a sandbox root: no project is made there',
+    async () => {
+      const base = realpathSync(mkdtempSync('/tmp/sbd-'));
+      // Outside `/private/tmp`, so only what the daemon is given counts.
+      const system = tempDir('sys');
+      const roots = {
+        ...sandboxRoots(base),
+        systemTempRoots: [join(system.path, 'tmp'), join(system.path, 'var-tmp')],
+      };
+      try {
+        for (const dir of roots.systemTempRoots) mkdirSync(join(dir, 'repo'), { recursive: true });
+        const running = await startDaemon({
+          dataDir: dir.path,
+          port: 0,
+          adapter: new FakeAdapter({}),
+          logLevel: 'warn',
+          sandbox: { ...roots, runtime: FAKE_SRT },
+          ...QUIET,
+        });
+        daemon = running;
+        const api = apiClient(running.url, running.token);
+        for (const dir of roots.systemTempRoots)
+          expect(
+            await api.post('/folders/inspect', FolderInspectResult, { path: join(dir, 'repo') }),
+            dir,
+          ).toMatchObject({ ok: false, reason: 'protected_path' });
+      } finally {
+        await daemon?.stop();
+        daemon = null;
+        rmSync(base, { recursive: true, force: true });
+        system.cleanup();
+      }
+    },
+  );
+
   // Its temp root is a short path under the shared `/tmp`, which no sandbox can write.
   it.skipIf(SANDBOXED)(
-    'removes the temp dirs and sealed files a crashed daemon left in its sandbox roots, and everything an earlier 10db left in /private/tmp, before any session starts',
+    "removes the temp dirs and sealed files a crashed daemon left in its sandbox roots before any session starts, and 10db's entries in a system temp dir once it listens",
     async () => {
       const base = realpathSync(mkdtempSync('/tmp/sbd-'));
       const roots = sandboxRoots(base);
-      const { tmpRoot, filesRoot, previousTempRoot } = roots;
+      const { tmpRoot, filesRoot } = roots;
+      const [systemTemp = ''] = roots.systemTempRoots;
       try {
-        for (const root of [tmpRoot, filesRoot, previousTempRoot]) mkdirSync(root);
+        for (const root of [tmpRoot, filesRoot, ...roots.systemTempRoots]) mkdirSync(root);
         mkdirSync(join(tmpRoot, '10db-a1B2c3', 'cache'), { recursive: true });
-        mkdirSync(join(previousTempRoot, '10db-a1B2c3', 'cache'), { recursive: true });
-        for (const root of [filesRoot, previousTempRoot])
+        mkdirSync(join(systemTemp, '10db-a1B2c3', 'cache'), { recursive: true });
+        for (const root of [filesRoot, systemTemp])
           for (const name of [
             '10db-env-0123456789ab.sh',
             '10db-mcp-0123456789ab.json',
@@ -527,7 +566,7 @@ describe('startDaemon', () => {
           ])
             writeFileSync(join(root, name), '', { mode: 0o400 });
         // A ledger there is never read: a ChatGPT lane can write there.
-        writeFileSync(join(previousTempRoot, '10db-proc-4321-0123456789ab.json'), '{}');
+        writeFileSync(join(systemTemp, '10db-proc-4321-0123456789ab.json'), '{}');
         daemon = await startDaemon({
           dataDir: dir.path,
           port: 0,
@@ -539,7 +578,9 @@ describe('startDaemon', () => {
         const mark = `10db-daemon-${String(process.pid)}`;
         expect(readdirSync(tmpRoot)).toEqual([mark]);
         expect(readdirSync(filesRoot).sort()).toEqual([mark, 'other.txt'].sort());
-        expect(readdirSync(previousTempRoot)).toEqual(['other.txt']);
+        // The system temp dir is swept off the event loop once the daemon listens.
+        await waitFor(() => readdirSync(systemTemp).length === 1);
+        expect(readdirSync(systemTemp)).toEqual(['other.txt']);
       } finally {
         await daemon?.stop();
         daemon = null;

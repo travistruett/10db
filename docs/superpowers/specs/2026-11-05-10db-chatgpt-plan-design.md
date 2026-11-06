@@ -248,12 +248,14 @@ folder. 10db kept all its temp files there, so Travis decided, 2026-11-05:
 | 10db's control files: process ledgers, srt settings files, env files  | `~/.10db/run/`            | A forged or swapped one escapes a sandbox or reads a token |
 | A ChatGPT lane's temp dir                                             | `~/.10db/lanes/`          | Keeps ChatGPT lanes apart, as Claude lanes are          |
 | Claude lanes', gates' and MCP servers' temp dirs                      | `/Users/Shared/10db-<uid>/` | Keeps ChatGPT lanes out of them; fits the 44-byte limit |
+| pnpm's store lock directory, which a package-install gate opens        | Stays; pnpm names it       | Walked only once renamed into `~/.10db/run/`, never in place |
 
 - `/Users/Shared/10db-501/10db-xxxxxx` is 34 bytes for this Mac's user, and at most 41 for any uid, under
   `MAX_SANDBOX_TMP_BYTES`. The uid keeps two macOS users apart, since `/Users/Shared` is writable by all of them. The
   root is made 0700 and refused when it is a link or another user's.
-- At start the daemon also sweeps its stale entries from `/private/tmp`, with the existing rules, so a sealed file a
-  crashed daemon left there isn't left for a ChatGPT lane to read.
+- Once it listens, the daemon also sweeps its stale entries from `/private/tmp` and `/private/var/tmp`, with the
+  existing rules and off the event loop, so a sealed file a crashed daemon left there isn't left for a ChatGPT lane to
+  read. Both count as lane-writable wherever the temp root does.
 - Codex's base policy closes both `~/.10db` and `/Users/Shared`; a command there got `Operation not permitted`.
 - A lane is granted only its own temp dir, as before. The control files are read only through the grants that already
   name them: a Claude lane's env file, an MCP server's env file.
