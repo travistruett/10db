@@ -115,6 +115,7 @@
 - [x] Accounts: `codex_signin` accounts with the Codex adapter (`decisions/2026-11-05-chatgpt-plan-through-the-codex-app-server.md`).
 - [ ] Accounts: `openai_api_key` accounts on the Codex adapter.
 - [ ] Accounts: run the first Ampsio lane by hand on a ChatGPT plan account (sign in, confirm the identity, fill in the Model map, start one small `quick` task) and check the real hard-limit and token-refresh behaviour.
+- [ ] Accounts: read OpenAI's Terms of Use themselves and record whether they allow a local app to run a ChatGPT plan's lanes through `codex app-server`. Only the app-server page was read, through a summarising tool (`decisions/2026-11-05-chatgpt-plan-through-the-codex-app-server.md`); a paid 10db tier or anything hosted reopens the question.
 - [ ] Accounts: the manual live checks, two subscriptions in parallel, an API-key or Bedrock account, a project moved mid-step and back, and the rate-limit events on a Max plan (plan 09 Task 14).
 - [ ] Accounts: spike carrying a cut-off conversation to the account a project moved to (`forkSession` and `getSessionMessages` on a per-account config directory, a subscription transcript resumed on Bedrock, thinking blocks, token cost). If it passes, a small follow-up plan resumes that conversation after a move instead of starting fresh from the handoff (accounts spec §11).
 - [ ] Accounts: the Accounts screen shows each project's fallback, the account it moved from and when 10db will ask to move it back.

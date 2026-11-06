@@ -343,6 +343,11 @@ Codex for other work doesn't stop Ampsio.
 
 - `write_stdin` is not seen by the hook: text can reach a running process unguarded. The kernel sandbox still bounds
   it, and the guard is a filter, not the boundary (`decisions/2026-10-29-sandbox-is-the-boundary.md`).
+- The guard judges a command's relative paths from the thread's cwd, the hook's `cwd`. It never sees the `workdir`
+  an `exec_command` call names, so a command run in another directory has its relative paths judged from the wrong
+  one. The kernel sandbox still bounds what it touches.
+- The process ledgers a daemon kept in `/private/tmp`, as 10db did before its files moved to `~/.10db/run`, are
+  removed unread by the start sweep, since a ChatGPT lane can write there, so the orphans they name aren't stopped.
 - No classifier. What the guard allows runs inside the sandbox.
 - A ChatGPT lane can read and write `/private/tmp`, as any Codex command can. 10db keeps nothing there, but other
   software's temp files, Claude Code's own included, stay readable to it (see Temp files).

@@ -39,7 +39,11 @@ and the guard is a filter in front of it. 10db relies on Codex's own sandbox and
   passes even in `limited`. Claude lanes have no method limit either. A wildcard host such as `*.example.net` matches
   hosts under the domain but not `example.net` itself, as srt does.
 - **Known gaps, accepted.** `write_stdin` is not seen by the hook, so text can reach a running process unguarded; the
-  kernel sandbox still bounds it. There is no auto-mode classifier: what the guard allows runs inside the sandbox
+  kernel sandbox still bounds it. The guard judges a command's relative paths from the thread's cwd and never sees the
+  `workdir` an `exec_command` call names, so a command run elsewhere has its relative paths judged from the wrong
+  directory; the sandbox bounds that too. The process ledgers a daemon kept in `/private/tmp`, as 10db did before
+  its files moved to `~/.10db/run`, are removed unread by the start sweep, since a ChatGPT lane can write there, so
+  the orphans they name aren't stopped. There is no auto-mode classifier: what the guard allows runs inside the sandbox
   without another check. A lane spends a read on `AGENTS.md`, and a project's `.codex/` doesn't apply to its lanes.
   Left out on purpose: a sandbox self-test at runtime, a CI job on the real Codex binary, and closing `write_stdin`.
   `/private/tmp` access is in `decisions/2026-11-05-sandbox-files-leave-private-tmp.md`.
