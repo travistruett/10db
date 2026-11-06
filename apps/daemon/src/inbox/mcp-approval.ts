@@ -9,7 +9,12 @@ import {
   type InboxOption,
   type ProjectId,
 } from '@10db/contracts';
-import { recordMcpApproval, type WriteContext } from '@10db/db';
+import {
+  getLatestApprovedMcpApproval,
+  recordMcpApproval,
+  type DbReader,
+  type WriteContext,
+} from '@10db/db';
 import type { InboxService } from './service';
 
 /**
@@ -68,7 +73,37 @@ function networkLine(hosts: readonly string[]): string {
   );
 }
 
-function approvalBody(review: McpServerReview): string {
+/** What the builder's latest approval of the same server opened, when the config has changed since. */
+export interface EarlierApproval {
+  readonly hosts: readonly string[];
+}
+
+/** What the builder's latest approval of this server opened, or undefined when they never approved it. */
+export function earlierMcpApproval(
+  db: DbReader,
+  projectId: ProjectId,
+  serverName: string,
+): EarlierApproval | undefined {
+  const approval = getLatestApprovedMcpApproval(db, projectId, serverName);
+  return approval === null ? undefined : { hosts: approval.hosts };
+}
+
+/** The hosts that differ from the earlier approval, each named; nothing when they are the same. */
+function hostChanges(hosts: readonly string[], earlier: EarlierApproval | undefined): string[] {
+  if (earlier === undefined) return [];
+  const added = hosts.filter((host) => !earlier.hosts.includes(host));
+  const dropped = earlier.hosts.filter((host) => !hosts.includes(host));
+  const lines: string[] = [];
+  if (added.length > 0)
+    lines.push(`New hosts since your last approval: ${added.map(shownHost).join(', ')}`);
+  if (dropped.length > 0)
+    lines.push(
+      `No longer reached: ${dropped.map(shownHost).join(', ')} (your last approval opened ${dropped.length === 1 ? 'it' : 'them'})`,
+    );
+  return lines;
+}
+
+function approvalBody(review: McpServerReview, earlier?: EarlierApproval): string {
   const lines = [
     `The repo's .mcp.json declares "${visible(review.name)}" (${review.transport}). Sessions in this project run without it until you approve it.`,
   ];
@@ -91,6 +126,7 @@ function approvalBody(review: McpServerReview): string {
         ? `Its env block replaces ${replaced.join(' and ')}, so what it runs is looked up and started as shown above. Otherwise it gets the variables lane commands get, ${none}.`
         : `It gets the variables lane commands get, ${none}, plus what its env block sets.`,
       networkLine(review.hosts),
+      ...hostChanges(review.hosts, earlier),
     );
   } else {
     lines.push(`Connects to: ${word(review.url ?? '')}`);
@@ -128,18 +164,20 @@ function approvalOptions(review: McpServerReview): InboxOption[] {
 
 /**
  * Raises the approval card for one exact config, or returns the open one. The card is project-wide, so
- * no workstream's end cancels it; it folds per server and config hash, so retries add nothing.
+ * no workstream's end cancels it; it folds per server and config hash, so retries add nothing. With the
+ * hosts of the builder's latest approval of the server, the card also names each host that changed.
  */
 export function requestMcpApproval(
   inbox: InboxService,
   projectId: ProjectId,
   review: McpServerReview,
+  earlier?: EarlierApproval,
 ): InboxItemDto {
   return inbox.flag({
     projectId,
     workstreamId: null,
     title: `Run the repo's MCP server "${visible(review.name)}"?`,
-    body: approvalBody(review),
+    body: approvalBody(review, earlier),
     options: approvalOptions(review),
     detail: { [MCP_APPROVAL_DETAIL]: review },
     foldKey: `project-mcp-approval:${projectId}:${review.name}:${review.configHash}`,

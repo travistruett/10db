@@ -275,6 +275,52 @@ describe('MCP approval cards', () => {
     ).not.toBe(first.id);
   });
 
+  describe('when the config changed since the last approval', () => {
+    const earlier = (hosts: string[]) => ({ hosts });
+
+    it('names each host the earlier approval did not open, and each it no longer does', () => {
+      const project = seedProject(store);
+      const card = requestMcpApproval(
+        inbox,
+        project.id,
+        npx({ hosts: ['billing.us-east-1.api.aws', 'sts.us-east-1.amazonaws.com'] }),
+        earlier(['billing.us-east-1.amazonaws.com', 'sts.us-east-1.amazonaws.com']),
+      );
+      const lines = card.body.split('\n');
+      expect(lines).toContain('New hosts since your last approval: billing.us-east-1.api.aws');
+      expect(lines).toContain(
+        'No longer reached: billing.us-east-1.amazonaws.com (your last approval opened it)',
+      );
+    });
+
+    it('says nothing of hosts when they did not change, or when nothing was approved before', () => {
+      const project = seedProject(store);
+      const hosts = ['registry.npmjs.org'];
+      const same = requestMcpApproval(inbox, project.id, npx({ hosts }), earlier(hosts));
+      expect(same.body).not.toContain('since your last approval');
+      expect(same.body).not.toContain('No longer reached');
+      const first = requestMcpApproval(
+        inbox,
+        project.id,
+        npx({ hosts, configHash: 'd'.repeat(64) }),
+      );
+      expect(first.body).not.toContain('since your last approval');
+    });
+
+    it('shows a host name that is not plain as the card shows every host', () => {
+      const project = seedProject(store);
+      const card = requestMcpApproval(
+        inbox,
+        project.id,
+        npx({ hosts: ['*.example.org'] }),
+        earlier([]),
+      );
+      expect(card.body).toContain(
+        'New hosts since your last approval: *.example.org (every subdomain of example.org, not example.org itself)',
+      );
+    });
+  });
+
   it("records approval with the card's hosts, and a denial with none", () => {
     const project = seedProject(store);
     const hosts = ['registry.npmjs.org'];

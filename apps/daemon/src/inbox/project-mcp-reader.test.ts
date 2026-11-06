@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { McpVerdict, type ProjectDto } from '@10db/contracts';
 import { createTestStore, recordMcpApproval, seedProject, type Store } from '@10db/db';
@@ -130,6 +130,43 @@ describe('the project MCP reader', () => {
     expect(flags.map((f) => f.title)).toEqual(['Run the repo\'s MCP server "aws-billing"?']);
     expect(flags[0]?.body).toContain(
       'Gets short-lived AWS credentials for the profile orgtools-prod',
+    );
+  });
+
+  it('asks again when the hosts file names another host, and the card names it', async () => {
+    const hostsFile = (hosts: string[]) => {
+      mkdirSync(join(repo.path, '.10db'), { recursive: true });
+      writeFileSync(
+        join(repo.path, '.10db', 'mcp-hosts.json'),
+        JSON.stringify({ servers: { 'aws-billing': { hosts } } }),
+      );
+    };
+    declare({ 'aws-billing': BILLING });
+    hostsFile(['billing.us-east-1.amazonaws.com']);
+    store.write((ctx) => {
+      for (const { review } of readRepoMcp(repo.path).servers)
+        recordMcpApproval(ctx, {
+          projectId: project.id,
+          serverName: review.name,
+          configHash: review.configHash,
+          verdict: McpVerdict.Approved,
+          variables: [],
+          hosts: review.hosts,
+          sourceInboxId: null,
+        });
+    });
+    const exporter = () => Promise.resolve(CREDENTIALS);
+    const same = await read(reader(exporter));
+    expect(Object.keys(same.servers)).toEqual(['aws-billing']);
+    expect(flags).toEqual([]);
+
+    hostsFile(['billing.us-east-1.amazonaws.com', 'billing.us-east-1.api.aws']);
+    const changed = await read(reader(exporter));
+    expect(changed.servers).toEqual({});
+    expect(changed.pending.map((r) => r.name)).toEqual(['aws-billing']);
+    expect(flags.map((f) => f.title)).toEqual(['Run the repo\'s MCP server "aws-billing"?']);
+    expect(flags[0]?.body.split('\n')).toContain(
+      'New hosts since your last approval: billing.us-east-1.api.aws',
     );
   });
 

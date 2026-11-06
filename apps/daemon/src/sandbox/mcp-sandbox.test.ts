@@ -1,4 +1,5 @@
 import {
+  appendFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -13,7 +14,9 @@ import { mintId } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { createTempRepo, FAKE_SRT, SANDBOXED, type TempDir } from '../../test/fixtures';
+import { ManualClock, type Clock } from '../clock';
 import { createGit } from '../git';
+import { REFUSED_MESSAGE } from './mcp-sandbox';
 import {
   createLaneSandbox,
   SandboxProfileError,
@@ -63,6 +66,7 @@ const SRT_PROXY_NAMES = [
 function forSession(
   overrides: Partial<LaneSessionInput> = {},
   runtime: SandboxRuntime = FAKE_SRT,
+  extra: { clock?: Clock; log?: { warn(fields: object, message: string): void } } = {},
 ): Promise<LaneSession> {
   return createLaneSandbox({
     home,
@@ -73,6 +77,7 @@ function forSession(
     systemPrefixes: [],
     runtime,
     worktreeRoot: join(home, 'worktrees'),
+    ...extra,
   }).forSession({
     project: {
       id: projectId,
@@ -110,7 +115,9 @@ function launchOf(session: LaneSession, name: string) {
   const envFile = /'\. "\$0" && exec "\$@"' '([^']+)'/.exec(inner)?.[1];
   if (envFile === undefined) throw new Error(`no env file in ${inner}`);
   const settings: unknown = JSON.parse(readFileSync(settingsFile, 'utf8'));
-  return { server, settingsFile, settings, inner, tmp, envFile };
+  const preload = server.args[server.args.indexOf('-r') + 1] ?? '';
+  const refusalLog = /const FILE = "([^"]+)"/.exec(readFileSync(preload, 'utf8'))?.[1] ?? '';
+  return { server, settingsFile, settings, inner, tmp, envFile, preload, refusalLog };
 }
 
 beforeEach(() => {
@@ -136,7 +143,7 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
     });
     try {
       expect(Object.keys(session.mcpServers)).toEqual(['docs', 'other']);
-      const { server, settingsFile, tmp, inner } = launchOf(session, 'docs');
+      const { server, settingsFile, tmp, inner, preload } = launchOf(session, 'docs');
       expect(server).toEqual({
         command: '/usr/bin/env',
         args: [
@@ -144,7 +151,11 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
           'PATH=/usr/bin:/bin:/usr/sbin:/sbin',
           `HOME=${home}`,
           `CLAUDE_CODE_TMPDIR=${tmp}`,
+          // srt's debug log is how its proxy says which host it refused; the preload carries it out.
+          'SRT_DEBUG=1',
           FAKE_SRT.node,
+          '-r',
+          preload,
           FAKE_SRT.cli,
           '--settings',
           settingsFile,
@@ -291,7 +302,7 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
       expect(session.mcpFailures[0]?.message).toContain('DOCS_TOKEN');
       // The value itself is never in the report.
       expect(JSON.stringify(session.mcpFailures)).not.toContain('line-one');
-      const { settingsFile, tmp, envFile } = launchOf(session, 'docs');
+      const { settingsFile, tmp, envFile, preload, refusalLog } = launchOf(session, 'docs');
       // Only the lane's own files, the started server's and the daemon's process ledger are left:
       // the failed one's are gone.
       const left = readdirSync(tmpRoot);
@@ -299,7 +310,15 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
         left.filter((name) => /^10db-proc-[1-9][0-9]*-[0-9a-f]{12}\.json$/.test(name)),
       ).toHaveLength(1);
       expect(left.filter((name) => !name.startsWith('10db-proc-')).sort()).toEqual(
-        [session.tmpDir, settingsFile, tmp, envFile, session.spec.env['CLAUDE_ENV_FILE'] ?? '']
+        [
+          session.tmpDir,
+          settingsFile,
+          tmp,
+          envFile,
+          preload,
+          refusalLog,
+          session.spec.env['CLAUDE_ENV_FILE'] ?? '',
+        ]
           .map((path) => path.slice(tmpRoot.length + 1))
           .sort(),
       );
@@ -311,10 +330,62 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
 
   it('removes each server temp dir, settings file and env file on dispose', async () => {
     const session = await forSession();
-    const { settingsFile, tmp, envFile } = launchOf(session, 'docs');
+    const { settingsFile, tmp, envFile, preload, refusalLog } = launchOf(session, 'docs');
     session.dispose();
-    for (const path of [settingsFile, tmp, envFile]) expect(existsSync(path)).toBe(false);
+    for (const path of [settingsFile, tmp, envFile, preload, refusalLog])
+      expect(existsSync(path)).toBe(false);
     expect(existsSync(session.tmpDir)).toBe(false);
+  });
+
+  it('names the server and the host in the daemon log when srt refuses one, once, even the last before the session ends', async () => {
+    const clock = new ManualClock();
+    const warnings: { fields: object; message: string }[] = [];
+    const session = await forSession(
+      { mcpServers: { docs: SERVER, other: { ...SERVER, hosts: [] } } },
+      FAKE_SRT,
+      {
+        clock,
+        log: {
+          warn: (fields, message) => {
+            warnings.push({ fields, message });
+          },
+        },
+      },
+    );
+    const docs = launchOf(session, 'docs');
+    const other = launchOf(session, 'other');
+    // What the preload writes when srt's proxy refuses a host.
+    appendFileSync(docs.refusalLog, 'billing.us-east-1.api.aws\n');
+    clock.advance(2000);
+    expect(warnings).toEqual([
+      {
+        fields: { server: 'docs', host: 'billing.us-east-1.api.aws' },
+        message: REFUSED_MESSAGE,
+      },
+    ]);
+    appendFileSync(docs.refusalLog, 'billing.us-east-1.api.aws\n');
+    appendFileSync(other.refusalLog, 'billing.us-east-1.api.aws\n');
+    clock.advance(2000);
+    expect(warnings.map((w) => w.fields)).toEqual([
+      { server: 'docs', host: 'billing.us-east-1.api.aws' },
+      { server: 'other', host: 'billing.us-east-1.api.aws' },
+    ]);
+    appendFileSync(docs.refusalLog, 'freetier.us-east-1.api.aws\n');
+    session.dispose();
+    expect(warnings.at(-1)?.fields).toEqual({ server: 'docs', host: 'freetier.us-east-1.api.aws' });
+    expect(clock.pendingTimers()).toBe(0);
+  });
+
+  it('seals the preload that runs in srt’s host, and leaves its log writable only by the daemon’s user', async () => {
+    const session = await forSession();
+    try {
+      const { preload, refusalLog } = launchOf(session, 'docs');
+      expect(statSync(preload).mode & 0o777).toBe(0o400);
+      expect(statSync(refusalLog).mode & 0o777).toBe(0o600);
+      expect(readFileSync(refusalLog, 'utf8')).toBe('');
+    } finally {
+      session.dispose();
+    }
   });
 
   it('refuses the session when srt lies where a project can write, and leaves nothing behind', async () => {

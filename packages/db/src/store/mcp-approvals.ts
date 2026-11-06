@@ -1,5 +1,5 @@
-import type { McpApprovalDto, ProjectId } from '@10db/contracts';
-import { and, eq } from 'drizzle-orm';
+import { McpVerdict, type McpApprovalDto, type ProjectId } from '@10db/contracts';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { DbReader, WriteContext } from './store';
 
@@ -33,6 +33,33 @@ export function recordMcpApproval(
     })
     .run();
   return row;
+}
+
+/**
+ * The builder's latest approval of a server under any config, or null when they never approved one: what
+ * a changed config is compared with, so its card can say what is new.
+ */
+export function getLatestApprovedMcpApproval(
+  db: DbReader,
+  projectId: ProjectId,
+  serverName: string,
+): McpApprovalDto | null {
+  const t = schema.mcpServerApprovals;
+  return (
+    db
+      .select()
+      .from(t)
+      .where(
+        and(
+          eq(t.projectId, projectId),
+          eq(t.serverName, serverName),
+          eq(t.verdict, McpVerdict.Approved),
+        ),
+      )
+      // Answers inside one clock tick share a time; the row written later has the larger rowid.
+      .orderBy(desc(t.updatedAt), sql`${t}.rowid desc`)
+      .get() ?? null
+  );
 }
 
 export function getMcpApproval(
