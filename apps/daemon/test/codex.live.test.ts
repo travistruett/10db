@@ -949,7 +949,9 @@ describe.skipIf(!live)(
           expect(existsSync(join(dir, 'planted'))).toBe(false);
         expect(existsSync(planted)).toBe(false);
         expect(readFileSync(ledger, 'utf8')).toBe(ledgerBefore);
-        expect(outputs[7]).toContain(`TMPDIR=${world.roots.codexLanes}/10db-`);
+        // The session's own temp dir, named by six characters in the Codex lanes root.
+        const lanesRoot = world.roots.codexLanes.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        expect(outputs[7]).toMatch(new RegExp(`TMPDIR=${lanesRoot}/[A-Za-z0-9]{6}(?![A-Za-z0-9])`));
         expect(outputs[7]).toContain('own-written');
       } finally {
         claudeLane.dispose();
