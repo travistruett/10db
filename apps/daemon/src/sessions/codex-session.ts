@@ -1,4 +1,5 @@
 import { homedir } from 'node:os';
+import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { MODEL_ALIAS_PATTERN, type AccountRefusal } from '@10db/contracts';
 import type { z } from 'zod';
@@ -94,8 +95,9 @@ function versionOf(userAgent: string): string | null {
 
 /**
  * Starts a Codex session behind the adapter's safety checks and emits `started` only once every one
- * has passed. Any failure ends it with `sandbox_refused`, `account_refused` or `error` and no prompt is
- * sent; the child is closed on every path. Each call runs under a deadline on the injected clock.
+ * has passed. A check that fails or cannot complete before `started` ends it `sandbox_refused`, an
+ * account that is not the expected one `account_refused`, and only a refused model or a failed resume
+ * `error`; no prompt is sent and the child is closed on every path. Each call runs under a deadline on the injected clock.
  */
 export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): SessionHandle {
   const events = createChannel<SessionEvent>();
@@ -199,7 +201,12 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
       { includeLayers: true, cwd: spec.cwd },
       ConfigReadResponse,
     );
-    const loaded = (config.layers ?? []).some(
+    // Codex omits the layers when it did not honour `includeLayers`, so their absence proves nothing.
+    if (config.layers === null || config.layers === undefined)
+      throw sandboxRefused(
+        'Codex did not list its config layers, so the project layer could not be checked.',
+      );
+    const loaded = config.layers.some(
       (layer) =>
         layer.name.type === 'project' &&
         (layer.disabledReason === null || layer.disabledReason === undefined),
@@ -210,17 +217,22 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
       );
   };
 
-  const readGuardHook = async (): Promise<HookEntry | undefined> => {
+  /** The hook the home's own `config.toml` declares; a hook from any other source is never the guard. */
+  const readGuardHook = async (own: string): Promise<HookEntry | undefined> => {
     const list = await ask('hooks/list', { cwds: [spec.cwd] }, HooksListResponse);
-    return list.data.flatMap((entry) => entry.hooks).find((h) => h.eventName === GUARD_HOOK_EVENT);
+    return list.data
+      .flatMap((entry) => entry.hooks)
+      .find((h) => h.eventName === GUARD_HOOK_EVENT && h.sourcePath === own);
   };
 
   const checkGuardHook = async (home: CodexHome): Promise<void> => {
-    let hook = await readGuardHook();
+    // Codex reports the resolved path, so the home's file is resolved the same way.
+    const own = await realpath(join(home.path, 'config.toml'));
+    let hook = await readGuardHook(own);
     if (hook?.enabled === true && hook.trustStatus !== TRUSTED) {
       await home.trustGuardHook(hook.key, hook.currentHash);
       // The trust takes effect in the running app-server, so the list is read again with no restart.
-      hook = await readGuardHook();
+      hook = await readGuardHook(own);
     }
     if (hook === undefined) throw sandboxRefused('Codex does not list the guard hook.');
     if (!hook.enabled) throw sandboxRefused('Codex has the guard hook disabled.');
@@ -348,13 +360,15 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
       finish(error.reason, error.message, error.refusal);
       return;
     }
+    // A start that cannot finish its checks is refused, not a crash the runner would retry.
+    const failed = started ? SessionEndReason.Error : SessionEndReason.SandboxRefused;
     if (error instanceof CallTimeout) {
-      finish(SessionEndReason.Error, `${error.message}. ${NO_PROMPT}`);
+      finish(failed, `${error.message}. ${NO_PROMPT}`);
       return;
     }
     if (error instanceof CodexRpcError) {
       finish(
-        SessionEndReason.Error,
+        failed,
         `Codex could not start the session. ${noAccountWhy(START_CALL_MS, [stderrTail], spec.account.kind).printed}. ${NO_PROMPT}`,
       );
       return;
@@ -363,7 +377,7 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
       { errName: error instanceof Error ? error.name : 'unknown' },
       'a codex session failed to start',
     );
-    finish(SessionEndReason.Error, `The Codex session could not start. ${NO_PROMPT}`);
+    finish(failed, `The Codex session could not start. ${NO_PROMPT}`);
   });
 
   return {

@@ -84,6 +84,7 @@ export const HooksListResponse = z.looseObject({
           enabled: z.boolean(),
           currentHash: z.string(),
           trustStatus: z.string(),
+          sourcePath: z.string().optional(),
         }),
       ),
     }),

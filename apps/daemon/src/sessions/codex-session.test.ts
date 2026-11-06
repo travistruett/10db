@@ -10,7 +10,7 @@ import { ManualClock } from '../clock';
 import { silentLogger, type Logger } from '../log';
 import { autoModeRules, type LaneSandboxSpec } from '../sandbox';
 import { codexThreadConfig } from './codex-lane-config';
-import { codexHomes, type CodexHome } from './codex-home';
+import { CodexHomeError, codexHomes, type CodexHome } from './codex-home';
 import { guardSocketPath, startCodexSession, type CodexSessionDeps } from './codex-session';
 import { fakeAppServer, type FakeAppServer } from './codex-test-support';
 import type { SignInState } from './sign-in-check';
@@ -32,25 +32,43 @@ const FINE = {
       { name: { type: 'project' }, disabledReason: 'the project is not trusted' },
     ],
   },
-  'hooks/list': hooksOf({ trustStatus: 'trusted', enabled: true }),
+  'hooks/list': () => hooksOf({ trustStatus: 'trusted', enabled: true }),
   'thread/start': threadOf('gpt-5.6-sol', 'lane'),
   'thread/resume': threadOf('gpt-5.6-sol', 'lane'),
   'turn/start': { turn: { id: 'turn-1', status: 'inProgress' } },
 };
 
-function hooksOf(hook: { trustStatus: string; enabled: boolean; eventName?: string }) {
+interface HookShape {
+  trustStatus: string;
+  enabled: boolean;
+  eventName?: string;
+}
+
+/** A hook another source lists, as a `hooks.json` in the home does; 10db must never trust it. */
+const FOREIGN_SOURCE = '/tmp/not-10db/hooks.json';
+const OWN_KEY = 'pre_tool_use:0:0';
+
+function entry(hook: HookShape, source: string) {
+  return {
+    key: `${source}:${OWN_KEY}`,
+    eventName: hook.eventName ?? 'preToolUse',
+    enabled: hook.enabled,
+    currentHash: source === FOREIGN_SOURCE ? 'sha256:evil' : 'sha256:abc',
+    trustStatus: hook.trustStatus,
+    sourcePath: source,
+    source: 'user',
+  };
+}
+
+/** The home's own hook, with `foreign` hooks listed before it. */
+function hooksOf(hook: HookShape, foreign: HookShape[] = [], own = true) {
   return {
     data: [
       {
         cwd: '/c',
         hooks: [
-          {
-            key: '/codex/config.toml:pre_tool_use:0:0',
-            eventName: hook.eventName ?? 'preToolUse',
-            enabled: hook.enabled,
-            currentHash: 'sha256:abc',
-            trustStatus: hook.trustStatus,
-          },
+          ...foreign.map((f) => entry(f, FOREIGN_SOURCE)),
+          ...(own ? [entry(hook, join(codexHome, 'config.toml'))] : []),
         ],
       },
     ],
@@ -85,7 +103,7 @@ let codexHome: string;
 beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'codex-session-'));
   checkout = join(root, 'checkout');
-  codexHome = join(root, 'account-home');
+  codexHome = join(await realpath(root), 'account-home');
   await mkdir(checkout);
 });
 
@@ -193,15 +211,61 @@ describe('the start checks', () => {
       'account_refused',
     ],
     ['the project layer is enabled', { 'config/read': projectLayerOn }, 'sandbox_refused'],
-    ['the hook is missing', { 'hooks/list': { data: [{ hooks: [] }] } }, 'sandbox_refused'],
+    [
+      'only a foreign trusted hook is listed',
+      {
+        'hooks/list': () =>
+          hooksOf(
+            { trustStatus: 'trusted', enabled: true },
+            [{ trustStatus: 'trusted', enabled: true }],
+            false,
+          ),
+      },
+      'sandbox_refused',
+    ],
+    [
+      'only a foreign untrusted hook is listed',
+      {
+        'hooks/list': () =>
+          hooksOf(
+            { trustStatus: 'trusted', enabled: true },
+            [{ trustStatus: 'untrusted', enabled: true }],
+            false,
+          ),
+      },
+      'sandbox_refused',
+    ],
+    ['the config read lists no layers', { 'config/read': {} }, 'sandbox_refused'],
+    ['the config read lists null layers', { 'config/read': { layers: null } }, 'sandbox_refused'],
+    [
+      'initialize fails',
+      { initialize: { error: { code: -32000, message: 'no' } } },
+      'sandbox_refused',
+    ],
+    [
+      'the config read fails',
+      { 'config/read': { error: { code: -32000, message: 'no' } } },
+      'sandbox_refused',
+    ],
+    [
+      'the hook list fails',
+      { 'hooks/list': { error: { code: -32000, message: 'no' } } },
+      'sandbox_refused',
+    ],
+    [
+      'the thread fails for another reason',
+      { 'thread/start': { error: { code: -32000, message: 'disk full' } } },
+      'sandbox_refused',
+    ],
+    ['the hook is missing', { 'hooks/list': () => ({ data: [{ hooks: [] }] }) }, 'sandbox_refused'],
     [
       'the hook is another event',
-      { 'hooks/list': hooksOf({ trustStatus: 'trusted', enabled: true, eventName: 'stop' }) },
+      { 'hooks/list': () => hooksOf({ trustStatus: 'trusted', enabled: true, eventName: 'stop' }) },
       'sandbox_refused',
     ],
     [
       'the hook is disabled',
-      { 'hooks/list': hooksOf({ trustStatus: 'trusted', enabled: false }) },
+      { 'hooks/list': () => hooksOf({ trustStatus: 'trusted', enabled: false }) },
       'sandbox_refused',
     ],
     [
@@ -300,7 +364,9 @@ describe('the hook trust', () => {
     const { handle, server } = startWith({
       'hooks/list': () => {
         lists += 1;
-        return hooksOf({ trustStatus: lists === 1 ? 'untrusted' : 'trusted', enabled: true });
+        return hooksOf({ trustStatus: lists === 1 ? 'untrusted' : 'trusted', enabled: true }, [
+          { trustStatus: 'untrusted', enabled: true },
+        ]);
       },
     });
     expect((await firstEvent(handle))?.type).toBe('started');
@@ -309,14 +375,50 @@ describe('the hook trust', () => {
     const config = parse(await readFile(join(codexHome, 'config.toml'), 'utf8')) as {
       hooks: { state: Record<string, { trusted_hash: string }> };
     };
-    expect(config.hooks.state['/codex/config.toml:pre_tool_use:0:0']).toEqual({
-      trusted_hash: 'sha256:abc',
+    // Only the home's own hook is trusted, never the foreign one listed before it.
+    expect(config.hooks.state).toEqual({
+      [`${join(codexHome, 'config.toml')}:${OWN_KEY}`]: { trusted_hash: 'sha256:abc' },
+    });
+  });
+
+  it('refuses, trusting nothing, when a foreign hook is the only one listed', async () => {
+    const { handle } = startWith({
+      'hooks/list': () =>
+        hooksOf(
+          { trustStatus: 'trusted', enabled: true },
+          [{ trustStatus: 'untrusted', enabled: true }],
+          false,
+        ),
+    });
+    expect((await collect(handle)).at(-1)).toMatchObject({ reason: 'sandbox_refused' });
+    await expect(readFile(join(codexHome, 'config.toml'), 'utf8')).resolves.not.toContain('evil');
+    await expect(readFile(join(codexHome, 'config.toml'), 'utf8')).resolves.not.toContain(
+      'not-10db',
+    );
+  });
+
+  it('ends sandbox_refused when the trust cannot be written', async () => {
+    const real = codexHomes();
+    const homes = (path: string): CodexHome => ({
+      path: real(path).path,
+      emptyHome: real(path).emptyHome,
+      prepare: (dir) => real(path).prepare(dir),
+      trustGuardHook: () => Promise.reject(new CodexHomeError('config.toml is not valid TOML')),
+    });
+    const { handle } = startWith(
+      { 'hooks/list': () => hooksOf({ trustStatus: 'untrusted', enabled: true }) },
+      {},
+      { homes },
+    );
+    expect((await collect(handle)).at(-1)).toMatchObject({
+      type: 'ended',
+      reason: 'sandbox_refused',
     });
   });
 
   it('refuses if the hook stays untrusted after it was trusted', async () => {
     const { handle, server } = startWith({
-      'hooks/list': hooksOf({ trustStatus: 'modified', enabled: true }),
+      'hooks/list': () => hooksOf({ trustStatus: 'modified', enabled: true }),
     });
     const events = await collect(handle);
     expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'sandbox_refused' });
@@ -449,7 +551,7 @@ describe('the deadline', () => {
     expect(server.killed()).toBe(false);
     clock.advance(1);
     const events = await collect(handle);
-    expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'error' });
+    expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'sandbox_refused' });
     expect(JSON.stringify(events.at(-1))).toContain('hooks/list');
     expect(server.killed()).toBe(true);
     expect(methods(server)).not.toContain('turn/start');
