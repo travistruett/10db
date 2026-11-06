@@ -24,6 +24,7 @@ import { leaveLate, takeLate, useLate } from './late-outcome';
 import { RecentConversations } from './recent-conversations';
 import { Transcript, type TranscriptProps } from './transcript';
 import { useShapeKeys } from './use-shape-keys';
+import { WaitingPermissions } from './waiting-permissions';
 
 export interface ConversationPaneProps {
   readonly projectId: ProjectId | null;
@@ -211,6 +212,7 @@ export function ConversationPane({
         )}
       </Group>
       <Transcript messages={view?.messages ?? []} why={why} />
+      <WaitingPermissions shapeId={shapeId} />
       {view?.turn.waitingForUpdate === true ? (
         <Text role="status" size="sm" c="dimmed" px="md" py="xs" style={{ flex: 'none' }}>
           Waiting for an update to install. If 10db quits for it, this won’t run: send or press it
