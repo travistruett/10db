@@ -2718,43 +2718,155 @@ const moveTo = (accountId: AccountId) =>
 /** What the scheduler does once the new account isn't paused. */
 const requeue = (id: Parameters<typeof getWorkstream>[1]) =>
   engine.state.write((ctx) => transitionWorkstream(ctx, id, { to: 'QUEUED', fence: null }));
+/** Every spec the fake adapter is started with, in order. */
+const recordSpecs = (): SessionSpec[] => {
+  const specs: SessionSpec[] = [];
+  engine.adapter.seen = (spec) => {
+    specs.push(spec);
+    return {};
+  };
+  return specs;
+};
 
 describe('moving accounts', () => {
   const accountsOf = (id: Parameters<typeof getWorkstream>[1]) =>
     listSessions(engine.store.db, id).map((s) => s.accountId);
 
-  it('starts a fresh session from the handoff when the project moved off the account its conversation ran on', async () => {
-    engine = await createTestEngine({
-      Alpha: [
-        [
-          {
-            do: 'mcp',
-            tool: 'write_handoff',
-            args: handoffArgs('op-move-0001', 'Write the second file'),
-          },
-          { do: 'rate_limit', status: 'rejected', resetsInSeconds: 600 },
-        ],
-        [write('src/api/b.txt'), commit('op-move-0002', ['src/api/b.txt']), turn],
-      ],
-    });
-    const { workstream } = engine.addTask('Alpha');
-    engine.launch(workstream.id);
-    await engine.runner.idle();
-    expect(ws(workstream.id)).toMatchObject({
-      state: 'PAUSED_LIMIT',
-      nextAction: { kind: 'resume' },
-    });
+  /** A ChatGPT account's Model map: a Codex model ID for each alias the router names. */
+  const CODEX_MODELS: Readonly<Record<string, string>> = {
+    opus: 'gpt-6-astra',
+    sonnet: 'gpt-5.6-sol',
+    haiku: 'gpt-5.6-luna',
+    fable: 'gpt-6-astra',
+  };
+  const CHATGPT = {
+    kind: 'codex_signin',
+    label: 'ChatGPT plan',
+    settings: { modelMap: CODEX_MODELS },
+  } as const;
+  const CHATGPT_IDENTITY = 'chatgpt@example.com · ws-1';
+  type Plan = 'claude' | 'chatgpt';
+  /** An engine whose project starts on a plan of `home`'s agent, its identity confirmed. */
+  const engineOn = async (home: Plan, book: Parameters<typeof createTestEngine>[0]) => {
+    engine = await createTestEngine(book, {}, {}, home === 'chatgpt' ? { account: CHATGPT } : {});
+    if (home === 'chatgpt')
+      engine.state.write((ctx) =>
+        patchAccount(ctx, engine.project.accountId, { expectedIdentity: CHATGPT_IDENTITY }),
+      );
+    return engine;
+  };
+  /** Another confirmed account for the project to move to, of `plan`'s agent. */
+  const otherPlan = (plan: Plan): AccountId => {
+    if (plan === 'claude') return secondPlan().id;
+    const account = seedAccount(engine.store, CHATGPT);
+    engine.state.write((ctx) =>
+      patchAccount(ctx, account.id, { expectedIdentity: CHATGPT_IDENTITY }),
+    );
+    return account.id;
+  };
+  /** The model a session on a plan of `plan`'s agent is asked for, given its step's alias. */
+  const modelOn = (plan: Plan, alias: string): string =>
+    plan === 'chatgpt' ? (CODEX_MODELS[alias] ?? alias) : alias;
+  const providerOn = (plan: Plan): string => (plan === 'chatgpt' ? 'codex' : 'claude');
 
-    const second = secondPlan();
-    moveTo(second.id);
-    requeue(workstream.id);
-    engine.launch(workstream.id);
-    await engine.runner.idle();
-    expect(ws(workstream.id).state).toBe('DONE');
-    expect(accountsOf(workstream.id)).toEqual([engine.project.accountId, second.id]);
-    expect(engine.adapter.prompts[1]).toMatchObject({ resume: null });
-    expect(engine.adapter.prompts[1]?.prompt).toContain('Next action: Write the second file');
-  });
+  it.each([
+    ['another Claude account', 'claude', 'claude'],
+    ['a ChatGPT account after a Claude one', 'claude', 'chatgpt'],
+    ['a Claude account after a ChatGPT one', 'chatgpt', 'claude'],
+  ] as const)(
+    'runs the next session on %s from the handoff, with the step alias mapped',
+    async (_name, home, away) => {
+      await engineOn(home, {
+        Alpha: [
+          [
+            {
+              do: 'mcp',
+              tool: 'write_handoff',
+              args: handoffArgs('op-move-0001', 'Write the second file'),
+            },
+            { do: 'rate_limit', status: 'rejected', resetsInSeconds: 600 },
+          ],
+          [write('src/api/b.txt'), commit('op-move-0002', ['src/api/b.txt']), turn],
+        ],
+      });
+      const specs = recordSpecs();
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      expect(ws(workstream.id)).toMatchObject({
+        state: 'PAUSED_LIMIT',
+        nextAction: { kind: 'resume' },
+      });
+
+      const other = otherPlan(away);
+      moveTo(other);
+      requeue(workstream.id);
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      expect(ws(workstream.id).state).toBe('DONE');
+      expect(accountsOf(workstream.id)).toEqual([engine.project.accountId, other]);
+      expect(engine.adapter.prompts[1]).toMatchObject({ resume: null });
+      expect(engine.adapter.prompts[1]?.prompt).toContain('Next action: Write the second file');
+      // Each session asks its account's agent for the step's alias, through that account's Model map.
+      const sessions = listSessions(engine.store.db, workstream.id);
+      expect(specs.map((s) => s.model)).toEqual([
+        modelOn(home, sessions[0]?.model ?? ''),
+        modelOn(away, sessions[1]?.model ?? ''),
+      ]);
+      expect(sessions.map((s) => s.provider)).toEqual([providerOn(home), providerOn(away)]);
+    },
+  );
+
+  it.each([
+    ['a Claude lane back from a ChatGPT session', 'claude', 'chatgpt'],
+    ['a ChatGPT lane back from a Claude session', 'chatgpt', 'claude'],
+  ] as const)(
+    'does not resume a conversation from the other account: %s',
+    async (_name, home, away) => {
+      await engineOn(home, {
+        Alpha: [
+          [
+            { do: 'mcp', tool: 'write_handoff', args: handoffArgs('op-across-001', 'Write a') },
+            { do: 'rate_limit', status: 'rejected', resetsInSeconds: 600 },
+          ],
+          [
+            { do: 'mcp', tool: 'write_handoff', args: handoffArgs('op-across-002', 'Write b') },
+            { do: 'rate_limit', status: 'rejected', resetsInSeconds: 600 },
+          ],
+          [write('src/api/b.txt'), commit('op-across-003', ['src/api/b.txt']), turn],
+        ],
+      });
+      const homeAccount = engine.project.accountId;
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      moveTo(otherPlan(away));
+      requeue(workstream.id);
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      // The lane paused again, this time with a conversation on the other agent's account to resume.
+      const [first, across] = listSessions(engine.store.db, workstream.id);
+      expect(ws(workstream.id).nextAction).toMatchObject({
+        kind: 'resume',
+        providerSessionId: across?.providerSessionId,
+      });
+
+      moveTo(homeAccount);
+      requeue(workstream.id);
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+      expect(ws(workstream.id).state).toBe('DONE');
+      expect(engine.adapter.prompts.map((p) => p.accountId)).toEqual([
+        homeAccount,
+        across?.accountId,
+        homeAccount,
+      ]);
+      // Back home, neither the other account's conversation nor the older one here is resumed.
+      expect(engine.adapter.prompts.map((p) => p.resume)).toEqual([null, null, null]);
+      expect(engine.adapter.prompts[2]?.prompt).toContain('Next action: Write b');
+      expect(first?.providerSessionId).not.toBe(across?.providerSessionId);
+    },
+  );
 
   it('briefs for the account a lane moved to, session by session', async () => {
     engine = await createTestEngine({
@@ -4568,15 +4680,6 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       home,
       tmpRoot,
     };
-  };
-  /** Every spec the fake adapter is started with. */
-  const recordSpecs = (): SessionSpec[] => {
-    const specs: SessionSpec[] = [];
-    engine.adapter.seen = (spec) => {
-      specs.push(spec);
-      return {};
-    };
-    return specs;
   };
   const hostCall = (host: string) => ({
     do: 'tool' as const,

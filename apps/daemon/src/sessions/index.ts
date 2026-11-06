@@ -1,5 +1,8 @@
 export { createClaudeAdapter } from './claude-adapter';
 export { createCodexAdapter } from './codex-adapter';
+export { patchPaths } from './codex-guard';
+export { spawnAppServer, type CodexChild } from './codex-rpc';
+export { guardSocketPath } from './codex-session';
 export { codexLoginStatus } from './codex-sign-in-check';
 export { createRoutedAdapter } from './routed-adapter';
 export {
