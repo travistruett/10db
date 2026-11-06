@@ -93,6 +93,7 @@ describe.skipIf(!SEATBELT)('toolchains under the gate sandbox (Seatbelt)', () =>
         tmpRoot: join(root, 't'),
         filesRoot: join(root, 'r'),
         runtime: resolveSandboxRuntime(),
+        log: silentLogger,
       }),
       logger: silentLogger,
     });

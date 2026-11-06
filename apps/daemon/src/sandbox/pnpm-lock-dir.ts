@@ -98,18 +98,34 @@ function asError(error: unknown): Error {
 const TOOL_ENV = { PATH: '/usr/bin:/bin' };
 const run = promisify(execFile);
 
-/** How many times the sweep opens the locked directories it can reach in a moved tree. */
-const UNLOCK_PASSES = 16;
+/** How many times one sweep opens the locked directories it can reach in a moved tree. */
+export const UNLOCK_PASSES = 16;
+
+/** macOS keeps user flags and ACLs; elsewhere neither tool takes them. */
+const MACOS = process.platform === 'darwin';
+
+/** Runs `tool` on every directory of `path` that `find` reaches, batched; true when all went. */
+function onDirectories(path: string, tool: readonly string[]): Promise<boolean> {
+  return run('/usr/bin/find', ['-P', path, '-type', 'd', '-exec', ...tool, '{}', '+'], {
+    env: TOOL_ENV,
+  }).then(
+    () => true,
+    () => false,
+  );
+}
 
 /**
- * Removes a moved lock directory and all it holds, off the event loop. Each pass of `find` opens
- * for their owner the directories it can reach that a run locked (one `chmod` per batch), so each
- * opens one more level; then the user flags a run can set are cleared, and `rm -rf` removes the
- * tree, with every ACL removed and a second try when the first fails. None follows a link, and only
- * directories have their mode changed, so a hard link's other name keeps its own.
+ * Removes a moved lock directory and all it holds, off the event loop. Only directories are ever
+ * changed: unlinking a file needs only its directory's write access, so a file's mode, flags and ACL
+ * stay as they are, a second name's included, and a file they keep from being removed is left with
+ * its tree. Each pass of `find` clears the user flags (`uchg`, `uappnd`) of the directories it can
+ * reach and opens the locked ones for their owner, one batch each, so each opens one more level.
+ * Then `rm -rf` removes the tree, with the directories' ACLs removed and a second try when the first
+ * fails. None follows a link.
  */
 async function removeTree(path: string): Promise<void> {
   for (let pass = 0; pass < UNLOCK_PASSES; pass += 1) {
+    if (MACOS) await onDirectories(path, ['/usr/bin/chflags', 'nouchg,nouappnd']);
     const opened = await run(
       '/usr/bin/find',
       ['-P', path, '-type', 'd', '!', '-perm', '-u=rwx', '-exec', '/bin/chmod', 'u+rwx', '{}', '+'],
@@ -120,17 +136,13 @@ async function removeTree(path: string): Promise<void> {
     );
     if (opened) break;
   }
-  // macOS's user flags; elsewhere the tool is missing and there are none.
-  await run('/usr/bin/chflags', ['-R', '-P', 'nouchg,nouappnd', path], { env: TOOL_ENV }).catch(
-    () => undefined,
-  );
   const removed = (): Promise<boolean> =>
     run('/bin/rm', ['-rf', '--', path], { env: TOOL_ENV }).then(
       () => !existsSync(path),
       () => false,
     );
   if (await removed()) return;
-  await run('/bin/chmod', ['-R', '-N', path], { env: TOOL_ENV }).catch(() => undefined);
+  if (MACOS) await onDirectories(path, ['/bin/chmod', '-N']);
   if (!(await removed())) throw new Error(`${path} could not be removed`);
 }
 

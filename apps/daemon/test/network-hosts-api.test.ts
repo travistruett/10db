@@ -17,6 +17,7 @@ import { z } from 'zod';
 import { startDaemon, type RunningDaemon } from '../src/daemon';
 import { createGit } from '../src/git';
 import { storableRule } from '../src/permissions';
+import { silentLogger } from '../src/log';
 import { createGateSandbox } from '../src/sandbox';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
@@ -330,6 +331,7 @@ describe('network hosts of a project', () => {
         gitDirs: (path) => git.gitDirs(path),
         systemPrefixes: [],
         runtime: FAKE_SRT,
+        log: silentLogger,
       });
       const run = await sandbox.forRun({
         project: { repoPath: repo.path, sandboxLoopback: false },

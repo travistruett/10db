@@ -701,6 +701,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
               loginConfigDir: launcher.loginConfigDir(),
               gitDirs: (repo) => git.gitDirs(repo),
               ...sandboxDepsOf(sandboxRoots),
+              log: logger.child({ component: 'sandbox' }),
               runtime,
             }),
         })

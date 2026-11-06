@@ -55,6 +55,12 @@ const gate = createGateRunner({
     loginConfigDir: env['CLAUDE_CONFIG_DIR'] ?? null,
     gitDirs: (repo) => git.gitDirs(repo),
     ...sandboxDepsOf(roots),
+    // What a sweep of pnpm's lock directory could not remove, on stderr.
+    log: {
+      warn: (fields, message) => {
+        process.stderr.write(`${message} ${JSON.stringify(fields)}\n`);
+      },
+    },
     runtime: resolveSandboxRuntime(),
   }),
   logger: silentLogger,

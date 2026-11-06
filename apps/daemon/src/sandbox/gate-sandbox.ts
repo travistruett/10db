@@ -97,8 +97,8 @@ export interface GateSandboxDeps extends Omit<ProjectAccessDeps, 'tmpRoot'> {
   readonly tmpRoot?: string;
   /** Where pnpm keeps its store locks; tests pass a directory of their own. */
   readonly pnpmLockDir?: string;
-  /** Told what a sweep of pnpm's lock directory could not remove. */
-  readonly log?: SweepLog;
+  /** Told what a sweep of pnpm's lock directory could not remove; required, so none is lost. */
+  readonly log: SweepLog;
   readonly runtime: SandboxRuntime;
 }
 

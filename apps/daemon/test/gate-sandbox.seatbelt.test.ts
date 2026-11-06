@@ -80,6 +80,7 @@ describe.skipIf(!SEATBELT)('the gate under the sandbox (Seatbelt)', () => {
         tmpRoot,
         filesRoot: join(root, 'r'),
         codexLaneTempRoot: join(root, 'l'),
+        log: silentLogger,
         pnpmLockDir: join(root, 'pnpm-locks'),
         runtime: resolveSandboxRuntime(),
       }),

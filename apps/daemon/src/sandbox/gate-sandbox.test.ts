@@ -27,7 +27,7 @@ import {
   type GateRunInput,
   type GateSandbox,
 } from './index';
-import { sweepPnpmLockDir } from './pnpm-lock-dir';
+import { sweepPnpmLockDir, UNLOCK_PASSES } from './pnpm-lock-dir';
 import { childListingGrant, listingGrant } from './profile';
 import { isEqualOrUnder } from './protected-reads';
 
@@ -46,6 +46,11 @@ let checkout: string;
 
 /** What the sandbox told the log, by message and fields. */
 let warnings: { fields: Record<string, unknown>; message: string }[] = [];
+const log = {
+  warn: (fields: object, message: string): void => {
+    warnings.push({ fields: { ...fields }, message });
+  },
+};
 
 function sandbox(): GateSandbox {
   return createGateSandbox({
@@ -60,11 +65,7 @@ function sandbox(): GateSandbox {
     // Hermetic: the machine's own install prefixes add no deny.
     systemPrefixes: [],
     runtime: RUNTIME,
-    log: {
-      warn: (fields, message) => {
-        warnings.push({ fields: { ...fields }, message });
-      },
-    },
+    log,
   });
 }
 
@@ -481,6 +482,7 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
       gitDirs: (path) => git.gitDirs(path),
       systemPrefixes: [],
       runtime,
+      log,
     }).forRun(input());
     await expect(pending).rejects.toThrow(SandboxProfileError);
     expect(readdirSync(tmpRoot).filter((name) => name.startsWith('10db-'))).toEqual([]);
@@ -511,6 +513,21 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
     expect(readdirSync(tmpRoot)).toEqual([]);
     expect(readdirSync(filesRoot)).toEqual([]);
   });
+  it('is never built without a log, so whatever a sweep leaves is told', () => {
+    const build = (): GateSandbox =>
+      // @ts-expect-error `log` is required: the daemon and `scripts/sandboxed-gate.ts` pass theirs.
+      createGateSandbox({
+        home,
+        dataDir,
+        loginConfigDir: null,
+        tmpRoot,
+        filesRoot,
+        gitDirs: (path) => git.gitDirs(path),
+        runtime: RUNTIME,
+      });
+    expect(build).toBeTypeOf('function');
+  });
+
   describe('a run that installs packages', () => {
     it("opens pnpm's store lock directory, which pnpm puts in the system temp dir whatever TMPDIR says", async () => {
       await withRun(input({ packageInstall: true }), (run) => {
@@ -580,16 +597,36 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
       expect(readdirSync(victim).sort()).toEqual(['file', 'sub']);
     });
 
-    // macOS's user flags are what keep a file from being removed by its owner.
+    /** Writes `name` in `dir`, making `dir` first, and returns its path. */
+    const writeIn = (dir: string, name: string, text = 'x'): string => {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, name), text);
+      return join(dir, name);
+    };
+    /** A file's user flags and ACL, as `stat` and `ls -le` show them. */
+    const metadata = (path: string): { readonly flags: string; readonly acl: string } => ({
+      flags: execFileSync('/usr/bin/stat', ['-f', '%Sf', path], { encoding: 'utf8' }).trim(),
+      acl: execFileSync('/bin/ls', ['-led', path], { encoding: 'utf8' })
+        .split('\n')
+        .slice(1)
+        .join('\n')
+        .trim(),
+    });
+    /** Undoes what a test set on a file, so the test can remove it. */
+    const unlock = (path: string): void => {
+      execFileSync('/usr/bin/chflags', ['nouchg,nouappnd', path]);
+      execFileSync('/bin/chmod', ['-N', path]);
+    };
+
+    // macOS's user flags and ACLs: they keep their owner from removing what a directory holds.
     it.skipIf(process.platform !== 'darwin')(
-      'clears the user flags a run set in the lock directory, and removes what they held',
+      'clears the user flags and ACLs a run set on directories in the lock directory, and removes what they held',
       async () => {
         const run = await sandbox().forRun(input({ packageInstall: true }));
-        writeFileSync(join(pnpmLockDir, 'stuck.lock'), '');
-        mkdirSync(join(pnpmLockDir, 'appended'));
-        writeFileSync(join(pnpmLockDir, 'appended', 'x'), '');
-        execFileSync('/usr/bin/chflags', ['uchg', join(pnpmLockDir, 'stuck.lock')]);
+        for (const name of ['appended', 'immutable', 'acl']) writeIn(join(pnpmLockDir, name), 'x');
         execFileSync('/usr/bin/chflags', ['uappnd', join(pnpmLockDir, 'appended')]);
+        execFileSync('/usr/bin/chflags', ['uchg', join(pnpmLockDir, 'immutable')]);
+        execFileSync('/bin/chmod', ['+a', 'everyone deny delete_child', join(pnpmLockDir, 'acl')]);
         await run.dispose();
         expect(existsSync(pnpmLockDir)).toBe(false);
         expect(readdirSync(root).filter((name) => name.includes('sweep'))).toEqual([]);
@@ -598,11 +635,65 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
       },
     );
 
+    it.skipIf(process.platform !== 'darwin')(
+      "never changes a file's flags or ACL: one it can't remove is left, logged, with both as they were",
+      async () => {
+        const run = await sandbox().forRun(input({ packageInstall: true }));
+        const stuck = join(pnpmLockDir, 'stuck.lock');
+        writeFileSync(stuck, '');
+        execFileSync('/bin/chmod', ['+a', 'everyone deny write', stuck]);
+        execFileSync('/usr/bin/chflags', ['uchg', stuck]);
+        const before = metadata(stuck);
+        expect(before.flags).toContain('uchg');
+        expect(before.acl).toContain('deny write');
+        await run.dispose();
+        const [moved, ...more] = readdirSync(tmpRoot);
+        expect(more).toEqual([]);
+        const left = join(tmpRoot, moved ?? '', 'stuck.lock');
+        try {
+          expect(metadata(left)).toEqual(before);
+          expect(warnings.map((w) => w.fields['path'])).toEqual([join(tmpRoot, moved ?? '')]);
+        } finally {
+          if (existsSync(left)) unlock(left);
+        }
+      },
+    );
+
+    it.skipIf(process.platform !== 'darwin')(
+      'leaves the flags and ACL of a file that a second link in the lock directory names',
+      async () => {
+        const run = await sandbox().forRun(input({ packageInstall: true }));
+        const outside = join(root, 'outside');
+        mkdirSync(outside);
+        const withAcl = writeIn(outside, 'acl.txt', 'keep');
+        const immutable = writeIn(outside, 'immutable.txt', 'keep');
+        execFileSync('ln', [withAcl, join(pnpmLockDir, 'acl.lock')]);
+        execFileSync('ln', [immutable, join(pnpmLockDir, 'immutable.lock')]);
+        // Set after the links: macOS links no immutable file.
+        execFileSync('/bin/chmod', ['+a', 'everyone deny write', withAcl]);
+        execFileSync('/usr/bin/chflags', ['uchg', immutable]);
+        const before = { withAcl: metadata(withAcl), immutable: metadata(immutable) };
+        try {
+          await run.dispose();
+          expect({ withAcl: metadata(withAcl), immutable: metadata(immutable) }).toEqual(before);
+          // The second name of an immutable file can't be unlinked: its tree is left and logged.
+          expect(warnings).toHaveLength(1);
+        } finally {
+          unlock(withAcl);
+          unlock(immutable);
+          for (const name of readdirSync(tmpRoot)) {
+            const lock = join(tmpRoot, name, 'immutable.lock');
+            if (existsSync(lock)) unlock(lock);
+          }
+        }
+      },
+    );
+
     it("logs what it can't remove in the temp root, closed to every sandbox, and lets every later run go on", async () => {
       // A tree locked deeper than two runs' sweeps open, as a run could leave the lock directory:
-      // each sweep opens a bounded number of levels.
+      // each run sweeps twice, and each sweep opens `UNLOCK_PASSES` levels.
       const leftover = join(tmpRoot, `pnpm-sweep-${randomUUID()}`);
-      const levels = Array.from({ length: 100 }, (_, n) =>
+      const levels = Array.from({ length: 2 * 2 * UNLOCK_PASSES + 4 }, (_, n) =>
         join(leftover, ...Array.from({ length: n + 1 }, () => 'd')),
       );
       mkdirSync(levels.at(-1) ?? leftover, { recursive: true });
@@ -657,6 +748,7 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
         gitDirs: (path) => git.gitDirs(path),
         systemPrefixes: [],
         runtime: RUNTIME,
+        log,
       }).forRun(input({ packageInstall: true }));
       await expect(pending).rejects.toThrow(SandboxProfileError);
       expect(readdirSync(pnpmLockDir).sort()).toEqual(['abc.lock', 'all-stores.lock']);
