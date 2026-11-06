@@ -30,7 +30,7 @@ export class CodexRpcError extends Error {
 }
 
 /** The code of a `CodexRpcError` that did not come from the server. */
-const CLIENT_ERROR_CODE = 0;
+export const CLIENT_ERROR_CODE = 0;
 
 export interface CodexRpc {
   call<T>(method: string, params: unknown, schema: z.ZodType<T>): Promise<T>;
