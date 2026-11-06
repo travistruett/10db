@@ -170,3 +170,20 @@ describe('the cards for a ChatGPT account', () => {
     expect((card.options ?? []).map((o) => o.label)).toContain(AccountCardChoice.Confirm);
   });
 });
+
+describe('the identity-mismatch fix', () => {
+  it.each([
+    ['codex_signin', 'CODEX_HOME='],
+    ['claude_subscription', 'CLAUDE_CONFIG_DIR='],
+  ] as const)('keeps the case of the sign-in command of a %s account', (kind, variable) => {
+    const test = createTestStore();
+    close = test.close;
+    const account = getAccountRow(
+      test.store.db,
+      seedAccount(test.store, { kind, label: 'Plan' }).id,
+    );
+    const fix = fixFor(account, AccountProblem.IdentityMismatch);
+    expect(fix).toContain(variable);
+    expect(fix).toContain('otherwise sign in again with:');
+  });
+});

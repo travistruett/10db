@@ -59,6 +59,7 @@ export function accountIdentityDto(
     apiKeySource: null,
     tokenSource: null,
     subscription: true,
+    models: [],
     refusal: null,
     ...overrides,
   });

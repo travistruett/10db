@@ -71,21 +71,22 @@ async function readAccount(rpc: CodexRpc): Promise<SeenAccount> {
   if (account === null) return nothing;
   // A key or Bedrock login is not a ChatGPT plan; the account check refuses it by its provider.
   if (account.type !== 'chatgpt') return { ...nothing, apiProvider: account.type };
-  // The workspace is named only by the usage read; without it the identity is the email alone.
-  const organization = await rpc
-    .call('account/rateLimits/read', undefined, RateLimitsReadResponse)
-    .then(
-      (usage) => usage.accountId ?? undefined,
-      () => undefined,
-    );
-  const models = await rpc.call('model/list', {}, ModelListResponse);
+  // A ChatGPT identity is the email and the workspace together, and only the usage read names the
+  // workspace: without it the account could be confirmed as the wrong one.
+  const usage = await rpc.call('account/rateLimits/read', undefined, RateLimitsReadResponse);
+  if (usage.accountId === null || usage.accountId === undefined)
+    throw new AccountProbeError('Codex did not name the workspace');
+  // The list only informs Settings, so a failed read leaves it unset.
+  const models = await rpc.call('model/list', {}, ModelListResponse).catch(() => undefined);
   return {
     ...nothing,
     apiProvider: 'chatgpt',
     email: account.email ?? undefined,
     subscriptionType: account.planType,
-    organization,
-    models: models.data.filter((m) => m.hidden !== true).map((m) => m.model),
+    organization: usage.accountId,
+    ...(models === undefined
+      ? {}
+      : { models: models.data.filter((m) => m.hidden !== true).map((m) => m.model) }),
   };
 }
 

@@ -85,15 +85,27 @@ describe('probeAccount', () => {
     });
   });
 
-  it('leaves the workspace unset when the usage read fails', async () => {
+  it.each([
+    ['fails', { error: { code: -32000, message: 'no usage' } }],
+    ['names no workspace', { rateLimits: { limitId: 'codex' } }],
+    ['names a null workspace', { rateLimits: { limitId: 'codex' }, accountId: null }],
+  ])('rejects with AccountProbeError when the usage read %s', async (_name, usage) => {
+    const server = fakeAppServer({ ...SIGNED_IN, 'account/rateLimits/read': usage });
+    const error = await adapterOn(server)
+      .probeAccount(probe)
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(AccountProbeError);
+    expect(server.killed()).toBe(true);
+  });
+
+  it('still reports the account, with no models, when model/list fails', async () => {
     const server = fakeAppServer({
       ...SIGNED_IN,
-      'account/rateLimits/read': { error: { code: -32000, message: 'no usage' } },
+      'model/list': { error: { code: -32000, message: 'no list' } },
     });
     const seen = await adapterOn(server).probeAccount(probe);
-    expect(seen.organization).toBeUndefined();
-    expect(seen).toMatchObject({ email: 'me@example.com', apiProvider: 'chatgpt' });
-    expect(checkAccount(expectation(null), seen)).toBeNull();
+    expect(seen).toMatchObject({ email: 'me@example.com', organization: 'ws-1' });
+    expect(seen.models).toBeUndefined();
   });
 
   it('reports nothing for a signed-out home', async () => {
@@ -106,6 +118,7 @@ describe('probeAccount', () => {
     expect(checkAccount(expectation(null), seen)).toMatchObject({
       problem: AccountProblem.SignedOut,
     });
+    expect(server.sent().map((m) => m.method)).not.toContain('account/rateLimits/read');
   });
 
   it('rejects with AccountProbeError when the app-server does not answer in time, and closes it', async () => {

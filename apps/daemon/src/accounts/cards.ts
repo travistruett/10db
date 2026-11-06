@@ -69,7 +69,7 @@ export function fixFor(account: AccountRow, problem: AccountProblem): string {
       return `Confirm the identity ${account.label} runs as, or set it with PATCH /accounts/${account.id}.`;
     case AccountProblem.IdentityMismatch:
       return signsInWithLogin(account.kind)
-        ? `If that is the right account, confirm it; otherwise ${signInAgain(account).toLowerCase()} and answer Resume.`
+        ? `If that is the right account, confirm it; otherwise sign in again with: ${signInCommandFor(account)} and answer Resume.`
         : `Check the account's key and its expected organization (PATCH /accounts/${account.id}), then answer Resume.`;
     case AccountProblem.WrongCredentials:
       return `10db strips every other credential, so a newer ${agentOf(account)} may read a different variable; the system check names the version 10db's checks were verified on.`;
