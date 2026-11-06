@@ -40,6 +40,7 @@ export default defineConfig({
         TENDB_SQLITE_BINDING: '',
         TENDB_CLAUDE_PATH: '',
         TENDB_LIVE_CLAUDE: '',
+        TENDB_LIVE_CODEX: '',
         // Each gate starts a daemon with a fresh data dir; it must not spend the shared AA quota.
         TENDB_BENCHMARKS: 'off',
         // No decision may call OpenRouter from a throwaway daemon.

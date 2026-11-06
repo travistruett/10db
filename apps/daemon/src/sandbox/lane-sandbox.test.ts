@@ -29,10 +29,13 @@ import { createGit } from '../git';
 import {
   createLaneSandbox,
   fileAccessJudge,
+  MAX_SANDBOX_TMP_BYTES,
   readAccess,
+  sandboxFilesRoot,
   SandboxProfileError,
   SandboxTempDirError,
   SYSTEM_READS,
+  writeAccess,
   type LaneProcessSetup,
   type LaneSandbox,
   type LaneSessionInput,
@@ -49,17 +52,26 @@ let root: string;
 let home: string;
 let dataDir: string;
 let tmpRoot: string;
+let filesRoot: string;
 let repo: TempDir;
 let checkout: string;
 
 function sandbox(
-  overrides: { loginConfigDir?: string | null; gitDirs?: LaneSandboxDeps['gitDirs'] } = {},
+  overrides: {
+    loginConfigDir?: string | null;
+    gitDirs?: LaneSandboxDeps['gitDirs'];
+    laneWritableRoots?: readonly string[];
+  } = {},
 ): LaneSandbox {
   return createLaneSandbox({
     home,
     dataDir,
     loginConfigDir: overrides.loginConfigDir ?? null,
     tmpRoot,
+    filesRoot,
+    ...(overrides.laneWritableRoots === undefined
+      ? {}
+      : { laneWritableRoots: overrides.laneWritableRoots }),
     gitDirs: overrides.gitDirs ?? ((path) => git.gitDirs(path)),
     // Hermetic: the machine's own install prefixes add no deny.
     systemPrefixes: [],
@@ -86,6 +98,9 @@ function input(overrides: Partial<LaneSessionInput> = {}): LaneSessionInput {
   };
 }
 
+/** What the session left in the temp root and the files root. */
+const left = (): string[] => [...readdirSync(tmpRoot), ...readdirSync(filesRoot)];
+
 const writeIn = (base: string, rel: string, text = 'x'): string => {
   const path = join(base, rel);
   mkdirSync(dirname(path), { recursive: true });
@@ -99,8 +114,11 @@ beforeEach(() => {
   home = join(root, 'home');
   dataDir = join(home, 'Library', 'Application Support', '10db');
   tmpRoot = join(root, 't');
+  // Where the daemon keeps it: under the home, beside its protected reads and in none of them.
+  filesRoot = sandboxFilesRoot(home);
   mkdirSync(home);
   mkdirSync(tmpRoot);
+  mkdirSync(filesRoot, { recursive: true });
   repo = createTempRepo();
   checkout = realpathSync(repo.path);
 });
@@ -443,8 +461,8 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         TENDB_SANDBOX: '1',
         CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1',
         CLAUDE_ENV_FILE: join(
-          tmpRoot,
-          readdirSync(tmpRoot).find((name) => name.startsWith('10db-env-')) ?? '',
+          filesRoot,
+          readdirSync(filesRoot).find((name) => name.startsWith('10db-env-')) ?? '',
         ),
       });
       expect(session.commandEnv).toEqual({
@@ -555,12 +573,18 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     const env = { PATH: `${bin}:/usr/bin`, HOME: home };
     const trusted = await sandbox().forSession(input({ env, checkouts: [repo.path] }));
     const untrusted = await sandbox().forSession(input({ env, checkouts: [repo.path, other] }));
+    // Another place lanes write, as a ChatGPT lane writes its temp root and the system temp dir.
+    const laneWritten = await sandbox({ laneWritableRoots: [other] }).forSession(
+      input({ env, checkouts: [repo.path] }),
+    );
     try {
       expect(trusted.spec.settings.filesystem.allowRead).toContain(join(bin, 'tool'));
       expect(untrusted.spec.settings.filesystem.allowRead).not.toContain(join(bin, 'tool'));
+      expect(laneWritten.spec.settings.filesystem.allowRead).not.toContain(join(bin, 'tool'));
     } finally {
       trusted.dispose();
       untrusted.dispose();
+      laneWritten.dispose();
     }
   });
 
@@ -715,6 +739,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       dataDir,
       loginConfigDir: null,
       tmpRoot,
+      filesRoot,
       gitDirs: (path) => git.gitDirs(path),
       systemPrefixes: [],
       runtime: FAKE_SRT,
@@ -768,7 +793,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     const session = await sandbox().forSession(input());
     try {
       const file = session.spec.env['CLAUDE_ENV_FILE'] ?? '';
-      expect(dirname(file)).toBe(tmpRoot);
+      expect(dirname(file)).toBe(filesRoot);
       // Claude Code strips variables such as CARGO_HOME from a sandboxed command's env; the shell
       // sources this file before each command. Its own `CLAUDE_*` settings are not for commands.
       const out = execFileSync('/bin/sh', [], {
@@ -855,7 +880,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     await expect(
       sandbox().forSession(input({ env: { PATH: '/usr/bin', 'A=B': 'x' } })),
     ).rejects.toThrow(SandboxProfileError);
-    expect(readdirSync(tmpRoot)).toEqual([]);
+    expect(left()).toEqual([]);
   });
 
   it('removes the temp dir on dispose, and a second dispose does nothing', async () => {
@@ -875,7 +900,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       const file = writeIn(checkout, name);
       await expect(sandbox().forSession(input())).rejects.toThrow(SandboxProfileError);
       await expect(sandbox().forSession(input())).rejects.toThrow(file);
-      expect(readdirSync(tmpRoot)).toEqual([]);
+      expect(left()).toEqual([]);
     },
   );
 
@@ -913,7 +938,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         await expect(sandbox().forSession(input())).rejects.toThrow(
           "a directory in the checkout can't be listed: apps/locked",
         );
-        expect(readdirSync(tmpRoot)).toEqual([]);
+        expect(left()).toEqual([]);
       } finally {
         chmodSync(locked, 0o700);
       }
@@ -984,7 +1009,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     await expect(sandbox().forSession(input())).rejects.toThrow(
       /a \.env\* link in the checkout leads to .*, which holds .* every lane command needs/,
     );
-    expect(readdirSync(tmpRoot)).toEqual([]);
+    expect(left()).toEqual([]);
   });
 
   it("opens an nvm install's own dirs but never its etc, and denies npm's builtin npmrc", async () => {
@@ -1025,7 +1050,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     await expect(sandbox().forSession(input())).rejects.toThrow(
       /a \.env\* link in the checkout leads to .*real-cargo-bin, which holds .* every lane command needs/,
     );
-    expect(readdirSync(tmpRoot)).toEqual([]);
+    expect(left()).toEqual([]);
   });
 
   it.each<[string, () => string]>([
@@ -1043,7 +1068,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     await expect(sandbox().forSession(input())).rejects.toThrow(
       /a \.env\* link in the checkout leads to .*, a directory inside .* that lane commands read/,
     );
-    expect(readdirSync(tmpRoot)).toEqual([]);
+    expect(left()).toEqual([]);
   });
 
   // macOS reaches `/private/etc` through the `/etc` link; Linux has no such link.
@@ -1116,7 +1141,68 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       first.dispose();
       second.dispose();
     }
-    expect(readdirSync(tmpRoot)).toEqual([]);
+    expect(left()).toEqual([]);
+  });
+
+  it('puts the env file and the ledger in the files root and the temp dir in the temp root', async () => {
+    const session = await sandbox().forSession(input());
+    try {
+      expect(dirname(session.tmpDir)).toBe(tmpRoot);
+      expect(readdirSync(tmpRoot)).toEqual([session.tmpDir.slice(tmpRoot.length + 1)]);
+      const envFile = session.spec.env['CLAUDE_ENV_FILE'] ?? '';
+      expect(dirname(envFile)).toBe(filesRoot);
+      const [env = '', ledger = '', ...more] = readdirSync(filesRoot).sort();
+      expect(join(filesRoot, env)).toBe(envFile);
+      expect(ledger).toMatch(/^10db-proc-[1-9][0-9]*-[0-9a-f]{12}\.json$/);
+      expect(more).toEqual([]);
+      // The shell reads the env file through its own grant, which no protected read takes away.
+      expect(session.spec.settings.filesystem.allowRead).toContain(envFile);
+      // The file tools refuse both roots but the session's own temp dir: a ledger a lane wrote
+      // would name what the next start signals.
+      expect(readAccess(envFile, session.fileAccess).access).toBe('protected');
+      expect(writeAccess(join(filesRoot, ledger), session.fileAccess).access).toBe('sandbox-temp');
+      expect(writeAccess(join(filesRoot, 'new.json'), session.fileAccess).access).toBe(
+        'sandbox-temp',
+      );
+      expect(writeAccess(join(session.tmpDir, 'scratch'), session.fileAccess).access).toBe('ok');
+    } finally {
+      session.dispose();
+    }
+    expect(left()).toEqual([]);
+  });
+
+  it("makes a session's temp dir in its own tempRoot when one is given, of any length", async () => {
+    // A ChatGPT lane's: no Claude Code or srt runs in it, so the socket path limit is not its.
+    const lanes = join(home, '.10db', 'lanes', 'longer-than-the-socket-path-limit');
+    mkdirSync(lanes, { recursive: true });
+    const lanesSandbox = sandbox({ laneWritableRoots: [lanes] });
+    const session = await lanesSandbox.forSession(input({ tempRoot: lanes }));
+    try {
+      expect(dirname(session.tmpDir)).toBe(lanes);
+      expect(Buffer.byteLength(session.tmpDir)).toBeGreaterThan(MAX_SANDBOX_TMP_BYTES);
+      expect(session.spec.shellEnv['TMPDIR']).toBe(session.tmpDir);
+      expect(session.spec.settings.filesystem.allowWrite).toEqual([session.tmpDir]);
+      expect(readdirSync(tmpRoot)).toEqual([]);
+      expect(dirname(session.spec.env['CLAUDE_ENV_FILE'] ?? '')).toBe(filesRoot);
+      // Each lane's file tools refuse the other's temp dir, in either root.
+      const other = await lanesSandbox.forSession(input());
+      try {
+        expect(dirname(other.tmpDir)).toBe(tmpRoot);
+        expect(writeAccess(join(other.tmpDir, 'x'), session.fileAccess).access).toBe(
+          'sandbox-temp',
+        );
+        expect(writeAccess(join(session.tmpDir, 'x'), other.fileAccess).access).toBe(
+          'sandbox-temp',
+        );
+        expect(readAccess(join(session.tmpDir, 'x'), other.fileAccess).access).toBe('protected');
+      } finally {
+        other.dispose();
+      }
+    } finally {
+      session.dispose();
+    }
+    expect(readdirSync(lanes)).toEqual([]);
+    expect(left()).toEqual([]);
   });
 });
 
@@ -1136,6 +1222,7 @@ describe.skipIf(SANDBOXED)('a lane session’s processes', () => {
       dataDir,
       loginConfigDir: null,
       tmpRoot,
+      filesRoot,
       gitDirs: (path) => git.gitDirs(path),
       systemPrefixes: [],
       runtime: FAKE_SRT,
@@ -1164,7 +1251,7 @@ describe.skipIf(SANDBOXED)('a lane session’s processes', () => {
   }
   /** Lets what a timer started finish: everything it awaits is already settled. */
   const settle = () => new Promise((r) => setImmediate(r));
-  const ledgers = () => readdirSync(tmpRoot).filter((n) => n.startsWith('10db-proc-'));
+  const ledgers = () => readdirSync(filesRoot).filter((n) => n.startsWith('10db-proc-'));
   beforeEach(() => {
     rows = [
       { pid: 100, ppid: 1, pgid: 100, startedAt: T },
@@ -1207,11 +1294,11 @@ describe.skipIf(SANDBOXED)('a lane session’s processes', () => {
     tableFails = true;
     await expect(session.endProcesses()).rejects.toThrow('ps failed');
     session.dispose();
-    const left = readdirSync(tmpRoot).filter((n) => n.startsWith('10db-proc-'));
-    expect(left).toHaveLength(1);
+    const kept = ledgers();
+    expect(kept).toHaveLength(1);
     // Named for the daemon that kept it, so a later daemon knows whether its owner still runs.
-    expect(left[0]).toMatch(/^10db-proc-100-[0-9a-f]{12}\.json$/);
-    const ledger = JSON.parse(readFileSync(join(tmpRoot, left[0] ?? ''), 'utf8')) as {
+    expect(kept[0]).toMatch(/^10db-proc-100-[0-9a-f]{12}\.json$/);
+    const ledger = JSON.parse(readFileSync(join(filesRoot, kept[0] ?? ''), 'utf8')) as {
       members: { pid: number }[];
     };
     expect(ledger.members.map((m) => m.pid).sort()).toEqual([200, 300, 301]);
@@ -1264,7 +1351,7 @@ describe.skipIf(SANDBOXED)('a lane session’s processes', () => {
     clock.advance(30_000);
     await settle();
     expect(rows.map((r) => r.pid)).toEqual([100]);
-    expect(readdirSync(tmpRoot)).toEqual([]);
+    expect(left()).toEqual([]);
   });
 
   it('never sweeps the ledger of a session that still runs', async () => {
@@ -1305,19 +1392,19 @@ describe.skipIf(SANDBOXED)('a lane session’s processes', () => {
     }
   });
 
-  it('keeps a ledger in the temp root while the session lives, and removes it with the rest', async () => {
+  it('keeps a ledger in the files root while the session lives, and removes it with the rest', async () => {
     const session = await withProcesses().forSession(input());
-    expect(readdirSync(tmpRoot).filter((n) => n.startsWith('10db-proc-'))).toHaveLength(1);
+    expect(ledgers()).toHaveLength(1);
     session.dispose();
-    expect(readdirSync(tmpRoot)).toEqual([]);
+    expect(left()).toEqual([]);
   });
 
   it('writes the ledger a later daemon uses to stop what a dead one left', async () => {
     const session = await withProcesses().forSession(input());
     try {
       await session.trackProcesses({ pid: 200, startedAt: T });
-      const name = readdirSync(tmpRoot).find((n) => n.startsWith('10db-proc-')) ?? '';
-      const ledger = JSON.parse(readFileSync(join(tmpRoot, name), 'utf8')) as {
+      const [name = ''] = ledgers();
+      const ledger = JSON.parse(readFileSync(join(filesRoot, name), 'utf8')) as {
         members: { pid: number }[];
       };
       expect(ledger.members.map((m) => m.pid).sort()).toEqual([200, 300, 301]);

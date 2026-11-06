@@ -11,7 +11,7 @@ export { isEqualOrUnder, protectedReads } from './protected-reads';
 export { toolchainAccess } from './toolchain-reads';
 export { packageCacheEnv } from './package-cache';
 export { createLaneEnvFile, removeLaneEnvFile } from './env-file';
-export { claimSandboxTempRoot } from './stale-files';
+export { claimSandboxRoots, claimSandboxTempRoot } from './stale-files';
 export {
   createLedgerSweep,
   reapLaneProcessLedgers,
@@ -20,12 +20,16 @@ export {
 } from './lane-processes';
 export { systemProcessTable } from './process-table';
 export {
+  codexLaneTempRoot,
   createLaneTempDir,
-  LANE_TEMP_ROOT,
+  ensurePrivateRoot,
+  laneTempRoot,
   MAX_SANDBOX_TMP_BYTES,
   removeLaneTempDir,
   removeLaneTempDirAsync,
+  sandboxFilesRoot,
   SandboxTempDirError,
+  SYSTEM_TEMP_ROOT,
 } from './temp-dir';
 export {
   expandHome,

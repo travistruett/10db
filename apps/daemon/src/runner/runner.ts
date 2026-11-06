@@ -276,6 +276,11 @@ export interface RunnerOptions {
   identifyProcess?(pid: number): Promise<string | null>;
   /** Runs every lane session under the lane sandbox; null (fake sessions and tests) runs none. */
   readonly laneSandbox: LaneSandbox | null;
+  /**
+   * Where a ChatGPT lane's temp dir is made (`codexLaneTempRoot` of the home, as the daemon made it
+   * private), apart from Claude lanes' and outside `/private/tmp`, which Codex opens to every lane.
+   */
+  readonly codexLaneTempRoot: string;
   /** Where the daemon makes lane copies: no prompt repeats a denied read of it outside the lane's copy. */
   readonly worktreeRoot: string;
   /**
@@ -1546,6 +1551,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           configDir,
           checkouts: allCheckouts(db),
           mcpServers: mcpServers.stdio,
+          ...(account.kind === AccountKind.CodexSignin ? { tempRoot: opts.codexLaneTempRoot } : {}),
         });
       } catch (error) {
         releaseStart();

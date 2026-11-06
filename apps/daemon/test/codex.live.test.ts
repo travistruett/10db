@@ -29,7 +29,16 @@ import { captureLoginEnv, createLauncher, findCodex, type Launcher } from '../sr
 import { createGit } from '../src/git';
 import { createLogger } from '../src/log';
 import { resolveSandboxRuntime } from '../src/paths';
-import { createLaneSandbox, type LaneSandbox } from '../src/sandbox';
+import {
+  codexLaneTempRoot,
+  createLaneSandbox,
+  ensurePrivateRoot,
+  laneTempRoot,
+  sandboxFilesRoot,
+  SYSTEM_TEMP_ROOT,
+  type LaneSandbox,
+  type LaneSessionInput,
+} from '../src/sandbox';
 import {
   createCodexAdapter,
   guardSocketPath,
@@ -113,9 +122,21 @@ const patch = (body: string): FakeStep => codeMode(`tools.apply_patch(${JSON.str
 const commit = (message: string): FakeStep =>
   codeMode(`tools.mcp__10db__commit({ message: ${JSON.stringify(message)} })`);
 
-/** A curl that prints `label=<status>`, which only a request that reached the host fills in. */
+/**
+ * A curl that prints the page and `label=<status>`, which only a request that reached the host
+ * fills in. Every host it asks serves the page that holds `EXAMPLE_PAGE`, a POST included.
+ */
 const curl = (label: string, url: string, opts: { readonly post?: boolean } = {}): string =>
-  `curl -sS -m 20 -o /dev/null ${opts.post === true ? '-X POST -d probe=1 ' : ''}-w '${label}=%{http_code}' ${url}`;
+  `curl -sS -m 20 ${opts.post === true ? '-X POST -d probe=1 ' : ''}-w ' ${label}=%{http_code}' ${url}`;
+
+/** What the IANA example domains' page holds, whatever the method or status. */
+const EXAMPLE_PAGE = '<title>Example Domain</title>';
+
+/** What Codex says, in a call's JSON output, of a command whose request to `host` it blocked. */
+const blocked = (host: string): string => `Network access to \\"${host}\\" was blocked`;
+
+/** How long a `codex` the test ended may take to exit. */
+const EXIT_DEADLINE_MS = 15_000;
 
 const addFile = (path: string, line: string): string =>
   `*** Begin Patch\n*** Add File: ${path}\n+${line}\n*** End Patch\n`;
@@ -331,6 +352,36 @@ interface GuardCall {
   readonly input: string;
 }
 
+/** A `codex` the adapter started, and whether it still runs. */
+interface StartedCodex {
+  readonly child: CodexChild;
+  readonly exit: Promise<void>;
+  readonly running: () => boolean;
+}
+
+/**
+ * Ends every `codex` that still runs and waits for each to exit, failing with the pids still running
+ * once the deadline passes.
+ */
+async function endCodexes(started: readonly StartedCodex[]): Promise<void> {
+  for (const codex of started) if (codex.running()) codex.child.kill();
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<'late'>((done) => {
+    timer = setTimeout(() => {
+      done('late');
+    }, EXIT_DEADLINE_MS);
+  });
+  try {
+    const all = Promise.all(started.map((codex) => codex.exit)).then(() => 'exited' as const);
+    if ((await Promise.race([all, late])) === 'late') {
+      const pids = started.filter((codex) => codex.running()).map((codex) => codex.child.pid);
+      throw new Error(`codex did not exit in ${String(EXIT_DEADLINE_MS)} ms: ${pids.join(', ')}`);
+    }
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 interface World {
   readonly root: string;
   readonly checkout: string;
@@ -345,13 +396,13 @@ interface World {
   readonly mcpToken: string;
   readonly adapter: SessionAdapter;
   readonly laneSandbox: LaneSandbox;
+  /** The daemon's roots, made as its start makes them: the lane temp root is the shared one. */
+  readonly roots: { readonly temp: string; readonly codexLanes: string; readonly files: string };
   readonly account: AccountRow;
   /** Every call the guard was asked about, in order. */
   readonly calls: GuardCall[];
   /** Every line the daemon's logger wrote. */
   readonly logs: string[];
-  /** Each `codex` process the adapter started, settled once it has exited. */
-  readonly exits: Promise<void>[];
   /** Run on each guard call before it is judged, for a test that acts mid-session. */
   onCall: (call: GuardCall, spec: SessionSpec) => void;
   close(): Promise<void>;
@@ -375,6 +426,31 @@ function launchPath(): string {
 async function openWorld(): Promise<World> {
   mkdirSync(LIVE_PARENT, { recursive: true, mode: 0o700 });
   const root = realpathSync(mkdtempSync(join(LIVE_PARENT, LIVE_PREFIX)));
+  // What is open so far, closed again when a later step fails.
+  const opened: (() => Promise<void>)[] = [];
+  try {
+    return await openWorldIn(root, opened);
+  } catch (error) {
+    await closeAll(opened).catch(() => undefined);
+    removeLiveDir(root);
+    throw error;
+  }
+}
+
+/** Closes what was opened, last first, every one even when one fails; the first failure is thrown. */
+async function closeAll(opened: readonly (() => Promise<void>)[]): Promise<void> {
+  const failures: Error[] = [];
+  for (const close of [...opened].reverse())
+    await close().catch((error: unknown) => {
+      failures.push(
+        error instanceof Error ? error : new Error('a live test resource would not close'),
+      );
+    });
+  const [first] = failures;
+  if (first !== undefined) throw first;
+}
+
+async function openWorldIn(root: string, opened: (() => Promise<void>)[]): Promise<World> {
   const dataDir = join(root, 'Application Support', '10db');
   const accountId: AccountId = mintId('Account');
   const codexHome = join(dataDir, 'accounts', accountId, 'codex');
@@ -385,8 +461,10 @@ async function openWorld(): Promise<World> {
   initRepo(other);
   const socketDir = join(root, 'run');
   const model = await startFakeResponses();
+  opened.push(() => model.close());
   const token = randomUUID();
   const mcp = await startFakeMcp(token);
+  opened.push(() => mcp.close());
   const logs: string[] = [];
   const logger = createLogger({
     level: 'info',
@@ -397,27 +475,38 @@ async function openWorld(): Promise<World> {
     },
   });
   const wrapper = codexOnFakeModel(root, codexPath, model.baseUrl);
-  const exits: Promise<void>[] = [];
+  const started: StartedCodex[] = [];
+  // Codex writes its state in the home until it exits, so the directory goes after it.
+  opened.push(() => endCodexes(started));
   const adapter = createCodexAdapter({
     codexPath: wrapper,
     logger,
     socketDir,
     spawn: (path, env) => {
       const child = spawnAppServer(path, env);
-      exits.push(
-        new Promise((done) => {
-          child.once('exit', () => {
-            done();
-          });
-        }),
-      );
+      let running = true;
+      const exit = new Promise<void>((done) => {
+        child.once('exit', () => {
+          running = false;
+          done();
+        });
+      });
+      started.push({ child, exit, running: () => running });
       return withStandInAccount(child);
     },
   });
+  const roots = {
+    temp: ensurePrivateRoot(laneTempRoot()),
+    codexLanes: ensurePrivateRoot(codexLaneTempRoot(homedir())),
+    files: ensurePrivateRoot(sandboxFilesRoot(homedir())),
+  };
   const laneSandbox = createLaneSandbox({
     home: homedir(),
     dataDir,
     loginConfigDir: null,
+    tmpRoot: roots.temp,
+    filesRoot: roots.files,
+    laneWritableRoots: [roots.codexLanes, SYSTEM_TEMP_ROOT],
     gitDirs: (repo) => createGit().gitDirs(repo),
     runtime: resolveSandboxRuntime(),
     worktreeRoot: join(root, 'worktrees'),
@@ -449,20 +538,54 @@ async function openWorld(): Promise<World> {
     mcpToken: token,
     adapter,
     laneSandbox,
+    roots,
     account,
     calls: [],
     logs,
-    exits,
     onCall: () => undefined,
     close: async () => {
-      // Codex writes its state in the home until it exits, so the directory goes after it.
-      await Promise.all(exits);
-      await model.close();
-      await mcp.close();
-      removeLiveDir(root);
+      try {
+        await closeAll(opened);
+      } finally {
+        removeLiveDir(root);
+      }
     },
   };
   return world;
+}
+
+/**
+ * What the runner hands the lane sandbox for a session on the world's account: a ChatGPT lane's,
+ * whose temp dir is in the Codex lanes root, unless `claude` asks for a Claude lane's.
+ */
+function laneInput(
+  world: World,
+  env: Readonly<Record<string, string>>,
+  opts: {
+    readonly hosts?: readonly string[];
+    readonly reads?: readonly string[];
+    readonly resume?: string | null;
+    readonly claude?: boolean;
+  } = {},
+): LaneSessionInput {
+  return {
+    project: {
+      id: mintId('Project'),
+      repoPath: world.checkout,
+      sandboxLoopback: false,
+      gateCommand: 'true',
+    },
+    env,
+    rules: [
+      ...(opts.hosts ?? []).map((host) => ({ toolName: 'SandboxNetworkAccess', pattern: host })),
+      ...(opts.reads ?? []).map((path) => ({ toolName: 'Read', pattern: path })),
+    ],
+    resumeProviderSessionId: opts.resume ?? null,
+    configDir: world.codexHome,
+    checkouts: [world.checkout, world.other],
+    mcpServers: {},
+    ...(opts.claude === true ? {} : { tempRoot: world.roots.codexLanes }),
+  };
 }
 
 /** Runs one session of `steps` to the end of its first turn, then stops it. */
@@ -471,25 +594,27 @@ async function runSession(
   steps: Parameters<FakeResponses['script']>[0],
   opts: {
     readonly hosts?: readonly string[];
+    readonly reads?: readonly string[];
     readonly resume?: string | null;
     readonly sessionId?: SessionId;
   } = {},
 ): Promise<SessionRun> {
   const launch = launcher.session(world.account, ALIAS);
-  const laneSession = await world.laneSandbox.forSession({
-    project: {
-      id: mintId('Project'),
-      repoPath: world.checkout,
-      sandboxLoopback: false,
-      gateCommand: 'true',
-    },
-    env: launch.env,
-    rules: (opts.hosts ?? []).map((host) => ({ toolName: 'SandboxNetworkAccess', pattern: host })),
-    resumeProviderSessionId: opts.resume ?? null,
-    configDir: world.codexHome,
-    checkouts: [world.checkout, world.other],
-    mcpServers: {},
-  });
+  const laneSession = await world.laneSandbox.forSession(laneInput(world, launch.env, opts));
+  try {
+    return await runOnLane(world, steps, opts, launch, laneSession);
+  } finally {
+    laneSession.dispose();
+  }
+}
+
+async function runOnLane(
+  world: World,
+  steps: Parameters<FakeResponses['script']>[0],
+  opts: { readonly resume?: string | null; readonly sessionId?: SessionId },
+  launch: ReturnType<Launcher['session']>,
+  laneSession: Awaited<ReturnType<LaneSandbox['forSession']>>,
+): Promise<SessionRun> {
   const prompt = world.model.script(steps);
   const spec: SessionSpec = {
     sessionId: opts.sessionId ?? mintId('Session'),
@@ -525,7 +650,6 @@ async function runSession(
     }
   } finally {
     await handle.stop();
-    laneSession.dispose();
   }
   const started = events.find((e) => e.type === 'started');
   return {
@@ -556,6 +680,8 @@ describe.skipIf(!live)(
   { timeout: 120_000 },
   () => {
     let world: World;
+    /** Whether `world` is open: a `beforeEach` that failed left none to close. */
+    let open = false;
 
     beforeAll(async () => {
       const found = findCodex();
@@ -570,8 +696,11 @@ describe.skipIf(!live)(
     });
     beforeEach(async () => {
       world = await openWorld();
+      open = true;
     });
     afterEach(async () => {
+      if (!open) return;
+      open = false;
       await world.close();
       // No log line names the account's email or carries the session's MCP token.
       expect(
@@ -710,6 +839,104 @@ describe.skipIf(!live)(
       expect(outputs[0]).toMatch(/auth=1/);
       expect(outputs[1]).toMatch(/env=1/);
       expect(outputs[2]).toMatch(/other=1/);
+      // The sandbox refused each read; the file was there to read all along.
+      for (const output of outputs.slice(0, 3)) expect(output).toContain('Operation not permitted');
+      expect(readFileSync(auth, 'utf8')).toBe(`${secrets.auth}\n`);
+    });
+
+    it("keeps a lane from reading auth.json when the project's read list opens the test's root", async () => {
+      // The read list opens every ancestor of the data dir here: only 10db's denies of the data dir
+      // and the account's home, which lie under it, keep the file closed.
+      const auth = join(world.codexHome, 'auth.json');
+      const token = plant(auth);
+      const notes = plant(join(world.root, 'notes.txt'));
+      const outputs = expectTurn(
+        await runSession(
+          world,
+          [
+            run(`cat '${join(world.root, 'notes.txt')}'; echo notes=$?`),
+            run(`cat '${auth}'; echo auth=$?`),
+            { say: 'done' },
+          ],
+          { reads: [world.root] },
+        ),
+      );
+      // The grant took: a file beside the data dir is read.
+      expect(outputs[0]).toContain(notes);
+      expect(outputs[0]).toMatch(/notes=0/);
+      expect(outputs.join('\n')).not.toContain(token);
+      expect(outputs[1]).toMatch(/auth=1/);
+      expect(outputs[1]).toContain('Operation not permitted');
+      expect(readFileSync(auth, 'utf8')).toBe(`${token}\n`);
+    });
+
+    it("keeps a lane out of other lanes' temp dirs, in either lanes' root, and out of 10db's files", async () => {
+      // Another Claude lane's session and another ChatGPT lane's, made as the daemon makes them.
+      const { env } = launcher.session(world.account, ALIAS);
+      const ledgersBefore = (): string[] =>
+        readdirSync(world.roots.files).filter((name) => name.startsWith('10db-proc-'));
+      const known = new Set(ledgersBefore());
+      const claudeLane = await world.laneSandbox.forSession(
+        laneInput(world, env, { claude: true }),
+      );
+      const codexLane = await world.laneSandbox.forSession(laneInput(world, env));
+      try {
+        expect(dirname(claudeLane.tmpDir)).toBe(world.roots.temp);
+        expect(dirname(codexLane.tmpDir)).toBe(world.roots.codexLanes);
+        const secrets = {
+          claude: plant(join(claudeLane.tmpDir, 'notes.txt')),
+          codex: plant(join(codexLane.tmpDir, 'notes.txt')),
+        };
+        const envFile = claudeLane.spec.env['CLAUDE_ENV_FILE'] ?? '';
+        expect(dirname(envFile)).toBe(world.roots.files);
+        const [ledgerName] = ledgersBefore().filter((name) => !known.has(name));
+        if (ledgerName === undefined) throw new Error('the other lanes kept no ledger');
+        const ledger = join(world.roots.files, ledgerName);
+        const ledgerBefore = readFileSync(ledger, 'utf8');
+        const planted = join(world.roots.files, '10db-planted');
+        const outputs = expectTurn(
+          await runSession(world, [
+            run(`cat '${join(claudeLane.tmpDir, 'notes.txt')}'; echo claudeRead=$?`),
+            run(`echo x > '${join(claudeLane.tmpDir, 'planted')}'; echo claudeWrite=$?`),
+            run(`cat '${join(codexLane.tmpDir, 'notes.txt')}'; echo codexRead=$?`),
+            run(`echo x > '${join(codexLane.tmpDir, 'planted')}'; echo codexWrite=$?`),
+            run(`cat '${envFile}'; echo envRead=$?`),
+            run(`echo '{}' > '${ledger}'; echo ledgerWrite=$?`),
+            run(`echo x > '${planted}'; echo filesWrite=$?`),
+            // The control: its own temp dir, in the same root, it writes and reads.
+            run(
+              `echo "TMPDIR=$TMPDIR"; printf '%s-%s' own written > "$TMPDIR/own.txt" && cat "$TMPDIR/own.txt"`,
+            ),
+            { say: 'done' },
+          ]),
+        );
+        const said = outputs.join('\n');
+        for (const token of Object.values(secrets)) expect(said).not.toContain(token);
+        expect(said).not.toContain('export TENDB_SANDBOX=');
+        const probes = [
+          'claudeRead',
+          'claudeWrite',
+          'codexRead',
+          'codexWrite',
+          'envRead',
+          'ledgerWrite',
+          'filesWrite',
+        ];
+        // `cat` says "Operation not permitted"; the lane's zsh, refused a redirection, lowercases it.
+        probes.forEach((name, at) => {
+          expect(outputs[at], name).toMatch(new RegExp(`${name}=1`));
+          expect(outputs[at], name).toMatch(/operation not permitted/i);
+        });
+        for (const dir of [claudeLane.tmpDir, codexLane.tmpDir])
+          expect(existsSync(join(dir, 'planted'))).toBe(false);
+        expect(existsSync(planted)).toBe(false);
+        expect(readFileSync(ledger, 'utf8')).toBe(ledgerBefore);
+        expect(outputs[7]).toContain(`TMPDIR=${world.roots.codexLanes}/10db-`);
+        expect(outputs[7]).toContain('own-written');
+      } finally {
+        claudeLane.dispose();
+        codexLane.dispose();
+      }
     });
 
     it('keeps a lane from writing .git', async () => {
@@ -769,10 +996,12 @@ describe.skipIf(!live)(
           { hosts: ['example.com'] },
         ),
       );
-      expect(outputs[0]).toMatch(/listed=[1-5]\d\d/);
-      expect(outputs[1]).not.toMatch(/unlisted=[1-5]\d\d/);
+      // The POST reached the host, which answered it with its page.
+      expect(outputs[0]).toContain(EXAMPLE_PAGE);
+      expect(outputs[0]).toMatch(/listed=\d{3}/);
       // A blocked host ends the whole command, its output lost, and Codex says why.
-      expect(outputs[1]).toContain('Network access to \\"example.org\\" was blocked');
+      expect(outputs[1]).not.toContain(EXAMPLE_PAGE);
+      expect(outputs[1]).toContain(blocked('example.org'));
     });
 
     it('lets a wildcard host reach the hosts under it, not the domain itself, and blocks another', async () => {
@@ -788,17 +1017,20 @@ describe.skipIf(!live)(
           { hosts: ['*.example.net'] },
         ),
       );
-      expect(outputs[0]).toMatch(/under=[1-5]\d\d/);
+      expect(outputs[0]).toContain(EXAMPLE_PAGE);
+      expect(outputs[0]).toMatch(/under=\d{3}/);
       // Codex matches `*.` against the hosts under the domain only, as Claude Code's sandbox does.
-      expect(outputs[1]).toContain('Network access to \\"example.net\\" was blocked');
-      expect(outputs[2]).not.toMatch(/another=[1-5]\d\d/);
+      expect(outputs[1]).toContain(blocked('example.net'));
+      expect(outputs[2]).toContain(blocked('www.example.org'));
+      for (const output of outputs.slice(1, 3)) expect(output).not.toContain(EXAMPLE_PAGE);
     });
 
     it('blocks every host for a project that lists none', async () => {
       const outputs = expectTurn(
         await runSession(world, [run(curl('reached', 'https://example.com/')), { say: 'done' }]),
       );
-      expect(outputs[0]).not.toMatch(/reached=[1-5]\d\d/);
+      expect(outputs[0]).toContain(blocked('example.com'));
+      expect(outputs[0]).not.toContain(EXAMPLE_PAGE);
     });
 
     it('runs with the real toolchain: node and git status', async () => {
@@ -863,6 +1095,8 @@ describe.skipIf(!live)(
       const written = [...new Set([...before.keys(), ...after.keys()])].filter(
         (file) => before.get(file) !== after.get(file),
       );
+      // A patch Codex refused writes nothing, which would match a reader that names nothing.
+      expect(written.length).toBeGreaterThan(0);
       expect(new Set(written)).toEqual(new Set(patchPaths(body)));
     });
   },

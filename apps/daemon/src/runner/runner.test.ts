@@ -4593,7 +4593,7 @@ describe("a lane's settled read-only line", () => {
           readList: [],
           configDir: input.configDir,
           providerSessionId: null,
-          sandboxTemp: { root: root.path, own: root.path },
+          sandboxTemp: { roots: [root.path], own: root.path },
         },
         tmpDir: root.path,
         commandEnv: {},
@@ -4634,13 +4634,19 @@ describe("a lane's settled read-only line", () => {
 // The probe's temp root is a short path under the shared `/tmp`, which no sandbox can write.
 describe.skipIf(SANDBOXED)('lane sandbox', () => {
   const lanesGit = createGit();
-  /** A real lane sandbox over a short temp root and a temp home, recording each session it makes. */
+  /**
+   * A real lane sandbox over a short temp root, its own files root and Codex lanes root, and a temp
+   * home, recording each session it makes.
+   */
   interface SandboxProbe {
     readonly laneSandbox: LaneSandbox;
     readonly inputs: LaneSessionInput[];
     readonly sessions: LaneSession[];
     readonly home: string;
     readonly tmpRoot: string;
+    readonly filesRoot: string;
+    /** What the engine is given as `codexLaneTempRoot`. */
+    readonly codexLanes: string;
   }
   let probeRoot: string | null = null;
   afterEach(() => {
@@ -4651,13 +4657,16 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     probeRoot = realpathSync(mkdtempSync('/tmp/sbr-'));
     const home = join(probeRoot, 'h');
     const tmpRoot = join(probeRoot, 't');
-    mkdirSync(home);
-    mkdirSync(tmpRoot);
+    const filesRoot = join(probeRoot, 'r');
+    const codexLanes = join(probeRoot, 'l');
+    for (const dir of [home, tmpRoot, filesRoot, codexLanes]) mkdirSync(dir);
     const real = createLaneSandbox({
       home,
       dataDir: join(probeRoot, 'd'),
       loginConfigDir: null,
       tmpRoot,
+      filesRoot,
+      laneWritableRoots: [codexLanes],
       gitDirs: (path) => lanesGit.gitDirs(path),
       runtime: FAKE_SRT,
       worktreeRoot: join(probeRoot, 'w'),
@@ -4679,6 +4688,8 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       sessions,
       home,
       tmpRoot,
+      filesRoot,
+      codexLanes,
     };
   };
   const hostCall = (host: string) => ({
@@ -4687,9 +4698,13 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     input: { host },
   });
 
-  it('runs the session under its profile in default mode, with checkout-scoped reads and the sandbox briefing', async () => {
+  it("runs the session under its profile in default mode, with checkout-scoped reads and the sandbox briefing, and keeps a Claude lane's temp dir under the lane temp root", async () => {
     const probe = sandboxProbe();
-    engine = await createTestEngine({ Alpha: [[turn]] }, {}, { laneSandbox: probe.laneSandbox });
+    engine = await createTestEngine(
+      { Alpha: [[turn]] },
+      {},
+      { laneSandbox: probe.laneSandbox, codexLaneTempRoot: probe.codexLanes },
+    );
     const specs = recordSpecs();
     const { workstream } = engine.addTask('Alpha');
     engine.launch(workstream.id);
@@ -4711,8 +4726,12 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     });
     // The id Claude Code named at `started` is the one the file tools judge by.
     expect(laneSession?.fileAccess.providerSessionId).toBe(session?.providerSessionId);
-    // The session ended, so its temp dir is gone.
+    // Claude Code and srt run in a Claude lane's temp dir: it stays under the short temp root.
+    expect(probe.inputs[0]?.tempRoot).toBeUndefined();
+    expect(dirname(laneSession?.tmpDir ?? '')).toBe(probe.tmpRoot);
+    // The session ended, so its temp dir and files are gone.
     expect(readdirSync(probe.tmpRoot)).toEqual([]);
+    expect(readdirSync(probe.filesRoot)).toEqual([]);
     expect(ws(workstream.id).state).toBe('DONE');
   });
 
@@ -4723,12 +4742,12 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     );
   };
 
-  it('builds a lane sandbox on the account home for a ChatGPT account', async () => {
+  it('builds a lane sandbox on the account home for a ChatGPT account, and makes its temp dir under the Codex lanes root', async () => {
     const probe = sandboxProbe();
     engine = await createTestEngine(
       { Alpha: [[turn]] },
       {},
-      { laneSandbox: probe.laneSandbox },
+      { laneSandbox: probe.laneSandbox, codexLaneTempRoot: probe.codexLanes },
       { account: { kind: 'codex_signin', label: 'ChatGPT plan' } },
     );
     confirmIdentity();
@@ -4740,6 +4759,11 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     expect(seen?.configDir).toBe(engine.store.db.select().from(schema.accounts).get()?.configDir);
     expect(seen?.configDir).not.toBe(join(homedir(), '.claude'));
     expect(seen?.env['CODEX_HOME']).toBe(seen?.configDir);
+    // A ChatGPT lane's temp dir is kept apart from Claude lanes', in the root the daemon names.
+    expect(seen?.tempRoot).toBe(probe.codexLanes);
+    expect(dirname(probe.sessions[0]?.tmpDir ?? '')).toBe(probe.codexLanes);
+    expect(readdirSync(probe.tmpRoot)).toEqual([]);
+    expect(readdirSync(probe.codexLanes)).toEqual([]);
   });
 
   it('warns once per skill a ChatGPT lane is briefed without, naming it', async () => {

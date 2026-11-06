@@ -34,7 +34,7 @@ export interface ShapeAccess {
   readonly secretFiles?: readonly string[];
   /** The conversation's dropped files (§5.4). */
   readonly filesDir: string;
-  /** The sandbox temp root, where other sessions' directories and ledgers are. */
+  /** The lane temp root, where other sessions' temp dirs are. */
   readonly tempRoot: string;
 }
 
@@ -66,7 +66,7 @@ function fileAccessContext(access: ShapeAccess): FileAccessContext {
     // Nothing of Claude Code's is readable: a large result is read back through a narrower search.
     configDir: join(access.tempRoot, 'no-claude-config'),
     providerSessionId: null,
-    sandboxTemp: { root: access.tempRoot, own: join(access.tempRoot, 'no-own-temp-dir') },
+    sandboxTemp: { roots: [access.tempRoot], own: join(access.tempRoot, 'no-own-temp-dir') },
   };
 }
 

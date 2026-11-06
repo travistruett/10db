@@ -36,6 +36,8 @@ let root: string;
 let home: string;
 let dataDir: string;
 let tmpRoot: string;
+let filesRoot: string;
+let lanesRoot: string;
 let pnpmLockDir: string;
 let repo: TempDir;
 let checkout: string;
@@ -46,6 +48,7 @@ function sandbox(): GateSandbox {
     dataDir,
     loginConfigDir: join(home, '.claude-work'),
     tmpRoot,
+    filesRoot,
     pnpmLockDir,
     gitDirs: (path) => git.gitDirs(path),
     // Hermetic: the machine's own install prefixes add no deny.
@@ -125,9 +128,13 @@ beforeEach(() => {
   home = join(root, 'home');
   dataDir = join(home, 'Library', 'Application Support', '10db');
   tmpRoot = join(root, 't');
+  filesRoot = join(root, 'run');
+  lanesRoot = join(root, 'lanes');
   pnpmLockDir = join(root, 'pnpm-locks');
   mkdirSync(home);
   mkdirSync(tmpRoot);
+  mkdirSync(filesRoot);
+  mkdirSync(lanesRoot);
   repo = createTempRepo();
   checkout = realpathSync(repo.path);
 });
@@ -370,6 +377,7 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
     await expect(sandbox().forRun(input({ env }))).rejects.toThrow(/LANG/);
     await expect(sandbox().forRun(input({ env }))).rejects.not.toThrow(/secret/);
     expect(readdirSync(tmpRoot)).toEqual([]);
+    expect(readdirSync(filesRoot)).toEqual([]);
   });
 
   // srt exits 0 when its own child dies by TERM or INT, so that child must never be the command.
@@ -395,10 +403,11 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
     });
   });
 
-  it('seals the settings file outside the temp dir, and removes both on dispose', async () => {
+  it('seals the settings file in the files root, outside every temp dir, and removes both on dispose', async () => {
     const run = await sandbox().forRun(input());
     const file = run.args[2] ?? '';
-    expect(dirname(file)).toBe(tmpRoot);
+    expect(dirname(file)).toBe(filesRoot);
+    expect(dirname(run.tmpDir)).toBe(tmpRoot);
     expect(statSync(file).mode & 0o777).toBe(0o400);
     expect(existsSync(run.tmpDir)).toBe(true);
     await run.dispose();
@@ -406,6 +415,7 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
     expect(existsSync(file)).toBe(false);
     expect(existsSync(run.tmpDir)).toBe(false);
     expect(readdirSync(tmpRoot)).toEqual([]);
+    expect(readdirSync(filesRoot)).toEqual([]);
   });
 
   it.each([
@@ -427,6 +437,14 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
         return { node: join(tmpRoot, 'node') };
       },
     ],
+    [
+      'node',
+      'linked from another root lanes write',
+      (): Partial<typeof RUNTIME> => {
+        symlinkSync(process.execPath, join(lanesRoot, 'node'));
+        return { node: join(lanesRoot, 'node') };
+      },
+    ],
   ])("refuses srt's %s %s: a project could swap it", async (_what, _where, place) => {
     const runtime = { ...RUNTIME, ...place() };
     const pending = createGateSandbox({
@@ -434,12 +452,15 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
       dataDir,
       loginConfigDir: null,
       tmpRoot,
+      filesRoot,
+      laneWritableRoots: [lanesRoot],
       gitDirs: (path) => git.gitDirs(path),
       systemPrefixes: [],
       runtime,
     }).forRun(input());
     await expect(pending).rejects.toThrow(SandboxProfileError);
     expect(readdirSync(tmpRoot).filter((name) => name.startsWith('10db-'))).toEqual([]);
+    expect(readdirSync(filesRoot)).toEqual([]);
   });
 
   it('removes the temp dir without blocking the event loop', async () => {
@@ -464,6 +485,7 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
     execFileSync('ln', ['-s', dirname(checkout), join(checkout, '.env')]);
     await expect(sandbox().forRun(input())).rejects.toThrow(SandboxProfileError);
     expect(readdirSync(tmpRoot)).toEqual([]);
+    expect(readdirSync(filesRoot)).toEqual([]);
   });
   describe('a run that installs packages', () => {
     it("opens pnpm's store lock directory, which pnpm puts in the system temp dir whatever TMPDIR says", async () => {

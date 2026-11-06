@@ -5,7 +5,12 @@ import { prepareCommandEnv } from './command-env';
 import { shellAssignments } from './env-file';
 import { singleQuoted } from './posix-quote';
 import { buildLaneProfile } from './profile';
-import { projectAccess, projectWritableRoots, type ProjectAccessDeps } from './project-access';
+import {
+  laneRootsOf,
+  projectAccess,
+  projectWritableRoots,
+  type ProjectAccessDeps,
+} from './project-access';
 import { defaultPnpmLockDir, openPnpmLockDir, sweepPnpmLockDir } from './pnpm-lock-dir';
 import { createSealedFile, removeSealedFile, type SealedFileKind } from './sealed-file';
 import {
@@ -18,7 +23,7 @@ import {
 import { srtSettings } from './srt-settings';
 import {
   createLaneTempDir,
-  LANE_TEMP_ROOT,
+  laneTempRoot,
   removeLaneTempDirAsync,
   SandboxTempDirError,
 } from './temp-dir';
@@ -83,8 +88,10 @@ export interface GateSandbox {
 }
 
 export interface GateSandboxDeps extends Omit<ProjectAccessDeps, 'tmpRoot'> {
-  /** Where temp dirs are made; tests pass a short temp root. */
+  /** Where temp dirs are made, `laneTempRoot()` by default; tests pass a short temp root. */
   readonly tmpRoot?: string;
+  /** Where each run's sealed settings file is made, outside every temp dir. */
+  readonly filesRoot: string;
   /** Where pnpm keeps its store locks; tests pass a directory of their own. */
   readonly pnpmLockDir?: string;
   readonly runtime: SandboxRuntime;
@@ -108,10 +115,14 @@ function writeDockerShim(binDir: string, marker: string): void {
  * inside the sandbox, so nothing outside it acts on what the gate's env or PATH name.
  */
 export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
-  const tmpRoot = deps.tmpRoot ?? LANE_TEMP_ROOT;
+  const tmpRoot = deps.tmpRoot ?? laneTempRoot();
+  const { filesRoot } = deps;
   return {
     async forRun(input) {
-      checkRuntime(deps.runtime, projectWritableRoots(input.checkouts, tmpRoot));
+      checkRuntime(
+        deps.runtime,
+        projectWritableRoots(input.checkouts, laneRootsOf({ ...deps, tmpRoot })),
+      );
       const access = await projectAccess(
         { ...deps, tmpRoot },
         {
@@ -144,7 +155,7 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
         };
         if (settingsFile !== null) {
           try {
-            removeSealedFile(settingsFile, tmpRoot, SETTINGS_FILE);
+            removeSealedFile(settingsFile, filesRoot, SETTINGS_FILE);
           } catch (error) {
             record(error);
           }
@@ -202,7 +213,7 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
           '; exit $?',
         ].join(' ');
         settingsFile = createSealedFile(
-          tmpRoot,
+          filesRoot,
           SETTINGS_FILE,
           JSON.stringify(srtSettings(profile), null, 2),
         );

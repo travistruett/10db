@@ -145,6 +145,7 @@ export async function createTestEngine(
       | 'judge'
       | 'git'
       | 'worktreeRoot'
+      | 'codexLaneTempRoot'
     >
   > = {},
   setup: { readonly account?: AccountInput; readonly secret?: string } = {},
@@ -287,6 +288,7 @@ export async function createTestEngine(
     logger: silentLogger,
     dataDir: data.path,
     worktreeRoot: join(data.path, 'worktrees'),
+    codexLaneTempRoot: join(data.path, 'lanes'),
     live,
     limits: { ...DEFAULT_RUNNER_LIMITS, gateTimeoutMs: 20_000 },
     mcpUrl: () => mcpUrl,

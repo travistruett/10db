@@ -2,7 +2,7 @@ import { prepareCommandEnv } from './command-env';
 import { shellAssignments } from './env-file';
 import { singleQuoted } from './posix-quote';
 import { buildLaneProfile, SandboxProfileError } from './profile';
-import { projectWritableRoots, type ProjectAccess } from './project-access';
+import type { ProjectAccess } from './project-access';
 import { createSealedFile, removeSealedFile, type SealedFileKind } from './sealed-file';
 import {
   allowlisted,
@@ -90,7 +90,10 @@ export class SandboxedMcpServer {
 export interface McpSandboxInput {
   readonly access: ProjectAccess;
   readonly home: string;
+  /** Where each server's temp dir is made. */
   readonly tmpRoot: string;
+  /** Where each server's sealed env and settings files are made, outside every temp dir. */
+  readonly filesRoot: string;
   readonly runtime: SandboxRuntime;
   /** The session's launch env: only its allowlisted names reach a server. */
   readonly env: Readonly<Record<string, string>>;
@@ -124,7 +127,7 @@ function sandboxOne(
   input: McpSandboxInput,
   removals: (() => void)[],
 ): SandboxedMcpServer {
-  const { access, tmpRoot } = input;
+  const { access, tmpRoot, filesRoot } = input;
   const tmpDir = createLaneTempDir(tmpRoot);
   removals.push(() => {
     removeLaneTempDir(tmpDir, tmpRoot);
@@ -138,14 +141,14 @@ function sandboxOne(
     ...server.env,
   };
   const envFile = createSealedFile(
-    tmpRoot,
+    filesRoot,
     ENV_FILE,
     shellAssignments(commandEnv)
       .map((assignment) => `export ${assignment}\n`)
       .join(''),
   );
   removals.push(() => {
-    removeSealedFile(envFile, tmpRoot, ENV_FILE);
+    removeSealedFile(envFile, filesRoot, ENV_FILE);
   });
   const profile = buildLaneProfile({
     checkout: access.checkout,
@@ -167,12 +170,12 @@ function sandboxOne(
     deniedEnvNames: [],
   });
   const settingsFile = createSealedFile(
-    tmpRoot,
+    filesRoot,
     SETTINGS_FILE,
     JSON.stringify(srtSettings(profile), null, 2),
   );
   removals.push(() => {
-    removeSealedFile(settingsFile, tmpRoot, SETTINGS_FILE);
+    removeSealedFile(settingsFile, filesRoot, SETTINGS_FILE);
   });
   const inner = [
     'exec /usr/bin/env -i',
@@ -207,7 +210,7 @@ function sandboxOne(
 export function sandboxMcpServers(input: McpSandboxInput): McpSandboxes {
   const entries = Object.entries(input.servers);
   if (entries.length === 0) return { servers: {}, failures: [], dispose: () => undefined };
-  checkRuntime(input.runtime, projectWritableRoots(input.checkouts, input.tmpRoot));
+  checkRuntime(input.runtime, input.access.writableRoots);
   const removals: (() => void)[] = [];
   try {
     const servers: Record<string, SandboxedMcpServer> = {};

@@ -42,7 +42,11 @@ function context(overrides: Partial<FileAccessContext> = {}): FileAccessContext 
     readList: [],
     configDir,
     providerSessionId: 'own-id',
-    sandboxTemp: { root: join(root, 't'), own: join(root, 't', '10db-ownabc') },
+    // The temp root and the files root, as a lane's sandbox has them.
+    sandboxTemp: {
+      roots: [join(root, 't'), join(root, 'run')],
+      own: join(root, 't', '10db-ownabc'),
+    },
     ...overrides,
   };
 }
@@ -105,6 +109,15 @@ describe('readAccess', () => {
         writeFileSync(join(root, 't', '10db-env-0123456789ab.sh'), '');
       },
       path: () => join(root, 't', '10db-env-0123456789ab.sh'),
+      expected: 'protected',
+    },
+    {
+      name: "an MCP server's sealed env file in the files root",
+      setup: () => {
+        mkdirSync(join(root, 'run'));
+        writeFileSync(join(root, 'run', '10db-mcp-0123456789ab.sh'), '');
+      },
+      path: () => join(root, 'run', '10db-mcp-0123456789ab.sh'),
       expected: 'protected',
     },
     {
@@ -578,13 +591,15 @@ describe('writeAccess', () => {
     expect(writeAccess('~/.zshrc', context()).access).toBe('claude-protected');
   });
 
-  it('flags the sandbox temp root: a process ledger there names what the next start signals', () => {
+  it('flags every sandbox root: a process ledger in the files root names what the next start signals', () => {
     const temp = join(root, 't');
-    expect(writeAccess(join(temp, '10db-proc-4321-0123456789ab.json'), context()).access).toBe(
+    const files = join(root, 'run');
+    expect(writeAccess(join(files, '10db-proc-4321-0123456789ab.json'), context()).access).toBe(
       'sandbox-temp',
     );
     expect(writeAccess(join(temp, '10db-otherxyz', 'a'), context()).access).toBe('sandbox-temp');
     expect(writeAccess(temp, context()).access).toBe('sandbox-temp');
+    expect(writeAccess(files, context()).access).toBe('sandbox-temp');
   });
 
   it('flags the temp root through a link', () => {
@@ -778,12 +793,12 @@ describe('fileAccessJudge in the guard', () => {
     });
   });
 
-  it('refuses a write into the sandbox temp root with no card, but not into the session’s own temp dir', () => {
+  it('refuses a write into a sandbox root with no card, but not into the session’s own temp dir', () => {
     const judge = fileAccessJudge(context());
-    const ledger = join(root, 't', '10db-proc-4321-0123456789ab.json');
+    const ledger = join(root, 'run', '10db-proc-4321-0123456789ab.json');
     expect(guard(judge, 'Write', { file_path: ledger, content: '{}' })).toEqual({
       decision: 'deny',
-      reason: `${ledger} is in 10db's sandbox temp root, outside this session's temp dir; 10db never lets a lane write there.`,
+      reason: `${ledger} is in one of 10db's sandbox roots, outside this session's temp dir; 10db never lets a lane write there.`,
     });
     expect(guard(judge, 'Edit', { file_path: ledger }).decision).toBe('deny');
     const own = join(root, 't', '10db-ownabc', 'scratch.txt');

@@ -49,6 +49,7 @@ describe.skipIf(!SEATBELT)('the gate under the sandbox (Seatbelt)', () => {
     // A short root: the gate's temp dir must fit the socket path limit.
     root = realpathSync(mkdtempSync('/tmp/sbs-'));
     mkdirSync(join(root, 't'));
+    mkdirSync(join(root, 'r'));
     const git = createGit();
     gate = createGateRunner({
       sandbox: createGateSandbox({
@@ -57,6 +58,7 @@ describe.skipIf(!SEATBELT)('the gate under the sandbox (Seatbelt)', () => {
         loginConfigDir: null,
         gitDirs: (path) => git.gitDirs(path),
         tmpRoot: join(root, 't'),
+        filesRoot: join(root, 'r'),
         pnpmLockDir: join(root, 'pnpm-locks'),
         runtime: resolveSandboxRuntime(),
       }),

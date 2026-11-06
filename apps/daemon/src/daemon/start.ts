@@ -145,11 +145,12 @@ import {
 } from '../runner';
 import { resolveSandboxRuntime } from '../paths';
 import {
-  claimSandboxTempRoot,
+  claimSandboxRoots,
+  codexLaneTempRoot,
   createGateSandbox,
   createLaneSandbox,
   createLedgerSweep,
-  LANE_TEMP_ROOT,
+  laneTempRoot,
   reapLaneProcessLedgers,
   systemProcessTable,
   type LaneProcessSetup,
@@ -190,6 +191,12 @@ import { acquireInstanceLock } from './instance-lock';
 import { removeRuntimeFiles, writeRuntimeFiles } from '../runtime-files';
 import { createAreaNamer } from './area-namer';
 import { createServices } from './services';
+import {
+  openSandboxRoots,
+  refusedGateSandbox,
+  refusedLaneSandbox,
+  type SandboxRootOptions,
+} from './sandbox-roots';
 import { assertWorktreeRootAllowed, DEFAULT_WORKTREE_BASE, worktreeRootFor } from './worktree-root';
 
 export interface DaemonOptions {
@@ -199,18 +206,22 @@ export interface DaemonOptions {
   readonly adapter: SessionAdapter | ((logger: Logger) => SessionAdapter);
   readonly logLevel: LogLevel;
   /**
-   * The sandbox every lane and every gate runs under; `tmpRoot` (tests) moves its temp dirs off
-   * `/private/tmp`, and `runtime` (tests) replaces srt, which runs the gate. Required, so no caller
-   * can forget it: null runs lanes and gates unsandboxed, which only fake sessions and tests ask
-   * for, and the Claude adapter refuses such a session. `processes` (tests) replaces how lane
-   * processes are read and signalled, for the sessions and for the start-up sweep of a dead
+   * The sandbox every lane and every gate runs under. Its roots (tests) move what it makes off the
+   * machine's: `tmpRoot` the temp dirs of Claude lanes, gates and MCP servers (`laneTempRoot()`),
+   * `codexLaneTempRoot` a ChatGPT lane's (`~/.10db/lanes`), `filesRoot` the sealed files, env files
+   * and process ledgers (`~/.10db/run`), and `previousTempRoot` where an earlier 10db kept them all
+   * (`/private/tmp`), swept at start. `runtime` (tests) replaces srt, which runs the gate. Required,
+   * so no caller can forget it: null runs lanes and gates unsandboxed, which only fake sessions and
+   * tests ask for, and the Claude adapter refuses such a session. `processes` (tests) replaces how
+   * lane processes are read and signalled, for the sessions and for the start-up sweep of a dead
    * daemon's leftovers.
    */
-  readonly sandbox: {
-    readonly tmpRoot?: string;
-    readonly runtime?: SandboxRuntime;
-    readonly processes?: LaneProcessSetup;
-  } | null;
+  readonly sandbox:
+    | (SandboxRootOptions & {
+        readonly runtime?: SandboxRuntime;
+        readonly processes?: LaneProcessSetup;
+      })
+    | null;
   /**
    * Where worktrees are made: a base directory, under which a level named after the data dir is
    * added. Defaults to `~/.10db/worktrees`. Nothing is created there until the first worktree is cut.
@@ -379,16 +390,25 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // off (the list route says so) and the daemon running. No card: it asks the builder nothing.
   const knowledgeIndex = repairKnowledgeIndex(db, logger.child({ component: 'knowledge' }));
 
+  // The sandbox's roots, made private before anything is put there. A refused one refuses every lane
+  // session and gate, as a temp dir the sandbox can't make does.
+  const sandboxRoots = opts.sandbox ? openSandboxRoots(opts.sandbox, homedir()) : null;
+  // The roots lanes write: Claude lanes', ChatGPT lanes', and the system temp dir, which Codex's base
+  // policy opens to every ChatGPT lane.
+  const laneWrittenRoots =
+    sandboxRoots === null
+      ? []
+      : [sandboxRoots.temp, sandboxRoots.codexLanes, sandboxRoots.previous];
+  const allSandboxRoots = sandboxRoots === null ? [] : [...laneWrittenRoots, sandboxRoots.files];
   // Where this daemon's worktrees live, as a real path. A root that could hold lane-written files or
   // the daemon's own is refused before anything else starts.
-  const sandboxTempRoot = opts.sandbox ? (opts.sandbox.tmpRoot ?? LANE_TEMP_ROOT) : null;
   let worktreeRoot: string;
   try {
     worktreeRoot = worktreeRootFor(opts.worktreeRoot ?? DEFAULT_WORKTREE_BASE, opts.dataDir);
     assertWorktreeRootAllowed(worktreeRoot, {
       checkouts: listProjects(db).map((project) => project.repoPath),
       dataDir: opts.dataDir,
-      tempRoot: sandboxTempRoot,
+      sandboxRoots: allSandboxRoots,
     });
   } catch (error) {
     db.$client.close();
@@ -538,7 +558,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     clock,
     logger: logger.child({ component: 'load' }),
     daemonPid: process.pid,
-    tempRoot: sandboxTempRoot,
+    tempRoot: sandboxRoots?.temp ?? null,
     tempDirs: laneTempDirs,
     onCleared: () => {
       scheduler?.requestTick();
@@ -561,32 +581,56 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     pins: createProjectPinStore(state, memoryPinStore()),
     bin: gitBin,
     checkouts: () => listProjects(state.db).map((project) => project.repoPath),
-    // Where sandboxed lanes and gates make their temp dirs. With no sandbox nothing is made there,
-    // so nothing lane-written lies in it.
-    laneRoots: [...(sandboxTempRoot === null ? [] : [sandboxTempRoot]), worktreeRoot],
+    // Where sandboxed lanes and gates make their temp dirs, and the system temp dir every ChatGPT
+    // lane writes. With no sandbox no lane runs, so nothing lane-written lies in them.
+    laneRoots: [...laneWrittenRoots, worktreeRoot],
     worktreeRoot,
   });
   // srt, which runs every gate and every repo stdio MCP server.
   const runtime = opts.sandbox ? (opts.sandbox.runtime ?? resolveSandboxRuntime()) : null;
-  // Before any session or gate starts: what a crashed run left in the temp root is stale.
-  const tempRoot = sandboxTempRoot === null ? null : claimSandboxTempRoot(sandboxTempRoot);
-  if (tempRoot && (tempRoot.removed > 0 || tempRoot.failed > 0 || tempRoot.sharedWith !== null)) {
+  if (sandboxRoots?.refusal) {
+    logger.error(
+      { err: sandboxRoots.refusal.message },
+      'a sandbox root was refused, so no lane session or gate can start',
+    );
+  }
+  // Before any session or gate starts: what a crashed run left in the roots is stale, and so is what
+  // an earlier 10db left in the system temp dir. A refused root is neither swept nor claimed.
+  const claimedRoots =
+    sandboxRoots === null
+      ? null
+      : claimSandboxRoots(
+          sandboxRoots.refusal === null
+            ? [sandboxRoots.temp, sandboxRoots.codexLanes, sandboxRoots.files]
+            : [],
+          sandboxRoots.previous,
+        );
+  if (
+    claimedRoots &&
+    (claimedRoots.removed > 0 || claimedRoots.failed > 0 || claimedRoots.sharedWith !== null)
+  ) {
     logger.info(
-      { removed: tempRoot.removed, failed: tempRoot.failed, sharedWith: tempRoot.sharedWith },
-      'swept the sandbox temp root',
+      {
+        removed: claimedRoots.removed,
+        failed: claimedRoots.failed,
+        sharedWith: claimedRoots.sharedWith,
+      },
+      'swept the sandbox roots',
     );
   }
   // Before recovery and before any session: processes the lane sessions of a daemon that died left
   // running (a lane's background loops reparent to launchd when their session goes) are stopped
-  // from the ledgers those sessions kept. Each ledger names its daemon: one sharing the root that
-  // still runs keeps its own, and every dead one's is reaped even then. What a machine whose
-  // processes can't be read leaves is swept again while the daemon runs, and so is what a session
-  // of this daemon could not stop as it ended; the next start takes whatever is still left.
+  // from the ledgers those sessions kept in the files root. Each ledger names its daemon: one
+  // sharing the root that still runs keeps its own, and every dead one's is reaped even then. What a
+  // machine whose processes can't be read leaves is swept again while the daemon runs, and so is
+  // what a session of this daemon could not stop as it ended; the next start takes whatever is
+  // still left.
   const laneProcesses = opts.sandbox?.processes ?? { table: systemProcessTable };
   let ledgerSweep: LedgerSweep | null = null;
-  if (tempRoot && sandboxTempRoot !== null) {
+  if (sandboxRoots !== null && sandboxRoots.refusal === null) {
+    const ledgerRoot = sandboxRoots.files;
     let sweepFailing = false;
-    ledgerSweep = createLedgerSweep(sandboxTempRoot, laneProcesses, {
+    ledgerSweep = createLedgerSweep(ledgerRoot, laneProcesses, {
       onSwept: (report) => {
         sweepFailing = false;
         if (report.ledgers === 0) return;
@@ -606,7 +650,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       },
     });
     try {
-      const reaped = await reapLaneProcessLedgers(sandboxTempRoot, laneProcesses);
+      const reaped = await reapLaneProcessLedgers(ledgerRoot, laneProcesses);
       if (reaped.ledgers > 0) {
         logger.info(
           { ledgers: reaped.ledgers, stopped: reaped.stopped },
@@ -625,15 +669,19 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // all, so the machine never runs more than `limits.gateSlots` at once.
   const gateRunner = createGateRunner({
     sandbox:
-      opts.sandbox && runtime
-        ? createGateSandbox({
-            home: homedir(),
-            dataDir: opts.dataDir,
-            loginConfigDir: launcher.loginConfigDir(),
-            gitDirs: (repo) => git.gitDirs(repo),
-            ...(opts.sandbox.tmpRoot === undefined ? {} : { tmpRoot: opts.sandbox.tmpRoot }),
-            runtime,
-          })
+      sandboxRoots && runtime
+        ? sandboxRoots.refusal
+          ? refusedGateSandbox(sandboxRoots.refusal)
+          : createGateSandbox({
+              home: homedir(),
+              dataDir: opts.dataDir,
+              loginConfigDir: launcher.loginConfigDir(),
+              gitDirs: (repo) => git.gitDirs(repo),
+              tmpRoot: sandboxRoots.temp,
+              filesRoot: sandboxRoots.files,
+              laneWritableRoots: laneWrittenRoots,
+              runtime,
+            })
         : null,
     logger: logger.child({ component: 'gate' }),
   });
@@ -926,29 +974,34 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           checkout: project.repoPath,
           home: homedir(),
           protectedReads: guarded.map((p) => p.path),
-          tempRoot: sandboxTempRoot ?? LANE_TEMP_ROOT,
+          tempRoot: sandboxRoots?.temp ?? laneTempRoot(),
         },
       };
     },
   });
   const laneSandbox =
-    opts.sandbox && runtime
-      ? createLaneSandbox({
-          home: homedir(),
-          dataDir: opts.dataDir,
-          loginConfigDir: launcher.loginConfigDir(),
-          gitDirs: (repo) => git.gitDirs(repo),
-          ...(opts.sandbox.tmpRoot === undefined ? {} : { tmpRoot: opts.sandbox.tmpRoot }),
-          ...(opts.sandbox.processes === undefined ? {} : { processes: opts.sandbox.processes }),
-          ...(ledgerSweep === null ? {} : { ledgers: ledgerSweep }),
-          log: logger.child({ component: 'sandbox' }),
-          runtime,
-          worktreeRoot,
-        })
+    opts.sandbox && sandboxRoots && runtime
+      ? sandboxRoots.refusal
+        ? refusedLaneSandbox(sandboxRoots.refusal)
+        : createLaneSandbox({
+            home: homedir(),
+            dataDir: opts.dataDir,
+            loginConfigDir: launcher.loginConfigDir(),
+            gitDirs: (repo) => git.gitDirs(repo),
+            tmpRoot: sandboxRoots.temp,
+            filesRoot: sandboxRoots.files,
+            laneWritableRoots: laneWrittenRoots,
+            ...(opts.sandbox.processes === undefined ? {} : { processes: opts.sandbox.processes }),
+            ...(ledgerSweep === null ? {} : { ledgers: ledgerSweep }),
+            log: logger.child({ component: 'sandbox' }),
+            runtime,
+            worktreeRoot,
+          })
       : null;
   const createdRunner = createRunner({
     protectedPaths: guarded,
     laneSandbox,
+    codexLaneTempRoot: sandboxRoots?.codexLanes ?? codexLaneTempRoot(homedir()),
     worktreeRoot,
     hold: startHold,
     laneTempDirs,
@@ -1123,11 +1176,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         env: delivery.networkEnv(),
         timeoutMs: delivery.limits.networkTimeoutMs,
       }),
-    protectedRoots: [
-      opts.dataDir,
-      ...(sandboxTempRoot === null ? [] : [sandboxTempRoot]),
-      worktreeRoot,
-    ],
+    protectedRoots: [opts.dataDir, ...allSandboxRoots, worktreeRoot],
     areaNamer: createAreaNamer({ adapter, launcher, db: state.db, scratchRoot: tmpdir() }),
     pinCheckout: (repoPath) => {
       // A checkout git can't read yet is recorded at the first git call that succeeds there.
@@ -1435,7 +1484,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         });
       });
       removeRuntimeFiles(opts.dataDir);
-      tempRoot?.release();
+      claimedRoots?.release();
       db.$client.close();
       lock.release();
     } finally {

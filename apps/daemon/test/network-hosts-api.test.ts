@@ -318,6 +318,7 @@ describe('network hosts of a project', () => {
     try {
       const home = join(root, 'home');
       mkdirSync(home);
+      // The run's sealed settings file goes in its home, which this test removes.
       const tmpRoot = shortWritableDir();
       const git = createGit();
       const sandbox = createGateSandbox({
@@ -325,6 +326,7 @@ describe('network hosts of a project', () => {
         dataDir: join(home, 'data'),
         loginConfigDir: join(home, '.claude'),
         tmpRoot,
+        filesRoot: home,
         gitDirs: (path) => git.gitDirs(path),
         systemPrefixes: [],
         runtime: FAKE_SRT,

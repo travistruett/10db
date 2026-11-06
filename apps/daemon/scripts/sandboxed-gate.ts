@@ -13,7 +13,12 @@ import { homedir, tmpdir } from 'node:os';
 import { createGit, resolveGit } from '../src/git';
 import { silentLogger } from '../src/log';
 import { resolveSandboxRuntime } from '../src/paths';
-import { createGateSandbox } from '../src/sandbox';
+import {
+  createGateSandbox,
+  ensurePrivateRoot,
+  laneTempRoot,
+  sandboxFilesRoot,
+} from '../src/sandbox';
 import { createGateRunner } from '../src/verify';
 
 const args = process.argv.slice(2);
@@ -48,6 +53,9 @@ const gate = createGateRunner({
     dataDir: join(homedir(), 'Library', 'Application Support', '10db'),
     loginConfigDir: env['CLAUDE_CONFIG_DIR'] ?? null,
     gitDirs: (repo) => git.gitDirs(repo),
+    // The daemon's own roots, made private as its start makes them.
+    tmpRoot: ensurePrivateRoot(laneTempRoot()),
+    filesRoot: ensurePrivateRoot(sandboxFilesRoot(homedir())),
     runtime: resolveSandboxRuntime(),
   }),
   logger: silentLogger,

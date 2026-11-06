@@ -8,7 +8,7 @@ import {
   rmSync,
   statSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { mintId } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -37,6 +37,7 @@ const projectId = mintId('Project');
 let root: string;
 let home: string;
 let tmpRoot: string;
+let filesRoot: string;
 let repo: TempDir;
 let checkout: string;
 
@@ -69,6 +70,7 @@ function forSession(
     dataDir: join(home, 'data'),
     loginConfigDir: null,
     tmpRoot,
+    filesRoot,
     gitDirs: (path) => git.gitDirs(path),
     systemPrefixes: [],
     runtime,
@@ -118,8 +120,10 @@ beforeEach(() => {
   root = realpathSync(mkdtempSync('/tmp/sbm-'));
   home = join(root, 'home');
   tmpRoot = join(root, 't');
+  filesRoot = join(root, 'run');
   mkdirSync(home);
   mkdirSync(tmpRoot);
+  mkdirSync(filesRoot);
   repo = createTempRepo();
   checkout = realpathSync(repo.path);
 });
@@ -168,8 +172,12 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
   it('puts no value on a command line: the approved variables travel in a sealed file', async () => {
     const session = await forSession();
     try {
-      const { server, envFile, tmp } = launchOf(session, 'docs');
+      const { server, envFile, settingsFile, tmp } = launchOf(session, 'docs');
       expect(JSON.stringify(server)).not.toContain('tok-1');
+      // Both sealed files are in the files root, outside every temp dir; the temp dir is the temp root's.
+      expect(dirname(envFile)).toBe(filesRoot);
+      expect(dirname(settingsFile)).toBe(filesRoot);
+      expect(dirname(tmp)).toBe(tmpRoot);
       expect(statSync(envFile).mode & 0o777).toBe(0o400);
       const text = readFileSync(envFile, 'utf8');
       const names = [...text.matchAll(/^export ([A-Za-z_][A-Za-z0-9_]*)=/gm)].map((m) => m[1]);
@@ -291,19 +299,23 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
       const { settingsFile, tmp, envFile } = launchOf(session, 'docs');
       // Only the lane's own files, the started server's and the daemon's process ledger are left:
       // the failed one's are gone.
-      const left = readdirSync(tmpRoot);
+      expect(readdirSync(tmpRoot).sort()).toEqual(
+        [session.tmpDir, tmp].map((path) => path.slice(tmpRoot.length + 1)).sort(),
+      );
+      const files = readdirSync(filesRoot);
       expect(
-        left.filter((name) => /^10db-proc-[1-9][0-9]*-[0-9a-f]{12}\.json$/.test(name)),
+        files.filter((name) => /^10db-proc-[1-9][0-9]*-[0-9a-f]{12}\.json$/.test(name)),
       ).toHaveLength(1);
-      expect(left.filter((name) => !name.startsWith('10db-proc-')).sort()).toEqual(
-        [session.tmpDir, settingsFile, tmp, envFile, session.spec.env['CLAUDE_ENV_FILE'] ?? '']
-          .map((path) => path.slice(tmpRoot.length + 1))
+      expect(files.filter((name) => !name.startsWith('10db-proc-')).sort()).toEqual(
+        [settingsFile, envFile, session.spec.env['CLAUDE_ENV_FILE'] ?? '']
+          .map((path) => path.slice(filesRoot.length + 1))
           .sort(),
       );
     } finally {
       session.dispose();
     }
     expect(readdirSync(tmpRoot)).toEqual([]);
+    expect(readdirSync(filesRoot)).toEqual([]);
   });
 
   it('removes each server temp dir, settings file and env file on dispose', async () => {
@@ -319,6 +331,7 @@ describe.skipIf(SANDBOXED)("a lane session's repo stdio MCP servers", () => {
       forSession({}, { node: process.execPath, cli: join(checkout, 'srt.mjs') }),
     ).rejects.toThrow(SandboxProfileError);
     expect(readdirSync(tmpRoot)).toEqual([]);
+    expect(readdirSync(filesRoot)).toEqual([]);
   });
 
   it('makes nothing and checks no srt when the repo has no stdio server', async () => {

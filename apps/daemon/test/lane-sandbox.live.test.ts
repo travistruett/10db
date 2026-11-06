@@ -14,7 +14,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { homedir, tmpdir, userInfo } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import {
   ClaimKind,
   mintId,
@@ -42,8 +42,11 @@ import { allowedToolsFor } from '../src/permissions';
 import {
   createLaneSandbox,
   createLaneTempDir,
+  ensurePrivateRoot,
   fileAccessJudge,
+  laneTempRoot,
   removeLaneTempDir,
+  sandboxFilesRoot,
   type LaneSession,
   type StdioMcpServer,
 } from '../src/sandbox';
@@ -53,6 +56,12 @@ import { isolatedGitEnv, seedWorkstream, TEST_REPO_CONFIG } from './fixtures';
 import { captureLogs } from './log-capture';
 
 const live = loadEnv(process.env).TENDB_LIVE_CLAUDE === '1';
+
+/** The daemon's own roots, made private as its start makes them. */
+const sandboxRoots = (): { readonly tmpRoot: string; readonly filesRoot: string } => ({
+  tmpRoot: ensurePrivateRoot(laneTempRoot()),
+  filesRoot: ensurePrivateRoot(sandboxFilesRoot(homedir())),
+});
 
 /** A file holding a random token that must never reach the session. */
 interface Canary {
@@ -299,6 +308,7 @@ async function runLane(opts: {
     home: homedir(),
     dataDir: opts.dataDir,
     loginConfigDir: launcher.loginConfigDir(),
+    ...sandboxRoots(),
     gitDirs: (repo) => createGit().gitDirs(repo),
     runtime: resolveSandboxRuntime(),
     worktreeRoot: join(opts.dataDir, 'worktrees'),
@@ -554,7 +564,8 @@ describe.skipIf(!live)('lane sandbox, live', () => {
   it('holds every canary in an ordinary checkout and keeps the git dir read-only', async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), '10db-live-')));
     const outside = realpathSync(mkdtempSync(join(tmpdir(), '10db-canary-')));
-    const otherLaneTmp = createLaneTempDir();
+    const { tmpRoot } = sandboxRoots();
+    const otherLaneTmp = createLaneTempDir(tmpRoot);
     const shared = `/Users/Shared/10db-canary-${randomUUID()}`;
     // pnpm 12's fixed lock directory is shared with every lane and the builder's pnpm: never writable.
     // It is made here when missing, so the probe's write fails on the sandbox, not on a missing dir.
@@ -659,7 +670,8 @@ describe.skipIf(!live)('lane sandbox, live', () => {
         expect.soft(run.probeOutput, `cat ${canary.label}`).not.toContain(canary.token);
         expect.soft(run.transcript, `transcript ${canary.label}`).not.toContain(canary.token);
       }
-      expect.soft(probeLine(run.probeOutput, 'TMPDIR=')).toMatch(/^TMPDIR=\/private\/tmp\/10db-/);
+      expect.soft(probeLine(run.probeOutput, 'TMPDIR=')).toBe(`TMPDIR=${run.tmpDir}`);
+      expect.soft(dirname(run.tmpDir)).toBe(laneTempRoot());
       expect.soft(probeLine(run.probeOutput, 'GH_TOKEN_COUNT=')).toBe('GH_TOKEN_COUNT=0');
       expectReadOnlyGitWorks(run.probeOutput);
       expect.soft(probeLine(run.probeOutput, 'OPTIONAL_LOCKS=')).toBe('OPTIONAL_LOCKS=0');
@@ -736,7 +748,7 @@ describe.skipIf(!live)('lane sandbox, live', () => {
       rmSync(shared, { force: true });
       rmSync(pnpmLock, { force: true });
       rmSync(tmpSibling, { force: true });
-      removeLaneTempDir(otherLaneTmp);
+      removeLaneTempDir(otherLaneTmp, tmpRoot);
     }
   }, 300_000);
 
