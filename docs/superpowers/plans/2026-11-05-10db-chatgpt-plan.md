@@ -111,7 +111,7 @@ Expected: PASS
   `signsInWithLogin(kind: SupportedAccountKind): boolean` (Claude subscription, Codex sign-in).
 - Produces in `environment`: `codexSignInCommand(home: string): string`;
   `signInCommandFor(account: { kind: SupportedAccountKind; configDir: string | null }): string`;
-  `sessionConfigDir(env: Readonly<Record<string, string>>, home: string): string`.
+  `sessionConfigDir(kind: SupportedAccountKind, env: Readonly<Record<string, string>>, home: string): string`.
 - Produces in `sessions`: a `SeenAccount` with `apiProvider: 'chatgpt'` means a ChatGPT sign-in, and its `organization`
   holds the workspace ID. A ChatGPT account's identity is `codexIdentity(email: string, workspace: string): string`,
   which is `${email} · ${workspace}`.
@@ -156,8 +156,8 @@ Expected: FAIL, `providerOf` undefined.
     the union's error text, which keeps refusing `openai_api_key`.
   - `launch.ts`: for this kind, filter `OPENAI_API_KEY`, `CODEX_API_KEY`, `OPENAI_BASE_URL`, `CODEX_ACCESS_TOKEN` and
     `CODEX_HOME` from the login env, set `CODEX_HOME` from `configDir`, and leave `CLAUDE_CONFIG_DIR` unset. Add the
-    `AccountKind.CodexSignin` case to `build()`. `sessionConfigDir` returns `CODEX_HOME`, else `CLAUDE_CONFIG_DIR`, else
-    `<home>/.claude`.
+    `AccountKind.CodexSignin` case to `build()`. `sessionConfigDir` reads `CODEX_HOME` only for a Codex kind; a Claude kind
+    reads `CLAUDE_CONFIG_DIR`, else `<home>/.claude`, whatever the login shell exports.
   - `account-check.ts`: `NEEDS` entry "a ChatGPT sign-in"; `credentialsMatch` is
     `seen.apiProvider === 'chatgpt' && Boolean(seen.subscriptionType)`; lines 89, 108 and 129 use `signsInWithLogin`.
     Every message in this file names the tool by kind ("Codex", `codex login status`), so a ChatGPT card never says
@@ -744,7 +744,7 @@ Run: `pnpm --filter @10db/daemon exec vitest run src/sessions/codex-lane-config.
 Expected: FAIL
 
 - [ ] **Step 3: Implement.** Skip `'/'` in `denyRead`. Skip any `allowRead` entry holding `*` or `[`. `runner.ts:1511` calls
-      `sessionConfigDir(launch.env, homedir())`; `:1575` records `providerOf(account.kind)`. `project.provider` stays.
+      `sessionConfigDir(account.kind, launch.env, homedir())`; `:1575` records `providerOf(account.kind)`. `project.provider` stays.
 
 - [ ] **Step 4: Run them to see them pass.**
 
