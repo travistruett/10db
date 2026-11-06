@@ -28,8 +28,8 @@ blocked on OpenAI's terms. The terms no longer block it, and Codex is built as t
 
 OpenAI's app-server page says app-server authentication was never permitted for commercial or hosted services, and that
 a local or open-source app built on it can keep using it. 10db is local, Apache-2.0, public and not hosted, so it
-is on the allowed side. That page was read through a summarising tool, and OpenAI's Terms of Use themselves are still
-unread. A paid 10db tier, or anything hosted, would reopen the question.
+is on the allowed side. That page was read through a summarising tool. Travis accepted OpenAI's Terms of Use on
+2026-11-06 without a further reading. A paid 10db tier, or anything hosted, would reopen the question.
 
 Ampsio has its own ChatGPT plan, and the rule is that each project's work is billed where it belongs, so Ampsio joins
 10db on ChatGPT rather than on Claude first.

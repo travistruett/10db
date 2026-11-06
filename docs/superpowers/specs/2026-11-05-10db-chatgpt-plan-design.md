@@ -50,7 +50,8 @@ Decided by Travis, 2026-11-05, and no longer a blocker: start with a login on th
 then move to Sign in with ChatGPT once this is stable. OpenAI's app-server page says app-server authentication was
 never permitted for commercial or hosted services, and that a local or open-source app built on it can keep using it.
 10db is local, Apache-2.0, public and not hosted, so it is on the allowed side. That page was read through a
-summarising tool, and OpenAI's Terms of Use themselves are still unread. `docs/architecture/open-questions.md` and its
+summarising tool. Travis accepted OpenAI's Terms of Use on 2026-11-06 without a further reading.
+`docs/architecture/open-questions.md` and its
 older notes predate this decision; the last step under Order closes the row.
 
 ## What the spike showed
