@@ -386,7 +386,7 @@ Expected: FAIL, modules missing.
 
 - [ ] **Step 3: Implement.**
   - `probeAccount` spawns with the probe's env, runs `initialize`, `initialized`, `account/read`,
-    `account/rateLimits/read`, `model/list`, closes. A failed usage read leaves `organization` unset. A deadline of 30 s,
+    `account/rateLimits/read`, `model/list`, closes. A failed usage read, or one with no `accountId`, fails the probe, since the identity needs the workspace. A failed `model/list` leaves `models` unset, since the list only informs Settings. A deadline of 30 s,
     as `AccountProbeError`. Log nothing from `account`.
   - `codexLoginStatus` mirrors `claudeAuthStatus`: `codex login status`, exit 0 `signed_in`, exit 1 with "Not logged in"
     `signed_out`, anything else `unknown`.
