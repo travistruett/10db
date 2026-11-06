@@ -4,11 +4,15 @@
 export { createScreenBroker, type ScreenOutcome } from './broker';
 export { readImageSize } from './image-check';
 export {
+  STRICTEST_LIMITS,
+  pictureLimitsFor,
+  poolBytes,
+  type PictureLimits,
+} from './picture-limits';
+export {
   FRESH_START_LINE,
-  INLINE_CONVERSATION_MAX_BYTES,
-  PICTURE_POOL_BYTES,
   READ_CHARGE_MAX_BYTES,
-  READ_RESERVE_BYTES,
+  carriedTooMuch,
   inlineBytesSpent,
   inlinePictureBytes,
   isImageName,

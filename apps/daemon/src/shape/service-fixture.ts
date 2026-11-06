@@ -1,10 +1,11 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { mintId, type DaemonEvent } from '@10db/contracts';
+import { AccountKind, mintId, type DaemonEvent, type SupportedAccountKind } from '@10db/contracts';
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { silentLogger } from '../log';
+import type { PictureLimits, ScreenService } from '../screens';
 import { FakeAdapter } from '../sessions';
 import type { Hold } from '../verify';
 import type { TrackedFiles } from './ceremony';
@@ -22,6 +23,8 @@ export interface ServiceFixture {
   /** The root the service keeps each conversation's dropped files under. */
   readonly filesDir: string;
   readonly events: DaemonEvent[];
+  /** Moves the project to an account of this kind, as a plan falling back to Bedrock does: the next start sees it. */
+  launchOn(kind: SupportedAccountKind): void;
   /** Closes the service and builds a new one over the same database, as quitting and reopening 10db does. */
   restart(): Promise<void>;
   close(): Promise<void>;
@@ -34,8 +37,15 @@ export function createServiceFixture(
     joiningProblem?: JoiningProblem;
     home?: string;
     checkout?: string;
+    /** The picture limits of an account kind; the real ones by default (`pictureLimitsFor`). */
+    limitsFor?: (kind: AccountKind) => PictureLimits;
+    /** The kind of the account the project launches on; a Claude plan by default. */
+    accountKind?: SupportedAccountKind;
+    /** Draws screens for `see_screen`; none by default. */
+    screens?: Pick<ScreenService, 'see'>;
   } = {},
 ): ServiceFixture {
+  const launched = { kind: opts.accountKind ?? AccountKind.ClaudeSubscription };
   const c = seedConversation();
   const bus = createEventBus();
   const events: DaemonEvent[] = [];
@@ -55,6 +65,8 @@ export function createServiceFixture(
       // No git in a test: the project's checkout is not a repository, so nothing is one-way unless asked.
       trackedFiles: opts.trackedFiles ?? (() => []),
       mcp: { url: 'http://127.0.0.1:4317/mcp', toolTimeoutMs: 60_000 },
+      ...(opts.limitsFor === undefined ? {} : { limitsFor: opts.limitsFor }),
+      ...(opts.screens === undefined ? {} : { screens: opts.screens }),
       launch: () => ({
         cwd: '/repo',
         model: 'opus',
@@ -62,8 +74,8 @@ export function createServiceFixture(
         env: {},
         account: {
           accountId: mintId('Account'),
-          label: 'Claude plan',
-          kind: 'claude_subscription',
+          label: launched.kind === AccountKind.Bedrock ? 'Bedrock' : 'Claude plan',
+          kind: launched.kind,
           identity: null,
         },
         access: {
@@ -84,6 +96,9 @@ export function createServiceFixture(
     },
     filesDir,
     events,
+    launchOn(kind) {
+      launched.kind = kind;
+    },
     async restart() {
       await service.close();
       service = make();

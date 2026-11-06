@@ -26,7 +26,10 @@ export interface ShapeToolDeps {
   /** What the ceremony rule reads about the project: its one-way paths (§7). */
   world?(shapeId: ShapeId): ViewWorld;
   /** Draws the app's screens for `see_screen` (§5.5); the tool is not offered without it. */
-  readonly screens?: Pick<ScreenService, 'see'>;
+  readonly screens?: {
+    /** The service's `see` with the limits of the conversation's account already given. */
+    see(shapeId: ShapeId, input: SeeScreenInput): ReturnType<ScreenService['see']>;
+  };
 }
 
 const plural = (n: number, noun: string): string => `${String(n)} ${noun}`;
