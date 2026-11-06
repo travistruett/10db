@@ -138,6 +138,41 @@ describe('buildLaneProfile', () => {
     expect(denyWrite).toEqual([]);
   });
 
+  it.each(SYSTEM_READS.map((entry) => [entry] as const))(
+    'leaves out the built-in read %s when a sandbox root lies under it, keeping the lane own temp dir and files',
+    (entry) => {
+      const tempRoot = join(entry, 'sbx-shared');
+      const files = join(entry, 'sbx-run');
+      const envFile = join(files, '10db-env-0123456789ab.sh');
+      const tmpDir = join(tempRoot, '10db-abcdef');
+      const { allowRead, denyRead } = buildLaneProfile(
+        input({
+          tmpDir,
+          sandboxRoots: [tempRoot, files],
+          ownFiles: [envFile],
+          extraReads: [envFile],
+        }),
+      ).filesystem;
+      expect(allowRead).not.toContain(entry);
+      expect(allowRead).toEqual(expect.arrayContaining([tmpDir, envFile]));
+      expect(denyRead).toEqual(expect.arrayContaining([tempRoot, files]));
+      // No remaining grant is a root or covers one, so nothing else opens another sandbox's files.
+      for (const granted of allowRead) {
+        for (const held of [tempRoot, files]) {
+          expect(
+            held === granted || held.startsWith(`${granted}/`),
+            `${granted} covers ${held}`,
+          ).toBe(false);
+        }
+      }
+    },
+  );
+
+  it('keeps every built-in read when no sandbox root lies under one', () => {
+    const { allowRead } = buildLaneProfile(withRoots()).filesystem;
+    expect(allowRead).toEqual(expect.arrayContaining([...SYSTEM_READS]));
+  });
+
   it.each<
     [
       string,

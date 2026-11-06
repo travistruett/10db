@@ -283,16 +283,21 @@ function refuseToolchainSecretsOverNeeds(
   }
 }
 
+/** Whether a readable path is, or holds, a sandbox root. */
+function holdsSandboxRoot(path: string, sandboxRoots: readonly string[]): boolean {
+  return sandboxRoots.some((root) => isEqualOrUnder(root, path));
+}
+
 /**
  * The read-list entries that are, or hold, a sandbox root. Such an entry opens none of the root and is
- * left out of a profile: srt applies a deny that lies inside a directory it opens after every grant,
- * so the sandbox's own files there would close.
+ * left out of a profile, as is any built-in read that holds one: srt applies a deny that lies inside a
+ * directory it opens after every grant, so the sandbox's own files there would close.
  */
 export function readListOverSandboxRoots(
   readList: readonly string[],
   sandboxRoots: readonly string[],
 ): string[] {
-  return readList.filter((path) => sandboxRoots.some((root) => isEqualOrUnder(root, path)));
+  return readList.filter((path) => holdsSandboxRoot(path, sandboxRoots));
 }
 
 /** Builds the lane's sandbox settings from one input and validates them before they reach Claude Code. */
@@ -315,9 +320,10 @@ export function buildLaneProfile(input: LaneProfileInput): LaneSandboxSettings {
     !own.some((mine) => isEqualOrUnder(path, mine));
   const isAllowed = (path: string): boolean =>
     !denied.some((root) => isEqualOrUnder(path, root)) && !inSandboxRoot(path);
-  const over = readListOverSandboxRoots(input.readList, input.sandboxRoots);
-  const readList = input.readList.filter((path) => !over.includes(path));
-  const readable = [...needed, ...readList].filter(isAllowed);
+  // A built-in read is left out the same way (`/tmp` on Linux, where the roots lie under it).
+  const readable = [...needed, ...input.readList]
+    .filter(isAllowed)
+    .filter((path) => !holdsSandboxRoot(path, input.sandboxRoots));
   const writable = [input.tmpDir, ...input.extraWrites].filter(isAllowed);
   refusePatterns(readable);
   // A listing of a dir that is, or lies under, a denied path opens nothing the deny keeps shut.
