@@ -1106,6 +1106,8 @@ export const shapes = sqliteTable(
     proposeUnlocked: integer('propose_unlocked', { mode: 'boolean' }).notNull().default(false),
     /** The last reconciled round; 0 before the first proposal. */
     round: integer('round').notNull().default(0),
+    /** The model alias the builder chose for the conversation; null runs it on the `plan` role's. */
+    model: text('model'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

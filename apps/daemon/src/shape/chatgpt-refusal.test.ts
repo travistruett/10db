@@ -9,8 +9,11 @@ import {
 import { afterEach, describe, expect, it } from 'vitest';
 import { createServiceFixture, type ServiceFixture } from './service-fixture';
 
-// A project on a ChatGPT account can't run a conversation. Each request that would start or advance one is
-// refused when it is made, before it writes anything.
+// A project on a ChatGPT account can't run a conversation. Each request that would start or advance one,
+// or choose the model it runs on, is refused when it is made, before it writes anything.
+
+/** The models a Claude account offers, so a model choice is refused for the account, not the model. */
+const MODELS = { default: 'opus', offered: ['opus', 'sonnet'] };
 
 let f: ServiceFixture;
 afterEach(async () => {
@@ -22,6 +25,7 @@ const requests: [string, () => unknown][] = [
   ['send', () => f.service.send(f.c.shape.id, 'Make the cards denser.')],
   ['propose', () => f.service.propose(f.c.shape.id)],
   ['rehearse', () => f.service.rehearse(f.c.shape.id)],
+  ['a model choice', () => f.service.chooseModel(f.c.shape.id, 'sonnet')],
   [
     'start_shape',
     () =>
@@ -33,7 +37,7 @@ const requests: [string, () => unknown][] = [
 
 describe('a conversation on a ChatGPT account', () => {
   it.each(requests)('refuses %s and writes nothing', (_name, request) => {
-    f = createServiceFixture({ accountKind: AccountKind.CodexSignin });
+    f = createServiceFixture({ accountKind: AccountKind.CodexSignin, models: () => MODELS });
     const before = f.service.view(f.c.shape.id);
     const listed = f.service.list(f.c.project.id).length;
     let thrown: unknown;
@@ -47,6 +51,7 @@ describe('a conversation on a ChatGPT account', () => {
     const after = f.service.view(f.c.shape.id);
     expect(after.messages).toEqual(before.messages);
     expect(after.shape.proposeUnlocked).toBe(before.shape.proposeUnlocked);
+    expect(after.shape.model).toBe(before.shape.model);
     expect(f.service.list(f.c.project.id)).toHaveLength(listed);
     expect(f.adapter.shapeSessions).toHaveLength(0);
   });
@@ -54,7 +59,8 @@ describe('a conversation on a ChatGPT account', () => {
   it.each<SupportedAccountKind>([AccountKind.ClaudeSubscription, AccountKind.Bedrock])(
     'is not refused on a %s account',
     (accountKind) => {
-      f = createServiceFixture({ accountKind });
+      f = createServiceFixture({ accountKind, models: () => MODELS });
+      expect(f.service.chooseModel(f.c.shape.id, 'sonnet').model).toBe('sonnet');
       expect(() => f.service.send(f.c.shape.id, 'Make the cards denser.')).not.toThrow();
       expect(f.service.propose(f.c.shape.id)).toMatchObject({ status: 'started' });
     },

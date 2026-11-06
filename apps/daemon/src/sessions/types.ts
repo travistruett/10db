@@ -27,6 +27,11 @@ export interface ToolRequest {
    * `cd` moves it off the lane's copy. Absent where no hook ran for the call.
    */
   readonly cwd?: string;
+  /**
+   * Every tool name the session's init message listed, project MCP tools included. A card for a project
+   * MCP tool offers "every tool of this server" over the ones listed here. Absent where the adapter has none.
+   */
+  readonly listedTools?: readonly string[];
 }
 
 export type ToolDecision =
@@ -86,6 +91,8 @@ export interface ShapeToolRequest {
   readonly input: unknown;
   readonly agentId?: string | undefined;
   readonly agentType?: string | undefined;
+  /** The hook's `cwd`: where the call runs, which an earlier Bash call's `cd` may have moved. */
+  readonly cwd?: string | undefined;
 }
 
 /** A tool call that has run, as a Shape session's PostToolUse hook sees it, with what it returned. */
@@ -100,17 +107,22 @@ export interface ShapeToolResult extends ShapeToolRequest {
 export type ShapeVerdict =
   GuardVerdict | { readonly decision: 'allow'; readonly updatedInput: Record<string, unknown> };
 
-/** A reviewer subagent, passed to Claude Code as a programmatic agent on the session's own model. */
+/**
+ * A subagent, passed to Claude Code as a programmatic agent. With no `model` it runs on the session's
+ * own; the session may still name one per call (the Agent tool's `model`).
+ */
 export interface ShapeAgentDefinition {
   readonly description: string;
   readonly prompt: string;
   readonly tools: readonly string[];
+  /** A model alias (`opus`, `fable`) or full ID; absent means the session's own. */
+  readonly model?: string;
 }
 
 /**
- * A Shape conversation's SDK session (Shape spec §5.1, §5.2): it loads no settings, plugins or
- * project MCP servers, runs in `default` mode with every unlisted call denied, and has no lane,
- * claim, area or sandbox, since it runs no command.
+ * A Shape conversation's SDK session (Shape spec §5.1, §5.2): it loads no settings or plugins, has no
+ * lane, claim or area, and runs in `default` mode. Its commands run in a read-only lane sandbox; a
+ * call its PreToolUse hook doesn't settle reaches `canUseTool`, the lanes' permission broker.
  */
 export interface ShapeSessionSpec {
   readonly sessionId: SessionId;
@@ -138,8 +150,17 @@ export interface ShapeSessionSpec {
     readonly token: string;
     readonly toolTimeoutMs: number;
   };
+  /**
+   * The read-only lane sandbox its commands run in. Null (a daemon with no sandbox) leaves Bash out of
+   * the session, so it runs no command at all.
+   */
+  readonly sandbox: LaneSandboxSpec | null;
+  /** The project's approved MCP servers; a stdio one only as its sandboxed launch. */
+  readonly projectMcpServers: Readonly<Record<string, SessionMcpServer>>;
   /** Runs before every tool call, the session's and its subagents'. */
   preToolUse(req: ShapeToolRequest): ShapeVerdict;
+  /** A call the hook answered `ask` for: the permission broker, which may raise a card. */
+  canUseTool(req: ToolRequest): Promise<ToolDecision>;
   /** Runs after a call has returned, with its result: how the daemon measures what a Read added. */
   readonly postToolUse?: (req: ShapeToolResult) => void;
   /** Runs when a call failed: what the daemon counted for a Read that returned nothing comes back. */

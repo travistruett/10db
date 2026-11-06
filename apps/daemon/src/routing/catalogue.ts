@@ -20,7 +20,8 @@ const FAMILIES = [
   { model: 'haiku', tier: ModelTier.Fast, aaFamily: 'claude-haiku-5-5', enabled: true },
   { model: 'sonnet', tier: ModelTier.Balanced, aaFamily: 'claude-sonnet-5-5', enabled: true },
   { model: 'opus', tier: ModelTier.Strongest, aaFamily: 'claude-opus-5-5', enabled: true },
-  // Off until Claude Code accepts the alias.
+  // Claude Code accepts the alias. Off for routing all the same: a tier as strong as opus's, it would
+  // take every plan and review step unasked. A Plan conversation's model picker offers it.
   { model: 'fable', tier: ModelTier.Strongest, aaFamily: 'claude-fable-5-1', enabled: false },
 ] as const;
 

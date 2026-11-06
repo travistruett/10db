@@ -7,8 +7,11 @@ import { removeLaneTempDir, removeLaneTempDirAsync } from './temp-dir';
 
 /** What `createLaneTempDir` makes: `mkdtemp`'s six characters after the prefix. */
 const TEMP_DIR = /^10db-[A-Za-z0-9]{6}$/;
-/** What `createSealedFile` makes for the lane env file, a gate's settings and an MCP server's. */
-const SEALED_FILE = /^10db-(?:env|gate|mcp)-[0-9a-f]{12}\.(?:json|sh)$/;
+/**
+ * What 10db seals: the lane env file, a gate's settings, and an MCP server's settings, env file,
+ * refusal preload and refusal log.
+ */
+const SEALED_FILE = /^10db-(?:env|gate|mcp)-[0-9a-f]{12}\.(?:json|sh|cjs|log)$/;
 /** What `createProcessLedger` makes, and the next content a ledger is given beside it. */
 const LEDGER_FILE = /^10db-proc-[1-9][0-9]*-[0-9a-f]{12}\.json(?:\.[0-9a-f]{12}\.tmp)?$/;
 /** A running daemon's mark in a sandbox root, named by its pid. */

@@ -20,6 +20,7 @@ export type {
   SessionEvent,
   ShapeAgentDefinition,
   SessionHandle,
+  SessionMcpServer,
   SessionSpec,
   ShapeImage,
   ShapeSessionHandle,
@@ -36,6 +37,7 @@ export {
   resolveProjectMcp,
   skippedServersNote,
   splitProjectMcp,
+  withAwsCredentials,
   type ProjectMcp,
   type RepoMcp,
 } from './project-mcp';

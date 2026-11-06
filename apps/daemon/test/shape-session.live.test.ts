@@ -125,6 +125,9 @@ describe.skipIf(!live)('a Shape session, live', () => {
       disallowedTools: [...SHAPE_DISALLOWED_TOOLS],
       agents: SHAPE_AGENTS,
       mcp: { url: 'http://127.0.0.1:9/mcp', token: 'unused', toolTimeoutMs: 5_000 },
+      sandbox: null,
+      projectMcpServers: {},
+      canUseTool: () => Promise.resolve({ behavior: 'deny', message: 'no broker here' }),
       preToolUse: (req) => {
         const verdict = judgeShapeCall(
           {
@@ -281,6 +284,9 @@ describe.skipIf(!live)('a Shape session, live', () => {
       disallowedTools: [...SHAPE_DISALLOWED_TOOLS],
       agents: {},
       mcp: { url: `http://127.0.0.1:${String(port)}/mcp`, token, toolTimeoutMs: 30_000 },
+      sandbox: null,
+      projectMcpServers: {},
+      canUseTool: () => Promise.resolve({ behavior: 'deny', message: 'no broker here' }),
       preToolUse: (req) => {
         const verdict = judgeShapeCall(
           {
@@ -400,6 +406,9 @@ describe.skipIf(!live)('a Shape session, live', () => {
       agents: {},
       // Nothing listens here; the session runs without 10db's tools.
       mcp: { url: 'http://127.0.0.1:9/mcp', token: 'unused', toolTimeoutMs: 5_000 },
+      sandbox: null,
+      projectMcpServers: {},
+      canUseTool: () => Promise.resolve({ behavior: 'deny', message: 'no broker here' }),
       preToolUse: (req) => {
         const verdict = judgeShapeCall(
           {
@@ -603,6 +612,9 @@ async function readInSession(
     disallowedTools: [...SHAPE_DISALLOWED_TOOLS],
     agents: {},
     mcp: { url: 'http://127.0.0.1:9/mcp', token: 'unused', toolTimeoutMs: 5_000 },
+    sandbox: null,
+    projectMcpServers: {},
+    canUseTool: () => Promise.resolve({ behavior: 'deny', message: 'no broker here' }),
     preToolUse: (req) => {
       if (req.toolName === 'Read') reads.push(req);
       return judgeShapeCall(

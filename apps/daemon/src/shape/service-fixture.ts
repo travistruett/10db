@@ -19,7 +19,12 @@ import type { Hold } from '../verify';
 import type { TrackedFiles } from './ceremony';
 import { seedConversation, type ConversationFixture } from './conversation-fixture';
 import type { JoiningProblem } from './convert';
-import { createShapeService, type ShapeService } from './service';
+import {
+  createShapeService,
+  type ShapeLaunch,
+  type ShapeService,
+  type ShapeServiceDeps,
+} from './service';
 
 /** A conversation served by a real shape service on the fake adapter, with a files directory of its own. */
 export interface ServiceFixture {
@@ -45,6 +50,10 @@ export function createServiceFixture(
     joiningProblem?: JoiningProblem;
     home?: string;
     checkout?: string;
+    prepare?: ShapeServiceDeps['prepare'];
+    models?: ShapeServiceDeps['models'];
+    /** Told the model each launch is resolved for: the conversation's choice, or null. */
+    onLaunch?: (model: string | null) => void;
     /** The picture limits of an account kind; the real ones by default (`pictureLimitsFor`). */
     limitsFor?: (kind: AccountKind) => PictureLimits;
     /** The kind of the account the project launches on; a Claude plan by default. */
@@ -70,6 +79,8 @@ export function createServiceFixture(
       filesDir,
       joiningProblem: opts.joiningProblem ?? (() => null),
       ...(opts.hold === undefined ? {} : { hold: opts.hold }),
+      ...(opts.prepare === undefined ? {} : { prepare: opts.prepare }),
+      ...(opts.models === undefined ? {} : { models: opts.models }),
       // No git in a test: the project's checkout is not a repository, so nothing is one-way unless asked.
       trackedFiles: opts.trackedFiles ?? (() => []),
       mcp: { url: 'http://127.0.0.1:4317/mcp', toolTimeoutMs: 60_000 },
@@ -77,25 +88,29 @@ export function createServiceFixture(
       ...(opts.screens === undefined ? {} : { screens: opts.screens }),
       brainstormRefusal: () =>
         providerOf(launched.kind) === Provider.Codex ? BRAINSTORM_REFUSED_ON_CHATGPT : null,
-      launch: () => ({
-        cwd: '/repo',
-        model: 'opus',
-        effort: 'high',
-        env: {},
-        account: {
-          accountId: mintId('Account'),
-          label: launched.kind === AccountKind.Bedrock ? 'Bedrock' : 'Claude plan',
-          kind: launched.kind,
-          identity: null,
-        },
-        access: {
-          checkout: opts.checkout ?? '/repo',
-          home: opts.home ?? '/home',
-          protectedReads: [],
-          sandboxRoots: ['/tmp/10db'],
-        },
-      }),
+      launch: (_projectId, chosen) => {
+        opts.onLaunch?.(chosen);
+        return launchFor(chosen);
+      },
     });
+  const launchFor = (chosen: string | null): ShapeLaunch => ({
+    cwd: '/repo',
+    model: chosen ?? 'opus',
+    effort: 'high',
+    env: {},
+    account: {
+      accountId: mintId('Account'),
+      label: launched.kind === AccountKind.Bedrock ? 'Bedrock' : 'Claude plan',
+      kind: launched.kind,
+      identity: null,
+    },
+    access: {
+      checkout: opts.checkout ?? '/repo',
+      home: opts.home ?? '/home',
+      protectedReads: [],
+      sandboxRoots: ['/tmp/10db'],
+    },
+  });
   let service = make();
   return {
     c,

@@ -345,6 +345,18 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     }
   });
 
+  it('makes the whole checkout read-only for a read-only session, and writes only its temp dir', async () => {
+    const session = await sandbox().forSession(input({ readOnly: true }));
+    try {
+      const { allowWrite, denyWrite } = session.spec.settings.filesystem;
+      // Claude Code opens the session's directory for writing itself; the deny keeps it shut.
+      expect(denyWrite).toEqual([checkout, join(checkout, '.git')]);
+      expect(allowWrite).toEqual([session.tmpDir]);
+    } finally {
+      session.dispose();
+    }
+  });
+
   it("makes every registered checkout's git state read-only, a project nested in this one included", async () => {
     // Project B sits inside this checkout, so this lane could otherwise write B's .git; project C is
     // elsewhere, with its git dir apart from its checkout.
@@ -493,6 +505,9 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         pnpm_config_state_dir: join(cache, 'pnpm-state'),
         pnpm_config_cache_dir: join(cache, 'pnpm-cache'),
         CARGO_HOME: join(cache, 'cargo'),
+        UV_CACHE_DIR: join(cache, 'uv'),
+        UV_TOOL_DIR: join(cache, 'uv-tools'),
+        UV_PYTHON_INSTALL_DIR: join(cache, 'uv-python'),
         MISE_CONFIG_DIR: join(session.tmpDir, 'mise'),
         MISE_GLOBAL_CONFIG_FILE: join(session.tmpDir, 'mise', 'config.toml'),
         MISE_SYSTEM_DIR: join(session.tmpDir, 'mise'),

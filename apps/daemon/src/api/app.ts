@@ -68,6 +68,7 @@ import {
   ShapeInput,
   ShapeMessageInput,
   ShapeProposalId,
+  ShapeModelInput,
   ShapeRehearseInput,
   ShapeResumeInput,
   ShapeUnpinInput,
@@ -486,6 +487,17 @@ export function createApp(deps: ApiDeps) {
         );
         return c.body(null, 204);
       },
+    )
+    .put(
+      '/shapes/:shapeId/model',
+      validator('json', (value): ShapeModelInput => ShapeModelInput.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.chooseShapeModel(
+            ShapeId.parse(c.req.param('shapeId')),
+            c.req.valid('json').model,
+          ),
+        ),
     )
     .post('/shapes/:shapeId/stop', async (c) => {
       await deps.services.stopShape(ShapeId.parse(c.req.param('shapeId')));

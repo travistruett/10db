@@ -1,5 +1,7 @@
 import {
   InboxKind,
+  MCP_TOOL_GRANT_DETAIL,
+  McpToolGrant,
   PermissionChoice,
   PrincipleVerdict,
   type InboxItemDto,
@@ -12,8 +14,20 @@ export const PERMISSION_LABELS: Readonly<Record<PermissionChoice, string>> = {
   [PermissionChoice.AllowOnce]: 'Allow once',
   [PermissionChoice.AllowWorkstream]: 'Allow for this workstream',
   [PermissionChoice.AllowProject]: 'Always allow in this project',
+  // A card names its server (`permissionWords`); this is the reading when it does not.
+  [PermissionChoice.AllowMcpServer]: 'Always allow every tool of this server in this project',
   [PermissionChoice.Deny]: 'Deny',
 };
+
+/** A permission choice in words; the server choice names the server its card carries. */
+function permissionWords(item: InboxItemDto, choice: PermissionChoice): string {
+  if (choice !== PermissionChoice.AllowMcpServer) return PERMISSION_LABELS[choice];
+  // The detail is JSON read back from the daemon: a boundary, so parse it.
+  const grant = McpToolGrant.safeParse(item.detail?.[MCP_TOOL_GRANT_DETAIL]);
+  return grant.success
+    ? `Always allow every ${grant.data.name} tool in this project`
+    : PERMISSION_LABELS[choice];
+}
 
 /** A principle proposal card's choices, in words; the area one gets its area's name (`optionLabel`). */
 export const PRINCIPLE_VERDICT_LABELS: Readonly<Record<PrincipleVerdict, string>> = {
@@ -55,7 +69,7 @@ export function optionLabel(
   area: string | null = null,
 ): string {
   if (item.kind === InboxKind.Permission && isPermissionChoice(option.label))
-    return PERMISSION_LABELS[option.label];
+    return permissionWords(item, option.label);
   if (mcpReview(item)) return MCP_APPROVAL_LABELS[option.label] ?? option.label;
   if (isPrincipleCard(item) && isPrincipleVerdict(option.label)) {
     const words = PRINCIPLE_VERDICT_LABELS[option.label];

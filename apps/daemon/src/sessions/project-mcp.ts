@@ -7,6 +7,7 @@ import {
   type McpServerReview,
 } from '@10db/contracts';
 import { z } from 'zod';
+import { AwsCredentialsError, type AwsCredentialsExporter } from '../environment';
 import { describeIssues } from './config-issues';
 import { MCP_HOSTS_FILE, McpHostsFileError, readMcpHosts } from './mcp-hosts-file';
 import { McpServerName } from './mcp-server-name';
@@ -120,6 +121,8 @@ export interface McpApproval {
 export interface ProjectMcp {
   /** Approved servers, ready to pass to a managed session next to 10db's own. */
   readonly servers: Readonly<Record<string, ProjectMcpServer>>;
+  /** The config hash the builder approved for each server in `servers`: what the session runs. */
+  readonly configHashes: Readonly<Record<string, string>>;
   readonly warnings: readonly string[];
   /** Servers with no verdict for their current config: each needs an approval card. */
   readonly pending: readonly McpServerReview[];
@@ -164,20 +167,33 @@ const sortedEntries = (map: Readonly<Record<string, string>> | undefined): [stri
   Object.entries(map ?? {}).sort(([a], [b]) => a.localeCompare(b));
 
 /**
+ * The profile a stdio server's declared env names as a literal `AWS_PROFILE`: the one whose
+ * short-lived credentials 10db exports for it. None for `${...}`, which reads the project env.
+ */
+function awsProfileOf(server: DeclaredServer): string | null {
+  if (!('command' in server)) return null;
+  const profile = server.env?.['AWS_PROFILE'];
+  return profile === undefined || profile === '' || profile.includes('${') ? null : profile;
+}
+
+/**
  * The config as 10db hashes it: defaults filled in and maps sorted, before any expansion. A stdio
  * server's hosts are part of it, so naming another host asks again; a server with none hashes as if
- * the field were absent, so its approval stands.
+ * the field were absent, so its approval stands. So is the AWS profile 10db exports credentials for:
+ * an approval given before that grant existed doesn't cover it, and the server asks again.
  */
 function normalized(server: DeclaredServer, hosts: readonly string[]): unknown {
-  return 'command' in server
-    ? {
-        transport: McpTransport.Stdio,
-        command: server.command,
-        args: server.args ?? [],
-        env: sortedEntries(server.env),
-        ...(hosts.length > 0 ? { hosts } : {}),
-      }
-    : { transport: server.type, url: server.url, headers: sortedEntries(server.headers) };
+  if (!('command' in server))
+    return { transport: server.type, url: server.url, headers: sortedEntries(server.headers) };
+  const awsProfile = awsProfileOf(server);
+  return {
+    transport: McpTransport.Stdio,
+    command: server.command,
+    args: server.args ?? [],
+    env: sortedEntries(server.env),
+    ...(hosts.length > 0 ? { hosts } : {}),
+    ...(awsProfile === null ? {} : { awsCredentials: awsProfile }),
+  };
 }
 
 function referencedNames(values: readonly string[]): string[] {
@@ -395,6 +411,7 @@ export function resolveProjectMcp(input: {
   readonly approvalFor: (review: McpServerReview) => McpApproval | null;
 }): ProjectMcp {
   const servers: Record<string, ProjectMcpServer> = {};
+  const configHashes: Record<string, string> = {};
   const pending: McpServerReview[] = [];
   const denied: string[] = [];
   const failures: { name: string; message: string }[] = [];
@@ -411,22 +428,76 @@ export function resolveProjectMcp(input: {
           { env: input.env, approved: new Set(approval.variables) },
           approval.hosts,
         );
+        configHashes[server.name] = server.review.configHash;
       } catch (error) {
         if (!(error instanceof ProjectMcpError)) throw error;
         failures.push({ name: server.name, message: error.message });
       }
     }
   }
-  return { servers, warnings: input.repo.warnings, pending, denied, failures };
+  return { servers, configHashes, warnings: input.repo.warnings, pending, denied, failures };
+}
+
+/** The AWS profile a stdio server's `env` block names as a literal, else null: a `${` is read from the project env. */
+function declaredAwsProfile(server: RepoMcpServer | undefined): string | null {
+  return server === undefined ? null : awsProfileOf(server.declared);
+}
+
+/**
+ * Swaps, in each approved stdio server whose declared env names a literal `AWS_PROFILE`, the profile
+ * for that profile's short-lived credentials (and drops `AWS_DEFAULT_PROFILE`). The server sandbox
+ * can't read `~/.aws`, and opening it would hand over the SSO token for every role the builder holds;
+ * the credentials come from `exportAwsCredentials`, which runs outside the sandbox, and act as that
+ * one role. A server whose export fails is left out and reported in `failures` with the error's
+ * message. `AWS_REGION` and the rest of its env stay as declared.
+ */
+export async function withAwsCredentials(input: {
+  readonly mcp: ProjectMcp;
+  readonly repo: RepoMcp;
+  /** The session env the exporter runs in: its PATH finds `aws` and its HOME finds `~/.aws`. */
+  readonly env: Readonly<Record<string, string>>;
+  readonly exportAwsCredentials: AwsCredentialsExporter;
+}): Promise<ProjectMcp> {
+  const exported = new Map<string, Promise<Record<string, string>>>();
+  const servers: Record<string, ProjectMcpServer> = {};
+  const failures = [...input.mcp.failures];
+  for (const [name, server] of Object.entries(input.mcp.servers)) {
+    const profile =
+      server.type === 'stdio'
+        ? declaredAwsProfile(input.repo.servers.find((s) => s.name === name))
+        : null;
+    if (server.type !== 'stdio' || profile === null) {
+      servers[name] = server;
+      continue;
+    }
+    let pending = exported.get(profile);
+    if (pending === undefined) {
+      pending = input.exportAwsCredentials(profile, input.env);
+      exported.set(profile, pending);
+    }
+    try {
+      const credentials = await pending;
+      const kept = Object.entries(server.env).filter(
+        ([key]) => key !== 'AWS_PROFILE' && key !== 'AWS_DEFAULT_PROFILE',
+      );
+      servers[name] = { ...server, env: { ...Object.fromEntries(kept), ...credentials } };
+    } catch (error) {
+      if (!(error instanceof AwsCredentialsError)) throw error;
+      failures.push({ name, message: error.message });
+    }
+  }
+  return { ...input.mcp, servers, failures };
 }
 
 /**
  * A line for the session's prompt when repo servers are left out, so the agent doesn't hunt for their
- * tools. `unsandboxed` names approved stdio servers left out because the session has no lane sandbox.
+ * tools. `unsandboxed` names approved stdio servers left out because the session has no lane sandbox;
+ * `instead` says what to do without them.
  */
 export function skippedServersNote(
   mcp: ProjectMcp,
   unsandboxed: readonly string[] = [],
+  instead = 'Work without them, or say in your handoff that the task needs one.',
 ): string | null {
   const skipped = [
     ...mcp.pending.map((r) => `${r.name} (waiting for the builder's approval)`),
@@ -437,6 +508,6 @@ export function skippedServersNote(
   if (skipped.length === 0) return null;
   return (
     `Note from 10db: these MCP servers from the repo's .mcp.json are not in this session: ${skipped.join('; ')}. ` +
-    "Don't look for their tools. Work without them, or say in your handoff that the task needs one."
+    `Don't look for their tools. ${instead}`
   );
 }

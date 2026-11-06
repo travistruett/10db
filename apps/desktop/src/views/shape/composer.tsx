@@ -14,6 +14,11 @@ export interface ComposerProps {
   readonly proposing: boolean;
   readonly proposeLabel: 'Propose' | 'Propose Again';
   readonly canPropose: boolean;
+  /**
+   * Nothing has been heard or proposed yet, so Propose has little to work with. The line beside
+   * Propose says so; Propose itself stays as `canPropose` has it.
+   */
+  readonly nothingDecided: boolean;
   /** Sends the text; rejects with the daemon's words. */
   readonly onSend: (text: string) => Promise<void>;
   readonly onPropose: () => void;
@@ -36,7 +41,7 @@ const FIRST_RUN_PLACEHOLDER = 'Talk it through, drop a document, or paste a list
 
 /** The input, Send, the group's one filled primary Propose, and Stop while a turn runs. */
 export function Composer(props: ComposerProps) {
-  const { firstRun, answering, proposing, proposeLabel, canPropose } = props;
+  const { firstRun, answering, proposing, proposeLabel, canPropose, nothingDecided } = props;
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
@@ -202,11 +207,18 @@ export function Composer(props: ComposerProps) {
         }}
       />
       <Group justify="space-between" align="flex-start" wrap="nowrap">
-        <Text id="shape-composer-hint" size="xs" c="dimmed">
-          {firstRun
-            ? 'Nothing is proposed until you press Propose. Nothing starts until you Convert.'
-            : '⌘↩ sends · ⌘⇧↩ proposes · Esc stops'}
-        </Text>
+        <Stack gap={2}>
+          <Text id="shape-composer-hint" size="xs" c="dimmed">
+            {firstRun
+              ? 'Nothing is proposed until you press Propose. Nothing starts until you Convert.'
+              : '⌘↩ sends · ⌘⇧↩ proposes · Esc stops'}
+          </Text>
+          {nothingDecided ? (
+            <Text id="shape-composer-propose-hint" size="xs" c="dimmed">
+              Propose turns decided work into tasks. Nothing is decided yet.
+            </Text>
+          ) : null}
+        </Stack>
         <Group gap="xs" wrap="nowrap" style={{ flex: 'none' }}>
           <ActionIcon
             variant="subtle"
@@ -233,7 +245,12 @@ export function Composer(props: ComposerProps) {
           >
             Send
           </Button>
-          <Button loading={proposing} disabled={!canPropose} onClick={props.onPropose}>
+          <Button
+            loading={proposing}
+            disabled={!canPropose}
+            aria-describedby={nothingDecided ? 'shape-composer-propose-hint' : undefined}
+            onClick={props.onPropose}
+          >
             {proposeLabel}
           </Button>
         </Group>

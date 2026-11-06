@@ -75,6 +75,8 @@ function leaveStaleFiles(dir: string = root): void {
     '10db-gate-0123456789ab.json',
     '10db-mcp-0123456789ab.json',
     '10db-mcp-ba9876543210.sh',
+    '10db-mcp-0123456789ef.cjs',
+    '10db-mcp-fedcba987654.log',
   ])
     writeFileSync(join(dir, name), "export A='1'\n", { mode: 0o400 });
 }
@@ -109,7 +111,7 @@ describe('claimSandboxTempRoot', () => {
     const others = leaveOthers();
     const claim = claimSandboxTempRoot(root, process.pid);
     try {
-      expect(claim).toMatchObject({ removed: 6, failed: 0, sharedWith: null });
+      expect(claim).toMatchObject({ removed: 8, failed: 0, sharedWith: null });
       expect(readdirSync(root).sort()).toEqual(
         [...others, `10db-daemon-${String(process.pid)}`].sort(),
       );
@@ -142,7 +144,7 @@ describe('claimSandboxTempRoot', () => {
     writeFileSync(join(root, `10db-daemon-${String(dead)}`), '', { mode: 0o400 });
     const claim = claimSandboxTempRoot(root, process.pid);
     try {
-      expect(claim).toMatchObject({ removed: 6, sharedWith: null });
+      expect(claim).toMatchObject({ removed: 8, sharedWith: null });
       expect(readdirSync(root)).toEqual([`10db-daemon-${String(process.pid)}`]);
     } finally {
       claim.release();
@@ -193,8 +195,8 @@ describe('claimSandboxRoots and the system temp sweeps', () => {
     const mark = `10db-daemon-${String(process.pid)}`;
     const claim = claimSandboxRoots([temp, lanes, files], process.pid);
     try {
-      // Six in the temp root, one in the lanes root, six in the files root.
-      expect(claim).toMatchObject({ removed: 13, failed: 0, sharedWith: null });
+      // Eight in the temp root, one in the lanes root, eight in the files root.
+      expect(claim).toMatchObject({ removed: 17, failed: 0, sharedWith: null });
       expect(readdirSync(temp)).toEqual([mark]);
       expect(readdirSync(lanes)).toEqual([mark]);
       expect(readdirSync(files).sort()).toEqual([...LEDGERS, mark].sort());
@@ -236,8 +238,8 @@ describe('claimSandboxRoots and the system temp sweeps', () => {
       const planted = liveProcess();
       writeFileSync(join(systemTemp, `10db-daemon-${String(planted)}`), '', { mode: 0o400 });
       const others = leaveOthers(systemTemp);
-      // Four sealed files and the two ledger files; the temp dirs are the later sweep's.
-      expect(sweepSystemTempFiles([systemTemp])).toMatchObject({ removed: 6, failed: 0 });
+      // Six sealed files and the two ledger files; the temp dirs are the later sweep's.
+      expect(sweepSystemTempFiles([systemTemp])).toMatchObject({ removed: 8, failed: 0 });
       expect(readdirSync(systemTemp).sort()).toEqual(
         [...others, '10db-Zz9yX8', '10db-a1B2c3', `10db-daemon-${String(planted)}`].sort(),
       );

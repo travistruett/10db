@@ -2,11 +2,19 @@ import {
   InvalidError,
   ShapeMessageAuthor,
   ShapeMessageKind,
+  ShapeProposalState,
   type PlanDraft,
   type SeeScreenInput,
   type ShapeId,
 } from '@10db/contracts';
-import { findRecords, getShape, insertShapeMessage, similarTasks } from '@10db/db';
+import {
+  findRecords,
+  getShape,
+  insertShapeMessage,
+  listShapeProposals,
+  similarTasks,
+  type WriteContext,
+} from '@10db/db';
 import type { StateStore } from '../events';
 import type { ShapeToolHandlers } from '../mcp';
 import type { ScreenService } from '../screens';
@@ -21,8 +29,11 @@ import { ceremonies, type ViewWorld } from './view';
 
 export interface ShapeToolDeps {
   readonly state: StateStore;
-  /** Told after each propose_plan call whether it was accepted, for the turn's guard (§5.3). */
-  onProposal?(shapeId: ShapeId, accepted: boolean): void;
+  /**
+   * Told after each propose_plan call whether it was accepted, for the turn's guard (§5.3), and
+   * whether the plan was left empty after it: no pending or converted row.
+   */
+  onProposal?(shapeId: ShapeId, accepted: boolean, empty?: boolean): void;
   /** What the ceremony rule reads about the project: its one-way paths (§7). */
   world?(shapeId: ShapeId): ViewWorld;
   /** Draws the app's screens for `see_screen` (§5.5); the tool is not offered without it. */
@@ -56,6 +67,17 @@ function describeDraft(draft: PlanDraft): string {
       : '',
   ].filter((p) => p !== '');
   return parts.length > 0 ? parts.join(', ') : 'nothing';
+}
+
+/**
+ * Whether the plan has nothing to act on after a round: no pending row (stated, or kept because it
+ * is pinned) and no converted one. An empty draft alone is not enough, since pinned rows the draft
+ * leaves out stay.
+ */
+function planIsEmpty(ctx: WriteContext, shapeId: ShapeId): boolean {
+  return !listShapeProposals(ctx.tx, shapeId).some(
+    (r) => r.state === ShapeProposalState.Pending || r.state === ShapeProposalState.Accepted,
+  );
 }
 
 const BEFORE_PROPOSE =
@@ -127,7 +149,7 @@ export function createShapeToolHandlers(deps: ShapeToolDeps, shapeId: ShapeId): 
         return Promise.reject(new InvalidError(BEFORE_PROPOSE));
       }
       // The reconcile and its transcript line are one write: the line never disagrees with the rows.
-      const outcome = deps.state.write((ctx) => {
+      const { outcome, empty } = deps.state.write((ctx) => {
         const result = reconcileDraft(ctx, shapeId, input.draft);
         insertShapeMessage(ctx, shapeId, {
           author: ShapeMessageAuthor.Claude,
@@ -136,9 +158,9 @@ export function createShapeToolHandlers(deps: ShapeToolDeps, shapeId: ShapeId): 
             ? `propose_plan · ${describeDraft(input.draft)} · passed`
             : `propose_plan · refused · ${plural(result.errors.length, result.errors.length === 1 ? 'error' : 'errors')}`,
         });
-        return result;
+        return { outcome: result, empty: result.ok && planIsEmpty(ctx, shapeId) };
       });
-      deps.onProposal?.(shapeId, outcome.ok);
+      deps.onProposal?.(shapeId, outcome.ok, empty);
       if (!outcome.ok)
         return Promise.reject(
           new InvalidError(

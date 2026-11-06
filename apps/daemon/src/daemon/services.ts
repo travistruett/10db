@@ -83,7 +83,7 @@ import type { EventBus, StateStore } from '../events';
 import { inspectFolder, proposeAreas, type AreaNamer } from '../folders';
 import { adoptGoal } from '../goals';
 import type { Git } from '../git';
-import { requestMcpApproval, type InboxService } from '../inbox';
+import { earlierMcpApproval, requestMcpApproval, type InboxService } from '../inbox';
 import type { KeepAwake } from '../keep-awake';
 import type { Runner } from '../runner';
 import type { Scheduler } from '../scheduler';
@@ -484,7 +484,12 @@ export function createServices(deps: {
         return {
           ...review,
           verdict: 'pending',
-          inboxId: requestMcpApproval(deps.inbox, projectId, review).id,
+          inboxId: requestMcpApproval(
+            deps.inbox,
+            projectId,
+            review,
+            earlierMcpApproval(db, projectId, review.name),
+          ).id,
         };
       });
     },

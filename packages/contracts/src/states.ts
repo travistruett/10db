@@ -72,6 +72,8 @@ export const PermissionChoice = {
   AllowOnce: 'allow_once',
   AllowWorkstream: 'allow_workstream',
   AllowProject: 'allow_project',
+  /** Only on a card for an approved project MCP server's tool: every tool the server listed, in this project. */
+  AllowMcpServer: 'allow_mcp_server',
   Deny: 'deny',
 } as const;
 export type PermissionChoice = ValueOf<typeof PermissionChoice>;

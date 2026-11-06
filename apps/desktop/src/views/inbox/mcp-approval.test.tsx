@@ -139,7 +139,7 @@ describe('MCP approval card', () => {
     renderApp('/inbox');
     await screen.findByText('Run the repo\'s MCP server "mantine"?');
     fireEvent.keyDown(document.body, { key: 'Enter' });
-    expect(await screen.findByText('Choose an option first (1–4).')).toBeTruthy();
+    expect(await screen.findByText('Choose an option first (1–5).')).toBeTruthy();
     expect(answers).toEqual([]);
   });
 

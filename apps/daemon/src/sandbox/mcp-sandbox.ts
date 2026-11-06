@@ -1,5 +1,13 @@
+import type { Clock } from '../clock';
 import { prepareCommandEnv } from './command-env';
 import { shellAssignments } from './env-file';
+import {
+  createRefusalLog,
+  REFUSAL_LOG,
+  REFUSAL_PRELOAD,
+  refusalPreload,
+  watchRefusals,
+} from './mcp-refusals';
 import { singleQuoted } from './posix-quote';
 import { buildLaneProfile, SandboxProfileError } from './profile';
 import type { ProjectAccess } from './project-access';
@@ -101,7 +109,20 @@ export interface McpSandboxInput {
   readonly env: Readonly<Record<string, string>>;
   readonly checkouts: readonly string[];
   readonly servers: Readonly<Record<string, StdioMcpServer>>;
+  /** Told, with the server's name and the host, each time srt's proxy refuses a host. */
+  readonly log?: RefusalLog;
+  /** Paces the reading of each server's refusal log. */
+  readonly clock?: Clock;
 }
+
+/** The daemon's logger, as far as the MCP sandbox tells it what a server was refused. */
+export interface RefusalLog {
+  warn(fields: object, message: string): void;
+}
+
+/** The log line for a host the proxy refused a server; the fields are `server` and `host`. */
+export const REFUSED_MESSAGE =
+  "mcp server was refused a host its approval doesn't list; add the host to its entry in .10db/mcp-hosts.json";
 
 /** A server the sandbox couldn't build, left out of the session. The message names no value. */
 export interface McpSandboxFailure {
@@ -125,6 +146,7 @@ export interface McpSandboxes {
  * reads its exit status.
  */
 function sandboxOne(
+  name: string,
   server: StdioMcpServer,
   input: McpSandboxInput,
   removals: (() => void)[],
@@ -172,6 +194,9 @@ function sandboxOne(
     // through them the hosts an approval withholds.
     loopback: false,
     deniedEnvNames: [],
+    // A server's HTTP client reads the system's proxy settings through configd as it starts; uv
+    // crashes without it. It answers what the network is set to and opens no route out of the proxy.
+    machLookups: ['com.apple.SystemConfiguration.configd'],
   });
   const settingsFile = createSealedFile(
     filesRoot,
@@ -180,6 +205,26 @@ function sandboxOne(
   );
   removals.push(() => {
     removeSealedFile(settingsFile, filesRoot, SETTINGS_FILE);
+  });
+  // srt's proxy says which host it refused only in its debug log; the preload carries that out to a
+  // log the daemon reads, so the daemon log names the server and the host. Both are in the files root
+  // with the server's other files: the preload is code srt's host runs outside every sandbox.
+  const refusalLog = createRefusalLog(filesRoot);
+  removals.push(
+    watchRefusals(
+      refusalLog,
+      (host) => {
+        input.log?.warn({ server: name, host }, REFUSED_MESSAGE);
+      },
+      input.clock,
+    ),
+    () => {
+      removeSealedFile(refusalLog, filesRoot, REFUSAL_LOG);
+    },
+  );
+  const preload = createSealedFile(filesRoot, REFUSAL_PRELOAD, refusalPreload(refusalLog));
+  removals.push(() => {
+    removeSealedFile(preload, filesRoot, REFUSAL_PRELOAD);
   });
   const inner = [
     'exec /usr/bin/env -i',
@@ -196,7 +241,10 @@ function sandboxOne(
       `PATH=${HOST_PATH}`,
       `HOME=${input.home}`,
       `CLAUDE_CODE_TMPDIR=${tmpDir}`,
+      'SRT_DEBUG=1',
       input.runtime.node,
+      '-r',
+      preload,
       input.runtime.cli,
       '--settings',
       settingsFile,
@@ -222,7 +270,7 @@ export function sandboxMcpServers(input: McpSandboxInput): McpSandboxes {
     for (const [name, server] of entries) {
       const own: (() => void)[] = [];
       try {
-        servers[name] = sandboxOne(server, input, own);
+        servers[name] = sandboxOne(name, server, input, own);
         removals.push(...own);
       } catch (error) {
         try {

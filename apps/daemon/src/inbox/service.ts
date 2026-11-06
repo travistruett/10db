@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   CARD_PROPOSED_PRINCIPLES,
   CARD_RELEASED_WORKSTREAMS,
@@ -12,6 +12,8 @@ import {
   InboxState,
   InvalidError,
   isParkChoice,
+  MCP_TOOL_GRANT_DETAIL,
+  McpToolGrant,
   PermissionChoice,
   ProposalId,
   ProposalKind,
@@ -24,6 +26,7 @@ import {
   type InboxTarget,
   type ProjectId,
   type SessionId,
+  type ShapeId,
   type WorkstreamId,
   withParkedTasks,
   withParkOption,
@@ -52,7 +55,7 @@ import {
 import type { StateStore } from '../events';
 import { applyPrincipleCard, proposeStandingRules, recordAnswerDecision } from '../knowledge';
 import type { Logger } from '../log';
-import { ESCALATED_KEY, EXACT_WRITE_KEY, storableRule } from '../permissions';
+import { ESCALATED_KEY, EXACT_WRITE_KEY, mcpGrantRules, storableRule } from '../permissions';
 import { proposePlacement } from '../placement';
 import { applyGateHostChoice } from './gate-host-card';
 import { applyMcpApproval } from './mcp-approval';
@@ -69,9 +72,16 @@ export class ParkedError extends Error {
   }
 }
 
-interface AskInput {
+/**
+ * Who waits on a card: a lane's workstream, or a Plan conversation, whose card has no target and names
+ * the conversation in its detail (`SHAPE_CARD_KEY`).
+ */
+type AskOwner =
+  | { readonly workstreamId: WorkstreamId; readonly shapeId?: never }
+  | { readonly workstreamId: null; readonly shapeId: ShapeId };
+
+type AskInput = AskOwner & {
   readonly projectId: ProjectId;
-  readonly workstreamId: WorkstreamId;
   readonly sessionId: SessionId;
   readonly kind: 'question' | 'permission';
   readonly title: string;
@@ -86,7 +96,10 @@ interface AskInput {
   readonly foldPerLane?: boolean;
   /** Claude Code's classifier handed the call to a person: the card folds only with other escalated asks. */
   readonly escalated?: boolean;
-}
+};
+
+/** The detail key naming the Plan conversation whose session asked a card. */
+export const SHAPE_CARD_KEY = 'shapeId';
 
 /** A flag card, as `InboxService.flag` and `flagCard` raise it. */
 interface FlagInput {
@@ -210,6 +223,7 @@ function foldKeyFor(
     AskInput,
     | 'projectId'
     | 'workstreamId'
+    | 'shapeId'
     | 'kind'
     | 'title'
     | 'body'
@@ -221,7 +235,10 @@ function foldKeyFor(
   const norm = (s: string): string => s.trim().replace(/\s+/g, ' ').toLowerCase();
   const parts = [
     input.projectId,
-    ...(input.foldPerLane === true ? [input.workstreamId] : []),
+    // A conversation's card never folds, with a lane's or with its own: two calls a session makes at once
+    // each wait on their own card, so one answer can't leave the other waiting.
+    ...(input.shapeId === undefined ? [] : [`shape:${input.shapeId}`, randomUUID()]),
+    ...(input.foldPerLane === true && input.workstreamId !== null ? [input.workstreamId] : []),
     // A call Claude Code handed to a person never shares a card with an ordinary ask.
     ...(input.escalated === true ? ['escalated'] : []),
     input.kind,
@@ -249,6 +266,39 @@ interface Waiter {
 }
 
 /**
+ * "Every tool of this server": one project rule for each tool name the server had listed when the card was
+ * raised, each tied to the config hash the builder had approved. Nothing is stored when the card carries no
+ * grant, so a card that never offered the choice cannot create one.
+ */
+function applyMcpServerChoice(ctx: WriteContext, item: InboxItemDto, answer: InboxAnswer): void {
+  const grant = McpToolGrant.safeParse(item.detail?.[MCP_TOOL_GRANT_DETAIL]);
+  if (!grant.success) return;
+  const rules = mcpGrantRules(grant.data);
+  for (const rule of rules) {
+    insertPermissionRule(ctx, {
+      projectId: item.projectId,
+      workstreamId: null,
+      toolName: rule.toolName,
+      pattern: rule.pattern,
+      sourceInboxId: item.id,
+    });
+  }
+  const sourceId = insertSource(ctx, 'inbox_answer', { inboxId: item.id });
+  insertDecision(ctx, {
+    projectId: item.projectId,
+    question: `Allow every ${grant.data.name} tool in this project?`,
+    choice: 'Always allow',
+    rationale:
+      answer.note ??
+      `Allowed from the inbox for the ${String(rules.length)} tools the server listed (${rules.map((r) => r.toolName).join(', ')}), while its approved config was ${grant.data.configHash}`,
+    decidedBy: 'me',
+    scope: 'project',
+    area: null,
+    sourceId,
+  });
+}
+
+/**
  * A permission card's choice becomes rules in the answer's own transaction, so the choice holds even
  * when the asking session was parked before the builder answered. A Bash command with no storable
  * prefix, and a sandboxed file path that holds a glob character, get no rule: the choice then
@@ -258,6 +308,10 @@ function applyPermissionChoice(ctx: WriteContext, item: InboxItemDto, answer: In
   const toolName = item.detail?.['toolName'];
   const summary = item.detail?.['summary'];
   if (typeof toolName !== 'string' || typeof summary !== 'string') return;
+  if (answer.choice === PermissionChoice.AllowMcpServer) {
+    applyMcpServerChoice(ctx, item, answer);
+    return;
+  }
   const rule = storableRule(toolName, summary);
   if (rule === undefined) return;
   if (answer.choice === PermissionChoice.AllowWorkstream) {
@@ -392,6 +446,10 @@ export function createInboxService(deps: {
       if (waiter) waiter.resolve(answer);
       else deps.onParkedAnswer(target, item);
     }
+    // A Plan conversation's session waits with no target, so it is handed the answer here; one that
+    // stopped waiting withdrew its card, and a stored rule from the answer still holds.
+    if (item.detail?.[SHAPE_CARD_KEY] !== undefined)
+      for (const waiter of live?.values() ?? []) waiter.resolve(answer);
     return transition(item.id, [InboxState.Delivering], InboxState.Resolved);
   }
 
@@ -484,11 +542,21 @@ export function createInboxService(deps: {
       const input =
         raw.kind === 'question' ? { ...raw, options: withParkOption(raw.options) } : raw;
       const foldKey = foldKeyFor(input);
-      const target: InboxTarget = { workstreamId: input.workstreamId, sessionId: input.sessionId };
+      // A conversation's card has no target: no workstream waits on it, and its session's waiter below
+      // is how the answer reaches it.
+      const target: InboxTarget | null =
+        input.workstreamId === null
+          ? null
+          : { workstreamId: input.workstreamId, sessionId: input.sessionId };
+      const detail =
+        input.shapeId === undefined
+          ? input.detail
+          : { ...input.detail, [SHAPE_CARD_KEY]: input.shapeId };
       const item = deps.state.write((ctx) => {
         const existing = findOpenByFoldKey(ctx.tx, input.projectId, foldKey);
         if (existing) {
-          const others = existing.targets.filter((t) => t.workstreamId !== input.workstreamId);
+          if (target === null) return existing;
+          const others = existing.targets.filter((t) => t.workstreamId !== target.workstreamId);
           const targets = [...others, target];
           return updateInboxItem(ctx, existing.id, {
             targets,
@@ -506,9 +574,9 @@ export function createInboxService(deps: {
           recommendation: input.recommendation,
           category: input.category,
           urgency: input.urgency,
-          detail: input.detail,
+          detail,
           foldKey,
-          targets: [target],
+          targets: target === null ? [] : [target],
         });
       });
       const answer = new Promise<InboxAnswer>((resolve, reject) => {

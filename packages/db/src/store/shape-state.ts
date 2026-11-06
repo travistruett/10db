@@ -40,6 +40,8 @@ export interface ShapePatch {
   /** Set for good by the builder's first Propose. */
   readonly proposeUnlocked?: true;
   readonly round?: number;
+  /** The model alias the builder chose; null goes back to the `plan` role's. */
+  readonly model?: string | null;
 }
 
 /** Changes a conversation and announces it. */

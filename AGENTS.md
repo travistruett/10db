@@ -106,8 +106,10 @@ A local macOS control plane that runs Claude Code sessions as a software factory
 | plan-reviewer | fable  | review of a spec or plan                        |
 
 Every report opens with the exact model ID it ran on. The author of a change never reviews it.
-`.codex/agents/*.toml` point at the same bodies. On Amazon Bedrock, dispatch plan-reviewer with
-model `opus`: Fable isn't available there.
+`.codex/agents/*.toml` point at the same bodies. Fable is on Amazon Bedrock (inference profile
+`us.anthropic.claude-fable-5-1`), but it answers only when the account's data retention mode in the region is
+`aws_review`; on `default` every call fails with a ValidationException. Until the account is set so, dispatch
+plan-reviewer with model `opus` on Bedrock.
 
 ## MCP servers
 

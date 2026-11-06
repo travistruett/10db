@@ -1,5 +1,6 @@
 import {
   PermissionChoice,
+  MCP_TOOL_GRANT_DETAIL,
   QuestionCategory,
   Urgency,
   type InboxAnswer,
@@ -7,8 +8,10 @@ import {
   type InboxItemId,
   type HazardDef,
   type InboxOption,
+  type McpToolGrant,
   type ProjectId,
   type SessionId,
+  type ShapeId,
   type WorkstreamId,
 } from '@10db/contracts';
 import { getInboxItem, listPermissionRules, updateInboxItem } from '@10db/db';
@@ -32,6 +35,7 @@ import {
   EXACT_WRITE_KEY,
   foundHostFile,
   matchPermissionRule,
+  mcpToolGrant,
   storableRule,
 } from '../permissions';
 import { takeFoundHostsReading } from '../registries';
@@ -51,12 +55,22 @@ export interface WaitObserver {
   onWaitEnd(item: InboxItemDto): void;
 }
 
-interface BrokerContext {
+/** Whose session asks: a lane's workstream, or a Plan conversation, which offers no workstream rule. */
+type BrokerOwner =
+  | { readonly workstreamId: WorkstreamId; readonly shapeId?: never }
+  | { readonly workstreamId: null; readonly shapeId: ShapeId };
+
+type BrokerContext = BrokerOwner & {
   readonly projectId: ProjectId;
-  readonly workstreamId: WorkstreamId;
   readonly sessionId: SessionId;
   readonly observer: WaitObserver;
   readonly signal: AbortSignal;
+  /**
+   * The repo MCP servers this session runs, each with the config hash the builder approved (server name to
+   * hash). A server grant matches only at that hash, and only a tool of one of these servers is offered one.
+   * Absent for a session that runs none (a Plan conversation).
+   */
+  readonly mcpApproved?: Readonly<Record<string, string>>;
   /**
    * An `allow_once` answered after the workstream was parked: the first identical call is allowed, and an
    * edit's write is recorded on the card it answered (`cardId`).
@@ -73,13 +87,19 @@ interface BrokerContext {
   readonly sandbox?: {
     readonly fileAccess: FileAccessContext;
     readonly hazards: readonly HazardDef[];
+    /**
+     * Every command that reaches the broker is asked about, hazard or not: a Plan conversation's
+     * read-only commands are settled by its PreToolUse hook, and anything else is the builder's call.
+     */
+    readonly commandsAsk?: boolean;
   };
-}
+};
 
 const ALLOWING: readonly string[] = [
   PermissionChoice.AllowOnce,
   PermissionChoice.AllowWorkstream,
   PermissionChoice.AllowProject,
+  PermissionChoice.AllowMcpServer,
 ];
 
 const AskUserQuestionInput = z.looseObject({
@@ -113,6 +133,14 @@ function permissionOptions(storable: boolean): InboxOption[] {
     },
     { label: PermissionChoice.Deny, description: 'Deny; your note is passed to the agent' },
   ];
+}
+
+/** The option a project MCP tool's card adds: the whole server, as far as it listed tools when the card was raised. */
+function serverOption(grant: McpToolGrant): InboxOption {
+  return {
+    label: PermissionChoice.AllowMcpServer,
+    description: `Always allow every ${grant.name} tool in this project: the ${String(grant.tools.length)} it lists now. A tool it adds later, or a change to its approved config, asks again (records a decision)`,
+  };
 }
 
 /** A card whose call is never stored as a rule: allow it this once, or deny it. */
@@ -231,12 +259,37 @@ export function createPermissionBroker(
   ctx: BrokerContext,
 ): (req: ToolRequest) => Promise<ToolDecision> {
   let allowOnce = ctx.allowOnce ?? null;
+  const owner: BrokerOwner =
+    ctx.workstreamId === null
+      ? { workstreamId: null, shapeId: ctx.shapeId }
+      : { workstreamId: ctx.workstreamId };
+  // A conversation has no workstream, so it is never offered a rule for one.
+  const optionsFor = (storable: boolean): InboxOption[] =>
+    permissionOptions(storable).filter(
+      (o) => ctx.workstreamId !== null || o.label !== PermissionChoice.AllowWorkstream,
+    );
 
   async function wait(item: InboxItemDto, answer: Promise<InboxAnswer>): Promise<InboxAnswer> {
     ctx.observer.onWaitStart(item);
     const result = await answer;
     ctx.observer.onWaitEnd(item);
     return result;
+  }
+
+  /**
+   * A conversation that stops waiting withdraws its card: no lane resumes on a late answer, and the
+   * next session asks again. A lane's card stays for its parked workstream.
+   */
+  async function waitOrWithdraw(
+    item: InboxItemDto,
+    answer: Promise<InboxAnswer>,
+  ): Promise<InboxAnswer> {
+    try {
+      return await wait(item, answer);
+    } catch (error) {
+      if (error instanceof ParkedError && ctx.workstreamId === null) deps.inbox.withdraw(item.id);
+      throw error;
+    }
   }
 
   async function askQuestions(req: ToolRequest): Promise<ToolDecision> {
@@ -251,7 +304,7 @@ export function createPermissionBroker(
     for (const q of parsed.data.questions) {
       const { item, answer } = deps.inbox.ask({
         projectId: ctx.projectId,
-        workstreamId: ctx.workstreamId,
+        ...owner,
         sessionId: ctx.sessionId,
         kind: 'question',
         title: q.question,
@@ -277,6 +330,8 @@ export function createPermissionBroker(
    * can't be read) records nothing, and its write is carded.
    */
   function recordAllowedWrite(cardId: InboxItemId, req: ToolRequest, ask: Ask | null): void {
+    const lane = ctx.workstreamId;
+    if (lane === null) return;
     const path = editedPath(req, ask);
     if (path === null) return;
     const hash = allowedWriteHash(req.toolName, req.input, path);
@@ -288,7 +343,7 @@ export function createPermissionBroker(
         updateInboxItem(w, cardId, {
           detail: {
             ...detail,
-            [ALLOWED_WRITES_KEY]: { ...allowedWritesIn(detail), [ctx.workstreamId]: hash },
+            [ALLOWED_WRITES_KEY]: { ...allowedWritesIn(detail), [lane]: hash },
           },
         });
       });
@@ -306,7 +361,7 @@ export function createPermissionBroker(
     if (
       !req.escalated &&
       !onceOnly &&
-      unlessTooDeep(() => matchPermissionRule(req, rules, paths), undefined)
+      unlessTooDeep(() => matchPermissionRule(req, rules, paths, ctx.mcpApproved), undefined)
     ) {
       return { behavior: 'allow' };
     }
@@ -319,21 +374,33 @@ export function createPermissionBroker(
     }
     const storable =
       unlessTooDeep(() => storableRule(req.toolName, summary), undefined) !== undefined;
+    // Only a project MCP server's tool, listed by this session, whose server runs at an approved config.
+    const grant =
+      onceOnly || ctx.mcpApproved === undefined || req.listedTools === undefined
+        ? null
+        : mcpToolGrant(req.toolName, req.listedTools, ctx.mcpApproved);
+    const options = onceOnly ? ONCE_OPTIONS : optionsFor(storable);
     const { item, answer } = deps.inbox.ask({
       projectId: ctx.projectId,
-      workstreamId: ctx.workstreamId,
+      ...owner,
       sessionId: ctx.sessionId,
       kind: 'permission',
       title: `Allow ${req.toolName}?`,
       body: ask?.body ?? summary,
       // The service refuses a choice the card does not offer, so a once-only card stores no rule.
-      options: onceOnly ? ONCE_OPTIONS : permissionOptions(storable),
+      options:
+        grant === null
+          ? options
+          : options.flatMap((o) =>
+              o.label === PermissionChoice.Deny ? [serverOption(grant), o] : [o],
+            ),
       recommendation: null,
       category: QuestionCategory.Environment,
       urgency: Urgency.Normal,
       detail: {
         toolName: req.toolName,
         summary,
+        ...(grant === null ? {} : { [MCP_TOOL_GRANT_DETAIL]: grant }),
         ...editDetail(req, ask),
         ...(req.escalated ? { [ESCALATED_KEY]: true } : {}),
       },
@@ -342,10 +409,12 @@ export function createPermissionBroker(
       // file on the one answer, before either writes, and the second write would match neither record.
       // A Write's content doesn't depend on the file, so Writes still fold.
       foldPerLane: EDIT_FAMILY.has(req.toolName) && req.toolName !== 'Write',
+      // A conversation's card goes with its call: Claude Code cancels the call when the turn is stopped.
+      ...(ctx.workstreamId === null ? { signal: AbortSignal.any([ctx.signal, req.signal]) } : {}),
       // The escalation is only in the detail, so without this an escalated and an ordinary ask would share a card.
       escalated: req.escalated,
     });
-    const result = await wait(item, answer);
+    const result = await waitOrWithdraw(item, answer);
     // inbox.answer has already written any rule this choice implies, in the answer's transaction.
     if (ALLOWING.includes(result.choice)) {
       recordAllowedWrite(item.id, req, ask);
@@ -388,9 +457,9 @@ export function createPermissionBroker(
       await takeFoundHostsReading(deps, ctx.projectId);
       // A project file that needs the host is a reason to allow it, not a grant.
       const file = foundHostFile(deps.state.db, ctx.projectId, host);
-      const { answer } = deps.inbox.ask({
+      const { item, answer } = deps.inbox.ask({
         projectId: ctx.projectId,
-        workstreamId: ctx.workstreamId,
+        ...owner,
         sessionId: ctx.sessionId,
         kind: 'permission',
         title: `Allow network access to ${host}?`,
@@ -404,6 +473,14 @@ export function createPermissionBroker(
         detail: { toolName: NETWORK_TOOL, summary: host },
         signal: ctx.signal,
       });
+      // A conversation's host card goes when the conversation stops waiting: no lane resumes on it.
+      if (ctx.workstreamId === null) {
+        const withdraw = (): void => {
+          deps.inbox.withdraw(item.id);
+        };
+        if (ctx.signal.aborted) withdraw();
+        else ctx.signal.addEventListener('abort', withdraw, { once: true });
+      }
       // The lane keeps working while the card is open, so nothing waits on it and the workstream
       // never enters WAITING_HUMAN. A parked or cancelled card adds nothing.
       void answer.then(
@@ -449,6 +526,7 @@ export function createPermissionBroker(
     ) {
       return { summary: command, body: `${command}\n\n${LOOP_CARD_BODY}`, onceOnly: true };
     }
+    if (sandbox.commandsAsk === true) return { summary: command };
     if (hit === null && !req.escalated && unread === null && unreadable === null)
       return { behavior: 'allow' };
     return hit?.name === 'deps' && hit.words[0] === 'pnpm'

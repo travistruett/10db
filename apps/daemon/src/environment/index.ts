@@ -38,3 +38,8 @@ export {
   type ResolvedTools,
 } from './system-check';
 export { SECRET_VARIABLES } from './secret-variables';
+export {
+  AwsCredentialsError,
+  exportAwsCredentials,
+  type AwsCredentialsExporter,
+} from './aws-credentials';

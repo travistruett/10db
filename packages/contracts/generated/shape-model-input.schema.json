@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "model": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^[a-z]+$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "model"
+  ],
+  "additionalProperties": false
+}

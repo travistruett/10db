@@ -3,7 +3,7 @@ import { ActionIcon, Group, Kbd, Modal, Stack, Text } from '@mantine/core';
 /** Every Inbox shortcut, as the list shows it. */
 const SHORTCUTS: readonly { readonly keys: readonly string[]; readonly action: string }[] = [
   { keys: ['↑', '↓', 'j', 'k'], action: 'Move between cards' },
-  { keys: ['1–4'], action: 'Choose an option' },
+  { keys: ['1–5'], action: 'Choose an option' },
   { keys: ['n'], action: 'Write a note' },
   { keys: ['↵'], action: 'Send the answer, or dismiss a flag' },
   { keys: ['⌘', '↵'], action: 'Send from the note' },

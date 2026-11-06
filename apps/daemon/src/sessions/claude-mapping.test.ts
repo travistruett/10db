@@ -331,7 +331,11 @@ describe('toSdkMcpServer', () => {
             'PATH=/usr/bin:/bin:/usr/sbin:/sbin',
             expect.stringMatching(/^HOME=\//),
             expect.stringMatching(/^CLAUDE_CODE_TMPDIR=(?:\/private)?\/tmp\/sbx-[^/]+\/t\/10db-/),
+            // srt's debug log says which host its proxy refused; the preload carries that out.
+            'SRT_DEBUG=1',
             FAKE_SRT.node,
+            '-r',
+            expect.stringMatching(/\/10db-mcp-[0-9a-f]+\.cjs$/),
             FAKE_SRT.cli,
             '--settings',
             expect.stringMatching(/\/10db-mcp-[0-9a-f]+\.json$/),

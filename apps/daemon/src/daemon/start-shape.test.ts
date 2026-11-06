@@ -74,8 +74,14 @@ describe('a Shape conversation on a ChatGPT account', () => {
     const refused = await api.get(`/shapes/${shape.id}`, ShapeViewDto);
     expect(refused.messages).toEqual([]);
     expect(refused.turn.running).toBe(false);
+    // No model is offered for a conversation that can't run, and none can be chosen.
+    expect(refused.models).toEqual({ default: null, offered: [] });
+    await expect(
+      api.put(`/shapes/${shape.id}/model`, ShapeDto, { model: 'sonnet' }),
+    ).rejects.toThrow(words);
 
     await api.patch(`/projects/${project.id}`, ProjectDto, { accountId: claudePlan });
+    expect((await api.get(`/shapes/${shape.id}`, ShapeViewDto)).models.offered).not.toEqual([]);
     await api.post(`/shapes/${shape.id}/messages`, ShapeMessageDto, {
       text: 'Make the cards denser.',
     });

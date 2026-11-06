@@ -104,6 +104,7 @@ import {
   ACCOUNT_NAMES_VERIFIED_ON,
   CODEX_VERIFIED_ON,
   createLauncher,
+  exportAwsCredentials,
   REQUIRED_TOOLS,
   OPENROUTER_KEY_ACCOUNT,
   unavailableKeychain,
@@ -129,11 +130,12 @@ import {
   withdrawStaleClaimWaits,
 } from '../mcp';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
-import { offeredProfiles, roleDefault } from '../routing';
+import { offeredModels, offeredProfiles, roleDefault } from '../routing';
 import { createScreenBroker, createScreens, renderMayRead } from '../screens';
 import { createShapeJev, createShapeService } from '../shape';
 import { createKnowledgeServices } from './knowledge-services';
 import { createShapeServices } from './shape-services';
+import { createShapePreparer } from './shape-session-tools';
 import {
   applyCheckAnswer,
   RunnerNotStartedError,
@@ -950,6 +952,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     providerOf(getAccountRow(db, getProject(db, projectId).accountId).kind) === Provider.Codex
       ? BRAINSTORM_REFUSED_ON_CHATGPT
       : null;
+  const laneSandbox = sandboxes?.lane ?? null;
   const shape = createShapeService({
     state,
     adapter,
@@ -974,7 +977,38 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       toolTimeoutMs: SHAPE_TOOL_TIMEOUT_MS,
     },
     brainstormRefusal,
-    launch(projectId) {
+    // A Plan conversation runs commands only in a read-only lane sandbox; with none it runs none.
+    ...(laneSandbox === null
+      ? {}
+      : {
+          prepare: createShapePreparer({
+            state,
+            inbox,
+            git,
+            logger: logger.child({ component: 'shape' }),
+            laneSandbox,
+            protectedPaths: guarded,
+            projectEnv: () => launcher.projectEnv(),
+            exportAwsCredentials,
+          }),
+        }),
+    models(projectId) {
+      // A conversation that can't run on the project's account has no model to choose.
+      if (brainstormRefusal(projectId) !== null) return { default: null, offered: [] };
+      const project = getProject(db, projectId);
+      const offered = offeredProfiles(
+        listModelProfiles(db),
+        getAccount(db, project.accountId).settings.aliases,
+      );
+      const plan = roleDefault({
+        provider: project.provider,
+        role: StepRole.Plan,
+        floor: null,
+        profiles: offered,
+      })?.profile;
+      return { default: plan?.model ?? null, offered: offeredModels(offered) };
+    },
+    launch(projectId, chosen) {
       const project = getProject(db, projectId);
       const row = getAccountRow(db, project.accountId);
       const refusal = brainstormRefusal(projectId);
@@ -990,7 +1024,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       })?.profile;
       if (profile === undefined)
         throw new InvalidError(`${row.label} offers no model for planning`);
-      const session = launcher.session(row, profile.model);
+      // The builder's pick runs at the plan role's effort, while the account still offers it; one it has
+      // stopped offering since gives way to the role's.
+      const offered = offeredModels(
+        offeredProfiles(listModelProfiles(db), getAccount(db, project.accountId).settings.aliases),
+      );
+      const session = launcher.session(
+        row,
+        chosen !== null && offered.includes(chosen) ? chosen : profile.model,
+      );
       return {
         cwd: project.repoPath,
         model: session.model,
@@ -1006,7 +1048,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       };
     },
   });
-  const laneSandbox = sandboxes?.lane ?? null;
   const createdRunner = createRunner({
     protectedPaths: guarded,
     laneSandbox,
@@ -1024,6 +1065,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     judge,
     clock,
     logger,
+    exportAwsCredentials,
     dataDir: opts.dataDir,
     live,
     limits,

@@ -344,6 +344,13 @@ describe.skipIf(!SEATBELT)('a repo stdio MCP server under the sandbox (Seatbelt)
     });
     expect(existsSync(join(checkout, 'inside'))).toBe(false);
     expect(existsSync(homeProbe)).toBe(false);
+    // The hosts srt's proxy refused, as the daemon reads them to name them in its log; no approved one.
+    const preload = server.launch().args[server.launch().args.indexOf('-r') + 1] ?? '';
+    const logFile = /const FILE = "([^"]+)"/.exec(readFileSync(preload, 'utf8'))?.[1] ?? '';
+    const refused = readFileSync(logFile, 'utf8').split('\n').filter(Boolean);
+    expect(refused).toEqual(expect.arrayContaining(['other.invalid', 'wild.invalid']));
+    expect(refused).not.toContain('approved.invalid');
+    expect(refused).not.toContain('a.wild.invalid');
   }, 60_000);
 
   it('refuses every host to a server approved with none', async () => {

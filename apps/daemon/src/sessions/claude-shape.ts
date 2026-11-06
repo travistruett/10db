@@ -3,6 +3,8 @@ import type {
   Options,
   SDKMessage,
   SDKUserMessage,
+  SpawnedProcess,
+  SpawnOptions,
 } from '@anthropic-ai/claude-agent-sdk';
 import type { AccountRefusal } from '@10db/contracts';
 import { systemClock, type Clock } from '../clock';
@@ -16,8 +18,16 @@ import {
 } from './account-check';
 import { createChannel } from './channel';
 import type { QueryFn } from './claude-adapter';
-import { mapSdkMessage, toHookOutput, toShapeHookOutput, userMessage } from './claude-mapping';
+import {
+  mapSdkMessage,
+  toHookOutput,
+  toPermissionResult,
+  toSdkMcpServer,
+  toShapeHookOutput,
+  userMessage,
+} from './claude-mapping';
 import { contextEvent } from './context-event';
+import { currentToolNames } from './mcp-tool-names';
 import { TENDB_MCP_SERVER } from './project-mcp';
 import { settleWithin } from './settle-within';
 import {
@@ -33,6 +43,8 @@ export interface ShapeSessionDeps {
   readonly query: QueryFn;
   readonly stopGraceMs?: number;
   readonly clock?: Clock;
+  /** Starts Claude Code as the daemon's own child and tells its pid, so the session's commands can be watched. */
+  readonly spawn?: (options: SpawnOptions, onSpawn: (pid: number | null) => void) => SpawnedProcess;
 }
 
 /** How long Claude Code may take to report its account before the first message is sent. */
@@ -40,37 +52,61 @@ const ACCOUNT_MS = 30_000;
 const STOP_GRACE_MS = 5_000;
 const UNVERIFIED =
   'The billing check for this session did not pass, so 10db allows no tools in it.';
-const NO_TOOLS =
-  'A Shape session asks for nothing: the calls it may make are settled before they run.';
+/** A line for the first message naming project servers that didn't connect, so the session doesn't hunt for their tools. */
+function failedServersNote(names: readonly string[]): string {
+  return (
+    `Note from 10db: these MCP servers of the project failed to connect and are not in this session: ${names.join(', ')}. ` +
+    "Don't look for their tools; tell the builder when the plan needs one."
+  );
+}
+
+/** How many calls' hook directories are kept for `canUseTool`: a call the hook allowed never reaches it. */
+const HOOK_CWDS_KEPT = 256;
 
 /**
- * The SDK options of a Shape session (Shape spec §5.2): no settings file, no plugin, no project MCP
- * server, `default` permission mode in which `canUseTool` denies whatever no allow rule covers, and
- * a PreToolUse hook that judges the session's calls and its subagents' alike.
+ * The SDK options of a Shape session (Shape spec §5.2): no settings file and no plugin, the project's
+ * approved MCP servers over the control channel, commands in a read-only lane sandbox, `default`
+ * permission mode in which a call no allow rule covers reaches the permission broker, and a PreToolUse
+ * hook that judges the session's calls and its subagents' alike.
  */
 function shapeOptions(
   spec: ShapeSessionSpec,
   deps: ShapeSessionDeps,
   gate: { readonly verified: Promise<boolean>; readonly refused: () => boolean },
   abortController: AbortController,
+  onSpawn: (pid: number | null) => void,
+  listedTools: () => Promise<readonly string[]>,
 ): Options {
+  const { spawn } = deps;
+  const { sandbox } = spec;
+  // `canUseTool` hears nothing of where a call runs; the hook does, by the same tool use id.
+  const hookCwds = new Map<string, string>();
   return {
     cwd: spec.cwd,
     model: spec.model,
     effort: spec.effort,
     ...(spec.resumeProviderSessionId ? { resume: spec.resumeProviderSessionId } : {}),
-    env: { ...spec.env },
+    // Default mode: Claude Code forces it while the scrub is on, and it keeps the processes outside
+    // the sandbox free of the session's variables.
+    env:
+      sandbox === null
+        ? { ...spec.env }
+        : { ...spec.env, ...sandbox.env, CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1' },
     pathToClaudeCodeExecutable: deps.claudePath,
     // Never the project's, the user's or a local settings file; never a plugin (the harness's skills
     // and personas are for lanes). MCP servers arrive over the control channel, not the command line.
     settingSources: [],
     strictMcpConfig: true,
-    settings: { autoCompactEnabled: true },
+    settings:
+      sandbox === null
+        ? { autoCompactEnabled: true }
+        : { autoCompactEnabled: true, permissions: { ask: [...sandbox.askRules] } },
+    ...(sandbox === null ? {} : { sandbox: sandbox.settings }),
     systemPrompt: { type: 'preset', preset: 'claude_code', append: spec.systemPrompt },
     tools: [...spec.tools],
     allowedTools: [...spec.allowedTools],
-    disallowedTools: [...spec.disallowedTools],
-    // Reviewers run on the session's own model.
+    disallowedTools: [...spec.disallowedTools, ...(sandbox?.disallowedTools ?? [])],
+    // An agent with no model of its own runs on the session's; a call may still name one.
     agents: Object.fromEntries(
       Object.entries(spec.agents).map(([name, agent]) => [
         name,
@@ -78,12 +114,31 @@ function shapeOptions(
           description: agent.description,
           prompt: agent.prompt,
           tools: [...agent.tools],
-          model: 'inherit',
+          model: agent.model ?? 'inherit',
         },
       ]),
     ),
     permissionMode: 'default',
-    canUseTool: () => Promise.resolve({ behavior: 'deny', message: NO_TOOLS }),
+    canUseTool: async (toolName, input, options) => {
+      if (!(await gate.verified) || gate.refused())
+        return { behavior: 'deny', message: UNVERIFIED, interrupt: true };
+      const cwd = hookCwds.get(options.toolUseID);
+      hookCwds.delete(options.toolUseID);
+      // Only a call to an MCP tool is offered a server rule, and only it needs the tool list.
+      const tools = toolName.startsWith('mcp__') ? await listedTools() : undefined;
+      const decision = await spec.canUseTool({
+        toolName,
+        input,
+        toolUseId: options.toolUseID,
+        escalated: false,
+        signal: options.signal,
+        ...(cwd === undefined ? {} : { cwd }),
+        ...(tools === undefined ? {} : { listedTools: tools }),
+      });
+      // The session can be refused while the answer was pending.
+      if (gate.refused()) return { behavior: 'deny', message: UNVERIFIED, interrupt: true };
+      return toPermissionResult(decision, input);
+    },
     hooks: {
       PreToolUse: [
         {
@@ -93,12 +148,16 @@ function shapeOptions(
               if (!(await gate.verified) || gate.refused())
                 return toHookOutput({ decision: 'deny', reason: UNVERIFIED });
               try {
+                hookCwds.set(hookInput.tool_use_id, hookInput.cwd);
+                const oldest = hookCwds.keys().next();
+                if (hookCwds.size > HOOK_CWDS_KEPT && !oldest.done) hookCwds.delete(oldest.value);
                 return toShapeHookOutput(
                   spec.preToolUse({
                     toolName: hookInput.tool_name,
                     input: hookInput.tool_input,
                     agentId: hookInput.agent_id,
                     agentType: hookInput.agent_type,
+                    cwd: hookInput.cwd,
                   }),
                 );
               } catch (error) {
@@ -157,6 +216,9 @@ function shapeOptions(
       ],
     },
     abortController,
+    ...(spawn === undefined
+      ? {}
+      : { spawnClaudeCodeProcess: (options: SpawnOptions) => spawn(options, onSpawn) }),
   };
 }
 
@@ -176,10 +238,13 @@ export function startShapeSession(
   const abortController = new AbortController();
   const totals = { inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
   let account: AccountInfo | undefined;
+  let pid: number | null = null;
   let ended = false;
   let stopRequested = false;
   let promptSent = false;
   let started = false;
+  /** The tool names the latest init message listed; the repo's MCP servers come after it. */
+  let initTools: readonly string[] = [];
   let failure: { reason: SessionEndReason; message: string; refusal?: AccountRefusal } | null =
     null;
   let resolvePreflight: (ok: boolean) => void = () => undefined;
@@ -223,6 +288,17 @@ export function startShapeSession(
       deps,
       { verified, refused: () => failure !== null },
       abortController,
+      (spawned) => {
+        pid = spawned;
+      },
+      () =>
+        currentToolNames(
+          () => q.mcpServerStatus(),
+          initTools,
+          (error) => {
+            log.debug({ err: String(error) }, 'mcp server tool list unavailable');
+          },
+        ),
     ),
   });
 
@@ -251,8 +327,16 @@ export function startShapeSession(
       refuse(SessionEndReason.AccountRefused, `${refusal.message}. No message was sent.`, refusal);
       return;
     }
+    let leftOut: string[];
     try {
-      await q.setMcpServers({
+      const registered = await q.setMcpServers({
+        ...Object.fromEntries(
+          Object.entries(spec.projectMcpServers).map(([name, server]) => [
+            name,
+            toSdkMcpServer(server),
+          ]),
+        ),
+        // Written last, so 10db's own keeps its name.
         [TENDB_MCP_SERVER]: {
           type: 'http',
           url: spec.mcp.url,
@@ -261,6 +345,7 @@ export function startShapeSession(
           alwaysLoad: true,
         },
       });
+      leftOut = Object.keys(registered.errors).filter((name) => name !== TENDB_MCP_SERVER);
     } catch (error) {
       // The error can quote the rejected config, which holds the token; only its class is logged.
       log.error(
@@ -277,7 +362,14 @@ export function startShapeSession(
       resolvePreflight(false);
       return;
     }
-    input.push(userMessage(spec.prompt, undefined, spec.images));
+    if (leftOut.length > 0) log.warn({ servers: leftOut }, 'project mcp servers failed to connect');
+    input.push(
+      userMessage(
+        leftOut.length > 0 ? `${spec.prompt}\n\n${failedServersNote(leftOut)}` : spec.prompt,
+        undefined,
+        spec.images,
+      ),
+    );
     promptSent = true;
     resolvePreflight(true);
   };
@@ -335,13 +427,14 @@ export function startShapeSession(
             continue;
           }
         }
+        if (msg.type === 'system' && msg.subtype === 'init') initTools = msg.tools;
         if (msg.type === 'system' && msg.subtype === 'init' && !started) {
           if (!(await preflightOk)) continue;
           checkInit(msg);
           if (refused()) continue;
           started = true;
         }
-        for (const event of mapSdkMessage(msg, { pid: null })) {
+        for (const event of mapSdkMessage(msg, { pid })) {
           if (event.type === 'turn_complete') {
             totals.inputTokens += event.inputTokens;
             totals.outputTokens += event.outputTokens;

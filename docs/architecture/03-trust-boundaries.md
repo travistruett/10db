@@ -439,9 +439,17 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
   (§4.7), one sandbox per server and session, made with the lane's own (`LaneSession.mcpServers`) and removed
   with it. An http or sse server is a connection Claude Code makes, not a process, so it needs none.
   - **Launch.** Claude Code runs `/usr/bin/env -i PATH=<system> HOME=… CLAUDE_CODE_TMPDIR=<its temp dir>
-<node> <srt.mjs> --settings <sealed file> -c <inner>`, so the session env Claude Code merges into a
-    server's never reaches srt's host. srt and node are the daemon's own (`sandboxRuntimeFor`), refused when
-    they lie where a project writes. Inside the sandbox, `/usr/bin/env -i <srt's proxy variables> /bin/sh -c '. <env file> && exec "$@"'`
+SRT_DEBUG=1 <node> -r ~/.10db/run/10db-mcp-<hex>.cjs <srt.mjs> --settings <sealed file> -c <inner>`, so the
+    session env Claude Code merges into a server's never reaches srt's host. srt and node are the daemon's own
+    (`sandboxRuntimeFor`), refused when they lie where a project writes. `SRT_DEBUG` changes only srt's
+    logging. The `-r` file is a refusal preload (`sandbox/mcp-refusals.ts`) that node runs in srt's host,
+    outside the sandbox. It is safe for the reason the other sealed files are: 10db writes it with `wx` and mode
+    0400 directly in the files root (`~/.10db/run`), outside every temp dir, in no sandbox's writable dir and
+    closed to every profile, so no lane or server can replace or edit it, and the after-crash sweep removes it
+    by exact name. Its only input is the log path the daemon chose; nothing of the server's is in its source. It
+    drops srt's `[SandboxDebug]` lines from stderr and appends each host srt's proxy refused
+    (`Connection blocked to h:p`, `HTTP request blocked to h:p`), once and at most 50, to a per-server
+    `10db-mcp-<hex>.log` in the files root too (0600, made with `wx`). Inside the sandbox, `/usr/bin/env -i <srt's proxy variables> /bin/sh -c '. <env file> && exec "$@"'`
     keeps srt's proxy variables by name and sets the rest of the server's env from a sealed file (mode 0400, in `~/.10db/run`, outside every temp dir), and execs
     the command, so srt's TERM reaches it when Claude Code stops it. No approved value is on a command line: a stdio
     server whose command or args hold `${` is ignored when the config is read, with a card saying values reach
@@ -470,11 +478,24 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
     forms). Their URLs carry srt's proxy token, which srt itself passes to `env` on a command line for the
     instant before it execs; the inner `env -i` passes them the same way, for no longer. The token stays in the
     server's env for its life (Residuals).
+  - **AWS credentials, never `~/.aws`.** A server whose declared env sets a literal `AWS_PROFILE` gets, in place of
+    the profile, that one profile's short-lived credentials, which the daemon exports outside the sandbox with the
+    `aws` of the fixed install prefixes (`environment/aws-credentials.ts`). `~/.aws` stays unreadable to it: the
+    SSO token there gets credentials for every role the builder holds. The grant is in the config hash, so an
+    approval given before it asks again, and the card says what the server gets. The credentials live in its
+    sealed env file and last the role's session (an hour on the Orgtools permission sets).
+  - **configd.** A server's profile opens the Mach service `com.apple.SystemConfiguration.configd` (a lane's
+    commands don't get it): uv's HTTP client reads the system proxy settings through it and crashes without. It
+    tells the server how the Mac's network is set up, and opens no route past srt's proxy.
   - **Package fetching.** A server that downloads its package when it starts (`npx -y <package>`, `uvx`,
     `pnpm dlx`) reaches the registry only when `.10db/mcp-hosts.json` names it (`registry.npmjs.org` for
     `npx`); otherwise it fails to connect unless the repo installs the package. 10db doesn't recognise such
     commands: a person writes the registry in the file and the builder approves it on the card. The session's
-    prompt and log name a server that failed to connect. A client that ignores the proxy variables and dials
+    prompt and log name a server that failed to connect. For a host srt's proxy refused, the daemon polls the
+    server's refusal log every two seconds, and a last time before the log is removed, and reads it as
+    untrusted input: it keeps only whole lines that are host names (lower case, at most 253 characters, once
+    each, at most 50) and warns `{ server, host }` with `REFUSED_MESSAGE`, which says to add the host to the
+    server's entry in `.10db/mcp-hosts.json`. A client that ignores the proxy variables and dials
     out itself is refused by Seatbelt.
   - **Measured** (`test/mcp-sandbox.seatbelt.test.ts`, macOS, in `make gate` and CI's macOS job): srt adds
     nothing to a server's stdout, whose JSON-RPC `initialize` answer is its only line. Reading a canary in home,
@@ -484,10 +505,11 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
     env file, writing its temp dir and its approved variable work, and the TERM sent to srt reaches it. A `CONNECT`
     through srt's proxy to an approved `.invalid` name and to a subdomain of an approved wildcard passes the
     allowlist; one to the wildcard's own domain, to an unapproved name, and every one from a server approved
-    with no host, gets srt's `blocked-by-allowlist` refusal.
+    with no host, gets srt's `blocked-by-allowlist` refusal. The refusal log then holds the hosts srt refused
+    (`other.invalid`, `wild.invalid`) and no approved one.
   - **After a crash.** A daemon that starts sweeps the sandbox roots (`/Users/Shared/10db-<uid>`, `~/.10db/run`, and the system temp dirs for what an older daemon left there) before any session or gate starts
     (`claimSandboxTempRoot`): it removes this user's lane temp dirs (`10db-` and six characters) and sealed
-    files (`10db-env-`, `10db-gate-`, `10db-mcp-`), each by its exact name and its own kind, never following
+    files and refusal logs (`10db-env-`, `10db-gate-`, `10db-mcp-`), each by its exact name and its own kind, never following
     or removing a link. It then marks the root with its pid (`10db-daemon-<pid>`), and a daemon with another
     data dir that finds a live mark sweeps nothing, since that daemon's sessions may be running.
 - **Residuals:** an approved variable reaches the server and can leave through its tool results (§7) or to
@@ -731,6 +753,38 @@ front of it.
   `TMPDIR` is unset. Normally `TMPDIR` is under `/var/folders`, which Codex keeps closed.
 - **Known gaps, accepted.** `write_stdin` is not seen by the hook; there is no auto-mode classifier; a lane spends a read on
   `AGENTS.md`; a project's `.codex/` doesn't apply to its lanes.
+
+### 4.14 A Plan conversation's session
+
+**Built** (`decisions/2026-11-05-plan-runs-commands-and-project-tools-through-the-lane-broker.md`, Shape spec
+§5.2). A Plan (Shape) session is a Claude Code session in `default` mode with no lane, claim or area. It holds the
+project's code and talks with the builder; the builder accepts its plan before any lane runs a task from it.
+It runs only on a Claude account: while the project is on a ChatGPT account, every request that would start or
+advance a conversation, or choose its model, is refused before it writes anything (`BRAINSTORM_REFUSED_ON_CHATGPT`).
+
+- **Files.** Its file tools read only the checkout and the conversation's files directory; the hook refuses the
+  rest with no card. Protected paths are refused to the file tools by the hook and to commands by the kernel.
+- **Commands.** With the daemon's lane sandbox, its `Bash` runs in a lane sandbox with the whole checkout in
+  `denyWrite`: a command writes only its own temp dir, whatever a card allows, and reaches only the project's
+  allowed hosts. The lanes' guard judges each command; a read-only one runs at once and any other is carded by the
+  lanes' broker, owned by the conversation (no workstream, project rules only). The daemon spawns its Claude Code
+  and the sandbox stops what runs under it when the session ends, as a lane's; background jobs, `nohup`, `setsid`,
+  `disown` and `dangerouslyDisableSandbox` are refused too, and agents run in the foreground. A command naming a
+  protected path is carded and then refused by the kernel. With no sandbox it has no `Bash`.
+- **Project MCP servers.** It gets the project's approved servers as a lane does (§4.6), expanded from the project
+  env and never the session's, which holds the account's key; a remote one on this Mac or its network, by name
+  or by the addresses its name resolves to when the session starts, is left out (a name that rebinds later is
+  not caught: Claude Code makes the connection). Only the session calls them, and each call is carded unless the builder allowed that tool always; every
+  call shows in the conversation.
+- **Who reaches the network.** The session itself now does, which the researcher split used to rule out. Its
+  commands reach only the project's allowed hosts and a server only its approved ones, every call carded or shown,
+  so code leaves the machine only for a destination the builder approved. The open web stays with the web
+  researcher, which holds no project file. The code researchers read the code and run its commands; they have no
+  web tool and no MCP server, and their commands reach only the project's allowed hosts, after a card or a stored
+  rule.
+- **Untrusted input.** A web page, a command's output and an MCP server's result (an AWS resource name, a tag, a
+  log line) are data, never instructions; the prompts say so. The checks behind the prompt are the builder's
+  acceptance of the plan and the sandbox that keeps every command off the checkout.
 
 ## 5. What the daemon reads, runs or sends for a lane
 

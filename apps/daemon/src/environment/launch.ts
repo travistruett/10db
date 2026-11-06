@@ -146,6 +146,25 @@ function withoutVars(
   return Object.fromEntries(Object.entries(login).filter(([name]) => !dropped.includes(name)));
 }
 
+/** The aliases Claude Code resolves through an `ANTHROPIC_DEFAULT_<ALIAS>_MODEL` variable. */
+const CLAUDE_CODE_ALIASES = ['opus', 'sonnet', 'haiku', 'fable'] as const;
+
+/**
+ * `env` with the account's model for each alias Claude Code knows, so a subagent named by alias
+ * (`model: 'fable'`) runs on the model the account maps it to, as the session's own model does.
+ */
+function withAliasModels(
+  env: Record<string, string>,
+  modelMap: Readonly<Record<string, string>>,
+): Record<string, string> {
+  const out = { ...env };
+  for (const alias of CLAUDE_CODE_ALIASES) {
+    const model = modelMap[alias];
+    if (model !== undefined) out[`ANTHROPIC_DEFAULT_${alias.toUpperCase()}_MODEL`] = model;
+  }
+  return out;
+}
+
 export function createLauncher(opts: {
   readonly base: Readonly<Record<string, string>>;
   readonly clientApp: string;
@@ -227,10 +246,15 @@ export function createLauncher(opts: {
     projectEnv,
     session(account, alias) {
       const { env, modelMap } = build(account);
-      return { env, model: modelMap[alias] ?? alias, expect: expectation(account) };
+      return {
+        env: withAliasModels(env, modelMap),
+        model: modelMap[alias] ?? alias,
+        expect: expectation(account),
+      };
     },
     probe(account) {
-      return { env: build(account).env, expect: expectation(account) };
+      const { env, modelMap } = build(account);
+      return { env: withAliasModels(env, modelMap), expect: expectation(account) };
     },
     loginConfigDir() {
       const dir = opts.base['CLAUDE_CONFIG_DIR'];

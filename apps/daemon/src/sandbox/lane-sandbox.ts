@@ -1,5 +1,6 @@
 import { realpathSync } from 'node:fs';
 import { Provider, type PermissionRuleDto, type ProjectDto } from '@10db/contracts';
+import type { Clock } from '../clock';
 import { prepareCommandEnv, withoutTempDirPaths } from './command-env';
 import { deniedEnvNames } from './env-allowlist';
 import { createLaneEnvFile, removeLaneEnvFile } from './env-file';
@@ -126,6 +127,11 @@ export interface LaneSessionInput {
    * than `MAX_SANDBOX_TMP_BYTES`: no Claude Code or srt runs in it.
    */
   readonly provider?: Provider;
+  /**
+   * A session that changes nothing in the checkout, a Plan conversation's: its commands write only
+   * its own temp dir, the checkout as a whole being denied over the write Claude Code opens itself.
+   */
+  readonly readOnly?: boolean;
 }
 
 export interface LaneSandbox {
@@ -151,6 +157,8 @@ export interface LaneSandboxDeps extends Omit<ProjectAccessDeps, 'tmpRoot'> {
   readonly ledgers?: LedgerSweep;
   /** Told, once per kind and session, what the watch of a session's processes could not do. */
   readonly log?: SandboxLog;
+  /** Paces the reading of each repo MCP server's log of refused hosts; the system's by default. */
+  readonly clock?: Clock;
   /**
    * Where the daemon makes lane copies. The file tools refuse (no card) a path under it that is not
    * in the session's own copy.
@@ -307,7 +315,11 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           extraWrites: [],
           // Claude Code would otherwise open the checkout's git state with the checkout, and a
           // project nested in it.
-          denyWrites: [...access.gitState, ...access.otherCheckouts],
+          denyWrites: [
+            ...(input.readOnly === true ? [checkout] : []),
+            ...access.gitState,
+            ...access.otherCheckouts,
+          ],
           sandboxRoots,
           ownFiles: [envFile],
           loopback: input.project.sandboxLoopback,
@@ -328,6 +340,8 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           env: input.env,
           checkouts: input.checkouts,
           servers: input.mcpServers,
+          ...(deps.log === undefined ? {} : { log: deps.log }),
+          ...(deps.clock === undefined ? {} : { clock: deps.clock }),
         });
         const claudeProtected = claudeProtectedPaths(checkout);
         const spec: LaneSandboxSpec = {
