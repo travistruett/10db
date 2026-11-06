@@ -239,6 +239,8 @@ doesn't apply to these lanes.
 - `.git` and `.codex` in the checkout are read-only under Codex's own protection, with no rule.
 - `LaneSandboxSpec` gains `commandEnv`, so `TMPDIR` and the rest reach commands. Without `TMPDIR`, `xcrun` fails.
 - `~/.codex` and `~/.agents` join `homeProtectedReads`. The account's home is already covered by the data directory.
+  A login shell whose `CODEX_HOME` moves a personal ChatGPT login elsewhere gets that directory protected too, as its
+  `CLAUDE_CONFIG_DIR` is (`Launcher.loginCodexHome`).
 - Listing patterns (`allowRead`'s `dir[x]`, `dir/*`) and `allowMachLookup` have no direct match. The plan tries a
   real toolchain and grants a plain read where one is needed. File watchers may not work in a lane; that's accepted.
 - `runner.ts:1511` takes the config directory from the launch, not from `CLAUDE_CONFIG_DIR`.

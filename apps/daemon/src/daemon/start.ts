@@ -703,6 +703,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
               home: homedir(),
               dataDir: opts.dataDir,
               loginConfigDir: launcher.loginConfigDir(),
+              loginCodexHome: launcher.loginCodexHome(),
               gitDirs: (repo) => git.gitDirs(repo),
               ...sandboxDepsOf(sandboxRoots),
               ...(opts.sandbox?.processes === undefined
@@ -718,6 +719,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
               home: homedir(),
               dataDir: opts.dataDir,
               loginConfigDir: launcher.loginConfigDir(),
+              loginCodexHome: launcher.loginCodexHome(),
               gitDirs: (repo) => git.gitDirs(repo),
               ...sandboxDepsOf(sandboxRoots),
               log: logger.child({ component: 'sandbox' }),

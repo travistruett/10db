@@ -53,6 +53,7 @@ const gate = createGateRunner({
     home: homedir(),
     dataDir: join(homedir(), 'Library', 'Application Support', '10db'),
     loginConfigDir: env['CLAUDE_CONFIG_DIR'] ?? null,
+    loginCodexHome: env['CODEX_HOME'] ?? null,
     gitDirs: (repo) => git.gitDirs(repo),
     ...sandboxDepsOf(roots),
     // What a sweep of pnpm's lock directory could not remove, on stderr.

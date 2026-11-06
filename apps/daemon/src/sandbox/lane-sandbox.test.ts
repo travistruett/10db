@@ -61,6 +61,7 @@ let checkout: string;
 function sandbox(
   overrides: {
     loginConfigDir?: string | null;
+    loginCodexHome?: string | null;
     gitDirs?: LaneSandboxDeps['gitDirs'];
     laneWritableRoots?: readonly string[];
     codexLaneTempRoot?: string;
@@ -70,6 +71,7 @@ function sandbox(
     home,
     dataDir,
     loginConfigDir: overrides.loginConfigDir ?? null,
+    ...(overrides.loginCodexHome === undefined ? {} : { loginCodexHome: overrides.loginCodexHome }),
     tmpRoot,
     filesRoot,
     codexLaneTempRoot: overrides.codexLaneTempRoot ?? lanesRoot,
@@ -809,6 +811,29 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       expect(session.spec.disallowedTools).toContain(`Read(/${login}/**)`);
     } finally {
       session.dispose();
+    }
+  });
+
+  it("protects the login shell's own Codex home, a personal ChatGPT login off ~/.codex", async () => {
+    const codexHome = join(home, 'elsewhere', 'codex-personal');
+    mkdirSync(codexHome, { recursive: true });
+    writeFileSync(join(codexHome, 'auth.json'), '{}');
+    const session = await sandbox({ loginCodexHome: codexHome }).forSession(input());
+    try {
+      expect(session.spec.settings.filesystem.denyRead).toContain(codexHome);
+      expect(readAccess(join(codexHome, 'auth.json'), session.fileAccess).access).toBe('protected');
+    } finally {
+      session.dispose();
+    }
+    // A ChatGPT lane's too, whose read list is the same profile's.
+    mkdirSync(lanesRoot, { recursive: true });
+    const codex = await sandbox({ loginCodexHome: codexHome }).forSession(
+      input({ provider: Provider.Codex, tempRoot: lanesRoot }),
+    );
+    try {
+      expect(codex.spec.settings.filesystem.denyRead).toContain(codexHome);
+    } finally {
+      codex.dispose();
     }
   });
 

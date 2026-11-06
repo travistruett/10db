@@ -89,6 +89,11 @@ export interface Launcher {
   loginConfigDir(): string | null;
   /** Why the login shell's directory was ignored (it is relative), naming the variable and never its value; null otherwise. */
   loginConfigDirWarning(): string | null;
+  /**
+   * Where the login shell keeps a personal ChatGPT login when it moves `CODEX_HOME` off `~/.codex`: an
+   * absolute directory, or null. No session runs on it; every sandbox denies it, as it does `~/.codex`.
+   */
+  loginCodexHome(): string | null;
 }
 
 function quoted(text: string): string {
@@ -258,6 +263,11 @@ export function createLauncher(opts: {
     },
     loginConfigDir() {
       const dir = opts.base['CLAUDE_CONFIG_DIR'];
+      // A relative path depends on the shell's working directory, so it names no one directory.
+      return dir !== undefined && isAbsolute(dir) ? dir : null;
+    },
+    loginCodexHome() {
+      const dir = opts.base['CODEX_HOME'];
       // A relative path depends on the shell's working directory, so it names no one directory.
       return dir !== undefined && isAbsolute(dir) ? dir : null;
     },

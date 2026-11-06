@@ -47,6 +47,11 @@ export interface ProjectAccessDeps {
   readonly dataDir: string;
   /** The config dir of the login shell's own Claude Code sign-in, when it isn't the default. */
   readonly loginConfigDir: string | null;
+  /**
+   * The login shell's own `CODEX_HOME`, a personal ChatGPT login, when it isn't `~/.codex`: a protected
+   * read like that one. None by default.
+   */
+  readonly loginCodexHome?: string | null;
   /** Where sandbox temp dirs are made: PATH entries in it are dropped like a checkout's. */
   readonly tmpRoot: string;
   /** Where ChatGPT lanes' temp dirs are made: lane-written and closed, as the temp root is. */
@@ -245,6 +250,9 @@ export async function projectAccess(
       configDirs: [
         ...input.configDirs,
         ...(deps.loginConfigDir === null ? [] : [deps.loginConfigDir]),
+        ...(deps.loginCodexHome === undefined || deps.loginCodexHome === null
+          ? []
+          : [deps.loginCodexHome]),
       ],
     }),
     ...MISE_SYSTEM_DIRS,

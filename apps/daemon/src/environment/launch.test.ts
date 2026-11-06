@@ -410,6 +410,22 @@ describe("the login shell's config directory", () => {
   });
 });
 
+describe("the login shell's Codex home", () => {
+  it.each<[string, Record<string, string>, string | null]>([
+    ['an absolute directory', { CODEX_HOME: '/h/b/.codex-other' }, '/h/b/.codex-other'],
+    ['none set', {}, null],
+    ['an empty value', { CODEX_HOME: '' }, null],
+    ['a relative path', { CODEX_HOME: '.codex-other' }, null],
+  ])('%s', (_name, vars, dir) => {
+    const login = createLauncher({
+      base: { PATH: '/bin', ...vars },
+      clientApp: 'test',
+      keychain: createMemoryKeychain(),
+    });
+    expect(login.loginCodexHome()).toBe(dir);
+  });
+});
+
 describe('signInCommand', () => {
   it.each<[string | null, string]>([
     [null, 'env -u CLAUDE_CONFIG_DIR claude /login'],

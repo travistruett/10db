@@ -748,7 +748,8 @@ front of it.
   nor starts an MCP server outside it. A session whose start checks fail ends with `sandbox_refused` or
   `account_refused` before any prompt.
 - **Credentials.** 10db stores no ChatGPT credential; Codex's login lives in the account's home, which the data
-  directory already closes to lanes, and `~/.codex` and `~/.agents` are protected reads. The Codex launch strips
+  directory already closes to lanes, and `~/.codex` and `~/.agents` are protected reads, as is the login shell's own
+  `CODEX_HOME` when it moves a personal ChatGPT login elsewhere (`Launcher.loginCodexHome`). The Codex launch strips
   `OPENAI_API_KEY`, `CODEX_API_KEY`, `OPENAI_BASE_URL`, `CODEX_ACCESS_TOKEN` and `CODEX_HOME`, and commands inherit nothing
   but what 10db sets.
 - **Network.** `network.domains` with `mode = "full"`. An HTTPS POST passes even in `limited`, since only plain HTTP is
