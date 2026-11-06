@@ -87,6 +87,10 @@ Both already send project content past the project's account. Neither is plan sp
   existing card confirms it and the existing mismatch card catches a change, so a sign-in to another workspace on the
   same email is refused rather than billed. The plan's name is never compared. `codex login status` answers the
   signed-out question, as `claude auth status` does.
+- At a session start the usage read is asked up to three times, 2 s apart on the injected clock, after no answer or a
+  server error. An account still unread fails the start with `error`, which the runner recovers from, and pauses the
+  account only when `codex login status` says the home is signed out. A usage read that names no workspace matches
+  nothing: Confirm can't record it, so the account shows a sign-in card, and a start refuses it.
 - `OPENAI_API_KEY`, `CODEX_API_KEY`, `OPENAI_BASE_URL`, `CODEX_ACCESS_TOKEN` and `CODEX_HOME` are stripped from a
   Codex launch only, in `launch.ts`. The shared `projectEnv()` keeps them, so no existing project's gate changes.
 - `forced_login_method = "chatgpt"` in the home keeps an API key from billing instead.
@@ -190,7 +194,8 @@ So:
   answered both ways in the spike; a real card can take much longer, which the plan tests.
 - The hook's `timeout` is a constant above the longest wait (`humanWaitMinutes` is at most 240), and `curl`'s
   `--max-time` comes from the session's tool timeout, so `curl` gives up first and refuses. A stopped session closes
-  its socket, which refuses the call.
+  its socket, which refuses the call. Codex's binary can clamp a hook's timeout, so the start checks read the one it
+  reports (`timeoutSec` in `hooks/list`) and refuse the session when it is missing or shorter.
 
 The adapter translates calls at this boundary, so the guard, the broker and the watcher see the shapes they know:
 

@@ -85,6 +85,8 @@ export const HooksListResponse = z.looseObject({
           currentHash: z.string(),
           trustStatus: z.string(),
           sourcePath: z.string().optional(),
+          /** The timeout Codex runs the hook under, which its binary may clamp below the configured one. */
+          timeoutSec: z.number().nullable().optional(),
         }),
       ),
     }),

@@ -3,18 +3,29 @@ import { createInterface } from 'node:readline';
 import { z } from 'zod';
 import type { CodexChild, CodexSpawn } from './codex-rpc';
 
-/** A message the client wrote to the fake server's stdin. */
-export interface Rpc {
-  readonly id?: number | string;
-  readonly method?: string;
-  readonly params?: unknown;
-}
-
-/** The error form of a script entry; any other non-function entry is the result itself. */
+/** The error form of a script entry or of what a function entry returns; anything else is the result itself. */
 const ErrorEntry = z.object({ error: z.object({ code: z.number(), message: z.string() }) });
 
-/** What the fake answers a method with: a result, `{ error }`, or a function of the params returning a result. */
+/** One line the client writes, as the fake reads it. */
+const RpcLine = z.looseObject({
+  id: z.union([z.number(), z.string()]).optional(),
+  method: z.string().optional(),
+  params: z.unknown().optional(),
+});
+
+/** A message the client wrote to the fake server's stdin. */
+export type Rpc = z.infer<typeof RpcLine>;
+
+/**
+ * What the fake answers a method with: a result, `{ error }`, or a function of the params returning
+ * either, or a promise of one.
+ */
 export type ScriptEntry = unknown;
+
+/** A script entry that is a function of the params. */
+function isHandler(entry: ScriptEntry): entry is (params: unknown) => unknown {
+  return typeof entry === 'function';
+}
 
 export interface FakeAppServer {
   readonly child: CodexChild;
@@ -51,8 +62,16 @@ export function fakeAppServer(script: Readonly<Record<string, ScriptEntry>>): Fa
   const requests = createInterface({ input: stdin });
   // A test may destroy stdin with an error; the interface would otherwise rethrow it.
   requests.on('error', () => undefined);
+  /** Answers `id` with `answer`: its error when it is `{ error }`, else as the result. */
+  const answer = (id: number | string, answer: unknown): void => {
+    const failure = ErrorEntry.safeParse(answer);
+    reply(failure.success ? { id, error: failure.data.error } : { id, result: answer });
+  };
+
   requests.on('line', (line) => {
-    const message = JSON.parse(line) as Rpc;
+    const parsed = RpcLine.safeParse(JSON.parse(line));
+    if (!parsed.success) return;
+    const message = parsed.data;
     sent.push(message);
     if (message.id === undefined || message.method === undefined) return;
     const id = message.id;
@@ -61,13 +80,12 @@ export function fakeAppServer(script: Readonly<Record<string, ScriptEntry>>): Fa
       return;
     }
     const entry = script[message.method];
-    if (typeof entry !== 'function') {
-      const failure = ErrorEntry.safeParse(entry);
-      reply(failure.success ? { id, error: failure.data.error } : { id, result: entry });
+    if (!isHandler(entry)) {
+      answer(id, entry);
       return;
     }
-    void Promise.resolve((entry as (params: unknown) => unknown)(message.params)).then((result) => {
-      reply({ id, result });
+    void Promise.resolve(entry(message.params)).then((result) => {
+      answer(id, result);
     });
   });
 

@@ -16,7 +16,7 @@ import {
   type GuardSocket,
   type HookInput,
 } from './codex-guard';
-import { GUARD_HOOK_EVENT, type CodexHome } from './codex-home';
+import { CODEX_HOOK_TIMEOUT_SECONDS, GUARD_HOOK_EVENT, type CodexHome } from './codex-home';
 import { codexThreadConfig, LANE_PROFILE } from './codex-lane-config';
 import {
   createTurnState,
@@ -58,6 +58,15 @@ export interface CodexSessionDeps extends CodexAdapterOptions {
 /** How long one call of the start sequence may take before the session ends. */
 const START_CALL_MS = 60_000;
 
+/** The read that names the workspace, which a slow or failing ChatGPT backend can fail once. */
+const USAGE_READ = 'account/rateLimits/read';
+
+/** How many times the start reads the usage before it gives up. */
+export const USAGE_READ_TRIES = 3;
+
+/** How long the start waits on the clock between two usage reads. */
+export const USAGE_READ_RETRY_MS = 2_000;
+
 /** The most of the child's stderr kept for a message. */
 const STDERR_KEPT_CHARS = 4096;
 
@@ -68,7 +77,10 @@ type HookEntry = z.infer<typeof HooksListResponse>['data'][number]['hooks'][numb
 /** Where session sockets live when the adapter is given no directory: short enough for a socket path. */
 const defaultSocketDir = (): string => join(homedir(), '.10db', 'run');
 
-/** The socket directory is the session's alone: no one else may reach a session's guard. */
+/**
+ * The socket directory is the files root every session's socket shares, private to this user, so no
+ * other user can reach a session's guard; no lane can, since every sandbox denies the root.
+ */
 const SOCKET_DIR_MODE = 0o700;
 
 const NO_PROMPT = 'No prompt was sent.';
@@ -130,6 +142,21 @@ class SessionOver extends Error {
   override readonly name = 'SessionOver';
 }
 
+/** A read of who the account is that got no answer: the message names the read and how it failed. */
+class AccountUnread extends Error {
+  override readonly name = 'AccountUnread';
+}
+
+/** How a failed read failed, in words that hold nothing Codex sent. */
+const howItFailed = (error: CodexRpcError | CallTimeout): string =>
+  error instanceof CallTimeout
+    ? `no answer within ${String(START_CALL_MS / 1_000)} s`
+    : 'an error from Codex';
+
+/** A read that may answer if asked again: it went unanswered, or the server failed it. */
+const mayAnswerAgain = (error: CodexRpcError | CallTimeout): boolean =>
+  error instanceof CallTimeout || error.code !== CLIENT_ERROR_CODE;
+
 const sandboxRefused = (message: string): StartRefused =>
   new StartRefused(SessionEndReason.SandboxRefused, `${message} ${NO_PROMPT}`);
 
@@ -141,8 +168,9 @@ function versionOf(userAgent: string): string | null {
 /**
  * Starts a Codex session behind the adapter's safety checks and emits `started` only once every one
  * has passed. A check that fails or cannot complete before `started` ends it `sandbox_refused`, an
- * account that is not the expected one `account_refused`, and only a refused model or a failed resume
- * `error`; no prompt is sent and the child is closed on every path. Each call runs under a deadline on the injected clock.
+ * account that is not the expected one or a signed-out home `account_refused`, and only a refused
+ * model, a failed resume or an account that can't be read `error`; no prompt is sent and the child is
+ * closed on every path. Each call runs under a deadline on the injected clock.
  */
 export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): SessionHandle {
   const events = createChannel<SessionEvent>();
@@ -214,34 +242,83 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
     }
   };
 
-  /** The account could not be read: only the sign-in command says whether it is signed out. */
-  const refuseUnreadAccount = async (): Promise<never> => {
+  /** Waits `ms` on the clock; a session that ends meanwhile ends the wait with `SessionOver`. */
+  const pause = async (ms: number): Promise<void> => {
+    let timer: { cancel(): void } = { cancel: () => undefined };
+    const waited = new Promise<void>((resolve) => {
+      timer = clock.setTimeout(resolve, ms);
+    });
+    try {
+      await Promise.race([waited, over]);
+    } finally {
+      timer.cancel();
+    }
+  };
+
+  /**
+   * `ask` for the account reads, the usage read asked again a few times: one slow answer or server
+   * error says nothing of the account. A read that still fails is an `AccountUnread`.
+   */
+  const askAccount: CodexCall = async (method, params, schema) => {
+    const tries = method === USAGE_READ ? USAGE_READ_TRIES : 1;
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await ask(method, params, schema);
+      } catch (error) {
+        if (!(error instanceof CodexRpcError || error instanceof CallTimeout)) throw error;
+        if (attempt >= tries || !mayAnswerAgain(error)) {
+          const who = `account "${spec.account.label}"`;
+          throw new AccountUnread(
+            method === USAGE_READ
+              ? `Codex could not read the usage of ${who}, which names its workspace (the usage read, ${USAGE_READ}): ${howItFailed(error)}, on ${attempt === 1 ? 'the one try' : `each of ${String(attempt)} tries`}`
+              : `Codex could not read ${who} (${method}): ${howItFailed(error)}`,
+          );
+        }
+        log.warn({ method, attempt }, 'codex did not answer the usage read; asking again');
+        await pause(USAGE_READ_RETRY_MS);
+      }
+    }
+  };
+
+  /**
+   * The account could not be read. Only a home the sign-in command calls signed out waits for its
+   * sign-in; any other is a start that failed, which the runner recovers from, so a slow or failing
+   * read never pauses the account.
+   */
+  const failUnreadAccount = async (unread: AccountUnread): Promise<never> => {
     const signIn = await signInCheck(childEnv());
     const { why, printed } = noAccountWhy(START_CALL_MS, [stderrTail], spec.account.kind);
-    const refusal = missingAccountRefusal(spec.account, why, printed, signIn);
-    if (refusal === null)
+    const refusal =
+      signIn === 'signed_out' ? missingAccountRefusal(spec.account, why, printed, signIn) : null;
+    if (refusal !== null)
       throw new StartRefused(
-        SessionEndReason.BillingRefused,
-        `Account check failed: ${why}. ${printed}. ${NO_PROMPT}`,
+        SessionEndReason.AccountRefused,
+        `${refusal.message}. ${NO_PROMPT}`,
+        refusal,
       );
-    throw new StartRefused(
-      SessionEndReason.AccountRefused,
-      `${refusal.message}. ${NO_PROMPT}`,
-      refusal,
-    );
+    throw new StartRefused(SessionEndReason.Error, `${unread.message}. ${printed}. ${NO_PROMPT}`);
+  };
+
+  /**
+   * A sign-in whose usage read names no workspace is refused: the identity is the email and the
+   * workspace, so the email alone matches nothing.
+   */
+  const noWorkspaceRefusal = (): StartRefused => {
+    const message = `Codex reported a ChatGPT sign-in with no workspace for account "${spec.account.label}", so it can't be checked against the confirmed one`;
+    return new StartRefused(SessionEndReason.AccountRefused, `${message}. ${NO_PROMPT}`, {
+      problem: AccountProblem.IdentityMismatch,
+      message,
+      seenIdentity: null,
+    });
   };
 
   const verifyAccount = async (): Promise<void> => {
     let seen;
     try {
-      seen = await readSeenAccount(ask, false);
+      seen = await readSeenAccount(askAccount, false);
     } catch (error) {
-      if (
-        error instanceof CodexRpcError ||
-        error instanceof AccountProbeError ||
-        error instanceof CallTimeout
-      )
-        return refuseUnreadAccount();
+      if (error instanceof AccountUnread) return failUnreadAccount(error);
+      if (error instanceof AccountProbeError) throw noWorkspaceRefusal();
       throw error;
     }
     const refusal = checkAccount(spec.account, seen);
@@ -296,13 +373,23 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
     if (!hook.enabled) throw sandboxRefused('Codex has the guard hook disabled.');
     if (hook.trustStatus !== TRUSTED)
       throw sandboxRefused('Codex does not trust the guard hook, even after it was trusted.');
+    // A hook that times out lets its call run, so one waiting on a card must outlast the longest wait.
+    const timeout = hook.timeoutSec;
+    if (timeout === null || timeout === undefined)
+      throw sandboxRefused(
+        "Codex does not report the guard hook's timeout, so a call waiting on a card could run when it ends.",
+      );
+    if (timeout < CODEX_HOOK_TIMEOUT_SECONDS)
+      throw sandboxRefused(
+        `Codex runs the guard hook with a ${String(timeout)} s timeout, under the ${String(CODEX_HOOK_TIMEOUT_SECONDS)} s 10db sets, so a call waiting on a card could run when it ends.`,
+      );
   };
 
-  /** A server error that names the model: the Model map has no usable entry for it. */
+  /** A server error that names the requested model: the Model map has no usable entry for it. */
   const isModelRefusal = (error: unknown): boolean =>
     error instanceof CodexRpcError &&
     error.code !== CLIENT_ERROR_CODE &&
-    /model/i.test(error.message);
+    error.message.includes(spec.model);
 
   const startThread = async (): Promise<z.infer<typeof ThreadResponse>> => {
     const params = {

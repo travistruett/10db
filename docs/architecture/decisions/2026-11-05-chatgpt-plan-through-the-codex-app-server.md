@@ -16,7 +16,9 @@ blocked on OpenAI's terms. The terms no longer block it, and Codex is built as t
   10db never reads, copies or stores a ChatGPT credential.
 - The identity of the account is the email and the workspace together. One email can hold several workspaces, and the
   workspace chosen at sign-in decides which plan pays, so the email alone can't tell them apart. A sign-in to another
-  workspace on the same email fails the identity check and is refused, not billed. The plan's name is never compared.
+  workspace on the same email fails the identity check and is refused, not billed. A sign-in whose usage read names
+  no workspace matches nothing: Confirm can't record it, so the account shows a sign-in card, and a session start
+  refuses it as an identity mismatch, never matching it on the email alone. The plan's name is never compared.
 - `forced_login_method = "chatgpt"` in the home keeps an API key from billing instead, and the launch strips
   `OPENAI_API_KEY`, `CODEX_API_KEY`, `OPENAI_BASE_URL`, `CODEX_ACCESS_TOKEN` and `CODEX_HOME` from a Codex launch only.
 - Out of scope: `openai_api_key` accounts, Sign in with ChatGPT, brainstorm chat on a ChatGPT account (refused with an

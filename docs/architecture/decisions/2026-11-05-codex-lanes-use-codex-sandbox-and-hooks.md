@@ -21,8 +21,10 @@ and the guard is a filter in front of it. 10db relies on Codex's own sandbox and
 - **Start checks.** Before any prompt, a session pins `[projects."<checkout>"] trust_level = "untrusted"` in the home's
   `config.toml`, starts `codex app-server --stdio --strict-config`, warns on an unverified version, confirms the account
   and workspace, reads the config layers (the project layer is absent or disabled), confirms the hook is trusted and
-  enabled, and after `thread/start` confirms the `lane` profile and the requested model. Any failure ends the session
-  with `sandbox_refused` or `account_refused`.
+  enabled and that the timeout Codex reports for it (`timeoutSec` in `hooks/list`) is no shorter than 10db's, since
+  Codex's binary can clamp a hook's timeout and a hook that times out lets its call run, and after `thread/start`
+  confirms the `lane` profile and the requested model. Any failure ends the session with `sandbox_refused` or
+  `account_refused`; an account that can't be read ends it with `error` unless its home is signed out.
 - **The `untrusted` pin must be in the file, and before `thread/start`.** Otherwise `thread/start` writes `trusted` for
   the checkout, and the repository's `.codex/config.toml` replaces the sandbox and starts its own MCP server outside it.
   A `-c` flag does not beat that entry. A pinned `untrusted` entry held across a first session, a second session, a

@@ -11,8 +11,19 @@ import { ManualClock } from '../clock';
 import { silentLogger, type Logger } from '../log';
 import { autoModeRules, type LaneSandboxSpec } from '../sandbox';
 import { codexThreadConfig } from './codex-lane-config';
-import { CodexHomeError, codexHomes, type CodexHome } from './codex-home';
-import { guardSocketPath, startCodexSession, type CodexSessionDeps } from './codex-session';
+import {
+  CODEX_HOOK_TIMEOUT_SECONDS,
+  CodexHomeError,
+  codexHomes,
+  type CodexHome,
+} from './codex-home';
+import {
+  guardSocketPath,
+  startCodexSession,
+  USAGE_READ_RETRY_MS,
+  USAGE_READ_TRIES,
+  type CodexSessionDeps,
+} from './codex-session';
 import { fakeAppServer, type FakeAppServer } from './codex-test-support';
 import type { SignInState } from './sign-in-check';
 import type { SessionEvent, SessionHandle, SessionSpec } from './types';
@@ -43,6 +54,8 @@ interface HookShape {
   trustStatus: string;
   enabled: boolean;
   eventName?: string;
+  /** What Codex reports it runs the hook under; 10db's own by default, `null` for none reported. */
+  timeoutSec?: number | null;
 }
 
 /** A hook another source lists, as a `hooks.json` in the home does; 10db must never trust it. */
@@ -58,6 +71,9 @@ function entry(hook: HookShape, source: string) {
     trustStatus: hook.trustStatus,
     sourcePath: source,
     source: 'user',
+    ...(hook.timeoutSec === null
+      ? {}
+      : { timeoutSec: hook.timeoutSec ?? CODEX_HOOK_TIMEOUT_SECONDS }),
   };
 }
 
@@ -204,11 +220,6 @@ describe('the start checks', () => {
       'account_refused',
     ],
     [
-      'the usage read fails',
-      { 'account/rateLimits/read': { error: { code: -32000, message: 'no usage' } } },
-      'account_refused',
-    ],
-    [
       'the usage read names no workspace',
       { 'account/rateLimits/read': { rateLimits: { limitId: 'codex' } } },
       'account_refused',
@@ -272,6 +283,32 @@ describe('the start checks', () => {
       'sandbox_refused',
     ],
     [
+      // A hook that times out lets the call run, so a card could not hold it.
+      "the hook's timeout is under 10db's",
+      {
+        'hooks/list': () =>
+          hooksOf({
+            trustStatus: 'trusted',
+            enabled: true,
+            timeoutSec: CODEX_HOOK_TIMEOUT_SECONDS - 1,
+          }),
+      },
+      'sandbox_refused',
+    ],
+    [
+      "the hook's timeout is not reported",
+      {
+        'hooks/list': () => hooksOf({ trustStatus: 'trusted', enabled: true, timeoutSec: null }),
+      },
+      'sandbox_refused',
+    ],
+    [
+      // An error that says "model" but not the model asked for is no Model map problem.
+      'the thread fails naming no requested model',
+      { 'thread/start': { error: { code: -32000, message: 'model provider is unavailable' } } },
+      'sandbox_refused',
+    ],
+    [
       'the thread runs another profile',
       { 'thread/start': threadOf('gpt-5.6-sol', ':danger-full-access') },
       'sandbox_refused',
@@ -315,21 +352,67 @@ describe('the start checks', () => {
     });
   });
 
-  it.each<[SignInState, AccountProblem]>([
-    ['signed_in', AccountProblem.StartTimeout],
-    ['unknown', AccountProblem.StartTimeout],
-    ['signed_out', AccountProblem.SignedOut],
-  ])('reads %s from codex login status when the account read fails', async (state, problem) => {
-    const { handle } = startWith(
-      { 'account/read': { error: { code: -32000, message: 'boom' } } },
+  // Only a signed-out home waits for its sign-in; any other unread account is a start that failed,
+  // which the runner tries again, so it pauses nothing.
+  it.each<[SignInState, string, AccountProblem | null]>([
+    ['signed_in', 'error', null],
+    ['unknown', 'error', null],
+    ['signed_out', 'account_refused', AccountProblem.SignedOut],
+  ])(
+    'reads %s from codex login status when the account read fails',
+    async (state, reason, problem) => {
+      const { handle } = startWith(
+        { 'account/read': { error: { code: -32000, message: 'boom' } } },
+        {},
+        { signInCheck: () => Promise.resolve(state) },
+      );
+      const ended = (await collect(handle)).at(-1);
+      expect(ended).toMatchObject({ type: 'ended', reason });
+      if (problem === null) {
+        expect(ended).not.toHaveProperty('refusal');
+        expect(JSON.stringify(ended)).toContain('account/read');
+      } else expect(ended).toMatchObject({ refusal: { problem } });
+    },
+  );
+
+  it('refuses a sign-in whose usage read names no workspace, asking once and matching nothing', async () => {
+    const { handle, server } = startWith(
+      { 'account/rateLimits/read': { rateLimits: { limitId: 'codex' } } },
       {},
-      { signInCheck: () => Promise.resolve(state) },
+      { signInCheck: () => Promise.resolve('signed_in') },
     );
-    expect((await collect(handle)).at(-1)).toMatchObject({
+    const ended = (await collect(handle)).at(-1);
+    expect(ended).toMatchObject({
       type: 'ended',
       reason: 'account_refused',
-      refusal: { problem },
+      refusal: { problem: AccountProblem.IdentityMismatch, seenIdentity: null },
     });
+    expect(JSON.stringify(ended)).toContain('no workspace');
+    expect(JSON.stringify(ended)).not.toContain('me@example.com');
+    expect(methods(server).filter((m) => m === 'account/rateLimits/read')).toHaveLength(1);
+  });
+
+  it("names the hook's timeout when Codex runs the hook under a shorter one", async () => {
+    const { handle } = startWith({
+      'hooks/list': () => hooksOf({ trustStatus: 'trusted', enabled: true, timeoutSec: 600 }),
+    });
+    const ended = (await collect(handle)).at(-1);
+    expect(ended).toMatchObject({ type: 'ended', reason: 'sandbox_refused' });
+    expect(JSON.stringify(ended)).toContain('600 s');
+    expect(JSON.stringify(ended)).toContain(`${String(CODEX_HOOK_TIMEOUT_SECONDS)} s`);
+  });
+
+  it('starts when Codex runs the hook under a longer timeout than 10db sets', async () => {
+    const { handle } = startWith({
+      'hooks/list': () =>
+        hooksOf({
+          trustStatus: 'trusted',
+          enabled: true,
+          timeoutSec: CODEX_HOOK_TIMEOUT_SECONDS + 1,
+        }),
+    });
+    expect(await firstEvent(handle)).toMatchObject({ type: 'started' });
+    await handle.stop();
   });
 
   it('says which check failed when it refuses the sandbox, with nothing the child printed', async () => {
@@ -539,6 +622,133 @@ describe('the process', () => {
   });
 });
 
+describe('the usage read', () => {
+  const USAGE = FINE['account/rateLimits/read'];
+  const BAD_GATEWAY = { error: { code: -32000, message: 'unexpected status 502 Bad Gateway' } };
+  /** Never answered, so the call's deadline ends it. */
+  const UNANSWERED = Symbol('unanswered');
+
+  /** A usage read that answers each call with the next of `answers`, the last one ever after. */
+  function usageReads(answers: readonly unknown[]): (params: unknown) => unknown {
+    let call = 0;
+    return () => {
+      const answer = answers[Math.min(call, answers.length - 1)];
+      call += 1;
+      return answer === UNANSWERED ? new Promise(() => undefined) : answer;
+    };
+  }
+
+  const usageCalls = (server: FakeAppServer): number =>
+    methods(server).filter((m) => m === 'account/rateLimits/read').length;
+
+  /** A logger that counts the session's waits before it reads the usage again. */
+  function recording(): { readonly logger: Logger; readonly waits: () => number } {
+    const lines: string[] = [];
+    const record = (...args: unknown[]): void => {
+      lines.push(JSON.stringify(args));
+    };
+    const logger: Logger = {
+      debug: record,
+      info: record,
+      warn: record,
+      error: record,
+      child: () => logger,
+    };
+    return { logger, waits: () => lines.filter((line) => line.includes('asking again')).length };
+  }
+
+  /** Starts a session whose usage reads answer `answers`, on a manual clock. */
+  function startReading(answers: readonly unknown[], signIn: SignInState = 'signed_in') {
+    const clock = new ManualClock();
+    const { logger, waits } = recording();
+    const started = startWith(
+      { 'account/rateLimits/read': usageReads(answers) },
+      {},
+      { clock, logger, signInCheck: () => Promise.resolve(signIn) },
+    );
+    /** Lets read `n` fail (its deadline passing, when it is never answered) and the wait after it begin. */
+    const failRead = async (n: number, deadline: number): Promise<void> => {
+      await vi.waitFor(() => {
+        expect(usageCalls(started.server)).toBe(n);
+      });
+      if (deadline > 0) clock.advance(deadline);
+      await vi.waitFor(() => {
+        expect(waits()).toBe(n);
+      });
+    };
+    return { ...started, clock, failRead };
+  }
+
+  it.each([
+    ['a server error', [BAD_GATEWAY, USAGE], 0],
+    ['no answer', [UNANSWERED, USAGE], 60_000],
+  ])('asks again on the clock after %s, and starts', async (_name, answers, deadline) => {
+    const { handle, server, clock, failRead } = startReading(answers);
+    await failRead(1, deadline);
+    // Not before the wait is over.
+    clock.advance(USAGE_READ_RETRY_MS - 1);
+    expect(usageCalls(server)).toBe(1);
+    clock.advance(1);
+    expect(await firstEvent(handle)).toMatchObject({ type: 'started' });
+    expect(usageCalls(server)).toBe(2);
+    await vi.waitFor(() => {
+      expect(methods(server)).toContain('turn/start');
+    });
+    await handle.stop();
+  });
+
+  it.each([
+    ['a server error', BAD_GATEWAY, 0],
+    ['no answer', UNANSWERED, 60_000],
+  ])(
+    'ends the start with error naming the usage read when every try meets %s, and pauses nothing',
+    async (_name, answer, deadline) => {
+      const { handle, server, clock, failRead } = startReading([answer]);
+      for (let n = 1; n < USAGE_READ_TRIES; n += 1) {
+        await failRead(n, deadline);
+        clock.advance(USAGE_READ_RETRY_MS);
+      }
+      await vi.waitFor(() => {
+        expect(usageCalls(server)).toBe(USAGE_READ_TRIES);
+      });
+      if (deadline > 0) clock.advance(deadline);
+      const events = await collect(handle);
+      const ended = events.at(-1);
+      expect(ended).toMatchObject({ type: 'ended', reason: 'error' });
+      expect(ended).not.toHaveProperty('refusal');
+      expect(JSON.stringify(ended)).toContain('usage read');
+      expect(JSON.stringify(ended)).toContain(`${String(USAGE_READ_TRIES)} tries`);
+      expect(JSON.stringify(ended)).not.toContain('502');
+      expect(events.filter((e) => e.type === 'started')).toEqual([]);
+      expect(usageCalls(server)).toBe(USAGE_READ_TRIES);
+      expect(methods(server)).not.toContain('turn/start');
+      expect(server.killed()).toBe(true);
+    },
+  );
+
+  it('waits for its sign-in when codex login status says the home is signed out', async () => {
+    const { handle, clock, failRead } = startReading([BAD_GATEWAY], 'signed_out');
+    for (let n = 1; n < USAGE_READ_TRIES; n += 1) {
+      await failRead(n, 0);
+      clock.advance(USAGE_READ_RETRY_MS);
+    }
+    expect((await collect(handle)).at(-1)).toMatchObject({
+      type: 'ended',
+      reason: 'account_refused',
+      refusal: { problem: AccountProblem.SignedOut },
+    });
+  });
+
+  it('does not ask again once the session is stopped during the wait', async () => {
+    const { handle, server, clock, failRead } = startReading([BAD_GATEWAY]);
+    await failRead(1, 0);
+    await handle.stop();
+    clock.advance(USAGE_READ_RETRY_MS * USAGE_READ_TRIES);
+    expect((await collect(handle)).at(-1)).toMatchObject({ type: 'ended', reason: 'stopped' });
+    expect(usageCalls(server)).toBe(1);
+  });
+});
+
 describe('the deadline', () => {
   it('ends the session, closing the child, when a call is not answered in 60 s', async () => {
     const clock = new ManualClock();
@@ -560,7 +770,7 @@ describe('the deadline', () => {
     expect(methods(server)).not.toContain('turn/start');
   });
 
-  it('turns an unanswered account read into the sign-in check refusal', async () => {
+  it('ends an unanswered account read with error when codex login status says it is signed in', async () => {
     const clock = new ManualClock();
     const { handle, server } = startWith(
       { 'account/read': () => new Promise(() => undefined) },
@@ -571,11 +781,10 @@ describe('the deadline', () => {
       expect(methods(server)).toContain('account/read');
     });
     clock.advance(60_000);
-    expect((await collect(handle)).at(-1)).toMatchObject({
-      type: 'ended',
-      reason: 'account_refused',
-      refusal: { problem: AccountProblem.StartTimeout },
-    });
+    const ended = (await collect(handle)).at(-1);
+    expect(ended).toMatchObject({ type: 'ended', reason: 'error' });
+    expect(ended).not.toHaveProperty('refusal');
+    expect(JSON.stringify(ended)).toContain('60 s');
     expect(server.killed()).toBe(true);
   });
 });
@@ -681,7 +890,7 @@ describe('the thread and the first turn', () => {
 
   it('names the Model map when the first turn is refused for the model', async () => {
     const { handle, server } = startWith({
-      'turn/start': { error: { code: -32600, message: 'unknown model' } },
+      'turn/start': { error: { code: -32600, message: 'unknown model gpt-5.6-sol' } },
     });
     const events = await collect(handle);
     expect(events.at(-1)).toMatchObject({
@@ -691,6 +900,15 @@ describe('the thread and the first turn', () => {
     });
     expect(events.at(-1)).not.toHaveProperty('refusal');
     expect(server.killed()).toBe(true);
+  });
+
+  it('does not name the Model map when the first turn fails naming no requested model', async () => {
+    const { handle } = startWith({
+      'turn/start': { error: { code: -32600, message: 'model context window exceeded' } },
+    });
+    const ended = (await collect(handle)).at(-1);
+    expect(ended).toMatchObject({ type: 'ended', reason: 'error' });
+    expect(JSON.stringify(ended)).not.toContain('Model map');
   });
 
   it('fails the session when the thread reports another model', async () => {
