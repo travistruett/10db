@@ -253,7 +253,11 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
           envFile,
         ]),
       );
-      expect(allowRead).toEqual(expect.arrayContaining([...SYSTEM_READS, checkout, run.tmpDir]));
+      // A built-in read that holds a sandbox root is left out (on Linux the roots lie under `/tmp`).
+      const builtIn = SYSTEM_READS.filter(
+        (path) => ![tmpRoot, lanesRoot, filesRoot].some((held) => isEqualOrUnder(held, path)),
+      );
+      expect(allowRead).toEqual(expect.arrayContaining([...builtIn, checkout, run.tmpDir]));
       // This home lies in the test's temp dir, which on Linux is under the system read `/tmp` (macOS
       // resolves it to `/private/tmp`). A real home never is, so only the rest must keep it closed.
       const systemCover: readonly string[] = SYSTEM_READS.filter((path) =>

@@ -11,6 +11,7 @@ import {
   type LaneProfileInput,
 } from './index';
 import { childListingGrant, listingGrant } from './profile';
+import { isEqualOrUnder } from './protected-reads';
 
 let root: string;
 let home: string;
@@ -168,9 +169,19 @@ describe('buildLaneProfile', () => {
     },
   );
 
-  it('keeps every built-in read when no sandbox root lies under one', () => {
-    const { allowRead } = buildLaneProfile(withRoots()).filesystem;
-    expect(allowRead).toEqual(expect.arrayContaining([...SYSTEM_READS]));
+  it.each<[string, () => LaneProfileInput]>([
+    // On Linux the test's temp dir lies under `/tmp`, a built-in read, so this row's roots do too.
+    ['roots in the test temp dir', withRoots],
+    // Roots no built-in read holds, on every platform.
+    ['roots no built-in read holds', () => input({ sandboxRoots: ['/10db-nowhere/shared'] })],
+  ])('keeps every built-in read that holds no sandbox root, with %s', (_name, make) => {
+    const given = make();
+    const { allowRead } = buildLaneProfile(given).filesystem;
+    const kept = SYSTEM_READS.filter(
+      (entry) => !given.sandboxRoots.some((sandboxRoot) => isEqualOrUnder(sandboxRoot, entry)),
+    );
+    expect(kept.length).toBeGreaterThan(0);
+    expect(allowRead).toEqual(expect.arrayContaining(kept));
   });
 
   it.each<
