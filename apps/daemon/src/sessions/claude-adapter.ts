@@ -28,13 +28,13 @@ import {
 } from './account-check';
 import { createChannel } from './channel';
 import {
-  contextEvent,
   mapSdkMessage,
   toHookOutput,
   toPermissionResult,
   toSdkMcpServer,
   userMessage,
 } from './claude-mapping';
+import { contextEvent } from './context-event';
 import { startShapeSession } from './claude-shape';
 import { TENDB_MCP_SERVER } from './project-mcp';
 import { projectSettingsBillingProblem } from './project-settings';

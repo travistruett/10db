@@ -721,6 +721,397 @@ describe('a running session', () => {
   });
 });
 
+const THREAD = 'thr-1';
+const turnStarted = (id: string) => ({
+  threadId: THREAD,
+  turn: { id, status: 'inProgress' },
+});
+const turnFailed = (codexErrorInfo: unknown, message: string, id = 'turn-1') => ({
+  threadId: THREAD,
+  turn: { id, status: 'failed', error: { message, codexErrorInfo } },
+});
+const weekWindow = {
+  rateLimits: {
+    limitId: 'codex',
+    primary: { usedPercent: 96.5, windowDurationMins: 10_080, resetsAt: 1_800_000_000 },
+    secondary: null,
+  },
+};
+
+interface Running {
+  readonly handle: SessionHandle;
+  readonly server: FakeAppServer;
+  readonly seen: SessionEvent[];
+  readonly clock: ManualClock;
+}
+
+/** A session whose events are collected as they come, with its first turn begun. */
+async function inTurn(
+  script: Record<string, unknown> = {},
+  depsOver: Partial<CodexSessionDeps> = {},
+): Promise<Running> {
+  const clock = new ManualClock();
+  const { handle, server } = startWith(
+    { 'turn/steer': {}, 'turn/interrupt': {}, ...script },
+    {},
+    { clock, ...depsOver },
+  );
+  const seen: SessionEvent[] = [];
+  void (async () => {
+    for await (const event of handle.events) seen.push(event);
+  })();
+  await vi.waitFor(() => {
+    expect(methods(server)).toContain('turn/start');
+  });
+  server.notify('turn/started', turnStarted('turn-1'));
+  await settled({ handle, server, seen, clock });
+  return { handle, server, seen, clock };
+}
+
+/** Waits until every notification written so far has been handled, which a later one's event proves. */
+async function settled(running: Running): Promise<void> {
+  const before = running.seen.length;
+  running.server.notify('thread/compacted', {});
+  await vi.waitFor(() => {
+    expect(running.seen.length).toBeGreaterThan(before);
+  });
+}
+
+const types = (seen: readonly SessionEvent[]): string[] => seen.map((e) => e.type);
+const endedOf = (seen: readonly SessionEvent[]): SessionEvent[] =>
+  seen.filter((e) => e.type === 'ended');
+
+describe('the turns', () => {
+  it('sends text as turn/steer during a turn and turn/start between turns', async () => {
+    const running = await inTurn();
+    const { handle, server } = running;
+    handle.send('more');
+    await vi.waitFor(() => {
+      expect(methods(server)).toContain('turn/steer');
+    });
+    expect(sentParams(server, 'turn/steer')).toEqual({
+      threadId: THREAD,
+      expectedTurnId: 'turn-1',
+      input: [{ type: 'text', text: 'more' }],
+    });
+
+    server.notify('turn/completed', {
+      threadId: THREAD,
+      turn: { id: 'turn-1', status: 'completed' },
+    });
+    await settled(running);
+    handle.send('next');
+    await vi.waitFor(() => {
+      expect(methods(server).filter((m) => m === 'turn/start')).toHaveLength(2);
+    });
+    const second = server.sent().filter((r) => r.method === 'turn/start')[1];
+    expect(second?.params).toMatchObject({
+      threadId: THREAD,
+      input: [{ type: 'text', text: 'next' }],
+      approvalPolicy: 'never',
+      model: 'gpt-5.6-sol',
+      effort: 'low',
+    });
+  });
+
+  it('starts a turn for a message whose steer lost the race with the end of its turn', async () => {
+    const running = await inTurn({
+      'turn/steer': { error: { code: -32600, message: 'expected turn turn-1 is not active' } },
+    });
+    running.handle.send('late');
+    await vi.waitFor(() => {
+      expect(methods(running.server).filter((m) => m === 'turn/start')).toHaveLength(2);
+    });
+    expect(endedOf(running.seen)).toEqual([]);
+  });
+
+  it('delivers messages in the order they were sent', async () => {
+    const running = await inTurn();
+    running.handle.send('one');
+    running.handle.send('two');
+    await vi.waitFor(() => {
+      expect(methods(running.server).filter((m) => m === 'turn/steer')).toHaveLength(2);
+    });
+    const texts = running.server
+      .sent()
+      .filter((r) => r.method === 'turn/steer')
+      .map((r) => JSON.stringify(r.params));
+    expect(texts[0]).toContain('one');
+    expect(texts[1]).toContain('two');
+  });
+
+  it('maps what Codex reports during a turn onto session events', async () => {
+    const running = await inTurn();
+    running.server.notify('item/completed', {
+      threadId: THREAD,
+      turnId: 'turn-1',
+      item: { type: 'agentMessage', text: 'all done' },
+    });
+    running.server.notify('turn/completed', {
+      threadId: THREAD,
+      turn: { id: 'turn-1', status: 'completed' },
+    });
+    await vi.waitFor(() => {
+      expect(types(running.seen)).toContain('turn_complete');
+    });
+    expect(running.seen.at(-1)).toMatchObject({
+      type: 'turn_complete',
+      text: 'all done',
+      costUsd: 0,
+    });
+  });
+
+  it('ends with error, quoting no email, when a message cannot be delivered', async () => {
+    const running = await inTurn({
+      'turn/steer': { error: { code: -32000, message: 'me@example.com is over' } },
+      'turn/start': (() => {
+        let calls = 0;
+        return () => {
+          calls += 1;
+          return calls === 1
+            ? { turn: { id: 'turn-1', status: 'inProgress' } }
+            : { error: { code: -32000, message: 'no' } };
+        };
+      })(),
+    });
+    running.handle.send('x');
+    await vi.waitFor(() => {
+      expect(endedOf(running.seen)).toHaveLength(1);
+    });
+    expect(endedOf(running.seen)[0]).toMatchObject({ reason: 'error' });
+    expect(JSON.stringify(running.seen)).not.toContain('me@example.com');
+  });
+});
+
+describe('limits and failed turns', () => {
+  it('turns usageLimitExceeded into rejected, then ended rate_limited', async () => {
+    const running = await inTurn();
+    running.server.notify('account/rateLimits/updated', weekWindow);
+    running.server.notify('turn/completed', turnFailed('usageLimitExceeded', 'You hit your limit'));
+    await vi.waitFor(() => {
+      expect(endedOf(running.seen)).toHaveLength(1);
+    });
+    expect(running.seen.slice(-3)).toEqual([
+      expect.objectContaining({ type: 'rate_limit', status: 'allowed', limitType: 'seven_day' }),
+      {
+        type: 'rate_limit',
+        status: 'rejected',
+        resetsAt: new Date(1_800_000_000_000),
+        utilization: 0.965,
+        limitType: 'seven_day',
+      },
+      expect.objectContaining({ type: 'ended', reason: 'rate_limited' }),
+    ]);
+    expect(running.server.killed()).toBe(true);
+  });
+
+  it('reads account/rateLimits/read when no window has been seen', async () => {
+    const running = await inTurn({
+      'account/rateLimits/read': { ...weekWindow, accountId: 'ws-1' },
+    });
+    running.server.notify('turn/completed', turnFailed('usageLimitExceeded', 'You hit your limit'));
+    await vi.waitFor(() => {
+      expect(endedOf(running.seen)).toHaveLength(1);
+    });
+    expect(running.seen.at(-2)).toMatchObject({
+      type: 'rate_limit',
+      status: 'rejected',
+      resetsAt: new Date(1_800_000_000_000),
+      limitType: 'seven_day',
+    });
+    expect(methods(running.server).filter((m) => m === 'account/rateLimits/read')).toHaveLength(2);
+  });
+
+  it('reads codexErrorInfo given as an object, and ends rate_limited with no reset when no window has one', async () => {
+    const running = await inTurn();
+    running.server.notify('turn/completed', turnFailed({ usageLimitExceeded: {} }, 'limit'));
+    await vi.waitFor(() => {
+      expect(endedOf(running.seen)).toHaveLength(1);
+    });
+    expect(running.seen.at(-1)).toMatchObject({ reason: 'rate_limited' });
+  });
+
+  it('ends account_refused, signed out, on unauthorized, naming no email', async () => {
+    const running = await inTurn();
+    running.server.notify('turn/completed', turnFailed('unauthorized', 'token for me@example.com'));
+    await vi.waitFor(() => {
+      expect(endedOf(running.seen)).toHaveLength(1);
+    });
+    expect(running.seen.at(-1)).toMatchObject({
+      type: 'ended',
+      reason: 'account_refused',
+      refusal: { problem: AccountProblem.SignedOut },
+    });
+    expect(JSON.stringify(running.seen)).not.toContain('me@example.com');
+    expect(running.server.killed()).toBe(true);
+  });
+
+  it('ends turn_complete with result error on another failed turn, and goes on', async () => {
+    const running = await inTurn();
+    running.server.notify('turn/completed', turnFailed({ httpConnectionFailed: {} }, 'offline'));
+    await vi.waitFor(() => {
+      expect(types(running.seen)).toContain('turn_complete');
+    });
+    expect(running.seen.at(-1)).toMatchObject({ type: 'turn_complete', result: 'error' });
+    expect(endedOf(running.seen)).toEqual([]);
+    expect(running.server.killed()).toBe(false);
+  });
+
+  it('ends with the Model map text when a turn is refused for the model it was given', async () => {
+    const running = await inTurn();
+    running.server.notify(
+      'turn/completed',
+      turnFailed('badRequest', 'The model gpt-5.6-sol does not exist'),
+    );
+    await vi.waitFor(() => {
+      expect(endedOf(running.seen)).toHaveLength(1);
+    });
+    expect(running.seen.at(-1)).toEqual({
+      type: 'ended',
+      reason: 'error',
+      message: 'Codex refused the model "gpt-5.6-sol". Set this account\'s Model map in Settings.',
+    });
+  });
+
+  it.each([
+    [
+      'a bad request that does not name the model',
+      'badRequest',
+      'a model of tidiness, no. Bad input',
+    ],
+    ['another error that names the model', 'internalServerError', 'gpt-5.6-sol fell over'],
+  ])('keeps the session going on %s', async (_name, info, message) => {
+    const running = await inTurn();
+    running.server.notify('turn/completed', turnFailed(info, message));
+    await vi.waitFor(() => {
+      expect(types(running.seen)).toContain('turn_complete');
+    });
+    expect(running.seen.at(-1)).toMatchObject({ type: 'turn_complete', result: 'error' });
+    expect(endedOf(running.seen)).toEqual([]);
+  });
+
+  it('logs only the method of a notification with a bad shape, and goes on', async () => {
+    const lines: string[] = [];
+    const record = (...args: unknown[]): void => {
+      lines.push(JSON.stringify(args));
+    };
+    const logger: Logger = {
+      debug: record,
+      info: record,
+      warn: record,
+      error: record,
+      child: () => logger,
+    };
+    const running = await inTurn({}, { logger });
+    running.server.notify('turn/completed', { threadId: THREAD, turn: 'secret@example.com' });
+    await settled(running);
+    expect(lines.join('\n')).toContain('turn/completed');
+    expect(lines.join('\n')).not.toContain('secret@example.com');
+    expect(endedOf(running.seen)).toEqual([]);
+  });
+});
+
+describe('the end of a session', () => {
+  it('ends with error when the process exits unasked, with the end of its stderr and no log line of it', async () => {
+    const lines: string[] = [];
+    const record = (...args: unknown[]): void => {
+      lines.push(JSON.stringify(args));
+    };
+    const logger: Logger = {
+      debug: record,
+      info: record,
+      warn: record,
+      error: record,
+      child: () => logger,
+    };
+    const running = await inTurn({}, { logger });
+    running.server.writeStderr('the disk is gone');
+    await settled(running);
+    running.server.exit(1);
+    await vi.waitFor(() => {
+      expect(endedOf(running.seen)).toHaveLength(1);
+    });
+    const ended = running.seen.at(-1);
+    expect(ended).toMatchObject({ type: 'ended', reason: 'error' });
+    expect(JSON.stringify(ended)).toContain('the disk is gone');
+    expect(lines.join('\n')).not.toContain('the disk is gone');
+  });
+
+  it('stop interrupts the turn, ends the process and emits one ended', async () => {
+    const running = await inTurn();
+    await running.handle.stop();
+    expect(sentParams(running.server, 'turn/interrupt')).toEqual({
+      threadId: THREAD,
+      turnId: 'turn-1',
+    });
+    expect(running.server.killed()).toBe(true);
+    await vi.waitFor(() => {
+      expect(endedOf(running.seen)).toHaveLength(1);
+    });
+    expect(endedOf(running.seen)).toEqual([{ type: 'ended', reason: 'stopped', message: null }]);
+  });
+
+  it('stop interrupts nothing between turns', async () => {
+    const running = await inTurn();
+    running.server.notify('turn/completed', {
+      threadId: THREAD,
+      turn: { id: 'turn-1', status: 'completed' },
+    });
+    await settled(running);
+    await running.handle.stop();
+    expect(methods(running.server)).not.toContain('turn/interrupt');
+    expect(running.server.killed()).toBe(true);
+  });
+
+  it('stop ends the process after the grace when the interrupt goes unanswered', async () => {
+    const running = await inTurn(
+      { 'turn/interrupt': () => new Promise(() => undefined) },
+      { stopGraceMs: 2_000 },
+    );
+    let stopped = false;
+    const stopping = running.handle.stop().then(() => {
+      stopped = true;
+    });
+    await vi.waitFor(() => {
+      expect(methods(running.server)).toContain('turn/interrupt');
+    });
+    expect(running.server.killed()).toBe(false);
+    running.clock.advance(1_999);
+    await Promise.resolve();
+    expect(stopped).toBe(false);
+    running.clock.advance(1);
+    await stopping;
+    expect(running.server.killed()).toBe(true);
+    await vi.waitFor(() => {
+      expect(endedOf(running.seen)).toHaveLength(1);
+    });
+  });
+
+  it('emits exactly one ended when the process exits during stop', async () => {
+    const running = await inTurn({ 'turn/interrupt': () => new Promise(() => undefined) });
+    const stopping = running.handle.stop();
+    await vi.waitFor(() => {
+      expect(methods(running.server)).toContain('turn/interrupt');
+    });
+    running.server.exit(0);
+    await stopping;
+    await vi.waitFor(() => {
+      expect(endedOf(running.seen)).toHaveLength(1);
+    });
+    expect(endedOf(running.seen)).toEqual([{ type: 'ended', reason: 'stopped', message: null }]);
+  });
+
+  it('does not say no prompt was sent once the session has started', async () => {
+    const { handle } = startWith({
+      'turn/start': { error: { code: -32000, message: 'the turn could not begin' } },
+    });
+    const events = await collect(handle);
+    expect(events.map((e) => e.type)).toEqual(['started', 'ended']);
+    expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'error' });
+    expect(JSON.stringify(events.at(-1))).not.toContain('No prompt was sent');
+  });
+});
+
 describe('codexThreadConfig', () => {
   it('declares the 10db server with its bearer variable, approval mode and tool timeout', () => {
     const config = codexThreadConfig(specOf());

@@ -141,3 +141,5 @@ export const ItemCompleted = z.looseObject({
   turnId: z.string(),
   item: z.looseObject({ type: z.string(), id: z.string().optional() }),
 });
+
+export const TurnStarted = z.looseObject({ threadId: z.string(), turn: Turn });

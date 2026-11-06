@@ -16,13 +16,8 @@ import {
 } from './account-check';
 import { createChannel } from './channel';
 import type { QueryFn } from './claude-adapter';
-import {
-  contextEvent,
-  mapSdkMessage,
-  toHookOutput,
-  toShapeHookOutput,
-  userMessage,
-} from './claude-mapping';
+import { mapSdkMessage, toHookOutput, toShapeHookOutput, userMessage } from './claude-mapping';
+import { contextEvent } from './context-event';
 import { TENDB_MCP_SERVER } from './project-mcp';
 import { settleWithin } from './settle-within';
 import {

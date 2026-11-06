@@ -1,8 +1,8 @@
 import { homedir } from 'node:os';
 import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
-import { MODEL_ALIAS_PATTERN, type AccountRefusal } from '@10db/contracts';
-import type { z } from 'zod';
+import { AccountProblem, MODEL_ALIAS_PATTERN, type AccountRefusal } from '@10db/contracts';
+import { z } from 'zod';
 import { systemClock, type Clock } from '../clock';
 import { CODEX_VERIFIED_ON } from '../environment';
 import { checkAccount, missingAccountRefusal, modelMatches, noAccountWhy } from './account-check';
@@ -12,10 +12,18 @@ import type { CodexAdapterOptions } from './codex-adapter';
 import { GUARD_HOOK_EVENT, type CodexHome } from './codex-home';
 import { codexThreadConfig, LANE_PROFILE } from './codex-lane-config';
 import {
+  createTurnState,
+  hasKnownShape,
+  mapCodexNotification,
+  rateLimitEvents,
+} from './codex-mapping';
+import {
   ConfigReadResponse,
   HooksListResponse,
   InitializeResponse,
+  RateLimitsReadResponse,
   ThreadResponse,
+  TurnCompleted,
   TurnStartResponse,
 } from './codex-protocol';
 import {
@@ -54,6 +62,33 @@ type HookEntry = z.infer<typeof HooksListResponse>['data'][number]['hooks'][numb
 const defaultSocketDir = (): string => join(homedir(), '.10db', 'run');
 
 const NO_PROMPT = 'No prompt was sent.';
+
+/** How long `stop` waits for Codex to acknowledge `turn/interrupt` before it ends the process. */
+const STOP_GRACE_MS = 5_000;
+
+/** The most of the child's stderr an `ended` message carries when the process exits unasked. */
+const EXIT_STDERR_CHARS = 500;
+
+/** A reply 10db reads nothing from. */
+const Acknowledged = z.looseObject({});
+
+/** How a failed turn ends the session, when it does: the kinds `turn/completed` names. */
+const TurnEnd = {
+  UsageLimit: 'usage_limit',
+  SignedOut: 'signed_out',
+  ModelRefused: 'model_refused',
+} as const;
+type TurnEnd = (typeof TurnEnd)[keyof typeof TurnEnd];
+
+/** `codexErrorInfo` is a bare name (`"unauthorized"`) or an object keyed by it (`{ "httpConnectionFailed": {} }`). */
+function errorKind(info: unknown): string | null {
+  if (typeof info === 'string') return info;
+  if (typeof info === 'object' && info !== null) return Object.keys(info)[0] ?? null;
+  return null;
+}
+
+/** The text of a message a session that has started sends; nothing was prompted before then. */
+const unlessStarted = (started: boolean): string => (started ? '' : ` ${NO_PROMPT}`);
 
 const modelRefusal = (model: string): string =>
   `Codex refused the model "${model}". Set this account's Model map in Settings.`;
@@ -108,6 +143,16 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
   let rpc: CodexRpc | null = null;
   let done = false;
   let started = false;
+  /** `stop` was called: the process is expected to end, and what it says no longer matters. */
+  let stopRequested = false;
+  /** The session is ending (a stop, or a failed turn that ends it), so notifications are no longer read. */
+  let closing = false;
+  let threadId: string | null = null;
+  /** Turns that have completed, so a `turn/start` reply is not taken for a turn that already ended. */
+  let turnsCompleted = 0;
+  const state = createTurnState();
+  const graceMs = deps.stopGraceMs ?? STOP_GRACE_MS;
+  let sends: Promise<void> = Promise.resolve();
   let stderrTail = '';
   /** What the process runs with beyond the spec's env; set once the home is known. */
   let homeEnv: Record<string, string> = {};
@@ -280,6 +325,162 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
     return thread;
   };
 
+  /** The end of the child's stderr, for the message of a session that ended because the child did. */
+  const stderrNote = (): string => {
+    const tail = stderrTail.replace(/\s+/g, ' ').trim().slice(-EXIT_STDERR_CHARS);
+    return tail === '' ? '' : ` Codex printed: "${tail}"`;
+  };
+
+  /** Begins a turn with `text`. The reply names the turn if its `turn/started` has not been read yet. */
+  const startTurn = async (thread: string, text: string): Promise<void> => {
+    const before = turnsCompleted;
+    const reply = await ask(
+      'turn/start',
+      {
+        threadId: thread,
+        input: [{ type: 'text', text, text_elements: [] }],
+        approvalPolicy: 'never',
+        model: spec.model,
+        effort: spec.effort,
+      },
+      TurnStartResponse,
+    );
+    if (state.turnId === null && turnsCompleted === before && reply.turn.status === 'inProgress')
+      state.turnId = reply.turn.id;
+  };
+
+  /** The limit a hard stop reports: the last window seen, else what Codex reports now. */
+  const currentLimit = async (): Promise<typeof state.lastLimit> => {
+    if (state.lastLimit !== null) return state.lastLimit;
+    try {
+      const read = await ask('account/rateLimits/read', undefined, RateLimitsReadResponse);
+      return rateLimitEvents(read.rateLimits).at(-1) ?? null;
+    } catch {
+      return null;
+    }
+  };
+
+  /** What a failed turn ends the session on, when it names one. */
+  const endOfTurn = (params: unknown): TurnEnd | null => {
+    const parsed = TurnCompleted.safeParse(params);
+    if (!parsed.success || parsed.data.turn.status !== 'failed') return null;
+    const kind = errorKind(parsed.data.turn.error?.codexErrorInfo);
+    if (kind === 'usageLimitExceeded') return TurnEnd.UsageLimit;
+    if (kind === 'unauthorized') return TurnEnd.SignedOut;
+    // Codex accepts an unknown model at thread/start, so a mistyped Model map ID fails only here.
+    if (kind === 'badRequest' && parsed.data.turn.error?.message.includes(spec.model) === true)
+      return TurnEnd.ModelRefused;
+    return null;
+  };
+
+  const endOnTurn = async (end: TurnEnd): Promise<void> => {
+    closing = true;
+    switch (end) {
+      case TurnEnd.ModelRefused:
+        finish(SessionEndReason.Error, modelRefusal(spec.model));
+        return;
+      case TurnEnd.SignedOut: {
+        const message = `Codex says account "${spec.account.label}" is signed out.`;
+        finish(SessionEndReason.AccountRefused, message, {
+          problem: AccountProblem.SignedOut,
+          message,
+          seenIdentity: null,
+        });
+        return;
+      }
+      case TurnEnd.UsageLimit: {
+        const limit = await currentLimit();
+        if (done) return;
+        events.push({
+          type: 'rate_limit',
+          status: 'rejected',
+          resetsAt: limit?.resetsAt ?? null,
+          utilization: limit?.utilization ?? null,
+          limitType: limit?.limitType ?? null,
+        });
+        finish(SessionEndReason.RateLimited, 'Codex reports the usage limit is reached.');
+        return;
+      }
+    }
+  };
+
+  /** Never throws: a throw in a notification handler would be an uncaught exception in the daemon. */
+  function onNotification(n: { method: string; params: unknown }): void {
+    if (done || closing) return;
+    try {
+      if (!hasKnownShape(n)) {
+        log.warn({ method: n.method }, 'codex sent a notification of a shape 10db does not read');
+        return;
+      }
+      if (n.method === 'turn/completed') {
+        turnsCompleted += 1;
+        const end = endOfTurn(n.params);
+        if (end !== null) {
+          void endOnTurn(end);
+          return;
+        }
+      }
+      const mapped = mapCodexNotification(n, state);
+      if (started) for (const event of mapped) events.push(event);
+    } catch (error) {
+      log.error(
+        { method: n.method, errName: error instanceof Error ? error.name : 'unknown' },
+        'a codex notification could not be handled',
+      );
+    }
+  }
+
+  /** Steers the active turn, or starts one between turns. */
+  const deliver = async (text: string): Promise<void> => {
+    if (done || closing || threadId === null) return;
+    try {
+      if (state.turnId !== null) {
+        try {
+          await ask(
+            'turn/steer',
+            {
+              threadId,
+              expectedTurnId: state.turnId,
+              input: [{ type: 'text', text }],
+            },
+            Acknowledged,
+          );
+          return;
+        } catch (error) {
+          // The turn may have ended as the message was sent; then it is a turn of its own.
+          if (!(error instanceof CodexRpcError) || error.code === CLIENT_ERROR_CODE) throw error;
+          log.warn({ method: 'turn/steer' }, 'codex refused to steer the turn');
+        }
+      }
+      await startTurn(threadId, text);
+    } catch (error) {
+      if (error instanceof SessionOver) return;
+      log.error(
+        { errName: error instanceof Error ? error.name : 'unknown' },
+        'a message could not be delivered to codex',
+      );
+      finish(SessionEndReason.Error, 'Codex did not accept a message sent to the session.');
+    }
+  };
+
+  /** Asks the active turn to stop, waiting `graceMs` for the acknowledgement. */
+  const interruptTurn = async (thread: string, turnId: string): Promise<void> => {
+    if (rpc === null) return;
+    const interrupt = rpc.call('turn/interrupt', { threadId: thread, turnId }, Acknowledged);
+    let timer: { cancel(): void } = { cancel: () => undefined };
+    const grace = new Promise<void>((resolve) => {
+      timer = clock.setTimeout(resolve, graceMs);
+    });
+    try {
+      await Promise.race([interrupt, grace, over]);
+    } catch {
+      // A refused interrupt, or a session that ended meanwhile, is the end of the wait.
+    } finally {
+      timer.cancel();
+      interrupt.catch(() => undefined);
+    }
+  };
+
   const run = async (): Promise<void> => {
     if ((spec.sandbox ?? null) === null)
       throw sandboxRefused('10db refused to start Codex without the lane sandbox.');
@@ -314,9 +515,14 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
       stderrTail = (stderrTail + chunk.toString()).slice(-STDERR_KEPT_CHARS);
     });
     rpc = createCodexRpc(child, log);
+    rpc.onNotification(onNotification);
     void rpc.exited.then(({ code }) => {
-      if (started)
-        finish(SessionEndReason.Error, `Codex exited (${String(code)}) before the session ended.`);
+      if (stopRequested) finish(SessionEndReason.Stopped, null);
+      else if (started)
+        finish(
+          SessionEndReason.Error,
+          `Codex exited (${String(code)}) before the session ended.${stderrNote()}`,
+        );
     });
 
     const init = await ask('initialize', { clientInfo: CODEX_CLIENT_INFO }, InitializeResponse);
@@ -333,20 +539,11 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
     await checkGuardHook(home);
     const thread = await startThread();
 
+    threadId = thread.thread.id;
     started = true;
     events.push({ type: 'started', providerSessionId: thread.thread.id, pid: child.pid ?? null });
     try {
-      await ask(
-        'turn/start',
-        {
-          threadId: thread.thread.id,
-          input: [{ type: 'text', text: spec.prompt, text_elements: [] }],
-          approvalPolicy: 'never',
-          model: spec.model,
-          effort: spec.effort,
-        },
-        TurnStartResponse,
-      );
+      await startTurn(thread.thread.id, spec.prompt);
     } catch (error) {
       if (isModelRefusal(error))
         throw new StartRefused(SessionEndReason.Error, modelRefusal(spec.model));
@@ -363,13 +560,13 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
     // A start that cannot finish its checks is refused, not a crash the runner would retry.
     const failed = started ? SessionEndReason.Error : SessionEndReason.SandboxRefused;
     if (error instanceof CallTimeout) {
-      finish(failed, `${error.message}. ${NO_PROMPT}`);
+      finish(failed, `${error.message}.${unlessStarted(started)}`);
       return;
     }
     if (error instanceof CodexRpcError) {
       finish(
         failed,
-        `Codex could not start the session. ${noAccountWhy(START_CALL_MS, [stderrTail], spec.account.kind).printed}. ${NO_PROMPT}`,
+        `Codex could not start the session. ${noAccountWhy(START_CALL_MS, [stderrTail], spec.account.kind).printed}.${unlessStarted(started)}`,
       );
       return;
     }
@@ -377,16 +574,22 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
       { errName: error instanceof Error ? error.name : 'unknown' },
       'a codex session failed to start',
     );
-    finish(failed, `The Codex session could not start. ${NO_PROMPT}`);
+    finish(failed, `The Codex session could not start.${unlessStarted(started)}`);
   });
 
   return {
     events,
-    // Later messages are delivered by the turn loop, which this start hands the thread to.
-    send: () => undefined,
-    stop: () => {
+    send: (text) => {
+      // One at a time, so messages reach Codex in the order they were sent.
+      sends = sends.then(() => deliver(text));
+    },
+    stop: async () => {
+      if (done) return;
+      stopRequested = true;
+      closing = true;
+      const turnId = state.turnId;
+      if (started && threadId !== null && turnId !== null) await interruptTurn(threadId, turnId);
       finish(SessionEndReason.Stopped, null);
-      return Promise.resolve();
     },
   };
 }
