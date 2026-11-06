@@ -7,7 +7,7 @@ export {
   type LaneProfileInput,
 } from './profile';
 export { autoModeRules } from './auto-mode-rules';
-export { protectedReads } from './protected-reads';
+export { isEqualOrUnder, protectedReads } from './protected-reads';
 export { toolchainAccess } from './toolchain-reads';
 export { packageCacheEnv } from './package-cache';
 export { createLaneEnvFile, removeLaneEnvFile } from './env-file';

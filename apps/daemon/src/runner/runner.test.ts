@@ -4571,6 +4571,53 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     expect(ws(workstream.id).state).toBe('DONE');
   });
 
+  /** A subscription session starts only on an account whose identity was confirmed. */
+  const confirmIdentity = (): void => {
+    engine.state.write((ctx) =>
+      patchAccount(ctx, engine.project.accountId, { expectedIdentity: 'me@example.com' }),
+    );
+  };
+
+  it('builds a lane sandbox on the account home for a ChatGPT account', async () => {
+    const probe = sandboxProbe();
+    engine = await createTestEngine(
+      { Alpha: [[turn]] },
+      {},
+      { laneSandbox: probe.laneSandbox },
+      { account: { kind: 'codex_signin', label: 'ChatGPT plan' } },
+    );
+    confirmIdentity();
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+
+    const [seen] = probe.inputs;
+    expect(seen?.configDir).toBe(engine.store.db.select().from(schema.accounts).get()?.configDir);
+    expect(seen?.configDir).not.toBe(join(homedir(), '.claude'));
+    expect(seen?.env['CODEX_HOME']).toBe(seen?.configDir);
+  });
+
+  it.each([
+    { kind: 'codex_signin' as const, provider: 'codex' },
+    { kind: 'claude_subscription' as const, provider: 'claude' },
+  ])('records the provider of the account a session runs on: $kind', async ({ kind, provider }) => {
+    engine = await createTestEngine(
+      { Alpha: [[turn]] },
+      {},
+      {},
+      { account: { kind, label: 'Plan' } },
+    );
+    confirmIdentity();
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(listSessions(engine.store.db, workstream.id).map((row) => row.provider)).toEqual([
+      provider,
+    ]);
+    // The project's own provider is left as it was.
+    expect(getProject(engine.store.db, engine.project.id).provider).toBe(engine.project.provider);
+  });
+
   describe('the processes a session’s commands start', () => {
     const STARTED = 'Thu Oct 30 12:00:00 2026';
     /** claude (4000), a command's shell (4001) and two loops that outlive both (4002, 4003). */

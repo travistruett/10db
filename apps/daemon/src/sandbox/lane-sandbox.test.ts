@@ -418,6 +418,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     );
     try {
       expect(session.spec.settings.filesystem.allowRead).toContain(checkout);
+      expect(session.spec.checkout).toBe(checkout);
       expect(session.spec.settings.filesystem.denyRead).toContain(env);
       expect(session.spec.askRules).toContain(`Edit(/${join(checkout, '.mcp.json')})`);
     } finally {
@@ -466,6 +467,19 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         TENDB_SANDBOX: '1',
       });
       expect(session.spec.settings.filesystem.allowWrite).toEqual([session.tmpDir]);
+      // An agent that starts commands from nothing gets the whole environment: the allowlisted
+      // names of the session env, the temp dir, and everything the sandbox sets.
+      expect(session.spec.shellEnv).toMatchObject(session.commandEnv);
+      expect(session.spec.shellEnv).toMatchObject({
+        PATH: '/usr/bin:/bin',
+        HOME: home,
+        TMPDIR: session.tmpDir,
+      });
+      expect(session.spec.shellEnv).toHaveProperty('GIT_CONFIG_GLOBAL', '/dev/null');
+      expect(session.spec.shellEnv).not.toHaveProperty('ANTHROPIC_API_KEY');
+      expect(session.spec.shellEnv).not.toHaveProperty('CLAUDE_ENV_FILE');
+      expect(session.commandEnv).not.toHaveProperty('PATH');
+      expect(session.commandEnv).not.toHaveProperty('TMPDIR');
     } finally {
       session.dispose();
     }

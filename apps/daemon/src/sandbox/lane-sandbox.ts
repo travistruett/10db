@@ -25,7 +25,7 @@ import {
 } from './lane-processes';
 import { cachedProcessTable, systemOpenPaths, systemProcessTable } from './process-table';
 import { isEqualOrUnder } from './protected-reads';
-import type { SandboxRuntime } from './srt-launch';
+import { allowlisted, type SandboxRuntime } from './srt-launch';
 import { autoModeRules, type AutoModeSettings } from './auto-mode-rules';
 import { createLaneTempDir, LANE_TEMP_ROOT, removeAll, removeLaneTempDir } from './temp-dir';
 
@@ -47,8 +47,16 @@ const LANE_DISALLOWED_TOOLS: readonly string[] = [
 /** What a sandboxed session hands Claude Code on top of its ordinary options. */
 export interface LaneSandboxSpec {
   readonly settings: LaneSandboxSettings;
+  /** The checkout's real path, which the profile builds on and does not list as writable. */
+  readonly checkout: string;
   /** Merged over the session's env. */
   readonly env: Readonly<Record<string, string>>;
+  /**
+   * A command's whole environment, for an agent that starts commands from nothing: the allowlisted
+   * names of the session env, the temp dir and every variable the sandbox sets. `LaneSession.commandEnv`
+   * alone holds no `PATH`, `HOME` or `TMPDIR`, because a Claude Code lane inherits those.
+   */
+  readonly shellEnv: Readonly<Record<string, string>>;
   readonly disallowedTools: readonly string[];
   /** Permission rules that make Claude Code ask before the call, whatever the allow rules say. */
   readonly askRules: readonly string[];
@@ -284,7 +292,9 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
         const claudeProtected = claudeProtectedPaths(checkout);
         const spec: LaneSandboxSpec = {
           settings,
+          checkout,
           env,
+          shellEnv: { ...allowlisted(input.env), TMPDIR: tmpDir, ...commandEnv },
           disallowedTools: [
             ...LANE_DISALLOWED_TOOLS,
             ...deniedToFileTools.flatMap((path) => [

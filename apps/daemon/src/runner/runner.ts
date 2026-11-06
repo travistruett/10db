@@ -39,6 +39,7 @@ import {
   type WorkstreamStep,
   MIGRATIONS_RENUMBERED_NOTICE_KEY,
   MIGRATIONS_UNCARRIED_NOTICE_KEY,
+  providerOf,
 } from '@10db/contracts';
 import {
   activeClaims,
@@ -134,6 +135,7 @@ import type { StateStore } from '../events';
 import {
   AccountLaunchError,
   KeychainError,
+  sessionConfigDir,
   type Launcher,
   type SessionLaunch,
 } from '../environment';
@@ -1508,7 +1510,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         ? await opts.startGate.acquire(account.id)
         : () => undefined;
     // Where Claude Code keeps this account's sessions, and with them each one's saved tool results.
-    const configDir = launch.env['CLAUDE_CONFIG_DIR'] ?? join(homedir(), '.claude');
+    const configDir = sessionConfigDir(account.kind, launch.env, homedir());
     let laneSession: LaneSession | null = null;
     if (opts.laneSandbox) {
       try {
@@ -1572,7 +1574,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       session = opts.state.write((ctx) => {
         const s = insertSession(ctx, {
           workstreamId: id,
-          provider: project.provider,
+          provider: providerOf(account.kind),
           model: row.model,
           effort: row.effort,
           mode: 'managed',

@@ -322,6 +322,8 @@ describe('protectedReads', () => {
       '/c',
       '/h/.claude',
       '/h/.claude.json',
+      '/h/.codex',
+      '/h/.agents',
       '/h/Library/Keychains',
       '/usr/bin/security',
     ]);

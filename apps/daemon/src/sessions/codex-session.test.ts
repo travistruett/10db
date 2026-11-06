@@ -91,7 +91,9 @@ const sandbox: LaneSandboxSpec = {
     network: { allowedDomains: [], allowMachLookup: [], allowUnixSockets: [] },
     credentials: { envVars: [] },
   },
+  checkout: '/w/lane',
   env: {},
+  shellEnv: { PATH: '/usr/bin', TMPDIR: '/tmp/lane-1' },
   disallowedTools: [],
   askRules: [],
   autoMode: autoModeRules('make gate'),
@@ -1141,18 +1143,102 @@ describe('the end of a session', () => {
 describe('codexThreadConfig', () => {
   it('declares the 10db server with its bearer variable, approval mode and tool timeout', () => {
     const config = codexThreadConfig(specOf());
-    expect(config).toEqual({
-      mcp_servers: {
-        '10db': {
-          url: 'http://127.0.0.1:7777/mcp',
-          bearer_token_env_var: 'TENDB_MCP_TOKEN',
-          required: true,
-          default_tools_approval_mode: 'approve',
-          tool_timeout_sec: 905,
-        },
+    expect(config['mcp_servers']).toEqual({
+      '10db': {
+        url: 'http://127.0.0.1:7777/mcp',
+        bearer_token_env_var: 'TENDB_MCP_TOKEN',
+        required: true,
+        default_tools_approval_mode: 'approve',
+        tool_timeout_sec: 905,
       },
     });
     expect(JSON.stringify(config)).not.toContain('tok-secret-1');
+  });
+
+  /** A sandbox whose profile is `settings` over the base fixture, checked out at /w/lane. */
+  const sandboxWith = (settings: {
+    filesystem?: Partial<LaneSandboxSpec['settings']['filesystem']>;
+    network?: Partial<LaneSandboxSpec['settings']['network']>;
+  }): LaneSandboxSpec => ({
+    ...sandbox,
+    settings: {
+      ...sandbox.settings,
+      filesystem: { ...sandbox.settings.filesystem, ...settings.filesystem },
+      network: { ...sandbox.settings.network, ...settings.network },
+    },
+  });
+  const laneOf = (config: Record<string, unknown>) =>
+    (config['permissions'] as { lane: { filesystem: unknown; network: unknown } }).lane;
+
+  it('translates the lane profile into the lane permission profile', () => {
+    const lane = sandboxWith({
+      filesystem: {
+        denyRead: ['/', '/w/lane/.env.local'],
+        allowRead: ['/usr', '/h/install[s]', '/h/installs/*'],
+        allowWrite: ['/tmp/lane-1'],
+        denyWrite: ['/w/lane/nested', '/w/other'],
+      },
+      network: {
+        allowedDomains: ['registry.npmjs.org'],
+        allowLocalBinding: true,
+        allowUnixSockets: ['/tmp/lane-1'],
+        allowMachLookup: ['com.apple.FSEvents'],
+      },
+    });
+    const config = codexThreadConfig(specOf({ sandbox: lane }));
+    const { filesystem, network } = laneOf(config);
+    expect(filesystem).toEqual({
+      ':minimal': 'read',
+      '/usr': 'read',
+      '/w/lane': 'write',
+      '/tmp/lane-1': 'write',
+      '/w/lane/.env.local': 'deny',
+      '/w/lane/nested': 'read',
+    });
+    expect(network).toEqual({
+      enabled: true,
+      mode: 'full',
+      domains: { 'registry.npmjs.org': 'allow' },
+      allow_local_binding: true,
+      unix_sockets: { '/tmp/lane-1': 'allow' },
+    });
+    expect(config['shell_environment_policy']).toEqual({
+      inherit: 'none',
+      set: { PATH: '/usr/bin', TMPDIR: '/tmp/lane-1' },
+    });
+  });
+
+  it('passes an empty host list through, which blocks every host', () => {
+    const { network } = laneOf(codexThreadConfig(specOf()));
+    expect(network).toMatchObject({ enabled: true, mode: 'full', domains: {} });
+  });
+
+  it.each([
+    {
+      name: 'a deny beats a write on the same path',
+      filesystem: { allowWrite: ['/x'], denyRead: ['/', '/x'] },
+      expected: { '/x': 'deny' },
+    },
+    {
+      name: 'a write beats a read on the same path',
+      filesystem: { allowRead: ['/x'], allowWrite: ['/x'] },
+      expected: { '/x': 'write' },
+    },
+    {
+      name: 'a denyWrite on a writable path narrows it to read',
+      filesystem: { allowWrite: ['/x'], denyWrite: ['/x'] },
+      expected: { '/x': 'read' },
+    },
+    {
+      name: 'a denyWrite does not open a read-denied path',
+      filesystem: { denyRead: ['/', '/w/lane/s'], denyWrite: ['/w/lane/s'] },
+      expected: { '/w/lane/s': 'deny' },
+    },
+  ])('resolves overlapping entries: $name', ({ filesystem, expected }) => {
+    const { filesystem: result } = laneOf(
+      codexThreadConfig(specOf({ sandbox: sandboxWith({ filesystem }) })),
+    );
+    expect(result).toMatchObject(expected);
   });
 
   it('maps a remote repo server to url and http_headers, with the same approval mode', () => {
