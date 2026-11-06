@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
@@ -11,9 +11,15 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { claimSandboxRoots, claimSandboxTempRoot, sweepSystemTempRoots } from './index';
+import { SANDBOXED, waitFor } from '../../test/fixtures';
+import {
+  claimSandboxRoots,
+  claimSandboxTempRoot,
+  sweepSystemTempDirs,
+  sweepSystemTempFiles,
+} from './index';
 
 let base: string;
 let root: string;
@@ -165,7 +171,7 @@ describe('claimSandboxTempRoot', () => {
   });
 });
 
-describe('claimSandboxRoots and sweepSystemTempRoots', () => {
+describe('claimSandboxRoots and the system temp sweeps', () => {
   /** The roots a daemon claims, and a system temp dir it only sweeps, here stand-ins. */
   function roots(): { temp: string; lanes: string; files: string; systemTemp: string } {
     const made = {
@@ -199,37 +205,82 @@ describe('claimSandboxRoots and sweepSystemTempRoots', () => {
     expect(readdirSync(files).sort()).toEqual([...LEDGERS].sort());
   });
 
-  it("sweeps 10db's stale entries from a system temp dir, its ledgers too and unread, marking nothing and never holding the event loop", async () => {
+  /** A process running a 10db daemon's entry, as a bundle runs `daemon.mjs`. */
+  function liveDaemon(): number {
+    const entry = join(base, 'app', 'daemon.mjs');
+    mkdirSync(dirname(entry), { recursive: true });
+    writeFileSync(entry, 'setInterval(() => undefined, 1000);\n');
+    const child = spawn(process.execPath, [entry], { stdio: 'ignore' });
+    children.push(child);
+    if (child.pid === undefined) throw new Error('no pid');
+    return child.pid;
+  }
+
+  /** Waits until `pid`'s command line is the one it was spawned with, so `ps` names its entry. */
+  const running = (pid: number, entry: RegExp): Promise<boolean> =>
+    waitFor(() =>
+      entry.test(
+        execFileSync('/bin/ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' }),
+      ),
+    );
+
+  it("removes 10db's sealed files and ledgers from a system temp dir at once, unread, whatever a mark of no 10db daemon says", () => {
     const { systemTemp } = roots();
     leaveStaleFiles(systemTemp);
     for (const name of LEDGERS) writeFileSync(join(systemTemp, name), '{"version":1,"members":[]}');
-    const dead = await deadPid();
-    writeFileSync(join(systemTemp, `10db-daemon-${String(dead)}`), '', { mode: 0o400 });
+    // A mark a ChatGPT lane could plant: a running process, but no 10db daemon.
+    const planted = liveProcess();
+    writeFileSync(join(systemTemp, `10db-daemon-${String(planted)}`), '', { mode: 0o400 });
     const others = leaveOthers(systemTemp);
-    let ticked = false;
-    const sweeping = sweepSystemTempRoots([systemTemp], process.pid);
-    setImmediate(() => {
-      ticked = true;
-    });
-    // Six stale entries and the two ledger files.
-    expect(await sweeping).toMatchObject({ removed: 8, failed: 0, sharedWith: null });
-    expect(ticked).toBe(true);
-    // Nothing of 10db's is left where every ChatGPT lane can read and write, and no mark either.
-    expect(readdirSync(systemTemp).sort()).toEqual(others);
+    // Four sealed files and the two ledger files; the temp dirs are the later sweep's.
+    expect(sweepSystemTempFiles([systemTemp])).toMatchObject({ removed: 6, failed: 0 });
+    expect(readdirSync(systemTemp).sort()).toEqual(
+      [...others, '10db-Zz9yX8', '10db-a1B2c3', `10db-daemon-${String(planted)}`].sort(),
+    );
     expect(readdirSync(outside)).toEqual(['keep.txt']);
   });
 
-  it('leaves a system temp dir alone while a daemon that still runs has marked it', async () => {
+  it("removes 10db's temp dirs from a system temp dir off the event loop, whatever a mark of no 10db daemon says, and stops when aborted", async () => {
     const { systemTemp } = roots();
     leaveStaleFiles(systemTemp);
-    for (const name of LEDGERS) writeFileSync(join(systemTemp, name), '{"version":1,"members":[]}');
-    const running = liveProcess();
-    writeFileSync(join(systemTemp, `10db-daemon-${String(running)}`), '', { mode: 0o400 });
-    const before = readdirSync(systemTemp).sort();
-    expect(await sweepSystemTempRoots([systemTemp], process.pid)).toMatchObject({
-      removed: 0,
-      sharedWith: running,
+    const planted = liveProcess();
+    writeFileSync(join(systemTemp, `10db-daemon-${String(planted)}`), '', { mode: 0o400 });
+    const others = leaveOthers(systemTemp);
+    const aborted = new AbortController();
+    aborted.abort();
+    expect(await sweepSystemTempDirs([systemTemp], aborted.signal)).toMatchObject({ removed: 0 });
+    expect(readdirSync(systemTemp)).toEqual(expect.arrayContaining(['10db-Zz9yX8', '10db-a1B2c3']));
+    let ticked = false;
+    const sweeping = sweepSystemTempDirs([systemTemp], new AbortController().signal);
+    setImmediate(() => {
+      ticked = true;
     });
-    expect(readdirSync(systemTemp).sort()).toEqual(before);
+    expect(await sweeping).toMatchObject({ removed: 2, failed: 0 });
+    expect(ticked).toBe(true);
+    expect(readdirSync(systemTemp)).not.toContain('10db-Zz9yX8');
+    expect(readdirSync(systemTemp)).not.toContain('10db-a1B2c3');
+    expect(readdirSync(systemTemp)).toEqual(expect.arrayContaining(others));
+    expect(readdirSync(outside)).toEqual(['keep.txt']);
   });
+
+  // `ps` names another process's entry only outside a sandbox.
+  it.skipIf(SANDBOXED)(
+    'leaves a system temp dir alone while a 10db daemon that runs has marked it',
+    async () => {
+      const { systemTemp } = roots();
+      leaveStaleFiles(systemTemp);
+      for (const name of LEDGERS)
+        writeFileSync(join(systemTemp, name), '{"version":1,"members":[]}');
+      const daemon = liveDaemon();
+      await running(daemon, /daemon\.mjs/);
+      writeFileSync(join(systemTemp, `10db-daemon-${String(daemon)}`), '', { mode: 0o400 });
+      const before = readdirSync(systemTemp).sort();
+      expect(sweepSystemTempFiles([systemTemp])).toMatchObject({ removed: 0, sharedWith: daemon });
+      expect(await sweepSystemTempDirs([systemTemp], new AbortController().signal)).toMatchObject({
+        removed: 0,
+        sharedWith: daemon,
+      });
+      expect(readdirSync(systemTemp).sort()).toEqual(before);
+    },
+  );
 });

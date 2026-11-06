@@ -150,7 +150,9 @@ import {
   createLaneSandbox,
   createLedgerSweep,
   reapLaneProcessLedgers,
-  sweepSystemTempRoots,
+  sweepSystemTempDirs,
+  sweepSystemTempFiles,
+  type SweepReport,
   systemProcessTable,
   type LaneProcessSetup,
   type LedgerSweep,
@@ -396,6 +398,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // The sandbox's roots, made private before anything is put there. A refused one refuses every lane
   // session and gate, as a temp dir the sandbox can't make does.
   const sandboxRoots = opts.sandbox ? openSandboxRoots(opts.sandbox, homedir()) : null;
+  /** Logs what a sweep of the system temp dirs removed, or which daemon's mark kept it. */
+  const logSweep = (report: SweepReport, what: string): void => {
+    if (report.removed === 0 && report.failed === 0 && report.sharedWith === null) return;
+    logger.info(
+      { removed: report.removed, failed: report.failed, sharedWith: report.sharedWith },
+      `swept ${what} from the system temp dirs`,
+    );
+  };
   // The roots lanes write: Claude lanes', ChatGPT lanes', and the system temp dirs, which Codex's base
   // policy opens to every ChatGPT lane. With no sandbox no lane runs, so none is.
   const laneWrittenRoots = sandboxRoots === null ? [] : laneWrittenRootsOf(sandboxRoots);
@@ -659,6 +669,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       );
       ledgerSweep.later();
     }
+  }
+  // After the reap, before any lane session or gate can start: a sealed file of 10db's in a system
+  // temp dir is readable to every ChatGPT lane, and a ledger there could be one a lane wrote.
+  if (sandboxRoots !== null) {
+    logSweep(sweepSystemTempFiles(sandboxRoots.systemTemps), "10db's files");
   }
   // Every lane session and every gate runs in one of these; over a refused root both refuse.
   const sandboxes =
@@ -1397,19 +1412,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     token,
   );
-  // Once the daemon listens, off the event loop: a lane can leave any number of entries there.
+  // Once the daemon listens, off the event loop, which a lane can fill with names; `stop()` ends it.
+  const systemTempAbort = new AbortController();
   const systemTempSwept = (
     sandboxRoots === null
       ? Promise.resolve()
-      : sweepSystemTempRoots(sandboxRoots.systemTemps).then((report) => {
-          if (report.removed === 0 && report.failed === 0 && report.sharedWith === null) return;
-          logger.info(
-            { removed: report.removed, failed: report.failed, sharedWith: report.sharedWith },
-            "swept 10db's entries from the system temp dirs",
-          );
+      : sweepSystemTempDirs(sandboxRoots.systemTemps, systemTempAbort.signal).then((report) => {
+          logSweep(report, "10db's temp dirs");
         })
   ).catch((error: unknown) => {
-    logger.warn({ err: error }, "could not sweep 10db's entries from the system temp dirs");
+    logger.warn({ err: error }, "could not sweep 10db's temp dirs from the system temp dirs");
   });
 
   const nightly = scheduleNightlyBackup(
@@ -1453,6 +1465,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       await prWatch.stop();
       retiredLandingsAbort.abort();
       await retiredLandings;
+      systemTempAbort.abort();
       await systemTempSwept;
       // A gate that waits must not start because shutdown freed the slot of the one it killed.
       gateSlots.close();

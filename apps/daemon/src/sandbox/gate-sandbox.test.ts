@@ -531,9 +531,15 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
       const target = join(root, 'target');
       writeFileSync(target, 'x');
       execFileSync('ln', [target, join(pnpmLockDir, 'hard.lock')]);
+      // A directory a run planted, with a file, a link out and a locked directory in it.
+      mkdirSync(join(pnpmLockDir, 'planted', 'locked'), { recursive: true });
+      writeFileSync(join(pnpmLockDir, 'planted', 'f'), 'x');
+      symlinkSync(outside, join(pnpmLockDir, 'planted', 'out'));
+      chmodSync(join(pnpmLockDir, 'planted', 'locked'), 0o000);
       await run.dispose();
       expect(existsSync(pnpmLockDir)).toBe(false);
       expect(readdirSync(root).filter((name) => name.includes('sweep'))).toEqual([]);
+      expect(readdirSync(tmpRoot)).toEqual([]);
       expect(readdirSync(filesRoot)).toEqual([]);
       expect(readdirSync(outside)).toEqual(['keep']);
       expect(readFileSync(target, 'utf8')).toBe('x');
@@ -563,22 +569,34 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
       expect(readdirSync(victim).sort()).toEqual(['file', 'sub']);
     });
 
-    it('throws a typed error when an entry cannot be removed, after trying the rest', async () => {
-      const run = await sandbox().forRun(input({ packageInstall: true }));
-      mkdirSync(join(pnpmLockDir, 'a', 'b'), { recursive: true });
-      writeFileSync(join(pnpmLockDir, 'a', 'b', 'x'), '');
-      await expect(run.dispose()).rejects.toThrow(SandboxProfileError);
-      expect(existsSync(pnpmLockDir)).toBe(false);
-      // The directory was walked in the files root, which no run can write, never beside its own
-      // path, which a ChatGPT lane can: what it holds was moved there first.
-      expect(readdirSync(root).filter((name) => name.includes('sweep'))).toEqual([]);
-      const [moved, ...more] = readdirSync(filesRoot);
-      expect(more).toEqual([]);
-      expect(moved).toMatch(/^pnpm-sweep-[0-9a-f-]{36}$/);
-      expect(readdirSync(join(filesRoot, moved ?? ''))).toEqual(['a']);
-    });
+    // macOS's user immutable flag is what keeps a file from being removed by its owner.
+    it.skipIf(process.platform !== 'darwin')(
+      'throws a typed error when an entry cannot be removed, leaving what is left only in the temp root, and removes it at the next sweep',
+      async () => {
+        const run = await sandbox().forRun(input({ packageInstall: true }));
+        writeFileSync(join(pnpmLockDir, 'stuck.lock'), '');
+        execFileSync('/usr/bin/chflags', ['uchg', join(pnpmLockDir, 'stuck.lock')]);
+        await expect(run.dispose()).rejects.toThrow(SandboxProfileError);
+        expect(existsSync(pnpmLockDir)).toBe(false);
+        // The directory was walked in the temp root, which no sandbox writes, never beside its own
+        // path, which a ChatGPT lane can: what it holds was moved there first.
+        expect(readdirSync(root).filter((name) => name.includes('sweep'))).toEqual([]);
+        expect(readdirSync(filesRoot)).toEqual([]);
+        const [moved, ...more] = readdirSync(tmpRoot);
+        expect(more).toEqual([]);
+        expect(moved).toMatch(/^pnpm-sweep-[0-9a-f-]{36}$/);
+        const stuck = join(tmpRoot, moved ?? '', 'stuck.lock');
+        expect(existsSync(stuck)).toBe(true);
+        execFileSync('/usr/bin/chflags', ['nouchg', stuck]);
+        // The next run's sweep removes what this one left.
+        const next = await sandbox().forRun(input({ packageInstall: true }));
+        expect(readdirSync(tmpRoot).filter((name) => name.startsWith('pnpm-sweep-'))).toEqual([]);
+        await next.dispose();
+        expect(readdirSync(tmpRoot)).toEqual([]);
+      },
+    );
 
-    it("walks nothing when the lock directory can't be moved into the files root", async () => {
+    it("walks nothing when the lock directory can't be moved into the temp root", async () => {
       const outside = join(root, 'outside');
       mkdirSync(outside);
       writeFileSync(join(outside, 'keep'), 'k');
@@ -589,8 +607,8 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
         home,
         dataDir,
         loginConfigDir: null,
-        tmpRoot,
-        filesRoot: join(root, 'no-files-root'),
+        tmpRoot: join(root, 'no-temp-root'),
+        filesRoot,
         pnpmLockDir,
         gitDirs: (path) => git.gitDirs(path),
         systemPrefixes: [],
@@ -599,7 +617,7 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
       await expect(pending).rejects.toThrow(SandboxProfileError);
       expect(readdirSync(pnpmLockDir).sort()).toEqual(['abc.lock', 'all-stores.lock']);
       expect(readdirSync(outside)).toEqual(['keep']);
-      expect(readdirSync(tmpRoot)).toEqual([]);
+      expect(readdirSync(filesRoot)).toEqual([]);
     });
 
     it.each([

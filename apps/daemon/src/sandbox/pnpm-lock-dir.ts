@@ -1,11 +1,12 @@
+import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
+  existsSync,
   lstatSync,
   mkdirSync,
   readdirSync,
   realpathSync,
   renameSync,
-  rmdirSync,
   unlinkSync,
 } from 'node:fs';
 import { userInfo } from 'node:os';
@@ -35,30 +36,77 @@ export function openPnpmLockDir(dir: string): void {
   }
 }
 
+/** What the sweep moves a lock directory to in the temp root; never a lane temp dir's name. */
+const MOVED = /^pnpm-sweep-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 /**
  * Removes pnpm's lock directory and all it holds. A run that could write there might have swapped the
  * directory for a link, or left links in it, for a later pnpm outside any sandbox to follow, and the
  * run's grant covers the directory's own path, so a swap can happen while this runs; every ChatGPT
  * lane can write the system temp dir it lies in, too. So the path is never looked into: it is first
- * renamed into `privateRoot` (the files root, which no sandbox writes), which moves a link rather
- * than following it, and only the name it was moved to is read. When it can't be moved there,
- * nothing is walked. A link there is unlinked; a directory's entries are unlinked or, for a
- * directory, removed when empty, never followed or removed recursively. Anything that could not be
- * removed is thrown after the rest was tried.
+ * renamed into `privateRoot` (the lane temp root, on the system's data volume like the system temp
+ * dir and closed to every sandbox), which moves a link rather than following it, and only the name
+ * it was moved to is walked, by tools that never follow a link. When it can't be moved there,
+ * nothing is walked. Each sweep first removes every moved tree left there. A failure is thrown
+ * after the rest was tried.
  */
 export function sweepPnpmLockDir(dir: string, privateRoot: string): void {
+  const failures: Error[] = [];
+  let names: string[] = [];
+  try {
+    names = readdirSync(privateRoot);
+  } catch (error) {
+    failures.push(asError(error));
+  }
+  for (const name of names) {
+    if (!MOVED.test(name)) continue;
+    try {
+      removeTree(join(privateRoot, name));
+    } catch (error) {
+      failures.push(asError(error));
+    }
+  }
   try {
     sweep(dir, privateRoot);
   } catch (error) {
+    failures.push(asError(error));
+  }
+  const [first] = failures;
+  if (first !== undefined) {
     throw new SandboxProfileError(
       'packageInstall',
-      `pnpm's lock directory ${dir} could not be cleared: ${asError(error).message}`,
+      `pnpm's lock directory ${dir} could not be cleared: ${first.message}`,
     );
   }
 }
 
 function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
+}
+
+/** The tools that walk a moved tree, with a fixed PATH. */
+const TOOL_ENV = { PATH: '/usr/bin:/bin' };
+
+/**
+ * Removes a moved lock directory and all it holds. `find` opens each directory in it for its owner
+ * first, since a run may have locked one; it and `rm -rf` walk by directory descriptor and never
+ * follow a link, so a link's target and a hard link's other name are left as they are.
+ */
+function removeTree(path: string): void {
+  try {
+    execFileSync('/usr/bin/find', [path, '-type', 'd', '-exec', '/bin/chmod', 'u+rwx', '{}', ';'], {
+      env: TOOL_ENV,
+      stdio: 'pipe',
+    });
+  } catch {
+    // What it could not open, `rm` fails on, and that is what is reported.
+  }
+  try {
+    execFileSync('/bin/rm', ['-rf', '--', path], { env: TOOL_ENV, stdio: 'pipe' });
+  } catch {
+    throw new Error(`${path} could not be removed`);
+  }
+  if (existsSync(path)) throw new Error(`${path} could not be removed`);
 }
 
 function sweep(dir: string, privateRoot: string): void {
@@ -70,34 +118,11 @@ function sweep(dir: string, privateRoot: string): void {
     if (isMissing(error) && lstatSync(dir, { throwIfNoEntry: false }) === undefined) return;
     throw error;
   }
-  const moved = lstatSync(aside);
-  if (!moved.isDirectory()) {
+  if (!lstatSync(aside).isDirectory()) {
     unlinkSync(aside);
     return;
   }
-  const failures: Error[] = [];
-  const attempt = (remove: () => void): void => {
-    try {
-      remove();
-    } catch (error) {
-      if (isMissing(error)) return;
-      failures.push(asError(error));
-    }
-  };
-  for (const name of readdirSync(aside)) {
-    const path = join(aside, name);
-    const entry = lstatSync(path, { throwIfNoEntry: false });
-    if (entry === undefined) continue;
-    attempt(() => {
-      if (entry.isDirectory()) rmdirSync(path);
-      else unlinkSync(path);
-    });
-  }
-  attempt(() => {
-    rmdirSync(aside);
-  });
-  const [first] = failures;
-  if (first !== undefined) throw first;
+  removeTree(aside);
 }
 
 function isMissing(error: unknown): boolean {

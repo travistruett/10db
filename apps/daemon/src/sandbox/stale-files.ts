@@ -1,6 +1,8 @@
-import { lstatSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { rm } from 'node:fs/promises';
+import { execFile, execFileSync } from 'node:child_process';
+import { lstatSync, opendirSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { opendir } from 'node:fs/promises';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { removeLaneTempDir, removeLaneTempDirAsync } from './temp-dir';
 
 /** What `createLaneTempDir` makes: `mkdtemp`'s six characters after the prefix. */
@@ -11,6 +13,8 @@ const SEALED_FILE = /^10db-(?:env|gate|mcp)-[0-9a-f]{12}\.(?:json|sh)$/;
 const LEDGER_FILE = /^10db-proc-[1-9][0-9]*-[0-9a-f]{12}\.json(?:\.[0-9a-f]{12}\.tmp)?$/;
 /** A running daemon's mark in a sandbox root, named by its pid. */
 const DAEMON_MARK = /^10db-daemon-([1-9][0-9]*)$/;
+/** A 10db daemon's entry on its command line: a bundle's `daemon.mjs`, or `src/main.ts` from source. */
+const DAEMON_ENTRY = /(?:^|[\s/])(?:daemon\.mjs|src\/main\.ts)(?:\s|$)/;
 
 /** What a sweep did. */
 export interface SweepReport {
@@ -40,11 +44,35 @@ export function processAlive(pid: number): boolean {
   }
 }
 
-function listing(root: string): string[] {
+/** Each name in `root`, read a few at a time; none past a listing that fails. */
+function* namesIn(root: string): Generator<string> {
+  let dir;
   try {
-    return readdirSync(root);
+    dir = opendirSync(root);
   } catch {
-    return [];
+    return;
+  }
+  try {
+    for (let entry = dir.readSync(); entry !== null; entry = dir.readSync()) yield entry.name;
+  } catch {
+    // A listing that fails part way ends there.
+  } finally {
+    dir.closeSync();
+  }
+}
+
+/** `namesIn` off the event loop. */
+async function* namesInAsync(root: string): AsyncGenerator<string> {
+  let dir;
+  try {
+    dir = await opendir(root);
+  } catch {
+    return;
+  }
+  try {
+    for await (const entry of dir) yield entry.name;
+  } catch {
+    // A listing that fails part way ends there.
   }
 }
 
@@ -60,61 +88,67 @@ function ownedKind(path: string, uid: number): 'dir' | 'file' | 'other' | null {
   }
 }
 
-/** A stale entry of 10db's in a root, by its own kind. */
-interface StaleEntry {
-  readonly path: string;
-  readonly kind: 'dir' | 'file';
+/** The kind a stale entry called `name` has, by 10db's exact names alone; null for any other name. */
+function staleKind(name: string, ledgers: boolean): 'dir' | 'file' | null {
+  if (TEMP_DIR.test(name)) return 'dir';
+  return SEALED_FILE.test(name) || (ledgers && LEDGER_FILE.test(name)) ? 'file' : null;
 }
 
 /**
- * The temp dirs and sealed files a crashed daemon left in `root`, its process ledgers too when
- * `ledgers` is set; the marks of daemons that are not running are removed. Every such entry is stale,
- * unless another live daemon (one with another data dir) has marked the root: its sessions may be
- * running, so nothing is named. Only this user's entries with 10db's exact names are named, by their
- * own kind: a link never is.
+ * The live daemon whose mark is in `root`, if one `counts`; marks of daemons that are not running,
+ * and one naming this daemon's own pid (a dead one's, reused), are removed. Only this user's plain
+ * files with the mark's exact name are read, and no other name is looked at.
  */
-function staleIn(
+function markedBy(
+  marks: Iterable<string>,
   root: string,
-  pid: number,
-  ledgers: boolean,
-): { readonly stale: StaleEntry[]; readonly sharedWith: number | null } {
-  const uid = process.getuid?.();
-  const names = listing(root);
+  uid: number,
+  counts: (pid: number) => boolean,
+): number | null {
   let sharedWith: number | null = null;
-  for (const name of names) {
+  for (const name of marks) {
     const marked = Number(DAEMON_MARK.exec(name)?.[1]);
-    if (!Number.isInteger(marked) || uid === undefined) continue;
-    if (ownedKind(join(root, name), uid) !== 'file') continue;
-    if (marked !== pid && processAlive(marked)) sharedWith = marked;
-    else rmSync(join(root, name), { force: true });
+    if (!Number.isInteger(marked) || ownedKind(join(root, name), uid) !== 'file') continue;
+    if (marked !== process.pid && processAlive(marked)) {
+      if (counts(marked)) sharedWith = marked;
+    } else {
+      rmSync(join(root, name), { force: true });
+    }
   }
-  if (sharedWith !== null || uid === undefined) return { stale: [], sharedWith };
-  const stale = names.flatMap((name): StaleEntry[] => {
-    const path = join(root, name);
-    const kind = ownedKind(path, uid);
-    if (kind === 'dir' && TEMP_DIR.test(name)) return [{ path, kind }];
-    const file = SEALED_FILE.test(name) || (ledgers && LEDGER_FILE.test(name));
-    return kind === 'file' && file ? [{ path, kind }] : [];
-  });
-  return { stale, sharedWith };
+  return sharedWith;
 }
 
 /**
  * Takes a sandbox root for a starting daemon, before any session or gate starts: removes the temp
- * dirs and sealed files a crashed daemon left there (see `staleIn`), then marks the root as in use by
- * `pid`. Its process ledgers stay for `reapLaneProcessLedgers`, which stops what they name.
+ * dirs and sealed files a crashed daemon left there, then marks the root as in use by `pid`. Every
+ * such entry is stale, unless another live daemon (one with another data dir) has marked the root:
+ * its sessions may be running, so nothing is removed. Only this user's entries with 10db's exact
+ * names are touched, by their own kind: a link is never followed or removed. Its process ledgers
+ * stay for `reapLaneProcessLedgers`, which stops what they name.
  */
 export function claimSandboxTempRoot(root: string, pid: number = process.pid): TempRootClaim {
-  const { stale, sharedWith } = staleIn(root, pid, false);
+  const uid = process.getuid?.();
   let removed = 0;
   let failed = 0;
-  for (const entry of stale) {
-    try {
-      if (entry.kind === 'dir') removeLaneTempDir(entry.path, root);
-      else rmSync(entry.path, { force: true });
-      removed += 1;
-    } catch {
-      failed += 1;
+  let sharedWith: number | null = null;
+  if (uid !== undefined) {
+    sharedWith = markedBy(namesIn(root), root, uid, (marked) => marked !== pid);
+    const stale =
+      sharedWith === null
+        ? [...namesIn(root)].flatMap((name) => {
+            const kind = staleKind(name, false);
+            const path = join(root, name);
+            return kind !== null && ownedKind(path, uid) === kind ? [{ path, kind }] : [];
+          })
+        : [];
+    for (const entry of stale) {
+      try {
+        if (entry.kind === 'dir') removeLaneTempDir(entry.path, root);
+        else rmSync(entry.path, { force: true });
+        removed += 1;
+      } catch {
+        failed += 1;
+      }
     }
   }
   const mark = join(root, daemonMarkName(pid));
@@ -151,27 +185,115 @@ export function claimSandboxRoots(
   };
 }
 
+/** The `ps` that names each process's command, with a fixed PATH. */
+const PS = ['/bin/ps', ['-axo', 'pid=,command=']] as const;
+const PS_OPTIONS = { encoding: 'utf8', env: { PATH: '/usr/bin:/bin' } } as const;
+const execPs = promisify(execFile);
+
+/** The pids whose command line runs a 10db daemon's entry, read from `ps`'s output. */
+function daemonPidsIn(table: string): ReadonlySet<number> {
+  const pids = new Set<number>();
+  for (const line of table.split('\n')) {
+    const match = /^\s*(\d+)\s+(.*)$/.exec(line);
+    if (match?.[2] !== undefined && DAEMON_ENTRY.test(match[2])) pids.add(Number(match[1]));
+  }
+  return pids;
+}
+
 /**
- * Removes 10db's entries from the system temp dirs (`SYSTEM_TEMP_ROOTS`) by the claim's rules, their
- * process ledgers too, never read, and marks nothing: every ChatGPT lane can read and write there, so
- * a sealed file there would stay readable to one, and a ledger there could be one a lane wrote. 10db
- * makes nothing there. The tools run as child processes the event loop doesn't wait on, so a lane
- * that leaves many entries there delays no start.
+ * Whether a live mark in a system temp dir counts: only while its pid runs a 10db daemon's entry.
+ * Every ChatGPT lane can write there, so a mark naming any other running process (one a lane
+ * planted) keeps nothing. When `ps` can't be read, every live mark counts.
  */
-export async function sweepSystemTempRoots(
-  roots: readonly string[],
-  pid: number = process.pid,
-): Promise<SweepReport> {
+function daemonCheck(daemons: ReadonlySet<number> | null): (pid: number) => boolean {
+  return (pid) => daemons === null || daemons.has(pid);
+}
+
+/**
+ * Removes 10db's sealed files and process ledgers from the system temp dirs (`SYSTEM_TEMP_ROOTS`),
+ * never reading one: every ChatGPT lane can read and write there, so a sealed file there would stay
+ * readable to one, and a ledger there could be one a lane wrote. Run it at start, before any lane
+ * session or gate: each is one unlink, and only this user's plain files with 10db's exact names are
+ * looked at. A running 10db daemon's mark keeps its dir (`daemonCheck`). Marks nothing.
+ */
+export function sweepSystemTempFiles(roots: readonly string[]): SweepReport {
+  const uid = process.getuid?.();
   let removed = 0;
   let failed = 0;
   let sharedWith: number | null = null;
-  for (const root of roots) {
-    const found = staleIn(root, pid, true);
-    sharedWith ??= found.sharedWith;
-    for (const entry of found.stale) {
+  if (uid === undefined) return { removed, failed, sharedWith };
+  let daemons: ReadonlySet<number> | null | undefined;
+  const counts = (pid: number): boolean => {
+    if (daemons === undefined) {
       try {
-        if (entry.kind === 'dir') await removeLaneTempDirAsync(entry.path, root);
-        else await rm(entry.path, { force: true });
+        daemons = daemonPidsIn(execFileSync(...PS, PS_OPTIONS));
+      } catch {
+        daemons = null;
+      }
+    }
+    return daemonCheck(daemons)(pid);
+  };
+  for (const root of roots) {
+    const marked = markedBy(namesIn(root), root, uid, counts);
+    sharedWith ??= marked;
+    if (marked !== null) continue;
+    for (const name of namesIn(root)) {
+      if (staleKind(name, true) !== 'file') continue;
+      const path = join(root, name);
+      if (ownedKind(path, uid) !== 'file') continue;
+      try {
+        unlinkSync(path);
+        removed += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+  }
+  return { removed, failed, sharedWith };
+}
+
+/**
+ * Removes 10db's lane temp dirs from the system temp dirs, by the claim's rules, off the event loop:
+ * the listing is read a few names at a time, a name is tested before its entry is looked at, the
+ * tools that remove a dir run as child processes, and `signal` (the daemon's stop) ends the sweep
+ * between entries. A running 10db daemon's mark keeps its dir (`daemonCheck`). Marks nothing.
+ */
+export async function sweepSystemTempDirs(
+  roots: readonly string[],
+  signal: AbortSignal,
+): Promise<SweepReport> {
+  const uid = process.getuid?.();
+  let removed = 0;
+  let failed = 0;
+  let sharedWith: number | null = null;
+  if (uid === undefined) return { removed, failed, sharedWith };
+  // Read again after every await: the daemon's stop can come at any of them.
+  const stopped = (): boolean => signal.aborted;
+  let daemons: ReadonlySet<number> | null | undefined;
+  for (const root of roots) {
+    if (stopped()) break;
+    const marks: string[] = [];
+    for await (const name of namesInAsync(root)) {
+      if (stopped()) break;
+      if (DAEMON_MARK.test(name)) marks.push(name);
+    }
+    if (stopped()) break;
+    if (marks.length > 0 && daemons === undefined) {
+      daemons = await execPs(...PS, PS_OPTIONS).then(
+        ({ stdout }) => daemonPidsIn(stdout),
+        () => null,
+      );
+    }
+    const marked = markedBy(marks, root, uid, daemonCheck(daemons ?? null));
+    sharedWith ??= marked;
+    if (marked !== null) continue;
+    for await (const name of namesInAsync(root)) {
+      if (stopped()) break;
+      if (staleKind(name, false) !== 'dir') continue;
+      const path = join(root, name);
+      if (ownedKind(path, uid) !== 'dir') continue;
+      try {
+        await removeLaneTempDirAsync(path, root);
         removed += 1;
       } catch {
         failed += 1;

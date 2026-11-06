@@ -548,7 +548,7 @@ describe('startDaemon', () => {
 
   // Its temp root is a short path under the shared `/tmp`, which no sandbox can write.
   it.skipIf(SANDBOXED)(
-    "removes the temp dirs and sealed files a crashed daemon left in its sandbox roots before any session starts, and 10db's entries in a system temp dir once it listens",
+    'removes the temp dirs and sealed files a crashed daemon left in its sandbox roots, and its sealed files and ledgers in a system temp dir, before any session starts, and its temp dirs there once it listens',
     async () => {
       const base = realpathSync(mkdtempSync('/tmp/sbd-'));
       const roots = sandboxRoots(base);
@@ -567,6 +567,12 @@ describe('startDaemon', () => {
             writeFileSync(join(root, name), '', { mode: 0o400 });
         // A ledger there is never read: a ChatGPT lane can write there.
         writeFileSync(join(systemTemp, '10db-proc-4321-0123456789ab.json'), '{}');
+        // A mark a ChatGPT lane could plant there, naming a running process that is no daemon.
+        const planted = spawn(process.execPath, ['-e', 'setInterval(() => undefined, 1000)'], {
+          stdio: 'ignore',
+        });
+        const plantedMark = `10db-daemon-${String(planted.pid ?? 0)}`;
+        writeFileSync(join(systemTemp, plantedMark), '', { mode: 0o400 });
         daemon = await startDaemon({
           dataDir: dir.path,
           port: 0,
@@ -578,9 +584,14 @@ describe('startDaemon', () => {
         const mark = `10db-daemon-${String(process.pid)}`;
         expect(readdirSync(tmpRoot)).toEqual([mark]);
         expect(readdirSync(filesRoot).sort()).toEqual([mark, 'other.txt'].sort());
-        // The system temp dir is swept off the event loop once the daemon listens.
-        await waitFor(() => readdirSync(systemTemp).length === 1);
-        expect(readdirSync(systemTemp)).toEqual(['other.txt']);
+        // Its sealed files and ledgers there went before any session could start, whatever the mark.
+        expect(readdirSync(systemTemp).sort()).toEqual(
+          ['10db-a1B2c3', plantedMark, 'other.txt'].sort(),
+        );
+        // Its temp dirs there go off the event loop, once the daemon listens.
+        await waitFor(() => !readdirSync(systemTemp).includes('10db-a1B2c3'));
+        expect(readdirSync(systemTemp).sort()).toEqual([plantedMark, 'other.txt'].sort());
+        planted.kill('SIGKILL');
       } finally {
         await daemon?.stop();
         daemon = null;

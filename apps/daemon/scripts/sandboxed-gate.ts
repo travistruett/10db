@@ -14,7 +14,7 @@ import { createGit, resolveGit } from '../src/git';
 import { silentLogger } from '../src/log';
 import { resolveSandboxRuntime } from '../src/paths';
 import { openSandboxRoots, sandboxDepsOf } from '../src/daemon';
-import { createGateSandbox } from '../src/sandbox';
+import { claimSandboxRoots, createGateSandbox } from '../src/sandbox';
 import { createGateRunner } from '../src/verify';
 
 const args = process.argv.slice(2);
@@ -46,6 +46,8 @@ const git = createGit({ bin: await resolveGit(), checkouts: () => [checkout] });
 // The daemon's own roots, made private as its start makes them, with every root lanes write.
 const roots = openSandboxRoots({}, homedir());
 if (roots.refusal !== null) throw roots.refusal;
+// Marked as a running daemon's for the run, so a daemon that starts meanwhile leaves its temp dir.
+const claim = claimSandboxRoots([roots.temp, roots.codexLanes, roots.files]);
 const gate = createGateRunner({
   sandbox: createGateSandbox({
     home: homedir(),
@@ -57,18 +59,22 @@ const gate = createGateRunner({
   }),
   logger: silentLogger,
 });
-const result = await gate.run({
-  project: { repoPath: checkout, sandboxLoopback: options.includes('--loopback') },
-  command,
-  logPath,
-  timeoutMs: 3_600_000,
-  env,
-  rules: [
-    ...hosts.map((pattern) => ({ toolName: 'SandboxNetworkAccess', pattern })),
-    ...reads.map((pattern) => ({ toolName: 'Read', pattern })),
-  ],
-  checkouts: [checkout],
-});
+const result = await gate
+  .run({
+    project: { repoPath: checkout, sandboxLoopback: options.includes('--loopback') },
+    command,
+    logPath,
+    timeoutMs: 3_600_000,
+    env,
+    rules: [
+      ...hosts.map((pattern) => ({ toolName: 'SandboxNetworkAccess', pattern })),
+      ...reads.map((pattern) => ({ toolName: 'Read', pattern })),
+    ],
+    checkouts: [checkout],
+  })
+  .finally(() => {
+    claim.release();
+  });
 process.stdout.write(
   `${result.tail.slice(-1500)}\nexit ${String(result.exitCode)} in ${String(Math.round(result.durationMs / 1000))} s; log: ${result.logPath}\n`,
 );

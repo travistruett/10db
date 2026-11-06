@@ -182,8 +182,9 @@ export interface LaneProfileInput {
   /** Exact paths no command may write, even where Claude Code opens their directory for writing. */
   denyWrites: readonly string[];
   /**
-   * Every root 10db keeps sandboxes' temp dirs and files in. Closed to reads and writes but for this
-   * sandbox's own temp dir and `ownFiles`, so no read list, toolchain or checkout opens another's.
+   * Every root 10db keeps sandboxes' temp dirs and files in. Closed to reads but for this sandbox's
+   * own temp dir and `ownFiles`, so no read list or toolchain opens another's; a profile whose
+   * checkout or extra write holds one is refused.
    */
   sandboxRoots: readonly string[];
   /** This sandbox's own files in a sandbox root that its commands read, such as its env file. */
@@ -247,6 +248,24 @@ function refuseSecretsOverNeeds(
  * given. `toolchainAccess` already keeps such paths out of the toolchain reads, so this can only meet
  * the checkout, the temp dir or an extra read, and refuses the session naming both.
  */
+/**
+ * A writable path at or over a sandbox root would let the lane write every other sandbox's temp dirs
+ * and files there, and would hold the deny that closes them, so the session is refused, naming both.
+ */
+function refuseWritesOverSandboxRoots(
+  writable: readonly string[],
+  sandboxRoots: readonly string[],
+): void {
+  for (const path of writable.flatMap(spellings)) {
+    const held = sandboxRoots.flatMap(spellings).find((root) => isEqualOrUnder(root, path));
+    if (held !== undefined)
+      throw new SandboxProfileError(
+        'sandboxRoots',
+        `${path} holds ${held}, where 10db keeps every sandbox's temp dirs and files; a lane may never write there, so register a project that doesn't hold it`,
+      );
+  }
+}
+
 function refuseToolchainSecretsOverNeeds(
   secrets: readonly string[],
   needed: readonly string[],
@@ -273,6 +292,7 @@ export function buildLaneProfile(input: LaneProfileInput): LaneSandboxSettings {
   const laneReads = [input.tmpDir, checkout, ...input.toolchainReads, ...input.extraReads];
   refuseSecretsOverNeeds(input.secretFiles, laneReads, input.toolchainReads);
   refuseToolchainSecretsOverNeeds(input.toolchainSecrets, laneReads);
+  refuseWritesOverSandboxRoots([checkout, ...input.extraWrites], input.sandboxRoots);
   const needed = [...SYSTEM_READS, ...laneReads];
   const denied = [...input.protectedReads, ...input.secretFiles, ...input.toolchainSecrets];
   const own = [input.tmpDir, ...input.ownFiles];
@@ -310,16 +330,7 @@ export function buildLaneProfile(input: LaneProfileInput): LaneSandboxSettings {
       ],
       allowRead: [...readable, ...listings],
       allowWrite: writable,
-      // A sandbox root under a writable path, such as a checkout that holds the home, stays closed
-      // to writes too; the one that holds this sandbox's own temp dir is left to its grant.
-      denyWrite: [
-        ...input.denyWrites,
-        ...input.sandboxRoots.filter(
-          (root) =>
-            !isEqualOrUnder(input.tmpDir, root) &&
-            [checkout, ...writable].some((path) => isEqualOrUnder(root, path)),
-        ),
-      ],
+      denyWrite: [...input.denyWrites],
     },
     network: {
       allowedDomains: [...input.allowedDomains],

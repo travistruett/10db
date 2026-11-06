@@ -28,7 +28,7 @@ import {
 } from '@10db/contracts';
 import { createTestStore, seedProject, type AccountRow } from '@10db/db';
 import { HARNESS_PLUGIN_DIR } from '@10db/harness';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { buildSessionPrompt } from '../src/briefing';
 import { loadEnv } from '../src/env';
@@ -56,6 +56,22 @@ import { isolatedGitEnv, seedWorkstream, TEST_REPO_CONFIG } from './fixtures';
 import { captureLogs } from './log-capture';
 
 const live = loadEnv(process.env).TENDB_LIVE_CLAUDE === '1';
+
+/**
+ * Marks the daemon's roots as a running daemon's while a describe's tests run, so a test daemon that
+ * starts meanwhile leaves their files alone. Taken before a test makes anything there: a claim
+ * removes every temp dir it finds unmarked.
+ */
+function claimRootsWhileRunning(): void {
+  let claim: ReturnType<typeof claimSandboxRoots> | null = null;
+  beforeAll(() => {
+    const roots = sandboxRoots();
+    claim = claimSandboxRoots([roots.temp, roots.codexLanes, roots.files]);
+  });
+  afterAll(() => {
+    claim?.release();
+  });
+}
 
 /** The daemon's own roots, made private as its start makes them, with every root lanes write. */
 function sandboxRoots(): SandboxRoots {
@@ -315,8 +331,6 @@ async function runLane(opts: {
     runtime: resolveSandboxRuntime(),
     worktreeRoot: join(opts.dataDir, 'worktrees'),
   });
-  // Marked as a running daemon's, so a test daemon that starts meanwhile leaves the lane's files alone.
-  const claim = claimSandboxRoots([roots.temp, roots.codexLanes, roots.files]);
   let laneSession: LaneSession | null = null;
   try {
     laneSession = await laneSandbox.forSession({
@@ -341,7 +355,6 @@ async function runLane(opts: {
     return await driveSession({ lane, project, workstreamId: workstream.id, envFile });
   } finally {
     laneSession?.dispose();
-    claim.release();
     test.close();
   }
 
@@ -566,6 +579,7 @@ function expectReadOnlyGitWorks(output: string): void {
 }
 
 describe.skipIf(!live)('lane sandbox, live', () => {
+  claimRootsWhileRunning();
   it('holds every canary in an ordinary checkout and keeps the git dir read-only', async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), '10db-live-')));
     const outside = realpathSync(mkdtempSync(join(tmpdir(), '10db-canary-')));
@@ -668,6 +682,12 @@ describe.skipIf(!live)('lane sandbox, live', () => {
         ].join('\n'),
       });
       report('ordinary-checkout', run, canaries);
+      // Each canary was there to read all run long, the other lane's temp dir's among them: a claim
+      // that swept it would make its row pass whatever the profile allowed.
+      for (const canary of canaries)
+        expect
+          .soft(readFileSync(canary.path, 'utf8'), `kept ${canary.label}`)
+          .toContain(canary.token);
 
       expect(run.events.at(-1)).toMatchObject({ type: 'ended', reason: 'stopped' });
       expect(run.probeOutput).toContain('CAT var-folders');
@@ -911,6 +931,7 @@ function expectAutoMode(run: LaneRun): void {
  * Auto mode needs a model that has it, so these run on sonnet.
  */
 describe.skipIf(!live)('lane sandbox in auto mode, live', () => {
+  claimRootsWhileRunning();
   const AUTO = { autoMode: true, model: 'sonnet' } as const;
 
   it('still hands 10db a hazard write, a hazard command however spelled and an edit an ask rule covers', async () => {

@@ -136,7 +136,7 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
         input.packageInstall === true ? (deps.pnpmLockDir ?? defaultPnpmLockDir()) : null;
       // What an earlier run or a crash left is not trusted either.
       if (lockPath !== null) {
-        sweepPnpmLockDir(lockPath, filesRoot);
+        sweepPnpmLockDir(lockPath, tmpRoot);
         openPnpmLockDir(lockPath);
       }
       const tmpDir = createLaneTempDir(tmpRoot);
@@ -160,7 +160,7 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
         }
         if (lockPath !== null) {
           try {
-            sweepPnpmLockDir(lockPath, filesRoot);
+            sweepPnpmLockDir(lockPath, tmpRoot);
           } catch (error) {
             record(error);
           }

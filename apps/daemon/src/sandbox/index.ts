@@ -14,7 +14,8 @@ export { createLaneEnvFile, removeLaneEnvFile } from './env-file';
 export {
   claimSandboxRoots,
   claimSandboxTempRoot,
-  sweepSystemTempRoots,
+  sweepSystemTempDirs,
+  sweepSystemTempFiles,
   type SweepReport,
 } from './stale-files';
 export {
