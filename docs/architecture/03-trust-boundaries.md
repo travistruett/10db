@@ -210,9 +210,9 @@ Under the lane sandbox (**built**), the design column holds for the file tools:
   the worktrees folder outside the session's own copy, with no card, and asks about the rest, naming every real
   path that needs asking. Read, Grep and Glob run without a card only inside the checkout and the project's read
   list, and the worktrees check runs before the read list, so a stored Read rule under that folder doesn't open
-  it (decision `2026-11-03-a-path-outside-the-lanes-copy-is-refused-not-carded.md`). The sandbox temp root (`/private/tmp`), all but the
-  session's own temp dir, is a protected read: it holds every other session's temp dir and sealed files, an MCP
-  server's approved variables among them.
+  it (decision `2026-11-03-a-path-outside-the-lanes-copy-is-refused-not-carded.md`). The sandbox temp roots (`/Users/Shared/10db-<uid>` for Claude lanes, gates and MCP servers, `~/.10db/lanes` for ChatGPT lanes) and the
+  sealed-file root `~/.10db/run`, all but the session's own temp dir, are protected reads: they hold every other session's temp dir, and
+  the sealed files and ledgers, an MCP server's approved variables among them.
 - Claude Code applies its own `disallowedTools` deny rules first (live: a Read of a space-named protected
   directory was denied by a rule, and the guard never saw it). For the calls that reach the guard's `PreToolUse`
   hook, it resolves every file-tool path through links, and refuses `.git/` internals and protected real paths. A path it can't resolve exactly is refused: a link loop, `..` past a missing
@@ -253,7 +253,8 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
   paths as well as their spelling, so a toolchain reached through a link is caught too. A link to a file
   anywhere just denies the file. `/tmp`, `/var`
   and `/etc` are in the allowed system locations, and they reopen only the links to `/private/tmp`,
-  `/private/var` and `/private/etc`: a canary under `/private/tmp` or `/private/var/folders` stays denied.
+  `/private/var` and `/private/etc`: a canary under `/private/var/folders` stays denied. A Claude lane's profile doesn't grant
+  `/private/tmp` itself; a ChatGPT lane can read and write it (§4.13).
 - **Write.** The checkout (Claude Code's own default) and the lane's temp directory, and nothing shared with
   another lane or the builder's own tools. In a linked worktree Claude Code also opens the worktree's own git dir for writing (`HEAD`, `index`, new files), except `commondir`, `config.worktree` and `gitdir`; see the linked-worktree bullet below.
 - **Temp directory.** Each session gets its own, under `/Users/Shared/10db-<uid>/` (a ChatGPT lane's under `~/.10db/lanes/`; `decisions/2026-11-05-sandbox-files-leave-private-tmp.md`), through `CLAUDE_CODE_TMPDIR`. Claude Code
@@ -392,11 +393,13 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
   program (`cd $d`, `eslint $f`) does not earn a card. This is a best-effort scan of the command's text, not a
   proof: a hazard run through a runner the scan does not look through (it reads through `env`, `mise x --`, `corepack`, `arch` and `script`), a flag value in a program with no flag table, and a program
   that runs a hazard on its own are known gaps (the decision names them), and the sandbox bounds what they can
-  do. An approved pnpm 12 install still fails in the sandbox: pnpm takes its store operation lock in a fixed
+  do. An approved pnpm 12 install fails in a lane's sandbox: pnpm takes its store operation lock in a fixed
   `/private/tmp/pnpm-store-operation-locks-<uid>` and ignores `TMPDIR` and its store settings for it (measured:
   pnpm 12.13.0 under a Seatbelt profile fails with `ERR_PNPM_STORE_DIR_OPEN_OPERATION_LOCK` without that
-  directory and installs with it). That directory is shared with every lane and the builder's own pnpm, so the
-  profile keeps it closed, and the pnpm hazard card says to run the install outside the lane or use npm.
+  directory and installs with it). That directory is shared with every lane and the builder's own pnpm, so a lane's
+  profile keeps it closed, and the pnpm hazard card says to run the install outside the lane or use npm. A package-install gate may write
+  it (`openPnpmLockDir`, which refuses a link or a directory open to other users); afterwards `sweepPnpmLockDir` never looks into it in
+  place: it renames it into a private directory under the lane temp root and removes only that moved name (§4.7).
 - **The git dirs are read-only to lanes.** Only the daemon writes git state. Claude Code opens the checkout,
   `.git` included, and a linked worktree's own git dir for writing; the profile denies writes to the checkout's
   git dir, its common dir and `<checkout>/.git`, file or directory, wherever the git dir lies, and to those of
@@ -439,7 +442,7 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
 <node> <srt.mjs> --settings <sealed file> -c <inner>`, so the session env Claude Code merges into a
     server's never reaches srt's host. srt and node are the daemon's own (`sandboxRuntimeFor`), refused when
     they lie where a project writes. Inside the sandbox, `/usr/bin/env -i <srt's proxy variables> /bin/sh -c '. <env file> && exec "$@"'`
-    keeps srt's proxy variables by name and sets the rest of the server's env from a sealed file (mode 0400, beside the temp dirs and outside every one), and execs
+    keeps srt's proxy variables by name and sets the rest of the server's env from a sealed file (mode 0400, in `~/.10db/run`, outside every temp dir), and execs
     the command, so srt's TERM reaches it when Claude Code stops it. No approved value is on a command line: a stdio
     server whose command or args hold `${` is ignored when the config is read, with a card saying values reach
     it only through its env block. The gate's signal wrapper isn't used: it exists so a killed gate fails its
@@ -482,7 +485,7 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
     through srt's proxy to an approved `.invalid` name and to a subdomain of an approved wildcard passes the
     allowlist; one to the wildcard's own domain, to an unapproved name, and every one from a server approved
     with no host, gets srt's `blocked-by-allowlist` refusal.
-  - **After a crash.** A daemon that starts sweeps the sandbox temp root before any session or gate starts
+  - **After a crash.** A daemon that starts sweeps the sandbox roots (`/Users/Shared/10db-<uid>`, `~/.10db/run`, and the system temp dirs for what an older daemon left there) before any session or gate starts
     (`claimSandboxTempRoot`): it removes this user's lane temp dirs (`10db-` and six characters) and sealed
     files (`10db-env-`, `10db-gate-`, `10db-mcp-`), each by its exact name and its own kind, never following
     or removing a link. It then marks the root with its pid (`10db-daemon-<pid>`), and a daemon with another
@@ -505,7 +508,7 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
   only for fake sessions (`TENDB_FAKE_SCRIPTS`, development and e2e only), whose gates then run unsandboxed
   (§7).
   - **The engine.** srt's own command line, which the app carries beside the daemon (`srt.mjs`), runs once per
-    gate with a sealed settings file (mode 0400, beside the temp dirs and outside every one of them), so each
+    gate with a sealed settings file (mode 0400, in `~/.10db/run`, outside every temp dir), so each
     run has its own proxy and allow list. srt in-process would share one proxy and one set of settings across
     every project's gates. srt's host, the shell it starts the sandbox from and `/usr/bin/env` run outside the
     sandbox with only a system `PATH`, `HOME` and srt's temp variable; the gate's env is set inside it.
@@ -521,7 +524,7 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
     `/`, allow back the system locations, the checkout, the toolchains by layout and the run's temp dir, and the
     project's stored read paths. The protected reads, the checkout's `.env*` files and the toolchain secrets stay
     denied. No home path opens but the toolchains: not `~/.ssh`, `~/.config` or the data directory.
-  - **Writes** are the checkout and the run's own temp dir, made under `/private/tmp` for the run and removed
+  - **Writes** are the checkout and the run's own temp dir, made under `/Users/Shared/10db-<uid>` for the run and removed
     after it, holding its package caches (`CARGO_HOME` included, so cargo builds from scratch each run). Every
     registered checkout's git dir, common dir and `.git` are denied, every other registered checkout that isn't
     this one's ancestor is denied as a whole, and so is srt's shared `/tmp/claude`.
