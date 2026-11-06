@@ -436,9 +436,18 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
   (§4.7), one sandbox per server and session, made with the lane's own (`LaneSession.mcpServers`) and removed
   with it. An http or sse server is a connection Claude Code makes, not a process, so it needs none.
   - **Launch.** Claude Code runs `/usr/bin/env -i PATH=<system> HOME=… CLAUDE_CODE_TMPDIR=<its temp dir>
-<node> <srt.mjs> --settings <sealed file> -c <inner>`, so the session env Claude Code merges into a
-    server's never reaches srt's host. srt and node are the daemon's own (`sandboxRuntimeFor`), refused when
-    they lie where a project writes. Inside the sandbox, `/usr/bin/env -i <srt's proxy variables> /bin/sh -c '. <env file> && exec "$@"'`
+SRT_DEBUG=1 <node> -r /private/tmp/10db-mcp-<hex>.cjs <srt.mjs> --settings <sealed file> -c <inner>`, so the
+    session env Claude Code merges into a server's never reaches srt's host. srt and node are the daemon's own
+    (`sandboxRuntimeFor`), refused when they lie where a project writes. `SRT_DEBUG` changes only srt's
+    logging. The `-r` file is a refusal preload (`sandbox/mcp-refusals.ts`) that node runs in srt's host,
+    outside the sandbox. It is the one file run outside a sandbox that lies under the sandbox temp root
+    (§4.7 refuses an srt or node there), and it is safe there for the reason the other sealed files are: 10db
+    writes it with `wx` and mode 0400 directly in the root, beside the temp dirs and in no sandbox's writable
+    dir, so no lane or server can replace or edit it, and the after-crash sweep removes it by exact name. Its
+    only input is the log path the daemon chose; nothing of the server's is in its source. It drops srt's
+    `[SandboxDebug]` lines from stderr and appends each host srt's proxy refused (`Connection blocked to h:p`,
+    `HTTP request blocked to h:p`), once and at most 50, to a per-server `10db-mcp-<hex>.log` (0600, made
+    with `wx`). Inside the sandbox, `/usr/bin/env -i <srt's proxy variables> /bin/sh -c '. <env file> && exec "$@"'`
     keeps srt's proxy variables by name and sets the rest of the server's env from a sealed file (mode 0400, beside the temp dirs and outside every one), and execs
     the command, so srt's TERM reaches it when Claude Code stops it. No approved value is on a command line: a stdio
     server whose command or args hold `${` is ignored when the config is read, with a card saying values reach
@@ -480,7 +489,11 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
     `pnpm dlx`) reaches the registry only when `.10db/mcp-hosts.json` names it (`registry.npmjs.org` for
     `npx`); otherwise it fails to connect unless the repo installs the package. 10db doesn't recognise such
     commands: a person writes the registry in the file and the builder approves it on the card. The session's
-    prompt and log name a server that failed to connect. A client that ignores the proxy variables and dials
+    prompt and log name a server that failed to connect. For a host srt's proxy refused, the daemon polls the
+    server's refusal log every two seconds, and a last time before the log is removed, and reads it as
+    untrusted input: it keeps only whole lines that are host names (lower case, at most 253 characters, once
+    each, at most 50) and warns `{ server, host }` with `REFUSED_MESSAGE`, which says to add the host to the
+    server's entry in `.10db/mcp-hosts.json`. A client that ignores the proxy variables and dials
     out itself is refused by Seatbelt.
   - **Measured** (`test/mcp-sandbox.seatbelt.test.ts`, macOS, in `make gate` and CI's macOS job): srt adds
     nothing to a server's stdout, whose JSON-RPC `initialize` answer is its only line. Reading a canary in home,
@@ -490,7 +503,8 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
     env file, writing its temp dir and its approved variable work, and the TERM sent to srt reaches it. A `CONNECT`
     through srt's proxy to an approved `.invalid` name and to a subdomain of an approved wildcard passes the
     allowlist; one to the wildcard's own domain, to an unapproved name, and every one from a server approved
-    with no host, gets srt's `blocked-by-allowlist` refusal.
+    with no host, gets srt's `blocked-by-allowlist` refusal. The refusal log then holds the hosts srt refused
+    (`other.invalid`, `wild.invalid`) and no approved one.
   - **After a crash.** A daemon that starts sweeps the sandbox temp root before any session or gate starts
     (`claimSandboxTempRoot`): it removes this user's lane temp dirs (`10db-` and six characters) and sealed
     files (`10db-env-`, `10db-gate-`, `10db-mcp-`), each by its exact name and its own kind, never following
