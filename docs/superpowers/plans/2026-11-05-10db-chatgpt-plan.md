@@ -541,7 +541,7 @@ Expected: PASS
 - Produces: `mapCodexNotification(n: { method: string; params: unknown }, state: CodexTurnState): readonly SessionEvent[]`
   and `rateLimitEvents(snapshot: RateLimitSnapshot): readonly RateLimitEvent[]`, with `limitTypeOf(minutes: number |
   null): string | null`: 300 is `five_hour`, 10080 is `seven_day`, null is null, otherwise `${minutes}_minutes`. Use the
-  windows Task 1 recorded. `CodexTurnState` holds the turn's last message text and this session's token totals.
+  windows Task 1 recorded. `CodexTurnState` holds the turn's last message text, the baseline and the latest `total`.
   `RateLimitSnapshot` comes from `codex-protocol.ts`; `RateLimitEvent` is
   `Extract<SessionEvent, { type: 'rate_limit' }>`.
 
@@ -553,7 +553,7 @@ Expected: PASS
 ['a message', itemCompleted({ type: 'agentMessage', text: 'hi' }), [{ type: 'activity', kind: 'text' }]],
 ['token use', tokenUsage({ last: 136000, window: 272000 }),
   [{ type: 'context', percentage: 50, totalTokens: 136000, maxTokens: 272000 }]],
-['compaction', { method: 'thread/compacted', params: {} }, [{ type: 'compacted', trigger: 'auto' }]],
+['compaction', itemCompleted({ type: 'contextCompaction', id: 'c1' }), [{ type: 'compacted', trigger: 'auto' }]],
 ['a method 10db does not read', { method: 'turn/diff/updated', params: {} }, []],
 ['a known method with a bad shape', { method: 'turn/completed', params: {} }, []], // logged by the caller
 
@@ -562,12 +562,12 @@ expect(rateLimitEvents({ primary: { usedPercent: 96.5, windowDurationMins: 10080
   .toEqual([{ type: 'rate_limit', status: 'allowed', utilization: 0.965,
     resetsAt: new Date(1800000000000), limitType: 'seven_day' }]);
 
-// turn_complete: this session's tokens, with cached ones split out as Claude's event carries them. Each
-// thread/tokenUsage/updated during a turn adds its `last`, because a resumed thread's `total` includes earlier sessions
-// and `updateSessionUsage` sets the row. Two updates of last { inputTokens: 300, cachedInputTokens: 30, outputTokens: 60 },
-// last message 'done'
+// turn_complete: this session's tokens, with cached ones split out as Claude's event carries them. A session's tokens
+// are the thread's latest `total` minus a baseline, the last `total` seen outside a turn before the first turn, because
+// a resumed thread's `total` includes earlier sessions, `last` repeats and estimates around compaction, and
+// `updateSessionUsage` sets the row. Baseline { inputTokens: 100, cachedInputTokens: 10, outputTokens: 20 }, then total
+// { inputTokens: 700, cachedInputTokens: 70, outputTokens: 140 }, last message 'done'
 // -> { type: 'turn_complete', inputTokens: 540, cachedTokens: 60, outputTokens: 120, costUsd: 0, text: 'done' }
-// a token update outside a turn adds nothing
 
 // codex-session.test.ts
 it('sends text as turn/steer during a turn and turn/start between turns', ...);

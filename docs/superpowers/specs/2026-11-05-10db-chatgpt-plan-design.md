@@ -144,11 +144,11 @@ Mapping to `SessionEvent`:
 
 | Codex                                | 10db                                                          |
 | ------------------------------------ | ------------------------------------------------------------- |
-| `item/completed`                     | `activity`, text or tool                                      |
+| `item/completed`, anything else | `activity`, text or tool |
 | `thread/tokenUsage/updated`          | `context`, from `last` and `modelContextWindow`               |
 | `turn/completed`, completed          | `turn_complete` with `costUsd: 0`                             |
 | `turn/completed`, failed             | `turn_complete` with `result: 'error'`, unless named below    |
-| `thread/compacted`                   | `compacted`, trigger `auto`                                   |
+| `item/completed`, `contextCompaction` | `compacted`, trigger `auto` |
 | `account/rateLimits/updated`         | `rate_limit`, one per window                                  |
 | `usageLimitExceeded`                 | `rate_limit` with `rejected`, then `ended: rate_limited`      |
 | `unauthorized`                       | `ended: account_refused`, signed out                          |

@@ -41,8 +41,9 @@
 - **Lifecycle.** `thread/resume` across a process restart, `turn/interrupt` in 0.8 s, `turn/steer` during a turn, and
   two app-servers on one home.
 - **Limits.** `account/rateLimits/updated` carries `usedPercent`, `windowDurationMins` and `resetsAt`. A hard limit is a
-  failed turn with `codexErrorInfo: usageLimitExceeded` and `willRetry: false`. Token updates fire per model request:
-  `last` is that request, and `total` is the whole thread, earlier sessions included after a resume.
+  failed turn with `codexErrorInfo: usageLimitExceeded` and `willRetry: false`. `total` is the whole thread, earlier
+  sessions included after a resume, where it replays outside a turn. `last` repeats and estimates around compaction.
+- **Compaction.** An `item/completed` with `contextCompaction`. `thread/compacted` is deprecated and never fired.
 
 ## Traps
 
