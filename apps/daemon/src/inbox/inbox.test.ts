@@ -10,6 +10,7 @@ import {
   InboxAnswerRefused,
   type HazardDef,
   InvalidError,
+  McpToolGrant,
   mintId,
   PARK_TASK_CHOICE,
   ProposedPrinciples,
@@ -1116,6 +1117,206 @@ describe('permission broker', () => {
     });
     void decide(request('Bash', { command: 'curl -s https://example.com' })).catch(() => undefined);
     expect(onlyOpenCard().kind).toBe('permission');
+  });
+
+  describe('every tool of an approved project MCP server', () => {
+    const HASH = 'c'.repeat(64);
+    const CHANGED = 'd'.repeat(64);
+    const COST = 'mcp__aws-billing__cost-explorer';
+    const CREDITS = 'mcp__aws-billing__credits';
+    const LISTED = [
+      'Bash',
+      'mcp__10db__commit',
+      COST,
+      CREDITS,
+      'mcp__aws-billing__compute-optimizer',
+      'mcp__other__cost-explorer',
+    ];
+    const SERVER_OPTION = 'allow_mcp_server';
+
+    function mcpBroker(
+      ws: ReturnType<typeof seedWorkstream>,
+      approved: Record<string, string> = { 'aws-billing': HASH, other: HASH },
+    ) {
+      return createPermissionBroker(
+        { state, inbox, git: NO_GIT, logger: silentLogger },
+        {
+          projectId: ws.project.id,
+          workstreamId: ws.workstream.id,
+          sessionId: mintId('Session'),
+          observer: { onWaitStart: () => undefined, onWaitEnd: () => undefined },
+          signal: new AbortController().signal,
+          mcpApproved: approved,
+        },
+      );
+    }
+    const call = (toolName: string, listedTools: readonly string[] | null = LISTED) => ({
+      toolName,
+      input: {} as Record<string, unknown>,
+      toolUseId: 't1',
+      escalated: false,
+      signal: new AbortController().signal,
+      ...(listedTools === null ? {} : { listedTools }),
+    });
+    function openCards(): InboxItemDto[] {
+      return listInbox(state.db, { states: ['OPEN'] });
+    }
+
+    it('offers the server option beside the existing four, with what it would cover', () => {
+      const ws = seedWorkstream(base);
+      void mcpBroker(ws)(call(COST)).catch(() => undefined);
+      const card = openCards()[0];
+      expect(card?.options.map((o) => o.label)).toEqual([
+        'allow_once',
+        'allow_workstream',
+        'allow_project',
+        SERVER_OPTION,
+        'deny',
+      ]);
+      expect(card?.options.find((o) => o.label === SERVER_OPTION)?.description).toContain(
+        'aws-billing',
+      );
+      expect(card?.detail?.['mcpToolGrant']).toEqual({
+        name: 'aws-billing',
+        configHash: HASH,
+        tools: [COST, CREDITS, 'mcp__aws-billing__compute-optimizer'],
+      });
+    });
+
+    it.each<
+      [string, string, Record<string, unknown>, Record<string, string>, readonly string[] | null]
+    >([
+      ['a Bash call', 'Bash', { command: 'docker compose up' }, { 'aws-billing': HASH }, LISTED],
+      ['a file call', 'Read', { file_path: '/x' }, { 'aws-billing': HASH }, LISTED],
+      ['an edit call', 'Edit', { file_path: '/x' }, { 'aws-billing': HASH }, LISTED],
+      ['a web call', 'WebFetch', { url: 'https://x.dev' }, { 'aws-billing': HASH }, LISTED],
+      ['a 10db tool', 'mcp__10db__commit', {}, { 'aws-billing': HASH }, LISTED],
+      [
+        'a server not approved in the session',
+        'mcp__stranger__x',
+        {},
+        { other: HASH },
+        ['mcp__stranger__x'],
+      ],
+      [
+        'a tool the server did not list',
+        'mcp__aws-billing__session-sql',
+        {},
+        { 'aws-billing': HASH },
+        LISTED,
+      ],
+      ['a session that listed no tools', COST, {}, { 'aws-billing': HASH }, []],
+      ['a session with no tool list', COST, {}, { 'aws-billing': HASH }, null],
+      ['a session with no approved servers', COST, {}, {}, LISTED],
+    ])('offers it on no card for %s', (_name, tool, input, approved, listed) => {
+      const ws = seedWorkstream(base);
+      void mcpBroker(ws, approved)({ ...call(tool, listed), input }).catch(() => undefined);
+      const card = openCards()[0];
+      expect(card?.kind).toBe('permission');
+      expect(card?.options.map((o) => o.label)).not.toContain(SERVER_OPTION);
+      expect(card?.detail?.['mcpToolGrant']).toBeUndefined();
+    });
+
+    it('allows every listed tool of the server in this project, and records the decision', async () => {
+      const ws = seedWorkstream(base);
+      const first = mcpBroker(ws)(call(COST));
+      inbox.answer(openCards()[0]?.id ?? mintId('InboxItem'), { choice: SERVER_OPTION });
+      expect(await first).toEqual({ behavior: 'allow' });
+      expect(
+        listPermissionRules(state.db, ws.project.id, null).map((r) => [
+          r.toolName,
+          r.workstreamId,
+          r.pattern,
+        ]),
+      ).toEqual(
+        [COST, CREDITS, 'mcp__aws-billing__compute-optimizer'].map((tool) => [
+          tool,
+          null,
+          `${HASH}:aws-billing`,
+        ]),
+      );
+      expect(searchDecisions(state.db, ws.project.id, 'aws-billing', 5)).toEqual([
+        expect.objectContaining({
+          question: 'Allow every aws-billing tool in this project?',
+          choice: 'Always allow',
+        }),
+      ]);
+      // A later call, even from a new session of the lane, runs without a card.
+      expect(await mcpBroker(ws)(call(CREDITS))).toEqual({ behavior: 'allow' });
+      expect(await mcpBroker(ws)(call('mcp__aws-billing__compute-optimizer'))).toEqual({
+        behavior: 'allow',
+      });
+      expect(openCards()).toEqual([]);
+    });
+
+    describe('after the answer', () => {
+      async function answered() {
+        const ws = seedWorkstream(base);
+        const first = mcpBroker(ws)(call(COST));
+        inbox.answer(openCards()[0]?.id ?? mintId('InboxItem'), { choice: SERVER_OPTION });
+        await first;
+        return ws;
+      }
+
+      it.each<[string, string, Record<string, string>, boolean]>([
+        ['a tool listed at the answer', CREDITS, { 'aws-billing': HASH }, false],
+        ['a tool added later', 'mcp__aws-billing__session-sql', { 'aws-billing': HASH }, true],
+        ['a listed tool once the config changed', CREDITS, { 'aws-billing': CHANGED }, true],
+        ['the answered tool once the config changed', COST, { 'aws-billing': CHANGED }, true],
+        [
+          'another server with a tool of the same name',
+          'mcp__other__cost-explorer',
+          { 'aws-billing': HASH, other: HASH },
+          true,
+        ],
+      ])('%s asks: %s', async (_name, tool, approved, asks) => {
+        const ws = await answered();
+        const listed = [...LISTED, 'mcp__aws-billing__session-sql'];
+        const outcome = mcpBroker(ws, approved)(call(tool, listed));
+        if (asks) {
+          void outcome.catch(() => undefined);
+          expect(openCards()).toHaveLength(1);
+        } else {
+          expect(await outcome).toEqual({ behavior: 'allow' });
+          expect(openCards()).toEqual([]);
+        }
+      });
+
+      it('offers the option again for a tool added later, covering it with the rest', async () => {
+        const ws = await answered();
+        const listed = [...LISTED, 'mcp__aws-billing__session-sql'];
+        void mcpBroker(ws)(call('mcp__aws-billing__session-sql', listed)).catch(() => undefined);
+        const grant = McpToolGrant.parse(openCards()[0]?.detail?.['mcpToolGrant']);
+        expect(grant.tools).toEqual([
+          COST,
+          CREDITS,
+          'mcp__aws-billing__compute-optimizer',
+          'mcp__aws-billing__session-sql',
+        ]);
+      });
+
+      it('does not cover another project', async () => {
+        await answered();
+        const other = seedWorkstream(base);
+        void mcpBroker(other)(call(CREDITS)).catch(() => undefined);
+        expect(openCards()).toHaveLength(1);
+        expect(openCards()[0]?.projectId).toBe(other.project.id);
+      });
+    });
+
+    it('stores nothing and allows only the call for allow_once', async () => {
+      const ws = seedWorkstream(base);
+      const first = mcpBroker(ws)(call(COST));
+      inbox.answer(openCards()[0]?.id ?? mintId('InboxItem'), { choice: 'allow_once' });
+      await first;
+      expect(listPermissionRules(state.db, ws.project.id, null)).toEqual([]);
+    });
+
+    it('refuses the option on a card that does not offer it', () => {
+      const ws = seedWorkstream(base);
+      void broker(ws)(request('Bash', { command: 'docker compose up' })).catch(() => undefined);
+      expect(() => inbox.answer(onlyOpenCard().id, { choice: SERVER_OPTION })).toThrow();
+    });
   });
 });
 

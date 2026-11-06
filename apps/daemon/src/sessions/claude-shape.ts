@@ -27,6 +27,7 @@ import {
   toShapeHookOutput,
   userMessage,
 } from './claude-mapping';
+import { currentToolNames } from './mcp-tool-names';
 import { TENDB_MCP_SERVER } from './project-mcp';
 import { settleWithin } from './settle-within';
 import {
@@ -74,6 +75,7 @@ function shapeOptions(
   gate: { readonly verified: Promise<boolean>; readonly refused: () => boolean },
   abortController: AbortController,
   onSpawn: (pid: number | null) => void,
+  listedTools: () => Promise<readonly string[]>,
 ): Options {
   const { spawn } = deps;
   const { sandbox } = spec;
@@ -122,6 +124,8 @@ function shapeOptions(
         return { behavior: 'deny', message: UNVERIFIED, interrupt: true };
       const cwd = hookCwds.get(options.toolUseID);
       hookCwds.delete(options.toolUseID);
+      // Only a call to an MCP tool is offered a server rule, and only it needs the tool list.
+      const tools = toolName.startsWith('mcp__') ? await listedTools() : undefined;
       const decision = await spec.canUseTool({
         toolName,
         input,
@@ -129,6 +133,7 @@ function shapeOptions(
         escalated: false,
         signal: options.signal,
         ...(cwd === undefined ? {} : { cwd }),
+        ...(tools === undefined ? {} : { listedTools: tools }),
       });
       // The session can be refused while the answer was pending.
       if (gate.refused()) return { behavior: 'deny', message: UNVERIFIED, interrupt: true };
@@ -238,6 +243,8 @@ export function startShapeSession(
   let stopRequested = false;
   let promptSent = false;
   let started = false;
+  /** The tool names the latest init message listed; the repo's MCP servers come after it. */
+  let initTools: readonly string[] = [];
   let failure: { reason: SessionEndReason; message: string; refusal?: AccountRefusal } | null =
     null;
   let resolvePreflight: (ok: boolean) => void = () => undefined;
@@ -284,6 +291,14 @@ export function startShapeSession(
       (spawned) => {
         pid = spawned;
       },
+      () =>
+        currentToolNames(
+          () => q.mcpServerStatus(),
+          initTools,
+          (error) => {
+            log.debug({ err: String(error) }, 'mcp server tool list unavailable');
+          },
+        ),
     ),
   });
 
@@ -412,6 +427,7 @@ export function startShapeSession(
             continue;
           }
         }
+        if (msg.type === 'system' && msg.subtype === 'init') initTools = msg.tools;
         if (msg.type === 'system' && msg.subtype === 'init' && !started) {
           if (!(await preflightOk)) continue;
           checkInit(msg);

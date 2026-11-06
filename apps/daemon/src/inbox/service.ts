@@ -12,6 +12,8 @@ import {
   InboxState,
   InvalidError,
   isParkChoice,
+  MCP_TOOL_GRANT_DETAIL,
+  McpToolGrant,
   PermissionChoice,
   ProposalId,
   ProposalKind,
@@ -53,7 +55,7 @@ import {
 import type { StateStore } from '../events';
 import { applyPrincipleCard, proposeStandingRules, recordAnswerDecision } from '../knowledge';
 import type { Logger } from '../log';
-import { ESCALATED_KEY, EXACT_WRITE_KEY, storableRule } from '../permissions';
+import { ESCALATED_KEY, EXACT_WRITE_KEY, mcpGrantRules, storableRule } from '../permissions';
 import { proposePlacement } from '../placement';
 import { applyGateHostChoice } from './gate-host-card';
 import { applyMcpApproval } from './mcp-approval';
@@ -264,6 +266,39 @@ interface Waiter {
 }
 
 /**
+ * "Every tool of this server": one project rule for each tool name the server had listed when the card was
+ * raised, each tied to the config hash the builder had approved. Nothing is stored when the card carries no
+ * grant, so a card that never offered the choice cannot create one.
+ */
+function applyMcpServerChoice(ctx: WriteContext, item: InboxItemDto, answer: InboxAnswer): void {
+  const grant = McpToolGrant.safeParse(item.detail?.[MCP_TOOL_GRANT_DETAIL]);
+  if (!grant.success) return;
+  const rules = mcpGrantRules(grant.data);
+  for (const rule of rules) {
+    insertPermissionRule(ctx, {
+      projectId: item.projectId,
+      workstreamId: null,
+      toolName: rule.toolName,
+      pattern: rule.pattern,
+      sourceInboxId: item.id,
+    });
+  }
+  const sourceId = insertSource(ctx, 'inbox_answer', { inboxId: item.id });
+  insertDecision(ctx, {
+    projectId: item.projectId,
+    question: `Allow every ${grant.data.name} tool in this project?`,
+    choice: 'Always allow',
+    rationale:
+      answer.note ??
+      `Allowed from the inbox for the ${String(rules.length)} tools the server listed (${rules.map((r) => r.toolName).join(', ')}), while its approved config was ${grant.data.configHash}`,
+    decidedBy: 'me',
+    scope: 'project',
+    area: null,
+    sourceId,
+  });
+}
+
+/**
  * A permission card's choice becomes rules in the answer's own transaction, so the choice holds even
  * when the asking session was parked before the builder answered. A Bash command with no storable
  * prefix, and a sandboxed file path that holds a glob character, get no rule: the choice then
@@ -273,6 +308,10 @@ function applyPermissionChoice(ctx: WriteContext, item: InboxItemDto, answer: In
   const toolName = item.detail?.['toolName'];
   const summary = item.detail?.['summary'];
   if (typeof toolName !== 'string' || typeof summary !== 'string') return;
+  if (answer.choice === PermissionChoice.AllowMcpServer) {
+    applyMcpServerChoice(ctx, item, answer);
+    return;
+  }
   const rule = storableRule(toolName, summary);
   if (rule === undefined) return;
   if (answer.choice === PermissionChoice.AllowWorkstream) {

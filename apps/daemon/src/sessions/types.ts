@@ -27,6 +27,11 @@ export interface ToolRequest {
    * `cd` moves it off the lane's copy. Absent where no hook ran for the call.
    */
   readonly cwd?: string;
+  /**
+   * Every tool name the session's init message listed, project MCP tools included. A card for a project
+   * MCP tool offers "every tool of this server" over the ones listed here. Absent where the adapter has none.
+   */
+  readonly listedTools?: readonly string[];
 }
 
 export type ToolDecision =

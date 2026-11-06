@@ -1,5 +1,6 @@
 import {
   PermissionChoice,
+  MCP_TOOL_GRANT_DETAIL,
   QuestionCategory,
   Urgency,
   type InboxAnswer,
@@ -7,6 +8,7 @@ import {
   type InboxItemId,
   type HazardDef,
   type InboxOption,
+  type McpToolGrant,
   type ProjectId,
   type SessionId,
   type ShapeId,
@@ -33,6 +35,7 @@ import {
   EXACT_WRITE_KEY,
   foundHostFile,
   matchPermissionRule,
+  mcpToolGrant,
   storableRule,
 } from '../permissions';
 import { takeFoundHostsReading } from '../registries';
@@ -63,6 +66,12 @@ type BrokerContext = BrokerOwner & {
   readonly observer: WaitObserver;
   readonly signal: AbortSignal;
   /**
+   * The repo MCP servers this session runs, each with the config hash the builder approved (server name to
+   * hash). A server grant matches only at that hash, and only a tool of one of these servers is offered one.
+   * Absent for a session that runs none (a Plan conversation).
+   */
+  readonly mcpApproved?: Readonly<Record<string, string>>;
+  /**
    * An `allow_once` answered after the workstream was parked: the first identical call is allowed, and an
    * edit's write is recorded on the card it answered (`cardId`).
    */
@@ -90,6 +99,7 @@ const ALLOWING: readonly string[] = [
   PermissionChoice.AllowOnce,
   PermissionChoice.AllowWorkstream,
   PermissionChoice.AllowProject,
+  PermissionChoice.AllowMcpServer,
 ];
 
 const AskUserQuestionInput = z.looseObject({
@@ -123,6 +133,14 @@ function permissionOptions(storable: boolean): InboxOption[] {
     },
     { label: PermissionChoice.Deny, description: 'Deny; your note is passed to the agent' },
   ];
+}
+
+/** The option a project MCP tool's card adds: the whole server, as far as it listed tools when the card was raised. */
+function serverOption(grant: McpToolGrant): InboxOption {
+  return {
+    label: PermissionChoice.AllowMcpServer,
+    description: `Always allow every ${grant.name} tool in this project: the ${String(grant.tools.length)} it lists now. A tool it adds later, or a change to its approved config, asks again (records a decision)`,
+  };
 }
 
 /** A card whose call is never stored as a rule: allow it this once, or deny it. */
@@ -343,7 +361,7 @@ export function createPermissionBroker(
     if (
       !req.escalated &&
       !onceOnly &&
-      unlessTooDeep(() => matchPermissionRule(req, rules, paths), undefined)
+      unlessTooDeep(() => matchPermissionRule(req, rules, paths, ctx.mcpApproved), undefined)
     ) {
       return { behavior: 'allow' };
     }
@@ -356,6 +374,12 @@ export function createPermissionBroker(
     }
     const storable =
       unlessTooDeep(() => storableRule(req.toolName, summary), undefined) !== undefined;
+    // Only a project MCP server's tool, listed by this session, whose server runs at an approved config.
+    const grant =
+      onceOnly || ctx.mcpApproved === undefined || req.listedTools === undefined
+        ? null
+        : mcpToolGrant(req.toolName, req.listedTools, ctx.mcpApproved);
+    const options = onceOnly ? ONCE_OPTIONS : optionsFor(storable);
     const { item, answer } = deps.inbox.ask({
       projectId: ctx.projectId,
       ...owner,
@@ -364,13 +388,19 @@ export function createPermissionBroker(
       title: `Allow ${req.toolName}?`,
       body: ask?.body ?? summary,
       // The service refuses a choice the card does not offer, so a once-only card stores no rule.
-      options: onceOnly ? ONCE_OPTIONS : optionsFor(storable),
+      options:
+        grant === null
+          ? options
+          : options.flatMap((o) =>
+              o.label === PermissionChoice.Deny ? [serverOption(grant), o] : [o],
+            ),
       recommendation: null,
       category: QuestionCategory.Environment,
       urgency: Urgency.Normal,
       detail: {
         toolName: req.toolName,
         summary,
+        ...(grant === null ? {} : { [MCP_TOOL_GRANT_DETAIL]: grant }),
         ...editDetail(req, ask),
         ...(req.escalated ? { [ESCALATED_KEY]: true } : {}),
       },
