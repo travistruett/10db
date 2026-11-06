@@ -55,3 +55,4 @@ export {
   type LaneSession,
   type LaneSessionInput,
 } from './lane-sandbox';
+export { singleQuoted } from './posix-quote';

@@ -9,8 +9,10 @@ import {
 import { join } from 'node:path';
 import { parse, stringify } from 'smol-toml';
 import { z } from 'zod';
+import { spawnSync } from 'node:child_process';
 import { afterEach, describe, expect, it } from 'vitest';
 import { tempDir, type TempDir } from '../../test/fixtures';
+import { singleQuoted } from '../sandbox';
 import { CODEX_HOOK_TIMEOUT_SECONDS, codexHomes, GUARD_HOOK_EVENT } from './codex-home';
 
 const dirs: TempDir[] = [];
@@ -151,5 +153,20 @@ describe('codex home', () => {
     expect(statSync(join(home, 'guard-hook.sh')).mode & 0o777).toBe(0o755);
     expect(statSync(home).mode & 0o777).toBe(0o700);
     expect(statSync(codexHome.emptyHome).isDirectory()).toBe(true);
+  });
+
+  it('quotes a home path that holds a single quote', async () => {
+    const root = tempDir("codex 'home'");
+    dirs.push(root);
+    const home = join(root.path, "it's here");
+    const checkout = join(root.path, 'checkout');
+    mkdirSync(checkout);
+    await codexHomes()(home).prepare(checkout);
+    const command = readConfig(home).hooks.PreToolUse[0]?.hooks[0]?.['command'];
+    expect(command).toBe(`/bin/sh ${singleQuoted(join(home, 'guard-hook.sh'))}`);
+    // The shell finds the script: it runs and refuses the call (exit 2) as it does with no socket.
+    const run = spawnSync('/bin/sh', ['-c', String(command)], { env: {}, encoding: 'utf8' });
+    expect(run.status).toBe(2);
+    expect(run.stderr).toContain('10db could not check this call');
   });
 });

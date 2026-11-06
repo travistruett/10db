@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
-import type { Readable, Writable } from 'node:stream';
-import { createInterface } from 'node:readline';
+import { PassThrough, type Readable, type Writable } from 'node:stream';
+import { StringDecoder } from 'node:string_decoder';
 import { z } from 'zod';
 import type { Logger } from '../log';
 
@@ -66,12 +66,18 @@ export function createCodexRpc(child: CodexChild, log: Pick<Logger, 'warn'>): Co
     child.stdin.write(`${JSON.stringify(message)}\n`);
   };
 
+  // A write to a child that has gone is an error event on stdin; unhandled it would end the daemon.
+  // Killing the child brings its exit, which settles every open call.
+  child.stdin.on('error', (error: NodeJS.ErrnoException) => {
+    log.warn({ code: error.code }, 'writing to codex app-server failed');
+    child.kill();
+  });
+
   child.stderr.on('data', (chunk: Buffer | string) => {
     stderr = (stderr + chunk.toString()).slice(-STDERR_TAIL_CHARS);
   });
 
-  const lines = createInterface({ input: child.stdout });
-  lines.on('line', (line) => {
+  const handleLine = (line: string): void => {
     let json: unknown;
     try {
       json = JSON.parse(line);
@@ -105,6 +111,18 @@ export function createCodexRpc(child: CodexChild, log: Pick<Logger, 'warn'>): Co
       return;
     }
     call.accept(message.result);
+  };
+
+  // Lines end at "\n" only: readline also splits on U+2028 and U+2029, which JSON leaves raw in strings.
+  const decoder = new StringDecoder('utf8');
+  let buffered = '';
+  child.stdout.on('data', (chunk: Buffer | string) => {
+    buffered += typeof chunk === 'string' ? chunk : decoder.write(chunk);
+    for (let end = buffered.indexOf('\n'); end >= 0; end = buffered.indexOf('\n')) {
+      const line = buffered.slice(0, end);
+      buffered = buffered.slice(end + 1);
+      if (line.length > 0) handleLine(line);
+    }
   });
 
   const exited = new Promise<{ readonly code: number | null; readonly stderr: string }>(
@@ -166,18 +184,39 @@ export function createCodexRpc(child: CodexChild, log: Pick<Logger, 'warn'>): Co
   };
 }
 
-/** Runs the real `codex app-server`; its environment is exactly `env`. */
+/**
+ * Runs the real `codex app-server`; its environment is exactly `env`. A program that cannot start
+ * is reported as an exit with a null code and the reason on stderr, like any other end.
+ */
 export const spawnAppServer: CodexSpawn = (codexPath, env) => {
   const child = spawn(codexPath, ['app-server', '--stdio', '--strict-config'], {
     env: { ...env },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
+  const stderr = new PassThrough();
+  child.stderr.pipe(stderr, { end: false });
+  const listeners: ((code: number | null) => void)[] = [];
+  let ended = false;
+  const end = (code: number | null): void => {
+    if (ended) return;
+    ended = true;
+    for (const listener of listeners) listener(code);
+  };
+  child.on('exit', end);
+  child.on('error', (error: NodeJS.ErrnoException) => {
+    stderr.write(`${error.code ?? 'error'}: ${error.message}\n`, () => {
+      end(null);
+    });
+  });
   return {
     pid: child.pid,
     stdin: child.stdin,
     stdout: child.stdout,
-    stderr: child.stderr,
+    stderr,
     kill: () => child.kill(),
-    once: (event, listener) => child.once(event, listener),
+    once: (_event, listener) => {
+      listeners.push(listener);
+      return child;
+    },
   };
 };

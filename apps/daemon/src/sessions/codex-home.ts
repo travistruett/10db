@@ -3,6 +3,7 @@ import { chmod, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs
 import { join, resolve } from 'node:path';
 import { parse, stringify } from 'smol-toml';
 import { z } from 'zod';
+import { singleQuoted } from '../sandbox';
 
 /** Above the longest wait for a card: `humanWaitMinutes` is at most 240, plus the 5 of the tool timeout. */
 export const CODEX_HOOK_TIMEOUT_SECONDS = 15_000;
@@ -20,7 +21,7 @@ export interface CodexHome {
   trustGuardHook(key: string, hash: string): Promise<void>;
 }
 
-/** A Codex home that cannot be written: an unreadable config file, or a path the hook command cannot quote. */
+/** A Codex home that cannot be written: its config file is unreadable. */
 export class CodexHomeError extends Error {
   constructor(message: string) {
     super(message);
@@ -77,7 +78,7 @@ function template(home: string): Record<string, unknown> {
             {
               type: 'command',
               timeout: CODEX_HOOK_TIMEOUT_SECONDS,
-              command: `/bin/sh '${join(home, 'guard-hook.sh')}'`,
+              command: `/bin/sh ${singleQuoted(join(home, 'guard-hook.sh'))}`,
             },
           ],
         },
@@ -136,8 +137,6 @@ class FileCodexHome implements CodexHome {
   private tail: Promise<unknown> = Promise.resolve();
 
   constructor(path: string) {
-    if (path.includes("'"))
-      throw new CodexHomeError('a Codex home path cannot hold a single quote');
     this.path = path;
     this.emptyHome = join(path, 'home');
   }
