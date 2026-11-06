@@ -350,14 +350,20 @@ function stagedScript(body: string): void {
   writeFileSync(join(scripts, 'install-app.sh'), `#!/bin/bash\n${body}\n`, { mode: 0o755 });
 }
 
+/**
+ * What a detached script wrote to `name`, once it has written something. A shell's `>` creates
+ * the file before `echo` fills it, so a file that exists but is still empty is not yet an answer.
+ */
+const writtenBy = (name: string): string | false => {
+  const path = join(workDir, name);
+  return (existsSync(path) && readFileSync(path, 'utf8').trim()) || false;
+};
+
 describe('apply', () => {
   it('starts the staged copy of the script detached, to quit the app and start it again', async () => {
     stagedScript(`echo "$*" > "${workDir}/applied"`);
     expect(await installer.apply(staged())).toMatchObject({ ok: true });
-    const args = await waitFor(() => {
-      const path = join(workDir, 'applied');
-      return existsSync(path) && readFileSync(path, 'utf8').trim();
-    });
+    const args = await waitFor(() => writtenBy('applied'));
     expect(args).toBe(
       `--apply ${join(workDir, 'stage')} --quit-first --relaunch --quit-pid ${String(process.pid)} --status-file ${join(workDir, 'status.json')}`,
     );
@@ -367,10 +373,7 @@ describe('apply', () => {
     installer = installerWith({ quitPids: () => [4242, 4243] });
     stagedScript(`echo "$*" > "${workDir}/applied"`);
     expect(await installer.apply(staged())).toMatchObject({ ok: true });
-    const args = await waitFor(() => {
-      const path = join(workDir, 'applied');
-      return existsSync(path) && readFileSync(path, 'utf8').trim();
-    });
+    const args = await waitFor(() => writtenBy('applied'));
     expect(args).toBe(
       `--apply ${join(workDir, 'stage')} --quit-first --relaunch --quit-pid 4242 --quit-pid 4243 --status-file ${join(workDir, 'status.json')}`,
     );
@@ -395,10 +398,7 @@ describe('apply', () => {
       `echo "$PATH|$TENDB_INSTALL_GH|\${BASH_ENV:-}|\${DYLD_INSERT_LIBRARIES:-}|\${GH_TOKEN:-}" > "${workDir}/applied-env"`,
     );
     expect(await installer.apply(staged())).toMatchObject({ ok: true });
-    const seen = await waitFor(() => {
-      const path = join(workDir, 'applied-env');
-      return existsSync(path) && readFileSync(path, 'utf8').trim();
-    });
+    const seen = await waitFor(() => writtenBy('applied-env'));
     expect(seen).toBe(`${FIXED_PATH}|${GH}|||builders-token`);
   });
 
