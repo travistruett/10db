@@ -80,6 +80,23 @@ describe('guardCalls', () => {
     expect(guardCalls({ tool_name: 'apply_patch', tool_input: { command } })).toBeNull();
   });
 
+  it('refuses a line it does not know in an Update hunk', () => {
+    const command = '*** Update File: a.ts\n@@\n-b\n*** Frobnicate: c';
+    expect(guardCalls({ tool_name: 'apply_patch', tool_input: { command } })).toBeNull();
+  });
+
+  it('refuses an environment line, which 10db has no use for', () => {
+    const command = '*** Environment ID: x\n*** Add File: a.ts';
+    expect(guardCalls({ tool_name: 'apply_patch', tool_input: { command } })).toBeNull();
+  });
+
+  it('reads a long run of interior whitespace quickly', () => {
+    const command = `*** Add File: a.ts\n+x${' '.repeat(400_000)}y`;
+    const started = performance.now();
+    expect(guardCalls({ tool_name: 'apply_patch', tool_input: { command } })).toHaveLength(1);
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
   it('accepts the markers Codex defines', () => {
     const command = [
       '*** Begin Patch',
@@ -123,13 +140,67 @@ describe('patchPaths', () => {
       ['a.ts', 'b.ts'],
     ],
     ['a trailing NEL', '*** Add File: secret.ts\u0085', ['secret.ts']],
+    ['two spaces after Add', '*** Add File:  a.ts', [' a.ts']],
+    ['two spaces after Update', '*** Update File:  a.ts', [' a.ts']],
+    ['two spaces after Delete', '*** Delete File:  a.ts', [' a.ts']],
+    ['two spaces after Move', '*** Update File: a.ts\n*** Move to:  b.ts', ['a.ts', ' b.ts']],
+    [
+      'trailing spaces on Move',
+      '*** Update File: a.ts\n*** Move to: b.ts \u0085 ',
+      ['a.ts', 'b.ts'],
+    ],
+    ['a leading FEFF', '*** Add File: \uFEFFa.ts', ['\uFEFFa.ts']],
+    ['a trailing FEFF', '*** Add File: a.ts\uFEFF', ['a.ts\uFEFF']],
+    ['a markdown rule as context', '*** Update File: a.ts\n@@\n a\n ***\n-b\n+B', ['a.ts']],
+    ['bold text as context', '*** Update File: a.ts\n@@\n *** Bold line\n-b\n+B', ['a.ts']],
+    ['a banner as context', '*** Update File: a.ts\n@@\n  *** WARNING ***\n-b\n+B', ['a.ts']],
+    ['an added rule above a context rule', '*** Update File: a.ts\n@@\n+***\n ***\n-b', ['a.ts']],
+    [
+      'a header-looking context line',
+      '*** Update File: a.ts\n@@\n *** Add File: elsewhere.txt\n-b',
+      ['a.ts'],
+    ],
+    [
+      'a hidden header after an Add hunk',
+      '*** Add File: ok.ts\n+x\n *** Add File: hidden.ts',
+      ['ok.ts', 'hidden.ts'],
+    ],
+    [
+      'a hidden header after a Delete hunk',
+      '*** Delete File: ok.ts\n *** Add File: hidden.ts',
+      ['ok.ts', 'hidden.ts'],
+    ],
+    [
+      'a column-0 header after an Update hunk',
+      '*** Update File: a.ts\n@@\n-b\n*** Add File: c.ts',
+      ['a.ts', 'c.ts'],
+    ],
     ['CRLF', '*** Add File: a.ts\r\n+x\r\n*** Add File: b.ts\r\n', ['a.ts', 'b.ts']],
   ])('%s', (_name, patch, expected) => {
     expect(patchPaths(patch)).toEqual(expected);
+    expect(guardCalls({ tool_name: 'apply_patch', tool_input: { command: patch } })).not.toBeNull();
   });
 });
 
 describe('judgeHookCall', () => {
+  it('says a patch it cannot read was not read, not that the tool is banned', async () => {
+    const hook: HookInput = { tool_name: 'apply_patch', tool_input: { command: '*** Bogus' } };
+    expect(await judgeHookCall(ALLOW_ALL, hook, NEVER)).toMatchObject({
+      allow: false,
+      reason: '10db could not read this patch, so it was refused.',
+    });
+  });
+
+  it('gives a reason of only NEL a fixed one', async () => {
+    const spec: Spec = { ...ALLOW_ALL, preToolUse: () => ({ decision: 'deny', reason: '\u0085' }) };
+    const answer = await judgeHookCall(
+      spec,
+      { tool_name: 'Bash', tool_input: { command: 'x' } },
+      NEVER,
+    );
+    expect(answer.allow ? '' : answer.reason).toBe('10db refused this call.');
+  });
+
   it('gives a refusal with an empty reason a fixed one, since Codex runs a deny without a reason', async () => {
     const spec: Spec = { ...ALLOW_ALL, preToolUse: () => ({ decision: 'deny', reason: '  ' }) };
     const answer = await judgeHookCall(

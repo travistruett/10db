@@ -25,29 +25,56 @@ const PatchInput = z.looseObject({ command: z.string() });
 
 const PATCH_HEADERS = ['*** Add File: ', '*** Update File: ', '*** Delete File: ', '*** Move to: '];
 
-/** Lines of a patch that carry no path. */
+/**
+ * Lines of a patch that carry no path. Codex also defines `*** Environment ID: `; 10db has no use for
+ * it, so it is read as unknown and the patch is refused.
+ */
 const PATCH_MARKERS = ['*** Begin Patch', '*** End Patch', '*** End of File'];
 
-/** Codex trims a line before it reads a hunk header, and its trim strips U+0085 where JavaScript's does not. */
-const edgeSpace = /^[\s\u0085]+|[\s\u0085]+$/g;
+const WHITE_SPACE = /^\p{White_Space}$/u;
+
+/** Codex's `trim`: Unicode White_Space, which includes U+0085 and leaves U+FEFF alone. A single pass, never a regex over the run. */
+function trimmed(text: string): string {
+  let start = 0;
+  let end = text.length;
+  while (start < end && WHITE_SPACE.test(text.charAt(start))) start += 1;
+  while (end > start && WHITE_SPACE.test(text.charAt(end - 1))) end -= 1;
+  return text.slice(start, end);
+}
 
 interface ReadPatch {
   readonly paths: readonly string[];
-  /** A line starts with `***` and is no marker Codex defines, so 10db cannot say what it does. */
+  /** A line is a hunk header or marker line that 10db cannot account for. */
   readonly unknownMarker: boolean;
 }
 
+type Hunk = 'none' | 'add' | 'update' | 'delete';
+
+/**
+ * Reads a patch hunk by hunk. Codex trims a line before it reads a header, but inside an Update hunk
+ * a line that starts with whitespace is context, so only a line that starts with `***` counts there.
+ * A `+` or `-` line is a body line and never a header.
+ */
 function readPatch(patch: string): ReadPatch {
   const paths: string[] = [];
   let unknownMarker = false;
+  let hunk: Hunk = 'none';
   for (const raw of patch.split('\n')) {
-    const line = raw.replace(edgeSpace, '');
+    const line = trimmed(raw);
     if (!line.startsWith('***')) continue;
+    if (hunk === 'update' && !raw.startsWith('***')) continue;
     const header = PATCH_HEADERS.find((prefix) => line.startsWith(prefix));
-    if (header !== undefined) {
-      const path = line.slice(header.length).replace(edgeSpace, '');
-      if (path !== '') paths.push(path);
-    } else if (!PATCH_MARKERS.includes(line)) unknownMarker = true;
+    if (header === undefined) {
+      if (!PATCH_MARKERS.includes(line)) unknownMarker = true;
+      if (line === '*** Begin Patch' || line === '*** End Patch') hunk = 'none';
+      continue;
+    }
+    // Codex keeps whitespace after the prefix as part of the path.
+    const path = line.slice(header.length);
+    if (path !== '') paths.push(path);
+    if (header === '*** Add File: ') hunk = 'add';
+    else if (header === '*** Delete File: ') hunk = 'delete';
+    else if (header === '*** Update File: ') hunk = 'update';
   }
   return { paths, unknownMarker };
 }
@@ -94,9 +121,16 @@ const NO_REASON = '10db refused this call.';
 /** Codex runs a call whose `deny` has no reason, so a refusal always carries one. */
 const refuse = (reason: string, interrupt = false): GuardAnswer => ({
   allow: false,
-  reason: reason.trim() === '' ? NO_REASON : reason,
+  reason: trimmed(reason) === '' ? NO_REASON : reason,
   interrupt,
 });
+
+function unreadable(toolName: string): string {
+  if (toolName === 'apply_patch') return '10db could not read this patch, so it was refused.';
+  if (toolName === 'Bash' || toolName.startsWith('mcp__'))
+    return '10db could not read this call, so it was refused.';
+  return `10db does not allow the tool "${toolName}" in a lane.`;
+}
 
 /**
  * Runs the session's guard and broker over one hook call. Every call a patch holds must pass; a tool
@@ -108,7 +142,7 @@ export async function judgeHookCall(
   signal: AbortSignal,
 ): Promise<GuardAnswer> {
   const calls = guardCalls(hook);
-  if (calls === null) return refuse(`10db does not allow the tool "${hook.tool_name}" in a lane.`);
+  if (calls === null) return refuse(unreadable(hook.tool_name));
   if (calls.length === 0)
     return refuse('10db found no file path in this patch, so it was refused.');
   for (const call of calls) {
