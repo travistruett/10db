@@ -12,7 +12,7 @@ import {
   type SandboxedMcpServer,
   type StdioMcpServer,
 } from './mcp-sandbox';
-import { buildLaneProfile, type LaneSandboxSettings } from './profile';
+import { buildLaneProfile, readListOverSandboxRoots, type LaneSandboxSettings } from './profile';
 import { laneRootsOf, projectAccess, type ProjectAccessDeps } from './project-access';
 import {
   createLaneProcessWatch,
@@ -252,6 +252,12 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
       const tmpDir = createLaneTempDir(roots.temp, tempDirLimit(input.provider ?? Provider.Claude));
       // The session's own temp dir root is closed to every other sandbox too.
       const sandboxRoots = [...new Set([...access.sandboxRoots, roots.temp])];
+      // Once per session, though the lane's profile and each repo server's leave each one out.
+      for (const entry of readListOverSandboxRoots(readList, sandboxRoots))
+        deps.log?.warn(
+          { projectId: input.project.id, entry },
+          "a read list entry holds a root where 10db keeps sandboxes' files, so the lane's profile leaves it out and the lane can't read it",
+        );
       let envFile: string | null = null;
       let ledger: string | null = null;
       let mcp: McpSandboxes | null = null;

@@ -62,6 +62,7 @@ function sandbox(
   overrides: {
     loginConfigDir?: string | null;
     loginCodexHome?: string | null;
+    log?: LaneSandboxDeps['log'];
     gitDirs?: LaneSandboxDeps['gitDirs'];
     laneWritableRoots?: readonly string[];
     codexLaneTempRoot?: string;
@@ -72,6 +73,7 @@ function sandbox(
     dataDir,
     loginConfigDir: overrides.loginConfigDir ?? null,
     ...(overrides.loginCodexHome === undefined ? {} : { loginCodexHome: overrides.loginCodexHome }),
+    ...(overrides.log === undefined ? {} : { log: overrides.log }),
     tmpRoot,
     filesRoot,
     codexLaneTempRoot: overrides.codexLaneTempRoot ?? lanesRoot,
@@ -225,6 +227,44 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       session.dispose();
       other.dispose();
     }
+  });
+
+  it('logs each read-list entry it leaves out over a sandbox root, once per session, naming it', async () => {
+    const shared = join(root, 'shared');
+    mkdirSync(shared);
+    const warned: { fields: object; message: string }[] = [];
+    const log = {
+      warn: (fields: object, message: string) => {
+        warned.push({ fields, message });
+      },
+    };
+    const lanes = sandbox({ log });
+    const rules = [
+      { toolName: 'Read', pattern: shared },
+      { toolName: 'Read', pattern: join(home, '.10db') },
+      { toolName: 'Read', pattern: home },
+    ];
+    const session = await lanes.forSession(
+      input({
+        rules,
+        // A server's profile leaves the same entries out, and says nothing more.
+        mcpServers: { probe: { command: '/usr/bin/true', args: [], env: {}, hosts: [] } },
+      }),
+    );
+    try {
+      expect(session.spec.settings.filesystem.allowRead).not.toContain(home);
+      const dropped = warned.filter((w) => w.message.includes('read list'));
+      expect(dropped.map((w) => w.fields)).toEqual([
+        { projectId, entry: join(home, '.10db') },
+        { projectId, entry: home },
+      ]);
+    } finally {
+      session.dispose();
+    }
+    // The next session says it again.
+    const next = await lanes.forSession(input({ rules }));
+    next.dispose();
+    expect(warned.filter((w) => w.message.includes('read list'))).toHaveLength(4);
   });
 
   it('leaves out a stored rule the sandbox could not parse, instead of refusing the lane', async () => {

@@ -179,17 +179,28 @@ export const BACKGROUND_DONE_NUDGE =
 export const BACKGROUND_DONE_NUDGE_READ_ONLY =
   '10db: the command you started in the background has finished. Read its output, finish the step and call mcp__10db__complete_step with your result (and, for a review, a verdict), then end your turn.';
 
-const COMMAND_SHAPE =
-  'Use no shell variables or arrays to hold the paths, no `cd` into the worktree (you are already in it), no `;`, `&&` or `$(…)` chains, and no pipes through tail or grep. A command built that way has no rule 10db can store, so it stops on an "Allow Bash?" card and waits for a person, which overnight can be hours.';
+const COMMAND_SHAPES =
+  'Use no shell variables or arrays to hold the paths, no `cd` into the worktree (you are already in it), no `;`, `&&` or `$(…)` chains, and no pipes through tail or grep.';
 
-const PLAIN_COMMANDS = `Run project commands in their plain form: \`pnpm exec <tool> …\` or the project's own scripts, with no \`-s\` or \`--silent\`, no trailing \`; echo $?\` (the exit code is reported to you), no \`timeout\` wrapper, and no piping test output through head or tail. Run formatters, linters and test commands each as its own command naming its paths, from your working directory: \`pnpm exec prettier --write path/a.ts path/b.ts\`, then \`pnpm exec eslint path/a.ts path/b.ts\`. ${COMMAND_SHAPE}`;
+const COMMAND_SHAPE = `${COMMAND_SHAPES} A command built that way has no rule 10db can store, so it stops on an "Allow Bash?" card and waits for a person, which overnight can be hours.`;
+
+/** A Codex lane gets no "Allow Bash?" card, so its reason is the guard's reading. */
+const CODEX_COMMAND_SHAPE = `${COMMAND_SHAPES} 10db's guard checks each command before it runs, and can't read one built that way.`;
+
+const plainCommands = (shape: string): string =>
+  `Run project commands in their plain form: \`pnpm exec <tool> …\` or the project's own scripts, with no \`-s\` or \`--silent\`, no trailing \`; echo $?\` (the exit code is reported to you), no \`timeout\` wrapper, and no piping test output through head or tail. Run formatters, linters and test commands each as its own command naming its paths, from your working directory: \`pnpm exec prettier --write path/a.ts path/b.ts\`, then \`pnpm exec eslint path/a.ts path/b.ts\`. ${shape}`;
+
+const PLAIN_COMMANDS = plainCommands(COMMAND_SHAPE);
 
 /**
  * readOnlyShellRefusal denies anything outside READ_COMMANDS and read-only git, so pnpm and every
  * check run through it are refused however they are spelled. Each backticked command here must
  * pass that hook; briefing.test.ts checks every one.
  */
-const READ_ONLY_COMMANDS = `The shell takes read-only commands only, so do not run pnpm, a formatter, a linter or a test: the hook refuses them. Formatting, lint and tests are left to the gate. Run each command on its own, naming its paths, from your working directory: \`grep -n name path/a.ts path/b.ts\`, then \`git log -p -- path/a.ts path/b.ts\`. ${COMMAND_SHAPE}`;
+const readOnlyCommands = (shape: string): string =>
+  `The shell takes read-only commands only, so do not run pnpm, a formatter, a linter or a test: the hook refuses them. Formatting, lint and tests are left to the gate. Run each command on its own, naming its paths, from your working directory: \`grep -n name path/a.ts path/b.ts\`, then \`git log -p -- path/a.ts path/b.ts\`. ${shape}`;
+
+const READ_ONLY_COMMANDS = readOnlyCommands(COMMAND_SHAPE);
 
 /**
  * Ending the turn ends the step, and a background command (the Bash tool moves a long one there)
@@ -226,13 +237,23 @@ const SANDBOX_RULES = [
 const CODEX_HOSTS_RULE =
   "A command that reaches a network host outside the project's allowed domains fails with its output lost. If you need one, ask with `mcp__10db__ask_human`. The builder adds a host in Settings, which applies from your next session.";
 
-const EDIT_RULE_TAIL =
-  ' (`python3 -c`, `node -e`, `perl -pi`, `sed -i`) or shell redirection (`>`, `>>`, a heredoc, `tee`). Edit and Write change the file in your lane without a permission card; a Bash command that writes a file stops on an "Allow Bash?" card and waits for a person, which overnight can be hours. Do a multi-line replacement with one Edit call.';
+const EDIT_RULE_WAYS =
+  ' (`python3 -c`, `node -e`, `perl -pi`, `sed -i`) or shell redirection (`>`, `>>`, a heredoc, `tee`).';
 
-const EDIT_RULE = `Change files with the Edit or Write tool, never with an interpreter one-liner${EDIT_RULE_TAIL}`;
+const EDIT_RULE = `Change files with the Edit or Write tool, never with an interpreter one-liner${EDIT_RULE_WAYS} Edit and Write change the file in your lane without a permission card; a Bash command that writes a file stops on an "Allow Bash?" card and waits for a person, which overnight can be hours. Do a multi-line replacement with one Edit call.`;
 
-/** A Codex lane changes files with apply_patch; the rest of the rule reads as Claude's does. */
-const CODEX_EDIT_RULE = `Change files with apply_patch, never with an interpreter one-liner${EDIT_RULE_TAIL}`;
+/**
+ * A Codex lane changes files with apply_patch, and gets no permission card either way: the guard
+ * judges each path a patch names against the claims, and a command that writes a file names none.
+ */
+const CODEX_EDIT_RULE = `Change files with apply_patch, never with an interpreter one-liner${EDIT_RULE_WAYS} apply_patch names each file it changes, so 10db checks each one against your claims before it is written; a command that writes a file names none. Do a multi-line replacement with one apply_patch call.`;
+
+/** The lines a Codex lane reads in its own words, by the line Claude's briefing has. */
+const CODEX_RULES: ReadonlyMap<string, string> = new Map([
+  [EDIT_RULE, CODEX_EDIT_RULE],
+  [PLAIN_COMMANDS, plainCommands(CODEX_COMMAND_SHAPE)],
+  [READ_ONLY_COMMANDS, readOnlyCommands(CODEX_COMMAND_SHAPE)],
+]);
 
 /** A skill, a persona or a tool result written for Claude names these tools. */
 const CODEX_TOOL_NAMES = 'In this session, the Edit or Write tool means apply_patch.';
@@ -285,13 +306,13 @@ function sandboxRulesFor(provider: Provider): readonly string[] {
   }
 }
 
-/** The rules, with Codex's edit tool in the edit rule when the session runs on Codex. */
-function rulesFor(provider: Provider, rules: readonly string[]): readonly string[] {
+/** A rule as the agent the session runs under reads it: Codex's tools and cards in its own words. */
+function ruleFor(provider: Provider, rule: string): string {
   switch (provider) {
     case Provider.Claude:
-      return rules;
+      return rule;
     case Provider.Codex:
-      return rules.map((rule) => (rule === EDIT_RULE ? CODEX_EDIT_RULE : rule));
+      return CODEX_RULES.get(rule) ?? rule;
   }
 }
 
@@ -301,15 +322,14 @@ function withSandboxRules(
   sandboxed: boolean,
   provider: Provider,
 ): string[] {
-  const own = rulesFor(provider, rules);
-  if (!sandboxed) return [...own];
-  const sandbox = sandboxRulesFor(provider);
-  return own.flatMap((rule) => {
-    if (rule === PLAIN_COMMANDS) return [rule, ...sandbox];
+  const sandbox = sandboxed ? sandboxRulesFor(provider) : [];
+  return rules.flatMap((rule) => {
+    const own = ruleFor(provider, rule);
+    if (rule === PLAIN_COMMANDS) return [own, ...sandbox];
     if (rule === READ_ONLY_COMMANDS) {
-      return [rule, ...sandbox.filter((line) => line !== TEMP_FILES_RULE)];
+      return [own, ...sandbox.filter((line) => line !== TEMP_FILES_RULE)];
     }
-    return [rule];
+    return [own];
   });
 }
 

@@ -1109,6 +1109,32 @@ describe('buildSessionPrompt for flow steps', () => {
       );
     });
 
+    it.each([
+      ['an implement step', implementStep],
+      ['a read-only step', reviewStep],
+    ])('tells a Codex lane of no card it never gets, for %s', (_name, step) => {
+      for (const sandboxed of [false, true]) {
+        const codex = buildSessionPrompt({
+          ...codexInput,
+          step: { ...step, skills: [] },
+          sandboxed,
+        });
+        expect(codex).not.toContain('Allow Bash');
+        expect(codex).not.toContain('permission card');
+        // The shapes to avoid stay, with the reason that holds on Codex.
+        expect(codex).toContain('no `;`, `&&` or `$(…)` chains');
+        expect(codex).toContain("10db's guard checks each command before it runs");
+      }
+    });
+
+    it('tells a Codex lane why apply_patch, not a command that writes a file', () => {
+      const codex = buildSessionPrompt(codexInput);
+      expect(codex).toContain(
+        'apply_patch names each file it changes, so 10db checks each one against your claims before it is written',
+      );
+      expect(codex).toContain('Do a multi-line replacement with one apply_patch call.');
+    });
+
     it('gives a Codex read-only step the sandbox lines without the Claude ones', () => {
       const codex = buildSessionPrompt({
         ...codexInput,

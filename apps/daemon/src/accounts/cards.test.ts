@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   CAP_RAISE_DETAIL,
   capCard,
+  confirmCard,
   credentialsCard,
   fixFor,
   recordedCard,
@@ -161,6 +162,14 @@ describe('the cards for a ChatGPT account', () => {
     expect(card.body).not.toContain('claude /login');
   });
 
+  it('asks to confirm the email and the workspace, which together are its identity', () => {
+    const card = confirmCard(codexAccount(), 'me@example.com · ws-1');
+    expect(card.body).toContain(
+      'Codex in /h/accounts/a/codex is signed in as me@example.com · ws-1',
+    );
+    expect(card.body).toContain('sessions run only while they report this email and workspace.');
+  });
+
   it('offers Confirm for a reported sign-in, as a subscription does', () => {
     const card = refusedCard(codexAccount(), {
       problem: AccountProblem.IdentityMismatch,
@@ -168,6 +177,20 @@ describe('the cards for a ChatGPT account', () => {
       seenIdentity: 'me@example.com · ws-1',
     });
     expect((card.options ?? []).map((o) => o.label)).toContain(AccountCardChoice.Confirm);
+  });
+});
+
+describe('the confirm card for a subscription', () => {
+  it('asks to confirm the email alone', () => {
+    const test = createTestStore();
+    close = test.close;
+    const row = getAccountRow(
+      test.store.db,
+      seedAccount(test.store, { kind: 'claude_subscription', label: 'Claude plan' }).id,
+    );
+    expect(confirmCard(row, 'me@example.com').body).toContain(
+      'sessions run only while they report this email.',
+    );
   });
 });
 

@@ -339,11 +339,16 @@ export function refusedCard(account: AccountRow, refusal: AccountRefusal): Accou
   };
 }
 
-/** For an account on its own directory: the builder confirms the email Claude Code reported (spec §5). */
+/**
+ * For an account on its own directory: the builder confirms the identity the agent reported (spec
+ * §5), a subscription's email, or a ChatGPT plan's email and workspace together.
+ */
 export function confirmCard(account: AccountRow, email: string): AccountCard {
+  const reported =
+    account.kind === AccountKind.CodexSignin ? 'this email and workspace' : 'this email';
   return {
     title: `Confirm the account ${account.label}`,
-    body: `${agentOf(account)} in ${account.configDir ?? `${agentOf(account)}'s default directory`} is signed in as ${email}. Confirm it, and ${account.label}'s sessions run only while they report this email.`,
+    body: `${agentOf(account)} in ${account.configDir ?? `${agentOf(account)}'s default directory`} is signed in as ${email}. Confirm it, and ${account.label}'s sessions run only while they report ${reported}.`,
     foldKey: accountFoldKey(account.id, AccountProblem.Unconfirmed),
     detail: detail(account, null, AccountProblem.Unconfirmed, email),
     options: [

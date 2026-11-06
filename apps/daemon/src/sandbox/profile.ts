@@ -283,6 +283,18 @@ function refuseToolchainSecretsOverNeeds(
   }
 }
 
+/**
+ * The read-list entries that are, or hold, a sandbox root. Such an entry opens none of the root and is
+ * left out of a profile: srt applies a deny that lies inside a directory it opens after every grant,
+ * so the sandbox's own files there would close.
+ */
+export function readListOverSandboxRoots(
+  readList: readonly string[],
+  sandboxRoots: readonly string[],
+): string[] {
+  return readList.filter((path) => sandboxRoots.some((root) => isEqualOrUnder(root, path)));
+}
+
 /** Builds the lane's sandbox settings from one input and validates them before they reach Claude Code. */
 export function buildLaneProfile(input: LaneProfileInput): LaneSandboxSettings {
   let checkout: string;
@@ -303,11 +315,8 @@ export function buildLaneProfile(input: LaneProfileInput): LaneSandboxSettings {
     !own.some((mine) => isEqualOrUnder(path, mine));
   const isAllowed = (path: string): boolean =>
     !denied.some((root) => isEqualOrUnder(path, root)) && !inSandboxRoot(path);
-  // A read-list entry over a sandbox root opens none of it, and is left out: srt applies a deny that
-  // lies inside a directory it opens after every grant, so this sandbox's own files there would close.
-  const readList = input.readList.filter(
-    (path) => !input.sandboxRoots.some((root) => isEqualOrUnder(root, path)),
-  );
+  const over = readListOverSandboxRoots(input.readList, input.sandboxRoots);
+  const readList = input.readList.filter((path) => !over.includes(path));
   const readable = [...needed, ...readList].filter(isAllowed);
   const writable = [input.tmpDir, ...input.extraWrites].filter(isAllowed);
   refusePatterns(readable);
