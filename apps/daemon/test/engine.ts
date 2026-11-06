@@ -36,7 +36,7 @@ import {
   transitionWorkstream,
   type Store,
 } from '@10db/db';
-import { readDefaultPersonas } from '@10db/harness';
+import { readDefaultPersonas, readSkillBody } from '@10db/harness';
 import {
   createAccountCardAnswers,
   createAccountLimits,
@@ -289,6 +289,7 @@ export async function createTestEngine(
     live,
     limits: { ...DEFAULT_RUNNER_LIMITS, gateTimeoutMs: 20_000 },
     mcpUrl: () => mcpUrl,
+    skillBody: (name) => readSkillBody(name),
     launcher: createLauncher({ base: { PATH: '/usr/bin:/bin' }, clientApp: 'test', keychain }),
     // A usage limit is recorded but pauses nothing, so a test sees the lane's own outcome.
     accounts: {

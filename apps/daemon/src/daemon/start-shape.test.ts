@@ -1,4 +1,6 @@
 import {
+  AccountCreatedDto,
+  BRAINSTORM_REFUSED_ON_CHATGPT,
   GoalDto,
   ProjectDto,
   ShapeConvertResult,
@@ -46,6 +48,44 @@ async function startOnTheFake(): Promise<ReturnType<typeof apiClient>> {
   });
   return apiClient(daemon.url, daemon.token);
 }
+
+describe('a Shape conversation on a ChatGPT account', () => {
+  it('is refused while the project is on one, and starts again once it is back on a Claude plan', async () => {
+    const api = await startOnTheFake();
+    const project = await api.post('/projects', ProjectDto, {
+      name: 'demo',
+      repoPath: repo.path,
+      gateCommand: 'true',
+      areas: [{ name: 'src', globs: ['src/**'] }],
+    });
+    const claudePlan = project.accountId;
+    const { account: chatgpt } = await api.post('/accounts', AccountCreatedDto, {
+      kind: 'codex_signin',
+      label: 'ChatGPT plan',
+    });
+    const shape = await api.post(`/projects/${project.id}/shapes`, ShapeDto, {});
+    await api.patch(`/projects/${project.id}`, ProjectDto, { accountId: chatgpt.id });
+
+    const words = new RegExp(`-> 400: .*${BRAINSTORM_REFUSED_ON_CHATGPT}`);
+    await expect(api.post(`/projects/${project.id}/shapes`, ShapeDto, {})).rejects.toThrow(words);
+    await expect(
+      api.post(`/shapes/${shape.id}/messages`, ShapeMessageDto, { text: 'Make the cards denser.' }),
+    ).rejects.toThrow(words);
+    const refused = await api.get(`/shapes/${shape.id}`, ShapeViewDto);
+    expect(refused.messages).toEqual([]);
+    expect(refused.turn.running).toBe(false);
+
+    await api.patch(`/projects/${project.id}`, ProjectDto, { accountId: claudePlan });
+    await api.post(`/shapes/${shape.id}/messages`, ShapeMessageDto, {
+      text: 'Make the cards denser.',
+    });
+    const talked = await waitForAsync(async () => {
+      const view = await api.get(`/shapes/${shape.id}`, ShapeViewDto);
+      return !view.turn.running && view.messages.some((m) => m.author === 'claude') ? view : false;
+    });
+    expect(talked.messages.some((m) => m.kind === 'notice')).toBe(false);
+  });
+});
 
 describe('a Shape conversation on a started daemon', () => {
   it('is talked through, proposed and converted over HTTP, starting nothing', async () => {

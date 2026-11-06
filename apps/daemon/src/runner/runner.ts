@@ -39,6 +39,7 @@ import {
   type WorkstreamStep,
   MIGRATIONS_RENUMBERED_NOTICE_KEY,
   MIGRATIONS_UNCARRIED_NOTICE_KEY,
+  Provider,
   providerOf,
 } from '@10db/contracts';
 import {
@@ -258,6 +259,8 @@ export interface RunnerOptions {
   readonly live: LiveSessions;
   readonly limits: RunnerLimits;
   mcpUrl(): string;
+  /** A craft skill's text, for a session that has no plugin to load it from; null when there is none. */
+  skillBody(name: string): string | null;
   /** Builds each session's launch, and the env the gate runs in. */
   readonly launcher: Pick<Launcher, 'projectEnv' | 'session'>;
   /** Usage limits, refusals and the monthly cap, per account. */
@@ -1440,7 +1443,13 @@ export function createRunner(opts: RunnerOptions): Runner {
     const noticeBody = (key: string): string | null =>
       batchNotices.find((n) => n.key === key)?.body ?? null;
     const uncarried = batchNotices.find((n) => n.key === MIGRATIONS_UNCARRIED_NOTICE_KEY);
+    // Read before the briefing: the briefing follows the account this session runs on, which can
+    // differ from the last session's when the project moved. Reading has no side effects.
+    const account = getAccountRow(db, ctl.accountId);
+    const provider = providerOf(account.kind);
+    const skills = persona?.skills ?? [];
     const prompt = buildSessionPrompt({
+      provider,
       sandboxed: Boolean(opts.laneSandbox),
       denials: denialsToTell(),
       answeredCards: answeredCardsForTask(db, row.taskId),
@@ -1458,7 +1467,16 @@ export function createRunner(opts: RunnerOptions): Runner {
         role: step.role,
         personaName: step.personaName,
         instructions: persona?.instructions ?? null,
-        skills: persona?.skills ?? [],
+        skills,
+        // A Codex session has no plugin to load a skill from.
+        ...(provider === Provider.Codex
+          ? {
+              skillBodies: skills.flatMap((name) => {
+                const body = opts.skillBody(name);
+                return body === null ? [] : [body];
+              }),
+            }
+          : {}),
         tools: step.tools,
       },
       priorResults,
@@ -1472,7 +1490,6 @@ export function createRunner(opts: RunnerOptions): Runner {
           : null,
     });
     const { token, hash } = mintSessionToken();
-    const account = getAccountRow(db, ctl.accountId);
     const notReady = unready(account);
     if (notReady) return { kind: 'unready', refusal: notReady, providerSessionId: null };
     // Built first, so a missing or changed secret refuses the session before any session row exists.

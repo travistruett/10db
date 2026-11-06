@@ -19,6 +19,7 @@ import {
   ClaimKind,
   mintId,
   PermissionChoice,
+  Provider,
   StepRole,
   ToolAccess,
   type AreaDef,
@@ -1280,6 +1281,7 @@ describe.skipIf(!live)('lane sandbox in auto mode, live', () => {
       // The real implement brief, as the runner builds it for a sandboxed lane, with the task that
       // asks for the change. Only 10db's own tools are missing from this session.
       const prompt = buildSessionPrompt({
+        provider: Provider.Claude,
         step: {
           index: 0,
           count: 2,

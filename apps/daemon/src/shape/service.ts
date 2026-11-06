@@ -1,6 +1,7 @@
 import { readFileSync, rmSync } from 'node:fs';
 import { join, resolve as resolvePath } from 'node:path';
 import {
+  BRAINSTORM_REFUSED_ON_CHATGPT,
   ConflictError,
   EventType,
   InvalidError,
@@ -517,6 +518,19 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       return limitsFor(deps.launch(getShape(state.db, shapeId).projectId).account.kind);
     } catch {
       return STRICTEST_LIMITS;
+    }
+  };
+  /**
+   * Refuses a request for a project whose account can't run a conversation, so the builder is told when
+   * they ask instead of by a notice in a transcript that never reached Claude. Any other reason a launch
+   * can't be resolved is left to the start that follows.
+   */
+  const refuseChatGptAccount = (projectId: ProjectId): void => {
+    try {
+      deps.launch(projectId);
+    } catch (error) {
+      if (error instanceof InvalidError && error.message === BRAINSTORM_REFUSED_ON_CHATGPT)
+        throw error;
     }
   };
   /** The limits a conversation's pictures are held to: its live session's, or the next one's. */
@@ -1263,9 +1277,13 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
   };
 
   return {
-    create: (projectId, input) => state.write((ctx) => insertShape(ctx, projectId, input)),
+    create(projectId, input) {
+      refuseChatGptAccount(projectId);
+      return state.write((ctx) => insertShape(ctx, projectId, input));
+    },
 
     startFromTerminal(input) {
+      refuseChatGptAccount(input.projectId);
       const made: { id: ShapeId | null } = { id: null };
       try {
         return state.write((ctx) => {
@@ -1367,6 +1385,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     },
 
     send(shapeId, text) {
+      refuseChatGptAccount(getShape(state.db, shapeId).projectId);
       const rt = runtimeOf(shapeId);
       const message = say(shapeId, ShapeMessageAuthor.Builder, ShapeMessageKind.Text, text);
       const title = titleFrom(text);

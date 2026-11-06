@@ -12,4 +12,4 @@ default persona definitions used for seeding, and hooks. Repos never copy any of
 - `plugin/personas/<key>.md` holds the default personas, one per flow role: frontmatter `name`, `role`, `tools` (only `implement` edits) and optional `skills` (names from `SKILL_NAMES`), then the instructions, under 4 KiB, naming 10db's tools in full. The daemon seeds each one whose key is missing when it starts and never overwrites a builder's edit. `src/personas.test.ts` enforces the shape.
 - Hook logic that needs daemon state runs in the daemon as SDK hook callbacks, not as scripts here.
   Script hooks here are only for terminal (takeover) sessions.
-- `src/` exposes the plugin path and validated manifest to the daemon; it never imports the daemon.
+- `src/` exposes the plugin path and validated manifest to the daemon; it never imports the daemon. `readSkillBody` gives a skill's text without its frontmatter, for a Codex session, which loads no plugin.

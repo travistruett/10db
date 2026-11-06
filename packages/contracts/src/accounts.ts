@@ -38,6 +38,9 @@ export function providerOf(kind: SupportedAccountKind): Provider {
   }
 }
 
+/** What a Shape conversation is told while its project's account is a ChatGPT account. */
+export const BRAINSTORM_REFUSED_ON_CHATGPT = "Brainstorm chat isn't available on a ChatGPT account";
+
 /** Whether the account's credential is a saved login that the builder signs in to: a Claude subscription or a ChatGPT plan. */
 export function signsInWithLogin(kind: SupportedAccountKind): boolean {
   return kind === AccountKind.ClaudeSubscription || kind === AccountKind.CodexSignin;

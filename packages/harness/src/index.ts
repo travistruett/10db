@@ -103,6 +103,22 @@ export function listSkills(dir: string = HARNESS_PLUGIN_DIR): SkillInfo[] {
     .sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/**
+ * A craft skill's text without its frontmatter, for a session that has no plugin to load it from;
+ * null for a name that is not a craft skill or a file that cannot be read.
+ */
+export function readSkillBody(name: string, dir: string = HARNESS_PLUGIN_DIR): string | null {
+  if (!SKILL_NAMES.some((known) => known === name)) return null;
+  let text: string;
+  try {
+    text = readFileSync(join(dir, 'skills', name, 'SKILL.md'), 'utf8');
+  } catch {
+    return null;
+  }
+  const match = FRONTMATTER.exec(text);
+  return (match ? text.slice(match[0].length) : text).trim();
+}
+
 /** The default personas 10db seeds when it starts (spec §11.3), one per flow role. */
 export const PERSONA_KEYS = ['implementer', 'plan-reviewer', 'planner', 'qa', 'reviewer'] as const;
 

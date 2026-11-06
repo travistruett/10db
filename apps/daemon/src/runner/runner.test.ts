@@ -67,6 +67,7 @@ import {
   transitionWorkstream,
   updateInboxItem,
 } from '@10db/db';
+import { readSkillBody } from '@10db/harness';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   BACKGROUND_DONE_NUDGE,
@@ -2753,6 +2754,47 @@ describe('moving accounts', () => {
     expect(accountsOf(workstream.id)).toEqual([engine.project.accountId, second.id]);
     expect(engine.adapter.prompts[1]).toMatchObject({ resume: null });
     expect(engine.adapter.prompts[1]?.prompt).toContain('Next action: Write the second file');
+  });
+
+  it('briefs for the account a lane moved to, session by session', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [
+          {
+            do: 'mcp',
+            tool: 'write_handoff',
+            args: handoffArgs('op-brief-0000', 'Write the second file'),
+          },
+          { do: 'rate_limit', status: 'rejected', resetsInSeconds: 600 },
+        ],
+        [write('src/api/b.txt'), commit('op-brief-0001', ['src/api/b.txt']), turn],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha', ['api'], [], { flow: 'quick' });
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('PAUSED_LIMIT');
+
+    const chatgpt = seedAccount(engine.store, { kind: 'codex_signin', label: 'ChatGPT plan' });
+    engine.state.write((ctx) =>
+      patchAccount(ctx, chatgpt.id, { expectedIdentity: 'chatgpt@example.com' }),
+    );
+    moveTo(chatgpt.id);
+    requeue(workstream.id);
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+
+    const [claude, codex] = engine.adapter.prompts.map((p) => p.prompt);
+    expect(claude).toContain('Change files with the Edit or Write tool');
+    expect(claude).not.toContain('apply_patch');
+    expect(codex).toContain('Change files with apply_patch');
+    expect(codex).toContain('In this session, the Edit or Write tool means apply_patch.');
+    // The implementer's skills are in the briefing itself, as a Codex lane loads no plugin.
+    expect(codex).toContain(readSkillBody('test-first') ?? 'missing');
+    expect(claude).not.toContain(readSkillBody('test-first') ?? 'missing');
+    // The project's own provider is not what the briefing follows.
+    expect(getProject(engine.store.db, engine.project.id).provider).toBe(engine.project.provider);
   });
 
   it("brings the builder's answer to a fresh session after the project moved", async () => {

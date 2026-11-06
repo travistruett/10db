@@ -7,6 +7,7 @@ import {
   type EvidenceDto,
   type HandoffDto,
   type NextAction,
+  Provider,
   type StepResult,
   StepRole,
   type TaskDto,
@@ -23,6 +24,8 @@ interface StepBrief {
   readonly personaName: string;
   readonly instructions: string | null;
   readonly skills: readonly string[];
+  /** The text of each skill, for a session that has no plugin to load them from. */
+  readonly skillBodies?: readonly string[];
   readonly tools: ToolAccess;
 }
 
@@ -33,6 +36,8 @@ interface PriorResult {
 }
 
 export interface PromptInput {
+  /** The agent the account this session runs on uses; never the project's, which can move between accounts. */
+  readonly provider: Provider;
   readonly task: Pick<TaskDto, 'title' | 'description' | 'acceptanceCriteria'>;
   readonly claims: readonly { readonly kind: ClaimKind; readonly name: string }[];
   readonly action: NextAction;
@@ -202,14 +207,35 @@ const BACKGROUND_COMMANDS_READ_ONLY =
 const TEMP_FILES_RULE =
   'Make temp files with `mktemp "$TMPDIR/x.XXXXXX"`; a bare `mktemp` fails in the sandbox.';
 
+const AUTO_MODE_RULE =
+  "Claude Code's auto mode refuses three things without saying which rule applied: running the full gate (10db runs it after your turn), generating CPU load on the builder's Mac, and reading or writing outside this lane's worktree. Don't retry a refused call another way. A dependency change, a loop with no end in the background, WebFetch, WebSearch and repo MCP tools wait on a card from the builder.";
+
+const CLAUDE_HOSTS_RULE =
+  "A command that reaches a network host outside the project's allowed domains is refused, with no prompt. If you need one, ask the builder with AskUserQuestion.";
+
 /** Beside the commands line in a sandboxed session. */
 const SANDBOX_RULES = [
   "Read the repository's agent instructions first: `AGENTS.md`, or `CLAUDE.md` where the repo uses it.",
   TEMP_FILES_RULE,
   "A command that fails with `Operation not permitted` hit the sandbox: say which path in your handoff, and don't retry it another way.",
-  "Claude Code's auto mode refuses three things without saying which rule applied: running the full gate (10db runs it after your turn), generating CPU load on the builder's Mac, and reading or writing outside this lane's worktree. Don't retry a refused call another way. A dependency change, a loop with no end in the background, WebFetch, WebSearch and repo MCP tools wait on a card from the builder.",
-  "A command that reaches a network host outside the project's allowed domains is refused, with no prompt. If you need one, ask the builder with AskUserQuestion.",
+  AUTO_MODE_RULE,
+  CLAUDE_HOSTS_RULE,
 ];
+
+/** Codex has no auto mode, and a command it cannot run loses its output instead of stopping on a prompt. */
+const CODEX_HOSTS_RULE =
+  "A command that reaches a network host outside the project's allowed domains fails with its output lost. If you need one, ask with `mcp__10db__ask_human`. The builder adds a host in Settings, which applies from your next session.";
+
+const EDIT_RULE_TAIL =
+  ' (`python3 -c`, `node -e`, `perl -pi`, `sed -i`) or shell redirection (`>`, `>>`, a heredoc, `tee`). Edit and Write change the file in your lane without a permission card; a Bash command that writes a file stops on an "Allow Bash?" card and waits for a person, which overnight can be hours. Do a multi-line replacement with one Edit call.';
+
+const EDIT_RULE = `Change files with the Edit or Write tool, never with an interpreter one-liner${EDIT_RULE_TAIL}`;
+
+/** A Codex lane changes files with apply_patch; the rest of the rule reads as Claude's does. */
+const CODEX_EDIT_RULE = `Change files with apply_patch, never with an interpreter one-liner${EDIT_RULE_TAIL}`;
+
+/** A skill, a persona or a tool result written for Claude names these tools. */
+const CODEX_TOOL_NAMES = 'In this session, the Edit or Write tool means apply_patch.';
 
 const RULES = [
   'Edit only files inside your claims. For anything else, call the request_claim tool first. When another task holds the claim, the call waits until it frees; if it answers waiting: true, call it again with the same opId. Do not edit those files without it.',
@@ -221,7 +247,7 @@ const RULES = [
   PLAIN_COMMANDS,
   BACKGROUND_COMMANDS,
   // In the brief as well as the persona: a builder's edited persona is never overwritten.
-  'Change files with the Edit or Write tool, never with an interpreter one-liner (`python3 -c`, `node -e`, `perl -pi`, `sed -i`) or shell redirection (`>`, `>>`, a heredoc, `tee`). Edit and Write change the file in your lane without a permission card; a Bash command that writes a file stops on an "Allow Bash?" card and waits for a person, which overnight can be hours. Do a multi-line replacement with one Edit call.',
+  EDIT_RULE,
   "Run only the checks for what you changed (the changed packages' tests, typecheck and lint), never the full gate: 10db runs it after your turn ends.",
   // In the brief as well as the persona: a builder's edited persona is never overwritten.
   'A task is about one pull request, design and docs included. When a design or docs change would grow past about 300 lines, stop at a coherent point so what you have stands on its own, and file each remaining section with mcp__10db__file_follow_up (one call each, a new opId): 10db parks it in the Icebox column and names this task in its description.',
@@ -247,13 +273,37 @@ function readOnlyRules(role: StepRole): string[] {
   ];
 }
 
+/** The sandbox's lines as the agent the session runs under needs them. */
+function sandboxRulesFor(provider: Provider): readonly string[] {
+  switch (provider) {
+    case Provider.Claude:
+      return SANDBOX_RULES;
+    case Provider.Codex:
+      return SANDBOX_RULES.filter((line) => line !== AUTO_MODE_RULE).map((line) =>
+        line === CLAUDE_HOSTS_RULE ? CODEX_HOSTS_RULE : line,
+      );
+  }
+}
+
+/** The rules, with Codex's edit tool in the edit rule when the session runs on Codex. */
+function rulesFor(provider: Provider, rules: readonly string[]): readonly string[] {
+  if (provider === Provider.Claude) return rules;
+  return rules.map((rule) => (rule === EDIT_RULE ? CODEX_EDIT_RULE : rule));
+}
+
 /** The rules with the sandbox's lines after the commands line, when the session is sandboxed. */
-function withSandboxRules(rules: readonly string[], sandboxed: boolean): string[] {
-  if (!sandboxed) return [...rules];
-  return rules.flatMap((rule) => {
-    if (rule === PLAIN_COMMANDS) return [rule, ...SANDBOX_RULES];
+function withSandboxRules(
+  rules: readonly string[],
+  sandboxed: boolean,
+  provider: Provider,
+): string[] {
+  const own = rulesFor(provider, rules);
+  if (!sandboxed) return [...own];
+  const sandbox = sandboxRulesFor(provider);
+  return own.flatMap((rule) => {
+    if (rule === PLAIN_COMMANDS) return [rule, ...sandbox];
     if (rule === READ_ONLY_COMMANDS) {
-      return [rule, ...SANDBOX_RULES.filter((line) => line !== TEMP_FILES_RULE)];
+      return [rule, ...sandbox.filter((line) => line !== TEMP_FILES_RULE)];
     }
     return [rule];
   });
@@ -466,7 +516,12 @@ function stepSection(input: PromptInput): string[] {
     `Your step: ${String(step.index + 1)} of ${String(step.count)}, ${step.role}, as ${step.personaName}.`,
   ];
   if (step.skills.length > 0) lines.push(`Skills to use: ${step.skills.join(', ')}.`);
+  // A Codex session has no plugin, so the skills it names are in the briefing itself.
+  if (input.provider === Provider.Codex) {
+    for (const body of step.skillBodies ?? []) lines.push('', body);
+  }
   if (step.instructions) lines.push('', `How you work:\n${step.instructions}`);
+  if (input.provider === Provider.Codex) lines.push('', CODEX_TOOL_NAMES);
   if (input.priorResults.length > 0) {
     lines.push('', 'Earlier steps:');
     for (const prior of input.priorResults) {
@@ -508,6 +563,7 @@ export function buildSessionPrompt(input: PromptInput): string {
       withSandboxRules(
         input.step.tools === ToolAccess.ReadOnly ? readOnlyRules(input.step.role) : RULES,
         input.sandboxed === true,
+        input.provider,
       ),
     ),
     '',

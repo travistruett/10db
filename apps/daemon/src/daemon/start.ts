@@ -5,9 +5,12 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { serve, upgradeWebSocket, type WebSocketServerLike } from '@hono/node-server';
 import {
+  BRAINSTORM_REFUSED_ON_CHATGPT,
   EventType,
   InvalidError,
   PROTOCOL_VERSION,
+  Provider,
+  providerOf,
   StepRole,
   type InboxAnswer,
   type InboxItemDto,
@@ -38,7 +41,7 @@ import {
   seedDefaultAccount,
   setAppSetting,
 } from '@10db/db';
-import { HARNESS_PLUGIN_DIR, readDefaultPersonas } from '@10db/harness';
+import { HARNESS_PLUGIN_DIR, readDefaultPersonas, readSkillBody } from '@10db/harness';
 import { WebSocketServer } from 'ws';
 import {
   createAccountCardAnswers,
@@ -892,6 +895,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     launch(projectId) {
       const project = getProject(db, projectId);
       const row = getAccountRow(db, project.accountId);
+      // Judged on the account the conversation runs on, which can differ from the project's provider.
+      if (providerOf(row.kind) === Provider.Codex)
+        throw new InvalidError(BRAINSTORM_REFUSED_ON_CHATGPT);
       const profile = roleDefault({
         provider: project.provider,
         role: StepRole.Plan,
@@ -954,6 +960,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     live,
     limits,
     mcpUrl: () => mcpUrl,
+    skillBody: (name) => readSkillBody(name, opts.harnessDir ?? HARNESS_PLUGIN_DIR),
     launcher,
     startGate,
     accounts: {

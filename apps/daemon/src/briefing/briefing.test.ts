@@ -1,5 +1,5 @@
 import type { ContextPack, HandoffDto, NextAction, StepResult } from '@10db/contracts';
-import { mintId } from '@10db/contracts';
+import { mintId, Provider } from '@10db/contracts';
 import {
   acquireClaims,
   createTestStore,
@@ -130,6 +130,7 @@ const implementStep = {
   tools: 'edit',
 } as const;
 const base = {
+  provider: Provider.Claude,
   step: implementStep,
   priorResults: [],
   previousResult: null,
@@ -990,6 +991,87 @@ describe('buildSessionPrompt for flow steps', () => {
       expect(prompt).not.toContain('agent instructions');
       expect(prompt).not.toContain('auto mode');
     }
+  });
+
+  describe('for the agent the session runs on', () => {
+    const planningBody = '# Planning\nWrite the plan as numbered steps.';
+    const codexInput = {
+      ...base,
+      provider: Provider.Codex,
+      step: { ...implementStep, skills: ['planning'], skillBodies: [planningBody] },
+      action: { kind: 'start' as const },
+      sandboxed: true,
+    };
+    const CLAUDE_HOSTS =
+      "A command that reaches a network host outside the project's allowed domains is refused, with no prompt. If you need one, ask the builder with AskUserQuestion.";
+    const CLAUDE_EDIT =
+      'Change files with the Edit or Write tool, never with an interpreter one-liner (`python3 -c`, `node -e`, `perl -pi`, `sed -i`) or shell redirection (`>`, `>>`, a heredoc, `tee`). Edit and Write change the file in your lane without a permission card; a Bash command that writes a file stops on an "Allow Bash?" card and waits for a person, which overnight can be hours. Do a multi-line replacement with one Edit call.';
+
+    it('briefs a Codex lane to change files with apply_patch and to ask through 10db', () => {
+      const codex = buildSessionPrompt(codexInput);
+      expect(codex).toContain('Change files with apply_patch, never with an interpreter one-liner');
+      expect(codex).toContain('In this session, the Edit or Write tool means apply_patch.');
+      expect(codex).toContain('mcp__10db__ask_human');
+      expect(codex).toContain(
+        'The builder adds a host in Settings, which applies from your next session.',
+      );
+      expect(codex).toContain('fails with its output lost');
+      expect(codex).not.toContain('auto mode');
+      expect(codex).not.toContain('AskUserQuestion');
+      expect(codex).not.toContain('Change files with the Edit or Write tool');
+    });
+
+    it('puts a skill’s body under Skills to use for a Codex lane only', () => {
+      const codex = buildSessionPrompt(codexInput);
+      expect(codex).toContain(planningBody);
+      expect(codex.indexOf('Skills to use: planning.')).toBeLessThan(codex.indexOf(planningBody));
+      const claude = buildSessionPrompt({ ...codexInput, provider: Provider.Claude });
+      expect(claude).toContain('Skills to use: planning.');
+      expect(claude).not.toContain(planningBody);
+    });
+
+    it('puts the tool-name line after the persona’s instructions', () => {
+      const codex = buildSessionPrompt({
+        ...codexInput,
+        step: { ...codexInput.step, instructions: 'Be brief.' },
+      });
+      expect(codex.indexOf('How you work:\nBe brief.')).toBeLessThan(
+        codex.indexOf('the Edit or Write tool means apply_patch'),
+      );
+    });
+
+    it.each([
+      ['an implement step', implementStep],
+      ['a read-only step', reviewStep],
+    ])('keeps Claude’s lines for %s unchanged', (_name, step) => {
+      const claude = buildSessionPrompt({
+        ...base,
+        step,
+        action: { kind: 'start' },
+        sandboxed: true,
+      });
+      expect(claude).toContain(CLAUDE_HOSTS);
+      expect(claude).toContain("Claude Code's auto mode refuses");
+      expect(claude).not.toContain('apply_patch');
+      expect(claude).not.toContain('fails with its output lost');
+    });
+
+    it('keeps the edit rule Claude has always had', () => {
+      expect(buildSessionPrompt({ ...base, action: { kind: 'start' } })).toContain(
+        `- ${CLAUDE_EDIT}`,
+      );
+    });
+
+    it('gives a Codex read-only step the sandbox lines without the Claude ones', () => {
+      const codex = buildSessionPrompt({
+        ...codexInput,
+        step: { ...reviewStep, skills: [] },
+      });
+      expect(codex).toContain('mcp__10db__ask_human');
+      expect(codex).toContain('Operation not permitted');
+      expect(codex).not.toContain('AskUserQuestion');
+      expect(codex).not.toContain('auto mode');
+    });
   });
 
   it('tells an implement step to commit every change before it ends its turn', () => {
