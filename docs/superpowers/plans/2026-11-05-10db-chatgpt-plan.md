@@ -883,7 +883,78 @@ Expected: skipped
 
 ---
 
-### Task 12: Docs, and the first Ampsio lane
+### Task 12: Keep 10db's files out of /private/tmp
+
+Codex's base policy opens all of `/private/tmp` to every command, so 10db moves its own files out, as Travis decided
+(spec, "Temp files"). Claude lanes, gates and MCP servers keep exactly the same sandbox, only at a new root.
+
+**Files:**
+
+- Modify: `apps/daemon/src/sandbox/temp-dir.ts`, `sealed-file.ts`, `env-file.ts`, `lane-processes.ts`, `stale-files.ts`,
+  `lane-sandbox.ts`, `gate-sandbox.ts`, `mcp-sandbox.ts`, `index.ts`
+- Modify: `apps/daemon/src/daemon/start.ts:384,572,589,609,634,929,941`, `apps/daemon/src/runner/runner.ts`
+- Test: the existing tests of each file above, extended
+
+**Interfaces:**
+
+- Produces in `sandbox`: `laneTempRoot(): string`, which is `/Users/Shared/10db-<uid>`; `sandboxFilesRoot(home): string`,
+  `<home>/.10db/run`; `codexLaneTempRoot(home): string`, `<home>/.10db/lanes`; and
+  `ensurePrivateRoot(path): string`, which makes the dir 0700 if missing and throws `SandboxTempDirError` when it is a
+  link, not a dir, or not owned by this user. `LANE_TEMP_ROOT` is removed.
+- `LaneSandboxDeps` and `GateSandboxDeps` gain `filesRoot`; their `tmpRoot` stays the temp dirs' root.
+  `LaneSessionInput` gains `tempRoot?: string`, the root this session's temp dir is made in.
+- Sealed files, env files and process ledgers are made in `filesRoot`. Temp dirs are made in `tmpRoot`, or in
+  `tempRoot` for the session.
+
+- [ ] **Step 1: Write the failing tests.**
+
+```ts
+// temp-dir.test.ts, on a temp parent standing in for /Users/Shared
+expect(laneTempRoot()).toBe(`/Users/Shared/10db-${String(process.getuid?.())}`);
+expect(Buffer.byteLength(join(laneTempRoot(), '10db-abcdef'))).toBeLessThanOrEqual(MAX_SANDBOX_TMP_BYTES);
+it('makes the root 0700', ...);
+it.each([['a link'], ['a file'], ['another user's dir']])('refuses a root that is %s', ...); // the last one skips
+                                                                                               // when not root-run
+// lane-sandbox.test.ts
+it('puts the env file and the ledger in the files root and the temp dir in the temp root', ...);
+it('makes a session's temp dir in its own tempRoot when one is given', ...);
+// gate-sandbox.test.ts and mcp-sandbox.test.ts: the srt settings and env files are in the files root
+// stale-files.test.ts
+it('sweeps stale temp dirs, sealed files and ledgers from both roots and from /private/tmp', ...); // old root injected
+// runner.test.ts
+it('makes a ChatGPT lane's temp dir under the Codex lanes root', ...);
+it('keeps a Claude lane's temp dir under the lane temp root', ...);
+```
+
+- [ ] **Step 2: Run them to see them fail.**
+
+Run: `pnpm --filter @10db/daemon exec vitest run src/sandbox src/runner src/daemon`
+Expected: FAIL, `laneTempRoot` undefined.
+
+- [ ] **Step 3: Implement.** The daemon makes each root with `ensurePrivateRoot` at start, before it claims them, and
+      refuses to start the sandbox when one is refused, as it does today for a temp root it can't claim. The claim and
+      sweep run on the temp root, the Codex lanes root and the files root; the sweep alone also runs on `/private/tmp`,
+      for what an earlier 10db left there. The runner passes `tempRoot: codexLaneTempRoot(home)` for a
+      `codex_signin` account. srt's own `SRT_SHARED_TEMP` stays as it is.
+
+- [ ] **Step 4: Run them to see them pass, and the rest.**
+
+Run: `pnpm --filter @10db/daemon exec vitest run src/sandbox src/runner src/daemon src/sessions`, then the daemon
+typecheck. Then `TENDB_LIVE_CODEX=1 pnpm --filter @10db/daemon exec vitest run test/codex.live.test.ts` with a row
+added: a Codex lane can't read or write another lane's temp dir under the lane temp root, or a file in the files root.
+Expected: PASS.
+
+- [ ] **Step 5: Run the Claude lane's live sandbox test when the Claude plan is available.**
+
+Run: `TENDB_LIVE_CLAUDE=1 pnpm --filter @10db/daemon exec vitest run test/lane-sandbox.live.test.ts`
+Expected: PASS. It is the proof that Claude lanes work at the new root. If the plan is at its limit, record that in the
+report and run it before the pull request opens.
+
+- [ ] **Step 6: Commit** `fix(daemon): keep 10db's sandbox files out of /private/tmp`, naming every path.
+
+---
+
+### Task 13: Docs, and the first Ampsio lane
 
 **Files:**
 

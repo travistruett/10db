@@ -236,6 +236,28 @@ doesn't apply to these lanes.
 - `trackProcesses` and `endProcesses` watch the app-server's process. A command outlived both `turn/interrupt` and the
   app-server in the spike, so this watch is the only cleanup.
 
+#### Temp files
+
+Codex's base Seatbelt policy lets every command read and write all of `/private/tmp` (and `/tmp`, `/var/tmp`), and no
+profile entry closes it: with denies on both a folder there and `/private/tmp`, a command still read and wrote that
+folder. 10db kept all its temp files there, so Travis decided, 2026-11-05:
+
+| What                                                                 | Where it goes            | Why                                                    |
+| -------------------------------------------------------------------- | ------------------------ | ------------------------------------------------------ |
+| Other software's temp files, including Claude Code's own              | Stays; Codex's own bar    | Nothing short of a second sandbox closes it             |
+| 10db's control files: process ledgers, srt settings files, env files  | `~/.10db/run/`            | A forged or swapped one escapes a sandbox or reads a token |
+| A ChatGPT lane's temp dir                                             | `~/.10db/lanes/`          | Keeps ChatGPT lanes apart, as Claude lanes are          |
+| Claude lanes', gates' and MCP servers' temp dirs                      | `/Users/Shared/10db-<uid>/` | Keeps ChatGPT lanes out of them; fits the 44-byte limit |
+
+- `/Users/Shared/10db-501/10db-xxxxxx` is 34 bytes for this Mac's user, and at most 41 for any uid, under
+  `MAX_SANDBOX_TMP_BYTES`. The uid keeps two macOS users apart, since `/Users/Shared` is writable by all of them. The
+  root is made 0700 and refused when it is a link or another user's.
+- At start the daemon also sweeps its stale entries from `/private/tmp`, with the existing rules, so a sealed file a
+  crashed daemon left there isn't left for a ChatGPT lane to read.
+- Codex's base policy closes both `~/.10db` and `/Users/Shared`; a command there got `Operation not permitted`.
+- A lane is granted only its own temp dir, as before. The control files are read only through the grants that already
+  name them: a Claude lane's env file, an MCP server's env file.
+
 ### Models
 
 A Codex account uses the Model map every account already has. Routing, role defaults, persona pins and the account's
@@ -301,6 +323,8 @@ Codex for other work doesn't stop Ampsio.
 - `write_stdin` is not seen by the hook: text can reach a running process unguarded. The kernel sandbox still bounds
   it, and the guard is a filter, not the boundary (`decisions/2026-10-29-sandbox-is-the-boundary.md`).
 - No classifier. What the guard allows runs inside the sandbox.
+- A ChatGPT lane can read and write `/private/tmp`, as any Codex command can. 10db keeps nothing there, but other
+  software's temp files, Claude Code's own included, stay readable to it (see Temp files).
 - A lane spends a read on `AGENTS.md`, and Ampsio's `.codex/` doesn't apply to its lanes.
 - A malformed start can still leave a lane unable to run; it refuses rather than runs open.
 
@@ -326,7 +350,7 @@ Fake adapter tests are unchanged: `FakeAdapter` stays Claude-shaped.
 2. Contracts: provider, account kind, `providerOf`.
 3. Account, home and Settings, through to a confirmed identity.
 4. Adapter, routing and event mapping.
-5. Guard and sandbox, with the live file.
+5. Guard and sandbox, with the live file, and 10db's temp files moved out of `/private/tmp`.
 6. Limits and the briefing.
 7. First Ampsio lane, then the docs: a decision for terms and login (amending decision 4, closing the row in
    `docs/architecture/open-questions.md`), one for how Codex lanes meet the guard and sandbox bar, and updates to
