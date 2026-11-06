@@ -13,10 +13,11 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { SANDBOXED } from '../../test/fixtures';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  claudeCodeTmpPath,
   codexLaneTempRoot,
   createLaneTempDir,
   ensurePrivateRoot,
@@ -37,11 +38,15 @@ afterEach(() => {
 
 describe('the sandbox roots', () => {
   it("puts Claude lanes' temp dirs in this user's folder of /Users/Shared, short enough for the limit", () => {
-    expect(laneTempRoot()).toBe(`/Users/Shared/10db-${String(process.getuid?.())}`);
-    // mkdtemp's six characters after the prefix: the longest path a temp dir there takes.
-    expect(Buffer.byteLength(join(laneTempRoot(), '10db-abcdef'))).toBeLessThanOrEqual(
-      MAX_SANDBOX_TMP_BYTES,
+    const uid = String(process.getuid?.());
+    expect(laneTempRoot()).toBe(`/Users/Shared/10db-${uid}`);
+    // mkdtemp's six characters, and Claude Code's own dir in it: what Claude Code measures.
+    expect(claudeCodeTmpPath(join(laneTempRoot(), 'abcdef'))).toBe(
+      `/Users/Shared/10db-${uid}/abcdef/claude-${uid}`,
     );
+    expect(
+      Buffer.byteLength(claudeCodeTmpPath(join(laneTempRoot(), 'abcdef'))),
+    ).toBeLessThanOrEqual(MAX_SANDBOX_TMP_BYTES);
   });
 
   it("puts a ChatGPT lane's temp dir and 10db's sandbox files under the home's .10db", () => {
@@ -124,13 +129,43 @@ describe.skipIf(SANDBOXED)('lane temp directory', () => {
     root = realpathSync(mkdtempSync('/tmp/sbx-'));
   });
 
-  it('creates a short private directory', () => {
+  it('creates a short private directory, named by six random characters alone', () => {
     const shortRoot = join(root, 'r');
     mkdirSync(shortRoot);
     const dir = createLaneTempDir(shortRoot);
-    expect(Buffer.byteLength(dir)).toBeLessThanOrEqual(MAX_SANDBOX_TMP_BYTES);
+    expect(Buffer.byteLength(claudeCodeTmpPath(dir))).toBeLessThanOrEqual(MAX_SANDBOX_TMP_BYTES);
     expect(statSync(dir).mode & 0o777).toBe(0o700);
-    expect(dir.startsWith(`${shortRoot}/10db-`)).toBe(true);
+    expect(dir.startsWith(`${shortRoot}/`)).toBe(true);
+    expect(basename(dir)).toMatch(/^[A-Za-z0-9]{6}$/);
+  });
+
+  /** A root whose temp dirs put Claude Code's own dir at exactly `bytes`, as it measures. */
+  function rootFor(bytes: number): string {
+    // The temp dir's name and Claude Code's `claude-<uid>` in it.
+    const inside = Buffer.byteLength(claudeCodeTmpPath('/abcdef'));
+    const made = join(root, 'a'.repeat(bytes - inside - Buffer.byteLength(root) - 1));
+    mkdirSync(made);
+    expect(Buffer.byteLength(claudeCodeTmpPath(join(made, 'abcdef')))).toBe(bytes);
+    return made;
+  }
+
+  it.for<{ name: string; bytes: number; made: boolean }>([
+    { name: 'at the limit', bytes: MAX_SANDBOX_TMP_BYTES, made: true },
+    { name: 'one byte over it', bytes: MAX_SANDBOX_TMP_BYTES + 1, made: false },
+  ])('measures the dir with Claude Code’s claude-<uid> in it: $name', ({ bytes, made }) => {
+    const at = rootFor(bytes);
+    if (made) {
+      const dir = createLaneTempDir(at);
+      expect(Buffer.byteLength(claudeCodeTmpPath(dir))).toBe(bytes);
+      removeLaneTempDir(dir, at);
+    } else {
+      // Refused, never handed to Claude Code, which would fall back to /tmp/claude-<uid> unsaid.
+      expect(() => createLaneTempDir(at)).toThrow(SandboxTempDirError);
+      expect(() => createLaneTempDir(at)).toThrow(
+        `The lane temp directory path is over ${String(MAX_SANDBOX_TMP_BYTES)} bytes`,
+      );
+    }
+    expect(readdirSync(at)).toEqual([]);
   });
 
   it('refuses a root that makes the path too long, leaving nothing behind', () => {
@@ -144,7 +179,8 @@ describe.skipIf(SANDBOXED)('lane temp directory', () => {
     const longRoot = join(root, 'a'.repeat(40));
     mkdirSync(longRoot);
     const dir = createLaneTempDir(longRoot, null);
-    expect(dir.startsWith(`${longRoot}/10db-`)).toBe(true);
+    expect(dir.startsWith(`${longRoot}/`)).toBe(true);
+    expect(basename(dir)).toMatch(/^[A-Za-z0-9]{6}$/);
     expect(statSync(dir).mode & 0o777).toBe(0o700);
     removeLaneTempDir(dir, longRoot);
   });
@@ -157,12 +193,19 @@ describe.skipIf(SANDBOXED)('lane temp directory', () => {
     const dir = createLaneTempDir(root);
     const other = join(root, 'keep');
     mkdirSync(other);
+    // Seven characters: no name a temp dir is made with.
+    const longer = join(root, 'abcdefg');
+    mkdirSync(longer);
     expect(() => {
       removeLaneTempDir(root, root);
     }).toThrow(SandboxTempDirError);
     expect(() => {
       removeLaneTempDir(other, root);
     }).toThrow(SandboxTempDirError);
+    expect(() => {
+      removeLaneTempDir(longer, root);
+    }).toThrow(SandboxTempDirError);
+    expect(existsSync(longer)).toBe(true);
     expect(() => {
       removeLaneTempDir(dir, join(root, 'elsewhere'));
     }).toThrow(SandboxTempDirError);

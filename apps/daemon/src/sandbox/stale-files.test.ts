@@ -36,11 +36,20 @@ beforeEach(() => {
   children = [];
 });
 
+/**
+ * The temp dirs a crashed daemon leaves: in a sandbox root `createLaneTempDir`'s six characters,
+ * in a system temp dir the `10db-` and six characters a daemon that made them there used.
+ */
+const LANE_DIRS = ['a1B2c3', 'Zz9yX8'] as const;
+const SYSTEM_DIRS = ['10db-a1B2c3', '10db-Zz9yX8'] as const;
+
 afterEach(() => {
   for (const child of children) child.kill('SIGKILL');
   for (const dir of readdirSync(base)) {
-    const locked = join(base, dir, '10db-Zz9yX8', 'locked');
-    if (existsSync(join(base, dir, '10db-Zz9yX8'))) chmodSync(locked, 0o700);
+    for (const name of [LANE_DIRS[1], SYSTEM_DIRS[1]]) {
+      const locked = join(base, dir, name, 'locked');
+      if (existsSync(locked)) chmodSync(locked, 0o700);
+    }
   }
   rmSync(base, { recursive: true, force: true });
 });
@@ -65,11 +74,13 @@ async function deadPid(): Promise<number> {
 }
 
 /** What a crashed daemon leaves: temp dirs (one locked down by its lane) and sealed files. */
-function leaveStaleFiles(dir: string = root): void {
-  mkdirSync(join(dir, '10db-a1B2c3', 'cache', 'npm'), { recursive: true });
-  writeFileSync(join(dir, '10db-a1B2c3', 'cache', 'npm', 'x'), '');
-  mkdirSync(join(dir, '10db-Zz9yX8', 'locked'), { recursive: true });
-  chmodSync(join(dir, '10db-Zz9yX8', 'locked'), 0o000);
+function leaveStaleFiles(dir: string = root, names: readonly string[] = LANE_DIRS): void {
+  const [open, locked] = names;
+  if (open === undefined || locked === undefined) throw new Error('two temp dir names');
+  mkdirSync(join(dir, open, 'cache', 'npm'), { recursive: true });
+  writeFileSync(join(dir, open, 'cache', 'npm', 'x'), '');
+  mkdirSync(join(dir, locked, 'locked'), { recursive: true });
+  chmodSync(join(dir, locked, 'locked'), 0o000);
   for (const name of [
     '10db-env-0123456789ab.sh',
     '10db-gate-0123456789ab.json',
@@ -87,22 +98,30 @@ const LEDGERS = [
   '10db-proc-4321-0123456789ab.json.ba9876543210.tmp',
 ];
 
-/** Names that aren't 10db's, or are 10db's names on something 10db never makes. */
-function leaveOthers(dir: string = root): string[] {
+/**
+ * Names that aren't 10db's, or are 10db's names on something 10db never makes there: a temp dir
+ * named as the other kind of root names one (`foreign`), a longer name, a link with a temp dir's name.
+ */
+function leaveOthers(dir: string = root, foreign: string = SYSTEM_DIRS[0]): string[] {
+  const link = foreign === SYSTEM_DIRS[0] ? 'L1nk00' : '10db-L1nk00';
   writeFileSync(join(dir, 'other.txt'), '');
   writeFileSync(join(dir, '10db-notes.txt'), '');
+  mkdirSync(join(dir, foreign));
+  mkdirSync(join(dir, 'a1B2c3d'));
   mkdirSync(join(dir, '10db-toolongname'));
   mkdirSync(join(dir, '10db-mcp-0123456789cd.sh'));
-  symlinkSync(outside, join(dir, '10db-L1nk00'));
+  symlinkSync(outside, join(dir, link));
   symlinkSync(join(outside, 'keep.txt'), join(dir, '10db-env-00000000000a.sh'));
   return [
-    '10db-L1nk00',
+    link,
+    foreign,
+    'a1B2c3d',
     '10db-env-00000000000a.sh',
     '10db-mcp-0123456789cd.sh',
     '10db-notes.txt',
     '10db-toolongname',
     'other.txt',
-  ];
+  ].sort();
 }
 
 describe('claimSandboxTempRoot', () => {
@@ -189,7 +208,7 @@ describe('claimSandboxRoots and the system temp sweeps', () => {
   it('sweeps stale temp dirs and sealed files from every root it claims, leaves their ledgers for the reap, and marks each', () => {
     const { temp, lanes, files } = roots();
     leaveStaleFiles(temp);
-    mkdirSync(join(lanes, '10db-Qq1Ww2', 'cache'), { recursive: true });
+    mkdirSync(join(lanes, 'Qq1Ww2', 'cache'), { recursive: true });
     leaveStaleFiles(files);
     for (const name of LEDGERS) writeFileSync(join(files, name), '{"version":1,"members":[]}');
     const mark = `10db-daemon-${String(process.pid)}`;
@@ -231,17 +250,17 @@ describe('claimSandboxRoots and the system temp sweeps', () => {
     "removes 10db's sealed files and ledgers from a system temp dir at once, unread, whatever a mark of no 10db daemon says",
     () => {
       const { systemTemp } = roots();
-      leaveStaleFiles(systemTemp);
+      leaveStaleFiles(systemTemp, SYSTEM_DIRS);
       for (const name of LEDGERS)
         writeFileSync(join(systemTemp, name), '{"version":1,"members":[]}');
       // A mark a ChatGPT lane could plant: a running process, but no 10db daemon.
       const planted = liveProcess();
       writeFileSync(join(systemTemp, `10db-daemon-${String(planted)}`), '', { mode: 0o400 });
-      const others = leaveOthers(systemTemp);
+      const others = leaveOthers(systemTemp, LANE_DIRS[0]);
       // Six sealed files and the two ledger files; the temp dirs are the later sweep's.
       expect(sweepSystemTempFiles([systemTemp])).toMatchObject({ removed: 8, failed: 0 });
       expect(readdirSync(systemTemp).sort()).toEqual(
-        [...others, '10db-Zz9yX8', '10db-a1B2c3', `10db-daemon-${String(planted)}`].sort(),
+        [...others, ...SYSTEM_DIRS, `10db-daemon-${String(planted)}`].sort(),
       );
       expect(readdirSync(outside)).toEqual(['keep.txt']);
     },
@@ -252,16 +271,15 @@ describe('claimSandboxRoots and the system temp sweeps', () => {
     "removes 10db's temp dirs from a system temp dir off the event loop, whatever a mark of no 10db daemon says, and stops when aborted",
     async () => {
       const { systemTemp } = roots();
-      leaveStaleFiles(systemTemp);
+      leaveStaleFiles(systemTemp, SYSTEM_DIRS);
       const planted = liveProcess();
       writeFileSync(join(systemTemp, `10db-daemon-${String(planted)}`), '', { mode: 0o400 });
-      const others = leaveOthers(systemTemp);
+      // A dir with a sandbox root's temp dir name is no 10db name in a system temp dir.
+      const others = leaveOthers(systemTemp, LANE_DIRS[0]);
       const aborted = new AbortController();
       aborted.abort();
       expect(await sweepSystemTempDirs([systemTemp], aborted.signal)).toMatchObject({ removed: 0 });
-      expect(readdirSync(systemTemp)).toEqual(
-        expect.arrayContaining(['10db-Zz9yX8', '10db-a1B2c3']),
-      );
+      expect(readdirSync(systemTemp)).toEqual(expect.arrayContaining([...SYSTEM_DIRS]));
       let ticked = false;
       const sweeping = sweepSystemTempDirs([systemTemp], new AbortController().signal);
       setImmediate(() => {
@@ -269,8 +287,7 @@ describe('claimSandboxRoots and the system temp sweeps', () => {
       });
       expect(await sweeping).toMatchObject({ removed: 2, failed: 0 });
       expect(ticked).toBe(true);
-      expect(readdirSync(systemTemp)).not.toContain('10db-Zz9yX8');
-      expect(readdirSync(systemTemp)).not.toContain('10db-a1B2c3');
+      for (const name of SYSTEM_DIRS) expect(readdirSync(systemTemp)).not.toContain(name);
       expect(readdirSync(systemTemp)).toEqual(expect.arrayContaining(others));
       expect(readdirSync(outside)).toEqual(['keep.txt']);
     },
@@ -281,7 +298,7 @@ describe('claimSandboxRoots and the system temp sweeps', () => {
     'leaves a system temp dir alone while a 10db daemon that runs has marked it',
     async () => {
       const { systemTemp } = roots();
-      leaveStaleFiles(systemTemp);
+      leaveStaleFiles(systemTemp, SYSTEM_DIRS);
       for (const name of LEDGERS)
         writeFileSync(join(systemTemp, name), '{"version":1,"members":[]}');
       const daemon = liveDaemon();

@@ -250,9 +250,12 @@ folder. 10db kept all its temp files there, so Travis decided, 2026-11-05:
 | Claude lanes', gates' and MCP servers' temp dirs                      | `/Users/Shared/10db-<uid>/` | Keeps ChatGPT lanes out of them; fits the 44-byte limit |
 | pnpm's store lock directory, which a package-install gate opens        | Stays; pnpm names it       | Walked only once renamed under the lane temp root, never in place |
 
-- `/Users/Shared/10db-501/10db-xxxxxx` is 34 bytes for this Mac's user, and at most 41 for any uid, under
-  `MAX_SANDBOX_TMP_BYTES`. The uid keeps two macOS users apart, since `/Users/Shared` is writable by all of them. The
-  root is made 0700 and refused when it is a link or another user's.
+- Claude Code takes `CLAUDE_CODE_TMPDIR` only when its own dir there, the path plus `/claude-<uid>`, fits 44 bytes
+  (`MAX_SANDBOX_TMP_BYTES`), and otherwise falls back to the shared `/tmp/claude-<uid>` without a word. A temp dir in
+  the root is named by six random characters alone: `/Users/Shared/10db-501/xxxxxx/claude-501` is 40 bytes for this
+  Mac's user. The uid is in it twice, so it fits for a uid of up to five digits, and a longer path is refused
+  (`SandboxTempDirError`), never handed to Claude Code. The uid keeps two macOS users apart, since `/Users/Shared` is
+  writable by all of them. The root is made 0700 and refused when it is a link or another user's.
 - At start, before any lane session or gate, the daemon unlinks its sealed files and ledgers from `/private/tmp` and
   `/private/var/tmp`, so one a crashed daemon left there isn't left for a ChatGPT lane to read. Once it listens, it
   removes its lane temp dirs there in the background, which `stop()` ends between entries. A mark there counts only

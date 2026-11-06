@@ -258,8 +258,10 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
 - **Write.** The checkout (Claude Code's own default) and the lane's temp directory, and nothing shared with
   another lane or the builder's own tools. In a linked worktree Claude Code also opens the worktree's own git dir for writing (`HEAD`, `index`, new files), except `commondir`, `config.worktree` and `gitdir`; see the linked-worktree bullet below.
 - **Temp directory.** Each session gets its own, under `/Users/Shared/10db-<uid>/` (a ChatGPT lane's under `~/.10db/lanes/`; `decisions/2026-11-05-sandbox-files-leave-private-tmp.md`), through `CLAUDE_CODE_TMPDIR`. Claude Code
-  falls back to the shared `/tmp/claude-<uid>` without a word when the path is over 44 bytes, so the daemon refuses
-  to start a session whose path is longer (spike 14 check 10). Unix sockets are allowed only there.
+  falls back to the shared `/tmp/claude-<uid>` without a word when its own dir there, the path plus `/claude-<uid>`,
+  is over 44 bytes (spike 14 check 10 measured the dir alone on Claude Code 2.1.310; 2.1.318 counts `/claude-<uid>`),
+  so the daemon names each temp dir by six random characters and refuses to start a session whose path is longer.
+  Unix sockets are allowed only there.
 - **Package caches are per lane.** No writable cache that can hold code a later install or build runs is shared
   between lanes. npm's cache, node-gyp's headers, corepack's downloads, pnpm's store, state and cache, and
   cargo's `CARGO_HOME` live in `<lane temp dir>/cache` and go with the lane. A shared writable cargo home would
@@ -507,11 +509,17 @@ SRT_DEBUG=1 <node> -r ~/.10db/run/10db-mcp-<hex>.cjs <srt.mjs> --settings <seale
     allowlist; one to the wildcard's own domain, to an unapproved name, and every one from a server approved
     with no host, gets srt's `blocked-by-allowlist` refusal. The refusal log then holds the hosts srt refused
     (`other.invalid`, `wild.invalid`) and no approved one.
-  - **After a crash.** A daemon that starts sweeps the sandbox roots (`/Users/Shared/10db-<uid>`, `~/.10db/run`, and the system temp dirs for what an older daemon left there) before any session or gate starts
-    (`claimSandboxTempRoot`): it removes this user's lane temp dirs (`10db-` and six characters) and sealed
-    files and refusal logs (`10db-env-`, `10db-gate-`, `10db-mcp-`), each by its exact name and its own kind, never following
-    or removing a link. It then marks the root with its pid (`10db-daemon-<pid>`), and a daemon with another
-    data dir that finds a live mark sweeps nothing, since that daemon's sessions may be running.
+  - **After a crash.** A daemon that starts claims its three sandbox roots, `/Users/Shared/10db-<uid>`, `~/.10db/lanes`
+    and `~/.10db/run`, before any session or gate starts (`claimSandboxRoots`): in each it removes this user's lane
+    temp dirs (six random characters) and sealed files and refusal logs (`10db-env-`, `10db-gate-`, `10db-mcp-`),
+    each by its exact name and its own kind, never following or removing a link, and leaves the process ledgers for
+    the reap that stops what they name. It then marks the root with its pid (`10db-daemon-<pid>`), and a daemon with
+    another data dir that finds a live mark sweeps nothing, since that daemon's sessions may be running.
+  - **The system temp dirs.** Separately, the sweep of `/private/tmp` and `/private/var/tmp` removes what a daemon
+    that kept its files there left (§4.13): before any session or gate, it unlinks 10db's sealed files and ledgers
+    there unread (`sweepSystemTempFiles`); once the daemon listens, it removes its lane temp dirs there (`10db-` and six
+    characters) off the event loop (`sweepSystemTempDirs`). It marks nothing there, and a mark there counts only while
+    its pid runs a 10db daemon.
 - **Residuals:** an approved variable reaches the server and can leave through its tool results (§7) or to
   the hosts its approval names; a wildcard over a public suffix (`*.github.io`) opens every site under it; srt's
   proxy token is in the server's env, so a lane that rewrites the server's code can have a tool return it and,

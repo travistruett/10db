@@ -26,9 +26,11 @@ export {
 } from './lane-processes';
 export { systemProcessTable } from './process-table';
 export {
+  claudeCodeTmpPath,
   codexLaneTempRoot,
   createLaneTempDir,
   ensurePrivateRoot,
+  isLaneTempDirName,
   laneTempRoot,
   MAX_SANDBOX_TMP_BYTES,
   removeLaneTempDir,

@@ -7,7 +7,7 @@ import {
   type ProcessSnapshot,
 } from './culprits';
 
-const TEMP_ROOT = '/private/tmp';
+const TEMP_ROOT = '/Users/Shared/10db-501';
 
 const row = (
   pid: number,
@@ -131,11 +131,11 @@ describe('findCulprits', () => {
   it('names the lane whose temp dir an orphaned busy loop holds open', async () => {
     const known: KnownProcesses = {
       ...NO_KNOWN,
-      tempDirs: [{ dir: '/private/tmp/10db-abc123', workstreamId: 'ws_7', label: 'task "Slow"' }],
+      tempDirs: [{ dir: `${TEMP_ROOT}/abc123`, workstreamId: 'ws_7', label: 'task "Slow"' }],
     };
     const found = await findCulprits(
       snapshot([row(500, 1, 500, 99, 'sh loop.sh')], {
-        500: ['/usr/lib/dyld', '/private/tmp/10db-abc123/work/loop.sh'],
+        500: ['/usr/lib/dyld', `${TEMP_ROOT}/abc123/work/loop.sh`],
       }),
       () => known,
     );
@@ -145,22 +145,26 @@ describe('findCulprits', () => {
   it('says a busy process in a lane temp dir that no lane owns now was left behind by one that ended', async () => {
     const found = await findCulprits(
       snapshot([row(500, 1, 500, 99, 'sh loop.sh')], {
-        500: ['/private/tmp/10db-gone99/loop.sh'],
+        500: [`${TEMP_ROOT}/gone99/loop.sh`],
       }),
       () => NO_KNOWN,
     );
     expect(found[0]?.owner).toEqual({ kind: 'ended-lane' });
   });
 
-  it('does not treat a similarly named directory as a lane temp dir', async () => {
+  it.each<[string, string, string]>([
+    ['another temp dir', 'abc124', 'ended-lane'],
+    ['a longer name', 'abc123x', 'other'],
+    ['the prefixed name temp dirs had in the system temp dir', '10db-abc123', 'other'],
+  ])("does not take %s for the lane's own temp dir", async (_name, dir, kind) => {
     const found = await findCulprits(
-      snapshot([row(500, 1, 500, 99, 'sh')], { 500: ['/private/tmp/10db-abc123-other/x'] }),
+      snapshot([row(500, 1, 500, 99, 'sh')], { 500: [`${TEMP_ROOT}/${dir}/x`] }),
       () => ({
         ...NO_KNOWN,
-        tempDirs: [{ dir: '/private/tmp/10db-abc123', workstreamId: 'ws_7', label: 'task' }],
+        tempDirs: [{ dir: `${TEMP_ROOT}/abc123`, workstreamId: 'ws_7', label: 'task' }],
       }),
     );
-    expect(found[0]?.owner).toEqual({ kind: 'ended-lane' });
+    expect(found[0]?.owner).toEqual({ kind });
   });
 
   it('names the lane whose worktree a busy process works in', async () => {

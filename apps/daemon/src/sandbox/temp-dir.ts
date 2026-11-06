@@ -15,10 +15,35 @@ import {
 import { basename, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 
-/** The longest temp directory path Claude Code's `CLAUDE_CODE_TMPDIR` can use under the sandbox. */
+/**
+ * The longest path Claude Code's own dir in `CLAUDE_CODE_TMPDIR` may have (`claudeCodeTmpPath`): it
+ * takes the variable only when that dir fits, and otherwise falls back to the shared
+ * `/tmp/claude-<uid>` without a word. srt names the same dir.
+ */
 export const MAX_SANDBOX_TMP_BYTES = 44;
 
-const PREFIX = '10db-';
+/** The dir Claude Code makes for itself in `CLAUDE_CODE_TMPDIR`, which it measures. */
+export function claudeCodeTmpPath(dir: string): string {
+  return join(dir, `claude-${String(process.getuid?.() ?? 'nouid')}`);
+}
+
+/**
+ * What `createLaneTempDir` names a temp dir: mkdtemp's six random characters and nothing else, so
+ * the dir and Claude Code's own in it fit the limit under `laneTempRoot()`.
+ */
+const LANE_TEMP_DIR = /^[A-Za-z0-9]{6}$/;
+
+/**
+ * What a daemon that made its lane temp dirs in a system temp dir named one, beside other software's
+ * names there; only the sweep of those dirs looks for it.
+ */
+const SYSTEM_TEMP_DIR = /^10db-[A-Za-z0-9]{6}$/;
+
+/** Whether `name` is one `createLaneTempDir` gives a temp dir in a sandbox root. */
+export const isLaneTempDirName = (name: string): boolean => LANE_TEMP_DIR.test(name);
+
+/** Whether `name` is one a lane temp dir had in a system temp dir. */
+export const isSystemTempDirName = (name: string): boolean => SYSTEM_TEMP_DIR.test(name);
 
 /** A sandbox root is this user's alone. */
 const ROOT_MODE = 0o700;
@@ -90,8 +115,10 @@ export function ensurePrivateRoot(path: string): string {
 }
 
 /**
- * Creates a private (mode 0700) temp directory for one lane session and returns its real path. Its
- * path must fit `maxBytes`, `MAX_SANDBOX_TMP_BYTES` unless no Claude Code or srt runs in it (null).
+ * Creates a private (mode 0700) temp directory for one lane session, named by six random characters
+ * in `root`, and returns its real path. Claude Code's own dir in it (`claudeCodeTmpPath`) must fit
+ * `maxBytes`, `MAX_SANDBOX_TMP_BYTES` unless no Claude Code or srt runs in it (null): a longer one
+ * is refused, never handed to Claude Code to fall back on the shared dir.
  */
 export function createLaneTempDir(
   root: string,
@@ -99,14 +126,14 @@ export function createLaneTempDir(
 ): string {
   let dir: string;
   try {
-    dir = mkdtempSync(join(root, PREFIX));
+    dir = mkdtempSync(`${root}/`);
   } catch {
     throw new SandboxTempDirError('Could not create the lane temp directory');
   }
   try {
     chmodSync(dir, 0o700);
     const real = realpathSync(dir);
-    if (maxBytes !== null && Buffer.byteLength(real) > maxBytes) {
+    if (maxBytes !== null && Buffer.byteLength(claudeCodeTmpPath(real)) > maxBytes) {
       throw new SandboxTempDirError(
         `The lane temp directory path is over ${String(maxBytes)} bytes`,
       );
@@ -156,13 +183,15 @@ function removalSteps(dir: string): readonly (readonly [string, readonly string[
 }
 
 function checkLaneTempDir(dir: string, root: string): void {
-  if (dirname(dir) !== root || !basename(dir).startsWith(PREFIX)) {
+  const name = basename(dir);
+  if (dirname(dir) !== root || !(isLaneTempDirName(name) || isSystemTempDirName(name))) {
     throw new SandboxTempDirError('Not a lane temp directory');
   }
 }
 
 /**
- * Removes a directory made by `createLaneTempDir`; refuses any other path. A lane can leave
+ * Removes a directory made by `createLaneTempDir`, or one named as a lane temp dir in a system temp
+ * dir was; refuses any other path. A lane can leave
  * directories it made unreadable or read-only, and a lane process may still be running and swap
  * a directory for a link mid-removal, so the daemon never walks the tree itself: `chmod -R` and
  * `rm -rf` walk it by directory descriptor and never follow a link.

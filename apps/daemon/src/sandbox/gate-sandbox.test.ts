@@ -21,6 +21,7 @@ import { createGit } from '../git';
 import {
   createGateSandbox,
   DOCKER_REFUSAL,
+  isLaneTempDirName,
   SandboxProfileError,
   SYSTEM_READS,
   type GateRun,
@@ -488,7 +489,8 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
       log,
     }).forRun(input());
     await expect(pending).rejects.toThrow(SandboxProfileError);
-    expect(readdirSync(tmpRoot).filter((name) => name.startsWith('10db-'))).toEqual([]);
+    // No temp dir is left beside the link a row plants there.
+    expect(readdirSync(tmpRoot).filter(isLaneTempDirName)).toEqual([]);
     expect(readdirSync(filesRoot)).toEqual([]);
   });
 

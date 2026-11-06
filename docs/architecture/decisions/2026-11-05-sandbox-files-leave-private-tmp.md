@@ -14,9 +14,12 @@ folder. 10db kept its temp files there, so Travis decided, in four questions on 
   one could escape a sandbox or read a token. The guard sockets are there too.
 - **A ChatGPT lane's temp dir goes to `~/.10db/lanes/`,** apart from other lanes' as Claude lanes' are.
 - **Claude lanes', gates' and MCP servers' temp dirs go to `/Users/Shared/10db-<uid>/`,** which keeps ChatGPT lanes out
-  of them and fits the 44-byte limit (`/Users/Shared/10db-501/10db-xxxxxx` is 34 bytes, at most 41 for any uid). The
-  root is made 0700 and refused when it is a link or another user's. The uid keeps two macOS users apart, since
-  `/Users/Shared` is writable by all of them.
+  of them and fits the 44-byte limit. The limit counts Claude Code's own dir in the temp dir, the path plus
+  `/claude-<uid>`: Claude Code falls back to the shared `/tmp/claude-<uid>` without a word when that is longer. So a
+  temp dir there is named by six random characters alone, and `/Users/Shared/10db-501/xxxxxx/claude-501` is 40 bytes.
+  The uid is in it twice, so it fits for a uid of up to five digits; a longer path is refused. The root is made 0700
+  and refused when it is a link or another user's. The uid keeps two macOS users apart, since `/Users/Shared` is
+  writable by all of them.
 
 As built:
 

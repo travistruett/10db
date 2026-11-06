@@ -3,10 +3,13 @@ import { lstatSync, opendirSync, rmSync, unlinkSync, writeFileSync } from 'node:
 import { opendir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { removeLaneTempDir, removeLaneTempDirAsync } from './temp-dir';
+import {
+  isLaneTempDirName,
+  isSystemTempDirName,
+  removeLaneTempDir,
+  removeLaneTempDirAsync,
+} from './temp-dir';
 
-/** What `createLaneTempDir` makes: `mkdtemp`'s six characters after the prefix. */
-const TEMP_DIR = /^10db-[A-Za-z0-9]{6}$/;
 /**
  * What 10db seals: the lane env file, a gate's settings, and an MCP server's settings, env file,
  * refusal preload and refusal log.
@@ -91,10 +94,23 @@ function ownedKind(path: string, uid: number): 'dir' | 'file' | 'other' | null {
   }
 }
 
-/** The kind a stale entry called `name` has, by 10db's exact names alone; null for any other name. */
-function staleKind(name: string, ledgers: boolean): 'dir' | 'file' | null {
-  if (TEMP_DIR.test(name)) return 'dir';
-  return SEALED_FILE.test(name) || (ledgers && LEDGER_FILE.test(name)) ? 'file' : null;
+/** Where a sweep looks: a sandbox root it claims, or a system temp dir it only sweeps. */
+type SweptRoot = 'sandbox' | 'system';
+
+/**
+ * The kind a stale entry called `name` has in a root of `where`, by 10db's exact names there alone;
+ * null for any other name. A system temp dir holds no ledger but one a lane wrote, so only its sweep
+ * removes them; a sandbox root's are left for the reap that stops what they name.
+ */
+function staleKind(name: string, where: SweptRoot): 'dir' | 'file' | null {
+  switch (where) {
+    case 'sandbox':
+      if (isLaneTempDirName(name)) return 'dir';
+      return SEALED_FILE.test(name) ? 'file' : null;
+    case 'system':
+      if (isSystemTempDirName(name)) return 'dir';
+      return SEALED_FILE.test(name) || LEDGER_FILE.test(name) ? 'file' : null;
+  }
 }
 
 /**
@@ -141,7 +157,7 @@ export function claimSandboxTempRoot(root: string, pid: number = process.pid): T
     const stale =
       sharedWith === null
         ? [...namesIn(root)].flatMap((name) => {
-            const kind = staleKind(name, false);
+            const kind = staleKind(name, 'sandbox');
             const path = join(root, name);
             return kind !== null && ownedKind(path, uid) === kind ? [{ path, kind }] : [];
           })
@@ -248,7 +264,7 @@ export function sweepSystemTempFiles(roots: readonly string[]): SweepReport {
     sharedWith ??= marked;
     if (marked !== null) continue;
     for (const name of namesIn(root)) {
-      if (staleKind(name, true) !== 'file') continue;
+      if (staleKind(name, 'system') !== 'file') continue;
       const path = join(root, name);
       if (ownedKind(path, uid) !== 'file') continue;
       try {
@@ -300,7 +316,7 @@ export async function sweepSystemTempDirs(
     if (marked !== null) continue;
     for await (const name of namesInAsync(root)) {
       if (stopped()) break;
-      if (staleKind(name, false) !== 'dir') continue;
+      if (staleKind(name, 'system') !== 'dir') continue;
       const path = join(root, name);
       if (ownedKind(path, uid) !== 'dir') continue;
       try {

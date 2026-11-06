@@ -557,7 +557,7 @@ describe('startDaemon', () => {
       let planted: ReturnType<typeof spawn> | null = null;
       try {
         for (const root of [tmpRoot, filesRoot, ...roots.systemTempRoots]) mkdirSync(root);
-        mkdirSync(join(tmpRoot, '10db-a1B2c3', 'cache'), { recursive: true });
+        mkdirSync(join(tmpRoot, 'a1B2c3', 'cache'), { recursive: true });
         mkdirSync(join(systemTemp, '10db-a1B2c3', 'cache'), { recursive: true });
         for (const root of [filesRoot, systemTemp])
           for (const name of [

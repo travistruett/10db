@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { isLaneTempDirName } from '../sandbox';
 import type { Culprit, Owner } from './guard';
 
 const run = promisify(execFile);
@@ -46,7 +47,6 @@ export interface FindOptions {
 const DEFAULT_TOP = 5;
 const DEFAULT_MIN_CPU = 20;
 const MAX_COMMAND = 120;
-const TEMP_PREFIX = '10db-';
 
 const PS_LINE = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+(?:\.\d+)?)\s+(.+?)\s*$/;
 
@@ -126,7 +126,7 @@ function shortened(command: string): string {
 function laneTempDirOf(path: string, tempRoot: string): string | null {
   if (!isUnder(path, tempRoot) || path === tempRoot) return null;
   const first = path.slice(tempRoot.length + 1).split('/')[0];
-  return first?.startsWith(TEMP_PREFIX) ? `${tempRoot}/${first}` : null;
+  return first !== undefined && isLaneTempDirName(first) ? `${tempRoot}/${first}` : null;
 }
 
 function ownerOf(

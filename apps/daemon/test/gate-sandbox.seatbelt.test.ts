@@ -203,7 +203,8 @@ describe.skipIf(!SEATBELT)('the gate under the sandbox (Seatbelt)', () => {
       // Controls: the probes can succeed, and the sandbox's own variables arrive as set.
       'write-checkout': 'touch inside && rm inside',
       'write-temp': 'touch "$TMPDIR/inside" && cat "$TMPDIR/inside" && ls "$TMPDIR"',
-      'temp-under-root': `case "$TMPDIR" in '${tmpRoot}'/10db-*) true ;; *) false ;; esac`,
+      // Its own temp dir, named by six characters alone, in the root.
+      'temp-under-root': `case "$TMPDIR" in '${tmpRoot}'/${'[A-Za-z0-9]'.repeat(6)}) true ;; *) false ;; esac`,
       'own-env':
         'test "$GIT_CONFIG_GLOBAL" = /dev/null && test "$GIT_OPTIONAL_LOCKS" = 0 && ' +
         'test "$TENDB_SANDBOX" = 1 && test "$CARGO_HOME" = "$TMPDIR/cache/cargo" && ' +
