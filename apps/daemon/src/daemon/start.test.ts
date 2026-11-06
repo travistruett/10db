@@ -439,15 +439,74 @@ describe('startDaemon', () => {
         expect(gateLog).toContain('"strictAllowlist":true');
         // The session and the gate ended, so their temp dirs and files are gone; the daemon's mark stays
         // in each root it claimed until it stops, and none is left in a system temp dir.
+        // Each root also keeps the marker that keeps Spotlight out of it.
         const mark = `10db-daemon-${String(process.pid)}`;
         for (const root of [tmpRoot, codexLaneTempRoot, filesRoot])
-          expect(readdirSync(root), root).toEqual([mark]);
+          expect(readdirSync(root).sort(), root).toEqual(['.metadata_never_index', mark].sort());
         for (const dir of roots.systemTempRoots) expect(readdirSync(dir), dir).toEqual([]);
         await running.stop();
         for (const root of [tmpRoot, codexLaneTempRoot, filesRoot])
-          expect(readdirSync(root), root).toEqual([]);
+          expect(readdirSync(root), root).toEqual(['.metadata_never_index']);
       } finally {
         repo.cleanup();
+        rmSync(base, { recursive: true, force: true });
+      }
+    },
+  );
+
+  // Same short base as above.
+  it.skipIf(SANDBOXED)(
+    'asks Time Machine to skip each root it claims, logs a root it could not and runs on, and stops asking at stop()',
+    async () => {
+      const base = realpathSync(mkdtempSync('/tmp/sbd-'));
+      const roots = sandboxRoots(base);
+      const asked: string[] = [];
+      let stopped = false;
+      try {
+        daemon = await startDaemon({
+          dataDir: dir.path,
+          port: 0,
+          adapter: new FakeAdapter({}),
+          logLevel: 'warn',
+          sandbox: {
+            ...roots,
+            runtime: FAKE_SRT,
+            backups: (root, signal) => {
+              asked.push(root);
+              if (root === realpathSync(roots.filesRoot))
+                return Promise.reject(new Error('tmutil failed'));
+              // One that never ends by itself: the stop ends it.
+              return new Promise((_resolve, reject) => {
+                signal.addEventListener('abort', () => {
+                  stopped = true;
+                  reject(new Error('aborted'));
+                });
+              });
+            },
+          },
+          ...QUIET,
+        });
+        const running = daemon;
+        await waitFor(() => asked.length === 3);
+        expect(asked.sort()).toEqual(
+          [roots.tmpRoot, roots.codexLaneTempRoot, roots.filesRoot]
+            .map((r) => realpathSync(r))
+            .sort(),
+        );
+        const logPath = join(dir.path, 'logs', 'daemon.log');
+        await waitFor(
+          () => existsSync(logPath) && readFileSync(logPath, 'utf8').includes('Time Machine'),
+        );
+        expect(readFileSync(logPath, 'utf8')).toContain(realpathSync(roots.filesRoot));
+        // The daemon runs on.
+        const health = await fetch(`${running.url}/health`);
+        expect(health.ok).toBe(true);
+        await running.stop();
+        daemon = null;
+        expect(stopped).toBe(true);
+      } finally {
+        await daemon?.stop();
+        daemon = null;
         rmSync(base, { recursive: true, force: true });
       }
     },
@@ -583,8 +642,11 @@ describe('startDaemon', () => {
           ...QUIET,
         });
         const mark = `10db-daemon-${String(process.pid)}`;
-        expect(readdirSync(tmpRoot)).toEqual([mark]);
-        expect(readdirSync(filesRoot).sort()).toEqual([mark, 'other.txt'].sort());
+        // The claim leaves the Spotlight marker each root is given.
+        expect(readdirSync(tmpRoot).sort()).toEqual(['.metadata_never_index', mark].sort());
+        expect(readdirSync(filesRoot).sort()).toEqual(
+          ['.metadata_never_index', mark, 'other.txt'].sort(),
+        );
         // Its sealed files and ledgers there went before any session could start, whatever the mark.
         expect(readdirSync(systemTemp).sort()).toEqual(
           ['10db-a1B2c3', plantedMark, 'other.txt'].sort(),
@@ -668,6 +730,7 @@ describe('startDaemon', () => {
         expect(rows.map((r) => r.pid)).toEqual([process.pid, 7003, 7004]);
         expect(readdirSync(filesRoot).sort()).toEqual(
           [
+            '.metadata_never_index',
             `10db-daemon-${String(otherPid)}`,
             `10db-daemon-${String(process.pid)}`,
             `10db-proc-${String(otherPid)}-00000000000a.json`,

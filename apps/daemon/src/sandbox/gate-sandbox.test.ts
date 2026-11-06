@@ -22,6 +22,7 @@ import {
   createGateSandbox,
   DOCKER_REFUSAL,
   isLaneTempDirName,
+  keepSpotlightOut,
   SandboxProfileError,
   SYSTEM_READS,
   type GateRun,
@@ -725,6 +726,8 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
         mkdirSync(join(pnpmLockDir, `d${String(n)}`, 'locked'), { recursive: true });
         chmodSync(join(pnpmLockDir, `d${String(n)}`, 'locked'), 0o000);
       }
+      // The root's Spotlight marker is no moved tree.
+      keepSpotlightOut(tmpRoot);
       let ticked = false;
       const sweeping = sweepPnpmLockDir(pnpmLockDir, tmpRoot);
       setImmediate(() => {
@@ -733,7 +736,7 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
       await sweeping;
       expect(ticked).toBe(true);
       expect(existsSync(pnpmLockDir)).toBe(false);
-      expect(readdirSync(tmpRoot)).toEqual([]);
+      expect(readdirSync(tmpRoot)).toEqual(['.metadata_never_index']);
     });
 
     it("walks nothing when the lock directory can't be moved into the temp root", async () => {

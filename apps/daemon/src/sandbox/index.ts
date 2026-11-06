@@ -31,6 +31,7 @@ export {
   createLaneTempDir,
   ensurePrivateRoot,
   isLaneTempDirName,
+  keepSpotlightOut,
   laneTempRoot,
   MAX_SANDBOX_TMP_BYTES,
   removeLaneTempDir,
@@ -38,6 +39,8 @@ export {
   sandboxFilesRoot,
   SandboxTempDirError,
   SYSTEM_TEMP_ROOTS,
+  tmutilExclusion,
+  type BackupExclusion,
 } from './temp-dir';
 export {
   expandHome,

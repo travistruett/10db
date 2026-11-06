@@ -271,6 +271,9 @@ folder. 10db kept all its temp files there, so Travis decided, 2026-11-05:
   while its pid's command line names `daemon.mjs` or `src/main.ts`. Both dirs count as lane-writable wherever the temp
   root does.
 - Codex's base policy closes both `~/.10db` and `/Users/Shared`; a command there got `Operation not permitted`.
+- Each of the three roots holds every lane's package caches, so at start it gets a `.metadata_never_index` file, which
+  keeps Spotlight out, and `tmutil addexclusion`, which keeps Time Machine out; a failure of the second is logged, not
+  fatal. No sweep or claim matches the marker's name.
 - A lane is granted only its own temp dir, as before. The control files are read only through the grants that already
   name them: a Claude lane's env file, an MCP server's env file.
 

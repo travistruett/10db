@@ -156,6 +156,8 @@ import {
   sweepSystemTempFiles,
   type SweepReport,
   systemProcessTable,
+  tmutilExclusion,
+  type BackupExclusion,
   type LaneProcessSetup,
   type LedgerSweep,
   type SandboxRuntime,
@@ -196,6 +198,7 @@ import { createAreaNamer } from './area-namer';
 import { createServices } from './services';
 import {
   allSandboxRootsOf,
+  keepRootsOutOfBackups,
   laneWrittenRootsOf,
   namedSandboxRoots,
   openSandboxRoots,
@@ -221,12 +224,14 @@ export interface DaemonOptions {
    * so no caller can forget it: null runs lanes and gates unsandboxed, which only fake sessions and
    * tests ask for, and the Claude adapter refuses such a session. `processes` (tests) replaces how
    * lane processes are read and signalled, for the sessions and for the start-up sweep of a dead
-   * daemon's leftovers.
+   * daemon's leftovers. `backups` (tests) replaces `tmutil addexclusion`, which asks Time Machine to
+   * skip each root.
    */
   readonly sandbox:
     | (SandboxRootOptions & {
         readonly runtime?: SandboxRuntime;
         readonly processes?: LaneProcessSetup;
+        readonly backups?: BackupExclusion;
       })
     | null;
   /**
@@ -612,6 +617,18 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     sandboxRoots?.refusal === null
       ? claimSandboxRoots([sandboxRoots.temp, sandboxRoots.codexLanes, sandboxRoots.files])
       : null;
+  // Off the event loop and never waited on by a start: `tmutil` can be slow, and a root it could
+  // not exclude costs backup space, not a lane. `stop()` ends what still runs.
+  const backupsAbort = new AbortController();
+  const rootsKeptOutOfBackups =
+    sandboxRoots === null
+      ? Promise.resolve()
+      : keepRootsOutOfBackups(
+          sandboxRoots,
+          opts.sandbox?.backups ?? tmutilExclusion,
+          logger.child({ component: 'sandbox' }),
+          backupsAbort.signal,
+        );
   if (
     claimedRoots &&
     (claimedRoots.removed > 0 || claimedRoots.failed > 0 || claimedRoots.sharedWith !== null)
@@ -1510,6 +1527,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       await retiredLandings;
       systemTempAbort.abort();
       await systemTempSwept;
+      backupsAbort.abort();
+      await rootsKeptOutOfBackups;
       // A gate that waits must not start because shutdown freed the slot of the one it killed.
       gateSlots.close();
       // Aborts a shipping gate and any git or gh child; the batch stays SHIPPING for recovery.

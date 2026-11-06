@@ -104,6 +104,8 @@ const LEDGERS = [
  */
 function leaveOthers(dir: string = root, foreign: string = SYSTEM_DIRS[0]): string[] {
   const link = foreign === SYSTEM_DIRS[0] ? 'L1nk00' : '10db-L1nk00';
+  // The marker a sandbox root holds to keep Spotlight out.
+  writeFileSync(join(dir, '.metadata_never_index'), '');
   writeFileSync(join(dir, 'other.txt'), '');
   writeFileSync(join(dir, '10db-notes.txt'), '');
   mkdirSync(join(dir, foreign));
@@ -113,6 +115,7 @@ function leaveOthers(dir: string = root, foreign: string = SYSTEM_DIRS[0]): stri
   symlinkSync(outside, join(dir, link));
   symlinkSync(join(outside, 'keep.txt'), join(dir, '10db-env-00000000000a.sh'));
   return [
+    '.metadata_never_index',
     link,
     foreign,
     'a1B2c3d',

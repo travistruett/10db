@@ -38,6 +38,9 @@ As built:
   can't be read, every live mark counts.
 - Codex's base policy closes both `~/.10db` and `/Users/Shared`; a command there got `Operation not permitted`. A lane is
   granted only its own temp dir, and reads control files only through the grants that already name them.
+- **Spotlight and Time Machine skip the three roots.** Every lane's package caches are in them. At start each root gets
+  a `.metadata_never_index` file, as the worktree root does, and the daemon runs `tmutil addexclusion` on each in the
+  background; a failure there is logged, not fatal. No sweep or claim matches the marker's name.
 
 ## Why
 

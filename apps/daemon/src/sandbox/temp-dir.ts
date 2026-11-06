@@ -11,6 +11,7 @@ import {
   openSync,
   realpathSync,
   rmSync,
+  writeFileSync,
 } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
@@ -113,6 +114,35 @@ export function ensurePrivateRoot(path: string): string {
     closeSync(fd);
   }
 }
+
+/** The file that keeps Spotlight out of the directory it is in and everything under it. */
+const SPOTLIGHT_MARKER = '.metadata_never_index';
+
+/**
+ * Marks a sandbox root so Spotlight skips everything in it: every lane's package caches are there,
+ * and nobody searches them. Run after `ensurePrivateRoot`. An existing entry is left as it is (`wx`
+ * also never follows a link), and no sweep or claim removes it, since it has no name they match.
+ * Best effort: a root that can't hold it costs indexing time, not a lane.
+ */
+export function keepSpotlightOut(root: string): void {
+  try {
+    writeFileSync(join(root, SPOTLIGHT_MARKER), '', { flag: 'wx', mode: 0o600 });
+  } catch {
+    // Already marked, or the marker can't be written.
+  }
+}
+
+/** Asks Time Machine to skip a sandbox root; `signal` ends the ask. */
+export type BackupExclusion = (root: string, signal: AbortSignal) => Promise<void>;
+
+/**
+ * `tmutil addexclusion` on macOS, a sticky exclusion that stays with the directory; nothing on
+ * another system, which has no Time Machine.
+ */
+export const tmutilExclusion: BackupExclusion = async (root, signal) => {
+  if (process.platform !== 'darwin') return;
+  await execTool('/usr/bin/tmutil', ['addexclusion', root], { env: TOOL_ENV, signal });
+};
 
 /**
  * Creates a private (mode 0700) temp directory for one lane session, named by six random characters
