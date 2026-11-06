@@ -42,6 +42,7 @@ import { allowedToolsFor } from '../src/permissions';
 import { openSandboxRoots, sandboxDepsOf, type SandboxRoots } from '../src/daemon';
 import {
   claimSandboxRoots,
+  claudeCodeTmpPath,
   createLaneSandbox,
   createLaneTempDir,
   fileAccessJudge,
@@ -249,8 +250,13 @@ async function runLane(opts: {
   readonly hosts?: readonly string[];
   /** Approved repo stdio servers, launched under srt as the runner launches them. */
   readonly mcpServers?: Readonly<Record<string, StdioMcpServer>>;
-  /** Tools allowed without a card on top of the lane's own, such as a repo server's. */
+  /** Tools allowed on top of the lane's own, such as a repo server's. */
   readonly extraAllowedTools?: readonly string[];
+  /**
+   * Tools whose cards the builder answers Allow once; every other card is denied. The hook sends
+   * every repo MCP tool call to the broker, so a repo server's tool runs only through its card.
+   */
+  readonly allowCardsFor?: readonly string[];
   /** Runs the session in auto mode, the mode lanes switch to once these tests pass. */
   readonly autoMode?: true;
   /** The model; haiku unless given. Auto mode needs a model that supports it. */
@@ -378,7 +384,14 @@ async function runLane(opts: {
         observer: {
           onWaitStart: (item) => {
             cards.push(item);
-            queueMicrotask(() => inbox.answer(item.id, { choice: PermissionChoice.Deny }));
+            const toolName = item.detail?.['toolName'];
+            const allowed =
+              typeof toolName === 'string' && (opts.allowCardsFor ?? []).includes(toolName);
+            queueMicrotask(() =>
+              inbox.answer(item.id, {
+                choice: allowed ? PermissionChoice.AllowOnce : PermissionChoice.Deny,
+              }),
+            );
           },
           onWaitEnd: () => undefined,
         },
@@ -695,7 +708,10 @@ describe.skipIf(!live)('lane sandbox, live', () => {
         expect.soft(run.probeOutput, `cat ${canary.label}`).not.toContain(canary.token);
         expect.soft(run.transcript, `transcript ${canary.label}`).not.toContain(canary.token);
       }
-      expect.soft(probeLine(run.probeOutput, 'TMPDIR=')).toBe(`TMPDIR=${run.tmpDir}`);
+      // Bash's TMPDIR is Claude Code's own dir in the lane's temp dir, which it took.
+      expect
+        .soft(probeLine(run.probeOutput, 'TMPDIR='))
+        .toBe(`TMPDIR=${claudeCodeTmpPath(run.tmpDir)}`);
       expect.soft(dirname(run.tmpDir)).toBe(laneTempRoot());
       expect.soft(probeLine(run.probeOutput, 'GH_TOKEN_COUNT=')).toBe('GH_TOKEN_COUNT=0');
       expectReadOnlyGitWorks(run.probeOutput);
@@ -863,6 +879,7 @@ describe.skipIf(!live)('lane sandbox, live', () => {
           },
         },
         extraAllowedTools: ['mcp__probe__check'],
+        allowCardsFor: ['mcp__probe__check'],
         prompt: [
           'This is a sandbox check. Call the MCP tool mcp__probe__check once, with no arguments, and nothing else.',
           'Then reply with the single word: done',
@@ -871,6 +888,8 @@ describe.skipIf(!live)('lane sandbox, live', () => {
       report('mcp-server', run, [canary]);
 
       expect(run.events.at(-1)).toMatchObject({ type: 'ended', reason: 'stopped' });
+      // A repo server's tool call is carded, and runs once the builder allows it.
+      expect(cardSummaries(run, 'mcp__probe__check')).toHaveLength(1);
       const check = run.calls.find((call) => call.name === 'mcp__probe__check');
       expect(check?.isError).toBe(false);
       expect(run.transcript).toContain(mark);
