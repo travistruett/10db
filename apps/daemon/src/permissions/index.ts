@@ -21,6 +21,7 @@ export {
   ESCALATED_KEY,
   EXACT_WRITE_KEY,
 } from './expected-write';
+export { mcpGrantRules, mcpServerPattern, mcpToolGrant } from './mcp-server-rule';
 export { laneAutoMode, setLaneAutoMode } from './lane-auto-mode';
 export {
   allowedToolsFor,

@@ -176,7 +176,7 @@ function OpenInbox({ onHelp }: { readonly onHelp: () => void }) {
     const key = selectedRow.key;
     const picked = effectiveChoice;
     if (picked === null || !selected.options.some((o) => o.label === picked)) {
-      patch(key, { error: 'Choose an option first (1–4).' });
+      patch(key, { error: 'Choose an option first (1–5).' });
       return;
     }
     const trimmed = note.trim();

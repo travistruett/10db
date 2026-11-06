@@ -149,3 +149,18 @@ export type KeepAwakeInput = z.infer<typeof KeepAwakeInput>;
 
 /** The `detail` key of an MCP approval card; it holds the server's `McpServerReview`. */
 export const MCP_APPROVAL_DETAIL = 'mcpApproval';
+
+/** The `detail` key of a permission card for an approved project MCP server's tool; it holds a `McpToolGrant`. */
+export const MCP_TOOL_GRANT_DETAIL = 'mcpToolGrant';
+
+/**
+ * What "always allow every tool of this server" would cover, fixed when the card is raised: the server, the
+ * config hash its session is running (the one the builder approved), and the tool names the server listed
+ * then. A tool the server adds later, or a changed config, is not in it.
+ */
+export const McpToolGrant = z.object({
+  name: z.string().min(1),
+  configHash: ConfigHash,
+  tools: z.array(z.string().min(1)).min(1),
+});
+export type McpToolGrant = z.infer<typeof McpToolGrant>;

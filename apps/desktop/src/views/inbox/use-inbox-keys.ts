@@ -11,7 +11,7 @@ export interface InboxKeys {
   readonly onHelp: () => void;
 }
 
-const DIGITS = ['1', '2', '3', '4'] as const;
+const DIGITS = ['1', '2', '3', '4', '5'] as const;
 
 /** Marks the selected card, so keys pressed inside it still count. */
 export const SELECTED_CARD_ATTRIBUTE = 'data-inbox-selected';
@@ -36,7 +36,7 @@ function onOption(target: EventTarget | null): boolean {
 }
 
 /**
- * ↑/↓ and j/k move, 1–4 choose, n focuses the note, Enter sends, ? lists the shortcuts. Ignored
+ * ↑/↓ and j/k move, 1–5 choose, n focuses the note, Enter sends, ? lists the shortcuts. Ignored
  * while typing in a field.
  */
 export function useInboxKeys(keys: InboxKeys): void {

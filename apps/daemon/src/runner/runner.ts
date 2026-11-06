@@ -392,6 +392,8 @@ const PERMISSION_ANSWER_TEXT: Readonly<Record<string, string>> = {
     'allowed once. Retry the call now; 10db lets this exact call through once.',
   [PermissionChoice.AllowWorkstream]: 'allowed for the rest of this workstream. Retry the call.',
   [PermissionChoice.AllowProject]: 'always allowed in this project. Retry the call.',
+  [PermissionChoice.AllowMcpServer]:
+    'allowed, with every tool the server listed, in this project. Retry the call.',
   [PermissionChoice.Deny]:
     'denied. The denial covers any equivalent: do not retry it, or a variant of it in another form; work without it, or ask with ask_human.',
 };
@@ -1684,6 +1686,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             observer,
             signal: abort.signal,
             allowOnce: permission?.allowOnce ?? null,
+            mcpApproved: projectMcp.configHashes,
             ...(laneSession
               ? { sandbox: { fileAccess: laneSession.fileAccess, hazards: project.hazards } }
               : {}),

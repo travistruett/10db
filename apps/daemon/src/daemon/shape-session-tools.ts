@@ -23,7 +23,14 @@ import { privateHostProblem, type ShapePrepareInput, type ShapePrepared } from '
 /** What a Plan conversation's session is told when one of the project's servers is left out. */
 const INSTEAD = 'Work without them, and tell the builder when the plan needs one.';
 
-const NO_MCP: ProjectMcp = { servers: {}, warnings: [], pending: [], denied: [], failures: [] };
+const NO_MCP: ProjectMcp = {
+  servers: {},
+  configHashes: {},
+  warnings: [],
+  pending: [],
+  denied: [],
+  failures: [],
+};
 
 /** Addresses on this Mac or its network: loopback, private, link-local, shared and unique-local ones. */
 const PRIVATE_ADDRESSES = (() => {
@@ -191,6 +198,7 @@ export function createShapePreparer(deps: {
           sessionId: input.sessionId,
           observer: input.observer,
           signal: input.signal,
+          mcpApproved: projectMcp.configHashes,
           sandbox: { fileAccess: sandboxed.fileAccess, hazards: [], commandsAsk: true },
         },
       );

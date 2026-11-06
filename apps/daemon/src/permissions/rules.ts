@@ -14,6 +14,7 @@ import {
   stripCommandPrefixes,
 } from '../guard';
 import { isSandboxDomain } from '../sandbox';
+import { mcpGrantCovers } from './mcp-server-rule';
 import { isLiteralSegment, plainSegments, type PlainSegment } from './plain-segments';
 import { runsOtherCommands, runsUnnamedProgram } from './runner-forms';
 
@@ -262,12 +263,15 @@ function hostMatches(host: string, pattern: string): boolean {
  * The stored rule that permits the call, if any: a Bash pattern must cover every plain segment, a
  * file rule's pattern every real path in `paths`, and a network rule's pattern the host. A sandboxed
  * lane passes `paths` (empty for a host), and there an unscoped file or network rule matches
- * nothing; without it an unscoped rule allows its tool, as it always has.
+ * nothing; without it an unscoped rule allows its tool, as it always has. An MCP tool's rule that carries
+ * a pattern is a server grant (`mcpServerPattern`): it matches only while `mcpApproved` (server name to the
+ * config hash the session runs) has the hash the grant was made at.
  */
 export function matchPermissionRule(
   req: { readonly toolName: string; readonly input: unknown },
   rules: readonly PermissionRuleDto[],
   paths?: { readonly realPaths: readonly string[] },
+  mcpApproved?: Readonly<Record<string, string>>,
 ): PermissionRuleDto | undefined {
   return rules.find((rule) => {
     const { pattern } = rule;
@@ -287,6 +291,9 @@ export function matchPermissionRule(
     }
     if (rule.toolName !== req.toolName) return false;
     if (req.toolName !== 'Bash') {
+      if (req.toolName.startsWith('mcp__') && pattern !== null) {
+        return mcpGrantCovers(req.toolName, pattern, mcpApproved);
+      }
       if (pattern === null) {
         // With real paths in hand (a sandboxed lane) an unscoped file rule covers no path.
         const fileTool = READ_TOOLS.has(req.toolName) || WRITE_TOOLS.has(req.toolName);
