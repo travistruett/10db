@@ -790,6 +790,7 @@ describe('startDaemon', () => {
     const check: SystemCheckDto = {
       loginEnv: { source: 'login_shell', warning: null },
       claudeCode: { verifiedOn: '2.1.302', warning: null },
+      codex: { verifiedOn: '0.154.0', warning: null },
       tools: [
         {
           name: 'git',
@@ -1022,6 +1023,7 @@ describe('startDaemon', () => {
         systemCheck: async (_resolved, ghLogin) => ({
           loginEnv: { source: 'login_shell', warning: null },
           claudeCode: { verifiedOn: '2.1.302', warning: null },
+          codex: { verifiedOn: '0.154.0', warning: null },
           tools: [
             {
               name: 'gh',

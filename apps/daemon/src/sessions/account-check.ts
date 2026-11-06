@@ -17,6 +17,8 @@ export interface SeenAccount {
   readonly tokenSource: string | undefined;
   readonly apiKeySource: string | undefined;
   readonly apiProvider: string | undefined;
+  /** The models a ChatGPT plan offers, when the agent lists them; Claude Code reports none. */
+  readonly models?: readonly string[];
 }
 
 export function seenFrom(info: {
@@ -101,6 +103,11 @@ function chatgptIdentity(seen: SeenAccount): string | undefined {
   return seen.organization === undefined
     ? seen.email
     : codexIdentity(seen.email, seen.organization);
+}
+
+/** What a login account is confirmed as: a ChatGPT plan's email and workspace, a subscription's email. */
+export function loginIdentity(kind: SupportedAccountKind, seen: SeenAccount): string | undefined {
+  return kind === AccountKind.CodexSignin ? chatgptIdentity(seen) : seen.email;
 }
 
 const same = (a: string, b: string): boolean => a.trim().toLowerCase() === b.trim().toLowerCase();

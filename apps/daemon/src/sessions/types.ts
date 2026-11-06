@@ -1,9 +1,9 @@
 import type {
   AccountRefusal,
   Effort,
-  Provider,
   SessionId,
   ShapeId,
+  SupportedAccountKind,
   WorkstreamId,
 } from '@10db/contracts';
 import type { AccountExpectation } from '../environment';
@@ -232,11 +232,13 @@ export interface ShapeSessionHandle extends SessionHandle {
 }
 
 export interface AccountProbeSpec {
+  /** The account's kind, which picks the agent that reports who it is. */
+  readonly kind: SupportedAccountKind;
   readonly cwd: string;
   readonly env: Readonly<Record<string, string>>;
 }
 
-/** Claude Code reported no account in time. */
+/** The agent reported no account in time. */
 export class AccountProbeError extends Error {
   override readonly name = 'AccountProbeError';
 }
@@ -260,12 +262,11 @@ export class CompletionError extends Error {
 }
 
 export interface SessionAdapter {
-  readonly provider: Provider;
   /** Sends `prompt` to the model once and resolves with its text; rejects with a `CompletionError`. */
   complete(spec: CompletionSpec): Promise<string>;
   start(spec: SessionSpec): SessionHandle;
   /** Starts a Shape conversation's session (Shape spec §5.1). */
   startShape(spec: ShapeSessionSpec): ShapeSessionHandle;
-  /** Starts Claude Code with no prompt only to read who it is. */
+  /** Starts the account's agent with no prompt only to read who it is. */
   probeAccount(probe: AccountProbeSpec): Promise<SeenAccount>;
 }

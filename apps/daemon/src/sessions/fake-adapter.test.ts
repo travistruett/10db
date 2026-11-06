@@ -236,10 +236,12 @@ describe('FakeAdapter', () => {
 
   it('answers a probe with what it is told to report, and records it', async () => {
     const adapter = new FakeAdapter({});
-    expect(await adapter.probeAccount({ cwd: '/d', env: {} })).toMatchObject({
+    expect(
+      await adapter.probeAccount({ kind: 'claude_subscription', cwd: '/d', env: {} }),
+    ).toMatchObject({
       email: 'builder@example.com',
     });
-    expect(adapter.probes).toEqual([{ cwd: '/d', env: {} }]);
+    expect(adapter.probes).toEqual([{ kind: 'claude_subscription', cwd: '/d', env: {} }]);
   });
 });
 

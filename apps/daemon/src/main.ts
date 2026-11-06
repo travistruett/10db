@@ -13,6 +13,7 @@ import {
   buildNetworkEnv,
   captureLoginEnv,
   findClaude,
+  findCodex,
   systemCheck,
   systemKeychain,
   type LoginEnv,
@@ -28,7 +29,10 @@ import {
 } from './paths';
 import { readBuildInfo } from './self-update';
 import {
+  codexLoginStatus,
   createClaudeAdapter,
+  createCodexAdapter,
+  createRoutedAdapter,
   createUnavailableAdapter,
   FakeAdapter,
   loadFakeScriptBook,
@@ -48,6 +52,9 @@ process.on('uncaughtException', (error) => {
 
 const CLAUDE_MISSING =
   'Claude Code was not found in /opt/homebrew/bin, /usr/local/bin, /usr/bin or ~/.local/bin, where 10db looks for it (never your PATH, where a lane could put one). Install it, or set TENDB_CLAUDE_PATH, then restart 10db.';
+
+const CODEX_MISSING =
+  'Codex was not found in /opt/homebrew/bin, /usr/local/bin or /usr/bin, where 10db looks for it (never your PATH, where a lane could put one). Install it, then restart 10db; only a project on a ChatGPT account needs it.';
 
 // The shell's supervisor stops on 4 instead of restarting into configuration a restart can't fix.
 const EXIT_REFUSED_CONFIG = 4;
@@ -95,13 +102,24 @@ function chooseAdapter(): SessionAdapter | ((logger: Logger) => SessionAdapter) 
     return fake;
   }
   const claudePath = env.TENDB_CLAUDE_PATH ?? findClaude();
-  if (!claudePath) return createUnavailableAdapter(CLAUDE_MISSING);
+  const codexPath = findCodex();
   // Through the daemon's own logger: one shared daemon.log, which the live acceptance checks read.
   return (logger) =>
-    createClaudeAdapter({
-      claudePath,
-      pluginDir: resolveHarnessDir(),
-      logger: logger.child({ component: 'claude' }),
+    createRoutedAdapter({
+      claude: claudePath
+        ? createClaudeAdapter({
+            claudePath,
+            pluginDir: resolveHarnessDir(),
+            logger: logger.child({ component: 'claude' }),
+          })
+        : createUnavailableAdapter(CLAUDE_MISSING),
+      codex: codexPath
+        ? createCodexAdapter({
+            codexPath,
+            logger: logger.child({ component: 'codex' }),
+            signInCheck: (sessionEnv) => codexLoginStatus(codexPath, sessionEnv),
+          })
+        : createUnavailableAdapter(CODEX_MISSING),
     });
 }
 

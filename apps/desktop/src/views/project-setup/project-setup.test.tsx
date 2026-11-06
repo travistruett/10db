@@ -65,6 +65,7 @@ function system(gh: Gh) {
   return SystemCheckDto.parse({
     loginEnv: { source: 'login_shell', warning: null },
     claudeCode: { verifiedOn: '2.1.302', warning: null },
+    codex: { verifiedOn: '0.154.0', warning: null },
     tools: [
       { name: 'claude', path: '/usr/local/bin/claude', version: '2.1', required: true },
       { name: 'git', path: '/usr/bin/git', version: 'git version 2.50.0', required: true },

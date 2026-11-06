@@ -11,7 +11,7 @@ import {
   type SpawnedProcess,
   type SpawnOptions,
 } from '@anthropic-ai/claude-agent-sdk';
-import { AccountKind, Provider, type AccountRefusal } from '@10db/contracts';
+import { AccountKind, type AccountRefusal } from '@10db/contracts';
 import { z } from 'zod';
 import { systemClock, type Clock } from '../clock';
 import type { Logger } from '../log';
@@ -1057,7 +1057,6 @@ async function complete(
 export function createClaudeAdapter(opts: ClaudeAdapterOptions): SessionAdapter {
   const runQuery: QueryFn = opts.query ?? ((params) => sdkQuery(params));
   return {
-    provider: Provider.Claude,
     start: (spec) =>
       (spec.sandbox ?? null) === null && opts.allowUnsandboxed !== true
         ? refusedSession(UNSANDBOXED_REFUSAL)

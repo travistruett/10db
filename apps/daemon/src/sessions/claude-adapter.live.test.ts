@@ -58,6 +58,7 @@ describe.skipIf(!live)('Claude adapter, live', () => {
       updatedAt: new Date(0).toISOString(),
     };
     const seen = await adapter.probeAccount({
+      kind: defaultAccount.kind,
       cwd: repo.path,
       env: launcher.probe(defaultAccount).env,
     });

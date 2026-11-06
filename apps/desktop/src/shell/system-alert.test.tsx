@@ -21,6 +21,7 @@ function serveSync(read: () => BenchmarkSyncWarning | null): void {
         SystemCheckDto.parse({
           loginEnv: { source: 'login_shell', warning: null },
           claudeCode: { verifiedOn: '2.1.0', warning: null },
+          codex: { verifiedOn: '0.154.0', warning: null },
           tools: [],
           benchmarkSync: read(),
         }),

@@ -5,6 +5,7 @@ import {
   CAP_RAISE_DETAIL,
   capCard,
   credentialsCard,
+  fixFor,
   recordedCard,
   refusedCard,
   secretCard,
@@ -123,5 +124,49 @@ describe('the cards that used to hold nothing', () => {
       toUsd: 70,
     });
     expect(card.body).toContain('Raise cap to $70');
+  });
+});
+
+describe('the cards for a ChatGPT account', () => {
+  function codexAccount() {
+    const test = createTestStore();
+    close = test.close;
+    const row = getAccountRow(
+      test.store.db,
+      seedAccount(test.store, { kind: 'codex_signin', label: 'ChatGPT plan' }).id,
+    );
+    // The seeded home is named for Claude; a created ChatGPT account's is named codex.
+    return { ...row, configDir: '/h/accounts/a/codex' };
+  }
+
+  it('fixes a signed-out account with codex login and never names claude', () => {
+    const fix = fixFor(codexAccount(), AccountProblem.SignedOut);
+    expect(fix).toContain('codex login');
+    expect(fix).not.toContain('claude');
+  });
+
+  it.each([AccountProblem.WrongCredentials, AccountProblem.StartTimeout])(
+    'names Codex, not Claude Code, for %s',
+    (problem) => {
+      const fix = fixFor(codexAccount(), problem);
+      expect(fix).toContain('Codex');
+      expect(fix).not.toContain('Claude');
+    },
+  );
+
+  it('tells the builder to sign in with codex login', () => {
+    const card = signInCard(codexAccount());
+    expect(card.body).toContain('codex login');
+    expect(card.body).not.toContain('Claude Code');
+    expect(card.body).not.toContain('claude /login');
+  });
+
+  it('offers Confirm for a reported sign-in, as a subscription does', () => {
+    const card = refusedCard(codexAccount(), {
+      problem: AccountProblem.IdentityMismatch,
+      message: 'it differs',
+      seenIdentity: 'me@example.com · ws-1',
+    });
+    expect((card.options ?? []).map((o) => o.label)).toContain(AccountCardChoice.Confirm);
   });
 });

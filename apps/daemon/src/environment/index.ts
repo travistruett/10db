@@ -26,7 +26,10 @@ export { BILLING_SWITCH_VARS, NESTED_SESSION_VARS, stripBillingSwitches } from '
 export { buildNetworkEnv } from './network-env';
 export {
   claudeCodeWarning,
+  CODEX_VERIFIED_ON,
+  codexWarning,
   findClaude,
+  findCodex,
   markGhRequired,
   probeVersion,
   REQUIRED_TOOLS,

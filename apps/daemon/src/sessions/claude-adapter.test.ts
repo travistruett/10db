@@ -2578,6 +2578,7 @@ describe('probeAccount', () => {
       allowUnsandboxed: true,
     });
     const seen = await adapter.probeAccount({
+      kind: 'claude_subscription',
       cwd: '/data',
       env: { PATH: '/bin', CLAUDE_CONFIG_DIR: '/data/accounts/a/claude' },
     });
@@ -2611,7 +2612,7 @@ describe('probeAccount', () => {
       allowUnsandboxed: true,
       clock,
     });
-    const probe = adapter.probeAccount({ cwd: '/data', env: {} });
+    const probe = adapter.probeAccount({ kind: 'claude_subscription', cwd: '/data', env: {} });
     clock.advance(15_000);
     await expect(probe).rejects.toThrow(AccountProbeError);
   });

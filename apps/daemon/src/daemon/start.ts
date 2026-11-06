@@ -98,6 +98,7 @@ import {
 import type { LogLevel } from '../env';
 import {
   ACCOUNT_NAMES_VERIFIED_ON,
+  CODEX_VERIFIED_ON,
   createLauncher,
   REQUIRED_TOOLS,
   OPENROUTER_KEY_ACCOUNT,
@@ -316,6 +317,7 @@ function noSystemCheck(): Promise<SystemCheckDto> {
   return Promise.resolve({
     loginEnv: { source: 'inherited', warning: 'The login environment was not captured' },
     claudeCode: { verifiedOn: ACCOUNT_NAMES_VERIFIED_ON, warning: null },
+    codex: { verifiedOn: CODEX_VERIFIED_ON, warning: null },
     tools: REQUIRED_TOOLS.map((t) => ({
       name: t.name,
       path: null,

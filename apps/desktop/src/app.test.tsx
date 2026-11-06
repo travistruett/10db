@@ -75,6 +75,7 @@ describe('App shell', () => {
               'The login shell timed out after 10 s; using the environment 10db was started with',
           },
           claudeCode: { verifiedOn: '2.1.302', warning: null },
+          codex: { verifiedOn: '0.154.0', warning: null },
           tools: [
             { name: 'claude', path: null, version: null, required: true },
             { name: 'git', path: '/usr/bin/git', version: 'git version 2.50.0', required: true },
@@ -100,6 +101,7 @@ describe('App shell', () => {
             verifiedOn: '2.1.302',
             warning: 'Claude Code 3.0.0 is a newer major version.',
           },
+          codex: { verifiedOn: '0.154.0', warning: null },
           tools: [
             { name: 'claude', path: '/bin/claude', version: '3.0.0 (Claude Code)', required: true },
             { name: 'git', path: '/usr/bin/git', version: 'git version 2.50.0', required: true },

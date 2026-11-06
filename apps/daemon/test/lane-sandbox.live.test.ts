@@ -267,6 +267,7 @@ async function runLane(opts: {
     updatedAt: new Date(0).toISOString(),
   };
   const seen = await adapter.probeAccount({
+    kind: defaultAccount.kind,
     cwd: opts.checkout,
     env: launcher.probe(defaultAccount).env,
   });

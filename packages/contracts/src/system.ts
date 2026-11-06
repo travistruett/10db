@@ -3,7 +3,13 @@ import { InboxItemId, ProjectId } from './ids';
 import { KeepAwakeMode } from './states';
 
 /** The tools the system check looks for: on the login PATH, but git in the daemon's fixed install prefixes. */
-export const ToolName = { Claude: 'claude', Git: 'git', Docker: 'docker', Gh: 'gh' } as const;
+export const ToolName = {
+  Claude: 'claude',
+  Codex: 'codex',
+  Git: 'git',
+  Docker: 'docker',
+  Gh: 'gh',
+} as const;
 export type ToolName = (typeof ToolName)[keyof typeof ToolName];
 
 export const ToolCheck = z.object({
@@ -34,6 +40,8 @@ export const SystemCheckDto = z.object({
   }),
   /** The Claude Code version the account checks were verified on, and a warning on a newer major version (accounts spec §10). */
   claudeCode: z.object({ verifiedOn: z.string(), warning: z.string().nullable() }),
+  /** The Codex version the ChatGPT-plan checks were verified on, and a warning on any other version. */
+  codex: z.object({ verifiedOn: z.string(), warning: z.string().nullable() }),
   tools: z.array(ToolCheck),
   benchmarkSync: BenchmarkSyncWarning.nullable().default(null),
 });

@@ -5,7 +5,6 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import {
   AccountKind,
   AccountProblem,
-  Provider,
   type AccountId,
   type AccountRefusal,
   type SessionId,
@@ -145,7 +144,6 @@ export interface FakeObservation {
 
 /** Stands in for Claude Code at the adapter boundary; scripts drive every event. */
 export class FakeAdapter implements SessionAdapter {
-  readonly provider = Provider.Claude;
   readonly observations: FakeObservation[] = [];
   /** Every message the runner sent a session, in order. */
   readonly sent: { sessionId: SessionId; text: string }[] = [];

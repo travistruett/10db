@@ -127,6 +127,47 @@ describe('the preparer', () => {
     expect(openCards()).toHaveLength(1);
   });
 
+  it('asks the builder to confirm a ChatGPT sign-in as its email and workspace, probing its own home', async () => {
+    const codex = seedAccount(store, { kind: 'codex_signin', label: 'ChatGPT plan' });
+    const projectId = seedProject(store, { accountId: codex.id }).id;
+    adapter.probeSeen = {
+      ...adapter.probeSeen,
+      email: 'me@example.com',
+      organization: 'ws-1',
+      subscriptionType: 'pro',
+      apiProvider: 'chatgpt',
+      apiKeySource: undefined,
+    };
+    preparer.prepare(getAccountRow(state.db, codex.id), projectId);
+    await preparer.idle();
+    expect(adapter.probes[0]?.kind).toBe('codex_signin');
+    expect(adapter.probes[0]?.env['CODEX_HOME']).toBe(codex.configDir);
+    const card = openCards()[0];
+    expect(card?.options.map((o) => o.label)).toEqual(['Confirm', 'Later']);
+    expect(card?.body).toContain('Codex');
+    expect(card?.body).not.toContain('Claude Code');
+    expect(card?.detail?.[ACCOUNT_CARD_DETAIL]).toMatchObject({
+      accountId: codex.id,
+      problem: 'unconfirmed',
+      seenIdentity: 'me@example.com · ws-1',
+    });
+  });
+
+  it('asks a signed-out ChatGPT account to run codex login', async () => {
+    const codex = seedAccount(store, { kind: 'codex_signin', label: 'ChatGPT plan' });
+    const projectId = seedProject(store, { accountId: codex.id }).id;
+    adapter.probeSeen = {
+      ...adapter.probeSeen,
+      email: undefined,
+      subscriptionType: undefined,
+      apiProvider: undefined,
+      apiKeySource: undefined,
+    };
+    preparer.prepare(getAccountRow(state.db, codex.id), projectId);
+    await preparer.idle();
+    expect(openCards().map((c) => c.body)).toEqual([expect.stringContaining('codex login')]);
+  });
+
   it('asks the builder to confirm an account on its own directory, and Confirm records it', async () => {
     seedProject(store);
     const sub = seedAccount(store, { kind: 'claude_subscription', label: 'Company A' });

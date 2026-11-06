@@ -5,6 +5,7 @@ import {
   EventType,
   InvalidError,
   NotFoundError,
+  providerOf,
   ShapeMessageAuthor,
   ShapeMessageKind,
   ShapeOrigin,
@@ -818,7 +819,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     const row = state.write((ctx) =>
       insertSession(ctx, {
         shapeId,
-        provider: adapter.provider,
+        provider: providerOf(launch.account.kind),
         model: launch.model,
         effort: launch.effort,
         mode: SessionMode.Managed,

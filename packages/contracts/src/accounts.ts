@@ -338,6 +338,8 @@ export const AccountIdentityDto = z.object({
   tokenSource: z.string().nullable(),
   /** Whether it reported a subscription plan; the plan's name is never compared or shown. */
   subscription: z.boolean(),
+  /** The models the account offers, when its agent lists them (a ChatGPT plan); empty otherwise. */
+  models: z.array(z.string()),
   refusal: AccountRefusal.nullable(),
 });
 export type AccountIdentityDto = z.infer<typeof AccountIdentityDto>;

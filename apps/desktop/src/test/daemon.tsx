@@ -120,6 +120,7 @@ export function baseHandlers(
         SystemCheckDto.parse({
           loginEnv: { source: 'login_shell', warning: null },
           claudeCode: { verifiedOn: '2.1.302', warning: null },
+          codex: { verifiedOn: '0.154.0', warning: null },
           tools: [
             {
               name: 'claude',

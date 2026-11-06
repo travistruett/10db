@@ -1,11 +1,11 @@
 import {
   ACCOUNT_CARD_DETAIL,
   AccountCardDetail,
-  AccountKind,
   AccountCardChoice,
   AccountProblem,
   ConflictError,
   InboxState,
+  signsInWithLogin,
   type AccountId,
   type InboxItemId,
   type ProjectId,
@@ -22,7 +22,7 @@ import type { Launcher } from '../environment';
 import type { StateStore } from '../events';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
-import { checkAccount, type SessionAdapter, type SeenAccount } from '../sessions';
+import { checkAccount, loginIdentity, type SessionAdapter, type SeenAccount } from '../sessions';
 import {
   confirmCard,
   credentialsCard,
@@ -91,6 +91,7 @@ export function createAccountPreparer(opts: {
       const release = await opts.startGate.acquire(account.id);
       try {
         seen = await opts.adapter.probeAccount({
+          kind: account.kind,
           cwd: opts.dataDir,
           env: opts.launcher.probe(account).env,
         });
@@ -129,7 +130,7 @@ export function createAccountPreparer(opts: {
       return;
     }
     closeNoLoginCards(opts.state, account.id);
-    raise(projectId, confirmCard(account, seen.email));
+    raise(projectId, confirmCard(account, loginIdentity(account.kind, seen) ?? seen.email));
   }
 
   /** The account's Confirm cards in the given states, from every project. */
@@ -177,10 +178,7 @@ export function createAccountPreparer(opts: {
       const last = lastTried.get(account.id);
       if (last !== undefined && now - last < PREPARE_RETRY_MS) return;
       lastTried.set(account.id, now);
-      if (
-        problem.problem !== AccountProblem.Unconfirmed ||
-        account.kind !== AccountKind.ClaudeSubscription
-      ) {
+      if (problem.problem !== AccountProblem.Unconfirmed || !signsInWithLogin(account.kind)) {
         raise(projectId, secretCard(account));
         return;
       }
@@ -199,10 +197,7 @@ export function createAccountPreparer(opts: {
         opts.onReady();
         return;
       }
-      if (
-        problem.problem !== AccountProblem.Unconfirmed ||
-        current.kind !== AccountKind.ClaudeSubscription
-      )
+      if (problem.problem !== AccountProblem.Unconfirmed || !signsInWithLogin(current.kind))
         throw new ConflictError(`${problem.message}. ${fixFor(current, problem.problem)}`);
       // The builder asked, so the minute between probes does not apply.
       lastTried.set(current.id, opts.clock.now().getTime());
