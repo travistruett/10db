@@ -67,6 +67,8 @@ function leaveStaleFiles(): void {
     '10db-gate-0123456789ab.json',
     '10db-mcp-0123456789ab.json',
     '10db-mcp-ba9876543210.sh',
+    '10db-mcp-0123456789ef.cjs',
+    '10db-mcp-fedcba987654.log',
   ])
     writeFileSync(join(root, name), "export A='1'\n", { mode: 0o400 });
 }
@@ -95,7 +97,7 @@ describe('claimSandboxTempRoot', () => {
     const others = leaveOthers();
     const claim = claimSandboxTempRoot(root, process.pid);
     try {
-      expect(claim).toMatchObject({ removed: 6, failed: 0, sharedWith: null });
+      expect(claim).toMatchObject({ removed: 8, failed: 0, sharedWith: null });
       expect(readdirSync(root).sort()).toEqual(
         [...others, `10db-daemon-${String(process.pid)}`].sort(),
       );
@@ -128,7 +130,7 @@ describe('claimSandboxTempRoot', () => {
     writeFileSync(join(root, `10db-daemon-${String(dead)}`), '', { mode: 0o400 });
     const claim = claimSandboxTempRoot(root, process.pid);
     try {
-      expect(claim).toMatchObject({ removed: 6, sharedWith: null });
+      expect(claim).toMatchObject({ removed: 8, sharedWith: null });
       expect(readdirSync(root)).toEqual([`10db-daemon-${String(process.pid)}`]);
     } finally {
       claim.release();

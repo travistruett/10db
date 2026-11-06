@@ -1,5 +1,6 @@
 import { realpathSync } from 'node:fs';
 import type { PermissionRuleDto, ProjectDto } from '@10db/contracts';
+import type { Clock } from '../clock';
 import { prepareCommandEnv, withoutTempDirPaths } from './command-env';
 import { deniedEnvNames } from './env-allowlist';
 import { createLaneEnvFile, removeLaneEnvFile } from './env-file';
@@ -135,6 +136,8 @@ export interface LaneSandboxDeps extends Omit<ProjectAccessDeps, 'tmpRoot'> {
   readonly ledgers?: LedgerSweep;
   /** Told, once per kind and session, what the watch of a session's processes could not do. */
   readonly log?: SandboxLog;
+  /** Paces the reading of each repo MCP server's log of refused hosts; the system's by default. */
+  readonly clock?: Clock;
   /**
    * Where the daemon makes lane copies. The file tools refuse (no card) a path under it that is not
    * in the session's own copy.
@@ -289,6 +292,8 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           env: input.env,
           checkouts: input.checkouts,
           servers: input.mcpServers,
+          ...(deps.log === undefined ? {} : { log: deps.log }),
+          ...(deps.clock === undefined ? {} : { clock: deps.clock }),
         });
         const claudeProtected = claudeProtectedPaths(checkout);
         const spec: LaneSandboxSpec = {

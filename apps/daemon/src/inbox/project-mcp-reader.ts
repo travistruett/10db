@@ -11,7 +11,7 @@ import {
   type ProjectMcp,
   type RepoMcp,
 } from '../sessions';
-import { requestMcpApproval } from './mcp-approval';
+import { earlierMcpApproval, requestMcpApproval } from './mcp-approval';
 import type { InboxService } from './service';
 
 /** A flag for an approved server 10db can't run as written; it folds per server. */
@@ -97,7 +97,13 @@ export function createProjectMcpReader(deps: ProjectMcpReaderDeps): ProjectMcpRe
           foldKey: `project-mcp-warning:${project.id}`,
         });
       }
-      for (const review of mcp.pending) requestMcpApproval(deps.inbox, project.id, review);
+      for (const review of mcp.pending)
+        requestMcpApproval(
+          deps.inbox,
+          project.id,
+          review,
+          earlierMcpApproval(deps.state.db, project.id, review.name),
+        );
       for (const failure of mcp.failures)
         flagMcpFailure(deps.inbox, project.id, workstreamId, failure);
       // Names only, never values. The live acceptance check reads this line by its message and field names.

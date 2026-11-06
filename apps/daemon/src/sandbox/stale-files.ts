@@ -5,7 +5,7 @@ import { removeLaneTempDir } from './temp-dir';
 /** What `createLaneTempDir` makes: `mkdtemp`'s six characters after the prefix. */
 const TEMP_DIR = /^10db-[A-Za-z0-9]{6}$/;
 /** What `createSealedFile` makes for the lane env file, a gate's settings and an MCP server's. */
-const SEALED_FILE = /^10db-(?:env|gate|mcp)-[0-9a-f]{12}\.(?:json|sh)$/;
+const SEALED_FILE = /^10db-(?:env|gate|mcp)-[0-9a-f]{12}\.(?:json|sh|cjs|log)$/;
 /** A running daemon's mark in the temp root, named by its pid. */
 const DAEMON_MARK = /^10db-daemon-([1-9][0-9]*)$/;
 

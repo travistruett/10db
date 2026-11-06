@@ -1,5 +1,5 @@
 export { raiseGateHostCards } from './gate-host-card';
-export { requestMcpApproval } from './mcp-approval';
+export { earlierMcpApproval, requestMcpApproval } from './mcp-approval';
 export { createProjectMcpReader, flagMcpFailure } from './project-mcp-reader';
 export {
   carriesRiskTags,
