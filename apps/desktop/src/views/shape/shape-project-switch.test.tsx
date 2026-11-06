@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, eventStream, renderApp, server } from '../../test/daemon';
@@ -44,6 +44,40 @@ describe('Shape: switching project', () => {
     expect(
       await screen.findByRole('button', { name: 'Project: beta. Switch project' }),
     ).toBeTruthy();
+  });
+
+  it('points Plan at the new project’s own latest unconverted conversation, never the old project’s', async () => {
+    const alphaShape = shapeDto({ projectId: alpha.id, title: 'Alpha chat', state: 'proposed' });
+    const betaDone = shapeDto({ projectId: beta.id, title: 'Beta done', state: 'converted' });
+    const betaShape = shapeDto({ projectId: beta.id, title: 'Beta chat', state: 'listening' });
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([alpha, beta])),
+      http.get(daemonUrl('/projects/:projectId/shapes'), ({ params }) =>
+        HttpResponse.json(params['projectId'] === alpha.id ? [alphaShape] : [betaDone, betaShape]),
+      ),
+      ...baseHandlers(),
+      eventStream.addEventListener('connection', () => undefined),
+    );
+    const { router } = renderApp('/board');
+    const trigger = await screen.findByRole('button', { name: 'Project: alpha. Switch project' });
+    const planHref = (): string | null =>
+      within(screen.getByRole('navigation'))
+        .getByRole('link', { name: 'Plan' })
+        .getAttribute('href');
+    await waitFor(() => {
+      expect(planHref()).toBe(`/shape/${alphaShape.id}`);
+    });
+
+    fireEvent.click(trigger);
+    fireEvent.click(await screen.findByRole('option', { name: /beta/, ...HIDDEN }));
+    await screen.findByRole('button', { name: 'Project: beta. Switch project' });
+    await waitFor(() => {
+      expect(planHref()).toBe(`/shape/${betaShape.id}`);
+    });
+    fireEvent.click(within(screen.getByRole('navigation')).getByRole('link', { name: 'Plan' }));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(`/shape/${betaShape.id}`);
+    });
   });
 
   it('still leaves for /shape of the new project when the switch came before the conversation loaded', async () => {

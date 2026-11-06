@@ -1150,13 +1150,59 @@ describe('Plan: the nav item', () => {
     serve(...conversations(view));
     open(view);
     const nav = await screen.findByRole('navigation');
-    expect(within(nav).getByRole('link', { name: 'Plan' }).getAttribute('href')).toBe('/shape');
     expect(within(nav).queryByRole('link', { name: 'Shape' })).toBeNull();
     // Give the list read time to land; the nav still shows nothing of it.
     await screen.findByRole('button', { name: 'History' });
     expect(within(nav).queryByRole('link', { name: /Board polish/ })).toBeNull();
     expect(within(nav).queryByRole('group', { name: 'Conversations' })).toBeNull();
     expect(within(nav).queryByText(/No conversations yet/)).toBeNull();
+  });
+
+  it('opens the most recent conversation that is not converted, a running turn included', async () => {
+    const converted = shapeViewDto({
+      shape: shapeDto({ ...inProject, title: 'Done', state: 'converted' }),
+    });
+    const running = shapeViewDto({
+      shape: shapeDto({ ...inProject, title: 'Running', state: 'listening' }),
+      turn: {
+        running: true,
+        queued: 0,
+        proposing: false,
+        rehearsing: false,
+        waitingForUpdate: false,
+      },
+    });
+    const older = shapeViewDto({
+      shape: shapeDto({ ...inProject, title: 'Older', state: 'proposed' }),
+    });
+    // The list is most recent first: a converted one leads, so Plan must pass over it.
+    serve(...conversations(converted, running, older));
+    const { router } = renderApp('/board');
+    const nav = await screen.findByRole('navigation');
+    await waitFor(() => {
+      expect(within(nav).getByRole('link', { name: 'Plan' }).getAttribute('href')).toBe(
+        `/shape/${running.shape.id}`,
+      );
+    });
+    fireEvent.click(within(nav).getByRole('link', { name: 'Plan' }));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(`/shape/${running.shape.id}`);
+    });
+  });
+
+  it('opens the new-conversation screen when every conversation is converted', async () => {
+    const converted = shapeViewDto({
+      shape: shapeDto({ ...inProject, title: 'Done', state: 'converted' }),
+    });
+    serve(...conversations(converted));
+    const { router } = renderApp('/board');
+    const nav = await screen.findByRole('navigation');
+    fireEvent.click(within(nav).getByRole('link', { name: 'Plan' }));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/shape');
+    });
+    expect(within(nav).getByRole('link', { name: 'Plan' }).getAttribute('href')).toBe('/shape');
+    expect(await screen.findByRole('textbox', { name: 'Message' })).toBeTruthy();
   });
 
   it('shows no empty-state line in the nav when the project has no conversations', async () => {
@@ -1241,6 +1287,12 @@ describe('Plan: New and History inside a conversation', () => {
     await waitFor(() => {
       expect(router.state.location.pathname).toBe('/shape');
     });
+    // The conversation it left is unconverted, yet nothing sends the builder back to it.
+    expect(await screen.findByRole('list', { name: 'Recent conversations' })).toBeTruthy();
+    expect(router.state.location.pathname).toBe('/shape');
+    expect(
+      (await screen.findByRole<HTMLTextAreaElement>('textbox', { name: 'Message' })).value,
+    ).toBe('');
   });
 
   it('History opens a searchable list of the conversations and opens the one picked', async () => {
