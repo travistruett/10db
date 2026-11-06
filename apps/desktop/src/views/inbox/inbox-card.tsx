@@ -57,7 +57,7 @@ export interface InboxCardProps {
 }
 
 /** Card text is untrusted (agent and tool output): it is only ever rendered as text. */
-function CardBody({ item }: { readonly item: InboxItemDto }) {
+export function CardBody({ item }: { readonly item: InboxItemDto }) {
   if (item.body === '') return null;
   if (item.kind === InboxKind.Permission) {
     return (

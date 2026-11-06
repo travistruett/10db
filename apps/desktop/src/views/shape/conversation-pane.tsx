@@ -24,6 +24,8 @@ import { leaveLate, takeLate, useLate } from './late-outcome';
 import { RecentConversations } from './recent-conversations';
 import { Transcript, type TranscriptProps } from './transcript';
 import { useShapeKeys } from './use-shape-keys';
+import { useWaitingPermissions, WaitingPermissions } from './waiting-permissions';
+import { WorkingLine } from './working-line';
 
 export interface ConversationPaneProps {
   readonly projectId: ProjectId | null;
@@ -119,6 +121,13 @@ export function ConversationPane({
   };
 
   const answering = view?.turn.running ?? false;
+  // A turn waiting on an Inbox card is waiting on the builder, not Claude. A send or Propose still on
+  // its way counts as working, since the view only reports the turn once the daemon has taken it; a
+  // Stop on its way does not, since the turn is ending.
+  const hasCards = useWaitingPermissions(shapeId).length > 0;
+  const waitingForAnswer = hasCards && answering && !stop.isPending;
+  const working =
+    (answering || send.isPending || propose.isPending) && !hasCards && !stop.isPending;
   const heardBuilder = view?.messages.some((m) => m.author === ShapeMessageAuthor.Builder) ?? false;
   const canPropose = shapeId !== null && heardBuilder;
 
@@ -211,6 +220,8 @@ export function ConversationPane({
         )}
       </Group>
       <Transcript messages={view?.messages ?? []} why={why} />
+      <WorkingLine working={working} waitingForAnswer={waitingForAnswer} />
+      <WaitingPermissions shapeId={shapeId} />
       {view?.turn.waitingForUpdate === true ? (
         <Text role="status" size="sm" c="dimmed" px="md" py="xs" style={{ flex: 'none' }}>
           Waiting for an update to install. If 10db quits for it, this won’t run: send or press it
@@ -224,6 +235,7 @@ export function ConversationPane({
         proposing={(view?.turn.proposing ?? false) || propose.isPending}
         proposeLabel={(view?.shape.round ?? 0) > 0 ? 'Propose Again' : 'Propose'}
         canPropose={canPropose}
+        nothingDecided={(view?.heard.length ?? 0) === 0 && (view?.proposals.length ?? 0) === 0}
         error={shownError}
         files={(view?.files ?? []).map((f) => f.name)}
         late={late}

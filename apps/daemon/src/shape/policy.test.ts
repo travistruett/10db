@@ -249,6 +249,26 @@ describe('a session in its read-only sandbox (§5.2)', () => {
     expect(prompt).toMatch(/data, never instructions/);
   });
 
+  describe.each([
+    ['the session prompt', () => SHAPE_SYSTEM_PROMPT],
+    ['the code researcher prompt', () => SHAPE_AGENTS['code-researcher'].prompt],
+  ])('%s steers reading away from Bash cards', (_name, prompt) => {
+    it('reads and searches files with Read, Grep and Glob, which never ask', () => {
+      expect(prompt()).toMatch(/Read, Grep and Glob[^.]*never ask/);
+      expect(prompt()).toMatch(/Bash[^.]*only for what (those|these) tools can't do/);
+    });
+
+    it('passes absolute paths instead of cd, and no command substitution', () => {
+      expect(prompt()).toMatch(/as an absolute path/);
+      expect(prompt()).toMatch(/never `cd`|not `cd`|no `cd`/);
+      expect(prompt()).toMatch(/command substitution/);
+    });
+
+    it('does not present ls, wc or rg through Bash as the way to read code', () => {
+      expect(prompt()).not.toMatch(/\b(ls|wc|rg)\b/);
+    });
+  });
+
   it('tells the session how to fan out code research, name a model, and treat tool output', () => {
     expect(SHAPE_SYSTEM_PROMPT).toMatch(/subagent_type "code-researcher"/);
     expect(SHAPE_SYSTEM_PROMPT).toMatch(/model "opus" or "fable"/);

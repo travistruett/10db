@@ -118,6 +118,13 @@ The card side of annotations (an indicator per kind on a task card) is the reada
   conversation; a dropped `.md` brief starts one too. Adopt a Plan… leaves the UI (its modal and hook,
   `apps/desktop/src/views/factory/adopt-plan.tsx` and `use-adopt-plan.ts`, are removed); the adopt route stays for
   briefs made elsewhere (the builder's choice, 2026-11-02).
+- **Going back to Plan** (the builder's call, 2026-11-05; this replaces the nav item listing conversations, which
+  the app never built, and "`/shape` is always a new conversation"). Choosing Plan in the sidebar opens the selected
+  project's most recent conversation that has not been converted (`state` is not `converted`), one whose turn is
+  still running included, and opens the blank composer when there is none. **New** in a conversation's header always
+  opens the blank composer: `/shape` itself never redirects. The nav item is a link whose target follows the
+  project's conversation list (most recently updated first), so after a project switch it points at that project's
+  own latest one, never another's; until the list arrives it points at `/shape`.
 - **Left, about 45%: the conversation.** Plain text blocks, not bubbles; the builder's in bright text; the list is virtualized, so a long conversation renders only what is on screen (the eng review's call). Tool use
   collapses to one dimmed line ("Read apps/desktop/src/views/board/ (12 files)", "propose_plan · 2 changes ·
   passed"). The input autosizes, takes dropped files and pasted images (§5.4), and holds the group's one filled
@@ -166,6 +173,13 @@ The card side of annotations (an indicator per kind on a task card) is the reada
 - **First run (D3).** With no conversations, Shape opens a new one with the input focused, placeholder "Talk it
   through, drop a document, or paste a list…", and one dimmed line under it: "Nothing is proposed until you press
   Propose. Nothing starts until you Convert." No illustration or tour.
+- **Propose with nothing to work with.** While no `note_heard` echo and no proposal exists, a second dimmed line
+  beside Propose reads "Propose turns decided work into tasks. Nothing is decided yet." (it is Propose's
+  description, not a gate: Propose stays enabled, since a builder who pasted a list may not have been echoed). It
+  goes once something is heard or proposed. A Propose turn whose last accepted `propose_plan` call leaves the plan
+  empty (no pending row, stated or kept because it is pinned, and no converted one; an empty draft that keeps
+  pinned rows does not count) adds a notice: "The plan came back empty: nothing has been decided yet. Say what you
+  want built, or answer Claude’s questions, then press Propose Again."
 - **Jev's nudges (D5)** are `Button variant="subtle" size="xs"` with a Tabler `sparkles` icon (14) and the
   suggestion, plus × to dismiss; at most two, newest first. DESIGN.md names this pattern.
 - **Keys and screen readers (D6).** ⌘↩ sends; ⌘⇧↩ is Propose / Propose Again; Esc stops a turn or cancels a row
@@ -337,15 +351,15 @@ request size. The API refuses a request over its size limit, an image over its p
 pixel limit, and a resumed session resends every earlier image, so one oversize block would end every later turn.
 Each figure is from a live doc page, checked 2026-11-05:
 
-| Limit                                 | Claude plan or Claude API key                                           | Amazon Bedrock, and a gateway                                            | Doc page it came from                                                                                          |
-| ------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
-| Request size                          | 128 MB                                                                  | 20 MB                                                                    | `platform.claude.com/docs/en/api/overview` (Request size limits); `…/build-with-claude/claude-on-amazon-bedrock` |
-| One image, as base64                  | 10 MB, so **7 MiB** raw (9.8 MB as base64)                              | 5 MB (3.75 MB raw), so **3.5 MiB** raw (4.9 MB as base64)                | `…/build-with-claude/vision` (Image limits and costs)                                                          |
-| Pixels                                | 8000 px a side; **3000 px** a side is safe once a request has over 20 images | the same                                                            | `…/build-with-claude/vision`                                                                                   |
-| Images a request                      | 600                                                                     | 600                                                                      | `…/build-with-claude/vision`                                                                                   |
-| PDF pages a request                   | 600 (100 under a 1M context), inside the request size                  | the same; a PDF counts toward the over-20-images pixel rule              | `…/build-with-claude/pdf-support`                                                                              |
-| **Picture pool** (ours, from the above) | **84 MiB**: 72 MiB inline + 12 MiB Read reserve (117 MB as base64, 10.6 MB left for text) | **11 MiB**: 8 MiB inline + 3 MiB Read reserve (15.4 MB as base64, 4.6 MB left for text) | the request size, less about 4 MB for a 1M-token context's text and framing                       |
-| Images in one message (ours)          | 18 MiB                                                                  | 6 MiB                                                                    | not a doc limit: it keeps one turn from taking the whole conversation total                                    |
+| Limit                                   | Claude plan or Claude API key                                                             | Amazon Bedrock, and a gateway                                                           | Doc page it came from                                                                                            |
+| --------------------------------------- | ----------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Request size                            | 128 MB                                                                                    | 20 MB                                                                                   | `platform.claude.com/docs/en/api/overview` (Request size limits); `…/build-with-claude/claude-on-amazon-bedrock` |
+| One image, as base64                    | 10 MB, so **7 MiB** raw (9.8 MB as base64)                                                | 5 MB (3.75 MB raw), so **3.5 MiB** raw (4.9 MB as base64)                               | `…/build-with-claude/vision` (Image limits and costs)                                                            |
+| Pixels                                  | 8000 px a side; **3000 px** a side is safe once a request has over 20 images              | the same                                                                                | `…/build-with-claude/vision`                                                                                     |
+| Images a request                        | 600                                                                                       | 600                                                                                     | `…/build-with-claude/vision`                                                                                     |
+| PDF pages a request                     | 600 (100 under a 1M context), inside the request size                                     | the same; a PDF counts toward the over-20-images pixel rule                             | `…/build-with-claude/pdf-support`                                                                                |
+| **Picture pool** (ours, from the above) | **84 MiB**: 72 MiB inline + 12 MiB Read reserve (117 MB as base64, 10.6 MB left for text) | **11 MiB**: 8 MiB inline + 3 MiB Read reserve (15.4 MB as base64, 4.6 MB left for text) | the request size, less about 4 MB for a 1M-token context's text and framing                                      |
+| Images in one message (ours)            | 18 MiB                                                                                    | 6 MiB                                                                                   | not a doc limit: it keeps one turn from taking the whole conversation total                                      |
 
 A gateway forwards to a platform 10db can't see, so it is held to the smaller (Bedrock's) limits; an account kind
 10db can't place is too. The 32 MB the budget was first sized from is not a limit of any of these. The 3000 px
@@ -523,17 +537,17 @@ handler builds a session's tool set from its row: a lane's tools for a workstrea
 share their session's MCP connection, so what a reviewer may call is set by its agent definition's tool list (§7),
 not by the token.
 
-| Tool                                           | Who                | Does                                                                                                                                                                                                                                                                                                                                                             |
-| ---------------------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `note_heard(items)`                            | session            | the Heard so far echo: up to 12 strings of at most 80 characters                                                                                                                                                                                                                                                                                                 |
-| `similar_tasks(query)`                         | session            | finished tasks with lane time (§8), matched by FTS over title and description, with lane time, wall time and tokens                                                                                                                                                                                                                                              |
-| `propose_plan(draft)`                          | session            | the whole plan (§6); refused until the first Propose                                                                                                                                                                                                                                                                                                             |
-| `attach(target, attachment)`                   | session            | a Mermaid diagram, a chart or an HTML mockup on a proposed task or goal (§10.3)                                                                                                                                                                                                                                                                                  |
-| `write_spec(effortKey, markdown)`              | session            | an effort's spec (§7)                                                                                                                                                                                                                                                                                                                                            |
-| `report_finding(effortKey, taskKey?, finding)` | reviewer subagents | a finding row under the effort, or under one task (§7); the daemon stamps the task's current hash; a rehearsal with nothing to ask reports `none`, which records that the task was read                                                                                                                                                                          |
-| `resolve_finding(findingId, how)`              | session            | marks a finding resolved once a `propose_plan` call has answered it, with a one-line how (§7)                                                                                                                                                                                                                                                                    |
+| Tool                                           | Who                | Does                                                                                                                                                                                                                                                                                                                                     |
+| ---------------------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `note_heard(items)`                            | session            | the Heard so far echo: up to 12 strings of at most 80 characters                                                                                                                                                                                                                                                                         |
+| `similar_tasks(query)`                         | session            | finished tasks with lane time (§8), matched by FTS over title and description, with lane time, wall time and tokens                                                                                                                                                                                                                      |
+| `propose_plan(draft)`                          | session            | the whole plan (§6); refused until the first Propose                                                                                                                                                                                                                                                                                     |
+| `attach(target, attachment)`                   | session            | a Mermaid diagram, a chart or an HTML mockup on a proposed task or goal (§10.3)                                                                                                                                                                                                                                                          |
+| `write_spec(effortKey, markdown)`              | session            | an effort's spec (§7)                                                                                                                                                                                                                                                                                                                    |
+| `report_finding(effortKey, taskKey?, finding)` | reviewer subagents | a finding row under the effort, or under one task (§7); the daemon stamps the task's current hash; a rehearsal with nothing to ask reports `none`, which records that the task was read                                                                                                                                                  |
+| `resolve_finding(findingId, how)`              | session            | marks a finding resolved once a `propose_plan` call has answered it, with a one-line how (§7)                                                                                                                                                                                                                                            |
 | `find_records(query)`                          | session            | read-only search over the decisions and current principles that apply to this project (the project's and the builder-wide `you` ones), and this project's earlier conversations (titles and kept records); each hit carries its date (`created_at`, added to the result) and is cited in chat as a dimmed line ("Decided 2026-10-30: …") |
-| `see_screen(screen, taskId?, width?, height?)` | session            | a screenshot of one of 10db's own screens (`factory`, `board`, `inbox`, `plan`, or `task` with a `taskId`), at a window of 480 to 1600 by 400 to 2000 px (default 1200 by 900), with the project's real data as it is now; answers an image, or a refusal that says why (below)                                                                                    |
+| `see_screen(screen, taskId?, width?, height?)` | session            | a screenshot of one of 10db's own screens (`factory`, `board`, `inbox`, `plan`, or `task` with a `taskId`), at a window of 480 to 1600 by 400 to 2000 px (default 1200 by 900), with the project's real data as it is now; answers an image, or a refusal that says why (below)                                                          |
 
 **Seeing the app: `see_screen`** (`decisions/2026-11-03-plan-sees-the-app-through-screenshots-not-a-browser.md`).
 **Built, not yet proven live** (see Open, below).
@@ -998,15 +1012,15 @@ All in scope; this is build order. Each slice ships something usable.
    Factory and Adopt a Plan…'s UI removed; the live confinement test (§15). Acceptance: the six-item list.
 2. **Editing and input.** Editable rows, pins, Restore, Drop; round marks and Why? (§6); file drop and pasted
    screenshots; `start_shape` (§5.6); a check that macOS dictation works in the Tauri window's input.
-   *Built, except the dictation check, which needs a person on a Mac (`pnpm --filter @10db/desktop dev:shell`,
+   _Built, except the dictation check, which needs a person on a Mac (`pnpm --filter @10db/desktop dev:shell`,
    open Shape, Fn twice, speak; a test pins only the input's structure). Enter on a row still opens its details
    (slice 1's behaviour), so E edits, P pins and W asks why. Files upload to `POST /shapes/:id/files` as the raw
    body (20 MB limit on that route only), not base64 JSON. The edit note reaches the next turn from memory and
-   stays out of the transcript view. See `decisions/2026-11-02-shape-editing-and-dropped-files.md`.*
+   stays out of the transcript view. See `decisions/2026-11-02-shape-editing-and-dropped-files.md`._
 3. **Intelligence.** `gate.started`/`finished` and lane-time reconstruction; `similar_tasks`, bases, derived sizes;
    calibration shown back (§8); `find_records` (§5.5); the three Jev decisions in shadow, their scoring and Settings
    rows; records with principles (§10.1); questions.
-   *Built: the gate events and `task_lane_times` with its backfill (migrations 0031, 0032); `similar_tasks`, derived
+   _Built: the gate events and `task_lane_times` with its backfill (migrations 0031, 0032); `similar_tasks`, derived
    sizes and hours (a builder-pinned `size` is the override), the actual on a finished converted row and Settings ›
    Decisions › Sizing; `find_records` with dated hits cited in the chat, and supersede through Convert; the
    per-project opt-in (Settings › General), the three decisions in shadow (`shape_shadow_answers`, judge outcome
@@ -1022,34 +1036,34 @@ All in scope; this is build order. Each slice ships something usable.
    `decisions/2026-11-03-convert-writes-principles-confirmed-and-stores-questions-under-their-goal-or-task.md`);
    Withdraw Principle… beside Withdraw Decision…; `find_records` returns principles beside decisions; and a
    conversation's session starts with the builder-wide and project policies and heuristics, again after a 70%
-   re-seed.*
+   re-seed._
 4. **Ceremony, rehearsal and eval.** The `oneWayPaths` setting; the ceremony rule, `write_spec`, the reviewer
    agents, findings and `resolve_finding`; the rehearsal reviewer, Rehearse, the rehearsal turn on opening the
    Convert modal and the question-card measure (§7); the proposed eval.
-   *Built, except the proposed eval's screen (only the eval a session states is stored as an attachment at Convert).
+   _Built, except the proposed eval's screen (only the eval a session states is stored as an attachment at Convert).
    `oneWayPaths` is an app setting (`shape.oneWayPaths.<projectId>`, Settings › General), as `shape.jev` is.
    `report_finding` takes a `final` flag: the rehearsal's mark for a task is written only by a closing report, so an
    interrupted rehearsal leaves none. The reviewer is stamped by the PreToolUse hook (`updatedInput`) from the
    subagent's `agent_type`. The Rehearse note has its own message kind (`rehearse`). A task's content hash ignores
    `ceremony`. The question-card measure counts started, non-cancelled tasks of projects that have a converted task.
-   Migration 0033. See `decisions/2026-11-02-shape-ceremony-review-and-rehearsal.md`.*
+   Migration 0033. See `decisions/2026-11-02-shape-ceremony-review-and-rehearsal.md`._
 5. **Preview, attachments, reopen.** The factory preview; Mermaid, charts and mockups with §10.3's tests; Open
    conversation, the resume route, re-plan additions, changes and removals.
-   *Built. The preview is in `ShapeViewDto.preview` and under the Proposed list. `attach` keeps a diagram, chart or
+   _Built. The preview is in `ShapeViewDto.preview` and under the Proposed list. `attach` keeps a diagram, chart or
    mockup in `shape_attachments` (on a proposal key, or a goal or task the conversation converted) and the view
    carries them as `attachments`. Charts and diagrams are drawn to SVG and shown as an `<img>`, so no script or link
    in them runs; charts use `vega-interpreter` (a fifth pinned renderer package) because the window's CSP has no
    `unsafe-eval`. Open conversation reads `GET /goals/:id/shape` and `GET /tasks/:id/shape` and opens the Shape
-   view; `POST /shapes/:id/resume` is for the engine's Re-plan in Shape cards, which don't exist yet.*
+   view; `POST /shapes/:id/resume` is for the engine's Re-plan in Shape cards, which don't exist yet._
 6. **Landings.** `landings[]` in the draft and the sidebar; `landing_groups` and `tasks.landing_group_id`;
    `groupByDependency` joining a landing's tasks and a late task joining its group's open batch; pull request and CI
    counts in the preview.
-   *Built. Migration 0034 adds `landing_groups` and `tasks.landing_group_id`; Convert writes a selected landing as
+   _Built. Migration 0034 adds `landing_groups` and `tasks.landing_group_id`; Convert writes a selected landing as
    a group; a landing's tasks start into one batch titled after the landing, a late task joins the landing's OPEN
    batch, and once that batch has shipped it makes a new one with a `landing-shipped` notice. A landing whose batch
    is cutting, shipping or failed refuses the start by name. The preview's `landings` counts pull requests and CI
    runs with and without them (one CI run per pull request). Not built: removing a group with its last unstarted
-   task, and ungrouping from the task's drawer (§11 Undo). See `decisions/2026-11-02-landings-share-a-batch.md`.*
+   task, and ungrouping from the task's drawer (§11 Undo). See `decisions/2026-11-02-landings-share-a-batch.md`._
 
 ## 15. Testing
 
