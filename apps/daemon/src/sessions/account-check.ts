@@ -202,7 +202,7 @@ function oneLine(raw: string): string {
 export function noAccountWhy(
   waitMs: number | readonly number[],
   printed: readonly string[],
-  kind: SupportedAccountKind = AccountKind.ClaudeSubscription,
+  kind: SupportedAccountKind,
 ): { readonly why: string; readonly printed: string } {
   const starts = printed.length;
   const waits = typeof waitMs === 'number' ? [waitMs] : [...new Set(waitMs)];

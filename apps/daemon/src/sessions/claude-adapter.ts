@@ -577,10 +577,11 @@ function startSession(
         attempt.unanswered(stderrTail, unsent);
         return;
       }
-      const { why, printed } = noAccountWhy(START_WAITS_MS.slice(0, attempt.earlier.length + 1), [
-        ...attempt.earlier,
-        stderrTail,
-      ]);
+      const { why, printed } = noAccountWhy(
+        START_WAITS_MS.slice(0, attempt.earlier.length + 1),
+        [...attempt.earlier, stderrTail],
+        spec.account.kind,
+      );
       // A signed-out subscription may answer nothing: the account waits for its sign-in, the lane doesn't fail.
       const signedOut = missingAccountRefusal(spec.account, why, printed, signIn);
       if (signedOut)

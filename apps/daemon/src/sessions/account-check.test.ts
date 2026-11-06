@@ -265,7 +265,7 @@ describe('missingAccountRefusal', () => {
 
 describe('noAccountWhy', () => {
   it('names one start by the wait alone, and says nothing was printed', () => {
-    expect(noAccountWhy(30_000, [''])).toEqual({
+    expect(noAccountWhy(30_000, [''], 'claude_subscription')).toEqual({
       why: 'Claude Code reported no account within 30 s',
       printed: 'Claude Code printed nothing',
     });
@@ -273,20 +273,26 @@ describe('noAccountWhy', () => {
 
   it('counts the starts and quotes what each printed, once for the same text', () => {
     expect(
-      noAccountWhy(30_000, [
-        'warming up\n  plugin cache locked',
-        '',
-        'warming up plugin cache locked',
-      ]),
+      noAccountWhy(
+        30_000,
+        ['warming up\n  plugin cache locked', '', 'warming up plugin cache locked'],
+        'claude_subscription',
+      ),
     ).toEqual({
       why: 'Claude Code reported no account within 30 s on each of 3 starts',
       printed: 'Claude Code printed: "warming up plugin cache locked"',
     });
-    expect(noAccountWhy(30_000, ['one', 'two']).printed).toBe('Claude Code printed: "one"; "two"');
+    expect(noAccountWhy(30_000, ['one', 'two'], 'claude_subscription').printed).toBe(
+      'Claude Code printed: "one"; "two"',
+    );
   });
 
   it('keeps the end of a long print on one line, without control characters or a final full stop', () => {
-    const { printed } = noAccountWhy(30_000, [`${'x'.repeat(1_000)}\u001b[31m\nfailed.\r\n`]);
+    const { printed } = noAccountWhy(
+      30_000,
+      [`${'x'.repeat(1_000)}\u001b[31m\nfailed.\r\n`],
+      'claude_subscription',
+    );
     expect(printed).toMatch(/^Claude Code printed: "…x+ failed"$/);
     expect(printed).not.toContain('\u001b');
     expect(printed.length).toBeLessThan(400);
@@ -349,13 +355,13 @@ describe('missingAccountRefusal with what claude auth status said', () => {
 
 describe('noAccountWhy with a wait that grows', () => {
   it('names each start by its wait when the waits differ', () => {
-    expect(noAccountWhy([30_000, 60_000, 120_000], ['', '', '']).why).toBe(
+    expect(noAccountWhy([30_000, 60_000, 120_000], ['', '', ''], 'claude_subscription').why).toBe(
       'Claude Code reported no account on each of 3 starts (waiting 30 s, 60 s and 120 s)',
     );
   });
 
   it('keeps the short wording when every start waited the same', () => {
-    expect(noAccountWhy([30_000, 30_000], ['', '']).why).toBe(
+    expect(noAccountWhy([30_000, 30_000], ['', ''], 'claude_subscription').why).toBe(
       'Claude Code reported no account within 30 s on each of 2 starts',
     );
   });
@@ -393,5 +399,15 @@ describe('missingAccountRefusal for a ChatGPT sign-in', () => {
     expect(refusal?.problem).toBe('start_timeout');
     expect(refusal?.message).toContain('codex login status');
     expect(refusal?.message).not.toMatch(/Claude|claude/);
+  });
+});
+
+describe('noAccountWhy for a ChatGPT sign-in', () => {
+  it('names Codex in both parts, never Claude', () => {
+    const { why, printed } = noAccountWhy(30_000, ['', 'rollout locked'], 'codex_signin');
+    expect(why).toBe('Codex reported no account within 30 s on each of 2 starts');
+    expect(printed).toBe('Codex printed: "rollout locked"');
+    expect(noAccountWhy(30_000, [''], 'codex_signin').printed).toBe('Codex printed nothing');
+    expect(`${why} ${printed}`).not.toMatch(/Claude/);
   });
 });

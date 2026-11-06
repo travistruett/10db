@@ -4,6 +4,8 @@ import {
   ApiKeySettings,
   BedrockSettings,
   GatewaySettings,
+  Provider,
+  providerOf,
   SubscriptionSettings,
   type AccountId,
   type SupportedAccountKind,
@@ -116,9 +118,18 @@ export function signInCommandFor(account: {
     : codexSignInCommand(account.configDir);
 }
 
-/** The directory a session's agent keeps its login in: CODEX_HOME, else CLAUDE_CONFIG_DIR, else Claude Code's default. */
-export function sessionConfigDir(env: Readonly<Record<string, string>>, home: string): string {
-  return env['CODEX_HOME'] ?? env['CLAUDE_CONFIG_DIR'] ?? join(home, '.claude');
+/**
+ * The directory a session's agent keeps its login in: CODEX_HOME for a Codex kind (default `~/.codex`),
+ * CLAUDE_CONFIG_DIR for a Claude kind (default `~/.claude`). A Claude kind ignores CODEX_HOME.
+ */
+export function sessionConfigDir(
+  kind: SupportedAccountKind,
+  env: Readonly<Record<string, string>>,
+  home: string,
+): string {
+  return providerOf(kind) === Provider.Codex
+    ? (env['CODEX_HOME'] ?? join(home, '.codex'))
+    : (env['CLAUDE_CONFIG_DIR'] ?? join(home, '.claude'));
 }
 
 /** The login env minus what the kind takes from its account only. */

@@ -1,4 +1,4 @@
-import { mintId, type AccountProblem } from '@10db/contracts';
+import { mintId, type AccountProblem, type SupportedAccountKind } from '@10db/contracts';
 import type { AccountRow } from '@10db/db';
 import { describe, expect, it } from 'vitest';
 import { createMemoryKeychain } from '../../test/fixtures';
@@ -307,12 +307,46 @@ describe('a ChatGPT sign-in launch', () => {
 });
 
 describe('sessionConfigDir', () => {
-  it.each<{ name: string; env: Record<string, string>; dir: string }>([
-    { name: 'CODEX_HOME first', env: { CODEX_HOME: '/c', CLAUDE_CONFIG_DIR: '/d' }, dir: '/c' },
-    { name: 'CLAUDE_CONFIG_DIR next', env: { CLAUDE_CONFIG_DIR: '/d' }, dir: '/d' },
-    { name: 'the default Claude directory last', env: {}, dir: '/h/b/.claude' },
-  ])('reads $name', ({ env, dir }) => {
-    expect(sessionConfigDir(env, '/h/b')).toBe(dir);
+  it.each<{ name: string; kind: SupportedAccountKind; env: Record<string, string>; dir: string }>([
+    {
+      name: 'CODEX_HOME for a ChatGPT sign-in',
+      kind: 'codex_signin',
+      env: { CODEX_HOME: '/c', CLAUDE_CONFIG_DIR: '/d' },
+      dir: '/c',
+    },
+    {
+      name: "a ChatGPT sign-in's default directory",
+      kind: 'codex_signin',
+      env: {},
+      dir: '/h/b/.codex',
+    },
+    {
+      name: 'CLAUDE_CONFIG_DIR for a subscription, whatever CODEX_HOME holds',
+      kind: 'claude_subscription',
+      env: { CODEX_HOME: '/h/b/.codex-other', CLAUDE_CONFIG_DIR: '/d' },
+      dir: '/d',
+    },
+    {
+      name: "the default account's Claude directory, whatever CODEX_HOME holds",
+      kind: 'claude_subscription',
+      env: { CODEX_HOME: '/h/b/.codex-other' },
+      dir: '/h/b/.claude',
+    },
+    {
+      name: 'the default Claude directory for a gateway',
+      kind: 'gateway',
+      env: {},
+      dir: '/h/b/.claude',
+    },
+  ])('reads $name', ({ kind, env, dir }) => {
+    expect(sessionConfigDir(kind, env, '/h/b')).toBe(dir);
+  });
+
+  it('carries the login shell CODEX_HOME through a Claude launch without using it', () => {
+    const { env } = launcher().session(account({}), 'sonnet');
+    expect(sessionConfigDir('claude_subscription', env, '/h/b')).toBe(SUB_DIR);
+    const login = launcher().session(account({ configDir: null }), 'sonnet');
+    expect(sessionConfigDir('claude_subscription', login.env, '/h/b')).toBe('/h/b/.claude');
   });
 });
 
