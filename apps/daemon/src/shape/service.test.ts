@@ -433,6 +433,33 @@ describe('Propose', () => {
     ]);
   });
 
+  it('says nothing about an empty plan when the round keeps pinned rows the draft leaves out', async () => {
+    const m = c.say();
+    adapter.shapeBehaviour = proposing(m, 'a', 'b');
+    service.propose(shapeId);
+    await service.settled(shapeId);
+    for (const row of listShapeProposals(c.store.db, shapeId))
+      service.restoreProposal(shapeId, row.id);
+    // A row pinned as a whole is not restated, so Claude has nothing new and states nothing.
+    adapter.shapeBehaviour = async (turn) => {
+      const handler = service.toolsFor({ sessionId: turn.spec.sessionId, shapeId }).propose_plan;
+      await must(
+        handler,
+        'propose_plan',
+      )(ShapeToolInputs.propose_plan.parse({ draft: PlanDraft.parse({}) }));
+      return { text: 'Nothing new.' };
+    };
+    service.propose(shapeId);
+    await service.settled(shapeId);
+    expect(
+      listShapeProposals(c.store.db, shapeId)
+        .filter((r) => r.state === ShapeProposalState.Pending)
+        .map((r) => r.key)
+        .sort(),
+    ).toEqual(['a', 'b']);
+    expect(notices()).toEqual([]);
+  });
+
   it('says nothing about an empty plan when a later call in the turn filled it', async () => {
     const m = c.say();
     adapter.shapeBehaviour = async (turn) => {

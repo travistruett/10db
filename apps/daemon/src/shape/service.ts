@@ -493,7 +493,7 @@ interface Runtime {
   contextPct: number;
   /** Whether the turn running now has had an accepted propose_plan call, and how many were refused. */
   proposed: boolean;
-  /** Whether the last accepted propose_plan call of the turn stated an empty plan. */
+  /** Whether the last accepted propose_plan call of the turn left the plan empty: no pending or converted row. */
   emptyPlan: boolean;
   refused: number;
   /** Stop or Convert interrupted the turn running now. */
