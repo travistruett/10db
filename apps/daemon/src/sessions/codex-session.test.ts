@@ -1,4 +1,5 @@
-import { mkdir, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AccountKind, AccountProblem, mintId } from '@10db/contracts';
@@ -1198,4 +1199,86 @@ describe('codexThreadConfig', () => {
       }
     },
   );
+});
+
+describe('the guard socket', () => {
+  /** Posts a Bash call to the session's socket; the status and body come back. */
+  function post(
+    spec: SessionSpec,
+    command: string,
+  ): Promise<{ status: number | undefined; body: string }> {
+    return new Promise((done, fail) => {
+      const req = request(
+        {
+          socketPath: guardSocketPath(join(root, 'run'), spec.sessionId),
+          path: '/pre-tool-use',
+          method: 'POST',
+        },
+        (res) => {
+          let body = '';
+          res.on('data', (chunk: Buffer) => {
+            body += chunk.toString();
+          });
+          res.on('end', () => {
+            done({ status: res.statusCode, body });
+          });
+        },
+      );
+      req.on('error', fail);
+      req.end(JSON.stringify({ tool_name: 'Bash', tool_input: { command } }));
+    });
+  }
+
+  async function running(specOver: Partial<SessionSpec>): Promise<{
+    handle: SessionHandle;
+    server: FakeAppServer;
+    spec: SessionSpec;
+  }> {
+    const started = startWith({ 'turn/interrupt': {} }, specOver);
+    await vi.waitFor(() => {
+      expect(methods(started.server)).toContain('turn/start');
+    });
+    started.server.notify('turn/started', turnStarted('turn-1'));
+    return started;
+  }
+
+  it.skipIf(SANDBOXED)(
+    'answers the hook while the session runs and is gone once it ends',
+    async () => {
+      const { handle, spec } = await running({
+        preToolUse: ({ input }) =>
+          JSON.stringify(input).includes('push')
+            ? { decision: 'deny', reason: 'push is refused' }
+            : { decision: 'allow' },
+      });
+      expect(await post(spec, 'ls')).toEqual({ status: 200, body: '' });
+      const refused = await post(spec, 'git push');
+      expect(refused.status).toBe(200);
+      expect(refused.body).toContain('"permissionDecision":"deny"');
+      await handle.stop();
+      await expect(post(spec, 'ls')).rejects.toThrow();
+    },
+  );
+
+  it.skipIf(SANDBOXED)('interrupts the turn when the broker says to', async () => {
+    const { handle, server, spec } = await running({
+      preToolUse: () => ({ decision: 'ask', reason: 'unread' }),
+      canUseTool: () => Promise.resolve({ behavior: 'deny', message: 'stop', interrupt: true }),
+    });
+    const refused = await post(spec, 'make');
+    expect(refused.body).toContain('stop');
+    await vi.waitFor(() => {
+      expect(sentParams(server, 'turn/interrupt')).toEqual({ threadId: THREAD, turnId: 'turn-1' });
+    });
+    await handle.stop();
+  });
+
+  it('refuses the session, sending no prompt, when the socket cannot be opened', async () => {
+    await writeFile(join(root, 'run'), 'a file where the socket directory should be');
+    const { handle, server } = startWith({});
+    const events = await collect(handle);
+    expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'sandbox_refused' });
+    // The socket opens before the process starts, so there is no process to send anything to.
+    expect(methods(server)).toEqual([]);
+  });
 });

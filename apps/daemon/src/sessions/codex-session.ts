@@ -1,5 +1,5 @@
 import { homedir } from 'node:os';
-import { realpath } from 'node:fs/promises';
+import { mkdir, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import { AccountProblem, MODEL_ALIAS_PATTERN, type AccountRefusal } from '@10db/contracts';
 import { z } from 'zod';
@@ -9,6 +9,13 @@ import { checkAccount, missingAccountRefusal, modelMatches, noAccountWhy } from 
 import { createChannel } from './channel';
 import { CODEX_CLIENT_INFO, readSeenAccount, type CodexCall } from './codex-account-read';
 import type { CodexAdapterOptions } from './codex-adapter';
+import {
+  judgeHookCall,
+  openGuardSocket,
+  type GuardAnswer,
+  type GuardSocket,
+  type HookInput,
+} from './codex-guard';
 import { GUARD_HOOK_EVENT, type CodexHome } from './codex-home';
 import { codexThreadConfig, LANE_PROFILE } from './codex-lane-config';
 import {
@@ -60,6 +67,9 @@ type HookEntry = z.infer<typeof HooksListResponse>['data'][number]['hooks'][numb
 
 /** Where session sockets live when the adapter is given no directory: short enough for a socket path. */
 const defaultSocketDir = (): string => join(homedir(), '.10db', 'run');
+
+/** The socket directory is the session's alone: no one else may reach a session's guard. */
+const SOCKET_DIR_MODE = 0o700;
 
 const NO_PROMPT = 'No prompt was sent.';
 
@@ -153,6 +163,7 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
   const state = createTurnState();
   const graceMs = deps.stopGraceMs ?? STOP_GRACE_MS;
   let sends: Promise<void> = Promise.resolve();
+  let guardSocket: GuardSocket | null = null;
   let stderrTail = '';
   /** What the process runs with beyond the spec's env; set once the home is known. */
   let homeEnv: Record<string, string> = {};
@@ -174,6 +185,8 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
     events.push({ type: 'ended', reason, message, ...(refusal ? { refusal } : {}) });
     events.end();
     rpc?.close();
+    // Closing the socket refuses every call still waiting on a card.
+    void guardSocket?.close().catch(() => undefined);
     endSession(new SessionOver());
   };
 
@@ -481,6 +494,47 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
     }
   };
 
+  /** The guard hook's answer for one call; a throw here is a refusal, since the socket answers 500. */
+  const judgeCall = async (hook: HookInput, signal: AbortSignal): Promise<GuardAnswer> => {
+    try {
+      const answer = await judgeHookCall(spec, { ...hook, cwd: hook.cwd ?? spec.cwd }, signal);
+      if (!answer.allow && answer.interrupt && threadId !== null && state.turnId !== null)
+        void interruptTurn(threadId, state.turnId);
+      return answer;
+    } catch (error) {
+      log.error(
+        { tool: hook.tool_name, errName: error instanceof Error ? error.name : 'unknown' },
+        'the guard could not judge a codex tool call',
+      );
+      throw error;
+    }
+  };
+
+  /** Opens the session's guard socket in a private directory; the hook cannot run without it. */
+  const openGuard = async (): Promise<string> => {
+    const socketDir = deps.socketDir ?? defaultSocketDir();
+    try {
+      await mkdir(socketDir, { recursive: true, mode: SOCKET_DIR_MODE });
+      const path = guardSocketPath(socketDir, spec.sessionId);
+      const socket = await openGuardSocket(path, judgeCall);
+      if (done) {
+        await socket.close();
+        throw new SessionOver();
+      }
+      guardSocket = socket;
+      return path;
+    } catch (error) {
+      if (error instanceof SessionOver) throw error;
+      log.error(
+        { errName: error instanceof Error ? error.name : 'unknown' },
+        'the guard socket could not be opened',
+      );
+      throw sandboxRefused(
+        'The guard socket could not be opened, so no tool call could be checked.',
+      );
+    }
+  };
+
   const run = async (): Promise<void> => {
     if ((spec.sandbox ?? null) === null)
       throw sandboxRefused('10db refused to start Codex without the lane sandbox.');
@@ -504,10 +558,11 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
     }
     if (done) return;
 
+    const socketPath = await openGuard();
     homeEnv = {
       HOME: home.emptyHome,
       TENDB_MCP_TOKEN: spec.mcp.token,
-      TENDB_GUARD_SOCKET: guardSocketPath(deps.socketDir ?? defaultSocketDir(), spec.sessionId),
+      TENDB_GUARD_SOCKET: socketPath,
       TENDB_GUARD_MAX_SECONDS: String(Math.ceil(spec.mcp.toolTimeoutMs / 1_000)),
     };
     const child = (deps.spawn ?? spawnAppServer)(deps.codexPath, childEnv());
