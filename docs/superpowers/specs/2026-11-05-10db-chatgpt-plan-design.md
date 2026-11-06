@@ -109,12 +109,16 @@ changes. Codex may add `projects` entries; 10db keeps them. Writes are atomic an
 | `web_search = "disabled"`                           | It runs at OpenAI, where the guard can't see it          |
 | `agents.enabled = false`, `features.goals = false`  | 10db owns steps, review and retries                      |
 | memories, apps and plugins off                      | Nothing a lane needs; less to reason about               |
+| Image generation, browser use and computer use off  | On by default in 0.154; each runs where the guard can't see it |
+| `features.skill_mcp_dependency_install = false`     | On by default in 0.154; a skill would install an MCP server |
 | `skills.include_instructions = false`               | 10db puts its skills in the briefing                     |
 | `hooks.PreToolUse` and `hooks.state`                | The guard (below); a hook runs only with its trust hash  |
 | `shell_environment_policy.inherit = "none"`         | Commands get only what 10db sets                         |
 
 The hook's `trusted_hash` comes from `hooks/list`'s `currentHash` when the home is prepared. A hook passed with
-`-c` is never trusted, so the hook must live in this file.
+`-c` is never trusted, so the hook must live in this file. The live test pins the tools the model is offered (code
+mode's `exec`, `wait` and `request_user_input`, and the tools `exec` names for its scripts), so a tool a later Codex
+turns on shows there first.
 
 ### The adapter
 

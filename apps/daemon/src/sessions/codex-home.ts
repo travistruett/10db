@@ -54,7 +54,12 @@ const MODE_HOME = 0o700;
 const MODE_SCRIPT = 0o755;
 const MODE_CONFIG = 0o600;
 
-function template(home: string): Record<string, unknown> {
+/**
+ * The home's config, with the hook trust Codex recorded (`state`). Every tool a lane has no use for
+ * is off, as web search is: image generation, the browser, computer use and a skill's MCP server
+ * installs, each on by default in Codex 0.154, run where the guard can't see them.
+ */
+function template(home: string, state: Record<string, unknown>): Record<string, unknown> {
   return {
     forced_login_method: 'chatgpt',
     default_permissions: 'lane',
@@ -66,6 +71,12 @@ function template(home: string): Record<string, unknown> {
       memories: false,
       apps: false,
       plugins: false,
+      image_generation: false,
+      browser_use: false,
+      browser_use_external: false,
+      browser_use_full_cdp_access: false,
+      computer_use: false,
+      skill_mcp_dependency_install: false,
     },
     agents: { enabled: false },
     skills: { include_instructions: false },
@@ -83,6 +94,7 @@ function template(home: string): Record<string, unknown> {
           ],
         },
       ],
+      ...(Object.keys(state).length > 0 ? { state } : {}),
     },
   };
 }
@@ -178,10 +190,11 @@ class FileCodexHome implements CodexHome {
     const file = join(this.path, 'config.toml');
     const kept = readKept(await readIfPresent(file));
     change(kept);
-    const base = template(this.path);
-    const hooks = base['hooks'] as Record<string, unknown>;
-    if (Object.keys(kept.state).length > 0) hooks['state'] = kept.state;
-    await writeAtomically(file, stringify({ ...base, projects: kept.projects }), MODE_CONFIG);
+    await writeAtomically(
+      file,
+      stringify({ ...template(this.path, kept.state), projects: kept.projects }),
+      MODE_CONFIG,
+    );
   }
 }
 

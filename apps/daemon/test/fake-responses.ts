@@ -16,6 +16,13 @@ export interface FakeRequest {
   readonly userTexts: readonly string[];
   /** The text each `exec` call returned since the script's prompt, in order. */
   readonly outputs: readonly string[];
+  /**
+   * Every tool the request offers the model, in its `tools` or an `additional_tools` input item, by
+   * name (a hosted tool by its type), a namespace's as `namespace.tool`, sorted.
+   */
+  readonly tools: readonly string[];
+  /** The tools code mode's `exec` names for its scripts (`tools.<name>`), sorted. */
+  readonly execTools: readonly string[];
 }
 
 /** A stand-in for the Responses API that a Codex `model_providers` entry points at. */
@@ -41,8 +48,43 @@ const InputItem = z.looseObject({
   content: Content.optional(),
   output: Content.optional(),
 });
-const ResponsesBody = z.looseObject({ input: z.array(InputItem).default([]) });
+interface Tool {
+  readonly type?: string | undefined;
+  readonly name?: string | undefined;
+  readonly description?: string | undefined;
+  readonly tools?: readonly Tool[] | undefined;
+}
+const Tool: z.ZodType<Tool> = z.lazy(() =>
+  z.looseObject({
+    type: z.string().optional(),
+    name: z.string().optional(),
+    description: z.string().optional(),
+    tools: z.array(Tool).optional(),
+  }),
+);
+const ResponsesBody = z.looseObject({
+  input: z.array(InputItem).default([]),
+  tools: z.array(Tool).default([]),
+});
+/** The input item Codex offers its tools in, beside or instead of the body's `tools`. */
+const ToolsItem = z.looseObject({ type: z.literal('additional_tools'), tools: z.array(Tool) });
 type InputItem = z.infer<typeof InputItem>;
+
+/** Each tool with its name, or its type when it has none; a namespace's tools under its name. */
+function namedTools(tools: readonly Tool[], under = ''): { name: string; tool: Tool }[] {
+  return tools.flatMap((tool) => {
+    const name = `${under}${tool.name ?? tool.type ?? '?'}`;
+    return tool.type === 'namespace' ? namedTools(tool.tools ?? [], `${name}.`) : [{ name, tool }];
+  });
+}
+
+/** The nested tools code mode's `exec` describes, one ``### `name` `` heading each. */
+function execToolsOf(tools: readonly Tool[]): string[] {
+  const exec = tools.find((tool) => tool.name === 'exec');
+  return [...(exec?.description ?? '').matchAll(/^### `([A-Za-z0-9_]+)`/gm)].flatMap((match) =>
+    match[1] === undefined ? [] : [match[1]],
+  );
+}
 
 function textOf(content: z.infer<typeof Content> | undefined): string {
   if (content === undefined) return '';
@@ -121,6 +163,13 @@ export async function startFakeResponses(): Promise<FakeResponses> {
     }
     const parsed = ResponsesBody.safeParse(JSON.parse(body));
     const items = parsed.success ? parsed.data.input : [];
+    const offered = namedTools([
+      ...(parsed.success ? parsed.data.tools : []),
+      ...items.flatMap((item) => {
+        const tools = ToolsItem.safeParse(item);
+        return tools.success ? tools.data.tools : [];
+      }),
+    ]);
     served += 1;
     let at = -1;
     let marker: string | null = null;
@@ -140,6 +189,8 @@ export async function startFakeResponses(): Promise<FakeResponses> {
       latest.set(marker, {
         userTexts: items.filter(isUserMessage).map((item) => textOf(item.content)),
         outputs,
+        tools: offered.map(({ name }) => name).sort(),
+        execTools: execToolsOf(offered.map(({ tool }) => tool)).sort(),
       });
     }
     answer(res, steps?.[outputs.length] ?? { say: 'finished' }, served);

@@ -70,6 +70,25 @@ const ALIAS = 'sonnet';
 /** Who the stand-in says the account is: no real account is ever signed in. */
 const STAND_IN = { email: 'live@example.invalid', workspace: 'ws-live' } as const;
 
+/**
+ * The tools a lane's model is offered on Codex 0.154, by name, as the fake model records them: code
+ * mode's `exec` and the tools its scripts call.
+ */
+const OFFERED_TOOLS: readonly string[] = [
+  'functions.exec',
+  'functions.request_user_input',
+  'functions.wait',
+];
+const EXEC_TOOLS: readonly string[] = [
+  'apply_patch',
+  'exec_command',
+  'list_mcp_resource_templates',
+  'list_mcp_resources',
+  'read_mcp_resource',
+  'view_image',
+  'write_stdin',
+];
+
 /** What the guard refuses, so a script can ask for a refusal by naming it. */
 const DENIED = 'DENYME';
 const DENIAL_REASON = 'the live test refused this call';
@@ -1030,6 +1049,21 @@ describe.skipIf(!live)(
       );
       expect(outputs[0]).toContain(blocked('example.com'));
       expect(outputs[0]).not.toContain(EXAMPLE_PAGE);
+    });
+
+    it('offers the model only the tools a lane uses', async () => {
+      const run = await runSession(world, [{ say: 'done' }]);
+      expectTurn(run);
+      const tools = [...(run.request?.tools ?? []), ...(run.request?.execTools ?? [])];
+      // On by default in Codex 0.154, and off in the home: none is any lane's.
+      for (const off of ['image_generation', 'browser', 'computer', 'skill', 'web_search'])
+        expect(
+          tools.filter((tool) => tool.includes(off)),
+          off,
+        ).toEqual([]);
+      // A tool a later Codex adds shows here before it reaches a lane.
+      expect(run.request?.tools).toEqual(OFFERED_TOOLS);
+      expect(run.request?.execTools).toEqual(EXEC_TOOLS);
     });
 
     it('runs with the real toolchain: node and git status', async () => {
