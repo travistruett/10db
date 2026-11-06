@@ -27,6 +27,7 @@ function mount(): {
         proposing={false}
         proposeLabel="Propose"
         canPropose={false}
+        nothingDecided={false}
         onSend={() =>
           new Promise<void>((resolve) => {
             settle = resolve;

@@ -235,6 +235,7 @@ export function ConversationPane({
         proposing={(view?.turn.proposing ?? false) || propose.isPending}
         proposeLabel={(view?.shape.round ?? 0) > 0 ? 'Propose Again' : 'Propose'}
         canPropose={canPropose}
+        nothingDecided={(view?.heard.length ?? 0) === 0 && (view?.proposals.length ?? 0) === 0}
         error={shownError}
         files={(view?.files ?? []).map((f) => f.name)}
         late={late}

@@ -390,6 +390,9 @@ const CREDENTIALS_MARGIN_MS = 5 * 60_000;
 const NOTHING_TO_ASK =
   'This planning session has no sandbox, so it runs no command and asks for nothing.';
 const TITLE_MAX = 60;
+/** What the builder reads when a Propose turn's accepted plan has nothing in it. */
+const EMPTY_PLAN_NOTICE =
+  'The plan came back empty: nothing has been decided yet. Say what you want built, or answer Claude’s questions, then press Propose Again.';
 
 /** The first non-empty line of a message, cut to fit a title. */
 function titleFrom(text: string): string {
@@ -490,6 +493,8 @@ interface Runtime {
   contextPct: number;
   /** Whether the turn running now has had an accepted propose_plan call, and how many were refused. */
   proposed: boolean;
+  /** Whether the last accepted propose_plan call of the turn stated an empty plan. */
+  emptyPlan: boolean;
   refused: number;
   /** Stop or Convert interrupted the turn running now. */
   interrupted: boolean;
@@ -525,6 +530,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
         idle: null,
         contextPct: 0,
         proposed: false,
+        emptyPlan: false,
         refused: 0,
         interrupted: false,
         closing: null,
@@ -622,10 +628,12 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
               },
             }),
         world: worldOfShape,
-        onProposal: (id, accepted) => {
+        onProposal: (id, accepted, empty = false) => {
           const rt = runtimeOf(id);
-          if (accepted) rt.proposed = true;
-          else rt.refused += 1;
+          if (accepted) {
+            rt.proposed = true;
+            rt.emptyPlan = empty;
+          } else rt.refused += 1;
         },
       },
       shapeId,
@@ -1284,6 +1292,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     rt.idle?.cancel();
     rt.idle = null;
     rt.proposed = false;
+    rt.emptyPlan = false;
     rt.refused = 0;
     rt.interrupted = false;
     // A session whose servers' AWS credentials are about to expire gives way; the next one, resumed,
@@ -1354,12 +1363,16 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     // Read through a function: Stop sets the flag while the turn is awaited, which narrowing misses.
     const stopped = (): boolean => rt.interrupted;
     const proposedIn = (): boolean => rt.proposed;
+    const emptyIn = (): boolean => rt.emptyPlan;
     const failed = end.kind === 'complete' && end.result === 'error' && !stopped();
     if (failed) notice(shapeId, "Claude's turn failed; send the message again.");
     if (end.kind === 'complete' && !failed && !stopped() && turn.kind === 'propose') {
       if (!proposedIn()) {
         log.info({ shapeId, refusedProposals: rt.refused }, 'a propose turn proposed nothing');
         notice(shapeId, "Claude didn't propose; Propose Again");
+      } else if (emptyIn()) {
+        log.info({ shapeId }, 'a propose turn ended with an empty plan');
+        notice(shapeId, EMPTY_PLAN_NOTICE);
       }
     }
     // A task the turn listed and got no closing report for stays "Not rehearsed": never read as clean.

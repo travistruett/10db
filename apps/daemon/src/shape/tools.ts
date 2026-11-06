@@ -21,8 +21,11 @@ import { ceremonies, type ViewWorld } from './view';
 
 export interface ShapeToolDeps {
   readonly state: StateStore;
-  /** Told after each propose_plan call whether it was accepted, for the turn's guard (§5.3). */
-  onProposal?(shapeId: ShapeId, accepted: boolean): void;
+  /**
+   * Told after each propose_plan call whether it was accepted, for the turn's guard (§5.3), and
+   * whether the draft it stated was empty: no goals, tasks, records, questions or changes.
+   */
+  onProposal?(shapeId: ShapeId, accepted: boolean, empty?: boolean): void;
   /** What the ceremony rule reads about the project: its one-way paths (§7). */
   world?(shapeId: ShapeId): ViewWorld;
   /** Draws the app's screens for `see_screen` (§5.5); the tool is not offered without it. */
@@ -56,6 +59,20 @@ function describeDraft(draft: PlanDraft): string {
       : '',
   ].filter((p) => p !== '');
   return parts.length > 0 ? parts.join(', ') : 'nothing';
+}
+
+function isEmptyDraft(draft: PlanDraft): boolean {
+  return (
+    draft.goals.length +
+      draft.looseTasks.length +
+      draft.landings.length +
+      draft.records.length +
+      draft.questions.length +
+      draft.additions.length +
+      draft.changes.length +
+      draft.removals.length ===
+    0
+  );
 }
 
 const BEFORE_PROPOSE =
@@ -138,7 +155,7 @@ export function createShapeToolHandlers(deps: ShapeToolDeps, shapeId: ShapeId): 
         });
         return result;
       });
-      deps.onProposal?.(shapeId, outcome.ok);
+      deps.onProposal?.(shapeId, outcome.ok, isEmptyDraft(input.draft));
       if (!outcome.ok)
         return Promise.reject(
           new InvalidError(

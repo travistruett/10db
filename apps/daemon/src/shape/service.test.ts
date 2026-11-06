@@ -415,6 +415,41 @@ describe('Propose', () => {
     expect(notices()).toEqual(["Claude didn't propose; Propose Again"]);
     expect(listShapeProposals(c.store.db, shapeId)).toEqual([]);
   });
+
+  it('says in plain words that nothing was decided when the accepted plan is empty', async () => {
+    c.say();
+    adapter.shapeBehaviour = async (turn) => {
+      const handler = service.toolsFor({ sessionId: turn.spec.sessionId, shapeId }).propose_plan;
+      await must(
+        handler,
+        'propose_plan',
+      )(ShapeToolInputs.propose_plan.parse({ draft: PlanDraft.parse({}) }));
+      return { text: 'Nothing yet.' };
+    };
+    service.propose(shapeId);
+    await service.settled(shapeId);
+    expect(notices()).toEqual([
+      'The plan came back empty: nothing has been decided yet. Say what you want built, or answer Claude’s questions, then press Propose Again.',
+    ]);
+  });
+
+  it('says nothing about an empty plan when a later call in the turn filled it', async () => {
+    const m = c.say();
+    adapter.shapeBehaviour = async (turn) => {
+      const handler = must(
+        service.toolsFor({ sessionId: turn.spec.sessionId, shapeId }).propose_plan,
+        'propose_plan',
+      );
+      await handler(ShapeToolInputs.propose_plan.parse({ draft: PlanDraft.parse({}) }));
+      await handler(
+        ShapeToolInputs.propose_plan.parse({ draft: PlanDraft.parse(looseDraft(m, 'a')) }),
+      );
+      return { text: 'ok' };
+    };
+    service.propose(shapeId);
+    await service.settled(shapeId);
+    expect(notices()).toEqual([]);
+  });
 });
 
 describe('Convert', () => {

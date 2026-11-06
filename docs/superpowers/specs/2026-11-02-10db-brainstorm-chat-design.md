@@ -173,6 +173,12 @@ The card side of annotations (an indicator per kind on a task card) is the reada
 - **First run (D3).** With no conversations, Shape opens a new one with the input focused, placeholder "Talk it
   through, drop a document, or paste a list…", and one dimmed line under it: "Nothing is proposed until you press
   Propose. Nothing starts until you Convert." No illustration or tour.
+- **Propose with nothing to work with.** While no `note_heard` echo and no proposal exists, a second dimmed line
+  beside Propose reads "Propose turns decided work into tasks. Nothing is decided yet." (it is Propose's
+  description, not a gate: Propose stays enabled, since a builder who pasted a list may not have been echoed). It
+  goes once something is heard or proposed. A Propose turn whose accepted `propose_plan` call is empty (no goals,
+  tasks, records, questions or changes) adds a notice: "The plan came back empty: nothing has been decided yet.
+  Say what you want built, or answer Claude's questions, then press Propose Again."
 - **Jev's nudges (D5)** are `Button variant="subtle" size="xs"` with a Tabler `sparkles` icon (14) and the
   suggestion, plus × to dismiss; at most two, newest first. DESIGN.md names this pattern.
 - **Keys and screen readers (D6).** ⌘↩ sends; ⌘⇧↩ is Propose / Propose Again; Esc stops a turn or cancels a row

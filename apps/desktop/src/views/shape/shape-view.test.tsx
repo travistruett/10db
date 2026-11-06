@@ -113,6 +113,50 @@ describe('Shape: the first run', () => {
     expect(screen.getByText(/Press Propose when you've said enough/)).toBeTruthy();
   });
 
+  it('says Propose turns decided work into tasks before anything is heard or decided, and keeps Propose enabled', async () => {
+    serve(...conversations());
+    renderApp('/shape');
+    await screen.findByRole('textbox', { name: 'Message' });
+    expect(
+      screen.getByText('Propose turns decided work into tasks. Nothing is decided yet.'),
+    ).toBeTruthy();
+  });
+
+  it('keeps saying it after a question and its answer, until something is heard', async () => {
+    const view = proposed([], { round: 0 });
+    serve(...conversations(view));
+    open(view);
+    const propose = await screen.findByRole('button', { name: 'Propose' });
+    expect(
+      screen.getByText('Propose turns decided work into tasks. Nothing is decided yet.'),
+    ).toBeTruthy();
+    // Propose still works as it did: the hint is not a gate.
+    await waitFor(() => {
+      expect(disabled(propose)).toBe(false);
+    });
+    expect(propose.getAttribute('aria-describedby')).toBe('shape-composer-propose-hint');
+  });
+
+  it('drops the line once Claude has heard something', async () => {
+    const view = proposed([], { round: 0, heard: ['Density first'] });
+    serve(...conversations(view));
+    open(view);
+    // Until the view loads there is nothing heard, so the line is there first and then goes.
+    await waitFor(() => {
+      expect(screen.queryByText(/Nothing is decided yet/)).toBeNull();
+    });
+  });
+
+  it('drops the line once a proposal exists', async () => {
+    const view = proposed([looseTaskProposal('density')]);
+    serve(...conversations(view));
+    open(view);
+    await screen.findByRole('button', { name: 'Propose Again' });
+    await waitFor(() => {
+      expect(screen.queryByText(/Nothing is decided yet/)).toBeNull();
+    });
+  });
+
   it('titles the view Plan and shows nothing under the composer when there are no conversations', async () => {
     serve(...conversations());
     renderApp('/shape');
