@@ -11,7 +11,12 @@ import {
   projectWritableRoots,
   type ProjectAccessDeps,
 } from './project-access';
-import { defaultPnpmLockDir, openPnpmLockDir, sweepPnpmLockDir } from './pnpm-lock-dir';
+import {
+  defaultPnpmLockDir,
+  openPnpmLockDir,
+  sweepPnpmLockDir,
+  type SweepLog,
+} from './pnpm-lock-dir';
 import { createSealedFile, removeSealedFile, type SealedFileKind } from './sealed-file';
 import {
   allowlisted,
@@ -92,6 +97,8 @@ export interface GateSandboxDeps extends Omit<ProjectAccessDeps, 'tmpRoot'> {
   readonly tmpRoot?: string;
   /** Where pnpm keeps its store locks; tests pass a directory of their own. */
   readonly pnpmLockDir?: string;
+  /** Told what a sweep of pnpm's lock directory could not remove. */
+  readonly log?: SweepLog;
   readonly runtime: SandboxRuntime;
 }
 
@@ -136,7 +143,7 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
         input.packageInstall === true ? (deps.pnpmLockDir ?? defaultPnpmLockDir()) : null;
       // What an earlier run or a crash left is not trusted either.
       if (lockPath !== null) {
-        sweepPnpmLockDir(lockPath, tmpRoot);
+        await sweepPnpmLockDir(lockPath, tmpRoot, deps.log);
         openPnpmLockDir(lockPath);
       }
       const tmpDir = createLaneTempDir(tmpRoot);
@@ -160,7 +167,7 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
         }
         if (lockPath !== null) {
           try {
-            sweepPnpmLockDir(lockPath, tmpRoot);
+            await sweepPnpmLockDir(lockPath, tmpRoot, deps.log);
           } catch (error) {
             record(error);
           }

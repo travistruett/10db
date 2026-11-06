@@ -138,17 +138,38 @@ describe('buildLaneProfile', () => {
     expect(denyWrite).toEqual([]);
   });
 
-  it.each<[string, (given: ReturnType<typeof withRoots>) => Partial<LaneProfileInput>]>([
+  it.each<
+    [
+      string,
+      (given: ReturnType<typeof withRoots>) => {
+        readonly writes: Partial<LaneProfileInput>;
+        readonly path: string;
+        readonly root: string;
+      },
+    ]
+  >([
     // It holds `~/.10db`: other lanes' temp dirs and files there would be the lane's to write.
-    ['the checkout holds the home', () => ({ checkout: home })],
+    [
+      'the checkout holds the home',
+      (given) => ({ writes: { checkout: home }, path: home, root: given.lanes }),
+    ],
     // It holds the root of the lane's own temp dir, and every other sandbox's temp dir beside it.
-    ['an extra write holds the temp root', () => ({ extraWrites: [root] })],
-    ['an extra write is a sandbox root', (given) => ({ extraWrites: [given.files] })],
-  ])('refuses the profile when %s, naming both paths', (_name, writes) => {
+    [
+      'an extra write holds the temp root',
+      (given) => ({ writes: { extraWrites: [root] }, path: root, root: given.tempRoot }),
+    ],
+    [
+      'an extra write is a sandbox root',
+      (given) => ({ writes: { extraWrites: [given.files] }, path: given.files, root: given.files }),
+    ],
+  ])('refuses the profile when %s, naming both paths', (_name, make) => {
     const given = withRoots();
-    const build = () => buildLaneProfile({ ...given, ...writes(given) });
+    const { writes, path, root: held } = make(given);
+    const build = () => buildLaneProfile({ ...given, ...writes });
     expect(build).toThrow(SandboxProfileError);
-    expect(build).toThrow(/holds .*, where 10db keeps every sandbox's temp dirs and files/);
+    expect(build).toThrow(
+      `${path} holds ${held}, where 10db keeps every sandbox's temp dirs and files`,
+    );
   });
 
   it('appends extra reads and writes, and filters them like the read list', () => {

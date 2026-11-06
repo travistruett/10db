@@ -554,6 +554,7 @@ describe('startDaemon', () => {
       const roots = sandboxRoots(base);
       const { tmpRoot, filesRoot } = roots;
       const [systemTemp = ''] = roots.systemTempRoots;
+      let planted: ReturnType<typeof spawn> | null = null;
       try {
         for (const root of [tmpRoot, filesRoot, ...roots.systemTempRoots]) mkdirSync(root);
         mkdirSync(join(tmpRoot, '10db-a1B2c3', 'cache'), { recursive: true });
@@ -568,7 +569,7 @@ describe('startDaemon', () => {
         // A ledger there is never read: a ChatGPT lane can write there.
         writeFileSync(join(systemTemp, '10db-proc-4321-0123456789ab.json'), '{}');
         // A mark a ChatGPT lane could plant there, naming a running process that is no daemon.
-        const planted = spawn(process.execPath, ['-e', 'setInterval(() => undefined, 1000)'], {
+        planted = spawn(process.execPath, ['-e', 'setInterval(() => undefined, 1000)'], {
           stdio: 'ignore',
         });
         const plantedMark = `10db-daemon-${String(planted.pid ?? 0)}`;
@@ -591,8 +592,8 @@ describe('startDaemon', () => {
         // Its temp dirs there go off the event loop, once the daemon listens.
         await waitFor(() => !readdirSync(systemTemp).includes('10db-a1B2c3'));
         expect(readdirSync(systemTemp).sort()).toEqual([plantedMark, 'other.txt'].sort());
-        planted.kill('SIGKILL');
       } finally {
+        planted?.kill('SIGKILL');
         await daemon?.stop();
         daemon = null;
         rmSync(base, { recursive: true, force: true });

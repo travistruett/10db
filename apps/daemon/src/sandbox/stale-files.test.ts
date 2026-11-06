@@ -224,44 +224,55 @@ describe('claimSandboxRoots and the system temp sweeps', () => {
       ),
     );
 
-  it("removes 10db's sealed files and ledgers from a system temp dir at once, unread, whatever a mark of no 10db daemon says", () => {
-    const { systemTemp } = roots();
-    leaveStaleFiles(systemTemp);
-    for (const name of LEDGERS) writeFileSync(join(systemTemp, name), '{"version":1,"members":[]}');
-    // A mark a ChatGPT lane could plant: a running process, but no 10db daemon.
-    const planted = liveProcess();
-    writeFileSync(join(systemTemp, `10db-daemon-${String(planted)}`), '', { mode: 0o400 });
-    const others = leaveOthers(systemTemp);
-    // Four sealed files and the two ledger files; the temp dirs are the later sweep's.
-    expect(sweepSystemTempFiles([systemTemp])).toMatchObject({ removed: 6, failed: 0 });
-    expect(readdirSync(systemTemp).sort()).toEqual(
-      [...others, '10db-Zz9yX8', '10db-a1B2c3', `10db-daemon-${String(planted)}`].sort(),
-    );
-    expect(readdirSync(outside)).toEqual(['keep.txt']);
-  });
+  // Inside a sandbox `ps` can't run, so every live mark counts there.
+  it.skipIf(SANDBOXED)(
+    "removes 10db's sealed files and ledgers from a system temp dir at once, unread, whatever a mark of no 10db daemon says",
+    () => {
+      const { systemTemp } = roots();
+      leaveStaleFiles(systemTemp);
+      for (const name of LEDGERS)
+        writeFileSync(join(systemTemp, name), '{"version":1,"members":[]}');
+      // A mark a ChatGPT lane could plant: a running process, but no 10db daemon.
+      const planted = liveProcess();
+      writeFileSync(join(systemTemp, `10db-daemon-${String(planted)}`), '', { mode: 0o400 });
+      const others = leaveOthers(systemTemp);
+      // Four sealed files and the two ledger files; the temp dirs are the later sweep's.
+      expect(sweepSystemTempFiles([systemTemp])).toMatchObject({ removed: 6, failed: 0 });
+      expect(readdirSync(systemTemp).sort()).toEqual(
+        [...others, '10db-Zz9yX8', '10db-a1B2c3', `10db-daemon-${String(planted)}`].sort(),
+      );
+      expect(readdirSync(outside)).toEqual(['keep.txt']);
+    },
+  );
 
-  it("removes 10db's temp dirs from a system temp dir off the event loop, whatever a mark of no 10db daemon says, and stops when aborted", async () => {
-    const { systemTemp } = roots();
-    leaveStaleFiles(systemTemp);
-    const planted = liveProcess();
-    writeFileSync(join(systemTemp, `10db-daemon-${String(planted)}`), '', { mode: 0o400 });
-    const others = leaveOthers(systemTemp);
-    const aborted = new AbortController();
-    aborted.abort();
-    expect(await sweepSystemTempDirs([systemTemp], aborted.signal)).toMatchObject({ removed: 0 });
-    expect(readdirSync(systemTemp)).toEqual(expect.arrayContaining(['10db-Zz9yX8', '10db-a1B2c3']));
-    let ticked = false;
-    const sweeping = sweepSystemTempDirs([systemTemp], new AbortController().signal);
-    setImmediate(() => {
-      ticked = true;
-    });
-    expect(await sweeping).toMatchObject({ removed: 2, failed: 0 });
-    expect(ticked).toBe(true);
-    expect(readdirSync(systemTemp)).not.toContain('10db-Zz9yX8');
-    expect(readdirSync(systemTemp)).not.toContain('10db-a1B2c3');
-    expect(readdirSync(systemTemp)).toEqual(expect.arrayContaining(others));
-    expect(readdirSync(outside)).toEqual(['keep.txt']);
-  });
+  // Inside a sandbox `ps` can't run, so every live mark counts there.
+  it.skipIf(SANDBOXED)(
+    "removes 10db's temp dirs from a system temp dir off the event loop, whatever a mark of no 10db daemon says, and stops when aborted",
+    async () => {
+      const { systemTemp } = roots();
+      leaveStaleFiles(systemTemp);
+      const planted = liveProcess();
+      writeFileSync(join(systemTemp, `10db-daemon-${String(planted)}`), '', { mode: 0o400 });
+      const others = leaveOthers(systemTemp);
+      const aborted = new AbortController();
+      aborted.abort();
+      expect(await sweepSystemTempDirs([systemTemp], aborted.signal)).toMatchObject({ removed: 0 });
+      expect(readdirSync(systemTemp)).toEqual(
+        expect.arrayContaining(['10db-Zz9yX8', '10db-a1B2c3']),
+      );
+      let ticked = false;
+      const sweeping = sweepSystemTempDirs([systemTemp], new AbortController().signal);
+      setImmediate(() => {
+        ticked = true;
+      });
+      expect(await sweeping).toMatchObject({ removed: 2, failed: 0 });
+      expect(ticked).toBe(true);
+      expect(readdirSync(systemTemp)).not.toContain('10db-Zz9yX8');
+      expect(readdirSync(systemTemp)).not.toContain('10db-a1B2c3');
+      expect(readdirSync(systemTemp)).toEqual(expect.arrayContaining(others));
+      expect(readdirSync(outside)).toEqual(['keep.txt']);
+    },
+  );
 
   // `ps` names another process's entry only outside a sandbox.
   it.skipIf(SANDBOXED)(

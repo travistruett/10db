@@ -244,11 +244,6 @@ function refuseSecretsOverNeeds(
 }
 
 /**
- * A toolchain secret that holds what lane commands read would leave a lane that fails with no reason
- * given. `toolchainAccess` already keeps such paths out of the toolchain reads, so this can only meet
- * the checkout, the temp dir or an extra read, and refuses the session naming both.
- */
-/**
  * A writable path at or over a sandbox root would let the lane write every other sandbox's temp dirs
  * and files there, and would hold the deny that closes them, so the session is refused, naming both.
  */
@@ -266,6 +261,11 @@ function refuseWritesOverSandboxRoots(
   }
 }
 
+/**
+ * A toolchain secret that holds what lane commands read would leave a lane that fails with no reason
+ * given. `toolchainAccess` already keeps such paths out of the toolchain reads, so this can only meet
+ * the checkout, the temp dir or an extra read, and refuses the session naming both.
+ */
 function refuseToolchainSecretsOverNeeds(
   secrets: readonly string[],
   needed: readonly string[],

@@ -104,9 +104,11 @@ function markedBy(
   root: string,
   uid: number,
   counts: (pid: number) => boolean,
+  stopped: () => boolean = () => false,
 ): number | null {
   let sharedWith: number | null = null;
   for (const name of marks) {
+    if (stopped()) break;
     const marked = Number(DAEMON_MARK.exec(name)?.[1]);
     if (!Number.isInteger(marked) || ownedKind(join(root, name), uid) !== 'file') continue;
     if (marked !== process.pid && processAlive(marked)) {
@@ -187,7 +189,12 @@ export function claimSandboxRoots(
 
 /** The `ps` that names each process's command, with a fixed PATH. */
 const PS = ['/bin/ps', ['-axo', 'pid=,command=']] as const;
-const PS_OPTIONS = { encoding: 'utf8', env: { PATH: '/usr/bin:/bin' } } as const;
+/** As `process-table.ts` reads it: a busy machine's table would pass the default 1 MiB buffer. */
+const PS_OPTIONS = {
+  encoding: 'utf8',
+  env: { PATH: '/usr/bin:/bin' },
+  maxBuffer: 64 * 1024 * 1024,
+} as const;
 const execPs = promisify(execFile);
 
 /** The pids whose command line runs a 10db daemon's entry, read from `ps`'s output. */
@@ -284,8 +291,9 @@ export async function sweepSystemTempDirs(
         () => null,
       );
     }
-    const marked = markedBy(marks, root, uid, daemonCheck(daemons ?? null));
+    const marked = markedBy(marks, root, uid, daemonCheck(daemons ?? null), stopped);
     sharedWith ??= marked;
+    if (stopped()) break;
     if (marked !== null) continue;
     for await (const name of namesInAsync(root)) {
       if (stopped()) break;

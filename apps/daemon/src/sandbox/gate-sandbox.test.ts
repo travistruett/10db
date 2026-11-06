@@ -1,4 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import {
   chmodSync,
   existsSync,
@@ -26,6 +27,7 @@ import {
   type GateRunInput,
   type GateSandbox,
 } from './index';
+import { sweepPnpmLockDir } from './pnpm-lock-dir';
 import { childListingGrant, listingGrant } from './profile';
 import { isEqualOrUnder } from './protected-reads';
 
@@ -42,6 +44,9 @@ let pnpmLockDir: string;
 let repo: TempDir;
 let checkout: string;
 
+/** What the sandbox told the log, by message and fields. */
+let warnings: { fields: Record<string, unknown>; message: string }[] = [];
+
 function sandbox(): GateSandbox {
   return createGateSandbox({
     home,
@@ -55,6 +60,11 @@ function sandbox(): GateSandbox {
     // Hermetic: the machine's own install prefixes add no deny.
     systemPrefixes: [],
     runtime: RUNTIME,
+    log: {
+      warn: (fields, message) => {
+        warnings.push({ fields: { ...fields }, message });
+      },
+    },
   });
 }
 
@@ -124,6 +134,7 @@ function runInner(run: GateRun): {
 }
 
 beforeEach(() => {
+  warnings = [];
   // A short root: the temp directory's whole path must fit the sandbox's socket path limit.
   root = realpathSync(mkdtempSync('/tmp/sbg-'));
   home = join(root, 'home');
@@ -569,32 +580,65 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
       expect(readdirSync(victim).sort()).toEqual(['file', 'sub']);
     });
 
-    // macOS's user immutable flag is what keeps a file from being removed by its owner.
+    // macOS's user flags are what keep a file from being removed by its owner.
     it.skipIf(process.platform !== 'darwin')(
-      'throws a typed error when an entry cannot be removed, leaving what is left only in the temp root, and removes it at the next sweep',
+      'clears the user flags a run set in the lock directory, and removes what they held',
       async () => {
         const run = await sandbox().forRun(input({ packageInstall: true }));
         writeFileSync(join(pnpmLockDir, 'stuck.lock'), '');
+        mkdirSync(join(pnpmLockDir, 'appended'));
+        writeFileSync(join(pnpmLockDir, 'appended', 'x'), '');
         execFileSync('/usr/bin/chflags', ['uchg', join(pnpmLockDir, 'stuck.lock')]);
-        await expect(run.dispose()).rejects.toThrow(SandboxProfileError);
+        execFileSync('/usr/bin/chflags', ['uappnd', join(pnpmLockDir, 'appended')]);
+        await run.dispose();
         expect(existsSync(pnpmLockDir)).toBe(false);
-        // The directory was walked in the temp root, which no sandbox writes, never beside its own
-        // path, which a ChatGPT lane can: what it holds was moved there first.
         expect(readdirSync(root).filter((name) => name.includes('sweep'))).toEqual([]);
-        expect(readdirSync(filesRoot)).toEqual([]);
-        const [moved, ...more] = readdirSync(tmpRoot);
-        expect(more).toEqual([]);
-        expect(moved).toMatch(/^pnpm-sweep-[0-9a-f-]{36}$/);
-        const stuck = join(tmpRoot, moved ?? '', 'stuck.lock');
-        expect(existsSync(stuck)).toBe(true);
-        execFileSync('/usr/bin/chflags', ['nouchg', stuck]);
-        // The next run's sweep removes what this one left.
-        const next = await sandbox().forRun(input({ packageInstall: true }));
-        expect(readdirSync(tmpRoot).filter((name) => name.startsWith('pnpm-sweep-'))).toEqual([]);
-        await next.dispose();
         expect(readdirSync(tmpRoot)).toEqual([]);
+        expect(warnings).toEqual([]);
       },
     );
+
+    it("logs what it can't remove in the temp root, closed to every sandbox, and lets every later run go on", async () => {
+      // A tree locked deeper than two runs' sweeps open, as a run could leave the lock directory:
+      // each sweep opens a bounded number of levels.
+      const leftover = join(tmpRoot, `pnpm-sweep-${randomUUID()}`);
+      const levels = Array.from({ length: 100 }, (_, n) =>
+        join(leftover, ...Array.from({ length: n + 1 }, () => 'd')),
+      );
+      mkdirSync(levels.at(-1) ?? leftover, { recursive: true });
+      writeFileSync(join(levels.at(-1) ?? leftover, 'f'), '');
+      for (const level of [...levels].reverse()) chmodSync(level, 0o000);
+      try {
+        for (const attempt of [1, 2]) {
+          const run = await sandbox().forRun(input({ packageInstall: true }));
+          expect(run.commandEnv['TMPDIR'], `run ${String(attempt)}`).toBe(run.tmpDir);
+          await run.dispose();
+        }
+        expect(existsSync(leftover)).toBe(true);
+        expect(warnings.length).toBeGreaterThan(0);
+        expect(warnings.every((w) => w.fields['path'] === leftover)).toBe(true);
+        expect(warnings[0]?.message).toContain("pnpm's lock directory");
+      } finally {
+        if (existsSync(leftover)) execFileSync('/bin/chmod', ['-R', 'u+rwx', leftover]);
+      }
+    });
+
+    it('walks a lock directory of many directories off the event loop', async () => {
+      mkdirSync(pnpmLockDir, { mode: 0o700 });
+      for (let n = 0; n < 200; n += 1) {
+        mkdirSync(join(pnpmLockDir, `d${String(n)}`, 'locked'), { recursive: true });
+        chmodSync(join(pnpmLockDir, `d${String(n)}`, 'locked'), 0o000);
+      }
+      let ticked = false;
+      const sweeping = sweepPnpmLockDir(pnpmLockDir, tmpRoot);
+      setImmediate(() => {
+        ticked = true;
+      });
+      await sweeping;
+      expect(ticked).toBe(true);
+      expect(existsSync(pnpmLockDir)).toBe(false);
+      expect(readdirSync(tmpRoot)).toEqual([]);
+    });
 
     it("walks nothing when the lock directory can't be moved into the temp root", async () => {
       const outside = join(root, 'outside');

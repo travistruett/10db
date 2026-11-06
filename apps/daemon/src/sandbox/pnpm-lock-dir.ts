@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
   existsSync,
@@ -11,6 +11,7 @@ import {
 } from 'node:fs';
 import { userInfo } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { SandboxProfileError } from './profile';
 
 /**
@@ -39,6 +40,11 @@ export function openPnpmLockDir(dir: string): void {
 /** What the sweep moves a lock directory to in the temp root; never a lane temp dir's name. */
 const MOVED = /^pnpm-sweep-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
+/** The daemon's logger, as far as the sweep tells it what it could not remove. */
+export interface SweepLog {
+  warn(fields: object, message: string): void;
+}
+
 /**
  * Removes pnpm's lock directory and all it holds. A run that could write there might have swapped the
  * directory for a link, or left links in it, for a later pnpm outside any sandbox to follow, and the
@@ -47,36 +53,40 @@ const MOVED = /^pnpm-sweep-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a
  * renamed into `privateRoot` (the lane temp root, on the system's data volume like the system temp
  * dir and closed to every sandbox), which moves a link rather than following it, and only the name
  * it was moved to is walked, by tools that never follow a link. When it can't be moved there,
- * nothing is walked. Each sweep first removes every moved tree left there. A failure is thrown
- * after the rest was tried.
+ * nothing is walked and the run is refused. Each sweep first removes every moved tree left there.
+ * What can't be removed there is told to `log` and left: no sandbox can reach it, and no later run
+ * waits on it.
  */
-export function sweepPnpmLockDir(dir: string, privateRoot: string): void {
-  const failures: Error[] = [];
+export async function sweepPnpmLockDir(
+  dir: string,
+  privateRoot: string,
+  log?: SweepLog,
+): Promise<void> {
   let names: string[] = [];
   try {
     names = readdirSync(privateRoot);
-  } catch (error) {
-    failures.push(asError(error));
+  } catch {
+    // The move below fails the same way, and says so.
   }
-  for (const name of names) {
-    if (!MOVED.test(name)) continue;
-    try {
-      removeTree(join(privateRoot, name));
-    } catch (error) {
-      failures.push(asError(error));
-    }
-  }
+  const moved = names.filter((name) => MOVED.test(name)).map((name) => join(privateRoot, name));
+  let aside: string | null;
   try {
-    sweep(dir, privateRoot);
+    aside = moveAside(dir, privateRoot);
   } catch (error) {
-    failures.push(asError(error));
-  }
-  const [first] = failures;
-  if (first !== undefined) {
     throw new SandboxProfileError(
       'packageInstall',
-      `pnpm's lock directory ${dir} could not be cleared: ${first.message}`,
+      `pnpm's lock directory ${dir} could not be cleared: ${asError(error).message}`,
     );
+  }
+  for (const path of aside === null ? moved : [...moved, aside]) {
+    try {
+      await removeTree(path);
+    } catch (error) {
+      log?.warn(
+        { path, err: asError(error).message },
+        "pnpm's lock directory, moved where no sandbox reaches it, could not be removed; it is left there",
+      );
+    }
   }
 }
 
@@ -86,43 +96,59 @@ function asError(error: unknown): Error {
 
 /** The tools that walk a moved tree, with a fixed PATH. */
 const TOOL_ENV = { PATH: '/usr/bin:/bin' };
+const run = promisify(execFile);
+
+/** How many times the sweep opens the locked directories it can reach in a moved tree. */
+const UNLOCK_PASSES = 16;
 
 /**
- * Removes a moved lock directory and all it holds. `find` opens each directory in it for its owner
- * first, since a run may have locked one; it and `rm -rf` walk by directory descriptor and never
- * follow a link, so a link's target and a hard link's other name are left as they are.
+ * Removes a moved lock directory and all it holds, off the event loop. Each pass of `find` opens
+ * for their owner the directories it can reach that a run locked (one `chmod` per batch), so each
+ * opens one more level; then the user flags a run can set are cleared, and `rm -rf` removes the
+ * tree, with every ACL removed and a second try when the first fails. None follows a link, and only
+ * directories have their mode changed, so a hard link's other name keeps its own.
  */
-function removeTree(path: string): void {
-  try {
-    execFileSync('/usr/bin/find', [path, '-type', 'd', '-exec', '/bin/chmod', 'u+rwx', '{}', ';'], {
-      env: TOOL_ENV,
-      stdio: 'pipe',
-    });
-  } catch {
-    // What it could not open, `rm` fails on, and that is what is reported.
+async function removeTree(path: string): Promise<void> {
+  for (let pass = 0; pass < UNLOCK_PASSES; pass += 1) {
+    const opened = await run(
+      '/usr/bin/find',
+      ['-P', path, '-type', 'd', '!', '-perm', '-u=rwx', '-exec', '/bin/chmod', 'u+rwx', '{}', '+'],
+      { env: TOOL_ENV },
+    ).then(
+      () => true,
+      () => false,
+    );
+    if (opened) break;
   }
-  try {
-    execFileSync('/bin/rm', ['-rf', '--', path], { env: TOOL_ENV, stdio: 'pipe' });
-  } catch {
-    throw new Error(`${path} could not be removed`);
-  }
-  if (existsSync(path)) throw new Error(`${path} could not be removed`);
+  // macOS's user flags; elsewhere the tool is missing and there are none.
+  await run('/usr/bin/chflags', ['-R', '-P', 'nouchg,nouappnd', path], { env: TOOL_ENV }).catch(
+    () => undefined,
+  );
+  const removed = (): Promise<boolean> =>
+    run('/bin/rm', ['-rf', '--', path], { env: TOOL_ENV }).then(
+      () => !existsSync(path),
+      () => false,
+    );
+  if (await removed()) return;
+  await run('/bin/chmod', ['-R', '-N', path], { env: TOOL_ENV }).catch(() => undefined);
+  if (!(await removed())) throw new Error(`${path} could not be removed`);
 }
 
-function sweep(dir: string, privateRoot: string): void {
+/**
+ * Renames `dir` into `privateRoot` and returns where it went, or null when nothing was there. A
+ * link or a file is unlinked there at once; a rename that fails with something at `dir` throws.
+ */
+function moveAside(dir: string, privateRoot: string): string | null {
   const aside = join(privateRoot, `pnpm-sweep-${randomUUID()}`);
   try {
     renameSync(dir, aside);
   } catch (error) {
-    // Nothing there is nothing to sweep; a rename that failed with something there walks nothing.
-    if (isMissing(error) && lstatSync(dir, { throwIfNoEntry: false }) === undefined) return;
+    if (isMissing(error) && lstatSync(dir, { throwIfNoEntry: false }) === undefined) return null;
     throw error;
   }
-  if (!lstatSync(aside).isDirectory()) {
-    unlinkSync(aside);
-    return;
-  }
-  removeTree(aside);
+  if (lstatSync(aside).isDirectory()) return aside;
+  unlinkSync(aside);
+  return null;
 }
 
 function isMissing(error: unknown): boolean {
