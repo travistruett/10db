@@ -256,7 +256,7 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
   `/private/var` and `/private/etc`: a canary under `/private/tmp` or `/private/var/folders` stays denied.
 - **Write.** The checkout (Claude Code's own default) and the lane's temp directory, and nothing shared with
   another lane or the builder's own tools. In a linked worktree Claude Code also opens the worktree's own git dir for writing (`HEAD`, `index`, new files), except `commondir`, `config.worktree` and `gitdir`; see the linked-worktree bullet below.
-- **Temp directory.** Each session gets its own, under `/private/tmp`, through `CLAUDE_CODE_TMPDIR`. Claude Code
+- **Temp directory.** Each session gets its own, under `/Users/Shared/10db-<uid>/` (a ChatGPT lane's under `~/.10db/lanes/`; `decisions/2026-11-05-sandbox-files-leave-private-tmp.md`), through `CLAUDE_CODE_TMPDIR`. Claude Code
   falls back to the shared `/tmp/claude-<uid>` without a word when the path is over 44 bytes, so the daemon refuses
   to start a session whose path is longer (spike 14 check 10). Unix sockets are allowed only there.
 - **Package caches are per lane.** No writable cache that can hold code a later install or build runs is shared
@@ -697,6 +697,37 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
 - **`TENDB_JUDGE=off`** keeps a daemon from reading the key and from calling OpenRouter. The e2e web server, the live acceptance daemon and `pnpm dev` set it (`tests/repo/src/benchmarks-off.test.ts` checks).
 - **A model answer can only skip a review.** The diff is text a lane wrote, and a System One model does not treat its state as hostile, so a steered lane could write a diff that talks the model into `skip`. The decision it feeds is limited to that: the gate has already passed, CI still runs, and the pull request still waits for the builder's merge. Every fallback (off, no key, timeout, error, an answer that does not parse or is under the floor) keeps today's rule. A model's answer never loosens the sandbox, the guard, a claim or a hazard.
 - **Every call is logged** and shown in Settings, with what 10db did with the answer. Rows are deleted after 30 days.
+
+### 4.13 A lane's Codex app-server process
+
+**Built** for `codex_signin` accounts (`decisions/2026-11-05-chatgpt-plan-through-the-codex-app-server.md`,
+`decisions/2026-11-05-codex-lanes-use-codex-sandbox-and-hooks.md`). A Codex lane runs `codex app-server --stdio
+--strict-config` with `CODEX_HOME` set to the account's own home and `HOME` set to an empty folder in the account's
+directory. The boundary is Codex's kernel sandbox, configured per lane as `permissions.lane`; the guard is a filter in
+front of it.
+
+- **The guard is a trusted `PreToolUse` hook,** a `/bin/sh` script that sends its input with `curl` to a Unix socket the
+  daemon opens for the session in `~/.10db/run/`. Codex hooks fail open, so the script exits 2 whenever `curl` fails,
+  and a stopped session closes its socket. `apply_patch` reaches the guard as one `Edit` per path; a tool the adapter
+  doesn't know is refused.
+- **A repository can't change how its lane runs.** Before `thread/start` the checkout is pinned
+  `trust_level = "untrusted"` in the home's `config.toml`, so the repository's `.codex/` neither replaces the sandbox
+  nor starts an MCP server outside it. A session whose start checks fail ends with `sandbox_refused` or
+  `account_refused` before any prompt.
+- **Credentials.** 10db stores no ChatGPT credential; Codex's login lives in the account's home, which the data
+  directory already closes to lanes, and `~/.codex` and `~/.agents` are protected reads. The Codex launch strips
+  `OPENAI_API_KEY`, `CODEX_API_KEY`, `OPENAI_BASE_URL`, `CODEX_ACCESS_TOKEN` and `CODEX_HOME`, and commands inherit nothing
+  but what 10db sets.
+- **Network.** `network.domains` with `mode = "full"`. An HTTPS POST passes even in `limited`, since only plain HTTP is
+  method-checked, so `limited` buys nothing. A wildcard host such as `*.example.net` matches hosts under the domain but not
+  `example.net` itself, as srt does.
+- **`/private/tmp` is open to every Codex command.** Codex's base policy allows it and nothing closes it, so a ChatGPT lane
+  can read other software's temp files there, Claude Code's own included. 10db keeps its control files, ledgers and lane
+  temp dirs elsewhere (`decisions/2026-11-05-sandbox-files-leave-private-tmp.md`). The daemon's own `tmpdir()` uses
+  (its private git index, `gh`, the git version probe, the area namer's scratch) fall back to `/private/tmp` when
+  `TMPDIR` is unset. Normally `TMPDIR` is under `/var/folders`, which Codex keeps closed.
+- **Known gaps, accepted.** `write_stdin` is not seen by the hook; there is no auto-mode classifier; a lane spends a read on
+  `AGENTS.md`; a project's `.codex/` doesn't apply to its lanes.
 
 ## 5. What the daemon reads, runs or sends for a lane
 
