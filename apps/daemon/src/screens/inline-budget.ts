@@ -11,43 +11,15 @@ import {
 import { listShapeFiles, listShapeMessages } from '@10db/db';
 import type { StateStore } from '../events';
 import { readImageSize } from './image-check';
+import { poolBytes, type PictureLimits } from './picture-limits';
 
 // Shape spec §5.4. A resumed session resends every earlier image with each request, whether it arrived in
-// a message or as a see_screen result, so dropped images and screens share one budget.
+// a message or as a see_screen result, so dropped images and screens share one budget. The limits it is held
+// to are those of the account the session runs on (`picture-limits.ts`): a picture Claude pulls in with `Read`
+// is a tool result this budget can't see; the Shape hook counts those (`shape/read-budget.ts`), and they draw
+// on one pool with these (`poolBytes`), so Reads past their reserve take from this budget.
 
 const MIB = 1024 * 1024;
-
-/** The largest image sent as a content block: 2 MiB is under 3 MB as base64. */
-const INLINE_IMAGE_MAX_BYTES = 2 * MIB;
-
-/**
- * The longest side of an image sent as a content block. The API takes at most 2000 px a side when a
- * request holds more than 20 images, and a conversation's screens (12) and dropped images (20) can pass
- * that together, so a request that failed on it would fail every later turn too. Claude Code is not
- * known to shrink an image block, so a larger one goes as a path, which `Read` resizes.
- */
-const INLINE_IMAGE_MAX_SIDE = 2000;
-
-/**
- * The most image bytes a whole conversation carries, dropped images and screens together. Base64 grows
- * them by 4/3: 18 MiB raw is 24 MiB (about 25 MB) on the wire, which leaves the API's 32 MB request limit
- * about 6 MB. Twelve screens at their 1.5 MB most fit inside it. A picture Claude pulls in with `Read` is a
- * tool result this budget can't see; the Shape hook counts those (`shape/read-budget.ts`), and they draw on
- * one pool with these (`PICTURE_POOL_BYTES`), so Reads past their reserve take from this budget.
- */
-export const INLINE_CONVERSATION_MAX_BYTES = 18 * MIB;
-
-/**
- * What pictures and PDF pages Claude pulls in with `Read` may add on top of a full inline budget: 3 MiB is
- * 4.2 MB as base64, so 25.2 MB of inline pictures plus it is near 29.4 MB, which leaves 2.6 MB of the 32 MB
- * for text. The two share one pool of their sum: Reads may use whatever the inline pictures leave of it, and
- * an inline picture may use whatever the Reads leave, so a conversation that has spent little of one can
- * spend more of the other and the sum still stays under the limit.
- */
-export const READ_RESERVE_BYTES = 3 * MIB;
-
-/** The pool inline pictures and Read pictures and PDFs draw on together. */
-export const PICTURE_POOL_BYTES = INLINE_CONVERSATION_MAX_BYTES + READ_RESERVE_BYTES;
 
 /** The transcript line that starts a session with nothing to resume and no digest to say so. */
 export const FRESH_START_LINE = 'Session · started fresh';
@@ -244,45 +216,104 @@ function liveScreenBytes(
  * Whether the stored image is within the side cap. One whose size can't be read (cut short, or not
  * what its name says) is not: it would be sent blind, and a model refusing it ends every turn.
  */
-function withinSideCap(storedPath: string): boolean {
+function withinSideCap(storedPath: string, maxSide: number): boolean {
   try {
     const size = readImageSize(readFileSync(storedPath));
-    return size !== null && Math.max(size.width, size.height) <= INLINE_IMAGE_MAX_SIDE;
+    return size !== null && Math.max(size.width, size.height) <= maxSide;
   } catch {
     return false;
   }
 }
 
 /**
- * An image too big, in bytes or in pixels, to be a content block on its own. The one rule for what goes
- * inline and what is charged for it, so the two can't disagree.
+ * An image too big, in bytes or in pixels, to be a content block on its own on this account. The one rule
+ * for what goes inline and what is charged for it, so the two can't disagree.
  */
-export const tooBigAlone = (file: {
-  readonly size: number;
-  readonly storedPath: string;
-}): boolean => file.size > INLINE_IMAGE_MAX_BYTES || !withinSideCap(file.storedPath);
+export const tooBigAlone = (
+  file: {
+    readonly size: number;
+    readonly storedPath: string;
+  },
+  limits: PictureLimits,
+): boolean =>
+  file.size > limits.imageMaxBytes || !withinSideCap(file.storedPath, limits.imageMaxSide);
 
 /**
  * The image bytes the daemon itself sent that the live session carries: every screen it took and every
  * dropped image one of its turns sent as a block (`shape_files.inline_sent`, which a fresh session
  * clears). Images that went as paths, and pictures of an earlier session, are not charged. `filesRoot` is
- * the data directory's `shapes` folder.
+ * the data directory's `shapes` folder. An image that passes `tooBigAlone` for `limits` is the only one
+ * charged, so this is what the session sends from now on, not what an earlier account let it send:
+ * `carriedTooMuch` is the check to resume with.
  */
-export function inlinePictureBytes(state: StateStore, filesRoot: string, shapeId: ShapeId): number {
+export function inlinePictureBytes(
+  state: StateStore,
+  filesRoot: string,
+  shapeId: ShapeId,
+  limits: PictureLimits,
+): number {
   const sent = listShapeFiles(state.db, shapeId).reduce(
     (sum, file) =>
-      file.inlineSent && isImageName(file.name) && !tooBigAlone(file) ? sum + file.size : sum,
+      file.inlineSent && isImageName(file.name) && !tooBigAlone(file, limits)
+        ? sum + file.size
+        : sum,
     0,
   );
   return sent + liveScreenBytes(listShapeMessages(state.db, shapeId), filesRoot, shapeId);
 }
 
 /**
- * What an inline picture is charged against `INLINE_CONVERSATION_MAX_BYTES`: the inline pictures the live
+ * What an inline picture is charged against `limits.inlineMaxBytes`: the inline pictures the live
  * session carries, and the Read pictures beyond their reserve, which took room the pool would have given
  * an inline one.
  */
-export function inlineBytesSpent(state: StateStore, filesRoot: string, shapeId: ShapeId): number {
+export function inlineBytesSpent(
+  state: StateStore,
+  filesRoot: string,
+  shapeId: ShapeId,
+  limits: PictureLimits,
+): number {
   const reads = readBytesSpent(listShapeMessages(state.db, shapeId));
-  return inlinePictureBytes(state, filesRoot, shapeId) + Math.max(0, reads - READ_RESERVE_BYTES);
+  return (
+    inlinePictureBytes(state, filesRoot, shapeId, limits) +
+    Math.max(0, reads - limits.readReserveBytes)
+  );
+}
+
+/** Why a resumed session can't be resumed on an account: what it carries is more than that account takes. */
+export interface CarriedTooMuch {
+  /** Every picture and PDF page the live session would resend, in bytes before base64. */
+  readonly carried: number;
+  /** What the account's pool takes (`poolBytes`), or the image cap a carried picture is over. */
+  readonly allowed: number;
+  readonly reason: 'pool' | 'image';
+}
+
+/**
+ * Whether the live session, resumed on an account with these limits, would resend more than the account's
+ * request takes: null when it would not. It counts what the session carries, whatever account let it in:
+ * every dropped image a turn sent as a block (`inline_sent`), every screen, and every Read picture and PDF
+ * page. `inlinePictureBytes` charges only what passes the account's own per-image caps, which is right for
+ * what is sent next but not for a block already in the session's history, so a picture sent on a larger
+ * account that is over this one's byte or pixel cap is checked here by itself. A conversation whose account
+ * changed between turns, such as a plan falling back to Bedrock, is resumed only when this is null.
+ */
+export function carriedTooMuch(
+  state: StateStore,
+  filesRoot: string,
+  shapeId: ShapeId,
+  limits: PictureLimits,
+): CarriedTooMuch | null {
+  const messages = listShapeMessages(state.db, shapeId);
+  let sent = 0;
+  for (const file of listShapeFiles(state.db, shapeId)) {
+    if (!file.inlineSent || !isImageName(file.name)) continue;
+    if (tooBigAlone(file, limits))
+      return { carried: file.size, allowed: limits.imageMaxBytes, reason: 'image' };
+    sent += file.size;
+  }
+  const carried = sent + liveScreenBytes(messages, filesRoot, shapeId) + readBytesSpent(messages);
+  return carried > poolBytes(limits)
+    ? { carried, allowed: poolBytes(limits), reason: 'pool' }
+    : null;
 }

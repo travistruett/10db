@@ -4,13 +4,13 @@ import { join, relative } from 'node:path';
 import { ShapeMessageKind, type ShapeMessageDto } from '@10db/contracts';
 import { listShapeMessages } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { ROUND_LIMITS } from '../../test/picture-limits';
 import { pngOfSize } from '../../test/png';
-import { INLINE_CONVERSATION_MAX_BYTES } from '../screens';
+import { poolBytes } from '../screens';
 import type { FakeShapeTurn } from '../sessions';
 import { must } from './conversation-fixture';
 import {
   READ_CHARGE_MAX_BYTES,
-  READ_RESERVE_BYTES,
   measuredMediaBytes,
   largestReadMeasured,
   readBytesSpent,
@@ -22,11 +22,16 @@ import { createServiceFixture, type ServiceFixture } from './service-fixture';
 // the pictures the daemon sends itself. The preToolUse hook counts it and refuses what would pass the total.
 
 const MB = 1024 * 1024;
-/** The API's request limit, and base64's growth of what a picture weighs on the wire. */
+/**
+ * The request the round test limits (`ROUND_LIMITS`) are sized to, and base64's growth of what a picture weighs
+ * on the wire. These tests run on the round limits so a few megabytes fill the pool; the figures of each account
+ * are checked in `picture-limits.test.ts` and `account-limits.test.ts`.
+ */
 const REQUEST_LIMIT = 32_000_000;
 const onTheWire = (bytes: number): number => Math.ceil((bytes * 4) / 3);
+const READ_RESERVE_BYTES = ROUND_LIMITS.readReserveBytes;
 /** What inline pictures and Read pictures may add together, and how many 1 MiB Reads a session with no inline picture holds. */
-const POOL = INLINE_CONVERSATION_MAX_BYTES + READ_RESERVE_BYTES;
+const POOL = poolBytes(ROUND_LIMITS);
 const EMPTY_ROOM = Math.floor(POOL / READ_CHARGE_MAX_BYTES);
 /** A base64 string of this many decoded bytes, as a Read's result carries a picture. */
 const base64Of = (bytes: number): string => Buffer.alloc(bytes, 7).toString('base64');
@@ -37,7 +42,7 @@ const imageResult = (bytes: number) => ({
 
 let f: ServiceFixture;
 beforeEach(() => {
-  f = createServiceFixture();
+  f = createServiceFixture({ limitsFor: () => ROUND_LIMITS });
 });
 afterEach(async () => {
   await f.close();
@@ -100,7 +105,7 @@ describe('the pictures a Shape session pulls in with Read', () => {
     const turn = await nextTurn('All of them');
     expect(turn.images).toHaveLength(0);
     expect(turn.message).toMatch(
-      /left out to keep the conversation within the image limit; Read it/,
+      /left out to keep the conversation within the image limit \(the round test limit\); Read it/,
     );
     expect(turn.message).not.toMatch(/too large to show/);
     const paths = files.map((file) => file.storedPath);
@@ -112,7 +117,7 @@ describe('the pictures a Shape session pulls in with Read', () => {
     const refused = answers.at(-1);
     expect(refused).toMatchObject({ decision: 'deny' });
     expect(refused?.decision === 'deny' ? refused.reason : '').toMatch(
-      /pictures .*Read.*32 MB|too many pictures/i,
+      /too many pictures.*the round test limit/i,
     );
     // What the request would carry stays under the limit, text left out.
     const charged = allowed * 2 * MB;
@@ -252,7 +257,7 @@ describe('the pictures a Shape session pulls in with Read', () => {
   it('count a path spelled from ~ the way they count the absolute one', async () => {
     // The judge and Claude Code both expand ~, so the charge must too. The dropped files are under the temp dir.
     await f.close();
-    f = createServiceFixture({ home: tmpdir() });
+    f = createServiceFixture({ home: tmpdir(), limitsFor: () => ROUND_LIMITS });
     const big = dropBig();
     await nextTurn('Hello');
     const spelled = `~/${relative(tmpdir(), big.storedPath)}`;
@@ -283,7 +288,7 @@ describe('the pictures a Shape session pulls in with Read', () => {
       await nextTurn('Hello');
       const answer = pages === undefined ? read(doc.storedPath) : readPages(doc.storedPath, pages);
       expect(answer).toMatchObject({ decision: 'deny' });
-      expect(reasonOf(answer)).toMatch(/PDF.*pages.*32 MB/s);
+      expect(reasonOf(answer)).toMatch(/PDF.*pages.*the round test limit/s);
       expect(reasonOf(answer)).toContain(`up to ${String(room)} pages`);
       expect(reasonOf(answer)).toMatch(/ask the builder for its text/);
       expect(spent()).toBe(0);
@@ -824,7 +829,7 @@ describe('the pictures a Shape session pulls in with Read', () => {
         // A real checkout: a Read outside it is denied by confinement and never reaches the pool.
         const checkout = realpathSync(mkdtempSync(join(tmpdir(), 'shape-checkout-')));
         await f.close();
-        f = createServiceFixture({ checkout });
+        f = createServiceFixture({ checkout, limitsFor: () => ROUND_LIMITS });
         try {
           await fillInline();
           const files = shots(2);
