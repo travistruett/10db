@@ -12,25 +12,25 @@ const itemCompleted = (item: Record<string, unknown>) => ({
   params: { threadId: 'thr-1', turnId: 'turn-1', item },
 });
 
-const tokenUsage = (usage: {
-  last: number;
-  window: number | null;
-  input?: number;
-  cached?: number;
-  output?: number;
-}) => ({
+interface Counts {
+  input: number;
+  cached: number;
+  output: number;
+}
+
+const tokenUsage = (usage: { last: number; window: number | null; total?: Counts }) => ({
   method: 'thread/tokenUsage/updated',
   params: {
     threadId: 'thr-1',
     turnId: 'turn-1',
     tokenUsage: {
-      total: { totalTokens: usage.last * 10 },
-      last: {
-        totalTokens: usage.last,
-        inputTokens: usage.input ?? 0,
-        cachedInputTokens: usage.cached ?? 0,
-        outputTokens: usage.output ?? 0,
+      total: {
+        totalTokens: usage.last * 10,
+        inputTokens: usage.total?.input ?? 0,
+        cachedInputTokens: usage.total?.cached ?? 0,
+        outputTokens: usage.total?.output ?? 0,
       },
+      last: { totalTokens: usage.last },
       modelContextWindow: usage.window,
     },
   },
@@ -80,7 +80,7 @@ describe('mapCodexNotification', () => {
     ],
     [
       'compaction',
-      { method: 'thread/compacted', params: {} },
+      itemCompleted({ type: 'contextCompaction', id: 'c1' }),
       [{ type: 'compacted', trigger: 'auto' }],
     ],
     [
@@ -99,6 +99,7 @@ describe('mapCodexNotification', () => {
         },
       ],
     ],
+    ['the deprecated compaction notice', { method: 'thread/compacted', params: {} }, []],
     ['a method 10db does not read', { method: 'turn/diff/updated', params: {} }, []],
     ['a known method with a bad shape', { method: 'turn/completed', params: {} }, []],
     [
@@ -129,14 +130,19 @@ describe('mapCodexNotification', () => {
     expect(hasKnownShape(notification)).toBe(expected);
   });
 
-  it('ends a turn with the totals of this session and the last message', () => {
+  it('ends a turn with the totals above the baseline and the last message', () => {
     const state = createTurnState();
-    const usage = { last: 1_000, window: 272_000, input: 300, cached: 30, output: 60 };
+    mapCodexNotification(
+      tokenUsage({ last: 1, window: 1, total: { input: 100, cached: 10, output: 20 } }),
+      state,
+    );
     mapCodexNotification(turnStarted, state);
     mapCodexNotification(itemCompleted({ type: 'agentMessage', text: 'working' }), state);
     mapCodexNotification(itemCompleted({ type: 'agentMessage', text: 'done' }), state);
-    mapCodexNotification(tokenUsage(usage), state);
-    mapCodexNotification(tokenUsage(usage), state);
+    mapCodexNotification(
+      tokenUsage({ last: 1, window: 1, total: { input: 700, cached: 70, output: 140 } }),
+      state,
+    );
     expect(mapCodexNotification(turnCompleted({ status: 'completed' }), state)).toEqual([
       {
         type: 'turn_complete',
@@ -149,23 +155,59 @@ describe('mapCodexNotification', () => {
     ]);
   });
 
-  it('keeps the totals across turns and starts each turn with no message', () => {
+  it('takes the thread total, not the sum of last, which repeats and estimates', () => {
     const state = createTurnState();
-    const usage = { last: 1_000, window: 272_000, input: 100, cached: 0, output: 10 };
-    for (const text of ['one', '']) {
-      mapCodexNotification(turnStarted, state);
-      if (text !== '') mapCodexNotification(itemCompleted({ type: 'agentMessage', text }), state);
-      mapCodexNotification(tokenUsage(usage), state);
-      const [event] = mapCodexNotification(turnCompleted({ status: 'completed' }), state);
-      if (text === '') expect(event).toMatchObject({ inputTokens: 200, outputTokens: 20 });
-      if (text === '') expect(event).not.toHaveProperty('text');
-    }
+    mapCodexNotification(turnStarted, state);
+    // Real trace of last/total: 5000/5000, 5410/5000, 300/5300.
+    for (const [last, input] of [
+      [5_000, 5_000],
+      [5_410, 5_000],
+      [300, 5_300],
+      [300, 5_300],
+    ] as const)
+      mapCodexNotification(
+        tokenUsage({ last, window: 272_000, total: { input, cached: 0, output: 0 } }),
+        state,
+      );
+    expect(mapCodexNotification(turnCompleted({ status: 'completed' }), state)).toMatchObject([
+      { inputTokens: 5_300 },
+    ]);
   });
 
-  it('counts no tokens outside a turn, though the context still shows', () => {
+  it('counts nothing for the replay of a resumed thread, which arrives outside a turn', () => {
     const state = createTurnState();
-    const usage = { last: 1_000, window: 272_000, input: 300, cached: 30, output: 60 };
-    expect(mapCodexNotification(tokenUsage(usage), state)).toHaveLength(1);
+    const total = { input: 9_000, cached: 4_000, output: 500 };
+    mapCodexNotification(tokenUsage({ last: 1, window: 1, total }), state);
+    mapCodexNotification(turnStarted, state);
+    expect(mapCodexNotification(turnCompleted({ status: 'completed' }), state)).toEqual([
+      { type: 'turn_complete', inputTokens: 0, cachedTokens: 0, outputTokens: 0, costUsd: 0 },
+    ]);
+  });
+
+  it('keeps the totals across turns and starts each turn with no message', () => {
+    const state = createTurnState();
+    const totals = [
+      { input: 100, cached: 0, output: 10 },
+      { input: 200, cached: 0, output: 20 },
+    ];
+    totals.forEach((total, index) => {
+      mapCodexNotification(turnStarted, state);
+      if (index === 0)
+        mapCodexNotification(itemCompleted({ type: 'agentMessage', text: 'one' }), state);
+      mapCodexNotification(tokenUsage({ last: 1_000, window: 272_000, total }), state);
+      const [event] = mapCodexNotification(turnCompleted({ status: 'completed' }), state);
+      if (index === 1) {
+        expect(event).toMatchObject({ inputTokens: 200, outputTokens: 20 });
+        expect(event).not.toHaveProperty('text');
+      }
+    });
+  });
+
+  it('shows the context but counts nothing before any total is known', () => {
+    const state = createTurnState();
+    expect(mapCodexNotification(tokenUsage({ last: 1_000, window: 272_000 }), state)).toHaveLength(
+      1,
+    );
     mapCodexNotification(turnStarted, state);
     expect(mapCodexNotification(turnCompleted({ status: 'completed' }), state)).toEqual([
       { type: 'turn_complete', inputTokens: 0, cachedTokens: 0, outputTokens: 0, costUsd: 0 },

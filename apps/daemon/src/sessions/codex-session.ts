@@ -551,7 +551,8 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
     }
   };
 
-  void run().catch((error: unknown) => {
+  // Messages sent while the session starts wait here for the first turn to begin.
+  sends = run().catch((error: unknown) => {
     if (error instanceof SessionOver) return;
     if (error instanceof StartRefused) {
       finish(error.reason, error.message, error.refusal);

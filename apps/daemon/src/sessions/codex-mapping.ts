@@ -21,21 +21,32 @@ export interface CodexTurnState {
   turnId: string | null;
   /** What the model wrote in the active turn's last message. */
   lastText: string;
-  /** Input tokens that were not served from cache, added up from each request's `last`. */
-  inputTokens: number;
-  cachedTokens: number;
-  outputTokens: number;
+  /**
+   * The thread's token total as of the first turn's start: 0 on a fresh thread, and on a resume what
+   * earlier sessions spent, which Codex replays outside a turn.
+   */
+  baseline: TokenCounts;
+  /** The thread's latest token total; this session's tokens are this minus the baseline. */
+  latest: TokenCounts;
+  /** Whether a turn has started, which fixes the baseline. */
+  baselineFixed: boolean;
   /** The last rate-limit window seen, which a hard limit takes its reset from. */
   lastLimit: RateLimitEvent | null;
+}
+
+interface TokenCounts {
+  input: number;
+  cached: number;
+  output: number;
 }
 
 export function createTurnState(): CodexTurnState {
   return {
     turnId: null,
     lastText: '',
-    inputTokens: 0,
-    cachedTokens: 0,
-    outputTokens: 0,
+    baseline: { input: 0, cached: 0, output: 0 },
+    latest: { input: 0, cached: 0, output: 0 },
+    baselineFixed: false,
     lastLimit: null,
   };
 }
@@ -140,7 +151,6 @@ export function mapCodexNotification(
   n: { method: string; params: unknown },
   state: CodexTurnState,
 ): readonly SessionEvent[] {
-  if (n.method === 'thread/compacted') return [{ type: 'compacted', trigger: 'auto' }];
   if (!isReadMethod(n.method)) return [];
   switch (n.method) {
     case 'turn/started': {
@@ -148,12 +158,14 @@ export function mapCodexNotification(
       if (!parsed.success) return [];
       state.turnId = parsed.data.turn.id;
       state.lastText = '';
+      state.baselineFixed = true;
       return [];
     }
     case 'turn/completed': {
       const parsed = TurnCompleted.safeParse(n.params);
       if (!parsed.success) return [];
       const text = state.lastText.trim().slice(0, MAX_STEP_SUMMARY);
+      const cached = state.latest.cached - state.baseline.cached;
       const result = parsed.data.turn.status === 'completed' ? {} : { result: 'error' as const };
       state.turnId = null;
       state.lastText = '';
@@ -162,9 +174,9 @@ export function mapCodexNotification(
           type: 'turn_complete',
           ...result,
           ...(text === '' ? {} : { text }),
-          inputTokens: state.inputTokens,
-          outputTokens: state.outputTokens,
-          cachedTokens: state.cachedTokens,
+          inputTokens: state.latest.input - state.baseline.input - cached,
+          outputTokens: state.latest.output - state.baseline.output,
+          cachedTokens: cached,
           costUsd: 0,
         },
       ];
@@ -174,19 +186,23 @@ export function mapCodexNotification(
       if (!parsed.success) return [];
       const message = MessageItem.safeParse(parsed.data.item);
       if (message.success) state.lastText = message.data.text;
+      // Codex 0.154 reports a compaction only as this item, never as `thread/compacted`.
+      if (parsed.data.item.type === 'contextCompaction')
+        return [{ type: 'compacted', trigger: 'auto' }];
       const activity = itemActivity(parsed.data.item);
       return activity === null ? [] : [activity];
     }
     case 'thread/tokenUsage/updated': {
       const parsed = TokenUsageUpdated.safeParse(n.params);
       if (!parsed.success) return [];
-      const { last, modelContextWindow } = parsed.data.tokenUsage;
-      if (state.turnId !== null) {
-        const cached = last.cachedInputTokens ?? 0;
-        state.inputTokens += (last.inputTokens ?? 0) - cached;
-        state.cachedTokens += cached;
-        state.outputTokens += last.outputTokens ?? 0;
-      }
+      const { last, total, modelContextWindow } = parsed.data.tokenUsage;
+      // `last` repeats and estimates around compaction, so only the thread's `total` is counted.
+      state.latest = {
+        input: total.inputTokens ?? 0,
+        cached: total.cachedInputTokens ?? 0,
+        output: total.outputTokens ?? 0,
+      };
+      if (!state.baselineFixed) state.baseline = state.latest;
       return [
         contextEvent({
           totalTokens: last.totalTokens,

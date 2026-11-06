@@ -771,7 +771,11 @@ async function inTurn(
 /** Waits until every notification written so far has been handled, which a later one's event proves. */
 async function settled(running: Running): Promise<void> {
   const before = running.seen.length;
-  running.server.notify('thread/compacted', {});
+  running.server.notify('item/completed', {
+    threadId: THREAD,
+    turnId: 'turn-1',
+    item: { type: 'contextCompaction', id: 'c1' },
+  });
   await vi.waitFor(() => {
     expect(running.seen.length).toBeGreaterThan(before);
   });
@@ -838,6 +842,27 @@ describe('the turns', () => {
       .map((r) => JSON.stringify(r.params));
     expect(texts[0]).toContain('one');
     expect(texts[1]).toContain('two');
+  });
+
+  it('queues a message sent before the thread exists and steers it once the first turn began', async () => {
+    const { handle, server } = startWith({ 'turn/steer': {} });
+    handle.send('hand off');
+    await vi.waitFor(() => {
+      expect(methods(server)).toContain('turn/steer');
+    });
+    expect(sentParams(server, 'turn/steer')).toEqual({
+      threadId: THREAD,
+      expectedTurnId: 'turn-1',
+      input: [{ type: 'text', text: 'hand off' }],
+    });
+  });
+
+  it('drops a message sent during a start that fails, without throwing or hanging', async () => {
+    const { handle, server } = startWith({ 'account/read': { account: null } });
+    handle.send('too early');
+    const events = await collect(handle);
+    expect(events.at(-1)).toMatchObject({ type: 'ended' });
+    expect(methods(server)).not.toContain('turn/steer');
   });
 
   it('maps what Codex reports during a turn onto session events', async () => {
