@@ -128,7 +128,7 @@ describe('scripts/gate.sh', () => {
   it('reports rust as skipped, not failed, when cargo is missing', () => {
     // A PATH without cargo but with node and pnpm.
     const path = [resolve(process.execPath, '..'), '/usr/bin', '/bin'].join(':');
-    // The CI gate job sets GATE_SKIP_RUST for the whole job; clear it so this proves the cargo path.
+    // GATE_SKIP_RUST may be set around this run; clear it so this proves the cargo path.
     const { status, last } = runGate(sandbox, {
       GATE_STEPS: 'rust',
       GATE_SKIP_RUST: '',
@@ -141,7 +141,7 @@ describe('scripts/gate.sh', () => {
   it('runs rust whenever cargo is on PATH and GATE_SKIP_RUST is unset', () => {
     const fake = failingCargoDir();
     try {
-      // The CI gate job sets GATE_SKIP_RUST for the whole job; clear it for this case.
+      // GATE_SKIP_RUST may be set around this run; clear it for this case.
       const { status, last } = runGate(sandbox, {
         GATE_STEPS: 'rust',
         GATE_SKIP_RUST: '',
@@ -215,6 +215,33 @@ describe('scripts/gate.sh', () => {
         PATH: `${fake}:${process.env['PATH'] ?? ''}`,
       });
       expect(last).toMatch(summary);
+    } finally {
+      rmSync(fake, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    { name: 'unset', env: {}, args: '' },
+    { name: 'empty', env: { GATE_TEST_ARGS: '' }, args: '' },
+    {
+      name: 'one shard',
+      env: { GATE_TEST_ARGS: '--shard=2/4 --bail=0' },
+      args: ' --shard=2/4 --bail=0',
+    },
+  ])('hands GATE_TEST_ARGS to the test step and its rerun command: $name', ({ env, args }) => {
+    const fake = mkdtempSync(join(tmpdir(), '10db-fake-pnpm-'));
+    writeFileSync(join(fake, 'pnpm'), '#!/bin/sh\necho "pnpm saw: $*"\nexit 1\n');
+    chmodSync(join(fake, 'pnpm'), 0o755);
+    try {
+      const { stdout } = runGate(sandbox, {
+        ...env,
+        GATE_STEPS: 'test',
+        PATH: `${fake}:${process.env['PATH'] ?? ''}`,
+      });
+      expect(stdout).toContain(`FAILED test: pnpm test${args} (log .gate/test.log)\n`);
+      expect(readFileSync(join(sandbox.dir, '.gate/test.log'), 'utf8')).toContain(
+        `pnpm saw: -s test${args}\n`,
+      );
     } finally {
       rmSync(fake, { recursive: true, force: true });
     }

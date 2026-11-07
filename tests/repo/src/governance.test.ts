@@ -13,7 +13,7 @@ import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 import { readManifest, readRepoFile, repoRoot } from './workspace';
-import { workflowJobNames } from './workflows';
+import { workflowCheckNames } from './workflows';
 
 interface Rule {
   type: string;
@@ -105,9 +105,10 @@ describe('rulesets', () => {
     expect(source).not.toMatch(/which the queue counts as passing/);
   });
 
-  it('requires exactly the CI jobs that ci.yml defines, but desktop-scope, which only decides desktop', () => {
+  it('requires exactly the checks that ci.yml reports, but desktop-scope, which only decides desktop', () => {
     // desktop-scope is not required: the required desktop check is skipped, which counts as
-    // passing, when it says no macOS runner is needed, so the ruleset keeps its five names.
+    // passing, when it says no macOS runner is needed. Each test shard is a required check of its
+    // own, so 10db reads the failing job's own log and cancelled state.
     const main = byName('main-protection');
     const checks = (rule(main, 'required_status_checks')?.parameters?.['required_status_checks'] ??
       []) as {
@@ -115,7 +116,7 @@ describe('rulesets', () => {
       integration_id?: number;
     }[];
     expect(checks.map((c) => c.context)).toEqual(
-      workflowJobNames('.github/workflows/ci.yml').filter((name) => name !== 'desktop-scope'),
+      workflowCheckNames('.github/workflows/ci.yml').filter((name) => name !== 'desktop-scope'),
     );
   });
 
@@ -123,7 +124,7 @@ describe('rulesets', () => {
     const main = byName('main-protection');
     const checks = (rule(main, 'required_status_checks')?.parameters?.['required_status_checks'] ??
       []) as { integration_id?: number }[];
-    expect(checks.length).toBe(5);
+    expect(checks.length).toBe(10);
     expect(checks.every((c) => c.integration_id === 15368)).toBe(true);
   });
 

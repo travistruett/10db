@@ -153,8 +153,8 @@ files. Fix what it reports rather than skipping it; CI runs the same checks and 
   them with `make github-settings`, by hand, with admin rights.
 - Keep the squash dialog's commit subject as it is. GitHub fills it in from the title, which CI
   has checked, and lets whoever merges edit it; no rule can stop an edit there.
-- Every required check must pass: `gate`, `desktop`, `policy`, `dependency-review` and
-  `cargo-deny`. Resolve every conversation before merging. Nobody can bypass these, the
+- Every required check must pass: `gate-static`, `gate-test-1` to `gate-test-4`, `gate-e2e`,
+  `desktop`, `policy`, `dependency-review` and `cargo-deny`. Resolve every conversation before merging. Nobody can bypass these, the
   maintainer included.
 - While the maintainer is the only person with write access, no approval is required: nobody else
   can merge, and the required checks are the bar. The code-owner approval rule (`main-review`) is
