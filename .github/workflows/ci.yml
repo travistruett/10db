@@ -24,7 +24,9 @@ on:
 permissions: {}
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # By pull request number, not ref alone: an edit to a merged pull request runs with main's ref, and
+  # would otherwise cancel main's own run.
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:

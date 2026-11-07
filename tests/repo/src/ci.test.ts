@@ -161,6 +161,15 @@ describe('CI workflow', () => {
     expect(skipsOnEvent.map(([name]) => name)).toEqual([]);
   });
 
+  it('keeps every pull request event out of the concurrency group of a push to main', () => {
+    // An edit to a merged pull request runs with main's ref. Grouped by ref, that run cancels main's
+    // own CI, as editing #541's description did.
+    expect(readWorkflow(CI).concurrency).toEqual({
+      group: 'ci-${{ github.event.pull_request.number || github.ref }}',
+      'cancel-in-progress': true,
+    });
+  });
+
   it('runs on merge queue entries, where every required check must report', () => {
     // main has no merge queue (decisions/2026-11-02-main-has-no-merge-queue.md), so this trigger is
     // inert until a queue returns. It is kept on purpose: a queue tests each pull request
