@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AccountId, ProjectId } from './ids';
+import { isSignInUrl } from './sign-in-url';
 import { Provider } from './states';
 
 type ValueOf<T> = T[keyof T];
@@ -298,6 +299,43 @@ export const AccountSignInDto = z.object({
   command: z.string(),
 });
 export type AccountSignInDto = z.infer<typeof AccountSignInDto>;
+
+/**
+ * `POST /accounts/:accountId/connect`: a browser sign-in has started. An agent that names its sign-in
+ * page (Codex) gives OpenAI's own, checked by `isSignInUrl`; one that opens the browser itself (Claude
+ * Code) gives null. The login is written by the agent into the account's directory, never by 10db.
+ */
+export const AccountConnectDto = z.object({
+  accountId: AccountId,
+  authUrl: z
+    .string()
+    .refine(isSignInUrl, { message: 'not an https page on a sign-in host' })
+    .nullable(),
+});
+export type AccountConnectDto = z.infer<typeof AccountConnectDto>;
+
+/**
+ * `GET /accounts/connecting`: the account whose browser sign-in holds the daemon's one slot, or null.
+ * Codex listens for its callback on a fixed local port, so no second sign-in can run beside it.
+ */
+export const AccountConnectingDto = z.object({
+  accountId: AccountId,
+  label: z.string(),
+});
+export type AccountConnectingDto = z.infer<typeof AccountConnectingDto>;
+
+/**
+ * What an `account.login_ended` event carries: whether the browser sign-in finished, a message safe to
+ * show that never holds what the agent printed, and whether the builder asked for the end (a cancel is
+ * not an error).
+ */
+export const AccountLoginEndedData = z.object({
+  accountId: AccountId,
+  ok: z.boolean(),
+  message: z.string(),
+  cancelled: z.boolean(),
+});
+export type AccountLoginEndedData = z.infer<typeof AccountLoginEndedData>;
 
 /** `POST /accounts`: the account, and its sign-in steps when it is a subscription. */
 export const AccountCreatedDto = z.object({

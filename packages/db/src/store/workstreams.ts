@@ -30,7 +30,19 @@ import {
   Effort,
   type WorkstreamStep,
 } from '@10db/contracts';
-import { and, asc, count, desc, eq, inArray, isNotNull, like, or, type SQL } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  count,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  like,
+  or,
+  type SQL,
+} from 'drizzle-orm';
 import * as schema from '../schema';
 import { getBoardColumn } from './board-columns';
 import { recordLaneTime } from './lane-times';
@@ -477,6 +489,17 @@ export interface LaneCounts {
   readonly byAccount: ReadonlyMap<AccountId, number>;
 }
 
+/** Which workstreams hold a lane: those in a lane state, and one waiting on a card with its session still live. */
+function holdsLane(): SQL | undefined {
+  return or(
+    inArray(schema.workstreams.state, [...LANE_STATES]),
+    and(
+      eq(schema.workstreams.state, WorkstreamState.WaitingHuman),
+      isNotNull(schema.workstreams.currentSessionId),
+    ),
+  );
+}
+
 export function countLanes(db: DbReader): LaneCounts {
   const rows = db
     .select({
@@ -485,15 +508,7 @@ export function countLanes(db: DbReader): LaneCounts {
     })
     .from(schema.workstreams)
     .innerJoin(schema.projects, eq(schema.projects.id, schema.workstreams.projectId))
-    .where(
-      or(
-        inArray(schema.workstreams.state, [...LANE_STATES]),
-        and(
-          eq(schema.workstreams.state, WorkstreamState.WaitingHuman),
-          isNotNull(schema.workstreams.currentSessionId),
-        ),
-      ),
-    )
+    .where(holdsLane())
     .all();
   const byProject = new Map<ProjectId, number>();
   const byAccount = new Map<AccountId, number>();
@@ -502,6 +517,35 @@ export function countLanes(db: DbReader): LaneCounts {
     byAccount.set(r.accountId, (byAccount.get(r.accountId) ?? 0) + 1);
   }
   return { global: rows.length, byProject, byAccount };
+}
+
+/**
+ * How many lanes run on each account now. A lane holds a lane exactly as `countLanes` counts it, and
+ * runs on the account of its live session, which stays the account it started on when its project is
+ * moved; a lane with no live session yet (a start in progress) runs on its project's account.
+ */
+export function lanesByAccount(db: DbReader): ReadonlyMap<AccountId, number> {
+  const lanes = db
+    .select({ id: schema.workstreams.id, accountId: schema.projects.accountId })
+    .from(schema.workstreams)
+    .innerJoin(schema.projects, eq(schema.projects.id, schema.workstreams.projectId))
+    .where(holdsLane())
+    .all();
+  // A conversation's session has no workstream, and a session that ended runs nothing.
+  const live = new Map<string, AccountId>();
+  for (const s of db
+    .select({ workstreamId: schema.sessions.workstreamId, accountId: schema.sessions.accountId })
+    .from(schema.sessions)
+    .where(and(isNotNull(schema.sessions.workstreamId), isNull(schema.sessions.endedAt)))
+    .all()) {
+    if (s.workstreamId !== null) live.set(s.workstreamId, s.accountId);
+  }
+  const byAccount = new Map<AccountId, number>();
+  for (const lane of lanes) {
+    const account = live.get(lane.id) ?? lane.accountId;
+    byAccount.set(account, (byAccount.get(account) ?? 0) + 1);
+  }
+  return byAccount;
 }
 
 /**

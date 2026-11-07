@@ -3,15 +3,25 @@ import { join } from 'node:path';
 import {
   AccountInput,
   AccountKind,
+  AccountLoginEndedData,
   AccountPauseReason,
+  AccountProblem,
   ConflictError,
+  EventType,
   type AccountId,
+  type DaemonEvent,
 } from '@10db/contracts';
-import { createTestStore, seedProject, type Store } from '@10db/db';
+import { createTestStore, seedProject, type Store, type WriteContext } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createMemoryKeychain, seedSpend, tempDir, waitFor } from '../../test/fixtures';
+import {
+  capturingLogger,
+  createMemoryKeychain,
+  seedSpend,
+  tempDir,
+  waitFor,
+} from '../../test/fixtures';
 import { ManualClock } from '../clock';
-import { createLauncher } from '../environment';
+import { AccountLaunchError, createLauncher, KeychainError, type Launcher } from '../environment';
 import { createEventBus, createStateStore } from '../events';
 import { FakeAdapter } from '../sessions';
 import type { AccountPause } from './pauses';
@@ -24,12 +34,25 @@ let adapter: FakeAdapter;
 let gate: StartGate;
 let service: AccountService;
 let store: Store;
+let logger: ReturnType<typeof capturingLogger>;
+/** Running lanes per account, as the runner reports them. */
+const live = new Map<AccountId, number>();
+const ended: AccountLoginEndedData[] = [];
+let saves = 0;
+/** What the launcher does for a probe; the real one unless a test replaces it. */
+let probeFor: Launcher['probe'];
+let failWrites = false;
 const activePauses = new Map<AccountId, AccountPause>();
 const lifted: AccountId[] = [];
 
 beforeEach(() => {
   activePauses.clear();
   lifted.length = 0;
+  live.clear();
+  ended.length = 0;
+  saves = 0;
+  failWrites = false;
+  logger = capturingLogger();
   dir = tempDir('account service');
   const clock = new ManualClock(new Date(2026, 9, 20));
   const test = createTestStore(() => clock.now());
@@ -38,12 +61,29 @@ beforeEach(() => {
   adapter = new FakeAdapter({});
   gate = createStartGate();
   const keychain = createMemoryKeychain();
+  const bus = createEventBus();
+  bus.subscribe((event: DaemonEvent) => {
+    if (event.type === EventType.AccountLoginEnded)
+      ended.push(AccountLoginEndedData.parse(event.data));
+  });
+  const launcher = createLauncher({ base: {}, clientApp: 'test', keychain });
+  probeFor = (row) => launcher.probe(row);
+  const state = createStateStore(test.store, bus);
   service = createAccountService({
-    state: createStateStore(test.store, createEventBus()),
+    state: {
+      db: state.db,
+      now: () => state.now(),
+      write<T>(fn: (ctx: WriteContext) => T): T {
+        if (failWrites) throw new Error('disk is full: secret-payload');
+        return state.write(fn);
+      },
+    },
     clock,
     dataDir: dir.path,
     keychain,
-    launcher: createLauncher({ base: {}, clientApp: 'test', keychain }),
+    launcher: { probe: (row) => probeFor(row) },
+    logger,
+    liveLanes: (id) => live.get(id) ?? 0,
     adapter,
     startGate: gate,
     runtime: { saved: () => undefined },
@@ -54,7 +94,9 @@ beforeEach(() => {
         activePauses.delete(id);
       },
     },
-    onSaved: () => undefined,
+    onSaved: () => {
+      saves += 1;
+    },
   });
 });
 afterEach(() => {
@@ -219,5 +261,154 @@ describe('pauses', () => {
     const account = keyed('A');
     expect(service.resume(account.id)).toEqual([]);
     expect(lifted).toEqual([]);
+  });
+});
+
+describe('connect', () => {
+  const signIn = (kind: AccountKind = AccountKind.ClaudeSubscription) =>
+    service.create(AccountInput.parse({ kind, label: 'Plan A' })).account;
+  const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+  it('refuses an account with a lane running, and starts nothing', async () => {
+    const account = signIn();
+    live.set(account.id, 1);
+    await expect(service.connect(account.id)).rejects.toThrow(/lane running/);
+    await expect(service.connect(account.id)).rejects.toBeInstanceOf(ConflictError);
+    expect(adapter.logins).toHaveLength(0);
+    expect(service.connecting()).toBeNull();
+    live.clear();
+    await service.connect(account.id);
+    expect(adapter.logins).toHaveLength(1);
+  });
+
+  it('refuses an archived account', async () => {
+    const account = signIn();
+    service.archive(account.id);
+    await expect(service.connect(account.id)).rejects.toThrow(/archived/);
+    expect(adapter.logins).toHaveLength(0);
+  });
+
+  it.each([
+    {
+      name: 'a launch refusal',
+      error: (id: AccountId) =>
+        new AccountLaunchError(id, AccountProblem.SecretMissing, 'Account "Plan A" has no secret'),
+      message: /no secret/,
+    },
+    {
+      name: 'a locked Keychain',
+      error: () => new KeychainError('Reading the Keychain failed (security exit status 51)'),
+      message: /Keychain failed/,
+    },
+  ])('answers a conflict with the reason for $name', async ({ error, message }) => {
+    const account = signIn();
+    probeFor = () => {
+      throw error(account.id);
+    };
+    await expect(service.connect(account.id)).rejects.toThrow(message);
+    await expect(service.connect(account.id)).rejects.toBeInstanceOf(ConflictError);
+    expect(service.connecting()).toBeNull();
+    expect(adapter.logins).toHaveLength(0);
+  });
+
+  it('reports the account that holds the slot until its sign-in ends, then tells the scheduler', async () => {
+    const account = signIn();
+    expect(service.connecting()).toBeNull();
+    await service.connect(account.id);
+    expect(service.connecting()).toEqual({ accountId: account.id, label: 'Plan A' });
+    adapter.logins[0]?.end({ ok: true });
+    await waitFor(() => service.connecting() === null, 2_000);
+    expect(ended).toEqual([
+      { accountId: account.id, ok: true, message: 'Signed in.', cancelled: false },
+    ]);
+    expect(saves).toBeGreaterThan(0);
+  });
+
+  it('marks a sign-in the builder cancelled as cancelled, and one that failed as not', async () => {
+    const account = signIn();
+    await service.connect(account.id);
+    adapter.logins[0]?.end({ ok: false, message: 'The sign-in took too long.' });
+    await waitFor(() => ended.length === 1, 2_000);
+    await service.connect(account.id);
+    await service.cancelConnect(account.id);
+    await waitFor(() => ended.length === 2, 2_000);
+    expect(ended.map((e) => [e.ok, e.cancelled])).toEqual([
+      [false, false],
+      [false, true],
+    ]);
+    expect(service.connecting()).toBeNull();
+  });
+
+  it('honours a cancel that arrives while the login is still starting', async () => {
+    const account = signIn();
+    let release: () => void = () => undefined;
+    const real = adapter.startLogin.bind(adapter);
+    adapter.startLogin = async (spec) => {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return real(spec);
+    };
+    const connecting = service.connect(account.id);
+    await flush();
+    await service.cancelConnect(account.id);
+    expect(service.connecting()).toEqual({ accountId: account.id, label: 'Plan A' });
+    release();
+    // No page is handed back for a login that is already cancelled.
+    await expect(connecting).resolves.toEqual({ accountId: account.id, authUrl: null });
+    await waitFor(() => ended.length === 1, 2_000);
+    expect(adapter.logins[0]?.cancelled).toBe(true);
+    expect(ended[0]?.cancelled).toBe(true);
+    expect(service.connecting()).toBeNull();
+  });
+
+  it('stop ends a waiting sign-in, tells the UI before it returns, and refuses a new one', async () => {
+    const account = signIn();
+    await service.connect(account.id);
+    await service.stop();
+    expect(adapter.logins[0]?.cancelled).toBe(true);
+    // The builder did not cancel it: the UI says what happened and offers Connect again.
+    expect(ended).toEqual([
+      {
+        accountId: account.id,
+        ok: false,
+        message: '10db stopped before the sign-in finished. Try Connect again.',
+        cancelled: false,
+      },
+    ]);
+    expect(service.connecting()).toBeNull();
+    await expect(service.connect(account.id)).rejects.toThrow(/stopping/);
+  });
+
+  it('stop waits for a login that is still starting, then ends it', async () => {
+    const account = signIn();
+    let release: () => void = () => undefined;
+    const real = adapter.startLogin.bind(adapter);
+    adapter.startLogin = async (spec) => {
+      await new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      return real(spec);
+    };
+    void service.connect(account.id);
+    await flush();
+    const stopped = service.stop();
+    release();
+    await stopped;
+    expect(adapter.logins[0]?.cancelled).toBe(true);
+    expect(service.connecting()).toBeNull();
+  });
+
+  it('logs a warning with no payload when the end of a sign-in cannot be recorded', async () => {
+    const account = signIn();
+    await service.connect(account.id);
+    failWrites = true;
+    adapter.logins[0]?.end({ ok: true });
+    await waitFor(() => service.connecting() === null, 2_000);
+    await waitFor(() => logger.lines().length > 0, 2_000);
+    const logged = logger.lines().join('\n');
+    expect(logged).toContain('could not record');
+    expect(logged).not.toContain('secret-payload');
+    expect(logged).not.toContain('disk is full');
   });
 });

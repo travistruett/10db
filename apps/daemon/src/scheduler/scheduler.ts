@@ -65,6 +65,11 @@ export interface SchedulerOptions {
    * launches again on the first tick after this answers false.
    */
   readonly held?: () => boolean;
+  /**
+   * The account whose browser sign-in is under way. It replaces the login sessions run on, so nothing
+   * starts on it until the sign-in is over.
+   */
+  readonly connecting?: () => { readonly accountId: AccountId } | null;
 }
 
 export interface Scheduler {
@@ -124,6 +129,7 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
 
   function launchQueued(snapshot: CheckoutSnapshot): number {
     if (opts.held?.()) return 0;
+    const signingIn = opts.connecting?.()?.accountId ?? null;
     const lanes = countLanes(db);
     let global = lanes.global;
     const byProject = new Map(lanes.byProject);
@@ -146,6 +152,7 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       if (opts.runner.isRunning(ws.id)) continue;
       const project = getProject(db, ws.projectId);
       const account = getAccountRow(db, project.accountId);
+      if (account.id === signingIn) continue;
       if (notReady.has(account.id)) continue;
       if (!open.has(account.id) && unready(account)) {
         opts.accounts.prepare(account, project.id);

@@ -14,8 +14,9 @@ export {
 export { scriptedShapeBehaviour } from './fake-shape';
 export type { FakeShapeBehaviour, FakeShapeTurn } from './fake-shape';
 export { checkAccount, loginIdentity, type SeenAccount } from './account-check';
-export { AccountProbeError, CompletionError, SessionEndReason } from './types';
+export { AccountLoginError, AccountProbeError, CompletionError, SessionEndReason } from './types';
 export type {
+  AccountLogin,
   SessionAdapter,
   SessionEvent,
   ShapeAgentDefinition,

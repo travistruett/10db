@@ -1,5 +1,6 @@
 import { createChannel } from './channel';
 import {
+  AccountLoginError,
   AccountProbeError,
   CompletionError,
   type SessionAdapter,
@@ -16,6 +17,7 @@ export function createUnavailableAdapter(message: string): SessionAdapter {
   };
   return {
     probeAccount: () => Promise.reject(new AccountProbeError(message)),
+    startLogin: () => Promise.reject(new AccountLoginError(message)),
     complete: () => Promise.reject(new CompletionError(message)),
     start() {
       return { events: ended(), send: () => undefined, stop: () => Promise.resolve() };

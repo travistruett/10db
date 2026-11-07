@@ -38,7 +38,8 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
     "Reading a goal's digest moves the goal's last-opened mark, which is a write.",
   '/accounts/:accountId/identity':
     "Reading an account's identity runs a command against the account's login.",
-  '/accounts/:accountId/signin': "A sign-in is for the builder's own terminal, not for a screen.",
+  '/accounts/:accountId/signin':
+    "The sign-in command is for the builder's own terminal, not for a screen; a screen can't start a sign-in either (POST /accounts/:accountId/connect).",
   '/system':
     'A system check probes the machine and runs commands; ?recheck=1 runs them again on every read.',
   '/workstreams/:id/changes':
@@ -60,6 +61,7 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/shape-measures': 'No screen draws a measure.',
   '/accounts': 'No screen draws an account.',
   '/accounts/pauses': 'No screen draws an account.',
+  '/accounts/connecting': 'No screen draws an account.',
   '/accounts/:accountId/usage': 'No screen draws an account.',
   '/personas': 'No screen draws a setting.',
   '/people': 'No screen draws a setting.',

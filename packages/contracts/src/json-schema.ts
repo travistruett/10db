@@ -15,6 +15,8 @@ import {
   AccountPauseDto,
   AccountSecretInput,
   AccountSignInDto,
+  AccountConnectDto,
+  AccountConnectingDto,
   AccountUsageDto,
 } from './accounts';
 import { AaModelDto, BenchmarkStatusDto } from './benchmarks';
@@ -176,6 +178,8 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'account-pause-dto': AccountPauseDto,
   'account-secret-input': AccountSecretInput,
   'account-sign-in-dto': AccountSignInDto,
+  'account-connect-dto': AccountConnectDto,
+  'account-connecting-dto': AccountConnectingDto,
   'account-usage-dto': AccountUsageDto,
   'daemon-event': DaemonEvent,
   'handoff-input': HandoffInput,

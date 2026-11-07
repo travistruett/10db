@@ -1,10 +1,22 @@
 import { AccountKind, type AccountDto } from '@10db/contracts';
-import { ActionIcon, Code, CopyButton, Group, Stack, Text, Tooltip } from '@mantine/core';
+import {
+  ActionIcon,
+  Button,
+  Code,
+  Collapse,
+  CopyButton,
+  Group,
+  Stack,
+  Text,
+  Tooltip,
+} from '@mantine/core';
+import { useDisclosure } from '@mantine/hooks';
 import { IconCheck, IconCopy } from '@tabler/icons-react';
 import { useAccountSignIn } from '../../../daemon/account-queries';
+import { ConnectAccount } from './connect-account';
 
-/** How to sign a subscription in with the unmodified `claude` or `codex`; the check itself is `IdentityCheck`. */
-export function SignInSteps({ account }: { readonly account: AccountDto }) {
+/** The Terminal steps: sign in with the unmodified `claude` or `codex`, then check. */
+function TerminalSteps({ account }: { readonly account: AccountDto }) {
   const signIn = useAccountSignIn(account.id, true);
   const isCodex = account.kind === AccountKind.CodexSignin;
   return (
@@ -57,6 +69,38 @@ export function SignInSteps({ account }: { readonly account: AccountDto }) {
         </Text>
       ) : null}
       <Text size="sm">3. Check sign-in</Text>
+    </Stack>
+  );
+}
+
+/**
+ * How to sign a subscription in: Connect, with the Terminal steps behind a fallback. The check itself is
+ * `IdentityCheck`.
+ */
+export function SignInSteps({
+  account,
+  onConnected,
+}: {
+  readonly account: AccountDto;
+  /** The account's browser sign-in finished. */
+  readonly onConnected: () => void;
+}) {
+  const [terminal, { toggle }] = useDisclosure(false);
+  return (
+    <Stack gap="xs">
+      <ConnectAccount account={account} onConnected={onConnected} />
+      <Button
+        variant="subtle"
+        size="compact-sm"
+        style={{ alignSelf: 'flex-start' }}
+        aria-expanded={terminal}
+        onClick={toggle}
+      >
+        Sign in from Terminal instead
+      </Button>
+      <Collapse expanded={terminal}>
+        {terminal ? <TerminalSteps account={account} /> : null}
+      </Collapse>
     </Stack>
   );
 }

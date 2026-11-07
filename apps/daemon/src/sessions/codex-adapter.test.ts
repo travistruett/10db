@@ -56,6 +56,27 @@ async function events(handle: SessionHandle): Promise<SessionEvent[]> {
   return seen;
 }
 
+describe('startLogin', () => {
+  it('starts the browser sign-in on the app-server it is given and keeps it for the caller to end', async () => {
+    const server = fakeAppServer(
+      {
+        initialize: SIGNED_IN.initialize,
+        'account/login/start': {
+          type: 'chatgpt',
+          loginId: 'L1',
+          authUrl: 'https://auth.openai.com/oauth/authorize?state=abc',
+        },
+      },
+      { exitsOn: 'SIGTERM' },
+    );
+    const login = await adapterOn(server).startLogin(probe);
+    expect(login.authUrl).toBe('https://auth.openai.com/oauth/authorize?state=abc');
+    expect(server.ended()).toBe(false);
+    await login.cancel();
+    expect(server.ended()).toBe(true);
+  });
+});
+
 describe('probeAccount', () => {
   it('reads who the account is from account/read, its workspace from the usage read and its models from model/list', async () => {
     const server = fakeAppServer(SIGNED_IN);

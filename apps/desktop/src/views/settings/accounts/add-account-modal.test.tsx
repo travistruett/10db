@@ -74,6 +74,9 @@ describe('AddAccountModal', () => {
     type(dialog, 'Label', 'Company A');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
     const drawer = await screen.findByRole('dialog', { name: /Company A/ });
+    fireEvent.click(
+      await within(drawer).findByRole('button', { name: 'Sign in from Terminal instead' }),
+    );
     expect(await within(drawer).findByText('1. In Terminal, run')).toBeTruthy();
     expect(posts).toEqual([
       { kind: 'claude_subscription', label: 'Company A', payer: '', laneCap: 4, settings: {} },

@@ -155,6 +155,9 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     setAccountSecret: track('setAccountSecret'),
     accountSignIn: track('accountSignIn'),
     accountIdentity: track('accountIdentity'),
+    connectingAccount: () => null,
+    connectAccount: track('connectAccount'),
+    cancelAccountConnect: track('cancelAccountConnect'),
     accountUsage: track('accountUsage'),
     listAccountPauses: track('listAccountPauses'),
     resumeAccount: track('resumeAccount'),
@@ -725,6 +728,8 @@ describe('team, routing and benchmark routes', () => {
     ['setAccountSecret', 'PUT', '/accounts/{id}/secret', { secret: 'sk-ant-api03-abcdef' }],
     ['accountSignIn', 'GET', '/accounts/{id}/signin', undefined],
     ['accountIdentity', 'GET', '/accounts/{id}/identity', undefined],
+    ['connectAccount', 'POST', '/accounts/{id}/connect', undefined],
+    ['cancelAccountConnect', 'DELETE', '/accounts/{id}/connect', undefined],
     ['accountUsage', 'GET', '/accounts/{id}/usage?month=2026-10', undefined],
   ])('routes %s behind the token', async (service, method, path, body) => {
     const request = (headers: Record<string, string>) =>

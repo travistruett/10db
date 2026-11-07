@@ -10,7 +10,7 @@ export interface CodexChild {
   readonly stdin: Writable;
   readonly stdout: Readable;
   readonly stderr: Readable;
-  kill(): boolean;
+  kill(signal?: NodeJS.Signals): boolean;
   once(event: 'exit', listener: (code: number | null) => void): unknown;
 }
 
@@ -37,7 +37,8 @@ export interface CodexRpc {
   notify(method: string, params?: unknown): void;
   onNotification(handler: (n: { method: string; params: unknown }) => void): void;
   readonly exited: Promise<{ readonly code: number | null; readonly stderr: string }>;
-  close(): void;
+  /** Stops the child with `signal`, SIGTERM when none is given. */
+  close(signal?: NodeJS.Signals): void;
 }
 
 const Message = z.looseObject({
@@ -178,8 +179,8 @@ export function createCodexRpc(child: CodexChild, log: Pick<Logger, 'warn'>): Co
       handlers.push(handler);
     },
     exited,
-    close() {
-      child.kill();
+    close(signal) {
+      child.kill(signal);
     },
   };
 }
@@ -213,7 +214,7 @@ export const spawnAppServer: CodexSpawn = (codexPath, env) => {
     stdin: child.stdin,
     stdout: child.stdout,
     stderr,
-    kill: () => child.kill(),
+    kill: (signal) => child.kill(signal),
     once: (_event, listener) => {
       listeners.push(listener);
       return child;

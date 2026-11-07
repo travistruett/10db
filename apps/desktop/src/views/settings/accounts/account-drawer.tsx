@@ -6,7 +6,7 @@ import {
   type AccountId,
 } from '@10db/contracts';
 import { Drawer, Stack, Text, Title } from '@mantine/core';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useAccounts } from '../../../daemon/account-queries';
 import { AccountPause } from './account-pause';
 import { ArchiveAccount } from './archive-account';
@@ -33,14 +33,21 @@ function AccountDrawerBody({
   readonly onClose: () => void;
   readonly onArchived: () => void;
 }) {
+  // Each finished browser sign-in asks the identity check to run once.
+  const [checkRequests, setCheckRequests] = useState(0);
+  const onConnected = useCallback(() => {
+    setCheckRequests((n) => n + 1);
+  }, []);
   return (
     <Stack gap="lg">
       {account.archived ? null : <AccountPause account={account} />}
       <Stack gap="xs">
         <Title order={4}>Identity</Title>
-        {signsInWithLogin(account.kind) ? <SignInSteps account={account} /> : null}
+        {signsInWithLogin(account.kind) && !account.archived ? (
+          <SignInSteps account={account} onConnected={onConnected} />
+        ) : null}
         {needsSecret(account.kind, account.settings) ? <SecretForm account={account} /> : null}
-        <IdentityCheck account={account} />
+        <IdentityCheck account={account} checkRequests={checkRequests} />
       </Stack>
       <Stack gap="xs">
         <Title order={4}>Usage this month</Title>

@@ -37,6 +37,14 @@ function recording(name: string): SessionAdapter & { readonly calls: string[] } 
         apiProvider: undefined,
       });
     },
+    startLogin: () => {
+      calls.push('startLogin');
+      return Promise.resolve({
+        authUrl: `https://auth.openai.com/${name}`,
+        outcome: new Promise<never>(() => undefined),
+        cancel: () => Promise.resolve(),
+      });
+    },
     start: () => {
       calls.push('start');
       return {
@@ -75,13 +83,14 @@ const CLAUDE_KINDS = [
   AccountKind.AnthropicApiKey,
 ] as const;
 
-const METHODS = ['start', 'startShape', 'complete', 'probeAccount'] as const;
+const METHODS = ['start', 'startShape', 'complete', 'probeAccount', 'startLogin'] as const;
 
 async function callAll(adapter: SessionAdapter, kind: SupportedAccountKind): Promise<void> {
   adapter.start(asSession(kind));
   adapter.startShape(asShape(kind));
   await adapter.complete({ cwd: '/d', prompt: 'q', model: 'm', env: {}, account: account(kind) });
   await adapter.probeAccount({ cwd: '/d', env: {}, kind });
+  await adapter.startLogin({ cwd: '/d', env: {}, kind });
 }
 
 describe('createRoutedAdapter', () => {
