@@ -60,7 +60,37 @@ function isOffered(model: ModelRowDto, accountIds: readonly AccountId[] | null):
   return model.availableOn.some((id) => accountIds === null || accountIds.includes(id));
 }
 
-function unlistedLabel(model: string, row: ModelRowDto | undefined, loading: boolean): string {
+/** How a model reads in a list: its name, with Unknown ones marked. */
+export const modelLabel = (model: ModelRowDto): string =>
+  model.status === ModelStatus.Unknown ? `${model.name} (Unknown)` : model.name;
+
+/**
+ * The models the accounts offer, one group per tier and Unknown tier last, each entry made by `entry`.
+ * `accountIds` null means every account.
+ */
+export function offeredModelGroups(
+  models: readonly ModelRowDto[],
+  accountIds: readonly AccountId[] | null,
+  entry: (model: ModelRowDto) => ComboboxItem,
+): ComboboxItemGroup<ComboboxItem>[] {
+  const offered = models.filter((m) => isOffered(m, accountIds));
+  const groups: ComboboxItemGroup<ComboboxItem>[] = [];
+  for (const tier of [...TIER_ORDER, null]) {
+    const inTier = offered.filter((m) => m.tier === tier);
+    if (inTier.length === 0) continue;
+    groups.push({
+      group: tier === null ? 'Unknown tier' : `${TIER_LABEL[tier]} models`,
+      items: inTier.map(entry),
+    });
+  }
+  return groups;
+}
+
+export function unlistedLabel(
+  model: string,
+  row: ModelRowDto | undefined,
+  loading: boolean,
+): string {
   if (loading) return model;
   if (row?.status === ModelStatus.Superseded) return `${row.name} (superseded)`;
   if (row?.status === ModelStatus.NotRunnable) return `${row.name} (not runnable)`;
@@ -101,20 +131,11 @@ export function settingChoices(input: {
       ],
     },
   ];
-  const offered = (input.models ?? []).filter((m) => isOffered(m, input.accountIds));
-  for (const tier of [...TIER_ORDER, null]) {
-    const inTier = offered.filter((m) => m.tier === tier);
-    if (inTier.length === 0) continue;
-    groups.push({
-      group: tier === null ? 'Unknown tier' : `${TIER_LABEL[tier]} models`,
-      items: inTier.map((m) =>
-        item(
-          { kind: 'model', model: m.model },
-          m.status === ModelStatus.Unknown ? `${m.name} (Unknown)` : m.name,
-        ),
-      ),
-    });
-  }
+  groups.push(
+    ...offeredModelGroups(input.models ?? [], input.accountIds, (m) =>
+      item({ kind: 'model', model: m.model }, modelLabel(m)),
+    ),
+  );
   const { current } = input;
   // A saved model that is not in the list stays there, with the reason; while the list loads it shows by its ID.
   if (current?.kind === 'model' && !settings.has(settingValue(current))) {

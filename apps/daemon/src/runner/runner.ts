@@ -1394,13 +1394,20 @@ export function createRunner(opts: RunnerOptions): Runner {
     // model now unusable, gives another model, and stops only when it would be asked for the same one.
     const again = resolveOn(row, currentStep(row), account, listAccountModels(db, account.id));
     const retry = again.model !== outcome.model;
+    const lead = marked
+      ? `10db marked ${outcome.model} unusable on ${account.label} until the account's model list changes`
+      : `${account.label} no longer lists ${outcome.model}, so 10db could not mark it unusable`;
+    // A tier name is no model: the account has none left that 10db may run, and its next session holds it.
+    const nothingLeft = isModelTier(again.model);
     opts.inbox.flag({
       projectId: row.projectId,
       workstreamId: id,
       title: `${account.label} cannot run ${outcome.model}`,
-      body: retry
-        ? `${outcome.message}. 10db marked ${outcome.model} unusable on ${account.label} until the account's model list changes, and is running the step on the next model of its tier.`
-        : `${outcome.message}. ${marked ? `10db marked ${outcome.model} unusable on ${account.label}, but` : `${account.label} lists no models, so 10db cannot mark ${outcome.model} unusable, and`} it would still choose ${outcome.model} for the step, so it stopped the task instead of asking for it again. Name a model for each tier in the account's settings.`,
+      body: !retry
+        ? `${outcome.message}. ${marked ? `10db marked ${outcome.model} unusable on ${account.label}, but` : `${account.label} lists no models, so 10db cannot mark ${outcome.model} unusable, and`} it would still choose ${outcome.model} for the step, so it stopped the task instead of asking for it again. Name a model for each tier in the account's settings.`
+        : nothingLeft
+          ? `${outcome.message}. ${lead}, and ${account.label} has nothing left to run the step on.`
+          : `${outcome.message}. ${lead}, and is running the step on ${again.model}.`,
       foldKey: `model-refused:${account.id}:${outcome.model}`,
     });
     if (retry) return 'retry';

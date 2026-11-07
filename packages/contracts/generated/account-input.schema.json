@@ -28,24 +28,20 @@
           "default": {},
           "type": "object",
           "properties": {
-            "modelMap": {
+            "tierOverrides": {
               "type": "object",
               "propertyNames": {
                 "type": "string",
-                "pattern": "^[a-z]+$"
+                "enum": [
+                  "fast",
+                  "balanced",
+                  "strongest"
+                ]
               },
               "additionalProperties": {
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 200
-              }
-            },
-            "aliases": {
-              "minItems": 1,
-              "type": "array",
-              "items": {
-                "type": "string",
-                "pattern": "^[a-z]+$"
               }
             }
           },
@@ -111,24 +107,20 @@
           "default": {},
           "type": "object",
           "properties": {
-            "modelMap": {
+            "tierOverrides": {
               "type": "object",
               "propertyNames": {
                 "type": "string",
-                "pattern": "^[a-z]+$"
+                "enum": [
+                  "fast",
+                  "balanced",
+                  "strongest"
+                ]
               },
               "additionalProperties": {
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 200
-              }
-            },
-            "aliases": {
-              "minItems": 1,
-              "type": "array",
-              "items": {
-                "type": "string",
-                "pattern": "^[a-z]+$"
               }
             }
           },
@@ -193,24 +185,20 @@
         "settings": {
           "type": "object",
           "properties": {
-            "modelMap": {
+            "tierOverrides": {
               "type": "object",
               "propertyNames": {
                 "type": "string",
-                "pattern": "^[a-z]+$"
+                "enum": [
+                  "fast",
+                  "balanced",
+                  "strongest"
+                ]
               },
               "additionalProperties": {
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 200
-              }
-            },
-            "aliases": {
-              "minItems": 1,
-              "type": "array",
-              "items": {
-                "type": "string",
-                "pattern": "^[a-z]+$"
               }
             },
             "region": {
@@ -282,24 +270,20 @@
         "settings": {
           "type": "object",
           "properties": {
-            "modelMap": {
+            "tierOverrides": {
               "type": "object",
               "propertyNames": {
                 "type": "string",
-                "pattern": "^[a-z]+$"
+                "enum": [
+                  "fast",
+                  "balanced",
+                  "strongest"
+                ]
               },
               "additionalProperties": {
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 200
-              }
-            },
-            "aliases": {
-              "minItems": 1,
-              "type": "array",
-              "items": {
-                "type": "string",
-                "pattern": "^[a-z]+$"
               }
             },
             "baseUrl": {
@@ -347,24 +331,20 @@
           "default": {},
           "type": "object",
           "properties": {
-            "modelMap": {
+            "tierOverrides": {
               "type": "object",
               "propertyNames": {
                 "type": "string",
-                "pattern": "^[a-z]+$"
+                "enum": [
+                  "fast",
+                  "balanced",
+                  "strongest"
+                ]
               },
               "additionalProperties": {
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 200
-              }
-            },
-            "aliases": {
-              "minItems": 1,
-              "type": "array",
-              "items": {
-                "type": "string",
-                "pattern": "^[a-z]+$"
               }
             }
           },

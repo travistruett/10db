@@ -1,5 +1,7 @@
+import { join } from 'node:path';
 import type { SystemCheckDto } from '@10db/contracts';
 import { SchemaMismatchError } from '@10db/db';
+import { CATALOGUE_SNAPSHOT_FILE } from './catalogue';
 import {
   AlreadyRunningError,
   aaKeyReaderFromEnv,
@@ -134,6 +136,7 @@ try {
     adapter: chooseAdapter(),
     migrationsDir: resolveMigrationsDir(),
     harnessDir: resolveHarnessDir(),
+    catalogueSnapshot: join(import.meta.dirname, CATALOGUE_SNAPSHOT_FILE),
     aaKey: aaKeyReaderFromEnv(env, () => systemKeychain.read(AA_KEY_ACCOUNT)),
     loginEnv: login.vars,
     keychain: systemKeychain,

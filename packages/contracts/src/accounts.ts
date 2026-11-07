@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ModelTier } from './catalogue';
 import { AccountId, ProjectId } from './ids';
 import { isSignInUrl } from './sign-in-url';
 import { Provider } from './states';
@@ -106,17 +107,9 @@ export function accountDisplayName(account: {
 const MAX_ACCOUNT_LANES = 16;
 const MAX_MONTHLY_CAP_USD = 1_000_000;
 
-/**
- * A Claude Code model alias as the router names profiles: `opus`, `sonnet`, `haiku`, `fable`. A model ID
- * never matches it, which is how the model check tells a requested alias from a mapped ID.
- */
-export const MODEL_ALIAS_PATTERN = /^[a-z]+$/;
-const Alias = z.string().regex(MODEL_ALIAS_PATTERN, 'a lowercase model alias');
 const modelChoice = {
-  /** The channel's model ID per alias, sent through the SDK's `model` option instead of the alias. */
-  modelMap: z.record(Alias, z.string().trim().min(1).max(200)).optional(),
-  /** The aliases the account offers; the router considers only these. Absent means every alias. */
-  aliases: z.array(Alias).min(1).optional(),
+  /** The model the account runs for a tier instead of the automatic choice; a tier absent here is chosen automatically. */
+  tierOverrides: z.partialRecord(z.enum(ModelTier), z.string().trim().min(1).max(200)).optional(),
 };
 const AwsRegion = z.string().regex(/^[a-z]{2}(-[a-z]+)+-\d+$/, 'an AWS region such as us-west-2');
 const AwsProfile = z.string().regex(/^[A-Za-z0-9._-]{1,64}$/, 'an AWS profile name');

@@ -150,7 +150,7 @@ describe('identity', () => {
       AccountInput.parse({
         kind: AccountKind.Gateway,
         label: 'G',
-        settings: { baseUrl: 'https://gw.example/api', aliases: ['haiku'] },
+        settings: { baseUrl: 'https://gw.example/api' },
       }),
     );
     service.setSecret(account.id, { secret: 'not-a-real-gateway-token-0001' });

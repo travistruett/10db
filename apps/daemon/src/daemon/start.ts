@@ -62,7 +62,12 @@ import {
 } from '../accounts';
 import { createApp, type SelfUpdateServices } from '../api';
 import { createBenchmarkSync, type BenchmarkSync } from '../benchmarks';
-import { createAccountLists, createCatalogueSync, reconcileProfiles } from '../catalogue';
+import {
+  createAccountLists,
+  createCatalogueSync,
+  readCatalogueSnapshot,
+  reconcileProfiles,
+} from '../catalogue';
 import { createJudge, JUDGE_LOG_RETENTION_MS, type JudgeService } from '../judge';
 import { createJudgeServices } from './judge-services';
 import {
@@ -277,6 +282,8 @@ export interface DaemonOptions {
    * the network; the entry point turns it on unless `TENDB_CATALOGUE=off`.
    */
   readonly catalogueSync?: boolean;
+  /** The file holding the catalogue the release embeds, read when nothing is stored; absent or missing means none. */
+  readonly catalogueSnapshot?: string;
   /** `TENDB_JUDGE=off`: the OpenRouter key is never read and no decision calls OpenRouter. */
   readonly judgeOff?: boolean;
   /** The harness plugin folder the default personas are read from. */
@@ -490,8 +497,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     clock,
     fetch: opts.fetch ?? fetch,
     logger: logger.child({ component: 'catalogue' }),
-    // A release build has no embedded snapshot yet.
-    snapshot: () => null,
+    snapshot: () => (opts.catalogueSnapshot ? readCatalogueSnapshot(opts.catalogueSnapshot) : null),
     onChanged: (changed) => {
       state.write((ctx) => {
         reconcileProfiles(ctx, changed);

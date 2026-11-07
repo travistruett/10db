@@ -46,23 +46,26 @@ describe('AccountInput', () => {
       },
     },
     {
-      name: 'Bedrock on a bearer token, with a model map',
+      name: 'Bedrock on a bearer token, with a fast-tier override',
       input: {
         kind: 'bedrock',
         label: 'Client D',
         settings: {
           region: 'eu-central-1',
           awsProfile: null,
-          modelMap: { sonnet: 'eu.anthropic.claude-sonnet-5-5-v1:0' },
+          tierOverrides: { fast: 'eu.anthropic.claude-haiku-5-5-v1:0' },
         },
       },
     },
     {
-      name: 'a gateway offering two aliases',
+      name: 'a gateway overriding two tiers',
       input: {
         kind: 'gateway',
         label: 'OpenRouter',
-        settings: { baseUrl: 'https://openrouter.ai/api', aliases: ['haiku', 'sonnet'] },
+        settings: {
+          baseUrl: 'https://openrouter.ai/api',
+          tierOverrides: { fast: 'vendor/small', strongest: 'vendor/large' },
+        },
       },
     },
     { name: 'a ChatGPT sign-in', input: { kind: 'codex_signin', label: 'ChatGPT Pro' } },
@@ -132,13 +135,22 @@ describe('AccountInput', () => {
       message: /region/,
     },
     {
-      name: 'a model map keyed by a model ID instead of an alias',
+      name: 'an override for a tier that does not exist',
       input: {
         kind: 'claude_subscription',
         label: 'x',
-        settings: { modelMap: { 'claude-sonnet-5-5': 'claude-sonnet-5-5' } },
+        settings: { tierOverrides: { huge: 'vendor/large' } },
       },
-      message: /model alias/,
+      message: /huge/,
+    },
+    {
+      name: 'an override naming no model',
+      input: {
+        kind: 'claude_subscription',
+        label: 'x',
+        settings: { tierOverrides: { fast: '  ' } },
+      },
+      message: /tierOverrides/,
     },
   ])('refuses $name', ({ input, message }) => {
     const parsed = AccountInput.safeParse(input);

@@ -89,6 +89,8 @@ export function baseHandlers(
     ),
     // The model list and the role settings and patterns of Settings › Team and Personas and flows; none yet.
     http.get(daemonUrl('/models', base), () => HttpResponse.json([])),
+    // and what each account offers, which an account's tier overrides read; none yet.
+    http.get(daemonUrl('/models/offers', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/model-settings', base), () =>
       HttpResponse.json({ roles: [], patterns: [] }),
     ),

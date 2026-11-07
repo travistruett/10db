@@ -115,7 +115,7 @@ export interface ShapeAgentDefinition {
   readonly description: string;
   readonly prompt: string;
   readonly tools: readonly string[];
-  /** A model alias (`opus`, `fable`) or full ID; absent means the session's own. */
+  /** A model alias or full ID; absent means the session's own. */
   readonly model?: string;
 }
 

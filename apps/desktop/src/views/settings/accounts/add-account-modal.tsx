@@ -70,7 +70,13 @@ function AddAccountForm({
             setValues({ ...emptyAccountForm(next), label: values.label, payer: values.payer });
           }}
         />
-        <AccountFields values={values} onChange={setValues} errors={errors} mode="create" />
+        <AccountFields
+          values={values}
+          onChange={setValues}
+          errors={errors}
+          mode="create"
+          accountId={null}
+        />
         {errors[FORM_ERROR] ? (
           <Alert color="red" role="alert">
             {errors[FORM_ERROR]}

@@ -137,7 +137,7 @@ describe('accounts over HTTP', () => {
         kind: 'gateway',
         label: 'OpenRouter',
         monthlyCapUsd: 100,
-        settings: { baseUrl: 'https://openrouter.ai/api', aliases: ['haiku'] },
+        settings: { baseUrl: 'https://openrouter.ai/api' },
       });
       expect(signIn).toBeNull();
       expect(account.secretSet).toBe(false);
@@ -756,7 +756,7 @@ describe('connecting a ChatGPT plan account over HTTP', () => {
     const { account } = await api.post('/accounts', AccountCreatedDto, {
       kind: 'gateway',
       label: 'OpenRouter',
-      settings: { baseUrl: 'https://openrouter.ai/api', aliases: ['haiku'] },
+      settings: { baseUrl: 'https://openrouter.ai/api' },
     });
     expect((await connect(url, token, account.id)).status).toBe(400);
     expect(adapter.logins).toHaveLength(0);

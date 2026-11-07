@@ -153,7 +153,7 @@ const LIMIT_NAMES: Readonly<Record<string, string>> = {
 
 const WEEKLY_LIMIT_PREFIX = 'seven_day_';
 
-/** A key's model segment as an ID is written with underscores: `gpt-6-astra` is `gpt_6_astra`. */
+/** A key's model segment as an ID is written with underscores: `vendor-model-2` is `vendor_model_2`. */
 const keyOf = (id: string): string => id.toLowerCase().replaceAll(/[^a-z0-9]+/g, '_');
 
 /**

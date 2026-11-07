@@ -1247,6 +1247,11 @@ describe('limits and failed turns', () => {
       'badRequest',
       'a model of tidiness, no. Bad input',
     ],
+    [
+      'a bad request that names the model without refusing it',
+      'badRequest',
+      'The prompt sent to gpt-5.6-sol is too long',
+    ],
     ['another error that names the model', 'internalServerError', 'gpt-5.6-sol fell over'],
   ])('keeps the session going on %s', async (_name, info, message) => {
     const running = await inTurn();

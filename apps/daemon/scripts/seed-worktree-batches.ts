@@ -68,7 +68,7 @@ seed.open.forEach((entry, index) => {
   const batch = cut(entry.title, index);
   store.write((ctx) => {
     const workstream = insertWorkstream(ctx, entry.taskId, {
-      first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      first: { model: 'seeded-model', effort: 'medium' },
       batchId: batch.id,
     });
     for (const to of PATH[entry.state]) {

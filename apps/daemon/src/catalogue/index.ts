@@ -7,6 +7,7 @@ export {
   type CatalogueModel,
   type CatalogueProvider,
 } from './source';
+export { CATALOGUE_SNAPSHOT_FILE, readCatalogueSnapshot } from './snapshot';
 export { deriveTiers, type DerivedTier } from './tiers';
 export { storedModelNames, type NamedModel } from './sync';
 export {

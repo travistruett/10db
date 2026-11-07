@@ -214,6 +214,10 @@ describe('a model the account refuses at the first reply', () => {
     ]);
     // The step still names what was planned, so a later resolve says why it changed.
     expect(ws(workstream.id).steps[0]?.model).toBe(only);
+    // The model's own card says nothing is left, not that the step runs on a next model.
+    const own = cards.find((c) => c.title === `Claude plan cannot run ${only}`);
+    expect(own?.body).toMatch(/nothing left to run/);
+    expect(own?.body).not.toMatch(/running the step on/);
     const refusal = cards.find((c) => c.title === 'Claude plan: sessions refused');
     expect(JSON.stringify(refusal?.detail)).toContain(AccountProblem.NoUsableModel);
     expect(refusal?.body).toMatch(/Settings › Accounts › Claude plan/);
@@ -303,6 +307,33 @@ describe('a model the account refuses at the first reply', () => {
     expect(specs).toHaveLength(2);
     expect(specs[1]?.model).not.toBe(specs[0]?.model);
     expect(ws(workstream.id).state).toBe('DONE');
+  });
+
+  it('does not say it marked a model unusable when the account no longer lists it', async () => {
+    engine = await createTestEngine({
+      Alpha: [[{ do: 'model_refused' }], finish('op-unmarked-1')],
+    });
+    const accountId = engine.project.accountId;
+    list(accountId, claudeModels());
+    const specs: SessionSpec[] = [];
+    // The account's list changes while the session runs and no longer holds the model it was given.
+    engine.adapter.seen = (spec) => {
+      specs.push(spec);
+      if (specs.length === 1)
+        list(
+          accountId,
+          claudeModels().filter((m) => m !== spec.model),
+        );
+      return {};
+    };
+    const { workstream } = engine.addTask('Alpha', ['api'], [], quick);
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+
+    expect(ws(workstream.id).state).toBe('DONE');
+    const [card] = openCards();
+    expect(card?.body).toMatch(new RegExp(`running the step on ${specs[1]?.model ?? ''}`));
+    expect(card?.body).not.toMatch(/marked .* unusable/);
   });
 
   it('fails the task with its card when the account lists no model to mark', async () => {

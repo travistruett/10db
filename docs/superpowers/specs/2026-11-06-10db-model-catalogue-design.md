@@ -1,7 +1,7 @@
 # 10db model catalogue design
 
-**Status:** designed, not built. Written 2026-11-06, and reviewed that day: an engineering review on real catalogue data, and a
-plan review against the code.
+**Status:** built (2026-11-07), in the order of work below. Written 2026-11-06, and reviewed that day: an engineering review on real catalogue data, and a
+plan review against the code. `decisions/2026-11-07-models-come-from-a-catalogue.md` records the build.
 
 ## Why
 

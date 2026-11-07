@@ -94,12 +94,11 @@ describe('toAccountInput', () => {
       },
     },
     {
-      name: 'a gateway with a base URL and a model map',
+      name: 'a gateway with a base URL and two tier overrides, a blank one dropped',
       values: form('gateway', {
         label: 'G',
         baseUrl: 'https://gw.example.com/v1',
-        modelMap: [{ alias: 'sonnet', modelId: 'anthropic/claude-sonnet' }],
-        aliases: ['sonnet'],
+        tierOverrides: { fast: 'vendor/small', balanced: '  ', strongest: ' vendor/large ' },
         organization: 'ignored',
       }),
       input: {
@@ -110,8 +109,7 @@ describe('toAccountInput', () => {
         monthlyCapUsd: null,
         settings: {
           baseUrl: 'https://gw.example.com/v1',
-          modelMap: { sonnet: 'anthropic/claude-sonnet' },
-          aliases: ['sonnet'],
+          tierOverrides: { fast: 'vendor/small', strongest: 'vendor/large' },
         },
       },
     },
@@ -145,38 +143,6 @@ describe('toAccountInput', () => {
       errors: {
         awsProfile: 'Enter an AWS profile name: letters, digits, dots, dashes or underscores',
       },
-    },
-    {
-      name: 'a capitalised alias, onto modelMap',
-      values: form('claude_subscription', {
-        label: 'S',
-        modelMap: [{ alias: 'Sonnet', modelId: 'x' }],
-      }),
-      errors: { modelMap: 'Enter a lowercase alias such as sonnet and a model ID for each row' },
-    },
-    {
-      name: 'a blank model ID, onto modelMap',
-      values: form('claude_subscription', {
-        label: 'S',
-        modelMap: [{ alias: 'sonnet', modelId: '' }],
-      }),
-      errors: { modelMap: 'Enter a lowercase alias such as sonnet and a model ID for each row' },
-    },
-    {
-      name: 'a duplicate alias, onto modelMap',
-      values: form('claude_subscription', {
-        label: 'S',
-        modelMap: [
-          { alias: 'sonnet', modelId: 'a' },
-          { alias: 'sonnet', modelId: 'b' },
-        ],
-      }),
-      errors: { modelMap: 'Each alias can appear once' },
-    },
-    {
-      name: 'a capitalised offered alias, onto aliases',
-      values: form('claude_subscription', { label: 'S', aliases: ['Sonnet'] }),
-      errors: { aliases: 'Use lowercase aliases such as sonnet' },
     },
     {
       name: 'an empty label, onto label',
@@ -214,12 +180,12 @@ describe('toAccountInput', () => {
       errors: { monthlyCapUsd: MONTHLY_CAP_MESSAGE },
     },
     {
-      name: 'a model ID over 200 characters, onto modelMap with its own message',
+      name: 'a tier override over 200 characters, onto tierOverrides',
       values: form('claude_subscription', {
         label: 'S',
-        modelMap: [{ alias: 'sonnet', modelId: 'x'.repeat(201) }],
+        tierOverrides: { fast: 'x'.repeat(201) },
       }),
-      errors: { modelMap: 'Keep each model ID up to 200 characters' },
+      errors: { tierOverrides: 'Keep each model ID up to 200 characters' },
     },
     {
       name: 'a payer over 200 characters, onto payer',
@@ -257,8 +223,7 @@ const gateway = accountDto({
   label: 'Router',
   settings: {
     baseUrl: 'https://gw.example.com/v1',
-    modelMap: { sonnet: 'anthropic/claude-sonnet' },
-    aliases: ['sonnet'],
+    tierOverrides: { fast: 'vendor/small' },
   },
 });
 
@@ -281,12 +246,11 @@ describe('formValuesOf', () => {
       values: { region: 'us-west-2', bedrockAuth: 'bearer', awsProfile: '' },
     },
     {
-      name: 'a gateway with a model map and aliases',
+      name: 'a gateway with a tier override',
       account: gateway,
       values: {
         baseUrl: 'https://gw.example.com/v1',
-        modelMap: [{ alias: 'sonnet', modelId: 'anthropic/claude-sonnet' }],
-        aliases: ['sonnet'],
+        tierOverrides: { fast: 'vendor/small' },
       },
     },
   ])('reads $name', ({ account, values }) => {
@@ -369,27 +333,27 @@ describe('toAccountPatch', () => {
       patch: { settings: { region: 'us-west-2', awsProfile: 'client-b' } },
     },
     {
-      name: 'a model map row added sends the whole settings',
+      name: 'a tier override added sends the whole settings',
       account: gateway,
-      changes: {
-        modelMap: [
-          { alias: 'sonnet', modelId: 'anthropic/claude-sonnet' },
-          { alias: 'haiku', modelId: 'anthropic/claude-haiku' },
-        ],
-      },
+      changes: { tierOverrides: { fast: 'vendor/small', strongest: 'vendor/large' } },
       patch: {
         settings: {
           baseUrl: 'https://gw.example.com/v1',
-          modelMap: { sonnet: 'anthropic/claude-sonnet', haiku: 'anthropic/claude-haiku' },
-          aliases: ['sonnet'],
+          tierOverrides: { fast: 'vendor/small', strongest: 'vendor/large' },
         },
       },
     },
     {
+      name: 'the last tier override cleared sends the settings without any',
+      account: gateway,
+      changes: { tierOverrides: { fast: '' } },
+      patch: { settings: { baseUrl: 'https://gw.example.com/v1' } },
+    },
+    {
       name: 'a label and a setting together',
       account: subscription,
-      changes: { label: 'Renamed', modelMap: [{ alias: 'sonnet', modelId: 'x' }] },
-      patch: { label: 'Renamed', settings: { modelMap: { sonnet: 'x' } } },
+      changes: { label: 'Renamed', tierOverrides: { balanced: 'x' } },
+      patch: { label: 'Renamed', settings: { tierOverrides: { balanced: 'x' } } },
     },
   ])('sends $name', ({ account, changes, patch }) => {
     expect(toAccountPatch(account, { ...formValuesOf(account), ...changes })).toEqual({
