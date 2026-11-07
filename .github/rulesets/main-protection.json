@@ -30,6 +30,8 @@
           { "context": "gate-test-2", "integration_id": 15368 },
           { "context": "gate-test-3", "integration_id": 15368 },
           { "context": "gate-test-4", "integration_id": 15368 },
+          { "context": "gate-test-5", "integration_id": 15368 },
+          { "context": "gate-test-6", "integration_id": 15368 },
           { "context": "gate-e2e", "integration_id": 15368 },
           { "context": "desktop", "integration_id": 15368 },
           { "context": "policy", "integration_id": 15368 },

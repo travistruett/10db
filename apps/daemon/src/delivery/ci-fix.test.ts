@@ -182,7 +182,8 @@ describe('starting a fix when a required check fails', () => {
 
   it('carries the log of every gate job when they all fail, and names any more without one', async () => {
     const { root } = await shippedRoot();
-    const names = ['gate-static', 'gate-test-1', 'gate-test-2', 'gate-test-3', 'gate-test-4'];
+    const shards = [1, 2, 3, 4, 5, 6].map((shard) => `gate-test-${String(shard)}`);
+    const names = ['gate-static', ...shards];
     const failing = [...names, 'gate-e2e'].map((name, index) => job(name, String(100 + index)));
     const beyond = job('desktop', '200');
     fails(root.prUrl ?? '', ...failing, beyond);

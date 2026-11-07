@@ -32,7 +32,8 @@ function runGate(sandbox: GateSandbox, env: Record<string, string>) {
   const result = spawnSync('/bin/bash', [join(sandbox.dir, 'scripts/gate.sh')], {
     cwd: sandbox.dir,
     encoding: 'utf8',
-    env: { ...envWithoutGitVariables(), ...env },
+    // CI's test jobs export GATE_TEST_ARGS for their own gate, and this gate must not inherit it.
+    env: { ...envWithoutGitVariables(), GATE_TEST_ARGS: undefined, ...env },
   });
   const lines = result.stdout.trim().split('\n');
   return { status: result.status, last: lines.at(-1) ?? '', stdout: result.stdout };

@@ -4,12 +4,12 @@
 
 ## Decision
 
-On CI, the single `gate` job becomes six jobs, each a required check in `.github/rulesets/main-protection.json`:
+On CI, the single `gate` job becomes eight jobs, each a required check in `.github/rulesets/main-protection.json`:
 
 | Check                          | Runs                             |
 | ------------------------------ | -------------------------------- |
 | `gate-static`                  | typecheck, build, drift and knip |
-| `gate-test-1` to `gate-test-4` | `pnpm test --shard=<n>/4`        |
+| `gate-test-1` to `gate-test-6` | `pnpm test --shard=<n>/6`        |
 | `gate-e2e`                     | the desktop end-to-end tests     |
 
 - Each job runs `scripts/gate.sh`, with `GATE_STEPS` naming its steps. `GATE_TEST_ARGS` adds arguments to the test
@@ -20,7 +20,7 @@ On CI, the single `gate` job becomes six jobs, each a required check in `.github
   `--shard` disagree. `tests/repo/src/governance.test.ts` keeps the ruleset equal to the checks `ci.yml` reports.
 - `fail-fast` is off, and no job uses `--bail`: every shard reports all of its failures.
 - `make gate` does not change. It still runs every step in one place.
-- `MAX_LOGGED_JOBS` in `apps/daemon/src/delivery/ci-fix.ts` rises from 3 to 6, so a fix task can carry every gate job's
+- `MAX_LOGGED_JOBS` in `apps/daemon/src/delivery/ci-fix.ts` rises from 3 to 8, so a fix task can carry every gate job's
   log.
 
 ## Rollout
@@ -28,7 +28,7 @@ On CI, the single `gate` job becomes six jobs, each a required check in `.github
 The ruleset has no bypass actors, so a pull request that removes `gate` can't merge while `gate` is required, and
 once the ruleset changes no pull request can merge without the new checks. The order is:
 
-1. Open the pull request, hold lanes' ships, and confirm `gh pr checks` shows exactly the six new names.
+1. Open the pull request, hold lanes' ships, and confirm `gh pr checks` shows exactly the eight new names.
 2. Run `make github-settings` from the branch, with the branch current with `main`.
 3. Merge at once.
 4. Give every open pull request a new event, a push or a title edit. Rerunning its old run replays the old workflow
@@ -41,8 +41,8 @@ reported leaves it blocked.
 
 The gate took about 22 minutes on one 4-vCPU runner, and a single failing test cost a full round. It grew from 210 s
 on 2026-10-28 to 1,315 s. The test step is limited by CPU, and standard runners are free on a public repository, so
-parallel jobs cost nothing. Running the four shards one after another in the pinned image took 112, 150, 166 and 91
-seconds; scaled to CI, each job should take about 5 minutes.
+parallel jobs cost nothing. On its first real run with four shards the jobs took 3m40 to 5m12, with `gate-e2e` at 3m29. Six shards bring the test
+jobs near that floor, and a shard count is a ruleset change, so it was set before the ruleset was applied.
 
 Each job is required, rather than rolled up under one `gate` job, because 10db reads required checks alone
 (`parseRequiredChecks` in `apps/daemon/src/github/gh.ts`). A roll-up over a cancelled shard would report a failure, so

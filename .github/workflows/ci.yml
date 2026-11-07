@@ -63,7 +63,7 @@ jobs:
       fail-fast: false
       matrix:
         # The ruleset requires one check per shard, so a new shard count is a ruleset change.
-        shard: [1, 2, 3, 4]
+        shard: [1, 2, 3, 4, 5, 6]
     # Microsoft's Playwright image for the version pnpm-lock.yaml pins ships WebKit and its system
     # libraries, so no run downloads them from the Ubuntu mirror; bump the tag and digest with
     # @playwright/test. uid 1001 is the runner user that owns the checkout, so git trusts it
@@ -75,7 +75,7 @@ jobs:
       options: --init --user 1001
     env:
       GATE_STEPS: test
-      GATE_TEST_ARGS: --shard=${{ matrix.shard }}/4
+      GATE_TEST_ARGS: --shard=${{ matrix.shard }}/6
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
