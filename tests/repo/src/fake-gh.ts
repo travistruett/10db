@@ -10,6 +10,8 @@ export interface GhReply {
   readonly stdout?: string;
   readonly stderr?: string;
   readonly status?: number;
+  /** Files a `run download` leaves in its `-D` directory: relative path to content. */
+  readonly downloads?: Readonly<Record<string, string>>;
 }
 
 const GhCall = z.object({ args: z.string(), stdin: z.string() });
@@ -17,7 +19,8 @@ export type GhCall = z.infer<typeof GhCall>;
 
 // gh is the network boundary, so a stand-in on PATH answers from the table and logs every call.
 const FAKE_GH = `#!/usr/bin/env node
-import { appendFileSync, readFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 const args = process.argv.slice(2).join(' ');
 const stdin = args.includes('--input -') ? readFileSync(0, 'utf8') : '';
 appendFileSync(process.env.FAKE_GH_LOG, JSON.stringify({ args, stdin }) + '\\n');
@@ -26,6 +29,11 @@ const reply = replies.find((row) => args.startsWith(row.args));
 if (!reply) {
   process.stderr.write('no canned reply for: ' + args);
   process.exit(99);
+}
+const target = process.argv[process.argv.indexOf('-D') + 1];
+for (const [path, content] of Object.entries(reply.downloads ?? {})) {
+  mkdirSync(dirname(join(target, path)), { recursive: true });
+  writeFileSync(join(target, path), content);
 }
 process.stdout.write(reply.stdout ?? '');
 process.stderr.write(reply.stderr ?? '');
@@ -38,6 +46,7 @@ export function runWithFakeGh(
   script: string,
   replies: readonly GhReply[],
   env: Readonly<Record<string, string>>,
+  cwd?: string,
 ) {
   const dir = mkdtempSync(join(tmpdir(), 'fake-gh-'));
   try {
@@ -50,6 +59,7 @@ export function runWithFakeGh(
     writeFileSync(repliesPath, JSON.stringify(replies));
     const result = spawnSync(process.execPath, [script], {
       encoding: 'utf8',
+      ...(cwd === undefined ? {} : { cwd }),
       env: {
         PATH: `${dir}${delimiter}${process.env['PATH'] ?? ''}`,
         FAKE_GH_LOG: log,

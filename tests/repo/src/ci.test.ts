@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parseAllDocuments } from 'yaml';
 import { z } from 'zod';
 import { createThrowawayRepo, fakeGithubToken, SANDBOXED, type ThrowawayRepo } from './fixtures';
+import { COMMENT_MARKER } from './test-report';
 import { readRepoFile, repoRoot } from './workspace';
 import {
   parseWorkflow,
@@ -40,6 +41,10 @@ function lockedPlaywrightVersion(): string {
 /** The jobs that run scripts/gate.sh, and the jobs among them that run in the Playwright image. */
 const GATE_JOBS = ['gate-static', 'gate-test', 'gate-e2e'];
 const CONTAINER_JOBS = ['gate-test', 'gate-e2e'];
+/** The informational jobs that comment on a pull request, which no ruleset may require. */
+const REPORT_JOBS = ['test-report', 'test-report-post'];
+const Permissions = z.record(z.string(), z.string());
+const StepMinutes = z.number().positive();
 
 function containerOf(job: string): { image?: string | undefined; options?: string | undefined } {
   const container = readWorkflow(CI).jobs[job]?.container;
@@ -68,7 +73,54 @@ describe('CI workflow', () => {
       'policy',
       'dependency-review',
       'cargo-deny',
+      ...REPORT_JOBS,
     ]);
+  });
+
+  it('runs the test report on pull requests only, after a failed shard too, without blocking', () => {
+    const { jobs } = readWorkflow(CI);
+    expect(jobs['test-report']?.needs).toBe('gate-test');
+    expect(jobs['test-report']?.if).toContain("github.event_name == 'pull_request'");
+    // It must still report when a shard failed, and a chain of needs skips without !cancelled().
+    expect(jobs['test-report']?.if).toContain('!cancelled()');
+    expect(jobs['test-report-post']?.if).toContain('!cancelled()');
+    expect(jobs['test-report']?.if).toContain("github.event.pull_request.state == 'open'");
+    // 10db's checks summary reads every check, so a job must not conclude as failed: a job-level
+    // continue-on-error keeps the run green, not necessarily the job's own check.
+    // continue-on-error absorbs a step's own timeout, not the job's, so the steps time out first.
+    for (const name of REPORT_JOBS) {
+      expect(jobs[name]?.['continue-on-error']).toBeUndefined();
+      const steps = jobs[name]?.steps ?? [];
+      for (const step of steps) expect(step['continue-on-error']).toBe(true);
+      const minutes = steps.map((step) => StepMinutes.parse(step['timeout-minutes']));
+      const total = minutes.reduce((sum, value) => sum + value, 0);
+      expect(total).toBeLessThan(jobs[name]?.['timeout-minutes'] ?? 0);
+    }
+  });
+
+  it('never gives the write token to a job that runs code from the checkout', () => {
+    const { jobs } = readWorkflow(CI);
+    const writers = Object.entries(jobs).filter(
+      ([, job]) => Permissions.parse(job.permissions ?? {})['pull-requests'] === 'write',
+    );
+    expect(writers.map(([name]) => name)).toEqual(['test-report-post']);
+    const steps = jobs['test-report-post']?.steps ?? [];
+    expect(steps.filter((step) => step.uses?.startsWith('actions/checkout'))).toEqual([]);
+  });
+
+  it('updates the comment the report starts with, and cannot fail a required shard', () => {
+    const { jobs } = readWorkflow(CI);
+    const post = jobs['test-report-post']?.steps?.find((step) => step.env?.['MARKER']);
+    expect(post?.env?.['MARKER']).toBe(COMMENT_MARKER);
+    const upload = jobs['gate-test']?.steps?.find((step) =>
+      step.uses?.startsWith('actions/upload-artifact'),
+    );
+    expect(upload?.['continue-on-error']).toBe(true);
+    expect(upload?.['timeout-minutes']).toBeGreaterThan(0);
+    const steps = jobs['gate-test']?.steps ?? [];
+    const gate = steps.findIndex((step) => step.run === 'bash scripts/gate.sh');
+    expect(steps.findIndex((step) => step === upload)).toBeGreaterThan(gate);
+    expect(jobs['gate-test']?.env?.['TENDB_TEST_TIMINGS']).toBe(upload?.with?.['path']);
   });
 
   it('runs every gate step in a required job, so splitting the gate drops none', () => {
@@ -84,9 +136,12 @@ describe('CI workflow', () => {
       expect.arrayContaining(['pnpm -s format:check', 'pnpm -s lint']),
     );
     expect(runsIn('desktop')).toContain('make rust-check');
-    // A step that may fail without failing its job no longer blocks a merge.
+    // A step that may fail without failing its job no longer blocks a merge. Uploading an artifact
+    // checks nothing, so it alone may fail: the check before it has already failed the job or not.
+    const checks = (job: string) =>
+      (jobs[job]?.steps ?? []).filter((step) => !step.uses?.startsWith('actions/upload-artifact'));
     const lenient = [...GATE_JOBS, 'policy', 'desktop'].filter((job) =>
-      [jobs[job], ...(jobs[job]?.steps ?? [])].some((part) => part?.['continue-on-error']),
+      [jobs[job], ...checks(job)].some((part) => part?.['continue-on-error']),
     );
     expect(lenient).toEqual([]);
     // Format and lint run even after an earlier policy step failed: a fix session reads every
@@ -181,7 +236,7 @@ describe('CI workflow', () => {
     // No job may be limited to other events, except dependency-review (next test). desktop has an
     // `if` too, but on desktop-scope's answer from the files, never on the event.
     const limited = Object.entries(parsed.jobs)
-      .filter(([, job]) => job.if !== undefined)
+      .filter(([name, job]) => job.if !== undefined && !REPORT_JOBS.includes(name))
       .map(([name]) => name);
     expect(limited).toEqual(['desktop', 'dependency-review']);
   });

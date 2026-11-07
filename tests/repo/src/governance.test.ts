@@ -105,7 +105,7 @@ describe('rulesets', () => {
     expect(source).not.toMatch(/which the queue counts as passing/);
   });
 
-  it('requires exactly the checks that ci.yml reports, but desktop-scope, which only decides desktop', () => {
+  it('requires exactly the checks that ci.yml reports, but desktop-scope and the informational test report', () => {
     // desktop-scope is not required: the required desktop check is skipped, which counts as
     // passing, when it says no macOS runner is needed. Each test shard is a required check of its
     // own, so 10db reads the failing job's own log and cancelled state.
@@ -116,7 +116,9 @@ describe('rulesets', () => {
       integration_id?: number;
     }[];
     expect(checks.map((c) => c.context)).toEqual(
-      workflowCheckNames('.github/workflows/ci.yml').filter((name) => name !== 'desktop-scope'),
+      workflowCheckNames('.github/workflows/ci.yml').filter(
+        (name) => !['desktop-scope', 'test-report', 'test-report-post'].includes(name),
+      ),
     );
   });
 
