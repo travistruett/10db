@@ -359,7 +359,7 @@ as the result, and say so in the PR. Don't fix it here: `10db-66` is likely to.
 
 - Modify: `packages/contracts/src/accounts.ts`, `apps/desktop/src/views/settings/accounts/account-fields.tsx`, `account-form-values.ts`, `edit-account-form.tsx`
 - Modify: `scripts/release/build-macos.sh`, `.github/workflows/release-dry-run.yml`, `release.yml`
-- Create: `scripts/release/fetch-catalogue.mjs`, and `docs/architecture/decisions/2026-11-06-models-come-from-a-catalogue.md`
+- Create: `scripts/release/fetch-catalogue.mjs`, and a decision file in `docs/architecture/decisions/`, named by its build date and `models-come-from-a-catalogue`
 - Modify: `docs/architecture/04-accounts.md`, `01-factory-loop.md`, `docs/architecture/open-questions.md`, `apps/desktop/src/views/settings/sections.ts`
 
 **Interfaces:**
