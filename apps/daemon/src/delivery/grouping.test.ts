@@ -50,6 +50,7 @@ function tasksNamed(
         dependsOn: (deps[name] ?? []).map(idOf),
         boardStatus: 'backlog',
         workstreamId: null,
+        modelSetting: null,
         ...(groupOf(name) === null ? {} : { landingGroupId: groupOf(name) }),
         createdAt: now,
         updatedAt: now,

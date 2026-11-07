@@ -282,7 +282,7 @@ const MODEL_UNAVAILABLE =
 
 const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-/** Whether `text` names `id` as a whole token, so `claude-opus-5` is not found in `claude-opus-5-5`. */
+/** Whether `text` names `id` as a whole token, so `<model>` is not found in `<model>-<suffix>`. */
 function namesToken(text: string, id: string): boolean {
   // A model ID continues through letters, digits, `-`, `_`, `:`, `/` and a `.` that a character follows.
   return new RegExp(`(?<![\\w.:/-])${escapeRegExp(id)}(?![\\w:/-]|\\.\\w)`).test(text);
