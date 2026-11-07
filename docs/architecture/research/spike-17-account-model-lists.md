@@ -1,7 +1,7 @@
 # Spike 17: What each account says it can run, and whether a listed model launches
 
-- **Status:** VERIFIED for the Claude subscription and for ChatGPT's model list. PARTIAL for Bedrock: the list was read,
-  but no launch ran, because the cloud credentials had expired.
+- **Status:** VERIFIED for the Claude subscription, for Bedrock (list and launches, rerun with a fresh login) and for
+  ChatGPT's model list. A gateway's list and a Codex launch by a listed ID are not tried.
 - **Date:** 2026-11-06
 - **Versions:** Claude Code 2.1.319, Agent SDK 0.3.316, codex-cli 0.154.0, macOS 27.2. models.dev fetched the same day:
   235 providers, 5.96 MB.
@@ -69,25 +69,33 @@ except for two aliases.
 
 Every ID is exact under models.dev `amazon-bedrock`, except the two `[1m]` rows, which join once the suffix is
 stripped. Haiku 5.5 is not listed, though models.dev has `us.anthropic.claude-haiku-5-5`. The list works with expired
-AWS credentials, so it is not a live read of the account: it is Claude Code's built-in view of Bedrock.
+AWS credentials, so it is not a live read of the account: it is Claude Code's built-in view of Bedrock, and it
+understates what runs (see the launches below).
 
-## Bedrock: launches are not proven
+## Bedrock: launches
 
-The AWS SSO token had expired, so every launch stopped at `cloud_credential_error`. `init.model` still shows how each
-request resolves, which is not proof that the model runs.
+The first run stopped at `cloud_credential_error` because the AWS SSO token had expired, so it proved nothing. The rerun
+with a fresh login launched every request below. `init.model` is what Claude Code reported for the request.
 
-| requested                        | init.model                                        |
-| -------------------------------- | ------------------------------------------------- |
-| `haiku`                          | us.anthropic.claude-haiku-4-5-20251001-v1:0       |
-| `us.anthropic.claude-haiku-5-5`  | us.anthropic.claude-haiku-5-5                     |
-| `sonnet`                         | us.anthropic.claude-sonnet-4-5-20250929-v1:0      |
-| `us.anthropic.claude-sonnet-5-5` | us.anthropic.claude-sonnet-5-5                    |
-| `opus`                           | us.anthropic.claude-opus-5-5                      |
-| `claude-opus-5-5`                | claude-opus-5-5 (an unprefixed ID passes through) |
-| `us.anthropic.claude-fable-5-1`  | us.anthropic.claude-fable-5-1                     |
+| requested                            | init.model                                   | context | result                       |
+| ------------------------------------ | -------------------------------------------- | ------- | ---------------------------- |
+| `haiku`                              | us.anthropic.claude-haiku-4-5-20251001-v1:0  | 200000  | OK                           |
+| `us.anthropic.claude-haiku-5-5`      | same                                         | 1000000 | OK, though the list omits it |
+| `global.anthropic.claude-haiku-5-5`  | same                                         | 1000000 | OK                           |
+| `sonnet`                             | us.anthropic.claude-sonnet-4-5-20250929-v1:0 | 200000  | OK                           |
+| `us.anthropic.claude-sonnet-5-5`     | same                                         | 1000000 | OK                           |
+| `opus`                               | us.anthropic.claude-opus-5-5                 | 1000000 | OK                           |
+| `us.anthropic.claude-opus-5-5`       | same                                         | 1000000 | OK                           |
+| `claude-opus-5-5`                    | same, unprefixed                             | 1000000 | OK                           |
+| `us.anthropic.claude-fable-5-1`      | same                                         | 1000000 | OK on this account today     |
+| `us.anthropic.claude-sonnet-4-6[1m]` | keeps `[1m]`, unlike a subscription          | 1000000 | OK                           |
 
-The `sonnet` alias resolves to Sonnet 4.5 on Bedrock unless `ANTHROPIC_DEFAULT_SONNET_MODEL` is set, while the list
-offers Sonnet 5.5.
+With `ANTHROPIC_DEFAULT_HAIKU_MODEL=us.anthropic.claude-haiku-5-5`, `haiku` launches Haiku 5.5 and the list's `haiku` row
+reports 5.5. So concrete IDs run, and Claude Code's Bedrock list understates what can run. The `sonnet` and `haiku`
+aliases also land on models with a 200k window where the current concrete IDs have 1M.
+
+Fable ran on this account. Whether it does depends on the account's data retention mode in the region, so another
+account can refuse it at launch.
 
 ## ChatGPT plan: Codex `model/list`
 
@@ -132,25 +140,30 @@ offer.
    `LOGNAME` signs it in: keychain access needs them.
 2. **`init.model` does not prove a model exists.** `not-a-model` reported `init.model: not-a-model` and failed only at the
    first assistant message, with `model_not_found`.
-3. **The Bedrock list is not a read of the account.** It answers with expired credentials.
-4. **Bedrock aliases resolve to older models than the list offers.** `sonnet` is Sonnet 4.5, and `haiku` is Haiku 4.5.
+3. **The Bedrock list is not a read of the account.** It answers with expired credentials, and it omits models that run,
+   such as Haiku 5.5.
+4. **Bedrock aliases do not follow the list.** `sonnet` resolves to Sonnet 4.5, older than the list's Sonnet 5.5. `opus`
+   resolves to Opus 5.5, the same as the list. `haiku` is the only alias the list has, and it names Haiku 4.5, so the
+   list has no newer Haiku.
 
 ## What this means for the catalogue work
 
 - **Join to models.dev by exact ID.** Every subscription and ChatGPT ID, and every Bedrock ID once `[1m]` is stripped,
   is a key under its models.dev provider. No alias table is needed for those accounts.
 - **Launch by concrete ID.** A subscription runs `claude-sonnet-5-5` as it runs `sonnet`, with the same context window,
-  and `init.model` equals the concrete ID. The launch ID must not carry `[1m]`, or `modelMatches` fails and the launch is
-  refused as `BillingRefused` at `claude-adapter.ts:704`.
-- **Do not treat a listing or an `init.model` as proof.** Whether the account is signed in comes from the billing check,
+  and `init.model` equals the concrete ID. A subscription launch ID must not carry `[1m]`, or `modelMatches` (in
+  `account-check.ts`) fails and the launch is refused as `BillingRefused`. On Bedrock `init.model` keeps `[1m]`; stripping
+  it before the launch makes the two agree.
+- **Do not treat a listing or an `init.model` as proof.** Whether the account is signed in comes from the account check,
   and whether a model exists comes from a first assistant message.
-- **Bedrock launches stay unproven.** Until a launch runs with live credentials, a Bedrock kind should be treated as
-  listed, not verified. Aliases there must not be relied on: `sonnet` and `haiku` resolve to 4.x models.
-- **Haiku 5.5 is missing from the Bedrock list.** Bedrock alone has Haiku 4.5 as its only Fast model, and with a
-  subscription alongside, Haiku 4.5 is Superseded, so a Bedrock account can have no Fast model. A role that wants Fast
-  must fall back, as the role-default path does when an account offers none.
+- **Bedrock concrete IDs run, and the list is incomplete.** Launch by concrete ID, never by alias: `sonnet` and `haiku`
+  resolve to 4.x models with a 200k window. Claude Code's list omits Haiku 5.5, so the catalogue adds the newest
+  `amazon-bedrock` model of each family under the region prefix the account's own list uses.
+- **Haiku 5.5 is missing from the Bedrock list.** Without the addition, Bedrock alone has Haiku 4.5 as its only Fast
+  model, and with a subscription alongside, Haiku 4.5 is Superseded, so a Bedrock account would have no Fast model. A role
+  that wants Fast falls back, as the role-default path does when an account offers none.
 - **A kind with no `resolvedModel` takes the no-list rule.** It does not stop the build.
-- **`default` duplicates Opus.** The catalogue should drop rows whose `resolvedModel` repeats another's.
+- **`default` duplicates Opus.** The catalogue drops the row whose value is `default`.
 - **`deriveTiers` must filter to offered models first,** then take the newest per family. Otherwise the 5.6 models are
   all superseded by `gpt-6.1-*` models that the account cannot run.
 - **Effort lists differ per row.** Bedrock's older Sonnet and Opus lack `xhigh`, and some rows report none, so efforts
@@ -159,7 +172,6 @@ offer.
 
 ## Not verified
 
-- A Bedrock launch of any model with live credentials, and so whether `us.anthropic.claude-sonnet-5-5` and the other
-  concrete IDs run.
 - Whether a gateway account lists its models the same way.
 - A launch of a Codex model by the model IDs `model/list` returns, beyond the listing.
+- Fable on any account other than this one: it depends on the account's data retention mode.
