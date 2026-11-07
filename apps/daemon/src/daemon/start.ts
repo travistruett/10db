@@ -53,6 +53,7 @@ import {
   createAccountPreparer,
   createAccountRuntime,
   createAccountService,
+  createListRefresh,
   createMoveBack,
   createStartGate,
   createUsageReports,
@@ -60,7 +61,7 @@ import {
 } from '../accounts';
 import { createApp, type SelfUpdateServices } from '../api';
 import { createBenchmarkSync, type BenchmarkSync } from '../benchmarks';
-import { createCatalogueSync } from '../catalogue';
+import { createAccountLists, createCatalogueSync, reconcileProfiles } from '../catalogue';
 import { createJudge, JUDGE_LOG_RETENTION_MS, type JudgeService } from '../judge';
 import { createJudgeServices } from './judge-services';
 import {
@@ -320,6 +321,11 @@ export interface RunningDaemon {
   readonly runner: Runner;
   readonly scheduler: Scheduler;
   readonly benchmarks: BenchmarkSync;
+  /**
+   * Fetches the catalogue, reads every account's list again, rebuilds the model profiles and then updates scores. A
+   * call during a run joins it. Does nothing when `catalogueSync` is off.
+   */
+  refreshModels(): Promise<void>;
   /** What routine decisions ask; reads the OpenRouter key from `keychain` for each call. */
   readonly judge: JudgeService;
   stop(): Promise<void>;
@@ -475,6 +481,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger: logger.child({ component: 'benchmarks' }),
   });
   benchmarks.start();
+  // The accounts' lists and the refresh that follows each fetch are made further down, once the adapter and the
+  // start gate exist; they are named here so the catalogue can reach them when it runs.
   const catalogue = createCatalogueSync({
     state,
     clock,
@@ -482,10 +490,18 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger: logger.child({ component: 'catalogue' }),
     // A release build has no embedded snapshot yet.
     snapshot: () => null,
-    // Nothing reads the catalogue yet.
-    onChanged: () => undefined,
+    onChanged: (changed) => {
+      state.write((ctx) => {
+        reconcileProfiles(ctx, changed);
+      });
+    },
+    afterSync: () => refreshAccountModels(),
   });
-  if (opts.catalogueSync === true) catalogue.start();
+  const accountLists = createAccountLists({
+    state,
+    catalogue: () => catalogue.catalogue(),
+    logger: logger.child({ component: 'catalogue' }),
+  });
   const judgeKeychain = opts.keychain ?? unavailableKeychain;
   const judge = createJudge({
     state,
@@ -946,6 +962,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     clock,
     inbox,
     adapter,
+    lists: accountLists,
     launcher,
     startGate,
     dataDir: opts.dataDir,
@@ -954,6 +971,32 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       scheduler?.requestTick();
     },
   });
+  const listRefresh = createListRefresh({
+    state,
+    adapter,
+    launcher,
+    startGate,
+    lists: accountLists,
+    dataDir: opts.dataDir,
+    logger: logger.child({ component: 'catalogue' }),
+  });
+  // What runs after every fetch of the catalogue: each account's list is read again through the identity probe, then
+  // the profiles are rebuilt from what the accounts now offer. Scores for the models that changed are read after the
+  // profiles exist, so a new model has a row to put them on.
+  async function refreshAccountModels(): Promise<void> {
+    await listRefresh.readAll();
+    const current = catalogue.catalogue();
+    if (current !== null)
+      state.write((ctx) => {
+        reconcileProfiles(ctx, current);
+      });
+  }
+  // One path for the daily timer, the start-up catch-up and the Models page: a call during a run joins it.
+  // Off, nothing is fetched and no account is probed.
+  const refreshModels = async (): Promise<void> => {
+    if (opts.catalogueSync === true) await catalogue.sync();
+  };
+  if (opts.catalogueSync === true) catalogue.start();
   const accountService = createAccountService({
     state,
     clock,
@@ -961,6 +1004,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     keychain: opts.keychain ?? unavailableKeychain,
     launcher,
     adapter,
+    lists: accountLists,
     startGate,
     runtime: accounts,
     pauses: accountPauses,
@@ -1616,6 +1660,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     runner: createdRunner,
     scheduler: createdScheduler,
     benchmarks,
+    refreshModels,
     judge,
     stop() {
       stopping ??= shutdown();

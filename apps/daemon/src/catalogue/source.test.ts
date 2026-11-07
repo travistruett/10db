@@ -45,8 +45,33 @@ describe('parseCatalogue', () => {
       deprecated: false,
       inputPrice: 4,
       outputPrice: 20,
+      efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
     });
     expect(find('openai', 'gpt-6.1-terra')).toMatchObject({ inputPrice: 1, outputPrice: 5 });
+  });
+
+  it.each([
+    ['one effort option', [{ type: 'effort', values: ['low', 'high'] }], ['low', 'high']],
+    [
+      'an effort option beside others',
+      [
+        { type: 'toggle' },
+        { type: 'effort', values: ['medium'] },
+        { type: 'budget_tokens', min: 1 },
+      ],
+      ['medium'],
+    ],
+    ['no effort option', [{ type: 'budget_tokens', min: 1024 }], []],
+    ['options of an unexpected shape', 'nope', []],
+    ['an effort option with no values', [{ type: 'effort' }], []],
+  ])('reads the efforts from %s', (_name, reasoningOptions, expected) => {
+    const parsed = parseCatalogue(doc({ a: entry({ reasoning_options: reasoningOptions }) }));
+    expect(parsed.providers['anthropic']?.models[0]?.efforts).toEqual(expected);
+    expect(parsed.skipped).toBe(0);
+  });
+
+  it('reads no efforts from an entry without reasoning options', () => {
+    expect(find('openai', 'gpt-6-luna')?.efforts).toEqual([]);
   });
 
   it.each([
@@ -158,6 +183,7 @@ describe('parseCatalogue', () => {
       ['the status', { status: 'deprecated' }],
       ['the family', { family: 'claude-z' }],
       ['the release date', { release_date: '2026-02-02' }],
+      ['the efforts', { reasoning_options: [{ type: 'effort', values: ['low'] }] }],
     ])('moves when %s changes', (_name, over) => {
       expect(hashOf(over)).not.toBe(hashOf({}));
     });

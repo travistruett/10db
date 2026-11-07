@@ -4,10 +4,21 @@ import {
   MODEL_ALIAS_PATTERN,
   signsInWithLogin,
   type AccountRefusal,
+  type Effort,
   type SupportedAccountKind,
 } from '@10db/contracts';
 import type { AccountExpectation } from '../environment';
 import type { SignInState } from './sign-in-check';
+
+/** A model an account lists. */
+export interface SeenModel {
+  /** What the account calls it, without a context-window suffix. */
+  readonly id: string;
+  /** The concrete model an alias stands for; null when the account reports none. */
+  readonly resolvedId: string | null;
+  /** The efforts it reports that 10db knows; empty when it reports none. */
+  readonly efforts: readonly Effort[];
+}
 
 /** What Claude Code reports about the account a session runs on (`accountInfo()`). */
 export interface SeenAccount {
@@ -17,8 +28,8 @@ export interface SeenAccount {
   readonly tokenSource: string | undefined;
   readonly apiKeySource: string | undefined;
   readonly apiProvider: string | undefined;
-  /** The models a ChatGPT plan offers, when the agent lists them; Claude Code reports none. */
-  readonly models?: readonly string[];
+  /** The models the account lists, when the agent could list them; absent when it could not. */
+  readonly models?: readonly SeenModel[];
 }
 
 export function seenFrom(info: {

@@ -14,6 +14,7 @@ const model = (row: Row): CatalogueModel => ({
   deprecated: false,
   inputPrice: 1,
   outputPrice: 1,
+  efforts: [],
   ...row,
 });
 

@@ -14,3 +14,5 @@ export {
   type CatalogueSync,
   type CatalogueSyncDeps,
 } from './sync';
+export { createAccountLists, type AccountLists } from './account-lists';
+export { reconcileProfiles } from './profiles';

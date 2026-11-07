@@ -32,6 +32,7 @@ import {
   patchAccount,
   recordAccountSecret,
 } from '@10db/db';
+import type { AccountLists } from '../catalogue';
 import type { Clock } from '../clock';
 import {
   AccountLaunchError,
@@ -138,6 +139,8 @@ export function createAccountService(deps: {
   readonly keychain: Keychain;
   readonly launcher: Pick<Launcher, 'probe'>;
   readonly adapter: Pick<SessionAdapter, 'probeAccount' | 'startLogin'>;
+  /** Where the models an account lists are kept, once the account check has passed. */
+  readonly lists: AccountLists;
   readonly logger: Pick<Logger, 'warn'>;
   /**
    * How many lanes run on the account now. A sign-in replaces the login they use, so none may. Plan
@@ -293,6 +296,8 @@ export function createAccountService(deps: {
           `Couldn't read the account ${row.label}: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
+      const refusal = checkAccount(launch.expect, seen);
+      if (refusal === null) deps.lists.record(row, seen);
       const unconfirmed =
         signsInWithLogin(row.kind) && row.expectedIdentity === null
           ? {
@@ -309,8 +314,8 @@ export function createAccountService(deps: {
         apiKeySource: seen.apiKeySource ?? null,
         tokenSource: seen.tokenSource ?? null,
         subscription: Boolean(seen.subscriptionType),
-        models: [...(seen.models ?? [])],
-        refusal: checkAccount(launch.expect, seen) ?? unconfirmed,
+        models: (seen.models ?? []).map((m) => m.id),
+        refusal: refusal ?? unconfirmed,
       };
     },
     async connect(id) {

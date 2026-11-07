@@ -27,6 +27,8 @@ export const CatalogueModel = z.object({
   deprecated: z.boolean(),
   inputPrice: z.number().min(0).nullable(),
   outputPrice: z.number().min(0).nullable(),
+  /** The reasoning efforts models.dev lists, as it spells them; empty when it lists none. */
+  efforts: z.array(z.string()).default([]),
 });
 export type CatalogueModel = z.infer<typeof CatalogueModel>;
 
@@ -48,12 +50,24 @@ const RawModel = z.object({
   name: z.string().min(1),
   family: z.string().min(1).optional(),
   release_date: z.unknown().optional(),
+  reasoning_options: z.unknown().optional(),
   status: z.string().optional(),
   cost: z
     .object({ input: z.number().min(0).optional(), output: z.number().min(0).optional() })
     .optional(),
 });
 const RawProvider = z.object({ models: z.record(z.string(), z.unknown()) });
+
+const EffortOption = z.object({ type: z.literal('effort'), values: z.array(z.string()) });
+
+/** The efforts among a model's reasoning options; an option of any other shape names none. */
+function effortsOf(options: unknown): string[] {
+  if (!Array.isArray(options)) return [];
+  return options.flatMap((option: unknown) => {
+    const parsed = EffortOption.safeParse(option);
+    return parsed.success ? parsed.data.values : [];
+  });
+}
 
 const RELEASE_DATE = /^\d{4}-\d{2}(-\d{2})?$/;
 
@@ -90,6 +104,7 @@ function hashOf(providers: Record<string, CatalogueProvider>): string {
           m.deprecated,
           m.inputPrice,
           m.outputPrice,
+          m.efforts,
         ])
         .sort((a, b) => compare(String(a[1]), String(b[1]))),
     );
@@ -129,6 +144,7 @@ export function parseCatalogue(raw: unknown): Catalogue {
         deprecated: m.data.status === 'deprecated',
         inputPrice: m.data.cost?.input ?? null,
         outputPrice: m.data.cost?.output ?? null,
+        efforts: effortsOf(m.data.reasoning_options),
       });
     }
     if (models.length === 0)

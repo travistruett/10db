@@ -10,7 +10,13 @@
           "input": 10,
           "output": 50,
           "cache_read": 0.25
-        }
+        },
+        "reasoning_options": [
+          {
+            "type": "effort",
+            "values": ["low", "medium", "high", "xhigh", "max"]
+          }
+        ]
       },
       "claude-opus-5": {
         "id": "claude-opus-5",
@@ -21,7 +27,13 @@
           "input": 5,
           "output": 25,
           "cache_read": 0.5
-        }
+        },
+        "reasoning_options": [
+          {
+            "type": "effort",
+            "values": ["low", "medium", "high", "xhigh", "max"]
+          }
+        ]
       },
       "claude-opus-5-5": {
         "id": "claude-opus-5-5",
@@ -32,7 +44,13 @@
           "input": 4,
           "output": 20,
           "cache_read": 0.2
-        }
+        },
+        "reasoning_options": [
+          {
+            "type": "effort",
+            "values": ["low", "medium", "high", "xhigh", "max"]
+          }
+        ]
       },
       "claude-sonnet-5-5": {
         "id": "claude-sonnet-5-5",
@@ -43,7 +61,13 @@
           "input": 2,
           "output": 10,
           "cache_read": 0.1
-        }
+        },
+        "reasoning_options": [
+          {
+            "type": "effort",
+            "values": ["low", "medium", "high", "xhigh", "max"]
+          }
+        ]
       },
       "claude-haiku-5-5": {
         "id": "claude-haiku-5-5",
@@ -54,7 +78,33 @@
           "input": 0.1,
           "output": 0.5,
           "cache_read": 0.01
-        }
+        },
+        "reasoning_options": [
+          {
+            "type": "toggle"
+          },
+          {
+            "type": "effort",
+            "values": ["low", "medium", "high", "xhigh", "max"]
+          }
+        ]
+      },
+      "claude-haiku-4-5-20251001": {
+        "id": "claude-haiku-4-5-20251001",
+        "name": "Claude Haiku 4.5",
+        "family": "claude-haiku",
+        "release_date": "2025-10-15",
+        "cost": {
+          "input": 1,
+          "output": 5,
+          "cache_read": 0.1
+        },
+        "reasoning_options": [
+          {
+            "type": "budget_tokens",
+            "min": 1024
+          }
+        ]
       }
     }
   },
@@ -143,7 +193,13 @@
           "input": 4.4,
           "output": 22,
           "cache_read": 0.22
-        }
+        },
+        "reasoning_options": [
+          {
+            "type": "effort",
+            "values": ["low", "medium", "high", "xhigh", "max"]
+          }
+        ]
       },
       "us.anthropic.claude-sonnet-5-5": {
         "id": "us.anthropic.claude-sonnet-5-5",
@@ -154,7 +210,13 @@
           "input": 2.2,
           "output": 11,
           "cache_read": 0.11
-        }
+        },
+        "reasoning_options": [
+          {
+            "type": "effort",
+            "values": ["low", "medium", "high", "xhigh", "max"]
+          }
+        ]
       },
       "openai.gpt-6.1-sol": {
         "id": "openai.gpt-6.1-sol",
@@ -165,7 +227,53 @@
           "input": 2.2,
           "output": 11,
           "cache_read": 0.11
-        }
+        },
+        "reasoning_options": [
+          {
+            "type": "effort",
+            "values": ["low", "medium", "high", "xhigh", "max"]
+          }
+        ]
+      },
+      "us.anthropic.claude-haiku-4-5-20251001-v1:0": {
+        "id": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
+        "name": "Claude Haiku 4.5 (US)",
+        "family": "claude-haiku",
+        "release_date": "2025-10-15",
+        "cost": {
+          "input": 1.1,
+          "output": 5.5,
+          "cache_read": 0.11
+        },
+        "reasoning_options": [
+          {
+            "type": "toggle"
+          },
+          {
+            "type": "budget_tokens",
+            "min": 1024
+          }
+        ]
+      },
+      "us.anthropic.claude-haiku-5-5": {
+        "id": "us.anthropic.claude-haiku-5-5",
+        "name": "Claude Haiku 5.5 (US)",
+        "family": "claude-haiku",
+        "release_date": "2026-10-07",
+        "cost": {
+          "input": 0.11,
+          "output": 0.55,
+          "cache_read": 0.011
+        },
+        "reasoning_options": [
+          {
+            "type": "toggle"
+          },
+          {
+            "type": "effort",
+            "values": ["low", "medium", "high", "xhigh", "max"]
+          }
+        ]
       }
     }
   },

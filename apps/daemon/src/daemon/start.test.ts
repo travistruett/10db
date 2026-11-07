@@ -33,12 +33,20 @@ import {
   SystemCheckDto,
   WorkstreamId,
 } from '@10db/contracts';
-import { getAccount, getWorkstream, listAccounts } from '@10db/db';
+import {
+  findModelProfile,
+  getAccount,
+  getWorkstream,
+  listAccountModels,
+  listAccounts,
+  listModelProfiles,
+} from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CATALOGUE_URL } from '../catalogue';
 import { z } from 'zod';
 import { WebSocket } from 'ws';
 import { apiClient, quickFlowId } from '../../test/api-client';
+import { readModelsDevFixture } from '../../test/models-dev-fixture';
 import { FakeGh } from '../../test/fake-gh';
 import {
   createTempRepo,
@@ -1435,6 +1443,57 @@ describe('startDaemon', () => {
     });
     await waitFor(() => requests.length > 0);
     expect(requests).toEqual([CATALOGUE_URL]);
+  });
+
+  describe('the model refresh', () => {
+    const OPUS = { id: 'opus', resolvedId: 'claude-opus-5-5', efforts: ['low' as const] };
+    const startWithList = async (catalogueSync: boolean) => {
+      const adapter = new FakeAdapter({});
+      adapter.probeSeen = { ...adapter.probeSeen, models: [OPUS] };
+      const fetches: string[] = [];
+      daemon = await startDaemon({
+        sandbox: null,
+        dataDir: dir.path,
+        port: 0,
+        adapter,
+        logLevel: 'warn',
+        ...QUIET,
+        catalogueSync,
+        fetch: (input) => {
+          fetches.push(
+            typeof input === 'string' ? input : input instanceof URL ? input.href : input.url,
+          );
+          return Promise.resolve(new Response(JSON.stringify(readModelsDevFixture())));
+        },
+      });
+      return { adapter, fetches, running: daemon };
+    };
+
+    it('builds disabled profiles from each account list after the fetch, beside the seeded ones, and a second call joins a run', async () => {
+      const { adapter, fetches, running } = await startWithList(true);
+      await waitFor(() =>
+        listModelProfiles(running.state.db).some((p) => p.model === 'claude-opus-5-5'),
+      );
+      expect(listAccountModels(running.state.db).map((m) => m.model)).toEqual(['claude-opus-5-5']);
+      expect(findModelProfile(running.state.db, 'claude', 'claude-opus-5-5', 'low')).toMatchObject({
+        enabled: false,
+        tier: 'strongest',
+        outputPrice: 20,
+      });
+      expect(findModelProfile(running.state.db, 'claude', 'sonnet', 'high')?.enabled).toBe(true);
+
+      const before = { fetches: fetches.length, probes: adapter.probes.length };
+      await Promise.all([running.refreshModels(), running.refreshModels()]);
+      expect(fetches.length - before.fetches).toBe(1);
+      expect(adapter.probes.length - before.probes).toBe(1);
+    });
+
+    it('with the catalogue off fetches nothing and probes no account, whoever asks', async () => {
+      const { adapter, fetches, running } = await startWithList(false);
+      await running.refreshModels();
+      expect(fetches).toEqual([]);
+      expect(adapter.probes).toEqual([]);
+    });
   });
 
   it('with TENDB_BENCHMARKS=off never reads the benchmark key and makes no Artificial Analysis request', async () => {

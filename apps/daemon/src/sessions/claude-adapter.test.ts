@@ -79,6 +79,8 @@ interface Script {
   /** What accountInfo() answers; a pending promise holds the billing preflight open. */
   readonly account?: AccountInfo | Promise<AccountInfo>;
   readonly interruptHangs?: boolean;
+  /** What supportedModels() answers; 'reject' fails it. */
+  readonly models?: readonly unknown[] | 'reject';
   /** What mcpServerStatus() answers. */
   readonly mcpStatus?: readonly McpServerStatus[];
   /** What setMcpServers() answers: a result, a pending result that holds the preflight open, or 'reject' to fail. */
@@ -208,6 +210,10 @@ function fakeQuery(scripts: Script | readonly Script[]): { query: QueryFn; recor
           script.mcpSet ?? { added: Object.keys(servers), removed: [], errors: {} },
         );
       },
+      supportedModels: () =>
+        script.models === 'reject'
+          ? Promise.reject(new Error('control request failed'))
+          : Promise.resolve(script.models ?? []),
       mcpServerStatus: () => Promise.resolve(script.mcpStatus ?? []),
       getContextUsage: (opts?: unknown) => {
         record.contextCalls.push(opts);
@@ -2620,6 +2626,48 @@ describe('probeAccount', () => {
       strictMcpConfig: true,
     });
     expect(fake.record.options?.abortController?.signal.aborted).toBe(true);
+  });
+
+  it('reads the models the account lists, over the same process, without a prompt', async () => {
+    const fake = fakeQuery({
+      messages: [],
+      then: 'hang',
+      models: [
+        { value: 'default', resolvedModel: 'claude-opus-5-5', supportedEffortLevels: ['low'] },
+        {
+          value: 'claude-fable-5-1[1m]',
+          resolvedModel: 'claude-fable-5-1',
+          supportedEffortLevels: ['low', 'ultra', 'max'],
+        },
+      ],
+    });
+    const adapter = createClaudeAdapter({
+      claudePath: '/c',
+      pluginDir: '/h',
+      logger: silentLogger,
+      query: fake.query,
+      allowUnsandboxed: true,
+    });
+    const seen = await adapter.probeAccount({ kind: 'claude_subscription', cwd: '/data', env: {} });
+    expect(seen.models).toEqual([
+      { id: 'claude-fable-5-1', resolvedId: 'claude-fable-5-1', efforts: ['low', 'max'] },
+    ]);
+    expect(fake.record.queries).toBe(1);
+    expect(fake.record.inputs).toEqual([]);
+  });
+
+  it('still reports the account, with no models, when the list cannot be read', async () => {
+    const fake = fakeQuery({ messages: [], then: 'hang', models: 'reject' });
+    const adapter = createClaudeAdapter({
+      claudePath: '/c',
+      pluginDir: '/h',
+      logger: silentLogger,
+      query: fake.query,
+      allowUnsandboxed: true,
+    });
+    const seen = await adapter.probeAccount({ kind: 'claude_subscription', cwd: '/data', env: {} });
+    expect(seen).toMatchObject({ email: 'builder@example.com' });
+    expect(seen.models).toBeUndefined();
   });
 
   it('fails with AccountProbeError when Claude Code reports no account in time', async () => {

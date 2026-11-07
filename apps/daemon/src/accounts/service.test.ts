@@ -11,7 +11,13 @@ import {
   type AccountId,
   type DaemonEvent,
 } from '@10db/contracts';
-import { createTestStore, seedProject, type Store, type WriteContext } from '@10db/db';
+import {
+  createTestStore,
+  listAccountModels,
+  seedProject,
+  type Store,
+  type WriteContext,
+} from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   capturingLogger,
@@ -20,10 +26,12 @@ import {
   tempDir,
   waitFor,
 } from '../../test/fixtures';
+import { readModelsDevFixture } from '../../test/models-dev-fixture';
+import { createAccountLists, parseCatalogue } from '../catalogue';
 import { ManualClock } from '../clock';
 import { AccountLaunchError, createLauncher, KeychainError, type Launcher } from '../environment';
 import { createEventBus, createStateStore } from '../events';
-import { FakeAdapter } from '../sessions';
+import { FakeAdapter, type SeenAccount } from '../sessions';
 import type { AccountPause } from './pauses';
 import { createAccountService, type AccountService } from './service';
 import { createStartGate, type StartGate } from './start-gate';
@@ -85,6 +93,11 @@ beforeEach(() => {
     logger,
     liveLanes: (id) => live.get(id) ?? 0,
     adapter,
+    lists: createAccountLists({
+      state,
+      catalogue: () => parseCatalogue(readModelsDevFixture()),
+      logger,
+    }),
     startGate: gate,
     runtime: { saved: () => undefined },
     pauses: {
@@ -135,6 +148,28 @@ describe('identity', () => {
   });
 });
 
+describe('the models an account lists', () => {
+  const OPUS = { id: 'opus', resolvedId: 'claude-opus-5-5', efforts: ['low' as const] };
+  const stored = (id: AccountId) => listAccountModels(store.db, id).map((m) => m.model);
+
+  it.each<[string, Partial<SeenAccount>, string[]]>([
+    ['a signed-in account', {}, ['claude-opus-5-5']],
+    [
+      'a signed-out process, which still answers a listing',
+      { email: undefined, subscriptionType: undefined },
+      [],
+    ],
+    ['credentials that are not the kind', { apiProvider: 'bedrock' }, []],
+  ])('are stored for %s only when the account check passes', async (_name, seen, expected) => {
+    const { account } = service.create(
+      AccountInput.parse({ kind: AccountKind.ClaudeSubscription, label: 'A' }),
+    );
+    adapter.probeSeen = { ...adapter.probeSeen, ...seen, models: [OPUS] };
+    await service.identity(account.id);
+    expect(stored(account.id)).toEqual(expected);
+  });
+});
+
 describe('a ChatGPT account', () => {
   const create = () =>
     service.create(AccountInput.parse({ kind: AccountKind.CodexSignin, label: 'ChatGPT plan' }));
@@ -158,7 +193,7 @@ describe('a ChatGPT account', () => {
       organization: 'ws-1',
       subscriptionType: 'pro',
       apiProvider: 'chatgpt',
-      models: ['gpt-6-astra'],
+      models: [{ id: 'gpt-6-astra', resolvedId: null, efforts: ['low'] }],
     };
     const held = await gate.acquire(account.id);
     const identity = await service.identity(account.id);

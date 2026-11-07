@@ -36,13 +36,18 @@ export interface CatalogueSyncDeps {
    * leaves the change undelivered, and the next sync delivers it again.
    */
   readonly onChanged: (catalogue: Catalogue) => void | Promise<void>;
+  /**
+   * What follows every fetch, whether it worked or not: the accounts' lists are read again against the
+   * catalogue in use. It runs inside the fetch's single flight and a throw is logged and dropped.
+   */
+  readonly afterSync: () => Promise<void>;
 }
 
 export interface CatalogueSync {
   status(): CatalogueStatusDto;
   /** The catalogue in use: the stored copy, else the snapshot; null when there is neither. */
   catalogue(): Catalogue | null;
-  /** One fetch; one already running is joined, not repeated. It never rejects. */
+  /** One fetch and the refresh after it; one already running is joined, not repeated. It never rejects. */
   sync(): Promise<CatalogueStatusDto>;
   /**
    * Fetches now if nothing is stored or the stored copy is a day old, else a day after it was fetched.
@@ -158,6 +163,14 @@ export function createCatalogueSync(deps: CatalogueSyncDeps): CatalogueSync {
       deps.logger.warn(
         { err: error instanceof Error ? error.name : 'error' },
         'model catalogue sync failed; keeping the last catalogue',
+      );
+    }
+    try {
+      await deps.afterSync();
+    } catch (error) {
+      deps.logger.warn(
+        { err: error instanceof Error ? error.name : 'error' },
+        'model refresh after the catalogue sync failed',
       );
     }
     rearm();

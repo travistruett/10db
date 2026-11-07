@@ -17,6 +17,7 @@ import {
   patchAccount,
   type AccountRow,
 } from '@10db/db';
+import type { AccountLists } from '../catalogue';
 import type { Clock } from '../clock';
 import type { Launcher } from '../environment';
 import type { StateStore } from '../events';
@@ -63,6 +64,8 @@ export function createAccountPreparer(opts: {
   readonly clock: Clock;
   readonly inbox: InboxService;
   readonly adapter: Pick<SessionAdapter, 'probeAccount'>;
+  /** Where the models an account lists are kept, once the account check has passed. */
+  readonly lists: AccountLists;
   readonly launcher: Pick<Launcher, 'probe'>;
   readonly startGate: StartGate;
   readonly dataDir: string;
@@ -115,6 +118,7 @@ export function createAccountPreparer(opts: {
       raise(projectId, credentialsCard(account, refusal));
       return;
     }
+    opts.lists.record(account, seen);
     if (!seen.email) {
       raise(projectId, signInCard(account));
       return;

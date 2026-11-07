@@ -54,6 +54,13 @@ export const Effort = {
 } as const;
 export type Effort = ValueOf<typeof Effort>;
 
+const KNOWN_EFFORTS: ReadonlySet<string> = new Set(Object.values(Effort));
+
+/** The efforts among `values` that 10db knows, in order. An agent may report more, such as Codex's `ultra`. */
+export function knownEfforts(values: readonly string[]): Effort[] {
+  return values.filter((value): value is Effort => KNOWN_EFFORTS.has(value));
+}
+
 export const TaskStatus = { Open: 'open', Done: 'done', Cancelled: 'cancelled' } as const;
 export type TaskStatus = ValueOf<typeof TaskStatus>;
 

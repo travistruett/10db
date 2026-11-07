@@ -28,6 +28,7 @@ import {
 } from './account-check';
 import { createChannel } from './channel';
 import { startClaudeLogin, type LoginSpawn } from './claude-connect';
+import { seenModelsFrom } from './claude-model-list';
 import {
   mapSdkMessage,
   toHookOutput,
@@ -986,7 +987,12 @@ async function probeAccount(
       throw new AccountProbeError(
         `Claude Code reported no account within ${String(IDENTITY_PROBE_MS / 1_000)} s`,
       );
-    return seenFrom(info);
+    // The list answers even for a signed-out process, so it is kept apart from the identity: the caller
+    // writes it only after the account check passes. A list that cannot be read leaves the stored one.
+    const models = seenModelsFrom(
+      await settleWithin(clock, q.supportedModels(), IDENTITY_PROBE_MS),
+    );
+    return { ...seenFrom(info), ...(models === undefined ? {} : { models }) };
   } finally {
     input.end();
     abortController.abort();

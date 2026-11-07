@@ -10,7 +10,7 @@ import { CATALOGUE_URL, parseCatalogue, type Catalogue } from './index';
 import { CATALOGUE_SYNC_INTERVAL_MS, createCatalogueSync } from './sync';
 
 const MINUTE = 60 * 1000;
-const FIXTURE_MODELS = 18;
+const FIXTURE_MODELS = 21;
 
 let state: StateStore;
 let close: () => void;
@@ -66,6 +66,7 @@ const catalogueSync = (
   onChanged: (c: Catalogue) => void | Promise<void> = (c) => {
     changed.push(c);
   },
+  afterSync: () => Promise<void> = () => Promise.resolve(),
 ) =>
   createCatalogueSync({
     state: store,
@@ -74,6 +75,7 @@ const catalogueSync = (
     logger: silentLogger,
     snapshot,
     onChanged,
+    afterSync,
   });
 
 describe('catalogue sync', () => {
@@ -244,6 +246,84 @@ describe('catalogue sync', () => {
     const s = catalogueSync(fakeFetch(ok(), ok()));
     await Promise.all([s.sync(), s.sync()]);
     expect(requested).toHaveLength(1);
+  });
+
+  describe('the refresh that follows a fetch', () => {
+    it('runs once after the change is delivered, for the callers that joined the fetch', async () => {
+      const seenAfter: number[] = [];
+      const s = catalogueSync(
+        fakeFetch(ok()),
+        () => null,
+        state,
+        undefined,
+        () => {
+          seenAfter.push(changed.length);
+          return Promise.resolve();
+        },
+      );
+      await Promise.all([s.sync(), s.sync()]);
+      expect(seenAfter).toEqual([1]);
+    });
+
+    it('runs when the fetch failed, so the accounts still refresh against the last catalogue', async () => {
+      let runs = 0;
+      const s = catalogueSync(
+        fakeFetch('network-error'),
+        () => null,
+        state,
+        undefined,
+        () => {
+          runs += 1;
+          return Promise.resolve();
+        },
+      );
+      await s.sync();
+      expect(runs).toBe(1);
+    });
+
+    it('does not reject the sync or stop the daily timer when it throws', async () => {
+      const s = catalogueSync(
+        fakeFetch(ok(), ok()),
+        () => null,
+        state,
+        undefined,
+        () => Promise.reject(new Error('probe failed')),
+      );
+      s.start();
+      await armed();
+      expect(requested).toHaveLength(1);
+      clock.advance(CATALOGUE_SYNC_INTERVAL_MS);
+      await vi.waitFor(() => {
+        expect(requested).toHaveLength(2);
+      });
+      s.stop();
+    });
+
+    it('runs on the daily timer and at start when the stored copy is a day old', async () => {
+      await catalogueSync(fakeFetch(ok())).sync();
+      clock.advance(CATALOGUE_SYNC_INTERVAL_MS);
+      let runs = 0;
+      const s = catalogueSync(
+        fakeFetch(ok(), ok()),
+        () => null,
+        state,
+        undefined,
+        () => {
+          runs += 1;
+          return Promise.resolve();
+        },
+      );
+      s.start();
+      await vi.waitFor(() => {
+        expect(runs).toBe(1);
+      });
+      await armed();
+      clock.advance(CATALOGUE_SYNC_INTERVAL_MS);
+      await vi.waitFor(() => {
+        expect(runs).toBe(2);
+      });
+      s.stop();
+    });
   });
 
   describe('schedule', () => {
