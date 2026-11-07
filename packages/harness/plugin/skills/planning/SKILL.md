@@ -19,8 +19,8 @@ your work after a handoff.
 4. Split the work into steps that each end with a passing check and a commit. Prefer
    several small commits over one large one. Name the tests each step needs: an existing
    test to extend first, otherwise the cheapest test that can fail for the regression you
-   fear. Give each new test, not a new row, a value card:
-   `Value: protects=<behavior>; fails_when=<regression>; why_new=<the tests you checked and what they miss>; seam=<what only the test needs, or none>; no_claim=<what green does not prove>`.
+   fear. Give each new test, not a new case, a value card for its commit to repeat:
+   `Value: protects=<behavior>; fails_when=<regression>; why_new=<tests checked, what they miss>; seam=<test-only code added, or none>; no_claim=<what green does not prove>`.
 5. Write the plan as a short numbered list in your reply, then start step 1.
 
 Record routine engineering choices (library call, file layout, naming) with
