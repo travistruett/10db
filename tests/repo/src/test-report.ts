@@ -46,13 +46,15 @@ export interface Report {
   readonly rows: readonly FileChange[];
   readonly lines: { readonly test: number; readonly code: number };
   readonly missing: Missing;
+  /** Touched test files left out, because `main` changed them after the baseline. */
+  readonly stale: number;
 }
 
 /** Whether a line added to `path` counts as test, as code, or as neither. */
 export function classifyPath(path: string): PathKind {
   if (GENERATED_PREFIXES.some((prefix) => path.startsWith(prefix))) return 'other';
-  if (TEST_PATH.test(path)) return 'test';
-  return CODE_PATH.test(path) ? 'code' : 'other';
+  if (!CODE_PATH.test(path)) return 'other';
+  return TEST_PATH.test(path) ? 'test' : 'code';
 }
 
 /**
@@ -103,16 +105,18 @@ function missingFrom(
 
 /**
  * Compares a pull request with `baseline`, the timings of an earlier commit on `main`. Tests and
- * seconds cover only the test files the pull request touched: the whole suite's seconds move by
- * more between two runs of the same code than one pull request adds, and an older baseline would
- * charge it for what merged since.
+ * seconds cover only the test files the pull request touched, because the whole suite's seconds
+ * move by more between two runs of the same code than one pull request adds. `movedOnMain` lists
+ * what changed between the baseline and the base: comparing those files would charge the pull
+ * request for what merged since, so they are left out.
  */
 export function buildReport(input: {
   readonly current: readonly ShardTimings[];
   readonly baseline: readonly ShardTimings[] | null;
   readonly diff: readonly DiffEntry[];
+  readonly movedOnMain?: readonly string[];
 }): Report {
-  const { current, baseline, diff } = input;
+  const { current, baseline, diff, movedOnMain = [] } = input;
   const lines = { test: 0, code: 0 };
   for (const { path, added } of diff) {
     const kind = classifyPath(path);
@@ -120,14 +124,20 @@ export function buildReport(input: {
   }
   const missing = missingFrom(current, baseline);
   if (missing !== null || baseline === null) {
-    return { tests: null, seconds: null, rows: [], lines, missing };
+    return { tests: null, seconds: null, rows: [], lines, missing, stale: 0 };
   }
   const now = byFile(current);
   const before = byFile(baseline);
+  const moved = new Set(movedOnMain);
+  let stale = 0;
   const rows = diff.flatMap(({ path, oldPath }) => {
     const after = now.get(path);
     const earlier = before.get(oldPath ?? path);
     if (after === undefined && earlier === undefined) return [];
+    if (moved.has(path) || moved.has(oldPath ?? path)) {
+      stale += 1;
+      return [];
+    }
     const tests = (after?.tests ?? 0) - (earlier?.tests ?? 0);
     const seconds = rounded((after?.seconds ?? 0) - (earlier?.seconds ?? 0));
     return tests === 0 && seconds === 0 ? [] : [{ file: path, tests, seconds }];
@@ -139,6 +149,7 @@ export function buildReport(input: {
     rows,
     lines,
     missing,
+    stale,
   };
 }
 
@@ -155,14 +166,14 @@ function ratio({ test, code }: Report['lines']): string {
 
 function why(missing: Missing): string | null {
   if (missing === null) return null;
-  if (missing === 'baseline') return 'No timings from `main` yet, so nothing is compared.';
+  if (missing === 'baseline') return 'No usable timings from `main`, so nothing is compared.';
   if (missing.expected === null) return 'No test shard reported, so nothing is compared.';
   return `Only ${String(missing.reported)} of ${String(missing.expected)} test shards reported, so nothing is compared.`;
 }
 
 /** The comment's Markdown. `baselineSha` is the commit on `main` the report compared with. */
 export function renderReport(report: Report, baselineSha: string | null): string {
-  const { tests, seconds, rows, lines, missing } = report;
+  const { tests, seconds, rows, lines, missing, stale } = report;
   const summary = [
     COMMENT_MARKER,
     '### Tests in this pull request',
@@ -191,9 +202,18 @@ export function renderReport(report: Report, baselineSha: string | null): string
           ...(left > 0 ? [`and ${String(left)} more file${left === 1 ? '' : 's'}.`, ''] : []),
         ];
   const reason = why(missing);
-  const compared = baselineSha === null ? '' : ` against ${codeSpan(baselineSha)} on \`main\``;
+  const sha = tests === null || baselineSha === null ? null : codeSpan(baselineSha);
+  const compared = sha === null ? '' : ` against ${sha} on \`main\``;
+  const leftOut =
+    stale === 0 || sha === null
+      ? []
+      : [
+          `${String(stale)} touched test ${stale === 1 ? 'file is' : 'files are'} left out: ${stale === 1 ? 'it' : 'they'} changed on \`main\` after ${sha}.`,
+          '',
+        ];
   const note =
     `Counts and seconds cover the Vitest files this pull request touched${compared}. ` +
     'Seconds vary between runs. Lines cover every test and code file. This blocks nothing.';
-  return [...summary, ...table, ...(reason === null ? [] : [reason, '']), note, ''].join('\n');
+  const notes = [...(reason === null ? [] : [reason, '']), ...leftOut, note, ''];
+  return [...summary, ...table, ...notes].join('\n');
 }

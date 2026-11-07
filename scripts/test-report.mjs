@@ -2,8 +2,8 @@
 // Writes the pull request's test report: tests added, seconds added and test lines per code line
 // (docs/architecture/decisions/2026-11-06-pull-requests-report-their-test-cost.md). It compares
 // the shards' timings with those of the newest commit on main that has every shard's, which can be
-// older than the base when a run on main was cancelled. Anything it cannot read leaves that number
-// out: the report is informational, so this script has no failure worth failing a job for.
+// older than the base when a run on main was cancelled. Timings it cannot read leave those numbers
+// out, and it exits non-zero with no report only when git cannot give the diff.
 // Usage: REPOSITORY=<owner>/<repo> TIMINGS_DIR=<dir> GH_TOKEN=<token> \
 //   node scripts/test-report.mjs > <body file>
 // Run in the checkout of a pull request's merge commit, with full history.
@@ -94,8 +94,18 @@ const shards = current[0]?.shard.count;
 const found = shards === undefined ? null : findBaseline(repository, shards);
 const downloaded = found === null ? null : downloadBaseline(repository, found);
 const baseline = downloaded?.length === shards ? downloaded : null;
-const diff = parseNumstat(run('git', ['diff', '-z', '--numstat', '-M', 'HEAD^1', 'HEAD']) ?? '');
-const report = buildReport({ current, baseline, diff });
+const numstat = run('git', ['diff', '-z', '--numstat', '-M', 'HEAD^1', 'HEAD']);
+if (numstat === null) process.exit(1);
+const moved =
+  baseline === null || found === null
+    ? ''
+    : (run('git', ['diff', '-z', '--name-only', '--no-renames', found.sha, 'HEAD^1']) ?? '');
+const report = buildReport({
+  current,
+  baseline,
+  diff: parseNumstat(numstat),
+  movedOnMain: moved.split('\0').filter(Boolean),
+});
 process.stdout.write(
   renderReport(report, baseline === null ? null : (found?.sha.slice(0, 7) ?? null)),
 );

@@ -83,7 +83,13 @@ describe('CI workflow', () => {
     // It must still report when a shard failed, and a chain of needs skips without !cancelled().
     expect(jobs['test-report']?.if).toContain('!cancelled()');
     expect(jobs['test-report-post']?.if).toContain('!cancelled()');
-    for (const name of REPORT_JOBS) expect(jobs[name]?.['continue-on-error']).toBe(true);
+    expect(jobs['test-report']?.if).toContain("github.event.pull_request.state == 'open'");
+    // 10db's checks summary reads every check, so a job must not conclude as failed: a job-level
+    // continue-on-error keeps the run green, not necessarily the job's own check.
+    for (const name of REPORT_JOBS) {
+      expect(jobs[name]?.['continue-on-error']).toBeUndefined();
+      for (const step of jobs[name]?.steps ?? []) expect(step['continue-on-error']).toBe(true);
+    }
   });
 
   it('never gives the write token to a job that runs code from the checkout', () => {
@@ -104,6 +110,7 @@ describe('CI workflow', () => {
       step.uses?.startsWith('actions/upload-artifact'),
     );
     expect(upload?.['continue-on-error']).toBe(true);
+    expect(upload?.['timeout-minutes']).toBeGreaterThan(0);
     const steps = jobs['gate-test']?.steps ?? [];
     const gate = steps.findIndex((step) => step.run === 'bash scripts/gate.sh');
     expect(steps.findIndex((step) => step === upload)).toBeGreaterThan(gate);

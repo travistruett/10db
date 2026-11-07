@@ -48,6 +48,8 @@ describe('classifyPath', () => {
     ['generated migrations', 'packages/db/drizzle/0000_baseline.sql', 'other'],
     ['generated migration metadata', 'packages/db/drizzle/meta/_journal.json', 'other'],
     ['a workflow', '.github/workflows/ci.yml', 'other'],
+    ['a manifest beside the tests', 'tests/repo/package.json', 'other'],
+    ['test data', 'apps/desktop/e2e/script-book.json', 'other'],
   ])('%s', (_name, path, kind) => {
     expect(classifyPath(path)).toBe(kind);
   });
@@ -111,6 +113,18 @@ describe('buildReport', () => {
     const report = buildReport({ current, baseline, diff });
     expect(report.tests).toEqual({ added: expected.tests });
     expect(report.seconds).toEqual({ added: expected.seconds });
+  });
+
+  it('leaves out a touched file that main changed after the baseline, and counts it', () => {
+    const report = buildReport({
+      current: [shard(1, [['a.test.ts', 31, 9]]), shard(2, [['b.test.ts', 6, 9]])],
+      baseline,
+      diff: [entry('a.test.ts', 1), entry('b.test.ts', 1)],
+      movedOnMain: ['a.test.ts'],
+    });
+    expect(report.rows).toEqual([{ file: 'b.test.ts', tests: 1, seconds: 1 }]);
+    expect(report.tests).toEqual({ added: 1 });
+    expect(report.stale).toBe(1);
   });
 
   it('adds up a file reported by two shards or projects', () => {
@@ -199,15 +213,29 @@ describe('renderReport', () => {
   });
 
   it.each([
-    ['a missing baseline', null, 1, 'No timings from `main` yet'],
+    ['a missing baseline', null, 1, 'No usable timings from `main`'],
     ['a missing shard', [shard(1, [], 3)], 3, 'Only 1 of 3 test shards reported'],
   ])('says why the comparison is absent with %s', (_name, baseline, count, text) => {
     const body = renderReport(
       buildReport({ current: [shard(1, [], count)], baseline, diff: [] }),
-      null,
+      'abc1234',
     );
     expect(body).toContain(text);
     expect(body).toContain('| Tests added | not compared |');
+    expect(body).not.toContain('abc1234');
+  });
+
+  it('says how many touched files it left out and why', () => {
+    const body = renderReport(
+      buildReport({
+        current: [shard(1, [['a.test.ts', 2, 2]], 1)],
+        baseline: [shard(1, [['a.test.ts', 1, 1]], 1)],
+        diff: [entry('a.test.ts', 1)],
+        movedOnMain: ['a.test.ts'],
+      }),
+      'abc1234',
+    );
+    expect(body).toContain('1 touched test file is left out: it changed on `main` after `abc1234`');
   });
 
   it('cannot break out of a code span with a file name', () => {
@@ -295,7 +323,14 @@ describe('scripts/test-report.mjs', () => {
         args: artifacts(1),
         stdout: JSON.stringify({ artifacts: [{ name: 'test-timings-1', expired: false }] }),
       },
-      { args: 'run download 1' },
+      {
+        args: 'run download 1',
+        downloads: {
+          'test-timings-1/test-timings.json': JSON.stringify(
+            shard(1, [['src/a.test.ts', 3, 0.5]], 1),
+          ),
+        },
+      },
     ]);
     expect(result.status).toBe(0);
     const calls = result.calls.map(({ args }) => args);
@@ -303,6 +338,8 @@ describe('scripts/test-report.mjs', () => {
       expect.stringContaining('run download 1 -R owner/repo -p test-timings-*'),
     ]);
     expect(calls.some((args) => args.startsWith(artifacts(4)))).toBe(false);
+    expect(result.stdout).toContain('| Tests added | +1 |');
+    expect(result.stdout).toContain('| Seconds added | +0.5 s |');
   });
 
   it('still reports the lines when GitHub cannot be reached, and leaves the rest out', () => {
@@ -310,7 +347,7 @@ describe('scripts/test-report.mjs', () => {
     expect(result.status).toBe(0);
     expect(result.stdout.startsWith(COMMENT_MARKER)).toBe(true);
     expect(result.stdout).toContain('| Test lines per code line | 4.00 (4 test, 1 code) |');
-    expect(result.stdout).toContain('No timings from `main` yet');
+    expect(result.stdout).toContain('No usable timings from `main`');
   });
 
   it('reports without asking GitHub when no shard left its timings', () => {

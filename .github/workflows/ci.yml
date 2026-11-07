@@ -98,6 +98,7 @@ jobs:
       # job upload again.
       - if: ${{ !cancelled() }}
         continue-on-error: true
+        timeout-minutes: 2
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-timings-${{ matrix.shard }}
@@ -257,69 +258,82 @@ jobs:
 
   # Comments on a pull request with its tests added, seconds added and test lines per code line
   # (decisions/2026-11-06-pull-requests-report-their-test-cost.md). Informational: no ruleset
-  # requires either job and each continues on error, so neither can hold a merge. The work is split
-  # because a lane writes the code this job runs: it gets a read-only token, and the one job with
-  # write access runs nothing from the checkout. A fork's token could not comment.
+  # requires either job. Every step continues on error rather than the job, so a failure can't show
+  # as a failed check, which 10db's checks summary reads. The work is split because a lane writes
+  # the code this job runs: it gets a read-only token, and the one job with write access runs
+  # nothing from the checkout. A fork's token could not comment.
   test-report:
     needs: gate-test
-    if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
-    continue-on-error: true
+    # An edit to a merged pull request runs on main's ref, where HEAD^1 is not its base.
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.state == 'open' && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     permissions:
       actions: read
       contents: read
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Finds which runs on main are ancestors of the pull request's base.
           fetch-depth: 0
           persist-credentials: false
-      - uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
+      - continue-on-error: true
+        uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
         with:
           version: 2026.10.25
           install_args: node pnpm
-      - run: pnpm install --frozen-lockfile
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - continue-on-error: true
+        run: pnpm install --frozen-lockfile
+      - continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: test-timings-*
           path: ${{ runner.temp }}/test-timings
       - name: Write the report
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
           TIMINGS_DIR: ${{ runner.temp }}/test-timings
         run: node scripts/test-report.mjs > "$RUNNER_TEMP/test-report.md"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+      - continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: test-report
           path: ${{ runner.temp }}/test-report.md
+          if-no-files-found: ignore
           overwrite: true
           retention-days: 1
 
   test-report-post:
     needs: test-report
     if: ${{ !cancelled() && needs.test-report.result == 'success' }}
-    continue-on-error: true
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       pull-requests: write
     steps:
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: test-report
-          path: ${{ runner.temp }}
+          path: ${{ runner.temp }}/test-report
       - name: Update the comment, or add it
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           MARKER: <!-- 10db:test-report -->
         run: |
+          body="$RUNNER_TEMP/test-report/test-report.md"
+          [ -s "$body" ] || exit 0
           comments="repos/$REPOSITORY/issues/$PR_NUMBER/comments"
-          existing=$(gh api --paginate "$comments" --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | startswith(env.MARKER))) | .id' | head -n 1)
-          jq -Rs '{body: .}' "$RUNNER_TEMP/test-report.md" > "$RUNNER_TEMP/comment.json"
+          # Not piped: a failed read must stop here, or it would add a second comment.
+          found=$(gh api --paginate "$comments" --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | startswith(env.MARKER))) | .id')
+          existing=${found%%$'\n'*}
+          jq -Rs '{body: .}' "$body" > "$RUNNER_TEMP/comment.json"
           if [ -n "$existing" ]; then
             gh api -X PATCH "repos/$REPOSITORY/issues/comments/$existing" --input "$RUNNER_TEMP/comment.json" > /dev/null
           else

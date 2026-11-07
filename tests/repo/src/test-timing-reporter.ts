@@ -7,7 +7,7 @@ import type { ShardTimings } from './test-report';
  * A file's seconds with its imports, setup and `beforeAll`. Vitest's JSON reporter measures from the
  * first test's start to the last test's end, which leaves out what a shared fixture costs.
  */
-export function moduleTiming(root: string, module: TestModule): ShardTimings['files'][number] {
+function moduleTiming(root: string, module: TestModule): ShardTimings['files'][number] {
   const { environmentSetupDuration, prepareDuration, collectDuration, setupDuration, duration } =
     module.diagnostic();
   const milliseconds =
@@ -39,7 +39,13 @@ export class TestTimingReporter implements Reporter {
       shard,
       files: modules.map((module) => moduleTiming(root, module)),
     };
-    mkdirSync(dirname(this.path), { recursive: true });
-    writeFileSync(this.path, JSON.stringify(timings));
+    // A reporter's error fails the run, and this runs inside a required check for a number that
+    // is only informational. No file reads as a shard that didn't report.
+    try {
+      mkdirSync(dirname(this.path), { recursive: true });
+      writeFileSync(this.path, JSON.stringify(timings));
+    } catch (error) {
+      process.stderr.write(`test timings not written: ${String(error)}\n`);
+    }
   }
 }
