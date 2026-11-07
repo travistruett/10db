@@ -3407,7 +3407,7 @@ describe('flows', () => {
     expect(ws(workstream.id)).toMatchObject({
       state: 'QUEUED',
       stepIndex: 1,
-      model: 'opus',
+      model: 'claude-opus-5-5',
       effort: 'medium',
     });
     engine.launch(workstream.id);
@@ -3488,10 +3488,10 @@ describe('flows', () => {
       'The review step (Reviewer) rejected the work',
     );
     expect(step(workstream.id, 0)).toMatchObject({
-      model: 'opus',
+      model: 'claude-opus-5-5',
       effort: 'low',
       attempts: 1,
-      reason: 'escalated from sonnet@high after the review step rejected it',
+      reason: 'escalated from claude-sonnet-5-5@high after the review step rejected it',
     });
     expect(ws(workstream.id).attempt).toBe(1);
     engine.launch(workstream.id); // the second gate passed; review again
@@ -4105,10 +4105,12 @@ describe('flows', () => {
     expect(ws(workstream.id)).toMatchObject({
       state: 'QUEUED',
       nextAction: { kind: 'fix' },
-      model: 'opus',
+      model: 'claude-opus-5-5',
       effort: 'low',
     });
-    expect(step(workstream.id, 0)?.reason).toBe('escalated from sonnet@high after the gate failed');
+    expect(step(workstream.id, 0)?.reason).toBe(
+      'escalated from claude-sonnet-5-5@high after the gate failed',
+    );
     expect(ws(workstream.id).attempt).toBe(1);
     expect(step(workstream.id, 0)?.attempts).toBe(1);
     await until(workstream.id, (s) => s === 'DONE');

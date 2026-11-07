@@ -31,11 +31,9 @@ import {
   deleteAppSetting,
   deleteJudgeCallsBefore,
   lanesByAccount,
-  getAccount,
   getAccountRow,
   getAppSetting,
   getProject,
-  listModelProfiles,
   listPermissionRules,
   listProjects,
   migrateDatabase,
@@ -134,7 +132,7 @@ import {
   withdrawStaleClaimWaits,
 } from '../mcp';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
-import { offeredModels, offeredProfiles, roleDefault } from '../routing';
+import { chooseModel, offeredModels, PLAN_NEED } from '../routing';
 import { createScreenBroker, createScreens, renderMayRead } from '../screens';
 import { createShapeJev, createShapeService } from '../shape';
 import { createKnowledgeServices } from './knowledge-services';
@@ -185,7 +183,7 @@ import {
   type SelfUpdate,
 } from '../self-update';
 import type { SessionAdapter } from '../sessions';
-import { seedTeam } from '../team';
+import { routingInputs, seedTeam } from '../team';
 import { createGateRunner, createGateSlots, limitGates } from '../verify';
 import { CLIENT_APP } from '../version';
 import { createWatcher, systemWatch, type WatchFn } from '../watcher';
@@ -1055,6 +1053,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     providerOf(getAccountRow(db, getProject(db, projectId).accountId).kind) === Provider.Codex
       ? BRAINSTORM_REFUSED_ON_CHATGPT
       : null;
+  // The model a Plan conversation runs on: what the builder's settings choose for the plan role.
+  const planModel = (project: ProjectDto) =>
+    chooseModel({
+      ...routingInputs(db, project),
+      def: { role: StepRole.Plan, need: PLAN_NEED },
+      persona: undefined,
+      task: { riskTags: [], acceptanceCriteria: [], areas: [], modelSetting: null },
+      project,
+      stakes: { retry: false },
+    }).profile ?? undefined;
   const laneSandbox = sandboxes?.lane ?? null;
   const shape = createShapeService({
     state,
@@ -1099,39 +1107,23 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       // A conversation that can't run on the project's account has no model to choose.
       if (brainstormRefusal(projectId) !== null) return { default: null, offered: [] };
       const project = getProject(db, projectId);
-      const offered = offeredProfiles(
-        listModelProfiles(db),
-        getAccount(db, project.accountId).settings.aliases,
-      );
-      const plan = roleDefault({
-        provider: project.provider,
-        role: StepRole.Plan,
-        floor: null,
-        profiles: offered,
-      })?.profile;
-      return { default: plan?.model ?? null, offered: offeredModels(offered) };
+      const inputs = routingInputs(db, project);
+      return {
+        default: planModel(project)?.model ?? null,
+        offered: offeredModels(inputs.profiles),
+      };
     },
     launch(projectId, chosen) {
       const project = getProject(db, projectId);
       const row = getAccountRow(db, project.accountId);
       const refusal = brainstormRefusal(projectId);
       if (refusal !== null) throw new InvalidError(refusal);
-      const profile = roleDefault({
-        provider: project.provider,
-        role: StepRole.Plan,
-        floor: null,
-        profiles: offeredProfiles(
-          listModelProfiles(db),
-          getAccount(db, project.accountId).settings.aliases,
-        ),
-      })?.profile;
+      const profile = planModel(project);
       if (profile === undefined)
         throw new InvalidError(`${row.label} offers no model for planning`);
       // The builder's pick runs at the plan role's effort, while the account still offers it; one it has
       // stopped offering since gives way to the role's.
-      const offered = offeredModels(
-        offeredProfiles(listModelProfiles(db), getAccount(db, project.accountId).settings.aliases),
-      );
+      const offered = offeredModels(routingInputs(db, project).profiles);
       const session = launcher.session(
         row,
         chosen !== null && offered.includes(chosen) ? chosen : profile.model,

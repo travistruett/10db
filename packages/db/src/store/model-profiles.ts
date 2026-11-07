@@ -182,6 +182,7 @@ export function recordProfileOutcome(
 }
 
 const CATALOGUE_FIELDS = [
+  'enabled',
   'maker',
   'family',
   'tier',
@@ -189,12 +190,12 @@ const CATALOGUE_FIELDS = [
   'inputPrice',
   'outputPrice',
   'releaseDate',
-] as const satisfies readonly (keyof ProfileCatalogueFields)[];
+] as const satisfies readonly (keyof CataloguedModelProfile)[];
 
 /**
- * Writes what the catalogue says about each profile, creating a profile the table lacks. A profile
- * that exists keeps its scores, `enabled` flag and AA slug; only a row whose catalogue fields change
- * is written, and each such row appends an event.
+ * Writes what the catalogue says about each profile, creating a profile the table lacks. `enabled` says
+ * whether routing may pick the model, which the catalogue decides. A profile that exists keeps its scores
+ * and AA slug; only a row whose catalogue fields or `enabled` change is written, and each such row appends an event.
  */
 export function upsertModelProfiles(
   ctx: WriteContext,
@@ -220,11 +221,12 @@ export function upsertModelProfiles(
 function writeCatalogueFields(
   ctx: WriteContext,
   id: ModelProfileId,
-  fields: ProfileCatalogueFields,
+  fields: ProfileCatalogueFields & Pick<NewModelProfile, 'enabled'>,
 ): void {
   ctx.tx
     .update(schema.modelProfiles)
     .set({
+      enabled: fields.enabled,
       maker: fields.maker,
       family: fields.family,
       tier: fields.tier,

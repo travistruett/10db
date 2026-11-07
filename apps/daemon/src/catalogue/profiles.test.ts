@@ -115,7 +115,7 @@ const byModel = (provider: Provider) => {
 };
 
 describe('reconcileProfiles', () => {
-  it('writes one profile per model and effort, disabled, from the catalogue', () => {
+  it('writes one profile per model and effort, on when ranked and current, from the catalogue', () => {
     const sub = account(AccountKind.ClaudeSubscription, 'sub');
     list(sub, AccountKind.ClaudeSubscription, [
       seen('opus', 'claude-opus-5-5', ['low', 'max']),
@@ -129,7 +129,7 @@ describe('reconcileProfiles', () => {
       ]),
     );
     expect(findModelProfile(store.db, Provider.Claude, 'claude-opus-5-5', 'max')).toMatchObject({
-      enabled: false,
+      enabled: true,
       aaSlug: null,
       maker: 'anthropic',
       family: 'claude-opus',
@@ -177,14 +177,16 @@ describe('reconcileProfiles', () => {
     expect(status('claude-haiku-4-5-20251001')).toMatchObject({
       tier: null,
       status: ModelStatus.Superseded,
+      enabled: false,
     });
     expect(status('claude-haiku-5-5')).toMatchObject({
       tier: ModelTier.Fast,
       status: ModelStatus.Current,
+      enabled: true,
     });
   });
 
-  it('keeps what is already there: enabled, scores, step counts and seeded alias rows', () => {
+  it('keeps scores, step counts and the slug, and sets enabled from what the accounts offer', () => {
     const sub = account(AccountKind.ClaudeSubscription, 'sub');
     list(sub, AccountKind.ClaudeSubscription, [seen('opus', 'claude-opus-5-5', ['low'])]);
     const { seed, existing } = store.write((ctx) => {
@@ -200,7 +202,7 @@ describe('reconcileProfiles', () => {
         model: 'claude-opus-5-5',
         effort: 'low',
         aaSlug: 'slug',
-        enabled: true,
+        enabled: false,
       });
       applyAaMeasurement(ctx, made.id, {
         scores: { intelligence: 40, coding: 41, agentic: 42 },
@@ -215,7 +217,7 @@ describe('reconcileProfiles', () => {
     reconcile();
     expect(findModelProfile(store.db, Provider.Claude, 'sonnet', 'low')).toMatchObject({
       id: seed.id,
-      enabled: true,
+      enabled: false,
       maker: null,
     });
     expect(findModelProfile(store.db, Provider.Claude, 'claude-opus-5-5', 'low')).toMatchObject({
@@ -361,9 +363,10 @@ describe('reconcileProfiles', () => {
     const sub = account(AccountKind.ClaudeSubscription, 'sub');
     reconcile();
     // With no list the maker's models are assumed and ranked.
-    expect(findModelProfile(store.db, Provider.Claude, 'claude-haiku-5-5', 'low')?.tier).toBe(
-      ModelTier.Fast,
-    );
+    expect(findModelProfile(store.db, Provider.Claude, 'claude-haiku-5-5', 'low')).toMatchObject({
+      tier: ModelTier.Fast,
+      enabled: true,
+    });
     store.write((ctx) => {
       const row = findModelProfile(ctx.tx, Provider.Claude, 'claude-haiku-5-5', 'low');
       if (row) recordProfileOutcome(ctx, row.id, { firstPass: true, escalated: false });
@@ -373,6 +376,7 @@ describe('reconcileProfiles', () => {
     expect(findModelProfile(store.db, Provider.Claude, 'claude-haiku-5-5', 'low')).toMatchObject({
       tier: null,
       status: null,
+      enabled: false,
       stepsRun: 1,
       maker: 'anthropic',
     });

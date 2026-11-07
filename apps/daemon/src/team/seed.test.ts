@@ -13,7 +13,7 @@ import {
 import { readDefaultPersonas } from '@10db/harness';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createEventBus, createStateStore, type StateStore } from '../events';
-import { DEFAULT_FLOWS, SEED_PROFILES } from '../routing';
+import { DEFAULT_FLOWS } from '../routing';
 import { seedTeam } from './seed';
 
 let state: StateStore;
@@ -28,22 +28,9 @@ afterEach(() => {
 });
 
 describe('seedTeam', () => {
-  it('seeds unmeasured profiles, the flows, the personas and the builder', () => {
+  it('seeds the flows, the personas and the builder, and no model profile', () => {
     seedTeam(state, readDefaultPersonas());
-    const profiles = listModelProfiles(state.db);
-    expect(profiles).toHaveLength(SEED_PROFILES.length);
-    expect(
-      profiles.every(
-        (p) => p.scores.coding === null && p.costPerTaskUsd === null && p.source === 'aa',
-      ),
-    ).toBe(true);
-    expect(profiles.find((p) => p.model === 'opus' && p.effort === 'high')?.aaSlug).toBe(
-      'claude-opus-5-5-high',
-    );
-    expect(profiles.find((p) => p.model === 'opus' && p.effort === 'max')?.aaSlug).toBe(
-      'claude-opus-5-5',
-    );
-    expect(profiles.filter((p) => p.model === 'fable').every((p) => !p.enabled)).toBe(true);
+    expect(listModelProfiles(state.db)).toEqual([]);
     expect(
       listFlows(state.db)
         .map((f) => f.name)
@@ -67,7 +54,6 @@ describe('seedTeam', () => {
       patchPersona(ctx, reviewer.id, { instructions: 'Mine now.', archived: true }),
     );
     seedTeam(state, readDefaultPersonas());
-    expect(listModelProfiles(state.db)).toHaveLength(SEED_PROFILES.length);
     expect(listPersonas(state.db, { includeArchived: true })).toHaveLength(5);
     expect(findPersonaByKey(state.db, 'reviewer')).toMatchObject({
       instructions: 'Mine now.',

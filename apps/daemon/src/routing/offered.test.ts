@@ -1,40 +1,87 @@
-import type { ModelProfileDto } from '@10db/contracts';
+import { mintId, ModelStatus, type AccountModelDto } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { offeredModels, offeredProfiles } from './index';
-import { testCatalogue } from './test-catalogue';
+import { offeredModels, offeredProfiles } from './offered';
+import { testCatalogue, unscoredCatalogue } from './test-catalogue';
+
+const NOW = '2026-10-17T12:00:00.000Z';
+const account = mintId('Account');
+const offer = (model: string, over: Partial<AccountModelDto> = {}): AccountModelDto => ({
+  accountId: account,
+  model,
+  family: null,
+  launchId: model,
+  efforts: [],
+  unusable: false,
+  inputPrice: null,
+  outputPrice: null,
+  lastSeenAt: NOW,
+  ...over,
+});
+const names = (profiles: readonly { model: string; effort: string }[]) =>
+  profiles.map((p) => `${p.model}@${p.effort}`).sort();
 
 describe('offeredProfiles', () => {
-  it('keeps every profile when the account lists no aliases, and only its aliases when it does', () => {
-    const all = testCatalogue();
-    expect(offeredProfiles(all, undefined)).toEqual(all);
-    const offered = offeredProfiles(all, ['mid']);
-    expect(offered.length).toBeGreaterThan(0);
-    expect(new Set(offered.map((p) => p.model))).toEqual(new Set(['mid']));
+  const all = testCatalogue();
+  it.each([
+    {
+      name: 'only the models the account lists',
+      offers: [offer('mid')],
+      want: ['mid@high', 'mid@low'],
+    },
+    {
+      name: 'every effort when the list reports none for a model',
+      offers: [offer('big', { efforts: [] })],
+      want: ['big@high', 'big@max'],
+    },
+    {
+      name: 'only the efforts the list reports',
+      offers: [offer('big', { efforts: ['max'] })],
+      want: ['big@max'],
+    },
+    {
+      name: 'nothing from a model marked unusable',
+      offers: [offer('mid', { unusable: true }), offer('small')],
+      want: ['small@high', 'small@low'],
+    },
+    { name: 'nothing when the list names no profile', offers: [offer('ghost')], want: [] },
+  ])('keeps $name', ({ offers, want }) => {
+    expect(names(offeredProfiles(all, offers, 'claude'))).toEqual(want);
+  });
+
+  it('assumes an account with no list offers every profile of its provider', () => {
+    const codex = testCatalogue().map((p) => ({ ...p, provider: 'codex' as const }));
+    expect(offeredProfiles([...all, ...codex], [], 'codex')).toEqual(codex);
+    expect(offeredProfiles(all, [], 'claude')).toEqual(all);
+  });
+
+  it('keeps only the account’s provider, even where a list names another provider’s model', () => {
+    const codex = testCatalogue().map((p) => ({ ...p, provider: 'codex' as const }));
+    expect(offeredProfiles([...all, ...codex], [offer('mid')], 'codex')).toEqual(
+      codex.filter((p) => p.model === 'mid'),
+    );
   });
 });
 
 describe('offeredModels', () => {
-  const [first] = testCatalogue();
-  if (first === undefined) throw new Error('the test catalogue is empty');
-  const profile = (model: string, enabled = true): ModelProfileDto => ({
-    ...first,
-    model,
-    enabled,
-    provider: 'claude',
+  it('lists each model once, the weakest tier first and the cheapest first within it', () => {
+    const profiles = unscoredCatalogue({}, ['big', 'peak', 'small', 'mid']);
+    expect(offeredModels(profiles)).toEqual(['small', 'mid', 'big', 'peak']);
   });
 
-  it('lists each Claude Code alias an account offers once, weakest first, enabled for routing or not', () => {
+  it('leaves out a replaced or retired model, and puts an unranked one last', () => {
     const profiles = [
-      profile('fable', false),
-      profile('opus'),
-      profile('opus'),
-      profile('haiku'),
-      profile('sonnet'),
+      ...unscoredCatalogue({}, ['small', 'mid']).map((p) =>
+        p.model === 'small' ? { ...p, status: ModelStatus.Superseded } : p,
+      ),
+      ...unscoredCatalogue({}, ['big']).map((p) => ({ ...p, status: ModelStatus.Retired })),
+      ...unscoredCatalogue({}, ['peak']).map((p) => ({
+        ...p,
+        model: 'house',
+        tier: null,
+        status: ModelStatus.Unknown,
+        outputPrice: null,
+      })),
     ];
-    expect(offeredModels(profiles)).toEqual(['haiku', 'sonnet', 'opus', 'fable']);
-  });
-
-  it('leaves out a model the catalogue does not rank', () => {
-    expect(offeredModels([profile('mid')])).toEqual([]);
+    expect(offeredModels(profiles)).toEqual(['mid', 'house']);
   });
 });

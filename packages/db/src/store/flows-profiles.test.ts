@@ -138,7 +138,7 @@ describe('model profiles', () => {
     releaseDate: '2026-09-01',
   } as const;
 
-  it('upserts catalogue fields, leaving scores, the enabled flag and the id as they were', () => {
+  it('upserts catalogue fields and the enabled flag, leaving scores and the id as they were', () => {
     const { events } = store.write((ctx) => {
       upsertModelProfiles(ctx, [catalogued]);
     });
@@ -153,9 +153,10 @@ describe('model profiles', () => {
     });
 
     store.write((ctx) => applyAaMeasurement(ctx, first.id, measurement));
-    store.write((ctx) => patchModelProfile(ctx, first.id, { enabled: false }));
     store.write((ctx) => {
-      upsertModelProfiles(ctx, [{ ...catalogued, status: 'superseded', inputPrice: 2 }]);
+      upsertModelProfiles(ctx, [
+        { ...catalogued, status: 'superseded', inputPrice: 2, enabled: false },
+      ]);
     });
     const second = listModelProfiles(store.db);
     expect(second).toHaveLength(1);
@@ -176,6 +177,17 @@ describe('model profiles', () => {
       upsertModelProfiles(ctx, [catalogued]);
     });
     expect(events).toEqual([]);
+  });
+
+  it('writes a change to the enabled flag alone', () => {
+    store.write((ctx) => {
+      upsertModelProfiles(ctx, [catalogued]);
+    });
+    const { events } = store.write((ctx) => {
+      upsertModelProfiles(ctx, [{ ...catalogued, enabled: false }]);
+    });
+    expect(events.map((e) => e.type)).toEqual([EventType.ModelProfileSaved]);
+    expect(findModelProfile(store.db, 'claude', 'sonnet', 'high')?.enabled).toBe(false);
   });
 });
 

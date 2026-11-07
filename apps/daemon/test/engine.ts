@@ -79,6 +79,7 @@ import { FakeAdapter, type FakeScriptBook } from '../src/sessions';
 import { createGateRunner } from '../src/verify';
 import { retryWorkstream, seedTeam, startTaskWithPlan } from '../src/team';
 import { measureForTests } from './catalogue';
+import { seedProfiles } from './seed-profiles';
 import { createMemoryKeychain, createTempRepo, tempDir } from './fixtures';
 
 export interface TestEngine {
@@ -162,6 +163,7 @@ export async function createTestEngine(
   const { store, close } = createTestStore(() => clock.now());
   const state = createStateStore(store, createEventBus());
   seedTeam(state, readDefaultPersonas());
+  seedProfiles(state);
   measureForTests(state);
   const adapter = new FakeAdapter(book);
   const live = createLiveSessions();

@@ -23,6 +23,7 @@ import { createEventBus, createStateStore } from '../events';
 import { createGit } from '../git';
 import { createInboxService } from '../inbox';
 import { silentLogger } from '../log';
+import { seedProfiles } from '../../test/seed-profiles';
 import { seedTeam, startTaskWithPlan } from '../team';
 import { createWatcher, type WatchFn } from '../watcher';
 import { createScheduler } from './index';
@@ -55,6 +56,7 @@ describe('a lane for a task filed from a proposal', () => {
     const state = createStateStore(store, bus);
     const clock = new ManualClock(new Date(2026, 9, 31, 12));
     seedTeam(state, readDefaultPersonas());
+    seedProfiles(state);
     const inbox = createInboxService({ state, onParkedAnswer: () => undefined });
     const pauses = createAccountPauses({
       state,

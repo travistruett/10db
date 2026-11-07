@@ -1,43 +1,10 @@
-import { Effort, ModelTier, StepRole, type FlowInput, type Provider } from '@10db/contracts';
-
-export interface SeedProfile {
-  readonly provider: Provider;
-  readonly model: string;
-  readonly effort: Effort;
-  readonly aaSlug: string;
-  readonly enabled: boolean;
-}
-
-/**
- * Claude Code's model aliases, weakest first, with each one's tier and the AA family it maps to; the
- * slugs only, never AA's data.
- */
-const FAMILIES = [
-  { model: 'haiku', tier: ModelTier.Fast, aaFamily: 'claude-haiku-5-5', enabled: true },
-  { model: 'sonnet', tier: ModelTier.Balanced, aaFamily: 'claude-sonnet-5-5', enabled: true },
-  { model: 'opus', tier: ModelTier.Strongest, aaFamily: 'claude-opus-5-5', enabled: true },
-  // Claude Code accepts the alias. Off for routing all the same: a tier as strong as opus's, it would
-  // take every plan and review step unasked. A Plan conversation's model picker offers it.
-  { model: 'fable', tier: ModelTier.Strongest, aaFamily: 'claude-fable-5-1', enabled: false },
-] as const;
-
-/** Claude Code's models, weakest first, with each one's tier. */
-export const MODEL_TIERS: readonly { readonly model: string; readonly tier: ModelTier }[] =
-  FAMILIES.map(({ model, tier }) => ({ model, tier }));
-
-/** AA lists `max` under the family slug and every other effort as `<family>-<effort>`. */
-export const SEED_PROFILES: readonly SeedProfile[] = FAMILIES.flatMap((family) =>
-  Object.values(Effort).map((effort) => ({
-    provider: 'claude' as const,
-    model: family.model,
-    effort,
-    aaSlug: effort === Effort.Max ? family.aaFamily : `${family.aaFamily}-${effort}`,
-    enabled: family.enabled,
-  })),
-);
+import { StepRole, type FlowInput } from '@10db/contracts';
 
 /** Starting needs, in the role's index points (spec §15): heuristics to tune, not AA data. */
 const NEED = { plan: 45, planReview: 48, implement: 40, review: 48, qa: 35 } as const;
+
+/** The need a Plan conversation's model is chosen for: the plan step's. */
+export const PLAN_NEED = NEED.plan;
 
 export const DEFAULT_FLOWS: readonly FlowInput[] = [
   { name: 'quick', steps: [{ role: StepRole.Implement, need: NEED.implement }] },

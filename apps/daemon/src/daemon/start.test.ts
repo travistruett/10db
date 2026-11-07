@@ -47,6 +47,7 @@ import { z } from 'zod';
 import { WebSocket } from 'ws';
 import { apiClient, quickFlowId } from '../../test/api-client';
 import { readModelsDevFixture } from '../../test/models-dev-fixture';
+import { seedProfiles } from '../../test/seed-profiles';
 import { FakeGh } from '../../test/fake-gh';
 import {
   createTempRepo,
@@ -1472,16 +1473,15 @@ describe('startDaemon', () => {
       return { adapter, fetches, net, running: daemon };
     };
 
-    it('builds disabled profiles from each account list after the fetch, beside the seeded ones, and a second call joins a run', async () => {
+    it('builds profiles from each account list after the fetch, and a second call joins a run', async () => {
       const { adapter, fetches, running } = await startWithList(true);
       await waitFor(() => listAccountModels(running.state.db).length > 0);
       expect(listAccountModels(running.state.db).map((m) => m.model)).toEqual(['claude-opus-5-5']);
       expect(findModelProfile(running.state.db, 'claude', 'claude-opus-5-5', 'low')).toMatchObject({
-        enabled: false,
+        enabled: true,
         tier: 'strongest',
         outputPrice: 20,
       });
-      expect(findModelProfile(running.state.db, 'claude', 'sonnet', 'high')?.enabled).toBe(true);
 
       const before = { fetches: fetches.length, probes: adapter.probes.length };
       await Promise.all([
@@ -1655,8 +1655,12 @@ describe('startDaemon', () => {
         outcome: 'no_key',
         models: 0,
       });
+      // With the catalogue fetch off, nothing builds profiles; the fixture's stand in for an account's list.
+      seedProfiles(daemon.state);
       const profiles = await api.get('/model-profiles', z.array(ModelProfileDto));
-      const sonnetHigh = profiles.find((p) => p.model === 'sonnet' && p.effort === 'high');
+      const sonnetHigh = profiles.find(
+        (p) => p.model === 'claude-sonnet-5-5' && p.effort === 'high',
+      );
       if (!sonnetHigh) throw new Error('not seeded');
       // Hand-set (invented) scores: the profile becomes manual and the only measured one.
       expect(
@@ -1679,8 +1683,8 @@ describe('startDaemon', () => {
       const plan = await api.get(`/tasks/${task.id}/step-plan`, StepPlanDto);
       expect(plan).toMatchObject({ flowName: 'standard', overBudget: [] });
       expect(plan.steps.map((s) => `${s.role}:${s.model}@${s.effort}`)).toEqual([
-        'implement:sonnet@high',
-        'review:sonnet@high',
+        'implement:claude-sonnet-5-5@high',
+        'review:claude-sonnet-5-5@high',
       ]);
       await api.patch(`/projects/${project.id}`, ProjectDto, { budgetCeiling: 1 });
       await expect(api.post(`/tasks/${task.id}/start`, WorkstreamDto)).rejects.toThrow('-> 400');

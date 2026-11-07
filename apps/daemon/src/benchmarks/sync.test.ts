@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { silentLogger } from '../log';
+import { seedProfiles } from '../../test/seed-profiles';
 import { seedTeam } from '../team';
 import { AA_FREE_MODELS_URL, AA_MAX_PAGES } from './aa-client';
 import { AA_SYNC_INTERVAL_MS, createBenchmarkSync } from './index';
@@ -89,9 +90,13 @@ const sync = (
     readKey: () => key,
     logger: silentLogger,
   });
-const opusHigh = () => findModelProfile(state.db, 'claude', 'opus', 'high');
+const opusHigh = () => findModelProfile(state.db, 'claude', 'claude-opus-5-5', 'high');
 
 describe('benchmark sync', () => {
+  beforeEach(() => {
+    seedProfiles(state);
+  });
+
   it('stores every page and measures the profiles whose slug AA lists', async () => {
     const status = await sync(
       fakeFetch(
@@ -118,9 +123,9 @@ describe('benchmark sync', () => {
       indexVersion: '9.9',
     });
     expect(status).toMatchObject({ outcome: 'ok', models: 3, keyConfigured: true });
-    expect(status.unmeasuredProfiles).toContain('opus@medium');
-    expect(status.unmeasuredProfiles).not.toContain('opus@high');
-    expect(status.unmeasuredProfiles).not.toContain('fable@max'); // disabled profiles are not reported
+    expect(status.unmeasuredProfiles).toContain('claude-opus-5-5@medium');
+    expect(status.unmeasuredProfiles).not.toContain('claude-opus-5-5@high');
+    expect(status.unmeasuredProfiles).not.toContain('claude-opus-5@max'); // disabled profiles are not reported
   });
 
   it.each([
@@ -198,7 +203,7 @@ describe('benchmark sync', () => {
   });
 
   it('clears a profile AA stops listing, names it, and leaves manual profiles alone', async () => {
-    const manual = findModelProfile(state.db, 'claude', 'sonnet', 'high');
+    const manual = findModelProfile(state.db, 'claude', 'claude-sonnet-5-5', 'high');
     if (!manual) throw new Error('not seeded');
     state.write((ctx) => patchModelProfile(ctx, manual.id, { costPerTaskUsd: 9 }));
     await sync(
@@ -213,8 +218,8 @@ describe('benchmark sync', () => {
       scores: { intelligence: null, coding: null, agentic: null },
       costPerTaskUsd: null,
     });
-    expect(status.unmeasuredProfiles).toContain('opus@high');
-    expect(findModelProfile(state.db, 'claude', 'sonnet', 'high')).toMatchObject({
+    expect(status.unmeasuredProfiles).toContain('claude-opus-5-5@high');
+    expect(findModelProfile(state.db, 'claude', 'claude-sonnet-5-5', 'high')).toMatchObject({
       source: 'manual',
       costPerTaskUsd: 9,
     });
@@ -249,7 +254,7 @@ describe('benchmark sync', () => {
     };
     const status = await sync(fakeFetch({ status: 200, body: page([unpriced], false) })).sync();
     expect(status.outcome).toBe('ok');
-    expect(status.unmeasuredProfiles).toContain('opus@high');
+    expect(status.unmeasuredProfiles).toContain('claude-opus-5-5@high');
   });
 
   it('reports a listed profile with no coding or agentic score as missing scores, not unmeasured', async () => {
@@ -258,12 +263,12 @@ describe('benchmark sync', () => {
       evaluations: { artificial_analysis_intelligence_index: 50 },
     };
     const status = await sync(fakeFetch({ status: 200, body: page([partial], false) })).sync();
-    expect(status.unmeasuredProfiles).not.toContain('opus@high');
+    expect(status.unmeasuredProfiles).not.toContain('claude-opus-5-5@high');
     expect(status.missingScores).toContainEqual({
-      profile: 'opus@high',
+      profile: 'claude-opus-5-5@high',
       kinds: ['coding', 'agentic'],
     });
-    expect(status.missingScores.map((m) => m.profile)).not.toContain('fable@max');
+    expect(status.missingScores.map((m) => m.profile)).not.toContain('claude-opus-5@max');
   });
 
   it('reports a listed profile with no intelligence score as unmeasured', async () => {
@@ -274,9 +279,9 @@ describe('benchmark sync', () => {
     const status = await sync(
       fakeFetch({ status: 200, body: page([noIntelligence], false) }),
     ).sync();
-    expect(status.unmeasuredProfiles).toContain('opus@high');
+    expect(status.unmeasuredProfiles).toContain('claude-opus-5-5@high');
     expect(status.missingScores).toContainEqual({
-      profile: 'opus@high',
+      profile: 'claude-opus-5-5@high',
       kinds: ['intelligence', 'agentic'],
     });
   });
@@ -285,10 +290,10 @@ describe('benchmark sync', () => {
     const status = await sync(
       fakeFetch({ status: 200, body: page([entry('claude-opus-5-5-high', 50)], false) }),
     ).sync();
-    expect(status.unmeasuredProfiles).toContain('opus@medium');
-    expect(status.missingScores.map((m) => m.profile)).not.toContain('opus@medium');
-    expect(status.unmeasuredProfiles).not.toContain('opus@high');
-    expect(status.missingScores.map((m) => m.profile)).not.toContain('opus@high');
+    expect(status.unmeasuredProfiles).toContain('claude-opus-5-5@medium');
+    expect(status.missingScores.map((m) => m.profile)).not.toContain('claude-opus-5-5@medium');
+    expect(status.unmeasuredProfiles).not.toContain('claude-opus-5-5@high');
+    expect(status.missingScores.map((m) => m.profile)).not.toContain('claude-opus-5-5@high');
   });
 
   it('reads a status stored before missing scores were recorded', () => {
@@ -300,13 +305,13 @@ describe('benchmark sync', () => {
         lastSuccessAt: null,
         outcome: null,
         message: 'stored earlier',
-        unmeasuredProfiles: ['opus@low'],
+        unmeasuredProfiles: ['claude-opus-5-5@low'],
       });
     });
     expect(s.status()).toMatchObject({
       keyConfigured: true,
       message: 'stored earlier',
-      unmeasuredProfiles: ['opus@low'],
+      unmeasuredProfiles: ['claude-opus-5-5@low'],
       missingScores: [],
       indexVersion: null,
     });

@@ -1,20 +1,43 @@
-import { MODEL_TIERS } from './catalogue';
-import type { ModelProfileDto } from '@10db/contracts';
+import {
+  ModelStatus,
+  type AccountModelDto,
+  type ModelProfileDto,
+  type Provider,
+} from '@10db/contracts';
+import { modelsByPrice, tierLevel } from './pools';
 
-/** The profiles an account offers: those whose alias it lists, or every one when it lists none (spec §3). */
+/**
+ * The profiles an account offers: those of a model it lists, at an effort it lists (every effort when it lists
+ * none for the model), leaving out a model marked unusable. An account that has not listed its models yet is
+ * assumed to offer every profile of its provider.
+ */
 export function offeredProfiles(
   profiles: readonly ModelProfileDto[],
-  aliases: readonly string[] | undefined,
+  accountModels: readonly AccountModelDto[],
+  provider: Provider,
 ): ModelProfileDto[] {
-  return aliases === undefined ? [...profiles] : profiles.filter((p) => aliases.includes(p.model));
+  const ofProvider = profiles.filter((p) => p.provider === provider);
+  if (accountModels.length === 0) return ofProvider;
+  const listed = new Map(accountModels.map((m) => [m.model, m]));
+  return ofProvider.filter((p) => {
+    const offer = listed.get(p.model);
+    return (
+      offer !== undefined &&
+      !offer.unusable &&
+      (offer.efforts.length === 0 || offer.efforts.includes(p.effort))
+    );
+  });
 }
 
 /**
- * The Claude Code aliases among the profiles an account offers, each once and weakest first: what a
- * conversation's model picker lists (Shape spec §5.1). A profile off for routing is still a model the
- * builder may choose by hand.
+ * The models among the profiles an account offers, each once, weakest tier first and cheapest first within
+ * it: what a conversation's model picker lists. A model off for routing, or not ranked, is still one the
+ * builder may choose by hand; a replaced or retired one is not.
  */
 export function offeredModels(profiles: readonly ModelProfileDto[]): string[] {
-  const held = new Set(profiles.map((p) => p.model));
-  return MODEL_TIERS.map((t) => t.model).filter((model) => held.has(model));
+  const choosable = profiles.filter(
+    (p) => p.status !== ModelStatus.Superseded && p.status !== ModelStatus.Retired,
+  );
+  const tierOf = new Map(choosable.map((p) => [p.model, p.tier === null ? 3 : tierLevel(p.tier)]));
+  return modelsByPrice(choosable).sort((a, b) => (tierOf.get(a) ?? 3) - (tierOf.get(b) ?? 3));
 }

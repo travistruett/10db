@@ -103,11 +103,12 @@ function collectOffers(ctx: WriteContext, catalogue: Catalogue): Offer[] {
  * Writes a `model_profiles` row for every model and effort an account offers, joined to the catalogue: its
  * maker, family, list price and release date, and the tier and status the offered models rank to. Only the
  * maker's own entries are ranked and priced; a model known only through Bedrock's copy gets no tier and no
- * price. Rows are written disabled, so nothing routes on them until a router reads them. An account with no
+ * price. A row is enabled for routing when its model is ranked and current; a superseded, retired, unknown
+ * or unranked model is disabled, and so is a profile no account offers. An account with no
  * list yet offers its maker's models, unranked while another account of the maker has a real list. A model the
  * runtime cannot run is listed in the account's rows only. A model the catalogue lacks is written Unknown.
- * Profiles that exist keep their scores, step counts and `enabled`; a profile no account offers any more loses
- * its tier and status. A second call with nothing changed writes nothing.
+ * Profiles that exist keep their scores and step counts; a profile no account offers any more loses its tier and
+ * status. A second call with nothing changed writes nothing.
  */
 export function reconcileProfiles(ctx: WriteContext, catalogue: Catalogue): void {
   const offers = collectOffers(ctx, catalogue);
@@ -135,7 +136,7 @@ export function reconcileProfiles(ctx: WriteContext, catalogue: Catalogue): void
         model: offer.model,
         effort,
         aaSlug: null,
-        enabled: false,
+        enabled: derived?.status === ModelStatus.Current,
         maker: known?.maker ?? null,
         family: known?.family ?? null,
         tier: derived?.tier ?? null,
@@ -148,8 +149,8 @@ export function reconcileProfiles(ctx: WriteContext, catalogue: Catalogue): void
   }
   for (const p of listModelProfiles(ctx.tx)) {
     if (wanted.has(JSON.stringify([p.provider, p.model, p.effort]))) continue;
-    if (p.tier === null && p.status === null) continue;
-    rows.push({ ...p, tier: null, status: null });
+    if (p.tier === null && p.status === null && !p.enabled) continue;
+    rows.push({ ...p, tier: null, status: null, enabled: false });
   }
   upsertModelProfiles(ctx, rows);
 }

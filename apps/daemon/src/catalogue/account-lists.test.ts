@@ -75,7 +75,7 @@ describe('recording an account list', () => {
     expect(stored()).toEqual(['claude-haiku-5-5', 'claude-opus-5-5']);
     expect(profileModels().sort()).toEqual(['claude-haiku-5-5', 'claude-opus-5-5']);
     expect(
-      listModelProfiles(store.db).every((p) => p.provider === Provider.Claude && !p.enabled),
+      listModelProfiles(store.db).every((p) => p.provider === Provider.Claude && p.enabled),
     ).toBe(true);
   });
 

@@ -1,32 +1,36 @@
 import {
   ROLE_LABEL,
-  ROLE_SCORE,
-  ScoreKind,
   StepRole,
   ToolAccess,
   type FlowDto,
   type FlowStepDef,
   type ModelProfileDto,
+  type ModelTier,
+  type PatternDto,
   type PersonaDto,
   type ProjectDto,
+  type RoleSettingDto,
   type StepPlanDto,
   type TeamBinding,
   type WorkstreamStep,
 } from '@10db/contracts';
 import { DEFAULT_PERSONA_FOR } from './catalogue';
-import { higherFloor, stepFloor } from './floors';
-import { roleDefault } from './role-defaults';
-import { NoProfileError, route, UnmeasuredError } from './router';
-import { skipReason, type TaskShape } from './skip-rules';
+import { chooseModel, type ChooseTask } from './choose-model';
+import { skipReason } from './skip-rules';
+import { ROLE_DEFAULT } from './role-defaults';
 
 export interface PlanInput {
   readonly flow: FlowDto;
-  readonly task: TaskShape;
-  readonly project: Pick<ProjectDto, 'provider' | 'budgetCeiling'>;
+  readonly task: ChooseTask;
+  readonly project: Pick<ProjectDto, 'id' | 'budgetCeiling'>;
   /** Personas that may play a role: archived ones are left out by the caller. */
   readonly personas: readonly PersonaDto[];
   readonly bindings: readonly TeamBinding[];
+  /** What the project's account offers, already narrowed by `offeredProfiles`. */
   readonly profiles: readonly ModelProfileDto[];
+  readonly roleSettings: readonly RoleSettingDto[];
+  readonly patterns: readonly PatternDto[];
+  readonly tierOverrides: Readonly<Partial<Record<ModelTier, string>>>;
 }
 
 /**
@@ -47,99 +51,45 @@ function personaFor(def: FlowStepDef, input: PlanInput): PersonaDto | undefined 
   );
 }
 
-/** The indefinite article for a score kind's name. */
-const article = (kind: ScoreKind): string => (kind === ScoreKind.Coding ? 'a' : 'an');
-
 function routedStep(
   def: FlowStepDef,
   persona: PersonaDto | undefined,
   input: PlanInput,
 ): WorkstreamStep {
-  const kind = ROLE_SCORE[def.role];
-  const base = {
+  const choice = chooseModel({
+    def,
+    persona,
+    task: input.task,
+    project: input.project,
+    profiles: input.profiles,
+    roleSettings: input.roleSettings,
+    patterns: input.patterns,
+    tierOverrides: input.tierOverrides,
+    stakes: { retry: false },
+  });
+  return {
     role: def.role,
     personaId: persona?.id ?? null,
     personaName: persona?.name ?? ROLE_LABEL[def.role],
     tools: def.role === StepRole.Implement ? ToolAccess.Edit : ToolAccess.ReadOnly,
-    score: kind,
+    score: choice.score,
     need: def.need,
     status: 'pending',
     attempts: 0,
     startedAt: null,
     sessionFloor: 0,
     result: null,
-  } as const;
-  const pin = persona?.modelPin ?? null;
-  if (pin && persona) {
-    const pinned = input.profiles.find(
-      (p) =>
-        p.provider === input.project.provider && p.model === pin.model && p.effort === pin.effort,
-    );
-    return {
-      ...base,
-      earlier: [],
-      sentBack: 0,
-      setting: null,
-      profileId: pinned?.id ?? null,
-      model: pin.model,
-      effort: pin.effort,
-      reason: `pinned by ${persona.key}`,
-      overBudget: false,
-      pinned: true,
-    };
-  }
-  const personaFloor =
-    persona && persona.minimumScore !== null
-      ? { minimum: persona.minimumScore, why: `${persona.key} minimum` }
-      : { minimum: 0, why: null };
-  const floor = higherFloor(stepFloor(def.role, input.task.riskTags), personaFloor);
-  try {
-    const choice = route({
-      provider: input.project.provider,
-      role: def.role,
-      need: def.need,
-      floor,
-      budgetCeiling: input.project.budgetCeiling,
-      profiles: input.profiles,
-    });
-    return {
-      ...base,
-      earlier: [],
-      sentBack: 0,
-      setting: null,
-      score: choice.score,
-      profileId: choice.profile.id,
-      model: choice.profile.model,
-      effort: choice.profile.effort,
-      reason: choice.reason,
-      overBudget: choice.overBudget,
-      pinned: false,
-    };
-  } catch (error) {
-    if (!(error instanceof UnmeasuredError)) throw error;
-    const fallback = roleDefault({
-      provider: input.project.provider,
-      role: def.role,
-      floor: floor.minimum > def.need ? floor.why : null,
-      profiles: input.profiles,
-    });
-    if (!fallback)
-      throw new NoProfileError(
-        `No enabled ${input.project.provider} profile the account offers is one of Claude Code's models`,
-      );
-    return {
-      ...base,
-      earlier: [],
-      sentBack: 0,
-      setting: null,
-      profileId: fallback.profile.id,
-      model: fallback.profile.model,
-      effort: fallback.profile.effort,
-      reason: `${fallback.reason}; no profile has ${article(error.kind)} ${error.kind} score to compare on yet (sync Artificial Analysis to route by score)`,
-      overBudget: false,
-      pinned: false,
-    };
-  }
+    earlier: [],
+    sentBack: 0,
+    setting: choice.setting,
+    // With nothing to run on, the step names the tier and has no profile; the launcher never starts a tier name.
+    profileId: choice.profile?.id ?? null,
+    model: choice.profile?.model ?? choice.tier,
+    effort: choice.profile?.effort ?? ROLE_DEFAULT[def.role].effort,
+    reason: choice.reason,
+    overBudget: choice.overBudget,
+    pinned: choice.pinned,
+  };
 }
 
 /** Resolves a flow into the steps a workstream runs. Skipped steps are left out. */

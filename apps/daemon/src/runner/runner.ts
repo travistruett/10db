@@ -45,7 +45,6 @@ import {
   activeClaims,
   clearLease,
   endSession,
-  getAccount,
   getAccountRow,
   getBatch,
   getJudgeConfig,
@@ -65,7 +64,6 @@ import {
   insertSource,
   latestHandoffForStep,
   latestToolOp,
-  listModelProfiles,
   listPermissionRules,
   listSessions,
   listEvidence,
@@ -154,7 +152,7 @@ import type { Logger } from '../log';
 import { mintSessionToken } from '../mcp';
 import { allowedToolsFor, laneAutoMode, storableRule } from '../permissions';
 import { takeFoundHostsReading } from '../registries';
-import { escalateStep, offeredProfiles } from '../routing';
+import { retryStep } from '../routing';
 import {
   fileAccessJudge,
   SandboxProfileError,
@@ -176,6 +174,7 @@ import {
   countSendBack,
   failStep,
   moveAfter,
+  routingInputs,
   sendBackSteps,
   sendBackTarget,
   type StepEntry,
@@ -761,14 +760,16 @@ export function createRunner(opts: RunnerOptions): Runner {
     why: string,
   ): { step: WorkstreamStep; moved: boolean } {
     const project = getProject(db, row.projectId);
-    const result = escalateStep(step, {
-      provider: project.provider,
-      budgetCeiling: project.budgetCeiling,
-      profiles: offeredProfiles(
-        listModelProfiles(db),
-        getAccount(db, project.accountId).settings.aliases,
-      ),
-      why,
+    const inputs = routingInputs(db, project);
+    const result = retryStep(step, {
+      choose: {
+        ...inputs,
+        def: { role: step.role, need: step.need },
+        persona: step.personaId ? getPersona(db, step.personaId) : undefined,
+        task: getTask(db, row.taskId),
+        project,
+      },
+      escalate: { budgetCeiling: project.budgetCeiling, profiles: inputs.profiles, why },
     });
     return { step: result.step, moved: result.escalated };
   }

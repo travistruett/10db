@@ -10,6 +10,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { apiClient } from '../../test/api-client';
+import { seedProfiles } from '../../test/seed-profiles';
 import { createTempRepo, tempDir, waitForAsync } from '../../test/fixtures';
 import { pngImage } from '../../test/png';
 import { FakeAdapter, scriptedShapeBehaviour } from '../sessions';
@@ -66,6 +67,8 @@ async function startOnTheFake(): Promise<ReturnType<typeof apiClient>> {
     caffeinate: () => null,
     watch: false,
   });
+  // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
+  seedProfiles(daemon.state);
   return apiClient(daemon.url, daemon.token);
 }
 
