@@ -17,6 +17,7 @@ import {
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
+import { commitIn, onOrigin, opened, pathOf } from '../../test/delivery-worlds';
 import { isolatedGitEnv } from '../../test/fixtures';
 import { createGit, parseWorktreeList, type GitTrustError } from '../git';
 import { createInboxService } from '../inbox';
@@ -71,48 +72,10 @@ function worktreePaths(): string[] {
   ).map((e) => (existsSync(e.path) ? realpathSync(e.path) : e.path));
 }
 
-function pathOf(batch: BatchDto): string {
-  if (batch.worktreePath === null) throw new Error(`batch ${batch.title} has no worktree path`);
-  return batch.worktreePath;
-}
-
-/** The SHA of `branch` on origin, or null when origin doesn't have it. */
-function onOrigin(branch: string | null): string | null {
-  try {
-    return h.origin$('rev-parse', '--verify', '-q', `refs/heads/${branch ?? ''}`);
-  } catch {
-    return null;
-  }
-}
-
-/** Starts one task and waits for its worktree. */
-async function opened(title = 'Alpha'): Promise<{ batch: BatchDto; ws: WorkstreamDto }> {
-  const started = h.starter.startTask(h.addTask(title).id);
-  await h.jobs.idle();
-  const batch = getBatch(h.store.db, started.id);
-  expect(batch.state).toBe('OPEN');
-  return { batch, ws: h.only(listWorkstreams(h.store.db, { batchId: batch.id })) };
-}
-
-/** Commits a file in the batch's worktree as the commit tool does for an agent; returns the SHA. */
-async function commitIn(batch: BatchDto, path: string, content = `${path}\n`): Promise<string> {
-  const file = join(pathOf(batch), path);
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, content);
-  const { sha } = await h.git.commit({
-    repo: pathOf(batch),
-    paths: [path],
-    message: `Add ${path}`,
-    opId: `op-${path}-${String(content.length)}`,
-    branch: batch.branch ?? '',
-  });
-  return sha;
-}
-
 /** A batch whose work finished and whose gate failed: what Retry starts from. */
 async function failedAfterWork(): Promise<{ batch: BatchDto; ws: WorkstreamDto; head: string }> {
-  const { batch, ws } = await opened();
-  const head = await commitIn(batch, 'src/api/alpha.txt');
+  const { batch, ws } = await opened(h);
+  const head = await commitIn(h, batch, 'src/api/alpha.txt');
   h.settle(ws.id, 'DONE');
   h.state.write((c) =>
     transitionBatch(c, batch.id, { to: 'FAILED', patch: { failure: 'gate_failed' } }),
@@ -147,9 +110,9 @@ function mainCheckout() {
 describe('shipping a worktree batch', () => {
   it('ships a worktree batch: gate in its worktree, its branch pushed, one PR titled after the task, the worktree removed and the main checkout untouched', async () => {
     // A lowercase title, so the PR title shows it unchanged after the prefix.
-    const { batch, ws } = await opened('add the alpha widget');
+    const { batch, ws } = await opened(h, { title: 'add the alpha widget' });
     const wt = pathOf(batch);
-    const head = await commitIn(batch, 'src/api/alpha.txt');
+    const head = await commitIn(h, batch, 'src/api/alpha.txt');
     h.state.write((c) => {
       setAppSetting(c, `checkout_pin.${batch.id}`, { kept: true });
       setAppSetting(c, `worktree_lockfile.${batch.id}`, 'a lockfile blob');
@@ -167,7 +130,7 @@ describe('shipping a worktree batch', () => {
     const shipped = getBatch(h.store.db, batch.id);
     expect(shipped.state).toBe('SHIPPED');
     expect(readFileSync(gateOut, 'utf8').trim()).toBe(wt);
-    expect(onOrigin(batch.branch)).toBe(head);
+    expect(onOrigin(h, batch.branch)).toBe(head);
     expect(h.gh.prCreates()).toMatchObject([
       { title: 'feat(app): add the alpha widget', head: batch.branch },
     ]);
@@ -182,7 +145,7 @@ describe('shipping a worktree batch', () => {
   });
 
   it("drops its tasks' kept starts on the merged base when the batch's worktree goes", async () => {
-    const { batch, ws } = await opened('Alpha');
+    const { batch, ws } = await opened(h);
     h.git$('update-ref', `refs/10db/${basename(h.worktreeRoot)}/starts/${ws.id}`, 'HEAD');
     h.settle(ws.id, 'DONE');
     h.shipper.checkBatch(batch.id);
@@ -192,7 +155,7 @@ describe('shipping a worktree batch', () => {
   });
 
   it('closes a worktree batch with no commits, removes the worktree and deletes its branch at the base', async () => {
-    const { batch, ws } = await opened('Alpha');
+    const { batch, ws } = await opened(h);
     h.settle(ws.id, 'DONE');
     h.shipper.checkBatch(batch.id);
     await h.jobs.idle();
@@ -205,8 +168,8 @@ describe('shipping a worktree batch', () => {
   });
 
   it("keeps a CLOSED batch's branch that moved", async () => {
-    const { batch } = await opened('Alpha');
-    const moved = await commitIn(batch, 'src/api/late.txt');
+    const { batch } = await opened(h);
+    const moved = await commitIn(h, batch, 'src/api/late.txt');
     h.state.write((c) => {
       transitionBatch(c, batch.id, { to: 'SHIPPING' });
       transitionBatch(c, batch.id, { to: 'CLOSED' });
@@ -221,9 +184,9 @@ describe('shipping a worktree batch', () => {
   });
 
   it("fails with the worktree's path when it has uncommitted changes", async () => {
-    const { batch, ws } = await opened('Alpha');
+    const { batch, ws } = await opened(h);
     const wt = pathOf(batch);
-    await commitIn(batch, 'src/api/alpha.txt');
+    await commitIn(h, batch, 'src/api/alpha.txt');
     writeFileSync(join(wt, 'src', 'api', 'stray.txt'), 'not committed\n');
     h.settle(ws.id, 'DONE');
     h.shipper.checkBatch(batch.id);
@@ -237,7 +200,7 @@ describe('shipping a worktree batch', () => {
     expect(card.body).toContain(wt);
     expect(card.body).toContain('src/api/stray.txt');
     expect(existsSync(join(wt, 'src', 'api', 'stray.txt'))).toBe(true);
-    expect(onOrigin(batch.branch)).toBeNull();
+    expect(onOrigin(h, batch.branch)).toBeNull();
   });
 });
 
@@ -251,8 +214,8 @@ describe("the base, brought into a worktree batch's branch before the shipping g
   }
 
   it("gates and pushes the branch merged with main as origin has it now, and reads the PR's base from it", async () => {
-    const { batch, ws } = await opened();
-    const head = await commitIn(batch, 'src/api/alpha.txt');
+    const { batch, ws } = await opened(h);
+    const head = await commitIn(h, batch, 'src/api/alpha.txt');
     const teammate = h.teammatePush('main', 'src/ui/teammate.txt');
     // Passes only where main's newer commit is in the worktree.
     gate('test -f src/ui/teammate.txt');
@@ -261,7 +224,7 @@ describe("the base, brought into a worktree batch's branch before the shipping g
 
     expect(shipped.state).toBe('SHIPPED');
     expect(shipped.baseSha).toBe(teammate);
-    const tip = onOrigin(batch.branch) ?? '';
+    const tip = onOrigin(h, batch.branch) ?? '';
     expect(h.origin$('log', '-1', '--format=%P', tip)).toBe(`${head} ${teammate}`);
     expect(h.origin$('ls-tree', '-r', '--name-only', tip).split('\n')).toEqual(
       expect.arrayContaining(['src/api/alpha.txt', 'src/ui/teammate.txt']),
@@ -271,15 +234,15 @@ describe("the base, brought into a worktree batch's branch before the shipping g
   });
 
   it("ships the branch as it is when it conflicts with main, with no card; the tasks say the pull request conflicts once the worktree's own notice goes", async () => {
-    const { batch, ws } = await opened();
+    const { batch, ws } = await opened(h);
     // Both sides add the file: no session can see the choice in markers, so it stays the builder's.
-    const head = await commitIn(batch, 'src/api/both.txt');
+    const head = await commitIn(h, batch, 'src/api/both.txt');
     h.teammatePush('main', 'src/api/both.txt', 'theirs\n');
 
     const shipped = await ship(batch, ws);
 
     expect(shipped.state).toBe('SHIPPED');
-    expect(onOrigin(batch.branch)).toBe(head);
+    expect(onOrigin(h, batch.branch)).toBe(head);
     // The shipping gate meets the conflict and raises nothing: the pull request shows it now.
     expect(listInbox(h.store.db, {})).toEqual([]);
     const [notice, ...rest] = getBatch(h.store.db, batch.id).notices;
@@ -294,7 +257,7 @@ describe("the base, brought into a worktree batch's branch before the shipping g
   });
 
   it("clears the batch's base notices, and closes the cards an earlier build raised, when its worktree goes", async () => {
-    const { batch, ws } = await opened();
+    const { batch, ws } = await opened(h);
     const path = pathOf(batch);
     h.state.write((w) => {
       setBatchNotice(w, batch.id, baseNotices.conflict(batch, path, ['README.md']));
@@ -319,8 +282,8 @@ describe("the base, brought into a worktree batch's branch before the shipping g
   });
 
   it('names what kept main out in the card of a shipping gate that failed', async () => {
-    const { batch, ws } = await opened();
-    await commitIn(batch, 'src/api/both.txt');
+    const { batch, ws } = await opened(h);
+    await commitIn(h, batch, 'src/api/both.txt');
     h.teammatePush('main', 'src/api/both.txt', 'theirs\n');
     gate('false');
 
@@ -329,14 +292,14 @@ describe("the base, brought into a worktree batch's branch before the shipping g
     expect(failed.state).toBe('FAILED');
     const card = h.cards().find((c) => c.title.includes('the gate failed'));
     expect(card?.body).toMatch(/^origin\/main conflicts with this branch in src\/api\/both\.txt/);
-    expect(onOrigin(batch.branch)).toBeNull();
+    expect(onOrigin(h, batch.branch)).toBeNull();
   });
 
   describe('a conflict whose markers a session can resolve, met at the shipping gate', () => {
     /** Both sides changed the one line of README.md. */
     async function overlapping() {
-      const { batch, ws } = await opened();
-      const own = await commitIn(batch, 'README.md', '# ours\n');
+      const { batch, ws } = await opened(h);
+      const own = await commitIn(h, batch, 'README.md', '# ours\n');
       const teammate = h.teammatePush('main', 'README.md', '# theirs\n');
       return { batch, ws, own, teammate };
     }
@@ -357,7 +320,7 @@ describe("the base, brought into a worktree batch's branch before the shipping g
 
       expect(reopened).toMatchObject({ state: 'OPEN', failure: null });
       expect(existsSync(gateOut)).toBe(false);
-      expect(onOrigin(batch.branch)).toBeNull();
+      expect(onOrigin(h, batch.branch)).toBeNull();
       expect(h.cards()).toEqual([]);
       expect(gitIn(pathOf(batch), 'log', '-1', '--format=%P')).toBe(`${own} ${teammate}`);
       expect(readFileSync(join(pathOf(batch), 'README.md'), 'utf8')).toContain('<<<<<<< ');
@@ -397,7 +360,7 @@ describe("the base, brought into a worktree batch's branch before the shipping g
       const { batch, ws } = await overlapping();
       await ship(batch, ws);
       const next = queuedBeside(batch, ws);
-      await commitIn(batch, 'README.md', '# ours and theirs\n');
+      await commitIn(h, batch, 'README.md', '# ours and theirs\n');
       // The worktree goes once the batch ships.
       const worktree = realpathSync(pathOf(batch));
 
@@ -407,7 +370,7 @@ describe("the base, brought into a worktree batch's branch before the shipping g
 
       expect(getBatch(h.store.db, batch.id).state).toBe('SHIPPED');
       expect(readFileSync(gateOut, 'utf8').trim()).toBe(worktree);
-      const tip = onOrigin(batch.branch) ?? '';
+      const tip = onOrigin(h, batch.branch) ?? '';
       expect(h.origin$('show', `${tip}:README.md`)).toBe('# ours and theirs');
       expect(h.cards()).toEqual([]);
     });
@@ -436,14 +399,14 @@ describe("the base, brought into a worktree batch's branch before the shipping g
 
   it('merges nothing for a project with no gate: the builder checked the work as it is', async () => {
     h.state.write((c) => patchProject(c, h.project.id, { gateCommand: null }));
-    const { batch, ws } = await opened();
-    const head = await commitIn(batch, 'src/api/alpha.txt');
+    const { batch, ws } = await opened(h);
+    const head = await commitIn(h, batch, 'src/api/alpha.txt');
     h.teammatePush('main', 'src/ui/teammate.txt');
 
     const shipped = await ship(batch, ws);
 
     expect(shipped.state).toBe('SHIPPED');
-    expect(onOrigin(batch.branch)).toBe(head);
+    expect(onOrigin(h, batch.branch)).toBe(head);
   });
 });
 
@@ -515,7 +478,7 @@ describe('Retry of a FAILED worktree batch', () => {
     if (shipped) {
       expect(now.state).toBe('SHIPPED');
       expect(readFileSync(gateOut, 'utf8').trim()).toBe(wt);
-      expect(onOrigin(batch.branch)).toBe(head);
+      expect(onOrigin(h, batch.branch)).toBe(head);
       expect(h.gh.prCreates()).toHaveLength(1);
       expect(now.worktreePath).toBeNull();
       expect(worktreePaths()).toEqual([realpathSync(h.repo)]);
@@ -525,7 +488,7 @@ describe('Retry of a FAILED worktree batch', () => {
     expect(h.only(h.cards()).body).toContain(wt);
     expect(readFileSync(join(wt, 'README.md'), 'utf8')).toBe('# the builder was here\n');
     expect(gitIn(wt, 'branch', '--show-current')).toBe('other');
-    expect(onOrigin(batch.branch)).toBeNull();
+    expect(onOrigin(h, batch.branch)).toBeNull();
     expect(h.gh.prCreates()).toEqual([]);
   });
 
@@ -621,7 +584,7 @@ describe('Retry of a FAILED worktree batch', () => {
   });
 
   it('Retry with unfinished work reopens only after the worktree is whole', async () => {
-    const { batch, ws } = await opened();
+    const { batch, ws } = await opened(h);
     const wt = pathOf(batch);
     h.state.write((c) =>
       transitionBatch(c, batch.id, { to: 'FAILED', patch: { failure: 'wrong_branch' } }),
@@ -667,7 +630,7 @@ describe('Retry of a FAILED worktree batch', () => {
   });
 
   it('a workstream Retry in a FAILED worktree batch reopens it through the cut queue', async () => {
-    const { batch, ws } = await opened();
+    const { batch, ws } = await opened(h);
     const wt = pathOf(batch);
     h.settle(ws.id, 'FAILED');
     h.state.write((c) =>
@@ -708,9 +671,9 @@ describe('Retry of a FAILED worktree batch', () => {
 
 describe('Abandon of a worktree batch', () => {
   it('removes a clean worktree and clears its path', async () => {
-    const { batch } = await opened();
+    const { batch } = await opened(h);
     const wt = pathOf(batch);
-    await commitIn(batch, 'src/api/alpha.txt');
+    await commitIn(h, batch, 'src/api/alpha.txt');
     expect(h.shipper.abandon(batch.id).state).toBe('ABANDONED');
     await h.jobs.idle();
     expect(getBatch(h.store.db, batch.id).worktreePath).toBeNull();
@@ -723,7 +686,7 @@ describe('Abandon of a worktree batch', () => {
   });
 
   it('keeps a dirty worktree, keeps its path and names it with --force --force', async () => {
-    const { batch } = await opened();
+    const { batch } = await opened(h);
     const wt = pathOf(batch);
     writeFileSync(join(wt, 'notes.txt'), 'not committed\n');
     h.shipper.abandon(batch.id);
@@ -740,7 +703,7 @@ describe('Abandon of a worktree batch', () => {
   });
 
   it('retireWorktree itself keeps an ABANDONED worktree with uncommitted changes', async () => {
-    const { batch } = await opened();
+    const { batch } = await opened(h);
     const wt = pathOf(batch);
     writeFileSync(join(wt, 'notes.txt'), 'not committed\n');
     h.state.write((c) => transitionBatch(c, batch.id, { to: 'ABANDONED' }));
@@ -757,7 +720,7 @@ describe('Abandon of a worktree batch', () => {
   });
 
   it('keeps a clean worktree git no longer trusts, and removes nothing', async () => {
-    const { batch } = await opened();
+    const { batch } = await opened(h);
     const wt = pathOf(batch);
     h.state.write((c) => transitionBatch(c, batch.id, { to: 'ABANDONED' }));
     const { ctx, refusals } = unpinned();
@@ -867,9 +830,9 @@ describe('a finished worktree with git-ignored files', () => {
     },
   ])('$name: kept $kept', async ({ to, patterns, tracked, files, kept }) => {
     ignore(...(patterns ?? ['.env', '.env.*', '.DS_Store', 'dist/', 'node_modules/']));
-    const { batch } = await opened();
+    const { batch } = await opened(h);
     const wt = pathOf(batch);
-    for (const file of tracked ?? []) await commitIn(batch, file);
+    for (const file of tracked ?? []) await commitIn(h, batch, file);
     write(wt, files);
     h.state.write((c) => {
       if (to === 'CLOSED') transitionBatch(c, batch.id, { to: 'SHIPPING' });
@@ -904,9 +867,9 @@ describe('a finished worktree with git-ignored files', () => {
 
   it("keeps a shipped batch's worktree that holds a .env, and raises one card however often it retires", async () => {
     ignore('.env');
-    const { batch, ws } = await opened();
+    const { batch, ws } = await opened(h);
     const wt = pathOf(batch);
-    await commitIn(batch, 'src/api/alpha.txt');
+    await commitIn(h, batch, 'src/api/alpha.txt');
     write(wt, ['.env']);
     h.settle(ws.id, 'DONE');
     h.shipper.checkBatch(batch.id);
@@ -919,7 +882,7 @@ describe('a finished worktree with git-ignored files', () => {
 
   it('keeps a worktree whose git dir 10db will not read through, with a card, and removes nothing', async () => {
     ignore('.env');
-    const { batch } = await opened();
+    const { batch } = await opened(h);
     const wt = pathOf(batch);
     write(wt, ['.env']);
     // `git worktree repair` under `worktree.useRelativePaths=true` leaves a relative gitfile.
@@ -947,7 +910,7 @@ describe('a finished worktree with git-ignored files', () => {
 
   it('lists every git-ignored file its command removes beside the uncommitted changes', async () => {
     ignore('.env', '*.tsbuildinfo');
-    const { batch } = await opened();
+    const { batch } = await opened(h);
     const wt = pathOf(batch);
     write(wt, ['.env', 'notes.txt', 'tsconfig.tsbuildinfo']);
     h.state.write((c) => transitionBatch(c, batch.id, { to: 'ABANDONED' }));
@@ -977,7 +940,7 @@ describe('a finished worktree with git-ignored files', () => {
     'withdraws the card for a worktree kept for $name once the worktree is removed',
     async ({ to, files, why }) => {
       ignore('.env');
-      const { batch } = await opened();
+      const { batch } = await opened(h);
       const wt = pathOf(batch);
       write(wt, files);
       h.state.write((c) => {

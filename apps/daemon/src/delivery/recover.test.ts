@@ -14,6 +14,7 @@ import {
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
+import { onOrigin } from '../../test/delivery-worlds';
 import { SANDBOXED, waitFor } from '../../test/fixtures';
 import { alive, orphanGateGroup } from '../../test/orphan-gate';
 import { ManualClock } from '../clock';
@@ -57,14 +58,6 @@ async function shippingAfterCrash(): Promise<BatchDto> {
   const batch = await openBatch();
   for (const ws of listWorkstreams(h.store.db, { batchId: batch.id })) h.settle(ws.id, 'DONE');
   return h.state.write((c) => transitionBatch(c, batch.id, { to: 'SHIPPING' }));
-}
-
-function onOrigin(branch: string | null): string | null {
-  try {
-    return h.origin$('rev-parse', '--verify', '-q', `refs/heads/${branch ?? ''}`);
-  } catch {
-    return null;
-  }
 }
 
 describe('recoverBatches', () => {
@@ -289,7 +282,9 @@ describe('recoverBatches', () => {
         prUrl: 'https://github.com/acme/widgets/pull/1',
       });
       expect(h.gh.calls.filter((c) => c.method === 'prCreate')).toHaveLength(1);
-      expect(onOrigin(batch.branch)).toBe(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`));
+      expect(onOrigin(h, batch.branch)).toBe(
+        h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`),
+      );
     },
   );
 
@@ -340,7 +335,7 @@ describe('shutdown while shipping', () => {
         gateExitCode: null,
       });
       expect(alive(pid)).toBe(false);
-      expect(onOrigin(batch.branch)).toBeNull();
+      expect(onOrigin(h, batch.branch)).toBeNull();
     },
   );
 });

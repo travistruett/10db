@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { mintId, type BatchDto, type WorkstreamDto } from '@10db/contracts';
 import {
   getBatch,
@@ -12,6 +12,7 @@ import {
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
+import { branchOf, commitIn, onOrigin, pathOf, shipped } from '../../test/delivery-worlds';
 import { createTempClone, isolatedGitEnv } from '../../test/fixtures';
 import { GhError, PrState } from '../github';
 import { silentLogger } from '../log';
@@ -36,25 +37,6 @@ function gitIn(dir: string, ...args: string[]): string {
     .trim();
 }
 
-function pathOf(batch: BatchDto): string {
-  if (batch.worktreePath === null) throw new Error(`batch ${batch.title} has no worktree path`);
-  return batch.worktreePath;
-}
-
-function branchOf(batch: BatchDto): string {
-  if (batch.branch === null) throw new Error(`batch ${batch.title} has no branch`);
-  return batch.branch;
-}
-
-/** The SHA of `branch` on origin, or null when origin doesn't have it. */
-function onOrigin(branch: string): string | null {
-  try {
-    return h.origin$('rev-parse', '--verify', '-q', `refs/heads/${branch}`);
-  } catch {
-    return null;
-  }
-}
-
 /** The SHA of local branch `branch`, or null when there is none. */
 function local(branch: string): string | null {
   try {
@@ -77,36 +59,6 @@ function handPush(branch: string, path: string): string {
   } finally {
     other.cleanup();
   }
-}
-
-async function commitIn(batch: BatchDto, path: string): Promise<string> {
-  const file = join(pathOf(batch), path);
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, `${path}\n`);
-  const { sha } = await h.git.commit({
-    repo: pathOf(batch),
-    paths: [path],
-    message: `Add ${path}`,
-    opId: `op-${path}`,
-    branch: branchOf(batch),
-  });
-  return sha;
-}
-
-/** A root batch shipped as a pull request: its branch on origin at `head`, the PR open. */
-async function shippedRoot(): Promise<{ root: BatchDto; head: string; prUrl: string }> {
-  const started = h.starter.startTask(h.addTask('Alpha').id);
-  await h.jobs.idle();
-  const batch = getBatch(h.store.db, started.id);
-  const ws = h.only(listWorkstreams(h.store.db, { batchId: batch.id }));
-  const head = await commitIn(batch, 'src/api/alpha.txt');
-  h.settle(ws.id, 'DONE');
-  h.shipper.checkBatch(batch.id);
-  await h.jobs.idle();
-  const root = getBatch(h.store.db, batch.id);
-  expect(root.state).toBe('SHIPPED');
-  expect(onOrigin(branchOf(root))).toBe(head);
-  return { root, head, prUrl: root.prUrl ?? '' };
 }
 
 /** What T7 makes when CI fails on `head`: a fix batch on the root's branch, CUTTING, its task queued. */
@@ -164,7 +116,7 @@ function afterCut(db: DbReader, id: BatchDto['id']): { fix: BatchDto; ws: Workst
 
 describe('cutting a fix batch', () => {
   it("starts the copy at the pull request's failing commit on the pull request's own branch", async () => {
-    const { root, head } = await shippedRoot();
+    const { batch: root, head } = await shipped(h);
     const branch = branchOf(root);
 
     const { fix } = await cutFix(root, head);
@@ -179,7 +131,7 @@ describe('cutting a fix batch', () => {
   });
 
   it('brings in a commit pushed by hand: the local branch moves to the failing head, never past it', async () => {
-    const { root, head } = await shippedRoot();
+    const { batch: root, head } = await shipped(h);
     const branch = branchOf(root);
     const handHead = handPush(branch, 'by-hand.txt');
     // The failing head is the one CI ran on, which is the hand push; nothing newer follows it.
@@ -194,7 +146,7 @@ describe('cutting a fix batch', () => {
   });
 
   it('makes the local branch from origin when the root batch no longer has one', async () => {
-    const { root, head } = await shippedRoot();
+    const { batch: root, head } = await shipped(h);
     const branch = branchOf(root);
     h.git$('branch', '-D', branch);
     expect(local(branch)).toBeNull();
@@ -229,7 +181,7 @@ describe('cutting a fix batch', () => {
   it.each(refusals)(
     'is refused for $name and leaves the pull request branch where it was',
     async ({ spoil }) => {
-      const { root, head } = await shippedRoot();
+      const { batch: root, head } = await shipped(h);
       const branch = branchOf(root);
       spoil(branch);
       const before = local(branch);
@@ -242,14 +194,14 @@ describe('cutting a fix batch', () => {
       expect(h.cards()).toHaveLength(2);
       // Neither the local branch nor the pull request's branch on origin was deleted or moved.
       expect(local(branch)).toBe(before);
-      expect(onOrigin(branch)).toBe(head);
+      expect(onOrigin(h, branch)).toBe(head);
       expect(existsSync(pathOf(fix))).toBe(false);
       expect(h.git$('worktree', 'list', '--porcelain')).not.toContain(pathOf(fix));
     },
   );
 
   it('is refused when origin cannot give the failing head, leaving the branch in place', async () => {
-    const { root, head } = await shippedRoot();
+    const { batch: root, head } = await shipped(h);
     const branch = branchOf(root);
     const { fix, plans } = fixBatchOf(root, 'f'.repeat(head.length));
 
@@ -258,11 +210,11 @@ describe('cutting a fix batch', () => {
     expect(listBatches(h.store.db, {}).map((b) => b.id)).toEqual([root.id]);
     expect(h.cards()).toHaveLength(2);
     expect(local(branch)).toBe(head);
-    expect(onOrigin(branch)).toBe(head);
+    expect(onOrigin(h, branch)).toBe(head);
   });
 
   it('is cut again by startup when the restart interrupted it, still a fix on the pull request branch', async () => {
-    const { root, head } = await shippedRoot();
+    const { batch: root, head } = await shipped(h);
     const branch = branchOf(root);
     const { fix } = fixBatchOf(root, head);
     const [queued] = listWorkstreams(h.store.db, { batchId: fix.id });
@@ -287,7 +239,7 @@ describe('cutting a fix batch', () => {
   });
 
   it('stops fixing, and offers no plain start of its task, when startup cannot cut it again', async () => {
-    const { root, head } = await shippedRoot();
+    const { batch: root, head } = await shipped(h);
     const { fix } = fixBatchOf(root, head);
     // Files at the worktree path only a person can move: the cut is not repeated.
     mkdirSync(pathOf(fix), { recursive: true });
@@ -307,10 +259,10 @@ describe('cutting a fix batch', () => {
 
 describe('shipping a fix batch', () => {
   it('adds its commits to the existing pull request without force and opens no second one', async () => {
-    const { root, head, prUrl } = await shippedRoot();
+    const { batch: root, head, prUrl } = await shipped(h);
     const branch = branchOf(root);
     const { fix, ws } = await cutFix(root, head);
-    const fixed = await commitIn(fix, 'src/api/fix.txt');
+    const fixed = await commitIn(h, fix, 'src/api/fix.txt');
     h.settle(ws.id, 'DONE');
 
     h.shipper.checkBatch(fix.id);
@@ -321,7 +273,7 @@ describe('shipping a fix batch', () => {
       prUrl,
       worktreePath: null,
     });
-    expect(onOrigin(branch)).toBe(fixed);
+    expect(onOrigin(h, branch)).toBe(fixed);
     // A fast-forward: the failing head is in the pushed history.
     expect(h.origin$('merge-base', '--is-ancestor', head, fixed)).toBe('');
     expect(h.gh.prCreates()).toHaveLength(1);
@@ -333,9 +285,9 @@ describe('shipping a fix batch', () => {
   });
 
   it('treats an error to re-arming auto-merge as armed: no notice and still shipped', async () => {
-    const { root, head, prUrl } = await shippedRoot();
+    const { batch: root, head, prUrl } = await shipped(h);
     const { fix, ws } = await cutFix(root, head);
-    await commitIn(fix, 'src/api/fix.txt');
+    await commitIn(h, fix, 'src/api/fix.txt');
     h.settle(ws.id, 'DONE');
     h.gh.failNext.set(
       'prAutoMerge',
@@ -349,7 +301,7 @@ describe('shipping a fix batch', () => {
   });
 
   it('ends closed with nothing pushed when it made no commits, though main moved and was merged in', async () => {
-    const { root, head } = await shippedRoot();
+    const { batch: root, head } = await shipped(h);
     const branch = branchOf(root);
     const { fix, ws } = await cutFix(root, head);
     // Main moves on, and the branch takes it in, as the per-step check's base update does.
@@ -368,7 +320,7 @@ describe('shipping a fix batch', () => {
     await h.jobs.idle();
 
     expect(getBatch(h.store.db, fix.id)).toMatchObject({ state: 'CLOSED', worktreePath: null });
-    expect(onOrigin(branch)).toBe(head);
+    expect(onOrigin(h, branch)).toBe(head);
     expect(h.gh.autoMerged).toHaveLength(1);
     expect(h.gh.prCreates()).toHaveLength(1);
     // The pull request's branch survives the close.
@@ -377,7 +329,7 @@ describe('shipping a fix batch', () => {
   });
 
   it('fails with the dirty-checkout card and keeps the worktree when the fix left its edits uncommitted', async () => {
-    const { root, head } = await shippedRoot();
+    const { batch: root, head } = await shipped(h);
     const branch = branchOf(root);
     const { fix, ws } = await cutFix(root, head);
     // A tracked file, edited and never committed: the fix made no commits of its own.
@@ -397,16 +349,16 @@ describe('shipping a fix batch', () => {
     ]);
     expect(existsSync(edited)).toBe(true);
     expect(gitIn(pathOf(fix), 'status', '--porcelain')).toContain('src/api/alpha.txt');
-    expect(onOrigin(branch)).toBe(head);
+    expect(onOrigin(h, branch)).toBe(head);
   });
 
   // A push takes the pull request out of its base's merge queue, which the builder or the queue may
   // have put it in since the fix started: the fix ends with nothing pushed.
   it('ends closed with nothing pushed when the pull request is in the merge queue', async () => {
-    const { root, head, prUrl } = await shippedRoot();
+    const { batch: root, head, prUrl } = await shipped(h);
     const branch = branchOf(root);
     const { fix, ws } = await cutFix(root, head);
-    await commitIn(fix, 'src/api/fix.txt');
+    await commitIn(h, fix, 'src/api/fix.txt');
     h.settle(ws.id, 'DONE');
     h.gh.setInMergeQueue(prUrl, true);
 
@@ -414,16 +366,16 @@ describe('shipping a fix batch', () => {
     await h.jobs.idle();
 
     expect(getBatch(h.store.db, fix.id)).toMatchObject({ state: 'CLOSED', worktreePath: null });
-    expect(onOrigin(branch)).toBe(head);
+    expect(onOrigin(h, branch)).toBe(head);
     expect(h.gh.autoMerged).toHaveLength(1);
     expect(local(branch)).not.toBeNull();
   });
 
   it('pushes nothing when the merge queue cannot be read', async () => {
-    const { root, head, prUrl } = await shippedRoot();
+    const { batch: root, head, prUrl } = await shipped(h);
     const branch = branchOf(root);
     const { fix, ws } = await cutFix(root, head);
-    await commitIn(fix, 'src/api/fix.txt');
+    await commitIn(h, fix, 'src/api/fix.txt');
     h.settle(ws.id, 'DONE');
     h.gh.failQueueRead.set(prUrl, new GhError('failed', 'HTTP 502'));
 
@@ -431,16 +383,16 @@ describe('shipping a fix batch', () => {
     await h.jobs.idle();
 
     expect(getBatch(h.store.db, fix.id).state).not.toBe('SHIPPED');
-    expect(onOrigin(branch)).toBe(head);
+    expect(onOrigin(h, branch)).toBe(head);
   });
 
   it.each([PrState.Merged, PrState.Closed])(
     'ends closed with nothing pushed when the pull request %s meanwhile',
     async (state) => {
-      const { root, head, prUrl } = await shippedRoot();
+      const { batch: root, head, prUrl } = await shipped(h);
       const branch = branchOf(root);
       const { fix, ws } = await cutFix(root, head);
-      await commitIn(fix, 'src/api/fix.txt');
+      await commitIn(h, fix, 'src/api/fix.txt');
       h.settle(ws.id, 'DONE');
       h.gh.setState(prUrl, state);
 
@@ -448,7 +400,7 @@ describe('shipping a fix batch', () => {
       await h.jobs.idle();
 
       expect(getBatch(h.store.db, fix.id)).toMatchObject({ state: 'CLOSED', worktreePath: null });
-      expect(onOrigin(branch)).toBe(head);
+      expect(onOrigin(h, branch)).toBe(head);
       expect(h.gh.autoMerged).toHaveLength(1);
       expect(h.gh.prCreates()).toHaveLength(1);
       expect(local(branch)).not.toBeNull();

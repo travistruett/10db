@@ -13,6 +13,7 @@ import type { BatchDto } from '@10db/contracts';
 import { getBatch, listWorkstreams, patchProject, patchWorkstream, setBatchNotice } from '@10db/db';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
+import { pathOf } from '../../test/delivery-worlds';
 import { isolatedGitEnv } from '../../test/fixtures';
 import { createInboxService } from '../inbox';
 import { LOST_MIGRATIONS_DETAIL, LostChoice } from './cards';
@@ -53,11 +54,6 @@ const statusOf = (dir: string): string =>
   })
     .toString()
     .trim();
-
-function pathOf(batch: BatchDto): string {
-  if (batch.worktreePath === null) throw new Error('the batch has no worktree');
-  return batch.worktreePath;
-}
 
 let commits = 0;
 

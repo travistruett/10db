@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
-import { mintId, type BatchDto, type BatchId, type WorkstreamDto } from '@10db/contracts';
+import { mintId, type BatchDto, type BatchId } from '@10db/contracts';
 import {
   clearWorktreePath,
   deleteAppSetting,
@@ -19,6 +19,7 @@ import {
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
+import { commitIn, onOrigin, opened, pathOf } from '../../test/delivery-worlds';
 import { isolatedGitEnv, tempDir, type TempDir } from '../../test/fixtures';
 import { createGit, parseWorktreeList, type Git } from '../git';
 import { silentLogger } from '../log';
@@ -74,19 +75,6 @@ function expectOnlyLiveWorktrees(): void {
   expect(listed().sort()).toEqual([realpathSync(h.repo), ...live].sort());
 }
 
-function pathOf(batch: BatchDto): string {
-  if (batch.worktreePath === null) throw new Error(`batch ${batch.title} has no worktree path`);
-  return batch.worktreePath;
-}
-
-function onOrigin(branch: string | null): string | null {
-  try {
-    return h.origin$('rev-parse', '--verify', '-q', `refs/heads/${branch ?? ''}`);
-  } catch {
-    return null;
-  }
-}
-
 function branchExists(branch: string): boolean {
   return h.git$('branch', '--list', branch) !== '';
 }
@@ -123,38 +111,11 @@ function addedWorktree(batch: BatchDto, path: string, branch: string): void {
   );
 }
 
-/** Starts one task and waits for its worktree. */
-async function opened(): Promise<{ batch: BatchDto; ws: WorkstreamDto; path: string }> {
-  const started = h.starter.startTask(h.addTask('Alpha').id);
-  await h.jobs.idle();
-  const batch = getBatch(h.store.db, started.id);
-  expect(batch.state).toBe('OPEN');
-  return {
-    batch,
-    ws: h.only(listWorkstreams(h.store.db, { batchId: batch.id })),
-    path: pathOf(batch),
-  };
-}
-
-/** Commits a file in the batch's worktree as the commit tool does for an agent; returns the SHA. */
-async function commitIn(batch: BatchDto, path: string): Promise<string> {
-  const file = join(pathOf(batch), path);
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, `${path}\n`);
-  const { sha } = await h.git.commit({
-    repo: pathOf(batch),
-    paths: [path],
-    message: `Add ${path}`,
-    opId: `op-${path}`,
-    branch: batch.branch ?? '',
-  });
-  return sha;
-}
-
 /** An open batch whose work finished, with one commit, moved to SHIPPING by the trigger. */
 async function shipping(): Promise<{ batch: BatchDto; path: string; head: string }> {
-  const { batch, ws, path } = await opened();
-  const head = await commitIn(batch, 'src/api/alpha.txt');
+  const { batch, ws } = await opened(h);
+  const path = pathOf(batch);
+  const head = await commitIn(h, batch, 'src/api/alpha.txt');
   h.settle(ws.id, 'DONE');
   h.state.write((c) => transitionBatch(c, batch.id, { to: 'SHIPPING' }));
   return { batch: getBatch(h.store.db, batch.id), path, head };
@@ -164,8 +125,9 @@ async function shipping(): Promise<{ batch: BatchDto; path: string; head: string
 async function finished(
   to: 'SHIPPED' | 'CLOSED' | 'ABANDONED',
 ): Promise<{ batch: BatchDto; path: string }> {
-  const { batch, ws, path } = await opened();
-  if (to === 'SHIPPED') await commitIn(batch, 'src/api/alpha.txt');
+  const { batch, ws } = await opened(h);
+  const path = pathOf(batch);
+  if (to === 'SHIPPED') await commitIn(h, batch, 'src/api/alpha.txt');
   h.settle(ws.id, to === 'ABANDONED' ? 'CANCELLED' : 'DONE');
   h.state.write((c) => {
     if (to !== 'ABANDONED') transitionBatch(c, batch.id, { to: 'SHIPPING' });
@@ -420,7 +382,8 @@ describe('recoverBatches with worktrees', () => {
     {
       name: 'OPEN with its worktree missing',
       check: async () => {
-        const { batch, path } = await opened();
+        const { batch } = await opened(h);
+        const path = pathOf(batch);
         rmSync(path, { recursive: true, force: true });
         const report = await recover();
         expect(report.failed).toEqual([batch.id]);
@@ -454,7 +417,8 @@ describe('recoverBatches with worktrees', () => {
     {
       name: 'OPEN with no pin',
       check: async () => {
-        const { batch, path } = await opened();
+        const { batch } = await opened(h);
+        const path = pathOf(batch);
         h.state.write((c) => {
           deleteAppSetting(c, `checkout_pin.${batch.id}`);
         });
@@ -472,7 +436,8 @@ describe('recoverBatches with worktrees', () => {
     {
       name: 'FAILED with its worktree missing',
       check: async () => {
-        const { batch, path } = await opened();
+        const { batch } = await opened(h);
+        const path = pathOf(batch);
         h.state.write((c) =>
           transitionBatch(c, batch.id, { to: 'FAILED', patch: { failure: 'gate_failed' } }),
         );
@@ -499,7 +464,7 @@ describe('recoverBatches with worktrees', () => {
           worktreePath: null,
         });
         expect(h.gh.prCreates()).toHaveLength(1);
-        expect(onOrigin(batch.branch)).toBe(head);
+        expect(onOrigin(h, batch.branch)).toBe(head);
         expect(existsSync(path)).toBe(false);
       },
     },
@@ -515,7 +480,7 @@ describe('recoverBatches with worktrees', () => {
           worktreePath: null,
         });
         expect(h.gh.prCreates()).toHaveLength(1);
-        expect(onOrigin(batch.branch)).toBe(head);
+        expect(onOrigin(h, batch.branch)).toBe(head);
         expect(existsSync(path)).toBe(false);
       },
     },
@@ -533,7 +498,7 @@ describe('recoverBatches with worktrees', () => {
           worktreePath: null,
         });
         expect(h.gh.calls.filter((c) => c.method === 'prCreate')).toHaveLength(0);
-        expect(onOrigin(batch.branch)).toBe(head);
+        expect(onOrigin(h, batch.branch)).toBe(head);
         expect(existsSync(path)).toBe(false);
       },
     },
