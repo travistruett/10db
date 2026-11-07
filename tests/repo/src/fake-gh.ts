@@ -38,6 +38,7 @@ export function runWithFakeGh(
   script: string,
   replies: readonly GhReply[],
   env: Readonly<Record<string, string>>,
+  cwd?: string,
 ) {
   const dir = mkdtempSync(join(tmpdir(), 'fake-gh-'));
   try {
@@ -50,6 +51,7 @@ export function runWithFakeGh(
     writeFileSync(repliesPath, JSON.stringify(replies));
     const result = spawnSync(process.execPath, [script], {
       encoding: 'utf8',
+      ...(cwd === undefined ? {} : { cwd }),
       env: {
         PATH: `${dir}${delimiter}${process.env['PATH'] ?? ''}`,
         FAKE_GH_LOG: log,
