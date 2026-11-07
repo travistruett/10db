@@ -60,6 +60,7 @@ import {
 } from '../accounts';
 import { createApp, type SelfUpdateServices } from '../api';
 import { createBenchmarkSync, type BenchmarkSync } from '../benchmarks';
+import { createCatalogueSync } from '../catalogue';
 import { createJudge, JUDGE_LOG_RETENTION_MS, type JudgeService } from '../judge';
 import { createJudgeServices } from './judge-services';
 import {
@@ -269,6 +270,11 @@ export interface DaemonOptions {
   /** The builder's Artificial Analysis key (the Keychain in production); absent means no sync. */
   readonly aaKey?: () => string | null;
   readonly fetch?: typeof fetch;
+  /**
+   * Fetch the model catalogue from models.dev and keep it fresh. Off unless given, so a test never reaches
+   * the network; the entry point turns it on unless `TENDB_CATALOGUE=off`.
+   */
+  readonly catalogueSync?: boolean;
   /** `TENDB_JUDGE=off`: the OpenRouter key is never read and no decision calls OpenRouter. */
   readonly judgeOff?: boolean;
   /** The harness plugin folder the default personas are read from. */
@@ -469,6 +475,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger: logger.child({ component: 'benchmarks' }),
   });
   benchmarks.start();
+  const catalogue = createCatalogueSync({
+    state,
+    clock,
+    fetch: opts.fetch ?? fetch,
+    logger: logger.child({ component: 'catalogue' }),
+    // A release build has no embedded snapshot yet.
+    snapshot: () => null,
+    // Nothing reads the catalogue yet.
+    onChanged: () => undefined,
+  });
+  if (opts.catalogueSync === true) catalogue.start();
   const judgeKeychain = opts.keychain ?? unavailableKeychain;
   const judge = createJudge({
     state,
@@ -1545,6 +1562,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       // Aborts a shipping gate and any git or gh child; the batch stays SHIPPING for recovery.
       await Promise.all([deliveryJobs.stop(), selfUpdateStopped]);
       benchmarks.stop();
+      catalogue.stop();
       accountPauses.stop();
       moveBack.stop();
       nightly.cancel();

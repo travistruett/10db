@@ -43,6 +43,8 @@ export default defineConfig({
         TENDB_LIVE_CODEX: '',
         // Each gate starts a daemon with a fresh data dir; it must not spend the shared AA quota.
         TENDB_BENCHMARKS: 'off',
+        // The catalogue is fetched from models.dev only by the installed app and `pnpm dev`.
+        TENDB_CATALOGUE: 'off',
         // No decision may call OpenRouter from a throwaway daemon.
         TENDB_JUDGE: 'off',
         TENDB_DATA_DIR: E2E_DATA,

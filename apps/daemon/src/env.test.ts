@@ -135,6 +135,20 @@ describe('loadEnv', () => {
     ['on', 'on'],
     ['off', 'off'],
     ['absent', undefined],
+  ])('reads TENDB_CATALOGUE when it is %s', (name, expected) => {
+    const source = name === 'absent' ? {} : { TENDB_CATALOGUE: name };
+    expect(loadEnv(source).TENDB_CATALOGUE).toBe(expected);
+  });
+
+  it('rejects TENDB_CATALOGUE as a boolean word, naming the variable and not the value', () => {
+    expect(() => loadEnv({ TENDB_CATALOGUE: 'false' })).toThrow('TENDB_CATALOGUE');
+    expect(() => loadEnv({ TENDB_CATALOGUE: 'false' })).not.toThrow(': false');
+  });
+
+  it.each([
+    ['on', 'on'],
+    ['off', 'off'],
+    ['absent', undefined],
     ['empty, which means unset', undefined],
   ])('reads TENDB_BENCHMARKS when it is %s', (name, expected) => {
     const source =

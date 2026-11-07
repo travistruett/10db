@@ -12,6 +12,12 @@ serves agents over MCP, and runs Claude Code sessions and, for a `codex_signin` 
   (`aaKeyReaderFromEnv`: the sync records `no_key`). Only the installed app's daemon syncs; the e2e web
   server, the live acceptance daemon and `scripts/dev.sh` set it, and `tests/repo/src/benchmarks-off.test.ts`
   checks they do. A new launcher of a throwaway daemon sets it too.
+- `TENDB_CATALOGUE=off` keeps a daemon from fetching the model catalogue from models.dev
+  (`catalogueSync` in `daemonOptionsFromEnv`); the stored copy and the release snapshot are still read.
+  The e2e web server and the live acceptance daemon set it, and `tests/repo/src/benchmarks-off.test.ts`
+  checks they do. `scripts/dev.sh` leaves it on, so `pnpm dev` sees real data; the fetch is one daily
+  GET with no key. A new launcher of a throwaway daemon sets it too. `DaemonOptions.catalogueSync` is
+  off unless given, so a test harness never reaches the network.
 - `TENDB_JUDGE=off` keeps a daemon from reading the OpenRouter key and from calling OpenRouter (`judgeOff` in
   `daemonOptionsFromEnv`; every decision then keeps today's rule). Only the installed app's daemon asks models;
   the e2e web server, the live acceptance daemon and `scripts/dev.sh` set it, and

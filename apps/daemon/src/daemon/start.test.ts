@@ -35,6 +35,7 @@ import {
 } from '@10db/contracts';
 import { getAccount, getWorkstream, listAccounts } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { CATALOGUE_URL } from '../catalogue';
 import { z } from 'zod';
 import { WebSocket } from 'ws';
 import { apiClient, quickFlowId } from '../../test/api-client';
@@ -1413,6 +1414,27 @@ describe('startDaemon', () => {
     expect(await api.get('/benchmarks/status', BenchmarkStatusDto)).toMatchObject({
       outcome: 'ok',
     });
+  });
+
+  it('fetches the model catalogue at start only when catalogueSync is given', async () => {
+    const requests: string[] = [];
+    daemon = await startDaemon({
+      sandbox: null,
+      dataDir: dir.path,
+      port: 0,
+      adapter: new FakeAdapter({}),
+      logLevel: 'warn',
+      ...QUIET,
+      catalogueSync: true,
+      fetch: (input) => {
+        requests.push(
+          typeof input === 'string' ? input : input instanceof URL ? input.href : input.url,
+        );
+        return Promise.reject(new Error('offline'));
+      },
+    });
+    await waitFor(() => requests.length > 0);
+    expect(requests).toEqual([CATALOGUE_URL]);
   });
 
   it('with TENDB_BENCHMARKS=off never reads the benchmark key and makes no Artificial Analysis request', async () => {

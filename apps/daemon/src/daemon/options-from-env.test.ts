@@ -23,6 +23,14 @@ describe('daemonOptionsFromEnv', () => {
     expect(options).not.toHaveProperty('permissionModeOverride');
   });
 
+  it.each([
+    ['absent', {}, true],
+    ['on', { TENDB_CATALOGUE: 'on' }, true],
+    ['off', { TENDB_CATALOGUE: 'off' }, false],
+  ])('syncs the catalogue when TENDB_CATALOGUE is %s: %s', (_name, source, expected) => {
+    expect(daemonOptionsFromEnv(loadEnv(source)).catalogueSync).toBe(expected);
+  });
+
   it('carries the port, log level and dev UI settings', () => {
     const token = 'a'.repeat(43);
     expect(
@@ -40,6 +48,7 @@ describe('daemonOptionsFromEnv', () => {
       sandbox: {},
       uiToken: token,
       devUiOrigin: 'http://localhost:51234',
+      catalogueSync: true,
     });
   });
 
