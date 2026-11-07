@@ -4,13 +4,41 @@
   for the expected reason. A test that never failed proves nothing.
 - **Fix production code, not the test.** When a test fails, assume the code is wrong until you
   have shown the test is.
-- **Real objects, mocks only at boundaries.** Use a real SQLite file in a temp directory, a real
-  git repo in a temp directory, real HTTP via `app.request()`. Mock only the network, the clock
-  and child processes you don't own (the fake Claude adapter is such a boundary).
 - **Extend before you add.** Before writing a test, find the tests that already cover the
-  behavior. Extend one or add a table row when one fits. A new test must say what it catches that
-  the others don't; in a step report, name the existing tests you checked. Reviewers may ask to
+  behavior. Extend one or add a table row when it sits on the cheapest rung that can catch the
+  regression. When it doesn't, add the cheaper test and say why in `why_new`. Reviewers may ask to
   merge overlapping tests or fold them into a table, not only to add tests.
+- **A new test is the cheapest one that can fail for the regression you fear.** Name the
+  regression, then take the first rung that can catch it:
+  1. A pure function.
+  2. A real SQLite file in a temp directory, for a query, a transaction or a persisted row.
+  3. A rendered component (`renderWithDaemon`), or real HTTP via `app.request()`, for what a view
+     shows or a route's contract.
+  4. A real git repo in a temp directory, when a test reaches git.
+  5. The real pipeline (`createTestEngine`, `createDeliveryHarness`, e2e), when the failure needs
+     the parts working together.
+
+  Count is not the cost: table rows and pure tests are nearly free, and fixtures are what is slow.
+  When a decision can only be reached through an expensive fixture, move it into a module
+  production calls and test it there. That adds a test: keep one that goes through the wiring.
+
+- **Some tests start on, and never move below, the rung that exercises the real thing, even when
+  they look repetitive.** Merges, pushes, worktrees, migrations where a git merge is the behavior,
+  and every recovery, trust, sandbox, guard, claim and permission row. The real thing is the state
+  or process the test acts on: git for merges, pushes and worktrees, a real database or restart for
+  recovery and claims. A pure rule table, such as a guard's judge or a schema, stays pure, with one
+  test through the wiring. Before any other test moves down a rung, see the cheaper one fail for the
+  same regression, and say how in the commit.
+- **Real objects on every rung, mocks only at boundaries.** A cheaper test is a smaller test, not a
+  mock of your own code. git and SQLite are never mocked. Mock only the network, the clock and child
+  processes you don't own (the fake Claude adapter is such a boundary).
+- **No new test-only code.** A dependency passed in with a production default, such as an injected
+  clock, is fine. A new branch, flag or export that only a test uses is not: test at the real
+  boundary instead.
+- **Each newly tested behavior carries one value card**, however many cases it has, in the commit
+  that adds it, wrapped to fit, and in the plan when there is one. Reviewers read commits, and an
+  implement step has no report. A new row in an existing table needs none.
+  `Value: protects=<behavior>; fails_when=<regression>; why_new=<tests checked, what they miss>; no_claim=<what green does not prove>`.
 - **Table-driven tests** for state machines, rules and parsers: one row per case, named.
 - **Test behavior, not implementation.** Assert on outputs, persisted rows and emitted events,
   not on which private function ran.
