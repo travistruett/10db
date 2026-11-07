@@ -262,23 +262,37 @@ describe('ShardTimings', () => {
   });
 });
 
+type History = 'plain' | 'moved' | 'single';
+
 describe('scripts/test-report.mjs', () => {
   const script = join(repoRoot, 'scripts/test-report.mjs');
   const repository = 'owner/repo';
   const runs = `api repos/${repository}/actions/workflows/ci.yml/runs`;
   const artifacts = (id: number) => `api repos/${repository}/actions/runs/${String(id)}/artifacts`;
 
-  /** Runs the script in a two-commit repository, whose first commit stands for the base. */
-  function report(replies: (base: string, head: string) => GhReply[], timings = true) {
+  /**
+   * Runs the script in a repository whose first commit stands for the baseline. `moved` adds a commit
+   * after it that changes the touched test, and `single` stops at the first commit, which has no base.
+   */
+  function report(
+    replies: (baseline: string, head: string) => GhReply[],
+    { timings = true, history = 'plain' }: { timings?: boolean; history?: History } = {},
+  ) {
     const repo = createThrowawayRepo('test-report');
     const dir = mkdtempSync(join(tmpdir(), 'test-report-timings-'));
     try {
       repo.stage('src/a.ts', 'one\n');
       repo.commit('base');
       const base = repo.gitOutput('rev-parse', 'HEAD');
-      repo.stage('src/a.ts', 'one\ntwo\n');
-      repo.stage('src/a.test.ts', 'one\ntwo\nthree\nfour\n');
-      repo.commit('pull request');
+      if (history === 'moved') {
+        repo.stage('src/a.test.ts', 'one\n');
+        repo.commit('merged on main after the baseline');
+      }
+      if (history !== 'single') {
+        repo.stage('src/a.ts', 'one\ntwo\n');
+        repo.stage('src/a.test.ts', 'one\ntwo\nthree\nfour\n');
+        repo.commit('pull request');
+      }
       const head = repo.gitOutput('rev-parse', 'HEAD');
       if (timings) {
         mkdirSync(join(dir, 'test-timings-1'));
@@ -350,8 +364,41 @@ describe('scripts/test-report.mjs', () => {
     expect(result.stdout).toContain('No usable timings from `main`');
   });
 
+  it('leaves out a touched file main changed after the baseline it downloaded', () => {
+    const result = report(
+      (baseline) => [
+        {
+          args: runs,
+          stdout: JSON.stringify({ workflow_runs: [{ id: 1, head_sha: baseline }] }),
+        },
+        {
+          args: artifacts(1),
+          stdout: JSON.stringify({ artifacts: [{ name: 'test-timings-1', expired: false }] }),
+        },
+        {
+          args: 'run download 1',
+          downloads: {
+            'test-timings-1/test-timings.json': JSON.stringify(
+              shard(1, [['src/a.test.ts', 3, 0.5]], 1),
+            ),
+          },
+        },
+      ],
+      { history: 'moved' },
+    );
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('| Tests added | 0 |');
+    expect(result.stdout).toContain('1 touched test file is left out');
+  });
+
+  it('writes no report when git cannot give the diff, rather than a report of nothing', () => {
+    const result = report(() => [], { history: 'single' });
+    expect(result.status).toBe(1);
+    expect(result.stdout).toBe('');
+  });
+
   it('reports without asking GitHub when no shard left its timings', () => {
-    const result = report(() => [], false);
+    const result = report(() => [], { timings: false });
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('No test shard reported');
     expect(result.calls).toEqual([]);

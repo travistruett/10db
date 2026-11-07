@@ -15,7 +15,7 @@ after that run. Lines come from the diff against the
 base, leaving out generated files and anything that isn't code.
 
 `test-report` runs the script with a read-only token. `test-report-post` has `pull-requests: write`, has no checkout,
-and only posts the body. Anything missing leaves a number out and the comment says why.
+and only posts the body. Missing timings leave a number out and the comment says why. A failed `git diff` writes no report, so the last comment stands rather than a report of nothing.
 
 ## Why
 
@@ -28,7 +28,7 @@ adds. So only touched files count. A baseline can be older than the base, becaus
 a touched file that changed since would charge the pull request for what merged in between, so it is left out and
 counted.
 
-Every step of the report jobs continues on error, not the job. Job-level `continue-on-error` keeps the run green, but
+Every step of the report jobs continues on error and has its own timeout, not the job. Job-level `continue-on-error` keeps the run green, but
 10db's checks summary reads every check, and a job that concludes as failed could show on the Board as checks failing.
 
 Vitest's JSON reporter measures from the first test's start to the last test's end, which leaves out imports, setup and

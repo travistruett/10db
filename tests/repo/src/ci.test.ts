@@ -44,6 +44,7 @@ const CONTAINER_JOBS = ['gate-test', 'gate-e2e'];
 /** The informational jobs that comment on a pull request, which no ruleset may require. */
 const REPORT_JOBS = ['test-report', 'test-report-post'];
 const Permissions = z.record(z.string(), z.string());
+const StepMinutes = z.number().positive();
 
 function containerOf(job: string): { image?: string | undefined; options?: string | undefined } {
   const container = readWorkflow(CI).jobs[job]?.container;
@@ -86,9 +87,14 @@ describe('CI workflow', () => {
     expect(jobs['test-report']?.if).toContain("github.event.pull_request.state == 'open'");
     // 10db's checks summary reads every check, so a job must not conclude as failed: a job-level
     // continue-on-error keeps the run green, not necessarily the job's own check.
+    // continue-on-error absorbs a step's own timeout, not the job's, so the steps time out first.
     for (const name of REPORT_JOBS) {
       expect(jobs[name]?.['continue-on-error']).toBeUndefined();
-      for (const step of jobs[name]?.steps ?? []) expect(step['continue-on-error']).toBe(true);
+      const steps = jobs[name]?.steps ?? [];
+      for (const step of steps) expect(step['continue-on-error']).toBe(true);
+      const minutes = steps.map((step) => StepMinutes.parse(step['timeout-minutes']));
+      const total = minutes.reduce((sum, value) => sum + value, 0);
+      expect(total).toBeLessThan(jobs[name]?.['timeout-minutes'] ?? 0);
     }
   });
 

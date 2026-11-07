@@ -18,6 +18,8 @@ function runVitest(path: string) {
     {
       cwd: repoRoot,
       encoding: 'utf8',
+      // Under the test's own limit: a sync spawn blocks the worker, so that limit can't stop a hang.
+      timeout: 25_000,
       env: { ...envWithoutGitVariables(), TENDB_TEST_TIMINGS: path },
     },
   );
