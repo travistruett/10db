@@ -17,6 +17,7 @@ const WorkflowStep = z.looseObject({
 export type WorkflowStep = z.infer<typeof WorkflowStep>;
 
 const WorkflowJob = z.looseObject({
+  name: z.string().optional(),
   if: z.string().optional(),
   needs: z.union([z.string(), z.array(z.string())]).optional(),
   outputs: z.record(z.string(), z.string()).optional(),
@@ -28,6 +29,12 @@ const WorkflowJob = z.looseObject({
   env: z.record(z.string(), z.string()).optional(),
   permissions: z.unknown().optional(),
   environment: z.union([z.string(), z.looseObject({ name: z.string() })]).optional(),
+  strategy: z
+    .looseObject({
+      'fail-fast': z.boolean().optional(),
+      matrix: z.looseObject({ shard: z.array(z.number().int().positive()).optional() }).optional(),
+    })
+    .optional(),
   steps: z.array(WorkflowStep).optional(),
 });
 export type WorkflowJob = z.infer<typeof WorkflowJob>;
@@ -77,6 +84,19 @@ export function readWorkflow(path: string): Workflow {
  */
 export function workflowJobNames(path: string): string[] {
   return Object.keys(readWorkflow(path).jobs);
+}
+
+/**
+ * The check names a workflow reports, which are what a ruleset requires: a job's key, or one name per
+ * shard for a job whose `name` carries `matrix.shard`.
+ */
+export function workflowCheckNames(path: string): string[] {
+  return Object.entries(readWorkflow(path).jobs).flatMap(([key, job]) => {
+    const shards = job.strategy?.matrix?.shard;
+    const name = job.name ?? key;
+    if (shards === undefined) return [name];
+    return shards.map((shard) => name.replace('${{ matrix.shard }}', String(shard)));
+  });
 }
 
 /** The name of the environment a job is bound to, whichever form the YAML uses. */

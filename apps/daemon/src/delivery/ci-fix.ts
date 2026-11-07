@@ -38,8 +38,11 @@ import { jobKey, JobQueue } from './jobs';
 import { cutWorktree } from './worktree-cut';
 import { madeWorktreeRoot, worktreePathFor } from './worktree-path';
 
-/** The failing jobs whose logs one fix task carries; any others are named without a log. */
-const MAX_LOGGED_JOBS = 3;
+/**
+ * The failing jobs whose logs one fix task carries, enough for every job the gate splits into on CI;
+ * any others are named without a log.
+ */
+const MAX_LOGGED_JOBS = 8;
 
 /** A failing check named in the task without a log. */
 const other = (job: RequiredCheckJobDto): CiFixOther => ({ name: job.name, link: job.link });
