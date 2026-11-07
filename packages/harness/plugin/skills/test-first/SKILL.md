@@ -6,10 +6,13 @@ description: Use when you add or change behavior, before writing the implementat
 # Test first, with red proof
 
 1. Find the tests that already cover the behavior (search by name, module, fixture). Extend
-   one or add a table row when one fits. Add a new test only when none does, and say in your
-   step report which tests you checked and what the new one catches that they don't.
-2. Write the test for the behavior you are about to add or fix. Use real objects;
-   mock only at process and network boundaries.
+   one or add a table row when one fits.
+2. Otherwise name the regression you fear and pick the cheapest test that can fail for it: a
+   pure function, then a real database, then real git, then the whole flow. Merges, pushes,
+   migrations, recovery, permissions and trust stay real. On every level use real objects;
+   mock only at process and network boundaries, and add no hook that only a test uses.
+   Give each new test, not a new row, a value card in your step report:
+   `Value: protects=<behavior>; fails_when=<regression>; why_new=<the tests you checked and what they miss>; seam=<what only the test needs, or none>; no_claim=<what green does not prove>`.
 3. Run only that test and watch it fail. Read the failure: it must fail because the
    behavior is missing, not because of a typo, an import error or a broken fixture.
 4. Write the smallest implementation that makes it pass. Run it again and see it pass.

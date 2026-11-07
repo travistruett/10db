@@ -18,7 +18,11 @@ severe first. Skip praise.
   files are regenerated, not hand-edited.
 - **Tests:** real objects, no sleeps where a condition can be awaited, no assertions that
   can never fail. Flag a new test that covers the same behavior as an existing one, and ask
-  to merge it or fold it into a table row, not only to add tests.
+  to merge it or fold it into a table row, not only to add tests. Flag a test that builds
+  real git or a whole flow when a cheaper one could fail for the same regression, but never
+  one for merges, pushes, migrations, recovery, permissions or trust. A new test, not a new
+  row, has a value card: protects, fails_when, why_new, seam, no_claim. A seam other than
+  `none` needs a production caller.
 - **Style:** names say what things are, comments say what and why, no dead code, no
   `utils` grab-bags, no new dependency without a reason.
 - **Secrets:** no tokens, keys or personal data in code, logs or fixtures.
