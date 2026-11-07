@@ -13,6 +13,7 @@ import { mintId, type BatchDto, type WorkstreamDto } from '@10db/contracts';
 import { getBatch, getWorkstreamRow, listWorkstreams, patchWorkstream, schema } from '@10db/db';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
+import { opened, pathOf } from '../../test/delivery-worlds';
 import { isolatedGitEnv } from '../../test/fixtures';
 import type { DeliveryContext } from './context';
 import { createBaseUpdates, ensureWorktreeWhole, workstreamChanges } from './index';
@@ -37,25 +38,6 @@ function gitIn(dir: string, ...args: string[]): string {
   return execFileSync('git', ['-C', dir, ...args], { env: isolatedGitEnv(), stdio: 'pipe' })
     .toString()
     .trim();
-}
-
-function pathOf(batch: BatchDto): string {
-  if (batch.worktreePath === null) throw new Error(`batch ${batch.title} has no worktree path`);
-  return batch.worktreePath;
-}
-
-/** Starts one task and waits for its batch to open; its workstream starts at the batch's base. */
-async function opened(): Promise<{ batch: BatchDto; ws: WorkstreamDto }> {
-  const started = h.starter.startTask(h.addTask('Alpha').id);
-  await h.jobs.idle();
-  const batch = getBatch(h.store.db, started.id);
-  expect(batch.state).toBe('OPEN');
-  const ws = h.only(listWorkstreams(h.store.db, { batchId: batch.id }));
-  // Where the runner's first session records it.
-  h.state.write((c) => {
-    patchWorkstream(c, ws.id, null, { baseHead: batch.baseSha ?? '' });
-  });
-  return { batch, ws };
 }
 
 /** Writes and commits a file on the batch branch where its work is, as the commit tool does. */
@@ -103,7 +85,7 @@ function state(checkout: string) {
 describe('bringing a worktree batch up to date with its base before a gate', () => {
   it("merges the base as origin has it now into the batch's branch, and moves the batch's base and its task's starting point", async () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
-    const { batch, ws } = await opened();
+    const { batch, ws } = await opened(h, { sessionStarted: true });
     const own = await commitOnBatch(batch, 'src/api/alpha.txt');
     const teammate = h.teammatePush('main', 'src/ui/teammate.txt');
     const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
@@ -123,7 +105,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
 
   it('changes nothing when origin has nothing newer', async () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
-    const { batch } = await opened();
+    const { batch } = await opened(h, { sessionStarted: true });
     await commitOnBatch(batch, 'src/api/alpha.txt');
     const before = state(pathOf(batch));
     expect(await createBaseUpdates(h.ctx).beforeGate(batch.id, signal)).toEqual({
@@ -140,7 +122,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
     h.commit('pnpm-lock.yaml', 'lockfileVersion: 9\n');
     h.git$('push', '-q', 'origin', 'main');
     mkdirSync(join(h.repo, 'node_modules', 'pkg'), { recursive: true });
-    const { batch } = await opened();
+    const { batch } = await opened(h, { sessionStarted: true });
     const path = realpathSync(pathOf(batch));
     expect(h.pnpm.calls()).toHaveLength(1);
     await commitOnBatch(batch, 'src/api/alpha.txt');
@@ -161,7 +143,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
     h.commit('pnpm-lock.yaml', 'lockfileVersion: 9\n');
     h.git$('push', '-q', 'origin', 'main');
     mkdirSync(join(h.repo, 'node_modules', 'pkg'), { recursive: true });
-    const { batch } = await opened();
+    const { batch } = await opened(h, { sessionStarted: true });
     await commitOnBatch(batch, 'src/api/alpha.txt');
     h.teammatePush('main', 'pnpm-lock.yaml', 'lockfileVersion: 9\npackages: {}\n');
     h.pnpm.failWith(1, 'ERR_PNPM_FETCH_403');
@@ -175,7 +157,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
   it("names the host the sandbox blocked the install after the merge from, in the gate's note and on a card", async () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
     withLockfile();
-    const { batch } = await opened();
+    const { batch } = await opened(h, { sessionStarted: true });
     await commitOnBatch(batch, 'src/api/alpha.txt');
     h.teammatePush('main', 'pnpm-lock.yaml', 'lockfileVersion: 9\npackages: {}\n');
     h.pnpm.blockedFrom('registry.npmjs.org');
@@ -195,7 +177,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
   it('installs again at the next gate when the last install failed, and not once one passed', async () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
     withLockfile();
-    const { batch } = await opened();
+    const { batch } = await opened(h, { sessionStarted: true });
     await commitOnBatch(batch, 'src/api/alpha.txt');
     h.teammatePush('main', 'pnpm-lock.yaml', 'lockfileVersion: 9\npackages: {}\n');
     h.pnpm.failWith(1, 'ERR_PNPM_FETCH_403');
@@ -228,7 +210,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       if (workspace !== undefined) h.commit('pnpm-workspace.yaml', workspace);
       h.git$('push', '-q', 'origin', 'main');
       mkdirSync(join(h.repo, 'node_modules', 'left-pad'), { recursive: true });
-      const { batch } = await opened();
+      const { batch } = await opened(h, { sessionStarted: true });
       await commitOnBatch(batch, 'src/api/alpha.txt');
       const path = pathOf(batch);
       expect(h.pnpm.calls()).toHaveLength(1);
@@ -598,7 +580,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       mkdirSync(join(h.repo, 'node_modules', 'other'), { recursive: true });
       h.pnpm.failsOnCall(1, 'ERR_PNPM_FETCH_403');
       h.pnpm.makesOnCall(2, { 'node_modules/left-pad/index.js': 'module.exports = 1;\n' });
-      const { batch } = await opened();
+      const { batch } = await opened(h, { sessionStarted: true });
       expect(h.pnpm.calls()).toHaveLength(2);
       const notice = h.only(getBatch(h.store.db, batch.id).notices);
       expect(notice).toMatchObject({ key: 'install-repaired', tone: 'info' });
@@ -638,7 +620,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
       h.commit('pnpm-lock.yaml', NEEDS_LEFT_PAD);
       h.git$('push', '-q', 'origin', 'main');
-      const { batch } = await opened();
+      const { batch } = await opened(h, { sessionStarted: true });
       expect(h.pnpm.calls()).toHaveLength(0);
       expect(await createBaseUpdates(h.ctx).beforeGate(batch.id, signal)).toEqual({
         kind: 'up_to_date',
@@ -651,7 +633,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
   it('installs at the next gate of a worktree made again for Retry', async () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
     withLockfile();
-    const { batch } = await opened();
+    const { batch } = await opened(h, { sessionStarted: true });
     await commitOnBatch(batch, 'src/api/alpha.txt');
     expect(h.pnpm.calls()).toHaveLength(1);
     // The repair's install fails, so the worktree it made holds the checkout's older packages.
@@ -707,7 +689,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
   it("never moves the batch's base back when the base branch was forced to an older commit", async () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
     h.teammatePush('main', 'src/ui/first.txt');
-    const { batch, ws } = await opened();
+    const { batch, ws } = await opened(h, { sessionStarted: true });
     await commitOnBatch(batch, 'src/api/alpha.txt');
     h.origin$('update-ref', 'refs/heads/main', h.origin$('rev-parse', 'main~1'));
     expect((await createBaseUpdates(h.ctx).beforeGate(batch.id, signal)).kind).toBe('up_to_date');
@@ -721,7 +703,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       // A lockfile with no packages to seed, so the cut installs nothing and the gate must.
       h.commit('pnpm-lock.yaml', 'lockfileVersion: 9\n');
       h.git$('push', '-q', 'origin', 'main');
-      const { batch } = await opened();
+      const { batch } = await opened(h, { sessionStarted: true });
       const ctx = {
         ...h.ctx,
         dependencies: { refresh: () => Promise.reject(new Error('the install blew up')) },
@@ -735,7 +717,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
 
     it('when the conflict notice cannot be written', async () => {
       h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
-      const { batch } = await opened();
+      const { batch } = await opened(h, { sessionStarted: true });
       await commitOnBatch(batch, 'README.md', '# ours\n');
       h.teammatePush('main', 'README.md', '# theirs\n');
       const closed = Object.create(h.ctx.state, {
@@ -783,7 +765,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       },
     ])('$name', async ({ setup, note }) => {
       h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
-      const { batch } = await opened();
+      const { batch } = await opened(h, { sessionStarted: true });
       await setup(batch);
       const before = state(pathOf(batch));
       try {
@@ -801,7 +783,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
 
   it('shows a conflict on the batch and raises no card, however many gates meet it', async () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
-    const { batch } = await opened();
+    const { batch } = await opened(h, { sessionStarted: true });
     await commitOnBatch(batch, 'README.md', '# ours\n');
     h.teammatePush('main', 'README.md', '# theirs\n');
     const updates = createBaseUpdates(h.ctx);
@@ -850,7 +832,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
     /** Both sides added a line to `src/index.ts` and a migration to the migration directory. */
     async function bothSidesChanged({ generator = true } = {}): Promise<BatchDto> {
       seedMain(generator);
-      const { batch } = await opened();
+      const { batch } = await opened(h, { sessionStarted: true });
       await commitOnBatch(
         batch,
         'src/index.ts',
@@ -887,7 +869,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
       h.commit('src/index.ts', "import a from './a';\nexport {};\n");
       h.git$('push', '-q', 'origin', 'main');
-      const { batch, ws } = await opened();
+      const { batch, ws } = await opened(h, { sessionStarted: true });
       const own = await commitOnBatch(
         batch,
         'src/index.ts',
@@ -921,7 +903,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
       h.commit('src/index.ts', 'a\nz\n');
       h.git$('push', '-q', 'origin', 'main');
-      const { batch } = await opened();
+      const { batch } = await opened(h, { sessionStarted: true });
       await commitOnBatch(batch, 'src/index.ts', 'a\nb\nz\n');
       await commitOnBatch(batch, 'README.md', '# ours\n');
       h.teammatePush('main', 'src/index.ts', 'a\nc\nz\n');
@@ -960,7 +942,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       h.commit(`${DB}/meta/_journal.json`, journal('0000_init'));
       h.commit('README.md', '# base\n');
       h.git$('push', '-q', 'origin', 'main');
-      const { batch } = await opened();
+      const { batch } = await opened(h, { sessionStarted: true });
       await commitOnBatch(batch, 'README.md', '# ours\n');
       await commitOnBatch(batch, `${DB}/0001_mine.sql`, MINE);
       await commitOnBatch(batch, `${DB}/meta/_journal.json`, journal('0000_init', '0001_mine'));
@@ -1058,7 +1040,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
         mkdirSync(join(h.repo, 'node_modules', 'left-pad'), { recursive: true });
         h.commit('src/index.ts', "import a from './a';\nexport {};\n");
         h.git$('push', '-q', 'origin', 'main');
-        const { batch } = await opened();
+        const { batch } = await opened(h, { sessionStarted: true });
         await commitOnBatch(
           batch,
           'src/index.ts',
@@ -1312,7 +1294,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
 
       it('names the merge of a catch-up with nothing to regenerate', async () => {
         h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
-        const { batch } = await opened();
+        const { batch } = await opened(h, { sessionStarted: true });
         await commitOnBatch(batch, 'src/mine.ts');
         h.teammatePush('main', 'src/theirs.ts', 'theirs\n');
         const path = pathOf(batch);
@@ -1515,7 +1497,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
       h.commit('pnpm-lock.yaml', 'a\nz\n');
       h.git$('push', '-q', 'origin', 'main');
-      const { batch } = await opened();
+      const { batch } = await opened(h, { sessionStarted: true });
       await commitOnBatch(batch, 'pnpm-lock.yaml', 'a\nb\nz\n');
       h.teammatePush('main', 'pnpm-lock.yaml', 'a\nc\nz\n');
       const update = await createBaseUpdates(h.ctx).beforeGate(batch.id, signal);
@@ -1532,7 +1514,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       /** Both sides changed the one line of README.md; the batch has its own commit first. */
       async function overlapping() {
         h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
-        const { batch, ws } = await opened();
+        const { batch, ws } = await opened(h, { sessionStarted: true });
         const own = await commitOnBatch(batch, 'README.md', '# ours\n');
         const teammate = h.teammatePush('main', 'README.md', '# theirs\n');
         return { batch, ws, own, teammate, path: pathOf(batch) };
@@ -1598,7 +1580,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
         h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
         h.commit('pnpm-lock.yaml', 'a\nz\n');
         h.git$('push', '-q', 'origin', 'main');
-        const { batch } = await opened();
+        const { batch } = await opened(h, { sessionStarted: true });
         await commitOnBatch(batch, 'pnpm-lock.yaml', 'a\nb\nz\n');
         h.teammatePush('main', 'pnpm-lock.yaml', 'a\nc\nz\n');
         const before = state(pathOf(batch));
@@ -1613,7 +1595,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       it('regenerates the generated files only once the session has resolved the sources they come from', async () => {
         h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
         seedMain(true);
-        const { batch } = await opened();
+        const { batch } = await opened(h, { sessionStarted: true });
         await commitOnBatch(batch, 'src/index.ts', "import a from './mine';\nexport {};\n");
         await commitOnBatch(batch, `${DB}/meta/_journal.json`, '["0000","0001_mine"]\n');
         await commitOnBatch(batch, `${DB}/0001_mine.sql`, MINE);
@@ -1653,7 +1635,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
       it('raises one card naming the generated directories when the merge note cannot be kept, since nothing else would regenerate them', async () => {
         h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
         seedMain(true);
-        const { batch } = await opened();
+        const { batch } = await opened(h, { sessionStarted: true });
         await commitOnBatch(batch, 'src/index.ts', "import a from './mine';\nexport {};\n");
         await commitOnBatch(batch, `${DB}/meta/_journal.json`, '["0000","0001_mine"]\n');
         await commitOnBatch(batch, `${DB}/0001_mine.sql`, MINE);
@@ -1685,7 +1667,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
     h.commit('.gitignore', 'build/\n');
     h.git$('push', '-q', 'origin', 'main');
-    const { batch } = await opened();
+    const { batch } = await opened(h, { sessionStarted: true });
     const path = pathOf(batch);
     await commitOnBatch(batch, 'src/api/alpha.txt');
     // The worktree holds an ignored build directory; main starts tracking a file of that name.
@@ -1786,7 +1768,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
   it('says the branch was merged but its base not moved when recording the base fails, and still installs', async () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
     withLockfile();
-    const { batch } = await opened();
+    const { batch } = await opened(h, { sessionStarted: true });
     await commitOnBatch(batch, 'src/api/alpha.txt');
     h.teammatePush('main', 'pnpm-lock.yaml', 'lockfileVersion: 9\npackages: {}\n');
     const git = { ...h.git, isAncestor: () => Promise.reject(new Error('history unreadable')) };
@@ -1801,7 +1783,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
 
   it('clears the conflict notice once the branch holds the base', async () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
-    const { batch } = await opened();
+    const { batch } = await opened(h, { sessionStarted: true });
     await commitOnBatch(batch, 'README.md', '# ours\n');
     h.teammatePush('main', 'README.md', '# theirs\n');
     const updates = createBaseUpdates(h.ctx);
@@ -1827,7 +1809,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
 
   it('closes the conflict and in-the-way cards an earlier build raised, once a gate finds the branch holds the base', async () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
-    const { batch } = await opened();
+    const { batch } = await opened(h, { sessionStarted: true });
     for (const foldKey of [baseConflictKey(batch.id), baseKeptKey(batch.id)])
       raise(h.inbox, h.project.id, {
         title: `Batch "${batch.title}" conflicts with main`,
@@ -1841,7 +1823,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
 
   it('closes the conflict card an earlier build raised when a gate shows the conflict as a notice', async () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
-    const { batch } = await opened();
+    const { batch } = await opened(h, { sessionStarted: true });
     raise(h.inbox, h.project.id, {
       title: `Batch "${batch.title}" conflicts with main`,
       body: 'x',
@@ -1856,7 +1838,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
 
   it('does nothing once shutdown has aborted it', async () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
-    const { batch } = await opened();
+    const { batch } = await opened(h, { sessionStarted: true });
     await commitOnBatch(batch, 'src/api/alpha.txt');
     h.teammatePush('main', 'src/ui/teammate.txt');
     const before = state(pathOf(batch));
@@ -1872,7 +1854,7 @@ describe('bringing a worktree batch up to date with its base before a gate', () 
 describe("bringing a queued batch's copy up to its base when a lane launches", () => {
   it('starts a lane on a copy with no work of its own at the base as it is now', async () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
-    const { batch, ws } = await opened();
+    const { batch, ws } = await opened(h, { sessionStarted: true });
     // The task was started at the old main; main moves while its lane waits in the queue.
     const teammate = h.teammatePush('main', 'src/ui/teammate.txt');
     const path = pathOf(batch);
@@ -1888,7 +1870,7 @@ describe("bringing a queued batch's copy up to its base when a lane launches", (
 
   it("merges the base into a copy that holds the task's own commits, and keeps them", async () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
-    const { batch } = await opened();
+    const { batch } = await opened(h, { sessionStarted: true });
     const own = await commitOnBatch(batch, 'src/api/alpha.txt');
     const teammate = h.teammatePush('main', 'src/ui/teammate.txt');
     const update = await createBaseUpdates(h.ctx).atLaunch(batch.id, signal);
@@ -1899,7 +1881,7 @@ describe("bringing a queued batch's copy up to its base when a lane launches", (
 
   it('changes nothing when origin has nothing newer', async () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
-    const { batch } = await opened();
+    const { batch } = await opened(h, { sessionStarted: true });
     const before = state(pathOf(batch));
     expect(await createBaseUpdates(h.ctx).atLaunch(batch.id, signal)).toEqual({
       kind: 'up_to_date',
@@ -1910,7 +1892,7 @@ describe("bringing a queued batch's copy up to its base when a lane launches", (
 
   it('starts the lane on the copy as it is when the fetch fails, with a notice on the batch that the next fetch clears', async () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
-    const { batch } = await opened();
+    const { batch } = await opened(h, { sessionStarted: true });
     const before = state(pathOf(batch));
     renameSync(h.origin, `${h.origin}-unreachable`);
     try {
@@ -1932,7 +1914,7 @@ describe("bringing a queued batch's copy up to its base when a lane launches", (
 
   it("starts the lane without the base when a sibling's uncommitted changes are in the way, with a notice naming the paths that the next merge clears", async () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
-    const { batch } = await opened();
+    const { batch } = await opened(h, { sessionStarted: true });
     const path = pathOf(batch);
     h.teammatePush('main', 'README.md', '# theirs\n');
     const original = readFileSync(join(path, 'README.md'), 'utf8');
@@ -1959,7 +1941,7 @@ describe("bringing a queued batch's copy up to its base when a lane launches", (
 
   it("hides the uncommitted notice once the sibling's commit makes the next gate's merge conflict", async () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
-    const { batch } = await opened();
+    const { batch } = await opened(h, { sessionStarted: true });
     const path = pathOf(batch);
     h.teammatePush('main', 'README.md', '# theirs\n');
     writeFileSync(join(path, 'README.md'), '# a sibling is still writing\n');
@@ -1976,7 +1958,7 @@ describe("bringing a queued batch's copy up to its base when a lane launches", (
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
     h.commit('.gitignore', 'build/\n');
     h.git$('push', '-q', 'origin', 'main');
-    const { batch } = await opened();
+    const { batch } = await opened(h, { sessionStarted: true });
     const path = pathOf(batch);
     h.teammatePush('main', 'README.md', '# theirs\n');
     writeFileSync(join(path, 'README.md'), '# a sibling is still writing\n');
@@ -1994,7 +1976,7 @@ describe("bringing a queued batch's copy up to its base when a lane launches", (
 
   it('names the files a later gate is blocked by, not the ones a launch named, when the notice is showing', async () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
-    const { batch } = await opened();
+    const { batch } = await opened(h, { sessionStarted: true });
     const path = pathOf(batch);
     h.teammatePush('main', 'README.md', '# theirs\n');
     h.teammatePush('main', 'src/x.ts', 'export const x = 2;\n');
@@ -2018,7 +2000,7 @@ describe("bringing a queued batch's copy up to its base when a lane launches", (
 
   it('shows no launch notice for uncommitted changes a gate meets', async () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
-    const { batch } = await opened();
+    const { batch } = await opened(h, { sessionStarted: true });
     const path = pathOf(batch);
     h.teammatePush('main', 'README.md', '# theirs\n');
     writeFileSync(join(path, 'README.md'), '# a sibling is still writing\n');
@@ -2028,7 +2010,7 @@ describe("bringing a queued batch's copy up to its base when a lane launches", (
 
   it("leaves a fix batch's branch, which is the pull request's, as it is", async () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
-    const { batch } = await opened();
+    const { batch } = await opened(h, { sessionStarted: true });
     // The harness holds this one batch, so the update needs no filter.
     h.store.db.update(schema.batches).set({ ciFixOf: batch.id, ciFixHead: batch.baseSha }).run();
     h.teammatePush('main', 'src/ui/teammate.txt');
@@ -2061,7 +2043,7 @@ describe('a migration numbered the same as one the base added since the batch wa
     h = createDeliveryHarness({ workspaceMode: 'worktree' }, { trigger: false });
     h.commit(JOURNAL, journal('0000_init'));
     h.git$('push', '-q', 'origin', 'main');
-    const { batch } = await opened();
+    const { batch } = await opened(h, { sessionStarted: true });
     await commitOnBatch(batch, `${DRIZZLE}/0001_branch_change.sql`, 'ALTER TABLE a ADD b text;\n');
     await commitOnBatch(batch, JOURNAL, journal('0000_init', '0001_branch_change'));
     h.teammatePush('main', `${DRIZZLE}/0001_track_prs.sql`, 'ALTER TABLE c ADD d text;\n');
@@ -2123,7 +2105,7 @@ describe('a migration numbered the same as one the base added since the batch wa
 describe("a batch in the builder's own checkout (shared mode)", () => {
   it('never merges into the checkout, and says how far behind the base the branch is', async () => {
     h = createDeliveryHarness({}, { trigger: false });
-    const { batch } = await opened();
+    const { batch } = await opened(h, { sessionStarted: true });
     await commitOnBatch(batch, 'src/api/alpha.txt');
     h.teammatePush('main', 'src/ui/one.txt');
     h.teammatePush('main', 'src/ui/two.txt');
@@ -2140,7 +2122,7 @@ describe("a batch in the builder's own checkout (shared mode)", () => {
 
   it('says nothing when the branch holds the base', async () => {
     h = createDeliveryHarness({}, { trigger: false });
-    const { batch } = await opened();
+    const { batch } = await opened(h, { sessionStarted: true });
     await commitOnBatch(batch, 'src/api/alpha.txt');
     expect(await createBaseUpdates(h.ctx).beforeGate(batch.id, signal)).toEqual({
       kind: 'up_to_date',

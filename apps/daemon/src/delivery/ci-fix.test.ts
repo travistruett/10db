@@ -1,9 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { BatchDto, RequiredCheckJobDto } from '@10db/contracts';
 import { getBatch, getTask, listBatches, listTasks, listWorkstreams } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
+import { pathOf, shipped } from '../../test/delivery-worlds';
 import { ManualClock } from '../clock';
 import { GhError } from '../github';
 import { createPrWatch, type PrWatch } from './index';
@@ -47,36 +48,6 @@ async function begin(w: PrWatch): Promise<void> {
   await h.jobs.idle();
 }
 
-function pathOf(batch: BatchDto): string {
-  if (batch.worktreePath === null) throw new Error(`batch ${batch.title} has no worktree path`);
-  return batch.worktreePath;
-}
-
-/** A root batch shipped as a pull request: its branch on origin at `head`, the PR open at `head`. */
-async function shippedRoot(): Promise<{ root: BatchDto; head: string; prUrl: string }> {
-  const started = h.starter.startTask(h.addTask('Alpha').id);
-  await h.jobs.idle();
-  const batch = getBatch(h.store.db, started.id);
-  const ws = h.only(listWorkstreams(h.store.db, { batchId: batch.id }));
-  const file = join(pathOf(batch), 'src/api/alpha.txt');
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, 'alpha\n');
-  const { sha } = await h.git.commit({
-    repo: pathOf(batch),
-    paths: ['src/api/alpha.txt'],
-    message: 'Add alpha',
-    opId: 'op-alpha',
-    branch: batch.branch ?? '',
-  });
-  h.settle(ws.id, 'DONE');
-  h.shipper.checkBatch(batch.id);
-  await h.jobs.idle();
-  const root = getBatch(h.store.db, batch.id);
-  expect(root.state).toBe('SHIPPED');
-  h.gh.setHead(root.prUrl ?? '', sha);
-  return { root, head: sha, prUrl: root.prUrl ?? '' };
-}
-
 const job = (name: string, jobId: string | null = '77'): RequiredCheckJobDto => ({
   name,
   link: jobId === null ? 'https://ci.example.com/build/1' : JOB_LINK.replace('77', jobId),
@@ -97,7 +68,7 @@ const logReads = () => h.gh.calls.filter((c) => c.method === 'jobLog').length;
 
 describe('starting a fix when a required check fails', () => {
   it('makes one task naming the job, with the end of its log, in a batch on the pull request branch', async () => {
-    const { root, head } = await shippedRoot();
+    const { batch: root, head } = await shipped(h);
     const prUrl = root.prUrl ?? '';
     fails(prUrl, job('build'));
     const log = Array.from({ length: 400 }, (_, i) => `step output ${String(i + 1)}`).join('\n');
@@ -134,7 +105,7 @@ describe('starting a fix when a required check fails', () => {
   });
 
   it('writes the whole log, without escape codes, to the data directory', async () => {
-    const { root, head } = await shippedRoot();
+    const { batch: root, head } = await shipped(h);
     fails(root.prUrl ?? '', job('build'));
     const log = Array.from({ length: 400 }, (_, i) => `line ${String(i + 1)}`).join('\n');
     h.gh.setJobLog('77', { kind: 'ready', log: `\u001b[1m${log}\u001b[0m` });
@@ -146,7 +117,7 @@ describe('starting a fix when a required check fails', () => {
   });
 
   it('keeps two failing jobs with the same name in two files', async () => {
-    const { root, head } = await shippedRoot();
+    const { batch: root, head } = await shipped(h);
     fails(root.prUrl ?? '', job('test', '77'), job('test', '78'));
     h.gh.setJobLog('77', { kind: 'ready', log: 'first workflow broke\n' });
     h.gh.setJobLog('78', { kind: 'ready', log: 'second workflow broke\n' });
@@ -162,7 +133,7 @@ describe('starting a fix when a required check fails', () => {
   });
 
   it('names every failing job in one task, one criterion each', async () => {
-    const { root } = await shippedRoot();
+    const { batch: root } = await shipped(h);
     fails(root.prUrl ?? '', job('build', '77'), job('lint', '78'));
     h.gh.setJobLog('77', { kind: 'ready', log: 'build broke\n' });
     h.gh.setJobLog('78', { kind: 'ready', log: 'lint broke\n' });
@@ -181,7 +152,7 @@ describe('starting a fix when a required check fails', () => {
   });
 
   it('carries the log of every gate job when they all fail, and names any more without one', async () => {
-    const { root } = await shippedRoot();
+    const { batch: root } = await shipped(h);
     const shards = [1, 2, 3, 4, 5, 6].map((shard) => `gate-test-${String(shard)}`);
     const names = ['gate-static', ...shards];
     const failing = [...names, 'gate-e2e'].map((name, index) => job(name, String(100 + index)));
@@ -201,7 +172,7 @@ describe('starting a fix when a required check fails', () => {
   });
 
   it('makes no second fix on a second round, after a restart, or after the fix ended on the same head', async () => {
-    const { root } = await shippedRoot();
+    const { batch: root } = await shipped(h);
     fails(root.prUrl ?? '', job('build'));
     h.gh.setJobLog('77', { kind: 'ready', log: 'boom\n' });
     const first = watcher();
@@ -232,7 +203,7 @@ describe('starting a fix when a required check fails', () => {
   });
 
   it('starts no fix while the failing job’s run is in progress, and one once its log is ready', async () => {
-    const { root } = await shippedRoot();
+    const { batch: root } = await shipped(h);
     fails(root.prUrl ?? '', job('build'));
     const w = watcher();
 
@@ -252,7 +223,7 @@ describe('starting a fix when a required check fails', () => {
   });
 
   it('starts none while one of two failing jobs is still in progress', async () => {
-    const { root } = await shippedRoot();
+    const { batch: root } = await shipped(h);
     fails(root.prUrl ?? '', job('build', '77'), job('lint', '78'));
     h.gh.setJobLog('77', { kind: 'ready', log: 'build broke\n' });
     const w = watcher();
@@ -266,7 +237,7 @@ describe('starting a fix when a required check fails', () => {
   });
 
   it('cannot be closed early by a log that prints backticks', async () => {
-    const { root } = await shippedRoot();
+    const { batch: root } = await shipped(h);
     fails(root.prUrl ?? '', job('build'));
     const log = [
       'before',
@@ -291,7 +262,7 @@ describe('starting a fix when a required check fails', () => {
   });
 
   it('starts no fix for a failing check that is no Actions job, and never reads a log', async () => {
-    const { root } = await shippedRoot();
+    const { batch: root } = await shipped(h);
     fails(root.prUrl ?? '', job('ci/circle', null));
     const w = watcher();
 
@@ -309,7 +280,7 @@ describe('starting a fix when a required check fails', () => {
     ['cancelled', { state: 'cancelled', failing: [], pending: [], cancelled: [job('build')] }],
     ['none', { state: 'none', failing: [], pending: [], cancelled: [] }],
   ] as const)('starts no fix when the required checks are %s', async (_name, required) => {
-    const { root } = await shippedRoot();
+    const { batch: root } = await shipped(h);
     h.gh.setRequiredChecks(root.prUrl ?? '', {
       ...required,
       failing: [...required.failing],
@@ -322,7 +293,7 @@ describe('starting a fix when a required check fails', () => {
   });
 
   it('starts no fix while the pull request conflicts with its base', async () => {
-    const { root } = await shippedRoot();
+    const { batch: root } = await shipped(h);
     fails(root.prUrl ?? '', job('build'));
     h.gh.setJobLog('77', { kind: 'ready', log: 'boom\n' });
     h.gh.setMergeBlocked(root.prUrl ?? '', 'conflicts');
@@ -337,7 +308,7 @@ describe('starting a fix when a required check fails', () => {
   });
 
   it('starts no fix for a pull request that merged', async () => {
-    const { root } = await shippedRoot();
+    const { batch: root } = await shipped(h);
     fails(root.prUrl ?? '', job('build'));
     h.gh.setJobLog('77', { kind: 'ready', log: 'boom\n' });
     h.gh.setState(root.prUrl ?? '', 'MERGED');
@@ -348,7 +319,7 @@ describe('starting a fix when a required check fails', () => {
   });
 
   it('starts no fix without a failing commit to cut from', async () => {
-    const { root } = await shippedRoot();
+    const { batch: root } = await shipped(h);
     fails(root.prUrl ?? '', job('build'));
     h.gh.setJobLog('77', { kind: 'ready', log: 'boom\n' });
     h.gh.setHead(root.prUrl ?? '', null);
@@ -359,7 +330,7 @@ describe('starting a fix when a required check fails', () => {
   });
 
   it('keeps going when one job’s log is gone and another’s is ready', async () => {
-    const { root } = await shippedRoot();
+    const { batch: root } = await shipped(h);
     fails(root.prUrl ?? '', job('build', '77'), job('lint', '78'));
     h.gh.setJobLog('78', { kind: 'ready', log: 'lint broke\n' });
     h.gh.failNext.set('jobLog', new GhError('failed', 'log has expired'));
@@ -373,7 +344,7 @@ describe('starting a fix when a required check fails', () => {
   });
 
   it('stops with no_log when no log can be read, and does not read a log again', async () => {
-    const { root } = await shippedRoot();
+    const { batch: root } = await shipped(h);
     fails(root.prUrl ?? '', job('build'));
     h.gh.failNext.set('jobLog', new GhError('failed', 'log has expired'));
     const w = watcher();
@@ -393,7 +364,7 @@ describe('starting a fix when a required check fails', () => {
   });
 
   it('writes nothing when the watch is given no fix path', async () => {
-    const { root } = await shippedRoot();
+    const { batch: root } = await shipped(h);
     fails(root.prUrl ?? '', job('build'));
     h.gh.setJobLog('77', { kind: 'ready', log: 'boom\n' });
     const w = createPrWatch({ ctx: h.ctx, clock, intervalMs: INTERVAL });
@@ -408,7 +379,7 @@ describe('starting a fix when a required check fails', () => {
 
 describe('a refused fix cut', () => {
   it('stops fixing with no_cut, in the write that deletes the batch, and makes no second fix', async () => {
-    const { root } = await shippedRoot();
+    const { batch: root } = await shipped(h);
     const branch = root.branch ?? '';
     // The pull request's branch checked out in the main checkout: the cut refuses it.
     h.git$('switch', '-q', branch);

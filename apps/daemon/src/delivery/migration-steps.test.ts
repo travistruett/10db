@@ -16,6 +16,7 @@ import { getBatch, listWorkstreams, patchWorkstream } from '@10db/db';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
+import { pathOf } from '../../test/delivery-worlds';
 import { DRIZZLE_CONFIG, drizzleGenerate } from '../../test/drizzle-kit';
 import { isolatedGitEnv } from '../../test/fixtures';
 import type { DeliveryContext } from './context';
@@ -128,11 +129,6 @@ const changedFiles = (now: Map<string, string>, before: Map<string, string>): Ma
 let h: DeliveryHarness;
 let scratch: string;
 let commits = 0;
-
-const pathOf = (batch: BatchDto): string => {
-  if (batch.worktreePath === null) throw new Error('the batch has no worktree');
-  return batch.worktreePath;
-};
 
 const statusOf = (dir: string): string =>
   execFileSync('git', ['-C', dir, 'status', '--porcelain', '--untracked-files=all'], {

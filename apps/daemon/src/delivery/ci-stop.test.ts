@@ -1,5 +1,3 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
 import {
   BoardStatus,
   type BatchDto,
@@ -10,6 +8,7 @@ import {
 import { findOpenByFoldKey, getBatch, listBatches, listTasks, listWorkstreams } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
+import { shipped } from '../../test/delivery-worlds';
 import { ManualClock } from '../clock';
 import { GhError } from '../github';
 import { createCiStopAnswers, createPrWatch, type PrWatch } from './index';
@@ -64,36 +63,6 @@ async function begin(w: PrWatch): Promise<void> {
   await h.jobs.idle();
 }
 
-function pathOf(batch: BatchDto): string {
-  if (batch.worktreePath === null) throw new Error(`batch ${batch.title} has no worktree path`);
-  return batch.worktreePath;
-}
-
-/** A root batch shipped as a pull request: its branch on origin at `head`, the PR open at `head`. */
-async function shippedRoot(): Promise<{ root: BatchDto; head: string; prUrl: string }> {
-  const started = h.starter.startTask(h.addTask('Alpha').id);
-  await h.jobs.idle();
-  const batch = getBatch(h.store.db, started.id);
-  const ws = h.only(listWorkstreams(h.store.db, { batchId: batch.id }));
-  const file = join(pathOf(batch), 'src/api/alpha.txt');
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, 'alpha\n');
-  const { sha } = await h.git.commit({
-    repo: pathOf(batch),
-    paths: ['src/api/alpha.txt'],
-    message: 'Add alpha',
-    opId: 'op-alpha',
-    branch: batch.branch ?? '',
-  });
-  h.settle(ws.id, 'DONE');
-  h.shipper.checkBatch(batch.id);
-  await h.jobs.idle();
-  const root = getBatch(h.store.db, batch.id);
-  expect(root.state).toBe('SHIPPED');
-  h.gh.setHead(root.prUrl ?? '', sha);
-  return { root, head: sha, prUrl: root.prUrl ?? '' };
-}
-
 const job = (name: string, jobId: string | null = '77'): RequiredCheckJobDto => ({
   name,
   link:
@@ -140,7 +109,7 @@ function pushedHead(root: BatchDto, message: string): string {
 
 describe('stopping after fixes that did not help', () => {
   it('stops after two fixes: Blocked, and one card naming the job, its link and a Retry', async () => {
-    const { root } = await shippedRoot();
+    const { batch: root } = await shipped(h);
     const prUrl = root.prUrl ?? '';
     fails(prUrl, job('build'));
     h.gh.setJobLog('77', { kind: 'ready', log: 'boom\n' });
@@ -170,7 +139,7 @@ describe('stopping after fixes that did not help', () => {
   });
 
   it('stops when a fix changed nothing, and starts no more however many rounds pass', async () => {
-    const { root } = await shippedRoot();
+    const { batch: root } = await shipped(h);
     fails(root.prUrl ?? '', job('build'));
     h.gh.setJobLog('77', { kind: 'ready', log: 'boom\n' });
     const w = watcher();
@@ -188,7 +157,7 @@ describe('stopping after fixes that did not help', () => {
   });
 
   it('stops with no fix when no failing check is an Actions job', async () => {
-    const { root } = await shippedRoot();
+    const { batch: root } = await shipped(h);
     fails(root.prUrl ?? '', job('ci/circle', null));
 
     await begin(watcher());
@@ -203,7 +172,7 @@ describe('stopping after fixes that did not help', () => {
   });
 
   it('stops with no fix when the failing job has no log to read', async () => {
-    const { root } = await shippedRoot();
+    const { batch: root } = await shipped(h);
     fails(root.prUrl ?? '', job('build'));
     h.gh.failNext.set('jobLog', new GhError('failed', 'log has expired'));
 
@@ -215,7 +184,7 @@ describe('stopping after fixes that did not help', () => {
   });
 
   it('does not stop while the failing job’s run is still in progress', async () => {
-    const { root } = await shippedRoot();
+    const { batch: root } = await shipped(h);
     fails(root.prUrl ?? '', job('build'));
 
     await begin(watcher());
@@ -225,7 +194,7 @@ describe('stopping after fixes that did not help', () => {
   });
 
   it('raises the card once, and leaves it dismissed when the checks go on failing', async () => {
-    const { root } = await shippedRoot();
+    const { batch: root } = await shipped(h);
     fails(root.prUrl ?? '', job('ci/circle', null));
     const w = watcher();
     await begin(w);
@@ -240,7 +209,7 @@ describe('stopping after fixes that did not help', () => {
   });
 
   it('names the cut’s reason when a fix cut is refused', async () => {
-    const { root } = await shippedRoot();
+    const { batch: root } = await shipped(h);
     h.git$('switch', '-q', root.branch ?? '');
     fails(root.prUrl ?? '', job('build'));
     h.gh.setJobLog('77', { kind: 'ready', log: 'boom\n' });
@@ -257,7 +226,7 @@ describe('stopping after fixes that did not help', () => {
 
 describe('the stop card’s Retry', () => {
   it('reruns the failed jobs of each failing Actions run on GitHub, once per run', async () => {
-    const { root } = await shippedRoot();
+    const { batch: root } = await shipped(h);
     // Stopped for want of a log (no job id), with runs GitHub can still rerun.
     const run = (name: string, runId: string): RequiredCheckJobDto => ({
       ...job(name, null),
@@ -281,7 +250,7 @@ describe('the stop card’s Retry', () => {
   });
 
   it('does nothing for any other answer', async () => {
-    const { root } = await shippedRoot();
+    const { batch: root } = await shipped(h);
     fails(root.prUrl ?? '', job('ci/circle', null));
     await begin(watcher());
 
@@ -292,7 +261,7 @@ describe('the stop card’s Retry', () => {
   });
 
   it('says so in a card when GitHub refuses the rerun', async () => {
-    const { root } = await shippedRoot();
+    const { batch: root } = await shipped(h);
     fails(root.prUrl ?? '', job('build'));
     h.gh.failNext.set('jobLog', new GhError('failed', 'log has expired'));
     await begin(watcher());
@@ -320,7 +289,7 @@ describe('the stop card’s Retry', () => {
   ] as const)(
     'raises the stop card again, with its Retry, when the checks still fail on the same head after %s',
     async (_name, refusal) => {
-      const { root } = await shippedRoot();
+      const { batch: root } = await shipped(h);
       fails(root.prUrl ?? '', job('build'));
       h.gh.failNext.set('jobLog', new GhError('failed', 'log has expired'));
       const w = watcher();
@@ -347,7 +316,7 @@ describe('the stop card’s Retry', () => {
 
 describe('clearing a stop', () => {
   async function stopped(): Promise<{ root: BatchDto; w: PrWatch }> {
-    const { root } = await shippedRoot();
+    const { batch: root } = await shipped(h);
     fails(root.prUrl ?? '', job('ci/circle', null));
     const w = watcher();
     await begin(w);
@@ -432,7 +401,7 @@ describe('clearing a stop', () => {
 
 describe('a pull request that merges or closes while a fix runs', () => {
   async function fixing(): Promise<{ root: BatchDto; fix: BatchDto; w: PrWatch }> {
-    const { root } = await shippedRoot();
+    const { batch: root } = await shipped(h);
     fails(root.prUrl ?? '', job('build'));
     h.gh.setJobLog('77', { kind: 'ready', log: 'boom\n' });
     const w = watcher();

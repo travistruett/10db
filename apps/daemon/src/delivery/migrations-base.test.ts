@@ -1,10 +1,10 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import type { BatchDto, WorkstreamDto } from '@10db/contracts';
-import { getBatch, listWorkstreams, patchWorkstream } from '@10db/db';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { getBatch } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
+import { checkoutOf, commitIn, opened as openedWorld } from '../../test/delivery-worlds';
 import { isolatedGitEnv } from '../../test/fixtures';
 import { createBaseUpdates, createMigrationsBase } from './index';
 
@@ -47,30 +47,12 @@ async function opened(mode: 'worktree' | 'shared' = 'worktree') {
   });
   h.commit(JOURNAL, journal('0000_init'));
   h.git$('push', '-q', 'origin', 'main');
-  const started = h.starter.startTask(h.addTask('Alpha').id);
-  await h.jobs.idle();
-  const batch = getBatch(h.store.db, started.id);
-  expect(batch.state).toBe('OPEN');
-  const ws: WorkstreamDto = h.only(listWorkstreams(h.store.db, { batchId: batch.id }));
-  h.state.write((c) => {
-    patchWorkstream(c, ws.id, null, { baseHead: batch.baseSha ?? '' });
-  });
-  const checkout = batch.worktreePath ?? h.repo;
-  return { batch, ws, checkout, bases: createMigrationsBase(h.ctx, createBaseUpdates(h.ctx)) };
-}
-
-async function commitOnBatch(batch: BatchDto, path: string, content = `${path}\n`) {
-  const checkout = batch.worktreePath ?? h.repo;
-  const file = join(checkout, path);
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, content);
-  await h.git.commit({
-    repo: checkout,
-    paths: [path],
-    message: `Add ${path}`,
-    opId: `op-${path.replaceAll('/', '-')}`,
-    branch: batch.branch ?? '',
-  });
+  const world = await openedWorld(h, { sessionStarted: true });
+  return {
+    ...world,
+    checkout: checkoutOf(h, world.batch),
+    bases: createMigrationsBase(h.ctx, createBaseUpdates(h.ctx)),
+  };
 }
 
 /** main gains migration 0001 after the batch was cut, as when another task's pull request merges. */
@@ -82,7 +64,7 @@ function mainGainsMigration(): string {
 describe("bringing main into a task's branch before it takes the migrations hazard", () => {
   it("merges main as origin has it now, so the next migration is numbered after main's latest", async () => {
     const { batch, ws, checkout, bases } = await opened();
-    await commitOnBatch(batch, 'src/api/alpha.txt');
+    await commitIn(h, batch, 'src/api/alpha.txt');
     const main = mainGainsMigration();
     expect(tagsIn(checkout)).toEqual(['0000_init']);
 
@@ -97,7 +79,7 @@ describe("bringing main into a task's branch before it takes the migrations haza
 
   it('holds the hazard back while main conflicts, with a notice on the batch that says the task generates no migration until it is resolved, and no card', async () => {
     const { batch, ws, checkout, bases } = await opened();
-    await commitOnBatch(batch, 'README.md', '# ours\n');
+    await commitIn(h, batch, 'README.md', '# ours\n');
     mainGainsMigration();
     h.teammatePush('main', 'README.md', '# theirs\n');
 
@@ -140,7 +122,7 @@ describe("bringing main into a task's branch before it takes the migrations haza
 
   it("holds the hazard back while the task's own uncommitted change is in main's way, and says to commit it, with no card", async () => {
     const { batch, ws, checkout, bases } = await opened();
-    await commitOnBatch(batch, 'src/api/alpha.txt');
+    await commitIn(h, batch, 'src/api/alpha.txt');
     h.teammatePush('main', 'README.md', '# theirs\n');
     writeFileSync(join(checkout, 'README.md'), '# a lane is still writing\n');
 
@@ -154,7 +136,7 @@ describe("bringing main into a task's branch before it takes the migrations haza
 
   it("never merges into the builder's own checkout", async () => {
     const { batch, ws, checkout, bases } = await opened('shared');
-    await commitOnBatch(batch, 'src/api/alpha.txt');
+    await commitIn(h, batch, 'src/api/alpha.txt');
     mainGainsMigration();
     const head = gitIn(checkout, 'rev-parse', 'HEAD');
 
@@ -166,7 +148,7 @@ describe("bringing main into a task's branch before it takes the migrations haza
 
   it('brings main in once for asks that overlap', async () => {
     const { batch, ws, bases } = await opened();
-    await commitOnBatch(batch, 'src/api/alpha.txt');
+    await commitIn(h, batch, 'src/api/alpha.txt');
     mainGainsMigration();
     const [one, two] = await Promise.all([bases.take(ws.id, signal), bases.take(ws.id, signal)]);
     expect([one, two]).toEqual([{ kind: 'ready' }, { kind: 'ready' }]);
@@ -176,7 +158,7 @@ describe("bringing main into a task's branch before it takes the migrations haza
 
   it('does nothing once its signal has aborted', async () => {
     const { batch, ws, checkout, bases } = await opened();
-    await commitOnBatch(batch, 'src/api/alpha.txt');
+    await commitIn(h, batch, 'src/api/alpha.txt');
     mainGainsMigration();
     const stop = new AbortController();
     stop.abort();

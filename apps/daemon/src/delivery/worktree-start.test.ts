@@ -23,6 +23,7 @@ import {
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
+import { pathOf } from '../../test/delivery-worlds';
 import { isolatedGitEnv } from '../../test/fixtures';
 import { hangingSsh } from '../../test/hanging-ssh';
 import { parseWorktreeList, type WorktreeEntry } from '../git';
@@ -66,11 +67,6 @@ function branches10db(): string[] {
     .git$('for-each-ref', '--format=%(refname)', 'refs/heads/10db/')
     .split('\n')
     .filter(Boolean);
-}
-
-function pathOf(batch: BatchDto): string {
-  if (batch.worktreePath === null) throw new Error(`batch ${batch.title} has no worktree path`);
-  return batch.worktreePath;
 }
 
 /** Starts one task, waits for its cut and returns its batch as it is now. */

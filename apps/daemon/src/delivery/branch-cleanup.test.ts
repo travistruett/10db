@@ -1,15 +1,10 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import type { BatchDto, InboxItemDto, WorkstreamDto } from '@10db/contracts';
-import {
-  clearWorktreePath,
-  getBatch,
-  getInboxItem,
-  listWorkstreams,
-  transitionBatch,
-} from '@10db/db';
+import { join } from 'node:path';
+import type { BatchDto, InboxItemDto } from '@10db/contracts';
+import { clearWorktreePath, getBatch, getInboxItem, transitionBatch } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
+import { commitIn, opened, shipped } from '../../test/delivery-worlds';
 import { ManualClock } from '../clock';
 import { PrState } from '../github';
 import { createInboxService, type InboxService } from '../inbox';
@@ -41,31 +36,6 @@ afterEach(async () => {
   for (const w of watches.splice(0)) await w.stop();
   h.close();
 });
-
-/** Starts one task and waits for its worktree. */
-async function opened(title = 'Alpha'): Promise<{ batch: BatchDto; ws: WorkstreamDto }> {
-  const started = h.starter.startTask(h.addTask(title).id);
-  await h.jobs.idle();
-  const batch = getBatch(h.store.db, started.id);
-  expect(batch.state).toBe('OPEN');
-  return { batch, ws: h.only(listWorkstreams(h.store.db, { batchId: batch.id })) };
-}
-
-/** Commits a file in the batch's worktree as the commit tool does for an agent; returns the SHA. */
-async function commitIn(batch: BatchDto, path: string): Promise<string> {
-  const worktree = batch.worktreePath ?? '';
-  const file = join(worktree, path);
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, `${path}\n`);
-  const { sha } = await h.git.commit({
-    repo: worktree,
-    paths: [path],
-    message: `Add ${path}`,
-    opId: `op-${path}`,
-    branch: batch.branch ?? '',
-  });
-  return sha;
-}
 
 /** Whether the local branch is in the main repository. */
 const exists = (branch: string | null): boolean => h.git$('branch', '--list', branch ?? '') !== '';
@@ -103,19 +73,6 @@ const pushed = (branch: string | null): string[] =>
 const cardsAbout = (branch: string | null): InboxItemDto[] =>
   h.cards().filter((c) => c.title.includes(branch ?? '?'));
 
-/** A task that shipped: its pull request is open and its branch is still local. */
-async function shipped(title = 'Alpha'): Promise<{ batch: BatchDto; tip: string; prUrl: string }> {
-  const { batch, ws } = await opened(title);
-  const tip = await commitIn(batch, `src/api/${title.toLowerCase()}.txt`);
-  h.settle(ws.id, 'DONE');
-  h.shipper.checkBatch(batch.id);
-  await h.jobs.idle();
-  const done = getBatch(h.store.db, batch.id);
-  expect(done.state).toBe('SHIPPED');
-  expect(exists(done.branch)).toBe(true);
-  return { batch: done, tip, prUrl: done.prUrl ?? '' };
-}
-
 /** Startup batch recovery as the daemon runs it, with this test's inbox. */
 const recover = () =>
   recoverBatches({
@@ -143,9 +100,9 @@ function watch(): PrWatch {
 
 describe('an abandoned task whose branch holds commits', () => {
   it('raises one card naming the branch and its commit count, and keeps the branch', async () => {
-    const { batch } = await opened();
-    await commitIn(batch, 'src/api/one.txt');
-    await commitIn(batch, 'src/api/two.txt');
+    const { batch } = await opened(h);
+    await commitIn(h, batch, 'src/api/one.txt');
+    await commitIn(h, batch, 'src/api/two.txt');
     h.shipper.abandon(batch.id);
     await h.jobs.idle();
     expect(exists(batch.branch)).toBe(true);
@@ -155,8 +112,8 @@ describe('an abandoned task whose branch holds commits', () => {
   });
 
   it('says one commit in the singular', async () => {
-    const { batch } = await opened();
-    await commitIn(batch, 'src/api/one.txt');
+    const { batch } = await opened(h);
+    await commitIn(h, batch, 'src/api/one.txt');
     h.shipper.abandon(batch.id);
     await h.jobs.idle();
     expect(h.only(cardsAbout(batch.branch)).title).toContain('1 commit');
@@ -164,8 +121,8 @@ describe('an abandoned task whose branch holds commits', () => {
   });
 
   it('deletes the branch on Delete Branch', async () => {
-    const { batch } = await opened();
-    await commitIn(batch, 'src/api/one.txt');
+    const { batch } = await opened(h);
+    await commitIn(h, batch, 'src/api/one.txt');
     h.shipper.abandon(batch.id);
     await h.jobs.idle();
     const card = h.only(cardsAbout(batch.branch));
@@ -175,8 +132,8 @@ describe('an abandoned task whose branch holds commits', () => {
   });
 
   it('keeps the branch on Keep, and does not ask again', async () => {
-    const { batch } = await opened();
-    await commitIn(batch, 'src/api/one.txt');
+    const { batch } = await opened(h);
+    await commitIn(h, batch, 'src/api/one.txt');
     h.shipper.abandon(batch.id);
     await h.jobs.idle();
     const card = h.only(cardsAbout(batch.branch));
@@ -187,8 +144,8 @@ describe('an abandoned task whose branch holds commits', () => {
   });
 
   it('refuses to delete a branch checked out in the main checkout, and says so on a new card', async () => {
-    const { batch } = await opened();
-    await commitIn(batch, 'src/api/one.txt');
+    const { batch } = await opened(h);
+    await commitIn(h, batch, 'src/api/one.txt');
     h.shipper.abandon(batch.id);
     await h.jobs.idle();
     const card = h.only(cardsAbout(batch.branch));
@@ -208,8 +165,8 @@ describe('an abandoned task whose branch holds commits', () => {
   });
 
   it('refuses to delete a branch being rebased in the main checkout, where it shows as detached', async () => {
-    const { batch } = await opened();
-    await commitIn(batch, 'src/api/one.txt');
+    const { batch } = await opened(h);
+    await commitIn(h, batch, 'src/api/one.txt');
     h.shipper.abandon(batch.id);
     await h.jobs.idle();
     const card = h.only(cardsAbout(batch.branch));
@@ -231,8 +188,8 @@ describe('an abandoned task whose branch holds commits', () => {
   });
 
   it('refuses to delete a branch checked out in another worktree', async () => {
-    const { batch } = await opened();
-    await commitIn(batch, 'src/api/one.txt');
+    const { batch } = await opened(h);
+    await commitIn(h, batch, 'src/api/one.txt');
     h.shipper.abandon(batch.id);
     await h.jobs.idle();
     const card = h.only(cardsAbout(batch.branch));
@@ -245,7 +202,7 @@ describe('an abandoned task whose branch holds commits', () => {
   });
 
   it('deletes the branch of an abandoned task that never moved off its base, and a card says so', async () => {
-    const { batch } = await opened();
+    const { batch } = await opened(h);
     const wt = batch.worktreePath ?? '';
     h.shipper.abandon(batch.id);
     await h.jobs.idle();
@@ -260,7 +217,7 @@ describe('an abandoned task whose branch holds commits', () => {
   });
 
   it('does not say the worktree was deleted when 10db left it behind, and still deletes the branch', async () => {
-    const { batch } = await opened();
+    const { batch } = await opened(h);
     const wt = batch.worktreePath ?? '';
     // Git forgets the worktree and a person's file sits at its path: not 10db's, not empty.
     h.git$('worktree', 'remove', '--force', '--force', wt);
@@ -280,16 +237,16 @@ describe('an abandoned task whose branch holds commits', () => {
   });
 
   it('raises no "abandoned" card: the builder just asked for it, and the branch card says what is unmerged', async () => {
-    const { batch } = await opened();
-    await commitIn(batch, 'src/api/one.txt');
+    const { batch } = await opened(h);
+    await commitIn(h, batch, 'src/api/one.txt');
     h.shipper.abandon(batch.id);
     await h.jobs.idle();
     expect(h.cards().filter((c) => c.title.endsWith('abandoned'))).toEqual([]);
   });
 
   it('answers a card whose branch is already gone without a new card', async () => {
-    const { batch } = await opened();
-    await commitIn(batch, 'src/api/one.txt');
+    const { batch } = await opened(h);
+    await commitIn(h, batch, 'src/api/one.txt');
     h.shipper.abandon(batch.id);
     await h.jobs.idle();
     const card = h.only(cardsAbout(batch.branch));
@@ -315,7 +272,7 @@ describe('an abandoned task whose branch holds commits', () => {
 
 describe('a pull request closed without merging', () => {
   it('raises one card offering to delete the local branch, which stays until answered', async () => {
-    const { batch, prUrl } = await shipped();
+    const { batch, prUrl } = await shipped(h);
     h.gh.setState(prUrl, PrState.Closed);
     const w = watch();
     w.start();
@@ -330,8 +287,8 @@ describe('a pull request closed without merging', () => {
   });
 
   it('deletes the branch on Delete Branch and leaves it on Keep', async () => {
-    const first = await shipped('Alpha');
-    const second = await shipped('Beta');
+    const first = await shipped(h, { title: 'Alpha' });
+    const second = await shipped(h, { title: 'Beta' });
     h.gh.setState(first.prUrl, PrState.Closed);
     h.gh.setState(second.prUrl, PrState.Closed);
     const w = watch();
@@ -360,7 +317,7 @@ describe('a pull request closed without merging', () => {
 
 describe('a pull request that merged', () => {
   it('has its local branch deleted in the watch round that reads the merge', async () => {
-    const { batch, tip, prUrl } = await shipped();
+    const { batch, head: tip, prUrl } = await shipped(h);
     h.gh.setState(prUrl, PrState.Merged);
     h.gh.setHead(prUrl, tip);
     const w = watch();
@@ -372,7 +329,7 @@ describe('a pull request that merged', () => {
   });
 
   it('leaves no remote-tracking ref or branch config behind, so nothing of the task stays', async () => {
-    const { batch, tip, prUrl } = await shipped();
+    const { batch, head: tip, prUrl } = await shipped(h);
     expect(leftOf('10db/')).toEqual(pushed(batch.branch));
     h.gh.setState(prUrl, PrState.Merged);
     h.gh.setHead(prUrl, tip);
@@ -385,7 +342,7 @@ describe('a pull request that merged', () => {
   });
 
   it('keeps a remote-tracking ref that holds a commit the pull request did not carry', async () => {
-    const { batch, tip, prUrl } = await shipped();
+    const { batch, head: tip, prUrl } = await shipped(h);
     const later = h.git$('commit-tree', `${tip}^{tree}`, '-p', tip, '-m', 'fetched later');
     h.git$('update-ref', `refs/remotes/origin/${batch.branch ?? '?'}`, later);
     h.gh.setState(prUrl, PrState.Merged);
@@ -399,7 +356,7 @@ describe('a pull request that merged', () => {
   });
 
   it('leaves a branch that is checked out in the main checkout', async () => {
-    const { batch, tip, prUrl } = await shipped();
+    const { batch, head: tip, prUrl } = await shipped(h);
     h.git$('switch', '-q', batch.branch ?? '');
     h.gh.setState(prUrl, PrState.Merged);
     h.gh.setHead(prUrl, tip);
@@ -415,7 +372,7 @@ describe('a pull request that merged', () => {
   });
 
   it('leaves a branch that holds a commit the pull request did not carry', async () => {
-    const { batch, tip, prUrl } = await shipped();
+    const { batch, head: tip, prUrl } = await shipped(h);
     h.gh.setState(prUrl, PrState.Merged);
     h.gh.setHead(prUrl, tip);
     h.git$('update-ref', `refs/heads/${batch.branch ?? ''}`, h.commit('src/api/late.txt'));
@@ -426,7 +383,7 @@ describe('a pull request that merged', () => {
   });
 
   it('deletes a branch behind the pull request head, whose commits the pull request carried', async () => {
-    const { batch, tip, prUrl } = await shipped();
+    const { batch, head: tip, prUrl } = await shipped(h);
     const head = h.git$('commit-tree', `${tip}^{tree}`, '-p', tip, '-m', 'a later commit');
     h.gh.setState(prUrl, PrState.Merged);
     h.gh.setHead(prUrl, head);
@@ -437,13 +394,13 @@ describe('a pull request that merged', () => {
   });
 
   it('does not let a pull request whose head this repository lacks hold back the branches after it', async () => {
-    const first = await shipped('Alpha');
-    const second = await shipped('Beta');
+    const first = await shipped(h, { title: 'Alpha' });
+    const second = await shipped(h, { title: 'Beta' });
     h.gh.setState(first.prUrl, PrState.Merged);
     // A commit GitHub made that neither this repository nor origin has: nothing says what it holds.
     h.gh.setHead(first.prUrl, 'a'.repeat(40));
     h.gh.setState(second.prUrl, PrState.Merged);
-    h.gh.setHead(second.prUrl, second.tip);
+    h.gh.setHead(second.prUrl, second.head);
     const w = watch();
     w.start();
     await w.idle();
@@ -452,7 +409,7 @@ describe('a pull request that merged', () => {
   });
 
   it('fetches a head commit GitHub made, such as a branch update, to see the branch is behind it', async () => {
-    const { batch, tip, prUrl } = await shipped();
+    const { batch, head: tip, prUrl } = await shipped(h);
     const head = h.origin$('commit-tree', `${tip}^{tree}`, '-p', tip, '-m', 'Update branch');
     h.origin$('update-ref', 'refs/pull/1/head', head);
     h.gh.setState(prUrl, PrState.Merged);
@@ -464,7 +421,7 @@ describe('a pull request that merged', () => {
   });
 
   it('keeps a branch holding a commit the fetched head does not carry', async () => {
-    const { batch, tip, prUrl } = await shipped();
+    const { batch, head: tip, prUrl } = await shipped(h);
     const head = h.origin$('commit-tree', `${tip}^{tree}`, '-p', tip, '-m', 'Update branch');
     h.origin$('update-ref', 'refs/pull/1/head', head);
     h.gh.setState(prUrl, PrState.Merged);
@@ -477,10 +434,10 @@ describe('a pull request that merged', () => {
   });
 
   it('sweeps after a round that failed, so one pull request that breaks the watch holds nothing back', async () => {
-    const merged = await shipped('Alpha');
-    const open = await shipped('Beta');
+    const merged = await shipped(h, { title: 'Alpha' });
+    const open = await shipped(h, { title: 'Beta' });
     h.gh.setState(merged.prUrl, PrState.Merged);
-    h.gh.setHead(merged.prUrl, merged.tip);
+    h.gh.setHead(merged.prUrl, merged.head);
     // Reading `open` records nothing: the write of the round fails after the merge is stored.
     h.gh.setState(open.prUrl, PrState.Merged);
     const real = h.ctx.state;
@@ -510,7 +467,8 @@ describe('a pull request that merged', () => {
   });
 
   it('leaves the branch when gh gives no head commit', async () => {
-    const { batch, prUrl } = await shipped();
+    const { batch, prUrl } = await shipped(h);
+    h.gh.setHead(prUrl, null);
     h.gh.setState(prUrl, PrState.Merged);
     const w = watch();
     w.start();
@@ -519,8 +477,8 @@ describe('a pull request that merged', () => {
   });
 
   it('says on the kept-worktree card that the branch stays with the worktree', async () => {
-    const { batch, ws } = await opened();
-    await commitIn(batch, 'src/api/alpha.txt');
+    const { batch, ws } = await opened(h);
+    await commitIn(h, batch, 'src/api/alpha.txt');
     writeFileSync(join(h.repo, '.git', 'info', 'exclude'), '.env\n');
     writeFileSync(join(batch.worktreePath ?? '', '.env'), 'SECRET=1\n');
     h.settle(ws.id, 'DONE');
@@ -533,7 +491,7 @@ describe('a pull request that merged', () => {
   });
 
   it('never touches a branch it did not make', async () => {
-    const { batch, tip, prUrl } = await shipped();
+    const { batch, head: tip, prUrl } = await shipped(h);
     h.git$('branch', 'feature/mine');
     h.git$('branch', '10db-mine');
     h.gh.setState(prUrl, PrState.Merged);
@@ -549,7 +507,7 @@ describe('a pull request that merged', () => {
 
 describe('the sweep at startup', () => {
   it('removes the branch of a pull request already recorded as merged', async () => {
-    const { batch, tip, prUrl } = await shipped();
+    const { batch, head: tip, prUrl } = await shipped(h);
     h.gh.setState(prUrl, PrState.Merged);
     h.gh.setHead(prUrl, tip);
     // The merge was recorded by an earlier daemon that stopped before it deleted the branch.
@@ -564,7 +522,7 @@ describe('the sweep at startup', () => {
   });
 
   it('keeps the branch of a pull request that is still open', async () => {
-    const { batch } = await shipped();
+    const { batch } = await shipped(h);
     await removeMergedBranches(h.ctx, new AbortController().signal);
     expect(exists(batch.branch)).toBe(true);
   });
@@ -573,7 +531,7 @@ describe('the sweep at startup', () => {
     h.git$('branch', '10db/stray-one');
     h.git$('branch', '10db/stray-two');
     h.git$('branch', 'feature/mine');
-    const { batch } = await opened();
+    const { batch } = await opened(h);
     await listStrayBranches(h.ctx);
     await listStrayBranches(h.ctx);
     const card = h.only(h.cards());
@@ -591,8 +549,8 @@ describe('the sweep at startup', () => {
    * daemon before branch cleanup, or in a shared checkout whose settle failed.
    */
   async function unsettled(commits: number): Promise<BatchDto> {
-    const { batch, ws } = await opened();
-    for (let i = 0; i < commits; i++) await commitIn(batch, `src/api/${String(i)}.txt`);
+    const { batch, ws } = await opened(h);
+    for (let i = 0; i < commits; i++) await commitIn(h, batch, `src/api/${String(i)}.txt`);
     h.settle(ws.id, 'DONE');
     await h.git.removeWorktree(h.repo, batch.worktreePath ?? '');
     h.state.write((w) => {
@@ -644,8 +602,8 @@ describe('the sweep at startup', () => {
 
 describe('a closed batch whose branch moved off its base', () => {
   it('keeps the branch without a card, as before', async () => {
-    const { batch } = await opened();
-    await commitIn(batch, 'src/api/late.txt');
+    const { batch } = await opened(h);
+    await commitIn(h, batch, 'src/api/late.txt');
     h.state.write((c) => {
       transitionBatch(c, batch.id, { to: 'SHIPPING' });
       transitionBatch(c, batch.id, { to: 'CLOSED' });

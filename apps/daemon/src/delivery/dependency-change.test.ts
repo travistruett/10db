@@ -1,9 +1,9 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { BatchDto } from '@10db/contracts';
 import { getBatch } from '@10db/db';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
+import { pathOf } from '../../test/delivery-worlds';
 import { createBaseUpdates } from './base-update';
 import { createDependencyChanges } from './dependency-change';
 
@@ -28,11 +28,6 @@ const LOCKFILE = [
 
 const manifest = (dependencies: Record<string, string>): string =>
   `${JSON.stringify({ name: 'app', version: '1.0.0', dependencies }, null, 2)}\n`;
-
-function pathOf(batch: BatchDto): string {
-  if (batch.worktreePath === null) throw new Error('no worktree');
-  return batch.worktreePath;
-}
 
 /** A project with a manifest and a lockfile on main and a cut copy; the lane then edits its package.json. */
 async function lane(edited: Record<string, string>) {

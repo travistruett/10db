@@ -1,9 +1,10 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { BatchDto, InboxItemDto } from '@10db/contracts';
+import type { InboxItemDto } from '@10db/contracts';
 import { clearWorktreePath, getBatch, getBatchRow } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
+import { opened, pathOf } from '../../test/delivery-worlds';
 import { comparablePath, samePath } from '../git';
 import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger } from '../log';
@@ -31,15 +32,6 @@ afterEach(() => {
 
 const labels = (card: InboxItemDto): string[] => card.options.map((o) => o.label);
 
-/** Starts one task and waits for its batch to open. */
-async function opened(): Promise<{ batch: BatchDto; path: string }> {
-  const started = h.starter.startTask(h.addTask('Alpha').id);
-  await h.jobs.idle();
-  const batch = getBatch(h.store.db, started.id);
-  expect(batch.state).toBe('OPEN');
-  return { batch, path: batch.worktreePath ?? '' };
-}
-
 const recover = () =>
   recoverBatches({
     state: h.state,
@@ -58,7 +50,8 @@ describe('a batch whose worktree is missing', () => {
   });
 
   it('offers Retry and Abandon batch once it failed, and Retry makes the worktree again', async () => {
-    const { batch, path } = await opened();
+    const { batch } = await opened(h);
+    const path = pathOf(batch);
     rmSync(path, { recursive: true, force: true });
     await recover();
     const card = h.only(h.cards());
@@ -74,7 +67,8 @@ describe('a batch whose worktree is missing', () => {
   });
 
   it('abandons the batch on Abandon batch', async () => {
-    const { batch, path } = await opened();
+    const { batch } = await opened(h);
+    const path = pathOf(batch);
     rmSync(path, { recursive: true, force: true });
     await recover();
     const card = h.only(h.cards());
@@ -86,7 +80,8 @@ describe('a batch whose worktree is missing', () => {
   });
 
   it('offers Abandon batch alone while the open batch waits, and does it', async () => {
-    const { batch, path } = await opened();
+    const { batch } = await opened(h);
+    const path = pathOf(batch);
     const card = worktreeCards.missing(batch, path, 'waits');
     raise(h.inbox, batch.projectId, card);
     const raised = h.only(h.cards());
@@ -99,7 +94,8 @@ describe('a batch whose worktree is missing', () => {
   });
 
   it('closes the card without acting when the batch has moved on since', async () => {
-    const { batch, path } = await opened();
+    const { batch } = await opened(h);
+    const path = pathOf(batch);
     raise(h.inbox, batch.projectId, worktreeCards.missing(batch, path, 'waits'));
     const raised = h.only(h.cards());
     h.shipper.abandon(batch.id);
@@ -122,7 +118,8 @@ describe('a worktree 10db kept', () => {
 
   /** Abandons a batch whose worktree holds an uncommitted file, so 10db keeps the worktree. */
   async function keptDirty() {
-    const { batch, path } = await opened();
+    const { batch } = await opened(h);
+    const path = pathOf(batch);
     writeFileSync(join(path, 'notes.txt'), 'not committed\n');
     h.shipper.abandon(batch.id);
     await h.jobs.idle();
@@ -154,7 +151,8 @@ describe('a worktree 10db kept', () => {
   });
 
   it('removes a closed batch worktree that holds a hand-made .env on Remove worktree', async () => {
-    const { batch, path } = await opened();
+    const { batch } = await opened(h);
+    const path = pathOf(batch);
     writeFileSync(join(h.repo, '.git', 'info', 'exclude'), '.env\n');
     writeFileSync(join(path, '.env'), 'mine\n');
     h.shipper.abandon(batch.id);
@@ -176,7 +174,8 @@ describe('a worktree no batch uses any more', () => {
 
   /** Opens a batch, then clears its worktree path so its locked worktree is an orphan. */
   async function orphaned() {
-    const { batch, path } = await opened();
+    const { batch } = await opened(h);
+    const path = pathOf(batch);
     h.state.write((c) => {
       clearWorktreePath(c, batch.id);
     });
@@ -202,7 +201,8 @@ describe('a worktree no batch uses any more', () => {
   });
 
   it('says nothing was removed, and why, when a batch holds the worktree again', async () => {
-    const { batch, path } = await opened();
+    const { batch } = await opened(h);
+    const path = pathOf(batch);
     raise(h.inbox, batch.projectId, worktreeCards.orphanKept(h.repo, path, ['notes.txt'], []));
     const card = h.only(h.cards());
 
@@ -256,7 +256,7 @@ describe('a directory 10db left in place', () => {
   });
 
   it('deletes it on Delete directory', async () => {
-    const { batch } = await opened();
+    const { batch } = await opened(h);
     const dir = join(h.worktreeRoot, 'widgets-0a1b2c', 'stray');
     mkdirSync(join(dir, 'inner'), { recursive: true });
     writeFileSync(join(dir, 'inner', 'a.txt'), 'x\n');
@@ -272,7 +272,7 @@ describe('a directory 10db left in place', () => {
   });
 
   it('refuses a directory outside the worktree root, and raises a card saying so', async () => {
-    const { batch } = await opened();
+    const { batch } = await opened(h);
     const dir = join(dirname(h.repo), 'not-ours');
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'a.txt'), 'x\n');
@@ -374,7 +374,8 @@ describe('a checkout left on the batch branch', () => {
 describe('every worktree and checkout card', () => {
   it('offers an answer beyond a bare dismiss', async () => {
     build('worktree');
-    const { batch, path } = await opened();
+    const { batch } = await opened(h);
+    const path = pathOf(batch);
     const place = { branch: 'main', sha: 'b'.repeat(40) };
     const project = h.project;
     const cards = [
@@ -414,7 +415,7 @@ describe('every worktree and checkout card', () => {
 
   it('the lanes-running cards name lanes in Your folder as what blocks a switch', async () => {
     build('worktree');
-    const { batch } = await opened();
+    const { batch } = await opened(h);
     const place = { branch: 'main', sha: 'b'.repeat(40) };
     const bodies = [
       startCards.lanesRunning(h.project, 3).body,

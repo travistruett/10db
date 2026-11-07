@@ -19,6 +19,7 @@ import {
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
+import { onOrigin } from '../../test/delivery-worlds';
 import { waitFor } from '../../test/fixtures';
 import { alive } from '../../test/orphan-gate';
 import { writeHook } from '../../test/git-hooks';
@@ -60,15 +61,6 @@ async function openBatch(title: string, ...titles: string[]) {
   return { batch, workstreams: listWorkstreams(h.store.db, { batchId: batch.id }) };
 }
 
-/** The SHA of `branch` on origin, or null when origin doesn't have it. */
-function onOrigin(branch: string | null): string | null {
-  try {
-    return h.origin$('rev-parse', '--verify', '-q', `refs/heads/${branch ?? ''}`);
-  } catch {
-    return null;
-  }
-}
-
 /** Every workstream DONE, as the runner would leave them; the trigger then ships the batch. */
 async function finishAll(batch: BatchDto) {
   for (const ws of listWorkstreams(h.store.db, { batchId: batch.id })) h.settle(ws.id, 'DONE');
@@ -87,7 +79,7 @@ describe('shipping', () => {
     const { batch } = await openBatch('Nothing', 'Alpha');
     const shipped = await finishAll(batch);
     expect(shipped.state).toBe('CLOSED');
-    expect(onOrigin(batch.branch)).toBeNull();
+    expect(onOrigin(h, batch.branch)).toBeNull();
     expect(h.gh.prCreates()).toEqual([]);
     expect(batchLines(batch.id)).toMatchObject([
       { msg: 'batch branch cut' },
@@ -181,7 +173,7 @@ describe('shipping', () => {
       failure: null,
     });
     const tip = h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`);
-    expect(onOrigin(batch.branch)).toBe(tip);
+    expect(onOrigin(h, batch.branch)).toBe(tip);
     expect(h.git$('rev-parse', '--abbrev-ref', `${batch.branch ?? ''}@{u}`)).toBe(
       `origin/${batch.branch ?? ''}`,
     );
@@ -202,7 +194,7 @@ describe('shipping', () => {
     h.teammatePush('main', 'src/ui/teammate.txt');
     const shipped = await finishAll(batch);
     expect(shipped.state).toBe('SHIPPED');
-    expect(onOrigin(batch.branch)).toBe(head);
+    expect(onOrigin(h, batch.branch)).toBe(head);
     expect(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`)).toBe(head);
     expect(h.git$('status', '--porcelain', '--untracked-files=all')).toBe('');
   });
@@ -240,7 +232,7 @@ describe('shipping', () => {
 
     expect(existsSync(join(h.repo, 'gate-ran'))).toBe(false);
     expect(failed).toMatchObject({ state: 'FAILED', failure: 'install_broken' });
-    expect(onOrigin(batch.branch)).toBeNull();
+    expect(onOrigin(h, batch.branch)).toBeNull();
     const card = h.only(h.cards());
     expect(card.title).toContain('the install in its copy is broken');
     expect(card.title).not.toContain('the gate failed');
@@ -385,7 +377,7 @@ describe('shipping', () => {
     h.commit('src/api/alpha.txt');
     const failed = await finishAll(batch);
     expect(failed.state).toBe('FAILED');
-    expect(onOrigin(batch.branch)).toBeNull();
+    expect(onOrigin(h, batch.branch)).toBeNull();
     expect(batchLines(batch.id).find((line) => line['msg'] === 'gate started')).toMatchObject({
       command: 'false',
     });
@@ -416,7 +408,7 @@ describe('shipping', () => {
     h.commit('src/api/alpha.txt');
     const failed = await finishAll(batch);
     expect(failed).toMatchObject({ state: 'FAILED', failure: 'gate_failed' });
-    expect(onOrigin(batch.branch)).toBeNull();
+    expect(onOrigin(h, batch.branch)).toBeNull();
     expect(h.gh.prCreates()).toEqual([]);
     const card = h.only(h.cards());
     expect(card.title).toContain('the pre-check failed (exit 3)');
@@ -434,7 +426,7 @@ describe('shipping', () => {
     const failed = await finishAll(batch);
     expect(failed.state).toBe('FAILED');
     expect(h.only(h.cards()).title).toContain('the pre-check timed out');
-    expect(onOrigin(batch.branch)).toBeNull();
+    expect(onOrigin(h, batch.branch)).toBeNull();
   });
 
   it('says the gate ran in the pull request when no pre-check is set', async () => {
@@ -466,7 +458,7 @@ describe('shipping', () => {
       'checkout switched back',
     ]);
     expect(existsSync(join(h.dataDir, 'logs', 'gate'))).toBe(false);
-    expect(onOrigin(batch.branch)).toBe(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`));
+    expect(onOrigin(h, batch.branch)).toBe(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`));
     const body = h.gh.body(shipped.prUrl ?? '');
     expect(body).toContain('No gate command: each task was approved in 10db.');
     expect(body).not.toContain('Gate, run on the branch before the push:');
@@ -678,7 +670,7 @@ describe('shipping', () => {
     );
     const { batch } = await openBatch('Greetings', 'Alpha');
     h.commit('src/api/alpha.txt');
-    const before = onOrigin(batch.branch);
+    const before = onOrigin(h, batch.branch);
     row.arrange?.(h, batch);
     const ended = await finishAll(batch);
     expect(ended).toMatchObject({ state: 'FAILED', failure: row.failure });
@@ -693,7 +685,7 @@ describe('shipping', () => {
       row.failure !== 'gh_unavailable' &&
       row.failure !== 'network'
     )
-      expect(onOrigin(batch.branch)).toBe(before);
+      expect(onOrigin(h, batch.branch)).toBe(before);
   });
 
   it.each<{
@@ -740,7 +732,7 @@ describe('a waiting update that drains the factory', () => {
     const held = await finishAll(batch);
     // Every member is done, yet the batch stays open: nothing is pushed or opened.
     expect(held.state).toBe('OPEN');
-    expect(onOrigin(batch.branch)).toBeNull();
+    expect(onOrigin(h, batch.branch)).toBeNull();
     expect(h.gh.prCreates()).toEqual([]);
     expect(h.jobs.pending()).toBe(0);
 
@@ -854,7 +846,7 @@ describe('the push', () => {
       expect(card.body).toContain('git push was still running after 1.0 s');
       const child = await ssh.childPid();
       await waitFor(() => !alive(child), 2_000);
-      expect(onOrigin(batch.branch)).toBeNull();
+      expect(onOrigin(h, batch.branch)).toBeNull();
       expect(h.gh.prCreates()).toEqual([]);
     } finally {
       ssh.cleanup();
@@ -895,7 +887,7 @@ describe('a push the server fails', () => {
     expect(shipped.state).toBe('SHIPPED');
     expect(pushes.calls.count).toBe(3);
     expect(h.cards()).toEqual([]);
-    expect(onOrigin(batch.branch)).toBe(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`));
+    expect(onOrigin(h, batch.branch)).toBe(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`));
   });
 
   it("quotes the remote's reason, and never says the branch diverged, when it keeps failing", async () => {

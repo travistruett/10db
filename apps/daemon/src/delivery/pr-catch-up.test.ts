@@ -1,10 +1,11 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import type { BatchDto, WorkstreamDto } from '@10db/contracts';
-import { getBatch, listWorkstreams, patchBatch, patchProject } from '@10db/db';
+import { join } from 'node:path';
+import type { BatchDto } from '@10db/contracts';
+import { getBatch, patchBatch, patchProject } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
+import { commitIn, committed, pathOf, shipped } from '../../test/delivery-worlds';
 import { GhError, PrMergeable } from '../github';
 import { NOTICE_KEY } from './notices';
 
@@ -33,53 +34,29 @@ const BOTH = {
   theirs: "import a from './a';\nimport c from './c';\nexport {};\n",
 };
 
-/** The SHA of `branch` on origin. */
-const onOrigin = (branch: string | null): string =>
+/** The SHA of `branch` on origin; throws when origin doesn't have it. */
+const tipOnOrigin = (branch: string | null): string =>
   h.origin$('rev-parse', '--verify', '-q', `refs/heads/${branch ?? ''}`);
 
-/** Commits a file in the batch's worktree, as the commit tool does for an agent. */
-async function commitIn(batch: BatchDto, path: string, content = `${path}\n`): Promise<void> {
-  const checkout = batch.worktreePath ?? '';
-  const file = join(checkout, path);
-  mkdirSync(dirname(file), { recursive: true });
-  writeFileSync(file, content);
-  await h.git.commit({
-    repo: checkout,
-    paths: [path],
-    message: `Add ${path}`,
-    opId: `op-${path.replaceAll('/', '-')}`,
-    branch: batch.branch ?? '',
-  });
-}
-
 /** Ships one task that wrote `path`; resolves with the SHIPPED batch. */
-async function shipped(
+async function shippedWith(
   path = 'src/index.ts',
   content = BOTH.mine,
   opts: { readonly keepWorktree?: boolean } = {},
 ): Promise<BatchDto> {
-  const started = h.starter.startTask(h.addTask('Alpha').id);
-  await h.jobs.idle();
-  const batch = getBatch(h.store.db, started.id);
-  await commitIn(batch, path, content);
+  const world = await committed(h, { path, content });
   if (opts.keepWorktree) {
     // A hand-made, git-ignored .env 10db didn't seed: the worktree stays after the ship.
     writeFileSync(join(h.repo, '.git', 'info', 'exclude'), '.env\n');
-    writeFileSync(join(batch.worktreePath ?? '', '.env'), 'SECRET=1\n');
+    writeFileSync(join(pathOf(world.batch), '.env'), 'SECRET=1\n');
   }
-  const ws: WorkstreamDto = h.only(listWorkstreams(h.store.db, { batchId: batch.id }));
-  h.settle(ws.id, 'DONE');
-  h.shipper.checkBatch(batch.id);
-  await h.jobs.idle();
-  const now = getBatch(h.store.db, batch.id);
-  expect(now.state).toBe('SHIPPED');
-  return now;
+  return (await shipped(h, { from: world })).batch;
 }
 
 /** GitHub now says the pull request conflicts with main, at the branch's tip on origin. */
 function conflicts(batch: BatchDto): string {
   const url = batch.prUrl ?? '';
-  h.gh.setHead(url, onOrigin(batch.branch));
+  h.gh.setHead(url, tipOnOrigin(batch.branch));
   h.gh.setMergeBlocked(url, 'conflicts');
   h.gh.setMergeable(url, PrMergeable.Conflicting);
   return url;
@@ -101,7 +78,7 @@ const commitsDuringInstall = (batch: BatchDto): (() => boolean) => {
   vi.spyOn(h.git, 'blobAt').mockImplementation(async (repo, rev, file) => {
     if (!committed && rev === 'HEAD' && file === 'pnpm-lock.yaml') {
       committed = true;
-      await commitIn(getBatch(h.store.db, batch.id), 'src/builder.ts');
+      await commitIn(h, getBatch(h.store.db, batch.id), 'src/builder.ts');
     }
     return read(repo, rev, file);
   });
@@ -110,14 +87,14 @@ const commitsDuringInstall = (batch: BatchDto): (() => boolean) => {
 
 describe('a shipped pull request that conflicts with its base', () => {
   it('has the base merged into it, settled conflicts named, pushed, and no card', async () => {
-    const batch = await shipped();
+    const batch = await shippedWith();
     const teammate = h.teammatePush('main', 'src/index.ts', BOTH.theirs);
-    const before = onOrigin(batch.branch);
+    const before = tipOnOrigin(batch.branch);
     conflicts(batch);
 
     const now = await catchUp(batch);
 
-    const tip = onOrigin(batch.branch);
+    const tip = tipOnOrigin(batch.branch);
     expect(tip).not.toBe(before);
     expect(h.origin$('log', '-1', '--format=%P', tip)).toBe(`${before} ${teammate}`);
     expect(h.origin$('show', `${tip}:src/index.ts`)).toBe(
@@ -134,15 +111,15 @@ describe('a shipped pull request that conflicts with its base', () => {
   });
 
   it('runs the gate on the merged branch before it pushes', async () => {
-    const batch = await shipped();
+    const batch = await shippedWith();
     h.teammatePush('main', 'src/index.ts', BOTH.theirs);
     conflicts(batch);
-    const before = onOrigin(batch.branch);
+    const before = tipOnOrigin(batch.branch);
     h.state.write((c) => patchProject(c, h.project.id, { gateCommand: 'false' }));
 
     const now = await catchUp(batch);
 
-    expect(onOrigin(batch.branch)).toBe(before);
+    expect(tipOnOrigin(batch.branch)).toBe(before);
     const card = h.only(h.cards());
     expect(card.title).toContain('gate failed');
     expect(card.body).toContain('main');
@@ -191,17 +168,17 @@ describe('a shipped pull request that conflicts with its base', () => {
       'pushes nothing, raises one card naming the install and puts the merge back when %s',
       async (_name, project) => {
         installable();
-        const batch = await shipped('src/index.ts', BOTH.mine, { keepWorktree: true });
+        const batch = await shippedWith('src/index.ts', BOTH.mine, { keepWorktree: true });
         const kept = batch.worktreePath ?? '';
         h.teammatePush('main', 'src/index.ts', BOTH.theirs);
         conflicts(batch);
-        const before = onOrigin(batch.branch);
+        const before = tipOnOrigin(batch.branch);
         if (project !== null) h.state.write((c) => patchProject(c, h.project.id, project));
         pruned(batch);
 
         const now = await catchUp(batch);
 
-        expect(onOrigin(batch.branch)).toBe(before);
+        expect(tipOnOrigin(batch.branch)).toBe(before);
         expect(existsSync(join(kept, 'gate-ran'))).toBe(false);
         // (The kept worktree has its own card, from the ship.)
         const card = h.only(h.cards().filter((c) => c.title.includes('conflicts with main')));
@@ -222,7 +199,7 @@ describe('a shipped pull request that conflicts with its base', () => {
     /** The batch and main each added a line to one file, and the copy's packages no longer resolve. */
     async function keptLinesOnBrokenInstall(keepWorktree: boolean): Promise<BatchDto> {
       installable();
-      const batch = await shipped('src/index.ts', BOTH.mine, { keepWorktree });
+      const batch = await shippedWith('src/index.ts', BOTH.mine, { keepWorktree });
       h.teammatePush('main', 'src/index.ts', BOTH.theirs);
       conflicts(batch);
       pruned(batch);
@@ -232,7 +209,7 @@ describe('a shipped pull request that conflicts with its base', () => {
     it('does not say the kept-lines merge went back when the builder commits during the install', async () => {
       const batch = await keptLinesOnBrokenInstall(true);
       const branch = batch.branch ?? '';
-      const before = onOrigin(branch);
+      const before = tipOnOrigin(branch);
       const committed = commitsDuringInstall(batch);
 
       await catchUp(batch);
@@ -242,7 +219,7 @@ describe('a shipped pull request that conflicts with its base', () => {
       const tip = h.git$('rev-parse', `refs/heads/${branch}`);
       expect(h.git$('log', '-1', '--format=%s', tip)).toBe('Add src/builder.ts');
       expect(h.git$('log', '-1', '--format=%P', `${tip}~1`)).toContain(before);
-      expect(onOrigin(branch)).toBe(before);
+      expect(tipOnOrigin(branch)).toBe(before);
       const card = h.only(h.cards().filter((c) => c.title.includes('conflicts with main')));
       expect(card.body).toContain('.: left-pad');
       expect(card.body).toContain('src/index.ts');
@@ -253,13 +230,13 @@ describe('a shipped pull request that conflicts with its base', () => {
     it("does not say the kept-lines merge went back when it can't be", async () => {
       const batch = await keptLinesOnBrokenInstall(false);
       const branch = batch.branch ?? '';
-      const before = onOrigin(branch);
+      const before = tipOnOrigin(branch);
       vi.spyOn(h.git, 'rewindBranch').mockRejectedValueOnce(new Error('index.lock exists'));
 
       await catchUp(batch);
 
       expect(h.git$('rev-parse', `refs/heads/${branch}`)).not.toBe(before);
-      expect(onOrigin(branch)).toBe(before);
+      expect(tipOnOrigin(branch)).toBe(before);
       const card = h.only(h.cards());
       expect(card.body).toContain('.: left-pad');
       expect(card.body).toContain('src/index.ts');
@@ -275,10 +252,10 @@ describe('a shipped pull request that conflicts with its base', () => {
       );
       h.commit(`${GENERATED}/a.schema.json`, '{"v":0}\n');
       h.git$('push', '-q', 'origin', 'main');
-      const batch = await shipped(`${GENERATED}/a.schema.json`, '{"v":"mine"}\n');
+      const batch = await shippedWith(`${GENERATED}/a.schema.json`, '{"v":"mine"}\n');
       h.teammatePush('main', `${GENERATED}/a.schema.json`, '{"v":"theirs"}\n');
       conflicts(batch);
-      const before = onOrigin(batch.branch);
+      const before = tipOnOrigin(batch.branch);
       h.state.write((c) => patchProject(c, h.project.id, { gateCommand: 'false' }));
       pruned(batch);
       const generators = vi.spyOn(h.ctx.generators, 'regenerate');
@@ -286,7 +263,7 @@ describe('a shipped pull request that conflicts with its base', () => {
       const now = await catchUp(batch);
 
       expect(generators).not.toHaveBeenCalled();
-      expect(onOrigin(batch.branch)).toBe(before);
+      expect(tipOnOrigin(batch.branch)).toBe(before);
       expect(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`)).toBe(before);
       const card = h.only(h.cards());
       expect(card.title).toContain("conflicts with main and 10db couldn't update it");
@@ -316,7 +293,7 @@ describe('a shipped pull request that conflicts with its base', () => {
         h.commit(`${GENERATED}/a.schema.json`, '{"v":0}\n');
         h.commit('pnpm-lock.yaml', 'lockfileVersion: 9\n');
         h.git$('push', '-q', 'origin', 'main');
-        const batch = await shipped(`${GENERATED}/a.schema.json`, '{"v":"mine"}\n', {
+        const batch = await shippedWith(`${GENERATED}/a.schema.json`, '{"v":"mine"}\n', {
           keepWorktree,
         });
         h.teammatePush('main', `${GENERATED}/a.schema.json`, '{"v":"theirs"}\n');
@@ -375,11 +352,11 @@ describe('a shipped pull request that conflicts with its base', () => {
         async (_problem, _check, why, setUp, kept, gateCommand) => {
           const batch = await generatedConflict(gateCommand, kept);
           setUp();
-          const before = onOrigin(batch.branch);
+          const before = tipOnOrigin(batch.branch);
 
           const now = await catchUp(batch);
 
-          expect(onOrigin(batch.branch)).toBe(before);
+          expect(tipOnOrigin(batch.branch)).toBe(before);
           expect(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`)).toBe(before);
           // (A kept worktree has its own card, from the ship.)
           const card = h.only(h.cards().filter((c) => !c.title.includes('kept the worktree')));
@@ -400,7 +377,7 @@ describe('a shipped pull request that conflicts with its base', () => {
         let committed = false;
         vi.spyOn(h.ctx.generators, 'regenerate').mockImplementation(async ({ path }) => {
           committed = true;
-          await commitIn(getBatch(h.store.db, batch.id), 'src/builder.ts');
+          await commitIn(h, getBatch(h.store.db, batch.id), 'src/builder.ts');
           return { kind: 'done', logPath: join(path, 'generate.log') };
         });
         return () => committed;
@@ -416,7 +393,7 @@ describe('a shipped pull request that conflicts with its base', () => {
         async (_when, commits, keepWorktree, gateCommand) => {
           const batch = await generatedConflict(gateCommand, keepWorktree);
           const branch = batch.branch ?? '';
-          const before = onOrigin(branch);
+          const before = tipOnOrigin(branch);
           const committed = commits(batch);
 
           await catchUp(batch);
@@ -424,7 +401,7 @@ describe('a shipped pull request that conflicts with its base', () => {
           expect(committed()).toBe(true);
           const tip = h.git$('rev-parse', `refs/heads/${branch}`);
           expect(h.git$('log', '-1', '--format=%s', tip)).toBe('Add src/builder.ts');
-          expect(onOrigin(branch)).toBe(before);
+          expect(tipOnOrigin(branch)).toBe(before);
           // (A kept worktree has its own card, from the ship.)
           const card = h.only(h.cards().filter((c) => !c.title.includes('kept the worktree')));
           expect(card.body).toContain('the branch moved to');
@@ -436,14 +413,14 @@ describe('a shipped pull request that conflicts with its base', () => {
       it("does not say the merge went back when it can't be", async () => {
         const batch = await generatedConflict(null, false);
         const branch = batch.branch ?? '';
-        const before = onOrigin(branch);
+        const before = tipOnOrigin(branch);
         failing();
         vi.spyOn(h.git, 'rewindBranch').mockRejectedValueOnce(new Error('index.lock exists'));
 
         await catchUp(batch);
 
         expect(h.git$('rev-parse', `refs/heads/${branch}`)).not.toBe(before);
-        expect(onOrigin(branch)).toBe(before);
+        expect(tipOnOrigin(branch)).toBe(before);
         const card = h.only(h.cards());
         expect(card.body).toContain('nothing was pushed');
         expect(card.body).not.toMatch(SAYS_PUT_BACK);
@@ -452,15 +429,15 @@ describe('a shipped pull request that conflicts with its base', () => {
 
     it('raises the card naming the conflict when the base could not be merged at all', async () => {
       installable();
-      const batch = await shipped('README.md', '# ours\n');
+      const batch = await shippedWith('README.md', '# ours\n');
       h.teammatePush('main', 'README.md', '# theirs\n');
       conflicts(batch);
-      const before = onOrigin(batch.branch);
+      const before = tipOnOrigin(batch.branch);
       pruned(batch);
 
       await catchUp(batch);
 
-      expect(onOrigin(batch.branch)).toBe(before);
+      expect(tipOnOrigin(batch.branch)).toBe(before);
       const card = h.only(h.cards());
       expect(card.body).toContain("10db couldn't settle them itself");
       expect(card.body).toContain('README.md');
@@ -469,14 +446,14 @@ describe('a shipped pull request that conflicts with its base', () => {
 
     it('raises no card when the branch holds the base, since there is no merge to stop', async () => {
       installable();
-      const batch = await shipped();
+      const batch = await shippedWith();
       conflicts(batch);
-      const before = onOrigin(batch.branch);
+      const before = tipOnOrigin(batch.branch);
       pruned(batch);
 
       await catchUp(batch);
 
-      expect(onOrigin(batch.branch)).toBe(before);
+      expect(tipOnOrigin(batch.branch)).toBe(before);
       expect(h.cards()).toEqual([]);
       expect(
         h.logs
@@ -487,17 +464,17 @@ describe('a shipped pull request that conflicts with its base', () => {
   });
 
   it('lists the files 10db settled in the merge on the card when the pre-check fails on the result', async () => {
-    const batch = await shipped();
+    const batch = await shippedWith();
     h.teammatePush('main', 'src/index.ts', BOTH.theirs);
     conflicts(batch);
-    const before = onOrigin(batch.branch);
+    const before = tipOnOrigin(batch.branch);
     h.state.write((c) =>
       patchProject(c, h.project.id, { gateCommand: 'true', precheckCommand: 'false' }),
     );
 
     await catchUp(batch);
 
-    expect(onOrigin(batch.branch)).toBe(before);
+    expect(tipOnOrigin(batch.branch)).toBe(before);
     const card = h.only(h.cards());
     expect(card.title).toContain('pre-check failed');
     expect(card.body).toContain('10db settled these files itself in the merge');
@@ -505,11 +482,11 @@ describe('a shipped pull request that conflicts with its base', () => {
   });
 
   it('puts the local branch back at the pull request head when the check fails in the worktree it kept', async () => {
-    const batch = await shipped('src/index.ts', BOTH.mine, { keepWorktree: true });
+    const batch = await shippedWith('src/index.ts', BOTH.mine, { keepWorktree: true });
     const kept = batch.worktreePath ?? '';
     h.teammatePush('main', 'src/index.ts', BOTH.theirs);
     conflicts(batch);
-    const before = onOrigin(batch.branch);
+    const before = tipOnOrigin(batch.branch);
     h.state.write((c) => patchProject(c, h.project.id, { gateCommand: 'false' }));
 
     await catchUp(batch);
@@ -521,7 +498,7 @@ describe('a shipped pull request that conflicts with its base', () => {
   });
 
   it('catches up again after a failed check and the builder updating the branch on GitHub', async () => {
-    const batch = await shipped();
+    const batch = await shippedWith();
     h.teammatePush('main', 'src/index.ts', BOTH.theirs);
     const url = conflicts(batch);
     const branch = batch.branch ?? '';
@@ -538,7 +515,7 @@ describe('a shipped pull request that conflicts with its base', () => {
       'commit-tree',
       `refs/heads/${branch}^{tree}`,
       '-p',
-      onOrigin(branch),
+      tipOnOrigin(branch),
       '-m',
       'Update branch',
     );
@@ -551,22 +528,22 @@ describe('a shipped pull request that conflicts with its base', () => {
     await catchUp(getBatch(h.store.db, batch.id));
 
     expect(h.cards().filter((c) => c.body.includes("can't tell which is current"))).toEqual([]);
-    expect(h.origin$('log', '-1', '--format=%P', onOrigin(branch)).split(' ')[0]).toBe(byHand);
+    expect(h.origin$('log', '-1', '--format=%P', tipOnOrigin(branch)).split(' ')[0]).toBe(byHand);
   });
 
   it('starts from the pull request head when the local branch holds an earlier unpushed merge of 10db', async () => {
-    const batch = await shipped();
+    const batch = await shippedWith();
     h.teammatePush('main', 'src/index.ts', BOTH.theirs);
     const url = conflicts(batch);
     const branch = batch.branch ?? '';
-    const head = onOrigin(branch);
+    const head = tipOnOrigin(branch);
     h.state.write((c) => patchProject(c, h.project.id, { gateCommand: 'false' }));
     // An earlier catch-up's merge of main fails its check and can't be put back: it stays, unpushed.
     vi.spyOn(h.git, 'rewindBranch').mockRejectedValueOnce(new Error('index.lock exists'));
     await catchUp(batch);
     const stale = h.git$('rev-parse', `refs/heads/${branch}`);
     expect(h.git$('log', '-1', '--format=%P', stale).split(' ')).toHaveLength(2);
-    expect(onOrigin(branch)).toBe(head);
+    expect(tipOnOrigin(branch)).toBe(head);
 
     // Its retry time passes, and the next catch-up starts from the head again.
     h.shipClock.advance(31 * 60_000);
@@ -574,7 +551,7 @@ describe('a shipped pull request that conflicts with its base', () => {
 
     expect(h.git$('rev-parse', `refs/heads/${branch}`)).toBe(head);
     expect(h.cards().filter((c) => c.body.includes('lacks'))).toEqual([]);
-    expect(onOrigin(branch)).toBe(head);
+    expect(tipOnOrigin(branch)).toBe(head);
 
     // The builder presses Update branch, the base moves again and the check is fixed.
     const byHand = h.origin$(
@@ -597,15 +574,15 @@ describe('a shipped pull request that conflicts with its base', () => {
     await catchUp(getBatch(h.store.db, batch.id));
 
     expect(h.cards().filter((c) => c.body.includes("can't tell which is current"))).toEqual([]);
-    expect(h.origin$('log', '-1', '--format=%P', onOrigin(branch)).split(' ')[0]).toBe(byHand);
+    expect(h.origin$('log', '-1', '--format=%P', tipOnOrigin(branch)).split(' ')[0]).toBe(byHand);
   });
 
   it("keeps a builder's local commit one ahead of the pull request head and raises a card naming it", async () => {
-    const batch = await shipped();
+    const batch = await shippedWith();
     h.teammatePush('main', 'src/index.ts', BOTH.theirs);
     conflicts(batch);
     const branch = batch.branch ?? '';
-    const head = onOrigin(branch);
+    const head = tipOnOrigin(branch);
     // A hand commit on the local branch, never pushed: not a merge of 10db's.
     const byHand = h.git$(
       '-c',
@@ -624,17 +601,17 @@ describe('a shipped pull request that conflicts with its base', () => {
     await catchUp(batch);
 
     expect(h.git$('rev-parse', `refs/heads/${branch}`)).toBe(byHand);
-    expect(onOrigin(branch)).toBe(head);
+    expect(tipOnOrigin(branch)).toBe(head);
     const card = h.only(h.cards());
     expect(card.body).toContain(byHand.slice(0, 7));
   });
 
   it("keeps the builder's own merge of main ahead of the pull request head and raises a card naming it", async () => {
-    const batch = await shipped();
+    const batch = await shippedWith();
     h.teammatePush('main', 'src/index.ts', BOTH.theirs);
     conflicts(batch);
     const branch = batch.branch ?? '';
-    const head = onOrigin(branch);
+    const head = tipOnOrigin(branch);
     h.git$('fetch', '-q', 'origin');
     // The builder runs `git merge origin/main` and settles the conflict by hand, not yet pushed.
     const byHand = h.git$(
@@ -656,13 +633,13 @@ describe('a shipped pull request that conflicts with its base', () => {
     await catchUp(batch);
 
     expect(h.git$('rev-parse', `refs/heads/${branch}`)).toBe(byHand);
-    expect(onOrigin(branch)).toBe(head);
+    expect(tipOnOrigin(branch)).toBe(head);
     const card = h.only(h.cards());
     expect(card.body).toContain(byHand.slice(0, 7));
   });
 
   it('keeps an unpushed merge of 10db after a restart and raises a card naming it', async () => {
-    const batch = await shipped();
+    const batch = await shippedWith();
     h.teammatePush('main', 'src/index.ts', BOTH.theirs);
     conflicts(batch);
     const branch = batch.branch ?? '';
@@ -670,7 +647,7 @@ describe('a shipped pull request that conflicts with its base', () => {
     vi.spyOn(h.git, 'rewindBranch').mockRejectedValueOnce(new Error('index.lock exists'));
     await catchUp(batch);
     const stale = h.git$('rev-parse', `refs/heads/${branch}`);
-    expect(stale).not.toBe(onOrigin(branch));
+    expect(stale).not.toBe(tipOnOrigin(branch));
 
     // The daemon restarts: what it knew of its own merge is gone.
     h.restartShipper();
@@ -687,7 +664,7 @@ describe('a shipped pull request that conflicts with its base', () => {
   ])(
     "keeps a builder's commit made in %s while the base update's install runs, when the check then fails",
     async (_where, keepWorktree) => {
-      const batch = await shipped('src/index.ts', BOTH.mine, { keepWorktree });
+      const batch = await shippedWith('src/index.ts', BOTH.mine, { keepWorktree });
       h.teammatePush('main', 'src/index.ts', BOTH.theirs);
       conflicts(batch);
       const branch = batch.branch ?? '';
@@ -698,7 +675,7 @@ describe('a shipped pull request that conflicts with its base', () => {
       vi.spyOn(h.git, 'blobAt').mockImplementation(async (repo, rev, file) => {
         if (!committed && rev === 'HEAD' && file === 'pnpm-lock.yaml') {
           committed = true;
-          await commitIn(getBatch(h.store.db, batch.id), 'src/builder.ts');
+          await commitIn(h, getBatch(h.store.db, batch.id), 'src/builder.ts');
         }
         return read(repo, rev, file);
       });
@@ -710,7 +687,7 @@ describe('a shipped pull request that conflicts with its base', () => {
       expect(h.git$('show', `${tip}:src/builder.ts`)).toBe('src/builder.ts');
       expect(h.git$('log', '-1', '--format=%s', tip)).toBe('Add src/builder.ts');
       // Nothing was pushed, and the failed check still has its one card.
-      expect(h.origin$('log', '-1', '--format=%s', onOrigin(branch))).not.toBe(
+      expect(h.origin$('log', '-1', '--format=%s', tipOnOrigin(branch))).not.toBe(
         'Add src/builder.ts',
       );
       expect(h.cards().filter((c) => c.title.includes('gate failed'))).toHaveLength(1);
@@ -729,7 +706,7 @@ describe('a shipped pull request that conflicts with its base', () => {
       h.commit(`${DB}/meta/_journal.json`, '["0000"]\n');
       h.commit(`${DB}/0000_init.sql`, 'create table a;\n');
       h.git$('push', '-q', 'origin', 'main');
-      const batch = await shipped(`${DB}/meta/_journal.json`, '["0000","0001_mine"]\n', {
+      const batch = await shippedWith(`${DB}/meta/_journal.json`, '["0000","0001_mine"]\n', {
         keepWorktree: true,
       });
       h.teammatePush('main', `${DB}/meta/_journal.json`, '["0000","0001_theirs"]\n');
@@ -754,7 +731,7 @@ describe('a shipped pull request that conflicts with its base', () => {
       const tip = h.git$('rev-parse', `refs/heads/${branch}`);
       expect(h.git$('log', '-1', '--format=%s', tip)).toBe('Add src/builder.ts');
       expect(h.git$('show', `${tip}:src/builder.ts`)).toBe('src/builder.ts');
-      expect(h.origin$('log', '-1', '--format=%s', onOrigin(branch))).not.toBe(
+      expect(h.origin$('log', '-1', '--format=%s', tipOnOrigin(branch))).not.toBe(
         'Add src/builder.ts',
       );
     }
@@ -768,7 +745,7 @@ describe('a shipped pull request that conflicts with its base', () => {
       vi.spyOn(h.git, 'blobAt').mockImplementation(async (repo, rev, file) => {
         if (!committed && rev === 'HEAD' && file === 'pnpm-lock.yaml') {
           committed = true;
-          await commitIn(getBatch(h.store.db, batch.id), 'src/builder.ts');
+          await commitIn(h, getBatch(h.store.db, batch.id), 'src/builder.ts');
         }
         return read(repo, rev, file);
       });
@@ -782,11 +759,11 @@ describe('a shipped pull request that conflicts with its base', () => {
     it('raises no regenerate card, and puts its merge back, when it is stopped after the merge', async () => {
       const batch = await migrationsCollide();
       vi.spyOn(h.ctx.generators, 'regenerate').mockResolvedValue({ kind: 'aborted' });
-      const pushed = onOrigin(batch.branch);
+      const pushed = tipOnOrigin(batch.branch);
 
       await catchUp(batch);
 
-      expect(onOrigin(batch.branch)).toBe(pushed);
+      expect(tipOnOrigin(batch.branch)).toBe(pushed);
       // The merge is not left for the next catch-up to take for a commit 10db did not write.
       expect(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`)).toBe(pushed);
       // The fixture keeps the worktree, which has a card of its own.
@@ -797,7 +774,7 @@ describe('a shipped pull request that conflicts with its base', () => {
       const batch = await migrationsCollide();
       const run = { ran: 0 };
       generating(run);
-      const pushed = onOrigin(batch.branch);
+      const pushed = tipOnOrigin(batch.branch);
       // The install reads the lockfile at HEAD after the merge: the stop comes in that window.
       const read = h.git.blobAt.bind(h.git);
       let stopped = false;
@@ -813,7 +790,7 @@ describe('a shipped pull request that conflicts with its base', () => {
 
       expect(stopped).toBe(true);
       expect(run.ran).toBe(0);
-      expect(onOrigin(batch.branch)).toBe(pushed);
+      expect(tipOnOrigin(batch.branch)).toBe(pushed);
       expect(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`)).toBe(pushed);
       expect(h.cards().filter((c) => !c.title.includes('kept the worktree'))).toEqual([]);
     });
@@ -830,10 +807,14 @@ describe('a shipped pull request that conflicts with its base', () => {
       h.commit(`${DB}/meta/_journal.json`, journal('0000_init'));
       h.commit(`${DB}/meta/0000_snapshot.json`, snapshot('s0', 'a'));
       h.git$('push', '-q', 'origin', 'main');
-      const batch = await shipped(`${DB}/meta/_journal.json`, journal('0000_init', '0001_mine'), {
-        keepWorktree: true,
-      });
-      await commitIn(batch, `${DB}/meta/0001_snapshot.json`, snapshot('s1', 'b'));
+      const batch = await shippedWith(
+        `${DB}/meta/_journal.json`,
+        journal('0000_init', '0001_mine'),
+        {
+          keepWorktree: true,
+        },
+      );
+      await commitIn(h, batch, `${DB}/meta/0001_snapshot.json`, snapshot('s1', 'b'));
       h.git$('push', '-q', 'origin', `${batch.branch ?? ''}:${batch.branch ?? ''}`);
       h.teammatePush('main', `${DB}/meta/_journal.json`, journal('0000_init', '0001_theirs'));
       conflicts(batch);
@@ -846,11 +827,11 @@ describe('a shipped pull request that conflicts with its base', () => {
           logPath: join(path, 'generate.log'),
         }),
       );
-      const pushed = h.origin$('rev-parse', onOrigin(batch.branch));
+      const pushed = h.origin$('rev-parse', tipOnOrigin(batch.branch));
 
       await catchUp(batch);
 
-      expect(h.origin$('rev-parse', onOrigin(batch.branch))).toBe(pushed);
+      expect(h.origin$('rev-parse', tipOnOrigin(batch.branch))).toBe(pushed);
       // The fixture keeps the worktree, which has a card of its own.
       const cards = h.cards().filter((c) => !c.title.includes('kept the worktree'));
       expect(h.only(cards).title).toContain("couldn't update it");
@@ -873,11 +854,15 @@ describe('a shipped pull request that conflicts with its base', () => {
         h.commit(`${DB}/meta/0000_snapshot.json`, snapshot('s0', 'a'));
         h.commit('pnpm-lock.yaml', 'lockfileVersion: 9\n');
         h.git$('push', '-q', 'origin', 'main');
-        const batch = await shipped(`${DB}/meta/_journal.json`, journal('0000_init', '0001_mine'), {
-          keepWorktree: true,
-        });
-        await commitIn(batch, `${DB}/meta/0001_snapshot.json`, snapshot('s1', 'b'));
-        await commitIn(batch, `${DB}/0001_mine.sql`, 'update a;\n');
+        const batch = await shippedWith(
+          `${DB}/meta/_journal.json`,
+          journal('0000_init', '0001_mine'),
+          {
+            keepWorktree: true,
+          },
+        );
+        await commitIn(h, batch, `${DB}/meta/0001_snapshot.json`, snapshot('s1', 'b'));
+        await commitIn(h, batch, `${DB}/0001_mine.sql`, 'update a;\n');
         h.git$('push', '-q', 'origin', `${batch.branch ?? ''}:${batch.branch ?? ''}`);
         h.teammatePush('main', `${DB}/meta/_journal.json`, journal('0000_init', '0001_theirs'));
         h.teammatePush('main', 'pnpm-lock.yaml', 'lockfileVersion: 9\n# changed\n');
@@ -887,11 +872,11 @@ describe('a shipped pull request that conflicts with its base', () => {
       }
 
       async function pushedNothing(batch: BatchDto, why?: string): Promise<void> {
-        const pushed = onOrigin(batch.branch);
+        const pushed = tipOnOrigin(batch.branch);
 
         await catchUp(batch);
 
-        expect(onOrigin(batch.branch)).toBe(pushed);
+        expect(tipOnOrigin(batch.branch)).toBe(pushed);
         expect(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`)).toBe(pushed);
         // The fixture keeps the worktree, which has a card of its own.
         const card = h.only(h.cards().filter((c) => !c.title.includes('kept the worktree')));
@@ -970,13 +955,17 @@ describe('a shipped pull request that conflicts with its base', () => {
           h.commit(`${SCHEMAS}/a.schema.json`, '{"v":0}\n');
         }
         h.git$('push', '-q', 'origin', 'main');
-        const batch = await shipped(`${DB}/meta/_journal.json`, journal('0000_init', '0001_mine'), {
-          keepWorktree: true,
-        });
-        await commitIn(batch, `${DB}/meta/0001_snapshot.json`, snapshot('s1', 'a', 'b'));
-        await commitIn(batch, `${DB}/0001_mine.sql`, 'alter table a add b;\n');
+        const batch = await shippedWith(
+          `${DB}/meta/_journal.json`,
+          journal('0000_init', '0001_mine'),
+          {
+            keepWorktree: true,
+          },
+        );
+        await commitIn(h, batch, `${DB}/meta/0001_snapshot.json`, snapshot('s1', 'a', 'b'));
+        await commitIn(h, batch, `${DB}/0001_mine.sql`, 'alter table a add b;\n');
         if (otherDirectory) {
-          await commitIn(batch, `${SCHEMAS}/a.schema.json`, '{"v":"mine"}\n');
+          await commitIn(h, batch, `${SCHEMAS}/a.schema.json`, '{"v":"mine"}\n');
           h.teammatePush('main', `${SCHEMAS}/a.schema.json`, '{"v":"theirs"}\n');
         }
         h.git$('push', '-q', 'origin', `${batch.branch ?? ''}:${batch.branch ?? ''}`);
@@ -1058,11 +1047,11 @@ describe('a shipped pull request that conflicts with its base', () => {
         'lists nothing and pushes nothing when another generated directory came back unchanged and %s',
         async (_name, gate) => {
           const batch = await renumbering(gate, { otherDirectory: true, leftAsIs: true });
-          const pushed = onOrigin(batch.branch);
+          const pushed = tipOnOrigin(batch.branch);
 
           await catchUp(batch);
 
-          expect(onOrigin(batch.branch)).toBe(pushed);
+          expect(tipOnOrigin(batch.branch)).toBe(pushed);
           expect(h.git$('rev-parse', `refs/heads/${batch.branch ?? ''}`)).toBe(pushed);
           // (The kept worktree has its own card, from the ship.)
           const card = h.only(h.cards().filter((c) => !c.title.includes('kept the worktree')));
@@ -1086,7 +1075,9 @@ describe('a shipped pull request that conflicts with its base', () => {
     it("keeps a builder's commit made while the generators run, when the check then fails", async () => {
       const batch = await migrationsCollide();
       const run = { ran: 0 };
-      generating(run, () => commitIn(getBatch(h.store.db, batch.id), 'src/builder.ts'));
+      generating(run, async () => {
+        await commitIn(h, getBatch(h.store.db, batch.id), 'src/builder.ts');
+      });
 
       await catchUp(batch);
 
@@ -1096,7 +1087,7 @@ describe('a shipped pull request that conflicts with its base', () => {
   });
 
   it("keeps a builder's commit made in the kept worktree while the check runs, when it then fails", async () => {
-    const batch = await shipped('src/index.ts', BOTH.mine, { keepWorktree: true });
+    const batch = await shippedWith('src/index.ts', BOTH.mine, { keepWorktree: true });
     h.teammatePush('main', 'src/index.ts', BOTH.theirs);
     conflicts(batch);
     const branch = batch.branch ?? '';
@@ -1124,14 +1115,14 @@ describe('a shipped pull request that conflicts with its base', () => {
         'gh pr merge failed (exit 1): the merge commit cannot be cleanly created',
       ),
     );
-    const batch = await shipped();
+    const batch = await shippedWith();
     expect(batch.notices.map((n) => n.key)).toEqual(['pull-request-merge']);
     h.teammatePush('main', 'src/index.ts', BOTH.theirs);
     const url = conflicts(batch);
 
     await catchUp(batch);
     // GitHub works out the new head and calls it clean.
-    h.gh.setHead(url, onOrigin(batch.branch));
+    h.gh.setHead(url, tipOnOrigin(batch.branch));
     h.gh.setMergeBlocked(url, null);
     h.gh.setMergeable(url, PrMergeable.Mergeable);
     h.shipper.retryMerge(batch.id);
@@ -1147,14 +1138,14 @@ describe('a shipped pull request that conflicts with its base', () => {
   it('raises one card naming the files when 10db cannot settle the conflict, and pushes nothing', async () => {
     h.gh.noRequiredChecks = true;
     h.gh.failNext.set('prMerge', new GhError('failed', 'gh pr merge failed (exit 1): conflict'));
-    const batch = await shipped('README.md', '# ours\n');
+    const batch = await shippedWith('README.md', '# ours\n');
     h.teammatePush('main', 'README.md', '# theirs\n');
-    const before = onOrigin(batch.branch);
+    const before = tipOnOrigin(batch.branch);
     conflicts(batch);
 
     const now = await catchUp(batch);
 
-    expect(onOrigin(batch.branch)).toBe(before);
+    expect(tipOnOrigin(batch.branch)).toBe(before);
     const card = h.only(h.cards());
     expect(card.title).toContain('conflicts with main');
     expect(card.body).toContain("10db couldn't settle them itself");
@@ -1181,7 +1172,7 @@ describe('a shipped pull request that conflicts with its base', () => {
         'gh pr merge failed (exit 1): the merge commit cannot be cleanly created',
       ),
     );
-    const batch = await shipped('README.md', '# ours\n');
+    const batch = await shippedWith('README.md', '# ours\n');
     h.teammatePush('main', 'README.md', '# theirs\n');
     const url = conflicts(batch);
     const stopped = await catchUp(batch);
@@ -1205,7 +1196,7 @@ describe('a shipped pull request that conflicts with its base', () => {
       'prAutoMerge',
       new GhError('failed', 'gh pr merge failed (exit 1): auto-merge is not allowed'),
     );
-    const batch = await shipped('README.md', '# ours\n');
+    const batch = await shippedWith('README.md', '# ours\n');
     expect(batch.notices.map((n) => n.key)).toEqual(['pull-request-merge']);
     h.teammatePush('main', 'README.md', '# theirs\n');
     const url = conflicts(batch);
@@ -1229,7 +1220,7 @@ describe('a shipped pull request that conflicts with its base', () => {
 
   it('treats an auto-merge error on a retry as armed, with no notice, when it was armed before', async () => {
     // The first arm succeeds, so the pull request is known to be set to merge.
-    const batch = await shipped('README.md', '# ours\n');
+    const batch = await shippedWith('README.md', '# ours\n');
     expect(batch.notices.map((n) => n.key)).not.toContain('pull-request-merge');
     h.teammatePush('main', 'README.md', '# theirs\n');
     const url = conflicts(batch);
@@ -1254,16 +1245,16 @@ describe('a shipped pull request that conflicts with its base', () => {
   });
 
   it('merges the base in the worktree 10db kept after the ship, and keeps it', async () => {
-    const batch = await shipped('src/index.ts', BOTH.mine, { keepWorktree: true });
+    const batch = await shippedWith('src/index.ts', BOTH.mine, { keepWorktree: true });
     const kept = batch.worktreePath ?? '';
     expect(kept).not.toBe('');
     const teammate = h.teammatePush('main', 'src/index.ts', BOTH.theirs);
-    const before = onOrigin(batch.branch);
+    const before = tipOnOrigin(batch.branch);
     conflicts(batch);
 
     const now = await catchUp(batch);
 
-    const tip = onOrigin(batch.branch);
+    const tip = tipOnOrigin(batch.branch);
     expect(h.origin$('log', '-1', '--format=%P', tip)).toBe(`${before} ${teammate}`);
     expect(now.notices.map((n) => n.key)).toEqual(['pull-request-update']);
     expect(h.cards().filter((c) => c.title.includes('conflicts with main'))).toEqual([]);
@@ -1274,7 +1265,7 @@ describe('a shipped pull request that conflicts with its base', () => {
   });
 
   it("names only the builder's commit, and 10db's own unpushed merge as 10db's, in the kept worktree", async () => {
-    const batch = await shipped('src/index.ts', BOTH.mine, { keepWorktree: true });
+    const batch = await shippedWith('src/index.ts', BOTH.mine, { keepWorktree: true });
     const kept = batch.worktreePath ?? '';
     const branch = batch.branch ?? '';
     h.teammatePush('main', 'src/index.ts', BOTH.theirs);
@@ -1284,11 +1275,11 @@ describe('a shipped pull request that conflicts with its base', () => {
     vi.spyOn(h.git, 'rewindBranch').mockRejectedValueOnce(new Error('index.lock exists'));
     await catchUp(batch);
     const merge = h.git$('rev-parse', `refs/heads/${branch}`);
-    expect(merge).not.toBe(onOrigin(branch));
+    expect(merge).not.toBe(tipOnOrigin(branch));
     expect(h.git$('log', '-1', '--format=%P', merge).split(' ')).toHaveLength(2);
 
     // The builder commits on top of that merge in the kept worktree.
-    await commitIn(getBatch(h.store.db, batch.id), 'src/mine.ts');
+    await commitIn(h, getBatch(h.store.db, batch.id), 'src/mine.ts');
     const builders = h.git$('rev-parse', `refs/heads/${branch}`);
     expect(builders).not.toBe(merge);
     h.shipClock.advance(31 * 60_000);
@@ -1304,7 +1295,7 @@ describe('a shipped pull request that conflicts with its base', () => {
     expect(card.body).not.toContain(`(${merge.slice(0, 7)}`);
     expect(card.body).not.toContain(`, ${merge.slice(0, 7)}`);
     // Pushing the builder's commit would push the merge under it: the card moves it onto the head first.
-    const head = onOrigin(branch);
+    const head = tipOnOrigin(branch);
     expect(card.body).toContain(
       `git rebase --onto ${head.slice(0, 7)} ${merge.slice(0, 7)} ${branch}`,
     );
@@ -1313,9 +1304,9 @@ describe('a shipped pull request that conflicts with its base', () => {
   });
 
   it('raises one card when a checkout 10db did not make holds the branch', async () => {
-    const batch = await shipped();
+    const batch = await shippedWith();
     h.teammatePush('main', 'src/index.ts', BOTH.theirs);
-    const before = onOrigin(batch.branch);
+    const before = tipOnOrigin(batch.branch);
     conflicts(batch);
     const byHand = mkdtempSync(join(tmpdir(), 'by-hand-'));
     try {
@@ -1323,7 +1314,7 @@ describe('a shipped pull request that conflicts with its base', () => {
 
       const now = await catchUp(batch);
 
-      expect(onOrigin(batch.branch)).toBe(before);
+      expect(tipOnOrigin(batch.branch)).toBe(before);
       const card = h.only(h.cards());
       expect(card.title).toContain('conflicts with main');
       expect(card.body).toContain(`${batch.branch ?? ''} is checked out at`);
@@ -1348,9 +1339,9 @@ describe('a shipped pull request that conflicts with its base', () => {
   }
 
   it('raises its card when the batch that holds the branch in a kept worktree has failed', async () => {
-    const batch = await shipped();
+    const batch = await shippedWith();
     h.teammatePush('main', 'src/index.ts', BOTH.theirs);
-    const before = onOrigin(batch.branch);
+    const before = tipOnOrigin(batch.branch);
     conflicts(batch);
     const byHand = mkdtempSync(join(tmpdir(), 'by-hand-'));
     try {
@@ -1358,7 +1349,7 @@ describe('a shipped pull request that conflicts with its base', () => {
 
       const now = await catchUp(batch);
 
-      expect(onOrigin(batch.branch)).toBe(before);
+      expect(tipOnOrigin(batch.branch)).toBe(before);
       const card = h.only(h.cards().filter((c) => c.title.includes('conflicts with main')));
       expect(card.body).toContain(`${batch.branch ?? ''} is checked out at`);
       expect(now.notices).toEqual([]);
@@ -1368,9 +1359,9 @@ describe('a shipped pull request that conflicts with its base', () => {
   });
 
   it('says on its tasks that it conflicts while a running CI fix holds the branch, and asks again', async () => {
-    const batch = await shipped();
+    const batch = await shippedWith();
     h.teammatePush('main', 'src/index.ts', BOTH.theirs);
-    const before = onOrigin(batch.branch);
+    const before = tipOnOrigin(batch.branch);
     conflicts(batch);
     const byHand = mkdtempSync(join(tmpdir(), 'by-hand-'));
     try {
@@ -1378,7 +1369,7 @@ describe('a shipped pull request that conflicts with its base', () => {
 
       const now = await catchUp(batch);
 
-      expect(onOrigin(batch.branch)).toBe(before);
+      expect(tipOnOrigin(batch.branch)).toBe(before);
       expect(now.notices.map((n) => n.key)).toEqual(['base-conflict']);
       expect(now.notices[0]?.line).toContain('conflicts with main');
       expect(h.cards().filter((c) => c.title.includes('conflicts with main'))).toEqual([]);
@@ -1388,25 +1379,25 @@ describe('a shipped pull request that conflicts with its base', () => {
   });
 
   it('does nothing once GitHub no longer says it conflicts', async () => {
-    const batch = await shipped();
+    const batch = await shippedWith();
     h.teammatePush('main', 'src/index.ts', BOTH.theirs);
-    const before = onOrigin(batch.branch);
+    const before = tipOnOrigin(batch.branch);
     // GitHub says clean (the default).
     const now = await catchUp(batch);
-    expect(onOrigin(batch.branch)).toBe(before);
+    expect(tipOnOrigin(batch.branch)).toBe(before);
     expect(now.notices).toEqual([]);
   });
 
   // A push takes a pull request out of its base's merge queue. The watch read it a round ago, and
   // the queue may have taken it since, so the job reads the queue itself before it pushes anything.
   it('pushes nothing to a pull request that is in the merge queue, nor when the queue cannot be read', async () => {
-    const batch = await shipped();
+    const batch = await shippedWith();
     h.teammatePush('main', 'src/index.ts', BOTH.theirs);
-    const before = onOrigin(batch.branch);
+    const before = tipOnOrigin(batch.branch);
     const url = conflicts(batch);
     h.gh.setInMergeQueue(url, true);
     const now = await catchUp(batch);
-    expect(onOrigin(batch.branch)).toBe(before);
+    expect(tipOnOrigin(batch.branch)).toBe(before);
     expect(h.cards()).toEqual([]);
     expect(now.notices).toEqual([]);
     expect(h.gh.calls.some((c) => c.method === 'prInMergeQueue')).toBe(true);
@@ -1414,13 +1405,13 @@ describe('a shipped pull request that conflicts with its base', () => {
     h.gh.setInMergeQueue(url, false);
     h.gh.failQueueRead.set(url, new GhError('failed', 'HTTP 502'));
     await catchUp(batch);
-    expect(onOrigin(batch.branch)).toBe(before);
+    expect(tipOnOrigin(batch.branch)).toBe(before);
     expect(h.cards()).toEqual([]);
 
     // Out of the queue and readable, the same pull request is caught up.
     h.gh.failQueueRead.delete(url);
     await catchUp(batch);
-    expect(onOrigin(batch.branch)).not.toBe(before);
+    expect(tipOnOrigin(batch.branch)).not.toBe(before);
   });
 
   it('is left to the builder when the batch did not ask to be merged by itself', async () => {
@@ -1428,12 +1419,12 @@ describe('a shipped pull request that conflicts with its base', () => {
     h = createDeliveryHarness({ workspaceMode: 'worktree', landing: 'hold' }, { trigger: false });
     h.commit('src/index.ts', "import a from './a';\nexport {};\n");
     h.git$('push', '-q', 'origin', 'main');
-    const batch = await shipped();
+    const batch = await shippedWith();
     h.teammatePush('main', 'src/index.ts', BOTH.theirs);
-    const before = onOrigin(batch.branch);
+    const before = tipOnOrigin(batch.branch);
     conflicts(batch);
     await catchUp(batch);
-    expect(onOrigin(batch.branch)).toBe(before);
+    expect(tipOnOrigin(batch.branch)).toBe(before);
     expect(h.cards()).toEqual([]);
   });
 });
@@ -1441,11 +1432,11 @@ describe('a shipped pull request that conflicts with its base', () => {
 describe('a catch-up while a waiting update drains the factory', () => {
   /** A shipped pull request that conflicts with main, as the drain begins. */
   async function conflictingAsItDrains() {
-    const batch = await shipped();
+    const batch = await shippedWith();
     h.teammatePush('main', 'src/index.ts', BOTH.theirs);
     conflicts(batch);
     draining = true;
-    return { batch, before: onOrigin(batch.branch) };
+    return { batch, before: tipOnOrigin(batch.branch) };
   }
 
   it.each([
@@ -1467,16 +1458,16 @@ describe('a catch-up while a waiting update drains the factory', () => {
     ask(batch);
     expect(h.jobs.pending()).toBe(0);
     await h.jobs.idle();
-    expect(onOrigin(batch.branch)).toBe(before);
+    expect(tipOnOrigin(batch.branch)).toBe(before);
   });
 
   it('brings the base in when the next round asks, once the drain has ended', async () => {
     const { batch, before } = await conflictingAsItDrains();
     await catchUp(batch);
-    expect(onOrigin(batch.branch)).toBe(before);
+    expect(tipOnOrigin(batch.branch)).toBe(before);
     draining = false;
     await catchUp(batch);
-    expect(onOrigin(batch.branch)).not.toBe(before);
+    expect(tipOnOrigin(batch.branch)).not.toBe(before);
   });
 });
 
@@ -1484,7 +1475,7 @@ describe('a shipped pull request whose head never got its required checks', () =
   /** GitHub holds the pull request, which merges cleanly, for a required check that has no run. */
   function waitsForChecks(batch: BatchDto): string {
     const url = batch.prUrl ?? '';
-    h.gh.setHead(url, onOrigin(batch.branch));
+    h.gh.setHead(url, tipOnOrigin(batch.branch));
     h.gh.setBlockedOnChecks(url, true);
     return url;
   }
@@ -1496,14 +1487,14 @@ describe('a shipped pull request whose head never got its required checks', () =
   }
 
   it('has the base merged into it and pushed, so a new head gets its workflows', async () => {
-    const batch = await shipped();
+    const batch = await shippedWith();
     const teammate = h.teammatePush('main', 'src/other.ts', 'export {};\n');
-    const before = onOrigin(batch.branch);
+    const before = tipOnOrigin(batch.branch);
     waitsForChecks(batch);
 
     const now = await restartCi(batch);
 
-    const tip = onOrigin(batch.branch);
+    const tip = tipOnOrigin(batch.branch);
     expect(tip).not.toBe(before);
     expect(h.origin$('log', '-1', '--format=%P', tip)).toBe(`${before} ${teammate}`);
     expect(h.cards()).toEqual([]);
@@ -1514,13 +1505,13 @@ describe('a shipped pull request whose head never got its required checks', () =
   });
 
   it('pushes nothing when the branch already holds the base, and raises no card', async () => {
-    const batch = await shipped();
-    const before = onOrigin(batch.branch);
+    const batch = await shippedWith();
+    const before = tipOnOrigin(batch.branch);
     waitsForChecks(batch);
 
     const now = await restartCi(batch);
 
-    expect(onOrigin(batch.branch)).toBe(before);
+    expect(tipOnOrigin(batch.branch)).toBe(before);
     expect(h.cards()).toEqual([]);
     expect(now.notices).toEqual([]);
   });
@@ -1530,9 +1521,9 @@ describe('a shipped pull request whose head never got its required checks', () =
     ['passed', [{ name: 'build', conclusion: 'SUCCESS' }]],
     ['failed', [{ name: 'build', conclusion: 'FAILURE' }]],
   ])('never pushes to a pull request whose checks are %s', async (_name, runs) => {
-    const batch = await shipped();
+    const batch = await shippedWith();
     h.teammatePush('main', 'src/other.ts', 'export {};\n');
-    const before = onOrigin(batch.branch);
+    const before = tipOnOrigin(batch.branch);
     const url = waitsForChecks(batch);
     h.gh.setChecks(
       url,
@@ -1547,32 +1538,32 @@ describe('a shipped pull request whose head never got its required checks', () =
 
     const now = await restartCi(batch);
 
-    expect(onOrigin(batch.branch)).toBe(before);
+    expect(tipOnOrigin(batch.branch)).toBe(before);
     expect(now.notices).toEqual([]);
   });
 
   it('pushes nothing when GitHub is not blocked on checks, such as a base with no CI', async () => {
-    const batch = await shipped();
+    const batch = await shippedWith();
     h.teammatePush('main', 'src/other.ts', 'export {};\n');
-    const before = onOrigin(batch.branch);
+    const before = tipOnOrigin(batch.branch);
     const url = waitsForChecks(batch);
     h.gh.setBlockedOnChecks(url, false);
 
     await restartCi(batch);
 
-    expect(onOrigin(batch.branch)).toBe(before);
+    expect(tipOnOrigin(batch.branch)).toBe(before);
   });
 
   it('runs the gate on the merged branch, and on a failure pushes nothing and raises no card', async () => {
-    const batch = await shipped();
+    const batch = await shippedWith();
     h.teammatePush('main', 'src/other.ts', 'export {};\n');
-    const before = onOrigin(batch.branch);
+    const before = tipOnOrigin(batch.branch);
     waitsForChecks(batch);
     h.state.write((c) => patchProject(c, h.project.id, { gateCommand: 'false' }));
 
     const now = await restartCi(batch);
 
-    expect(onOrigin(batch.branch)).toBe(before);
+    expect(tipOnOrigin(batch.branch)).toBe(before);
     // The watch's notice says the checks never started; a card about conflicts would be wrong.
     expect(h.cards()).toEqual([]);
     expect(now.notices).toEqual([]);
@@ -1580,15 +1571,15 @@ describe('a shipped pull request whose head never got its required checks', () =
   });
 
   it('pushes nothing to a pull request in the merge queue, which reads BLOCKED with no checks', async () => {
-    const batch = await shipped();
+    const batch = await shippedWith();
     h.teammatePush('main', 'src/other.ts', 'export {};\n');
-    const before = onOrigin(batch.branch);
+    const before = tipOnOrigin(batch.branch);
     const url = waitsForChecks(batch);
     h.gh.setInMergeQueue(url, true);
 
     const now = await restartCi(batch);
 
-    expect(onOrigin(batch.branch)).toBe(before);
+    expect(tipOnOrigin(batch.branch)).toBe(before);
     expect(now.notices).toEqual([]);
     expect(h.cards()).toEqual([]);
   });
@@ -1598,12 +1589,12 @@ describe('a shipped pull request whose head never got its required checks', () =
     h = createDeliveryHarness({ workspaceMode: 'worktree', landing: 'hold' }, { trigger: false });
     h.commit('src/index.ts', "import a from './a';\nexport {};\n");
     h.git$('push', '-q', 'origin', 'main');
-    const batch = await shipped();
+    const batch = await shippedWith();
     h.teammatePush('main', 'src/other.ts', 'export {};\n');
-    const before = onOrigin(batch.branch);
+    const before = tipOnOrigin(batch.branch);
     waitsForChecks(batch);
     await restartCi(batch);
-    expect(onOrigin(batch.branch)).toBe(before);
+    expect(tipOnOrigin(batch.branch)).toBe(before);
   });
 });
 
@@ -1614,7 +1605,7 @@ describe('a merge GitHub refused for a reason that has gone', () => {
       'prMerge',
       new GhError('failed', 'gh pr merge failed (exit 1): not mergeable'),
     );
-    const batch = await shipped();
+    const batch = await shippedWith();
     expect(h.gh.merged).toEqual([]);
     expect(batch.notices.map((n) => n.key)).toEqual(['pull-request-merge']);
 
@@ -1629,7 +1620,7 @@ describe('a merge GitHub refused for a reason that has gone', () => {
     h.gh.noRequiredChecks = true;
     const refusal = () => new GhError('failed', 'gh pr merge failed (exit 1): not mergeable');
     h.gh.failNext.set('prMerge', refusal());
-    const batch = await shipped();
+    const batch = await shippedWith();
     h.gh.failNext.set('prMerge', refusal());
     h.shipper.retryMerge(batch.id);
     await h.jobs.idle();
@@ -1640,7 +1631,7 @@ describe('a merge GitHub refused for a reason that has gone', () => {
   });
 
   it('asks nothing when no merge was refused', async () => {
-    const batch = await shipped();
+    const batch = await shippedWith();
     const calls = h.gh.calls.length;
     h.shipper.retryMerge(batch.id);
     await h.jobs.idle();
