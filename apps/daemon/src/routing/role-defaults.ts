@@ -1,5 +1,14 @@
 import { Effort, ModelTier, StepRole, type ModelProfileDto } from '@10db/contracts';
-import { atEffort, automatic, effortLevel, modelsByPrice, priceOf, type TierPool } from './pools';
+import {
+  atEffort,
+  automatic,
+  effortLevel,
+  modelsByPrice,
+  TIERS,
+  tierLevel,
+  topModel,
+  type TierPool,
+} from './pools';
 
 /** The tier and effort each role runs on when no score can route it. */
 export const ROLE_DEFAULT: Readonly<Record<StepRole, { tier: ModelTier; effort: Effort }>> = {
@@ -42,19 +51,23 @@ export const defaultTier = (role: StepRole, floored: boolean): ModelTier =>
   floored ? ModelTier.Strongest : ROLE_DEFAULT[role].tier;
 
 /**
- * One rung up from a profile: the next model that costs more at the nearest effort, then, on the dearest, the
- * next effort up. Undefined at the top.
+ * One rung up from a profile: the top model of its tier when it is not already there, then the cheapest model of
+ * the next tier up, then, on the top of the strongest, the next effort. A model with no tier climbs from the
+ * role's tier, never downward. Undefined at the top.
  */
 export function strongerDefault(
-  from: Pick<ModelProfileDto, 'model' | 'effort' | 'outputPrice'>,
+  from: Pick<ModelProfileDto, 'model' | 'effort' | 'tier'>,
   profiles: readonly ModelProfileDto[],
+  roleTier: ModelTier,
 ): ModelProfileDto | undefined {
   const offered = profiles.filter(automatic);
-  const here = priceOf(from);
-  const next = modelsByPrice(offered).find(
-    (model) => priceOf(offered.find((p) => p.model === model) ?? { outputPrice: null }) > here,
-  );
-  if (next !== undefined) return atEffort(next, from.effort, offered);
+  const tier = from.tier ?? roleTier;
+  const top = topModel(offered.filter((p) => p.tier === tier))[0]?.model;
+  if (top !== undefined && top !== from.model) return atEffort(top, from.effort, offered);
+  for (const above of TIERS.slice(tierLevel(tier) + 1)) {
+    const cheapest = modelsByPrice(offered.filter((p) => p.tier === above))[0];
+    if (cheapest !== undefined) return atEffort(cheapest, from.effort, offered);
+  }
   return offered
     .filter((p) => p.model === from.model && effortLevel(p.effort) > effortLevel(from.effort))
     .sort((a, b) => effortLevel(a.effort) - effortLevel(b.effort))[0];

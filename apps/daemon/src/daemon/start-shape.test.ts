@@ -12,6 +12,7 @@ import {
 } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
+import { applyAaMeasurement, listModelProfiles, replaceAccountModels } from '@10db/db';
 import { apiClient } from '../../test/api-client';
 import { seedProfiles } from '../../test/seed-profiles';
 import { createTempRepo, tempDir, waitForAsync } from '../../test/fixtures';
@@ -153,6 +154,45 @@ describe('a Shape conversation on a started daemon', () => {
     expect(await api.get('/workstreams?active=false', z.array(WorkstreamDto))).toEqual([]);
     const goalId = after.proposals.find((p) => p.kind === 'goal')?.converted?.goalId ?? '';
     expect((await api.get(`/goals/${goalId}`, GoalDto)).title).toBe('Board polish');
+  });
+
+  it('offers a Plan model from the role default when no listed model scores up to the plan need', async () => {
+    const api = await startOnTheFake();
+    const project = await api.post('/projects', ProjectDto, {
+      name: 'demo',
+      repoPath: repo.path,
+      gateCommand: 'true',
+      areas: [{ name: 'src', globs: ['src/**'] }],
+    });
+    const state = daemon?.state;
+    if (!state) throw new Error('no daemon');
+    // The account lists two models, and a sync left every effort of both below the plan step's need.
+    state.write((ctx) => {
+      replaceAccountModels(
+        ctx,
+        project.accountId,
+        ['claude-haiku-5-5', 'claude-sonnet-5-5'].map((model) => ({
+          model,
+          family: null,
+          launchId: model,
+          efforts: [],
+          inputPrice: null,
+          outputPrice: null,
+        })),
+      );
+      for (const p of listModelProfiles(ctx.tx))
+        applyAaMeasurement(ctx, p.id, {
+          scores: { intelligence: 30, coding: 30, agentic: 30 },
+          costPerTaskUsd: 0.1,
+          outputTokensPerSecond: 100,
+          indexVersion: 'test',
+          measuredAt: ctx.now,
+        });
+    });
+    const shape = await api.post(`/projects/${project.id}/shapes`, ShapeDto, {});
+    const view = await api.get(`/shapes/${shape.id}`, ShapeViewDto);
+    expect(view.models.default).toBe('claude-sonnet-5-5');
+    expect(view.models.offered).toEqual(['claude-haiku-5-5', 'claude-sonnet-5-5']);
   });
 
   it('answers 404 for an unknown conversation and 401 without the token', async () => {

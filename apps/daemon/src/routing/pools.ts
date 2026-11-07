@@ -57,7 +57,7 @@ export function atEffort(
 export interface TierPool {
   /** The tier the pool is of: the one asked for, or the nearest the account offers. */
   readonly tier: ModelTier;
-  readonly profiles: ModelProfileDto[];
+  readonly profiles: readonly ModelProfileDto[];
 }
 
 /**

@@ -24,10 +24,17 @@ offer, or one its maker has retired, takes the automatic choice of the role's ti
 - **Top of tier** takes the most expensive model of the tier the step would otherwise land in, then the cheapest effort
   of it that clears the need (or the role's effort without scores). The seeded pattern for security, auth and
   migration work therefore moves a step from Opus to Fable and leaves a Fast or Balanced step where it was.
-- **A tier override** an account sets swaps the tier's automatic choice only: it does not apply to Top of tier or to a
-  model named by a setting.
-- **Escalation** climbs by output price, then effort: the next dearer model at the nearest effort, then the next effort
-  on the dearest. On a retry a pattern that applies only to retries is tried first.
+- **A tier override** an account sets swaps the tier's automatic choice, after a scored choice too: it does not apply to
+  Top of tier or to a model named by a setting. An override naming a model with no profile at all is launched as
+  named (a gateway that lists no models).
+- **A persona's pin** the account does not offer gives way to the role tier's automatic choice, not to the task,
+  pattern or role settings below it.
+- **Escalation** goes to the top model of the step's tier, then the cheapest model of the next tier up, then the
+  next effort on the dearest. A model with no tier climbs from the role's tier, never downward. On a retry a pattern
+  that applies only to retries is tried first, and a retry that no profile reaches the need for climbs a rung rather
+  than refusing.
+- **A Plan conversation** chooses by the role's default effort and never by score, so it is never refused for want of
+  a profile that reaches the plan step's need.
 - **Nothing to choose from.** An account with no routable model does not stop planning. The step holds the tier's name as
   its model (`strongest`, `balanced`, `fast`), no profile, the setting that decided and the reason `no model offered for
 the <tier> tier`. A tier name is never a model to launch: the launcher must refuse it, and a later list re-resolves

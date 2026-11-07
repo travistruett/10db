@@ -95,3 +95,14 @@ describe('retryStep', () => {
     expect(result.step.reason).toBe('escalated from mid@high after the gate failed');
   });
 });
+
+describe('retryStep when no profile reaches the need', () => {
+  it('climbs a rung instead of throwing, with every scored profile below the need', () => {
+    const result = retryStep(stepOn('mid@high', { need: 99 }), {
+      ...input([]),
+      choose: { ...input([]).choose, def: { role: 'implement', need: 99 } },
+    });
+    expect(ran(result)).toBe('big@high');
+    expect(result.escalated).toBe(true);
+  });
+});

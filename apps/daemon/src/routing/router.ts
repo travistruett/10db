@@ -7,7 +7,7 @@ import {
 } from '@10db/contracts';
 import type { Floor } from './floors';
 import { automatic } from './pools';
-import { strongerDefault } from './role-defaults';
+import { ROLE_DEFAULT, strongerDefault } from './role-defaults';
 
 export interface RouteInput {
   readonly role: StepRole;
@@ -133,7 +133,7 @@ function climbRoleDefaults(
   input: EscalateInput,
 ): { readonly step: WorkstreamStep; readonly escalated: boolean } {
   const current = `${step.model}@${step.effort}`;
-  const next = strongerDefault(here, input.profiles);
+  const next = strongerDefault(here, input.profiles, ROLE_DEFAULT[step.role].tier);
   if (!next)
     return {
       step: { ...step, reason: `kept ${current} after ${input.why}: no stronger model offered` },

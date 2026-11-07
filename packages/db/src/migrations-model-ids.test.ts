@@ -2,6 +2,7 @@ import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync }
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { DB_MIGRATIONS_DIR, migrateDatabase, openDatabase, type TendbDatabase } from './index';
 
 const AT = '2026-10-21T12:00:00.000Z';
@@ -28,7 +29,7 @@ function migrationsBefore(tag: string): string {
   cpSync(DB_MIGRATIONS_DIR, before, { recursive: true });
   const journalPath = join(before, 'meta/_journal.json');
   // A journal this test just copied from the shipped migrations; the shape is known.
-  const journal = JSON.parse(readFileSync(journalPath, 'utf8')) as { entries: { tag: string }[] };
+  const journal = Journal.parse(JSON.parse(readFileSync(journalPath, 'utf8')));
   const cut = journal.entries.findIndex((e) => e.tag === tag);
   const keep = new Set(journal.entries.slice(0, cut).map((e) => e.tag));
   journal.entries = journal.entries.filter((e) => keep.has(e.tag));
@@ -41,22 +42,30 @@ function migrationsBefore(tag: string): string {
 }
 
 const sql = (text: string, ...values: unknown[]) => db.$client.prepare(text).run(...values);
-const rows = <T>(text: string, ...values: unknown[]) =>
-  db.$client.prepare(text).all(...values) as T[];
+/** The rows a query answers, read through the schema that says what the test expects of them. */
+const rows = <S extends z.ZodType>(schema: S, text: string, ...values: unknown[]): z.infer<S>[] =>
+  z.array(schema).parse(db.$client.prepare(text).all(...values));
 
-interface Profile {
-  id: string;
-  model: string;
-  effort: string;
-  enabled: number;
-  steps_run: number;
-  first_pass_steps: number;
-  escalations: number;
-  intelligence: number | null;
-  cost_per_task_usd: number | null;
-  measured_at: string | null;
-  aa_slug: string | null;
-}
+const Journal = z.looseObject({ entries: z.array(z.looseObject({ tag: z.string() })) });
+const Profile = z.object({
+  id: z.string(),
+  model: z.string(),
+  effort: z.string(),
+  enabled: z.number(),
+  steps_run: z.number(),
+  first_pass_steps: z.number(),
+  escalations: z.number(),
+  intelligence: z.number().nullable(),
+  cost_per_task_usd: z.number().nullable(),
+  measured_at: z.string().nullable(),
+  aa_slug: z.string().nullable(),
+});
+const Steps = z.array(
+  z.object({ model: z.string(), profileId: z.string().nullable(), reason: z.string() }),
+);
+const StoredSteps = z.object({
+  steps: z.string().transform((text) => Steps.parse(JSON.parse(text))),
+});
 
 const PROFILE = `INSERT INTO model_profiles (id, provider, model, effort, aa_slug, intelligence, cost_per_task_usd,
     source, measured_at, enabled, steps_run, first_pass_steps, escalations, created_at, updated_at)
@@ -127,12 +136,13 @@ function seed(): void {
     LATER,
     LATER,
   );
+  let made = 0;
   const step = (model: string, profileId: string | null) => ({
     role: 'implement',
     model,
     profileId,
     effort: 'high',
-    reason: 'by score',
+    reason: `step ${String(made++)}`,
   });
   sql(
     `INSERT INTO workstreams (id, task_id, project_id, state, next_action, attempt, recovery_attempts,
@@ -181,32 +191,39 @@ describe('the migration that renames stored model aliases', () => {
     migrateDatabase(db);
   });
 
+  const storedSteps = () => {
+    const [stored] = rows(StoredSteps, 'SELECT steps FROM workstreams');
+    return stored?.steps ?? [];
+  };
+
   const profile = (model: string, effort: string) =>
-    rows<Profile>('SELECT * FROM model_profiles WHERE model = ? AND effort = ?', model, effort)[0];
+    rows(Profile, 'SELECT * FROM model_profiles WHERE model = ? AND effort = ?', model, effort)[0];
 
   it('renames the four aliases in every column that names the model a row will run on', () => {
-    expect(rows<{ model: string }>('SELECT model FROM workstreams')).toEqual([
+    expect(rows(z.object({ model: z.string() }), 'SELECT model FROM workstreams')).toEqual([
       { model: 'claude-sonnet-5-5' },
     ]);
-    const [stored] = rows<{ steps: string }>('SELECT steps FROM workstreams');
-    const steps = JSON.parse(stored?.steps ?? '[]') as {
-      model: string;
-      profileId: string | null;
-    }[];
-    expect(steps.map((s) => s.model)).toEqual([
+    expect(storedSteps().map((s) => s.model)).toEqual([
       'claude-sonnet-5-5',
       'claude-opus-5-5',
       'gpt-6.1-sol',
     ]);
     expect(
-      rows<{ model_pin: string | null }>('SELECT model_pin FROM personas ORDER BY key'),
+      rows(
+        z.object({ model_pin: z.string().nullable() }),
+        'SELECT model_pin FROM personas ORDER BY key',
+      ),
     ).toEqual([
       { model_pin: JSON.stringify({ model: 'claude-opus-5-5', effort: 'high' }) },
       { model_pin: null },
     ]);
-    expect(rows<{ model: string }>('SELECT model FROM shapes')).toEqual([
+    expect(rows(z.object({ model: z.string() }), 'SELECT model FROM shapes')).toEqual([
       { model: 'claude-opus-5-5' },
     ]);
+  });
+
+  it('keeps a workstream’s steps in their order', () => {
+    expect(storedSteps().map((s) => s.reason)).toEqual(['step 0', 'step 1', 'step 2']);
   });
 
   it('renames a profile and keeps its scores, step counts and slug', () => {
@@ -251,17 +268,17 @@ describe('the migration that renames stored model aliases', () => {
   });
 
   it("points a step at the merged profile's row", () => {
-    const [stored] = rows<{ steps: string }>('SELECT steps FROM workstreams');
-    const steps = JSON.parse(stored?.steps ?? '[]') as { profileId: string | null }[];
-    expect(steps.map((s) => s.profileId)).toEqual(['mpr_sonnet', 'mpr_opus_new', null]);
+    expect(storedSteps().map((s) => s.profileId)).toEqual(['mpr_sonnet', 'mpr_opus_new', null]);
   });
 
   it('leaves what records history as written', () => {
-    expect(rows<{ model: string }>('SELECT model FROM sessions')).toEqual([{ model: 'sonnet' }]);
+    expect(rows(z.object({ model: z.string() }), 'SELECT model FROM sessions')).toEqual([
+      { model: 'sonnet' },
+    ]);
   });
 
   it('drops the two account settings and keeps the others', () => {
-    const [account] = rows<{ settings: string }>('SELECT settings FROM accounts');
+    const [account] = rows(z.object({ settings: z.string() }), 'SELECT settings FROM accounts');
     expect(JSON.parse(account?.settings ?? '{}')).toEqual({ baseUrl: 'https://gw.example/api' });
   });
 });

@@ -13,6 +13,7 @@ import {
 } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { chooseModel, type ChooseInput } from './choose-model';
+import { NoProfileError } from './router';
 import { label, testCatalogue, unscoredCatalogue } from './test-catalogue';
 
 /** What a reason says when no profile has a score to route on. */
@@ -96,24 +97,27 @@ describe('chooseModel: which setting decides', () => {
   const levels = [
     {
       name: "a persona's pin",
-      setting: { kind: 'model', model: 'big' } as ModelSetting,
+      setting: { kind: 'model', model: 'big' } satisfies ModelSetting,
       pinned: true,
     },
     {
       name: "the task's own setting",
-      setting: { kind: 'tier', tier: ModelTier.Fast } as ModelSetting,
+      setting: { kind: 'tier', tier: ModelTier.Fast } satisfies ModelSetting,
     },
     {
       name: "the project's pattern",
-      setting: { kind: 'model', model: 'mid' } as ModelSetting,
+      setting: { kind: 'model', model: 'mid' } satisfies ModelSetting,
     },
-    { name: 'a global pattern', setting: { kind: 'top_of_tier' } as ModelSetting },
+    { name: 'a global pattern', setting: { kind: 'top_of_tier' } satisfies ModelSetting },
     {
       name: "the project's role setting",
-      setting: { kind: 'tier', tier: ModelTier.Strongest } as ModelSetting,
+      setting: { kind: 'tier', tier: ModelTier.Strongest } satisfies ModelSetting,
     },
-    { name: 'the global role setting', setting: { kind: 'model', model: 'peak' } as ModelSetting },
-    { name: 'the default', setting: { kind: 'automatic' } as ModelSetting },
+    {
+      name: 'the global role setting',
+      setting: { kind: 'model', model: 'peak' } satisfies ModelSetting,
+    },
+    { name: 'the default', setting: { kind: 'automatic' } satisfies ModelSetting },
   ];
   const everyLevel = (from: number): Partial<ChooseInput> => ({
     profiles: [...testCatalogue(), ...scoredPeak()],
@@ -612,8 +616,23 @@ describe('chooseModel: the account’s tier override', () => {
     ).toBe('small@high');
   });
 
-  it('is ignored when the account does not offer the model it names', () => {
-    expect(pick({ profiles, tierOverrides: { balanced: 'ghost' } })).toBe('mid@high');
+  it('launches the model it names when no profile describes it', () => {
+    const choice = chooseModel(input({ profiles, tierOverrides: { balanced: 'ghost' } }));
+    expect(choice.profile).toBeNull();
+    expect(choice.model).toBe('ghost');
+  });
+
+  it('is ignored when the model it names is retired', () => {
+    const retired = profiles.map((p) =>
+      p.model === 'big' ? { ...p, status: ModelStatus.Retired, tier: null, enabled: false } : p,
+    );
+    expect(
+      pick({
+        profiles: retired,
+        def: { role: 'review', need: 48 },
+        tierOverrides: { strongest: 'big' },
+      }),
+    ).toBe('peak@high');
   });
 });
 
@@ -677,3 +696,90 @@ describe('chooseModel: score, floor and budget', () => {
 function failed(): never {
   throw new Error('expected a profile');
 }
+
+describe('chooseModel: a conversation that must not refuse', () => {
+  const lowScores = testCatalogue().filter((p) => p.model !== 'big');
+  it('routes by score for a step, which refuses a need nothing reaches', () => {
+    expect(() =>
+      chooseModel(input({ profiles: lowScores, def: { role: 'plan', need: 99 } })),
+    ).toThrow(NoProfileError);
+  });
+
+  it.each([
+    { name: 'a need nothing reaches', profiles: lowScores, need: 99, want: 'mid@high' },
+    {
+      name: 'scores that would pick a cheaper model',
+      profiles: testCatalogue(),
+      need: 20,
+      want: 'big@high',
+    },
+  ])(
+    'chooses the role’s tier by default effort, without scores, for $name',
+    ({ profiles, need, want }) => {
+      const choice = chooseModel(input({ profiles, def: { role: 'plan', need }, byScore: false }));
+      expect(label(choice.profile ?? failed())).toBe(want);
+      expect(choice.reason).toContain('by role default: the cheapest model of the');
+    },
+  );
+
+  it('still honours the role’s setting', () => {
+    const choice = chooseModel(
+      input({
+        byScore: false,
+        def: { role: 'plan', need: 99 },
+        roleSettings: [roleSetting('plan', { kind: 'model', model: 'small' }, null)],
+      }),
+    );
+    expect(label(choice.profile ?? failed())).toBe('small@high');
+  });
+});
+
+describe('chooseModel: a persona pin the account lacks', () => {
+  const profiles = [...testCatalogue(), ...scoredPeak()];
+  const securityReview = {
+    def: { role: 'review', need: 48 } as const,
+    task: task({ riskTags: ['security'] }),
+    persona: persona({ modelPin: { model: 'ghost', effort: 'high' } }),
+    profiles,
+  };
+  it('takes the role tier’s automatic choice, not the seeded pattern’s', () => {
+    const highRisk = pattern({ kind: 'top_of_tier' }, { name: 'High-risk work' });
+    const withPattern = chooseModel(input({ ...securityReview, patterns: [highRisk] }));
+    const without = chooseModel(input(securityReview));
+    expect(label(withPattern.profile ?? failed())).toBe('big@max');
+    expect(label(without.profile ?? failed())).toBe('big@max');
+    expect(withPattern.setting).toEqual({ kind: 'automatic' });
+    expect(withPattern.reason).toContain('reviewer pins ghost, which this account does not offer');
+  });
+});
+
+describe('chooseModel: the account’s override after a scored choice', () => {
+  const profiles = [...testCatalogue(), ...scoredPeak()];
+  it('swaps the model a scored Automatic choice landed on for its tier’s override', () => {
+    const choice = chooseModel(
+      input({ profiles, def: { role: 'review', need: 48 }, tierOverrides: { strongest: 'peak' } }),
+    );
+    expect(label(choice.profile ?? failed())).toBe('peak@low');
+    expect(choice.reason).toContain("the account's strongest model");
+  });
+
+  it('leaves a scored choice alone when its tier has no override', () => {
+    expect(
+      pick({ profiles, def: { role: 'review', need: 48 }, tierOverrides: { fast: 'small' } }),
+    ).toBe('big@high');
+  });
+
+  it('launches an override that has no profile, as a gateway with no list does', () => {
+    const choice = chooseModel(
+      input({
+        profiles,
+        def: { role: 'review', need: 48 },
+        tierOverrides: { strongest: 'gateway-model' },
+      }),
+    );
+    expect(choice.profile).toBeNull();
+    expect(choice.model).toBe('gateway-model');
+    expect(choice.tier).toBe(ModelTier.Strongest);
+    expect(choice.reason).toContain("the account's strongest model gateway-model");
+  });
+});

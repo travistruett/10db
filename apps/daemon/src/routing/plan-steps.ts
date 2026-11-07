@@ -17,7 +17,6 @@ import {
 import { DEFAULT_PERSONA_FOR } from './catalogue';
 import { chooseModel, type ChooseTask } from './choose-model';
 import { skipReason } from './skip-rules';
-import { ROLE_DEFAULT } from './role-defaults';
 
 export interface PlanInput {
   readonly flow: FlowDto;
@@ -84,8 +83,8 @@ function routedStep(
     setting: choice.setting,
     // With nothing to run on, the step names the tier and has no profile; the launcher never starts a tier name.
     profileId: choice.profile?.id ?? null,
-    model: choice.profile?.model ?? choice.tier,
-    effort: choice.profile?.effort ?? ROLE_DEFAULT[def.role].effort,
+    model: choice.model,
+    effort: choice.effort,
     reason: choice.reason,
     overBudget: choice.overBudget,
     pinned: choice.pinned,

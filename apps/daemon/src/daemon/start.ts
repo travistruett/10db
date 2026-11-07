@@ -12,6 +12,7 @@ import {
   Provider,
   providerOf,
   StepRole,
+  type Effort,
   type InboxAnswer,
   type InboxItemDto,
   type ProjectDto,
@@ -1053,16 +1054,23 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     providerOf(getAccountRow(db, getProject(db, projectId).accountId).kind) === Provider.Codex
       ? BRAINSTORM_REFUSED_ON_CHATGPT
       : null;
-  // The model a Plan conversation runs on: what the builder's settings choose for the plan role.
-  const planModel = (project: ProjectDto) =>
-    chooseModel({
+  // The model a Plan conversation runs on: what the builder's settings choose for the plan role, by the role's
+  // default and never by score, so a conversation is never refused for want of one. Undefined when the account
+  // offers nothing to run it on.
+  const planModel = (project: ProjectDto): { model: string; effort: Effort } | undefined => {
+    const choice = chooseModel({
       ...routingInputs(db, project),
       def: { role: StepRole.Plan, need: PLAN_NEED },
       persona: undefined,
       task: { riskTags: [], acceptanceCriteria: [], areas: [], modelSetting: null },
       project,
       stakes: { retry: false },
-    }).profile ?? undefined;
+      byScore: false,
+    });
+    return choice.profile === null && choice.model === choice.tier
+      ? undefined
+      : { model: choice.model, effort: choice.effort };
+  };
   const laneSandbox = sandboxes?.lane ?? null;
   const shape = createShapeService({
     state,

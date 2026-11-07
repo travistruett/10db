@@ -9,6 +9,8 @@ const MODELS = {
   big: { tier: ModelTier.Strongest, outputPrice: 25 },
   /** Dearer than `big` in the same tier: what top of tier picks. */
   peak: { tier: ModelTier.Strongest, outputPrice: 50 },
+  /** Dearer still: a third model in the Strongest tier. */
+  apex: { tier: ModelTier.Strongest, outputPrice: 75 },
 } as const;
 type TestModel = keyof typeof MODELS;
 

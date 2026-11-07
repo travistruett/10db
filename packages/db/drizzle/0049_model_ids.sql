@@ -63,7 +63,7 @@ UPDATE `workstreams` SET `steps` = (
         )
       )
       ELSE s.`value`
-    END))
+    END) ORDER BY s.`key`)
   FROM json_each(`workstreams`.`steps`) s
 )
 WHERE json_valid(`steps`) AND EXISTS (
