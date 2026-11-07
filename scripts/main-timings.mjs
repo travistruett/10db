@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { RunArtifacts, WorkflowRuns } from '../tests/repo/src/ci-runs.ts';
 import { ShardTimings } from '../tests/repo/src/test-report.ts';
 
 export const ARTIFACT_PREFIX = 'test-timings-';
@@ -18,12 +19,14 @@ function gh(args) {
   return null;
 }
 
-function jsonFrom(args) {
+/** gh's output for `args`, parsed with `schema`, or null when gh fails or the shape is unknown. */
+function parsedFrom(args, schema) {
   const output = gh(args);
   if (output === null) return null;
   try {
-    return JSON.parse(output);
-  } catch {
+    return schema.parse(JSON.parse(output));
+  } catch (error) {
+    process.stderr.write(`gh ${args.join(' ')}: ${String(error)}\n`);
     return null;
   }
 }
@@ -51,14 +54,13 @@ export function mainRuns(repository, { successOnly = false } = {}) {
   const url =
     `repos/${repository}/actions/workflows/ci.yml/runs` +
     `?branch=main&event=push${status}&per_page=${String(RUNS_TO_SEARCH)}`;
-  return jsonFrom(['api', url])?.workflow_runs ?? [];
+  return parsedFrom(['api', url], WorkflowRuns)?.workflow_runs ?? [];
 }
 
 /** How many unexpired timing artifacts run `id` holds. */
 export function timingArtifacts(repository, id) {
-  const listed =
-    jsonFrom(['api', `repos/${repository}/actions/runs/${String(id)}/artifacts?per_page=100`])
-      ?.artifacts ?? [];
+  const url = `repos/${repository}/actions/runs/${String(id)}/artifacts?per_page=100`;
+  const listed = parsedFrom(['api', url], RunArtifacts)?.artifacts ?? [];
   return listed.filter(({ name, expired }) => name.startsWith(ARTIFACT_PREFIX) && !expired).length;
 }
 

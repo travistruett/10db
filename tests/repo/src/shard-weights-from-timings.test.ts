@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { runWithFakeGh, type GhReply } from './fake-gh';
 import {
   everyShard,
-  NoTimingsError,
+  NoWeightsError,
   renderShardWeights,
   shardWeights,
   type MainRun,
@@ -69,8 +69,15 @@ describe('shardWeights', () => {
     },
     {
       name: 'the cut-off applies to the median, not to any one run',
-      runs: [run(1, [['a.test.ts', 9]]), run(2, [['a.test.ts', 2]]), run(3, [['a.test.ts', 3]])],
-      weights: [],
+      runs: [
+        run(1, [
+          ['a.test.ts', 9],
+          ['b.test.ts', 4],
+        ]),
+        run(2, [['a.test.ts', 2]]),
+        run(3, [['a.test.ts', 3]]),
+      ],
+      weights: [['b.test.ts', 4]],
     },
     {
       name: 'slowest first, then by path, so a refresh changes only the lines that moved',
@@ -91,8 +98,12 @@ describe('shardWeights', () => {
     expect(shardWeights(runs)).toEqual(weights);
   });
 
-  it('refuses no runs, so a failed lookup never writes an empty list', () => {
-    expect(() => shardWeights([])).toThrow(NoTimingsError);
+  it.each<{ name: string; runs: MainRun[] }>([
+    { name: 'no runs', runs: [] },
+    { name: 'runs with no files', runs: [run(1, []), run(2, [])] },
+    { name: 'runs with only fast files', runs: [run(1, [['a.test.ts', 3.9]])] },
+  ])('refuses $name, so it never writes an empty list', ({ runs }) => {
+    expect(() => shardWeights(runs)).toThrow(NoWeightsError);
   });
 });
 
@@ -108,6 +119,11 @@ describe('everyShard', () => {
     {
       name: 'shards of two different splits',
       shards: [shard(1, [], 2), shard(2, [], 3)],
+      complete: false,
+    },
+    {
+      name: 'a shard past the count in place of one missing',
+      shards: [shard(1, [], 2), shard(3, [], 2)],
       complete: false,
     },
     { name: 'none', shards: [], complete: false },
@@ -177,7 +193,7 @@ describe('scripts/shard-weights.mjs', () => {
       {
         args: runs,
         stdout: JSON.stringify({
-          workflow_runs: [{ id: 6 }, { id: 5 }, { id: 4 }, { id: 3 }, { id: 2 }, { id: 1 }],
+          workflow_runs: [6, 5, 4, 3, 2, 1].map((id) => ({ id, head_sha: `sha${String(id)}` })),
         }),
       },
       { args: artifacts(6), ...listed(['test-timings-1']) },
@@ -192,6 +208,10 @@ describe('scripts/shard-weights.mjs', () => {
     ]);
     expect(result.stderr).toContain('run 6');
     expect(result.status).toBe(0);
+    // A failed run on main still uploads every shard's timings, so only green runs are asked for.
+    expect(result.calls.find(({ args }) => args.startsWith(runs))?.args).toContain(
+      '&status=success',
+    );
     const downloaded = result.calls.flatMap(({ args }) =>
       args.startsWith('run download') ? [args.split(' ')[2]] : [],
     );
@@ -203,7 +223,12 @@ describe('scripts/shard-weights.mjs', () => {
 
   it('writes nothing and fails when fewer than three runs left every shard', () => {
     const result = refresh([
-      { args: runs, stdout: JSON.stringify({ workflow_runs: [{ id: 2 }, { id: 1 }] }) },
+      {
+        args: runs,
+        stdout: JSON.stringify({
+          workflow_runs: [2, 1].map((id) => ({ id, head_sha: `sha${String(id)}` })),
+        }),
+      },
       { args: artifacts(2), ...listed(bothShards) },
       { args: artifacts(1), ...listed(bothShards) },
       download(2, 20),

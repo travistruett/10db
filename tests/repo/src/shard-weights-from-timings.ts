@@ -12,11 +12,14 @@ export interface MainRun {
 /** A test file and the whole seconds it is weighted at. */
 export type Weight = readonly [file: string, seconds: number];
 
-/** There were no runs to take timings from, so there is nothing to write. */
-export class NoTimingsError extends Error {
-  override readonly name = 'NoTimingsError';
+/**
+ * The runs gave no file slow enough to list. Writing that would weigh every file the same and undo
+ * the split, so nothing is written.
+ */
+export class NoWeightsError extends Error {
+  override readonly name = 'NoWeightsError';
   constructor() {
-    super('no runs on main to take test timings from');
+    super(`no test file took ${String(LISTED_FROM_SECONDS)} s or more in the runs on main`);
   }
 }
 
@@ -24,7 +27,7 @@ export class NoTimingsError extends Error {
 export function everyShard(shards: readonly ShardTimings[]): boolean {
   const count = shards[0]?.shard.count;
   if (count === undefined || shards.length !== count) return false;
-  if (shards.some(({ shard }) => shard.count !== count)) return false;
+  if (shards.some(({ shard }) => shard.count !== count || shard.index > count)) return false;
   return new Set(shards.map(({ shard }) => shard.index)).size === count;
 }
 
@@ -39,9 +42,9 @@ function median(values: readonly number[]): number {
  * Each file's median seconds over `runs`, for the files at `LISTED_FROM_SECONDS` or more: slowest
  * first, then by path. A file two shards or projects ran is summed within its run, and a file a run
  * didn't have takes the median of the runs that had it, so a renamed or new file still gets a weight.
+ * Throws `NoWeightsError` when no file is listed.
  */
 export function shardWeights(runs: readonly MainRun[]): Weight[] {
-  if (runs.length === 0) throw new NoTimingsError();
   const seconds = new Map<string, number[]>();
   for (const { shards } of runs) {
     const inRun = new Map<string, number>();
@@ -54,6 +57,7 @@ export function shardWeights(runs: readonly MainRun[]): Weight[] {
     const middle = median(taken);
     return middle < LISTED_FROM_SECONDS ? [] : [[file, Math.round(middle)]];
   });
+  if (weights.length === 0) throw new NoWeightsError();
   return weights.sort(([a, x], [b, y]) => y - x || (a < b ? -1 : a > b ? 1 : 0));
 }
 
@@ -77,13 +81,9 @@ export function renderShardWeights(weights: readonly Weight[], runIds: readonly 
     ' * Written by `make shard-weights` (`scripts/shard-weights.mjs`), never by hand: each file is its',
     ` * median over main runs ${listOf(runIds)}, listed from ${String(LISTED_FROM_SECONDS)} s.`,
     ' */',
-    ...(weights.length === 0
-      ? ['export const SHARD_WEIGHTS: Readonly<Record<string, number>> = {};']
-      : [
-          'export const SHARD_WEIGHTS: Readonly<Record<string, number>> = {',
-          ...weights.map(([file, seconds]) => `  ${quoted(file)}: ${String(seconds)},`),
-          '};',
-        ]),
+    'export const SHARD_WEIGHTS: Readonly<Record<string, number>> = {',
+    ...weights.map(([file, seconds]) => `  ${quoted(file)}: ${String(seconds)},`),
+    '};',
     '',
     `/** About what a test file under the listed threshold of ${String(LISTED_FROM_SECONDS)} s takes. */`,
     'export const UNWEIGHTED_FILE_SECONDS = 1;',

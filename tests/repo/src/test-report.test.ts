@@ -352,6 +352,8 @@ describe('scripts/test-report.mjs', () => {
       expect.stringContaining('run download 1 -R owner/repo -p test-timings-*'),
     ]);
     expect(calls.some((args) => args.startsWith(artifacts(4)))).toBe(false);
+    // The report compares with any run on main, green or not.
+    expect(calls.find((args) => args.startsWith(runs))).not.toContain('status=');
     expect(result.stdout).toContain('| Tests added | +1 |');
     expect(result.stdout).toContain('| Seconds added | +0.5 s |');
   });

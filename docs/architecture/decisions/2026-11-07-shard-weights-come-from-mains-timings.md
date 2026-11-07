@@ -15,7 +15,8 @@ hand, and committed like any other change.
   shards or projects ran counts once in its run, summed. A file a run didn't have takes the median of the runs
   that had it.
 - **Which files.** A file is listed when its median is 4 s or more. The rest count as 1 s, as before.
-- **Fewer than three runs.** It writes nothing and exits non-zero.
+- **Fewer than three runs, or no file listed.** It writes nothing and exits non-zero. Listing nothing would
+  weigh every file the same and undo the split.
 
 The arithmetic is in `tests/repo/src/shard-weights-from-timings.ts`, and the gh lookups it shares with the pull
 request report are in `scripts/main-timings.mjs`. Rerun the command when the shard jobs' times drift apart, or
