@@ -29,7 +29,7 @@ only process that writes the database.
   against 27. The template sits in `10db-test-db-templates` under the temp directory, named by a hash
   of the shipped migrations and of `openDatabase` and `migrateDatabase`. It is used only from a real
   directory this user owns that nobody else can write, and each copy is checked for the shipped
-  migrations; a damaged template is deleted and rebuilt, and an unsafe directory means each store
+  migrations; a damaged template is rebuilt in place, and an unsafe directory or a failed build means each store
   migrates its own. A test of migrating itself opens and migrates its own database, as
   `database.test.ts` does.
 - The daemon bundle ships its own copy of `drizzle/`; pass its path to `migrateDatabase`.

@@ -57,32 +57,44 @@ function safeDirectory(dir: string): boolean {
 }
 
 /**
+ * Builds a migrated database at `path`, under a name of its own first and then renamed into place,
+ * replacing any file there: another worker never copies a half-written one. False when it can't, for
+ * a read-only directory, a full disk or a migration that throws; the store then migrates its own,
+ * which reports the migration's own error.
+ */
+function buildTemplate(path: string): boolean {
+  const building = `${path}.${String(process.pid)}.${randomUUID()}`;
+  let db: TendbDatabase | undefined;
+  try {
+    db = openDatabase(building);
+    migrateDatabase(db);
+    // Closing the only connection folds the WAL into the file, so the file alone holds it all.
+    db.$client.close();
+    renameSync(building, path);
+    return true;
+  } catch {
+    return false;
+  } finally {
+    if (db?.$client.open) db.$client.close();
+    for (const leftover of [building, `${building}-wal`, `${building}-shm`]) {
+      rmSync(leftover, { force: true });
+    }
+  }
+}
+
+/**
  * A database file with every shipped migration applied, built once and copied for each store:
- * migrating took about 27 ms per store, and a copy takes about 2. A worker builds it under a name of
- * its own and renames it into place, so another worker never copies a half-written file. Null when
- * the directory isn't safe, and each store then migrates its own.
+ * migrating took about 27 ms per store, and a copy takes about 2. Null when the directory isn't safe
+ * or the template can't be built, and each store then migrates its own.
  */
 function migratedTemplate(): string | null {
   const temp = tmpdir();
   const known = templates.get(temp);
   if (known !== undefined) return known;
   const dir = join(temp, TEMPLATE_DIR);
-  const path = safeDirectory(dir) ? join(dir, `${shippedMigrations().key}.sqlite`) : null;
+  let path = safeDirectory(dir) ? join(dir, `${shippedMigrations().key}.sqlite`) : null;
+  if (path !== null && !existsSync(path) && !buildTemplate(path)) path = null;
   templates.set(temp, path);
-  if (path === null || existsSync(path)) return path;
-  const building = `${path}.${String(process.pid)}.${randomUUID()}`;
-  const db = openDatabase(building);
-  try {
-    migrateDatabase(db);
-    // Closing the only connection folds the WAL into the file, so the file alone holds it all.
-    db.$client.close();
-    renameSync(building, path);
-  } finally {
-    if (db.$client.open) db.$client.close();
-    for (const leftover of [building, `${building}-wal`, `${building}-shm`]) {
-      rmSync(leftover, { force: true });
-    }
-  }
   return path;
 }
 
@@ -106,14 +118,20 @@ function holdsShippedMigrations(db: TendbDatabase): boolean {
 function openMigrated(path: string): TendbDatabase {
   const template = migratedTemplate();
   if (template !== null) {
-    copyFileSync(template, path);
-    const copy = openDatabase(path);
-    if (holdsShippedMigrations(copy)) return copy;
-    // A damaged template: drop it so the next store builds a new one, and migrate this store afresh.
-    copy.$client.close();
-    rmSync(template, { force: true });
-    templates.delete(tmpdir());
-    for (const file of [path, `${path}-wal`, `${path}-shm`]) rmSync(file, { force: true });
+    try {
+      copyFileSync(template, path);
+    } catch {
+      // Gone since it was found: the next store looks for it, and builds it, again.
+      templates.delete(tmpdir());
+    }
+    if (existsSync(path)) {
+      const copy = openDatabase(path);
+      if (holdsShippedMigrations(copy)) return copy;
+      // A damaged template: replace it, never delete it, so no worker finds it missing.
+      copy.$client.close();
+      buildTemplate(template);
+      for (const file of [path, `${path}-wal`, `${path}-shm`]) rmSync(file, { force: true });
+    }
   }
   const db = openDatabase(path);
   migrateDatabase(db);

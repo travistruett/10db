@@ -87,7 +87,22 @@ describe('createTestStore', () => {
     expect(statSync(join(tmp, TEMPLATES, name)).size).toBeGreaterThan(0);
   });
 
+  it('migrates the store itself when the template is removed during a run, and builds it again', () => {
+    open();
+    const [name = ''] = templates();
+    rmSync(join(tmp, TEMPLATES, name));
+    expectMigrated(open());
+    expectMigrated(open());
+    expect(templates()).toEqual([name]);
+  });
+
   it.each([
+    [
+      'its directory is read-only, so no template can be built',
+      () => {
+        mkdirSync(join(tmp, TEMPLATES), { mode: 0o500 });
+      },
+    ],
     [
       'a file stands at its path',
       () => {
