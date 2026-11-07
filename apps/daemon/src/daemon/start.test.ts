@@ -71,6 +71,7 @@ import {
   type RunningDaemon,
 } from './index';
 import { WorktreeRootError, worktreeRootFor } from './worktree-root';
+import { startDaemonWithProfiles } from '../../test/daemon-with-profiles';
 
 /** No real caffeinate and no file watcher in daemon tests that are not about them. */
 const QUIET = { caffeinate: () => null, watch: false } as const;
@@ -294,7 +295,7 @@ describe('startDaemon', () => {
     try {
       // A fresh data directory: the default account is seeded with no identity; the fake's probe reports builder@example.com.
       const adapter = new FakeAdapter({ Alpha: [[{ do: 'turn_complete' }]] });
-      const running = await startDaemon({
+      const running = await startDaemonWithProfiles({
         sandbox: null,
         dataDir: dir.path,
         port: 0,
@@ -302,8 +303,6 @@ describe('startDaemon', () => {
         logLevel: 'warn',
         ...QUIET,
       });
-      // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
-      seedProfiles(running.state);
       daemon = running;
       const api = apiClient(running.url, running.token);
       const project = await api.post('/projects', ProjectDto, {
@@ -342,7 +341,7 @@ describe('startDaemon', () => {
         specs.push(spec);
         return {};
       };
-      const running = await startDaemon({
+      const running = await startDaemonWithProfiles({
         sandbox: null,
         dataDir: dir.path,
         port: 0,
@@ -350,8 +349,6 @@ describe('startDaemon', () => {
         logLevel: 'warn',
         ...QUIET,
       });
-      // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
-      seedProfiles(running.state);
       daemon = running;
       const api = apiClient(running.url, running.token);
       const project = await api.post('/projects', ProjectDto, {
@@ -404,7 +401,7 @@ describe('startDaemon', () => {
           specs.push(spec);
           return {};
         };
-        const running = await startDaemon({
+        const running = await startDaemonWithProfiles({
           dataDir: dir.path,
           port: 0,
           adapter,
@@ -412,8 +409,6 @@ describe('startDaemon', () => {
           sandbox: { ...roots, runtime: FAKE_SRT },
           ...QUIET,
         });
-        // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
-        seedProfiles(running.state);
         daemon = running;
         // Each root it puts files in is made private to this user before any is put there.
         for (const root of [tmpRoot, codexLaneTempRoot, filesRoot])
@@ -542,7 +537,7 @@ describe('startDaemon', () => {
       symlinkSync(elsewhere, roots.filesRoot);
       try {
         const adapter = new FakeAdapter({ Alpha: [[{ do: 'turn_complete' }]] });
-        const running = await startDaemon({
+        const running = await startDaemonWithProfiles({
           dataDir: dir.path,
           port: 0,
           adapter,
@@ -550,8 +545,6 @@ describe('startDaemon', () => {
           sandbox: { ...roots, runtime: FAKE_SRT },
           ...QUIET,
         });
-        // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
-        seedProfiles(running.state);
         daemon = running;
         const api = apiClient(running.url, running.token);
         const project = await api.post('/projects', ProjectDto, {
@@ -882,7 +875,7 @@ describe('startDaemon', () => {
     const repo = createTempRepo();
     const book: FakeScriptBook = { Alpha: [[{ do: 'hang' }], [{ do: 'hang' }]] };
     const start = () =>
-      startDaemon({
+      startDaemonWithProfiles({
         sandbox: null,
         dataDir: dir.path,
         port: 0,
@@ -893,8 +886,6 @@ describe('startDaemon', () => {
     try {
       let running = await start();
       daemon = running;
-      // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
-      seedProfiles(running.state);
       const call = async (path: string, body: unknown): Promise<{ id: string }> => {
         const res = await fetch(`${running.url}${path}`, {
           method: 'POST',
@@ -1142,7 +1133,7 @@ describe('startDaemon', () => {
       return {};
     };
     try {
-      daemon = await startDaemon({
+      daemon = await startDaemonWithProfiles({
         sandbox: null,
         dataDir: dir.path,
         port: 0,
@@ -1163,8 +1154,6 @@ describe('startDaemon', () => {
           sustainedMs: 0,
         },
       });
-      // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
-      seedProfiles(daemon.state);
       const api = apiClient(daemon.url, daemon.token);
       const project = await api.post('/projects', ProjectDto, {
         name: 'demo',
@@ -1482,7 +1471,7 @@ describe('startDaemon', () => {
             : Promise.reject(new Error('offline'));
         },
       });
-      // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
+      // With the catalogue fetch off nothing builds profiles; the fixture's models stand in for an account's list.
       if (!catalogueSync) seedProfiles(daemon.state);
       return { adapter, fetches, net, running: daemon };
     };

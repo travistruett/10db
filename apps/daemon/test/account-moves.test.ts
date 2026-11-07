@@ -9,7 +9,7 @@ import {
 import { listSessions } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { startDaemon, type RunningDaemon } from '../src/daemon';
+import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter, type FakeScriptBook } from '../src/sessions';
 import { apiClient, quickFlowId } from './api-client';
 import {
@@ -19,7 +19,7 @@ import {
   tempDir,
   waitForAsync,
 } from './fixtures';
-import { seedProfiles } from './seed-profiles';
+import { startDaemonWithProfiles } from './daemon-with-profiles';
 
 const QUIET = { caffeinate: () => null, watch: false } as const;
 
@@ -43,7 +43,7 @@ afterEach(async () => {
  */
 async function runOnFallback(book: FakeScriptBook) {
   const adapter = new FakeAdapter(book);
-  const running = await startDaemon({
+  const running = await startDaemonWithProfiles({
     sandbox: null,
     dataDir: data.path,
     port: 0,
@@ -52,8 +52,6 @@ async function runOnFallback(book: FakeScriptBook) {
     keychain: createMemoryKeychain(),
     ...QUIET,
   });
-  // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
-  seedProfiles(running.state);
   daemon = running;
   const api = apiClient(running.url, running.token);
   const { account: fallback } = await api.post('/accounts', AccountCreatedDto, {

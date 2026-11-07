@@ -1,11 +1,21 @@
-import { AccountProblem, isModelTier, Provider, type AccountId } from '@10db/contracts';
+import {
+  AccountProblem,
+  Effort,
+  isModelTier,
+  ModelStatus,
+  Provider,
+  type AccountId,
+} from '@10db/contracts';
 import {
   getWorkstream,
   listAccountModels,
   listInbox,
   listModelProfiles,
   listSessions,
+  markAccountModelUnusable,
   patchAccount,
+  patchWorkstream,
+  upsertModelProfiles,
   patchProject,
   replaceAccountModels,
   seedAccount,
@@ -186,7 +196,7 @@ describe('a model the account refuses at the first reply', () => {
     );
   });
 
-  it('holds the account with one card and starts no second session when no model is left', async () => {
+  it('holds the account with one refusal card, beside the model’s own, and starts no second session when no model is left', async () => {
     engine = await createTestEngine({ Alpha: [[{ do: 'model_refused' }]] });
     const { workstream } = engine.addTask('Alpha', ['api'], [], quick);
     const only = ws(workstream.id).steps[0]?.model ?? '';
@@ -198,11 +208,97 @@ describe('a model the account refuses at the first reply', () => {
     expect(ws(workstream.id).state).toBe('PAUSED_LIMIT');
     expect(engine.accounts.isPaused(engine.project.accountId)).toBe(true);
     const cards = openCards();
-    expect(cards.map((c) => c.title)).toContain('Claude plan: sessions refused');
-    expect(cards.filter((c) => c.title === 'Claude plan: sessions refused')).toHaveLength(1);
+    expect(cards.map((c) => c.title).sort()).toEqual([
+      `Claude plan cannot run ${only}`,
+      'Claude plan: sessions refused',
+    ]);
+    // The step still names what was planned, so a later resolve says why it changed.
+    expect(ws(workstream.id).steps[0]?.model).toBe(only);
     const refusal = cards.find((c) => c.title === 'Claude plan: sessions refused');
     expect(JSON.stringify(refusal?.detail)).toContain(AccountProblem.NoUsableModel);
     expect(refusal?.body).toMatch(/Settings › Accounts › Claude plan/);
+  });
+
+  it('starts over in the refused model’s tier, whatever the step’s setting', async () => {
+    engine = await createTestEngine({ Alpha: [[{ do: 'model_refused' }], finish('op-tier-01')] });
+    list(engine.project.accountId, claudeModels());
+    const specs = recordSpecs();
+    const { workstream } = engine.addTask('Alpha', ['api'], [], quick);
+    const step = ws(workstream.id).steps[0];
+    const fable = listModelProfiles(engine.store.db).find(
+      (p) => p.model === 'claude-fable-5-1' && p.effort === Effort.High,
+    );
+    if (!step || !fable) throw new Error('no step or profile');
+    engine.state.write((ctx) => {
+      patchWorkstream(ctx, workstream.id, null, {
+        steps: [
+          {
+            ...step,
+            profileId: fable.id,
+            model: fable.model,
+            effort: fable.effort,
+            setting: { kind: 'automatic' },
+          },
+        ],
+        model: fable.model,
+        effort: fable.effort,
+      });
+    });
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+
+    expect(specs.map((s) => s.model)).toEqual(['claude-fable-5-1', 'claude-opus-5-5']);
+    expect(ws(workstream.id).steps[0]?.setting).toEqual({ kind: 'automatic' });
+  });
+
+  it('holds the account with one card and no session when every listed model is Unknown', async () => {
+    engine = await createTestEngine({ Alpha: [[turn]] });
+    engine.state.write((ctx) => {
+      upsertModelProfiles(
+        ctx,
+        Object.values(Effort).map((effort) => ({
+          provider: Provider.Claude,
+          model: 'house-model',
+          effort,
+          aaSlug: null,
+          enabled: false,
+          maker: null,
+          family: null,
+          tier: null,
+          status: ModelStatus.Unknown,
+          inputPrice: null,
+          outputPrice: null,
+          releaseDate: null,
+        })),
+      );
+    });
+    list(engine.project.accountId, ['house-model']);
+    const { workstream } = engine.addTask('Alpha', ['api'], [], quick);
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+
+    expect(listSessions(engine.store.db, workstream.id)).toHaveLength(0);
+    expect(ws(workstream.id).state).toBe('PAUSED_LIMIT');
+    expect(openCards().map((c) => c.title)).toEqual(['Claude plan: sessions refused']);
+  });
+
+  it('fails the task, and does not ask again, for a model already marked unusable', async () => {
+    engine = await createTestEngine({ Alpha: [[{ do: 'model_refused' }], finish('op-again-01')] });
+    list(engine.project.accountId, claudeModels());
+    const accountId = engine.project.accountId;
+    // Marked after the model was chosen, as an override that named a refused model would have left it.
+    engine.adapter.seen = (spec) => {
+      engine.state.write((ctx) => {
+        markAccountModelUnusable(ctx, accountId, spec.model);
+      });
+      return {};
+    };
+    const { workstream } = engine.addTask('Alpha', ['api'], [], quick);
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+
+    expect(listSessions(engine.store.db, workstream.id)).toHaveLength(1);
+    expect(ws(workstream.id).state).toBe('FAILED');
   });
 
   it('fails the task with its card when the account lists no model to mark', async () => {

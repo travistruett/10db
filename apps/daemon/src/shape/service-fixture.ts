@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import {
   AccountKind,
   BRAINSTORM_REFUSED_ON_CHATGPT,
-  mintId,
   Provider,
   providerOf,
   type DaemonEvent,
@@ -101,7 +100,7 @@ export function createServiceFixture(
     agentModels: shapeAgentModels(launched.kind),
     env: {},
     account: {
-      accountId: mintId('Account'),
+      accountId: c.project.accountId,
       label: launched.kind === AccountKind.Bedrock ? 'Bedrock' : 'Claude plan',
       kind: launched.kind,
       identity: null,

@@ -37,7 +37,7 @@ import {
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { startDaemon, type RunningDaemon } from '../src/daemon';
+import type { RunningDaemon } from '../src/daemon';
 import { KeychainError, secretFingerprint, type Keychain } from '../src/environment';
 import {
   AccountLoginError,
@@ -47,7 +47,7 @@ import {
 } from '../src/sessions';
 import { apiClient } from './api-client';
 import { createMemoryKeychain, createTempRepo, tempDir, waitForAsync } from './fixtures';
-import { seedProfiles } from './seed-profiles';
+import { startDaemonWithProfiles } from './daemon-with-profiles';
 
 const SECRET = 'sk-or-v1-0123456789abcdef-NEVER-SHOWN';
 const QUIET = { caffeinate: () => null, watch: false } as const;
@@ -73,7 +73,7 @@ async function start(
 ) {
   const keychain = opts.keychain ?? createMemoryKeychain();
   const adapter = opts.adapter ?? new FakeAdapter({});
-  daemon = await startDaemon({
+  daemon = await startDaemonWithProfiles({
     sandbox: null,
     dataDir: data.path,
     port: 0,
@@ -84,8 +84,6 @@ async function start(
     ...(opts.loginEnv === undefined ? {} : { loginEnv: opts.loginEnv }),
     ...QUIET,
   });
-  // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
-  seedProfiles(daemon.state);
   return {
     api: apiClient(daemon.url, daemon.token),
     keychain,

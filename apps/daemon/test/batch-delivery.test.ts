@@ -10,7 +10,7 @@ import {
 } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { startDaemon, type RunningDaemon } from '../src/daemon';
+import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter, type FakeScriptBook } from '../src/sessions';
 import { apiClient, quickFlowId } from './api-client';
 import { FakeGh } from './fake-gh';
@@ -22,7 +22,7 @@ import {
   tempDir,
   waitForAsync,
 } from './fixtures';
-import { seedProfiles } from './seed-profiles';
+import { startDaemonWithProfiles } from './daemon-with-profiles';
 
 const write = (path: string) => ({
   do: 'tool' as const,
@@ -73,7 +73,7 @@ const git = (dir: string, ...args: string[]) =>
 
 /** Starts a daemon on the test's data dir; a second call after `daemon.stop()` is a restart. */
 async function boot(systemCheck?: () => Promise<SystemCheck>, prWatchIntervalMs?: number) {
-  daemon = await startDaemon({
+  daemon = await startDaemonWithProfiles({
     sandbox: null,
     dataDir: data.path,
     port: 0,
@@ -86,8 +86,6 @@ async function boot(systemCheck?: () => Promise<SystemCheck>, prWatchIntervalMs?
     ...(systemCheck ? { systemCheck } : {}),
     ...(prWatchIntervalMs ? { prWatchIntervalMs } : {}),
   });
-  // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
-  seedProfiles(daemon.state);
   return apiClient(daemon.url, daemon.token);
 }
 
@@ -253,7 +251,7 @@ describe('batch delivery through the daemon', () => {
   });
 
   it('still answers 201 with the workstream in a local project', async () => {
-    daemon = await startDaemon({
+    daemon = await startDaemonWithProfiles({
       sandbox: null,
       dataDir: data.path,
       port: 0,
@@ -263,8 +261,6 @@ describe('batch delivery through the daemon', () => {
       watch: false,
       gh,
     });
-    // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
-    seedProfiles(daemon.state);
     const api = apiClient(daemon.url, daemon.token);
     const project = await api.post('/projects', ProjectDto, {
       name: 'local',

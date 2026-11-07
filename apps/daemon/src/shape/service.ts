@@ -10,6 +10,7 @@ import {
   ShapeMessageKind,
   ShapeOrigin,
   ShapeProposalState,
+  type AccountId,
   shapeFileKind,
   SessionMode,
   type AccountKind,
@@ -50,6 +51,7 @@ import {
   listShapeMessages,
   listShapes,
   listUntoldShapeFiles,
+  markAccountModelUnusable,
   markSessionStarted,
   markShapeFilesInline,
   markShapeFilesTold,
@@ -481,6 +483,9 @@ interface Live {
   readonly expiresAt: string | null;
   /** The picture limits of the account this session runs on, which it keeps even if the project's changes. */
   readonly limits: PictureLimits;
+  /** The account and model it runs on, for a refusal to mark. */
+  readonly account: AccountId;
+  readonly model: string;
   /** Why the daemon ended it, when it did; the session's exit reason otherwise comes from Claude Code. */
   endReason: string | null;
   /** Resolves when its events have ended: the session has ended and its row says so. */
@@ -737,6 +742,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           endSession(ctx, live.sessionId, live.endReason ?? event.reason);
         });
         if (running) rt.live = null;
+        if (event.reason === 'model_refused') markRefused(live);
         if (live.endReason === null && event.reason !== 'completed' && event.reason !== 'stopped')
           notice(shapeId, event.message ?? `Claude's session ended (${event.reason}).`);
         if (running) rt.waiting?.({ kind: 'ended' });
@@ -746,6 +752,18 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       case 'background_tasks':
         break;
     }
+  };
+
+  /** The account cannot run the model: it is marked unusable, so the picker stops offering it. */
+  const markRefused = (live: Live): void => {
+    state.write((ctx) => {
+      try {
+        markAccountModelUnusable(ctx, live.account, live.model);
+      } catch (error) {
+        // An account that lists no models has no row to mark.
+        if (!(error instanceof NotFoundError)) throw error;
+      }
+    });
   };
 
   const consume = async (shapeId: ShapeId, rt: Runtime, live: Live): Promise<void> => {
@@ -1263,6 +1281,8 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       },
       expiresAt: ready?.credentialsExpireAt ?? null,
       limits,
+      account: launch.account.accountId,
+      model: launch.model,
       endReason: null,
       done: Promise.resolve(),
     };

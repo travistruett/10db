@@ -1,6 +1,6 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { isModelTier, mintId, ModelTier, providerOf, StepRole } from '@10db/contracts';
+import { isModelTier, ModelTier, providerOf, StepRole } from '@10db/contracts';
 import { defaultAccountId, getAccountRow, listAccountModels, type DbReader } from '@10db/db';
 import type { Launcher } from '../environment';
 import type { AreaNamer } from '../folders';
@@ -40,7 +40,7 @@ export function createAreaNamer(deps: AreaNamerDeps): AreaNamer {
         areas: [],
         modelSetting: { kind: 'tier', tier: NAMING_MODEL },
       },
-      project: { id: mintId('Project'), budgetCeiling: null },
+      project: { id: null, budgetCeiling: null },
       stakes: { retry: false },
       byScore: false,
     });

@@ -2,6 +2,7 @@ import {
   ModelStatus,
   ROLE_SCORE,
   ScoreKind,
+  type AccountModelDto,
   type Effort,
   type FlowStepDef,
   type ModelProfileDto,
@@ -10,6 +11,7 @@ import {
   type PatternDto,
   type PatternMatch,
   type PersonaDto,
+  type ProjectId,
   type ProjectDto,
   type RoleSettingDto,
   type StepRole,
@@ -29,13 +31,23 @@ export interface ChooseInput {
   /** The persona playing the step; its pin and minimum score apply. */
   readonly persona: PersonaDto | undefined;
   readonly task: ChooseTask;
-  readonly project: Pick<ProjectDto, 'id' | 'budgetCeiling'>;
+  /** The project the step is for; a null id is a choice made for no project (naming areas), which only global patterns and settings reach. */
+  readonly project: {
+    readonly id: ProjectId | null;
+    readonly budgetCeiling: ProjectDto['budgetCeiling'];
+  };
   /** What the project's account offers, already narrowed by `offeredProfiles`. */
   readonly profiles: readonly ModelProfileDto[];
   readonly roleSettings: readonly RoleSettingDto[];
   readonly patterns: readonly PatternDto[];
   /** The model the account runs for a tier instead of the automatic choice. */
   readonly tierOverrides: Readonly<Partial<Record<ModelTier, string>>>;
+  /**
+   * The account's own list, when the caller has it. With a list, an override naming a model the list lacks, or
+   * has marked unusable, is not offered and gives way to the tier's automatic choice; without one an override
+   * is launched as named, since nothing else can say what the account serves.
+   */
+  readonly accountModels?: readonly AccountModelDto[];
   readonly stakes: { readonly retry: boolean };
   /**
    * Whether profiles that carry scores are routed by them. Off, the pool's tier decides by default effort, which
@@ -275,6 +287,8 @@ export function chooseModel(input: ChooseInput): ModelChoice {
   const overrideFor = (tier: ModelTier, note: string): ModelChoice | undefined => {
     const name = input.tierOverrides[tier];
     if (name === undefined) return undefined;
+    const listed = input.accountModels ?? [];
+    if (listed.length > 0 && !listed.some((m) => m.model === name && !m.unusable)) return undefined;
     const described = input.profiles.filter((p) => p.model === name);
     const named = described.filter((p) => p.status !== ModelStatus.Retired);
     const prefix = `${note}the account's ${tier} model: `;

@@ -10,7 +10,7 @@ import {
   WorkstreamDto,
   WorkstreamState,
 } from '@10db/contracts';
-import { createStore, openDatabase } from '@10db/db';
+import { createStore, DB_MIGRATIONS_DIR, migrateDatabase, openDatabase } from '@10db/db';
 import Database from 'better-sqlite3';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -146,6 +146,12 @@ async function connect(daemon: ChildProcess) {
 beforeAll(() => {
   repo = createTempRepo();
   data = tempDir('crash');
+  // The child fetches no catalogue, and a task has no model to run on without profiles: they are in its
+  // database before it starts.
+  const seeding = openDatabase(join(data.path, '10db.sqlite'));
+  migrateDatabase(seeding, DB_MIGRATIONS_DIR);
+  seedProfiles(createStateStore(createStore(seeding), createEventBus()));
+  seeding.$client.close();
   writeFileSync(join(data.path, 'book.json'), JSON.stringify(BOOK));
 });
 afterAll(() => {
@@ -161,10 +167,6 @@ describe('kill -9 mid-step', () => {
       child = launchDaemon();
       const first = child;
       let api = await connect(first);
-      // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
-      const seeding = openDatabase(join(data.path, '10db.sqlite'));
-      seedProfiles(createStateStore(createStore(seeding), createEventBus()));
-      seeding.$client.close();
       const project = await api.post('/projects', ProjectDto, {
         name: 'crash',
         repoPath: repo.path,

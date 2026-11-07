@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { InboxItemDto, ProjectDto, TaskDto } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { startDaemon, type RunningDaemon } from '../src/daemon';
+import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient, quickFlowId } from './api-client';
 import { FakeGh } from './fake-gh';
@@ -14,7 +14,7 @@ import {
   tempDir,
   waitForAsync,
 } from './fixtures';
-import { seedProfiles } from './seed-profiles';
+import { startDaemonWithProfiles } from './daemon-with-profiles';
 
 let data: { path: string; cleanup(): void };
 let remote: ReturnType<typeof createTempRepoWithOrigin>;
@@ -40,7 +40,7 @@ const git = (dir: string, ...args: string[]) =>
 
 /** Starts the daemon on the test's data directory; a second start finds what the first stored. */
 async function boot() {
-  daemon = await startDaemon({
+  daemon = await startDaemonWithProfiles({
     sandbox: null,
     dataDir: data.path,
     port: 0,
@@ -51,8 +51,6 @@ async function boot() {
     gh: new FakeGh(),
     networkEnv: () => ({ ...NETWORK_ENV, GIT_CONFIG_GLOBAL: network.global }),
   });
-  // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
-  seedProfiles(daemon.state);
   return apiClient(daemon.url, daemon.token);
 }
 

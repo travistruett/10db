@@ -10,7 +10,7 @@ import {
 } from '@10db/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { startDaemon, type RunningDaemon } from '../src/daemon';
+import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter, type FakeScriptBook } from '../src/sessions';
 import {
   checkServerEnv,
@@ -21,7 +21,7 @@ import {
 } from '../scripts/acceptance-checks';
 import { apiClient, quickFlowId } from './api-client';
 import { createTempRepo, handoffArgs, isolatedGitEnv, tempDir, waitForAsync } from './fixtures';
-import { seedProfiles } from './seed-profiles';
+import { startDaemonWithProfiles } from './daemon-with-profiles';
 
 const write = (path: string) => ({
   do: 'tool' as const,
@@ -85,7 +85,7 @@ let daemon: RunningDaemon;
 beforeAll(async () => {
   repo = createTempRepo();
   data = tempDir('acceptance-checks');
-  daemon = await startDaemon({
+  daemon = await startDaemonWithProfiles({
     sandbox: null,
     dataDir: data.path,
     port: 0,
@@ -94,8 +94,6 @@ beforeAll(async () => {
     caffeinate: () => null,
     watch: false,
   });
-  // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
-  seedProfiles(daemon.state);
   // Every call names the zod schema its response is parsed with, so a changed response fails here.
   const api = apiClient(daemon.url, daemon.token);
   const project = await api.post('/projects', ProjectDto, {

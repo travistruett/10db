@@ -309,6 +309,12 @@ describe('the start checks', () => {
       'sandbox_refused',
     ],
     [
+      // A transient server error that names the model is not the account refusing it.
+      'the thread fails with a server error that names the requested model',
+      { 'thread/start': { error: { code: -32603, message: 'gpt-5.6-sol is at capacity' } } },
+      'sandbox_refused',
+    ],
+    [
       'the thread runs another profile',
       { 'thread/start': threadOf('gpt-5.6-sol', ':danger-full-access') },
       'sandbox_refused',
@@ -886,6 +892,15 @@ describe('the thread and the first turn', () => {
     });
     expect(events.at(-1)).not.toHaveProperty('refusal');
     expect(server.killed()).toBe(true);
+  });
+
+  it('ends as an ordinary error when the first turn fails with a transient error naming the model', async () => {
+    const { handle } = startWith({
+      'turn/start': { error: { code: -32603, message: 'gpt-5.6-sol is at capacity' } },
+    });
+    const ended = (await collect(handle)).at(-1);
+    expect(ended).toMatchObject({ type: 'ended', reason: 'error' });
+    expect(JSON.stringify(ended)).not.toContain('refused the model');
   });
 
   it('ends as an ordinary error when the first turn fails naming no requested model', async () => {

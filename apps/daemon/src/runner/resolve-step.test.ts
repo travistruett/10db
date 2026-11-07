@@ -247,6 +247,58 @@ describe('resolveStep', () => {
     expect(out.reason).toMatch(/ada pins big, which this account does not offer/);
   });
 
+  it.each<{
+    name: string;
+    rows: AccountModelDto[];
+    overrides: Partial<Record<ModelTier, string>>;
+    want: string;
+  }>([
+    {
+      name: 'an override naming the model the account has marked unusable',
+      rows: [row('big', { unusable: true }), row('peak')],
+      overrides: { strongest: 'big' },
+      want: 'peak',
+    },
+    {
+      name: 'an override naming a model absent from a list the account has',
+      rows: [row('big'), row('peak')],
+      overrides: { strongest: 'ghost' },
+      want: 'big',
+    },
+  ])(
+    'does not launch $name, which is not offered, but the tier’s automatic choice',
+    ({ rows: listed, overrides, want }) => {
+      const { rows, profiles } = offering(listed);
+      const out = resolveStep(
+        planned('mid@high', { setting: tier(ModelTier.Strongest) }),
+        ACCOUNT,
+        profiles,
+        rows,
+        context({ tierOverrides: overrides }),
+      );
+      expect(out.model).toBe(want);
+      expect(out.profileId).not.toBeNull();
+    },
+  );
+
+  it('keeps a refused model’s step in its tier whatever the setting, and keeps the setting', () => {
+    const { rows, profiles } = offering([
+      row('small'),
+      row('mid'),
+      row('big', { unusable: true }),
+      row('peak'),
+    ]);
+    const out = resolveStep(
+      planned('big@high', { setting: { kind: 'automatic' } }),
+      ACCOUNT,
+      profiles,
+      rows,
+      context({ plannedTier: ModelTier.Strongest }),
+    );
+    expect(out.model).toBe('peak');
+    expect(out.setting).toEqual({ kind: 'automatic' });
+  });
+
   it('launches a model typed against a tier on a gateway that lists none', () => {
     const profiles: ModelProfileDto[] = [];
     const out = resolveStep(

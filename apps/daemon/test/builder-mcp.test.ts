@@ -30,7 +30,8 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { startDaemon, type RunningDaemon } from '../src/daemon';
+import type { startDaemon } from '../src/daemon';
+import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
 import { FakeGh } from './fake-gh';
@@ -42,7 +43,7 @@ import {
   tempDir,
   waitForAsync,
 } from './fixtures';
-import { seedProfiles } from './seed-profiles';
+import { startDaemonWithProfiles } from './daemon-with-profiles';
 
 let data: { path: string; cleanup(): void };
 let repo: { path: string; cleanup(): void };
@@ -50,7 +51,7 @@ let daemon: RunningDaemon;
 let client: Client;
 /** Starts a daemon and connects the builder client to it; `extra` adds to the daemon's options. */
 async function boot(extra: Partial<Parameters<typeof startDaemon>[0]> = {}) {
-  daemon = await startDaemon({
+  daemon = await startDaemonWithProfiles({
     sandbox: null,
     dataDir: data.path,
     port: 0,
@@ -64,8 +65,6 @@ async function boot(extra: Partial<Parameters<typeof startDaemon>[0]> = {}) {
     caps: { global: 0 },
     ...extra,
   });
-  // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
-  seedProfiles(daemon.state);
   client = new Client({ name: 'test', version: '0' });
   await client.connect(
     new StreamableHTTPClientTransport(new URL(`${daemon.url}/builder/mcp`), {

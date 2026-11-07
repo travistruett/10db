@@ -14,7 +14,7 @@ import {
 import { insertPermissionRule, listPermissionRules } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { startDaemon, type RunningDaemon } from '../src/daemon';
+import type { RunningDaemon } from '../src/daemon';
 import { createGit } from '../src/git';
 import { storableRule } from '../src/permissions';
 import { silentLogger } from '../src/log';
@@ -22,7 +22,7 @@ import { createGateSandbox } from '../src/sandbox';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
 import { createTempRepo, FAKE_SRT, SANDBOXED, tempDir } from './fixtures';
-import { seedProfiles } from './seed-profiles';
+import { startDaemonWithProfiles } from './daemon-with-profiles';
 
 /**
  * The shortest directory this process can create in: `/tmp`, or, where a sandbox denies it, the
@@ -51,7 +51,7 @@ let daemon: RunningDaemon;
 beforeEach(async () => {
   data = tempDir('network hosts');
   repo = createTempRepo();
-  daemon = await startDaemon({
+  daemon = await startDaemonWithProfiles({
     sandbox: null,
     dataDir: data.path,
     port: 0,
@@ -61,8 +61,6 @@ beforeEach(async () => {
     watch: false,
     tickMs: 3_600_000,
   });
-  // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
-  seedProfiles(daemon.state);
 });
 afterEach(async () => {
   await daemon.stop();

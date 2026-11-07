@@ -1,5 +1,5 @@
 import { CatalogueAttempt, CatalogueSource, type CatalogueStatusDto } from '@10db/contracts';
-import { getAppSetting, setAppSetting } from '@10db/db';
+import { getAppSetting, setAppSetting, type DbReader } from '@10db/db';
 import { z } from 'zod';
 import type { Clock, Timer } from '../clock';
 import type { StateStore } from '../events';
@@ -23,6 +23,25 @@ type StoredDocument = z.infer<typeof StoredDocument>;
 /** The wait before the retry that follows `failures` failures in a row. */
 const retryDelayMs = (failures: number): number =>
   Math.min(RETRY_BASE_MS * 2 ** (failures - 1), RETRY_CAP_MS);
+
+/** A model of the stored catalogue, by the ID it is run under and the name its maker gives it. */
+export interface NamedModel {
+  readonly id: string;
+  readonly name: string;
+}
+
+/** The models of the catalogue last fetched; none when nothing is stored. */
+export function storedModelNames(db: DbReader): NamedModel[] {
+  try {
+    const parsed = StoredDocument.safeParse(getAppSetting(db, DOCUMENT_KEY));
+    if (!parsed.success) return [];
+    return Object.values(parsed.data.catalogue.providers).flatMap((p) =>
+      p.models.map((m) => ({ id: m.id, name: m.name })),
+    );
+  } catch {
+    return [];
+  }
+}
 
 export interface CatalogueSyncDeps {
   readonly state: StateStore;

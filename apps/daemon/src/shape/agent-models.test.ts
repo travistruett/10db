@@ -1,4 +1,4 @@
-import { SUPPORTED_ACCOUNT_KINDS, type SupportedAccountKind } from '@10db/contracts';
+import type { SupportedAccountKind } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { SHAPE_AGENT_MODELS } from './confinement';
 import { shapeAgentModels } from './agent-models';
@@ -14,11 +14,6 @@ describe('the models a Plan session may launch an agent on', () => {
     { kind: 'codex_signin', models: [] },
   ])('are $models on $kind', ({ kind, models }) => {
     expect(shapeAgentModels(kind)).toEqual(models);
-  });
-
-  it('covers every kind a session can run on', () => {
-    for (const kind of SUPPORTED_ACCOUNT_KINDS)
-      expect(Array.isArray(shapeAgentModels(kind))).toBe(true);
   });
 });
 

@@ -3,16 +3,23 @@ import {
   ModelStatus,
   type AccountModelDto,
   type ModelProfileDto,
+  type ModelTier,
   type WorkstreamStep,
 } from '@10db/contracts';
 import type { AccountRow } from '@10db/db';
 import { chooseModel, NoProfileError, type ChooseInput } from '../routing';
 
 /** What choosing again needs besides what the account offers: the step's task, project and the builder's settings. */
-export type StepContext = Pick<
+export interface StepContext extends Pick<
   ChooseInput,
   'persona' | 'task' | 'project' | 'roleSettings' | 'patterns' | 'tierOverrides'
->;
+> {
+  /**
+   * The tier the planned model is in, for a step whose model the account refused: the step starts over in
+   * that tier whatever its setting, and keeps the setting.
+   */
+  readonly plannedTier?: ModelTier | undefined;
+}
 
 /** Whether the account can run the step's model at the step's effort now. */
 function offered(
@@ -58,11 +65,17 @@ export function resolveStep(
   context: StepContext,
 ): WorkstreamStep {
   if (offered(step, profiles, accountModels)) return step;
+  const refused = accountModels.some((m) => m.model === step.model && m.unusable);
+  const setting =
+    refused && context.plannedTier !== undefined
+      ? { kind: 'tier' as const, tier: context.plannedTier }
+      : (step.setting ?? context.task.modelSetting);
   const choose = (byScore: boolean) =>
     chooseModel({
       ...context,
       def: { role: step.role, need: step.need },
-      task: { ...context.task, modelSetting: step.setting ?? context.task.modelSetting },
+      task: { ...context.task, modelSetting: setting },
+      accountModels,
       profiles,
       stakes: { retry: false },
       byScore,
@@ -83,7 +96,8 @@ export function resolveStep(
     profileId,
     model: choice.model,
     effort: choice.effort,
-    setting: choice.setting,
+    // A refusal moves the step to another model of its tier, not to another kind of choice.
+    setting: refused && context.plannedTier !== undefined ? step.setting : choice.setting,
     overBudget: choice.overBudget,
     pinned: choice.pinned,
     score: choice.score,

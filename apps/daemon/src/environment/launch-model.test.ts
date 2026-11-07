@@ -80,8 +80,8 @@ describe('the model a session launches', () => {
       name: `a ChatGPT account launches ${model}, the model of one of its tiers, with no map`,
       account: chatgpt,
       model,
-      rows: [row(model, model)],
-      launches: model,
+      rows: [row(model, `${model}-launch`)],
+      launches: `${model}-launch`,
     })),
     {
       name: 'an account with no row launches the canonical ID',

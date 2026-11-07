@@ -22,11 +22,11 @@ import { BatchCardChoice, batchCardFields } from '../src/delivery/batch-card';
 import { flagCard } from '../src/inbox';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { startDaemon, type RunningDaemon } from '../src/daemon';
+import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
 import { createTempRepo, tempDir, waitForAsync } from './fixtures';
-import { seedProfiles } from './seed-profiles';
+import { startDaemonWithProfiles } from './daemon-with-profiles';
 
 let data: { path: string; cleanup(): void };
 let repo: { path: string; cleanup(): void };
@@ -36,7 +36,7 @@ beforeEach(async () => {
   data = tempDir('restart failed');
   worktrees = tempDir('restart failed worktrees');
   repo = createTempRepo();
-  daemon = await startDaemon({
+  daemon = await startDaemonWithProfiles({
     sandbox: null,
     dataDir: data.path,
     worktreeRoot: worktrees.path,
@@ -48,8 +48,6 @@ beforeEach(async () => {
     // A tick long enough that a queued run stays where the test left it.
     tickMs: 3_600_000,
   });
-  // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
-  seedProfiles(daemon.state);
 });
 afterEach(async () => {
   // A start requests a tick; let it finish before the daemon closes its logger.

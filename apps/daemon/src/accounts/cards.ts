@@ -16,6 +16,7 @@ import {
 } from '@10db/contracts';
 import type { AccountRow, Json } from '@10db/db';
 import { signInCommand, signInCommandFor } from '../environment';
+import type { NamedModel } from '../catalogue';
 import type { CapStatus } from './cap';
 import type { UsageReport } from './usage-reports';
 
@@ -152,15 +153,24 @@ const LIMIT_NAMES: Readonly<Record<string, string>> = {
 
 const WEEKLY_LIMIT_PREFIX = 'seven_day_';
 
-/** How a card names the limit a session reported; a model's weekly limit is named from its key, and one 10db hasn't seen reads as the usage limit. */
-export function limitName(limitType: string | null): string {
+/** A key's model segment as an ID is written with underscores: `gpt-6-astra` is `gpt_6_astra`. */
+const keyOf = (id: string): string => id.toLowerCase().replaceAll(/[^a-z0-9]+/g, '_');
+
+/**
+ * How a card names the limit a session reported. A model's weekly limit is named after the catalogue's name for
+ * the one model its key names, else from the key's words; a limit 10db hasn't seen reads as the usage limit.
+ */
+export function limitName(limitType: string | null, models: readonly NamedModel[] = []): string {
   if (limitType === null) return 'usage limit';
   const known = LIMIT_NAMES[limitType];
   if (known !== undefined) return known;
   if (!limitType.startsWith(WEEKLY_LIMIT_PREFIX) || limitType === WEEKLY_LIMIT_PREFIX)
     return 'usage limit';
-  const words = limitType
-    .slice(WEEKLY_LIMIT_PREFIX.length)
+  const tail = limitType.slice(WEEKLY_LIMIT_PREFIX.length);
+  const named = models.filter((m) => keyOf(m.id) === tail);
+  const [only] = named;
+  if (only !== undefined && named.length === 1) return `weekly ${only.name} limit`;
+  const words = tail
     .split('_')
     .filter((word) => word !== '')
     .map((word) => `${word.charAt(0).toUpperCase()}${word.slice(1)}`);
@@ -168,8 +178,8 @@ export function limitName(limitType: string | null): string {
 }
 
 /** "is at 96% of its 5-hour limit", or "reached its 5-hour limit" at the limit itself. */
-function standing(report: UsageReport): string {
-  const limit = limitName(report.limitType);
+function standing(report: UsageReport, models: readonly NamedModel[]): string {
+  const limit = limitName(report.limitType, models);
   if (report.status === 'rejected' || report.utilization === null) return `reached its ${limit}`;
   return `is at ${String(Math.round(report.utilization * 100))}% of its ${limit}`;
 }
@@ -190,6 +200,7 @@ export function usageHighCard(
   account: AccountRow,
   targets: readonly AccountDto[],
   report: UsageReport,
+  models: readonly NamedModel[] = [],
 ): AccountCard {
   const moves = targets.map((t) => ({ choice: `Move to ${offered(t)}`, accountId: t.id }));
   const only = targets.length === 1 ? targets[0] : undefined;
@@ -198,9 +209,9 @@ export function usageHighCard(
   return {
     title:
       moves.length > 0
-        ? `${account.label} ${standing(report)}: hand off and move ${project.name} to ${where}?`
-        : `${account.label} ${standing(report)}`,
-    body: `A session on ${account.label} reported that it ${standing(report)}.${resets} ${
+        ? `${account.label} ${standing(report, models)}: hand off and move ${project.name} to ${where}?`
+        : `${account.label} ${standing(report, models)}`,
+    body: `A session on ${account.label} reported that it ${standing(report, models)}.${resets} ${
       moves.length > 0
         ? `Moving asks each lane of ${project.name} on ${account.label} to hand off, then runs its next sessions on the account you pick, and 10db asks whether to move back once the limit resets.`
         : `No other account can take ${project.name} now, so it stays on ${account.label} until the limit.`
@@ -227,12 +238,13 @@ export function movedCard(
   account: AccountRow,
   fallback: AccountDto,
   report: UsageReport,
+  models: readonly NamedModel[] = [],
 ): AccountCard {
   const handedOff =
     report.status === 'rejected' ? '' : ' after asking its running lanes to hand off';
   return {
-    title: `${project.name} moved to ${fallback.label}: ${account.label} ${standing(report)}`,
-    body: `A session on ${account.label} reported that it ${standing(report)}. ${project.name} names ${accountDisplayName(fallback)} as its fallback, so 10db moved it there${handedOff}. Each lane's next session runs on ${fallback.label} from its latest handoff; work neither committed nor handed off stays behind. 10db asks whether to move back once ${account.label}'s limit resets.`,
+    title: `${project.name} moved to ${fallback.label}: ${account.label} ${standing(report, models)}`,
+    body: `A session on ${account.label} reported that it ${standing(report, models)}. ${project.name} names ${accountDisplayName(fallback)} as its fallback, so 10db moved it there${handedOff}. Each lane's next session runs on ${fallback.label} from its latest handoff; work neither committed nor handed off stays behind. 10db asks whether to move back once ${account.label}'s limit resets.`,
     foldKey: accountFoldKey(account.id, MOVED_CARD),
     detail: detail(account, null, null, null, {
       moves: [{ choice: AccountCardChoice.MoveBack, accountId: account.id }],

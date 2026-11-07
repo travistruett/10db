@@ -16,6 +16,8 @@ export interface FakeShapeTurnResult {
   readonly text?: string;
   /** The share of the context window in use after the turn; 10 when absent. */
   readonly contextPercent?: number;
+  /** The account could not run the session's model: the session ends as refused, after no turn. */
+  readonly refusedModel?: boolean;
 }
 
 /** One turn the fake runs for a message it was sent. */
@@ -210,7 +212,7 @@ export function createFakeShapeSession(
   let number = 0;
   // Read through a function: TypeScript would otherwise keep the narrowing from before the awaits.
   const isEnded = (): boolean => ended;
-  const finish = (reason: 'stopped' | 'error', message: string | null): void => {
+  const finish = (reason: 'stopped' | 'error' | 'model_refused', message: string | null): void => {
     if (ended) return;
     ended = true;
     events.push({ type: 'ended', reason, message });
@@ -258,6 +260,13 @@ export function createFakeShapeSession(
       }
       current = null;
       if (isEnded()) break;
+      if (result.refusedModel === true) {
+        finish(
+          'model_refused',
+          `Claude Code reported that the account cannot run the model ${spec.model}.`,
+        );
+        break;
+      }
       const percent = result.contextPercent ?? DEFAULT_CONTEXT_PERCENT;
       events.push({
         type: 'context',

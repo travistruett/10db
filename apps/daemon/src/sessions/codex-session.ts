@@ -112,6 +112,9 @@ function errorKind(info: unknown): string | null {
 /** The text of a message a session that has started sends; nothing was prompted before then. */
 const unlessStarted = (started: boolean): string => (started ? '' : ` ${NO_PROMPT}`);
 
+/** JSON-RPC's invalid-request code, which Codex answers a request naming a model it cannot run. */
+const INVALID_REQUEST_CODE = -32600;
+
 const modelRefusal = (model: string): string =>
   `Codex refused the model "${model}" on this account.`;
 
@@ -385,11 +388,15 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
       );
   };
 
-  /** A server error that names the requested model: the account cannot run it. */
+  /**
+   * A server error that names the requested model and says it is unknown or does not exist, or is an
+   * invalid request: the account cannot run it. A transient error that merely names it (at capacity) is not.
+   */
   const isModelRefusal = (error: unknown): boolean =>
     error instanceof CodexRpcError &&
     error.code !== CLIENT_ERROR_CODE &&
-    error.message.includes(spec.model);
+    error.message.includes(spec.model) &&
+    (error.code === INVALID_REQUEST_CODE || /does not exist|unknown model/i.test(error.message));
 
   const startThread = async (): Promise<z.infer<typeof ThreadResponse>> => {
     const params = {

@@ -3,7 +3,7 @@ import { DaemonEvent, InboxItemDto, ProjectDto, TaskDto, WorkstreamDto } from '@
 import { listEvidence, listSessions, schema } from '@10db/db';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { startDaemon, type RunningDaemon } from '../src/daemon';
+import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter, type FakeScriptBook } from '../src/sessions';
 import { apiClient, quickFlowId } from './api-client';
 import {
@@ -14,7 +14,7 @@ import {
   waitForAsync,
   type TempDir,
 } from './fixtures';
-import { seedProfiles } from './seed-profiles';
+import { startDaemonWithProfiles } from './daemon-with-profiles';
 
 const write = (path: string) => ({
   do: 'tool' as const,
@@ -105,7 +105,7 @@ let api: ReturnType<typeof apiClient>;
 beforeAll(async () => {
   repo = createTempRepo();
   data = tempDir('acceptance');
-  daemon = await startDaemon({
+  daemon = await startDaemonWithProfiles({
     sandbox: null,
     dataDir: data.path,
     port: 0,
@@ -113,8 +113,6 @@ beforeAll(async () => {
     logLevel: 'warn',
     ...QUIET,
   });
-  // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
-  seedProfiles(daemon.state);
   api = apiClient(daemon.url, daemon.token);
 });
 afterAll(async () => {

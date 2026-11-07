@@ -8,6 +8,7 @@ export {
   type CatalogueProvider,
 } from './source';
 export { deriveTiers, type DerivedTier } from './tiers';
+export { storedModelNames, type NamedModel } from './sync';
 export {
   CATALOGUE_SYNC_INTERVAL_MS,
   createCatalogueSync,
