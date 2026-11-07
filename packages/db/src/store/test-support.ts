@@ -125,10 +125,15 @@ function openMigrated(path: string): TendbDatabase {
       templates.delete(tmpdir());
     }
     if (existsSync(path)) {
-      const copy = openDatabase(path);
-      if (holdsShippedMigrations(copy)) return copy;
+      let copy: TendbDatabase | undefined;
+      try {
+        copy = openDatabase(path);
+        if (holdsShippedMigrations(copy)) return copy;
+      } catch {
+        // Not a database at all, or one cut short: as damaged as one with the wrong migrations.
+      }
       // A damaged template: replace it, never delete it, so no worker finds it missing.
-      copy.$client.close();
+      if (copy?.$client.open) copy.$client.close();
       buildTemplate(template);
       for (const file of [path, `${path}-wal`, `${path}-shm`]) rmSync(file, { force: true });
     }

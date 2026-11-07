@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   readdirSync,
   rmSync,
   statSync,
@@ -78,13 +79,19 @@ describe('createTestStore', () => {
     expect(second.db.$client.name).not.toBe(first.db.$client.name);
   });
 
-  it('replaces a template that holds the wrong migrations, and still migrates the store', () => {
+  it.each([
+    ['empty', () => Buffer.alloc(0)],
+    ['not a database', () => Buffer.from('not a database, only some text that sits here\n')],
+    ['cut short by a crash', (whole: Buffer) => whole.subarray(0, 8192)],
+  ])('replaces a template that is %s, and still migrates the store', (_name, damage) => {
     open();
     const [name = ''] = templates();
-    writeFileSync(join(tmp, TEMPLATES, name), '');
+    const path = join(tmp, TEMPLATES, name);
+    const whole = readFileSync(path);
+    writeFileSync(path, damage(whole));
     expectMigrated(open());
     expectMigrated(open());
-    expect(statSync(join(tmp, TEMPLATES, name)).size).toBeGreaterThan(0);
+    expect(readFileSync(path).length).toBe(whole.length);
   });
 
   it('migrates the store itself when the template is removed during a run, and builds it again', () => {
