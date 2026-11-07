@@ -39,6 +39,10 @@ export interface FakeAppServer {
   writeBytes(bytes: Uint8Array): void;
   /** Whether the client has killed the child. */
   killed(): boolean;
+  /** The signals the client sent the child, in order. */
+  signals(): NodeJS.Signals[];
+  /** Whether the child has exited, by `exit()` or by a signal it does not ignore. */
+  ended(): boolean;
   /** Writes text to stderr. */
   writeStderr(text: string): void;
   exit(code: number | null): void;
@@ -48,12 +52,18 @@ export interface FakeAppServer {
  * Stands in for `codex app-server` at the process boundary. A request is answered from `script`
  * by method name; a method the script lacks is answered with -32601, as the server does.
  */
-export function fakeAppServer(script: Readonly<Record<string, ScriptEntry>>): FakeAppServer {
+export function fakeAppServer(
+  script: Readonly<Record<string, ScriptEntry>>,
+  /** The signal that ends the child, as a real process ends on SIGTERM; with none it ignores every signal. */
+  opts: { readonly exitsOn?: NodeJS.Signals } = {},
+): FakeAppServer {
   const stdin = new PassThrough();
   const stdout = new PassThrough();
   const stderr = new PassThrough();
   const sent: Rpc[] = [];
   let wasKilled = false;
+  let hasEnded = false;
+  const signals: NodeJS.Signals[] = [];
   const exitListeners: ((code: number | null) => void)[] = [];
   const reply = (message: object): void => {
     stdout.write(`${JSON.stringify(message)}\n`);
@@ -89,13 +99,24 @@ export function fakeAppServer(script: Readonly<Record<string, ScriptEntry>>): Fa
     });
   });
 
+  const end = (code: number | null): void => {
+    if (hasEnded) return;
+    hasEnded = true;
+    for (const listener of exitListeners) listener(code);
+  };
   const child: CodexChild = {
     pid: 4242,
     stdin,
     stdout,
     stderr,
-    kill: () => {
+    kill: (signal = 'SIGTERM') => {
       wasKilled = true;
+      signals.push(signal);
+      if (signal === opts.exitsOn || signal === 'SIGKILL') {
+        queueMicrotask(() => {
+          end(null);
+        });
+      }
       return true;
     },
     once: (_event, listener) => {
@@ -121,8 +142,8 @@ export function fakeAppServer(script: Readonly<Record<string, ScriptEntry>>): Fa
     writeStderr: (text) => {
       stderr.write(text);
     },
-    exit: (code) => {
-      for (const listener of exitListeners) listener(code);
-    },
+    exit: end,
+    signals: () => [...signals],
+    ended: () => hasEnded,
   };
 }

@@ -29,6 +29,7 @@ import {
   DB_MIGRATIONS_DIR,
   deleteAppSetting,
   deleteJudgeCallsBefore,
+  lanesByAccount,
   getAccount,
   getAccountRow,
   getAppSetting,
@@ -946,6 +947,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     startGate,
     runtime: accounts,
     pauses: accountPauses,
+    logger: logger.child({ component: 'accounts' }),
+    liveLanes: (id) => lanesByAccount(db).get(id) ?? 0,
     onSaved: () => {
       scheduler?.requestTick();
     },
@@ -1119,6 +1122,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         preparer.prepare(account, projectId);
       },
     },
+    connecting: () => accountService.connecting(),
     clock,
     instanceId,
     logger,
@@ -1522,6 +1526,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         },
       );
       createdScheduler.stop();
+      // A sign-in's agent is a child of ours: it is told to end now, in step with the lanes, and awaited
+      // before the database closes, so a slow stop does not eat the window the lanes need.
+      const loginStopped = accountService.stop().catch((error: unknown) => {
+        logger.warn({ err: error }, 'could not stop the sign-in');
+      });
       unsubscribeShip();
       unsubscribePrWatch();
       await prWatch.stop();
@@ -1554,6 +1563,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       // After the runner too: what its sessions could not stop stays for the next start.
       ledgerSweep?.stop();
       await preparer.idle();
+      await loginStopped;
       state.write((ctx) => {
         setAppSetting(ctx, CLEAN_SHUTDOWN_KEY, { at: ctx.now });
       });

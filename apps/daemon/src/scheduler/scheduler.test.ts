@@ -62,9 +62,12 @@ let wrongBranchAt: string[];
 let missing: { batchId: string; path: string }[];
 /** Whether the Mac is overloaded, as the scheduler's `held` reads it. */
 let held: boolean;
+/** The account whose browser sign-in holds the slot, as the scheduler's `connecting` reads it. */
+let connecting: AccountId | null;
 
 beforeEach(() => {
   held = false;
+  connecting = null;
   clock = new ManualClock(new Date(2026, 9, 20, 12));
   ({ store, close } = createTestStore(() => clock.now()));
   state = createStateStore(store, createEventBus());
@@ -99,6 +102,7 @@ function scheduler(caps = { global: 4 }, awaited: ReadonlySet<WorkstreamId> = ne
     caps,
     awaitedHolders: () => awaited,
     held: () => held,
+    connecting: () => (connecting === null ? null : { accountId: connecting }),
     instanceId: 'daemon-1',
     leaseMs: 60_000,
     tickMs: 2_000,
@@ -197,6 +201,20 @@ describe('scheduler', () => {
     expect(launched).toEqual([]);
     held = false;
     expect(await s.tick()).toBe(2);
+  });
+
+  it('starts nothing on the account whose sign-in is under way, only there, and starts it once the sign-in is over', async () => {
+    const sub = seedAccount(store, { kind: 'anthropic_api_key', label: 'Signing in' });
+    state.write((ctx) => recordAccountSecret(ctx, sub.id, 'sha256:0000000000000000'));
+    const signingIn = queue({ accountId: sub.id });
+    const other = queue();
+    connecting = sub.id;
+    const s = scheduler();
+    expect(await s.tick()).toBe(1);
+    expect(launched.map((l) => l.id)).toEqual([other.workstream.id]);
+    connecting = null;
+    expect(await s.tick()).toBe(1);
+    expect(launched.map((l) => l.id)).toEqual([other.workstream.id, signingIn.workstream.id]);
   });
 
   it('respects the global cap', async () => {

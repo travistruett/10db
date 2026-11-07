@@ -264,6 +264,34 @@ export class AccountProbeError extends Error {
   override readonly name = 'AccountProbeError';
 }
 
+/** An agent could not start a browser sign-in; the message is safe to show the builder. */
+export class AccountLoginError extends Error {
+  override readonly name = 'AccountLoginError';
+}
+
+/** How a browser sign-in ended. The message never holds what the agent printed. */
+export type AccountLoginOutcome =
+  { readonly ok: true } | { readonly ok: false; readonly message: string };
+
+/** How long the builder has to finish a browser sign-in before the agent is stopped. */
+export const LOGIN_MS = 10 * 60_000;
+
+/** A browser sign-in the agent is waiting on. The agent writes the login; 10db only opens the page. */
+export interface AccountLogin {
+  /**
+   * The page the builder signs in on, for an agent that names one for 10db to open; null for one that
+   * opens the browser itself. Never logged.
+   */
+  readonly authUrl: string | null;
+  /** Settles once, when the sign-in ends in any way, and never rejects. */
+  readonly outcome: Promise<AccountLoginOutcome>;
+  /**
+   * Abandons the sign-in and frees the agent. `outcome` then settles as a failure, unless the agent
+   * reported the sign-in finished first: its login is written, so that is a success.
+   */
+  cancel(): Promise<void>;
+}
+
 /** One question to a model: no tool, no settings, no project files. */
 export interface CompletionSpec {
   /** An empty folder of 10db's own: Claude Code starts here and finds nothing to read. */
@@ -290,4 +318,9 @@ export interface SessionAdapter {
   startShape(spec: ShapeSessionSpec): ShapeSessionHandle;
   /** Starts the account's agent with no prompt only to read who it is. */
   probeAccount(probe: AccountProbeSpec): Promise<SeenAccount>;
+  /**
+   * Starts the account's browser sign-in with its own agent; rejects with an `AccountLoginError` when it
+   * cannot start. Only a kind that signs in with a login has one.
+   */
+  startLogin(login: AccountProbeSpec): Promise<AccountLogin>;
 }

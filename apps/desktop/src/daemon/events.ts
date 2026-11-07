@@ -1,10 +1,10 @@
-import { DaemonEvent, EventsHead, type EventType } from '@10db/contracts';
+import { AccountLoginEndedData, DaemonEvent, EventsHead, EventType } from '@10db/contracts';
 import { useQueryClient, type QueryKey } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import { readJson } from './client';
 import type { DaemonConnection } from './connection';
 import { useDaemon } from './provider';
-import { accountKeys } from './account-queries';
+import { accountKeys, accountLoginKey } from './account-queries';
 import { goalKeys } from './goal-queries';
 import { humanTouchKeys } from './human-touch-queries';
 import { NETWORK_HOSTS_KEY } from './network-host-queries';
@@ -122,6 +122,11 @@ export function useEventStream(onEvent?: (event: DaemonEvent) => void): void {
         ...(EVENT_INVALIDATIONS[event.type] ?? []),
       ])
         void queryClient.invalidateQueries({ queryKey });
+      if (event.type === EventType.AccountLoginEnded) {
+        const ended = AccountLoginEndedData.safeParse(event.data);
+        if (ended.success)
+          queryClient.setQueryData(accountLoginKey(ended.data.accountId), ended.data);
+      }
       listener.current?.(event);
     }
 

@@ -28,6 +28,7 @@ export * from './mcp-tools';
 export * from './model-profiles';
 export * from './picker';
 export * from './review-rounds';
+export * from './sign-in-url';
 export { PROTOCOL_VERSION } from './protocol';
 export * from './self-update';
 export * from './run-next';

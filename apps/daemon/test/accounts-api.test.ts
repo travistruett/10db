@@ -6,6 +6,10 @@ import {
   AccountCardDetail,
   AccountCreatedDto,
   AccountDto,
+  AccountConnectDto,
+  AccountConnectingDto,
+  AccountLoginEndedData,
+  EventType,
   AccountIdentityDto,
   AccountPauseDto,
   AccountPauseReason,
@@ -22,12 +26,25 @@ import {
   WorkstreamDto,
   WorkstreamState,
 } from '@10db/contracts';
-import { getAccountRow, insertInboxItem } from '@10db/db';
+import {
+  getAccountRow,
+  insertInboxItem,
+  insertSession,
+  insertTask,
+  patchProject,
+  insertWorkstream,
+  transitionWorkstream,
+} from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { startDaemon, type RunningDaemon } from '../src/daemon';
 import { KeychainError, secretFingerprint, type Keychain } from '../src/environment';
-import { AccountProbeError, FAKE_ACCOUNT_EMAIL, FakeAdapter } from '../src/sessions';
+import {
+  AccountLoginError,
+  AccountProbeError,
+  FAKE_ACCOUNT_EMAIL,
+  FakeAdapter,
+} from '../src/sessions';
 import { apiClient } from './api-client';
 import { createMemoryKeychain, createTempRepo, tempDir, waitForAsync } from './fixtures';
 
@@ -45,7 +62,14 @@ afterEach(async () => {
   data.cleanup();
 });
 
-async function start(opts: { keychain?: Keychain; adapter?: FakeAdapter; tickMs?: number } = {}) {
+async function start(
+  opts: {
+    keychain?: Keychain;
+    adapter?: FakeAdapter;
+    tickMs?: number;
+    loginEnv?: Record<string, string>;
+  } = {},
+) {
   const keychain = opts.keychain ?? createMemoryKeychain();
   const adapter = opts.adapter ?? new FakeAdapter({});
   daemon = await startDaemon({
@@ -56,6 +80,7 @@ async function start(opts: { keychain?: Keychain; adapter?: FakeAdapter; tickMs?
     logLevel: 'debug',
     keychain,
     ...(opts.tickMs === undefined ? {} : { tickMs: opts.tickMs }),
+    ...(opts.loginEnv === undefined ? {} : { loginEnv: opts.loginEnv }),
     ...QUIET,
   });
   return {
@@ -541,5 +566,236 @@ describe('account identity over HTTP', () => {
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(res.status).toBe(500);
+  });
+});
+
+describe('connecting a ChatGPT plan account over HTTP', () => {
+  const codexAccount = (api: Api, label: string) =>
+    api.post('/accounts', AccountCreatedDto, { kind: 'codex_signin', label });
+  const endedEvents = async (api: Api) =>
+    z
+      .array(z.object({ type: z.string(), data: z.unknown() }))
+      .parse(await api.get('/events?after=0&limit=1000', z.unknown()))
+      .filter((event) => event.type === EventType.AccountLoginEnded)
+      .map((event) => AccountLoginEndedData.parse(event.data));
+  const connect = (url: string, token: string, id: string, method: 'POST' | 'DELETE' = 'POST') =>
+    fetch(`${url}/accounts/${id}/connect`, {
+      method,
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+  it('starts the login in the account home, one at a time, and tells the UI when it ends', async () => {
+    const { api, adapter, url, token } = await start();
+    const first = (await codexAccount(api, 'Plan A')).account;
+    const second = (await codexAccount(api, 'Plan B')).account;
+
+    const res = await connect(url, token, first.id);
+    expect(res.status).toBe(200);
+    const started = AccountConnectDto.parse(await res.json());
+    expect(started).toEqual({
+      accountId: first.id,
+      authUrl: 'https://auth.openai.com/oauth/authorize?state=fake',
+    });
+    // The login runs on the account's own home, not the builder's.
+    expect(adapter.logins[0]?.spec.env['CODEX_HOME']).toBe(first.configDir);
+
+    const busy = await connect(url, token, second.id);
+    expect(busy.status).toBe(409);
+    expect(JSON.stringify(await busy.json())).toContain('Plan A');
+    expect(adapter.logins).toHaveLength(1);
+
+    adapter.logins[0]?.end({ ok: true });
+    await waitForAsync(async () => ((await endedEvents(api)).length > 0 ? true : undefined));
+    expect(await endedEvents(api)).toEqual([
+      { accountId: first.id, ok: true, message: 'Signed in.', cancelled: false },
+    ]);
+    // The slot is free again.
+    expect((await connect(url, token, second.id)).status).toBe(200);
+  });
+
+  it('refuses to connect an account while a lane runs on it, and allows it when the lane is over', async () => {
+    const repo = createTempRepo();
+    try {
+      const { api, state, url, token } = await start();
+      const { account } = await codexAccount(api, 'Plan A');
+      const project = await api.post('/projects', ProjectDto, projectBody(repo.path));
+      await api.patch(`/projects/${project.id}`, ProjectDto, { accountId: account.id });
+      // Straight into a lane state in one step, so the scheduler never sees it queued.
+      const lane = state.write((ctx) => {
+        const task = insertTask(ctx, project.id, {
+          title: 'T',
+          acceptanceCriteria: ['x'],
+          areas: ['src'],
+        });
+        const queued = insertWorkstream(ctx, task.id);
+        transitionWorkstream(ctx, queued.id, { to: 'STARTING', fence: null });
+        return queued;
+      });
+      const refused = await connect(url, token, account.id);
+      expect(refused.status).toBe(409);
+      expect(JSON.stringify(await refused.json())).toContain('lane running');
+      state.write((ctx) => transitionWorkstream(ctx, lane.id, { to: 'FAILED', fence: null }));
+      expect((await connect(url, token, account.id)).status).toBe(200);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it('keeps a lane on the account its session runs on after the project moves to another', async () => {
+    const repo = createTempRepo();
+    try {
+      const { api, state, url, token } = await start();
+      const a = (await codexAccount(api, 'Plan A')).account;
+      const b = (await codexAccount(api, 'Plan B')).account;
+      const project = await api.post('/projects', ProjectDto, projectBody(repo.path));
+      await api.patch(`/projects/${project.id}`, ProjectDto, { accountId: a.id });
+      state.write((ctx) => {
+        const task = insertTask(ctx, project.id, {
+          title: 'T',
+          acceptanceCriteria: ['x'],
+          areas: ['src'],
+        });
+        const lane = insertWorkstream(ctx, task.id);
+        transitionWorkstream(ctx, lane.id, { to: 'STARTING', fence: null });
+        insertSession(ctx, {
+          workstreamId: lane.id,
+          provider: 'codex',
+          model: 'm',
+          effort: 'medium',
+          mode: 'managed',
+          mcpTokenHash: 'hash-1',
+          accountId: a.id,
+        });
+        // The project is moved to B while the session keeps running on A.
+        patchProject(ctx, project.id, { accountId: b.id });
+      });
+      expect((await connect(url, token, a.id)).status).toBe(409);
+      expect((await connect(url, token, b.id)).status).toBe(200);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it('reads which account holds the slot, for any window to show and to cancel', async () => {
+    const { api, adapter, url, token } = await start();
+    const { account } = await codexAccount(api, 'Plan A');
+    const slot = () => api.get('/accounts/connecting', AccountConnectingDto.nullable());
+    expect(await slot()).toBeNull();
+    await connect(url, token, account.id);
+    expect(await slot()).toEqual({ accountId: account.id, label: 'Plan A' });
+    adapter.logins[0]?.end({ ok: true });
+    await waitForAsync(async () => ((await slot()) === null ? true : undefined));
+  });
+
+  it('ends a waiting login when the daemon stops, before the database closes', async () => {
+    const { api, adapter, url, token } = await start();
+    const { account } = await codexAccount(api, 'Plan A');
+    await connect(url, token, account.id);
+    await daemon?.stop();
+    expect(adapter.logins[0]?.cancelled).toBe(true);
+  });
+
+  it('does not let a sign-in that is slow to stop hold up stopping the lanes', async () => {
+    const { api, adapter, url, token } = await start();
+    const { account } = await codexAccount(api, 'Plan A');
+    let finishStop: () => void = () => undefined;
+    const real = adapter.startLogin.bind(adapter);
+    adapter.startLogin = async (spec) => {
+      const login = await real(spec);
+      return {
+        ...login,
+        cancel: async () => {
+          await new Promise<void>((resolve) => {
+            finishStop = resolve;
+          });
+          await login.cancel();
+        },
+      };
+    };
+    await connect(url, token, account.id);
+    const running = daemon;
+    if (!running) throw new Error('no daemon');
+    let lanesStopped = false;
+    const stopAll = running.runner.stopAll.bind(running.runner);
+    running.runner.stopAll = async (...args) => {
+      lanesStopped = true;
+      await stopAll(...args);
+    };
+    const stopping = running.stop();
+    // The lanes are stopped while the sign-in is still being stopped.
+    await waitForAsync(() => Promise.resolve(lanesStopped ? true : undefined));
+    finishStop();
+    await stopping;
+  });
+
+  it('cancels a waiting login on DELETE and answers 204 when none is waiting', async () => {
+    const { api, adapter, url, token } = await start();
+    const { account } = await codexAccount(api, 'Plan A');
+    expect((await connect(url, token, account.id, 'DELETE')).status).toBe(204);
+    await connect(url, token, account.id);
+    expect((await connect(url, token, account.id, 'DELETE')).status).toBe(204);
+    expect(adapter.logins[0]?.cancelled).toBe(true);
+    await waitForAsync(async () => ((await endedEvents(api)).length > 0 ? true : undefined));
+    expect(await endedEvents(api)).toEqual([
+      {
+        accountId: account.id,
+        ok: false,
+        message: 'The sign-in was cancelled.',
+        cancelled: true,
+      },
+    ]);
+  });
+
+  it('refuses an account that does not sign in with a login', async () => {
+    const { api, adapter, url, token } = await start();
+    const { account } = await api.post('/accounts', AccountCreatedDto, {
+      kind: 'gateway',
+      label: 'OpenRouter',
+      settings: { baseUrl: 'https://openrouter.ai/api', aliases: ['haiku'] },
+    });
+    expect((await connect(url, token, account.id)).status).toBe(400);
+    expect(adapter.logins).toHaveLength(0);
+  });
+
+  it('connects a Claude subscription with no page to open, in the account directory', async () => {
+    const { api, adapter, url, token } = await start();
+    const { account } = await api.post('/accounts', AccountCreatedDto, {
+      kind: 'claude_subscription',
+      label: 'Company A',
+    });
+    const res = await connect(url, token, account.id);
+    expect(res.status).toBe(200);
+    expect(AccountConnectDto.parse(await res.json())).toEqual({
+      accountId: account.id,
+      authUrl: null,
+    });
+    expect(adapter.logins[0]?.spec.env['CLAUDE_CONFIG_DIR']).toBe(account.configDir);
+    adapter.logins[0]?.end({ ok: true });
+    await waitForAsync(async () => ((await endedEvents(api)).length > 0 ? true : undefined));
+  });
+
+  it('leaves CLAUDE_CONFIG_DIR unset for the default account, as its sign-in command does, even when the login shell exports a relative path', async () => {
+    const { api, adapter, url, token } = await start({
+      loginEnv: { PATH: '/usr/bin', CLAUDE_CONFIG_DIR: 'relative/dir' },
+    });
+    const accounts = await api.get('/accounts', z.array(AccountDto));
+    const base = accounts.find((a) => a.isDefault);
+    if (!base) throw new Error('no default account');
+    expect((await connect(url, token, base.id)).status).toBe(200);
+    expect(adapter.logins[0]?.spec.env).not.toHaveProperty('CLAUDE_CONFIG_DIR');
+    expect(adapter.logins[0]?.spec.env['PATH']).toBe('/usr/bin');
+  });
+
+  it('answers 409 with the reason when the login cannot start, and frees the slot', async () => {
+    const adapter = new FakeAdapter({});
+    const { api, url, token } = await start({ adapter });
+    const { account } = await codexAccount(api, 'Plan A');
+    const real = adapter.startLogin.bind(adapter);
+    adapter.startLogin = () => Promise.reject(new AccountLoginError('port 1455 is in use'));
+    const res = await connect(url, token, account.id);
+    expect(res.status).toBe(409);
+    expect(JSON.stringify(await res.json())).toContain('port 1455');
+    adapter.startLogin = real;
+    expect((await connect(url, token, account.id)).status).toBe(200);
   });
 });

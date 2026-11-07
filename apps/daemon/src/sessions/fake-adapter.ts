@@ -5,6 +5,8 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import {
   AccountKind,
   AccountProblem,
+  Provider,
+  providerOf,
   type AccountId,
   type AccountRefusal,
   type SessionId,
@@ -18,6 +20,8 @@ import { createChannel } from './channel';
 import {
   CompletionError,
   SessionEndReason,
+  type AccountLogin,
+  type AccountLoginOutcome,
   type AccountProbeSpec,
   type CompletionSpec,
   type SessionAdapter,
@@ -167,6 +171,12 @@ export class FakeAdapter implements SessionAdapter {
     apiKeySource: 'none',
   };
   readonly probes: AccountProbeSpec[] = [];
+  /** Every browser sign-in started here, with a way to end it as the agent would. */
+  readonly logins: {
+    readonly spec: AccountProbeSpec;
+    readonly end: (outcome: AccountLoginOutcome) => void;
+    cancelled: boolean;
+  }[] = [];
   /** Every question put to the model by `complete`. */
   readonly completions: CompletionSpec[] = [];
   /** What the model answers; the default has none, so a caller falls back to what it can do without. */
@@ -187,6 +197,28 @@ export class FakeAdapter implements SessionAdapter {
   probeAccount(probe: AccountProbeSpec): Promise<SeenAccount> {
     this.probes.push(probe);
     return Promise.resolve(this.probeSeen);
+  }
+
+  startLogin(spec: AccountProbeSpec): Promise<AccountLogin> {
+    let end: (outcome: AccountLoginOutcome) => void = () => undefined;
+    const outcome = new Promise<AccountLoginOutcome>((resolve) => {
+      end = resolve;
+    });
+    const record = { spec, end, cancelled: false };
+    this.logins.push(record);
+    return Promise.resolve({
+      // Codex names the page to open; Claude Code opens the browser itself.
+      authUrl:
+        providerOf(spec.kind) === Provider.Codex
+          ? 'https://auth.openai.com/oauth/authorize?state=fake'
+          : null,
+      outcome,
+      cancel() {
+        record.cancelled = true;
+        end({ ok: false, message: 'The sign-in was cancelled.' });
+        return Promise.resolve();
+      },
+    });
   }
 
   /** What each Shape session started here ran with, and what it was sent after its first message. */

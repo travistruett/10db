@@ -4,6 +4,8 @@ import type {
   AccountCreatedDto,
   AccountDto,
   AccountId,
+  AccountConnectDto,
+  AccountConnectingDto,
   AccountIdentityDto,
   AccountPatch,
   AccountPauseDto,
@@ -426,6 +428,12 @@ export interface ApiServices {
   accountSignIn(id: AccountId): AccountSignInDto;
   /** Starts Claude Code on the account, with no prompt, to read who it is now. */
   accountIdentity(id: AccountId): Promise<AccountIdentityDto>;
+  /** Starts an account's browser sign-in and answers the page to open, if the agent names one; its end is an `account.login_ended` event. */
+  connectAccount(id: AccountId): Promise<AccountConnectDto>;
+  /** The account whose sign-in holds the daemon's one slot, or null. */
+  connectingAccount(): AccountConnectingDto | null;
+  /** Abandons the account's waiting sign-in; with none waiting it does nothing. */
+  cancelAccountConnect(id: AccountId): Promise<void>;
   /** A month's tokens and dollars, in total and per project; `null` is the current month. */
   accountUsage(id: AccountId, month: string | null): AccountUsageDto;
   /** The accounts paused now, with why, since when and until when. */

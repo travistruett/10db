@@ -3,6 +3,7 @@ import type { Logger } from '../log';
 import type { SeenAccount } from './account-check';
 import { createChannel } from './channel';
 import { CODEX_CLIENT_INFO, readSeenAccount } from './codex-account-read';
+import { startCodexLogin } from './codex-connect';
 import { codexHomes } from './codex-home';
 import { InitializeResponse } from './codex-protocol';
 import {
@@ -100,6 +101,7 @@ export function createCodexAdapter(opts: CodexAdapterOptions): SessionAdapter {
   const homes = codexHomes();
   return {
     probeAccount: (probe) => probeAccount(probe, opts),
+    startLogin: (login) => startCodexLogin(login, opts),
     complete: () => Promise.reject(new CompletionError(NO_QUESTIONS)),
     start: (spec) => startCodexSession(spec, { ...opts, homes }),
     startShape(): ShapeSessionHandle {

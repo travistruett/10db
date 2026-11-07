@@ -5,10 +5,14 @@ import {
   AccountPauseReason,
   AccountProblem,
   AccountSecretInput,
+  EventType,
   signsInWithLogin,
   ConflictError,
   InvalidError,
   type AccountConfig,
+  type AccountConnectDto,
+  type AccountConnectingDto,
+  type AccountLoginEndedData,
   type AccountCreatedDto,
   type AccountDto,
   type AccountId,
@@ -38,10 +42,13 @@ import {
   type Launcher,
 } from '../environment';
 import type { StateStore } from '../events';
+import type { Logger } from '../log';
 import {
+  AccountLoginError,
   AccountProbeError,
   checkAccount,
   loginIdentity,
+  type AccountLogin,
   type SeenAccount,
   type SessionAdapter,
 } from '../sessions';
@@ -59,6 +66,26 @@ export interface AccountService {
   setSecret(id: AccountId, input: AccountSecretInput): AccountDto;
   signIn(id: AccountId): AccountSignInDto;
   identity(id: AccountId): Promise<AccountIdentityDto>;
+  /**
+   * Starts the browser sign-in of an account that signs in with a login (a Claude subscription or a
+   * ChatGPT plan) in the account's own directory, and answers the page to open when the agent names one.
+   * One sign-in runs at a time across all accounts, because Codex listens for its callback on a fixed
+   * local port; its end arrives as an `account.login_ended` event. The agent writes the login; 10db never
+   * reads it.
+   */
+  connect(id: AccountId): Promise<AccountConnectDto>;
+  /**
+   * Abandons the account's sign-in if one is waiting, or starting; nothing waiting is not an error. A
+   * sign-in still starting is cancelled the moment it has started.
+   */
+  cancelConnect(id: AccountId): Promise<void>;
+  /** The account whose sign-in holds the one slot, or null. */
+  connecting(): AccountConnectingDto | null;
+  /**
+   * Ends a sign-in under way and waits until its process is gone and the end is recorded, then refuses
+   * new ones. Called before the database closes.
+   */
+  stop(): Promise<void>;
   usage(id: AccountId, month: string | null): AccountUsageDto;
   /** Every account paused now, with why, since when and until when. */
   pauses(): AccountPauseDto[];
@@ -88,13 +115,36 @@ const nothingSeen = (id: AccountId): Omit<AccountIdentityDto, 'refusal'> => ({
   models: [],
 });
 
+/** What a sign-in that the daemon's stopping cut short tells the builder. */
+const STOPPED_MESSAGE = '10db stopped before the sign-in finished. Try Connect again.';
+
+/** The one browser sign-in the daemon runs, from the moment it is reserved until its end is recorded. */
+interface ConnectSlot {
+  readonly accountId: AccountId;
+  readonly label: string;
+  /** Set once the agent has started the sign-in. */
+  login: AccountLogin | null;
+  /** Who asked to end it, possibly before `login` was set: the builder, or the daemon stopping. */
+  endedBy: 'builder' | 'shutdown' | null;
+  /** Settles when the sign-in is over, its process gone and its end recorded. */
+  readonly over: Promise<void>;
+  finish(): void;
+}
+
 export function createAccountService(deps: {
   readonly state: StateStore;
   readonly clock: Clock;
   readonly dataDir: string;
   readonly keychain: Keychain;
   readonly launcher: Pick<Launcher, 'probe'>;
-  readonly adapter: Pick<SessionAdapter, 'probeAccount'>;
+  readonly adapter: Pick<SessionAdapter, 'probeAccount' | 'startLogin'>;
+  readonly logger: Pick<Logger, 'warn'>;
+  /**
+   * How many lanes run on the account now. A sign-in replaces the login they use, so none may. Plan
+   * conversations and identity probes are not counted: the builder is present for the first, and the
+   * second is read again at the next start.
+   */
+  liveLanes(id: AccountId): number;
   readonly startGate: StartGate;
   readonly runtime: Pick<AccountRuntime, 'saved'>;
   readonly pauses: Pick<AccountPauses, 'pausedFor' | 'resume'>;
@@ -111,6 +161,10 @@ export function createAccountService(deps: {
     signsInWithLogin(account.kind)
       ? { accountId: account.id, configDir: account.configDir, command: signInCommandFor(account) }
       : null;
+
+  /** The one sign-in in progress, or being started, across all accounts. */
+  let connecting: ConnectSlot | null = null;
+  let stopping = false;
 
   const pauses = (): AccountPauseDto[] =>
     listAccounts(db, { includeArchived: true }).flatMap((account) => {
@@ -258,6 +312,112 @@ export function createAccountService(deps: {
         models: [...(seen.models ?? [])],
         refusal: checkAccount(launch.expect, seen) ?? unconfirmed,
       };
+    },
+    async connect(id) {
+      const row = getAccountRow(db, id);
+      if (!signsInWithLogin(row.kind))
+        throw new InvalidError(`Account "${row.label}" does not sign in with a login`);
+      if (row.archived) throw new ConflictError(`Account "${row.label}" is archived`);
+      if (stopping) throw new ConflictError('10db is stopping');
+      if (connecting !== null)
+        throw new ConflictError(
+          `Account "${connecting.label}" is already connecting; finish or cancel that sign-in first`,
+        );
+      // A sign-in replaces the login that sessions on the account run on.
+      if (deps.liveLanes(id) > 0)
+        throw new ConflictError(
+          `Account "${row.label}" has a lane running; wait for it to end before connecting`,
+        );
+      let launch;
+      try {
+        launch = deps.launcher.probe(row);
+      } catch (error) {
+        if (error instanceof KeychainError || error instanceof AccountLaunchError)
+          throw new ConflictError(error.message);
+        throw error;
+      }
+      let finish: () => void = () => undefined;
+      const over = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+      const slot: ConnectSlot = {
+        accountId: id,
+        label: row.label,
+        login: null,
+        endedBy: null,
+        over,
+        finish,
+      };
+      connecting = slot;
+      let login: AccountLogin;
+      try {
+        login = await deps.adapter.startLogin({
+          kind: row.kind,
+          cwd: deps.dataDir,
+          env: launch.env,
+        });
+      } catch (error) {
+        connecting = null;
+        slot.finish();
+        if (error instanceof AccountLoginError) throw new ConflictError(error.message);
+        throw error;
+      }
+      slot.login = login;
+      void login.outcome.then((outcome) => {
+        const data: AccountLoginEndedData = {
+          accountId: id,
+          ok: outcome.ok,
+          message: outcome.ok
+            ? 'Signed in.'
+            : slot.endedBy === 'shutdown'
+              ? STOPPED_MESSAGE
+              : outcome.message,
+          cancelled: slot.endedBy === 'builder',
+        };
+        try {
+          deps.state.write((ctx) => {
+            ctx.emit({
+              type: EventType.AccountLoginEnded,
+              entityType: 'account',
+              entityId: id,
+              data,
+            });
+          });
+        } catch (error) {
+          // The error's text can hold what was being written, so only its kind is kept.
+          deps.logger.warn(
+            { accountId: id, error: error instanceof Error ? error.name : 'unknown' },
+            'could not record the end of a sign-in',
+          );
+        }
+        if (connecting === slot) connecting = null;
+        slot.finish();
+        // Work held back while the sign-in ran can start.
+        deps.onSaved();
+      });
+      // A cancel that came while the agent was starting: end it now, and hand back no page to open.
+      if (slot.endedBy !== null) {
+        await login.cancel();
+        return { accountId: id, authUrl: null };
+      }
+      return { accountId: id, authUrl: login.authUrl };
+    },
+    async cancelConnect(id) {
+      const slot = connecting;
+      if (slot?.accountId !== id) return;
+      slot.endedBy ??= 'builder';
+      await slot.login?.cancel();
+    },
+    connecting: () =>
+      connecting === null ? null : { accountId: connecting.accountId, label: connecting.label },
+    async stop() {
+      stopping = true;
+      const slot = connecting;
+      if (slot === null) return;
+      slot.endedBy ??= 'shutdown';
+      // A sign-in still starting is cancelled by `connect` the moment it has started.
+      await slot.login?.cancel();
+      await slot.over;
     },
     usage(id, month) {
       getAccountRow(db, id);

@@ -772,6 +772,14 @@ export function createApp(deps: ApiDeps) {
     .get('/accounts/:accountId/identity', async (c) =>
       c.json(await deps.services.accountIdentity(AccountId.parse(c.req.param('accountId')))),
     )
+    .get('/accounts/connecting', (c) => c.json(deps.services.connectingAccount()))
+    .post('/accounts/:accountId/connect', async (c) =>
+      c.json(await deps.services.connectAccount(AccountId.parse(c.req.param('accountId')))),
+    )
+    .delete('/accounts/:accountId/connect', async (c) => {
+      await deps.services.cancelAccountConnect(AccountId.parse(c.req.param('accountId')));
+      return c.body(null, 204);
+    })
     .get(
       '/accounts/:accountId/usage',
       validator('query', (query) => z.object({ month: Month.optional() }).parse(query)),

@@ -22,10 +22,25 @@ export function isTauri(): boolean {
 
 /**
  * Opens a web page in the default browser, for the desktop app, whose webview follows no
- * `target="_blank"` link. The capability allows only `https://github.com/*`.
+ * `target="_blank"` link. The capability allows only `https://github.com/*`, besides the sign-in page `openSignInPage` opens.
  */
 export function openInBrowser(url: string): Promise<void> {
   return openUrl(url);
+}
+
+/**
+ * Opens the page an agent names for a browser sign-in. The capability allows only
+ * `https://auth.openai.com/*` besides GitHub; a plain browser opens a tab.
+ */
+export function openSignInPage(url: string): Promise<void> {
+  if (isTauri()) return openUrl(url);
+  // A blocked pop-up answers null; `noopener` would answer null for a page that did open, so the
+  // opened window is cut off from the app by hand. `noreferrer` would also answer null, so this path
+  // (a plain browser: development and tests) sends a Referer rather than give up pop-up detection.
+  const opened = window.open(url, '_blank');
+  if (opened === null) return Promise.reject(new Error('the browser blocked the sign-in page'));
+  opened.opener = null;
+  return Promise.resolve();
 }
 
 /** Mirrors lanes, open cards and keep-awake into the menu bar. A no-op in a browser. */

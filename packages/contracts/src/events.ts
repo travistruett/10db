@@ -5,6 +5,8 @@ export const EventType = {
   AccountCapReached: 'account.cap_reached',
   AccountPaused: 'account.paused',
   AccountResumed: 'account.resumed',
+  /** An account's browser sign-in ended: it finished, failed, was cancelled or timed out. */
+  AccountLoginEnded: 'account.login_ended',
   ProjectCreated: 'project.created',
   TaskCreated: 'task.created',
   TaskChanged: 'task.changed',

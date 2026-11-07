@@ -279,11 +279,12 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await addAccount.getByRole('button', { name: 'Create' }).click();
   await expect(addAccount).toBeHidden();
   const drawer = page.getByRole('dialog', { name: 'Company A' });
+  await drawer.getByRole('button', { name: 'Sign in from Terminal instead' }).click();
   await expect(drawer.getByText(/CLAUDE_CONFIG_DIR=.* claude \/login/)).toBeVisible();
   await drawer.getByRole('button', { name: 'Check sign-in' }).click();
-  await drawer.getByRole('button', { name: 'Confirm builder@example.com' }).click();
+  await drawer.getByRole('button', { name: 'Confirm' }).click();
   await expect(drawer).toHaveAccessibleName('Company A · builder@example.com');
-  await expect(drawer.getByRole('button', { name: 'Confirm builder@example.com' })).toBeHidden();
+  await expect(drawer.getByRole('button', { name: 'Confirm' })).toBeHidden();
   await expectAccessible(page, 'settings, accounts drawer, dark');
   await drawer.getByRole('button', { name: 'Close' }).click();
   await expect(drawer).toBeHidden();

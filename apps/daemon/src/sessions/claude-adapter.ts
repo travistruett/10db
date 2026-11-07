@@ -27,6 +27,7 @@ import {
   type SeenAccount,
 } from './account-check';
 import { createChannel } from './channel';
+import { startClaudeLogin, type LoginSpawn } from './claude-connect';
 import {
   mapSdkMessage,
   toHookOutput,
@@ -90,6 +91,8 @@ export interface ClaudeAdapterOptions {
   /** The injected harness plugin directory. */
   readonly pluginDir: string;
   readonly logger: Logger;
+  /** Starts `claude auth login`; tests stand in for the process. */
+  readonly spawnLogin?: LoginSpawn;
   /** The SDK's query(); tests pass a scripted one. */
   readonly query?: QueryFn;
   /** How long stop() waits for interrupt, then for exit after abort. */
@@ -1102,6 +1105,13 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): SessionAdapter 
         ...(opts.clock === undefined ? {} : { clock: opts.clock }),
       }),
     probeAccount: (probe) => probeAccount(probe, opts, runQuery),
+    startLogin: (login) =>
+      startClaudeLogin(login, {
+        claudePath: opts.claudePath,
+        logger: opts.logger,
+        ...(opts.spawnLogin === undefined ? {} : { spawn: opts.spawnLogin }),
+        ...(opts.clock === undefined ? {} : { clock: opts.clock }),
+      }),
     complete: (ask) => complete(ask, opts, runQuery),
   };
 }
