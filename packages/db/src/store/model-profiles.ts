@@ -6,6 +6,8 @@ import {
   NotFoundError,
   ProfileSource,
   type Effort,
+  type ModelStatus,
+  type ModelTier,
   type ModelProfileDto,
   type ModelProfileId,
   type ProfileScores,
@@ -22,6 +24,19 @@ export interface NewModelProfile {
   readonly aaSlug: string | null;
   readonly enabled: boolean;
 }
+
+/** What a catalogue says about a model; any of it may be unknown. */
+export interface ProfileCatalogueFields {
+  readonly maker: string | null;
+  readonly family: string | null;
+  readonly tier: ModelTier | null;
+  readonly status: ModelStatus | null;
+  readonly inputPrice: number | null;
+  readonly outputPrice: number | null;
+  readonly releaseDate: string | null;
+}
+
+export type CataloguedModelProfile = NewModelProfile & ProfileCatalogueFields;
 
 export interface AaMeasurement {
   readonly scores: ProfileScores;
@@ -43,6 +58,13 @@ export function insertModelProfile(ctx: WriteContext, input: NewModelProfile): M
   const row: Row = {
     id: mintId('ModelProfile'),
     ...input,
+    maker: null,
+    family: null,
+    tier: null,
+    status: null,
+    inputPrice: null,
+    outputPrice: null,
+    releaseDate: null,
     intelligence: null,
     coding: null,
     agentic: null,
@@ -153,6 +175,63 @@ export function recordProfileOutcome(
       stepsRun: sql`${schema.modelProfiles.stepsRun} + 1`,
       firstPassSteps: sql`${schema.modelProfiles.firstPassSteps} + ${outcome.firstPass ? 1 : 0}`,
       escalations: sql`${schema.modelProfiles.escalations} + ${outcome.escalated ? 1 : 0}`,
+      updatedAt: ctx.now,
+    })
+    .where(eq(schema.modelProfiles.id, id))
+    .run();
+}
+
+const CATALOGUE_FIELDS = [
+  'maker',
+  'family',
+  'tier',
+  'status',
+  'inputPrice',
+  'outputPrice',
+  'releaseDate',
+] as const satisfies readonly (keyof ProfileCatalogueFields)[];
+
+/**
+ * Writes what the catalogue says about each profile, creating a profile the table lacks. A profile
+ * that exists keeps its scores, `enabled` flag and AA slug; only a row whose catalogue fields change
+ * is written, and each such row appends an event.
+ */
+export function upsertModelProfiles(
+  ctx: WriteContext,
+  rows: readonly CataloguedModelProfile[],
+): void {
+  for (const input of rows) {
+    const existing = findModelProfile(ctx.tx, input.provider, input.model, input.effort);
+    if (!existing) {
+      const created = insertModelProfile(ctx, input);
+      writeCatalogueFields(ctx, created.id, input);
+      continue;
+    }
+    if (CATALOGUE_FIELDS.every((field) => existing[field] === input[field])) continue;
+    writeCatalogueFields(ctx, existing.id, input);
+    ctx.emit({
+      type: EventType.ModelProfileSaved,
+      entityType: 'model_profile',
+      entityId: existing.id,
+    });
+  }
+}
+
+function writeCatalogueFields(
+  ctx: WriteContext,
+  id: ModelProfileId,
+  fields: ProfileCatalogueFields,
+): void {
+  ctx.tx
+    .update(schema.modelProfiles)
+    .set({
+      maker: fields.maker,
+      family: fields.family,
+      tier: fields.tier,
+      status: fields.status,
+      inputPrice: fields.inputPrice,
+      outputPrice: fields.outputPrice,
+      releaseDate: fields.releaseDate,
       updatedAt: ctx.now,
     })
     .where(eq(schema.modelProfiles.id, id))

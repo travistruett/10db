@@ -3,6 +3,17 @@ import { SEED_PROFILES } from './catalogue';
 
 const NOW = '2026-10-17T12:00:00.000Z';
 
+/** What a profile carries before any catalogue describes it. */
+const UNDESCRIBED = {
+  maker: null,
+  family: null,
+  tier: null,
+  status: null,
+  inputPrice: null,
+  outputPrice: null,
+  releaseDate: null,
+} as const;
+
 /** An invented frontier: three model sizes at two efforts, scored and priced to make the tables readable. */
 const ROWS = [
   ['small', 'low', 20, 18, 15, 0.05, 200],
@@ -29,6 +40,7 @@ export function testCatalogue(
     indexVersion: 'test',
     measuredAt: NOW,
     enabled: true,
+    ...UNDESCRIBED,
     stepsRun: 0,
     firstPassSteps: 0,
     escalations: 0,
@@ -53,6 +65,7 @@ export function seedCatalogue(
     source: 'aa',
     indexVersion: null,
     measuredAt: null,
+    ...UNDESCRIBED,
     stepsRun: 0,
     firstPassSteps: 0,
     escalations: 0,

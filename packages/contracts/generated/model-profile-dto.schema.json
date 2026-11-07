@@ -134,6 +134,93 @@
     "enabled": {
       "type": "boolean"
     },
+    "maker": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "family": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "tier": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "fast",
+            "balanced",
+            "strongest"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "status": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "current",
+            "superseded",
+            "retired",
+            "unknown",
+            "not_runnable"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "inputPrice": {
+      "anyOf": [
+        {
+          "type": "number",
+          "minimum": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "outputPrice": {
+      "anyOf": [
+        {
+          "type": "number",
+          "minimum": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "releaseDate": {
+      "anyOf": [
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
     "stepsRun": {
       "type": "integer",
       "minimum": 0,
@@ -173,6 +260,13 @@
     "indexVersion",
     "measuredAt",
     "enabled",
+    "maker",
+    "family",
+    "tier",
+    "status",
+    "inputPrice",
+    "outputPrice",
+    "releaseDate",
     "stepsRun",
     "firstPassSteps",
     "escalations",

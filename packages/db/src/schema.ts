@@ -44,6 +44,11 @@ import type {
   JudgeOutcome,
   McpVerdict,
   ModelPin,
+  ModelSetting,
+  ModelStatus,
+  ModelTier,
+  PatternId,
+  PatternMatch,
   ModelProfileId,
   NextAction,
   Notice,
@@ -959,6 +964,13 @@ export const modelProfiles = sqliteTable(
     indexVersion: text('index_version'),
     measuredAt: text('measured_at'),
     enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    maker: text('maker'),
+    family: text('family'),
+    tier: text('tier').$type<ModelTier>(),
+    status: text('status').$type<ModelStatus>(),
+    inputPrice: real('input_price'),
+    outputPrice: real('output_price'),
+    releaseDate: text('release_date'),
     stepsRun: integer('steps_run').notNull().default(0),
     firstPassSteps: integer('first_pass_steps').notNull().default(0),
     escalations: integer('escalations').notNull().default(0),
@@ -966,6 +978,65 @@ export const modelProfiles = sqliteTable(
     updatedAt: updatedAt(),
   },
   (t) => [uniqueIndex('model_profiles_key_idx').on(t.provider, t.model, t.effort)],
+);
+
+/** The models one account can run, as it reports them. Each refresh replaces the account's rows, so a model it stops listing disappears. */
+export const accountModels = sqliteTable(
+  'account_models',
+  {
+    accountId: text('account_id')
+      .$type<AccountId>()
+      .notNull()
+      .references(() => accounts.id),
+    model: text('model').notNull(),
+    family: text('family'),
+    launchId: text('launch_id').notNull(),
+    efforts: text('efforts', { mode: 'json' }).$type<Effort[]>().notNull(),
+    unusable: integer('unusable', { mode: 'boolean' }).notNull().default(false),
+    inputPrice: real('input_price'),
+    outputPrice: real('output_price'),
+    lastSeenAt: text('last_seen_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.accountId, t.model] })],
+);
+
+/** The model setting for a role: one row per role and project, and one per role with no project. */
+export const roleSettings = sqliteTable(
+  'role_settings',
+  {
+    role: text('role').$type<StepRole>().notNull(),
+    projectId: text('project_id')
+      .$type<ProjectId>()
+      .references(() => projects.id),
+    setting: text('setting', { mode: 'json' }).$type<ModelSetting>().notNull(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex('role_settings_project_idx')
+      .on(t.role, t.projectId)
+      .where(sql`${t.projectId} is not null`),
+    uniqueIndex('role_settings_global_idx')
+      .on(t.role)
+      .where(sql`${t.projectId} is null`),
+  ],
+);
+
+/** A rule that gives matching steps a model setting; the lowest position within its scope that matches wins. */
+export const patterns = sqliteTable(
+  'patterns',
+  {
+    id: text('id').$type<PatternId>().primaryKey(),
+    projectId: text('project_id')
+      .$type<ProjectId>()
+      .references(() => projects.id),
+    name: text('name').notNull(),
+    match: text('match', { mode: 'json' }).$type<PatternMatch>().notNull(),
+    setting: text('setting', { mode: 'json' }).$type<ModelSetting>().notNull(),
+    position: integer('position').notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index('patterns_scope_idx').on(t.projectId, t.position)],
 );
 
 /** Artificial Analysis's free model list, kept only on this machine (AA's terms forbid sharing it); keyed by AA's slug. */
