@@ -135,6 +135,11 @@ describe('ModelRowDto', () => {
     expect(ModelRowDto.parse(row)).toEqual(row);
   });
 
+  it('accepts a model with no first-seen time: it has no profile to date it by', () => {
+    const row = ModelRowDto.shape.firstSeenAt.safeParse(null);
+    expect(row.success).toBe(true);
+  });
+
   it('rejects a status outside the five', () => {
     expect(ModelRowDto.shape.status.safeParse('deprecated').success).toBe(false);
   });
@@ -148,12 +153,28 @@ describe('CatalogueStatusDto', () => {
     { source: 'none', ok: true },
     { source: 'cache', ok: false },
   ])('source $source: parses $ok', ({ source, ok }) => {
-    const dto = { fetchedAt: '2026-11-06T12:00:00.000Z', source, models: 12 };
+    const dto = {
+      fetchedAt: '2026-11-06T12:00:00.000Z',
+      source,
+      models: 12,
+      lastAttempt: 'succeeded',
+    };
+    expect(CatalogueStatusDto.safeParse(dto).success).toBe(ok);
+  });
+
+  it.each([
+    { lastAttempt: 'not_tried', ok: true },
+    { lastAttempt: 'succeeded', ok: true },
+    { lastAttempt: 'failed', ok: true },
+    { lastAttempt: 'off', ok: true },
+    { lastAttempt: 'running', ok: false },
+  ])('last attempt $lastAttempt: parses $ok', ({ lastAttempt, ok }) => {
+    const dto = { fetchedAt: null, source: 'none', models: 0, lastAttempt };
     expect(CatalogueStatusDto.safeParse(dto).success).toBe(ok);
   });
 
   it('describes a daemon with no catalogue', () => {
-    const dto = { fetchedAt: null, source: 'none', models: 0 };
+    const dto = { fetchedAt: null, source: 'none', models: 0, lastAttempt: 'failed' };
     expect(CatalogueStatusDto.parse(dto)).toEqual(dto);
   });
 });

@@ -182,14 +182,52 @@ describe('the Models page', () => {
     expect(credit.getAttribute('href')).toBe('https://artificialanalysis.ai/');
   });
 
+  it.each([
+    {
+      name: 'a failed last attempt names the copy in use',
+      status: { fetchedAt: '2026-11-07T09:00:00.000Z', lastAttempt: 'failed' as const },
+      text: /Could not reach models\.dev; showing the copy from 3 hours ago/,
+    },
+    {
+      name: 'a failed attempt with nothing to show',
+      status: {
+        source: 'none' as const,
+        fetchedAt: null,
+        models: 0,
+        lastAttempt: 'failed' as const,
+      },
+      text: /Could not reach models\.dev, and there is no catalogue yet/,
+    },
+    {
+      name: 'a fetch turned off',
+      status: { lastAttempt: 'off' as const },
+      text: /catalogue fetch is off/,
+    },
+  ])('$name', async ({ status, text }) => {
+    serve({ status: catalogueStatusDto(status) });
+    renderWithDaemon(<ModelsSection />);
+    expect(await screen.findByText(text)).toBeTruthy();
+  });
+
+  it('says so when the catalogue status cannot be read, rather than waiting on it', async () => {
+    serve();
+    server.use(
+      http.get(daemonUrl('/models/status'), () =>
+        HttpResponse.json({ error: 'boom' }, { status: 500 }),
+      ),
+    );
+    renderWithDaemon(<ModelsSection />);
+    expect(await screen.findByText(/catalogue status could not be read/i)).toBeTruthy();
+  });
+
   it('says there is no catalogue yet', async () => {
     serve({ status: catalogueStatusDto({ source: 'none', fetchedAt: null, models: 0 }), rows: [] });
     renderWithDaemon(<ModelsSection />);
     expect(await screen.findByText(/No catalogue yet/)).toBeTruthy();
   });
 
-  it('refreshes the catalogue on demand, shows that it is running, and shows the new status', async () => {
-    serve();
+  it('refreshes the catalogue on demand, shows it is running, then shows the new age', async () => {
+    serve({ status: catalogueStatusDto({ fetchedAt: '2026-11-07T09:00:00.000Z' }) });
     let release: () => void = () => undefined;
     const gate = new Promise<void>((resolve) => {
       release = resolve;
@@ -199,23 +237,60 @@ describe('the Models page', () => {
       http.post(daemonUrl('/models/refresh'), async () => {
         posts += 1;
         await gate;
-        return HttpResponse.json(catalogueStatusDto({ fetchedAt: '2026-11-07T11:59:00.000Z' }));
+        // The daemon has the newer copy by the time it answers.
+        server.use(
+          http.get(daemonUrl('/models/status'), () =>
+            HttpResponse.json(catalogueStatusDto({ fetchedAt: '2026-11-07T11:58:00.000Z' })),
+          ),
+        );
+        return HttpResponse.json(catalogueStatusDto({ fetchedAt: '2026-11-07T11:58:00.000Z' }));
       }),
+    );
+    renderWithDaemon(<ModelsSection />);
+    expect(await screen.findByText(/fetched 3 hours ago/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh Models' }));
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: 'Refresh Models' }).hasAttribute('data-loading'),
+      ).toBe(true);
+    });
+    release();
+    expect(await screen.findByText(/fetched 2 minutes ago/)).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: 'Refresh Models' }).hasAttribute('data-loading'),
+    ).toBe(false);
+    expect(posts).toBe(1);
+  });
+
+  it('shows the daemon’s refusal when a refresh fails', async () => {
+    serve();
+    server.use(
+      http.post(daemonUrl('/models/refresh'), () =>
+        HttpResponse.json({ error: 'internal', message: 'The refresh broke' }, { status: 500 }),
+      ),
     );
     renderWithDaemon(<ModelsSection />);
     await screen.findByRole('button', { name: 'Open Alpha Max' });
     fireEvent.click(screen.getByRole('button', { name: 'Refresh Models' }));
-    const running = await screen.findByRole('button', { name: /Refresh Models/ });
-    await waitFor(() => {
-      expect(running.hasAttribute('data-loading')).toBe(true);
+    expect((await screen.findByRole('alert')).textContent).toContain('The refresh broke');
+  });
+
+  it('marks nothing New and gives no first-seen time for a model with no profile to date it', async () => {
+    const dateless = modelRowDto({
+      model: 'delta-held',
+      name: 'Delta Held',
+      tier: null,
+      status: 'not_runnable',
+      firstSeenAt: null,
     });
-    release();
-    await waitFor(() => {
-      expect(
-        screen.getByRole('button', { name: 'Refresh Models' }).hasAttribute('data-loading'),
-      ).toBe(false);
-    });
-    expect(posts).toBe(1);
+    serve({ rows: [dateless] });
+    renderWithDaemon(<ModelsSection />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Open Delta Held' }));
+    const drawer = await screen.findByRole('dialog', { name: 'Delta Held' });
+    expect(within(rowOf('Delta Held')).queryByText('New')).toBeNull();
+    expect(within(drawer).queryByText(/first seen/)).toBeNull();
+    // The status reads as a label, not as the raw value.
+    expect(within(drawer).getByText('Not runnable')).toBeTruthy();
   });
 
   it('opens a drawer from a row with the accounts that offer it, each with its launch ID and own price', async () => {
@@ -255,6 +330,9 @@ describe('the Models page', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Open Alpha Max' }));
     const drawer = await screen.findByRole('dialog', { name: 'Alpha Max' });
     expect(await within(drawer).findByText('launch.alpha-max-v1')).toBeTruthy();
+    // How old each account's list is.
+    expect(within(drawer).getByRole('columnheader', { name: 'Read' })).toBeTruthy();
+    expect(within(drawer).getAllByText('a month ago').length).toBe(2);
     // A flat-rate plan is included, never $0; an account that pays per token shows its own price.
     expect(within(drawer).getByText('Included in plan')).toBeTruthy();
     expect(within(drawer).getByText('$5.50 in · $27.00 out')).toBeTruthy();

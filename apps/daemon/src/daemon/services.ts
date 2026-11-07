@@ -2,6 +2,8 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   ACTIVE_STATES,
+  CatalogueAttempt,
+  type CatalogueStatusDto,
   type BatchId,
   Delivery,
   InvalidError,
@@ -123,6 +125,8 @@ export function createServices(deps: {
   readonly catalogue: Pick<CatalogueSync, 'status' | 'catalogue'>;
   /** Fetches the catalogue and reads every account's list; a call during a run joins it. */
   readonly refreshModels: (opts: { readonly force: boolean }) => Promise<void>;
+  /** Whether this daemon fetches the catalogue at all; off, the status says so. */
+  readonly catalogueOn: boolean;
   readonly judge: JudgeApiServices;
   readonly shape: ShapeApiServices;
   readonly knowledge: KnowledgeApiServices;
@@ -145,6 +149,10 @@ export function createServices(deps: {
 }): ApiServices & TaskRemovalServices & TaskLookupServices {
   const db = deps.state.db;
   const restarts = createFailedRestarts(deps);
+  const catalogueStatus = (): CatalogueStatusDto => ({
+    ...deps.catalogue.status(),
+    ...(deps.catalogueOn ? {} : { lastAttempt: CatalogueAttempt.Off }),
+  });
   // The tool check and gh's login are probed on the first request and on a recheck, never otherwise.
   let lastCheck: Promise<SystemCheckDto> | null = null;
 
@@ -383,11 +391,11 @@ export function createServices(deps: {
         catalogue: deps.catalogue.catalogue(),
       }),
     listAccountOffers: () => listAccountModels(db),
-    catalogueStatus: () => deps.catalogue.status(),
+    catalogueStatus,
     // The builder asked, so every account is read whatever the day's earlier reads were.
     refreshModels: async () => {
       await deps.refreshModels({ force: true });
-      return deps.catalogue.status();
+      return catalogueStatus();
     },
     async patchProject(id, patch) {
       await refuseMissingDefaultBranch(getProject(db, id), patch);

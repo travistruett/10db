@@ -41,16 +41,11 @@ function strongestScored(profiles: readonly ModelProfileDto[]): ModelProfileDto 
 }
 
 /**
- * When 10db first saw the model: its earliest profile. A model with no profile (one its runtime cannot run) has
- * only the accounts' last reads to go by.
+ * When 10db first saw the model: its earliest profile. A model with no profile (one its runtime cannot run, or
+ * one only an account's list names) has nothing to date it by: an account's last read moves on every refresh.
  */
-function firstSeen(
-  profiles: readonly ModelProfileDto[],
-  offers: readonly AccountModelDto[],
-): string {
-  const times =
-    profiles.length > 0 ? profiles.map((p) => p.createdAt) : offers.map((o) => o.lastSeenAt);
-  return [...times].sort()[0] ?? new Date(0).toISOString();
+function firstSeen(profiles: readonly ModelProfileDto[]): string | null {
+  return profiles.map((p) => p.createdAt).sort()[0] ?? null;
 }
 
 /**
@@ -68,11 +63,6 @@ export function buildModelRows(input: ModelRowsInput): ModelRowDto[] {
   const offers = input.offers.filter((o) => live.has(o.accountId));
   const listing = new Set(offers.map((o) => o.accountId));
   const withoutList = [...live.values()].filter((a) => !listing.has(a.id));
-  // An account's list is real once it holds a model; the providers of those accounts have lists to compare against.
-  const withList = new Set<Provider>();
-  for (const account of live.values()) {
-    if (listing.has(account.id)) withList.add(providerOf(account.kind));
-  }
 
   const models = [
     ...new Set([...input.profiles.map((p) => p.model), ...offers.map((o) => o.model)]),
@@ -95,10 +85,9 @@ export function buildModelRows(input: ModelRowsInput): ModelRowDto[] {
     const assumedOn =
       described !== null &&
       described.maker === RUNTIME_MAKER[described.provider] &&
-      withList.has(described.provider)
-        ? withoutList.filter(
-            (a) => providerOf(a.kind) === described.provider && assumedEntry?.deprecated !== true,
-          )
+      assumedEntry !== null &&
+      !assumedEntry.deprecated
+        ? withoutList.filter((a) => providerOf(a.kind) === described.provider)
         : [];
 
     const profileStatus = profiles.find((p) => p.status !== null)?.status ?? null;
@@ -144,9 +133,12 @@ export function buildModelRows(input: ModelRowsInput): ModelRowDto[] {
       outputPrice: described?.outputPrice ?? null,
       intelligence: scored?.scores.intelligence ?? null,
       coding: scored?.scores.coding ?? null,
-      outputTokensPerSecond: scored?.outputTokensPerSecond ?? null,
+      outputTokensPerSecond:
+        scored?.outputTokensPerSecond ??
+        profiles.find((p) => p.outputTokensPerSecond !== null)?.outputTokensPerSecond ??
+        null,
       stepsRun: profiles.reduce((sum, p) => sum + p.stepsRun, 0),
-      firstSeenAt: firstSeen(profiles, offered),
+      firstSeenAt: firstSeen(profiles),
     });
   }
   return rows;

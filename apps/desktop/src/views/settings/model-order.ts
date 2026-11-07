@@ -92,7 +92,21 @@ export function filterModels(rows: readonly ModelRowDto[], filter: ModelFilter):
   );
 }
 
-/** Whether 10db first saw the model within the last seven days. */
-export function isNewModel(row: ModelRowDto, now: number): boolean {
-  return now - Date.parse(row.firstSeenAt) < NEW_WINDOW_MS;
+/** The earliest first-seen time of any model, in ms; null when no model has one. */
+export function earliestFirstSeen(rows: readonly ModelRowDto[]): number | null {
+  const times = rows.flatMap((r) => (r.firstSeenAt === null ? [] : [Date.parse(r.firstSeenAt)]));
+  return times.length === 0 ? null : Math.min(...times);
+}
+
+/** A model first seen after the first batch is news only that long after it. */
+const FIRST_BATCH_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Whether the model is new: first seen within the last seven days and more than a day after the earliest
+ * first-seen time of any model, so the models a builder sees on a fresh install are never news.
+ */
+export function isNewModel(row: ModelRowDto, now: number, earliest: number | null): boolean {
+  if (row.firstSeenAt === null || earliest === null) return false;
+  const seen = Date.parse(row.firstSeenAt);
+  return now - seen < NEW_WINDOW_MS && seen - earliest > FIRST_BATCH_MS;
 }

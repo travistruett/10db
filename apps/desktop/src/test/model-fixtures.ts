@@ -35,6 +35,7 @@ export function catalogueStatusDto(over: Partial<CatalogueStatusDto> = {}): Cata
     fetchedAt: '2026-11-06T10:00:00.000Z',
     source: 'fetched',
     models: 40,
+    lastAttempt: 'succeeded',
     ...over,
   });
 }

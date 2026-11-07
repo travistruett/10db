@@ -12,7 +12,7 @@ import { useModelOffers, useModelProfiles } from '../../daemon/model-queries';
 import { fromNow } from '../../shell/relative';
 import { ArtificialAnalysisCredit } from './artificial-analysis-credit';
 import { formatFirstPass, formatPrice, formatScore, NO_DATA } from './model-format';
-import { TIER_LABEL } from './model-labels';
+import { STATUS_LABEL, TIER_LABEL } from './model-labels';
 
 const EFFORT_ORDER = ['low', 'medium', 'high', 'xhigh', 'max'];
 
@@ -48,10 +48,12 @@ function Accounts({
   row,
   offers,
   accounts,
+  now,
 }: {
   readonly row: ModelRowDto;
   readonly offers: readonly AccountModelDto[];
   readonly accounts: readonly AccountDto[];
+  readonly now: number;
 }) {
   const byId = new Map(accounts.map((a) => [a.id, a]));
   const listed = new Set(offers.map((o) => o.accountId));
@@ -63,6 +65,7 @@ function Accounts({
           <Table.Th>Account</Table.Th>
           <Table.Th>Launch ID</Table.Th>
           <Table.Th>Price per 1M tokens</Table.Th>
+          <Table.Th>Read</Table.Th>
         </Table.Tr>
       </Table.Thead>
       <Table.Tbody>
@@ -82,13 +85,14 @@ function Accounts({
                 ) : null}
               </Table.Td>
               <Table.Td>{priceOf(offer, account)}</Table.Td>
+              <Table.Td>{fromNow(offer.lastSeenAt, now)}</Table.Td>
             </Table.Tr>
           );
         })}
         {unconfirmed.map((id) => (
           <Table.Tr key={id}>
             <Table.Td>{byId.get(id)?.label ?? 'Removed account'}</Table.Td>
-            <Table.Td colSpan={2}>
+            <Table.Td colSpan={3}>
               <Text size="sm" c="dimmed">
                 Not confirmed: its list has not been read yet
               </Text>
@@ -160,7 +164,7 @@ function DrawerBody({ row, now }: { readonly row: ModelRowDto; readonly now: num
         <Group gap="xs">
           {row.tier ? <Badge variant="light">{TIER_LABEL[row.tier]}</Badge> : null}
           <Badge variant="light" color="gray">
-            {row.status.replace('_', ' ')}
+            {STATUS_LABEL[row.status]}
           </Badge>
         </Group>
         {reason ? (
@@ -171,7 +175,8 @@ function DrawerBody({ row, now }: { readonly row: ModelRowDto; readonly now: num
         <Text size="sm" c="dimmed">
           {row.maker ?? 'Maker unknown'}
           {row.family ? ` · ${row.family}` : ''}
-          {released ? ` · released ${released}` : ''} · first seen {fromNow(row.firstSeenAt, now)}
+          {released ? ` · released ${released}` : ''}
+          {row.firstSeenAt === null ? '' : ` · first seen ${fromNow(row.firstSeenAt, now)}`}
         </Text>
         <Text size="sm" c="dimmed">
           List price per 1M tokens: {formatPrice(row.inputPrice)} in ·{' '}
@@ -180,7 +185,7 @@ function DrawerBody({ row, now }: { readonly row: ModelRowDto; readonly now: num
       </Stack>
       <Stack gap="xs">
         <Title order={4}>Accounts</Title>
-        <Accounts row={row} offers={mine} accounts={accountList} />
+        <Accounts row={row} offers={mine} accounts={accountList} now={now} />
       </Stack>
       <Stack gap="xs">
         <Title order={4}>Scores per effort</Title>

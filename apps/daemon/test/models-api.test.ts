@@ -1,11 +1,12 @@
 import {
   AccountModelDto,
+  CatalogueAttempt,
   CatalogueSource,
   CatalogueStatusDto,
   ModelRowDto,
   type Effort,
 } from '@10db/contracts';
-import { listAccountModels } from '@10db/db';
+import { findModelProfile, listAccountModels } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { startDaemon, type RunningDaemon } from '../src/daemon';
@@ -31,7 +32,10 @@ afterEach(async () => {
 });
 
 /** A daemon whose one account lists the models given, against the committed catalogue fixture. */
-async function start(models: { id: string; resolvedId: string }[]) {
+async function start(
+  models: { id: string; resolvedId: string }[],
+  opts: { catalogueSync?: boolean; offline?: { value: boolean } } = {},
+) {
   const adapter = new FakeAdapter({});
   adapter.probeSeen = {
     ...adapter.probeSeen,
@@ -44,14 +48,20 @@ async function start(models: { id: string; resolvedId: string }[]) {
     adapter,
     logLevel: 'warn',
     ...QUIET,
-    catalogueSync: true,
+    catalogueSync: opts.catalogueSync ?? true,
     fetch: () => {
       fetches += 1;
+      if (opts.offline?.value === true) return Promise.reject(new Error('offline'));
       return Promise.resolve(new Response(JSON.stringify(readModelsDevFixture())));
     },
   });
   daemon = running;
-  await waitFor(() => listAccountModels(running.state.db).length > 0);
+  if (opts.catalogueSync !== false)
+    await waitFor(() =>
+      models.length > 0
+        ? listAccountModels(running.state.db).length > 0
+        : findModelProfile(running.state.db, 'claude', 'claude-opus-5-5', 'high') !== undefined,
+    );
   return { running, api: apiClient(running.url, running.token) };
 }
 
@@ -69,6 +79,15 @@ describe('the model list over HTTP', () => {
       intelligence: null,
     });
     expect(rows[0]?.availableOn).toHaveLength(1);
+  });
+
+  it('lists the maker’s models as available on an account whose list has not been read', async () => {
+    const { running, api } = await start([]);
+    expect(listAccountModels(running.state.db)).toEqual([]);
+    const rows = await api.get('/models', z.array(ModelRowDto));
+    const opus = rows.find((r) => r.model === 'claude-opus-5-5');
+    expect(opus).toMatchObject({ status: 'current', tier: 'strongest' });
+    expect(opus?.availableOn).toHaveLength(1);
   });
 
   it('lists a model an account reports that the catalogue does not know, as Unknown', async () => {
@@ -100,6 +119,32 @@ describe('the model list over HTTP', () => {
     expect(status.source).toBe(CatalogueSource.Fetched);
     expect(status.fetchedAt).not.toBeNull();
     expect(status.models).toBeGreaterThan(0);
+    expect(status.lastAttempt).toBe(CatalogueAttempt.Succeeded);
+  });
+
+  it('says a refresh failed, keeping the copy it has', async () => {
+    const offline = { value: false };
+    const { api } = await start([{ id: 'opus', resolvedId: 'claude-opus-5-5' }], { offline });
+    offline.value = true;
+    const status = await api.post('/models/refresh', CatalogueStatusDto);
+    expect(status).toMatchObject({
+      source: CatalogueSource.Fetched,
+      lastAttempt: CatalogueAttempt.Failed,
+    });
+    expect(status.fetchedAt).not.toBeNull();
+  });
+
+  it('says the catalogue fetch is off when the daemon was started without it', async () => {
+    const { api } = await start([{ id: 'opus', resolvedId: 'claude-opus-5-5' }], {
+      catalogueSync: false,
+    });
+    expect(await api.get('/models/status', CatalogueStatusDto)).toMatchObject({
+      lastAttempt: CatalogueAttempt.Off,
+    });
+    expect(await api.post('/models/refresh', CatalogueStatusDto)).toMatchObject({
+      lastAttempt: CatalogueAttempt.Off,
+    });
+    expect(fetches).toBe(0);
   });
 
   it('refreshes on demand: fetches the catalogue again and answers its status', async () => {

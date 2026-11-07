@@ -152,6 +152,38 @@ describe('buildModelRows', () => {
     expect(row).toMatchObject({ intelligence: 35, coding: null, outputTokensPerSecond: 50 });
   });
 
+  it.each([
+    {
+      name: 'the strongest scored effort when it has one',
+      low: { speed: 200, scores: scored(null, null) },
+      high: { speed: 50, scores: scored(35, null) },
+      expected: 50,
+    },
+    {
+      name: 'another effort when the strongest scored one has none',
+      low: { speed: 120, scores: scored(null, null) },
+      high: { speed: null, scores: scored(35, null) },
+      expected: 120,
+    },
+    {
+      name: 'nothing when no effort has one',
+      low: { speed: null, scores: scored(null, null) },
+      high: { speed: null, scores: scored(35, null) },
+      expected: null,
+    },
+  ])('takes speed from $name', ({ low, high, expected }) => {
+    const [row] = buildModelRows({
+      catalogue: CATALOGUE,
+      accounts: [subscription],
+      profiles: [
+        profile({ effort: 'low', scores: low.scores, outputTokensPerSecond: low.speed }),
+        profile({ effort: 'high', scores: high.scores, outputTokensPerSecond: high.speed }),
+      ],
+      offers: [offer(subscription.id)],
+    });
+    expect(row?.outputTokensPerSecond).toBe(expected);
+  });
+
   describe('which models are listed, and with what status', () => {
     it.each([
       {
@@ -176,7 +208,7 @@ describe('buildModelRows', () => {
         name: 'a described profile that no account offers any more is not listed',
         profiles: [profile({ tier: null, status: null })],
         offers: [] as AccountModelDto[],
-        accounts: [subscription],
+        accounts: [],
         expected: [],
       },
       {
@@ -222,6 +254,28 @@ describe('buildModelRows', () => {
         only: 'claude-sonnet-5-5',
       },
       {
+        name: 'accounts with no list yet, none of their maker having one, offer its models with the profile status',
+        profiles: [profile({})],
+        offers: [] as AccountModelDto[],
+        accounts: [subscription, claudeNoList],
+        expected: [
+          {
+            model: 'claude-opus-5-5',
+            status: 'current',
+            tier: 'strongest',
+            availableOn: [subscription.id, claudeNoList.id],
+            providers: ['anthropic_api_key', 'claude_subscription'],
+          },
+        ],
+      },
+      {
+        name: 'an account with no list does not offer a model the catalogue lacks',
+        profiles: [profile({ model: 'house-model', tier: null, status: null })],
+        offers: [] as AccountModelDto[],
+        accounts: [subscription],
+        expected: [],
+      },
+      {
         name: 'a model another maker makes, offered on Bedrock, is Not runnable and has no price',
         profiles: [] as ModelProfileDto[],
         offers: [
@@ -237,6 +291,8 @@ describe('buildModelRows', () => {
             inputPrice: null,
             outputPrice: null,
             availableOn: [bedrock.id],
+            // No profile dates it, and the account's last read says nothing of when it first appeared.
+            firstSeenAt: null,
           },
         ],
       },
@@ -266,6 +322,11 @@ describe('buildModelRows', () => {
       profiles: [],
       offers: [offer(bedrock.id, { model: 'openai.gpt-6.1-sol', launchId: 'openai.gpt-6.1-sol' })],
     });
-    expect(row).toMatchObject({ status: 'unknown', name: 'openai.gpt-6.1-sol', maker: null });
+    expect(row).toMatchObject({
+      status: 'unknown',
+      name: 'openai.gpt-6.1-sol',
+      maker: null,
+      firstSeenAt: null,
+    });
   });
 });

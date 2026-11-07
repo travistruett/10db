@@ -17,6 +17,15 @@ export const CatalogueSource = {
 } as const;
 export type CatalogueSource = ValueOf<typeof CatalogueSource>;
 
+/** How the last fetch of the catalogue went; off when this daemon is set not to fetch it. */
+export const CatalogueAttempt = {
+  NotTried: 'not_tried',
+  Succeeded: 'succeeded',
+  Failed: 'failed',
+  Off: 'off',
+} as const;
+export type CatalogueAttempt = ValueOf<typeof CatalogueAttempt>;
+
 /** Where a model stands with its maker, as far as 10db can tell. */
 export const ModelStatus = {
   Current: 'current',
@@ -104,7 +113,8 @@ export const ModelRowDto = z.object({
   outputTokensPerSecond: z.number().nullable(),
   /** Steps 10db has run on this model. */
   stepsRun: z.int().min(0),
-  firstSeenAt: Timestamp,
+  /** The earliest of its profiles; null for a model with no profile, which has nothing to date it by. */
+  firstSeenAt: Timestamp.nullable(),
 });
 export type ModelRowDto = z.infer<typeof ModelRowDto>;
 
@@ -114,5 +124,7 @@ export const CatalogueStatusDto = z.object({
   fetchedAt: Timestamp.nullable(),
   source: z.enum(CatalogueSource),
   models: z.int().min(0),
+  /** The last fetch's outcome, which the source alone does not say: a failed fetch leaves the old copy in use. */
+  lastAttempt: z.enum(CatalogueAttempt),
 });
 export type CatalogueStatusDto = z.infer<typeof CatalogueStatusDto>;

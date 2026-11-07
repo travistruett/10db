@@ -1,4 +1,4 @@
-import { CatalogueSource } from '@10db/contracts';
+import { CatalogueAttempt, CatalogueSource } from '@10db/contracts';
 import { createTestStore } from '@10db/db';
 import { z } from 'zod';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -86,6 +86,7 @@ describe('catalogue sync', () => {
       fetchedAt: '2026-11-06T12:00:00.000Z',
       source: CatalogueSource.Fetched,
       models: FIXTURE_MODELS,
+      lastAttempt: CatalogueAttempt.Succeeded,
     });
     expect(changed).toHaveLength(1);
   });
@@ -98,6 +99,8 @@ describe('catalogue sync', () => {
       fetchedAt: '2026-11-06T12:00:00.000Z',
       source: CatalogueSource.Stored,
       models: FIXTURE_MODELS,
+      // This process has not fetched; the stored copy is from an earlier run.
+      lastAttempt: CatalogueAttempt.NotTried,
     });
     expect(restarted.catalogue()?.hash).toBe(parseCatalogue(readFixture()).hash);
   });
@@ -145,6 +148,8 @@ describe('catalogue sync', () => {
       fetchedAt: '2026-11-06T12:00:00.000Z',
       source: CatalogueSource.Fetched,
       models: FIXTURE_MODELS,
+      // The old copy stays in use, and the status says the newest attempt did not work.
+      lastAttempt: CatalogueAttempt.Failed,
     });
     expect(changed).toHaveLength(0);
   });
@@ -209,7 +214,12 @@ describe('catalogue sync', () => {
       },
     };
     const s = catalogueSync(fakeFetch(ok()), () => null, failing);
-    expect(await s.sync()).toEqual({ fetchedAt: null, source: CatalogueSource.None, models: 0 });
+    expect(await s.sync()).toEqual({
+      fetchedAt: null,
+      source: CatalogueSource.None,
+      models: 0,
+      lastAttempt: CatalogueAttempt.Failed,
+    });
     expect(s.catalogue()).toBeNull();
     expect(changed).toHaveLength(0);
   });
@@ -221,12 +231,18 @@ describe('catalogue sync', () => {
       fetchedAt: null,
       source: CatalogueSource.Snapshot,
       models: FIXTURE_MODELS,
+      lastAttempt: CatalogueAttempt.Failed,
     });
   });
 
   it('reports none when the fetch fails and there is neither a stored copy nor a snapshot', async () => {
     const s = catalogueSync(fakeFetch('network-error'));
-    expect(await s.sync()).toEqual({ fetchedAt: null, source: CatalogueSource.None, models: 0 });
+    expect(await s.sync()).toEqual({
+      fetchedAt: null,
+      source: CatalogueSource.None,
+      models: 0,
+      lastAttempt: CatalogueAttempt.Failed,
+    });
     expect(s.catalogue()).toBeNull();
   });
 

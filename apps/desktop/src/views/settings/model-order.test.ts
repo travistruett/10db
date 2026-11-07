@@ -2,6 +2,7 @@ import { ModelStatus, ModelTier } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { modelRowDto, someAccountId } from '../../test/model-fixtures';
 import {
+  earliestFirstSeen,
   filterModels,
   isNewModel,
   ModelColumn,
@@ -92,13 +93,37 @@ describe('filtering the model list', () => {
 
 describe('what counts as new', () => {
   const now = Date.parse('2026-11-07T00:00:00.000Z');
+  const DAY = 24 * 3600_000;
+  const at = (ago: number) => new Date(now - ago).toISOString();
+  // The first batch a builder sees all share one first-seen time, and none of it is news.
+  const OLDEST = at(30 * DAY);
+  const oldest = modelRowDto({ model: 'oldest', firstSeenAt: OLDEST });
+
   it.each([
-    { name: 'a day old', age: 24 * 3600_000, expected: true },
+    { name: 'two days old, a month after the first batch', age: 2 * DAY, expected: true },
     { name: 'just inside seven days', age: NEW_WINDOW_MS - 1, expected: true },
     { name: 'exactly seven days', age: NEW_WINDOW_MS, expected: false },
-    { name: 'a month old', age: 30 * 24 * 3600_000, expected: false },
+    { name: 'a month old', age: 30 * DAY, expected: false },
   ])('$name: $expected', ({ age, expected }) => {
-    const row = modelRowDto({ model: 'x', firstSeenAt: new Date(now - age).toISOString() });
-    expect(isNewModel(row, now)).toBe(expected);
+    const row = modelRowDto({ model: 'x', firstSeenAt: at(age) });
+    expect(isNewModel(row, now, earliestFirstSeen([oldest, row]))).toBe(expected);
+  });
+
+  it.each([
+    { name: 'on a fresh install, where every model arrived together', gap: 0, expected: false },
+    { name: 'within a day of the first batch', gap: DAY - 1, expected: false },
+    { name: 'more than a day after the first batch', gap: DAY + 1, expected: true },
+  ])('$name: $expected', ({ gap, expected }) => {
+    const first = Date.parse(at(3 * DAY));
+    const early = modelRowDto({ model: 'a', firstSeenAt: new Date(first).toISOString() });
+    const later = modelRowDto({ model: 'b', firstSeenAt: new Date(first + gap).toISOString() });
+    const earliest = earliestFirstSeen([early, later]);
+    expect(isNewModel(later, now, earliest)).toBe(expected);
+    expect(isNewModel(early, now, earliest)).toBe(false);
+  });
+
+  it('is never new for a model with no first-seen time', () => {
+    const row = modelRowDto({ model: 'x', firstSeenAt: null });
+    expect(isNewModel(row, now, earliestFirstSeen([oldest, row]))).toBe(false);
   });
 });

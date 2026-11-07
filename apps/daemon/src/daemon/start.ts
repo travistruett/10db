@@ -1320,6 +1320,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     benchmarks,
     catalogue,
     refreshModels,
+    catalogueOn: modelRefreshOn,
     judge: createJudgeServices({
       state,
       keychain: judgeKeychain,

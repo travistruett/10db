@@ -17,10 +17,11 @@ import { useCatalogueStatus, useModels, useRefreshModels } from '../../daemon/mo
 import { useNow } from '../../shell/relative';
 import { ArtificialAnalysisCredit } from './artificial-analysis-credit';
 import { ModelDrawer } from './model-drawer';
-import { TIER_LABEL } from './model-labels';
+import { STATUS_LABEL, TIER_LABEL } from './model-labels';
 import { catalogueLine, formatPrice, formatScore, NO_DATA } from './model-format';
 import {
   filterModels,
+  earliestFirstSeen,
   isNewModel,
   ModelColumn,
   SortDirection,
@@ -56,14 +57,6 @@ const COLUMNS: readonly ColumnSpec[] = [
   { column: ModelColumn.OutputPrice, label: 'Output', numeric: true },
   { column: ModelColumn.StepsRun, label: 'Steps run', numeric: true },
 ];
-
-const STATUS_BADGE: Readonly<Record<ModelStatus, string | null>> = {
-  [ModelStatus.Current]: null,
-  [ModelStatus.Superseded]: 'Superseded',
-  [ModelStatus.Retired]: 'Retired',
-  [ModelStatus.Unknown]: 'Unknown',
-  [ModelStatus.NotRunnable]: 'Not runnable',
-};
 
 function SortableHeader({
   spec,
@@ -108,16 +101,17 @@ function ModelTableRow({
   row,
   accountLabels,
   now,
+  earliest,
   onOpen,
 }: {
   readonly row: ModelRowDto;
   readonly accountLabels: ReadonlyMap<string, string>;
   readonly now: number;
+  readonly earliest: number | null;
   readonly onOpen: (row: ModelRowDto) => void;
 }) {
-  const statusBadge = STATUS_BADGE[row.status];
-  // A model no agent can run is never routed, so how new it is does not matter.
-  const fresh = row.status !== ModelStatus.NotRunnable && isNewModel(row, now);
+  const statusBadge = row.status === ModelStatus.Current ? null : STATUS_LABEL[row.status];
+  const fresh = isNewModel(row, now, earliest);
   const accounts = row.availableOn.map((id) => accountLabels.get(id) ?? 'Removed account');
   return (
     <Table.Tr>
@@ -184,6 +178,7 @@ export function ModelsSection() {
 
   const live = (accounts.data ?? []).filter((a) => !a.archived);
   const labels = new Map((accounts.data ?? []).map((a) => [a.id, a.label]));
+  const earliest = earliestFirstSeen(models.data);
   const rows = sortModels(filterModels(models.data, { tier, accountId }), sort);
   const onSort = (column: ModelColumn) => {
     setSort((current) =>
@@ -203,7 +198,11 @@ export function ModelsSection() {
     <Stack>
       <Group justify="space-between" align="flex-start" wrap="nowrap">
         <Text size="xs" c="dimmed">
-          {status.data === undefined ? 'Reading the catalogue…' : catalogueLine(status.data, now)}
+          {status.data !== undefined
+            ? catalogueLine(status.data, now)
+            : status.isError
+              ? 'The catalogue status could not be read.'
+              : 'Reading the catalogue…'}
         </Text>
         <Group gap="xs" wrap="nowrap">
           {refresh.isError ? (
@@ -281,6 +280,7 @@ export function ModelsSection() {
                 row={row}
                 accountLabels={labels}
                 now={now}
+                earliest={earliest}
                 onOpen={(r) => {
                   setSelected(r);
                   setOpened(true);

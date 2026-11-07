@@ -1,4 +1,4 @@
-import { CatalogueSource, type CatalogueStatusDto } from '@10db/contracts';
+import { CatalogueAttempt, CatalogueSource, type CatalogueStatusDto } from '@10db/contracts';
 import { getAppSetting, setAppSetting } from '@10db/db';
 import { z } from 'zod';
 import type { Clock, Timer } from '../clock';
@@ -70,6 +70,8 @@ export function createCatalogueSync(deps: CatalogueSyncDeps): CatalogueSync {
   let remembered: StoredDocument | null = null;
   let deliveredInMemory: string | null = null;
   let source: CatalogueSource | null = null;
+  /** How the newest fetch in this process went. */
+  let attempt: CatalogueAttempt = CatalogueAttempt.NotTried;
 
   const stored = (): StoredDocument | null => {
     try {
@@ -95,11 +97,17 @@ export function createCatalogueSync(deps: CatalogueSyncDeps): CatalogueSync {
         fetchedAt: doc.fetchedAt,
         source: source ?? CatalogueSource.Stored,
         models: countOf(doc.catalogue),
+        lastAttempt: attempt,
       };
     const fallback = snapshot();
     if (fallback !== null)
-      return { fetchedAt: null, source: CatalogueSource.Snapshot, models: countOf(fallback) };
-    return { fetchedAt: null, source: CatalogueSource.None, models: 0 };
+      return {
+        fetchedAt: null,
+        source: CatalogueSource.Snapshot,
+        models: countOf(fallback),
+        lastAttempt: attempt,
+      };
+    return { fetchedAt: null, source: CatalogueSource.None, models: 0, lastAttempt: attempt };
   };
 
   /** The hash `onChanged` last accepted; empty when it has accepted none; null before the first fetch. */
@@ -161,8 +169,10 @@ export function createCatalogueSync(deps: CatalogueSyncDeps): CatalogueSync {
     try {
       const parsed = await fetchAndStore();
       fetched = true;
+      attempt = CatalogueAttempt.Succeeded;
       failures = (await deliver(parsed)) ? 0 : failures + 1;
     } catch (error) {
+      attempt = CatalogueAttempt.Failed;
       failures += 1;
       deps.logger.warn(
         { err: error instanceof Error ? error.name : 'error' },
