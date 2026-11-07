@@ -1492,6 +1492,60 @@ describe('startDaemon', () => {
       expect(adapter.probes.length - before.probes).toBe(1);
     });
 
+    it('scores the models an account lists after the profiles exist, in one request, and a second refresh asks for nothing', async () => {
+      const adapter = new FakeAdapter({});
+      adapter.probeSeen = { ...adapter.probeSeen, models: [OPUS] };
+      const aaRequests: string[] = [];
+      // No key until the profiles exist, so only the refresh after the catalogue can score them.
+      const key: { value: string | null } = { value: null };
+      daemon = await startDaemon({
+        sandbox: null,
+        dataDir: dir.path,
+        port: 0,
+        adapter,
+        logLevel: 'warn',
+        ...QUIET,
+        catalogueSync: true,
+        aaKey: () => key.value,
+        fetch: (input) => {
+          const url =
+            typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+          if (!url.includes('artificialanalysis')) {
+            return Promise.resolve(new Response(JSON.stringify(readModelsDevFixture())));
+          }
+          aaRequests.push(url);
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                intelligence_index_version: '9.9',
+                pagination: { has_more: false },
+                data: [
+                  {
+                    slug: 'claude-opus-5-5-low',
+                    name: 'Invented Opus',
+                    model_creator: { name: 'Test Lab' },
+                    evaluations: { artificial_analysis_intelligence_index: 42 },
+                  },
+                ],
+              }),
+            ),
+          );
+        },
+      });
+      const running = daemon;
+      await waitFor(
+        () => findModelProfile(running.state.db, 'claude', 'claude-opus-5-5', 'low') !== undefined,
+      );
+      key.value = 'aa-test-key';
+      await running.refreshModels({ force: false });
+      expect(aaRequests).toHaveLength(1);
+      expect(findModelProfile(running.state.db, 'claude', 'claude-opus-5-5', 'low')).toMatchObject({
+        aaSlug: 'claude-opus-5-5-low',
+      });
+      await running.refreshModels({ force: false });
+      expect(aaRequests).toHaveLength(1);
+    });
+
     it('after a failed fetch reads only accounts not read today, unless the builder forces it', async () => {
       const { adapter, net, running } = await startWithList(true);
       await waitFor(() => listAccountModels(running.state.db).length > 0);

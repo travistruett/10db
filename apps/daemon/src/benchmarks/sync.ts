@@ -1,5 +1,6 @@
 import {
   BenchmarkStatusDto,
+  ModelStatus,
   ScoreKind,
   type AaModelDto,
   type ModelProfileDto,
@@ -9,6 +10,7 @@ import {
   getAppSetting,
   listAaModels,
   listModelProfiles,
+  patchModelProfile,
   replaceAaModels,
   setAppSetting,
 } from '@10db/db';
@@ -17,6 +19,7 @@ import type { Clock, Timer } from '../clock';
 import type { StateStore } from '../events';
 import type { Logger } from '../log';
 import { fetchAaModels } from './aa-client';
+import { aaSlugFor } from './slugs';
 
 /** A daily sync stays far inside the free tier's 100 requests a day. */
 export const AA_SYNC_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -34,6 +37,8 @@ const isFailure = (outcome: BenchmarkStatusDto['outcome']): boolean =>
   outcome === 'unauthorized' || outcome === 'rate_limited' || outcome === 'failed';
 
 const STATUS_KEY = 'benchmarks.status';
+/** The models and efforts offered when scores were last asked for, so an unchanged offer asks for nothing. */
+const OFFERED_KEY = 'benchmarks.offered';
 /** Everything but the model count is recorded at sync time, so reading the status never touches the Keychain. */
 const StoredStatus = BenchmarkStatusDto.omit({ models: true });
 type StoredStatus = z.infer<typeof StoredStatus>;
@@ -66,6 +71,12 @@ export interface BenchmarkSync {
    * a good one, and after a failure the backoff, which a later sync replaces.
    */
   start(): void;
+  /**
+   * The sync that follows a change of the catalogue or the accounts' lists: it runs when the offered models
+   * differ from the last run's, when the builder forces it, or when an offered model still has no score and the
+   * last sync is a day old. Otherwise it asks for nothing. Never rejects.
+   */
+  syncForCatalogue(opts: { readonly force: boolean }): Promise<BenchmarkStatusDto>;
   /** Cancels the pending sync; a sync already running finishes without scheduling another. */
   stop(): void;
 }
@@ -93,6 +104,15 @@ const unmeasured = (now: string) => ({
   indexVersion: null,
   measuredAt: now,
 });
+
+/**
+ * A profile some account offers, built from the catalogue. A retired or not runnable model is not offered, and
+ * a row without catalogue fields is a seeded one, which keeps its own slug.
+ */
+const offered = (p: ModelProfileDto) =>
+  (p.status !== null || p.maker !== null) &&
+  p.status !== ModelStatus.Retired &&
+  p.status !== ModelStatus.NotRunnable;
 
 const profileName = (p: ModelProfileDto) => `${p.model}@${p.effort}`;
 
@@ -183,10 +203,15 @@ export function createBenchmarkSync(deps: BenchmarkSyncDeps): BenchmarkSync {
         message: 'Artificial Analysis returned no models; keeping the last list',
       });
     const bySlug = new Map(outcome.models.map((m) => [m.slug, m]));
+    const listed: ReadonlySet<string> = new Set(bySlug.keys());
     state.write((ctx) => {
       replaceAaModels(ctx, outcome.models);
       for (const profile of listModelProfiles(ctx.tx)) {
-        const model = profile.aaSlug ? bySlug.get(profile.aaSlug) : undefined;
+        // A profile without a slug takes the one AA lists for its model and effort; seeded ones keep theirs.
+        const slug = profile.aaSlug ?? aaSlugFor(profile.model, profile.effort, listed);
+        if (slug !== null && slug !== profile.aaSlug)
+          patchModelProfile(ctx, profile.id, { aaSlug: slug });
+        const model = slug ? bySlug.get(slug) : undefined;
         if (model) applyAaMeasurement(ctx, profile.id, measurement(model));
         else applyAaMeasurement(ctx, profile.id, unmeasured(now));
       }
@@ -250,6 +275,40 @@ export function createBenchmarkSync(deps: BenchmarkSyncDeps): BenchmarkSync {
     return running;
   };
 
+  /** The offered models and efforts, in a stable order. */
+  const offeredKey = (): string =>
+    JSON.stringify(
+      listModelProfiles(state.db)
+        .filter(offered)
+        .map((p) => `${p.provider}/${p.model}@${p.effort}`),
+    );
+  const hasUnscored = (): boolean =>
+    listModelProfiles(state.db).some((p) => offered(p) && p.scores.intelligence === null);
+
+  async function syncForCatalogue(opts: { readonly force: boolean }): Promise<BenchmarkStatusDto> {
+    try {
+      const key = offeredKey();
+      const last = stored().lastSyncAt;
+      const age = last === null ? Infinity : deps.clock.now().getTime() - Date.parse(last);
+      const changed = getAppSetting(state.db, OFFERED_KEY) !== key;
+      if (!opts.force && !changed && !(hasUnscored() && age >= AA_SYNC_INTERVAL_MS))
+        return status();
+      const result = await sync();
+      // With no key nothing was asked for, so the next change asks again once a key exists.
+      if (result.outcome !== 'no_key')
+        state.write((ctx) => {
+          setAppSetting(ctx, OFFERED_KEY, key);
+        });
+      return result;
+    } catch (error) {
+      deps.logger.error(
+        { err: error instanceof Error ? error.name : 'error' },
+        'could not sync scores for the catalogue',
+      );
+      return status();
+    }
+  }
+
   /** `sync` never rejects; the catch is a last guard so a daemon-wide unhandled rejection can't happen. */
   const syncQuietly = (): Promise<void> =>
     sync().then(
@@ -275,6 +334,7 @@ export function createBenchmarkSync(deps: BenchmarkSyncDeps): BenchmarkSync {
   return {
     status,
     sync,
+    syncForCatalogue,
     start() {
       active = true;
       const last = stored();

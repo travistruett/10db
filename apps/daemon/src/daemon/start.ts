@@ -991,6 +991,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     // After a failed fetch only accounts not read in the last day are read, so a retry loop does not probe them all;
     // the builder's own refresh reads every account.
     const everyAccount = fetched || forced;
+    const builderAsked = forced;
     forced = false;
     await listRefresh.readAll({ staleOnly: !everyAccount });
     const current = catalogue.catalogue();
@@ -998,6 +999,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       state.write((ctx) => {
         reconcileProfiles(ctx, current);
       });
+    // Scores come last, so every new model has a row to put them on; with no key or benchmarks off nothing is fetched.
+    await benchmarks.syncForCatalogue({ force: builderAsked });
   }
   // One path for the daily timer, the start-up catch-up and the Models page: a call during a run joins it.
   // Off, nothing is fetched and no account is probed.

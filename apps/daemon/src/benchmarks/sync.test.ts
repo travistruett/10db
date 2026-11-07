@@ -4,6 +4,7 @@ import {
   listAaModels,
   patchModelProfile,
   setAppSetting,
+  upsertModelProfiles,
 } from '@10db/db';
 import { readDefaultPersonas } from '@10db/harness';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -567,5 +568,113 @@ describe('retry after a failed sync', () => {
     await recorded(s);
     expect(requests).toHaveLength(1);
     expect(s.status().outcome).toBe('ok');
+  });
+});
+
+describe('scores after a catalogue change', () => {
+  const OK = (...slugs: string[]) => ({
+    status: 200,
+    body: page(
+      slugs.map((slug, i) => entry(slug, 40 + i)),
+      false,
+    ),
+  });
+  /** Catalogue-built rows: canonical IDs, no AA slug yet, as `reconcileProfiles` writes them. */
+  const offer = (model: string, ...efforts: ('low' | 'high' | 'max')[]) => {
+    state.write((ctx) => {
+      upsertModelProfiles(
+        ctx,
+        efforts.map((effort) => ({
+          provider: 'codex' as const,
+          model,
+          effort,
+          aaSlug: null,
+          enabled: false,
+          maker: null,
+          family: null,
+          tier: null,
+          status: 'current' as const,
+          inputPrice: null,
+          outputPrice: null,
+          releaseDate: null,
+        })),
+      );
+    });
+  };
+  const row = (model: string, effort: 'low' | 'high' | 'max') =>
+    findModelProfile(state.db, 'codex', model, effort);
+  const DAY = AA_SYNC_INTERVAL_MS;
+
+  it('fills the slug of each offered effort AA lists and leaves an unlisted one unscored, without an error', async () => {
+    offer('lab-x-1.2', 'low', 'high', 'max');
+    const status = await sync(fakeFetch(OK('lab-x-1-2-high', 'lab-x-1-2'))).syncForCatalogue({
+      force: false,
+    });
+    expect(status).toMatchObject({ outcome: 'ok' });
+    expect(row('lab-x-1.2', 'high')).toMatchObject({
+      aaSlug: 'lab-x-1-2-high',
+      scores: { intelligence: 40 },
+    });
+    expect(row('lab-x-1.2', 'max')).toMatchObject({
+      aaSlug: 'lab-x-1-2',
+      scores: { intelligence: 41 },
+    });
+    expect(row('lab-x-1.2', 'low')).toMatchObject({ aaSlug: null, scores: { intelligence: null } });
+    expect(requests).toHaveLength(1);
+  });
+
+  it('asks once for a change of offered models, not again for the same ones, and again for a new one', async () => {
+    const s = sync(fakeFetch(OK('lab-x-1-high'), OK('lab-x-1-high', 'lab-y-2-high'), OK()));
+    offer('lab-x-1', 'high');
+    await s.syncForCatalogue({ force: false });
+    await s.syncForCatalogue({ force: false });
+    expect(requests).toHaveLength(1);
+    offer('lab-y-2', 'high');
+    await s.syncForCatalogue({ force: false });
+    expect(requests).toHaveLength(2);
+    expect(row('lab-y-2', 'high')?.scores.intelligence).toBe(41);
+  });
+
+  it('asks on every forced refresh, one request each', async () => {
+    const s = sync(fakeFetch(OK('lab-x-1-high'), OK('lab-x-1-high')));
+    offer('lab-x-1', 'high');
+    await s.syncForCatalogue({ force: false });
+    await s.syncForCatalogue({ force: true });
+    expect(requests).toHaveLength(2);
+  });
+
+  it('asks again once a day while an offered model has no score, and not sooner', async () => {
+    const s = sync(fakeFetch(OK('other-lab'), OK('other-lab'), OK('lab-x-1-high')));
+    offer('lab-x-1', 'high');
+    await s.syncForCatalogue({ force: false });
+    expect(requests).toHaveLength(1);
+    clock.advance(DAY - 1);
+    await s.syncForCatalogue({ force: false });
+    expect(requests).toHaveLength(1);
+    clock.advance(1);
+    await s.syncForCatalogue({ force: false });
+    expect(requests).toHaveLength(2);
+    expect(row('lab-x-1', 'high')?.scores.intelligence).toBeNull();
+    clock.advance(DAY);
+    await s.syncForCatalogue({ force: false });
+    expect(row('lab-x-1', 'high')?.scores.intelligence).toBe(40);
+  });
+
+  it('does not ask on a timer of its own once every offered model is scored', async () => {
+    const s = sync(fakeFetch(OK('lab-x-1-high'), OK('lab-x-1-high')));
+    offer('lab-x-1', 'high');
+    await s.syncForCatalogue({ force: false });
+    clock.advance(DAY * 3);
+    await s.syncForCatalogue({ force: false });
+    expect(requests).toHaveLength(1);
+  });
+
+  it('fetches nothing without a key, forced or not', async () => {
+    offer('lab-x-1', 'high');
+    const s = sync(fakeFetch(), null);
+    await s.syncForCatalogue({ force: false });
+    const status = await s.syncForCatalogue({ force: true });
+    expect(status.outcome).toBe('no_key');
+    expect(requests).toEqual([]);
   });
 });
