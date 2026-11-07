@@ -366,6 +366,14 @@ describe('scripts/test-report.mjs', () => {
     expect(result.stdout).toContain('No usable timings from `main`');
   });
 
+  it('still reports when GitHub lists runs in a shape it does not know', () => {
+    const result = report(() => [
+      { args: runs, stdout: JSON.stringify({ workflow_runs: [{ id: 1 }] }) },
+    ]);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('No usable timings from `main`');
+  });
+
   it('leaves out a touched file main changed after the baseline it downloaded', () => {
     const result = report(
       (baseline) => [
