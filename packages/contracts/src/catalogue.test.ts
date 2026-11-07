@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   AccountModelDto,
   CatalogueStatusDto,
+  GlobalModelSettingsInput,
   ModelRowDto,
   ModelSetting,
   PatternDto,
   PatternMatch,
+  ProjectModelSettingsInput,
   RoleSettingDto,
 } from './catalogue';
 import { mintId } from './ids';
@@ -71,6 +73,68 @@ describe('RoleSettingDto', () => {
       setting: { kind: 'automatic' },
     };
     expect(RoleSettingDto.parse(dto)).toEqual(dto);
+  });
+});
+
+describe('the model settings a form sends', () => {
+  const automatic = { kind: 'automatic' };
+  it.each([
+    {
+      name: 'a global role set',
+      input: { roles: [{ role: 'review', setting: automatic }] },
+      ok: true,
+    },
+    {
+      name: 'a global role with no setting',
+      input: { roles: [{ role: 'review', setting: null }] },
+      ok: false,
+    },
+    {
+      name: 'a global list of patterns',
+      input: { patterns: [{ name: 'Risky', setting: automatic }] },
+      ok: true,
+    },
+    {
+      name: 'a pattern with a blank name',
+      input: { patterns: [{ name: '   ', setting: automatic }] },
+      ok: false,
+    },
+    {
+      name: 'a role that is not a step role',
+      input: { roles: [{ role: 'janitor', setting: automatic }] },
+      ok: false,
+    },
+    {
+      name: 'a role set twice',
+      input: {
+        roles: [
+          { role: 'review', setting: automatic },
+          { role: 'review', setting: automatic },
+        ],
+      },
+      ok: false,
+    },
+  ])('global: $name parses $ok', ({ input, ok }) => {
+    expect(GlobalModelSettingsInput.safeParse(input).success).toBe(ok);
+  });
+
+  it('lets a project hand a role back to the global setting with null', () => {
+    const parsed = ProjectModelSettingsInput.parse({ roles: [{ role: 'review', setting: null }] });
+    expect(parsed.roles).toEqual([{ role: 'review', setting: null }]);
+    expect(parsed.patterns).toBeUndefined();
+  });
+
+  it('fills a pattern’s match and trims its name', () => {
+    const parsed = GlobalModelSettingsInput.parse({
+      patterns: [{ name: ' Risky ', setting: automatic }],
+    });
+    expect(parsed.patterns).toEqual([
+      {
+        name: 'Risky',
+        match: { roles: [], riskTags: [], areas: [], retryOnly: false },
+        setting: automatic,
+      },
+    ]);
   });
 });
 

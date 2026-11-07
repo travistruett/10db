@@ -1,11 +1,14 @@
+import type { ModelSettingsDto, PatternMatch } from '@10db/contracts';
 import {
   AccountModelDto,
   CatalogueStatusDto,
   ModelProfileDto,
   ModelRowDto,
+  PatternDto,
   mintId,
   type AccountId,
 } from '@10db/contracts';
+import type { z } from 'zod';
 
 const AT = '2026-10-01T10:00:00.000Z';
 
@@ -85,3 +88,21 @@ export function modelProfileDto(over: Partial<ModelProfileDto> & Pick<ModelProfi
     ...over,
   });
 }
+
+export function patternDto(
+  over: Partial<Omit<PatternDto, 'match'>> & {
+    name: string;
+    match?: z.input<typeof PatternMatch>;
+  },
+): PatternDto {
+  return PatternDto.parse({
+    id: mintId('Pattern'),
+    projectId: null,
+    match: {},
+    setting: { kind: 'automatic' },
+    position: 0,
+    ...over,
+  });
+}
+
+export const noModelSettings = (): ModelSettingsDto => ({ roles: [], patterns: [] });

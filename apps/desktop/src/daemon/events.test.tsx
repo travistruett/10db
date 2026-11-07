@@ -334,6 +334,12 @@ describe('useEventStream', () => {
     }
   });
 
+  it('refetches the role settings and patterns when either changes', () => {
+    for (const entity of ['role_setting', 'pattern']) {
+      expect(INVALIDATIONS[entity]).toEqual(expect.arrayContaining([['model-settings']]));
+    }
+  });
+
   it('builds ws and wss stream URLs', () => {
     expect(eventStreamUrl({ url: 'http://127.0.0.1:4317', token: 't k' }, 7)).toBe(
       'ws://127.0.0.1:4317/events/stream?after=7&token=t+k',

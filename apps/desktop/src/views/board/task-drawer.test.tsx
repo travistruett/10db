@@ -11,7 +11,9 @@ import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/re
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderWithDaemon, server } from '../../test/daemon';
+import { DEFAULT_ACCOUNT } from '../../test/account-fixtures';
 import { batchDto, flowDto, stepDto, taskDto, workstreamDto } from '../../test/fixtures';
+import { modelRowDto } from '../../test/model-fixtures';
 import { RISK_LABEL } from './risk-labels';
 import { TaskDrawer } from './task-drawer';
 import { failureLine } from './task-state';
@@ -43,6 +45,8 @@ interface Opts {
   /** The column the card sits in; "Ready" unless given. */
   readonly columnName?: string;
   readonly onCancelRun?: (workstream: WorkstreamDto) => void;
+  /** The project's account, whose models the task's own setting offers. */
+  readonly accountId?: typeof DEFAULT_ACCOUNT.id;
 }
 
 function open(opts: Opts = {}): { closed: () => number } {
@@ -62,6 +66,7 @@ function open(opts: Opts = {}): { closed: () => number } {
       {...(opts.pullRequestBase ? { pullRequestBase: opts.pullRequestBase } : {})}
       {...(opts.placementEditable ? { placementEditable: true } : {})}
       {...(opts.onCancelRun ? { onCancelRun: opts.onCancelRun } : {})}
+      {...(opts.accountId ? { accountId: opts.accountId } : {})}
       onClose={() => {
         closes += 1;
       }}
@@ -1414,5 +1419,64 @@ describe('TaskDrawer', () => {
       await openTab('Reviews');
       expect(screen.queryByTestId('review-round')).toBeNull();
     });
+  });
+});
+
+describe('TaskDrawer model setting', () => {
+  const offered = [
+    modelRowDto({
+      model: 'fast-a',
+      name: 'Fast A',
+      tier: 'fast',
+      availableOn: [DEFAULT_ACCOUNT.id],
+    }),
+  ];
+  function serveModels(patched: TaskPatch[]) {
+    serve(
+      http.get(daemonUrl('/models'), () => HttpResponse.json(offered)),
+      http.patch(daemonUrl('/tasks/:taskId'), async ({ request }) => {
+        patched.push((await request.json()) as TaskPatch);
+        return HttpResponse.json(taskDto());
+      }),
+    );
+  }
+
+  it('is not offered when the drawer does not know the project’s account', async () => {
+    serveModels([]);
+    open();
+    const d = await openTab('Edit');
+    expect(within(d).queryByRole('combobox', { name: 'Model' })).toBeNull();
+  });
+
+  it('starts with no override, and saves the pick with the rest of the form', async () => {
+    const patched: TaskPatch[] = [];
+    serveModels(patched);
+    open({ accountId: DEFAULT_ACCOUNT.id });
+    const d = await openTab('Edit');
+    const field = within(d).getByRole<HTMLInputElement>('combobox', { name: 'Model' });
+    expect(field.value).toBe('No override');
+    fireEvent.click(field);
+    fireEvent.click(await screen.findByRole('option', { name: 'Fast A', hidden: true }));
+    fireEvent.click(within(d).getByRole('button', { name: 'Save Changes' }));
+    await waitFor(() => {
+      expect(patched).toHaveLength(1);
+    });
+    expect(patched[0]).toMatchObject({ modelSetting: { kind: 'model', model: 'fast-a' } });
+  });
+
+  it('shows a saved override and removes it with No override', async () => {
+    const patched: TaskPatch[] = [];
+    serveModels(patched);
+    open({ accountId: DEFAULT_ACCOUNT.id, task: { modelSetting: { kind: 'top_of_tier' } } });
+    const d = await openTab('Edit');
+    const field = within(d).getByRole<HTMLInputElement>('combobox', { name: 'Model' });
+    expect(field.value).toBe('Top of tier');
+    fireEvent.click(field);
+    fireEvent.click(await screen.findByRole('option', { name: 'No override', hidden: true }));
+    fireEvent.click(within(d).getByRole('button', { name: 'Save Changes' }));
+    await waitFor(() => {
+      expect(patched).toHaveLength(1);
+    });
+    expect(patched[0]).toMatchObject({ modelSetting: null });
   });
 });

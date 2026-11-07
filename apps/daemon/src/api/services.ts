@@ -53,7 +53,9 @@ import type {
   LanePermissionsDto,
   McpServerStatusDto,
   ModelProfileDto,
+  GlobalModelSettingsInput,
   ModelRowDto,
+  ModelSettingsDto,
   NetworkHostDto,
   ModelProfileId,
   ModelProfilePatch,
@@ -67,6 +69,7 @@ import type {
   PickerProposalDto,
   ProjectDto,
   ProjectId,
+  ProjectModelSettingsInput,
   ProjectInput,
   ProjectPatch,
   ProjectViewDto,
@@ -400,6 +403,12 @@ export interface ApiServices {
   syncBenchmarks(): Promise<BenchmarkStatusDto>;
   /** AA's list as stored locally; the UI shows it only with AA's attribution. */
   listAaModels(): AaModelDto[];
+  /** The role settings and patterns of one project, or of everywhere for null. Throws NotFoundError for a missing project. */
+  getModelSettings(projectId: ProjectId | null): ModelSettingsDto;
+  /** Sets the listed roles everywhere and replaces the patterns when the input has them; answers what is in force. */
+  setGlobalModelSettings(input: GlobalModelSettingsInput): ModelSettingsDto;
+  /** As the global one for a project; a null setting hands the role back to the global setting. */
+  setProjectModelSettings(projectId: ProjectId, input: ProjectModelSettingsInput): ModelSettingsDto;
   /** Every model any account can reach, one row each. */
   listModels(): ModelRowDto[];
   /** What each account offers, with its launch ID and its own price. */

@@ -75,6 +75,47 @@ export const PatternDto = z.object({
 });
 export type PatternDto = z.infer<typeof PatternDto>;
 
+/** A pattern as the builder writes it; the daemon gives it an id and its place in the list. */
+export const PatternInput = z.object({
+  name: z.string().trim().min(1),
+  match: PatternMatch.prefault({}),
+  setting: ModelSetting,
+});
+export type PatternInput = z.infer<typeof PatternInput>;
+
+/** The role settings and patterns of one scope: a project's own, or the ones that apply everywhere. */
+export const ModelSettingsDto = z.object({
+  roles: z.array(RoleSettingDto),
+  patterns: z.array(PatternDto),
+});
+export type ModelSettingsDto = z.infer<typeof ModelSettingsDto>;
+
+const noRoleTwice = (roles: readonly { readonly role: string }[]) =>
+  new Set(roles.map((r) => r.role)).size === roles.length;
+
+/**
+ * What a form changes in the settings that apply everywhere. A role listed here is set; one left
+ * out keeps its setting. `patterns`, when given, replaces the whole list in the order sent.
+ */
+export const GlobalModelSettingsInput = z.object({
+  roles: z
+    .array(z.object({ role: z.enum(StepRole), setting: ModelSetting }))
+    .refine(noRoleTwice, { message: 'A role is set twice' })
+    .default([]),
+  patterns: z.array(PatternInput).optional(),
+});
+export type GlobalModelSettingsInput = z.infer<typeof GlobalModelSettingsInput>;
+
+/** As the global input, but a null setting removes the project's own, so the role uses the global one. */
+export const ProjectModelSettingsInput = z.object({
+  roles: z
+    .array(z.object({ role: z.enum(StepRole), setting: ModelSetting.nullable() }))
+    .refine(noRoleTwice, { message: 'A role is set twice' })
+    .default([]),
+  patterns: z.array(PatternInput).optional(),
+});
+export type ProjectModelSettingsInput = z.infer<typeof ProjectModelSettingsInput>;
+
 /** A model an account can run, as that account reports it. */
 export const AccountModelDto = z.object({
   accountId: AccountId,

@@ -23,6 +23,7 @@ const task = {
   dependsOn: [],
   boardStatus: 'ready',
   workstreamId: null,
+  modelSetting: null,
   createdAt: AT,
   updatedAt: AT,
 };

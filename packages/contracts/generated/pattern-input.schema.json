@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "match": {
+      "default": {},
+      "type": "object",
+      "properties": {
+        "roles": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "plan",
+              "plan_review",
+              "implement",
+              "review",
+              "qa"
+            ]
+          }
+        },
+        "riskTags": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "security",
+              "auth",
+              "migration",
+              "dependency"
+            ]
+          }
+        },
+        "areas": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "retryOnly": {
+          "default": false,
+          "type": "boolean"
+        }
+      }
+    },
+    "setting": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "automatic"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "tier"
+            },
+            "tier": {
+              "type": "string",
+              "enum": [
+                "fast",
+                "balanced",
+                "strongest"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "tier"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "top_of_tier"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "model"
+            },
+            "model": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "kind",
+            "model"
+          ]
+        }
+      ]
+    }
+  },
+  "required": [
+    "name",
+    "setting"
+  ]
+}

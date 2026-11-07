@@ -106,6 +106,7 @@ import { findRegistryHosts } from '../registries';
 import { proposeCandidates, resolveStepPlan, startTaskWithPlan } from '../team';
 import type { JudgeApiServices } from './judge-services';
 import type { KnowledgeApiServices } from './knowledge-services';
+import { createModelSettingsServices } from './model-settings-services';
 import type { ShapeApiServices } from './shape-services';
 import { checkoutConflictsWithRoot } from './worktree-root';
 
@@ -378,6 +379,7 @@ export function createServices(deps: {
     listModelProfiles: () => listModelProfiles(db),
     patchModelProfile: (id, patch) => deps.state.write((ctx) => patchModelProfile(ctx, id, patch)),
     ...deps.judge,
+    ...createModelSettingsServices(deps.state),
     ...deps.shape,
     ...deps.knowledge,
     benchmarkStatus: () => deps.benchmarks.status(),

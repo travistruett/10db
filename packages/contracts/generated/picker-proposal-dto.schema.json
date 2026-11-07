@@ -207,6 +207,79 @@
                   }
                 ]
               },
+              "modelSetting": {
+                "anyOf": [
+                  {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "automatic"
+                          }
+                        },
+                        "required": [
+                          "kind"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "tier"
+                          },
+                          "tier": {
+                            "type": "string",
+                            "enum": [
+                              "fast",
+                              "balanced",
+                              "strongest"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "tier"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "top_of_tier"
+                          }
+                        },
+                        "required": [
+                          "kind"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "type": "string",
+                            "const": "model"
+                          },
+                          "model": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "model"
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
               "createdAt": {
                 "type": "string",
                 "format": "date-time",
@@ -238,6 +311,7 @@
               "dependsOn",
               "boardStatus",
               "workstreamId",
+              "modelSetting",
               "createdAt",
               "updatedAt"
             ]

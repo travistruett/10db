@@ -87,6 +87,14 @@ export function baseHandlers(
     http.get(daemonUrl('/projects/:projectId/small-proposal-limit', base), () =>
       HttpResponse.json({ limit: 1200 }),
     ),
+    // The model list and the role settings and patterns of Settings › Team and Personas and flows; none yet.
+    http.get(daemonUrl('/models', base), () => HttpResponse.json([])),
+    http.get(daemonUrl('/model-settings', base), () =>
+      HttpResponse.json({ roles: [], patterns: [] }),
+    ),
+    http.get(daemonUrl('/projects/:projectId/model-settings', base), () =>
+      HttpResponse.json({ roles: [], patterns: [] }),
+    ),
     // A goal's and a task's drawer ask which conversation made them (Shape spec §12); none did.
     http.get(daemonUrl('/goals/:goalId/shape', base), () => HttpResponse.json({ shapeId: null })),
     http.get(daemonUrl('/tasks/:taskId/shape', base), () => HttpResponse.json({ shapeId: null })),

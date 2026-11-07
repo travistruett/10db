@@ -394,6 +394,8 @@ export const tasks = sqliteTable(
     landingGroupId: text('landing_group_id')
       .$type<LandingGroupId>()
       .references((): AnySQLiteColumn => landingGroups.id),
+    /** The builder's own model setting for the task; null is no override. */
+    modelSetting: text('model_setting', { mode: 'json' }).$type<ModelSetting>(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

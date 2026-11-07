@@ -13,8 +13,12 @@ import {
 import type { HarnessPersona } from '@10db/harness';
 import type { StateStore } from '../events';
 import { DEFAULT_FLOWS, SEED_PROFILES } from '../routing';
+import { seedPatterns } from './seed-patterns';
 
-/** Adds whatever is missing, in one transaction; never changes a row that exists, so the builder's edits win. */
+/**
+ * Adds whatever is missing, in one transaction; never changes a row that exists, so the builder's
+ * edits win. The high-risk pattern is offered once and then left to the builder.
+ */
 export function seedTeam(state: StateStore, personas: readonly HarnessPersona[]): void {
   state.write((ctx) => {
     for (const profile of SEED_PROFILES)
@@ -27,5 +31,6 @@ export function seedTeam(state: StateStore, personas: readonly HarnessPersona[])
     for (const flow of DEFAULT_FLOWS) if (!findFlowByName(ctx.tx, flow.name)) insertFlow(ctx, flow);
     if (!findPersonByHandle(ctx.tx, BUILDER_HANDLE))
       insertPerson(ctx, { handle: BUILDER_HANDLE, name: 'You', isBuilder: true });
+    seedPatterns(ctx);
   });
 }
