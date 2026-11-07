@@ -23,8 +23,10 @@ export interface SettingsSection {
   readonly key: SettingsSectionKey;
   readonly group: SettingsGroup;
   readonly label: string;
-  /** What a section that is not built yet will hold, and which plan fills it; null once it is built. */
+  /** What is still to come in the section, and which plan fills it; null once nothing is left. */
   readonly planned: string | null;
+  /** Whether the section has content to open; the nav lists only these. A built section may still have a planned remainder. */
+  readonly built: boolean;
 }
 
 export const GENERAL_SECTION: SettingsSection = {
@@ -32,6 +34,7 @@ export const GENERAL_SECTION: SettingsSection = {
   group: SettingsGroup.Project,
   label: 'General',
   planned: null,
+  built: true,
 };
 
 /** Spec §10 Settings: per project, then app-wide. */
@@ -42,24 +45,28 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     group: SettingsGroup.Project,
     label: 'Board columns',
     planned: null,
+    built: true,
   },
   {
     key: SettingsSectionKey.Areas,
     group: SettingsGroup.Project,
     label: 'Areas and hazards',
     planned: null,
+    built: true,
   },
   {
     key: SettingsSectionKey.NetworkHosts,
     group: SettingsGroup.Project,
     label: 'Network hosts',
     planned: null,
+    built: true,
   },
   {
     key: SettingsSectionKey.Billing,
     group: SettingsGroup.Project,
     label: 'Billing',
     planned: null,
+    built: true,
   },
   {
     key: SettingsSectionKey.Team,
@@ -67,6 +74,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     label: 'Team',
     planned:
       'Which persona runs each role in this project, and its human members. The team editor plan fills it.',
+    built: true,
   },
   {
     key: SettingsSectionKey.RoutingRules,
@@ -74,43 +82,49 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     label: 'Routing rules',
     planned:
       'Who answers each question category, optionally per area. The team editor plan fills it.',
+    built: false,
   },
   {
     key: SettingsSectionKey.KeepAwake,
     group: SettingsGroup.Global,
     label: 'Keep-awake',
     planned: null,
+    built: true,
   },
   {
     key: SettingsSectionKey.Updates,
     group: SettingsGroup.Global,
     label: 'Updates',
     planned: null,
+    built: true,
   },
   {
     key: SettingsSectionKey.LanePermissions,
     group: SettingsGroup.Global,
     label: 'Lane permissions',
     planned: null,
+    built: true,
   },
   {
     key: SettingsSectionKey.Accounts,
     group: SettingsGroup.Global,
     label: 'Accounts',
     planned: null,
+    built: true,
   },
   {
     key: SettingsSectionKey.Decisions,
     group: SettingsGroup.Global,
     label: 'Decisions',
     planned: null,
+    built: true,
   },
   {
     key: SettingsSectionKey.Models,
     group: SettingsGroup.Global,
     label: 'Models and benchmarks',
-    planned:
-      "The Artificial Analysis key and sync, the model profiles, and the Intelligence-vs-Cost chart with AA's attribution. A later M2 plan fills it.",
+    planned: null,
+    built: true,
   },
   {
     key: SettingsSectionKey.PersonasAndFlows,
@@ -118,6 +132,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     label: 'Personas and flows',
     planned:
       'The personas, their instructions and pins, and the flows of steps. The team editor plan fills it.',
+    built: true,
   },
 ];
 

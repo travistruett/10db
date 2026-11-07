@@ -23,7 +23,7 @@ describe('a task whose landing names a branch that is gone from origin', () => {
     const fresh = h.addTask('Fresh', { landing: NEXT });
     const started = h.addTask('Started', { landing: NEXT });
     h.state.write((w) => {
-      insertWorkstream(w, started.id);
+      insertWorkstream(w, started.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } });
     });
     const kept = h.addTask('Kept');
 

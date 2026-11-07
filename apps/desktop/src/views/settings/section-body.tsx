@@ -5,7 +5,9 @@ import { BoardColumnsSection } from './board-columns-section';
 import { DecisionsSection } from './decisions-section';
 import { KeepAwakeSection } from './keep-awake-section';
 import { LanePermissionsSection } from './lane-permissions-section';
-import { PlannedSection } from './planned-section';
+import { PatternsSection } from './patterns-section';
+import { PlannedRemainder, PlannedSection } from './planned-section';
+import { ModelsSection } from './models-section';
 import { NetworkHostsSection } from './network-hosts-section';
 import { OneWayPathsSetting } from './one-way-paths-setting';
 import { SmallProposalLimitSetting } from './small-proposal-limit-setting';
@@ -13,6 +15,7 @@ import { ProjectAreas } from './project-areas';
 import { ProjectBilling } from './project-billing';
 import { ProjectGeneralForm } from './project-general-form';
 import { sectionByKey, SettingsSectionKey } from './sections';
+import { RoleSettings } from './role-settings';
 import { SelfUpdateSection } from './self-update-section';
 import { ShapeJevSetting } from './shape-jev-setting';
 
@@ -109,10 +112,38 @@ export function SectionBody({
           <DecisionsSection />
         </>
       );
-    case SettingsSectionKey.Team:
-    case SettingsSectionKey.RoutingRules:
     case SettingsSectionKey.Models:
+      return (
+        <>
+          {heading}
+          <ModelsSection />
+        </>
+      );
+    case SettingsSectionKey.Team:
+      return (
+        <>
+          {heading}
+          {project ? (
+            <>
+              <RoleSettings key={`roles-${project.id}`} project={project} />
+              <PatternsSection key={`patterns-${project.id}`} project={project} />
+            </>
+          ) : (
+            <NoProject />
+          )}
+          <PlannedRemainder section={section} />
+        </>
+      );
     case SettingsSectionKey.PersonasAndFlows:
+      return (
+        <>
+          {heading}
+          <RoleSettings project={null} />
+          <PatternsSection project={null} />
+          <PlannedRemainder section={section} />
+        </>
+      );
+    case SettingsSectionKey.RoutingRules:
       return (
         <>
           {heading}

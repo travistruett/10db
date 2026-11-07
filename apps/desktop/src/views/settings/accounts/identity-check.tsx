@@ -66,6 +66,7 @@ function refusalColor(problem: AccountProblem): 'yellow' | 'red' {
     case AccountProblem.SecretMissing:
     case AccountProblem.KeychainUnavailable:
     case AccountProblem.StartTimeout:
+    case AccountProblem.NoUsableModel:
       return 'yellow';
     case AccountProblem.IdentityMismatch:
     case AccountProblem.WrongCredentials:

@@ -116,6 +116,7 @@ export function taskDto(overrides: Partial<TaskDto> = {}): TaskDto {
     dependsOn: [],
     boardStatus: 'ready',
     workstreamId: null,
+    modelSetting: null,
     createdAt: AT,
     updatedAt: AT,
     ...overrides,
@@ -209,6 +210,7 @@ export function stepDto(overrides: Partial<WorkstreamStep> = {}): WorkstreamStep
     result: null,
     earlier: [],
     sentBack: 0,
+    setting: null,
     ...overrides,
   });
 }

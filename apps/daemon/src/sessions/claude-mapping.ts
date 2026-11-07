@@ -2,12 +2,14 @@ import type {
   HookJSONOutput,
   McpServerConfig,
   PermissionResult,
+  SDKAssistantMessage,
   SDKMessage,
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
 import { MAX_STEP_SUMMARY } from '@10db/contracts';
 import type { GuardVerdict } from '../guard';
 import { SandboxedMcpServer } from '../sandbox';
+import { isModelRefusal, MODEL_NOT_FOUND_ERROR } from './account-check';
 import type {
   SessionEvent,
   SessionMcpServer,
@@ -23,6 +25,21 @@ const BRIEF_CHARS = 80;
 const TURN_TEXT_CHARS = MAX_STEP_SUMMARY;
 /** Unix seconds stay below this until the year 33658; milliseconds are already above it. */
 const MILLISECONDS_FLOOR = 1e12;
+
+/**
+ * Whether an assistant message shows the account cannot run the model the session launched on. The first reply
+ * of a session, before any tool ran, may carry any error that names the launched model (see `isModelRefusal`);
+ * Claude Code's own `model_not_found` counts wherever it comes.
+ */
+export function refusesModel(
+  msg: SDKAssistantMessage,
+  launched: string,
+  firstReply: boolean,
+): boolean {
+  if (!firstReply) return msg.error === MODEL_NOT_FOUND_ERROR;
+  const text = msg.message.content.flatMap((block) => (block.type === 'text' ? [block.text] : []));
+  return isModelRefusal(msg.error, text.join('\n'), launched);
+}
 
 /** What a tool call is about, in a few words: the command, or the file it touches. */
 export function toolBrief(input: unknown): string {

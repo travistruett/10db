@@ -20,6 +20,7 @@ import { createChannel } from './channel';
 import type { QueryFn } from './claude-adapter';
 import {
   mapSdkMessage,
+  refusesModel,
   toHookOutput,
   toPermissionResult,
   toSdkMcpServer,
@@ -411,11 +412,25 @@ export function startShapeSession(
     resolveVerified(true);
   };
 
+  /**
+   * Whether the conversation has had a reply: only its first can show the model was refused. A resumed
+   * conversation has had one, whatever this process has seen.
+   */
+  let repliedYet = spec.resumeProviderSessionId !== null;
   const pump = async (): Promise<void> => {
     try {
       for await (const msg of q) {
         if (failure) continue;
         if (msg.type === 'assistant') {
+          const firstReply = !repliedYet;
+          repliedYet = true;
+          if (refusesModel(msg, spec.model, firstReply)) {
+            refuse(
+              SessionEndReason.ModelRefused,
+              `Claude Code reported that account "${spec.account.label}" cannot run the model ${spec.model}.`,
+            );
+            continue;
+          }
           const problem = credentialProblem(msg.error);
           if (problem) {
             const message = `Claude Code reported ${String(msg.error)} for account "${spec.account.label}"`;

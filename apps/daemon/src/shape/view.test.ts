@@ -25,6 +25,7 @@ import { silentLogger } from '../log';
 import { FakeAdapter, type FakeShapeBehaviour } from '../sessions';
 import { must, seedConversation, type ConversationFixture } from './conversation-fixture';
 import { createShapeService, DEFAULT_SHAPE_TITLE, type ShapeService } from './service';
+import { SHAPE_AGENT_MODELS } from './confinement';
 
 // Shape spec §4, §11: what the screen reads (the view), and the actions the routes call.
 
@@ -53,8 +54,10 @@ beforeEach(() => {
     brainstormRefusal: () => null,
     launch: () => ({
       cwd: '/repo',
-      model: 'opus',
+      model: 'claude-opus-5-5',
+      modelId: 'claude-opus-5-5',
       effort: 'high',
+      agentModels: SHAPE_AGENT_MODELS,
       env: {},
       account: {
         accountId: mintId('Account'),

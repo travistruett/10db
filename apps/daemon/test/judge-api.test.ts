@@ -9,11 +9,12 @@ import {
 import { insertJudgeCall } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { startDaemon, type RunningDaemon } from '../src/daemon';
+import type { RunningDaemon } from '../src/daemon';
 import { KeychainError, OPENROUTER_KEY_ACCOUNT, type Keychain } from '../src/environment';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
 import { createMemoryKeychain, tempDir } from './fixtures';
+import { startDaemonWithProfiles } from './daemon-with-profiles';
 
 const KEY = 'sk-or-v1-0123456789abcdef-NEVER-SHOWN';
 const QUIET = { caffeinate: () => null, watch: false } as const;
@@ -48,7 +49,7 @@ afterEach(async () => {
 
 async function start(opts: { keychain?: Keychain; judgeOff?: boolean } = {}) {
   const keychain = opts.keychain ?? createMemoryKeychain();
-  daemon = await startDaemon({
+  daemon = await startDaemonWithProfiles({
     sandbox: null,
     dataDir: data.path,
     port: 0,

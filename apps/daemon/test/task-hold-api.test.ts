@@ -12,10 +12,11 @@ import {
 import { transitionWorkstream } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { startDaemon, type RunningDaemon } from '../src/daemon';
+import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
 import { createTempRepo, tempDir, waitForAsync } from './fixtures';
+import { startDaemonWithProfiles } from './daemon-with-profiles';
 
 let data: { path: string; cleanup(): void };
 let repo: { path: string; cleanup(): void };
@@ -26,7 +27,7 @@ beforeEach(async () => {
   data = tempDir('task hold');
   caps.global = 0;
   repo = createTempRepo();
-  daemon = await startDaemon({
+  daemon = await startDaemonWithProfiles({
     sandbox: null,
     dataDir: data.path,
     port: 0,

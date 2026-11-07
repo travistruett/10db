@@ -1,4 +1,7 @@
 import {
+  ACCOUNT_CARD_DETAIL,
+  AccountCardDetail,
+  AccountProblem,
   InboxKind,
   isParkChoice,
   type DecisionRecording,
@@ -6,6 +9,7 @@ import {
 } from '@10db/contracts';
 import {
   Alert,
+  Anchor,
   Badge,
   Button,
   Code,
@@ -18,6 +22,7 @@ import {
   Textarea,
   UnstyledButton,
 } from '@mantine/core';
+import { Link } from '@tanstack/react-router';
 import type { KeyboardEvent, RefObject } from 'react';
 import { ExternalLink } from '../board/pull-request-link';
 import { BatchCardActions } from './batch-card-actions';
@@ -30,6 +35,7 @@ import { KIND_LABELS, optionLabel } from './permission-labels';
 import { usePrincipleOf } from './principle-card';
 import { RecordDecision } from './record-decision';
 import { PRINCIPLE_KIND_LABELS } from '../knowledge/knowledge-labels';
+import { SettingsSectionKey } from '../settings/sections';
 
 export interface InboxCardProps {
   readonly item: InboxItemDto;
@@ -81,6 +87,12 @@ const GITHUB_PAGE = 'https://github.com/';
  * only. The daemon's text is not trusted to be a link, and the desktop app opens nothing else, so a
  * check elsewhere (a third-party CI) gets no button; the card's body holds its address regardless.
  */
+/** Whether the card says an account has no model 10db may run, which is fixed under Settings › Accounts. */
+function needsAccountModels(item: InboxItemDto): boolean {
+  const card = AccountCardDetail.safeParse(item.detail?.[ACCOUNT_CARD_DETAIL]);
+  return card.success && card.data.problem === AccountProblem.NoUsableModel;
+}
+
 function cardLink(item: InboxItemDto): string | null {
   if (item.kind !== InboxKind.Flag) return null;
   const link = item.detail?.['link'];
@@ -231,6 +243,21 @@ export function InboxCard({
         )}
         {rejection ? <ReviewRejection review={rejection} /> : null}
         {link === null ? null : <ExternalLink url={link} label="Open on GitHub" />}
+        {needsAccountModels(item) ? (
+          // The account's drawer has no route of its own, so this opens the section that lists its accounts.
+          <Anchor
+            size="sm"
+            renderRoot={(props) => (
+              <Link
+                {...props}
+                to="/settings/$section"
+                params={{ section: SettingsSectionKey.Accounts }}
+              />
+            )}
+          >
+            Open Accounts in Settings
+          </Anchor>
+        ) : null}
         <BatchCardActions item={item} onDone={onDismiss} />
         {hasOptions ? (
           <Radio.Group value={choice} onChange={onChoose} aria-label="Answer">

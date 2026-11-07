@@ -36,6 +36,10 @@ out="$root/dist/release"
 rm -rf "$bundle" "$out"
 mkdir -p "$out"
 
+# The catalogue the release starts from until its first fetch works. Tauri bundles resources/daemon/, and the
+# daemon bundle step leaves this file alone. A failed fetch stops the build (set -e).
+node "$root/scripts/release/fetch-catalogue.mjs" "$root/apps/desktop/src-tauri/resources/daemon/catalogue-snapshot.json"
+
 if [ "$mode" = signed ]; then
   pnpm --filter @10db/desktop tauri build --target "$target" --bundles dmg
 else

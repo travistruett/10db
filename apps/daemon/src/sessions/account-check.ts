@@ -1,13 +1,23 @@
 import {
   AccountKind,
   AccountProblem,
-  MODEL_ALIAS_PATTERN,
   signsInWithLogin,
   type AccountRefusal,
+  type Effort,
   type SupportedAccountKind,
 } from '@10db/contracts';
 import type { AccountExpectation } from '../environment';
 import type { SignInState } from './sign-in-check';
+
+/** A model an account lists. */
+export interface SeenModel {
+  /** What the account calls it, without a context-window suffix. */
+  readonly id: string;
+  /** The concrete model an alias stands for; null when the account reports none. */
+  readonly resolvedId: string | null;
+  /** The efforts it reports that 10db knows; empty when it reports none. */
+  readonly efforts: readonly Effort[];
+}
 
 /** What Claude Code reports about the account a session runs on (`accountInfo()`). */
 export interface SeenAccount {
@@ -17,8 +27,8 @@ export interface SeenAccount {
   readonly tokenSource: string | undefined;
   readonly apiKeySource: string | undefined;
   readonly apiProvider: string | undefined;
-  /** The models a ChatGPT plan offers, when the agent lists them; Claude Code reports none. */
-  readonly models?: readonly string[];
+  /** The models the account lists, when the agent could list them; absent when it could not. */
+  readonly models?: readonly SeenModel[];
 }
 
 export function seenFrom(info: {
@@ -247,13 +257,16 @@ export function checkInitCredentials(
       };
 }
 
-/** An alias matches the model ID Claude Code resolved it to; a model-map ID must come back unchanged. */
-export function modelMatches(requested: string, reported: string): boolean {
-  if (requested === reported) return true;
-  return (
-    MODEL_ALIAS_PATTERN.test(requested) && reported.toLowerCase().includes(`claude-${requested}`)
-  );
+/** The suffix that asks Claude Code for the 1M context window; a subscription's `init.model` leaves it off. */
+const CONTEXT_SUFFIX = /\[1m\]$/;
+
+/** The model a session reports is the one launched, up to the context suffix a subscription drops. */
+export function modelMatches(launched: string, reported: string): boolean {
+  return launched.replace(CONTEXT_SUFFIX, '') === reported.replace(CONTEXT_SUFFIX, '');
 }
+
+/** The assistant error Claude Code reports for a model the account cannot run. */
+export const MODEL_NOT_FOUND_ERROR = 'model_not_found';
 
 const CREDENTIAL_ERRORS: Readonly<Record<string, AccountProblem>> = {
   authentication_failed: AccountProblem.SignedOut,
@@ -262,6 +275,31 @@ const CREDENTIAL_ERRORS: Readonly<Record<string, AccountProblem>> = {
   billing_error: AccountProblem.CannotBill,
   account_on_hold: AccountProblem.CannotBill,
 };
+
+/** What an error says when it reports that a model is missing or off limits to the account. */
+const MODEL_UNAVAILABLE =
+  /not found|does not exist|doesn['’]t exist|not available|isn['’]t supported|is not supported|no access|(?:don['’]t|do not) have access|not authorized|access denied|accessdenied|unknown model/i;
+
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** Whether `text` names `id` as a whole token, so `<model>` is not found in `<model>-<suffix>`. */
+function namesToken(text: string, id: string): boolean {
+  // A model ID continues through letters, digits, `-`, `_`, `:`, `/` and a `.` that a character follows.
+  return new RegExp(`(?<![\\w.:/-])${escapeRegExp(id)}(?![\\w:/-]|\\.\\w)`).test(text);
+}
+
+/**
+ * Whether an assistant error at a session's first reply means the account cannot run the model it was launched on.
+ * Claude Code names that case `model_not_found`. A gateway or Bedrock may report it as an invalid request or an
+ * unknown error instead, so those count only when the text names the launched model ID as a whole token and says
+ * the model is missing or off limits. Every other error (a server error, an overload, a rate limit, a credential or
+ * billing error) never does, whatever it quotes.
+ */
+export function isModelRefusal(error: string | undefined, text: string, launched: string): boolean {
+  if (error === MODEL_NOT_FOUND_ERROR) return true;
+  if (error !== 'invalid_request' && error !== 'unknown') return false;
+  return namesToken(text, launched.replace(CONTEXT_SUFFIX, '')) && MODEL_UNAVAILABLE.test(text);
+}
 
 /** An assistant error that is the account's, not the work's. */
 export function credentialProblem(error: string | undefined): AccountProblem | null {

@@ -33,11 +33,21 @@ import {
   SystemCheckDto,
   WorkstreamId,
 } from '@10db/contracts';
-import { getAccount, getWorkstream, listAccounts } from '@10db/db';
+import {
+  findModelProfile,
+  getAccount,
+  getWorkstream,
+  listAccountModels,
+  listAccounts,
+  patchAccount,
+} from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { CATALOGUE_URL } from '../catalogue';
 import { z } from 'zod';
 import { WebSocket } from 'ws';
 import { apiClient, quickFlowId } from '../../test/api-client';
+import { readModelsDevFixture } from '../../test/models-dev-fixture';
+import { seedProfiles } from '../../test/seed-profiles';
 import { FakeGh } from '../../test/fake-gh';
 import {
   createTempRepo,
@@ -61,6 +71,7 @@ import {
   type RunningDaemon,
 } from './index';
 import { WorktreeRootError, worktreeRootFor } from './worktree-root';
+import { startDaemonWithProfiles } from '../../test/daemon-with-profiles';
 
 /** No real caffeinate and no file watcher in daemon tests that are not about them. */
 const QUIET = { caffeinate: () => null, watch: false } as const;
@@ -284,7 +295,7 @@ describe('startDaemon', () => {
     try {
       // A fresh data directory: the default account is seeded with no identity; the fake's probe reports builder@example.com.
       const adapter = new FakeAdapter({ Alpha: [[{ do: 'turn_complete' }]] });
-      const running = await startDaemon({
+      const running = await startDaemonWithProfiles({
         sandbox: null,
         dataDir: dir.path,
         port: 0,
@@ -330,7 +341,7 @@ describe('startDaemon', () => {
         specs.push(spec);
         return {};
       };
-      const running = await startDaemon({
+      const running = await startDaemonWithProfiles({
         sandbox: null,
         dataDir: dir.path,
         port: 0,
@@ -390,7 +401,7 @@ describe('startDaemon', () => {
           specs.push(spec);
           return {};
         };
-        const running = await startDaemon({
+        const running = await startDaemonWithProfiles({
           dataDir: dir.path,
           port: 0,
           adapter,
@@ -526,7 +537,7 @@ describe('startDaemon', () => {
       symlinkSync(elsewhere, roots.filesRoot);
       try {
         const adapter = new FakeAdapter({ Alpha: [[{ do: 'turn_complete' }]] });
-        const running = await startDaemon({
+        const running = await startDaemonWithProfiles({
           dataDir: dir.path,
           port: 0,
           adapter,
@@ -864,7 +875,7 @@ describe('startDaemon', () => {
     const repo = createTempRepo();
     const book: FakeScriptBook = { Alpha: [[{ do: 'hang' }], [{ do: 'hang' }]] };
     const start = () =>
-      startDaemon({
+      startDaemonWithProfiles({
         sandbox: null,
         dataDir: dir.path,
         port: 0,
@@ -1122,7 +1133,7 @@ describe('startDaemon', () => {
       return {};
     };
     try {
-      daemon = await startDaemon({
+      daemon = await startDaemonWithProfiles({
         sandbox: null,
         dataDir: dir.path,
         port: 0,
@@ -1415,6 +1426,183 @@ describe('startDaemon', () => {
     });
   });
 
+  it('fetches the model catalogue at start only when catalogueSync is given', async () => {
+    const requests: string[] = [];
+    daemon = await startDaemon({
+      sandbox: null,
+      dataDir: dir.path,
+      port: 0,
+      adapter: new FakeAdapter({}),
+      logLevel: 'warn',
+      ...QUIET,
+      catalogueSync: true,
+      fetch: (input) => {
+        requests.push(
+          typeof input === 'string' ? input : input instanceof URL ? input.href : input.url,
+        );
+        return Promise.reject(new Error('offline'));
+      },
+    });
+    await waitFor(() => requests.length > 0);
+    expect(requests).toEqual([CATALOGUE_URL]);
+  });
+
+  describe('the model refresh', () => {
+    const OPUS = { id: 'opus', resolvedId: 'claude-opus-5-5', efforts: ['low' as const] };
+    const startWithList = async (catalogueSync: boolean) => {
+      const adapter = new FakeAdapter({ Alpha: [[{ do: 'turn_complete' }]] });
+      adapter.probeSeen = { ...adapter.probeSeen, models: [OPUS] };
+      const fetches: string[] = [];
+      const net = { online: true };
+      daemon = await startDaemon({
+        sandbox: null,
+        dataDir: dir.path,
+        port: 0,
+        adapter,
+        logLevel: 'warn',
+        ...QUIET,
+        catalogueSync,
+        fetch: (input) => {
+          fetches.push(
+            typeof input === 'string' ? input : input instanceof URL ? input.href : input.url,
+          );
+          return net.online
+            ? Promise.resolve(new Response(JSON.stringify(readModelsDevFixture())))
+            : Promise.reject(new Error('offline'));
+        },
+      });
+      // With no snapshot given and the fetch off there is no catalogue to build profiles from; the fixture's models stand in.
+      if (!catalogueSync) seedProfiles(daemon.state);
+      return { adapter, fetches, net, running: daemon };
+    };
+
+    it('builds profiles from each account list after the fetch, and a second call joins a run', async () => {
+      const { adapter, fetches, running } = await startWithList(true);
+      await waitFor(() => listAccountModels(running.state.db).length > 0);
+      expect(listAccountModels(running.state.db).map((m) => m.model)).toEqual(['claude-opus-5-5']);
+      expect(findModelProfile(running.state.db, 'claude', 'claude-opus-5-5', 'low')).toMatchObject({
+        enabled: true,
+        tier: 'strongest',
+        outputPrice: 20,
+      });
+
+      const before = { fetches: fetches.length, probes: adapter.probes.length };
+      await Promise.all([
+        running.refreshModels({ force: false }),
+        running.refreshModels({ force: false }),
+      ]);
+      expect(fetches.length - before.fetches).toBe(1);
+      expect(adapter.probes.length - before.probes).toBe(1);
+    });
+
+    it('scores the models an account lists after the profiles exist, in one request, and a second refresh asks for nothing', async () => {
+      const adapter = new FakeAdapter({});
+      adapter.probeSeen = { ...adapter.probeSeen, models: [OPUS] };
+      const aaRequests: string[] = [];
+      // No key until the profiles exist, so only the refresh after the catalogue can score them.
+      const key: { value: string | null } = { value: null };
+      daemon = await startDaemon({
+        sandbox: null,
+        dataDir: dir.path,
+        port: 0,
+        adapter,
+        logLevel: 'warn',
+        ...QUIET,
+        catalogueSync: true,
+        aaKey: () => key.value,
+        fetch: (input) => {
+          const url =
+            typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+          if (!url.includes('artificialanalysis')) {
+            return Promise.resolve(new Response(JSON.stringify(readModelsDevFixture())));
+          }
+          aaRequests.push(url);
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                intelligence_index_version: '9.9',
+                pagination: { has_more: false },
+                data: [
+                  {
+                    slug: 'claude-opus-5-5-low',
+                    name: 'Invented Opus',
+                    model_creator: { name: 'Test Lab' },
+                    evaluations: { artificial_analysis_intelligence_index: 42 },
+                  },
+                ],
+              }),
+            ),
+          );
+        },
+      });
+      const running = daemon;
+      await waitFor(
+        () => findModelProfile(running.state.db, 'claude', 'claude-opus-5-5', 'low') !== undefined,
+      );
+      key.value = 'aa-test-key';
+      await running.refreshModels({ force: false });
+      expect(aaRequests).toHaveLength(1);
+      expect(findModelProfile(running.state.db, 'claude', 'claude-opus-5-5', 'low')).toMatchObject({
+        aaSlug: 'claude-opus-5-5-low',
+      });
+      await running.refreshModels({ force: false });
+      expect(aaRequests).toHaveLength(1);
+    });
+
+    it('after a failed fetch reads only accounts not read today, unless the builder forces it', async () => {
+      const { adapter, net, running } = await startWithList(true);
+      await waitFor(() => listAccountModels(running.state.db).length > 0);
+      net.online = false;
+      const probes = adapter.probes.length;
+      await running.refreshModels({ force: false });
+      expect(adapter.probes.length).toBe(probes);
+      await running.refreshModels({ force: true });
+      expect(adapter.probes.length).toBe(probes + 1);
+    });
+
+    it('with the catalogue off fetches nothing and probes no account, whoever asks: not a refresh, a sign-in or a session', async () => {
+      const repo = createTempRepo();
+      try {
+        const { adapter, fetches, running } = await startWithList(false);
+        const api = apiClient(running.url, running.token);
+        await running.refreshModels({ force: true });
+        // A ready account, so the session start needs no probe of its own.
+        const [account] = listAccounts(running.state.db);
+        if (!account) throw new Error('no default account');
+        running.state.write((ctx) =>
+          patchAccount(ctx, account.id, { expectedIdentity: 'builder@example.com' }),
+        );
+        await api.post(`/accounts/${account.id}/connect`, z.unknown());
+        adapter.logins[0]?.end({ ok: true });
+        await waitForAsync(async () =>
+          (await api.get('/accounts/connecting', z.unknown())) === null ? true : undefined,
+        );
+        const project = await api.post('/projects', ProjectDto, {
+          name: 'demo',
+          repoPath: repo.path,
+          gateCommand: 'true',
+          flowId: await quickFlowId(api),
+          areas: [{ name: 'src', globs: ['src/**'] }],
+        });
+        const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
+          title: 'Alpha',
+          acceptanceCriteria: ['it works'],
+          areas: ['src'],
+        });
+        await api.post(`/tasks/${task.id}/start`, z.unknown());
+        await waitForAsync(async () =>
+          (await api.get('/workstreams?active=false', z.array(WorkstreamDto))).some(
+            (w) => w.taskId === task.id && w.state === 'DONE',
+          ),
+        );
+        expect(fetches).toEqual([]);
+        expect(adapter.probes).toEqual([]);
+      } finally {
+        repo.cleanup();
+      }
+    });
+  });
+
   it('with TENDB_BENCHMARKS=off never reads the benchmark key and makes no Artificial Analysis request', async () => {
     let keyReads = 0;
     const requests: string[] = [];
@@ -1470,8 +1658,12 @@ describe('startDaemon', () => {
         outcome: 'no_key',
         models: 0,
       });
+      // With the catalogue fetch off, nothing builds profiles; the fixture's stand in for an account's list.
+      seedProfiles(daemon.state);
       const profiles = await api.get('/model-profiles', z.array(ModelProfileDto));
-      const sonnetHigh = profiles.find((p) => p.model === 'sonnet' && p.effort === 'high');
+      const sonnetHigh = profiles.find(
+        (p) => p.model === 'claude-sonnet-5-5' && p.effort === 'high',
+      );
       if (!sonnetHigh) throw new Error('not seeded');
       // Hand-set (invented) scores: the profile becomes manual and the only measured one.
       expect(
@@ -1494,8 +1686,8 @@ describe('startDaemon', () => {
       const plan = await api.get(`/tasks/${task.id}/step-plan`, StepPlanDto);
       expect(plan).toMatchObject({ flowName: 'standard', overBudget: [] });
       expect(plan.steps.map((s) => `${s.role}:${s.model}@${s.effort}`)).toEqual([
-        'implement:sonnet@high',
-        'review:sonnet@high',
+        'implement:claude-sonnet-5-5@high',
+        'review:claude-sonnet-5-5@high',
       ]);
       await api.patch(`/projects/${project.id}`, ProjectDto, { budgetCeiling: 1 });
       await expect(api.post(`/tasks/${task.id}/start`, WorkstreamDto)).rejects.toThrow('-> 400');

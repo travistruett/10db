@@ -95,7 +95,9 @@ function laneToken(): string {
   const task = state.write((ctx) =>
     insertTask(ctx, project.id, { title: 'A', acceptanceCriteria: ['x'], areas: ['api'] }),
   );
-  const workstream = state.write((ctx) => insertWorkstream(ctx, task.id));
+  const workstream = state.write((ctx) =>
+    insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+  );
   const { token, hash } = mintSessionToken();
   state.write((ctx) =>
     insertSession(ctx, {

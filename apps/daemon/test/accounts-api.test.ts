@@ -37,7 +37,7 @@ import {
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { startDaemon, type RunningDaemon } from '../src/daemon';
+import type { RunningDaemon } from '../src/daemon';
 import { KeychainError, secretFingerprint, type Keychain } from '../src/environment';
 import {
   AccountLoginError,
@@ -47,6 +47,7 @@ import {
 } from '../src/sessions';
 import { apiClient } from './api-client';
 import { createMemoryKeychain, createTempRepo, tempDir, waitForAsync } from './fixtures';
+import { startDaemonWithProfiles } from './daemon-with-profiles';
 
 const SECRET = 'sk-or-v1-0123456789abcdef-NEVER-SHOWN';
 const QUIET = { caffeinate: () => null, watch: false } as const;
@@ -72,7 +73,7 @@ async function start(
 ) {
   const keychain = opts.keychain ?? createMemoryKeychain();
   const adapter = opts.adapter ?? new FakeAdapter({});
-  daemon = await startDaemon({
+  daemon = await startDaemonWithProfiles({
     sandbox: null,
     dataDir: data.path,
     port: 0,
@@ -136,7 +137,7 @@ describe('accounts over HTTP', () => {
         kind: 'gateway',
         label: 'OpenRouter',
         monthlyCapUsd: 100,
-        settings: { baseUrl: 'https://openrouter.ai/api', aliases: ['haiku'] },
+        settings: { baseUrl: 'https://openrouter.ai/api' },
       });
       expect(signIn).toBeNull();
       expect(account.secretSet).toBe(false);
@@ -627,7 +628,9 @@ describe('connecting a ChatGPT plan account over HTTP', () => {
           acceptanceCriteria: ['x'],
           areas: ['src'],
         });
-        const queued = insertWorkstream(ctx, task.id);
+        const queued = insertWorkstream(ctx, task.id, {
+          first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        });
         transitionWorkstream(ctx, queued.id, { to: 'STARTING', fence: null });
         return queued;
       });
@@ -655,7 +658,9 @@ describe('connecting a ChatGPT plan account over HTTP', () => {
           acceptanceCriteria: ['x'],
           areas: ['src'],
         });
-        const lane = insertWorkstream(ctx, task.id);
+        const lane = insertWorkstream(ctx, task.id, {
+          first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        });
         transitionWorkstream(ctx, lane.id, { to: 'STARTING', fence: null });
         insertSession(ctx, {
           workstreamId: lane.id,
@@ -751,7 +756,7 @@ describe('connecting a ChatGPT plan account over HTTP', () => {
     const { account } = await api.post('/accounts', AccountCreatedDto, {
       kind: 'gateway',
       label: 'OpenRouter',
-      settings: { baseUrl: 'https://openrouter.ai/api', aliases: ['haiku'] },
+      settings: { baseUrl: 'https://openrouter.ai/api' },
     });
     expect((await connect(url, token, account.id)).status).toBe(400);
     expect(adapter.logins).toHaveLength(0);

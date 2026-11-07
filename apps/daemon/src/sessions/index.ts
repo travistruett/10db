@@ -13,7 +13,7 @@ export {
 } from './fake-adapter';
 export { scriptedShapeBehaviour } from './fake-shape';
 export type { FakeShapeBehaviour, FakeShapeTurn } from './fake-shape';
-export { checkAccount, loginIdentity, type SeenAccount } from './account-check';
+export { checkAccount, loginIdentity, type SeenAccount, type SeenModel } from './account-check';
 export { AccountLoginError, AccountProbeError, CompletionError, SessionEndReason } from './types';
 export type {
   AccountLogin,

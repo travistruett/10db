@@ -67,7 +67,10 @@ function cut(title: string, index: number): ReturnType<typeof insertBatch> {
 seed.open.forEach((entry, index) => {
   const batch = cut(entry.title, index);
   store.write((ctx) => {
-    const workstream = insertWorkstream(ctx, entry.taskId, { batchId: batch.id });
+    const workstream = insertWorkstream(ctx, entry.taskId, {
+      first: { model: 'seeded-model', effort: 'medium' },
+      batchId: batch.id,
+    });
     for (const to of PATH[entry.state]) {
       transitionWorkstream(ctx, workstream.id, { to, fence: null, reason: 'seeded' });
     }

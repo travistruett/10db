@@ -1,129 +1,12 @@
-import { AccountKind, isMetered } from '@10db/contracts';
-import {
-  ActionIcon,
-  Button,
-  Group,
-  SegmentedControl,
-  Stack,
-  TagsInput,
-  Text,
-  TextInput,
-} from '@mantine/core';
-import { IconPlus, IconTrash } from '@tabler/icons-react';
-import { useEffect, useId, useRef } from 'react';
+import { AccountKind, isMetered, type AccountId } from '@10db/contracts';
+import { SegmentedControl, Stack, Text, TextInput } from '@mantine/core';
 import { ACCOUNT_KIND_LABEL } from '../account-kind-label';
 import type { AccountFormValues } from './account-form-values';
+import { TierOverrides } from './tier-overrides';
 
 export type AccountFormMode = 'create' | 'edit';
 
 type Errors = Readonly<Record<string, string>>;
-
-function ModelMapRows({
-  values,
-  onChange,
-  error,
-}: {
-  readonly values: AccountFormValues;
-  readonly onChange: (next: AccountFormValues) => void;
-  readonly error: string | undefined;
-}) {
-  const errorId = useId();
-  const container = useRef<HTMLDivElement>(null);
-  const addButton = useRef<HTMLButtonElement>(null);
-  // Which control takes focus once the rows it belongs to have rendered.
-  const pendingFocus = useRef<number | 'add' | null>(null);
-  useEffect(() => {
-    const target = pendingFocus.current;
-    if (target === null) return;
-    pendingFocus.current = null;
-    if (target === 'add') addButton.current?.focus();
-    else
-      container.current
-        ?.querySelector<HTMLInputElement>(`[data-alias-row="${String(target)}"]`)
-        ?.focus();
-  });
-  const setRow = (index: number, row: { alias: string; modelId: string }) => {
-    onChange({ ...values, modelMap: values.modelMap.map((r, i) => (i === index ? row : r)) });
-  };
-  const invalid = error
-    ? { withAria: false, 'aria-invalid': true, 'aria-describedby': errorId }
-    : {};
-  return (
-    <Stack gap="xs" ref={container}>
-      <div>
-        <Text size="sm" fw={500}>
-          Model map
-        </Text>
-        <Text size="xs" c="dimmed">
-          The channel&apos;s own model ID for each alias, such as sonnet. Sessions asking for the
-          alias use the ID instead.
-        </Text>
-      </div>
-      {values.modelMap.map((row, index) => (
-        <Group key={index} gap="xs" wrap="nowrap" align="flex-start">
-          <TextInput
-            size="md"
-            aria-label={`Alias, row ${String(index + 1)}`}
-            data-alias-row={index}
-            placeholder="sonnet"
-            value={row.alias}
-            {...invalid}
-            onChange={(e) => {
-              setRow(index, { ...row, alias: e.currentTarget.value });
-            }}
-          />
-          <TextInput
-            size="md"
-            style={{ flex: 1 }}
-            aria-label={`Model ID, row ${String(index + 1)}`}
-            placeholder="anthropic/claude-sonnet"
-            value={row.modelId}
-            {...invalid}
-            onChange={(e) => {
-              setRow(index, { ...row, modelId: e.currentTarget.value });
-            }}
-          />
-          <ActionIcon
-            size={36}
-            variant="subtle"
-            color="gray"
-            aria-label={
-              row.alias.trim() === '' ||
-              values.modelMap.filter((r) => r.alias.trim() === row.alias.trim()).length > 1
-                ? `Remove row ${String(index + 1)} mapping`
-                : `Remove ${row.alias.trim()} mapping`
-            }
-            onClick={() => {
-              pendingFocus.current = index < values.modelMap.length - 1 ? index : 'add';
-              onChange({ ...values, modelMap: values.modelMap.filter((_, i) => i !== index) });
-            }}
-          >
-            <IconTrash size={20} stroke={1.5} />
-          </ActionIcon>
-        </Group>
-      ))}
-      {error ? (
-        <Text id={errorId} size="xs" c="red" role="alert">
-          {error}
-        </Text>
-      ) : null}
-      <Group>
-        <Button
-          ref={addButton}
-          size="sm"
-          variant="subtle"
-          leftSection={<IconPlus size={16} stroke={1.5} />}
-          onClick={() => {
-            pendingFocus.current = values.modelMap.length;
-            onChange({ ...values, modelMap: [...values.modelMap, { alias: '', modelId: '' }] });
-          }}
-        >
-          Add Model Mapping
-        </Button>
-      </Group>
-    </Stack>
-  );
-}
 
 /** The fields an account of `values.kind` takes. The kind itself is chosen, or fixed, outside. */
 export function AccountFields({
@@ -131,11 +14,14 @@ export function AccountFields({
   onChange,
   errors,
   mode,
+  accountId,
 }: {
   readonly values: AccountFormValues;
   readonly onChange: (next: AccountFormValues) => void;
   readonly errors: Errors;
   readonly mode: AccountFormMode;
+  /** The account being edited; null while it is being created, when it has no list of models yet. */
+  readonly accountId: AccountId | null;
 }) {
   const metered = isMetered(values.kind);
   const text =
@@ -260,17 +146,14 @@ export function AccountFields({
           }}
         />
       ) : null}
-      <ModelMapRows values={values} onChange={onChange} error={errors['modelMap']} />
-      <TagsInput
-        size="md"
-        label="Offered aliases"
-        description="The model aliases this account offers. Leave empty to offer every alias."
-        value={[...values.aliases]}
-        error={errors['aliases']}
-        onChange={(aliases) => {
-          onChange({ ...values, aliases });
-        }}
-      />
+      {mode === 'edit' && accountId !== null ? (
+        <TierOverrides
+          accountId={accountId}
+          values={values}
+          onChange={onChange}
+          error={errors['tierOverrides']}
+        />
+      ) : null}
     </Stack>
   );
 }

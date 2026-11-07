@@ -49,6 +49,7 @@ import {
   PickSize,
   ProjectId,
   ProjectInput,
+  ModelSettingsInput,
   ProjectPatch,
   PROTOCOL_VERSION,
   RetryInput,
@@ -868,6 +869,26 @@ export function createApp(deps: ApiDeps) {
       (c) =>
         c.json(deps.services.patchFlow(FlowId.parse(c.req.param('flowId')), c.req.valid('json'))),
     )
+    .get('/model-settings', (c) => c.json(deps.services.getModelSettings(null)))
+    .put(
+      '/model-settings',
+      validator('json', (value): ModelSettingsInput => ModelSettingsInput.parse(value)),
+      (c) => c.json(deps.services.setGlobalModelSettings(c.req.valid('json'))),
+    )
+    .get('/projects/:projectId/model-settings', (c) =>
+      c.json(deps.services.getModelSettings(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .put(
+      '/projects/:projectId/model-settings',
+      validator('json', (value): ModelSettingsInput => ModelSettingsInput.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.setProjectModelSettings(
+            ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('json'),
+          ),
+        ),
+    )
     .get('/model-profiles', (c) => c.json(deps.services.listModelProfiles()))
     .patch(
       '/model-profiles/:profileId',
@@ -901,6 +922,10 @@ export function createApp(deps: ApiDeps) {
     .get('/benchmarks/status', (c) => c.json(deps.services.benchmarkStatus()))
     .post('/benchmarks/sync', async (c) => c.json(await deps.services.syncBenchmarks()))
     .get('/benchmarks/models', (c) => c.json(deps.services.listAaModels()))
+    .get('/models', (c) => c.json(deps.services.listModels()))
+    .get('/models/offers', (c) => c.json(deps.services.listAccountOffers()))
+    .get('/models/status', (c) => c.json(deps.services.catalogueStatus()))
+    .post('/models/refresh', async (c) => c.json(await deps.services.refreshModels()))
     .patch(
       '/tasks/:taskId',
       validator('json', (value): TaskPatch => TaskPatch.parse(value)),

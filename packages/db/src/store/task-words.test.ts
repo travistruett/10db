@@ -74,7 +74,9 @@ describe('a task headline and why', () => {
 
   it("are carried on the task's workstream as taskHeadline beside taskTitle", () => {
     const task = store.write((ctx) => insertTask(ctx, project.id, { ...base, ...words })).value;
-    const ws = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+    const ws = store.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    ).value;
     expect(ws.taskTitle).toBe(base.title);
     expect(ws.taskHeadline).toBe(words.headline);
   });

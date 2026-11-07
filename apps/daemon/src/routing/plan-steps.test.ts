@@ -1,10 +1,8 @@
 import { mintId, type FlowDto, type PersonaDto } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_FLOWS } from './catalogue';
-import { offeredProfiles } from './offered';
 import { planSteps, type PlanInput } from './plan-steps';
-import { NoProfileError } from './router';
-import { seedCatalogue, testCatalogue } from './test-catalogue';
+import { testCatalogue, unscoredCatalogue } from './test-catalogue';
 
 const NOW = '2026-10-17T12:00:00.000Z';
 const flow = (name: string, steps?: FlowDto['steps']): FlowDto => {
@@ -45,10 +43,12 @@ const defaults = [
   persona('reviewer', 'review'),
   persona('qa', 'qa'),
 ];
-const project = { provider: 'claude', budgetCeiling: null } as const;
+const project = { id: mintId('Project'), budgetCeiling: null } as const;
 const task = (riskTags: ('security' | 'migration')[] = [], criteria = 1) => ({
   riskTags,
   acceptanceCriteria: Array.from({ length: criteria }, (_, i) => `c${String(i)}`),
+  areas: [],
+  modelSetting: null,
 });
 const input = (over: Partial<PlanInput> = {}): PlanInput => ({
   flow: flow('standard'),
@@ -57,6 +57,9 @@ const input = (over: Partial<PlanInput> = {}): PlanInput => ({
   personas: defaults,
   bindings: [],
   profiles: testCatalogue(),
+  roleSettings: [],
+  patterns: [],
+  tierOverrides: {},
   ...over,
 });
 const summary = (plan: ReturnType<typeof planSteps>) =>
@@ -112,50 +115,50 @@ describe('planSteps', () => {
   it.each([
     {
       name: 'no scores: every step on its role default',
-      profiles: seedCatalogue(),
+      profiles: unscoredCatalogue(),
       want: [
-        'plan:opus@high:default',
-        'implement:sonnet@high:default',
-        'review:opus@high:default',
-        'qa:haiku@medium:default',
+        'plan:big@high:default',
+        'implement:mid@high:default',
+        'review:big@high:default',
+        'qa:small@medium:default',
       ],
     },
     {
       name: 'scores but no costs: every step on its role default',
-      profiles: seedCatalogue({
-        'sonnet@high': measured({ intelligence: 46, coding: 42, agentic: 40 }, null),
-        'opus@high': measured({ intelligence: 51, coding: 50, agentic: 48 }, null),
+      profiles: unscoredCatalogue({
+        'mid@high': measured({ intelligence: 46, coding: 42, agentic: 40 }, null),
+        'big@high': measured({ intelligence: 51, coding: 50, agentic: 48 }, null),
       }),
       want: [
-        'plan:opus@high:default',
-        'implement:sonnet@high:default',
-        'review:opus@high:default',
-        'qa:haiku@medium:default',
+        'plan:big@high:default',
+        'implement:mid@high:default',
+        'review:big@high:default',
+        'qa:small@medium:default',
       ],
     },
     {
       name: 'partial: two profiles measured, every step routed among them by score',
-      profiles: seedCatalogue({
-        'sonnet@high': measured({ intelligence: 46, coding: 42, agentic: null }, 0.75),
-        'opus@high': measured({ intelligence: 51, coding: 50, agentic: null }, 2.5),
+      profiles: unscoredCatalogue({
+        'mid@high': measured({ intelligence: 46, coding: 42, agentic: null }, 0.75),
+        'big@high': measured({ intelligence: 51, coding: 50, agentic: null }, 2.5),
       }),
       want: [
-        'plan:sonnet@high:score',
-        'implement:sonnet@high:score',
-        'review:opus@high:score',
-        'qa:sonnet@high:score',
+        'plan:mid@high:score',
+        'implement:mid@high:score',
+        'review:big@high:score',
+        'qa:mid@high:score',
       ],
     },
     {
       name: 'partial: only an agentic score, so QA routes by score and the rest by role',
-      profiles: seedCatalogue({
-        'haiku@medium': measured({ intelligence: null, coding: null, agentic: 36 }, 0.08),
+      profiles: unscoredCatalogue({
+        'small@medium': measured({ intelligence: null, coding: null, agentic: 36 }, 0.08),
       }),
       want: [
-        'plan:opus@high:default',
-        'implement:sonnet@high:default',
-        'review:opus@high:default',
-        'qa:haiku@medium:score',
+        'plan:big@high:default',
+        'implement:mid@high:default',
+        'review:big@high:default',
+        'qa:small@medium:score',
       ],
     },
     {
@@ -261,16 +264,16 @@ describe('planSteps', () => {
   });
 
   it('says which source chose a model without scores, and runs a role default unpinned', () => {
-    const plan = planSteps(input({ profiles: seedCatalogue() }));
+    const plan = planSteps(input({ profiles: unscoredCatalogue() }));
     expect(plan.steps.map((s) => [s.model, s.effort, s.pinned, s.profileId === null])).toEqual([
-      ['sonnet', 'high', false, false],
-      ['opus', 'high', false, false],
+      ['mid', 'high', false, false],
+      ['big', 'high', false, false],
     ]);
     expect(plan.steps[0]?.reason).toBe(
-      'by role default: the balanced model offered; no profile has a coding score to compare on yet (sync Artificial Analysis to route by score)',
+      'by role default: the cheapest model of the balanced tier; no profile has a coding score to compare on yet (sync Artificial Analysis to route by score)',
     );
     expect(plan.steps[1]?.reason).toBe(
-      'by role default: the strongest model offered; no profile has an intelligence score to compare on yet (sync Artificial Analysis to route by score)',
+      'by role default: the cheapest model of the strongest tier; no profile has an intelligence score to compare on yet (sync Artificial Analysis to route by score)',
     );
     expect(plan.overBudget).toEqual([]);
   });
@@ -280,23 +283,56 @@ describe('planSteps', () => {
       input({
         flow: flow('full'),
         task: task(['security', 'migration'], 4),
-        profiles: seedCatalogue(),
+        profiles: unscoredCatalogue(),
       }),
     );
     expect(summary(plan)).toEqual([
-      'plan:planner:opus@high',
-      'plan_review:plan-reviewer:opus@xhigh',
-      'implement:implementer:opus@xhigh',
-      'review:reviewer:opus@xhigh',
-      'qa:qa:haiku@medium',
+      'plan:planner:big@high',
+      'plan_review:plan-reviewer:big@xhigh',
+      'implement:implementer:big@xhigh',
+      'review:reviewer:big@xhigh',
+      'qa:qa:small@medium',
     ]);
     expect(plan.steps[3]?.reason).toContain('(floor: security-sensitive review)');
   });
 
-  it('throws NoProfileError when the account offers none of Claude Code’s models', () => {
-    expect(() =>
-      planSteps(input({ profiles: offeredProfiles(seedCatalogue(), ['opusplan']) })),
-    ).toThrow(NoProfileError);
+  it('names the tier on each step when the account offers nothing, and does not throw', () => {
+    const plan = planSteps(input({ profiles: [] }));
+    expect(
+      plan.steps.map((s) => [s.role, s.model, s.profileId, s.setting, s.reason, s.pinned]),
+    ).toEqual([
+      [
+        'implement',
+        'balanced',
+        null,
+        { kind: 'automatic' },
+        'no model offered for the balanced tier',
+        false,
+      ],
+      [
+        'review',
+        'strongest',
+        null,
+        { kind: 'automatic' },
+        'no model offered for the strongest tier',
+        false,
+      ],
+    ]);
+  });
+
+  it('records the setting that chose each step, so a later list can choose again', () => {
+    const plan = planSteps(
+      input({
+        roleSettings: [
+          { role: 'review', projectId: null, setting: { kind: 'tier', tier: 'fast' } },
+        ],
+      }),
+    );
+    expect(plan.steps.map((s) => s.setting)).toEqual([
+      { kind: 'automatic' },
+      { kind: 'tier', tier: 'fast' },
+    ]);
+    expect(plan.steps[1]?.model).toBe('small');
   });
 
   it('lists the steps no profile within the ceiling can run', () => {

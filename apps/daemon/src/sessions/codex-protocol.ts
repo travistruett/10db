@@ -56,6 +56,7 @@ export const ModelListResponse = z.looseObject({
       model: z.string(),
       hidden: z.boolean().optional(),
       isDefault: z.boolean().optional(),
+      supportedReasoningEfforts: z.array(z.looseObject({ reasoningEffort: z.string() })).optional(),
     }),
   ),
   nextCursor: z.string().nullable().optional(),

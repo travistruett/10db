@@ -41,14 +41,20 @@ function seedWorkstream(title = 'A', areas: string[] = ['api'], project = seedPr
   const task = store.write((ctx) =>
     insertTask(ctx, project.id, { title, acceptanceCriteria: ['x'], areas }),
   ).value;
-  const ws = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+  const ws = store.write((ctx) =>
+    insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+  ).value;
   return { project, task, ws };
 }
 
 describe('workstreams', () => {
   it('refuses a second active workstream for the same task', () => {
     const { task } = seedWorkstream();
-    expect(() => store.write((ctx) => insertWorkstream(ctx, task.id))).toThrow(ConflictError);
+    expect(() =>
+      store.write((ctx) =>
+        insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+      ),
+    ).toThrow(ConflictError);
   });
 
   it('moves along allowed transitions and records each as an event', () => {

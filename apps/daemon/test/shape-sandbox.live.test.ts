@@ -20,10 +20,14 @@ import { createClaudeAdapter, type ShapeToolRequest } from '../src/sessions';
 import {
   judgeShapeCall,
   SHAPE_ALLOWED_TOOLS,
-  SHAPE_SYSTEM_PROMPT,
+  shapeAgentModels,
+  shapeSystemPrompt,
   shapeToolset,
 } from '../src/shape';
 import { createTempRepo } from './fixtures';
+
+/** The prompt for a subscription, whose agents take every alias. */
+const SHAPE_SYSTEM_PROMPT = shapeSystemPrompt(shapeAgentModels('claude_subscription'));
 
 // Shape spec §5.2, §15: a Plan session's commands, in its read-only lane sandbox and through the lanes'
 // broker, on the real SDK and the real srt. Runs on the builder's Max subscription through the
@@ -84,7 +88,11 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
       cwd: checkout,
       env: launcher.probe(account).env,
     });
-    const launch = launcher.session({ ...account, expectedIdentity: seen.email ?? null }, 'haiku');
+    const launch = launcher.session(
+      { ...account, expectedIdentity: seen.email ?? null },
+      'claude-haiku-5-5',
+      [],
+    );
 
     const test = createTestStore();
     const state = createStateStore(test.store, createEventBus());

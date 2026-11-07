@@ -3,10 +3,11 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { startDaemon, type RunningDaemon } from '../src/daemon';
+import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient, quickFlowId } from './api-client';
 import { createTempRepo, tempDir } from './fixtures';
+import { startDaemonWithProfiles } from './daemon-with-profiles';
 
 let data: { path: string; cleanup(): void };
 let repo: { path: string; cleanup(): void };
@@ -15,7 +16,7 @@ let client: Client;
 beforeEach(async () => {
   data = tempDir('task placement');
   repo = createTempRepo();
-  daemon = await startDaemon({
+  daemon = await startDaemonWithProfiles({
     sandbox: null,
     dataDir: data.path,
     port: 0,

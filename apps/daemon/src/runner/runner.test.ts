@@ -2732,17 +2732,9 @@ describe('moving accounts', () => {
   const accountsOf = (id: Parameters<typeof getWorkstream>[1]) =>
     listSessions(engine.store.db, id).map((s) => s.accountId);
 
-  /** A ChatGPT account's Model map: a Codex model ID for each alias the router names. */
-  const CODEX_MODELS: Readonly<Record<string, string>> = {
-    opus: 'gpt-6-astra',
-    sonnet: 'gpt-5.6-sol',
-    haiku: 'gpt-5.6-luna',
-    fable: 'gpt-6-astra',
-  };
   const CHATGPT = {
     kind: 'codex_signin',
     label: 'ChatGPT plan',
-    settings: { modelMap: CODEX_MODELS },
   } as const;
   const CHATGPT_IDENTITY = 'chatgpt@example.com · ws-1';
   type Plan = 'claude' | 'chatgpt';
@@ -2764,9 +2756,6 @@ describe('moving accounts', () => {
     );
     return account.id;
   };
-  /** The model a session on a plan of `plan`'s agent is asked for, given its step's alias. */
-  const modelOn = (plan: Plan, alias: string): string =>
-    plan === 'chatgpt' ? (CODEX_MODELS[alias] ?? alias) : alias;
   const providerOn = (plan: Plan): string => (plan === 'chatgpt' ? 'codex' : 'claude');
 
   it.each([
@@ -2774,7 +2763,7 @@ describe('moving accounts', () => {
     ['a ChatGPT account after a Claude one', 'claude', 'chatgpt'],
     ['a Claude account after a ChatGPT one', 'chatgpt', 'claude'],
   ] as const)(
-    'runs the next session on %s from the handoff, with the step alias mapped',
+    'runs the next session on %s from the handoff, on the model its step recorded',
     async (_name, home, away) => {
       await engineOn(home, {
         Alpha: [
@@ -2807,12 +2796,9 @@ describe('moving accounts', () => {
       expect(accountsOf(workstream.id)).toEqual([engine.project.accountId, other]);
       expect(engine.adapter.prompts[1]).toMatchObject({ resume: null });
       expect(engine.adapter.prompts[1]?.prompt).toContain('Next action: Write the second file');
-      // Each session asks its account's agent for the step's alias, through that account's Model map.
+      // Each session asks its account's agent for the model its step recorded.
       const sessions = listSessions(engine.store.db, workstream.id);
-      expect(specs.map((s) => s.model)).toEqual([
-        modelOn(home, sessions[0]?.model ?? ''),
-        modelOn(away, sessions[1]?.model ?? ''),
-      ]);
+      expect(specs.map((s) => s.model)).toEqual(sessions.map((s) => s.model));
       expect(sessions.map((s) => s.provider)).toEqual([providerOn(home), providerOn(away)]);
     },
   );
@@ -3407,7 +3393,7 @@ describe('flows', () => {
     expect(ws(workstream.id)).toMatchObject({
       state: 'QUEUED',
       stepIndex: 1,
-      model: 'opus',
+      model: 'claude-opus-5-5',
       effort: 'medium',
     });
     engine.launch(workstream.id);
@@ -3488,10 +3474,10 @@ describe('flows', () => {
       'The review step (Reviewer) rejected the work',
     );
     expect(step(workstream.id, 0)).toMatchObject({
-      model: 'opus',
+      model: 'claude-opus-5-5',
       effort: 'low',
       attempts: 1,
-      reason: 'escalated from sonnet@high after the review step rejected it',
+      reason: 'escalated from claude-sonnet-5-5@high after the review step rejected it',
     });
     expect(ws(workstream.id).attempt).toBe(1);
     engine.launch(workstream.id); // the second gate passed; review again
@@ -4105,10 +4091,12 @@ describe('flows', () => {
     expect(ws(workstream.id)).toMatchObject({
       state: 'QUEUED',
       nextAction: { kind: 'fix' },
-      model: 'opus',
+      model: 'claude-opus-5-5',
       effort: 'low',
     });
-    expect(step(workstream.id, 0)?.reason).toBe('escalated from sonnet@high after the gate failed');
+    expect(step(workstream.id, 0)?.reason).toBe(
+      'escalated from claude-sonnet-5-5@high after the gate failed',
+    );
     expect(ws(workstream.id).attempt).toBe(1);
     expect(step(workstream.id, 0)?.attempts).toBe(1);
     await until(workstream.id, (s) => s === 'DONE');

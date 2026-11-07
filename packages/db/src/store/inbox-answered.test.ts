@@ -18,7 +18,9 @@ function seedRun(title: string) {
   const task = store.write((ctx) =>
     insertTask(ctx, project.id, { title, acceptanceCriteria: ['it works'], areas: ['api'] }),
   ).value;
-  const workstream = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+  const workstream = store.write((ctx) =>
+    insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+  ).value;
   return { project, task, workstream };
 }
 

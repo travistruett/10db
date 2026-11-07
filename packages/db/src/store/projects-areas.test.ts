@@ -24,7 +24,9 @@ function holdClaim(
   const task = store.write((ctx) =>
     insertTask(ctx, projectId, { title, acceptanceCriteria: ['x'], areas: [claim.name] }),
   ).value;
-  const ws = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+  const ws = store.write((ctx) =>
+    insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+  ).value;
   const held = store.write((ctx) =>
     acquireClaims(ctx, {
       projectId,

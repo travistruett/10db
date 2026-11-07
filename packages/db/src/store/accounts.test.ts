@@ -71,7 +71,9 @@ function spend(
       acceptanceCriteria: ['x'],
       areas: ['api'],
     });
-    const ws = insertWorkstream(ctx, task.id);
+    const ws = insertWorkstream(ctx, task.id, {
+      first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+    });
     const session = insertSession(ctx, {
       workstreamId: ws.id,
       provider: 'claude',
@@ -306,7 +308,9 @@ describe('projects on accounts', () => {
         acceptanceCriteria: ['x'],
         areas: ['api'],
       });
-      const ws = insertWorkstream(ctx, task.id);
+      const ws = insertWorkstream(ctx, task.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      });
       transitionWorkstream(ctx, ws.id, { to: 'STARTING', fence: null });
     });
     store.write((ctx) => patchProject(ctx, project.id, { accountId: key.id }));
@@ -324,7 +328,9 @@ describe('projects on accounts', () => {
           acceptanceCriteria: ['x'],
           areas: ['api'],
         });
-        const ws = insertWorkstream(ctx, task.id);
+        const ws = insertWorkstream(ctx, task.id, {
+          first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        });
         transitionWorkstream(ctx, ws.id, { to: 'STARTING', fence: null });
       });
     }
@@ -343,7 +349,9 @@ describe('usage', () => {
         areas: ['api'],
       });
       return insertSession(ctx, {
-        workstreamId: insertWorkstream(ctx, task.id).id,
+        workstreamId: insertWorkstream(ctx, task.id, {
+          first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        }).id,
         accountId: key.id,
         provider: 'claude',
         model: 'sonnet',

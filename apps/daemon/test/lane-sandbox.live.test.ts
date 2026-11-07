@@ -306,7 +306,8 @@ async function runLane(opts: {
   });
   const launch = launcher.session(
     { ...defaultAccount, expectedIdentity: seen.email ?? null },
-    opts.model ?? 'haiku',
+    opts.model ?? 'claude-haiku-5-5',
+    [],
   );
   const env = { ...launch.env, ...opts.extraEnv };
   const configDir = env['CLAUDE_CONFIG_DIR'] ?? join(homedir(), '.claude');
@@ -951,7 +952,7 @@ function expectAutoMode(run: LaneRun): void {
  */
 describe.skipIf(!live)('lane sandbox in auto mode, live', () => {
   claimRootsWhileRunning();
-  const AUTO = { autoMode: true, model: 'sonnet' } as const;
+  const AUTO = { autoMode: true, model: 'claude-sonnet-5-5' } as const;
 
   it('still hands 10db a hazard write, a hazard command however spelled and an edit an ask rule covers', async () => {
     const root = realpathSync(mkdtempSync(join(tmpdir(), '10db-live-')));

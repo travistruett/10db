@@ -20,7 +20,7 @@ import {
 } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { startDaemon, type RunningDaemon } from '../src/daemon';
+import type { RunningDaemon } from '../src/daemon';
 import { parseWorktreeList } from '../src/git';
 import { FakeAdapter, type FakeScriptBook } from '../src/sessions';
 import { apiClient, quickFlowId } from './api-client';
@@ -34,6 +34,7 @@ import {
   tempDir,
   waitForAsync,
 } from './fixtures';
+import { startDaemonWithProfiles } from './daemon-with-profiles';
 
 const TITLES = ['Alpha', 'Beta', 'Gamma'] as const;
 const fileOf = (title: string) => `src/ui/${title.toLowerCase()}.txt`;
@@ -98,7 +99,7 @@ const git = (dir: string, ...args: string[]) =>
     .trim();
 
 async function start(gateCommand = 'true', maxLanes = 3) {
-  daemon = await startDaemon({
+  daemon = await startDaemonWithProfiles({
     sandbox: null,
     dataDir: data.path,
     port: 0,

@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { apiClient, quickFlowId } from '../../test/api-client';
 import { FakeGh } from '../../test/fake-gh';
+import { seedProfiles } from '../../test/seed-profiles';
 import {
   createTempRepo,
   createTempRepoWithOrigin,
@@ -154,6 +155,8 @@ async function start(
     },
     ...QUIET,
   });
+  // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
+  seedProfiles(daemon.state);
   return apiClient(daemon.url, daemon.token);
 }
 

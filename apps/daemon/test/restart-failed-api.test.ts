@@ -22,10 +22,11 @@ import { BatchCardChoice, batchCardFields } from '../src/delivery/batch-card';
 import { flagCard } from '../src/inbox';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { startDaemon, type RunningDaemon } from '../src/daemon';
+import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
 import { createTempRepo, tempDir, waitForAsync } from './fixtures';
+import { startDaemonWithProfiles } from './daemon-with-profiles';
 
 let data: { path: string; cleanup(): void };
 let repo: { path: string; cleanup(): void };
@@ -35,7 +36,7 @@ beforeEach(async () => {
   data = tempDir('restart failed');
   worktrees = tempDir('restart failed worktrees');
   repo = createTempRepo();
-  daemon = await startDaemon({
+  daemon = await startDaemonWithProfiles({
     sandbox: null,
     dataDir: data.path,
     worktreeRoot: worktrees.path,
@@ -97,7 +98,10 @@ async function failedInOpenBatch(waitsOn: readonly string[] = []) {
   const { batchId, workstreamId } = daemon.state.write((ctx) => {
     const batch = insertBatch(ctx, { projectId: project.id, title: 'Alpha', baseBranch: 'main' });
     transitionBatch(ctx, batch.id, { to: 'OPEN', patch: { branch: 'tendb/alpha' } });
-    const ws = insertWorkstream(ctx, task.id, { batchId: batch.id });
+    const ws = insertWorkstream(ctx, task.id, {
+      first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      batchId: batch.id,
+    });
     for (const to of ['STARTING', 'RUNNING', 'FAILED'] as const)
       transitionWorkstream(ctx, ws.id, { to, fence: null });
     return { batchId: batch.id, workstreamId: ws.id };
@@ -236,7 +240,10 @@ describe('POST /tasks/:id/start on a task whose run failed in an open batch', ()
           title: 'Real areas',
           taskIds: [task.id, beta.id],
         });
-        const other = insertWorkstream(ctx, beta.id, { batchId });
+        const other = insertWorkstream(ctx, beta.id, {
+          first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+          batchId,
+        });
         for (const to of ['STARTING', 'RUNNING', 'VERIFYING', 'DONE'] as const)
           transitionWorkstream(ctx, other.id, { to, fence: null });
         patchTask(ctx, task.id, { workspaceMode: WorkspaceMode.Worktree });
@@ -300,10 +307,16 @@ describe('POST /tasks/:id/start on a task whose run failed in an open batch', ()
     const { batchId, workstreamId } = daemon.state.write((ctx) => {
       const batch = insertBatch(ctx, { projectId: project.id, title: 'Both', baseBranch: 'main' });
       transitionBatch(ctx, batch.id, { to: 'OPEN', patch: { branch: 'tendb/both' } });
-      const done = insertWorkstream(ctx, beta.id, { batchId: batch.id });
+      const done = insertWorkstream(ctx, beta.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        batchId: batch.id,
+      });
       for (const to of ['STARTING', 'RUNNING', 'VERIFYING', 'DONE'] as const)
         transitionWorkstream(ctx, done.id, { to, fence: null });
-      const ws = insertWorkstream(ctx, alpha.id, { batchId: batch.id });
+      const ws = insertWorkstream(ctx, alpha.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        batchId: batch.id,
+      });
       for (const to of ['STARTING', 'RUNNING', 'FAILED'] as const)
         transitionWorkstream(ctx, ws.id, { to, fence: null });
       return { batchId: batch.id, workstreamId: ws.id };
@@ -336,7 +349,10 @@ describe('POST /tasks/:id/start on a task whose run failed in an open batch', ()
       areas: ['src'],
     });
     const workstreamId = daemon.state.write((ctx) => {
-      const ws = insertWorkstream(ctx, task.id, { batchId: null });
+      const ws = insertWorkstream(ctx, task.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        batchId: null,
+      });
       for (const to of ['STARTING', 'RUNNING', 'FAILED'] as const)
         transitionWorkstream(ctx, ws.id, { to, fence: null });
       return ws.id;

@@ -10,13 +10,16 @@ import {
   WorkstreamDto,
   WorkstreamState,
 } from '@10db/contracts';
+import { createStore, DB_MIGRATIONS_DIR, migrateDatabase, openDatabase } from '@10db/db';
 import Database from 'better-sqlite3';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { readRuntimeInfo } from '../src/daemon';
+import { createEventBus, createStateStore } from '../src/events';
 import type { FakeScriptBook } from '../src/sessions';
 import { apiClient, quickFlowId } from './api-client';
 import { createTempRepo, isolatedGitEnv, tempDir, waitForAsync, type TempDir } from './fixtures';
+import { seedProfiles } from './seed-profiles';
 
 const DAEMON_DIR = resolve(import.meta.dirname, '..');
 const BOOK: FakeScriptBook = {
@@ -76,6 +79,10 @@ function launchDaemon(): ChildProcess {
       TENDB_DATA_DIR: data.path,
       TENDB_PORT: '0',
       TENDB_LOG_LEVEL: 'warn',
+      // A throwaway daemon never fetches models.dev.
+      TENDB_CATALOGUE: 'off',
+      // It still builds its model profiles, from the fixture catalogue.
+      TENDB_CATALOGUE_SNAPSHOT: resolve(import.meta.dirname, 'fixtures/catalogue.json'),
       TENDB_FAKE_SCRIPTS: join(data.path, 'book.json'),
     },
     stdio: 'ignore',
@@ -141,6 +148,12 @@ async function connect(daemon: ChildProcess) {
 beforeAll(() => {
   repo = createTempRepo();
   data = tempDir('crash');
+  // The child fetches no catalogue, and a task has no model to run on without profiles: they are in its
+  // database before it starts.
+  const seeding = openDatabase(join(data.path, '10db.sqlite'));
+  migrateDatabase(seeding, DB_MIGRATIONS_DIR);
+  seedProfiles(createStateStore(createStore(seeding), createEventBus()));
+  seeding.$client.close();
   writeFileSync(join(data.path, 'book.json'), JSON.stringify(BOOK));
 });
 afterAll(() => {

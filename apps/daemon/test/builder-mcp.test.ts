@@ -30,7 +30,8 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { startDaemon, type RunningDaemon } from '../src/daemon';
+import type { startDaemon } from '../src/daemon';
+import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
 import { FakeGh } from './fake-gh';
@@ -42,6 +43,7 @@ import {
   tempDir,
   waitForAsync,
 } from './fixtures';
+import { startDaemonWithProfiles } from './daemon-with-profiles';
 
 let data: { path: string; cleanup(): void };
 let repo: { path: string; cleanup(): void };
@@ -49,7 +51,7 @@ let daemon: RunningDaemon;
 let client: Client;
 /** Starts a daemon and connects the builder client to it; `extra` adds to the daemon's options. */
 async function boot(extra: Partial<Parameters<typeof startDaemon>[0]> = {}) {
-  daemon = await startDaemon({
+  daemon = await startDaemonWithProfiles({
     sandbox: null,
     dataDir: data.path,
     port: 0,
@@ -544,7 +546,10 @@ describe('the builder MCP endpoint', () => {
             baseBranch: 'main',
           });
           transitionBatch(ctx, batch.id, { to: 'OPEN', patch: { branch: 'tendb/alpha' } });
-          const ws = insertWorkstream(ctx, task.id, { batchId: batch.id });
+          const ws = insertWorkstream(ctx, task.id, {
+            first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+            batchId: batch.id,
+          });
           for (const to of ['STARTING', 'RUNNING', 'FAILED'] as const)
             transitionWorkstream(ctx, ws.id, { to, fence: null });
           return batch.id;
@@ -580,7 +585,9 @@ describe('the builder MCP endpoint', () => {
         const first = await seedTask(project.id, 'first');
         const waiting = await seedTask(project.id, 'waiting', [first.id]);
         const failedId = daemon.state.write((ctx) => {
-          const ws = insertWorkstream(ctx, waiting.id);
+          const ws = insertWorkstream(ctx, waiting.id, {
+            first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+          });
           for (const to of ['STARTING', 'RUNNING', 'FAILED'] as const)
             transitionWorkstream(ctx, ws.id, { to, fence: null });
           return ws.id;

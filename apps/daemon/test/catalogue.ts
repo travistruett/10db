@@ -2,12 +2,12 @@ import type { Effort } from '@10db/contracts';
 import { applyAaMeasurement, listModelProfiles } from '@10db/db';
 import type { StateStore } from '../src/events';
 
-/** Score base, cost per task and speed by model alias. */
+/** Score base, cost per task and speed by canonical model ID; a model not listed stays unmeasured. */
 const BASE: Readonly<Record<string, readonly [number, number, number]>> = {
-  haiku: [20, 0.05, 200],
-  sonnet: [35, 0.3, 100],
-  opus: [45, 1, 50],
-  fable: [50, 2, 40],
+  'claude-haiku-5-5': [20, 0.05, 200],
+  'claude-sonnet-5-5': [35, 0.3, 100],
+  'claude-opus-5-5': [45, 1, 50],
+  'claude-fable-5-1': [50, 2, 40],
 };
 /** Score bonus and cost multiplier by effort. */
 const EFFORT: Readonly<Record<Effort, readonly [number, number]>> = {
@@ -18,7 +18,7 @@ const EFFORT: Readonly<Record<Effort, readonly [number, number]>> = {
   max: [10, 6],
 };
 
-/** Invented measurements for the seeded catalogue: deterministic routing in tests, and never AA's numbers. */
+/** Invented measurements for the profiles `seedProfiles` writes: deterministic routing in tests, and never AA's numbers. */
 export function measureForTests(state: StateStore): void {
   state.write((ctx) => {
     for (const p of listModelProfiles(ctx.tx)) {

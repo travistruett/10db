@@ -92,11 +92,11 @@ const REPO_MCP_HOSTS_FILE = { servers: { [REPO_MCP_SERVER]: { hosts: REPO_MCP_HO
 
 const TASKS = [
   {
-    title: 'Alpha haiku pair',
+    title: 'Alpha poem pair',
     area: 'alpha',
     outputs: ['src/alpha/one.md', 'src/alpha/two.md'],
     description:
-      'First read reference/sorting.txt and reference/hashing.txt in full, unless a handoff in your briefing says you already have. Then create src/alpha/one.md with a haiku about sorting and commit it with the 10db commit tool. Then create src/alpha/two.md with a haiku about hashing and commit it.',
+      'First read reference/sorting.txt and reference/hashing.txt in full, unless a handoff in your briefing says you already have. Then create src/alpha/one.md with a short poem about sorting and commit it with the 10db commit tool. Then create src/alpha/two.md with a short poem about hashing and commit it.',
   },
   {
     title: 'Beta greeting',
@@ -115,7 +115,7 @@ const TASKS = [
 ] as const;
 
 /**
- * Alpha reads these before writing, so its first session crosses `handoffPct` with both haikus
+ * Alpha reads these before writing, so its first session crosses `handoffPct` with both poems
  * still to do. A session starts near 2.3% of the 1M window and the small tasks alone stay under
  * 3%; each file adds about 20k tokens (2 points), under the Read tool's per-call token limit.
  */
@@ -233,6 +233,10 @@ function startDaemonProcess(): ChildProcess {
       TENDB_DEV_UI_ORIGIN: 'http://localhost:1420',
       TENDB_LOG_LEVEL: 'info',
       TENDB_BENCHMARKS: 'off',
+      // No fetch of models.dev from a throwaway daemon.
+      TENDB_CATALOGUE: 'off',
+      // It still builds its model profiles, from the fixture catalogue.
+      TENDB_CATALOGUE_SNAPSHOT: join(root, 'apps/daemon/test/fixtures/catalogue.json'),
       // Task text and diffs would go to OpenRouter on the builder's key.
       TENDB_JUDGE: 'off',
       // The daemon shuts down when this pipe closes, which is how it learns this script died.

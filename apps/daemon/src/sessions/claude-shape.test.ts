@@ -30,7 +30,7 @@ function spec(overrides: Partial<ShapeSessionSpec> = {}): ShapeSessionSpec {
     cwd: '/repo',
     systemPrompt: 'You are Shape.',
     prompt: 'First message',
-    model: 'sonnet',
+    model: 'claude-sonnet-5-5',
     effort: 'high',
     resumeProviderSessionId: null,
     env: { PATH: '/usr/bin:/bin' },
@@ -189,7 +189,7 @@ describe('a Shape session’s SDK options', () => {
       tools: ['Read', 'Grep', 'Glob', 'Agent'],
       allowedTools: ['Read', 'Grep', 'Glob', 'mcp__10db__note_heard'],
       disallowedTools: ['Edit', 'Bash'],
-      model: 'sonnet',
+      model: 'claude-sonnet-5-5',
       effort: 'high',
       cwd: '/repo',
       systemPrompt: { type: 'preset', preset: 'claude_code', append: 'You are Shape.' },
@@ -551,5 +551,71 @@ describe('the session’s run', () => {
     const events = await collect(handle, () => false);
     expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'account_refused' });
     expect(run.inputs).toEqual([]);
+  });
+
+  it('ends as a refused model when the account cannot run the model the conversation chose', async () => {
+    const { query } = fakeQuery({
+      turns: [
+        [
+          initMessage('none', undefined, 'not-a-model'),
+          assistantMessage([textBlock('')], 'model_not_found'),
+        ],
+      ],
+    });
+    const handle = startShapeSession(spec({ model: 'not-a-model' }), deps(query));
+    const events = await collect(handle, () => false);
+    expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'model_refused' });
+    expect(events.at(-1)).not.toHaveProperty('refusal');
+  });
+
+  it.each([
+    {
+      name: 'a Bedrock validation error naming the launch ID is a refused model',
+      error: 'invalid_request' as const,
+      text: 'ValidationException: The model us.anthropic.claude-fable-5-1-v1:0 does not exist or you do not have access to it.',
+      refused: true,
+      resume: null,
+    },
+    {
+      name: 'the same error in a resumed conversation, which had its first reply long ago, is not',
+      error: 'invalid_request' as const,
+      text: 'ValidationException: The model us.anthropic.claude-fable-5-1-v1:0 does not exist or you do not have access to it.',
+      refused: false,
+      resume: 'provider-session-1',
+    },
+    {
+      name: 'a server error naming the launch ID is not',
+      error: 'server_error' as const,
+      text: '500: us.anthropic.claude-fable-5-1-v1:0 does not exist',
+      refused: false,
+      resume: null,
+    },
+    {
+      name: 'an overloaded error naming the launch ID is not',
+      error: 'overloaded' as const,
+      text: 'us.anthropic.claude-fable-5-1-v1:0 is overloaded',
+      refused: false,
+      resume: null,
+    },
+  ])('$name', async ({ error, text, refused, resume }) => {
+    const launched = 'us.anthropic.claude-fable-5-1-v1:0';
+    const { query } = fakeQuery({
+      turns: [
+        [
+          initMessage('none', undefined, launched),
+          assistantMessage([textBlock(text)], error),
+          resultMessage({ input: 1, output: 1, costUsd: 0 }),
+        ],
+      ],
+    });
+    const handle = startShapeSession(
+      spec({ model: launched, resumeProviderSessionId: resume }),
+      deps(query),
+    );
+    const events = await collect(handle, (e) =>
+      e.some((x) => x.type === 'turn_complete' || x.type === 'ended'),
+    );
+    const reasons = events.flatMap((e) => (e.type === 'ended' ? [e.reason] : []));
+    expect(reasons.includes('model_refused')).toBe(refused);
   });
 });

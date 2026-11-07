@@ -115,7 +115,11 @@ describe('Remove Draft Goal', () => {
 
   it('refuses once a task has started, leaving everything as it was', () => {
     const { goalId, taskIds } = convertedGoalAndDecision();
-    write((ctx) => insertWorkstream(ctx, taskIds[0] ?? mintId('Task')));
+    write((ctx) =>
+      insertWorkstream(ctx, taskIds[0] ?? mintId('Task'), {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      }),
+    );
     expect(() => {
       write((ctx) => {
         removeDraftGoalOf(ctx, c.shape.id, goalId);
@@ -588,7 +592,11 @@ describe('Remove Draft Goal', () => {
     it('leaves the question where it was when the removal is refused', () => {
       const goalId = convertedWithQuestion('density');
       const [task] = listTasks(c.store.db, c.project.id);
-      write((ctx) => insertWorkstream(ctx, task?.id ?? mintId('Task')));
+      write((ctx) =>
+        insertWorkstream(ctx, task?.id ?? mintId('Task'), {
+          first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        }),
+      );
       expect(() => {
         write((ctx) => {
           removeDraftGoalOf(ctx, c.shape.id, goalId);

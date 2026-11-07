@@ -61,7 +61,9 @@ const refusal = (fn: () => unknown): unknown => {
 };
 /** Sets the latest run's state directly: the transitions under test are the patch's, not the workstream's. */
 const runIn = (taskId: TaskId, state: string) => {
-  const ws = store.write((ctx) => insertWorkstream(ctx, taskId)).value;
+  const ws = store.write((ctx) =>
+    insertWorkstream(ctx, taskId, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+  ).value;
   store.db.$client.prepare('UPDATE workstreams SET state = ? WHERE id = ?').run(state, ws.id);
 };
 
@@ -150,7 +152,12 @@ describe('task placement', () => {
     const batch = store.write((ctx) =>
       insertBatch(ctx, { projectId: p.id, title: 'Cutting', baseBranch: 'main' }),
     ).value;
-    store.write((ctx) => insertWorkstream(ctx, task.id, { batchId: batch.id }));
+    store.write((ctx) =>
+      insertWorkstream(ctx, task.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        batchId: batch.id,
+      }),
+    );
     expect(() => place(task.id, 'worktree')).toThrow(ConflictError);
   });
 

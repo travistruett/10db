@@ -29,7 +29,9 @@ describe('reads the UI needs', () => {
         areas: ['api'],
       }),
     ).value;
-    const ws = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+    const ws = store.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    ).value;
     expect(ws.taskTitle).toBe('Write the greeting');
     expect(getWorkstream(store.db, ws.id).taskTitle).toBe('Write the greeting');
     expect(listWorkstreams(store.db).map((w) => w.taskTitle)).toEqual(['Write the greeting']);

@@ -115,7 +115,7 @@ export interface ShapeAgentDefinition {
   readonly description: string;
   readonly prompt: string;
   readonly tools: readonly string[];
-  /** A model alias (`opus`, `fable`) or full ID; absent means the session's own. */
+  /** A model alias or full ID; absent means the session's own. */
   readonly model?: string;
 }
 
@@ -178,6 +178,8 @@ export const SessionEndReason = {
   AccountRefused: 'account_refused',
   /** Claude Code could not start the session's sandbox; trying again cannot change that. */
   SandboxRefused: 'sandbox_refused',
+  /** The account cannot run the model the session asked for; another model on the same account can. */
+  ModelRefused: 'model_refused',
 } as const;
 export type SessionEndReason = (typeof SessionEndReason)[keyof typeof SessionEndReason];
 

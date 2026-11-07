@@ -185,7 +185,9 @@ describe('provenance', () => {
       const task = store.write((ctx) =>
         insertTask(ctx, project.id, { title: 'A', acceptanceCriteria: ['x'], areas: ['api'] }),
       ).value;
-      const workstream = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+      const workstream = store.write((ctx) =>
+        insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+      ).value;
       const session = store.write((ctx) =>
         insertSession(ctx, { workstreamId: workstream.id, ...sessionFields }),
       ).value;

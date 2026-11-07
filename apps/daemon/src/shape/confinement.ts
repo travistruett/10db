@@ -69,7 +69,7 @@ export interface ShapeAccess {
     readonly protectedPaths: readonly ProtectedPath[];
     readonly fileAccess: FileAccessJudge;
   };
-  /** The model aliases the project's account offers, which an agent may be launched on; any known one when absent. */
+  /** The Agent tool aliases the project's account takes, which an agent may be launched on; empty when it takes none; every alias when absent. */
   readonly agentModels?: readonly string[];
 }
 
@@ -246,7 +246,9 @@ function judgeAgentType(call: ShapeCall, access: ShapeAccess): GuardVerdict {
   const offered: readonly string[] = access.agentModels ?? SHAPE_AGENT_MODELS;
   if (model !== null && !offered.includes(model))
     return deny(
-      `An agent runs on a model this project's account offers (${offered.join(', ')}), or on the session's model.`,
+      offered.length === 0
+        ? "An agent runs on the session's model on this project's account; name no model."
+        : `An agent runs on a model this project's account offers (${offered.join(', ')}), or on the session's model.`,
     );
   if (type === SHAPE_CODE_RESEARCHER) return ALLOW;
   if (type === SHAPE_RESEARCHER) {

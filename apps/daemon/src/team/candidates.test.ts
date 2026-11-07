@@ -13,6 +13,7 @@ import {
 import { readDefaultPersonas } from '@10db/harness';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { measureForTests } from '../../test/catalogue';
+import { seedProfiles } from '../../test/seed-profiles';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { proposeCandidates } from './candidates';
 import { seedTeam } from './seed';
@@ -28,6 +29,7 @@ beforeEach(() => {
   store = test.store;
   state = createStateStore(test.store, createEventBus());
   seedTeam(state, readDefaultPersonas());
+  seedProfiles(state);
   project = seedProject(test.store); // areas api and ui
 });
 afterEach(() => {

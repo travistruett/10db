@@ -10,7 +10,7 @@ import {
 } from '@10db/contracts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { startDaemon, type RunningDaemon } from '../src/daemon';
+import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter, type FakeScriptBook } from '../src/sessions';
 import {
   checkServerEnv,
@@ -21,6 +21,7 @@ import {
 } from '../scripts/acceptance-checks';
 import { apiClient, quickFlowId } from './api-client';
 import { createTempRepo, handoffArgs, isolatedGitEnv, tempDir, waitForAsync } from './fixtures';
+import { startDaemonWithProfiles } from './daemon-with-profiles';
 
 const write = (path: string) => ({
   do: 'tool' as const,
@@ -84,7 +85,7 @@ let daemon: RunningDaemon;
 beforeAll(async () => {
   repo = createTempRepo();
   data = tempDir('acceptance-checks');
-  daemon = await startDaemon({
+  daemon = await startDaemonWithProfiles({
     sandbox: null,
     dataDir: data.path,
     port: 0,

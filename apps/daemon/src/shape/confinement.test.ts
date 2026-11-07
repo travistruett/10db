@@ -637,6 +637,21 @@ describe('judgeShapeCall in the read-only sandbox', () => {
     ).toBe(decision);
   });
 
+  it('refuses any model named on an agent when the account takes no alias, and says agents use the session’s', () => {
+    const none: ShapeAccess = { ...sandboxed, agentModels: [] };
+    const named = judgeShapeCall(
+      call('Agent', { subagent_type: 'code-researcher', prompt: 'x', model: 'sonnet' }),
+      none,
+    );
+    expect(named.decision).toBe('deny');
+    expect(JSON.stringify(named)).toMatch(/session's model/);
+    expect(JSON.stringify(named)).not.toMatch(/\(\)/);
+    expect(
+      judgeShapeCall(call('Agent', { subagent_type: 'code-researcher', prompt: 'x' }), none)
+        .decision,
+    ).toBe('allow');
+  });
+
   it('still refuses with no card what it refused outside the sandbox, but for Bash and project MCP', () => {
     const projectTool = (name: string): boolean =>
       name.startsWith('mcp__') && !name.startsWith('mcp__10db__');

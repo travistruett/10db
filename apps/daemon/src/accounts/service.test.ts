@@ -11,7 +11,13 @@ import {
   type AccountId,
   type DaemonEvent,
 } from '@10db/contracts';
-import { createTestStore, seedProject, type Store, type WriteContext } from '@10db/db';
+import {
+  createTestStore,
+  listAccountModels,
+  seedProject,
+  type Store,
+  type WriteContext,
+} from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   capturingLogger,
@@ -20,10 +26,13 @@ import {
   tempDir,
   waitFor,
 } from '../../test/fixtures';
+import { readModelsDevFixture } from '../../test/models-dev-fixture';
+import { createAccountLists, parseCatalogue } from '../catalogue';
 import { ManualClock } from '../clock';
 import { AccountLaunchError, createLauncher, KeychainError, type Launcher } from '../environment';
 import { createEventBus, createStateStore } from '../events';
-import { FakeAdapter } from '../sessions';
+import { FakeAdapter, type SeenAccount } from '../sessions';
+import { createListRefresh } from './list-refresh';
 import type { AccountPause } from './pauses';
 import { createAccountService, type AccountService } from './service';
 import { createStartGate, type StartGate } from './start-gate';
@@ -69,6 +78,12 @@ beforeEach(() => {
   const launcher = createLauncher({ base: {}, clientApp: 'test', keychain });
   probeFor = (row) => launcher.probe(row);
   const state = createStateStore(test.store, bus);
+  const lists = createAccountLists({
+    state,
+    clock,
+    catalogue: () => parseCatalogue(readModelsDevFixture()),
+    logger,
+  });
   service = createAccountService({
     state: {
       db: state.db,
@@ -85,6 +100,17 @@ beforeEach(() => {
     logger,
     liveLanes: (id) => live.get(id) ?? 0,
     adapter,
+    lists,
+    listRefresh: createListRefresh({
+      state,
+      clock,
+      adapter,
+      launcher: { probe: (row) => probeFor(row) },
+      startGate: gate,
+      lists,
+      dataDir: dir.path,
+      logger,
+    }),
     startGate: gate,
     runtime: { saved: () => undefined },
     pauses: {
@@ -124,7 +150,7 @@ describe('identity', () => {
       AccountInput.parse({
         kind: AccountKind.Gateway,
         label: 'G',
-        settings: { baseUrl: 'https://gw.example/api', aliases: ['haiku'] },
+        settings: { baseUrl: 'https://gw.example/api' },
       }),
     );
     service.setSecret(account.id, { secret: 'not-a-real-gateway-token-0001' });
@@ -132,6 +158,28 @@ describe('identity', () => {
     await service.identity(account.id);
     expect(adapter.probes).toHaveLength(1);
     held();
+  });
+});
+
+describe('the models an account lists', () => {
+  const OPUS = { id: 'opus', resolvedId: 'claude-opus-5-5', efforts: ['low' as const] };
+  const stored = (id: AccountId) => listAccountModels(store.db, id).map((m) => m.model);
+
+  it.each<[string, Partial<SeenAccount>, string[]]>([
+    ['a signed-in account', {}, ['claude-opus-5-5']],
+    [
+      'a signed-out process, which still answers a listing',
+      { email: undefined, subscriptionType: undefined },
+      [],
+    ],
+    ['credentials that are not the kind', { apiProvider: 'bedrock' }, []],
+  ])('are stored for %s only when the account check passes', async (_name, seen, expected) => {
+    const { account } = service.create(
+      AccountInput.parse({ kind: AccountKind.ClaudeSubscription, label: 'A' }),
+    );
+    adapter.probeSeen = { ...adapter.probeSeen, ...seen, models: [OPUS] };
+    await service.identity(account.id);
+    expect(stored(account.id)).toEqual(expected);
   });
 });
 
@@ -158,7 +206,7 @@ describe('a ChatGPT account', () => {
       organization: 'ws-1',
       subscriptionType: 'pro',
       apiProvider: 'chatgpt',
-      models: ['gpt-6-astra'],
+      models: [{ id: 'gpt-6-astra', resolvedId: null, efforts: ['low'] }],
     };
     const held = await gate.acquire(account.id);
     const identity = await service.identity(account.id);
@@ -323,6 +371,28 @@ describe('connect', () => {
     ]);
     expect(saves).toBeGreaterThan(0);
   });
+
+  it.each<[string, { ok: true } | { ok: false; message: string }, string[]]>([
+    ['a finished sign-in', { ok: true }, ['claude-opus-5-5']],
+    ['a failed sign-in', { ok: false, message: 'The sign-in took too long.' }, []],
+  ])(
+    'reads the list for %s with no one asking for the identity',
+    async (_name, outcome, expected) => {
+      const account = signIn();
+      adapter.probeSeen = {
+        ...adapter.probeSeen,
+        models: [{ id: 'opus', resolvedId: 'claude-opus-5-5', efforts: ['low'] }],
+      };
+      await service.connect(account.id);
+      adapter.logins[0]?.end(outcome);
+      await waitFor(() => service.connecting() === null, 2_000);
+      await waitFor(
+        () => expected.length === 0 || listAccountModels(store.db, account.id).length > 0,
+        2_000,
+      );
+      expect(listAccountModels(store.db, account.id).map((m) => m.model)).toEqual(expected);
+    },
+  );
 
   it('marks a sign-in the builder cancelled as cancelled, and one that failed as not', async () => {
     const account = signIn();

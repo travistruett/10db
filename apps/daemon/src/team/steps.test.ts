@@ -25,19 +25,23 @@ import {
   listBoardColumns,
   listEvidence,
   listWorkstreams,
+  markAccountModelUnusable,
   moveTask,
-  patchAccount,
   patchProject,
+  replaceAccountModels,
+  seedAccount,
   patchTask,
   patchWorkstream,
   seedProject,
   setWorkstreamNotice,
+  type Store,
   transitionBatch,
   transitionWorkstream,
 } from '@10db/db';
 import { readDefaultPersonas } from '@10db/harness';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { measureForTests } from '../../test/catalogue';
+import { seedProfiles } from '../../test/seed-profiles';
 import { revertCommitLine } from './reverted-work';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { outstandingFixEvidence } from '../runner';
@@ -52,13 +56,16 @@ import {
 } from './steps';
 
 let state: StateStore;
+let store: Store;
 let close: () => void;
 let project: ReturnType<typeof seedProject>;
 beforeEach(() => {
   const test = createTestStore();
   close = test.close;
+  store = test.store;
   state = createStateStore(test.store, createEventBus());
   seedTeam(state, readDefaultPersonas());
+  seedProfiles(state);
   project = seedProject(test.store);
 });
 afterEach(() => {
@@ -106,14 +113,56 @@ describe('resolveStepPlan', () => {
   it('routes on the measured catalogue once there is one', () => {
     measureForTests(state);
     const plan = resolveStepPlan(state.db, addTask().id);
-    expect(plan.steps.map((s) => `${s.model}@${s.effort}`)).toEqual(['sonnet@high', 'opus@medium']);
+    expect(plan.steps.map((s) => `${s.model}@${s.effort}`)).toEqual([
+      'claude-sonnet-5-5@high',
+      'claude-opus-5-5@medium',
+    ]);
   });
 
-  it("routes only on the aliases the project's account offers", () => {
+  const listed = (model: string) => ({
+    model,
+    family: null,
+    launchId: model,
+    efforts: [],
+    inputPrice: null,
+    outputPrice: null,
+  });
+  const modelsOf = () => resolveStepPlan(state.db, addTask().id).steps.map((s) => s.model);
+
+  it("routes only on the models the project's account lists", () => {
     measureForTests(state);
-    state.write((ctx) => patchAccount(ctx, project.accountId, { settings: { aliases: ['opus'] } }));
-    const plan = resolveStepPlan(state.db, addTask().id);
-    expect(plan.steps.map((s) => s.model)).toEqual(['opus', 'opus']);
+    state.write((ctx) => {
+      replaceAccountModels(ctx, project.accountId, [listed('claude-opus-5-5')]);
+    });
+    expect(modelsOf()).toEqual(['claude-opus-5-5', 'claude-opus-5-5']);
+  });
+
+  it('leaves out a model the account refused to run', () => {
+    measureForTests(state);
+    state.write((ctx) => {
+      replaceAccountModels(ctx, project.accountId, [
+        listed('claude-opus-5-5'),
+        listed('claude-sonnet-5-5'),
+      ]);
+      markAccountModelUnusable(ctx, project.accountId, 'claude-sonnet-5-5');
+    });
+    expect(modelsOf()).toEqual(['claude-opus-5-5', 'claude-opus-5-5']);
+  });
+
+  it("routes a ChatGPT account on its own models even when the project's provider is claude", () => {
+    const chatgpt = seedAccount(store, { kind: 'codex_signin', label: 'ChatGPT plan' });
+    state.write((ctx) => patchProject(ctx, project.id, { accountId: chatgpt.id }));
+    expect(project.provider).toBe('claude');
+    expect(modelsOf().every((model) => model.startsWith('gpt-'))).toBe(true);
+  });
+
+  it('plans a project whose account offers nothing without throwing, naming the tier', () => {
+    const empty = seedAccount(store, { kind: 'codex_signin', label: 'Empty plan' });
+    state.write((ctx) => {
+      patchProject(ctx, project.id, { accountId: empty.id });
+      replaceAccountModels(ctx, empty.id, [listed('a-model-no-profile-has')]);
+    });
+    expect(modelsOf()).toEqual(['balanced', 'strongest']);
   });
 });
 
@@ -125,10 +174,13 @@ describe('startTaskWithPlan', () => {
       ['review', 'pending'],
     ]);
     expect(ws.steps[0]?.startedAt).not.toBeNull();
-    expect(ws.steps.map((s) => `${s.model}@${s.effort}`)).toEqual(['sonnet@high', 'opus@high']);
+    expect(ws.steps.map((s) => `${s.model}@${s.effort}`)).toEqual([
+      'claude-sonnet-5-5@high',
+      'claude-opus-5-5@high',
+    ]);
     expect(getWorkstream(state.db, ws.id)).toMatchObject({
       stepIndex: 0,
-      model: 'sonnet',
+      model: 'claude-sonnet-5-5',
       effort: 'high',
     });
   });
@@ -228,7 +280,12 @@ describe('retryWorkstream in a batch', () => {
       transitionBatch(ctx, b.id, { to: 'OPEN' });
       return b;
     });
-    const ws = state.write((ctx) => insertWorkstream(ctx, task.id, { batchId: batch.id }));
+    const ws = state.write((ctx) =>
+      insertWorkstream(ctx, task.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        batchId: batch.id,
+      }),
+    );
     state.write((ctx) => {
       for (const s of ['STARTING', 'RUNNING', 'FAILED'] as const)
         transitionWorkstream(ctx, ws.id, { to: s, fence: null });
@@ -254,7 +311,12 @@ describe('retryWorkstream in a batch', () => {
       transitionBatch(ctx, b.id, { to: 'OPEN' });
       return b;
     });
-    const ws = state.write((ctx) => insertWorkstream(ctx, task.id, { batchId: batch.id }));
+    const ws = state.write((ctx) =>
+      insertWorkstream(ctx, task.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        batchId: batch.id,
+      }),
+    );
     state.write((ctx) => {
       for (const s of ['STARTING', 'RUNNING', 'FAILED'] as const)
         transitionWorkstream(ctx, ws.id, { to: s, fence: null });
@@ -268,7 +330,11 @@ describe('retryWorkstream in a batch', () => {
   });
 
   it('retries a workstream with no batch as before', () => {
-    const ws = state.write((ctx) => insertWorkstream(ctx, addTask().id));
+    const ws = state.write((ctx) =>
+      insertWorkstream(ctx, addTask().id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      }),
+    );
     state.write((ctx) => {
       for (const s of ['STARTING', 'RUNNING', 'FAILED'] as const)
         transitionWorkstream(ctx, ws.id, { to: s, fence: null });
@@ -279,7 +345,9 @@ describe('retryWorkstream in a batch', () => {
 
 describe('retryWorkstream', () => {
   const failedWorkstream = (taskId: TaskId) => {
-    const ws = state.write((ctx) => insertWorkstream(ctx, taskId));
+    const ws = state.write((ctx) =>
+      insertWorkstream(ctx, taskId, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    );
     state.write((ctx) => transitionWorkstream(ctx, ws.id, { to: 'STARTING', fence: null }));
     state.write((ctx) => transitionWorkstream(ctx, ws.id, { to: 'FAILED', fence: null }));
     return ws;
@@ -288,7 +356,9 @@ describe('retryWorkstream', () => {
   const failedThenCancelled = () => {
     const task = addTask();
     const first = failedWorkstream(task.id);
-    const second = state.write((ctx) => insertWorkstream(ctx, task.id));
+    const second = state.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    );
     state.write((ctx) => transitionWorkstream(ctx, second.id, { to: 'CANCELLED', fence: null }));
     return { task, first };
   };

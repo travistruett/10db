@@ -347,6 +347,38 @@ describe('InboxView', () => {
 
   it.each([
     {
+      name: 'links a card that says an account has no usable model to Settings › Accounts',
+      problem: 'no_usable_model',
+      shown: true,
+    },
+    { name: 'offers no such link on another account card', problem: 'signed_out', shown: false },
+  ])('$name', async ({ problem, shown }) => {
+    const card = inboxItemDto({
+      kind: 'flag',
+      title: 'Claude plan: sessions refused',
+      body: 'Choose a model for each tier under Settings › Accounts › Claude plan.',
+      options: [],
+      detail: {
+        accountCard: {
+          accountId: mintId('Account'),
+          reason: 'refused',
+          problem,
+          seenIdentity: null,
+        },
+      },
+    });
+    inbox([card]);
+    renderApp('/inbox');
+
+    fireEvent.click(await screen.findByText(card.title));
+    await screen.findByText('Choose a model for each tier', { exact: false });
+    const anchor = screen.queryByRole('link', { name: 'Open Accounts in Settings' });
+    if (shown) expect(anchor?.getAttribute('href')).toBe('/settings/accounts');
+    else expect(anchor).toBeNull();
+  });
+
+  it.each([
+    {
       name: 'links a gate card to its failing step log',
       logPath: '/wt/.gate/test.log',
       shown: true,

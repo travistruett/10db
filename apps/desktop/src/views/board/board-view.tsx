@@ -452,6 +452,7 @@ function BoardColumns({
           {...(openPlace !== undefined ? { place: openPlace } : {})}
           placementEditable={pullRequests}
           gateCommand={project.gateCommand}
+          accountId={project.accountId}
           areaNames={project.areas.map((area) => area.name)}
           {...(pullRequests ? { pullRequestBase: project.baseBranch } : {})}
           onStart={() => {

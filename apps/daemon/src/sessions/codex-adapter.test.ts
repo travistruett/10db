@@ -25,7 +25,15 @@ const SIGNED_IN = {
   },
   'model/list': {
     data: [
-      { id: 'astra', model: 'gpt-6-astra', isDefault: true },
+      {
+        id: 'astra',
+        model: 'gpt-6-astra',
+        isDefault: true,
+        supportedReasoningEfforts: ['low', 'high', 'max', 'ultra'].map((reasoningEffort) => ({
+          reasoningEffort,
+          description: reasoningEffort,
+        })),
+      },
       { id: 'sol', model: 'gpt-5.6-sol' },
       { id: 'secret', model: 'gpt-hidden', hidden: true },
     ],
@@ -86,7 +94,10 @@ describe('probeAccount', () => {
       email: 'me@example.com',
       subscriptionType: 'pro',
       organization: 'ws-1',
-      models: ['gpt-6-astra', 'gpt-5.6-sol'],
+      models: [
+        { id: 'gpt-6-astra', resolvedId: null, efforts: ['low', 'high', 'max'] },
+        { id: 'gpt-5.6-sol', resolvedId: null, efforts: [] },
+      ],
     });
     expect(server.sent().map((m) => m.method)).toEqual([
       'initialize',

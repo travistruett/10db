@@ -1,8 +1,11 @@
+import { join } from 'node:path';
 import type { SystemCheckDto } from '@10db/contracts';
 import { SchemaMismatchError } from '@10db/db';
+import { CATALOGUE_SNAPSHOT_FILE } from './catalogue';
 import {
   AlreadyRunningError,
   aaKeyReaderFromEnv,
+  catalogueSnapshotFromEnv,
   daemonOptionsFromEnv,
   startDaemon,
   WorktreeRootError,
@@ -134,6 +137,10 @@ try {
     adapter: chooseAdapter(),
     migrationsDir: resolveMigrationsDir(),
     harnessDir: resolveHarnessDir(),
+    catalogueSnapshot: catalogueSnapshotFromEnv(
+      env,
+      join(import.meta.dirname, CATALOGUE_SNAPSHOT_FILE),
+    ),
     aaKey: aaKeyReaderFromEnv(env, () => systemKeychain.read(AA_KEY_ACCOUNT)),
     loginEnv: login.vars,
     keychain: systemKeychain,

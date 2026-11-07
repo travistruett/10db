@@ -1,12 +1,15 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { defaultAccountId, getAccountRow, type DbReader } from '@10db/db';
+import { isModelTier, ModelTier, providerOf, StepRole } from '@10db/contracts';
+import { defaultAccountId, getAccountRow, listAccountModels, type DbReader } from '@10db/db';
 import type { Launcher } from '../environment';
 import type { AreaNamer } from '../folders';
+import { chooseModel } from '../routing';
 import { CompletionError, type SessionAdapter } from '../sessions';
+import { routingInputs } from '../team';
 
-/** A cheap, quick model: naming and merging a few dozen candidates needs no more. */
-const NAMING_MODEL = 'haiku';
+/** The tier that names areas: a cheap, quick model, since naming and merging a few dozen candidates needs no more. */
+const NAMING_MODEL = ModelTier.Fast;
 
 export interface AreaNamerDeps {
   readonly adapter: Pick<SessionAdapter, 'complete'>;
@@ -25,7 +28,25 @@ export function createAreaNamer(deps: AreaNamerDeps): AreaNamer {
   return async (prompt, signal) => {
     const id = defaultAccountId(deps.db);
     if (id === null) throw new CompletionError('There is no default account to ask.');
-    const launch = deps.launcher.session(getAccountRow(deps.db, id), NAMING_MODEL);
+    const account = getAccountRow(deps.db, id);
+    // The tier's model on this account, by the tier's default and never by score, so naming is never refused.
+    const choice = chooseModel({
+      ...routingInputs(deps.db, { accountId: id, provider: providerOf(account.kind) }),
+      def: { role: StepRole.Plan, need: 0 },
+      persona: undefined,
+      task: {
+        riskTags: [],
+        acceptanceCriteria: [],
+        areas: [],
+        modelSetting: { kind: 'tier', tier: NAMING_MODEL },
+      },
+      project: { id: null, budgetCeiling: null },
+      stakes: { retry: false },
+      byScore: false,
+    });
+    if (isModelTier(choice.model))
+      throw new CompletionError(`${account.label} offers no model to name areas with.`);
+    const launch = deps.launcher.session(account, choice.model, listAccountModels(deps.db, id));
     const cwd = await mkdtemp(join(deps.scratchRoot, 'areas-'));
     try {
       return await deps.adapter.complete({

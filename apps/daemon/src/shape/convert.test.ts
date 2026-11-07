@@ -1314,7 +1314,9 @@ describe('additions, changes and removals', () => {
     const id = taskTitled('Task a').id;
     const m2 = c.say('Rename it.');
     propose({ changes: [{ taskId: id, title: 'Renamed', sourceMessageIds: [m2] }] });
-    write((ctx) => insertWorkstream(ctx, id));
+    write((ctx) =>
+      insertWorkstream(ctx, id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    );
     const out = convert(`change:${id}`);
     expect(out).toMatchObject({ ok: false });
     expect(getTask(c.store.db, id).title).toBe('Task a');

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { USAGE_HANDOFF_AT, USAGE_HANDOFF_MAX, USAGE_HANDOFF_MIN } from './accounts';
 import { AllowedCommands } from './allowed-commands';
+import { ModelSetting } from './catalogue';
 import { BranchName, PrTitlePrefix } from './git-names';
 import {
   AccountId,
@@ -539,6 +540,8 @@ export const TaskDto = z.object({
    * so one pull request. Absent or null for a task that lands alone.
    */
   landingGroupId: LandingGroupId.nullable().optional(),
+  /** The builder's own model setting for this task; null is no override, and Automatic is a setting. */
+  modelSetting: ModelSetting.nullable(),
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });
@@ -566,6 +569,8 @@ export const TaskPatchFields = z.object({
 export const TaskPatch = TaskPatchFields.extend({
   landing: TaskLanding,
   workspaceMode: z.enum(WorkspaceMode),
+  /** Null removes the task's override. */
+  modelSetting: ModelSetting.nullable(),
 })
   .partial()
   .refine((p) => Object.keys(p).length > 0, {

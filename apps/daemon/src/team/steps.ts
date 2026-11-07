@@ -39,8 +39,6 @@ import {
   listSessions,
   listToolOpResults,
   listWorkstreams,
-  getAccount,
-  listModelProfiles,
   listPersonas,
   patchWorkstream,
   setWorkstreamNotice,
@@ -51,7 +49,8 @@ import {
   type WriteContext,
 } from '@10db/db';
 import type { StateStore } from '../events';
-import { DEFAULT_PROJECT_FLOW, NoProfileError, offeredProfiles, planSteps } from '../routing';
+import { DEFAULT_PROJECT_FLOW, NoProfileError, planSteps } from '../routing';
+import { routingInputs } from './routing-inputs';
 import {
   commitCoveredByRevert,
   commitAdaptsMerge,
@@ -79,10 +78,7 @@ export function resolveStepPlan(db: DbReader, taskId: TaskId): StepPlanDto {
       project,
       personas: listPersonas(db),
       bindings: getTeam(db, project.id).bindings,
-      profiles: offeredProfiles(
-        listModelProfiles(db),
-        getAccount(db, project.accountId).settings.aliases,
-      ),
+      ...routingInputs(db, project),
     });
   } catch (error) {
     if (error instanceof NoProfileError) throw new InvalidError(error.message);

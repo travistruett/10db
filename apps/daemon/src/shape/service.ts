@@ -10,6 +10,7 @@ import {
   ShapeMessageKind,
   ShapeOrigin,
   ShapeProposalState,
+  type AccountId,
   shapeFileKind,
   SessionMode,
   type AccountKind,
@@ -50,6 +51,7 @@ import {
   listShapeMessages,
   listShapes,
   listUntoldShapeFiles,
+  markAccountModelUnusable,
   markSessionStarted,
   markShapeFilesInline,
   markShapeFilesTold,
@@ -127,7 +129,7 @@ import {
   proposeNote,
   rehearseNote,
   SHAPE_ALLOWED_TOOLS,
-  SHAPE_SYSTEM_PROMPT,
+  shapeSystemPrompt,
   shapeToolset,
 } from './policy';
 import {
@@ -167,11 +169,15 @@ import { buildShapeView, fileDtoOf, type ViewWorld } from './view';
 export interface ShapeLaunch {
   readonly cwd: string;
   readonly model: string;
+  /** The model's own ID, which the account's list is keyed by; `model` is what the account launches it with. */
+  readonly modelId: string;
   readonly effort: Effort;
   readonly env: Readonly<Record<string, string>>;
   readonly account: AccountExpectation;
   /** Where the session may read; the service adds the conversation's own files directory. */
   readonly access: Omit<ShapeAccess, 'filesDir'>;
+  /** The Agent tool aliases the account takes, which the prompt names and the hook allows; none runs agents on the session's model. */
+  readonly agentModels: readonly string[];
 }
 
 /** What a session's commands and project tools are prepared from: the conversation and who asks. */
@@ -216,7 +222,7 @@ export interface ShapeServiceDeps {
   readonly log: Logger;
   readonly mcp: { readonly url: string; readonly toolTimeoutMs: number };
   /**
-   * Resolves a project's launch, on `model` (an alias the account offers) or, with null, on the `plan`
+   * Resolves a project's launch, on `model` (an ID the account lists) or, with null, on the `plan`
    * role's; throws when its account can't start a session.
    */
   launch(projectId: ProjectId, model: string | null): ShapeLaunch;
@@ -479,6 +485,9 @@ interface Live {
   readonly expiresAt: string | null;
   /** The picture limits of the account this session runs on, which it keeps even if the project's changes. */
   readonly limits: PictureLimits;
+  /** The account and the model (by its own ID, not the one the account launches it with) it runs on, for a refusal to mark. */
+  readonly account: AccountId;
+  readonly model: string;
   /** Why the daemon ended it, when it did; the session's exit reason otherwise comes from Claude Code. */
   endReason: string | null;
   /** Resolves when its events have ended: the session has ended and its row says so. */
@@ -735,6 +744,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           endSession(ctx, live.sessionId, live.endReason ?? event.reason);
         });
         if (running) rt.live = null;
+        if (event.reason === 'model_refused') markRefused(live);
         if (live.endReason === null && event.reason !== 'completed' && event.reason !== 'stopped')
           notice(shapeId, event.message ?? `Claude's session ended (${event.reason}).`);
         if (running) rt.waiting?.({ kind: 'ended' });
@@ -744,6 +754,18 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       case 'background_tasks':
         break;
     }
+  };
+
+  /** The account cannot run the model: it is marked unusable, so the picker stops offering it. */
+  const markRefused = (live: Live): void => {
+    state.write((ctx) => {
+      try {
+        markAccountModelUnusable(ctx, live.account, live.model);
+      } catch (error) {
+        // An account that lists no models has no row to mark.
+        if (!(error instanceof NotFoundError)) throw error;
+      }
+    });
   };
 
   const consume = async (shapeId: ShapeId, rt: Runtime, live: Live): Promise<void> => {
@@ -936,12 +958,11 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     const shape = getShape(state.db, shapeId);
     const launch = deps.launch(shape.projectId, shape.model);
     // Only this conversation's files: another conversation's, in the same project or not, stay unread.
-    // An agent the session launches runs only on a model the project's account offers.
-    const offered = deps.models?.(shape.projectId).offered;
     const fileAccess: ShapeAccess = {
       ...launch.access,
       filesDir: shapeFilesDir(deps.filesDir, shapeId),
-      ...(offered === undefined ? {} : { agentModels: offered }),
+      // An agent the session launches takes only the aliases its account's Agent tool resolves.
+      agentModels: launch.agentModels,
     };
     const limits = limitsFor(launch.account.kind);
     let resumeId = getShapeSdkSessionId(state.db, shapeId);
@@ -1106,7 +1127,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       sessionId: row.id,
       shapeId,
       cwd: launch.cwd,
-      systemPrompt: SHAPE_SYSTEM_PROMPT,
+      systemPrompt: shapeSystemPrompt(launch.agentModels),
       prompt: skipped === null ? prompt : `${skipped}\n\n${prompt}`,
       ...(images.length === 0 ? {} : { images }),
       model: launch.model,
@@ -1262,6 +1283,8 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       },
       expiresAt: ready?.credentialsExpireAt ?? null,
       limits,
+      account: launch.account.accountId,
+      model: launch.modelId,
       endReason: null,
       done: Promise.resolve(),
     };
@@ -1694,7 +1717,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     chooseModel(shapeId, model) {
       const { projectId } = getShape(state.db, shapeId);
       refuseChatGptAccount(projectId);
-      const offered = deps.models?.(projectId).offered ?? [];
+      const offered = (deps.models?.(projectId).offered ?? []).map((o) => o.model);
       if (model !== null && !offered.includes(model))
         throw new InvalidError(
           `${model} is not a model this project's account offers; choose one of ${offered.join(', ') || 'none'}.`,

@@ -1,5 +1,6 @@
 import type { AccountId, ProjectId } from '@10db/contracts';
 import { findOpenByFoldKey, getAccountRow } from '@10db/db';
+import { storedModelNames } from '../catalogue';
 import type { Clock } from '../clock';
 import type { StateStore } from '../events';
 import type { InboxService } from '../inbox';
@@ -110,11 +111,17 @@ export function createAccountLimits(opts: {
           });
           // A card from an earlier move would absorb this one: each move says so afresh.
           withdraw(project.id, accountId, MOVED_CARD);
-          raise(project.id, movedCard(project, account, fallback, report));
+          raise(project.id, movedCard(project, account, fallback, report, storedModelNames(db)));
         } else if (!atLimit) {
           raise(
             project.id,
-            usageHighCard(project, account, moveTargets(db, project, isPaused), report),
+            usageHighCard(
+              project,
+              account,
+              moveTargets(db, project, isPaused),
+              report,
+              storedModelNames(db),
+            ),
           );
         }
       }

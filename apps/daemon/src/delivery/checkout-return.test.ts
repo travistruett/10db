@@ -277,7 +277,9 @@ describe('a batch that ended while the daemon was down', () => {
     const batch = await openBatch('CLOSED');
     endedWhileDown(batch, 'CLOSED');
     const other = h.addTask('Running', { areas: ['ui'] });
-    const ws = h.state.write((c) => insertWorkstream(c, other.id));
+    const ws = h.state.write((c) =>
+      insertWorkstream(c, other.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    );
     h.settle(ws.id, 'RUNNING');
     await recover();
     expect(where().branch).toBe(batch.branch);
@@ -295,7 +297,9 @@ describe('what keeps the checkout where it is', () => {
       h = createDeliveryHarness();
       const batch = await openBatch('ABANDONED');
       const other = h.addTask('Elsewhere', { areas: ['ui'] });
-      const ws = h.state.write((c) => insertWorkstream(c, other.id));
+      const ws = h.state.write((c) =>
+        insertWorkstream(c, other.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+      );
       h.settle(ws.id, state);
       await endLive(batch, 'ABANDONED');
       expect(where().branch).toBe(batch.branch);

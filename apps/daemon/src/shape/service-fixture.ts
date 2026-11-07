@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import {
   AccountKind,
   BRAINSTORM_REFUSED_ON_CHATGPT,
-  mintId,
   Provider,
   providerOf,
   type DaemonEvent,
@@ -17,6 +16,7 @@ import type { PictureLimits, ScreenService } from '../screens';
 import { FakeAdapter } from '../sessions';
 import type { Hold } from '../verify';
 import type { TrackedFiles } from './ceremony';
+import { shapeAgentModels } from './agent-models';
 import { seedConversation, type ConversationFixture } from './conversation-fixture';
 import type { JoiningProblem } from './convert';
 import {
@@ -52,6 +52,8 @@ export function createServiceFixture(
     checkout?: string;
     prepare?: ShapeServiceDeps['prepare'];
     models?: ShapeServiceDeps['models'];
+    /** What the account launches a model with, when that is not the model's own ID. */
+    launchId?: (model: string) => string;
     /** Told the model each launch is resolved for: the conversation's choice, or null. */
     onLaunch?: (model: string | null) => void;
     /** The picture limits of an account kind; the real ones by default (`pictureLimitsFor`). */
@@ -95,11 +97,13 @@ export function createServiceFixture(
     });
   const launchFor = (chosen: string | null): ShapeLaunch => ({
     cwd: '/repo',
-    model: chosen ?? 'opus',
+    model: opts.launchId?.(chosen ?? 'claude-opus-5-5') ?? chosen ?? 'claude-opus-5-5',
+    modelId: chosen ?? 'claude-opus-5-5',
     effort: 'high',
+    agentModels: shapeAgentModels(launched.kind),
     env: {},
     account: {
-      accountId: mintId('Account'),
+      accountId: c.project.accountId,
       label: launched.kind === AccountKind.Bedrock ? 'Bedrock' : 'Claude plan',
       kind: launched.kind,
       identity: null,

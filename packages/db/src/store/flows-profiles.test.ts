@@ -9,6 +9,7 @@ import {
   listModelProfiles,
   patchModelProfile,
   recordProfileOutcome,
+  upsertModelProfiles,
 } from './model-profiles';
 import type { Store } from './store';
 import { insertPersona } from './team';
@@ -124,6 +125,69 @@ describe('model profiles', () => {
     );
     store.write((ctx) => patchModelProfile(ctx, profile.id, { source: 'aa' }));
     expect(store.write((ctx) => applyAaMeasurement(ctx, profile.id, measurement)).value).toBe(true);
+  });
+
+  const catalogued = {
+    ...definition,
+    maker: 'Anthropic',
+    family: 'claude-sonnet',
+    tier: 'balanced',
+    status: 'current',
+    inputPrice: 3,
+    outputPrice: 15,
+    releaseDate: '2026-09-01',
+  } as const;
+
+  it('upserts catalogue fields and the enabled flag, leaving scores and the id as they were', () => {
+    const { events } = store.write((ctx) => {
+      upsertModelProfiles(ctx, [catalogued]);
+    });
+    expect(events.map((e) => e.type)).toEqual([EventType.ModelProfileSaved]);
+    const first = findModelProfile(store.db, 'claude', 'sonnet', 'high');
+    if (!first) throw new Error('the profile was not stored');
+    expect(listModelProfiles(store.db)).toHaveLength(1);
+    expect(first).toMatchObject({
+      maker: 'Anthropic',
+      tier: 'balanced',
+      releaseDate: '2026-09-01',
+    });
+
+    store.write((ctx) => applyAaMeasurement(ctx, first.id, measurement));
+    store.write((ctx) => {
+      upsertModelProfiles(ctx, [
+        { ...catalogued, status: 'superseded', inputPrice: 2, enabled: false },
+      ]);
+    });
+    const second = listModelProfiles(store.db);
+    expect(second).toHaveLength(1);
+    expect(second[0]).toMatchObject({
+      id: first.id,
+      status: 'superseded',
+      inputPrice: 2,
+      enabled: false,
+      scores: { intelligence: 50, coding: 45, agentic: 40 },
+    });
+  });
+
+  it('writes nothing when the catalogue fields are unchanged', () => {
+    store.write((ctx) => {
+      upsertModelProfiles(ctx, [catalogued]);
+    });
+    const { events } = store.write((ctx) => {
+      upsertModelProfiles(ctx, [catalogued]);
+    });
+    expect(events).toEqual([]);
+  });
+
+  it('writes a change to the enabled flag alone', () => {
+    store.write((ctx) => {
+      upsertModelProfiles(ctx, [catalogued]);
+    });
+    const { events } = store.write((ctx) => {
+      upsertModelProfiles(ctx, [{ ...catalogued, enabled: false }]);
+    });
+    expect(events.map((e) => e.type)).toEqual([EventType.ModelProfileSaved]);
+    expect(findModelProfile(store.db, 'claude', 'sonnet', 'high')?.enabled).toBe(false);
   });
 });
 

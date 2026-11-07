@@ -50,10 +50,14 @@ describe('settings sections', () => {
     { key: 'routing-rules', planned: true },
     { key: 'accounts', planned: false },
     { key: 'decisions', planned: false },
-    { key: 'models', planned: true },
+    { key: 'models', planned: false },
     { key: 'personas-and-flows', planned: true },
   ])('marks $key planned: $planned', ({ key, planned }) => {
     expect(SETTINGS_SECTIONS.find((s) => s.key === key)?.planned !== null).toBe(planned);
+  });
+
+  it('lists every section but Routing rules as built, even Team and Personas and flows, whose editors are still to come', () => {
+    expect(SETTINGS_SECTIONS.filter((s) => !s.built).map((s) => s.key)).toEqual(['routing-rules']);
   });
 
   it.each([

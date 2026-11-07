@@ -60,6 +60,7 @@ import type { GateSandbox } from '../src/sandbox';
 import { seedTeam } from '../src/team';
 import { createGateRunner, type GateRunner } from '../src/verify';
 import { measureForTests } from './catalogue';
+import { seedProfiles } from './seed-profiles';
 import { FakeGh } from './fake-gh';
 import { captureLogs, type LogCapture } from './log-capture';
 import {
@@ -299,6 +300,7 @@ export function createDeliveryHarness(
   const bus = createEventBus();
   const state = createStateStore(store, bus);
   seedTeam(state, readDefaultPersonas());
+  seedProfiles(state);
   measureForTests(state);
   const inbox = createInboxService({ state, onParkedAnswer: () => undefined });
   const gitRefusals: GitTrustError[] = [];

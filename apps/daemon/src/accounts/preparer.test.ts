@@ -9,6 +9,7 @@ import {
   createTestStore,
   getAccount,
   getAccountRow,
+  listAccountModels,
   listInbox,
   patchAccount,
   recordAccountSecret,
@@ -19,6 +20,8 @@ import {
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createMemoryKeychain } from '../../test/fixtures';
+import { readModelsDevFixture } from '../../test/models-dev-fixture';
+import { createAccountLists, parseCatalogue } from '../catalogue';
 import { ManualClock } from '../clock';
 import { createLauncher } from '../environment';
 import { createEventBus, createStateStore, type StateStore } from '../events';
@@ -54,6 +57,12 @@ beforeEach(() => {
     clock,
     inbox,
     adapter,
+    lists: createAccountLists({
+      state,
+      clock,
+      catalogue: () => parseCatalogue(readModelsDevFixture()),
+      logger: silentLogger,
+    }),
     launcher: createLauncher({
       base: { PATH: '/bin' },
       clientApp: 'test',
@@ -107,6 +116,33 @@ describe('the preparer', () => {
         accountId: defaultAccount.id,
         seenIdentity: 'me@example.com',
       });
+    },
+  );
+
+  it.each<[string, Partial<SeenAccount>, string[]]>([
+    ['a signed-in directory', { email: 'me@example.com' }, ['claude-opus-5-5']],
+    [
+      'a signed-out directory, which still answers a listing',
+      { email: undefined, subscriptionType: undefined },
+      [],
+    ],
+    [
+      'a directory that reports a plan but no email, which waits for its sign-in',
+      { email: undefined },
+      [],
+    ],
+  ])(
+    'keeps the models a probe listed for %s only if the account check passes',
+    async (_name, seen, expected) => {
+      const { defaultAccount, projectId } = freshDefault();
+      adapter.probeSeen = {
+        ...adapter.probeSeen,
+        ...seen,
+        models: [{ id: 'opus', resolvedId: 'claude-opus-5-5', efforts: ['low'] }],
+      };
+      preparer.prepare(getAccountRow(state.db, defaultAccount.id), projectId);
+      await preparer.idle();
+      expect(listAccountModels(state.db, defaultAccount.id).map((m) => m.model)).toEqual(expected);
     },
   );
 

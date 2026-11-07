@@ -275,7 +275,11 @@ describe('moveTask between columns', () => {
   });
 
   it('refuses to move a running task', () => {
-    store.write((ctx) => insertWorkstream(ctx, tasks.a.id));
+    store.write((ctx) =>
+      insertWorkstream(ctx, tasks.a.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      }),
+    );
     expect(() =>
       store.write((ctx) => moveTask(ctx, tasks.a.id, { to: icebox, after: null, before: null })),
     ).toThrow(ConflictError);
@@ -298,7 +302,11 @@ describe('moveTask neighbours', () => {
   });
 
   it('refuses a running neighbour', () => {
-    store.write((ctx) => insertWorkstream(ctx, tasks.c.id));
+    store.write((ctx) =>
+      insertWorkstream(ctx, tasks.c.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      }),
+    );
     expect(() =>
       store.write((ctx) =>
         moveTask(ctx, tasks.b.id, { to: null, after: tasks.c.id, before: tasks.d.id }),
@@ -418,7 +426,11 @@ describe('moveTask from a stale view', () => {
       // d started from Ready and is In progress; the view is fresh, and Ready ends at c.
       name: 'places it at the bottom when a task past the neighbour has moved on to In progress',
       setup: () => {
-        const ws = store.write((ctx) => insertWorkstream(ctx, tasks.d.id)).value;
+        const ws = store.write((ctx) =>
+          insertWorkstream(ctx, tasks.d.id, {
+            first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+          }),
+        ).value;
         for (const state of ['STARTING', 'RUNNING'] as const)
           store.write((ctx) => transitionWorkstream(ctx, ws.id, { to: state, fence: null }));
       },
@@ -442,10 +454,18 @@ describe('moveTask from a stale view', () => {
 
 describe('a task with an older run still active', () => {
   it('refuses to move it, whatever its latest run says', () => {
-    const first = store.write((ctx) => insertWorkstream(ctx, tasks.a.id)).value;
+    const first = store.write((ctx) =>
+      insertWorkstream(ctx, tasks.a.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      }),
+    ).value;
     store.write((ctx) => transitionWorkstream(ctx, first.id, { to: 'STARTING', fence: null }));
     store.write((ctx) => transitionWorkstream(ctx, first.id, { to: 'FAILED', fence: null }));
-    const second = store.write((ctx) => insertWorkstream(ctx, tasks.a.id)).value;
+    const second = store.write((ctx) =>
+      insertWorkstream(ctx, tasks.a.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      }),
+    ).value;
     store.write((ctx) => transitionWorkstream(ctx, second.id, { to: 'CANCELLED', fence: null }));
     // Bypass the retry route: the first run is queued again while the latest run is cancelled.
     store.write((ctx) => transitionWorkstream(ctx, first.id, { to: 'QUEUED', fence: null }));
@@ -469,14 +489,20 @@ describe('a dependency parked in a human column', () => {
   it('refuses to start its dependent, naming the dependency', () => {
     const e = dependent();
     store.write((ctx) => moveTask(ctx, tasks.a.id, { to: icebox, after: null, before: null }));
-    expect(() => store.write((ctx) => insertWorkstream(ctx, e.id))).toThrow(
-      'Task e waits on a, which is parked in Icebox; move it to Backlog or Ready first',
-    );
+    expect(() =>
+      store.write((ctx) =>
+        insertWorkstream(ctx, e.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+      ),
+    ).toThrow('Task e waits on a, which is parked in Icebox; move it to Backlog or Ready first');
   });
 
   it('lets the dependent queue while the dependency is planned', () => {
     const e = dependent();
-    expect(() => store.write((ctx) => insertWorkstream(ctx, e.id))).not.toThrow();
+    expect(() =>
+      store.write((ctx) =>
+        insertWorkstream(ctx, e.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+      ),
+    ).not.toThrow();
   });
 
   const PARK_REFUSAL = "Task e waits on a and has started; a can't be parked until e finishes";
@@ -502,7 +528,9 @@ describe('a dependency parked in a human column', () => {
     },
   ] as const)('$name', ({ path, to, refusal }) => {
     const e = dependent();
-    const ws = store.write((ctx) => insertWorkstream(ctx, e.id)).value;
+    const ws = store.write((ctx) =>
+      insertWorkstream(ctx, e.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    ).value;
     for (const state of path)
       store.write((ctx) => transitionWorkstream(ctx, ws.id, { to: state, fence: null }));
     const move: TaskMove =
@@ -523,8 +551,12 @@ describe('a dependency parked in a human column', () => {
 describe('parked tasks', () => {
   it('refuses to start a parked task, naming its column', () => {
     store.write((ctx) => moveTask(ctx, tasks.a.id, { to: icebox, after: null, before: null }));
-    expect(() => store.write((ctx) => insertWorkstream(ctx, tasks.a.id))).toThrow(
-      'Task a is parked in Icebox; move it to Backlog or Ready to start it',
-    );
+    expect(() =>
+      store.write((ctx) =>
+        insertWorkstream(ctx, tasks.a.id, {
+          first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        }),
+      ),
+    ).toThrow('Task a is parked in Icebox; move it to Backlog or Ready to start it');
   });
 });

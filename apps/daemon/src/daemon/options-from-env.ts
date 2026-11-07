@@ -12,6 +12,7 @@ export type EnvDaemonOptions = Pick<
   | 'worktreeRoot'
   | 'limits'
   | 'judgeOff'
+  | 'catalogueSync'
 >;
 
 /**
@@ -20,6 +21,11 @@ export type EnvDaemonOptions = Pick<
  */
 export function aaKeyReaderFromEnv(env: DaemonEnv, read: () => string | null): () => string | null {
   return env.TENDB_BENCHMARKS === 'off' ? () => null : read;
+}
+
+/** The catalogue file to read when none is stored: the one the environment names, else the release's own. */
+export function catalogueSnapshotFromEnv(env: DaemonEnv, bundled: string): string {
+  return env.TENDB_CATALOGUE_SNAPSHOT ?? bundled;
 }
 
 /**
@@ -37,5 +43,6 @@ export function daemonOptionsFromEnv(env: DaemonEnv): EnvDaemonOptions {
     ...(env.TENDB_GATE_SLOTS === undefined ? {} : { limits: { gateSlots: env.TENDB_GATE_SLOTS } }),
     ...(env.TENDB_DEV_UI_ORIGIN ? { devUiOrigin: env.TENDB_DEV_UI_ORIGIN } : {}),
     ...(env.TENDB_JUDGE === 'off' ? { judgeOff: true } : {}),
+    catalogueSync: env.TENDB_CATALOGUE !== 'off',
   };
 }

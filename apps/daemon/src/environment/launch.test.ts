@@ -99,56 +99,41 @@ describe('a session launch', () => {
   it.each<{
     name: string;
     row: AccountRow;
-    alias: string;
     adds: Record<string, string>;
     absent: string[];
-    model: string;
   }>([
     {
       name: 'a subscription on its own directory',
       row: account({}),
-      alias: 'sonnet',
       adds: { CLAUDE_CONFIG_DIR: SUB_DIR },
       absent: ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_AUTH_TOKEN'],
-      model: 'sonnet',
     },
     {
       name: "the default account on the login shell's own directory",
       row: account({ label: 'Claude plan', configDir: '/h/b/.claude-other' }),
-      alias: 'opus',
       adds: { CLAUDE_CONFIG_DIR: '/h/b/.claude-other' },
       absent: ['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'],
-      model: 'opus',
     },
     {
       name: "the default account on Claude Code's default directory, which the login shell's value never overrides",
       row: account({ label: 'Claude plan', configDir: null }),
-      alias: 'opus',
       adds: {},
       absent: ['CLAUDE_CONFIG_DIR', 'ANTHROPIC_API_KEY'],
-      model: 'opus',
     },
     {
       name: 'an API key on its own directory',
       row: keyed({ kind: 'anthropic_api_key' }),
-      alias: 'haiku',
       adds: { ANTHROPIC_API_KEY: SECRET, CLAUDE_CONFIG_DIR: KEY_DIR },
       absent: ['ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN'],
-      model: 'haiku',
     },
     {
-      name: 'Bedrock on a profile, with a model map',
+      name: 'Bedrock on a profile',
       row: account({
         kind: 'bedrock',
         configDir: KEY_DIR,
         expectedIdentity: null,
-        settings: {
-          region: 'us-west-2',
-          awsProfile: 'client-c',
-          modelMap: { sonnet: 'us.anthropic.claude-sonnet-5-5-v1:0' },
-        },
+        settings: { region: 'us-west-2', awsProfile: 'client-c' },
       }),
-      alias: 'sonnet',
       adds: {
         CLAUDE_CODE_USE_BEDROCK: '1',
         AWS_REGION: 'us-west-2',
@@ -167,42 +152,10 @@ describe('a session launch', () => {
         'AWS_BEARER_TOKEN_BEDROCK',
         'ANTHROPIC_API_KEY',
       ],
-      model: 'us.anthropic.claude-sonnet-5-5-v1:0',
-    },
-    {
-      // A subagent named by alias (`model: 'fable'`) resolves through these, so it runs on the account's
-      // model as the session does, not on Claude Code's own default for the alias.
-      name: 'Bedrock mapping every alias, which a subagent resolves through Claude Code’s variables',
-      row: account({
-        kind: 'bedrock',
-        configDir: KEY_DIR,
-        expectedIdentity: null,
-        settings: {
-          region: 'us-east-1',
-          awsProfile: 'orgtools-admin',
-          modelMap: {
-            opus: 'us.anthropic.claude-opus-5-5',
-            sonnet: 'us.anthropic.claude-sonnet-5-5',
-            haiku: 'us.anthropic.claude-haiku-5-5',
-            fable: 'us.anthropic.claude-fable-5-1',
-          },
-        },
-      }),
-      alias: 'fable',
-      adds: {
-        AWS_PROFILE: 'orgtools-admin',
-        ANTHROPIC_DEFAULT_OPUS_MODEL: 'us.anthropic.claude-opus-5-5',
-        ANTHROPIC_DEFAULT_SONNET_MODEL: 'us.anthropic.claude-sonnet-5-5',
-        ANTHROPIC_DEFAULT_HAIKU_MODEL: 'us.anthropic.claude-haiku-5-5',
-        ANTHROPIC_DEFAULT_FABLE_MODEL: 'us.anthropic.claude-fable-5-1',
-      },
-      absent: ['AWS_BEARER_TOKEN_BEDROCK'],
-      model: 'us.anthropic.claude-fable-5-1',
     },
     {
       name: 'Bedrock on a bearer token',
       row: keyed({ kind: 'bedrock', settings: { region: 'eu-central-1', awsProfile: null } }),
-      alias: 'haiku',
       adds: {
         CLAUDE_CODE_USE_BEDROCK: '1',
         AWS_REGION: 'eu-central-1',
@@ -210,39 +163,28 @@ describe('a session launch', () => {
         CLAUDE_CONFIG_DIR: KEY_DIR,
       },
       absent: ['AWS_PROFILE', 'AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY'],
-      model: 'haiku',
     },
     {
-      name: 'a gateway with a model map',
+      name: 'a gateway',
       row: keyed({
         kind: 'gateway',
-        settings: {
-          baseUrl: 'https://openrouter.ai/api',
-          modelMap: { haiku: '~anthropic/claude-haiku-latest' },
-        },
+        settings: { baseUrl: 'https://openrouter.ai/api' },
       }),
-      alias: 'haiku',
       adds: {
         ANTHROPIC_BASE_URL: 'https://openrouter.ai/api',
         ANTHROPIC_AUTH_TOKEN: SECRET,
         CLAUDE_CONFIG_DIR: KEY_DIR,
       },
-      absent: [
-        'ANTHROPIC_API_KEY',
-        'ANTHROPIC_DEFAULT_OPUS_MODEL',
-        'ANTHROPIC_DEFAULT_FABLE_MODEL',
-      ],
-      model: '~anthropic/claude-haiku-latest',
+      absent: ['ANTHROPIC_API_KEY'],
     },
-  ])('$name', ({ row, alias, adds, absent, model }) => {
-    const launch = launcher().session(row, alias);
+  ])('$name', ({ row, adds, absent }) => {
+    const launch = launcher().session(row, 'claude-sonnet-5-5', []);
     expect(launch.env).toMatchObject({
       ...adds,
       CLAUDE_AGENT_SDK_CLIENT_APP: '10db/0.1.0',
       PATH: BASE['PATH'],
     });
     for (const name of absent) expect(launch.env).not.toHaveProperty(name);
-    expect(launch.model).toBe(model);
     expect(launch.expect).toEqual({
       accountId: row.id,
       label: row.label,
@@ -282,7 +224,7 @@ describe('a session launch', () => {
   ])('refuses $name before anything starts, naming no value', ({ items, row, problem }) => {
     let thrown: unknown;
     try {
-      launcher(items).session(row, 'sonnet');
+      launcher(items).session(row, 'claude-sonnet-5-5', []);
     } catch (error) {
       thrown = error;
     }
@@ -306,12 +248,10 @@ describe('a ChatGPT sign-in launch', () => {
     label: 'ChatGPT Pro',
     configDir: CODEX_DIR,
     expectedIdentity: 'a@example.com · w1',
-    settings: { modelMap: { sonnet: 'gpt-5.6-sol' } },
   });
 
-  it('runs on its own CODEX_HOME with the mapped model and none of the OpenAI credentials', () => {
-    const { env, model } = launcher().session(codexAccount, 'sonnet');
-    expect(model).toBe('gpt-5.6-sol');
+  it('runs on its own CODEX_HOME and none of the OpenAI credentials', () => {
+    const { env } = launcher().session(codexAccount, 'gpt-5.6-sol', []);
     expect(env['CODEX_HOME']).toBe(CODEX_DIR);
     expect(env).not.toHaveProperty('CLAUDE_CONFIG_DIR');
     for (const name of ['OPENAI_API_KEY', 'CODEX_API_KEY', 'OPENAI_BASE_URL', 'CODEX_ACCESS_TOKEN'])
@@ -320,7 +260,7 @@ describe('a ChatGPT sign-in launch', () => {
   });
 
   it('never inherits the login shell CODEX_HOME when it has no directory', () => {
-    const { env } = launcher().session({ ...codexAccount, configDir: null }, 'sonnet');
+    const { env } = launcher().session({ ...codexAccount, configDir: null }, 'gpt-5.6-sol', []);
     expect(env).not.toHaveProperty('CODEX_HOME');
   });
 
@@ -377,9 +317,9 @@ describe('sessionConfigDir', () => {
   });
 
   it('carries the login shell CODEX_HOME through a Claude launch without using it', () => {
-    const { env } = launcher().session(account({}), 'sonnet');
+    const { env } = launcher().session(account({}), 'claude-sonnet-5-5', []);
     expect(sessionConfigDir('claude_subscription', env, '/h/b')).toBe(SUB_DIR);
-    const login = launcher().session(account({ configDir: null }), 'sonnet');
+    const login = launcher().session(account({ configDir: null }), 'claude-sonnet-5-5', []);
     expect(sessionConfigDir('claude_subscription', login.env, '/h/b')).toBe('/h/b/.claude');
   });
 });

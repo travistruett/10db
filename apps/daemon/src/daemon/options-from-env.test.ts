@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { loadEnv } from '../env';
-import { aaKeyReaderFromEnv, daemonOptionsFromEnv } from './options-from-env';
+import {
+  aaKeyReaderFromEnv,
+  catalogueSnapshotFromEnv,
+  daemonOptionsFromEnv,
+} from './options-from-env';
 
 describe('daemonOptionsFromEnv', () => {
   it('sandboxes every lane of a daemon that runs real Claude Code sessions', () => {
@@ -23,6 +27,27 @@ describe('daemonOptionsFromEnv', () => {
     expect(options).not.toHaveProperty('permissionModeOverride');
   });
 
+  it.each([
+    ['absent', {}, true],
+    ['on', { TENDB_CATALOGUE: 'on' }, true],
+    ['off', { TENDB_CATALOGUE: 'off' }, false],
+  ])('syncs the catalogue when TENDB_CATALOGUE is %s: %s', (_name, source, expected) => {
+    expect(daemonOptionsFromEnv(loadEnv(source)).catalogueSync).toBe(expected);
+  });
+
+  it.each([
+    [
+      'the file the environment names',
+      { TENDB_CATALOGUE_SNAPSHOT: '/x/catalogue.json' },
+      '/x/catalogue.json',
+    ],
+    ['the bundled file when none is named', {}, '/bundle/catalogue-snapshot.json'],
+  ])('reads the catalogue snapshot from %s', (_name, source, expected) => {
+    expect(catalogueSnapshotFromEnv(loadEnv(source), '/bundle/catalogue-snapshot.json')).toBe(
+      expected,
+    );
+  });
+
   it('carries the port, log level and dev UI settings', () => {
     const token = 'a'.repeat(43);
     expect(
@@ -40,6 +65,7 @@ describe('daemonOptionsFromEnv', () => {
       sandbox: {},
       uiToken: token,
       devUiOrigin: 'http://localhost:51234',
+      catalogueSync: true,
     });
   });
 

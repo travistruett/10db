@@ -80,7 +80,9 @@ describe('setting the areas of a task', () => {
   it('refuses a task that has started, saying why', () => {
     const project = seedProject(store);
     const task = addTask(project.id);
-    store.write((ctx) => insertWorkstream(ctx, task.id));
+    store.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    );
     const error = refusal(() => setAreas(task.id, ['ui']));
     expect(error).toBeInstanceOf(ConflictError);
     expect((error as Error).message).toBe(

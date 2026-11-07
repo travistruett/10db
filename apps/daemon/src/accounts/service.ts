@@ -32,6 +32,7 @@ import {
   patchAccount,
   recordAccountSecret,
 } from '@10db/db';
+import type { AccountLists } from '../catalogue';
 import type { Clock } from '../clock';
 import {
   AccountLaunchError,
@@ -54,6 +55,7 @@ import {
 } from '../sessions';
 import { capStatus } from './cap';
 import { monthOf, monthWindow, usageWindow } from './month';
+import type { ListRefresh } from './list-refresh';
 import type { AccountPauses } from './pauses';
 import type { AccountRuntime } from './runtime';
 import type { StartGate } from './start-gate';
@@ -138,6 +140,10 @@ export function createAccountService(deps: {
   readonly keychain: Keychain;
   readonly launcher: Pick<Launcher, 'probe'>;
   readonly adapter: Pick<SessionAdapter, 'probeAccount' | 'startLogin'>;
+  /** Where the models an account lists are kept, once the account check has passed. */
+  readonly lists: AccountLists;
+  /** Reads an account's list on its own, as a finished sign-in must: no one need be watching a drawer. */
+  readonly listRefresh: Pick<ListRefresh, 'readOne'>;
   readonly logger: Pick<Logger, 'warn'>;
   /**
    * How many lanes run on the account now. A sign-in replaces the login they use, so none may. Plan
@@ -150,6 +156,8 @@ export function createAccountService(deps: {
   readonly pauses: Pick<AccountPauses, 'pausedFor' | 'resume'>;
   /** An account changed: the scheduler looks again. */
   onSaved(): void;
+  /** An account was created: the model profiles are rebuilt for it from the catalogue already held. */
+  onCreated?(): void;
 }): AccountService {
   const db = deps.state.db;
   const root = join(deps.dataDir, 'accounts');
@@ -223,6 +231,7 @@ export function createAccountService(deps: {
         if (created.configDir !== null) makePrivate(root, created.configDir);
         return created;
       });
+      deps.onCreated?.();
       return { account, signIn: signInOf(account) };
     },
     patch(id, patch) {
@@ -293,6 +302,8 @@ export function createAccountService(deps: {
           `Couldn't read the account ${row.label}: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
+      const refusal = checkAccount(launch.expect, seen);
+      if (refusal === null) deps.lists.record(row, seen);
       const unconfirmed =
         signsInWithLogin(row.kind) && row.expectedIdentity === null
           ? {
@@ -309,8 +320,8 @@ export function createAccountService(deps: {
         apiKeySource: seen.apiKeySource ?? null,
         tokenSource: seen.tokenSource ?? null,
         subscription: Boolean(seen.subscriptionType),
-        models: [...(seen.models ?? [])],
-        refusal: checkAccount(launch.expect, seen) ?? unconfirmed,
+        models: (seen.models ?? []).map((m) => m.id),
+        refusal: refusal ?? unconfirmed,
       };
     },
     async connect(id) {
@@ -392,6 +403,8 @@ export function createAccountService(deps: {
         }
         if (connecting === slot) connecting = null;
         slot.finish();
+        // The new login's models are read now; the read never rejects.
+        if (outcome.ok) void deps.listRefresh.readOne(id);
         // Work held back while the sign-in ran can start.
         deps.onSaved();
       });

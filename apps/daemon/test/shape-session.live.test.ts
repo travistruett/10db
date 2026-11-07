@@ -37,13 +37,17 @@ import {
   SHAPE_ALLOWED_TOOLS,
   SHAPE_BUILT_IN_TOOLS,
   SHAPE_DISALLOWED_TOOLS,
-  SHAPE_SYSTEM_PROMPT,
   judgeShapeCall,
+  shapeAgentModels,
+  shapeSystemPrompt,
 } from '../src/shape';
 import { createClaudeAdapter, type SessionEvent, type ShapeToolRequest } from '../src/sessions';
 import { createTempRepo } from './fixtures';
 import { textPdf } from './pdf';
 import { noisePng, pngImage } from './png';
+
+/** The prompt for a subscription, whose agents take every alias. */
+const SHAPE_SYSTEM_PROMPT = shapeSystemPrompt(shapeAgentModels('claude_subscription'));
 
 // Shape spec §5.2, §15: the confinement holds on the real SDK. Runs on the builder's Max
 // subscription through the logged-in claude; never in CI and never in `make gate`
@@ -95,7 +99,11 @@ describe.skipIf(!live)('a Shape session, live', () => {
       cwd: checkout,
       env: launcher.probe(account).env,
     });
-    const launch = launcher.session({ ...account, expectedIdentity: seen.email ?? null }, 'haiku');
+    const launch = launcher.session(
+      { ...account, expectedIdentity: seen.email ?? null },
+      'claude-haiku-5-5',
+      [],
+    );
     const access = {
       checkout,
       home: homedir(),
@@ -257,7 +265,11 @@ describe.skipIf(!live)('a Shape session, live', () => {
       cwd: checkout,
       env: launcher.probe(account).env,
     });
-    const launch = launcher.session({ ...account, expectedIdentity: seen.email ?? null }, 'haiku');
+    const launch = launcher.session(
+      { ...account, expectedIdentity: seen.email ?? null },
+      'claude-haiku-5-5',
+      [],
+    );
     const access = {
       checkout,
       home: homedir(),
@@ -373,7 +385,8 @@ describe.skipIf(!live)('a Shape session, live', () => {
     });
     const launch = launcher.session(
       { ...defaultAccount, expectedIdentity: seen.email ?? null },
-      'haiku',
+      'claude-haiku-5-5',
+      [],
     );
     const access = {
       checkout,
@@ -585,7 +598,11 @@ async function readInSession(
     cwd: checkout,
     env: launcher.probe(account).env,
   });
-  const launch = launcher.session({ ...account, expectedIdentity: seen.email ?? null }, 'haiku');
+  const launch = launcher.session(
+    { ...account, expectedIdentity: seen.email ?? null },
+    'claude-haiku-5-5',
+    [],
+  );
   const access = {
     checkout,
     home: homedir(),

@@ -7,6 +7,16 @@
   `decisions.md`. Changes to it are new rows in `decisions.md` that name what they supersede; the
   spec text itself is not edited after this section was locked.
 
+## Which model runs a step
+
+One function, `chooseModel` (`apps/daemon/src/routing/choose-model.ts`), decides a step's model and effort from the
+persona, the task's own setting, the patterns, the role's setting and then Automatic
+(`decisions/2026-11-07-one-function-chooses-a-steps-model.md`, built). Its pool is what the project's account offers,
+and a tier is filled by the account's override for it, else by price within the catalogue. The step records the setting
+that decided and a reason. At each session start `resolveStep` keeps a planned model the account still offers and
+otherwise chooses again, so a changed list or a refused model never strands a step. The catalogue, the tiers and the
+account's overrides are `decisions/2026-11-07-models-come-from-a-catalogue.md` (built).
+
 ## The builder's check
 
 A project with no gate command has no program to verify finished work, so the builder does

@@ -37,6 +37,10 @@ function run(extraEnv: Record<string, string>): Promise<{ code: number | null; s
       TENDB_DATA_DIR: data.path,
       TENDB_PORT: '0',
       TENDB_LOG_LEVEL: 'warn',
+      // A throwaway daemon never fetches models.dev.
+      TENDB_CATALOGUE: 'off',
+      // It still builds its model profiles, from the fixture catalogue.
+      TENDB_CATALOGUE_SNAPSHOT: resolve(import.meta.dirname, 'fixtures/catalogue.json'),
       TENDB_FAKE_SCRIPTS: join(data.path, 'book.json'),
       ...extraEnv,
     },

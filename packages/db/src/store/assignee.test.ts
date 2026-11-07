@@ -62,7 +62,9 @@ describe('assigneeFor', () => {
     const task = store.write((ctx) =>
       insertTask(ctx, project.id, { title: 'T', acceptanceCriteria: ['x'], areas: ['ui'] }),
     ).value;
-    const ws = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+    const ws = store.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    ).value;
     const card = store.write((ctx) =>
       insertInboxItem(ctx, {
         projectId: project.id,

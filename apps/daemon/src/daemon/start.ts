@@ -12,9 +12,11 @@ import {
   Provider,
   providerOf,
   StepRole,
+  type Effort,
   type InboxAnswer,
   type InboxItemDto,
   type ProjectDto,
+  type AccountId,
   type ProjectId,
   type ShapeId,
   type SystemCheckDto,
@@ -30,11 +32,11 @@ import {
   deleteAppSetting,
   deleteJudgeCallsBefore,
   lanesByAccount,
-  getAccount,
   getAccountRow,
+  listModelProfiles,
+  listAccountModels,
   getAppSetting,
   getProject,
-  listModelProfiles,
   listPermissionRules,
   listProjects,
   migrateDatabase,
@@ -53,6 +55,8 @@ import {
   createAccountPreparer,
   createAccountRuntime,
   createAccountService,
+  createModelListWait,
+  createListRefresh,
   createMoveBack,
   createStartGate,
   createUsageReports,
@@ -60,6 +64,13 @@ import {
 } from '../accounts';
 import { createApp, type SelfUpdateServices } from '../api';
 import { createBenchmarkSync, type BenchmarkSync } from '../benchmarks';
+import {
+  createAccountLists,
+  createCatalogueSync,
+  readCatalogueSnapshot,
+  reconcileProfiles,
+  type Catalogue,
+} from '../catalogue';
 import { createJudge, JUDGE_LOG_RETENTION_MS, type JudgeService } from '../judge';
 import { createJudgeServices } from './judge-services';
 import {
@@ -131,9 +142,9 @@ import {
   withdrawStaleClaimWaits,
 } from '../mcp';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
-import { offeredModels, offeredProfiles, roleDefault } from '../routing';
+import { chooseModel, offeredModels, PLAN_NEED } from '../routing';
 import { createScreenBroker, createScreens, renderMayRead } from '../screens';
-import { createShapeJev, createShapeService } from '../shape';
+import { createShapeJev, createShapeService, shapeAgentModels } from '../shape';
 import { createKnowledgeServices } from './knowledge-services';
 import { createShapeServices } from './shape-services';
 import { createShapePreparer } from './shape-session-tools';
@@ -182,7 +193,7 @@ import {
   type SelfUpdate,
 } from '../self-update';
 import type { SessionAdapter } from '../sessions';
-import { seedTeam } from '../team';
+import { routingInputs, seedTeam } from '../team';
 import { createGateRunner, createGateSlots, limitGates } from '../verify';
 import { CLIENT_APP } from '../version';
 import { createWatcher, systemWatch, type WatchFn } from '../watcher';
@@ -269,6 +280,13 @@ export interface DaemonOptions {
   /** The builder's Artificial Analysis key (the Keychain in production); absent means no sync. */
   readonly aaKey?: () => string | null;
   readonly fetch?: typeof fetch;
+  /**
+   * Fetch the model catalogue from models.dev and keep it fresh. Off unless given, so a test never reaches
+   * the network; the entry point turns it on unless `TENDB_CATALOGUE=off`.
+   */
+  readonly catalogueSync?: boolean;
+  /** The file holding the catalogue the release embeds, read when nothing is stored; absent or missing means none. */
+  readonly catalogueSnapshot?: string;
   /** `TENDB_JUDGE=off`: the OpenRouter key is never read and no decision calls OpenRouter. */
   readonly judgeOff?: boolean;
   /** The harness plugin folder the default personas are read from. */
@@ -314,6 +332,12 @@ export interface RunningDaemon {
   readonly runner: Runner;
   readonly scheduler: Scheduler;
   readonly benchmarks: BenchmarkSync;
+  /**
+   * Fetches the catalogue, reads every account's list again, rebuilds the model profiles and then updates scores. A
+   * call during a run joins it. With `force` every account is read even when the fetch failed; without it a failed
+   * fetch leaves alone the accounts read in the last day. Does nothing when `catalogueSync` is off.
+   */
+  refreshModels(opts: { readonly force: boolean }): Promise<void>;
   /** What routine decisions ask; reads the OpenRouter key from `keychain` for each call. */
   readonly judge: JudgeService;
   stop(): Promise<void>;
@@ -469,6 +493,32 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger: logger.child({ component: 'benchmarks' }),
   });
   benchmarks.start();
+  // The accounts' lists and the refresh that follows each fetch are made further down, once the adapter and the
+  // start gate exist; they are named here so the catalogue can reach them when it runs.
+  let snapshot: { readonly value: Catalogue | null } | undefined;
+  const catalogue = createCatalogueSync({
+    state,
+    clock,
+    fetch: opts.fetch ?? fetch,
+    logger: logger.child({ component: 'catalogue' }),
+    snapshot: () => {
+      // The file is part of the install and does not change while the process runs.
+      snapshot ??= {
+        value: opts.catalogueSnapshot ? readCatalogueSnapshot(opts.catalogueSnapshot) : null,
+      };
+      return snapshot.value;
+    },
+    onChanged: (changed) => {
+      rebuildProfiles(changed);
+    },
+    afterSync: (fetched) => refreshAccountModels(fetched),
+  });
+  const accountLists = createAccountLists({
+    state,
+    clock,
+    catalogue: () => catalogue.catalogue(),
+    logger: logger.child({ component: 'catalogue' }),
+  });
   const judgeKeychain = opts.keychain ?? unavailableKeychain;
   const judge = createJudge({
     state,
@@ -568,6 +618,29 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       answerDeadlockCard(item, answer);
     },
   });
+  // A lane that finds no model profile for its account waits for the profiles instead of retrying every tick.
+  const modelWait = createModelListWait({
+    clock,
+    inbox,
+    logger: logger.child({ component: 'catalogue' }),
+    onReleased: () => {
+      scheduler?.requestTick();
+    },
+  });
+  /**
+   * Writes the model profiles from `catalogue` and ends the wait of every account they now cover. The rebuild is
+   * idempotent, so it runs from a fetch, an account list, the catalogue the daemon already holds at start and
+   * when an account is created, with no network.
+   */
+  function rebuildProfiles(from: Catalogue): void {
+    state.write((ctx) => {
+      reconcileProfiles(ctx, from);
+    });
+    modelWait.release((id) => {
+      const provider = providerOf(getAccountRow(db, id).kind);
+      return listModelProfiles(db).some((p) => p.provider === provider);
+    });
+  }
   // Sustained overload holds new lane sessions and gates and raises one card naming what is busy.
   const laneTempDirs = createLaneTempDirs();
   const loadGuard = createLoadMonitor({
@@ -929,6 +1002,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     clock,
     inbox,
     adapter,
+    lists: accountLists,
     launcher,
     startGate,
     dataDir: opts.dataDir,
@@ -937,6 +1011,49 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       scheduler?.requestTick();
     },
   });
+  const listRefresh = createListRefresh({
+    state,
+    clock,
+    adapter,
+    launcher,
+    startGate,
+    lists: accountLists,
+    dataDir: opts.dataDir,
+    logger: logger.child({ component: 'catalogue' }),
+  });
+  // What runs after every fetch of the catalogue: each account's list is read again through the identity probe, then
+  // the profiles are rebuilt from what the accounts now offer. Scores for the models that changed are read after the
+  // profiles exist, so a new model has a row to put them on.
+  async function refreshAccountModels(fetched: boolean): Promise<void> {
+    // After a failed fetch only accounts not read in the last day are read, so a retry loop does not probe them all;
+    // the builder's own refresh reads every account.
+    const everyAccount = fetched || forced;
+    const builderAsked = forced;
+    forced = false;
+    await listRefresh.readAll({ staleOnly: !everyAccount });
+    const current = catalogue.catalogue();
+    if (current !== null) rebuildProfiles(current);
+    // Scores come last, so every new model has a row to put them on; with no key or benchmarks off nothing is fetched.
+    await benchmarks.syncForCatalogue({ force: builderAsked });
+  }
+  // One path for the daily timer, the start-up catch-up and the Models page: a call during a run joins it.
+  // Off, nothing is fetched and no account is probed.
+  const modelRefreshOn = opts.catalogueSync === true;
+  /** A forced refresh is waiting for the run in flight to read the accounts. */
+  let forced = false;
+  const refreshModels = async ({ force }: { readonly force: boolean }): Promise<void> => {
+    if (!modelRefreshOn) return;
+    forced ||= force;
+    await catalogue.sync();
+    // A run already past its read never saw the request: read once more.
+    if (forced) await refreshAccountModels(true);
+  };
+  // Profiles come from the catalogue the daemon holds (the stored copy, else the release's snapshot), not from a
+  // fetch: a daemon that never fetches still plans and launches on real models. The rebuild is idempotent, so a
+  // fetch that lands later only changes what differs.
+  const held = catalogue.catalogue();
+  if (held !== null) rebuildProfiles(held);
+  if (modelRefreshOn) catalogue.start();
   const accountService = createAccountService({
     state,
     clock,
@@ -944,6 +1061,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     keychain: opts.keychain ?? unavailableKeychain,
     launcher,
     adapter,
+    lists: accountLists,
+    // Off, a finished sign-in reads no list either.
+    listRefresh: modelRefreshOn ? listRefresh : { readOne: () => Promise.resolve() },
     startGate,
     runtime: accounts,
     pauses: accountPauses,
@@ -951,6 +1071,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     liveLanes: (id) => lanesByAccount(db).get(id) ?? 0,
     onSaved: () => {
       scheduler?.requestTick();
+    },
+    onCreated: () => {
+      const held = catalogue.catalogue();
+      if (held !== null) rebuildProfiles(held);
     },
   });
   // The data directory, and the default account's sign-in wherever the login shell keeps it.
@@ -974,6 +1098,23 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     providerOf(getAccountRow(db, getProject(db, projectId).accountId).kind) === Provider.Codex
       ? BRAINSTORM_REFUSED_ON_CHATGPT
       : null;
+  // The model a Plan conversation runs on: what the builder's settings choose for the plan role, by the role's
+  // default and never by score, so a conversation is never refused for want of one. Undefined when the account
+  // offers nothing to run it on.
+  const planModel = (project: ProjectDto): { model: string; effort: Effort } | undefined => {
+    const choice = chooseModel({
+      ...routingInputs(db, project),
+      def: { role: StepRole.Plan, need: PLAN_NEED },
+      persona: undefined,
+      task: { riskTags: [], acceptanceCriteria: [], areas: [], modelSetting: null },
+      project,
+      stakes: { retry: false },
+      byScore: false,
+    });
+    return choice.profile === null && choice.model === choice.tier
+      ? undefined
+      : { model: choice.model, effort: choice.effort };
+  };
   const laneSandbox = sandboxes?.lane ?? null;
   const shape = createShapeService({
     state,
@@ -1018,47 +1159,31 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       // A conversation that can't run on the project's account has no model to choose.
       if (brainstormRefusal(projectId) !== null) return { default: null, offered: [] };
       const project = getProject(db, projectId);
-      const offered = offeredProfiles(
-        listModelProfiles(db),
-        getAccount(db, project.accountId).settings.aliases,
-      );
-      const plan = roleDefault({
-        provider: project.provider,
-        role: StepRole.Plan,
-        floor: null,
-        profiles: offered,
-      })?.profile;
-      return { default: plan?.model ?? null, offered: offeredModels(offered) };
+      const inputs = routingInputs(db, project);
+      return {
+        default: planModel(project)?.model ?? null,
+        offered: offeredModels(inputs.profiles),
+      };
     },
     launch(projectId, chosen) {
       const project = getProject(db, projectId);
       const row = getAccountRow(db, project.accountId);
       const refusal = brainstormRefusal(projectId);
       if (refusal !== null) throw new InvalidError(refusal);
-      const profile = roleDefault({
-        provider: project.provider,
-        role: StepRole.Plan,
-        floor: null,
-        profiles: offeredProfiles(
-          listModelProfiles(db),
-          getAccount(db, project.accountId).settings.aliases,
-        ),
-      })?.profile;
+      const profile = planModel(project);
       if (profile === undefined)
         throw new InvalidError(`${row.label} offers no model for planning`);
       // The builder's pick runs at the plan role's effort, while the account still offers it; one it has
       // stopped offering since gives way to the role's.
-      const offered = offeredModels(
-        offeredProfiles(listModelProfiles(db), getAccount(db, project.accountId).settings.aliases),
-      );
-      const session = launcher.session(
-        row,
-        chosen !== null && offered.includes(chosen) ? chosen : profile.model,
-      );
+      const offered = offeredModels(routingInputs(db, project).profiles).map((o) => o.model);
+      const modelId = chosen !== null && offered.includes(chosen) ? chosen : profile.model;
+      const session = launcher.session(row, modelId, listAccountModels(db, row.id));
       return {
         cwd: project.repoPath,
         model: session.model,
+        modelId,
         effort: profile.effort,
+        agentModels: shapeAgentModels(row.kind),
         env: session.env,
         account: session.expect,
         access: {
@@ -1095,6 +1220,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     skillBody: (name) => readSkillBody(name, opts.harnessDir ?? HARNESS_PLUGIN_DIR),
     launcher,
     startGate,
+    modelWait,
     accounts: {
       ...accounts,
       prepare: (account, projectId) => {
@@ -1121,8 +1247,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       prepare: (account, projectId) => {
         preparer.prepare(account, projectId);
       },
+      // Off, no session start reads a list.
+      ...(modelRefreshOn
+        ? {
+            readList: (id: AccountId) => {
+              void listRefresh.readIfStale(id);
+            },
+          }
+        : {}),
     },
     connecting: () => accountService.connecting(),
+    modelWait,
     clock,
     instanceId,
     logger,
@@ -1229,6 +1364,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           )
         : noSystemCheck(),
     benchmarks,
+    catalogue,
+    refreshModels,
+    catalogueOn: modelRefreshOn,
     judge: createJudgeServices({
       state,
       keychain: judgeKeychain,
@@ -1545,6 +1683,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       // Aborts a shipping gate and any git or gh child; the batch stays SHIPPING for recovery.
       await Promise.all([deliveryJobs.stop(), selfUpdateStopped]);
       benchmarks.stop();
+      catalogue.stop();
+      await listRefresh.stop();
       accountPauses.stop();
       moveBack.stop();
       nightly.cancel();
@@ -1598,6 +1738,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     runner: createdRunner,
     scheduler: createdScheduler,
     benchmarks,
+    refreshModels,
     judge,
     stop() {
       stopping ??= shutdown();

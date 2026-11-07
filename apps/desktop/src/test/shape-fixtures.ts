@@ -178,7 +178,16 @@ export function shapeViewDto(
   const shape = shapeDto(shapeOverrides);
   return ShapeViewDto.parse({
     shape,
-    models: { default: 'opus', offered: ['haiku', 'sonnet', 'opus', 'fable'] },
+    models: {
+      default: 'claude-opus-5-5',
+      offered: [
+        { model: 'claude-haiku-5-5', tier: 'fast' },
+        { model: 'claude-sonnet-5-5', tier: 'balanced' },
+        { model: 'claude-opus-5-5', tier: 'strongest' },
+        { model: 'claude-fable-5-1', tier: 'strongest' },
+        { model: 'house-model', tier: null },
+      ],
+    },
     messages: [],
     proposals: [],
     heard: [],

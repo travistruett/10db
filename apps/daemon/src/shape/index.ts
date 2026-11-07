@@ -2,13 +2,14 @@
 // conversation's read-only session, its plan drafts and Convert. `createShapeService` (service.ts)
 // joins the composition root with the HTTP routes (daemon/shape-services.ts).
 
+export { shapeAgentModels } from './agent-models';
 export { judgeShapeCall, privateHostProblem } from './confinement';
 export {
   SHAPE_AGENTS,
   SHAPE_ALLOWED_TOOLS,
   SHAPE_BUILT_IN_TOOLS,
   SHAPE_DISALLOWED_TOOLS,
-  SHAPE_SYSTEM_PROMPT,
+  shapeSystemPrompt,
   shapeToolset,
 } from './policy';
 export { createShapeJev, shadowAgreement } from './jev';

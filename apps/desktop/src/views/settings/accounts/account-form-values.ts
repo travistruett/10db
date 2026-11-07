@@ -7,13 +7,9 @@ import {
   parseAccountSettings,
   type AccountConfig,
   type AccountDto,
+  type ModelTier,
   type SupportedAccountKind,
 } from '@10db/contracts';
-
-export interface ModelMapRow {
-  readonly alias: string;
-  readonly modelId: string;
-}
 
 /** What the account fields edit: plain strings and booleans, turned into an `AccountInput` on submit. */
 export interface AccountFormValues {
@@ -28,8 +24,8 @@ export interface AccountFormValues {
   readonly bedrockAuth: 'profile' | 'bearer';
   readonly awsProfile: string;
   readonly baseUrl: string;
-  readonly modelMap: readonly ModelMapRow[];
-  readonly aliases: readonly string[];
+  /** The model ID the account runs for each tier; a tier that is absent or blank is chosen automatically. */
+  readonly tierOverrides: Readonly<Partial<Record<ModelTier, string>>>;
 }
 
 export function emptyAccountForm(kind: SupportedAccountKind): AccountFormValues {
@@ -44,8 +40,7 @@ export function emptyAccountForm(kind: SupportedAccountKind): AccountFormValues 
     bedrockAuth: 'profile',
     awsProfile: '',
     baseUrl: '',
-    modelMap: [],
-    aliases: [],
+    tierOverrides: {},
   };
 }
 
@@ -54,13 +49,8 @@ export type AccountFormResult =
   | { readonly ok: false; readonly errors: Readonly<Record<string, string>> };
 
 function modelChoice(values: AccountFormValues): Record<string, unknown> {
-  const rows = values.modelMap.filter((r) => r.alias.trim() !== '' || r.modelId.trim() !== '');
-  return {
-    ...(rows.length > 0
-      ? { modelMap: Object.fromEntries(rows.map((r) => [r.alias.trim(), r.modelId])) }
-      : {}),
-    ...(values.aliases.length > 0 ? { aliases: [...values.aliases] } : {}),
-  };
+  const overrides = Object.entries(values.tierOverrides).filter(([, model]) => model.trim() !== '');
+  return overrides.length > 0 ? { tierOverrides: Object.fromEntries(overrides) } : {};
 }
 
 function settingsOf(values: AccountFormValues): Record<string, unknown> {
@@ -110,20 +100,16 @@ const FIELD_MESSAGE: Readonly<Record<string, string>> = {
   region: 'Enter an AWS region such as us-west-2',
   awsProfile: 'Enter an AWS profile name: letters, digits, dots, dashes or underscores',
   baseUrl: 'Enter an https URL with no credentials, query or fragment',
-  modelMap: 'Enter a lowercase alias such as sonnet and a model ID for each row',
-  aliases: 'Use lowercase aliases such as sonnet',
+  tierOverrides: 'Enter a model ID of up to 200 characters, not a tier name',
 };
-const DUPLICATE_ALIAS_MESSAGE = 'Each alias can appear once';
 const EMPTY_LABEL_MESSAGE = 'Enter a label';
-const MODEL_ID_LENGTH_MESSAGE = 'Keep each model ID up to 200 characters';
 
 function messageOf(
   field: string,
-  issue: { readonly code: string; readonly message: string },
+  issue: { readonly message: string },
   values: AccountFormValues,
 ): string {
   if (field === 'label' && values.label.trim() === '') return EMPTY_LABEL_MESSAGE;
-  if (field === 'modelMap' && issue.code === 'too_big') return MODEL_ID_LENGTH_MESSAGE;
   return FIELD_MESSAGE[field] ?? issue.message;
 }
 
@@ -135,22 +121,14 @@ function fieldOf(path: readonly PropertyKey[]): string {
   return typeof name === 'string' && name in FIELD_MESSAGE ? name : FORM_ERROR;
 }
 
-function hasDuplicateAlias(values: AccountFormValues): boolean {
-  const aliases = values.modelMap.map((r) => r.alias.trim()).filter((a) => a !== '');
-  return new Set(aliases).size < aliases.length;
-}
-
 /** The values as the zod output, defaults filled, or each failing field's message. */
 export function toAccountInput(values: AccountFormValues): AccountFormResult {
   const parsed = AccountInput.safeParse(inputOf(values));
+  if (parsed.success) return { ok: true, input: parsed.data };
   const errors: Record<string, string> = {};
-  if (hasDuplicateAlias(values)) errors['modelMap'] = DUPLICATE_ALIAS_MESSAGE;
-  if (parsed.success && Object.keys(errors).length === 0) return { ok: true, input: parsed.data };
-  if (!parsed.success) {
-    for (const issue of parsed.error.issues) {
-      const field = fieldOf(issue.path);
-      errors[field] ??= messageOf(field, issue, values);
-    }
+  for (const issue of parsed.error.issues) {
+    const field = fieldOf(issue.path);
+    errors[field] ??= messageOf(field, issue, values);
   }
   return { ok: false, errors };
 }
@@ -169,11 +147,7 @@ export function formValuesOf(account: AccountDto): AccountFormValues {
     bedrockAuth: 'awsProfile' in settings && settings.awsProfile === null ? 'bearer' : 'profile',
     awsProfile: 'awsProfile' in settings ? (settings.awsProfile ?? '') : '',
     baseUrl: 'baseUrl' in settings ? settings.baseUrl : '',
-    modelMap: Object.entries(settings.modelMap ?? {}).map(([alias, modelId]) => ({
-      alias,
-      modelId,
-    })),
-    aliases: settings.aliases ?? [],
+    tierOverrides: settings.tierOverrides ?? {},
   };
 }
 
@@ -185,12 +159,12 @@ export type AccountPatchResult =
     }
   | { readonly ok: false; readonly errors: Readonly<Record<string, string>> };
 
-/** Settings as a string that ignores key order and an empty model map, which the daemon treats as none. */
+/** Settings as a string that ignores key order and an empty set of tier overrides, which the daemon treats as none. */
 function settingsKey(settings: unknown): string {
   return JSON.stringify(settings, (_key, value: unknown) => {
     if (typeof value !== 'object' || value === null || Array.isArray(value)) return value;
     const entries = Object.entries(value).sort(([a], [b]) => a.localeCompare(b));
-    return Object.fromEntries(entries.filter(([k, v]) => !(k === 'modelMap' && isEmpty(v))));
+    return Object.fromEntries(entries.filter(([k, v]) => !(k === 'tierOverrides' && isEmpty(v))));
   });
 }
 

@@ -1,20 +1,49 @@
-import { MODEL_TIERS } from './catalogue';
-import type { ModelProfileDto } from '@10db/contracts';
+import {
+  isPickableModel,
+  type AccountModelDto,
+  type ModelProfileDto,
+  type Provider,
+  type ShapeModelOption,
+} from '@10db/contracts';
+import { modelsByPrice, TIERS, tierLevel } from './pools';
 
-/** The profiles an account offers: those whose alias it lists, or every one when it lists none (spec §3). */
+/**
+ * The profiles an account offers: those of a model it lists, at an effort it lists (every effort when it lists
+ * none for the model), leaving out a model marked unusable. An account that has not listed its models yet is
+ * assumed to offer every profile of its provider.
+ */
 export function offeredProfiles(
   profiles: readonly ModelProfileDto[],
-  aliases: readonly string[] | undefined,
+  accountModels: readonly AccountModelDto[],
+  provider: Provider,
 ): ModelProfileDto[] {
-  return aliases === undefined ? [...profiles] : profiles.filter((p) => aliases.includes(p.model));
+  const ofProvider = profiles.filter((p) => p.provider === provider);
+  if (accountModels.length === 0) return ofProvider;
+  const listed = new Map(accountModels.map((m) => [m.model, m]));
+  return ofProvider.filter((p) => {
+    const offer = listed.get(p.model);
+    return (
+      offer !== undefined &&
+      !offer.unusable &&
+      (offer.efforts.length === 0 || offer.efforts.includes(p.effort))
+    );
+  });
 }
 
 /**
- * The Claude Code aliases among the profiles an account offers, each once and weakest first: what a
- * conversation's model picker lists (Shape spec §5.1). A profile off for routing is still a model the
- * builder may choose by hand.
+ * The models among the profiles an account offers, each once with its tier, weakest tier first and cheapest
+ * first within it: what a conversation's model picker lists. It is the account's whole list, a replaced
+ * model and one the catalogue does not rank (last) included, because the builder may choose any by hand
+ * (`isPickableModel`, which the desktop's dropdowns use too).
  */
-export function offeredModels(profiles: readonly ModelProfileDto[]): string[] {
-  const held = new Set(profiles.map((p) => p.model));
-  return MODEL_TIERS.map((t) => t.model).filter((model) => held.has(model));
+export function offeredModels(profiles: readonly ModelProfileDto[]): ShapeModelOption[] {
+  const choosable = profiles.filter((p) => isPickableModel(p.status));
+  const tiers = new Map(choosable.map((p) => [p.model, p.tier]));
+  const level = (model: string): number => {
+    const tier = tiers.get(model) ?? null;
+    return tier === null ? TIERS.length : tierLevel(tier);
+  };
+  return modelsByPrice(choosable)
+    .sort((a, b) => level(a) - level(b))
+    .map((model) => ({ model, tier: tiers.get(model) ?? null }));
 }

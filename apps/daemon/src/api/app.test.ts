@@ -86,6 +86,13 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     benchmarkStatus: track('benchmarkStatus'),
     syncBenchmarks: track('syncBenchmarks'),
     listAaModels: track('listAaModels'),
+    getModelSettings: track('getModelSettings'),
+    setGlobalModelSettings: track('setGlobalModelSettings'),
+    setProjectModelSettings: track('setProjectModelSettings'),
+    listModels: track('listModels'),
+    listAccountOffers: track('listAccountOffers'),
+    catalogueStatus: track('catalogueStatus'),
+    refreshModels: track('refreshModels'),
     patchProject: track('patchProject'),
     getTeam: track('getTeam'),
     setTeam: track('setTeam'),
@@ -619,6 +626,34 @@ describe('team, routing and benchmark routes', () => {
       service: 'patchModelProfile',
     },
     {
+      name: 'GET /model-settings',
+      method: 'GET',
+      path: '/model-settings',
+      body: undefined,
+      service: 'getModelSettings',
+    },
+    {
+      name: 'PUT /model-settings',
+      method: 'PUT',
+      path: '/model-settings',
+      body: { roles: [{ role: 'review', setting: { kind: 'automatic' } }] },
+      service: 'setGlobalModelSettings',
+    },
+    {
+      name: 'GET /projects/:id/model-settings',
+      method: 'GET',
+      path: `/projects/${projectId}/model-settings`,
+      body: undefined,
+      service: 'getModelSettings',
+    },
+    {
+      name: 'PUT /projects/:id/model-settings',
+      method: 'PUT',
+      path: `/projects/${projectId}/model-settings`,
+      body: { roles: [{ role: 'review', setting: null }] },
+      service: 'setProjectModelSettings',
+    },
+    {
       name: 'GET /benchmarks/status',
       method: 'GET',
       path: '/benchmarks/status',
@@ -638,6 +673,28 @@ describe('team, routing and benchmark routes', () => {
       path: '/benchmarks/models',
       body: undefined,
       service: 'listAaModels',
+    },
+    { name: 'GET /models', method: 'GET', path: '/models', body: undefined, service: 'listModels' },
+    {
+      name: 'GET /models/offers',
+      method: 'GET',
+      path: '/models/offers',
+      body: undefined,
+      service: 'listAccountOffers',
+    },
+    {
+      name: 'GET /models/status',
+      method: 'GET',
+      path: '/models/status',
+      body: undefined,
+      service: 'catalogueStatus',
+    },
+    {
+      name: 'POST /models/refresh',
+      method: 'POST',
+      path: '/models/refresh',
+      body: undefined,
+      service: 'refreshModels',
     },
     {
       name: 'PATCH /projects/:id',
@@ -1254,7 +1311,10 @@ describe('shape routes', () => {
   it('answers a conversation’s view, 404 for an unknown one', async () => {
     const view = {
       shape,
-      models: { default: 'opus', offered: ['opus', 'fable'] },
+      models: {
+        default: 'claude-opus-5-5',
+        offered: [{ model: 'claude-opus-5-5', tier: 'strongest' as const }],
+      },
       messages: [],
       proposals: [],
       heard: [],
@@ -1339,7 +1399,7 @@ describe('shape routes', () => {
     expect(stopped).toEqual([shapeId]);
   });
 
-  it('runs the conversation on the model chosen, refuses one malformed (400), and a change mid-turn (409)', async () => {
+  it('runs the conversation on the model chosen, whatever its ID, refuses a blank one (400), and a change mid-turn (409)', async () => {
     const chosen: (string | null)[] = [];
     const services = stubServices({
       chooseShapeModel: (_id, model) => {
@@ -1354,14 +1414,14 @@ describe('shape routes', () => {
         headers: { ...auth.headers, 'content-type': 'application/json' },
         body: JSON.stringify(body),
       });
-    const ok = await put({ model: 'fable' });
+    const ok = await put({ model: 'us.anthropic.claude-fable-5-1' });
     expect(ok.status).toBe(200);
-    expect(await ok.json()).toEqual({ ...shape, model: 'fable' });
+    expect(await ok.json()).toEqual({ ...shape, model: 'us.anthropic.claude-fable-5-1' });
     expect((await put({ model: null })).status).toBe(200);
-    expect((await put({ model: 'Fable 5.1' })).status).toBe(400);
+    expect((await put({ model: '  ' })).status).toBe(400);
     expect((await put({})).status).toBe(400);
     expect((await put({ model: 'opus' })).status).toBe(409);
-    expect(chosen).toEqual(['fable', null]);
+    expect(chosen).toEqual(['us.anthropic.claude-fable-5-1', null]);
   });
 
   describe('Convert', () => {

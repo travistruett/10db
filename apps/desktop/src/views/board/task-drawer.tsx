@@ -6,8 +6,10 @@ import {
   SYSTEM_COLUMN_LABEL,
   RiskTag,
   TaskStatus,
+  type AccountId,
   type BatchDto,
   type FlowId,
+  type ModelSetting,
   type Notice,
   type ShapeId,
   type TaskDto,
@@ -63,6 +65,8 @@ import {
   landingLine,
   type LandingDraft,
 } from './landing-draft';
+import { sameSetting } from '../settings/model-setting-options';
+import { ModelSettingSelect } from '../settings/model-setting-select';
 import { LandingField } from './landing-field';
 import { placementOpen } from './placement';
 import { PlacementBadge } from './placement-badge';
@@ -111,6 +115,8 @@ export interface TaskDrawerProps {
   readonly placementEditable?: boolean;
   /** The project's gate command, named beside a failed gate's exit code. */
   readonly gateCommand?: string | null;
+  /** The project's account, whose models the task's own model setting offers; the field shows only with it. */
+  readonly accountId?: AccountId;
   /** Starts the task afresh: offered when a failed run shipped anyway and its pull request closed. */
   readonly onStart?: () => void;
   /** Cancels the task's run once the builder confirms; the board holds the confirm. */
@@ -146,6 +152,7 @@ export function TaskDrawer({
   workstreams = [],
   placementEditable = false,
   gateCommand = null,
+  accountId,
   onStart,
   onCancelRun,
   place,
@@ -171,6 +178,8 @@ export function TaskDrawer({
   const [criteria, setCriteria] = useState(initialCriteria);
   const [flowId, setFlowId] = useState<FlowId | null>(task.flowId);
   const [risks, setRisks] = useState<RiskTag[]>([...task.riskTags]);
+  const [modelSetting, setModelSetting] = useState<ModelSetting | null>(task.modelSetting);
+  const modelSettingChanged = !sameSetting(modelSetting, task.modelSetting);
   // Areas are the claims the lane takes when it starts, so they change only before then.
   const areasEditable =
     areaNames !== undefined && task.workstreamId === null && task.status === TaskStatus.Open;
@@ -203,6 +212,7 @@ export function TaskDrawer({
     flowId !== task.flowId ||
     risks.length !== task.riskTags.length ||
     risks.some((r) => !task.riskTags.includes(r)) ||
+    modelSettingChanged ||
     areasChanged ||
     (pullRequestBase !== undefined && landingEditable && landingChanged(task.landing, landing));
 
@@ -249,6 +259,7 @@ export function TaskDrawer({
           riskTags: risks,
           ...(wordsChanged ? { headline: headline.trim(), why: why.trim() } : {}),
           ...(areasChanged ? { areas } : {}),
+          ...(modelSettingChanged ? { modelSetting } : {}),
           ...(changesLanding && where.ok ? { landing: where.landing } : {}),
         },
       },
@@ -492,6 +503,16 @@ export function TaskDrawer({
                   setRisks(values.filter(isRisk));
                 }}
               />
+              {accountId === undefined ? null : (
+                <ModelSettingSelect
+                  label="Model"
+                  description="Overrides the setting for its role and any pattern that matches. No override leaves them in charge."
+                  accountIds={[accountId]}
+                  value={modelSetting}
+                  noneLabel="No override"
+                  onChange={setModelSetting}
+                />
+              )}
               {pullRequestBase === undefined ? null : landingEditable ? (
                 <LandingField
                   baseBranch={pullRequestBase}

@@ -29,7 +29,10 @@ import { seedSpend, tempDir, waitFor, type TempDir } from '../../test/fixtures';
 import {
   createAccountPauses,
   createAccountRuntime,
+  createModelListWait,
+  MODEL_LIST_WAIT_MS,
   type AccountPauses,
+  type ModelListWait,
   type AccountRuntime,
 } from '../accounts';
 import { ManualClock } from '../clock';
@@ -57,6 +60,8 @@ let branchReads: string[];
 /** While set, a branch read waits for it: a tick stays inside `branchSnapshot`. */
 let branchGate: Promise<void> | null;
 let prepared: { accountId: AccountId; projectId: ProjectId }[];
+/** The accounts the scheduler asked to have their model list read, as a session was about to start on them. */
+let listed: AccountId[];
 let wrongBranch: { batchId: string; current: string | null }[];
 let wrongBranchAt: string[];
 let missing: { batchId: string; path: string }[];
@@ -64,6 +69,8 @@ let missing: { batchId: string; path: string }[];
 let held: boolean;
 /** The account whose browser sign-in holds the slot, as the scheduler's `connecting` reads it. */
 let connecting: AccountId | null;
+/** Holds an account's queued work while its model profiles are missing, as the runner does. */
+let modelWait: ModelListWait;
 
 beforeEach(() => {
   held = false;
@@ -79,6 +86,12 @@ beforeEach(() => {
     stopAccount: () => Promise.resolve(),
     onResume: () => undefined,
   });
+  modelWait = createModelListWait({
+    clock,
+    inbox,
+    logger: silentLogger,
+    onReleased: () => undefined,
+  });
   accounts = createAccountRuntime({ state, clock, inbox, pauses, defaultPauseMs: 30 * 60_000 });
   launched = [];
   running = new Set();
@@ -90,6 +103,7 @@ beforeEach(() => {
   wrongBranchAt = [];
   missing = [];
   prepared = [];
+  listed = [];
 });
 afterEach(() => {
   close();
@@ -102,6 +116,7 @@ function scheduler(caps = { global: 4 }, awaited: ReadonlySet<WorkstreamId> = ne
     caps,
     awaitedHolders: () => awaited,
     held: () => held,
+    modelWait,
     connecting: () => (connecting === null ? null : { accountId: connecting }),
     instanceId: 'daemon-1',
     leaseMs: 60_000,
@@ -117,6 +132,9 @@ function scheduler(caps = { global: 4 }, awaited: ReadonlySet<WorkstreamId> = ne
       ...accounts,
       prepare: (account, projectId) => {
         prepared.push({ accountId: account.id, projectId });
+      },
+      readList: (id) => {
+        listed.push(id);
       },
     },
     branches: {
@@ -173,7 +191,13 @@ function add(
   const task = state.write((ctx) =>
     insertTask(ctx, project.id, { title: 't', acceptanceCriteria: ['x'], areas, dependsOn }),
   );
-  return { project, task, workstream: state.write((ctx) => insertWorkstream(ctx, task.id)) };
+  return {
+    project,
+    task,
+    workstream: state.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    ),
+  };
 }
 
 function pause(project: ReturnType<typeof seedProject>): void {
@@ -201,6 +225,23 @@ describe('scheduler', () => {
     expect(launched).toEqual([]);
     held = false;
     expect(await s.tick()).toBe(2);
+  });
+
+  it('leaves the queued work of an account waiting for its model list alone, and launches it once the wait ends', async () => {
+    const keyed = seedAccount(store, { kind: 'anthropic_api_key', label: 'Keyed' });
+    state.write((ctx) => recordAccountSecret(ctx, keyed.id, 'sha256:0000000000000000'));
+    const waiting = queue();
+    const other = queue({ accountId: keyed.id });
+    modelWait.hold({ id: waiting.project.accountId, label: 'Waiting' }, waiting.project.id);
+    const s = scheduler();
+    expect(await s.tick()).toBe(1);
+    expect(launched.map((l) => l.id)).toEqual([other.workstream.id]);
+    // The held row is not claimed on any later tick either: it stays QUEUED, with no state changes.
+    expect(await s.tick()).toBe(0);
+    expect(getWorkstream(store.db, waiting.workstream.id).state).toBe('QUEUED');
+    clock.advance(MODEL_LIST_WAIT_MS);
+    expect(await s.tick()).toBe(1);
+    expect(launched.map((l) => l.id)).toEqual([other.workstream.id, waiting.workstream.id]);
   });
 
   it('starts nothing on the account whose sign-in is under way, only there, and starts it once the sign-in is over', async () => {
@@ -411,7 +452,9 @@ describe('scheduler', () => {
     const { project, task, workstream: first } = queue();
     moveWorkstream(first.id, 'STARTING');
     moveWorkstream(first.id, 'FAILED');
-    const second = state.write((ctx) => insertWorkstream(ctx, task.id));
+    const second = state.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    );
     moveWorkstream(second.id, 'CANCELLED');
     const column = listBoardColumns(store.db, project.id)[0];
     if (!column) throw new Error('no Icebox');
@@ -528,7 +571,12 @@ describe('pull-request delivery', () => {
       if (to.length > 0) patchBatch(ctx, b.id, { branch: BRANCH, ...(baseSha ? { baseSha } : {}) });
       return b;
     });
-    const workstream = state.write((ctx) => insertWorkstream(ctx, task.id, { batchId: batch.id }));
+    const workstream = state.write((ctx) =>
+      insertWorkstream(ctx, task.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        batchId: batch.id,
+      }),
+    );
     return { project, batch, workstream };
   }
 
@@ -745,6 +793,18 @@ describe('accounts', () => {
     expect(getWorkstream(state.db, waiting.workstream.id).state).toBe('QUEUED');
   });
 
+  it('asks for the model list once a tick for a ready account a session can start on, not for an unready one', async () => {
+    const key = metered('Shared', { laneCap: 2 });
+    const a = queue({ accountId: key.id, maxLanes: 3 });
+    add(a.project, ['ui']);
+    const b = queue({ accountId: key.id, maxLanes: 3 });
+    add(b.project, ['ui']);
+    const unready = seedAccount(store, { kind: 'anthropic_api_key', label: 'No secret yet' });
+    queue({ accountId: unready.id });
+    await scheduler().tick();
+    expect(listed).toEqual([key.id]);
+  });
+
   it('caps lanes per account across two projects', async () => {
     const key = metered('Shared', { laneCap: 2 });
     const a = queue({ accountId: key.id, maxLanes: 3 });
@@ -873,7 +933,10 @@ describe('worktree batches', () => {
       });
       branchOf.set(dir.path, `${BRANCH}-${String(i)}`);
       const workstream = state.write((ctx) =>
-        insertWorkstream(ctx, task.id, { batchId: batch.id }),
+        insertWorkstream(ctx, task.id, {
+          first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+          batchId: batch.id,
+        }),
       );
       return { project, batch, workstream, path: dir.path };
     });
@@ -1009,7 +1072,12 @@ describe('shared and separate-copy work in one project', () => {
         workspaceMode: copy ? 'worktree' : 'shared',
       }),
     );
-    return state.write((ctx) => insertWorkstream(ctx, task.id, { batchId }));
+    return state.write((ctx) =>
+      insertWorkstream(ctx, task.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        batchId,
+      }),
+    );
   }
 
   it('launches a shared task and a copy task on the same area in one tick', async () => {

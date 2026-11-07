@@ -29,8 +29,7 @@ function mergedValues(
     bedrockAuth: pick('bedrockAuth'),
     awsProfile: pick('awsProfile'),
     baseUrl: pick('baseUrl'),
-    modelMap: pick('modelMap'),
-    aliases: pick('aliases'),
+    tierOverrides: pick('tierOverrides'),
   };
 }
 
@@ -76,6 +75,7 @@ export function EditAccountForm({ account }: { readonly account: AccountDto }) {
           }}
           errors={errors}
           mode="edit"
+          accountId={account.id}
         />
         {errors[FORM_ERROR] ? (
           <Alert color="red" role="alert">

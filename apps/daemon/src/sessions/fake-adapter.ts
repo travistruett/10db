@@ -113,6 +113,8 @@ export const FakeStep = z.discriminatedUnion('do', [
   z.object({ do: z.literal('background'), tasks: z.array(z.string()) }),
   z.object({ do: z.literal('crash'), message: z.string() }),
   z.object({ do: z.literal('billing_refused'), message: z.string() }),
+  /** The account cannot run the model the session was launched on. */
+  z.object({ do: z.literal('model_refused') }),
   z.object({
     do: z.literal('auth_error'),
     error: z.enum([
@@ -507,6 +509,9 @@ export class FakeAdapter implements SessionAdapter {
           return 'halt';
         case 'billing_refused':
           end(SessionEndReason.BillingRefused, step.message);
+          return 'halt';
+        case 'model_refused':
+          end(SessionEndReason.ModelRefused, `The account cannot run the model ${spec.model}`);
           return 'halt';
         case 'auth_error':
           end(SessionEndReason.AccountRefused, `Claude Code reported ${step.error}`, {

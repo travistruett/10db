@@ -105,29 +105,18 @@ describe('AddAccountModal', () => {
     ]);
   });
 
-  it('adds a gateway with a model map and opens its secret form', async () => {
+  it('adds a gateway and opens its secret form', async () => {
     const { posts } = serve();
     const dialog = await openModal('Gateway');
     type(dialog, 'Label', 'Router');
     type(dialog, 'Base URL', 'https://gw.example.com/v1');
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Add Model Mapping' }));
-    type(dialog, 'Alias, row 1', 'sonnet');
-    type(dialog, 'Model ID, row 1', 'anthropic/claude-sonnet');
-    const tags = within(dialog).getByRole('combobox', { name: 'Offered aliases' });
-    tags.focus();
-    fireEvent.change(tags, { target: { value: 'sonnet' } });
-    fireEvent.blur(tags);
     fireEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
     const drawer = await screen.findByRole('dialog', { name: /Router/ });
     expect(await within(drawer).findByText('No secret yet')).toBeTruthy();
     expect(posts).toEqual([
       expect.objectContaining({
         kind: 'gateway',
-        settings: {
-          baseUrl: 'https://gw.example.com/v1',
-          modelMap: { sonnet: 'anthropic/claude-sonnet' },
-          aliases: ['sonnet'],
-        },
+        settings: { baseUrl: 'https://gw.example.com/v1' },
       }),
     ]);
   });
@@ -169,59 +158,5 @@ describe('AddAccountModal', () => {
     await waitFor(() => {
       expect(document.activeElement).toBe(add);
     });
-  });
-
-  it('moves focus through the model map rows as they are added and removed', async () => {
-    serve();
-    const dialog = await openModal('Claude subscription');
-    const add = within(dialog).getByRole('button', { name: 'Add Model Mapping' });
-    fireEvent.click(add);
-    expect(document.activeElement).toBe(
-      within(dialog).getByRole('textbox', { name: 'Alias, row 1' }),
-    );
-    type(dialog, 'Alias, row 1', 'sonnet');
-    fireEvent.click(add);
-    expect(document.activeElement).toBe(
-      within(dialog).getByRole('textbox', { name: 'Alias, row 2' }),
-    );
-    expect(within(dialog).getByRole('textbox', { name: 'Model ID, row 2' })).toBeTruthy();
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove sonnet mapping' }));
-    expect(document.activeElement).toBe(
-      within(dialog).getByRole('textbox', { name: 'Alias, row 1' }),
-    );
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove row 1 mapping' }));
-    expect(document.activeElement).toBe(add);
-  });
-
-  it('names Remove buttons by row when two rows share an alias', async () => {
-    serve();
-    const dialog = await openModal('Claude subscription');
-    const add = within(dialog).getByRole('button', { name: 'Add Model Mapping' });
-    fireEvent.click(add);
-    type(dialog, 'Alias, row 1', 'sonnet');
-    fireEvent.click(add);
-    type(dialog, 'Alias, row 2', 'sonnet ');
-    expect(within(dialog).getByRole('button', { name: 'Remove row 1 mapping' })).toBeTruthy();
-    expect(within(dialog).getByRole('button', { name: 'Remove row 2 mapping' })).toBeTruthy();
-    expect(within(dialog).queryByRole('button', { name: 'Remove sonnet mapping' })).toBeNull();
-  });
-
-  it('ties a model map error to its rows', async () => {
-    const { posts } = serve();
-    const dialog = await openModal('Claude subscription');
-    type(dialog, 'Label', 'Company A');
-    const add = within(dialog).getByRole('button', { name: 'Add Model Mapping' });
-    fireEvent.click(add);
-    fireEvent.click(add);
-    for (const row of ['1', '2']) {
-      type(dialog, `Alias, row ${row}`, 'sonnet');
-      type(dialog, `Model ID, row ${row}`, 'x');
-    }
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Create' }));
-    const message = await within(dialog).findByText('Each alias can appear once');
-    const alias = within(dialog).getByRole('textbox', { name: 'Alias, row 1' });
-    expect(alias.getAttribute('aria-invalid')).toBe('true');
-    expect(alias.getAttribute('aria-describedby')).toBe(message.id);
-    expect(posts).toEqual([]);
   });
 });

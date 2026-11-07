@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ModelStatus, ModelTier } from './catalogue';
 import { ModelProfileId } from './ids';
 import { Effort, ProfileSource, Provider } from './states';
 
@@ -26,6 +27,15 @@ export const ModelProfileDto = z.object({
   indexVersion: z.string().nullable(),
   measuredAt: z.iso.datetime().nullable(),
   enabled: z.boolean(),
+  /** What the maker publishes about the model; all null until a catalogue describes it. */
+  maker: z.string().min(1).nullable(),
+  family: z.string().min(1).nullable(),
+  tier: z.enum(ModelTier).nullable(),
+  status: z.enum(ModelStatus).nullable(),
+  inputPrice: z.number().min(0).nullable(),
+  outputPrice: z.number().min(0).nullable(),
+  /** The maker's release date, as a calendar day. */
+  releaseDate: z.string().min(1).nullable(),
   /** Observed: finished steps, steps that passed first time, and escalations away from this profile. */
   stepsRun: z.int().min(0),
   firstPassSteps: z.int().min(0),

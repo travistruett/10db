@@ -220,7 +220,12 @@ describe('batches', () => {
     const batch = newBatch(project.id);
     move(batch.id, 'OPEN');
     const task = addTask(project.id);
-    const ws = store.write((ctx) => insertWorkstream(ctx, task.id, { batchId: batch.id })).value;
+    const ws = store.write((ctx) =>
+      insertWorkstream(ctx, task.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        batchId: batch.id,
+      }),
+    ).value;
     expect(ws.batchId).toBe(batch.id);
     expect(listWorkstreams(store.db, { batchId: batch.id }).map((w) => w.id)).toEqual([ws.id]);
     expect(latestDoneWorkstream(store.db, task.id)).toBeUndefined();
@@ -236,7 +241,12 @@ describe('batches', () => {
     const batch = newBatch(project.id);
     move(batch.id, 'OPEN');
     const task = addTask(project.id);
-    const ws = store.write((ctx) => insertWorkstream(ctx, task.id, { batchId: batch.id })).value;
+    const ws = store.write((ctx) =>
+      insertWorkstream(ctx, task.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        batchId: batch.id,
+      }),
+    ).value;
     store.write((ctx) => {
       for (const to of ['STARTING', 'RUNNING', 'VERIFYING', 'DONE'] as const)
         transitionWorkstream(ctx, ws.id, { to, fence: null });
@@ -313,7 +323,9 @@ describe('worktree batches', () => {
         }),
       ).value;
     const workstreamOf = (taskId: TaskId) =>
-      store.write((ctx) => insertWorkstream(ctx, taskId)).value;
+      store.write((ctx) =>
+        insertWorkstream(ctx, taskId, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+      ).value;
     const run = (id: WorkstreamId, ...states: WorkstreamState[]) => {
       for (const to of states)
         store.write((ctx) => transitionWorkstream(ctx, id, { to, fence: null }));
@@ -480,7 +492,13 @@ describe('worktree batches', () => {
     const batch = newWorktree(project.id, 'A');
     const tasks = [addTask(project.id, 'T1'), addTask(project.id, 'T2')];
     const streams = tasks.map(
-      (task) => store.write((ctx) => insertWorkstream(ctx, task.id, { batchId: batch.id })).value,
+      (task) =>
+        store.write((ctx) =>
+          insertWorkstream(ctx, task.id, {
+            first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+            batchId: batch.id,
+          }),
+        ).value,
     );
     const { events } = store.write((ctx) => {
       deleteCuttingBatch(ctx, batch.id, 'refused');
@@ -493,7 +511,9 @@ describe('worktree batches', () => {
     }
     expect(events.filter((e) => e.type === 'workstream.changed')).toHaveLength(2);
     for (const task of tasks) {
-      const again = store.write((ctx) => insertWorkstream(ctx, task.id));
+      const again = store.write((ctx) =>
+        insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+      );
       expect(again.value.state).toBe('QUEUED');
     }
   });
@@ -575,7 +595,11 @@ describe('project delivery', () => {
       name: 'an active workstream',
       arrange: (projectId) => {
         const task = addTask(projectId);
-        store.write((ctx) => insertWorkstream(ctx, task.id));
+        store.write((ctx) =>
+          insertWorkstream(ctx, task.id, {
+            first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+          }),
+        );
       },
     },
     { name: 'an unfinished batch', arrange: (projectId) => newBatch(projectId) },

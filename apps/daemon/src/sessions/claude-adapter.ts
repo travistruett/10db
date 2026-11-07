@@ -28,8 +28,10 @@ import {
 } from './account-check';
 import { createChannel } from './channel';
 import { startClaudeLogin, type LoginSpawn } from './claude-connect';
+import { seenModelsFrom } from './claude-model-list';
 import {
   mapSdkMessage,
+  refusesModel,
   toHookOutput,
   toPermissionResult,
   toSdkMcpServer,
@@ -746,11 +748,23 @@ function startSession(
     );
   };
 
+  /** Whether an assistant message has come yet: only the first can show the model was refused. */
+  let repliedYet = false;
   const pump = async (): Promise<void> => {
     try {
       for await (const msg of q) {
         if (failure) continue;
         if (msg.type === 'assistant') {
+          const firstReply = !repliedYet;
+          repliedYet = true;
+          if (refusesModel(msg, spec.model, firstReply)) {
+            // `init.model` echoes even a made-up ID, so only the first reply shows the account cannot run it.
+            refuse(
+              SessionEndReason.ModelRefused,
+              `Claude Code reported that account "${spec.account.label}" cannot run the model ${spec.model}.`,
+            );
+            continue;
+          }
           const problem = credentialProblem(msg.error);
           if (problem) {
             const refusal = {
@@ -986,7 +1000,12 @@ async function probeAccount(
       throw new AccountProbeError(
         `Claude Code reported no account within ${String(IDENTITY_PROBE_MS / 1_000)} s`,
       );
-    return seenFrom(info);
+    // The list answers even for a signed-out process, so it is kept apart from the identity: the caller
+    // writes it only after the account check passes. A list that cannot be read leaves the stored one.
+    const models = seenModelsFrom(
+      await settleWithin(clock, q.supportedModels(), IDENTITY_PROBE_MS),
+    );
+    return { ...seenFrom(info), ...(models === undefined ? {} : { models }) };
   } finally {
     input.end();
     abortController.abort();

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ModelTier } from './catalogue';
 import {
   DecisionId,
   GoalId,
@@ -149,17 +150,24 @@ export const ShapeAttachmentDto = z.object({
 });
 export type ShapeAttachmentDto = z.infer<typeof ShapeAttachmentDto>;
 
-/** Everything the Shape screen renders for one conversation. */
+/** A model the project's account lists, with the tier it belongs to; null for a model the catalogue does not rank. */
+export const ShapeModelOption = z.object({
+  model: z.string(),
+  tier: z.enum(ModelTier).nullable(),
+});
+export type ShapeModelOption = z.infer<typeof ShapeModelOption>;
+
 /**
  * The models a conversation may run on (Shape spec §5.1): the one the `plan` role picks, null when the
- * account offers none, and every alias the project's account offers, the strongest last.
+ * account offers none, and every model the project's account lists, the weakest tier first and unranked ones last.
  */
 export const ShapeModelsDto = z.object({
   default: z.string().nullable(),
-  offered: z.array(z.string()),
+  offered: z.array(ShapeModelOption),
 });
 export type ShapeModelsDto = z.infer<typeof ShapeModelsDto>;
 
+/** Everything the Shape screen renders for one conversation. */
 export const ShapeViewDto = z.object({
   shape: ShapeDto,
   /** What the conversation's model picker offers; `shape.model` is the builder's pick. */

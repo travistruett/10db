@@ -48,7 +48,7 @@ function spec(overrides: Partial<SessionSpec> = {}): SessionSpec {
     sequence: 1,
     cwd: '/repo',
     prompt: 'Task: Alpha\nDo it.',
-    model: 'sonnet',
+    model: 'claude-sonnet-5-5',
     effort: 'medium',
     resumeProviderSessionId: null,
     env: { PATH: '/usr/bin:/bin', CLAUDE_AGENT_SDK_CLIENT_APP: '10db/0.1.0' },
@@ -79,6 +79,8 @@ interface Script {
   /** What accountInfo() answers; a pending promise holds the billing preflight open. */
   readonly account?: AccountInfo | Promise<AccountInfo>;
   readonly interruptHangs?: boolean;
+  /** What supportedModels() answers; 'reject' fails it. */
+  readonly models?: readonly unknown[] | 'reject';
   /** What mcpServerStatus() answers. */
   readonly mcpStatus?: readonly McpServerStatus[];
   /** What setMcpServers() answers: a result, a pending result that holds the preflight open, or 'reject' to fail. */
@@ -208,6 +210,10 @@ function fakeQuery(scripts: Script | readonly Script[]): { query: QueryFn; recor
           script.mcpSet ?? { added: Object.keys(servers), removed: [], errors: {} },
         );
       },
+      supportedModels: () =>
+        script.models === 'reject'
+          ? Promise.reject(new Error('control request failed'))
+          : Promise.resolve(script.models ?? []),
       mcpServerStatus: () => Promise.resolve(script.mcpStatus ?? []),
       getContextUsage: (opts?: unknown) => {
         record.contextCalls.push(opts);
@@ -330,7 +336,7 @@ describe('buildQueryOptions', () => {
     const options = buildQueryOptions(spec(), deps);
     expect(options).toMatchObject({
       cwd: '/repo',
-      model: 'sonnet',
+      model: 'claude-sonnet-5-5',
       effort: 'medium',
       pathToClaudeCodeExecutable: '/usr/local/bin/claude',
       settingSources: ['project'],
@@ -518,7 +524,7 @@ describe('buildQueryOptions', () => {
       buildQueryOptions(spec(overrides), deps);
     expect(values).toEqual({
       cwd: '/repo',
-      model: 'sonnet',
+      model: 'claude-sonnet-5-5',
       effort: 'medium',
       env: { PATH: '/usr/bin:/bin', CLAUDE_AGENT_SDK_CLIENT_APP: '10db/0.1.0' },
       pathToClaudeCodeExecutable: '/usr/local/bin/claude',
@@ -2413,10 +2419,12 @@ describe('the account check', () => {
       ],
       then: 'hang',
     });
-    const events = await collect(adapter.start(spec({ model: 'opus' })).events);
+    const events = await collect(adapter.start(spec({ model: 'claude-opus-5-5' })).events);
     expect(events.map((e) => e.type)).toEqual(['ended']);
     expect(events[0]).toMatchObject({ reason: 'billing_refused' });
-    expect(endMessage(events[0])).toMatch(/asked for opus but Claude Code runs claude-sonnet-5-5/);
+    expect(endMessage(events[0])).toMatch(
+      /asked for claude-opus-5-5 but Claude Code runs claude-sonnet-5-5/,
+    );
   });
 
   it('accepts a mapped model only when init reports it exactly', async () => {
@@ -2441,6 +2449,81 @@ describe('the account check', () => {
       type: 'ended',
       reason: 'account_refused',
       refusal: { problem: 'signed_out', seenIdentity: null },
+    });
+  });
+
+  it('ends a session whose model the account cannot run as a refused model, not a refused account', async () => {
+    const { adapter } = adapterFor({
+      messages: [
+        initMessage('none', undefined, 'not-a-model'),
+        assistantMessage([textBlock('')], 'model_not_found'),
+      ],
+      then: 'hang',
+    });
+    const events = await collect(adapter.start(spec({ model: 'not-a-model' })).events);
+    const ended = events.at(-1);
+    expect(ended).toMatchObject({ type: 'ended', reason: 'model_refused' });
+    expect(ended).not.toHaveProperty('refusal');
+    expect(endMessage(ended)).toMatch(/not-a-model/);
+  });
+
+  describe('an error at the first reply that names the launched model', () => {
+    const LAUNCHED = 'us.anthropic.claude-fable-5-1-v1:0';
+    const BEDROCK = `ValidationException: The model ${LAUNCHED} does not exist or you do not have access to it.`;
+    it.each([
+      {
+        name: 'a Bedrock validation error is a refused model',
+        error: 'invalid_request' as const,
+        text: BEDROCK,
+        reason: 'model_refused',
+      },
+      {
+        name: 'an overloaded error is not',
+        error: 'overloaded' as const,
+        text: `${LAUNCHED} is overloaded`,
+        reason: 'completed',
+      },
+      {
+        name: 'a server error naming the model is not',
+        error: 'server_error' as const,
+        text: `500: ${LAUNCHED} does not exist`,
+        reason: 'completed',
+      },
+      {
+        name: 'an invalid max_tokens request naming the model is not',
+        error: 'invalid_request' as const,
+        text: `max_tokens is too large for ${LAUNCHED}`,
+        reason: 'completed',
+      },
+      {
+        name: 'an invalid request about something else is not',
+        error: 'invalid_request' as const,
+        text: 'The request body is malformed',
+        reason: 'completed',
+      },
+    ])('$name', async ({ error, text, reason }) => {
+      const { adapter } = adapterFor({
+        messages: [
+          initMessage('none', undefined, LAUNCHED),
+          assistantMessage([textBlock(text)], error),
+          resultMessage({ input: 1, output: 1, costUsd: 0 }),
+        ],
+      });
+      const events = await collect(adapter.start(spec({ model: LAUNCHED })).events);
+      expect(events.at(-1)).toMatchObject({ type: 'ended', reason });
+    });
+
+    it('is not a refused model once a tool has run', async () => {
+      const { adapter } = adapterFor({
+        messages: [
+          initMessage('none', undefined, LAUNCHED),
+          assistantMessage([toolUseBlock('Read', { file_path: 'a.ts' })]),
+          assistantMessage([textBlock(BEDROCK)], 'invalid_request'),
+          resultMessage({ input: 1, output: 1, costUsd: 0 }),
+        ],
+      });
+      const events = await collect(adapter.start(spec({ model: LAUNCHED })).events);
+      expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'completed' });
     });
   });
 
@@ -2620,6 +2703,48 @@ describe('probeAccount', () => {
       strictMcpConfig: true,
     });
     expect(fake.record.options?.abortController?.signal.aborted).toBe(true);
+  });
+
+  it('reads the models the account lists, over the same process, without a prompt', async () => {
+    const fake = fakeQuery({
+      messages: [],
+      then: 'hang',
+      models: [
+        { value: 'default', resolvedModel: 'claude-opus-5-5', supportedEffortLevels: ['low'] },
+        {
+          value: 'claude-fable-5-1[1m]',
+          resolvedModel: 'claude-fable-5-1',
+          supportedEffortLevels: ['low', 'ultra', 'max'],
+        },
+      ],
+    });
+    const adapter = createClaudeAdapter({
+      claudePath: '/c',
+      pluginDir: '/h',
+      logger: silentLogger,
+      query: fake.query,
+      allowUnsandboxed: true,
+    });
+    const seen = await adapter.probeAccount({ kind: 'claude_subscription', cwd: '/data', env: {} });
+    expect(seen.models).toEqual([
+      { id: 'claude-fable-5-1', resolvedId: 'claude-fable-5-1', efforts: ['low', 'max'] },
+    ]);
+    expect(fake.record.queries).toBe(1);
+    expect(fake.record.inputs).toEqual([]);
+  });
+
+  it('still reports the account, with no models, when the list cannot be read', async () => {
+    const fake = fakeQuery({ messages: [], then: 'hang', models: 'reject' });
+    const adapter = createClaudeAdapter({
+      claudePath: '/c',
+      pluginDir: '/h',
+      logger: silentLogger,
+      query: fake.query,
+      allowUnsandboxed: true,
+    });
+    const seen = await adapter.probeAccount({ kind: 'claude_subscription', cwd: '/data', env: {} });
+    expect(seen).toMatchObject({ email: 'builder@example.com' });
+    expect(seen.models).toBeUndefined();
   });
 
   it('fails with AccountProbeError when Claude Code reports no account in time', async () => {

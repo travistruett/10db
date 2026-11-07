@@ -1,3 +1,4 @@
+import { knownEfforts } from '@10db/contracts';
 import type { z } from 'zod';
 import type { SeenAccount } from './account-check';
 import { AccountReadResponse, ModelListResponse, RateLimitsReadResponse } from './codex-protocol';
@@ -22,7 +23,7 @@ const NOTHING: SeenAccount = {
  * Who the initialized app-server is signed in as. A ChatGPT identity is the email and the workspace
  * together, and only the usage read names the workspace: without it the account could be confirmed
  * as the wrong one, so a missing workspace rejects with an `AccountProbeError`. `withModels` also
- * reads the model list, which only informs Settings, so a failed read leaves it unset.
+ * reads the model list, which only informs Settings and the catalogue, so a failed read leaves it unset.
  */
 export async function readSeenAccount(call: CodexCall, withModels: boolean): Promise<SeenAccount> {
   const { account } = await call('account/read', { refreshToken: false }, AccountReadResponse);
@@ -43,6 +44,16 @@ export async function readSeenAccount(call: CodexCall, withModels: boolean): Pro
     organization: usage.accountId,
     ...(models === undefined
       ? {}
-      : { models: models.data.filter((m) => m.hidden !== true).map((m) => m.model) }),
+      : {
+          models: models.data
+            .filter((m) => m.hidden !== true)
+            .map((m) => ({
+              id: m.model,
+              resolvedId: null,
+              efforts: knownEfforts(
+                (m.supportedReasoningEfforts ?? []).map((option) => option.reasoningEffort),
+              ),
+            })),
+        }),
   };
 }

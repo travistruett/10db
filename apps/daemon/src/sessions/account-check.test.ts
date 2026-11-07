@@ -6,6 +6,7 @@ import {
   codexIdentity,
   checkInitCredentials,
   credentialProblem,
+  isModelRefusal,
   missingAccountRefusal,
   modelMatches,
   noAccountWhy,
@@ -233,16 +234,32 @@ describe('checkAccount', () => {
 });
 
 describe('modelMatches', () => {
-  it.each<[string, string, boolean]>([
-    ['haiku', 'claude-haiku-5-5', true],
-    ['sonnet', 'claude-sonnet-5-5[1m]', true],
-    ['sonnet', 'us.anthropic.claude-sonnet-5-5-v1:0', true],
-    ['haiku', '~anthropic/claude-haiku-latest', true],
-    ['opus', 'claude-sonnet-5-5', false],
-    ['~anthropic/claude-haiku-latest', '~anthropic/claude-haiku-latest', true],
-    ['us.anthropic.claude-sonnet-5-5-v1:0', 'claude-sonnet-5-5', false],
-  ])('%s against %s: %s', (requested, reported, ok) => {
-    expect(modelMatches(requested, reported)).toBe(ok);
+  it.each<[string, string, string, boolean]>([
+    ['the launch ID reported back', 'claude-opus-5-5', 'claude-opus-5-5', true],
+    [
+      'a [1m] launch ID a subscription reports without it',
+      'claude-opus-5-5[1m]',
+      'claude-opus-5-5',
+      true,
+    ],
+    [
+      'a [1m] launch ID Bedrock reports with it',
+      'us.anthropic.claude-sonnet-4-6[1m]',
+      'us.anthropic.claude-sonnet-4-6[1m]',
+      true,
+    ],
+    ['a prefixed Bedrock ID', 'us.anthropic.claude-opus-5-5', 'us.anthropic.claude-opus-5-5', true],
+    ['a Codex model', 'gpt-5.6-sol', 'gpt-5.6-sol', true],
+    ['another model than the one launched', 'claude-opus-5-5', 'claude-sonnet-5-5', false],
+    ['an alias, which 10db no longer launches', 'haiku', 'claude-haiku-5-5', false],
+    [
+      'a canonical ID against a prefixed one',
+      'claude-opus-5-5',
+      'us.anthropic.claude-opus-5-5',
+      false,
+    ],
+  ])('%s', (_name, launched, reported, ok) => {
+    expect(modelMatches(launched, reported)).toBe(ok);
   });
 });
 
@@ -379,6 +396,88 @@ describe('credentialProblem', () => {
     [undefined, null],
   ])('%s → %s', (error, problem) => {
     expect(credentialProblem(error)).toBe(problem);
+  });
+});
+
+describe('isModelRefusal', () => {
+  const LAUNCHED = 'us.anthropic.claude-fable-5-1-v1:0';
+  const BEDROCK =
+    'ValidationException: The provided model identifier is invalid. Model us.anthropic.claude-fable-5-1-v1:0 is not available in this region.';
+  it.each<[string, string | undefined, string, boolean]>([
+    ['model_not_found, whatever it says', 'model_not_found', 'nothing useful', true],
+    [
+      'a Bedrock ValidationException naming the launch ID, as invalid_request',
+      'invalid_request',
+      BEDROCK,
+      true,
+    ],
+    ['the same text under an unknown error', 'unknown', BEDROCK, true],
+    [
+      'an invalid request that names another model',
+      'invalid_request',
+      'Model gpt-6 is not available',
+      false,
+    ],
+    [
+      'an invalid request that names no model',
+      'invalid_request',
+      'The request was malformed',
+      false,
+    ],
+    [
+      'an overloaded error that names the launch ID',
+      'overloaded',
+      `${LAUNCHED} is overloaded`,
+      false,
+    ],
+    ['a rate limit that names the launch ID', 'rate_limit', `${LAUNCHED} rate limited`, false],
+    ['an authentication error that names the launch ID', 'authentication_failed', LAUNCHED, false],
+    ['a billing error that names the launch ID', 'billing_error', LAUNCHED, false],
+    ['no error at all', undefined, BEDROCK, false],
+    ['a server error naming the launch ID', 'server_error', `500: ${LAUNCHED} not found`, false],
+    ['an unknown timeout naming the launch ID', 'unknown', `${LAUNCHED}: request timed out`, false],
+    [
+      'an invalid max_tokens request naming the launch ID',
+      'invalid_request',
+      `max_tokens is too large for ${LAUNCHED}`,
+      false,
+    ],
+    [
+      'a not-found phrase and a longer ID that begins with the launch ID',
+      'invalid_request',
+      `Model ${LAUNCHED}-preview does not exist`,
+      false,
+    ],
+    [
+      'a Bedrock-style access error naming the launch ID',
+      'invalid_request',
+      `AccessDeniedException: You don't have access to the model with the specified model ID ${LAUNCHED}.`,
+      true,
+    ],
+    [
+      'a ValidationException with a no-access phrase, the ID ending the sentence',
+      'unknown',
+      `ValidationException: Invocation of model ID ${LAUNCHED}. You do not have access to it.`,
+      true,
+    ],
+  ])('%s', (_name, error, text, expected) => {
+    expect(isModelRefusal(error, text, LAUNCHED)).toBe(expected);
+  });
+
+  it('matches a launch ID that carries the context suffix without it', () => {
+    expect(
+      isModelRefusal(
+        'invalid_request',
+        'Model claude-fable-5-1 does not exist',
+        'claude-fable-5-1[1m]',
+      ),
+    ).toBe(true);
+  });
+
+  it('does not take a model whose ID only begins with the launch ID for the launched model', () => {
+    expect(
+      isModelRefusal('invalid_request', 'Model claude-opus-5-5 does not exist', 'claude-opus-5'),
+    ).toBe(false);
   });
 });
 

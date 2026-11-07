@@ -1,7 +1,7 @@
 import { homedir } from 'node:os';
 import { mkdir, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
-import { AccountProblem, MODEL_ALIAS_PATTERN, type AccountRefusal } from '@10db/contracts';
+import { AccountProblem, type AccountRefusal } from '@10db/contracts';
 import { z } from 'zod';
 import { systemClock, type Clock } from '../clock';
 import { CODEX_VERIFIED_ON } from '../environment';
@@ -113,7 +113,7 @@ function errorKind(info: unknown): string | null {
 const unlessStarted = (started: boolean): string => (started ? '' : ` ${NO_PROMPT}`);
 
 const modelRefusal = (model: string): string =>
-  `Codex refused the model "${model}". Set this account's Model map in Settings.`;
+  `Codex refused the model "${model}" on this account.`;
 
 /** The socket the session's guard hook talks to: short enough for macOS's socket path limit. */
 export function guardSocketPath(socketDir: string, sessionId: string): string {
@@ -385,11 +385,18 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
       );
   };
 
-  /** A server error that names the requested model: the Model map has no usable entry for it. */
+  /**
+   * Whether a message names the requested model and says it does not exist or is unknown: the account cannot
+   * run it. An error that merely names it (at capacity, a context window exceeded) is not a refusal.
+   */
+  const refusesModel = (message: string): boolean =>
+    message.includes(spec.model) && /does not exist|unknown model/i.test(message);
+
+  /** A server error that refuses the requested model. */
   const isModelRefusal = (error: unknown): boolean =>
     error instanceof CodexRpcError &&
     error.code !== CLIENT_ERROR_CODE &&
-    error.message.includes(spec.model);
+    refusesModel(error.message);
 
   const startThread = async (): Promise<z.infer<typeof ThreadResponse>> => {
     const params = {
@@ -407,7 +414,7 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
           : await ask('thread/resume', { threadId: resumeId, ...params }, ThreadResponse);
     } catch (error) {
       if (isModelRefusal(error))
-        throw new StartRefused(SessionEndReason.Error, modelRefusal(spec.model));
+        throw new StartRefused(SessionEndReason.ModelRefused, modelRefusal(spec.model));
       if (resumeId !== null && error instanceof CodexRpcError)
         throw new StartRefused(
           SessionEndReason.Error,
@@ -467,8 +474,8 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
     const kind = errorKind(parsed.data.turn.error?.codexErrorInfo);
     if (kind === 'usageLimitExceeded') return TurnEnd.UsageLimit;
     if (kind === 'unauthorized') return TurnEnd.SignedOut;
-    // Codex accepts an unknown model at thread/start, so a mistyped Model map ID fails only here.
-    if (kind === 'badRequest' && parsed.data.turn.error?.message.includes(spec.model) === true)
+    // Codex accepts an unknown model at thread/start, so a model the account cannot run fails only here.
+    if (kind === 'badRequest' && refusesModel(parsed.data.turn.error?.message ?? ''))
       return TurnEnd.ModelRefused;
     return null;
   };
@@ -477,7 +484,7 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
     closing = true;
     switch (end) {
       case TurnEnd.ModelRefused:
-        finish(SessionEndReason.Error, modelRefusal(spec.model));
+        finish(SessionEndReason.ModelRefused, modelRefusal(spec.model));
         return;
       case TurnEnd.SignedOut: {
         const message = `Codex says account "${spec.account.label}" is signed out.`;
@@ -630,8 +637,6 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
     const codexHome = spec.env['CODEX_HOME'];
     if (codexHome === undefined || codexHome === '')
       throw sandboxRefused('The session has no CODEX_HOME, so Codex would run in the shared home.');
-    if (MODEL_ALIAS_PATTERN.test(spec.model))
-      throw new StartRefused(SessionEndReason.Error, modelRefusal(spec.model));
 
     const home = deps.homes(codexHome);
     try {
@@ -690,7 +695,7 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
       await startTurn(thread.thread.id, spec.prompt);
     } catch (error) {
       if (isModelRefusal(error))
-        throw new StartRefused(SessionEndReason.Error, modelRefusal(spec.model));
+        throw new StartRefused(SessionEndReason.ModelRefused, modelRefusal(spec.model));
       throw error;
     }
   };

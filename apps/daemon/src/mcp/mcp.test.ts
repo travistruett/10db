@@ -247,7 +247,12 @@ function seedWorktreeWorkstream(
   const task = state.write((ctx) =>
     insertTask(ctx, project.id, { title: 'Alpha', acceptanceCriteria: ['it works'], areas }),
   );
-  const workstream = state.write((ctx) => insertWorkstream(ctx, task.id, { batchId: batch.id }));
+  const workstream = state.write((ctx) =>
+    insertWorkstream(ctx, task.id, {
+      first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      batchId: batch.id,
+    }),
+  );
   return { project, task, workstream, areaScope: batch.id };
 }
 
@@ -2516,6 +2521,7 @@ const stepAt = (role: 'implement' | 'review' | 'plan'): WorkstreamStep => ({
   result: null,
   earlier: [],
   sentBack: 0,
+  setting: null,
 });
 
 async function onStep(role: 'implement' | 'review' | 'plan') {

@@ -4,10 +4,12 @@ import {
   ApiKeySettings,
   BedrockSettings,
   GatewaySettings,
+  isModelTier,
   Provider,
   providerOf,
   SubscriptionSettings,
   type AccountId,
+  type AccountModelDto,
   type SupportedAccountKind,
 } from '@10db/contracts';
 import { isAbsolute, join } from 'node:path';
@@ -55,7 +57,7 @@ export interface AccountExpectation {
 
 export interface SessionLaunch {
   readonly env: Readonly<Record<string, string>>;
-  /** The alias, or the channel's model ID from the account's model map. */
+  /** What the CLI is launched with: the account's own ID for the model, or the canonical ID when it lists none. */
   readonly model: string;
   readonly expect: AccountExpectation;
 }
@@ -77,12 +79,30 @@ export class AccountLaunchError extends Error {
   }
 }
 
+/** A step named a tier, not a model: its account offered nothing to run, so there is nothing to launch. */
+export class ModelNotLaunchableError extends Error {
+  override readonly name = 'ModelNotLaunchableError';
+  readonly model: string;
+  constructor(model: string) {
+    super(`"${model}" names a model tier, not a model, so there is nothing to launch`);
+    this.model = model;
+  }
+}
+
 /** The one owner of account variables (accounts spec §3). */
 export interface Launcher {
   /** The login env with every billing switch stripped: for the gate and the repo's MCP servers. */
   projectEnv(): Record<string, string>;
-  /** A session on `account` asking for `alias`; reads a keyed account's secret now and caches nothing. */
-  session(account: AccountRow, alias: string): SessionLaunch;
+  /**
+   * A session on `account` running `model` (a canonical ID); `accountModels` is that account's own list: it launches the account's `launchId` for the
+   * model, or the canonical ID when the account lists none. Reads a keyed account's secret now and caches
+   * nothing. Throws `ModelNotLaunchableError` for a tier name.
+   */
+  session(
+    account: AccountRow,
+    model: string,
+    accountModels: readonly AccountModelDto[],
+  ): SessionLaunch;
   /** The same environment, for reading who the account is without a prompt. */
   probe(account: AccountRow): ProbeLaunch;
   /** Where the builder's own login lives when the login shell moves it: an absolute directory, or null for Claude Code's default. */
@@ -151,25 +171,6 @@ function withoutVars(
   return Object.fromEntries(Object.entries(login).filter(([name]) => !dropped.includes(name)));
 }
 
-/** The aliases Claude Code resolves through an `ANTHROPIC_DEFAULT_<ALIAS>_MODEL` variable. */
-const CLAUDE_CODE_ALIASES = ['opus', 'sonnet', 'haiku', 'fable'] as const;
-
-/**
- * `env` with the account's model for each alias Claude Code knows, so a subagent named by alias
- * (`model: 'fable'`) runs on the model the account maps it to, as the session's own model does.
- */
-function withAliasModels(
-  env: Record<string, string>,
-  modelMap: Readonly<Record<string, string>>,
-): Record<string, string> {
-  const out = { ...env };
-  for (const alias of CLAUDE_CODE_ALIASES) {
-    const model = modelMap[alias];
-    if (model !== undefined) out[`ANTHROPIC_DEFAULT_${alias.toUpperCase()}_MODEL`] = model;
-  }
-  return out;
-}
-
 export function createLauncher(opts: {
   readonly base: Readonly<Record<string, string>>;
   readonly clientApp: string;
@@ -195,10 +196,7 @@ export function createLauncher(opts: {
     return secret;
   }
 
-  function build(account: AccountRow): {
-    env: Record<string, string>;
-    modelMap: Readonly<Record<string, string>>;
-  } {
+  function build(account: AccountRow): Record<string, string> {
     const login = projectEnv();
     const env: Record<string, string> = {
       ...withoutVars(login, account.kind),
@@ -211,13 +209,13 @@ export function createLauncher(opts: {
         account.configDir;
     switch (account.kind) {
       case AccountKind.ClaudeSubscription: {
-        const settings = SubscriptionSettings.parse(account.settings);
-        return { env, modelMap: settings.modelMap ?? {} };
+        SubscriptionSettings.parse(account.settings);
+        return env;
       }
       case AccountKind.AnthropicApiKey: {
-        const settings = ApiKeySettings.parse(account.settings);
+        ApiKeySettings.parse(account.settings);
         env['ANTHROPIC_API_KEY'] = secretOf(account);
-        return { env, modelMap: settings.modelMap ?? {} };
+        return env;
       }
       case AccountKind.Bedrock: {
         const settings = BedrockSettings.parse(account.settings);
@@ -225,17 +223,17 @@ export function createLauncher(opts: {
         env['AWS_REGION'] = settings.region;
         if (settings.awsProfile === null) env['AWS_BEARER_TOKEN_BEDROCK'] = secretOf(account);
         else env['AWS_PROFILE'] = settings.awsProfile;
-        return { env, modelMap: settings.modelMap ?? {} };
+        return env;
       }
       case AccountKind.Gateway: {
         const settings = GatewaySettings.parse(account.settings);
         env['ANTHROPIC_BASE_URL'] = settings.baseUrl;
         env['ANTHROPIC_AUTH_TOKEN'] = secretOf(account);
-        return { env, modelMap: settings.modelMap ?? {} };
+        return env;
       }
       case AccountKind.CodexSignin: {
-        const settings = SubscriptionSettings.parse(account.settings);
-        return { env, modelMap: settings.modelMap ?? {} };
+        SubscriptionSettings.parse(account.settings);
+        return env;
       }
     }
   }
@@ -249,17 +247,17 @@ export function createLauncher(opts: {
 
   return {
     projectEnv,
-    session(account, alias) {
-      const { env, modelMap } = build(account);
+    session(account, model, accountModels) {
+      if (isModelTier(model)) throw new ModelNotLaunchableError(model);
+      const own = accountModels.find((m) => m.model === model);
       return {
-        env: withAliasModels(env, modelMap),
-        model: modelMap[alias] ?? alias,
+        env: build(account),
+        model: own?.launchId ?? model,
         expect: expectation(account),
       };
     },
     probe(account) {
-      const { env, modelMap } = build(account);
-      return { env: withAliasModels(env, modelMap), expect: expectation(account) };
+      return { env: build(account), expect: expectation(account) };
     },
     loginConfigDir() {
       const dir = opts.base['CLAUDE_CONFIG_DIR'];
