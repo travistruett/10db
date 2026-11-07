@@ -9,7 +9,7 @@ import {
   SANDBOXED,
   type ThrowawayRepo,
 } from './fixtures';
-import { repoRoot } from './workspace';
+import { readRepoFile, repoRoot } from './workspace';
 
 const LEFTHOOK = resolve(repoRoot, 'node_modules/.bin/lefthook');
 const COMMITLINT = resolve(repoRoot, 'node_modules/.bin/commitlint');
@@ -35,6 +35,9 @@ describe('lefthook.yml', () => {
     expect(names('pre-commit')).toEqual(['gitleaks', 'hygiene', 'prettier', 'eslint', 'cargo-fmt']);
     expect(names('commit-msg')).toEqual(['commitlint']);
     expect(names('pre-push')).toEqual(['no-push-to-main', 'check']);
+    // Tests are CI's job: a push is not held for longer than the run it starts.
+    expect(readRepoFile('lefthook.yml')).toMatch(/\bmake precheck\n/);
+    expect(readRepoFile('lefthook.yml')).not.toMatch(/\bmake check\n/);
   });
 });
 

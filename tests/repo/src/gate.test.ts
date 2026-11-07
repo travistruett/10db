@@ -325,7 +325,7 @@ describe('scripts/check.sh', () => {
   };
 
   it('exits 0 on a clean tree, where no test file changed', () => {
-    // make check runs from the pre-push hook on a clean tree. --passWithNoTests is defensive.
+    // make check can run on a clean tree. --passWithNoTests is defensive.
     const { status, last } = check();
     expect(status).toBe(0);
     expect(last).toBe('CHECK PASS');
