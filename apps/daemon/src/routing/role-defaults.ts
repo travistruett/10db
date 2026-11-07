@@ -1,5 +1,5 @@
-import { Effort, StepRole, type ModelProfileDto, type Provider } from '@10db/contracts';
-import { MODEL_TIERS, ModelTier } from './catalogue';
+import { Effort, ModelTier, StepRole, type ModelProfileDto, type Provider } from '@10db/contracts';
+import { MODEL_TIERS } from './catalogue';
 
 /** The tier and effort each role runs on when no score can route it. */
 const ROLE_DEFAULT: Readonly<Record<StepRole, { tier: ModelTier; effort: Effort }>> = {

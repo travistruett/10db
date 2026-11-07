@@ -22,6 +22,7 @@ const base: WorkstreamStep = {
   result: null,
   earlier: [],
   sentBack: 0,
+  setting: null,
 };
 
 describe('WorkstreamStep', () => {

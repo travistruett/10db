@@ -48,6 +48,7 @@ const step = (role: WorkstreamStep['role'], sessionFloor = 0): WorkstreamStep =>
   result: null,
   earlier: [],
   sentBack: 0,
+  setting: null,
 });
 
 describe('planning fields', () => {

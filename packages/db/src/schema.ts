@@ -122,7 +122,7 @@ const updatedAt = () => text('updated_at').notNull();
 
 /**
  * A workstream's step plan, as JSON text. A step stored before a field was added reads back with
- * that field's default, the one the contract gives it: `earlier` [] and `sentBack` 0. Nothing else
+ * that field's default, the one the contract gives it: `earlier` [], `sentBack` 0 and `setting` null. Nothing else
  * is checked here, so one odd row can't stop the board from loading.
  */
 const workstreamSteps = customType<{ data: WorkstreamStep[]; driverData: string }>({
@@ -130,7 +130,7 @@ const workstreamSteps = customType<{ data: WorkstreamStep[]; driverData: string 
   toDriver: (steps) => JSON.stringify(steps),
   fromDriver: (stored) =>
     (JSON.parse(stored) as Partial<WorkstreamStep>[]).map(
-      (step) => ({ earlier: [], sentBack: 0, ...step }) as WorkstreamStep,
+      (step) => ({ earlier: [], sentBack: 0, setting: null, ...step }) as WorkstreamStep,
     ),
 });
 

@@ -1,4 +1,4 @@
-import { Effort, StepRole, type FlowInput, type Provider } from '@10db/contracts';
+import { Effort, ModelTier, StepRole, type FlowInput, type Provider } from '@10db/contracts';
 
 export interface SeedProfile {
   readonly provider: Provider;
@@ -7,10 +7,6 @@ export interface SeedProfile {
   readonly aaSlug: string;
   readonly enabled: boolean;
 }
-
-/** How strong a model is, for routing a step no score can route. */
-export const ModelTier = { Fast: 'fast', Balanced: 'balanced', Strongest: 'strongest' } as const;
-export type ModelTier = (typeof ModelTier)[keyof typeof ModelTier];
 
 /**
  * Claude Code's model aliases, weakest first, with each one's tier and the AA family it maps to; the

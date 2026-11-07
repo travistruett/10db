@@ -27,6 +27,15 @@ import {
   JudgeStatusDto,
   JudgeTestResultDto,
 } from './judge';
+import {
+  AccountModelDto,
+  CatalogueStatusDto,
+  ModelRowDto,
+  ModelSetting,
+  PatternDto,
+  PatternMatch,
+  RoleSettingDto,
+} from './catalogue';
 import { AdvertisedBuilderToolInputs, BuilderToolName } from './builder-mcp-tools';
 import {
   BoardColumnDelete,
@@ -225,6 +234,13 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'folder-inspect-result': FolderInspectResult,
   'area-proposal-input': AreaProposalInput,
   'area-proposal-result': AreaProposalResult,
+  'account-model-dto': AccountModelDto,
+  'catalogue-status-dto': CatalogueStatusDto,
+  'model-row-dto': ModelRowDto,
+  'model-setting': ModelSetting,
+  'pattern-dto': PatternDto,
+  'pattern-match': PatternMatch,
+  'role-setting-dto': RoleSettingDto,
   'model-profile-dto': ModelProfileDto,
   'model-profile-patch': ModelProfilePatch,
   'picker-proposal-dto': PickerProposalDto,

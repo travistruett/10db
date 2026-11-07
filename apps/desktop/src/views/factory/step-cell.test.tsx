@@ -32,6 +32,7 @@ const step = (
   result: null,
   earlier: [],
   sentBack: 0,
+  setting: null,
 });
 
 function show(ws: ReturnType<typeof workstreamDto>) {

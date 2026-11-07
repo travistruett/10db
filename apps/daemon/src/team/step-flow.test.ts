@@ -30,6 +30,7 @@ const step = (role: StepRole, verdict: Verdict | null | 'none' = 'none'): Workst
   sessionFloor: 0,
   earlier: [],
   sentBack: 0,
+  setting: null,
   result:
     verdict === 'none'
       ? null

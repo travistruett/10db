@@ -2516,6 +2516,7 @@ const stepAt = (role: 'implement' | 'review' | 'plan'): WorkstreamStep => ({
   result: null,
   earlier: [],
   sentBack: 0,
+  setting: null,
 });
 
 async function onStep(role: 'implement' | 'review' | 'plan') {

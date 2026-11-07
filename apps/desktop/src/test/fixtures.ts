@@ -209,6 +209,7 @@ export function stepDto(overrides: Partial<WorkstreamStep> = {}): WorkstreamStep
     result: null,
     earlier: [],
     sentBack: 0,
+    setting: null,
     ...overrides,
   });
 }

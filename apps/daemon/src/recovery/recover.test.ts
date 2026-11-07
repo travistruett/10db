@@ -131,6 +131,7 @@ const flowStep = (role: 'implement' | 'review', sessionFloor: number): Workstrea
   result: null,
   earlier: [],
   sentBack: 0,
+  setting: null,
 });
 
 /**

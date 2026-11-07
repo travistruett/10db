@@ -182,6 +182,7 @@ const step = (over: Partial<WorkstreamStep>): WorkstreamStep => ({
   result: null,
   earlier: [],
   sentBack: 0,
+  setting: null,
   ...over,
 });
 

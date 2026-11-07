@@ -267,6 +267,7 @@ describe('escalateStep', () => {
       result: null,
       earlier: [],
       sentBack: 0,
+      setting: null,
       ...extra,
     };
   };
@@ -386,6 +387,7 @@ describe('escalateStep without scores', () => {
       result: null,
       earlier: [],
       sentBack: 0,
+      setting: null,
     };
   };
   const escalate = (from: string) =>
@@ -471,6 +473,7 @@ describe('escalateStep on a profile it cannot compare', () => {
       result: null,
       earlier: [],
       sentBack: 0,
+      setting: null,
     };
     const result = escalateStep(step, {
       provider: 'claude',

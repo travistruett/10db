@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ModelSetting } from './catalogue';
 import { ModelProfileId, PersonaId, SessionId, TaskId } from './ids';
 import { Effort, ROLE_SCORE, ScoreKind, StepRole, StepStatus, ToolAccess, Verdict } from './states';
 
@@ -38,6 +39,8 @@ export const WorkstreamStep = z.object({
   model: z.string().min(1),
   effort: z.enum(Effort),
   need: z.number().min(0).max(100),
+  /** What the router was asked for this step; null when nothing asked, so a stored step parses. */
+  setting: ModelSetting.nullable().default(null),
   /** Why this profile: the router's reason, a pin, a fallback or an escalation. */
   reason: z.string(),
   overBudget: z.boolean(),
@@ -117,6 +120,7 @@ export function currentStep(ws: StepPosition): WorkstreamStep {
     model: ws.model,
     effort: ws.effort,
     need: 0,
+    setting: null,
     reason: 'started before flows: runs on its stored model',
     overBudget: false,
     pinned: true,

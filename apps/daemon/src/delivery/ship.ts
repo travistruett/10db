@@ -429,6 +429,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
               result: null,
               earlier: [],
               sentBack: 0,
+              setting: null,
             },
           ],
         },
