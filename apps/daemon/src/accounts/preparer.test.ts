@@ -59,6 +59,7 @@ beforeEach(() => {
     adapter,
     lists: createAccountLists({
       state,
+      clock,
       catalogue: () => parseCatalogue(readModelsDevFixture()),
       logger: silentLogger,
     }),

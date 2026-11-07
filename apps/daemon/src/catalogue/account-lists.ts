@@ -1,5 +1,6 @@
 import type { AccountId, SupportedAccountKind } from '@10db/contracts';
 import { replaceAccountModels } from '@10db/db';
+import type { Clock } from '../clock';
 import type { StateStore } from '../events';
 import type { Logger } from '../log';
 import type { SeenAccount } from '../sessions';
@@ -17,16 +18,25 @@ export interface AccountLists {
     account: { readonly id: AccountId; readonly kind: SupportedAccountKind },
     seen: SeenAccount,
   ): void;
+  /**
+   * When `record` was last called for the account, whatever it stored: any probe that passed the account check is
+   * a read, so one path's read keeps another from repeating it. Null when never, and lost with the process.
+   */
+  lastReadAt(id: AccountId): number | null;
 }
 
 export function createAccountLists(deps: {
   readonly state: StateStore;
+  readonly clock: Clock;
   /** The catalogue in use; null when there is none, and then nothing can be joined or stored. */
   readonly catalogue: () => Catalogue | null;
   readonly logger: Logger;
 }): AccountLists {
+  const reads = new Map<AccountId, number>();
   return {
+    lastReadAt: (id) => reads.get(id) ?? null,
     record(account, seen) {
+      reads.set(account.id, deps.clock.now().getTime());
       const catalogue = deps.catalogue();
       // An empty list is no list: an agent that hides every model, or lists none, would wipe the last good one.
       if (seen.models === undefined || seen.models.length === 0 || catalogue === null) return;

@@ -62,20 +62,36 @@ export function joinModel(
 export type Runnability = 'runs' | 'refused' | 'unknown';
 
 /**
+ * The maker an ID names itself, by a `vendor/` prefix or a dotted vendor segment, when that vendor is a lab of
+ * the catalogue (a provider that lists its own models). A router or cloud is not a lab, so `openrouter/...` and
+ * `amazon-bedrock...` name none.
+ */
+function namedMaker(id: string, catalogue: Catalogue): string | null {
+  const isLab = (name: string): boolean =>
+    Object.hasOwn(catalogue.providers, name) &&
+    (catalogue.providers[name]?.models.some((m) => m.maker === name) ?? false);
+  const slash = id.includes('/') ? id.slice(0, id.indexOf('/')) : null;
+  if (slash !== null && isLab(slash)) return slash;
+  return id.split('.').find((part, at, parts) => at < parts.length - 1 && isLab(part)) ?? null;
+}
+
+/**
  * Whether the provider's runtime can run the model an account lists, judged apart from the join. A model that
  * joins runs when its maker is the runtime's, and is refused when the maker is another or the catalogue cannot
- * name it. One that joins nothing is still refused when another provider of the catalogue lists it, by its exact
- * ID, its canonical ID or its `vendor/` ID; otherwise it is unknown.
+ * name it. One that joins nothing is refused when its ID names another lab, listed or not, or when another
+ * provider of the catalogue lists it under another maker; otherwise it is unknown, and stays choosable by hand.
  */
 export function runnability(id: string, provider: Provider, catalogue: Catalogue): Runnability {
   const entry = joinModel(id, provider, catalogue);
   const maker = RUNTIME_MAKER[provider];
   if (entry) return entry.maker === maker ? 'runs' : 'refused';
+  const named = namedMaker(id, catalogue);
+  if (named !== null) return named === maker ? 'unknown' : 'refused';
   const [vendor, rest] = id.includes('/') ? [id.split('/')[0], id.slice(id.indexOf('/') + 1)] : [];
   for (const [name, { models }] of Object.entries(catalogue.providers)) {
     if (name === maker) continue;
-    const named = [id, canonicalId(id, catalogue), ...(vendor === name && rest ? [rest] : [])];
-    if (models.some((m) => named.includes(m.id))) return 'refused';
+    const ids = [id, canonicalId(id, catalogue), ...(vendor === name && rest ? [rest] : [])];
+    if (models.some((m) => ids.includes(m.id) && m.maker !== maker)) return 'refused';
   }
   return 'unknown';
 }

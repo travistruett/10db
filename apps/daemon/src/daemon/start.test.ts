@@ -39,6 +39,7 @@ import {
   getWorkstream,
   listAccountModels,
   listAccounts,
+  patchAccount,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CATALOGUE_URL } from '../catalogue';
@@ -320,8 +321,7 @@ describe('startDaemon', () => {
           (w) => w.taskId === task.id && w.state === 'DONE',
         ),
       );
-      // The preparer's probe, then the read of the model list as the session starts.
-      expect(adapter.probes).toHaveLength(2);
+      expect(adapter.probes).toHaveLength(1);
       expect(getAccount(running.state.db, project.accountId).expectedIdentity).toBe(
         'builder@example.com',
       );
@@ -1448,9 +1448,10 @@ describe('startDaemon', () => {
   describe('the model refresh', () => {
     const OPUS = { id: 'opus', resolvedId: 'claude-opus-5-5', efforts: ['low' as const] };
     const startWithList = async (catalogueSync: boolean) => {
-      const adapter = new FakeAdapter({});
+      const adapter = new FakeAdapter({ Alpha: [[{ do: 'turn_complete' }]] });
       adapter.probeSeen = { ...adapter.probeSeen, models: [OPUS] };
       const fetches: string[] = [];
+      const net = { online: true };
       daemon = await startDaemon({
         sandbox: null,
         dataDir: dir.path,
@@ -1463,10 +1464,12 @@ describe('startDaemon', () => {
           fetches.push(
             typeof input === 'string' ? input : input instanceof URL ? input.href : input.url,
           );
-          return Promise.resolve(new Response(JSON.stringify(readModelsDevFixture())));
+          return net.online
+            ? Promise.resolve(new Response(JSON.stringify(readModelsDevFixture())))
+            : Promise.reject(new Error('offline'));
         },
       });
-      return { adapter, fetches, running: daemon };
+      return { adapter, fetches, net, running: daemon };
     };
 
     it('builds disabled profiles from each account list after the fetch, beside the seeded ones, and a second call joins a run', async () => {
@@ -1481,16 +1484,65 @@ describe('startDaemon', () => {
       expect(findModelProfile(running.state.db, 'claude', 'sonnet', 'high')?.enabled).toBe(true);
 
       const before = { fetches: fetches.length, probes: adapter.probes.length };
-      await Promise.all([running.refreshModels(), running.refreshModels()]);
+      await Promise.all([
+        running.refreshModels({ force: false }),
+        running.refreshModels({ force: false }),
+      ]);
       expect(fetches.length - before.fetches).toBe(1);
       expect(adapter.probes.length - before.probes).toBe(1);
     });
 
-    it('with the catalogue off fetches nothing and probes no account, whoever asks', async () => {
-      const { adapter, fetches, running } = await startWithList(false);
-      await running.refreshModels();
-      expect(fetches).toEqual([]);
-      expect(adapter.probes).toEqual([]);
+    it('after a failed fetch reads only accounts not read today, unless the builder forces it', async () => {
+      const { adapter, net, running } = await startWithList(true);
+      await waitFor(() => listAccountModels(running.state.db).length > 0);
+      net.online = false;
+      const probes = adapter.probes.length;
+      await running.refreshModels({ force: false });
+      expect(adapter.probes.length).toBe(probes);
+      await running.refreshModels({ force: true });
+      expect(adapter.probes.length).toBe(probes + 1);
+    });
+
+    it('with the catalogue off fetches nothing and probes no account, whoever asks: not a refresh, a sign-in or a session', async () => {
+      const repo = createTempRepo();
+      try {
+        const { adapter, fetches, running } = await startWithList(false);
+        const api = apiClient(running.url, running.token);
+        await running.refreshModels({ force: true });
+        // A ready account, so the session start needs no probe of its own.
+        const [account] = listAccounts(running.state.db);
+        if (!account) throw new Error('no default account');
+        running.state.write((ctx) =>
+          patchAccount(ctx, account.id, { expectedIdentity: 'builder@example.com' }),
+        );
+        await api.post(`/accounts/${account.id}/connect`, z.unknown());
+        adapter.logins[0]?.end({ ok: true });
+        await waitForAsync(async () =>
+          (await api.get('/accounts/connecting', z.unknown())) === null ? true : undefined,
+        );
+        const project = await api.post('/projects', ProjectDto, {
+          name: 'demo',
+          repoPath: repo.path,
+          gateCommand: 'true',
+          flowId: await quickFlowId(api),
+          areas: [{ name: 'src', globs: ['src/**'] }],
+        });
+        const task = await api.post(`/projects/${project.id}/tasks`, TaskDto, {
+          title: 'Alpha',
+          acceptanceCriteria: ['it works'],
+          areas: ['src'],
+        });
+        await api.post(`/tasks/${task.id}/start`, z.unknown());
+        await waitForAsync(async () =>
+          (await api.get('/workstreams?active=false', z.array(WorkstreamDto))).some(
+            (w) => w.taskId === task.id && w.state === 'DONE',
+          ),
+        );
+        expect(fetches).toEqual([]);
+        expect(adapter.probes).toEqual([]);
+      } finally {
+        repo.cleanup();
+      }
     });
   });
 

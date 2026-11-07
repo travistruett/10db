@@ -6,10 +6,15 @@ import {
   seedAccount,
   type Store,
 } from '@10db/db';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMemoryKeychain } from '../../test/fixtures';
 import { readModelsDevFixture } from '../../test/models-dev-fixture';
-import { createAccountLists, parseCatalogue } from '../catalogue';
+import {
+  createAccountLists,
+  parseCatalogue,
+  type AccountLists,
+  type Catalogue,
+} from '../catalogue';
 import { ManualClock } from '../clock';
 import { createLauncher } from '../environment';
 import { createEventBus, createStateStore, type StateStore } from '../events';
@@ -32,6 +37,11 @@ let state: StateStore;
 let behaviour: Map<AccountId, SeenModel[] | Partial<SeenAccount> | Error>;
 let probed: AccountId[];
 let refresh: ListRefresh;
+let lists: AccountLists;
+/** The catalogue the lists join to; null as when there is none. */
+let current: Catalogue | null;
+/** While set for an account, its probe answers only once the promise settles. */
+let gates: Map<AccountId, Promise<void>>;
 let logger: ReturnType<typeof capturingLogger>;
 
 beforeEach(() => {
@@ -39,6 +49,8 @@ beforeEach(() => {
   ({ store, close } = createTestStore(() => clock.now()));
   state = createStateStore(store, createEventBus());
   behaviour = new Map();
+  gates = new Map();
+  current = parseCatalogue(readModelsDevFixture());
   probed = [];
   logger = capturingLogger();
   const base = new FakeAdapter({}).probeSeen;
@@ -51,11 +63,12 @@ beforeEach(() => {
       probed.push(id);
       const staged = behaviour.get(id);
       if (staged instanceof Error) return Promise.reject(staged);
-      return Promise.resolve(
-        Array.isArray(staged) ? { ...base, models: staged } : { ...base, ...staged },
-      );
+      const answer = Array.isArray(staged) ? { ...base, models: staged } : { ...base, ...staged };
+      const gate = gates.get(id);
+      return gate ? gate.then(() => answer) : Promise.resolve(answer);
     },
   };
+  lists = createAccountLists({ state, clock, catalogue: () => current, logger });
   refresh = createListRefresh({
     state,
     clock,
@@ -66,11 +79,7 @@ beforeEach(() => {
       keychain: createMemoryKeychain(),
     }),
     startGate: createStartGate(),
-    lists: createAccountLists({
-      state,
-      catalogue: () => parseCatalogue(readModelsDevFixture()),
-      logger,
-    }),
+    lists,
     dataDir: '/data',
     logger,
   });
@@ -178,12 +187,77 @@ describe('reading every account list', () => {
     behaviour.set(a, [OPUS]);
     behaviour.set(b, [HAIKU]);
     const read = refresh.readAll();
-    refresh.stop();
+    await refresh.stop();
     await read;
     expect(probed.length).toBeLessThan(2);
     probed.length = 0;
     await refresh.readAll();
     expect(probed).toEqual([]);
+  });
+
+  it('counts a probe by another path as a read, whatever it stored', async () => {
+    current = null;
+    const a = subscription('A');
+    behaviour.set(a, [OPUS]);
+    lists.record(
+      { id: a, kind: AccountKind.ClaudeSubscription },
+      { ...new FakeAdapter({}).probeSeen, models: [OPUS] },
+    );
+    expect(stored(a)).toEqual([]);
+    await refresh.readIfStale(a);
+    expect(probed).toEqual([]);
+    clock.advance(24 * 60 * 60_000);
+    await refresh.readIfStale(a);
+    expect(probed).toEqual([a]);
+  });
+
+  it('reads again, after the running probe, for a sign-in that ended during it', async () => {
+    const a = subscription('A');
+    behaviour.set(a, [OPUS]);
+    let release: () => void = () => undefined;
+    gates.set(
+      a,
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+    );
+    const running = refresh.readAll();
+    await vi.waitFor(() => {
+      expect(probed).toHaveLength(1);
+    });
+    // The login finishes now; the probe in flight saw the account before it.
+    behaviour.set(a, [HAIKU]);
+    const afterLogin = refresh.readOne(a);
+    release();
+    await Promise.all([running, afterLogin]);
+    expect(probed).toEqual([a, a]);
+    expect(stored(a)).toEqual(['claude-haiku-5-5']);
+  });
+
+  it('waits for a read in flight when it stops', async () => {
+    const a = subscription('A');
+    behaviour.set(a, [OPUS]);
+    let release: () => void = () => undefined;
+    gates.set(
+      a,
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+    );
+    const running = refresh.readAll();
+    await vi.waitFor(() => {
+      expect(probed).toHaveLength(1);
+    });
+    let stopped = false;
+    const stopping = refresh.stop().then(() => {
+      stopped = true;
+    });
+    await Promise.resolve();
+    expect(stopped).toBe(false);
+    release();
+    await stopping;
+    await running;
+    expect(stored(a)).toEqual(['claude-opus-5-5']);
   });
 
   it('leaves out an archived account', async () => {

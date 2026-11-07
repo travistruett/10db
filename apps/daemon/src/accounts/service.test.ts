@@ -80,6 +80,7 @@ beforeEach(() => {
   const state = createStateStore(test.store, bus);
   const lists = createAccountLists({
     state,
+    clock,
     catalogue: () => parseCatalogue(readModelsDevFixture()),
     logger,
   });

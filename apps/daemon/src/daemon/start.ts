@@ -15,6 +15,7 @@ import {
   type InboxAnswer,
   type InboxItemDto,
   type ProjectDto,
+  type AccountId,
   type ProjectId,
   type ShapeId,
   type SystemCheckDto,
@@ -323,9 +324,10 @@ export interface RunningDaemon {
   readonly benchmarks: BenchmarkSync;
   /**
    * Fetches the catalogue, reads every account's list again, rebuilds the model profiles and then updates scores. A
-   * call during a run joins it. Does nothing when `catalogueSync` is off.
+   * call during a run joins it. With `force` every account is read even when the fetch failed; without it a failed
+   * fetch leaves alone the accounts read in the last day. Does nothing when `catalogueSync` is off.
    */
-  refreshModels(): Promise<void>;
+  refreshModels(opts: { readonly force: boolean }): Promise<void>;
   /** What routine decisions ask; reads the OpenRouter key from `keychain` for each call. */
   readonly judge: JudgeService;
   stop(): Promise<void>;
@@ -499,6 +501,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   const accountLists = createAccountLists({
     state,
+    clock,
     catalogue: () => catalogue.catalogue(),
     logger: logger.child({ component: 'catalogue' }),
   });
@@ -985,8 +988,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // the profiles are rebuilt from what the accounts now offer. Scores for the models that changed are read after the
   // profiles exist, so a new model has a row to put them on.
   async function refreshAccountModels(fetched: boolean): Promise<void> {
-    // After a failed fetch only accounts not read in the last day are read, so a retry loop does not probe them all.
-    await listRefresh.readAll({ staleOnly: !fetched });
+    // After a failed fetch only accounts not read in the last day are read, so a retry loop does not probe them all;
+    // the builder's own refresh reads every account.
+    const everyAccount = fetched || forced;
+    forced = false;
+    await listRefresh.readAll({ staleOnly: !everyAccount });
     const current = catalogue.catalogue();
     if (current !== null)
       state.write((ctx) => {
@@ -995,10 +1001,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   }
   // One path for the daily timer, the start-up catch-up and the Models page: a call during a run joins it.
   // Off, nothing is fetched and no account is probed.
-  const refreshModels = async (): Promise<void> => {
-    if (opts.catalogueSync === true) await catalogue.sync();
+  const modelRefreshOn = opts.catalogueSync === true;
+  /** A forced refresh is waiting for the run in flight to read the accounts. */
+  let forced = false;
+  const refreshModels = async ({ force }: { readonly force: boolean }): Promise<void> => {
+    if (!modelRefreshOn) return;
+    forced ||= force;
+    await catalogue.sync();
+    // A run already past its read never saw the request: read once more.
+    if (forced) await refreshAccountModels(true);
   };
-  if (opts.catalogueSync === true) catalogue.start();
+  if (modelRefreshOn) catalogue.start();
   const accountService = createAccountService({
     state,
     clock,
@@ -1007,7 +1020,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     launcher,
     adapter,
     lists: accountLists,
-    listRefresh,
+    // Off, a finished sign-in reads no list either.
+    listRefresh: modelRefreshOn ? listRefresh : { readOne: () => Promise.resolve() },
     startGate,
     runtime: accounts,
     pauses: accountPauses,
@@ -1185,9 +1199,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       prepare: (account, projectId) => {
         preparer.prepare(account, projectId);
       },
-      readList: (id) => {
-        void listRefresh.readIfStale(id);
-      },
+      // Off, no session start reads a list.
+      ...(modelRefreshOn
+        ? {
+            readList: (id: AccountId) => {
+              void listRefresh.readIfStale(id);
+            },
+          }
+        : {}),
     },
     connecting: () => accountService.connecting(),
     clock,
@@ -1613,7 +1632,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       await Promise.all([deliveryJobs.stop(), selfUpdateStopped]);
       benchmarks.stop();
       catalogue.stop();
-      listRefresh.stop();
+      await listRefresh.stop();
       accountPauses.stop();
       moveBack.stop();
       nightly.cancel();

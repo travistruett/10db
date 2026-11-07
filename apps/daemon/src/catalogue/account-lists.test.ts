@@ -46,7 +46,7 @@ beforeEach(() => {
   id = seedAccount(store, { kind: AccountKind.ClaudeSubscription, label: 'sub' }).id;
   current = fixture;
   logger = capturingLogger();
-  lists = createAccountLists({ state, catalogue: () => current, logger });
+  lists = createAccountLists({ state, clock, catalogue: () => current, logger });
 });
 afterEach(() => {
   close();

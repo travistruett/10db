@@ -9,7 +9,7 @@ import { checkAccount, type SeenAccount, type SessionAdapter } from '../sessions
 import type { StartGate } from './start-gate';
 
 /** A list read within this long is fresh enough that a session start does not read it again. */
-export const LIST_FRESH_MS = 24 * 60 * 60 * 1000;
+const LIST_FRESH_MS = 24 * 60 * 60 * 1000;
 
 export interface ListRefresh {
   /**
@@ -18,12 +18,15 @@ export interface ListRefresh {
    * an account read within the last day is skipped. Never rejects.
    */
   readAll(opts?: { readonly staleOnly?: boolean }): Promise<void>;
-  /** Reads one account's list now; a read already running for it is joined. Never rejects. */
+  /**
+   * Reads one account's list now, for a caller whose account just changed: a read already running saw the account
+   * before, so this waits for it and reads once more. Never rejects.
+   */
   readOne(id: AccountId): Promise<void>;
   /** Reads one account's list unless it was read within the last day. Never rejects. */
   readIfStale(id: AccountId): Promise<void>;
-  /** No further account is read; one already being read finishes. */
-  stop(): void;
+  /** No further account is read; settles once the reads in flight have finished. */
+  stop(): Promise<void>;
 }
 
 export function createListRefresh(deps: {
@@ -41,6 +44,7 @@ export function createListRefresh(deps: {
   /** When each account was last read, listed or not: an account that lists nothing stores no rows to date it by. */
   const tried = new Map<AccountId, number>();
   let stopped = false;
+  const isStopped = (): boolean => stopped;
 
   /** Whether the account was read, or its newest stored row dated, within the last day. */
   function stale(id: AccountId): boolean {
@@ -48,6 +52,7 @@ export function createListRefresh(deps: {
     const newest = Math.max(
       Number.isFinite(stored) ? stored : -Infinity,
       tried.get(id) ?? -Infinity,
+      deps.lists.lastReadAt(id) ?? -Infinity,
     );
     return !Number.isFinite(newest) || deps.clock.now().getTime() - newest >= LIST_FRESH_MS;
   }
@@ -95,14 +100,18 @@ export function createListRefresh(deps: {
         await readOne(account.id);
       }
     },
-    readOne(id) {
-      return stopped ? Promise.resolve() : readOne(id);
+    async readOne(id) {
+      if (stopped) return;
+      await running.get(id);
+      // Stopped while waiting: the flag changed behind the compiler's back.
+      if (!isStopped()) await readOne(id);
     },
     readIfStale(id) {
       return stopped || !stale(id) ? Promise.resolve() : readOne(id);
     },
-    stop() {
+    async stop() {
       stopped = true;
+      await Promise.all([...running.values()]);
     },
   };
 }

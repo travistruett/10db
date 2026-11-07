@@ -34,6 +34,10 @@ let catalogue = BASE;
 
 /** The fixture with entries added to a provider, as models.dev lists them. */
 function withModels(provider: string, ...added: Partial<CatalogueModel>[]): Catalogue {
+  return addTo(BASE, provider, ...added);
+}
+
+function addTo(base: Catalogue, provider: string, ...added: Partial<CatalogueModel>[]): Catalogue {
   const models = added.map((m): CatalogueModel => ({
     provider,
     id: 'x',
@@ -48,10 +52,10 @@ function withModels(provider: string, ...added: Partial<CatalogueModel>[]): Cata
     ...m,
   }));
   return {
-    ...BASE,
+    ...base,
     providers: {
-      ...BASE.providers,
-      [provider]: { models: [...(BASE.providers[provider]?.models ?? []), ...models] },
+      ...base.providers,
+      [provider]: { models: [...(base.providers[provider]?.models ?? []), ...models] },
     },
   };
 }
@@ -258,11 +262,25 @@ describe('reconcileProfiles', () => {
     ['a vendor-prefixed ID of another maker', AccountKind.Gateway, 'openai/gpt-6-astra', null],
     ['an OpenRouter ID of another maker', AccountKind.Gateway, 'unbiased/pareto-26.9', null],
     ['a gateway model no provider lists', AccountKind.Gateway, 'house-model', 'house-model'],
+    ['an unlisted vendor-prefixed ID of another maker', AccountKind.Gateway, 'openai/gpt-99', null],
+    [
+      'an unlisted Bedrock-style ID of another maker',
+      AccountKind.Bedrock,
+      'us.openai.gpt-99',
+      null,
+    ],
+    [
+      "the runtime maker's own model that only OpenRouter lists",
+      AccountKind.Gateway,
+      'anthropic/claude-3.5-sonnet',
+      'anthropic/claude-3.5-sonnet',
+    ],
   ])('lists %s on a Claude Code account without a routable profile', (_name, kind, id, profile) => {
-    catalogue = withModels('amazon-bedrock', {
-      id: 'meta.llama3-70b-instruct-v1:0',
-      outputPrice: 1,
-    });
+    catalogue = addTo(
+      withModels('amazon-bedrock', { id: 'meta.llama3-70b-instruct-v1:0', outputPrice: 1 }),
+      'openrouter',
+      { id: 'anthropic/claude-3.5-sonnet', maker: 'anthropic' },
+    );
     const id_ = account(kind, 'acct');
     list(id_, kind, [seen('claude-opus-5-5', 'claude-opus-5-5'), seen(id, id)]);
     reconcile();
