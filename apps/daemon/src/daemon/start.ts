@@ -1028,6 +1028,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     // A run already past its read never saw the request: read once more.
     if (forced) await refreshAccountModels(true);
   };
+  // Profiles come from the catalogue the daemon holds (the stored copy, else the release's snapshot), not from a
+  // fetch: a daemon that never fetches still plans and launches on real models. The rebuild is idempotent, so a
+  // fetch that lands later only changes what differs.
+  const held = catalogue.catalogue();
+  if (held !== null)
+    state.write((ctx) => {
+      reconcileProfiles(ctx, held);
+    });
   if (modelRefreshOn) catalogue.start();
   const accountService = createAccountService({
     state,

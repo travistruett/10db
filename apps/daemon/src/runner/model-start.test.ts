@@ -18,11 +18,13 @@ import {
   upsertModelProfiles,
   patchProject,
   replaceAccountModels,
+  schema,
   seedAccount,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTestEngine, type TestEngine } from '../../test/engine';
 import { handoffArgs } from '../../test/fixtures';
+import { seedProfiles } from '../../test/seed-profiles';
 import type { SessionSpec } from '../sessions';
 
 // What a session starts on: the account's own ID for the planned model, a model chosen again after a
@@ -170,6 +172,27 @@ describe('the model a planned step starts on', () => {
       );
       expect(saved.model).toBe(ran);
     });
+  });
+});
+
+describe('an account whose provider has no model profiles yet', () => {
+  it('leaves the step queued without pausing the account, and runs it once the profiles exist', async () => {
+    engine = await createTestEngine({ Alpha: [finish('op-profiles-01')] });
+    const { workstream } = engine.addTask('Alpha', ['api'], [], quick);
+    // An old database before its first catalogue read: the step is planned, and no profile has been written.
+    engine.store.db.delete(schema.modelProfiles).run();
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+
+    expect(ws(workstream.id).state).toBe('QUEUED');
+    expect(listSessions(engine.store.db, workstream.id)).toHaveLength(0);
+    expect(engine.accounts.isPaused(engine.project.accountId)).toBe(false);
+    expect(openCards()).toEqual([]);
+
+    seedProfiles(engine.state);
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
   });
 });
 

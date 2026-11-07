@@ -23,6 +23,11 @@ export function aaKeyReaderFromEnv(env: DaemonEnv, read: () => string | null): (
   return env.TENDB_BENCHMARKS === 'off' ? () => null : read;
 }
 
+/** The catalogue file to read when none is stored: the one the environment names, else the release's own. */
+export function catalogueSnapshotFromEnv(env: DaemonEnv, bundled: string): string {
+  return env.TENDB_CATALOGUE_SNAPSHOT ?? bundled;
+}
+
 /**
  * Every real lane and gate runs under the sandbox, and nothing in the environment turns it off. Fake
  * sessions (`TENDB_FAKE_SCRIPTS`) run no commands and write nothing a gate runs, so they and their

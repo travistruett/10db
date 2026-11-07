@@ -380,6 +380,14 @@ type Outcome =
       readonly providerSessionId: null;
     }
   | {
+      /**
+       * No model profile of the account's provider exists yet, before the first read of the catalogue. That is not
+       * the account's fault: the step goes back to the queue and is tried again on a later tick.
+       */
+      readonly kind: 'awaiting_profiles';
+      readonly providerSessionId: null;
+    }
+  | {
       readonly kind: 'crashed';
       readonly message: string;
       readonly providerSessionId: string | null;
@@ -1185,6 +1193,16 @@ export function createRunner(opts: RunnerOptions): Runner {
     });
   }
 
+  /** Back to the queue with the next action as it was, and the lease released. */
+  function requeue(id: WorkstreamId, ctl: Control, pausedFor: string, queuedFor: string): void {
+    opts.state.write((ctx) => {
+      // The state machine has no shorter way back to the queue.
+      transitionWorkstream(ctx, id, { to: S.PausedLimit, fence: ctl.fence, reason: pausedFor });
+      transitionWorkstream(ctx, id, { to: S.Queued, fence: ctl.fence, reason: queuedFor });
+      clearLease(ctx, id);
+    });
+  }
+
   function settle(id: WorkstreamId, ctl: Control, outcome: Terminal): void {
     const row = getWorkstreamRow(db, id);
     if (
@@ -1257,21 +1275,16 @@ export function createRunner(opts: RunnerOptions): Runner {
           opts.accounts.refused(getAccountRow(db, ctl.accountId), lane.id, outcome.refusal);
         }
         return;
+      case 'awaiting_profiles':
+        requeue(id, ctl, 'the model catalogue has not been read yet', 'waiting for model profiles');
+        return;
       case 'unready': {
-        opts.state.write((ctx) => {
-          // The state machine has no shorter way back to the queue; the next action is kept as it was.
-          transitionWorkstream(ctx, id, {
-            to: S.PausedLimit,
-            fence: ctl.fence,
-            reason: `account not ready: ${outcome.refusal.problem}`,
-          });
-          transitionWorkstream(ctx, id, {
-            to: S.Queued,
-            fence: ctl.fence,
-            reason: 'waiting for the account to be ready',
-          });
-          clearLease(ctx, id);
-        });
+        requeue(
+          id,
+          ctl,
+          `account not ready: ${outcome.refusal.problem}`,
+          'waiting for the account to be ready',
+        );
         // The scheduler holds it there until the preparer makes the account ready.
         const lane = getProject(db, row.projectId);
         opts.accounts.prepare(getAccountRow(db, ctl.accountId), lane.id);
@@ -1558,6 +1571,9 @@ export function createRunner(opts: RunnerOptions): Runner {
     const accountModels = listAccountModels(db, account.id);
     const launchStep = resolvedStep(id, ctl, row, step, account, accountModels);
     if (isModelTier(launchStep.model)) {
+      // Before the catalogue is first read no profile of this provider exists, which says nothing about the account.
+      if (!listModelProfiles(db).some((p) => p.provider === provider))
+        return { kind: 'awaiting_profiles', providerSessionId: null };
       return {
         kind: 'held',
         until: null,

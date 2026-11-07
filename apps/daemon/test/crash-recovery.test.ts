@@ -81,6 +81,8 @@ function launchDaemon(): ChildProcess {
       TENDB_LOG_LEVEL: 'warn',
       // A throwaway daemon never fetches models.dev.
       TENDB_CATALOGUE: 'off',
+      // It still builds its model profiles, from the fixture catalogue.
+      TENDB_CATALOGUE_SNAPSHOT: resolve(import.meta.dirname, 'fixtures/catalogue.json'),
       TENDB_FAKE_SCRIPTS: join(data.path, 'book.json'),
     },
     stdio: 'ignore',

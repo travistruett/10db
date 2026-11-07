@@ -5,6 +5,7 @@ import { CATALOGUE_SNAPSHOT_FILE } from './catalogue';
 import {
   AlreadyRunningError,
   aaKeyReaderFromEnv,
+  catalogueSnapshotFromEnv,
   daemonOptionsFromEnv,
   startDaemon,
   WorktreeRootError,
@@ -136,7 +137,10 @@ try {
     adapter: chooseAdapter(),
     migrationsDir: resolveMigrationsDir(),
     harnessDir: resolveHarnessDir(),
-    catalogueSnapshot: join(import.meta.dirname, CATALOGUE_SNAPSHOT_FILE),
+    catalogueSnapshot: catalogueSnapshotFromEnv(
+      env,
+      join(import.meta.dirname, CATALOGUE_SNAPSHOT_FILE),
+    ),
     aaKey: aaKeyReaderFromEnv(env, () => systemKeychain.read(AA_KEY_ACCOUNT)),
     loginEnv: login.vars,
     keychain: systemKeychain,

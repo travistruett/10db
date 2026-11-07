@@ -118,6 +118,11 @@ describe('loadEnv', () => {
     ['a short dev token', { TENDB_DEV_UI_TOKEN: 'short-secret-value' }, 'TENDB_DEV_UI_TOKEN'],
     ['a relative claude path', { TENDB_CLAUDE_PATH: 'bin/claude' }, 'TENDB_CLAUDE_PATH'],
     ['a relative worktree root', { TENDB_WORKTREE_ROOT: 'worktrees' }, 'TENDB_WORKTREE_ROOT'],
+    [
+      'a relative catalogue snapshot',
+      { TENDB_CATALOGUE_SNAPSHOT: 'catalogue.json' },
+      'TENDB_CATALOGUE_SNAPSHOT',
+    ],
     ['zero gate slots', { TENDB_GATE_SLOTS: '0' }, 'TENDB_GATE_SLOTS'],
     ['a fractional gate slot count', { TENDB_GATE_SLOTS: '1.5' }, 'TENDB_GATE_SLOTS'],
     ['a text gate slot count', { TENDB_GATE_SLOTS: 'two' }, 'TENDB_GATE_SLOTS'],
@@ -138,6 +143,13 @@ describe('loadEnv', () => {
   ])('reads TENDB_CATALOGUE when it is %s', (name, expected) => {
     const source = name === 'absent' ? {} : { TENDB_CATALOGUE: name };
     expect(loadEnv(source).TENDB_CATALOGUE).toBe(expected);
+  });
+
+  it('reads TENDB_CATALOGUE_SNAPSHOT as an absolute path, and leaves it unset when absent', () => {
+    expect(
+      loadEnv({ TENDB_CATALOGUE_SNAPSHOT: '/x/catalogue.json' }).TENDB_CATALOGUE_SNAPSHOT,
+    ).toBe('/x/catalogue.json');
+    expect(loadEnv({}).TENDB_CATALOGUE_SNAPSHOT).toBeUndefined();
   });
 
   it('rejects TENDB_CATALOGUE as a boolean word, naming the variable and not the value', () => {

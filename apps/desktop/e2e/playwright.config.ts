@@ -45,6 +45,8 @@ export default defineConfig({
         TENDB_BENCHMARKS: 'off',
         // The catalogue is fetched from models.dev only by the installed app and `pnpm dev`.
         TENDB_CATALOGUE: 'off',
+        // It still builds its model profiles, from the daemon's fixture catalogue.
+        TENDB_CATALOGUE_SNAPSHOT: resolve(DESKTOP_DIR, '../daemon/test/fixtures/catalogue.json'),
         // No decision may call OpenRouter from a throwaway daemon.
         TENDB_JUDGE: 'off',
         TENDB_DATA_DIR: E2E_DATA,

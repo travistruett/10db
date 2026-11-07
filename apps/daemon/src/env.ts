@@ -48,6 +48,9 @@ const DaemonEnv = z.object({
   // release's snapshot are still read. Set for every daemon that is not the installed app and not
   // `pnpm dev`, which keeps real data on purpose.
   TENDB_CATALOGUE: z.enum(['on', 'off']).optional(),
+  // The file the model catalogue is read from when none is stored, instead of the one the release bundles.
+  // A throwaway daemon that fetches nothing points it at a catalogue file so it still has model profiles.
+  TENDB_CATALOGUE_SNAPSHOT: z.string().startsWith('/').optional(),
   // `off` keeps the daemon from reading the OpenRouter key and from calling OpenRouter: every decision
   // keeps today's rule. Set for every daemon that is not the installed app, as TENDB_BENCHMARKS is.
   TENDB_JUDGE: z.enum(['on', 'off']).optional(),

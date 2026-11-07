@@ -235,6 +235,8 @@ function startDaemonProcess(): ChildProcess {
       TENDB_BENCHMARKS: 'off',
       // No fetch of models.dev from a throwaway daemon.
       TENDB_CATALOGUE: 'off',
+      // It still builds its model profiles, from the fixture catalogue.
+      TENDB_CATALOGUE_SNAPSHOT: join(root, 'apps/daemon/test/fixtures/catalogue.json'),
       // Task text and diffs would go to OpenRouter on the builder's key.
       TENDB_JUDGE: 'off',
       // The daemon shuts down when this pipe closes, which is how it learns this script died.

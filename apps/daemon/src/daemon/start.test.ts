@@ -1471,7 +1471,7 @@ describe('startDaemon', () => {
             : Promise.reject(new Error('offline'));
         },
       });
-      // With the catalogue fetch off nothing builds profiles; the fixture's models stand in for an account's list.
+      // With no snapshot given and the fetch off there is no catalogue to build profiles from; the fixture's models stand in.
       if (!catalogueSync) seedProfiles(daemon.state);
       return { adapter, fetches, net, running: daemon };
     };
