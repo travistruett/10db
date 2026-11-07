@@ -1,7 +1,14 @@
-import type { PatternMatch } from '@10db/contracts';
+import { mintId, type PatternMatch } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { listEventsAfter } from './events';
-import { listPatterns, listRoleSettings, setPatterns, setRoleSetting } from './model-settings';
+import {
+  clearRoleSetting,
+  listPatterns,
+  listRoleSettings,
+  setPatterns,
+  setRoleSetting,
+} from './model-settings';
+import * as schema from '../schema';
 import { createTestStore, seedProject } from './test-support';
 import type { Store } from './store';
 
@@ -47,6 +54,52 @@ describe('role settings', () => {
     });
   });
 
+  const auto = { kind: 'automatic' } as const;
+  const uniqueCases: readonly [string, boolean | 'both', boolean][] = [
+    ['a second global row for a role', false, true],
+    ['a second row for a role and project', true, true],
+    ['one role in both scopes', 'both', false],
+  ];
+  it.each(uniqueCases)('the table itself refuses %s: %s', (_name, scope, refused) => {
+    const project = seedProject(store);
+    const insert = (projectId: typeof project.id | null) => {
+      store.write((ctx) => {
+        ctx.tx
+          .insert(schema.roleSettings)
+          .values({ role: 'plan', projectId, setting: auto, updatedAt: ctx.now })
+          .run();
+      });
+    };
+    const first = scope === true ? project.id : null;
+    insert(first);
+    const second = scope === 'both' ? project.id : first;
+    if (refused)
+      expect(() => {
+        insert(second);
+      }).toThrow(/UNIQUE/);
+    else
+      expect(() => {
+        insert(second);
+      }).not.toThrow();
+  });
+
+  it('clearRoleSetting removes one scope so the role falls back, and says whether a row was there', () => {
+    const project = seedProject(store);
+    store.write((ctx) => {
+      setRoleSetting(ctx, { role: 'qa', projectId: null, setting: { kind: 'top_of_tier' } });
+      setRoleSetting(ctx, { role: 'qa', projectId: project.id, setting: auto });
+    });
+    const cleared = store.write((ctx) => [
+      clearRoleSetting(ctx, 'qa', project.id),
+      clearRoleSetting(ctx, 'qa', project.id),
+    ]);
+    expect(cleared.value).toEqual([true, false]);
+    expect(cleared.events).toHaveLength(1);
+    expect(listRoleSettings(store.db)).toEqual([
+      { role: 'qa', projectId: null, setting: { kind: 'top_of_tier' } },
+    ]);
+  });
+
   it('appends an event for each change', () => {
     const before = listEventsAfter(store.db, 0, 1000).length;
     store.write((ctx) => {
@@ -59,7 +112,32 @@ describe('role settings', () => {
 describe('patterns', () => {
   const match: PatternMatch = { roles: ['review'], riskTags: [], areas: [], retryOnly: false };
 
-  it('reads in position order, which is the order given', () => {
+  it('reads in position order, not insertion order', () => {
+    store.write((ctx) => {
+      for (const [name, position] of [
+        ['c', 2],
+        ['a', 0],
+        ['b', 1],
+      ] as const) {
+        ctx.tx
+          .insert(schema.patterns)
+          .values({
+            id: mintId('Pattern'),
+            projectId: null,
+            name,
+            match,
+            setting: { kind: 'automatic' },
+            position,
+            createdAt: ctx.now,
+            updatedAt: ctx.now,
+          })
+          .run();
+      }
+    });
+    expect(listPatterns(store.db).map((p) => p.name)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('stores the list given as positions 0, 1, 2', () => {
     store.write((ctx) => {
       setPatterns(ctx, null, [
         { name: 'third', match, setting: { kind: 'automatic' } },
@@ -67,8 +145,7 @@ describe('patterns', () => {
         { name: 'second', match, setting: { kind: 'tier', tier: 'fast' } },
       ]);
     });
-    const patterns = listPatterns(store.db);
-    expect(patterns.map((p) => [p.name, p.position])).toEqual([
+    expect(listPatterns(store.db).map((p) => [p.name, p.position])).toEqual([
       ['third', 0],
       ['first', 1],
       ['second', 2],

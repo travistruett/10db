@@ -6,6 +6,7 @@ import {
   type PatternMatch,
   type ProjectId,
   type RoleSettingDto,
+  type StepRole,
 } from '@10db/contracts';
 import { and, asc, eq, isNull } from 'drizzle-orm';
 import type { AnySQLiteColumn } from 'drizzle-orm/sqlite-core';
@@ -56,6 +57,30 @@ export function setRoleSetting(ctx: WriteContext, input: RoleSettingDto): void {
     entityType: 'role_setting',
     entityId: `${input.role}/${input.projectId ?? 'all'}`,
   });
+}
+
+/**
+ * Removes the role's row for one project, or the global one for null, so the role falls back to the
+ * next level. Answers whether a row was there.
+ */
+export function clearRoleSetting(
+  ctx: WriteContext,
+  role: StepRole,
+  projectId: ProjectId | null,
+): boolean {
+  const result = ctx.tx
+    .delete(schema.roleSettings)
+    .where(
+      and(eq(schema.roleSettings.role, role), projectIs(schema.roleSettings.projectId, projectId)),
+    )
+    .run();
+  if (result.changes === 0) return false;
+  ctx.emit({
+    type: EventType.SettingsChanged,
+    entityType: 'role_setting',
+    entityId: `${role}/${projectId ?? 'all'}`,
+  });
+  return true;
 }
 
 /** Every pattern, global first, each scope in position order. */

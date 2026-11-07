@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { NotFoundError, type AccountId } from '@10db/contracts';
+import { ConflictError, NotFoundError, type AccountId } from '@10db/contracts';
 import { listEventsAfter } from './events';
 import {
   listAccountModels,
@@ -106,6 +106,29 @@ describe('replaceAccountModels', () => {
       replaceAccountModels(ctx, accountA, [gateway]);
     });
     expect(count()).toBe(afterFirst + 1);
+  });
+});
+
+describe('replaceAccountModels input and answer', () => {
+  it('refuses a model named twice and leaves the stored list as it was', () => {
+    store.write((ctx) => {
+      replaceAccountModels(ctx, accountA, [sonnet]);
+    });
+    expect(() =>
+      store.write((ctx) => {
+        replaceAccountModels(ctx, accountA, [gateway, gateway]);
+      }),
+    ).toThrow(ConflictError);
+    expect(listAccountModels(store.db, accountA).map((m) => m.model)).toEqual(['sonnet']);
+  });
+
+  it('answers whether the list changed', () => {
+    const answers = store.write((ctx) => [
+      replaceAccountModels(ctx, accountA, [sonnet]),
+      replaceAccountModels(ctx, accountA, [sonnet]),
+      replaceAccountModels(ctx, accountA, [gateway]),
+    ]).value;
+    expect(answers).toEqual([true, false, true]);
   });
 });
 

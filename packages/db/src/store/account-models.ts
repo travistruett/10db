@@ -1,4 +1,5 @@
 import {
+  ConflictError,
   EventType,
   NotFoundError,
   type AccountId,
@@ -43,12 +44,18 @@ export function listAccountModels(db: DbReader, accountId?: AccountId): AccountM
  * Makes the account's list exactly `models`. A model the account still lists keeps `unusable` while
  * its launch id and efforts are unchanged; a price change alone does not clear it. An event is
  * appended only when the list differs from what was stored, so a refresh that finds nothing new is quiet.
+ * Answers whether the list changed. A model named twice is refused with a `ConflictError`.
  */
 export function replaceAccountModels(
   ctx: WriteContext,
   accountId: AccountId,
   models: readonly NewAccountModel[],
-): void {
+): boolean {
+  const names = new Set<string>();
+  for (const { model } of models) {
+    if (names.has(model)) throw new ConflictError(`${model} is listed twice for ${accountId}`);
+    names.add(model);
+  }
   const before = new Map(listAccountModels(ctx.tx, accountId).map((m) => [m.model, m]));
   const rows: Row[] = models.map((m) => {
     const previous = before.get(m.model);
@@ -81,6 +88,7 @@ export function replaceAccountModels(
       entityId: accountId,
     });
   }
+  return changed;
 }
 
 /** Marks a model the account lists as one it refused to run, until a refresh shows it changed. */
