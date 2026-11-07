@@ -1,6 +1,7 @@
 import type {
   AaModelDto,
   AccountConfig,
+  AccountModelDto,
   AccountCreatedDto,
   AccountDto,
   AccountId,
@@ -17,6 +18,7 @@ import type {
   BatchStartInput,
   BenchmarkStatusDto,
   BoardColumnDelete,
+  CatalogueStatusDto,
   BoardColumnDto,
   BoardColumnId,
   BoardColumnInput,
@@ -51,6 +53,7 @@ import type {
   LanePermissionsDto,
   McpServerStatusDto,
   ModelProfileDto,
+  ModelRowDto,
   NetworkHostDto,
   ModelProfileId,
   ModelProfilePatch,
@@ -397,6 +400,17 @@ export interface ApiServices {
   syncBenchmarks(): Promise<BenchmarkStatusDto>;
   /** AA's list as stored locally; the UI shows it only with AA's attribution. */
   listAaModels(): AaModelDto[];
+  /** Every model any account can reach, one row each. */
+  listModels(): ModelRowDto[];
+  /** What each account offers, with its launch ID and its own price. */
+  listAccountOffers(): AccountModelDto[];
+  /** Where the model catalogue came from and when. */
+  catalogueStatus(): CatalogueStatusDto;
+  /**
+   * Fetches the catalogue and reads every account's list now, and answers the catalogue's status. A call made
+   * while a refresh runs joins it.
+   */
+  refreshModels(): Promise<CatalogueStatusDto>;
   /** Throws InvalidError when the default landing names a branch origin does not have, after asking origin. */
   patchProject(id: ProjectId, patch: ProjectPatch): ProjectDto | Promise<ProjectDto>;
   getTeam(projectId: ProjectId): TeamDto;

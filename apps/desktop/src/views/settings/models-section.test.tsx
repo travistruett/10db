@@ -1,0 +1,284 @@
+import type {
+  AccountDto,
+  AccountModelDto,
+  CatalogueStatusDto,
+  ModelProfileDto,
+  ModelRowDto,
+} from '@10db/contracts';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { http, HttpResponse } from 'msw';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { accountDto, DEFAULT_ACCOUNT } from '../../test/account-fixtures';
+import { baseHandlers, daemonUrl, renderWithDaemon, server } from '../../test/daemon';
+import {
+  accountModelDto,
+  catalogueStatusDto,
+  modelProfileDto,
+  modelRowDto,
+} from '../../test/model-fixtures';
+import { ModelsSection } from './models-section';
+
+const NOW = new Date('2026-11-07T12:00:00.000Z');
+const SUBSCRIPTION = DEFAULT_ACCOUNT;
+const KEYED: AccountDto = accountDto({ label: 'Work key', kind: 'anthropic_api_key' });
+
+const FAST = modelRowDto({
+  model: 'alpha-fast',
+  name: 'Alpha Fast',
+  tier: 'fast',
+  availableOn: [KEYED.id],
+  inputPrice: 1,
+  outputPrice: 5,
+  intelligence: 31.5,
+  coding: 28,
+  outputTokensPerSecond: 180,
+  stepsRun: 4,
+  firstSeenAt: '2026-09-01T10:00:00.000Z',
+});
+const STRONG = modelRowDto({
+  model: 'alpha-max',
+  name: 'Alpha Max',
+  tier: 'strongest',
+  availableOn: [SUBSCRIPTION.id, KEYED.id],
+  inputPrice: 5,
+  outputPrice: 25,
+  intelligence: 60,
+  coding: 55,
+  outputTokensPerSecond: 40,
+  stepsRun: 12,
+  firstSeenAt: '2026-11-05T10:00:00.000Z',
+});
+const UNKNOWN = modelRowDto({
+  model: 'house-model',
+  tier: null,
+  status: 'unknown',
+  maker: null,
+  family: null,
+  availableOn: [SUBSCRIPTION.id],
+  // The highest score of the list, so only the Unknown rule can put it last.
+  intelligence: 99,
+});
+const BLANK = modelRowDto({
+  model: 'beta-plain',
+  name: 'Beta Plain',
+  tier: 'balanced',
+  availableOn: [SUBSCRIPTION.id],
+});
+
+function serve(
+  opts: {
+    rows?: ModelRowDto[];
+    status?: CatalogueStatusDto;
+    offers?: AccountModelDto[];
+    profiles?: ModelProfileDto[];
+  } = {},
+) {
+  server.use(
+    http.get(daemonUrl('/models'), () =>
+      HttpResponse.json(opts.rows ?? [FAST, STRONG, UNKNOWN, BLANK]),
+    ),
+    http.get(daemonUrl('/models/status'), () =>
+      HttpResponse.json(opts.status ?? catalogueStatusDto()),
+    ),
+    http.get(daemonUrl('/models/offers'), () => HttpResponse.json(opts.offers ?? [])),
+    http.get(daemonUrl('/model-profiles'), () => HttpResponse.json(opts.profiles ?? [])),
+    http.get(daemonUrl('/accounts'), () => HttpResponse.json([SUBSCRIPTION, KEYED])),
+    ...baseHandlers(),
+  );
+}
+
+/** The model names in the table, top to bottom. */
+const shownNames = () =>
+  screen
+    .getAllByRole('button', { name: /^Open / })
+    .map((b) => b.getAttribute('aria-label')?.replace('Open ', ''));
+
+const rowOf = (name: string) => {
+  const row = screen.getByRole('button', { name: `Open ${name}` }).closest('tr');
+  if (!row) throw new Error(`no row for ${name}`);
+  return row;
+};
+
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'], now: NOW });
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+describe('the Models page', () => {
+  it('lists a row per model with its tier, accounts, scores, prices and speed', async () => {
+    serve();
+    renderWithDaemon(<ModelsSection />);
+    const row = within(
+      await screen.findByRole('button', { name: 'Open Alpha Max' }).then(() => rowOf('Alpha Max')),
+    );
+    expect(row.getByText('alpha-max')).toBeTruthy();
+    expect(row.getByText('Strongest')).toBeTruthy();
+    expect(row.getByText('Claude plan, Work key')).toBeTruthy();
+    for (const cell of ['60', '55', '40', '$5.00', '$25.00', '12']) {
+      expect(row.getByText(cell)).toBeTruthy();
+    }
+  });
+
+  it('shows a dash where there is no data, never a zero', async () => {
+    serve({ rows: [BLANK] });
+    renderWithDaemon(<ModelsSection />);
+    await screen.findByRole('button', { name: 'Open Beta Plain' });
+    const cells = within(rowOf('Beta Plain')).getAllByRole('cell');
+    // Intelligence, Coding, Speed, Input and Output.
+    expect(cells.slice(3, 8).map((c) => c.textContent)).toEqual(['—', '—', '—', '—', '—']);
+  });
+
+  it('marks an Unknown model and a model first seen in the last seven days', async () => {
+    serve();
+    renderWithDaemon(<ModelsSection />);
+    await screen.findByRole('button', { name: 'Open Alpha Max' });
+    expect(within(rowOf('Alpha Max')).getByText('New')).toBeTruthy();
+    expect(within(rowOf('Alpha Fast')).queryByText('New')).toBeNull();
+    expect(within(rowOf('house-model')).getByText('Unknown')).toBeTruthy();
+  });
+
+  it('filters by tier with the segmented control', async () => {
+    serve();
+    renderWithDaemon(<ModelsSection />);
+    await screen.findByRole('button', { name: 'Open Alpha Max' });
+    const tiers = screen.getByRole('radiogroup', { name: 'Tier' });
+    fireEvent.click(within(tiers).getByLabelText('Fast'));
+    expect(shownNames()).toEqual(['Alpha Fast']);
+    fireEvent.click(within(tiers).getByLabelText('Strongest'));
+    expect(shownNames()).toEqual(['Alpha Max']);
+    fireEvent.click(within(tiers).getByLabelText('All'));
+    expect(shownNames()).toHaveLength(4);
+  });
+
+  it('filters by account', async () => {
+    serve();
+    renderWithDaemon(<ModelsSection />);
+    await screen.findByRole('button', { name: 'Open Alpha Max' });
+    fireEvent.click(screen.getByRole('combobox', { name: 'Account' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'Work key', hidden: true }));
+    expect(shownNames().sort()).toEqual(['Alpha Fast', 'Alpha Max']);
+  });
+
+  it('sorts by a column, reverses on a second click, and keeps Unknown and blanks last', async () => {
+    serve();
+    renderWithDaemon(<ModelsSection />);
+    await screen.findByRole('button', { name: 'Open Alpha Max' });
+    fireEvent.click(screen.getByRole('button', { name: 'Intelligence' }));
+    expect(shownNames()).toEqual(['Alpha Fast', 'Alpha Max', 'Beta Plain', 'house-model']);
+    fireEvent.click(screen.getByRole('button', { name: 'Intelligence' }));
+    expect(shownNames()).toEqual(['Alpha Max', 'Alpha Fast', 'Beta Plain', 'house-model']);
+    expect(
+      screen.getByRole('columnheader', { name: /Intelligence/ }).getAttribute('aria-sort'),
+    ).toBe('descending');
+  });
+
+  it('says where the data came from and how old it is, and credits Artificial Analysis with a link', async () => {
+    serve({ status: catalogueStatusDto({ fetchedAt: '2026-11-07T09:00:00.000Z', models: 40 }) });
+    renderWithDaemon(<ModelsSection />);
+    expect(await screen.findByText(/models\.dev, fetched 3 hours ago/)).toBeTruthy();
+    const credit = screen.getByRole('link', { name: 'Artificial Analysis' });
+    expect(credit.getAttribute('href')).toBe('https://artificialanalysis.ai/');
+  });
+
+  it('says there is no catalogue yet', async () => {
+    serve({ status: catalogueStatusDto({ source: 'none', fetchedAt: null, models: 0 }), rows: [] });
+    renderWithDaemon(<ModelsSection />);
+    expect(await screen.findByText(/No catalogue yet/)).toBeTruthy();
+  });
+
+  it('refreshes the catalogue on demand, shows that it is running, and shows the new status', async () => {
+    serve();
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let posts = 0;
+    server.use(
+      http.post(daemonUrl('/models/refresh'), async () => {
+        posts += 1;
+        await gate;
+        return HttpResponse.json(catalogueStatusDto({ fetchedAt: '2026-11-07T11:59:00.000Z' }));
+      }),
+    );
+    renderWithDaemon(<ModelsSection />);
+    await screen.findByRole('button', { name: 'Open Alpha Max' });
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh Models' }));
+    const running = await screen.findByRole('button', { name: /Refresh Models/ });
+    await waitFor(() => {
+      expect(running.hasAttribute('data-loading')).toBe(true);
+    });
+    release();
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: 'Refresh Models' }).hasAttribute('data-loading'),
+      ).toBe(false);
+    });
+    expect(posts).toBe(1);
+  });
+
+  it('opens a drawer from a row with the accounts that offer it, each with its launch ID and own price', async () => {
+    serve({
+      offers: [
+        accountModelDto({
+          accountId: SUBSCRIPTION.id,
+          model: 'alpha-max',
+          launchId: 'alpha-max',
+        }),
+        accountModelDto({
+          accountId: KEYED.id,
+          model: 'alpha-max',
+          launchId: 'launch.alpha-max-v1',
+          inputPrice: 5.5,
+          outputPrice: 27,
+        }),
+      ],
+      profiles: [
+        modelProfileDto({
+          model: 'alpha-max',
+          effort: 'low',
+          scores: { intelligence: 50, coding: 40, agentic: null },
+          stepsRun: 4,
+          firstPassSteps: 3,
+          escalations: 1,
+          measuredAt: '2026-11-06T12:00:00.000Z',
+        }),
+        modelProfileDto({
+          model: 'alpha-max',
+          effort: 'high',
+          scores: { intelligence: 60, coding: 55, agentic: null },
+        }),
+      ],
+    });
+    renderWithDaemon(<ModelsSection />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Open Alpha Max' }));
+    const drawer = await screen.findByRole('dialog', { name: 'Alpha Max' });
+    expect(await within(drawer).findByText('launch.alpha-max-v1')).toBeTruthy();
+    // A flat-rate plan is included, never $0; an account that pays per token shows its own price.
+    expect(within(drawer).getByText('Included in plan')).toBeTruthy();
+    expect(within(drawer).getByText('$5.50 in · $27.00 out')).toBeTruthy();
+    // One line per effort, with the first-pass rate where steps ran.
+    const low = within(drawer).getByRole('row', { name: /low/ });
+    expect(within(low).getByText('75%')).toBeTruthy();
+    const high = within(drawer).getByRole('row', { name: /high/ });
+    expect(within(high).getAllByText('—').length).toBeGreaterThan(0);
+  });
+
+  it('says why a model is Unknown when an account has not listed it yet', async () => {
+    const unconfirmed = modelRowDto({
+      model: 'gamma-new',
+      tier: null,
+      status: 'unknown',
+      availableOn: [KEYED.id],
+    });
+    serve({
+      rows: [unconfirmed],
+      offers: [accountModelDto({ accountId: SUBSCRIPTION.id, model: 'other' })],
+    });
+    renderWithDaemon(<ModelsSection />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Open gamma-new' }));
+    const drawer = await screen.findByRole('dialog', { name: 'gamma-new' });
+    expect(await within(drawer).findByText(/Work key has not listed its models yet/)).toBeTruthy();
+  });
+});

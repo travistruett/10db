@@ -1318,6 +1318,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
           )
         : noSystemCheck(),
     benchmarks,
+    catalogue,
+    refreshModels,
     judge: createJudgeServices({
       state,
       keychain: judgeKeychain,

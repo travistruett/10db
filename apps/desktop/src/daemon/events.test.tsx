@@ -328,6 +328,12 @@ describe('useEventStream', () => {
     }
   });
 
+  it("refetches the Models page when a profile or an account's list changes", () => {
+    for (const entity of ['model_profile', 'account_models']) {
+      expect(INVALIDATIONS[entity]).toEqual(expect.arrayContaining([['models']]));
+    }
+  });
+
   it('builds ws and wss stream URLs', () => {
     expect(eventStreamUrl({ url: 'http://127.0.0.1:4317', token: 't k' }, 7)).toBe(
       'ws://127.0.0.1:4317/events/stream?after=7&token=t+k',

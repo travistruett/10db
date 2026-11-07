@@ -16,3 +16,5 @@ export {
 } from './sync';
 export { createAccountLists, type AccountLists } from './account-lists';
 export { reconcileProfiles } from './profiles';
+export { joinModel, runnability, type Runnability } from './join';
+export { buildModelRows, type ModelRowAccount, type ModelRowsInput } from './model-rows';

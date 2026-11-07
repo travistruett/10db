@@ -59,8 +59,10 @@ describe('SettingsView', () => {
     server.use(...baseHandlers());
     renderApp('/settings/general');
     const nav = await screen.findByRole('navigation', { name: 'Settings sections' });
-    for (const label of ['Team', 'Routing rules', 'Models and benchmarks', 'Personas and flows'])
+    for (const label of ['Team', 'Routing rules', 'Personas and flows'])
       expect(within(nav).queryByRole('link', { name: new RegExp(label) })).toBeNull();
+    // Models is built, so it is listed.
+    expect(within(nav).getByRole('link', { name: /Models and benchmarks/ })).toBeTruthy();
   });
 
   it('Back to Board returns to /board', async () => {

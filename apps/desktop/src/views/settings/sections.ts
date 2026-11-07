@@ -109,8 +109,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     key: SettingsSectionKey.Models,
     group: SettingsGroup.Global,
     label: 'Models and benchmarks',
-    planned:
-      "The Artificial Analysis key and sync, the model profiles, and the Intelligence-vs-Cost chart with AA's attribution. A later M2 plan fills it.",
+    planned: null,
   },
   {
     key: SettingsSectionKey.PersonasAndFlows,

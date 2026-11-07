@@ -41,6 +41,8 @@ import {
   latestWorkstreamOf,
   openGoalDigest,
   listAaModels,
+  listAccountModels,
+  listAccounts,
   listBatches,
   listBoardColumns,
   listEventsAfter,
@@ -70,6 +72,7 @@ import {
 import { MoveCause, type AccountMoves, type AccountService } from '../accounts';
 import type { Clock } from '../clock';
 import { syncWarning, type BenchmarkSync } from '../benchmarks';
+import { buildModelRows, type CatalogueSync } from '../catalogue';
 import { proposePlacement } from '../placement';
 import type { ApiServices, TaskLookupServices, TaskRemovalServices, TaskStarted } from '../api';
 import {
@@ -116,6 +119,10 @@ export function createServices(deps: {
   /** Probes the tools and gh's login; the services keep its last answer. */
   readonly systemCheck: () => Promise<SystemCheckDto>;
   readonly benchmarks: BenchmarkSync;
+  /** The model catalogue in use, for the model list's names and runnability. */
+  readonly catalogue: Pick<CatalogueSync, 'status' | 'catalogue'>;
+  /** Fetches the catalogue and reads every account's list; a call during a run joins it. */
+  readonly refreshModels: (opts: { readonly force: boolean }) => Promise<void>;
   readonly judge: JudgeApiServices;
   readonly shape: ShapeApiServices;
   readonly knowledge: KnowledgeApiServices;
@@ -368,6 +375,20 @@ export function createServices(deps: {
     benchmarkStatus: () => deps.benchmarks.status(),
     syncBenchmarks: () => deps.benchmarks.sync(),
     listAaModels: () => listAaModels(db),
+    listModels: () =>
+      buildModelRows({
+        profiles: listModelProfiles(db),
+        offers: listAccountModels(db),
+        accounts: listAccounts(db),
+        catalogue: deps.catalogue.catalogue(),
+      }),
+    listAccountOffers: () => listAccountModels(db),
+    catalogueStatus: () => deps.catalogue.status(),
+    // The builder asked, so every account is read whatever the day's earlier reads were.
+    refreshModels: async () => {
+      await deps.refreshModels({ force: true });
+      return deps.catalogue.status();
+    },
     async patchProject(id, patch) {
       await refuseMissingDefaultBranch(getProject(db, id), patch);
       return patch.accountId === undefined

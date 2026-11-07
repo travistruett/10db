@@ -7,6 +7,7 @@ import { useDaemon } from './provider';
 import { accountKeys, accountLoginKey } from './account-queries';
 import { goalKeys } from './goal-queries';
 import { humanTouchKeys } from './human-touch-queries';
+import { modelKeys } from './model-queries';
 import { NETWORK_HOSTS_KEY } from './network-host-queries';
 import { queryKeys } from './queries';
 import { shapeKeys } from './shape-queries';
@@ -61,7 +62,9 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   persona: [CANDIDATES],
   person: [],
   flow: [queryKeys.flows, CANDIDATES],
-  model_profile: [CANDIDATES],
+  // The Models page lists profiles and what each account offers.
+  model_profile: [CANDIDATES, modelKeys.all],
+  account_models: [modelKeys.all],
   team: [CANDIDATES],
   routing_rules: [CANDIDATES],
   benchmarks: [CANDIDATES],

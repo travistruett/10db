@@ -6,6 +6,7 @@ import { DecisionsSection } from './decisions-section';
 import { KeepAwakeSection } from './keep-awake-section';
 import { LanePermissionsSection } from './lane-permissions-section';
 import { PlannedSection } from './planned-section';
+import { ModelsSection } from './models-section';
 import { NetworkHostsSection } from './network-hosts-section';
 import { OneWayPathsSetting } from './one-way-paths-setting';
 import { SmallProposalLimitSetting } from './small-proposal-limit-setting';
@@ -109,9 +110,15 @@ export function SectionBody({
           <DecisionsSection />
         </>
       );
+    case SettingsSectionKey.Models:
+      return (
+        <>
+          {heading}
+          <ModelsSection />
+        </>
+      );
     case SettingsSectionKey.Team:
     case SettingsSectionKey.RoutingRules:
-    case SettingsSectionKey.Models:
     case SettingsSectionKey.PersonasAndFlows:
       return (
         <>
