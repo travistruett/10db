@@ -304,7 +304,9 @@ export function seedWorkstream(
       areas: opts.areas ?? ['api'],
     }),
   ).value;
-  const workstream = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+  const workstream = store.write((ctx) =>
+    insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+  ).value;
   return { project, task, workstream };
 }
 
@@ -372,7 +374,9 @@ export function seedSpend(store: Store, project: ProjectDto, costUsd: number): S
       acceptanceCriteria: ['x'],
       areas: [project.areas[0]?.name ?? 'api'],
     });
-    const ws = insertWorkstream(ctx, task.id);
+    const ws = insertWorkstream(ctx, task.id, {
+      first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+    });
     const session = insertSession(ctx, {
       workstreamId: ws.id,
       provider: 'claude',

@@ -22,6 +22,7 @@ import {
   tempDir,
   waitForAsync,
 } from './fixtures';
+import { seedProfiles } from './seed-profiles';
 
 const write = (path: string) => ({
   do: 'tool' as const,
@@ -85,6 +86,8 @@ async function boot(systemCheck?: () => Promise<SystemCheck>, prWatchIntervalMs?
     ...(systemCheck ? { systemCheck } : {}),
     ...(prWatchIntervalMs ? { prWatchIntervalMs } : {}),
   });
+  // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
+  seedProfiles(daemon.state);
   return apiClient(daemon.url, daemon.token);
 }
 
@@ -260,6 +263,8 @@ describe('batch delivery through the daemon', () => {
       watch: false,
       gh,
     });
+    // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
+    seedProfiles(daemon.state);
     const api = apiClient(daemon.url, daemon.token);
     const project = await api.post('/projects', ProjectDto, {
       name: 'local',

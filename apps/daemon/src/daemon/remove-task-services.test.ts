@@ -55,7 +55,9 @@ describe('the single-task Remove service', () => {
 describe('the Close service', () => {
   it('leaves no question attached to the closed task, and keeps it stored', () => {
     const task = h.addTask('Alpha', { areas: ['api'] });
-    const run = h.state.write((ctx) => insertWorkstream(ctx, task.id));
+    const run = h.state.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    );
     h.settle(run.id, 'FAILED');
     const shapeId = storeQuestionAbout(h.state, h.project.id, task.id);
     expect(listShapeQuestions(h.state.db, shapeId)[0]?.taskId).toBe(task.id);

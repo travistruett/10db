@@ -99,7 +99,9 @@ describe('the answers of a refused start', () => {
   it('leaves no question attached to a failed task it closes, and keeps it stored', () => {
     const base = h.addTask('Base', { areas: ['api'] });
     const task = h.addTask('Alpha', { areas: ['ui'], dependsOn: [base.id] });
-    const earlier = h.state.write((w) => insertWorkstream(w, task.id));
+    const earlier = h.state.write((w) =>
+      insertWorkstream(w, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    );
     h.settle(earlier.id, 'FAILED');
     const shapeId = storeQuestionAbout(h.state, h.project.id, task.id);
     expect(() =>
@@ -138,7 +140,9 @@ describe('the answers of a refused start', () => {
 
   it('cancels a task that ran before and failed, when its restart is refused', () => {
     cancelRefusedRestart((taskId) => {
-      const earlier = h.state.write((w) => insertWorkstream(w, taskId));
+      const earlier = h.state.write((w) =>
+        insertWorkstream(w, taskId, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+      );
       h.settle(earlier.id, 'FAILED');
       return earlier;
     });
@@ -146,7 +150,9 @@ describe('the answers of a refused start', () => {
 
   it('cancels a task whose latest run was cancelled in Factory, when its restart is refused', () => {
     cancelRefusedRestart((taskId) => {
-      const earlier = h.state.write((w) => insertWorkstream(w, taskId));
+      const earlier = h.state.write((w) =>
+        insertWorkstream(w, taskId, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+      );
       h.state.write((w) =>
         insertSession(w, {
           workstreamId: earlier.id,
@@ -164,7 +170,9 @@ describe('the answers of a refused start', () => {
 
   it('cancels a reopened task, whose latest run finished, when its restart is refused', () => {
     cancelRefusedRestart((taskId) => {
-      const earlier = h.state.write((w) => insertWorkstream(w, taskId));
+      const earlier = h.state.write((w) =>
+        insertWorkstream(w, taskId, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+      );
       h.settle(earlier.id, 'DONE');
       // reopenTask leaves the task open with its finished run as the latest.
       h.state.write((w) => {

@@ -20,6 +20,7 @@ import {
   checkAccount,
   checkInitCredentials,
   credentialProblem,
+  MODEL_NOT_FOUND_ERROR,
   missingAccountRefusal,
   modelMatches,
   noAccountWhy,
@@ -752,6 +753,14 @@ function startSession(
       for await (const msg of q) {
         if (failure) continue;
         if (msg.type === 'assistant') {
+          if (msg.error === MODEL_NOT_FOUND_ERROR) {
+            // `init.model` echoes even a made-up ID, so only the first reply shows the account cannot run it.
+            refuse(
+              SessionEndReason.ModelRefused,
+              `Claude Code reported that account "${spec.account.label}" cannot run the model ${spec.model}.`,
+            );
+            continue;
+          }
           const problem = credentialProblem(msg.error);
           if (problem) {
             const refusal = {

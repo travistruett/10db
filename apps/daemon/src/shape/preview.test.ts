@@ -59,7 +59,9 @@ function finishedTask(laneMinutes: number, wallMinutes = laneMinutes): void {
       acceptanceCriteria: ['x'],
       areas: ['api'],
     });
-    const ws = insertWorkstream(ctx, task.id);
+    const ws = insertWorkstream(ctx, task.id, {
+      first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+    });
     ctx.tx
       .insert(schema.taskLaneTimes)
       .values({
@@ -88,7 +90,9 @@ function finishedTask(laneMinutes: number, wallMinutes = laneMinutes): void {
 function activeTask(title: string, areas: string[], state: 'queued' | 'running'): TaskId {
   return write((ctx) => {
     const task = insertTask(ctx, c.project.id, { title, acceptanceCriteria: ['x'], areas });
-    const ws = insertWorkstream(ctx, task.id);
+    const ws = insertWorkstream(ctx, task.id, {
+      first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+    });
     if (state === 'running') {
       transitionWorkstream(ctx, ws.id, { to: WorkstreamState.Starting, fence: null });
       transitionWorkstream(ctx, ws.id, { to: WorkstreamState.Running, fence: null });
@@ -214,7 +218,9 @@ describe('the factory preview', () => {
       (r) => r.taskIds,
     );
     write((ctx) => {
-      const ws = insertWorkstream(ctx, must(taskId, 'task'));
+      const ws = insertWorkstream(ctx, must(taskId, 'task'), {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      });
       transitionWorkstream(ctx, ws.id, { to: WorkstreamState.Starting, fence: null });
       transitionWorkstream(ctx, ws.id, { to: WorkstreamState.Running, fence: null });
       insertSession(ctx, {
@@ -305,7 +311,9 @@ describe('reading sizes for a preview', () => {
 
   function run(taskId: TaskId): void {
     write((ctx) => {
-      const ws = insertWorkstream(ctx, taskId);
+      const ws = insertWorkstream(ctx, taskId, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      });
       transitionWorkstream(ctx, ws.id, { to: WorkstreamState.Starting, fence: null });
       transitionWorkstream(ctx, ws.id, { to: WorkstreamState.Running, fence: null });
       insertSession(ctx, {

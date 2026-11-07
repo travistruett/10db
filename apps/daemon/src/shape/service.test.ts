@@ -37,6 +37,7 @@ import {
   type ConversationFixture,
 } from './conversation-fixture';
 import { createShapeService, type ShapeService } from './service';
+import { SHAPE_AGENT_MODELS } from './confinement';
 
 // Shape spec §5.1, §5.3, §11: one turn at a time, the Propose and Convert guards, the move to a
 // fresh session past 70% of the context, resume and the idle close.
@@ -69,8 +70,9 @@ beforeEach(() => {
     brainstormRefusal: () => null,
     launch: () => ({
       cwd: '/repo',
-      model: 'opus',
+      model: 'claude-opus-5-5',
       effort: 'high',
+      agentModels: SHAPE_AGENT_MODELS,
       env: {},
       account: {
         accountId: mintId('Account'),

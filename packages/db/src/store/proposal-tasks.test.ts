@@ -193,7 +193,9 @@ describe('proposalSourceTask', () => {
     const raiser = store.write((ctx) =>
       insertTask(ctx, project.id, { title: 'Raiser', acceptanceCriteria: ['a'], areas: ['api'] }),
     ).value;
-    const workstream = store.write((ctx) => insertWorkstream(ctx, raiser.id)).value;
+    const workstream = store.write((ctx) =>
+      insertWorkstream(ctx, raiser.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    ).value;
     const fromLane = seedProposal(project.id, { sessionId: 'ses_x', workstreamId: workstream.id });
     expect(proposalSourceTask(store.db, fromLane)?.id).toBe(raiser.id);
     expect(proposalSourceTask(store.db, seedProposal(project.id))).toBeNull();
@@ -225,7 +227,9 @@ describe('insertTaskFromProposal areas', () => {
         areas: ['ui', 'api'],
       }),
     ).value;
-    const workstream = store.write((ctx) => insertWorkstream(ctx, raiser.id)).value;
+    const workstream = store.write((ctx) =>
+      insertWorkstream(ctx, raiser.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    ).value;
     const proposalId = seedProposal(project.id, {
       sessionId: 'ses_x',
       workstreamId: workstream.id,
@@ -249,7 +253,9 @@ describe('insertTaskFromProposal areas', () => {
     store.write((ctx) => {
       ctx.tx.update(schema.tasks).set({ areas: [] }).where(eq(schema.tasks.id, raiser.id)).run();
     });
-    const workstream = store.write((ctx) => insertWorkstream(ctx, raiser.id)).value;
+    const workstream = store.write((ctx) =>
+      insertWorkstream(ctx, raiser.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    ).value;
     const proposalId = seedProposal(project.id, { workstreamId: workstream.id });
     expect(file(project.id, proposalId).areas).toEqual(['repo']);
   });

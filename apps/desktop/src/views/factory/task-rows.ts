@@ -15,7 +15,7 @@ import { canRetryRun, taskState } from '../board/task-state';
 
 const S = WorkstreamState;
 
-/** What a running row says of its step: "Implement 2/4 · sonnet". */
+/** What a running row says of its step: its role, its place in the plan, then the model it runs on. */
 const STEP_LABEL: Readonly<Record<StepRole, string>> = {
   [StepRole.Plan]: 'Plan',
   [StepRole.PlanReview]: 'Plan review',
@@ -242,7 +242,7 @@ export function barCounts(progress: GoalProgress, rows: readonly TaskRow[]): Bar
   };
 }
 
-/** "Implementer opus@high, sonnet@medium · Reviewer opus@medium": each persona once, then its profiles. */
+/** One entry per persona, each followed by its profiles as model@effort: "Implementer <model>@high, <model>@medium · Reviewer <model>@medium". */
 export function teamLine(team: readonly DigestTeamMember[]): string {
   const byPersona = new Map<string, string[]>();
   for (const member of team) {

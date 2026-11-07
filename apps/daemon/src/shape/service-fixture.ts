@@ -17,6 +17,7 @@ import type { PictureLimits, ScreenService } from '../screens';
 import { FakeAdapter } from '../sessions';
 import type { Hold } from '../verify';
 import type { TrackedFiles } from './ceremony';
+import { shapeAgentModels } from './agent-models';
 import { seedConversation, type ConversationFixture } from './conversation-fixture';
 import type { JoiningProblem } from './convert';
 import {
@@ -95,8 +96,9 @@ export function createServiceFixture(
     });
   const launchFor = (chosen: string | null): ShapeLaunch => ({
     cwd: '/repo',
-    model: chosen ?? 'opus',
+    model: chosen ?? 'claude-opus-5-5',
     effort: 'high',
+    agentModels: shapeAgentModels(launched.kind),
     env: {},
     account: {
       accountId: mintId('Account'),

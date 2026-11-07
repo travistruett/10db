@@ -303,7 +303,7 @@ describe('the start checks', () => {
       'sandbox_refused',
     ],
     [
-      // An error that says "model" but not the model asked for is no Model map problem.
+      // An error that says "model" but not the model asked for is no refusal of it.
       'the thread fails naming no requested model',
       { 'thread/start': { error: { code: -32000, message: 'model provider is unavailable' } } },
       'sandbox_refused',
@@ -860,55 +860,41 @@ describe('the thread and the first turn', () => {
     expect(server.killed()).toBe(true);
   });
 
-  it('names the Model map for an alias with no map entry, spawning nothing', async () => {
-    const spawn = vi.fn();
-    const { handle } = startWith({}, { model: 'sonnet' }, { spawn });
-    const events = await collect(handle);
-    expect(events).toEqual([
-      {
-        type: 'ended',
-        reason: 'error',
-        message: 'Codex refused the model "sonnet". Set this account\'s Model map in Settings.',
-      },
-    ]);
-    expect(spawn).not.toHaveBeenCalled();
-  });
-
-  it('names the Model map when Codex refuses the model, and pauses nothing', async () => {
+  it('ends as a refused model when Codex refuses it at the thread, and pauses nothing', async () => {
     const { handle, server } = startWith({
       'thread/start': { error: { code: -32600, message: 'The model gpt-5.6-sol does not exist' } },
     });
     const ended = (await collect(handle)).at(-1);
     expect(ended).toEqual({
       type: 'ended',
-      reason: 'error',
-      message: 'Codex refused the model "gpt-5.6-sol". Set this account\'s Model map in Settings.',
+      reason: 'model_refused',
+      message: 'Codex refused the model "gpt-5.6-sol" on this account.',
     });
     expect(methods(server)).not.toContain('turn/start');
     expect(server.killed()).toBe(true);
   });
 
-  it('names the Model map when the first turn is refused for the model', async () => {
+  it('ends as a refused model when the first turn is refused for it', async () => {
     const { handle, server } = startWith({
       'turn/start': { error: { code: -32600, message: 'unknown model gpt-5.6-sol' } },
     });
     const events = await collect(handle);
     expect(events.at(-1)).toMatchObject({
       type: 'ended',
-      reason: 'error',
-      message: 'Codex refused the model "gpt-5.6-sol". Set this account\'s Model map in Settings.',
+      reason: 'model_refused',
+      message: 'Codex refused the model "gpt-5.6-sol" on this account.',
     });
     expect(events.at(-1)).not.toHaveProperty('refusal');
     expect(server.killed()).toBe(true);
   });
 
-  it('does not name the Model map when the first turn fails naming no requested model', async () => {
+  it('ends as an ordinary error when the first turn fails naming no requested model', async () => {
     const { handle } = startWith({
       'turn/start': { error: { code: -32600, message: 'model context window exceeded' } },
     });
     const ended = (await collect(handle)).at(-1);
     expect(ended).toMatchObject({ type: 'ended', reason: 'error' });
-    expect(JSON.stringify(ended)).not.toContain('Model map');
+    expect(JSON.stringify(ended)).not.toContain('refused the model');
   });
 
   it('fails the session when the thread reports another model', async () => {
@@ -1203,7 +1189,7 @@ describe('limits and failed turns', () => {
     expect(running.server.killed()).toBe(false);
   });
 
-  it('ends with the Model map text when a turn is refused for the model it was given', async () => {
+  it('ends as a refused model when a turn is refused for the model it was given', async () => {
     const running = await inTurn();
     running.server.notify(
       'turn/completed',
@@ -1214,8 +1200,8 @@ describe('limits and failed turns', () => {
     });
     expect(running.seen.at(-1)).toEqual({
       type: 'ended',
-      reason: 'error',
-      message: 'Codex refused the model "gpt-5.6-sol". Set this account\'s Model map in Settings.',
+      reason: 'model_refused',
+      message: 'Codex refused the model "gpt-5.6-sol" on this account.',
     });
   });
 

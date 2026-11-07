@@ -120,7 +120,10 @@ function run(
   opts: { steps?: WorkstreamStep[]; stepIndex?: number; batchId?: BatchId } = {},
 ): WorkstreamId {
   const id = store.write((ctx) =>
-    insertWorkstream(ctx, taskId, opts.batchId ? { batchId: opts.batchId } : {}),
+    insertWorkstream(ctx, taskId, {
+      ...(opts.batchId ? { batchId: opts.batchId } : {}),
+      first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+    }),
   ).value.id;
   store.write((ctx) => {
     ctx.tx

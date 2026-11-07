@@ -1,7 +1,6 @@
 import {
   AccountKind,
   AccountProblem,
-  MODEL_ALIAS_PATTERN,
   signsInWithLogin,
   type AccountRefusal,
   type Effort,
@@ -258,13 +257,16 @@ export function checkInitCredentials(
       };
 }
 
-/** An alias matches the model ID Claude Code resolved it to; a model-map ID must come back unchanged. */
-export function modelMatches(requested: string, reported: string): boolean {
-  if (requested === reported) return true;
-  return (
-    MODEL_ALIAS_PATTERN.test(requested) && reported.toLowerCase().includes(`claude-${requested}`)
-  );
+/** The suffix that asks Claude Code for the 1M context window; a subscription's `init.model` leaves it off. */
+const CONTEXT_SUFFIX = /\[1m\]$/;
+
+/** The model a session reports is the one launched, up to the context suffix a subscription drops. */
+export function modelMatches(launched: string, reported: string): boolean {
+  return launched.replace(CONTEXT_SUFFIX, '') === reported.replace(CONTEXT_SUFFIX, '');
 }
+
+/** The assistant error Claude Code reports for a model the account cannot run. */
+export const MODEL_NOT_FOUND_ERROR = 'model_not_found';
 
 const CREDENTIAL_ERRORS: Readonly<Record<string, AccountProblem>> = {
   authentication_failed: AccountProblem.SignedOut,

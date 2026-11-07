@@ -14,6 +14,7 @@ import {
   tempDir,
   waitForAsync,
 } from './fixtures';
+import { seedProfiles } from './seed-profiles';
 
 let data: { path: string; cleanup(): void };
 let remote: ReturnType<typeof createTempRepoWithOrigin>;
@@ -50,6 +51,8 @@ async function boot() {
     gh: new FakeGh(),
     networkEnv: () => ({ ...NETWORK_ENV, GIT_CONFIG_GLOBAL: network.global }),
   });
+  // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
+  seedProfiles(daemon.state);
   return apiClient(daemon.url, daemon.token);
 }
 

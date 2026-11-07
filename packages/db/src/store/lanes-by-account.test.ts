@@ -44,7 +44,9 @@ function lane(
       acceptanceCriteria: ['x'],
       areas: ['api'],
     });
-    const ws = insertWorkstream(ctx, task.id);
+    const ws = insertWorkstream(ctx, task.id, {
+      first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+    });
     if (state !== S.Queued) transitionWorkstream(ctx, ws.id, { to: S.Starting, fence: null });
     if (state === S.Running || state === S.WaitingHuman)
       transitionWorkstream(ctx, ws.id, { to: S.Running, fence: null });

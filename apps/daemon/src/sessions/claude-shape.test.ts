@@ -30,7 +30,7 @@ function spec(overrides: Partial<ShapeSessionSpec> = {}): ShapeSessionSpec {
     cwd: '/repo',
     systemPrompt: 'You are Shape.',
     prompt: 'First message',
-    model: 'sonnet',
+    model: 'claude-sonnet-5-5',
     effort: 'high',
     resumeProviderSessionId: null,
     env: { PATH: '/usr/bin:/bin' },
@@ -189,7 +189,7 @@ describe('a Shape session’s SDK options', () => {
       tools: ['Read', 'Grep', 'Glob', 'Agent'],
       allowedTools: ['Read', 'Grep', 'Glob', 'mcp__10db__note_heard'],
       disallowedTools: ['Edit', 'Bash'],
-      model: 'sonnet',
+      model: 'claude-sonnet-5-5',
       effort: 'high',
       cwd: '/repo',
       systemPrompt: { type: 'preset', preset: 'claude_code', append: 'You are Shape.' },
@@ -551,5 +551,20 @@ describe('the session’s run', () => {
     const events = await collect(handle, () => false);
     expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'account_refused' });
     expect(run.inputs).toEqual([]);
+  });
+
+  it('ends as a refused model when the account cannot run the model the conversation chose', async () => {
+    const { query } = fakeQuery({
+      turns: [
+        [
+          initMessage('none', undefined, 'not-a-model'),
+          assistantMessage([textBlock('')], 'model_not_found'),
+        ],
+      ],
+    });
+    const handle = startShapeSession(spec({ model: 'not-a-model' }), deps(query));
+    const events = await collect(handle, () => false);
+    expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'model_refused' });
+    expect(events.at(-1)).not.toHaveProperty('refusal');
   });
 });

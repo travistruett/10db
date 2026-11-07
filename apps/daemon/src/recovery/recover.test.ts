@@ -380,7 +380,10 @@ describe('recoverOnStartup', () => {
         }),
       );
       const workstream = state.write((ctx) =>
-        insertWorkstream(ctx, task.id, { batchId: batch.id }),
+        insertWorkstream(ctx, task.id, {
+          first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+          batchId: batch.id,
+        }),
       );
       state.write((ctx) => {
         for (const to of ['STARTING', 'RUNNING'] as const)

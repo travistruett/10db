@@ -75,8 +75,14 @@ describe('landing groups', () => {
         baseBranch: project.baseBranch,
         worktreePath: '/tmp/wt',
       });
-      insertWorkstream(ctx, a.id, { batchId: made.id });
-      insertWorkstream(ctx, b.id, { batchId: made.id });
+      insertWorkstream(ctx, a.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        batchId: made.id,
+      });
+      insertWorkstream(ctx, b.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        batchId: made.id,
+      });
       return made;
     }).value;
     expect(landingBatches(store.db, group.id).map((x) => x.id)).toEqual([batch.id]);

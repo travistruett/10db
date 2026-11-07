@@ -30,7 +30,9 @@ const write = <T>(fn: (ctx: WriteContext) => T): T => c.store.write(fn).value;
 /** Marks a task finished with this many lane minutes, as a finished workstream leaves it. */
 function finish(taskId: TaskId, minutes: number): void {
   write((ctx) => {
-    const ws = insertWorkstream(ctx, taskId);
+    const ws = insertWorkstream(ctx, taskId, {
+      first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+    });
     ctx.tx
       .insert(schema.taskLaneTimes)
       .values({

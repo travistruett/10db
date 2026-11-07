@@ -192,7 +192,10 @@ describe('a Shape conversation on a started daemon', () => {
     const shape = await api.post(`/projects/${project.id}/shapes`, ShapeDto, {});
     const view = await api.get(`/shapes/${shape.id}`, ShapeViewDto);
     expect(view.models.default).toBe('claude-sonnet-5-5');
-    expect(view.models.offered).toEqual(['claude-haiku-5-5', 'claude-sonnet-5-5']);
+    expect(view.models.offered).toEqual([
+      { model: 'claude-haiku-5-5', tier: 'fast' },
+      { model: 'claude-sonnet-5-5', tier: 'balanced' },
+    ]);
   });
 
   it('answers 404 for an unknown conversation and 401 without the token', async () => {

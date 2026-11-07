@@ -48,33 +48,55 @@ function acceptModels(view: ShapeViewDto, sent: unknown[]): RequestHandler {
 }
 
 describe('the Plan conversation model picker', () => {
-  it('offers the default and every offered model, and shows the pick', async () => {
-    const view = conversation({}, 'sonnet');
+  it('offers the default and every model the account lists by tier, Unknown ones last, and shows the pick', async () => {
+    const view = conversation({}, 'claude-sonnet-5-5');
     serve(view);
     renderApp(`/shape/${view.shape.id}`);
     const list = await openList();
     const names = within(list)
       .getAllByRole('option', { hidden: true })
       .map((o) => o.textContent);
-    expect(names).toEqual(['Default (Opus)', 'Haiku', 'Sonnet', 'Opus', 'Fable']);
+    expect(names).toEqual([
+      'Default (claude-opus-5-5)',
+      'claude-haiku-5-5',
+      'claude-sonnet-5-5',
+      'claude-opus-5-5',
+      'claude-fable-5-1',
+      'house-model',
+    ]);
+    const headings = ['Fast models', 'Balanced models', 'Strongest models', 'Unknown tier'];
+    for (const heading of headings) expect(within(list).getByText(heading)).toBeTruthy();
     const input = screen.getByRole<HTMLInputElement>('combobox', { name: 'Model' });
-    expect(input.value).toBe('Sonnet');
+    expect(input.value).toBe('claude-sonnet-5-5');
+  });
+
+  it('keeps a pick the account no longer lists, marked, rather than reading as the default', async () => {
+    const view = conversation({}, 'claude-opus-4-8');
+    serve(view);
+    renderApp(`/shape/${view.shape.id}`);
+    const input = await screen.findByRole<HTMLInputElement>('combobox', { name: 'Model' });
+    expect(input.value).toBe('claude-opus-4-8 (not offered)');
   });
 
   it('sends the chosen model, and null for the default', async () => {
-    const view = conversation({}, 'sonnet');
+    const view = conversation({}, 'claude-sonnet-5-5');
     const sent: unknown[] = [];
     serve(view, acceptModels(view, sent));
     renderApp(`/shape/${view.shape.id}`);
-    fireEvent.click(within(await openList()).getByRole('option', { name: 'Fable', hidden: true }));
-    await waitFor(() => {
-      expect(sent).toEqual([{ model: 'fable' }]);
-    });
     fireEvent.click(
-      within(await openList()).getByRole('option', { name: 'Default (Opus)', hidden: true }),
+      within(await openList()).getByRole('option', { name: 'claude-fable-5-1', hidden: true }),
     );
     await waitFor(() => {
-      expect(sent).toEqual([{ model: 'fable' }, { model: null }]);
+      expect(sent).toEqual([{ model: 'claude-fable-5-1' }]);
+    });
+    fireEvent.click(
+      within(await openList()).getByRole('option', {
+        name: 'Default (claude-opus-5-5)',
+        hidden: true,
+      }),
+    );
+    await waitFor(() => {
+      expect(sent).toEqual([{ model: 'claude-fable-5-1' }, { model: null }]);
     });
   });
 
@@ -107,7 +129,9 @@ describe('the Plan conversation model picker', () => {
       ),
     );
     renderApp(`/shape/${view.shape.id}`);
-    fireEvent.click(within(await openList()).getByRole('option', { name: 'Fable', hidden: true }));
+    fireEvent.click(
+      within(await openList()).getByRole('option', { name: 'claude-fable-5-1', hidden: true }),
+    );
     expect(
       await screen.findByText('A turn is running: change the model after it ends.'),
     ).toBeTruthy();

@@ -45,7 +45,9 @@ function goal() {
 /** A decision the goal's task recorded: its source names the task's run. */
 function decide(question: string, taskId: TaskId) {
   h.state.write((ctx) => {
-    const workstreamId = insertWorkstream(ctx, taskId).id;
+    const workstreamId = insertWorkstream(ctx, taskId, {
+      first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+    }).id;
     insertDecision(ctx, {
       projectId: h.project.id,
       question,

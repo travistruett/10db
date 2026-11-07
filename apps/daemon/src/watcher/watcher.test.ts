@@ -979,7 +979,12 @@ describe('worktree checkouts', () => {
     const task = state.write((ctx) =>
       insertTask(ctx, project.id, { title, acceptanceCriteria: ['x'], areas: [claim] }),
     );
-    const workstream = state.write((ctx) => insertWorkstream(ctx, task.id, { batchId: batch.id }));
+    const workstream = state.write((ctx) =>
+      insertWorkstream(ctx, task.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        batchId: batch.id,
+      }),
+    );
     state.write((ctx) => {
       acquireClaims(ctx, {
         projectId: project.id,

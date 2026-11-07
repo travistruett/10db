@@ -121,7 +121,11 @@ describe('cutting a branch', () => {
       name: 'a lane runs in the project',
       arrange: (x) => {
         const other = x.addTask('Running', { areas: ['ui'] });
-        const ws = x.state.write((c) => insertWorkstream(c, other.id));
+        const ws = x.state.write((c) =>
+          insertWorkstream(c, other.id, {
+            first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+          }),
+        );
         x.settle(ws.id, 'RUNNING');
       },
       title: 'work is still running',

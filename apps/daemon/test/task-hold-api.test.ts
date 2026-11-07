@@ -16,6 +16,7 @@ import { startDaemon, type RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
 import { createTempRepo, tempDir, waitForAsync } from './fixtures';
+import { seedProfiles } from './seed-profiles';
 
 let data: { path: string; cleanup(): void };
 let repo: { path: string; cleanup(): void };
@@ -37,6 +38,8 @@ beforeEach(async () => {
     caps,
     tickMs: 3_600_000,
   });
+  // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
+  seedProfiles(daemon.state);
 });
 afterEach(async () => {
   await daemon.stop();

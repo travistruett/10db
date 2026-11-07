@@ -14,6 +14,7 @@ import {
   waitForAsync,
   type TempDir,
 } from './fixtures';
+import { seedProfiles } from './seed-profiles';
 
 const write = (path: string) => ({
   do: 'tool' as const,
@@ -112,6 +113,8 @@ beforeAll(async () => {
     logLevel: 'warn',
     ...QUIET,
   });
+  // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
+  seedProfiles(daemon.state);
   api = apiClient(daemon.url, daemon.token);
 });
 afterAll(async () => {

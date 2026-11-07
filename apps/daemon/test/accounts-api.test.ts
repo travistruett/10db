@@ -47,6 +47,7 @@ import {
 } from '../src/sessions';
 import { apiClient } from './api-client';
 import { createMemoryKeychain, createTempRepo, tempDir, waitForAsync } from './fixtures';
+import { seedProfiles } from './seed-profiles';
 
 const SECRET = 'sk-or-v1-0123456789abcdef-NEVER-SHOWN';
 const QUIET = { caffeinate: () => null, watch: false } as const;
@@ -83,6 +84,8 @@ async function start(
     ...(opts.loginEnv === undefined ? {} : { loginEnv: opts.loginEnv }),
     ...QUIET,
   });
+  // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
+  seedProfiles(daemon.state);
   return {
     api: apiClient(daemon.url, daemon.token),
     keychain,
@@ -627,7 +630,9 @@ describe('connecting a ChatGPT plan account over HTTP', () => {
           acceptanceCriteria: ['x'],
           areas: ['src'],
         });
-        const queued = insertWorkstream(ctx, task.id);
+        const queued = insertWorkstream(ctx, task.id, {
+          first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        });
         transitionWorkstream(ctx, queued.id, { to: 'STARTING', fence: null });
         return queued;
       });
@@ -655,7 +660,9 @@ describe('connecting a ChatGPT plan account over HTTP', () => {
           acceptanceCriteria: ['x'],
           areas: ['src'],
         });
-        const lane = insertWorkstream(ctx, task.id);
+        const lane = insertWorkstream(ctx, task.id, {
+          first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        });
         transitionWorkstream(ctx, lane.id, { to: 'STARTING', fence: null });
         insertSession(ctx, {
           workstreamId: lane.id,

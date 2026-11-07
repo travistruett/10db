@@ -179,7 +179,13 @@ function add(
   const task = state.write((ctx) =>
     insertTask(ctx, project.id, { title: 't', acceptanceCriteria: ['x'], areas, dependsOn }),
   );
-  return { project, task, workstream: state.write((ctx) => insertWorkstream(ctx, task.id)) };
+  return {
+    project,
+    task,
+    workstream: state.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    ),
+  };
 }
 
 function pause(project: ReturnType<typeof seedProject>): void {
@@ -417,7 +423,9 @@ describe('scheduler', () => {
     const { project, task, workstream: first } = queue();
     moveWorkstream(first.id, 'STARTING');
     moveWorkstream(first.id, 'FAILED');
-    const second = state.write((ctx) => insertWorkstream(ctx, task.id));
+    const second = state.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    );
     moveWorkstream(second.id, 'CANCELLED');
     const column = listBoardColumns(store.db, project.id)[0];
     if (!column) throw new Error('no Icebox');
@@ -534,7 +542,12 @@ describe('pull-request delivery', () => {
       if (to.length > 0) patchBatch(ctx, b.id, { branch: BRANCH, ...(baseSha ? { baseSha } : {}) });
       return b;
     });
-    const workstream = state.write((ctx) => insertWorkstream(ctx, task.id, { batchId: batch.id }));
+    const workstream = state.write((ctx) =>
+      insertWorkstream(ctx, task.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        batchId: batch.id,
+      }),
+    );
     return { project, batch, workstream };
   }
 
@@ -891,7 +904,10 @@ describe('worktree batches', () => {
       });
       branchOf.set(dir.path, `${BRANCH}-${String(i)}`);
       const workstream = state.write((ctx) =>
-        insertWorkstream(ctx, task.id, { batchId: batch.id }),
+        insertWorkstream(ctx, task.id, {
+          first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+          batchId: batch.id,
+        }),
       );
       return { project, batch, workstream, path: dir.path };
     });
@@ -1027,7 +1043,12 @@ describe('shared and separate-copy work in one project', () => {
         workspaceMode: copy ? 'worktree' : 'shared',
       }),
     );
-    return state.write((ctx) => insertWorkstream(ctx, task.id, { batchId }));
+    return state.write((ctx) =>
+      insertWorkstream(ctx, task.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        batchId,
+      }),
+    );
   }
 
   it('launches a shared task and a copy task on the same area in one tick', async () => {

@@ -8,9 +8,11 @@ import {
   findingNotes,
   FIX_ATTEMPT_LIMIT,
   InboxKind,
+  isModelTier,
   JudgeCallId,
   JudgeDecision,
   JudgeOutcome,
+  NotFoundError,
   parseFindings,
   PermissionChoice,
   REVIEW_CARD_DETAIL,
@@ -25,6 +27,7 @@ import {
   AccountKind,
   AccountProblem,
   type AccountId,
+  type AccountModelDto,
   type AccountRefusal,
   type HandoffId,
   type InboxItemDto,
@@ -62,6 +65,8 @@ import {
   insertRetryLimitFollowUp,
   insertSession,
   insertSource,
+  listAccountModels,
+  markAccountModelUnusable,
   latestHandoffForStep,
   latestToolOp,
   listPermissionRules,
@@ -78,6 +83,7 @@ import {
   releaseClaims,
   setTaskStatus,
   StaleFenceError,
+  type AccountRow,
   type DbReader,
   transitionWorkstream,
   updateSessionUsage,
@@ -153,6 +159,7 @@ import { mintSessionToken } from '../mcp';
 import { allowedToolsFor, laneAutoMode, storableRule } from '../permissions';
 import { takeFoundHostsReading } from '../registries';
 import { retryStep } from '../routing';
+import { resolveStep } from './resolve-step';
 import {
   fileAccessJudge,
   SandboxProfileError,
@@ -383,6 +390,12 @@ type Outcome =
       readonly providerSessionId: string | null;
     }
   | {
+      /** The account cannot run the model the session launched on; the lane starts over on another. */
+      readonly kind: 'model_refused';
+      readonly model: string;
+      readonly message: string;
+    }
+  | {
       /** The session ended its turn with a command running in the background that never finished. */
       readonly kind: 'background_hung';
       readonly message: string;
@@ -394,7 +407,10 @@ type Outcome =
       readonly providerSessionId: string | null;
     };
 
-type Terminal = Exclude<Outcome, { kind: 'handoff' } | { kind: 'moved' } | { kind: 'step_done' }>;
+type Terminal = Exclude<
+  Outcome,
+  { kind: 'handoff' } | { kind: 'moved' } | { kind: 'step_done' } | { kind: 'model_refused' }
+>;
 
 const PERMISSION_ANSWER_TEXT: Readonly<Record<string, string>> = {
   [PermissionChoice.AllowOnce]:
@@ -1300,6 +1316,83 @@ export function createRunner(opts: RunnerOptions): Runner {
     }
   }
 
+  /**
+   * The step as it launches on `account`: the planned model if the account still offers it, else the step's
+   * setting applied to what the account offers now. A changed step is saved with the workstream's model and
+   * effort, so the plan shows what ran.
+   */
+  function resolvedStep(
+    id: WorkstreamId,
+    ctl: Control,
+    row: WorkstreamRow,
+    step: WorkstreamStep,
+    account: AccountRow,
+    accountModels: readonly AccountModelDto[],
+  ): WorkstreamStep {
+    const project = getProject(db, row.projectId);
+    const inputs = routingInputs(db, { ...project, accountId: account.id });
+    const resolved = resolveStep(step, account, inputs.profiles, accountModels, {
+      persona: step.personaId ? getPersona(db, step.personaId) : undefined,
+      task: getTask(db, row.taskId),
+      project,
+      roleSettings: inputs.roleSettings,
+      patterns: inputs.patterns,
+      tierOverrides: inputs.tierOverrides,
+    });
+    if (resolved === step) return step;
+    opts.state.write((ctx) => {
+      patchWorkstream(ctx, id, ctl.fence, {
+        model: resolved.model,
+        effort: resolved.effort,
+        ...(row.steps.length > 0
+          ? { steps: row.steps.map((s, i) => (i === row.stepIndex ? resolved : s)) }
+          : {}),
+      });
+    });
+    return resolved;
+  }
+
+  /**
+   * A session ended because its account cannot run the model. The model is marked unusable on the account
+   * until the account's list changes, and a card says so; the lane then starts over, and the step takes the
+   * tier's next model. An account with no row for the model (it lists none) records nothing, so the lane
+   * would ask for the same model again: it fails instead.
+   */
+  function refuseModel(
+    id: WorkstreamId,
+    ctl: Control,
+    outcome: Extract<Outcome, { kind: 'model_refused' }>,
+  ): 'retry' | 'stop' {
+    const row = getWorkstreamRow(db, id);
+    const account = getAccountRow(db, ctl.accountId);
+    const marked = opts.state.write((ctx) => {
+      try {
+        markAccountModelUnusable(ctx, account.id, outcome.model);
+        return true;
+      } catch (error) {
+        if (!(error instanceof NotFoundError)) throw error;
+        return false;
+      }
+    });
+    opts.inbox.flag({
+      projectId: row.projectId,
+      workstreamId: id,
+      title: `${account.label} cannot run ${outcome.model}`,
+      body: marked
+        ? `${outcome.message}. 10db marked ${outcome.model} unusable on ${account.label} until the account's model list changes, and is running the step on the next model of its tier.`
+        : `${outcome.message}. ${account.label} lists no models, so 10db cannot mark ${outcome.model} unusable and stopped the task instead of asking for it again. Name a model for each tier in the account's settings.`,
+      foldKey: `model-refused:${account.id}:${outcome.model}`,
+    });
+    if (marked) return 'retry';
+    opts.state.write((ctx) => {
+      failIn(ctx, id, ctl.fence, row, {
+        kind: WorkstreamFailure.SessionFailed,
+        reason: outcome.message,
+      });
+    });
+    return 'stop';
+  }
+
   async function runSession(id: WorkstreamId, ctl: Control): Promise<Outcome> {
     const row = getWorkstreamRow(db, id);
     const project = getProject(db, row.projectId);
@@ -1433,10 +1526,26 @@ export function createRunner(opts: RunnerOptions): Runner {
     const { token, hash } = mintSessionToken();
     const notReady = unready(account);
     if (notReady) return { kind: 'unready', refusal: notReady, providerSessionId: null };
+    // The model this session runs on, worked out again on this account: the project may have moved since the
+    // step was planned or last ran, or the account may have stopped offering the planned model.
+    const accountModels = listAccountModels(db, account.id);
+    const launchStep = resolvedStep(id, ctl, row, step, account, accountModels);
+    if (isModelTier(launchStep.model)) {
+      return {
+        kind: 'held',
+        until: null,
+        refusal: {
+          problem: AccountProblem.NoUsableModel,
+          message: `${account.label} offers no model 10db may run for the ${launchStep.model} tier`,
+          seenIdentity: null,
+        },
+        providerSessionId: null,
+      };
+    }
     // Built first, so a missing or changed secret refuses the session before any session row exists.
     let launch: SessionLaunch;
     try {
-      launch = opts.launcher.session(account, row.model);
+      launch = opts.launcher.session(account, launchStep.model, accountModels);
     } catch (error) {
       if (!(error instanceof AccountLaunchError || error instanceof KeychainError)) throw error;
       // A locked or unreachable Keychain is the account's problem, not the lane's: it pauses the account
@@ -1540,8 +1649,8 @@ export function createRunner(opts: RunnerOptions): Runner {
         const s = insertSession(ctx, {
           workstreamId: id,
           provider: providerOf(account.kind),
-          model: row.model,
-          effort: row.effort,
+          model: launchStep.model,
+          effort: launchStep.effort,
           mode: 'managed',
           accountId: ctl.accountId,
           mcpTokenHash: hash,
@@ -1669,7 +1778,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         cwd: checkout,
         prompt: mcpNote ? `${prompt}\n\n${mcpNote}` : prompt,
         model: launch.model,
-        effort: row.effort,
+        effort: launchStep.effort,
         resumeProviderSessionId: resumeId,
         env: launch.env,
         account: launch.expect,
@@ -1992,6 +2101,13 @@ export function createRunner(opts: RunnerOptions): Runner {
                     },
                     // A session that never started has no conversation to resume; its next action stands.
                     providerSessionId: st.started ? st.providerSessionId : null,
+                  };
+                  break;
+                case SessionEndReason.ModelRefused:
+                  st.outcome = {
+                    kind: 'model_refused',
+                    model: launchStep.model,
+                    message: event.message ?? `${account.label} cannot run ${launchStep.model}`,
                   };
                   break;
                 case SessionEndReason.BillingRefused:
@@ -2734,6 +2850,10 @@ export function createRunner(opts: RunnerOptions): Runner {
         }
         const outcome = await runSession(id, ctl);
         if (outcome.kind === 'handoff' || outcome.kind === 'moved') continue;
+        if (outcome.kind === 'model_refused') {
+          if (refuseModel(id, ctl, outcome) === 'retry') continue;
+          return;
+        }
         if (outcome.kind === 'step_done') {
           const finished = getWorkstreamRow(db, id);
           const readOnly = currentStep(finished).role !== StepRole.Implement;

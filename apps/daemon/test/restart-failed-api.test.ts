@@ -26,6 +26,7 @@ import { startDaemon, type RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
 import { createTempRepo, tempDir, waitForAsync } from './fixtures';
+import { seedProfiles } from './seed-profiles';
 
 let data: { path: string; cleanup(): void };
 let repo: { path: string; cleanup(): void };
@@ -47,6 +48,8 @@ beforeEach(async () => {
     // A tick long enough that a queued run stays where the test left it.
     tickMs: 3_600_000,
   });
+  // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
+  seedProfiles(daemon.state);
 });
 afterEach(async () => {
   // A start requests a tick; let it finish before the daemon closes its logger.
@@ -97,7 +100,10 @@ async function failedInOpenBatch(waitsOn: readonly string[] = []) {
   const { batchId, workstreamId } = daemon.state.write((ctx) => {
     const batch = insertBatch(ctx, { projectId: project.id, title: 'Alpha', baseBranch: 'main' });
     transitionBatch(ctx, batch.id, { to: 'OPEN', patch: { branch: 'tendb/alpha' } });
-    const ws = insertWorkstream(ctx, task.id, { batchId: batch.id });
+    const ws = insertWorkstream(ctx, task.id, {
+      first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      batchId: batch.id,
+    });
     for (const to of ['STARTING', 'RUNNING', 'FAILED'] as const)
       transitionWorkstream(ctx, ws.id, { to, fence: null });
     return { batchId: batch.id, workstreamId: ws.id };
@@ -236,7 +242,10 @@ describe('POST /tasks/:id/start on a task whose run failed in an open batch', ()
           title: 'Real areas',
           taskIds: [task.id, beta.id],
         });
-        const other = insertWorkstream(ctx, beta.id, { batchId });
+        const other = insertWorkstream(ctx, beta.id, {
+          first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+          batchId,
+        });
         for (const to of ['STARTING', 'RUNNING', 'VERIFYING', 'DONE'] as const)
           transitionWorkstream(ctx, other.id, { to, fence: null });
         patchTask(ctx, task.id, { workspaceMode: WorkspaceMode.Worktree });
@@ -300,10 +309,16 @@ describe('POST /tasks/:id/start on a task whose run failed in an open batch', ()
     const { batchId, workstreamId } = daemon.state.write((ctx) => {
       const batch = insertBatch(ctx, { projectId: project.id, title: 'Both', baseBranch: 'main' });
       transitionBatch(ctx, batch.id, { to: 'OPEN', patch: { branch: 'tendb/both' } });
-      const done = insertWorkstream(ctx, beta.id, { batchId: batch.id });
+      const done = insertWorkstream(ctx, beta.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        batchId: batch.id,
+      });
       for (const to of ['STARTING', 'RUNNING', 'VERIFYING', 'DONE'] as const)
         transitionWorkstream(ctx, done.id, { to, fence: null });
-      const ws = insertWorkstream(ctx, alpha.id, { batchId: batch.id });
+      const ws = insertWorkstream(ctx, alpha.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        batchId: batch.id,
+      });
       for (const to of ['STARTING', 'RUNNING', 'FAILED'] as const)
         transitionWorkstream(ctx, ws.id, { to, fence: null });
       return { batchId: batch.id, workstreamId: ws.id };
@@ -336,7 +351,10 @@ describe('POST /tasks/:id/start on a task whose run failed in an open batch', ()
       areas: ['src'],
     });
     const workstreamId = daemon.state.write((ctx) => {
-      const ws = insertWorkstream(ctx, task.id, { batchId: null });
+      const ws = insertWorkstream(ctx, task.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        batchId: null,
+      });
       for (const to of ['STARTING', 'RUNNING', 'FAILED'] as const)
         transitionWorkstream(ctx, ws.id, { to, fence: null });
       return ws.id;

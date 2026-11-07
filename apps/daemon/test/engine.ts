@@ -378,7 +378,12 @@ export async function createTestEngine(
       );
       const workstream = plan
         ? startTaskWithPlan(state, task.id)
-        : state.write((ctx) => insertWorkstream(ctx, task.id, { batchId: batchId ?? null }));
+        : state.write((ctx) =>
+            insertWorkstream(ctx, task.id, {
+              first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+              batchId: batchId ?? null,
+            }),
+          );
       return { task, workstream };
     },
     launch(id) {

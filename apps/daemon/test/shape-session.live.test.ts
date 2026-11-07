@@ -95,7 +95,11 @@ describe.skipIf(!live)('a Shape session, live', () => {
       cwd: checkout,
       env: launcher.probe(account).env,
     });
-    const launch = launcher.session({ ...account, expectedIdentity: seen.email ?? null }, 'haiku');
+    const launch = launcher.session(
+      { ...account, expectedIdentity: seen.email ?? null },
+      'claude-haiku-5-5',
+      [],
+    );
     const access = {
       checkout,
       home: homedir(),
@@ -257,7 +261,11 @@ describe.skipIf(!live)('a Shape session, live', () => {
       cwd: checkout,
       env: launcher.probe(account).env,
     });
-    const launch = launcher.session({ ...account, expectedIdentity: seen.email ?? null }, 'haiku');
+    const launch = launcher.session(
+      { ...account, expectedIdentity: seen.email ?? null },
+      'claude-haiku-5-5',
+      [],
+    );
     const access = {
       checkout,
       home: homedir(),
@@ -373,7 +381,8 @@ describe.skipIf(!live)('a Shape session, live', () => {
     });
     const launch = launcher.session(
       { ...defaultAccount, expectedIdentity: seen.email ?? null },
-      'haiku',
+      'claude-haiku-5-5',
+      [],
     );
     const access = {
       checkout,
@@ -585,7 +594,11 @@ async function readInSession(
     cwd: checkout,
     env: launcher.probe(account).env,
   });
-  const launch = launcher.session({ ...account, expectedIdentity: seen.email ?? null }, 'haiku');
+  const launch = launcher.session(
+    { ...account, expectedIdentity: seen.email ?? null },
+    'claude-haiku-5-5',
+    [],
+  );
   const access = {
     checkout,
     home: homedir(),

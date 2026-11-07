@@ -183,7 +183,9 @@ describe('cancelTask', () => {
     (name) => {
       const project = seedProject(store);
       const task = seedTask(project.id);
-      const ws = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+      const ws = store.write((ctx) =>
+        insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+      ).value;
       for (const to of PATHS[name] ?? [])
         store.write((ctx) => transitionWorkstream(ctx, ws.id, { to, fence: null }));
       expect(() => store.write((ctx) => cancelTask(ctx, task.id))).toThrow(TaskStartedError);
@@ -257,7 +259,9 @@ describe('cancelTask', () => {
   it('names the cancel route only for a live workstream', () => {
     const project = seedProject(store);
     const task = seedTask(project.id);
-    const ws = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+    const ws = store.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    ).value;
     expect(() => store.write((ctx) => cancelTask(ctx, task.id))).toThrow(
       `/workstreams/${ws.id}/cancel`,
     );
@@ -270,7 +274,9 @@ describe('cancelRefusedStartTask', () => {
   it('detaches a question stored under the task it cancels, keeping the question and its link', () => {
     const project = seedProject(store);
     const task = seedTask(project.id);
-    const ws = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+    const ws = store.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    ).value;
     store.write((ctx) => transitionWorkstream(ctx, ws.id, { to: S.Cancelled, fence: null }));
     const seeded = seedQuestionOf(project.id, task.id);
     store.write((ctx) => cancelRefusedStartTask(ctx, task.id));
@@ -280,7 +286,9 @@ describe('cancelRefusedStartTask', () => {
   it('detaches a question when it closes a task whose latest run failed', () => {
     const project = seedProject(store);
     const task = seedTask(project.id);
-    const ws = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+    const ws = store.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    ).value;
     for (const to of PATHS['FAILED'] ?? [])
       store.write((ctx) => transitionWorkstream(ctx, ws.id, { to, fence: null }));
     const seeded = seedQuestionOf(project.id, task.id);
@@ -291,7 +299,9 @@ describe('cancelRefusedStartTask', () => {
   it('removes a task whose only run was cancelled before it had a session, as a refused cut leaves it', () => {
     const project = seedProject(store);
     const task = seedTask(project.id);
-    const ws = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+    const ws = store.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    ).value;
     store.write((ctx) => transitionWorkstream(ctx, ws.id, { to: S.Cancelled, fence: null }));
     const { value } = store.write((ctx) => cancelRefusedStartTask(ctx, task.id));
     expect(value.status).toBe(TaskStatus.Cancelled);
@@ -308,7 +318,9 @@ describe('cancelRefusedStartTask', () => {
   it('closes a task whose latest run failed, as a refused restart leaves it', () => {
     const project = seedProject(store);
     const task = seedTask(project.id);
-    const ws = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+    const ws = store.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    ).value;
     for (const to of PATHS['FAILED'] ?? [])
       store.write((ctx) => transitionWorkstream(ctx, ws.id, { to, fence: null }));
     expect(store.write((ctx) => cancelRefusedStartTask(ctx, task.id)).value.status).toBe(
@@ -320,10 +332,14 @@ describe('cancelRefusedStartTask', () => {
   it('removes a restarted task whose newest run was cancelled before a session, after a failed one', () => {
     const project = seedProject(store);
     const task = seedTask(project.id);
-    const first = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+    const first = store.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    ).value;
     for (const to of PATHS['FAILED'] ?? [])
       store.write((ctx) => transitionWorkstream(ctx, first.id, { to, fence: null }));
-    const second = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+    const second = store.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    ).value;
     store.write((ctx) => transitionWorkstream(ctx, second.id, { to: S.Cancelled, fence: null }));
     expect(store.write((ctx) => cancelRefusedStartTask(ctx, task.id)).value.status).toBe(
       TaskStatus.Cancelled,
@@ -333,7 +349,9 @@ describe('cancelRefusedStartTask', () => {
   it.each(['RUNNING', 'QUEUED'])('refuses a task whose run is %s with TaskStartedError', (name) => {
     const project = seedProject(store);
     const task = seedTask(project.id);
-    const ws = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+    const ws = store.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    ).value;
     for (const to of PATHS[name] ?? [])
       store.write((ctx) => transitionWorkstream(ctx, ws.id, { to, fence: null }));
     expect(() => store.write((ctx) => cancelRefusedStartTask(ctx, task.id))).toThrow(
@@ -344,7 +362,9 @@ describe('cancelRefusedStartTask', () => {
   it('closes a task whose latest run was cancelled after a session, as a refused restart leaves it', () => {
     const project = seedProject(store);
     const task = seedTask(project.id);
-    const ws = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+    const ws = store.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    ).value;
     store.write((ctx) =>
       insertSession(ctx, {
         workstreamId: ws.id,
@@ -369,7 +389,9 @@ describe('cancelRefusedStartTask', () => {
     const project = seedProject(store);
     const task = seedTask(project.id, 'Base');
     seedTask(project.id, 'Child', [task.id]);
-    const ws = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+    const ws = store.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    ).value;
     store.write((ctx) =>
       insertSession(ctx, {
         workstreamId: ws.id,
@@ -399,7 +421,9 @@ describe('cancelRefusedStartTask', () => {
 describe('closeTask', () => {
   function failedTask(projectId: ReturnType<typeof seedProject>['id'], title = 'A') {
     const task = seedTask(projectId, title);
-    const ws = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+    const ws = store.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    ).value;
     for (const to of PATHS['FAILED'] ?? [])
       store.write((ctx) => transitionWorkstream(ctx, ws.id, { to, fence: null }));
     return { task, ws };
@@ -458,7 +482,9 @@ describe('closeTask', () => {
     (name) => {
       const project = seedProject(store);
       const task = seedTask(project.id);
-      const ws = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+      const ws = store.write((ctx) =>
+        insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+      ).value;
       for (const to of PATHS[name] ?? [])
         store.write((ctx) => transitionWorkstream(ctx, ws.id, { to, fence: null }));
       expect(() => store.write((ctx) => closeTask(ctx, task.id))).toThrow(ConflictError);
@@ -475,9 +501,13 @@ describe('closeTask', () => {
   it('closes a task whose newest run failed after an earlier one was cancelled', () => {
     const project = seedProject(store);
     const task = seedTask(project.id);
-    const first = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+    const first = store.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    ).value;
     store.write((ctx) => transitionWorkstream(ctx, first.id, { to: S.Cancelled, fence: null }));
-    const second = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+    const second = store.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    ).value;
     for (const to of PATHS['FAILED'] ?? [])
       store.write((ctx) => transitionWorkstream(ctx, second.id, { to, fence: null }));
     expect(store.write((ctx) => closeTask(ctx, task.id)).value.status).toBe(TaskStatus.Cancelled);
@@ -535,7 +565,12 @@ describe('a task whose pull request closed without merging', () => {
     for (const to of ['OPEN', 'SHIPPING'] as const)
       store.write((ctx) => transitionBatch(ctx, batch.id, { to }));
     store.write((ctx) => transitionBatch(ctx, batch.id, { to: 'SHIPPED', patch: { prUrl: PR } }));
-    const ws = store.write((ctx) => insertWorkstream(ctx, task.id, { batchId: batch.id })).value;
+    const ws = store.write((ctx) =>
+      insertWorkstream(ctx, task.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        batchId: batch.id,
+      }),
+    ).value;
     for (const to of [S.Starting, S.Running, S.Verifying, S.Done])
       store.write((ctx) => transitionWorkstream(ctx, ws.id, { to, fence: null }));
     store.write((ctx) => {
@@ -610,7 +645,9 @@ describe('a task whose pull request closed without merging', () => {
     const project = seedProject(store);
     const { task } = inReview(project.id, 'closed');
     store.write((ctx) => reopenTask(ctx, task.id));
-    const again = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+    const again = store.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    ).value;
     expect(again.state).toBe(S.Queued);
   });
 
@@ -630,7 +667,9 @@ describe('a task whose pull request closed without merging', () => {
     const { task } = inReview(project.id, 'closed');
     store.write((ctx) => reopenTask(ctx, task.id));
     // The new run finishes before it is put in a batch.
-    const again = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+    const again = store.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    ).value;
     for (const to of [S.Starting, S.Running, S.Verifying, S.Done])
       store.write((ctx) => transitionWorkstream(ctx, again.id, { to, fence: null }));
     store.write((ctx) => {
@@ -683,7 +722,9 @@ describe('a task whose pull request closed without merging', () => {
   it('starts a failed run shipped anyway again once its pull request closed', () => {
     const project = seedProject(store);
     const task = shippedAnyway(project.id, 'closed');
-    const again = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+    const again = store.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    ).value;
     expect(again.state).toBe(S.Queued);
     expect(getTask(store.db, task.id)).toMatchObject({
       status: TaskStatus.Open,

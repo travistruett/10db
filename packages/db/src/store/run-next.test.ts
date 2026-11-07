@@ -41,7 +41,9 @@ function queued(title: string, dependsOn: TaskDto['id'][] = []) {
   const task = store.write((ctx) =>
     insertTask(ctx, project.id, { title, acceptanceCriteria: ['x'], areas: ['api'], dependsOn }),
   ).value;
-  const workstream = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+  const workstream = store.write((ctx) =>
+    insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+  ).value;
   return { task, workstream };
 }
 
@@ -89,7 +91,12 @@ describe('runNext', () => {
     const dep = store.write((ctx) =>
       insertTask(ctx, project.id, { title: 'dep', acceptanceCriteria: ['x'], areas: ['api'] }),
     ).value;
-    const run = store.write((ctx) => insertWorkstream(ctx, dep.id, { batchId: batch.id })).value;
+    const run = store.write((ctx) =>
+      insertWorkstream(ctx, dep.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        batchId: batch.id,
+      }),
+    ).value;
     for (const to of [WorkstreamState.Starting, WorkstreamState.Running, WorkstreamState.Failed])
       store.write((ctx) => transitionWorkstream(ctx, run.id, { to, fence: null }));
     const waiting = queued('waiting', [dep.id]);

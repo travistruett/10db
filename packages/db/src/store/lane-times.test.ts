@@ -38,7 +38,9 @@ function finishedTask(
       areas: ['api'],
     }),
   ).value;
-  const ws = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+  const ws = store.write((ctx) =>
+    insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+  ).value;
   store.write((ctx) => {
     transitionWorkstream(ctx, ws.id, { to: S.Starting, fence: null });
     transitionWorkstream(ctx, ws.id, { to: S.Running, fence: null });

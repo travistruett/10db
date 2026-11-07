@@ -394,7 +394,12 @@ describe('refusing a worktree cut', () => {
             patch: { branch: '10db/dep-0a1b2c3d', baseSha: 'a'.repeat(40), repo: 'acme/widgets' },
           });
         });
-        const ws = x.state.write((c) => insertWorkstream(c, dep.id, { batchId: shipped.id }));
+        const ws = x.state.write((c) =>
+          insertWorkstream(c, dep.id, {
+            first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+            batchId: shipped.id,
+          }),
+        );
         x.settle(ws.id, 'DONE');
         const url = x.gh.openPr('10db/dep-0a1b2c3d');
         x.state.write((c) => {

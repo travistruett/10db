@@ -127,7 +127,7 @@ import {
   proposeNote,
   rehearseNote,
   SHAPE_ALLOWED_TOOLS,
-  SHAPE_SYSTEM_PROMPT,
+  shapeSystemPrompt,
   shapeToolset,
 } from './policy';
 import {
@@ -172,6 +172,8 @@ export interface ShapeLaunch {
   readonly account: AccountExpectation;
   /** Where the session may read; the service adds the conversation's own files directory. */
   readonly access: Omit<ShapeAccess, 'filesDir'>;
+  /** The Agent tool aliases the account takes, which the prompt names and the hook allows; none runs agents on the session's model. */
+  readonly agentModels: readonly string[];
 }
 
 /** What a session's commands and project tools are prepared from: the conversation and who asks. */
@@ -216,7 +218,7 @@ export interface ShapeServiceDeps {
   readonly log: Logger;
   readonly mcp: { readonly url: string; readonly toolTimeoutMs: number };
   /**
-   * Resolves a project's launch, on `model` (an alias the account offers) or, with null, on the `plan`
+   * Resolves a project's launch, on `model` (an ID the account lists) or, with null, on the `plan`
    * role's; throws when its account can't start a session.
    */
   launch(projectId: ProjectId, model: string | null): ShapeLaunch;
@@ -936,12 +938,11 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     const shape = getShape(state.db, shapeId);
     const launch = deps.launch(shape.projectId, shape.model);
     // Only this conversation's files: another conversation's, in the same project or not, stay unread.
-    // An agent the session launches runs only on a model the project's account offers.
-    const offered = deps.models?.(shape.projectId).offered;
     const fileAccess: ShapeAccess = {
       ...launch.access,
       filesDir: shapeFilesDir(deps.filesDir, shapeId),
-      ...(offered === undefined ? {} : { agentModels: offered }),
+      // An agent the session launches takes only the aliases its account's Agent tool resolves.
+      agentModels: launch.agentModels,
     };
     const limits = limitsFor(launch.account.kind);
     let resumeId = getShapeSdkSessionId(state.db, shapeId);
@@ -1106,7 +1107,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       sessionId: row.id,
       shapeId,
       cwd: launch.cwd,
-      systemPrompt: SHAPE_SYSTEM_PROMPT,
+      systemPrompt: shapeSystemPrompt(launch.agentModels),
       prompt: skipped === null ? prompt : `${skipped}\n\n${prompt}`,
       ...(images.length === 0 ? {} : { images }),
       model: launch.model,
@@ -1694,7 +1695,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
     chooseModel(shapeId, model) {
       const { projectId } = getShape(state.db, shapeId);
       refuseChatGptAccount(projectId);
-      const offered = deps.models?.(projectId).offered ?? [];
+      const offered = (deps.models?.(projectId).offered ?? []).map((o) => o.model);
       if (model !== null && !offered.includes(model))
         throw new InvalidError(
           `${model} is not a model this project's account offers; choose one of ${offered.join(', ') || 'none'}.`,

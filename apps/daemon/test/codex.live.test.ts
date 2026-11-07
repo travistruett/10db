@@ -63,9 +63,8 @@ const live = loadEnv(process.env).TENDB_LIVE_CODEX === '1';
 const LIVE_PARENT = join(homedir(), '.10db');
 const LIVE_PREFIX = 'codex-live-';
 
-/** The model ID the account's Model map gives the step's alias; the fake model answers any. */
+/** The model the lane launches on; the fake model answers any. */
 const MODEL = 'gpt-5.6-sol';
-const ALIAS = 'sonnet';
 
 /** Who the stand-in says the account is: no real account is ever signed in. */
 const STAND_IN = { email: 'live@example.invalid', workspace: 'ws-live' } as const;
@@ -537,7 +536,7 @@ async function openWorldIn(root: string, opened: (() => Promise<void>)[]): Promi
     configDir: codexHome,
     secretRef: null,
     secretFingerprint: null,
-    settings: { modelMap: { [ALIAS]: MODEL } },
+    settings: {},
     laneCap: 4,
     monthlyCapUsd: null,
     archived: false,
@@ -616,7 +615,7 @@ async function runSession(
     readonly sessionId?: SessionId;
   } = {},
 ): Promise<SessionRun> {
-  const launch = launcher.session(world.account, ALIAS);
+  const launch = launcher.session(world.account, MODEL, []);
   const laneSession = await world.laneSandbox.forSession(laneInput(world, launch.env, opts));
   try {
     return await runOnLane(world, steps, opts, launch, laneSession);
@@ -889,7 +888,7 @@ describe.skipIf(!live)(
 
     it("keeps a lane out of other lanes' temp dirs, in either lanes' root, and out of 10db's files", async () => {
       // Another Claude lane's session and another ChatGPT lane's, made as the daemon makes them.
-      const { env } = launcher.session(world.account, ALIAS);
+      const { env } = launcher.session(world.account, MODEL, []);
       const ledgersBefore = (): string[] =>
         readdirSync(world.roots.files).filter((name) => name.startsWith('10db-proc-'));
       const known = new Set(ledgersBefore());

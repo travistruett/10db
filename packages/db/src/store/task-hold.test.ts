@@ -42,7 +42,9 @@ function seedQueuedIn(
   const task = store.write((ctx) =>
     insertTask(ctx, projectId, { title, acceptanceCriteria: ['x'], areas: ['api'], dependsOn }),
   ).value;
-  const ws = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+  const ws = store.write((ctx) =>
+    insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+  ).value;
   return { projectId, task, ws };
 }
 

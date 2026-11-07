@@ -63,12 +63,17 @@ describe('offeredProfiles', () => {
 });
 
 describe('offeredModels', () => {
-  it('lists each model once, the weakest tier first and the cheapest first within it', () => {
+  it('lists each model once with its tier, the weakest tier first and the cheapest first within it', () => {
     const profiles = unscoredCatalogue({}, ['big', 'peak', 'small', 'mid']);
-    expect(offeredModels(profiles)).toEqual(['small', 'mid', 'big', 'peak']);
+    expect(offeredModels(profiles)).toEqual([
+      { model: 'small', tier: 'fast' },
+      { model: 'mid', tier: 'balanced' },
+      { model: 'big', tier: 'strongest' },
+      { model: 'peak', tier: 'strongest' },
+    ]);
   });
 
-  it('leaves out a replaced or retired model, and puts an unranked one last', () => {
+  it('keeps a replaced model in its tier, puts an unranked one last, and leaves a retired one out', () => {
     const profiles = [
       ...unscoredCatalogue({}, ['small', 'mid']).map((p) =>
         p.model === 'small' ? { ...p, status: ModelStatus.Superseded } : p,
@@ -82,6 +87,10 @@ describe('offeredModels', () => {
         outputPrice: null,
       })),
     ];
-    expect(offeredModels(profiles)).toEqual(['mid', 'house']);
+    expect(offeredModels(profiles)).toEqual([
+      { model: 'small', tier: 'fast' },
+      { model: 'mid', tier: 'balanced' },
+      { model: 'house', tier: null },
+    ]);
   });
 });

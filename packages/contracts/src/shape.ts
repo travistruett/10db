@@ -292,18 +292,18 @@ export const ShapeDto = z.object({
   proposeUnlocked: z.boolean(),
   /** The last reconciled round; 0 before the first proposal. */
   round: z.int().min(0),
-  /** The model alias the builder chose for the conversation; null runs it on the `plan` role's. */
+  /** The model ID the builder chose for the conversation; null runs it on the `plan` role's. */
   model: z.string().nullable().default(null),
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });
 export type ShapeDto = z.infer<typeof ShapeDto>;
 
-/** A model the builder may choose for a conversation (Shape spec §5.1). */
-export const ShapeModelAlias = z.string().regex(/^[a-z]+$/);
+/** A model the builder may choose for a conversation (Shape spec §5.1): any model ID the project's account lists. */
+export const ShapeModel = z.string().trim().min(1).max(200);
 
-/** `PUT /shapes/:id/model`: the model alias to run the conversation on, or null for the `plan` role's. */
-export const ShapeModelInput = z.strictObject({ model: ShapeModelAlias.nullable() });
+/** `PUT /shapes/:id/model`: the model ID to run the conversation on, or null for the `plan` role's. */
+export const ShapeModelInput = z.strictObject({ model: ShapeModel.nullable() });
 export type ShapeModelInput = z.infer<typeof ShapeModelInput>;
 
 export const ShapeMessageDto = z.object({

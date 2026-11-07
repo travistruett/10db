@@ -111,7 +111,9 @@ describe("a task's landing", () => {
     ).value;
     const held = store.write((ctx) => patchTask(ctx, task.id, { landing: { kind: 'hold' } })).value;
     expect(held.landing).toEqual({ kind: 'hold' });
-    store.write((ctx) => insertWorkstream(ctx, task.id));
+    store.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    );
     expect(() =>
       store.write((ctx) => patchTask(ctx, task.id, { landing: { kind: 'base' } })),
     ).toThrow(ConflictError);
@@ -123,7 +125,9 @@ describe("a task's landing", () => {
     const task = store.write((ctx) =>
       insertTask(ctx, p.id, { ...TASK, landing: { kind: 'branch', branch: 'next' } }),
     ).value;
-    store.write((ctx) => insertWorkstream(ctx, task.id));
+    store.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    );
     const reset = store.write((ctx) => resetTaskLanding(ctx, task.id, { kind: 'base' })).value;
     expect(reset.landing).toEqual({ kind: 'base' });
     expect(getTask(store.db, task.id).landing).toEqual({ kind: 'base' });
@@ -134,7 +138,9 @@ describe("a task's landing", () => {
   it('still lets a started task change its other fields', () => {
     const p = seedProject(store);
     const task = store.write((ctx) => insertTask(ctx, p.id, TASK)).value;
-    store.write((ctx) => insertWorkstream(ctx, task.id));
+    store.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    );
     expect(store.write((ctx) => patchTask(ctx, task.id, { title: 'Renamed' })).value.title).toBe(
       'Renamed',
     );

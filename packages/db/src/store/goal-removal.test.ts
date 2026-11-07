@@ -97,7 +97,11 @@ describe('removeDraftGoal', () => {
   it('refuses once a task has started, and removes nothing', () => {
     const id = seedGoal();
     const [first] = listGoalTasks(store.db, id);
-    store.write((ctx) => insertWorkstream(ctx, first?.id ?? mintId('Task')));
+    store.write((ctx) =>
+      insertWorkstream(ctx, first?.id ?? mintId('Task'), {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      }),
+    );
     expect(() => remove(id)).toThrow(TaskStartedError);
     expect(getGoal(store.db, id).state).toBe(GoalState.Draft);
     expect(listTasks(store.db, project.id)).toHaveLength(2);
@@ -108,7 +112,11 @@ describe('removeDraftGoal', () => {
   it('removes a goal whose task had a run cancelled while queued, as the digest reads it as not started', () => {
     const id = seedGoal();
     const [first] = listGoalTasks(store.db, id);
-    const ws = store.write((ctx) => insertWorkstream(ctx, first?.id ?? mintId('Task'))).value;
+    const ws = store.write((ctx) =>
+      insertWorkstream(ctx, first?.id ?? mintId('Task'), {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      }),
+    ).value;
     store.write((ctx) =>
       transitionWorkstream(ctx, ws.id, { to: WorkstreamState.Cancelled, fence: null }),
     );
@@ -121,7 +129,11 @@ describe('removeDraftGoal', () => {
   it('refuses a goal whose task had a run cancelled after a session, as the digest reads it as started', () => {
     const id = seedGoal();
     const [first] = listGoalTasks(store.db, id);
-    const ws = store.write((ctx) => insertWorkstream(ctx, first?.id ?? mintId('Task'))).value;
+    const ws = store.write((ctx) =>
+      insertWorkstream(ctx, first?.id ?? mintId('Task'), {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      }),
+    ).value;
     store.write((ctx) => {
       insertSession(ctx, {
         workstreamId: ws.id,
@@ -170,11 +182,21 @@ describe('removeDraftGoal', () => {
     function startAgain(): { id: GoalId; taskId: TaskId; again: WorkstreamDto } {
       const id = seedGoal();
       const taskId = listGoalTasks(store.db, id)[0]?.id ?? mintId('Task');
-      const first = store.write((ctx) => insertWorkstream(ctx, taskId)).value;
+      const first = store.write((ctx) =>
+        insertWorkstream(ctx, taskId, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+      ).value;
       store.write((ctx) => {
         firstRun(ctx, first);
       });
-      return { id, taskId, again: store.write((ctx) => insertWorkstream(ctx, taskId)).value };
+      return {
+        id,
+        taskId,
+        again: store.write((ctx) =>
+          insertWorkstream(ctx, taskId, {
+            first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+          }),
+        ).value,
+      };
     }
 
     function expectRefused(id: GoalId): void {
@@ -206,11 +228,15 @@ describe('removeDraftGoal', () => {
   it('removes a goal whose task was started again after a run that never began, with that run held', () => {
     const id = seedGoal();
     const taskId = listGoalTasks(store.db, id)[0]?.id ?? mintId('Task');
-    const first = store.write((ctx) => insertWorkstream(ctx, taskId)).value;
+    const first = store.write((ctx) =>
+      insertWorkstream(ctx, taskId, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    ).value;
     store.write((ctx) =>
       transitionWorkstream(ctx, first.id, { to: WorkstreamState.Cancelled, fence: null }),
     );
-    const again = store.write((ctx) => insertWorkstream(ctx, taskId)).value;
+    const again = store.write((ctx) =>
+      insertWorkstream(ctx, taskId, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    ).value;
     store.write((ctx) => holdTask(ctx, taskId));
     expect(goalDigest(store.db, id, null).status).toBe(GoalStatus.NotStarted);
     remove(id);
@@ -221,7 +247,11 @@ describe('removeDraftGoal', () => {
   it('removes a goal when the only task that ran was already removed, as the digest reads it as not started', () => {
     const id = seedGoal();
     const [first] = listGoalTasks(store.db, id);
-    const ws = store.write((ctx) => insertWorkstream(ctx, first?.id ?? mintId('Task'))).value;
+    const ws = store.write((ctx) =>
+      insertWorkstream(ctx, first?.id ?? mintId('Task'), {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      }),
+    ).value;
     store.write((ctx) => {
       for (const to of [WorkstreamState.Starting, WorkstreamState.Running, WorkstreamState.Failed])
         transitionWorkstream(ctx, ws.id, { to, fence: null });

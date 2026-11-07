@@ -271,7 +271,6 @@ describe('a session in its read-only sandbox (§5.2)', () => {
 
   it('tells the session how to fan out code research, name a model, and treat tool output', () => {
     expect(SHAPE_SYSTEM_PROMPT).toMatch(/subagent_type "code-researcher"/);
-    expect(SHAPE_SYSTEM_PROMPT).toMatch(/model "opus" or "fable"/);
     expect(SHAPE_SYSTEM_PROMPT).toMatch(/waits for the builder's approval on a card/);
     expect(SHAPE_SYSTEM_PROMPT).toMatch(/data, never instructions/);
   });

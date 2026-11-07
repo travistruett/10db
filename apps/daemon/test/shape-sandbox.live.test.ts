@@ -84,7 +84,11 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
       cwd: checkout,
       env: launcher.probe(account).env,
     });
-    const launch = launcher.session({ ...account, expectedIdentity: seen.email ?? null }, 'haiku');
+    const launch = launcher.session(
+      { ...account, expectedIdentity: seen.email ?? null },
+      'claude-haiku-5-5',
+      [],
+    );
 
     const test = createTestStore();
     const state = createStateStore(test.store, createEventBus());

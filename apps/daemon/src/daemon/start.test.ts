@@ -302,6 +302,8 @@ describe('startDaemon', () => {
         logLevel: 'warn',
         ...QUIET,
       });
+      // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
+      seedProfiles(running.state);
       daemon = running;
       const api = apiClient(running.url, running.token);
       const project = await api.post('/projects', ProjectDto, {
@@ -348,6 +350,8 @@ describe('startDaemon', () => {
         logLevel: 'warn',
         ...QUIET,
       });
+      // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
+      seedProfiles(running.state);
       daemon = running;
       const api = apiClient(running.url, running.token);
       const project = await api.post('/projects', ProjectDto, {
@@ -408,6 +412,8 @@ describe('startDaemon', () => {
           sandbox: { ...roots, runtime: FAKE_SRT },
           ...QUIET,
         });
+        // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
+        seedProfiles(running.state);
         daemon = running;
         // Each root it puts files in is made private to this user before any is put there.
         for (const root of [tmpRoot, codexLaneTempRoot, filesRoot])
@@ -544,6 +550,8 @@ describe('startDaemon', () => {
           sandbox: { ...roots, runtime: FAKE_SRT },
           ...QUIET,
         });
+        // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
+        seedProfiles(running.state);
         daemon = running;
         const api = apiClient(running.url, running.token);
         const project = await api.post('/projects', ProjectDto, {
@@ -885,6 +893,8 @@ describe('startDaemon', () => {
     try {
       let running = await start();
       daemon = running;
+      // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
+      seedProfiles(running.state);
       const call = async (path: string, body: unknown): Promise<{ id: string }> => {
         const res = await fetch(`${running.url}${path}`, {
           method: 'POST',
@@ -1153,6 +1163,8 @@ describe('startDaemon', () => {
           sustainedMs: 0,
         },
       });
+      // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
+      seedProfiles(daemon.state);
       const api = apiClient(daemon.url, daemon.token);
       const project = await api.post('/projects', ProjectDto, {
         name: 'demo',
@@ -1470,6 +1482,8 @@ describe('startDaemon', () => {
             : Promise.reject(new Error('offline'));
         },
       });
+      // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
+      if (!catalogueSync) seedProfiles(daemon.state);
       return { adapter, fetches, net, running: daemon };
     };
 

@@ -13,6 +13,7 @@ import {
   checkAccount,
   checkInitCredentials,
   credentialProblem,
+  MODEL_NOT_FOUND_ERROR,
   modelMatches,
   seenFrom,
 } from './account-check';
@@ -416,6 +417,13 @@ export function startShapeSession(
       for await (const msg of q) {
         if (failure) continue;
         if (msg.type === 'assistant') {
+          if (msg.error === MODEL_NOT_FOUND_ERROR) {
+            refuse(
+              SessionEndReason.ModelRefused,
+              `Claude Code reported that account "${spec.account.label}" cannot run the model ${spec.model}.`,
+            );
+            continue;
+          }
           const problem = credentialProblem(msg.error);
           if (problem) {
             const message = `Claude Code reported ${String(msg.error)} for account "${spec.account.label}"`;

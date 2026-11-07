@@ -21,6 +21,7 @@ import {
 } from '../scripts/acceptance-checks';
 import { apiClient, quickFlowId } from './api-client';
 import { createTempRepo, handoffArgs, isolatedGitEnv, tempDir, waitForAsync } from './fixtures';
+import { seedProfiles } from './seed-profiles';
 
 const write = (path: string) => ({
   do: 'tool' as const,
@@ -93,6 +94,8 @@ beforeAll(async () => {
     caffeinate: () => null,
     watch: false,
   });
+  // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
+  seedProfiles(daemon.state);
   // Every call names the zod schema its response is parsed with, so a changed response fails here.
   const api = apiClient(daemon.url, daemon.token);
   const project = await api.post('/projects', ProjectDto, {

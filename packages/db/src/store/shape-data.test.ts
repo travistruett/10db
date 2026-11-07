@@ -79,7 +79,9 @@ function laneSession() {
     });
     return insertSession(ctx, {
       ...sessionInput,
-      workstreamId: insertWorkstream(ctx, task.id).id,
+      workstreamId: insertWorkstream(ctx, task.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      }).id,
       mcpTokenHash: 'hash-lane',
     });
   }).value;

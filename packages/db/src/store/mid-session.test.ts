@@ -33,7 +33,9 @@ function workstream(): WorkstreamId {
   const task = store.write((ctx) =>
     insertTask(ctx, project.id, { title: 'T', acceptanceCriteria: ['x'], areas: ['api'] }),
   ).value;
-  return store.write((ctx) => insertWorkstream(ctx, task.id)).value.id;
+  return store.write((ctx) =>
+    insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+  ).value.id;
 }
 
 function moveThrough(id: WorkstreamId, path: readonly S[]): void {

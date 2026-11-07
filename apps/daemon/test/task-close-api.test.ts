@@ -27,6 +27,7 @@ import { startDaemon, type RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
 import { createTempRepo, tempDir } from './fixtures';
+import { seedProfiles } from './seed-profiles';
 
 let data: { path: string; cleanup(): void };
 let repo: { path: string; cleanup(): void };
@@ -45,6 +46,8 @@ beforeEach(async () => {
     // A tick long enough that a started task stays where the test left it.
     tickMs: 3_600_000,
   });
+  // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
+  seedProfiles(daemon.state);
 });
 afterEach(async () => {
   await daemon.stop();
@@ -180,7 +183,10 @@ async function shippedTask(projectId: ProjectId, state: 'open' | 'closed', faile
       to: 'SHIPPED',
       patch: { prUrl: 'https://github.com/o/r/pull/3' },
     });
-    const ws = insertWorkstream(ctx, task.id, { batchId: batch.id });
+    const ws = insertWorkstream(ctx, task.id, {
+      first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      batchId: batch.id,
+    });
     for (const to of failed
       ? (['STARTING', 'RUNNING', 'FAILED'] as const)
       : (['STARTING', 'RUNNING', 'VERIFYING', 'DONE'] as const))

@@ -42,6 +42,7 @@ import {
   tempDir,
   waitForAsync,
 } from './fixtures';
+import { seedProfiles } from './seed-profiles';
 
 let data: { path: string; cleanup(): void };
 let repo: { path: string; cleanup(): void };
@@ -63,6 +64,8 @@ async function boot(extra: Partial<Parameters<typeof startDaemon>[0]> = {}) {
     caps: { global: 0 },
     ...extra,
   });
+  // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
+  seedProfiles(daemon.state);
   client = new Client({ name: 'test', version: '0' });
   await client.connect(
     new StreamableHTTPClientTransport(new URL(`${daemon.url}/builder/mcp`), {
@@ -544,7 +547,10 @@ describe('the builder MCP endpoint', () => {
             baseBranch: 'main',
           });
           transitionBatch(ctx, batch.id, { to: 'OPEN', patch: { branch: 'tendb/alpha' } });
-          const ws = insertWorkstream(ctx, task.id, { batchId: batch.id });
+          const ws = insertWorkstream(ctx, task.id, {
+            first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+            batchId: batch.id,
+          });
           for (const to of ['STARTING', 'RUNNING', 'FAILED'] as const)
             transitionWorkstream(ctx, ws.id, { to, fence: null });
           return batch.id;
@@ -580,7 +586,9 @@ describe('the builder MCP endpoint', () => {
         const first = await seedTask(project.id, 'first');
         const waiting = await seedTask(project.id, 'waiting', [first.id]);
         const failedId = daemon.state.write((ctx) => {
-          const ws = insertWorkstream(ctx, waiting.id);
+          const ws = insertWorkstream(ctx, waiting.id, {
+            first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+          });
           for (const to of ['STARTING', 'RUNNING', 'FAILED'] as const)
             transitionWorkstream(ctx, ws.id, { to, fence: null });
           return ws.id;

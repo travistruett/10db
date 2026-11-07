@@ -1311,7 +1311,10 @@ describe('shape routes', () => {
   it('answers a conversation’s view, 404 for an unknown one', async () => {
     const view = {
       shape,
-      models: { default: 'opus', offered: ['opus', 'fable'] },
+      models: {
+        default: 'claude-opus-5-5',
+        offered: [{ model: 'claude-opus-5-5', tier: 'strongest' as const }],
+      },
       messages: [],
       proposals: [],
       heard: [],
@@ -1396,7 +1399,7 @@ describe('shape routes', () => {
     expect(stopped).toEqual([shapeId]);
   });
 
-  it('runs the conversation on the model chosen, refuses one malformed (400), and a change mid-turn (409)', async () => {
+  it('runs the conversation on the model chosen, whatever its ID, refuses a blank one (400), and a change mid-turn (409)', async () => {
     const chosen: (string | null)[] = [];
     const services = stubServices({
       chooseShapeModel: (_id, model) => {
@@ -1411,14 +1414,14 @@ describe('shape routes', () => {
         headers: { ...auth.headers, 'content-type': 'application/json' },
         body: JSON.stringify(body),
       });
-    const ok = await put({ model: 'fable' });
+    const ok = await put({ model: 'us.anthropic.claude-fable-5-1' });
     expect(ok.status).toBe(200);
-    expect(await ok.json()).toEqual({ ...shape, model: 'fable' });
+    expect(await ok.json()).toEqual({ ...shape, model: 'us.anthropic.claude-fable-5-1' });
     expect((await put({ model: null })).status).toBe(200);
-    expect((await put({ model: 'Fable 5.1' })).status).toBe(400);
+    expect((await put({ model: '  ' })).status).toBe(400);
     expect((await put({})).status).toBe(400);
     expect((await put({ model: 'opus' })).status).toBe(409);
-    expect(chosen).toEqual(['fable', null]);
+    expect(chosen).toEqual(['us.anthropic.claude-fable-5-1', null]);
   });
 
   describe('Convert', () => {

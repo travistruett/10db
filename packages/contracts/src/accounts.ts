@@ -71,6 +71,8 @@ export const AccountProblem = {
   CannotBill: 'cannot_bill',
   /** Claude Code reported no account on every bounded start, and `claude auth status` did not say signed out. */
   StartTimeout: 'start_timeout',
+  /** Every model the account lists is Unknown or marked unusable, so no tier has a model 10db may run. */
+  NoUsableModel: 'no_usable_model',
 } as const;
 export type AccountProblem = ValueOf<typeof AccountProblem>;
 

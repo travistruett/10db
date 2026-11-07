@@ -85,7 +85,31 @@
         "offered": {
           "type": "array",
           "items": {
-            "type": "string"
+            "type": "object",
+            "properties": {
+              "model": {
+                "type": "string"
+              },
+              "tier": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "fast",
+                      "balanced",
+                      "strongest"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "model",
+              "tier"
+            ]
           }
         }
       },

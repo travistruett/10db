@@ -233,16 +233,32 @@ describe('checkAccount', () => {
 });
 
 describe('modelMatches', () => {
-  it.each<[string, string, boolean]>([
-    ['haiku', 'claude-haiku-5-5', true],
-    ['sonnet', 'claude-sonnet-5-5[1m]', true],
-    ['sonnet', 'us.anthropic.claude-sonnet-5-5-v1:0', true],
-    ['haiku', '~anthropic/claude-haiku-latest', true],
-    ['opus', 'claude-sonnet-5-5', false],
-    ['~anthropic/claude-haiku-latest', '~anthropic/claude-haiku-latest', true],
-    ['us.anthropic.claude-sonnet-5-5-v1:0', 'claude-sonnet-5-5', false],
-  ])('%s against %s: %s', (requested, reported, ok) => {
-    expect(modelMatches(requested, reported)).toBe(ok);
+  it.each<[string, string, string, boolean]>([
+    ['the launch ID reported back', 'claude-opus-5-5', 'claude-opus-5-5', true],
+    [
+      'a [1m] launch ID a subscription reports without it',
+      'claude-opus-5-5[1m]',
+      'claude-opus-5-5',
+      true,
+    ],
+    [
+      'a [1m] launch ID Bedrock reports with it',
+      'us.anthropic.claude-sonnet-4-6[1m]',
+      'us.anthropic.claude-sonnet-4-6[1m]',
+      true,
+    ],
+    ['a prefixed Bedrock ID', 'us.anthropic.claude-opus-5-5', 'us.anthropic.claude-opus-5-5', true],
+    ['a Codex model', 'gpt-5.6-sol', 'gpt-5.6-sol', true],
+    ['another model than the one launched', 'claude-opus-5-5', 'claude-sonnet-5-5', false],
+    ['an alias, which 10db no longer launches', 'haiku', 'claude-haiku-5-5', false],
+    [
+      'a canonical ID against a prefixed one',
+      'claude-opus-5-5',
+      'us.anthropic.claude-opus-5-5',
+      false,
+    ],
+  ])('%s', (_name, launched, reported, ok) => {
+    expect(modelMatches(launched, reported)).toBe(ok);
   });
 });
 

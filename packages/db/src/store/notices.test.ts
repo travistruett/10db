@@ -48,7 +48,10 @@ function seed() {
     insertTask(ctx, project.id, { title: 'Alpha', acceptanceCriteria: ['x'], areas: ['api'] }),
   ).value;
   const workstream = store.write((ctx) =>
-    insertWorkstream(ctx, task.id, { batchId: batch.id }),
+    insertWorkstream(ctx, task.id, {
+      first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      batchId: batch.id,
+    }),
   ).value;
   return { batch, workstream };
 }

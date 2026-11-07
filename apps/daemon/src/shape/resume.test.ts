@@ -81,7 +81,9 @@ function convertTasks(...keys: string[]): TaskId[] {
 /** Marks a task finished with this many lane minutes, as a finished workstream leaves it. */
 function finishTask(taskId: TaskId, minutes: number): void {
   write((ctx) => {
-    const ws = insertWorkstream(ctx, taskId);
+    const ws = insertWorkstream(ctx, taskId, {
+      first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+    });
     ctx.tx
       .insert(schema.taskLaneTimes)
       .values({
@@ -136,7 +138,11 @@ describe('resuming a conversation', () => {
 
   it('tells the next turn the event under its id, and each converted row with its state', async () => {
     const [unstarted, started] = convertTasks('a', 'b').map((id) => must(id, 'task'));
-    write((ctx) => insertWorkstream(ctx, must(started, 'started')));
+    write((ctx) =>
+      insertWorkstream(ctx, must(started, 'started'), {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      }),
+    );
     const note = f.service.resume(shapeId(), 'Task b is running late.');
     f.service.send(shapeId(), 'What should change?');
     await f.service.settled(shapeId());
@@ -300,7 +306,9 @@ describe('telling a reopened conversation what Convert made', () => {
   it('gives a resumed session each converted row with its id and state on the next message', async () => {
     const [unstarted, started] = convertTasks('a', 'b').map((id) => must(id, 'task'));
     write((ctx) => {
-      insertWorkstream(ctx, must(started, 'started'));
+      insertWorkstream(ctx, must(started, 'started'), {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      });
       patchShape(ctx, shapeId(), { sdkSessionId: 'sdk-1' });
     });
     await send('What should change?');
@@ -316,7 +324,11 @@ describe('telling a reopened conversation what Convert made', () => {
   it('tells a live session as it stands at its next turn', async () => {
     const [first] = convertTasks('a').map((id) => must(id, 'task'));
     await send('First.');
-    write((ctx) => insertWorkstream(ctx, must(first, 'task')));
+    write((ctx) =>
+      insertWorkstream(ctx, must(first, 'task'), {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      }),
+    );
     await send('Second.');
     const session = must(f.adapter.shapeSessions[0], 'a session');
     expect(session.sent[0]).toMatch(new RegExp(`task ${first ?? ''} "Task a" — started`));
@@ -357,7 +369,9 @@ describe('telling a reopened conversation what Convert made', () => {
     const [first] = convertTasks('a').map((id) => must(id, 'task'));
     propose({ looseTasks: [loose(f.c.say(), 'b')] });
     write((ctx) => {
-      insertWorkstream(ctx, must(first, 'task'));
+      insertWorkstream(ctx, must(first, 'task'), {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      });
       patchShape(ctx, shapeId(), { sdkSessionId: 'sdk-1' });
     });
     expect(getShape(f.c.store.db, shapeId()).state).toBe(ShapeState.Proposed);
@@ -374,7 +388,11 @@ describe('telling a reopened conversation what Convert made', () => {
       patchShape(ctx, shapeId(), { sdkSessionId: 'sdk-1' });
     });
     f.service.resume(shapeId(), 'Task a is done.');
-    write((ctx) => insertWorkstream(ctx, must(first, 'task')));
+    write((ctx) =>
+      insertWorkstream(ctx, must(first, 'task'), {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      }),
+    );
     await send('What should change?');
     const prompt = must(prompts()[0], 'prompt');
     expect(times(prompt, `task ${first ?? ''} "Task a"`)).toBe(1);
@@ -394,7 +412,11 @@ describe('telling a reopened conversation what Convert made', () => {
     await send('First.');
     f.adapter.startShape = startShape;
 
-    write((ctx) => insertWorkstream(ctx, must(first, 'task')));
+    write((ctx) =>
+      insertWorkstream(ctx, must(first, 'task'), {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      }),
+    );
     await send('Second.');
     const prompt = must(prompts()[0], 'prompt');
     expect(times(prompt, `task ${first ?? ''} "Task a"`)).toBe(1);
@@ -468,7 +490,11 @@ describe('re-planning a reopened conversation', () => {
     ['a removal of a task that has started', 'removal'],
   ])('refuses %s', async (_name, kind) => {
     const [first] = convertTasks('a').map((id) => must(id, 'task'));
-    write((ctx) => insertWorkstream(ctx, must(first, 'task')));
+    write((ctx) =>
+      insertWorkstream(ctx, must(first, 'task'), {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      }),
+    );
     const event = cite();
     const answer = await callPropose(
       kind === 'change'

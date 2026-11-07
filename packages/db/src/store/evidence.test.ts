@@ -20,7 +20,9 @@ function seedWorkstream() {
   const task = store.write((ctx) =>
     insertTask(ctx, project.id, { title: 'A', acceptanceCriteria: ['x'], areas: ['api'] }),
   ).value;
-  return store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+  return store.write((ctx) =>
+    insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+  ).value;
 }
 
 describe('evidence', () => {

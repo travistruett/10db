@@ -7,6 +7,7 @@ import { silentLogger } from '../log';
 import { FakeAdapter, type FakeShapeTurn } from '../sessions';
 import { seedConversation, type ConversationFixture } from './conversation-fixture';
 import { createShapeService, type ShapeService } from './service';
+import { SHAPE_AGENT_MODELS } from './confinement';
 
 // Shape spec §5.2: the researcher reaches the web, and every search, fetch and refusal shows in the
 // conversation as a dimmed line (a Tool message from Claude).
@@ -30,8 +31,9 @@ beforeEach(() => {
     brainstormRefusal: () => null,
     launch: () => ({
       cwd: '/repo',
-      model: 'opus',
+      model: 'claude-opus-5-5',
       effort: 'high',
+      agentModels: SHAPE_AGENT_MODELS,
       env: {},
       account: {
         accountId: mintId('Account'),

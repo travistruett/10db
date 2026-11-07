@@ -80,6 +80,8 @@ export function fixFor(account: AccountRow, problem: AccountProblem): string {
       return "Unlock the login Keychain, and allow 10db's access if macOS asks, then answer Resume.";
     case AccountProblem.CannotBill:
       return "Check the account's billing with its provider, then answer Resume.";
+    case AccountProblem.NoUsableModel:
+      return `Choose a model for each tier under Settings › Accounts › ${account.label}, or wait for the account's model list to change, then answer Resume.`;
     case AccountProblem.StartTimeout:
       // Only a subscription is paused for this, but the card must not name a command that does not apply.
       return signsInWithLogin(account.kind)
@@ -144,15 +146,25 @@ export const MOVED_CARD = 'moved';
 const LIMIT_NAMES: Readonly<Record<string, string>> = {
   five_hour: '5-hour limit',
   seven_day: 'weekly limit',
-  seven_day_opus: 'weekly Opus limit',
-  seven_day_sonnet: 'weekly Sonnet limit',
   seven_day_overage_included: 'weekly limit',
   overage: 'extra-usage limit',
 };
 
-/** How a card names the limit a session reported; one 10db hasn't seen reads as the usage limit. */
+const WEEKLY_LIMIT_PREFIX = 'seven_day_';
+
+/** How a card names the limit a session reported; a model's weekly limit is named from its key, and one 10db hasn't seen reads as the usage limit. */
 export function limitName(limitType: string | null): string {
-  return (limitType === null ? undefined : LIMIT_NAMES[limitType]) ?? 'usage limit';
+  if (limitType === null) return 'usage limit';
+  const known = LIMIT_NAMES[limitType];
+  if (known !== undefined) return known;
+  if (!limitType.startsWith(WEEKLY_LIMIT_PREFIX) || limitType === WEEKLY_LIMIT_PREFIX)
+    return 'usage limit';
+  const words = limitType
+    .slice(WEEKLY_LIMIT_PREFIX.length)
+    .split('_')
+    .filter((word) => word !== '')
+    .map((word) => `${word.charAt(0).toUpperCase()}${word.slice(1)}`);
+  return `weekly ${words.join(' ')} limit`;
 }
 
 /** "is at 96% of its 5-hour limit", or "reached its 5-hour limit" at the limit itself. */

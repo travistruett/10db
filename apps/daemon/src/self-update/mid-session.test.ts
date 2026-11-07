@@ -43,7 +43,9 @@ describe('midSessionWork', () => {
     const task = store.write((ctx) =>
       insertTask(ctx, project.id, { title: 'T', acceptanceCriteria: ['x'], areas: ['api'] }),
     ).value;
-    const ws = store.write((ctx) => insertWorkstream(ctx, task.id)).value;
+    const ws = store.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    ).value;
     for (const to of [S.Starting, S.Running]) {
       store.write((ctx) => transitionWorkstream(ctx, ws.id, { to, fence: null }));
     }

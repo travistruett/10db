@@ -1,13 +1,30 @@
-import type { ShapeViewDto } from '@10db/contracts';
-import { Group, Select, Text } from '@mantine/core';
+import { ModelTier, type ShapeModelOption, type ShapeViewDto } from '@10db/contracts';
+import { Group, Select, Text, type ComboboxData } from '@mantine/core';
 import { useChooseShapeModel } from '../../daemon/shape-queries';
 
 /** The default option's value: Select cannot hold null as an option, and null is what it means. */
 const DEFAULT_VALUE = '';
 
-/** A model alias as the builder reads it: `fable` is Fable. */
-function modelLabel(alias: string): string {
-  return alias.charAt(0).toUpperCase() + alias.slice(1);
+/** The groups, weakest tier first; a model the catalogue does not rank comes last. */
+const TIER_ORDER: readonly (ModelTier | null)[] = [
+  ModelTier.Fast,
+  ModelTier.Balanced,
+  ModelTier.Strongest,
+  null,
+];
+
+function groupLabel(tier: ModelTier | null): string {
+  return tier === null ? 'Unknown tier' : `${tier.charAt(0).toUpperCase()}${tier.slice(1)} models`;
+}
+
+/** The account's models as the Select takes them: one group per tier, in the daemon's order within it. */
+function groupedByTier(offered: readonly ShapeModelOption[]): ComboboxData {
+  return TIER_ORDER.flatMap((tier) => {
+    const items = offered
+      .filter((option) => option.tier === tier)
+      .map((option) => ({ value: option.model, label: option.model }));
+    return items.length === 0 ? [] : [{ group: groupLabel(tier), items }];
+  });
 }
 
 export interface ModelPickerProps {
@@ -26,12 +43,13 @@ export function ModelPicker({ view }: ModelPickerProps) {
   const busy = view.turn.running || view.turn.queued > 0 || choose.isPending;
   const picked = view.shape.model;
   const defaultLabel =
-    view.models.default === null ? 'Default' : `Default (${modelLabel(view.models.default)})`;
+    view.models.default === null ? 'Default' : `Default (${view.models.default})`;
   // A pick the account no longer offers still shows, rather than reading as the default.
-  const aliases = picked === null || offered.includes(picked) ? offered : [picked, ...offered];
-  const data = [
+  const gone = picked !== null && !offered.some((option) => option.model === picked);
+  const data: ComboboxData = [
     { value: DEFAULT_VALUE, label: defaultLabel },
-    ...aliases.map((alias) => ({ value: alias, label: modelLabel(alias) })),
+    ...(gone ? [{ value: picked, label: `${picked} (not offered)` }] : []),
+    ...groupedByTier(offered),
   ];
 
   return (
@@ -44,7 +62,7 @@ export function ModelPicker({ view }: ModelPickerProps) {
       <Select
         aria-label="Model"
         size="xs"
-        w={170}
+        w={260}
         data={data}
         value={picked ?? DEFAULT_VALUE}
         allowDeselect={false}

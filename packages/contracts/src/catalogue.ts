@@ -8,6 +8,13 @@ type ValueOf<T> = T[keyof T];
 export const ModelTier = { Fast: 'fast', Balanced: 'balanced', Strongest: 'strongest' } as const;
 export type ModelTier = ValueOf<typeof ModelTier>;
 
+const TIER_NAMES: ReadonlySet<string> = new Set(Object.values(ModelTier));
+
+/** Whether `value` names a tier, as a planned step's model does when its account offers nothing to run it on. */
+export function isModelTier(value: string): value is ModelTier {
+  return TIER_NAMES.has(value);
+}
+
 /** Where the catalogue came from; none when this daemon has no catalogue at all. */
 export const CatalogueSource = {
   Fetched: 'fetched',

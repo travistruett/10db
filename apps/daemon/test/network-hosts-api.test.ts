@@ -22,6 +22,7 @@ import { createGateSandbox } from '../src/sandbox';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
 import { createTempRepo, FAKE_SRT, SANDBOXED, tempDir } from './fixtures';
+import { seedProfiles } from './seed-profiles';
 
 /**
  * The shortest directory this process can create in: `/tmp`, or, where a sandbox denies it, the
@@ -60,6 +61,8 @@ beforeEach(async () => {
     watch: false,
     tickMs: 3_600_000,
   });
+  // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
+  seedProfiles(daemon.state);
 });
 afterEach(async () => {
   await daemon.stop();

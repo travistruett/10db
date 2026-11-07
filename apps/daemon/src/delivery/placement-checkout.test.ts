@@ -64,7 +64,9 @@ function sharedLane(): void {
     areas: ['ui'],
     workspaceMode: WorkspaceMode.Shared,
   });
-  const ws = h.state.write((c) => insertWorkstream(c, other.id));
+  const ws = h.state.write((c) =>
+    insertWorkstream(c, other.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+  );
   h.settle(ws.id, 'RUNNING');
 }
 

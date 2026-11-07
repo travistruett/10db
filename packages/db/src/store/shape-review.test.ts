@@ -186,13 +186,17 @@ describe('question cards per task', () => {
     store.write((ctx) =>
       insertShapeLink(ctx, { shapeId, proposalId: row.id, key: title, taskId: task.id }),
     );
-    return store.write((ctx) => insertWorkstream(ctx, task.id)).value.id;
+    return store.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    ).value.id;
   }
   function startedAlone(title: string): { taskId: TaskId; workstreamId: WorkstreamId } {
     const task = store.write((ctx) => insertTask(ctx, project.id, taskInput(title))).value;
     return {
       taskId: task.id,
-      workstreamId: store.write((ctx) => insertWorkstream(ctx, task.id)).value.id,
+      workstreamId: store.write((ctx) =>
+        insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+      ).value.id,
     };
   }
   function ask(workstreamId: WorkstreamId, kind: InboxKind = InboxKind.Question) {

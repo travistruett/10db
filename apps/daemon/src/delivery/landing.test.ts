@@ -41,7 +41,7 @@ const autoMergeCalls = () => h.gh.calls.filter((c) => c.method === 'prAutoMerge'
 function underWay(title: string): TaskDto {
   const task = h.addTask(title, { landing: { kind: 'branch', branch: 'feature/x' } });
   h.state.write((c) => {
-    insertWorkstream(c, task.id);
+    insertWorkstream(c, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } });
   });
   return task;
 }

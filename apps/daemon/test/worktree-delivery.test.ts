@@ -34,6 +34,7 @@ import {
   tempDir,
   waitForAsync,
 } from './fixtures';
+import { seedProfiles } from './seed-profiles';
 
 const TITLES = ['Alpha', 'Beta', 'Gamma'] as const;
 const fileOf = (title: string) => `src/ui/${title.toLowerCase()}.txt`;
@@ -110,6 +111,8 @@ async function start(gateCommand = 'true', maxLanes = 3) {
     networkEnv: () => ({ ...NETWORK_ENV, GIT_CONFIG_GLOBAL: network.global }),
     worktreeRoot: worktrees.path,
   });
+  // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
+  seedProfiles(daemon.state);
   const running = daemon;
   const api = apiClient(running.url, running.token);
   const project = await api.post('/projects', ProjectDto, {

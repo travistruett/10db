@@ -61,7 +61,8 @@
                 "secret_changed",
                 "keychain_unavailable",
                 "cannot_bill",
-                "start_timeout"
+                "start_timeout",
+                "no_usable_model"
               ]
             },
             "message": {

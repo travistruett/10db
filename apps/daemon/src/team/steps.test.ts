@@ -280,7 +280,12 @@ describe('retryWorkstream in a batch', () => {
       transitionBatch(ctx, b.id, { to: 'OPEN' });
       return b;
     });
-    const ws = state.write((ctx) => insertWorkstream(ctx, task.id, { batchId: batch.id }));
+    const ws = state.write((ctx) =>
+      insertWorkstream(ctx, task.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        batchId: batch.id,
+      }),
+    );
     state.write((ctx) => {
       for (const s of ['STARTING', 'RUNNING', 'FAILED'] as const)
         transitionWorkstream(ctx, ws.id, { to: s, fence: null });
@@ -306,7 +311,12 @@ describe('retryWorkstream in a batch', () => {
       transitionBatch(ctx, b.id, { to: 'OPEN' });
       return b;
     });
-    const ws = state.write((ctx) => insertWorkstream(ctx, task.id, { batchId: batch.id }));
+    const ws = state.write((ctx) =>
+      insertWorkstream(ctx, task.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        batchId: batch.id,
+      }),
+    );
     state.write((ctx) => {
       for (const s of ['STARTING', 'RUNNING', 'FAILED'] as const)
         transitionWorkstream(ctx, ws.id, { to: s, fence: null });
@@ -320,7 +330,11 @@ describe('retryWorkstream in a batch', () => {
   });
 
   it('retries a workstream with no batch as before', () => {
-    const ws = state.write((ctx) => insertWorkstream(ctx, addTask().id));
+    const ws = state.write((ctx) =>
+      insertWorkstream(ctx, addTask().id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      }),
+    );
     state.write((ctx) => {
       for (const s of ['STARTING', 'RUNNING', 'FAILED'] as const)
         transitionWorkstream(ctx, ws.id, { to: s, fence: null });
@@ -331,7 +345,9 @@ describe('retryWorkstream in a batch', () => {
 
 describe('retryWorkstream', () => {
   const failedWorkstream = (taskId: TaskId) => {
-    const ws = state.write((ctx) => insertWorkstream(ctx, taskId));
+    const ws = state.write((ctx) =>
+      insertWorkstream(ctx, taskId, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    );
     state.write((ctx) => transitionWorkstream(ctx, ws.id, { to: 'STARTING', fence: null }));
     state.write((ctx) => transitionWorkstream(ctx, ws.id, { to: 'FAILED', fence: null }));
     return ws;
@@ -340,7 +356,9 @@ describe('retryWorkstream', () => {
   const failedThenCancelled = () => {
     const task = addTask();
     const first = failedWorkstream(task.id);
-    const second = state.write((ctx) => insertWorkstream(ctx, task.id));
+    const second = state.write((ctx) =>
+      insertWorkstream(ctx, task.id, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+    );
     state.write((ctx) => transitionWorkstream(ctx, second.id, { to: 'CANCELLED', fence: null }));
     return { task, first };
   };

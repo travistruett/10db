@@ -14,6 +14,7 @@ export {
   AccountLaunchError,
   codexSignInCommand,
   createLauncher,
+  ModelNotLaunchableError,
   type AccountExpectation,
   type Launcher,
   type SessionLaunch,

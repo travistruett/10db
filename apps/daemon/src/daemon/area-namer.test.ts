@@ -1,8 +1,16 @@
 import { existsSync, readdirSync } from 'node:fs';
-import { createTestStore, defaultAccountId, getAccountRow, seedDefaultAccount } from '@10db/db';
+import {
+  createTestStore,
+  defaultAccountId,
+  getAccountRow,
+  replaceAccountModels,
+  seedDefaultAccount,
+} from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createMemoryKeychain, tempDir } from '../../test/fixtures';
+import { seedProfiles } from '../../test/seed-profiles';
 import { createLauncher } from '../environment';
+import { createEventBus, createStateStore } from '../events';
 import { FakeAdapter, FakeScriptBook } from '../sessions';
 import { createAreaNamer } from './area-namer';
 
@@ -13,6 +21,7 @@ beforeEach(() => {
   close = test.close;
   store = test.store;
   store.write((ctx) => seedDefaultAccount(ctx, { expectedIdentity: 'me@example.com' }));
+  seedProfiles(createStateStore(store, createEventBus()));
 });
 afterEach(() => {
   close();
@@ -26,7 +35,7 @@ const launcher = () =>
   });
 
 describe('createAreaNamer', () => {
-  it('asks the default account for a cheap model, in an empty folder, and returns the text', async () => {
+  it('asks the default account for its fast model, in an empty folder, and returns the text', async () => {
     const adapter = new FakeAdapter(FakeScriptBook.parse({}));
     adapter.answer = () => Promise.resolve('{"areas":[]}');
     const scratch = tempDir('namer');
@@ -43,7 +52,7 @@ describe('createAreaNamer', () => {
     if (id === null || ask === undefined) return;
     expect(ask).toMatchObject({
       prompt: 'Name these.',
-      model: 'haiku',
+      model: 'claude-haiku-5-5',
       account: { accountId: id, label: getAccountRow(store.db, id).label },
     });
     // The billing switches never reach a one-shot question on a subscription.
@@ -51,6 +60,49 @@ describe('createAreaNamer', () => {
     expect(ask.cwd.startsWith(scratch.path)).toBe(true);
     expect(existsSync(ask.cwd)).toBe(false);
     expect(readdirSync(scratch.path)).toEqual([]);
+    scratch.cleanup();
+  });
+
+  it.each([
+    {
+      name: 'the ID the account launches its fast model with',
+      list: [
+        { model: 'claude-haiku-5-5', launchId: 'us.anthropic.claude-haiku-5-5' },
+        { model: 'claude-opus-5-5', launchId: 'us.anthropic.claude-opus-5-5' },
+      ],
+      model: 'us.anthropic.claude-haiku-5-5',
+    },
+    {
+      name: 'the tier above when the account lists no fast model',
+      list: [{ model: 'claude-sonnet-5-5', launchId: 'claude-sonnet-5-5' }],
+      model: 'claude-sonnet-5-5',
+    },
+  ])('asks for $name', async ({ list, model }) => {
+    const id = defaultAccountId(store.db);
+    if (id === null) throw new Error('no default account');
+    store.write((ctx) =>
+      replaceAccountModels(
+        ctx,
+        id,
+        list.map((m) => ({
+          ...m,
+          family: null,
+          efforts: [],
+          inputPrice: null,
+          outputPrice: null,
+        })),
+      ),
+    );
+    const adapter = new FakeAdapter(FakeScriptBook.parse({}));
+    adapter.answer = () => Promise.resolve('x');
+    const scratch = tempDir('namer');
+    await createAreaNamer({
+      adapter,
+      launcher: launcher(),
+      db: store.db,
+      scratchRoot: scratch.path,
+    })('Name these.');
+    expect(adapter.completions[0]?.model).toBe(model);
     scratch.cleanup();
   });
 

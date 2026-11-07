@@ -65,7 +65,8 @@ describe.skipIf(!live)('Claude adapter, live', () => {
     expect(seen.email).toBeTruthy();
     const launch = launcher.session(
       { ...defaultAccount, expectedIdentity: seen.email ?? null },
-      'haiku',
+      'claude-haiku-5-5',
+      [],
     );
     const handle = adapter.start({
       sessionId: mintId('Session'),

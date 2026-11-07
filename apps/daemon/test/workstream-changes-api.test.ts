@@ -18,6 +18,7 @@ import { raiseBuilderCheck } from '../src/runner';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
 import { createTempRepo, isolatedGitEnv, tempDir } from './fixtures';
+import { seedProfiles } from './seed-profiles';
 
 let data: { path: string; cleanup(): void };
 let repo: { path: string; cleanup(): void };
@@ -36,6 +37,8 @@ beforeEach(async () => {
     // A tick long enough that a started task stays where the test left it.
     tickMs: 3_600_000,
   });
+  // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
+  seedProfiles(daemon.state);
 });
 afterEach(async () => {
   await daemon.stop();
@@ -289,7 +292,10 @@ describe('GET /workstreams/:id/changes', () => {
           baseBranch: 'main',
           ...(worktreePath === null ? {} : { worktreePath }),
         });
-        const ws = insertWorkstream(ctx, task.id, { batchId: batch.id });
+        const ws = insertWorkstream(ctx, task.id, {
+          first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+          batchId: batch.id,
+        });
         patchWorkstream(ctx, ws.id, null, { baseHead });
         return ws;
       });

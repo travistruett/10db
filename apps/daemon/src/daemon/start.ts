@@ -33,6 +33,7 @@ import {
   deleteJudgeCallsBefore,
   lanesByAccount,
   getAccountRow,
+  listAccountModels,
   getAppSetting,
   getProject,
   listPermissionRules,
@@ -135,7 +136,7 @@ import {
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
 import { chooseModel, offeredModels, PLAN_NEED } from '../routing';
 import { createScreenBroker, createScreens, renderMayRead } from '../screens';
-import { createShapeJev, createShapeService } from '../shape';
+import { createShapeJev, createShapeService, shapeAgentModels } from '../shape';
 import { createKnowledgeServices } from './knowledge-services';
 import { createShapeServices } from './shape-services';
 import { createShapePreparer } from './shape-session-tools';
@@ -1131,15 +1132,17 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         throw new InvalidError(`${row.label} offers no model for planning`);
       // The builder's pick runs at the plan role's effort, while the account still offers it; one it has
       // stopped offering since gives way to the role's.
-      const offered = offeredModels(routingInputs(db, project).profiles);
+      const offered = offeredModels(routingInputs(db, project).profiles).map((o) => o.model);
       const session = launcher.session(
         row,
         chosen !== null && offered.includes(chosen) ? chosen : profile.model,
+        listAccountModels(db, row.id),
       );
       return {
         cwd: project.repoPath,
         model: session.model,
         effort: profile.effort,
+        agentModels: shapeAgentModels(row.kind),
         env: session.env,
         account: session.expect,
         access: {

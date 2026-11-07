@@ -48,7 +48,7 @@ function spec(overrides: Partial<SessionSpec> = {}): SessionSpec {
     sequence: 1,
     cwd: '/repo',
     prompt: 'Task: Alpha\nDo it.',
-    model: 'sonnet',
+    model: 'claude-sonnet-5-5',
     effort: 'medium',
     resumeProviderSessionId: null,
     env: { PATH: '/usr/bin:/bin', CLAUDE_AGENT_SDK_CLIENT_APP: '10db/0.1.0' },
@@ -336,7 +336,7 @@ describe('buildQueryOptions', () => {
     const options = buildQueryOptions(spec(), deps);
     expect(options).toMatchObject({
       cwd: '/repo',
-      model: 'sonnet',
+      model: 'claude-sonnet-5-5',
       effort: 'medium',
       pathToClaudeCodeExecutable: '/usr/local/bin/claude',
       settingSources: ['project'],
@@ -524,7 +524,7 @@ describe('buildQueryOptions', () => {
       buildQueryOptions(spec(overrides), deps);
     expect(values).toEqual({
       cwd: '/repo',
-      model: 'sonnet',
+      model: 'claude-sonnet-5-5',
       effort: 'medium',
       env: { PATH: '/usr/bin:/bin', CLAUDE_AGENT_SDK_CLIENT_APP: '10db/0.1.0' },
       pathToClaudeCodeExecutable: '/usr/local/bin/claude',
@@ -2419,10 +2419,12 @@ describe('the account check', () => {
       ],
       then: 'hang',
     });
-    const events = await collect(adapter.start(spec({ model: 'opus' })).events);
+    const events = await collect(adapter.start(spec({ model: 'claude-opus-5-5' })).events);
     expect(events.map((e) => e.type)).toEqual(['ended']);
     expect(events[0]).toMatchObject({ reason: 'billing_refused' });
-    expect(endMessage(events[0])).toMatch(/asked for opus but Claude Code runs claude-sonnet-5-5/);
+    expect(endMessage(events[0])).toMatch(
+      /asked for claude-opus-5-5 but Claude Code runs claude-sonnet-5-5/,
+    );
   });
 
   it('accepts a mapped model only when init reports it exactly', async () => {
@@ -2448,6 +2450,21 @@ describe('the account check', () => {
       reason: 'account_refused',
       refusal: { problem: 'signed_out', seenIdentity: null },
     });
+  });
+
+  it('ends a session whose model the account cannot run as a refused model, not a refused account', async () => {
+    const { adapter } = adapterFor({
+      messages: [
+        initMessage('none', undefined, 'not-a-model'),
+        assistantMessage([textBlock('')], 'model_not_found'),
+      ],
+      then: 'hang',
+    });
+    const events = await collect(adapter.start(spec({ model: 'not-a-model' })).events);
+    const ended = events.at(-1);
+    expect(ended).toMatchObject({ type: 'ended', reason: 'model_refused' });
+    expect(ended).not.toHaveProperty('refusal');
+    expect(endMessage(ended)).toMatch(/not-a-model/);
   });
 
   it('reports cache reads apart from input, and cache writes as input', async () => {

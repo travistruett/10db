@@ -6,7 +6,8 @@
       "anyOf": [
         {
           "type": "string",
-          "pattern": "^[a-z]+$"
+          "minLength": 1,
+          "maxLength": 200
         },
         {
           "type": "null"

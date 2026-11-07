@@ -19,6 +19,7 @@ import {
   tempDir,
   waitForAsync,
 } from './fixtures';
+import { seedProfiles } from './seed-profiles';
 
 const QUIET = { caffeinate: () => null, watch: false } as const;
 
@@ -51,6 +52,8 @@ async function runOnFallback(book: FakeScriptBook) {
     keychain: createMemoryKeychain(),
     ...QUIET,
   });
+  // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
+  seedProfiles(running.state);
   daemon = running;
   const api = apiClient(running.url, running.token);
   const { account: fallback } = await api.post('/accounts', AccountCreatedDto, {

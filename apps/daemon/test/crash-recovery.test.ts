@@ -10,13 +10,16 @@ import {
   WorkstreamDto,
   WorkstreamState,
 } from '@10db/contracts';
+import { createStore, openDatabase } from '@10db/db';
 import Database from 'better-sqlite3';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { readRuntimeInfo } from '../src/daemon';
+import { createEventBus, createStateStore } from '../src/events';
 import type { FakeScriptBook } from '../src/sessions';
 import { apiClient, quickFlowId } from './api-client';
 import { createTempRepo, isolatedGitEnv, tempDir, waitForAsync, type TempDir } from './fixtures';
+import { seedProfiles } from './seed-profiles';
 
 const DAEMON_DIR = resolve(import.meta.dirname, '..');
 const BOOK: FakeScriptBook = {
@@ -158,6 +161,10 @@ describe('kill -9 mid-step', () => {
       child = launchDaemon();
       const first = child;
       let api = await connect(first);
+      // With the catalogue fetch off nothing builds profiles; the fixture's stand in for an account's list.
+      const seeding = openDatabase(join(data.path, '10db.sqlite'));
+      seedProfiles(createStateStore(createStore(seeding), createEventBus()));
+      seeding.$client.close();
       const project = await api.post('/projects', ProjectDto, {
         name: 'crash',
         repoPath: repo.path,

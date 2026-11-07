@@ -13,7 +13,13 @@ import { createServiceFixture, type ServiceFixture } from './service-fixture';
 // or choose the model it runs on, is refused when it is made, before it writes anything.
 
 /** The models a Claude account offers, so a model choice is refused for the account, not the model. */
-const MODELS = { default: 'opus', offered: ['opus', 'sonnet'] };
+const MODELS = {
+  default: 'claude-opus-5-5',
+  offered: [
+    { model: 'claude-opus-5-5', tier: 'strongest' as const },
+    { model: 'claude-sonnet-5-5', tier: 'balanced' as const },
+  ],
+};
 
 let f: ServiceFixture;
 afterEach(async () => {
@@ -25,7 +31,7 @@ const requests: [string, () => unknown][] = [
   ['send', () => f.service.send(f.c.shape.id, 'Make the cards denser.')],
   ['propose', () => f.service.propose(f.c.shape.id)],
   ['rehearse', () => f.service.rehearse(f.c.shape.id)],
-  ['a model choice', () => f.service.chooseModel(f.c.shape.id, 'sonnet')],
+  ['a model choice', () => f.service.chooseModel(f.c.shape.id, 'claude-sonnet-5-5')],
   [
     'start_shape',
     () =>
@@ -60,7 +66,9 @@ describe('a conversation on a ChatGPT account', () => {
     'is not refused on a %s account',
     (accountKind) => {
       f = createServiceFixture({ accountKind, models: () => MODELS });
-      expect(f.service.chooseModel(f.c.shape.id, 'sonnet').model).toBe('sonnet');
+      expect(f.service.chooseModel(f.c.shape.id, 'claude-sonnet-5-5').model).toBe(
+        'claude-sonnet-5-5',
+      );
       expect(() => f.service.send(f.c.shape.id, 'Make the cards denser.')).not.toThrow();
       expect(f.service.propose(f.c.shape.id)).toMatchObject({ status: 'started' });
     },

@@ -81,7 +81,12 @@ function startRun(projectId: ProjectId, title: string, batchId: BatchId | null =
       areas: ['api'],
     }),
   ).value;
-  const ws = store.write((ctx) => insertWorkstream(ctx, task.id, { batchId })).value;
+  const ws = store.write((ctx) =>
+    insertWorkstream(ctx, task.id, {
+      first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      batchId,
+    }),
+  ).value;
   move(ws.id, S.Starting);
   move(ws.id, S.Running);
   const session = store.write((ctx) =>
