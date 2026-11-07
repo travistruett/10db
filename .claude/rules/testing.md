@@ -5,8 +5,9 @@
 - **Fix production code, not the test.** When a test fails, assume the code is wrong until you
   have shown the test is.
 - **Extend before you add.** Before writing a test, find the tests that already cover the
-  behavior. Extend one or add a table row when one fits, whatever its fixture costs. Reviewers may
-  ask to merge overlapping tests or fold them into a table, not only to add tests.
+  behavior. Extend one or add a table row when it sits on the cheapest rung that can catch the
+  regression. When it doesn't, add the cheaper test and say why in `why_new`. Reviewers may ask to
+  merge overlapping tests or fold them into a table, not only to add tests.
 - **A new test is the cheapest one that can fail for the regression you fear.** Name the
   regression, then take the first rung that can catch it:
   1. A pure function.
@@ -21,19 +22,20 @@
   When a decision can only be reached through an expensive fixture, move it into a module
   production calls and test it there. That adds a test: keep one that goes through the wiring.
 
-- **Some tests never move down a rung, even when they look repetitive.** Merges, pushes, worktrees,
-  migrations where a git merge is the behavior, and every recovery, trust, sandbox, guard, claim and
-  permission row. Before any other test moves down a rung, show the cheaper one failing for the
-  same regression.
+- **Some tests start on, and never move below, the rung that exercises the real thing, even when
+  they look repetitive.** Merges, pushes, worktrees, migrations where a git merge is the behavior,
+  and every recovery, trust, sandbox, guard, claim and permission row. Before any other test moves
+  down a rung, see the cheaper one fail for the same regression, and say how in the commit.
 - **Real objects on every rung, mocks only at boundaries.** A cheaper test is a smaller test, not a
   mock of your own code. git and SQLite are never mocked. Mock only the network, the clock and child
   processes you don't own (the fake Claude adapter is such a boundary).
-- **No test-only code.** A dependency passed in with a production default, such as an injected
-  clock, is fine. A branch, flag or export that only a test uses is a seam: test at the real
+- **No new test-only code.** A dependency passed in with a production default, such as an injected
+  clock, is fine. A new branch, flag or export that only a test uses is not: test at the real
   boundary instead.
-- **A new test, not a new row, carries a value card**, in the plan and in the commit that adds it,
-  wrapped to fit: reviewers read commits, and an implement step has no report.
-  `Value: protects=<behavior>; fails_when=<regression>; why_new=<tests checked, what they miss>; seam=<test-only code added, or none>; no_claim=<what green does not prove>`.
+- **Each newly tested behavior carries one value card**, however many cases it has, in the commit
+  that adds it, wrapped to fit, and in the plan when there is one. Reviewers read commits, and an
+  implement step has no report.
+  `Value: protects=<behavior>; fails_when=<regression>; why_new=<tests checked, what they miss>; no_claim=<what green does not prove>`.
 - **Table-driven tests** for state machines, rules and parsers: one row per case, named.
 - **Test behavior, not implementation.** Assert on outputs, persisted rows and emitted events,
   not on which private function ran.
