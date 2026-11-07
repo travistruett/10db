@@ -1,5 +1,5 @@
 import {
-  ModelStatus,
+  isPickableModel,
   type AccountModelDto,
   type ModelProfileDto,
   type Provider,
@@ -33,11 +33,11 @@ export function offeredProfiles(
 /**
  * The models among the profiles an account offers, each once with its tier, weakest tier first and cheapest
  * first within it: what a conversation's model picker lists. It is the account's whole list, a replaced
- * model and one the catalogue does not rank (last) included, because the builder may choose any by hand;
- * only a model its maker has retired is left out.
+ * model and one the catalogue does not rank (last) included, because the builder may choose any by hand
+ * (`isPickableModel`, which the desktop's dropdowns use too).
  */
 export function offeredModels(profiles: readonly ModelProfileDto[]): ShapeModelOption[] {
-  const choosable = profiles.filter((p) => p.status !== ModelStatus.Retired);
+  const choosable = profiles.filter((p) => isPickableModel(p.status));
   const tiers = new Map(choosable.map((p) => [p.model, p.tier]));
   const level = (model: string): number => {
     const tier = tiers.get(model) ?? null;

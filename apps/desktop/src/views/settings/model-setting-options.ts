@@ -1,4 +1,5 @@
 import {
+  isPickableModel,
   ModelStatus,
   ModelTier,
   type AccountId,
@@ -53,16 +54,32 @@ const GENERAL: readonly ModelSetting[] = [
   { kind: 'top_of_tier' },
 ];
 
-/** A model an account can run now: not replaced by its maker, and one 10db can launch. */
+/** A model an account offers that can be chosen by hand: the daemon's own rule, `isPickableModel`. */
 function isOffered(model: ModelRowDto, accountIds: readonly AccountId[] | null): boolean {
-  if (model.status === ModelStatus.Superseded || model.status === ModelStatus.NotRunnable)
-    return false;
+  if (!isPickableModel(model.status)) return false;
   return model.availableOn.some((id) => accountIds === null || accountIds.includes(id));
 }
 
-/** How a model reads in a list: its name, with Unknown ones marked. */
-export const modelLabel = (model: ModelRowDto): string =>
-  model.status === ModelStatus.Unknown ? `${model.name} (Unknown)` : model.name;
+/** How a model reads in a list: its name, with a replaced or Unknown one marked. */
+export const modelLabel = (model: ModelRowDto): string => {
+  switch (model.status) {
+    case ModelStatus.Unknown:
+      return `${model.name} (Unknown)`;
+    case ModelStatus.Superseded:
+      return `${model.name} (superseded)`;
+    case ModelStatus.Current:
+    case ModelStatus.Retired:
+    case ModelStatus.NotRunnable:
+      return model.name;
+  }
+};
+
+/** The heading of a tier's models in a list; models the catalogue does not rank go under "Unknown tier". */
+export const tierGroupLabel = (tier: ModelTier | null): string =>
+  tier === null ? 'Unknown tier' : `${TIER_LABEL[tier]} models`;
+
+/** The tiers in the order lists show them, the models with none last. */
+export const LIST_TIER_ORDER: readonly (ModelTier | null)[] = [...TIER_ORDER, null];
 
 /**
  * The models the accounts offer, one group per tier and Unknown tier last, each entry made by `entry`.
@@ -75,13 +92,10 @@ export function offeredModelGroups(
 ): ComboboxItemGroup<ComboboxItem>[] {
   const offered = models.filter((m) => isOffered(m, accountIds));
   const groups: ComboboxItemGroup<ComboboxItem>[] = [];
-  for (const tier of [...TIER_ORDER, null]) {
+  for (const tier of LIST_TIER_ORDER) {
     const inTier = offered.filter((m) => m.tier === tier);
     if (inTier.length === 0) continue;
-    groups.push({
-      group: tier === null ? 'Unknown tier' : `${TIER_LABEL[tier]} models`,
-      items: inTier.map(entry),
-    });
+    groups.push({ group: tierGroupLabel(tier), items: inTier.map(entry) });
   }
   return groups;
 }

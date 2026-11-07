@@ -1,5 +1,5 @@
 import {
-  ModelStatus,
+  isPickableModel,
   ROLE_SCORE,
   ScoreKind,
   type AccountModelDto,
@@ -50,6 +50,17 @@ export interface ChooseInput {
   readonly accountModels?: readonly AccountModelDto[];
   readonly stakes: { readonly retry: boolean };
   /**
+   * For a step chosen again: the setting it was planned with. It stands in for the setting the task, patterns and
+   * roles give, and the reason names where it came from when one of them still gives it, else says it was the
+   * step's planned setting.
+   */
+  readonly plannedSetting?: ModelSetting | null;
+  /**
+   * For a step whose model the account refused: the tier of that model. The step starts over in it whatever its
+   * setting, and the reason says so.
+   */
+  readonly startOverTier?: ModelTier;
+  /**
    * Whether profiles that carry scores are routed by them. Off, the pool's tier decides by default effort, which
    * never refuses: a Plan conversation chooses its model this way. Default on.
    */
@@ -89,8 +100,33 @@ interface Decided {
   readonly source: string | null;
 }
 
+const sameSetting = (a: ModelSetting, b: ModelSetting): boolean => {
+  switch (a.kind) {
+    case 'automatic':
+    case 'top_of_tier':
+      return b.kind === a.kind;
+    case 'tier':
+      return b.kind === 'tier' && b.tier === a.tier;
+    case 'model':
+      return b.kind === 'model' && b.model === a.model;
+  }
+};
+
 /** The first setting that applies: the task, a pattern, a role, else Automatic. */
 function decide(input: ChooseInput): Decided {
+  if (input.startOverTier !== undefined)
+    return {
+      setting: { kind: 'tier', tier: input.startOverTier },
+      source: `the refused model's tier (${input.startOverTier})`,
+    };
+  const planned = input.plannedSetting;
+  if (planned) {
+    // Where the planned setting came from is kept when the task, a pattern or a role still gives it.
+    const current = decide({ ...input, plannedSetting: null });
+    return sameSetting(current.setting, planned)
+      ? current
+      : { setting: planned, source: `its planned setting (${describeSetting(planned)})` };
+  }
   const { task, project, def } = input;
   if (task.modelSetting) return { setting: task.modelSetting, source: "the task's own setting" };
   const patterns = [...input.patterns].sort((a, b) => a.position - b.position);
@@ -233,9 +269,7 @@ export function chooseModel(input: ChooseInput): ModelChoice {
   let pinNote = '';
   let pinMissed = false;
   if (pin && persona) {
-    const model = input.profiles.filter(
-      (p) => p.model === pin.model && p.status !== ModelStatus.Retired,
-    );
+    const model = input.profiles.filter((p) => p.model === pin.model && isPickableModel(p.status));
     const profile = atEffort(pin.model, pin.effort, model);
     if (profile)
       return {
@@ -290,7 +324,7 @@ export function chooseModel(input: ChooseInput): ModelChoice {
     const listed = input.accountModels ?? [];
     if (listed.length > 0 && !listed.some((m) => m.model === name && !m.unusable)) return undefined;
     const described = input.profiles.filter((p) => p.model === name);
-    const named = described.filter((p) => p.status !== ModelStatus.Retired);
+    const named = described.filter((p) => isPickableModel(p.status));
     const prefix = `${note}the account's ${tier} model: `;
     if (named.length > 0)
       return finish(
@@ -364,9 +398,7 @@ export function chooseModel(input: ChooseInput): ModelChoice {
       return inTier(decided.setting.tier, false, '');
     case 'model': {
       const model = decided.setting.model;
-      const named = input.profiles.filter(
-        (p) => p.model === model && p.status !== ModelStatus.Retired,
-      );
+      const named = input.profiles.filter((p) => p.model === model && isPickableModel(p.status));
       if (named.length === 0)
         return inTier(
           roleTier,

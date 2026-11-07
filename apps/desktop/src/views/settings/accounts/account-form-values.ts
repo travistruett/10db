@@ -100,7 +100,7 @@ const FIELD_MESSAGE: Readonly<Record<string, string>> = {
   region: 'Enter an AWS region such as us-west-2',
   awsProfile: 'Enter an AWS profile name: letters, digits, dots, dashes or underscores',
   baseUrl: 'Enter an https URL with no credentials, query or fragment',
-  tierOverrides: 'Keep each model ID up to 200 characters',
+  tierOverrides: 'Enter a model ID of up to 200 characters, not a tier name',
 };
 const EMPTY_LABEL_MESSAGE = 'Enter a label';
 

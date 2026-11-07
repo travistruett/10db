@@ -2467,6 +2467,54 @@ describe('the account check', () => {
     expect(endMessage(ended)).toMatch(/not-a-model/);
   });
 
+  describe('an error at the first reply that names the launched model', () => {
+    const LAUNCHED = 'us.anthropic.claude-fable-5-1-v1:0';
+    const BEDROCK = `ValidationException: The provided model identifier is invalid: ${LAUNCHED}.`;
+    it.each([
+      {
+        name: 'a Bedrock validation error is a refused model',
+        error: 'invalid_request' as const,
+        text: BEDROCK,
+        reason: 'model_refused',
+      },
+      {
+        name: 'an overloaded error is not',
+        error: 'overloaded' as const,
+        text: `${LAUNCHED} is overloaded`,
+        reason: 'completed',
+      },
+      {
+        name: 'an invalid request about something else is not',
+        error: 'invalid_request' as const,
+        text: 'The request body is malformed',
+        reason: 'completed',
+      },
+    ])('$name', async ({ error, text, reason }) => {
+      const { adapter } = adapterFor({
+        messages: [
+          initMessage('none', undefined, LAUNCHED),
+          assistantMessage([textBlock(text)], error),
+          resultMessage({ input: 1, output: 1, costUsd: 0 }),
+        ],
+      });
+      const events = await collect(adapter.start(spec({ model: LAUNCHED })).events);
+      expect(events.at(-1)).toMatchObject({ type: 'ended', reason });
+    });
+
+    it('is not a refused model once a tool has run', async () => {
+      const { adapter } = adapterFor({
+        messages: [
+          initMessage('none', undefined, LAUNCHED),
+          assistantMessage([toolUseBlock('Read', { file_path: 'a.ts' })]),
+          assistantMessage([textBlock(BEDROCK)], 'invalid_request'),
+          resultMessage({ input: 1, output: 1, costUsd: 0 }),
+        ],
+      });
+      const events = await collect(adapter.start(spec({ model: LAUNCHED })).events);
+      expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'completed' });
+    });
+  });
+
   it('reports cache reads apart from input, and cache writes as input', async () => {
     const { adapter } = adapterFor({
       messages: [

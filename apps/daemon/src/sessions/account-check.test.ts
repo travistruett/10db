@@ -6,6 +6,7 @@ import {
   codexIdentity,
   checkInitCredentials,
   credentialProblem,
+  isModelRefusal,
   missingAccountRefusal,
   modelMatches,
   noAccountWhy,
@@ -395,6 +396,56 @@ describe('credentialProblem', () => {
     [undefined, null],
   ])('%s → %s', (error, problem) => {
     expect(credentialProblem(error)).toBe(problem);
+  });
+});
+
+describe('isModelRefusal', () => {
+  const LAUNCHED = 'us.anthropic.claude-fable-5-1-v1:0';
+  const BEDROCK =
+    'ValidationException: The provided model identifier is invalid. Model us.anthropic.claude-fable-5-1-v1:0 is not available in this region.';
+  it.each<[string, string | undefined, string, boolean]>([
+    ['model_not_found, whatever it says', 'model_not_found', 'nothing useful', true],
+    [
+      'a Bedrock ValidationException naming the launch ID, as invalid_request',
+      'invalid_request',
+      BEDROCK,
+      true,
+    ],
+    ['the same text under an unknown error', 'unknown', BEDROCK, true],
+    [
+      'an invalid request that names another model',
+      'invalid_request',
+      'Model gpt-6 is not available',
+      false,
+    ],
+    [
+      'an invalid request that names no model',
+      'invalid_request',
+      'The request was malformed',
+      false,
+    ],
+    [
+      'an overloaded error that names the launch ID',
+      'overloaded',
+      `${LAUNCHED} is overloaded`,
+      false,
+    ],
+    ['a rate limit that names the launch ID', 'rate_limit', `${LAUNCHED} rate limited`, false],
+    ['an authentication error that names the launch ID', 'authentication_failed', LAUNCHED, false],
+    ['a billing error that names the launch ID', 'billing_error', LAUNCHED, false],
+    ['no error at all', undefined, BEDROCK, false],
+  ])('%s', (_name, error, text, expected) => {
+    expect(isModelRefusal(error, text, LAUNCHED)).toBe(expected);
+  });
+
+  it('matches a launch ID that carries the context suffix without it', () => {
+    expect(
+      isModelRefusal(
+        'invalid_request',
+        'Model claude-fable-5-1 is invalid',
+        'claude-fable-5-1[1m]',
+      ),
+    ).toBe(true);
   });
 });
 

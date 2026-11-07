@@ -1,4 +1,4 @@
-import { ModelTier, type AccountId, type ModelRowDto } from '@10db/contracts';
+import { isModelTier, ModelTier, type AccountId, type ModelRowDto } from '@10db/contracts';
 import { Select, Stack, Text, TextInput } from '@mantine/core';
 import { useModelOffers, useModels } from '../../../daemon/model-queries';
 import { TIER_LABEL } from '../model-labels';
@@ -12,6 +12,10 @@ const AUTOMATIC = 'automatic';
 /** The longest model ID an account's settings take. */
 const MAX_MODEL_ID = 200;
 const MODEL_PREFIX = 'model:';
+
+/** A typed model ID the account's settings refuse: over the limit, or a tier's name. */
+const isInvalidModelId = (typed: string | undefined): boolean =>
+  typed !== undefined && (typed.trim().length > MAX_MODEL_ID || isModelTier(typed.trim()));
 
 function TierSelect({
   label,
@@ -122,9 +126,7 @@ export function TierOverrides({
                 placeholder="Automatic"
                 description="The model ID this account runs for the tier. Leave empty for Automatic."
                 value={values.tierOverrides[tier] ?? ''}
-                {...((values.tierOverrides[tier]?.trim().length ?? 0) > MAX_MODEL_ID && error
-                  ? { error }
-                  : {})}
+                {...(isInvalidModelId(values.tierOverrides[tier]) && error ? { error } : {})}
                 onChange={(e) => {
                   set(tier, e.currentTarget.value);
                 }}

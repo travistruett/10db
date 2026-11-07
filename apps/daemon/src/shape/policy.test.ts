@@ -1,6 +1,6 @@
 import { ShapeToolName } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { judgeShapeCall, type ShapeAccess } from './confinement';
+import { judgeShapeCall, SHAPE_AGENT_MODELS, type ShapeAccess } from './confinement';
 import {
   rehearseNote,
   SHAPE_AGENTS,
@@ -8,9 +8,12 @@ import {
   SHAPE_BUILT_IN_TOOLS,
   SHAPE_DISALLOWED_TOOLS,
   SHAPE_OFFERED_TOOLS,
-  SHAPE_SYSTEM_PROMPT,
+  shapeSystemPrompt,
   shapeToolset,
 } from './policy';
+
+/** The prompt for a subscription, whose agents take every alias. */
+const SHAPE_SYSTEM_PROMPT = shapeSystemPrompt(SHAPE_AGENT_MODELS);
 
 // Shape spec §5.2: the lists a session starts with, and the one prompt that explains them.
 

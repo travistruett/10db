@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ModelTier } from './catalogue';
+import { isModelTier, ModelTier } from './catalogue';
 import { AccountId, ProjectId } from './ids';
 import { isSignInUrl } from './sign-in-url';
 import { Provider } from './states';
@@ -109,7 +109,18 @@ const MAX_MONTHLY_CAP_USD = 1_000_000;
 
 const modelChoice = {
   /** The model the account runs for a tier instead of the automatic choice; a tier absent here is chosen automatically. */
-  tierOverrides: z.partialRecord(z.enum(ModelTier), z.string().trim().min(1).max(200)).optional(),
+  tierOverrides: z
+    .partialRecord(
+      z.enum(ModelTier),
+      // A tier's name is no model: launched as one it would fail, so an override cannot be one.
+      z
+        .string()
+        .trim()
+        .min(1)
+        .max(200)
+        .refine((model) => !isModelTier(model)),
+    )
+    .optional(),
 };
 const AwsRegion = z.string().regex(/^[a-z]{2}(-[a-z]+)+-\d+$/, 'an AWS region such as us-west-2');
 const AwsProfile = z.string().regex(/^[A-Za-z0-9._-]{1,64}$/, 'an AWS profile name');

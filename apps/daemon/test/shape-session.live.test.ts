@@ -37,13 +37,17 @@ import {
   SHAPE_ALLOWED_TOOLS,
   SHAPE_BUILT_IN_TOOLS,
   SHAPE_DISALLOWED_TOOLS,
-  SHAPE_SYSTEM_PROMPT,
   judgeShapeCall,
+  shapeAgentModels,
+  shapeSystemPrompt,
 } from '../src/shape';
 import { createClaudeAdapter, type SessionEvent, type ShapeToolRequest } from '../src/sessions';
 import { createTempRepo } from './fixtures';
 import { textPdf } from './pdf';
 import { noisePng, pngImage } from './png';
+
+/** The prompt for a subscription, whose agents take every alias. */
+const SHAPE_SYSTEM_PROMPT = shapeSystemPrompt(shapeAgentModels('claude_subscription'));
 
 // Shape spec §5.2, §15: the confinement holds on the real SDK. Runs on the builder's Max
 // subscription through the logged-in claude; never in CI and never in `make gate`

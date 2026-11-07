@@ -196,6 +196,37 @@ describe('an account whose provider has no model profiles yet', () => {
   });
 });
 
+describe('a step the gate sends back for another try', () => {
+  it('moves up among the models of the account the lane ran on, not the account the project has moved to', async () => {
+    const second = { id: null as AccountId | null };
+    engine = await createTestEngine(
+      { Alpha: [[turn], finish('op-escalate-01')] },
+      { gateCommand: 'test -f src/api/a.txt' },
+    );
+    const specs: SessionSpec[] = [];
+    // The project moves to an account that lists only the planned model while the first session runs.
+    engine.adapter.seen = (spec) => {
+      specs.push(spec);
+      if (specs.length === 1 && second.id !== null) {
+        const to = second.id;
+        engine.state.write((ctx) => patchProject(ctx, engine.project.id, { accountId: to }));
+      }
+      return {};
+    };
+    const { workstream } = engine.addTask('Alpha', ['api'], [], quick);
+    const planned = ws(workstream.id).steps[0]?.model ?? '';
+    second.id = secondPlan().id;
+    list(second.id, [planned]);
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+
+    expect(ws(workstream.id).steps[0]?.reason).toBe(
+      'escalated from claude-sonnet-5-5@high after the gate failed',
+    );
+    expect(ws(workstream.id).steps[0]?.model).toBe('claude-opus-5-5');
+  });
+});
+
 describe('a model the account refuses at the first reply', () => {
   it('is marked unusable, raises a card, and the step starts over on another model', async () => {
     engine = await createTestEngine({

@@ -567,4 +567,36 @@ describe('the session’s run', () => {
     expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'model_refused' });
     expect(events.at(-1)).not.toHaveProperty('refusal');
   });
+
+  it.each([
+    {
+      name: 'a Bedrock validation error naming the launch ID is a refused model',
+      error: 'invalid_request' as const,
+      text: 'ValidationException: The provided model identifier is invalid: us.anthropic.claude-fable-5-1-v1:0.',
+      refused: true,
+    },
+    {
+      name: 'an overloaded error naming the launch ID is not',
+      error: 'overloaded' as const,
+      text: 'us.anthropic.claude-fable-5-1-v1:0 is overloaded',
+      refused: false,
+    },
+  ])('$name', async ({ error, text, refused }) => {
+    const launched = 'us.anthropic.claude-fable-5-1-v1:0';
+    const { query } = fakeQuery({
+      turns: [
+        [
+          initMessage('none', undefined, launched),
+          assistantMessage([textBlock(text)], error),
+          resultMessage({ input: 1, output: 1, costUsd: 0 }),
+        ],
+      ],
+    });
+    const handle = startShapeSession(spec({ model: launched }), deps(query));
+    const events = await collect(handle, (e) =>
+      e.some((x) => x.type === 'turn_complete' || x.type === 'ended'),
+    );
+    const reasons = events.flatMap((e) => (e.type === 'ended' ? [e.reason] : []));
+    expect(reasons.includes('model_refused')).toBe(refused);
+  });
 });

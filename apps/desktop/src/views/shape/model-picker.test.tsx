@@ -4,6 +4,7 @@ import { http, HttpResponse, type RequestHandler } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 import { projectViewDto } from '../../test/fixtures';
+import { modelRowDto } from '../../test/model-fixtures';
 import { shapeDto, shapeMessageDto, shapeViewDto } from '../../test/shape-fixtures';
 
 const project = projectViewDto();
@@ -68,6 +69,51 @@ describe('the Plan conversation model picker', () => {
     for (const heading of headings) expect(within(list).getByText(heading)).toBeTruthy();
     const input = screen.getByRole<HTMLInputElement>('combobox', { name: 'Model' });
     expect(input.value).toBe('claude-sonnet-5-5');
+  });
+
+  it('names each model as Settings does, marks a replaced or Unknown one, and groups by the shared tier labels', async () => {
+    const view = conversation();
+    serve(
+      view,
+      http.get(daemonUrl('/models'), () =>
+        HttpResponse.json([
+          modelRowDto({ model: 'claude-haiku-5-5', name: 'Haiku', tier: 'fast' }),
+          modelRowDto({
+            model: 'claude-sonnet-5-5',
+            name: 'Sonnet',
+            tier: 'balanced',
+            status: 'superseded',
+          }),
+          modelRowDto({ model: 'claude-opus-5-5', name: 'Opus', tier: 'strongest' }),
+          modelRowDto({
+            model: 'house-model',
+            name: 'House',
+            tier: null,
+            status: 'unknown',
+            maker: null,
+            family: null,
+          }),
+        ]),
+      ),
+    );
+    renderApp(`/shape/${view.shape.id}`);
+    const list = await openList();
+    await waitFor(() => {
+      expect(
+        within(list)
+          .getAllByRole('option', { hidden: true })
+          .map((o) => o.textContent),
+      ).toEqual([
+        'Default (Opus)',
+        'Haiku',
+        'Sonnet (superseded)',
+        'Opus',
+        'claude-fable-5-1',
+        'House (Unknown)',
+      ]);
+    });
+    for (const heading of ['Fast models', 'Balanced models', 'Strongest models', 'Unknown tier'])
+      expect(within(list).getByText(heading)).toBeTruthy();
   });
 
   it('keeps a pick the account no longer lists, marked, rather than reading as the default', async () => {

@@ -20,7 +20,6 @@ import {
   checkAccount,
   checkInitCredentials,
   credentialProblem,
-  MODEL_NOT_FOUND_ERROR,
   missingAccountRefusal,
   modelMatches,
   noAccountWhy,
@@ -32,6 +31,7 @@ import { startClaudeLogin, type LoginSpawn } from './claude-connect';
 import { seenModelsFrom } from './claude-model-list';
 import {
   mapSdkMessage,
+  refusesModel,
   toHookOutput,
   toPermissionResult,
   toSdkMcpServer,
@@ -748,12 +748,16 @@ function startSession(
     );
   };
 
+  /** Whether an assistant message has come yet: only the first can show the model was refused. */
+  let repliedYet = false;
   const pump = async (): Promise<void> => {
     try {
       for await (const msg of q) {
         if (failure) continue;
         if (msg.type === 'assistant') {
-          if (msg.error === MODEL_NOT_FOUND_ERROR) {
+          const firstReply = !repliedYet;
+          repliedYet = true;
+          if (refusesModel(msg, spec.model, firstReply)) {
             // `init.model` echoes even a made-up ID, so only the first reply shows the account cannot run it.
             refuse(
               SessionEndReason.ModelRefused,

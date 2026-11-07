@@ -105,6 +105,7 @@ describe('Settings › Team › model by role', () => {
         ...CHOICES,
         'Fast A',
         'Mid A',
+        'Old A (superseded)',
         'House (Unknown)',
       ]);
     });
@@ -169,7 +170,6 @@ describe('Settings › Team › model by role', () => {
 
 describe('a saved model that is left out of the list', () => {
   it.each([
-    { model: 'old-a', shown: 'Old A (superseded)' },
     { model: 'dud-a', shown: 'Dud A (not runnable)' },
     { model: 'gone', shown: 'Gone (not offered)' },
   ])('says why $model is not chosen', async ({ model, shown }) => {
@@ -196,6 +196,7 @@ describe('Settings › Personas and flows › model by role', () => {
         ...CHOICES,
         'Fast A',
         'Mid A',
+        'Old A (superseded)',
         'Top B',
         'House (Unknown)',
       ]);

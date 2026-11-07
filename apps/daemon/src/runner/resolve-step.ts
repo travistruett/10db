@@ -1,6 +1,6 @@
 import {
   isModelTier,
-  ModelStatus,
+  isPickableModel,
   type AccountModelDto,
   type ModelProfileDto,
   type ModelTier,
@@ -30,7 +30,7 @@ function offered(
   if (isModelTier(step.model)) return false;
   const named = profiles.filter((p) => p.model === step.model);
   if (named.length > 0)
-    return named.some((p) => p.effort === step.effort && p.status !== ModelStatus.Retired);
+    return named.some((p) => p.effort === step.effort && isPickableModel(p.status));
   // A model the account lists that the catalogue has no profile for still launches.
   return accountModels.some((m) => m.model === step.model && !m.unusable);
 }
@@ -66,19 +66,17 @@ export function resolveStep(
 ): WorkstreamStep {
   if (offered(step, profiles, accountModels)) return step;
   const refused = accountModels.some((m) => m.model === step.model && m.unusable);
-  const setting =
-    refused && context.plannedTier !== undefined
-      ? { kind: 'tier' as const, tier: context.plannedTier }
-      : (step.setting ?? context.task.modelSetting);
+  const startOverTier = refused ? context.plannedTier : undefined;
   const choose = (byScore: boolean) =>
     chooseModel({
       ...context,
       def: { role: step.role, need: step.need },
-      task: { ...context.task, modelSetting: setting },
       accountModels,
       profiles,
       stakes: { retry: false },
       byScore,
+      plannedSetting: step.setting,
+      ...(startOverTier === undefined ? {} : { startOverTier }),
     });
   let choice;
   try {
@@ -97,7 +95,7 @@ export function resolveStep(
     model: choice.model,
     effort: choice.effort,
     // A refusal moves the step to another model of its tier, not to another kind of choice.
-    setting: refused && context.plannedTier !== undefined ? step.setting : choice.setting,
+    setting: startOverTier === undefined ? choice.setting : step.setting,
     overBudget: choice.overBudget,
     pinned: choice.pinned,
     score: choice.score,

@@ -7,6 +7,7 @@ import {
   type AccountModelDto,
   type ModelProfileDto,
   type ModelSetting,
+  type PatternDto,
   type PersonaDto,
   type WorkstreamStep,
 } from '@10db/contracts';
@@ -182,6 +183,70 @@ describe('resolveStep', () => {
     expect(isModelTier(out.model)).toBe(false);
   });
 
+  describe('the reason names where a re-resolved step’s setting came from', () => {
+    const pattern = (name: string, setting: ModelSetting): PatternDto => ({
+      id: mintId('Pattern'),
+      projectId: null,
+      name,
+      match: { roles: [], riskTags: [], areas: [], retryOnly: false },
+      setting,
+      position: 0,
+    });
+    const ELSEWHERE = 'big is not offered by Bedrock, so the step was resolved again: ';
+    const ROUTED =
+      'by role default: the cheapest model of the balanced tier; no profile has a coding score to compare on yet (sync Artificial Analysis to route by score)';
+    it.each<{
+      name: string;
+      over: Partial<StepContext>;
+      setting: ModelSetting;
+      source: string;
+    }>([
+      {
+        name: 'the task’s own setting',
+        over: {
+          task: {
+            riskTags: [],
+            acceptanceCriteria: [],
+            areas: [],
+            modelSetting: tier(ModelTier.Balanced),
+          },
+        },
+        setting: tier(ModelTier.Balanced),
+        source: "the task's own setting",
+      },
+      {
+        name: 'a pattern that still gives it',
+        over: { patterns: [pattern('High-risk work', tier(ModelTier.Balanced))] },
+        setting: tier(ModelTier.Balanced),
+        source: 'the pattern "High-risk work"',
+      },
+      {
+        name: 'a role setting that still gives it',
+        over: {
+          roleSettings: [{ role: 'implement', projectId: null, setting: tier(ModelTier.Balanced) }],
+        },
+        setting: tier(ModelTier.Balanced),
+        source: "the role's setting",
+      },
+      {
+        name: 'a setting nothing gives any more',
+        over: {},
+        setting: tier(ModelTier.Balanced),
+        source: 'its planned setting (the balanced tier)',
+      },
+    ])('for $name', ({ over, setting, source }) => {
+      const { rows, profiles } = offering([row('small'), row('mid')]);
+      const out = resolveStep(
+        planned('big@high', { setting }),
+        ACCOUNT,
+        profiles,
+        rows,
+        context(over),
+      );
+      expect(out.reason).toBe(`${ELSEWHERE}${source}: ${ROUTED}`);
+    });
+  });
+
   it('keeps what the step was for when it moves: its role, persona and progress', () => {
     const { rows, profiles } = offering([row('small'), row('mid')]);
     const step = planned('big@high', { status: 'running', attempts: 2, personaName: 'Ada' });
@@ -297,6 +362,9 @@ describe('resolveStep', () => {
     );
     expect(out.model).toBe('peak');
     expect(out.setting).toEqual({ kind: 'automatic' });
+    expect(out.reason).toBe(
+      "big is marked unusable on Bedrock, so the step was resolved again: the refused model's tier (strongest): by role default: the cheapest model of the strongest tier; no profile has a coding score to compare on yet (sync Artificial Analysis to route by score)",
+    );
   });
 
   it('launches a model typed against a tier on a gateway that lists none', () => {

@@ -196,7 +196,8 @@ Every step shows what ran and which setting or pattern chose it.
 - The launcher writes the concrete model ID on the step, and a step never changes model once started. If the account no
   longer offers the planned model when the step starts, it takes the tier's automatic choice and says so.
 - Claude Code's own aliases remain only where Claude Code itself requires one, such as an agent's `model` field and the
-  `ANTHROPIC_DEFAULT_*` values the launcher sets. They are generated from the tiers.
+  `ANTHROPIC_DEFAULT_*` values the launcher sets. They are generated from the tiers. (As built, the launcher sets no
+  `ANTHROPIC_DEFAULT_*`; see `docs/architecture/decisions/2026-11-07-models-come-from-a-catalogue.md`.)
 - `settings.modelMap` and `settings.aliases` go away. `v0.1.0` is tagged, so migrations are forward-only
   (`packages/db/AGENTS.md`). A `--custom` migration renames the four aliases in stored rows to their canonical IDs, and
   removes those two keys from `accounts.settings`, because the settings schemas are strict and would reject them. Those

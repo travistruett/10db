@@ -16,6 +16,7 @@ function form(
   return { ...emptyAccountForm(kind), ...changes };
 }
 
+const TIER_OVERRIDE_MESSAGE = 'Enter a model ID of up to 200 characters, not a tier name';
 const MONTHLY_CAP_MESSAGE =
   'Enter a dollar amount above zero and up to $1,000,000, or leave it empty';
 
@@ -185,7 +186,12 @@ describe('toAccountInput', () => {
         label: 'S',
         tierOverrides: { fast: 'x'.repeat(201) },
       }),
-      errors: { tierOverrides: 'Keep each model ID up to 200 characters' },
+      errors: { tierOverrides: TIER_OVERRIDE_MESSAGE },
+    },
+    {
+      name: 'a tier override that is a tier name, onto tierOverrides',
+      values: form('claude_subscription', { label: 'S', tierOverrides: { strongest: 'fast' } }),
+      errors: { tierOverrides: TIER_OVERRIDE_MESSAGE },
     },
     {
       name: 'a payer over 200 characters, onto payer',

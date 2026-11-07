@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Writes the model catalogue a release carries: models.dev's document cut to the providers the daemon reads.
+// Writes the model catalogue a release carries: models.dev's document cut to the providers the daemon reads, with
+// every other provider kept by name only, because the daemon names a Bedrock model's maker by the providers listed.
 // The daemon starts from it until its first fetch succeeds. A fetch that fails, or an answer that is not a
 // catalogue, fails the build rather than ship a release with none.
 // Usage: node scripts/release/fetch-catalogue.mjs <out-file> [url]
@@ -43,7 +44,8 @@ try {
 }
 if (!isObject(document)) fail(`${url} answered something that is not an object`);
 
-const kept = {};
+// Names only: the daemon reads no model of these, but a Bedrock ID such as `mistral.x` is matched against them.
+const kept = Object.fromEntries(Object.keys(document).map((name) => [name, {}]));
 for (const provider of PROVIDERS) {
   const models = document[provider]?.models;
   if (!isObject(models)) fail(`the ${provider} provider is missing or lists no models`);

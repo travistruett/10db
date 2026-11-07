@@ -783,9 +783,14 @@ export function createRunner(opts: RunnerOptions): Runner {
     row: WorkstreamRow,
     step: WorkstreamStep,
     why: string,
+    leased?: AccountId,
   ): { step: WorkstreamStep; moved: boolean } {
     const project = getProject(db, row.projectId);
-    const inputs = routingInputs(db, project);
+    // The account the lane ran on, as `resolveOn` reads it, which differs from the project's after a move.
+    const inputs = routingInputs(
+      db,
+      leased === undefined ? project : { ...project, accountId: leased },
+    );
     const result = retryStep(step, {
       choose: {
         ...inputs,
@@ -1134,7 +1139,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         }
         const target = row.steps[move.to];
         if (!target) return 'stop';
-        const up = escalated(row, target, `the ${step.role} step rejected it`);
+        const up = escalated(row, target, `the ${step.role} step rejected it`, ctl.accountId);
         opts.state.write((ctx) => {
           if (up.moved && target.profileId)
             recordProfileOutcome(ctx, target.profileId, { firstPass: false, escalated: true });
@@ -2778,7 +2783,8 @@ export function createRunner(opts: RunnerOptions): Runner {
       return;
     }
     const failedStep = currentStep(row);
-    const up = row.steps.length > 0 ? escalated(row, failedStep, 'the gate failed') : null;
+    const up =
+      row.steps.length > 0 ? escalated(row, failedStep, 'the gate failed', ctl.accountId) : null;
     opts.state.write((ctx) => {
       if (up?.moved && failedStep.profileId)
         recordProfileOutcome(ctx, failedStep.profileId, { firstPass: false, escalated: true });

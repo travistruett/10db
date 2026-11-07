@@ -88,9 +88,14 @@ describe('parseCatalogue', () => {
     ['an unseen region prefix', 'xx.anthropic.claude-x', 'anthropic'],
     ['a vendor with no provider of its own', 'meta.llama-x', null],
     ['an ID with no separator', 'plainid', null],
+    [
+      'a vendor the document names but the snapshot keeps by name only',
+      'mistral.mistral-x',
+      'mistral',
+    ],
   ])('reads a Bedrock maker from %s', (_name, id, maker) => {
     const parsed = parseCatalogue(
-      doc({ a: entry() }, { 'amazon-bedrock': { models: { x: entry({ id }) } } }),
+      doc({ a: entry() }, { 'amazon-bedrock': { models: { x: entry({ id }) } }, mistral: {} }),
     );
     expect(parsed.providers['amazon-bedrock']?.models[0]?.maker).toBe(maker);
   });

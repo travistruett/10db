@@ -62,7 +62,7 @@ async function choose(label: string, option: string) {
 }
 
 describe('the tier overrides in an account’s settings', () => {
-  it('lists, for each tier, Automatic and only the models the account offers, grouped by tier', async () => {
+  it('lists, for each tier, Automatic and only the models the account offers, grouped by tier and a replaced one marked', async () => {
     const account = gateway();
     serve(account, true);
     renderWithDaemon(<EditAccountForm account={account} />);
@@ -73,6 +73,7 @@ describe('the tier overrides in an account’s settings', () => {
         expect(list.getAllByRole('option', { hidden: true }).map((o) => o.textContent)).toEqual([
           'Automatic',
           'Small',
+          'Old (superseded)',
           'Mid',
           'Large',
         ]);
@@ -141,6 +142,20 @@ describe('the tier overrides in an account’s settings', () => {
     });
   });
 
+  it('shows a tier’s name typed as a model as an error on its field and sends nothing', async () => {
+    const account = gateway();
+    const patches = serve(account, false);
+    renderWithDaemon(<EditAccountForm account={account} />);
+    const strongest = await screen.findByRole('textbox', { name: 'Strongest model' });
+    fireEvent.change(strongest, { target: { value: 'fast' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    const message = await screen.findByText(
+      'Enter a model ID of up to 200 characters, not a tier name',
+    );
+    expect(strongest.getAttribute('aria-describedby')).toContain(message.id);
+    expect(patches).toEqual([]);
+  });
+
   it('shows an over-long model ID as an error on its field and sends nothing', async () => {
     const account = gateway();
     const patches = serve(account, false);
@@ -148,7 +163,9 @@ describe('the tier overrides in an account’s settings', () => {
     const fast = await screen.findByRole('textbox', { name: 'Fast model' });
     fireEvent.change(fast, { target: { value: 'x'.repeat(201) } });
     fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
-    const message = await screen.findByText('Keep each model ID up to 200 characters');
+    const message = await screen.findByText(
+      'Enter a model ID of up to 200 characters, not a tier name',
+    );
     expect(fast.getAttribute('aria-invalid')).toBe('true');
     expect(fast.getAttribute('aria-describedby')).toContain(message.id);
     expect(

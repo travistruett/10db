@@ -13,7 +13,7 @@ fills in. The design is `docs/superpowers/specs/2026-11-06-10db-model-catalogue-
 and the points where the build settled a question.
 
 - **Sources.** The models come from models.dev (`apps/daemon/src/catalogue/`) and from each account's own list (what its
-  agent reports). The catalogue is fetched nightly and by the Refresh button on Settings › Models, and only a real change
+  agent reports). The catalogue is fetched daily, 24 hours after the last fetch, and by the Refresh button on Settings › Models, and only a real change
   counts (a hash of IDs, prices, statuses, families, dates and efforts). A release carries a snapshot written at build
   time (`scripts/release/fetch-catalogue.mjs`, run by `scripts/release/build-macos.sh`) that the daemon starts from until
   a fetch works; a release build whose fetch fails fails. The snapshot is not committed.

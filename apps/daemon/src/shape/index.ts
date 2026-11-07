@@ -9,7 +9,6 @@ export {
   SHAPE_ALLOWED_TOOLS,
   SHAPE_BUILT_IN_TOOLS,
   SHAPE_DISALLOWED_TOOLS,
-  SHAPE_SYSTEM_PROMPT,
   shapeSystemPrompt,
   shapeToolset,
 } from './policy';

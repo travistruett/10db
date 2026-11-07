@@ -43,6 +43,15 @@ export const ModelStatus = {
 } as const;
 export type ModelStatus = ValueOf<typeof ModelStatus>;
 
+/**
+ * Whether a model can be chosen by hand from an account's list: every model the account offers except one its
+ * maker has retired and one 10db cannot run. A replaced model and an Unknown one can be chosen, and lists mark
+ * them. A model with no status yet (a profile written before the catalogue ranked it) can be chosen too.
+ */
+export function isPickableModel(status: ModelStatus | null): boolean {
+  return status !== ModelStatus.Retired && status !== ModelStatus.NotRunnable;
+}
+
 const Timestamp = z.iso.datetime();
 
 /** What a step, role or pattern asks of the router: leave it to 10db, a tier, the best, or one model. */

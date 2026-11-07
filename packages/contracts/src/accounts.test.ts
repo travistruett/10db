@@ -144,6 +144,15 @@ describe('AccountInput', () => {
       message: /huge/,
     },
     {
+      name: 'an override that is a tier name, not a model',
+      input: {
+        kind: 'claude_subscription',
+        label: 'x',
+        settings: { tierOverrides: { strongest: 'fast' } },
+      },
+      message: /tierOverrides/,
+    },
+    {
       name: 'an override naming no model',
       input: {
         kind: 'claude_subscription',

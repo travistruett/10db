@@ -276,6 +276,27 @@ const CREDENTIAL_ERRORS: Readonly<Record<string, AccountProblem>> = {
   account_on_hold: AccountProblem.CannotBill,
 };
 
+/** Assistant errors that say nothing about whether the model can run, whatever text they carry. */
+const NEVER_A_MODEL_REFUSAL: ReadonlySet<string> = new Set([
+  'rate_limit',
+  'overloaded',
+  'max_output_tokens',
+  'verification_required',
+]);
+
+/**
+ * Whether an assistant error at a session's first reply means the account cannot run the model it was launched on.
+ * Claude Code names that case `model_not_found`, but a gateway or Bedrock reports it as another error whose text
+ * names the model (a validation or access error naming the launch ID). A credential, billing, overload or
+ * rate-limit error never counts, however it is worded.
+ */
+export function isModelRefusal(error: string | undefined, text: string, launched: string): boolean {
+  if (error === undefined) return false;
+  if (error === MODEL_NOT_FOUND_ERROR) return true;
+  if (credentialProblem(error) !== null || NEVER_A_MODEL_REFUSAL.has(error)) return false;
+  return text.includes(launched.replace(CONTEXT_SUFFIX, ''));
+}
+
 /** An assistant error that is the account's, not the work's. */
 export function credentialProblem(error: string | undefined): AccountProblem | null {
   return error === undefined ? null : (CREDENTIAL_ERRORS[error] ?? null);

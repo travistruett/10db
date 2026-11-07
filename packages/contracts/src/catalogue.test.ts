@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   AccountModelDto,
   CatalogueStatusDto,
+  isPickableModel,
+  ModelStatus,
   ModelSettingsInput,
   ModelRowDto,
   ModelSetting,
@@ -11,6 +13,27 @@ import {
 } from './catalogue';
 import { mintId } from './ids';
 import { WorkstreamStep } from './steps';
+
+describe('isPickableModel', () => {
+  it.each([
+    { name: 'a current model', status: ModelStatus.Current, pickable: true },
+    {
+      name: 'a replaced one, which the list marks',
+      status: ModelStatus.Superseded,
+      pickable: true,
+    },
+    {
+      name: 'one the catalogue does not know, which the list marks',
+      status: ModelStatus.Unknown,
+      pickable: true,
+    },
+    { name: 'one with no status yet', status: null, pickable: true },
+    { name: 'one its maker has retired', status: ModelStatus.Retired, pickable: false },
+    { name: 'one 10db cannot run', status: ModelStatus.NotRunnable, pickable: false },
+  ])('$name: $pickable', ({ status, pickable }) => {
+    expect(isPickableModel(status)).toBe(pickable);
+  });
+});
 
 describe('ModelSetting', () => {
   it.each([

@@ -60,16 +60,19 @@ let counter = 0;
 const outFile = () => join(dir, `snapshot-${String(++counter)}.json`);
 
 describe('fetch-catalogue.mjs', () => {
-  it('writes the four providers the daemon keeps, and none of models.dev’s others', async () => {
+  it('writes the four providers the daemon keeps, and the others by name only', async () => {
     reply = { status: 200, body: JSON.stringify(document()) };
     const out = outFile();
     const result = await run([out, base]);
     expect(result.stderr).toBe('');
     expect(result.status).toBe(0);
     const written = JSON.parse(readFileSync(out, 'utf8')) as Record<string, unknown>;
+    // The daemon names a Bedrock model's maker by the providers the document lists, so the snapshot keeps every
+    // key, with nothing under the ones it does not read.
     expect(Object.keys(written).sort()).toEqual(
-      ['amazon-bedrock', 'anthropic', 'openai', 'openrouter'].sort(),
+      ['amazon-bedrock', 'anthropic', 'mistral', 'openai', 'openrouter'].sort(),
     );
+    expect(written['mistral']).toEqual({});
     expect(written['anthropic']).toEqual(provider('claude-x'));
   });
 

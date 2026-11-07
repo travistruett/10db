@@ -1,6 +1,6 @@
 import { ShapeToolName, type ShapeReviewer } from '@10db/contracts';
 import type { ShapeAgentDefinition } from '../sessions';
-import { SHAPE_AGENT_MODELS, SHAPE_CODE_RESEARCHER, SHAPE_RESEARCHER } from './confinement';
+import { SHAPE_CODE_RESEARCHER, SHAPE_RESEARCHER } from './confinement';
 
 // Shape spec §5.2. What a conversation's session starts with. Its file tools are read-only by these
 // lists and the PreToolUse hook (confinement.ts); its commands, when it has a sandbox, are read-only
@@ -217,9 +217,6 @@ After a plan is accepted you may call propose_plan on your own after a message, 
 
 Be brief. Name files and paths when you cite the code.`;
 }
-
-/** The prompt for a subscription, whose agents take every alias. */
-export const SHAPE_SYSTEM_PROMPT = shapeSystemPrompt(SHAPE_AGENT_MODELS);
 
 /**
  * What a rehearsal turn is told (§7). The daemon can't launch a subagent itself, so it injects a note,
