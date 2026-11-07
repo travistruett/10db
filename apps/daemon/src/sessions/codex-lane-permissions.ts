@@ -48,13 +48,18 @@ function opensMoreThanItself(path: string, grants: readonly string[]): boolean {
  * The lane profile's file system as Codex's `permissions.lane.filesystem`. Two entries on one path
  * keep the stricter. A `denyWrite` under a writable path narrows it to `read`; anywhere else it gets
  * no entry, so the path stays closed under `:minimal`, where a `read` entry would open it.
+ *
+ * Entries are keyed by real path, so a link and its target are one entry. Codex's sandbox matches real
+ * paths anyway, and it repeats every read and deny entry in the rules for its temp dirs: a list with
+ * each alias of each toolchain install outgrows macOS's sandbox compiler, and then no command runs.
  */
 function filesystemOf(sandbox: LaneSandboxSpec): Record<string, Access> {
   const { allowRead, allowWrite, denyRead, denyWrite } = sandbox.settings.filesystem;
   const entries = new Map<string, Access>();
   const grant = (path: string, access: Access): void => {
-    const held = entries.get(path);
-    if (held === undefined || STRICTNESS[access] > STRICTNESS[held]) entries.set(path, access);
+    const real = realOrSelf(path);
+    const held = entries.get(real);
+    if (held === undefined || STRICTNESS[access] > STRICTNESS[held]) entries.set(real, access);
   };
   const grants = [...allowRead, sandbox.checkout, ...allowWrite].filter((path) => !isPattern(path));
   for (const path of allowRead) {
@@ -66,7 +71,7 @@ function filesystemOf(sandbox: LaneSandboxSpec): Record<string, Access> {
   for (const path of denyWrite) {
     const denied = denyRead.some((root) => root !== '/' && isEqualOrUnder(path, root));
     if (!writable.some((root) => isEqualOrUnder(path, root)) || denied) continue;
-    entries.set(path, 'read');
+    entries.set(realOrSelf(path), 'read');
   }
   return { [MINIMAL]: 'read', ...Object.fromEntries(entries) };
 }

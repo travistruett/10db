@@ -18,6 +18,7 @@ import { defineWebSocketHelper } from 'hono/ws';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createApp, MAX_BODY_BYTES } from './app';
 import type { ApiServices } from './services';
+import { CODEX_VERIFIED_ON } from '../environment';
 
 const TOKEN = 'ui-token-for-tests';
 const startedAt = new Date('2026-10-13T12:00:00.000Z');
@@ -207,7 +208,7 @@ describe('API', () => {
         return Promise.resolve({
           loginEnv: { source: 'login_shell' as const, warning: null },
           claudeCode: { verifiedOn: '2.1.302', warning: null },
-          codex: { verifiedOn: '0.154.0', warning: null },
+          codex: { verifiedOn: CODEX_VERIFIED_ON, warning: null },
           tools: [],
           benchmarkSync: null,
         });
@@ -221,7 +222,7 @@ describe('API', () => {
     const check = {
       loginEnv: { source: 'login_shell' as const, warning: null },
       claudeCode: { verifiedOn: '2.1.302', warning: null },
-      codex: { verifiedOn: '0.154.0', warning: null },
+      codex: { verifiedOn: CODEX_VERIFIED_ON, warning: null },
       tools: [
         {
           name: 'git' as const,

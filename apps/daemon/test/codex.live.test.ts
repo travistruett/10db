@@ -70,7 +70,7 @@ const MODEL = 'gpt-5.6-sol';
 const STAND_IN = { email: 'live@example.invalid', workspace: 'ws-live' } as const;
 
 /**
- * The tools a lane's model is offered on Codex 0.154, by name, as the fake model records them: code
+ * The tools a lane's model is offered on the verified Codex (`CODEX_VERIFIED_ON`), by name, as the fake model records them: code
  * mode's `exec` and the tools its scripts call.
  */
 const OFFERED_TOOLS: readonly string[] = [
@@ -1056,7 +1056,7 @@ describe.skipIf(!live)(
       const run = await runSession(world, [{ say: 'done' }]);
       expectTurn(run);
       const tools = [...(run.request?.tools ?? []), ...(run.request?.execTools ?? [])];
-      // On by default in Codex 0.154, and off in the home: none is any lane's.
+      // On by default in Codex, and off in the home: none is any lane's.
       for (const off of ['image_generation', 'browser', 'computer', 'skill', 'web_search'])
         expect(
           tools.filter((tool) => tool.includes(off)),

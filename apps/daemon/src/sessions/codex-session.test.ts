@@ -27,9 +27,10 @@ import {
 import { fakeAppServer, type FakeAppServer } from './codex-test-support';
 import type { SignInState } from './sign-in-check';
 import type { SessionEvent, SessionHandle, SessionSpec } from './types';
+import { CODEX_VERIFIED_ON } from '../environment';
 
 const FINE = {
-  initialize: { userAgent: 'codex/0.154.0', codexHome: '/h/codex' },
+  initialize: { userAgent: `codex/${CODEX_VERIFIED_ON}`, codexHome: '/h/codex' },
   'account/read': {
     account: { type: 'chatgpt', email: 'me@example.com', planType: 'pro' },
     requiresOpenaiAuth: true,
@@ -1467,7 +1468,7 @@ describe('codexThreadConfig', () => {
     expect(result).toMatchObject({ '/w/lane/secret': 'deny' });
   });
 
-  it('drops a read entry that is a link whose target is not granted, and keeps one whose target is', async () => {
+  it('drops a read entry that is a link whose target is not granted, and keeps one entry per real path', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'lanelink-'));
     try {
       const target = join(dir, 'target');
@@ -1483,8 +1484,13 @@ describe('codexThreadConfig', () => {
           specOf({ sandbox: sandboxWith({ filesystem: { allowRead: [granted, open, closed] } }) }),
         ),
       );
-      expect(filesystem).toMatchObject({ [granted]: 'read', [open]: 'read' });
-      expect(filesystem).not.toHaveProperty(closed);
+      const keys = Object.keys(filesystem as Record<string, string>);
+      // A link and its target are one entry, under the real path: Codex repeats every read and deny
+      // entry in its temp-dir rules, and a list with each alias outgrows macOS's sandbox compiler.
+      expect(filesystem).toMatchObject({ [await realpath(granted)]: 'read' });
+      expect(keys).not.toContain(open);
+      expect(keys).not.toContain(closed);
+      expect(keys).not.toContain(await realpath(target));
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
