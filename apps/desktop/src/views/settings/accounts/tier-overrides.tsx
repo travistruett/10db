@@ -9,6 +9,8 @@ const TIERS: readonly ModelTier[] = [ModelTier.Fast, ModelTier.Balanced, ModelTi
 
 /** The select value of a tier left to 10db. A model's value carries a prefix, so no model ID can equal it. */
 const AUTOMATIC = 'automatic';
+/** The longest model ID an account's settings take. */
+const MAX_MODEL_ID = 200;
 const MODEL_PREFIX = 'model:';
 
 function TierSelect({
@@ -73,10 +75,13 @@ export function TierOverrides({
   accountId,
   values,
   onChange,
+  error,
 }: {
   readonly accountId: AccountId;
   readonly values: AccountFormValues;
   readonly onChange: (next: AccountFormValues) => void;
+  /** What is wrong with the overrides, shown on each field whose ID is too long. */
+  readonly error: string | undefined;
 }) {
   const models = useModels();
   const offers = useModelOffers();
@@ -117,6 +122,9 @@ export function TierOverrides({
                 placeholder="Automatic"
                 description="The model ID this account runs for the tier. Leave empty for Automatic."
                 value={values.tierOverrides[tier] ?? ''}
+                {...((values.tierOverrides[tier]?.trim().length ?? 0) > MAX_MODEL_ID && error
+                  ? { error }
+                  : {})}
                 onChange={(e) => {
                   set(tier, e.currentTarget.value);
                 }}

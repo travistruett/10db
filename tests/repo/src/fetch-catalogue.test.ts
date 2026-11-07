@@ -95,6 +95,12 @@ describe('fetch-catalogue.mjs', () => {
       body: JSON.stringify(document({ openrouter: { models: { x: { name: 'no id' } } } })),
       message: /openrouter/,
     },
+    {
+      name: 'a provider’s models all lack a name, which the daemon would reject',
+      status: 200,
+      body: JSON.stringify(document({ openai: { models: { x: { id: 'x' } } } })),
+      message: /openai/,
+    },
   ])('fails the build and writes nothing when $name', async ({ status, body, message }) => {
     reply = { status, body };
     const out = outFile();

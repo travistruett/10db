@@ -15,7 +15,7 @@ const TEST_CODE =
 
 /** A Claude Code alias, or an ID in the shape of Anthropic's, OpenAI's, Google's or Meta's. */
 const MODEL_NAME =
-  /\b(opus|sonnet|haiku|fable|claude-(?:opus|sonnet|haiku|fable|[0-9])[a-z0-9.-]*|gpt-[0-9][a-z0-9.-]*|gemini-[a-z0-9.-]+|llama-?[0-9][a-z0-9.-]*)\b/gi;
+  /\b(opus|sonnet|haiku|fable|claude-(?:opus|sonnet|haiku|fable|[0-9])[a-z0-9.-]*|chatgpt-[0-9][a-z0-9.-]*|gpt-(?:[0-9]|oss)[a-z0-9.-]*|o[0-9](?:-[a-z0-9.-]+)?|gemini-[a-z0-9.-]+|llama-?[0-9][a-z0-9.-]*)\b/gi;
 
 interface Allowed {
   readonly file: string;
@@ -31,11 +31,6 @@ const ALLOWED: readonly Allowed[] = [
     names: ['opus', 'fable', 'sonnet', 'haiku'],
     reason:
       'the aliases Claude Code’s own Agent tool takes: they are its vocabulary, not a model 10db chose',
-  },
-  {
-    file: 'apps/daemon/scripts/live-acceptance.ts',
-    names: ['haiku'],
-    reason: 'the poems the acceptance task asks a session to write',
   },
 ];
 

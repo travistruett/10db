@@ -2,6 +2,7 @@ import {
   ROLE_LABEL,
   StepRole,
   ToolAccess,
+  type AccountModelDto,
   type FlowDto,
   type FlowStepDef,
   type ModelProfileDto,
@@ -30,6 +31,8 @@ export interface PlanInput {
   readonly roleSettings: readonly RoleSettingDto[];
   readonly patterns: readonly PatternDto[];
   readonly tierOverrides: Readonly<Partial<Record<ModelTier, string>>>;
+  /** The account's own list, which decides whether an override is offered. */
+  readonly accountModels?: readonly AccountModelDto[];
 }
 
 /**
@@ -64,6 +67,7 @@ function routedStep(
     roleSettings: input.roleSettings,
     patterns: input.patterns,
     tierOverrides: input.tierOverrides,
+    ...(input.accountModels === undefined ? {} : { accountModels: input.accountModels }),
     stakes: { retry: false },
   });
   return {

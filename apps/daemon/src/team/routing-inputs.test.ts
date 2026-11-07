@@ -1,4 +1,4 @@
-import { ModelTier, type ModelSetting } from '@10db/contracts';
+import { mintId, ModelTier, type ModelSetting } from '@10db/contracts';
 import {
   createTestStore,
   defaultAccountId,
@@ -11,7 +11,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { seedProfiles } from '../../test/seed-profiles';
 import { createEventBus, createStateStore } from '../events';
-import { chooseModel } from '../routing';
+import { chooseModel, planSteps } from '../routing';
 import { routingInputs } from './routing-inputs';
 
 let close: () => void = () => undefined;
@@ -94,5 +94,42 @@ describe('routingInputs: the account’s tier overrides', () => {
       patchAccount(ctx, accountId, { settings: { tierOverrides: overrides } });
     });
     expect(fastModel()).toBe(expected);
+  });
+});
+
+describe('planning a step with the account’s overrides', () => {
+  it('skips an override the account marked unusable, as choosing does', () => {
+    const accountId = defaultAccountId(store.db);
+    if (accountId === null) throw new Error('no default account');
+    store.write((ctx) => {
+      replaceAccountModels(
+        ctx,
+        accountId,
+        ['claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5'].map(offer),
+      );
+      markAccountModelUnusable(ctx, accountId, 'claude-opus-5-5');
+      patchAccount(ctx, accountId, { settings: { tierOverrides: { fast: 'claude-opus-5-5' } } });
+    });
+    const plan = planSteps({
+      flow: {
+        id: mintId('Flow'),
+        name: 'one-step',
+        steps: [{ role: 'implement', need: 0, skip: [], persona: null }],
+        createdAt: '2026-11-07T00:00:00.000Z',
+        updatedAt: '2026-11-07T00:00:00.000Z',
+      },
+      task: {
+        riskTags: [],
+        acceptanceCriteria: [],
+        areas: [],
+        modelSetting: { kind: 'tier', tier: ModelTier.Fast },
+      },
+      project: { id: mintId('Project'), budgetCeiling: null },
+      personas: [],
+      bindings: [],
+      ...routingInputs(store.db, { accountId, provider: 'claude' }),
+    });
+    expect(plan.steps.length).toBeGreaterThan(0);
+    expect(plan.steps.map((s) => s.model)).not.toContain('claude-opus-5-5');
   });
 });

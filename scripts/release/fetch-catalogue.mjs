@@ -24,6 +24,7 @@ function fail(message) {
   process.exit(1);
 }
 
+const filled = (value) => typeof value === 'string' && value !== '';
 const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 
 let response;
@@ -46,8 +47,13 @@ const kept = {};
 for (const provider of PROVIDERS) {
   const models = document[provider]?.models;
   if (!isObject(models)) fail(`the ${provider} provider is missing or lists no models`);
-  if (!Object.values(models).some((entry) => isObject(entry) && typeof entry.id === 'string'))
-    fail(`the ${provider} provider has no model with an id`);
+  // The daemon keeps an entry only with an id and a name; a provider with none would be rejected whole.
+  if (
+    !Object.values(models).some(
+      (entry) => isObject(entry) && filled(entry.id) && filled(entry.name),
+    )
+  )
+    fail(`the ${provider} provider has no model with an id and a name`);
   kept[provider] = document[provider];
 }
 

@@ -147,7 +147,12 @@ export function AccountFields({
         />
       ) : null}
       {mode === 'edit' && accountId !== null ? (
-        <TierOverrides accountId={accountId} values={values} onChange={onChange} />
+        <TierOverrides
+          accountId={accountId}
+          values={values}
+          onChange={onChange}
+          error={errors['tierOverrides']}
+        />
       ) : null}
     </Stack>
   );

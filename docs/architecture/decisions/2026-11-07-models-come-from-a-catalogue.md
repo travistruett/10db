@@ -1,7 +1,8 @@
 # Models come from a catalogue, so no account keeps a model map
 
 - **Date:** 2026-11-07
-- **Supersedes:** decision 105 (an account's model map and offered aliases), and the sentence of
+- **Amends:** decision 105 (it drops the account's model map and offered aliases, and changes nothing else
+  about accounts), and the sentence of
   `decisions/2026-11-05-plan-runs-commands-and-project-tools-through-the-lane-broker.md` that has the launcher set
   `ANTHROPIC_DEFAULT_<ALIAS>_MODEL` for each mapped alias
 
@@ -39,7 +40,7 @@ and the points where the build settled a question.
   another account of the same maker has a list, an account that hasn't been read yet has its models left unranked, so a
   fresh account does not move a tier.
 - **A guard.** `tests/repo/src/model-names.test.ts` fails when non-test source names a model, with an allowlist that
-  gives a reason for each entry (Claude Code's Agent tool aliases, and the word in an acceptance task's poems).
+  gives a reason for each entry (today only Claude Code's Agent tool aliases).
 
 ## Why
 

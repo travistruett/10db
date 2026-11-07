@@ -67,6 +67,7 @@ import {
   createCatalogueSync,
   readCatalogueSnapshot,
   reconcileProfiles,
+  type Catalogue,
 } from '../catalogue';
 import { createJudge, JUDGE_LOG_RETENTION_MS, type JudgeService } from '../judge';
 import { createJudgeServices } from './judge-services';
@@ -492,12 +493,19 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   benchmarks.start();
   // The accounts' lists and the refresh that follows each fetch are made further down, once the adapter and the
   // start gate exist; they are named here so the catalogue can reach them when it runs.
+  let snapshot: { readonly value: Catalogue | null } | undefined;
   const catalogue = createCatalogueSync({
     state,
     clock,
     fetch: opts.fetch ?? fetch,
     logger: logger.child({ component: 'catalogue' }),
-    snapshot: () => (opts.catalogueSnapshot ? readCatalogueSnapshot(opts.catalogueSnapshot) : null),
+    snapshot: () => {
+      // The file is part of the install and does not change while the process runs.
+      snapshot ??= {
+        value: opts.catalogueSnapshot ? readCatalogueSnapshot(opts.catalogueSnapshot) : null,
+      };
+      return snapshot.value;
+    },
     onChanged: (changed) => {
       state.write((ctx) => {
         reconcileProfiles(ctx, changed);

@@ -140,4 +140,20 @@ describe('the tier overrides in an account’s settings', () => {
       ]);
     });
   });
+
+  it('shows an over-long model ID as an error on its field and sends nothing', async () => {
+    const account = gateway();
+    const patches = serve(account, false);
+    renderWithDaemon(<EditAccountForm account={account} />);
+    const fast = await screen.findByRole('textbox', { name: 'Fast model' });
+    fireEvent.change(fast, { target: { value: 'x'.repeat(201) } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save Changes' }));
+    const message = await screen.findByText('Keep each model ID up to 200 characters');
+    expect(fast.getAttribute('aria-invalid')).toBe('true');
+    expect(fast.getAttribute('aria-describedby')).toContain(message.id);
+    expect(
+      screen.getByRole('textbox', { name: 'Balanced model' }).getAttribute('aria-invalid'),
+    ).toBe(null);
+    expect(patches).toEqual([]);
+  });
 });
