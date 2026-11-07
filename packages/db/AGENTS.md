@@ -25,7 +25,13 @@ only process that writes the database.
 - Every state change writes its row and appends its event in one transaction (M1a adds the helper). `composeKnowledgeText` is an exception: it composes stored Knowledge text at daemon start and appends no event (see Knowledge repositories).
 - Full-text search lives in one module so the storage engine can change later.
 - Tests use a real database file in a temp directory, never `:memory:`, so WAL and file paths are
-  exercised.
+  exercised. `createTestStore` copies a migrated template instead of migrating each store: about 2 ms
+  against 27. The template sits in `10db-test-db-templates` under the temp directory, named by a hash
+  of the shipped migrations and of `openDatabase` and `migrateDatabase`. It is used only from a real
+  directory this user owns that nobody else can write, and each copy is checked for the shipped
+  migrations; a damaged template is rebuilt in place, and an unsafe directory or a failed build means each store
+  migrates its own. A test of migrating itself opens and migrates its own database, as
+  `database.test.ts` does.
 - The daemon bundle ships its own copy of `drizzle/`; pass its path to `migrateDatabase`.
 - Repositories are synchronous functions over `DbReader` (reads) or `WriteContext` (writes); never open a second connection.
 - `board_columns` holds the builder's human columns; `tasks.board_column_id` set means parked (never started: `insertWorkstream` refuses it), null means planned. `moveTask` refuses to park a task that a started dependent waits on.
