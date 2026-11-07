@@ -23,8 +23,8 @@ severe first. Skip praise.
   Reject a test moved to a cheaper level unless its commit names the failure seen for the
   same regression. Reject any test of merges, pushes, worktrees, migrations, recovery, sandboxes, guards,
   permissions, claims and other trust boundaries below the level exercising the real thing.
-- **Test cost:** each newly tested behavior has a value card in its commit or plan, and a new
-  table case needs none: protects,
+- **Test cost:** each newly tested behavior, not table case, has a value card in its commit
+  or plan: protects,
   fails_when, why_new, no_claim. Note a missing card in your summary. Put a named cheaper
   replacement in `followUps`. Neither rejects the change.
 - **Style:** names say what things are, comments say what and why, no dead code, no
