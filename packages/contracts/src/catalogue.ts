@@ -8,6 +8,15 @@ type ValueOf<T> = T[keyof T];
 export const ModelTier = { Fast: 'fast', Balanced: 'balanced', Strongest: 'strongest' } as const;
 export type ModelTier = ValueOf<typeof ModelTier>;
 
+/** Where the catalogue came from; none when this daemon has no catalogue at all. */
+export const CatalogueSource = {
+  Fetched: 'fetched',
+  Stored: 'stored',
+  Snapshot: 'snapshot',
+  None: 'none',
+} as const;
+export type CatalogueSource = ValueOf<typeof CatalogueSource>;
+
 /** Where a model stands with its maker, as far as 10db can tell. */
 export const ModelStatus = {
   Current: 'current',
@@ -61,7 +70,8 @@ export type PatternDto = z.infer<typeof PatternDto>;
 export const AccountModelDto = z.object({
   accountId: AccountId,
   model: z.string().min(1),
-  family: z.string().min(1),
+  /** Null for a model with no catalogue entry. */
+  family: z.string().min(1).nullable(),
   /** What the account's CLI is launched with to run this model. */
   launchId: z.string().min(1),
   efforts: z.array(z.enum(Effort)),
@@ -78,8 +88,9 @@ export type AccountModelDto = z.infer<typeof AccountModelDto>;
 export const ModelRowDto = z.object({
   model: z.string().min(1),
   name: z.string().min(1),
-  maker: z.string().min(1),
-  family: z.string().min(1),
+  /** Maker and family are null for a model with no catalogue entry. */
+  maker: z.string().min(1).nullable(),
+  family: z.string().min(1).nullable(),
   tier: z.enum(ModelTier).nullable(),
   status: z.enum(ModelStatus),
   availableOn: z.array(AccountId),
@@ -99,8 +110,9 @@ export type ModelRowDto = z.infer<typeof ModelRowDto>;
 
 /** Where the catalogue came from and how many models it holds. */
 export const CatalogueStatusDto = z.object({
-  fetchedAt: Timestamp,
-  source: z.enum(['fetched', 'stored', 'snapshot']),
+  /** Null when no catalogue has ever been loaded. */
+  fetchedAt: Timestamp.nullable(),
+  source: z.enum(CatalogueSource),
   models: z.int().min(0),
 });
 export type CatalogueStatusDto = z.infer<typeof CatalogueStatusDto>;

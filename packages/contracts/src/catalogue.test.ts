@@ -95,6 +95,19 @@ describe('AccountModelDto', () => {
     expect(AccountModelDto.parse({ ...row, inputPrice: 3, outputPrice: 15 }).outputPrice).toBe(15);
   });
 
+  it('accepts a model with no family', () => {
+    expect(AccountModelDto.parse({ ...row, family: null }).family).toBeNull();
+  });
+
+  it.each([
+    { name: 'no inputPrice', over: { inputPrice: undefined } },
+    { name: 'no outputPrice', over: { outputPrice: undefined } },
+    { name: 'a negative inputPrice', over: { inputPrice: -1 } },
+    { name: 'a negative outputPrice', over: { outputPrice: -0.5 } },
+  ])('rejects $name', ({ over }) => {
+    expect(AccountModelDto.safeParse({ ...row, ...over }).success).toBe(false);
+  });
+
   it('rejects an effort 10db does not know', () => {
     expect(AccountModelDto.safeParse({ ...row, efforts: ['ludicrous'] }).success).toBe(false);
   });
@@ -105,8 +118,8 @@ describe('ModelRowDto', () => {
     const row = {
       model: 'mystery-1',
       name: 'Mystery 1',
-      maker: 'Unknown',
-      family: 'mystery',
+      maker: null,
+      family: null,
       tier: null,
       status: 'unknown',
       availableOn: [mintId('Account')],
@@ -132,10 +145,16 @@ describe('CatalogueStatusDto', () => {
     { source: 'fetched', ok: true },
     { source: 'stored', ok: true },
     { source: 'snapshot', ok: true },
+    { source: 'none', ok: true },
     { source: 'cache', ok: false },
   ])('source $source: parses $ok', ({ source, ok }) => {
     const dto = { fetchedAt: '2026-11-06T12:00:00.000Z', source, models: 12 };
     expect(CatalogueStatusDto.safeParse(dto).success).toBe(ok);
+  });
+
+  it('describes a daemon with no catalogue', () => {
+    const dto = { fetchedAt: null, source: 'none', models: 0 };
+    expect(CatalogueStatusDto.parse(dto)).toEqual(dto);
   });
 });
 

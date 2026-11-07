@@ -124,14 +124,15 @@ describe('planning fields', () => {
     });
   });
 
-  it('reads a step stored before it kept earlier rounds and send-backs with neither yet', () => {
+  it('reads a step stored before it kept earlier rounds, send-backs or a setting with none yet', () => {
     const project = seedProject(store);
     const created = store.write((ctx) => insertTask(ctx, project.id, task)).value;
     const ws = store.write((ctx) => insertWorkstream(ctx, created.id)).value;
-    // The JSON a step had before `earlier` and `sentBack` were added.
+    // The JSON a step had before `earlier`, `sentBack` and `setting` were added.
     const older = JSON.parse(JSON.stringify(step('review'))) as Record<string, unknown>;
     delete older['earlier'];
     delete older['sentBack'];
+    delete older['setting'];
     store.db.$client
       .prepare('UPDATE workstreams SET steps = ? WHERE id = ?')
       .run(JSON.stringify([older]), ws.id);
