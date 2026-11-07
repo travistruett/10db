@@ -10,11 +10,12 @@ import type { DeliveryHarness } from './delivery-harness';
  * `createDeliveryHarness`. Each world is the one before it plus one step, and each checks it got
  * there, so a test that starts from one never starts from a state the daemon can't reach:
  *
- * | World       | What holds                                                                      |
- * | ----------- | ------------------------------------------------------------------------------- |
- * | `opened`    | one task started; its batch OPEN, cut and checked out, its one workstream made   |
- * | `committed` | `opened`, plus one commit on the batch's branch, as the commit tool makes it     |
- * | `shipped`   | `committed`, its work done and shipped: SHIPPED, the branch on origin, a PR open |
+ * | World       | What holds                                                                     |
+ * | ----------- | ------------------------------------------------------------------------------ |
+ * | `opened`    | one task started; its batch OPEN with its one workstream                       |
+ * | `committed` | `opened`, plus one commit on the batch's branch, as the commit tool makes it    |
+ * | `shipped`   | `committed`, shipped: SHIPPED, a PR open, the branch local and on origin, where |
+ * |             | its tip holds the commit                                                       |
  *
  * A test that needs a state none of these give adds a world here rather than building one in its
  * own file.
@@ -35,21 +36,37 @@ export interface Committed extends Opened {
   readonly head: string;
 }
 
-export interface Shipped extends Committed {
-  /** The commit the pull request is at, on origin and on GitHub. */
+export interface Shipped extends Opened {
+  /** The commit `committed` made. */
+  readonly commit: string;
+  /**
+   * The commit the pull request is at, on origin and on GitHub: `commit`, or a merge on top of it
+   * when the ship brought the base in first.
+   */
   readonly head: string;
   readonly prUrl: string;
 }
 
-interface WorldOptions {
+interface Titled {
   /** The task's title; also names the file `committed` writes. */
   readonly title?: string;
 }
 
-interface CommitOptions extends WorldOptions {
+interface FileOptions {
   /** The file the commit writes, relative to the checkout; `src/api/<title>.txt` by default. */
   readonly path?: string;
   readonly content?: string;
+}
+
+/** A world built from the one given, which already has its title. */
+interface From<World> {
+  readonly from: World;
+  readonly title?: never;
+}
+
+/** A world built from scratch. */
+interface Fresh extends Titled {
+  readonly from?: never;
 }
 
 /** The batch's worktree; throws for a batch that runs in the project's own checkout. */
@@ -107,7 +124,7 @@ export async function commitIn(
 /** One task started and its batch OPEN. */
 export async function opened(
   h: DeliveryHarness,
-  opts: WorldOptions & {
+  opts: Titled & {
     /** The runner's first session has begun and recorded the workstream's base head. */
     readonly sessionStarted?: boolean;
   } = {},
@@ -119,8 +136,10 @@ export async function opened(
     throw new WorldError(`batch ${batch.title} is ${batch.state} after its start, not OPEN`);
   const ws = h.only(listWorkstreams(h.store.db, { batchId: batch.id }));
   if (opts.sessionStarted) {
+    const baseHead = batch.baseSha;
+    if (baseHead === null) throw new WorldError(`batch ${batch.title} has no base commit`);
     h.state.write((c) => {
-      patchWorkstream(c, ws.id, null, { baseHead: batch.baseSha ?? '' });
+      patchWorkstream(c, ws.id, null, { baseHead });
     });
   }
   return { batch, ws };
@@ -129,7 +148,7 @@ export async function opened(
 /** `opened`, or the world given as `from`, plus one commit on the batch's branch. */
 export async function committed(
   h: DeliveryHarness,
-  opts: CommitOptions & { readonly from?: Opened } = {},
+  opts: FileOptions & (From<Opened> | Fresh) = {},
 ): Promise<Committed> {
   const world = opts.from ?? (await opened(h, opts));
   const path = opts.path ?? `src/api/${world.batch.title.toLowerCase()}.txt`;
@@ -138,12 +157,14 @@ export async function committed(
 }
 
 /**
- * `committed`, or the world given as `from`, with its workstream done and the batch shipped: the
- * branch is on origin and the pull request is open there, with GitHub reporting it at `head`.
+ * `committed`, or the world given as `from`, with its workstream done and the batch shipped, and
+ * GitHub reporting the pull request at `head`.
  */
 export async function shipped(
   h: DeliveryHarness,
-  opts: CommitOptions & { readonly from?: Committed } = {},
+  opts:
+    | (FileOptions & Fresh)
+    | (From<Committed> & { readonly path?: never; readonly content?: never }) = {},
 ): Promise<Shipped> {
   const world = opts.from ?? (await committed(h, opts));
   h.settle(world.ws.id, 'DONE');
@@ -154,8 +175,23 @@ export async function shipped(
     throw new WorldError(
       `batch ${batch.title} is ${batch.state} after its ship, not SHIPPED with a pull request`,
     );
-  const head = onOrigin(h, batch.branch);
-  if (head === null) throw new WorldError(`origin has no branch ${String(batch.branch)}`);
+  const branch = branchOf(batch);
+  if (h.git$('branch', '--list', branch) === '')
+    throw new WorldError(`the ship left no local branch ${branch}`);
+  const head = onOrigin(h, branch);
+  if (head === null) throw new WorldError(`origin has no branch ${branch}`);
+  if (!holds(h, head, world.head))
+    throw new WorldError(`origin's ${branch} is at ${head}, which lacks the commit ${world.head}`);
   h.gh.setHead(batch.prUrl, head);
-  return { batch, ws: world.ws, head, prUrl: batch.prUrl };
+  return { batch, ws: world.ws, commit: world.head, head, prUrl: batch.prUrl };
+}
+
+/** Whether `tip` on origin is `commit` or descends from it. */
+function holds(h: DeliveryHarness, tip: string, commit: string): boolean {
+  try {
+    h.origin$('merge-base', '--is-ancestor', commit, tip);
+    return true;
+  } catch {
+    return false;
+  }
 }
