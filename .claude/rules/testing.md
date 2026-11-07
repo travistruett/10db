@@ -24,8 +24,11 @@
 
 - **Some tests start on, and never move below, the rung that exercises the real thing, even when
   they look repetitive.** Merges, pushes, worktrees, migrations where a git merge is the behavior,
-  and every recovery, trust, sandbox, guard, claim and permission row. Before any other test moves
-  down a rung, see the cheaper one fail for the same regression, and say how in the commit.
+  and every recovery, trust, sandbox, guard, claim and permission row. The real thing is the state
+  or process the test acts on: git for merges, pushes and worktrees, a real database or restart for
+  recovery and claims. A pure rule table, such as a guard's judge or a schema, stays pure, with one
+  test through the wiring. Before any other test moves down a rung, see the cheaper one fail for the
+  same regression, and say how in the commit.
 - **Real objects on every rung, mocks only at boundaries.** A cheaper test is a smaller test, not a
   mock of your own code. git and SQLite are never mocked. Mock only the network, the clock and child
   processes you don't own (the fake Claude adapter is such a boundary).
@@ -34,7 +37,7 @@
   boundary instead.
 - **Each newly tested behavior carries one value card**, however many cases it has, in the commit
   that adds it, wrapped to fit, and in the plan when there is one. Reviewers read commits, and an
-  implement step has no report.
+  implement step has no report. A new row in an existing table needs none.
   `Value: protects=<behavior>; fails_when=<regression>; why_new=<tests checked, what they miss>; no_claim=<what green does not prove>`.
 - **Table-driven tests** for state machines, rules and parsers: one row per case, named.
 - **Test behavior, not implementation.** Assert on outputs, persisted rows and emitted events,

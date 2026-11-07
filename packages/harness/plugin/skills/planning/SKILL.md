@@ -18,8 +18,8 @@ your work after a handoff.
    Every path must sit inside your claims; if not, call `mcp__10db__request_claim` first.
 4. Split the work into steps that each end with a passing check and a commit. Prefer
    several small commits over one large one. Name the tests each step needs: an existing
-   test to extend if it is cheap enough, otherwise the cheapest test that can fail for the regression you
-   fear. Give each newly tested behavior one value card for its commit to repeat:
+   test to extend if it sits on the cheapest level, otherwise the cheapest test that can fail for the regression you
+   fear. Give each newly tested behavior, not table case, one value card for its commit to repeat:
    `Value: protects=<behavior>; fails_when=<regression>; why_new=<tests checked, what they miss>; no_claim=<what green does not prove>`.
 5. Write the plan as a short numbered list in your reply, then start step 1.
 

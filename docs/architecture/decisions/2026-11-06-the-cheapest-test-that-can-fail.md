@@ -11,11 +11,13 @@ pipeline.
 
 The ladder has a floor. Tests of merges, pushes, worktrees, migrations where a git merge is the behavior, and every
 recovery, trust, sandbox, guard, claim and permission row start on, and never move below, the rung that exercises the
-real thing. Any other test moves down only after the cheaper one is seen failing for the same regression, and the
+real thing: the state or process the test acts on, such as git for merges or a real database or restart for recovery. A
+pure rule table, such as a guard's judge or a schema, stays pure, with one test through the wiring. Any other test moves down only after the cheaper one is seen failing for the same regression, and the
 commit says how. An extraction adds a test and keeps one through the wiring. git and SQLite are never mocked. A
 dependency passed in with a production default is fine; a new branch, flag or export only a test uses is not.
 
-Each newly tested behavior carries one value card, however many cases it has:
+Each newly tested behavior carries one value card, however many cases it has, and a new row in an existing table needs
+none:
 `Value: protects=...; fails_when=...; why_new=...; no_claim=...`. It goes in the commit that adds the test, wrapped to
 commitlint's 100 columns, and in the plan when there is one.
 
@@ -45,8 +47,8 @@ alone would leave most tests with no card. The card has one per behavior because
 
 Test cost and a missing card never reject a change. A reviewer finding needs a concrete failure, and neither has one.
 Rejecting on them would burn a round, and it is the likeliest way to get a real test rewritten cheaper. A named cheaper
-replacement goes in `followUps`. A missing card is only noted in the summary: the commit has shipped, so a follow-up
-would be a task nobody can finish.
+replacement goes in `followUps`. A missing card is only noted in the summary: by the time a follow-up task ran, the
+commit would have merged, so nobody could finish it. A row needs no card because rows are the shape this rule asks for.
 
 Turned down:
 
