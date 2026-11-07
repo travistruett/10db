@@ -1133,14 +1133,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       // The builder's pick runs at the plan role's effort, while the account still offers it; one it has
       // stopped offering since gives way to the role's.
       const offered = offeredModels(routingInputs(db, project).profiles).map((o) => o.model);
-      const session = launcher.session(
-        row,
-        chosen !== null && offered.includes(chosen) ? chosen : profile.model,
-        listAccountModels(db, row.id),
-      );
+      const modelId = chosen !== null && offered.includes(chosen) ? chosen : profile.model;
+      const session = launcher.session(row, modelId, listAccountModels(db, row.id));
       return {
         cwd: project.repoPath,
         model: session.model,
+        modelId,
         effort: profile.effort,
         agentModels: shapeAgentModels(row.kind),
         env: session.env,

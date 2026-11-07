@@ -52,6 +52,8 @@ export function createServiceFixture(
     checkout?: string;
     prepare?: ShapeServiceDeps['prepare'];
     models?: ShapeServiceDeps['models'];
+    /** What the account launches a model with, when that is not the model's own ID. */
+    launchId?: (model: string) => string;
     /** Told the model each launch is resolved for: the conversation's choice, or null. */
     onLaunch?: (model: string | null) => void;
     /** The picture limits of an account kind; the real ones by default (`pictureLimitsFor`). */
@@ -95,7 +97,8 @@ export function createServiceFixture(
     });
   const launchFor = (chosen: string | null): ShapeLaunch => ({
     cwd: '/repo',
-    model: chosen ?? 'claude-opus-5-5',
+    model: opts.launchId?.(chosen ?? 'claude-opus-5-5') ?? chosen ?? 'claude-opus-5-5',
+    modelId: chosen ?? 'claude-opus-5-5',
     effort: 'high',
     agentModels: shapeAgentModels(launched.kind),
     env: {},

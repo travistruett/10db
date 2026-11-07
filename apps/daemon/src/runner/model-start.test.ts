@@ -282,23 +282,27 @@ describe('a model the account refuses at the first reply', () => {
     expect(openCards().map((c) => c.title)).toEqual(['Claude plan: sessions refused']);
   });
 
-  it('fails the task, and does not ask again, for a model already marked unusable', async () => {
+  it('lets a second lane retry on another model when the first already marked the refused one', async () => {
     engine = await createTestEngine({ Alpha: [[{ do: 'model_refused' }], finish('op-again-01')] });
     list(engine.project.accountId, claudeModels());
     const accountId = engine.project.accountId;
-    // Marked after the model was chosen, as an override that named a refused model would have left it.
+    const specs: SessionSpec[] = [];
+    // Another lane's refusal of the same model lands after this lane chose it and before its own arrives.
     engine.adapter.seen = (spec) => {
-      engine.state.write((ctx) => {
-        markAccountModelUnusable(ctx, accountId, spec.model);
-      });
+      specs.push(spec);
+      if (specs.length === 1)
+        engine.state.write((ctx) => {
+          markAccountModelUnusable(ctx, accountId, spec.model);
+        });
       return {};
     };
     const { workstream } = engine.addTask('Alpha', ['api'], [], quick);
     engine.launch(workstream.id);
     await engine.runner.idle();
 
-    expect(listSessions(engine.store.db, workstream.id)).toHaveLength(1);
-    expect(ws(workstream.id).state).toBe('FAILED');
+    expect(specs).toHaveLength(2);
+    expect(specs[1]?.model).not.toBe(specs[0]?.model);
+    expect(ws(workstream.id).state).toBe('DONE');
   });
 
   it('fails the task with its card when the account lists no model to mark', async () => {

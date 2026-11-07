@@ -169,6 +169,8 @@ import { buildShapeView, fileDtoOf, type ViewWorld } from './view';
 export interface ShapeLaunch {
   readonly cwd: string;
   readonly model: string;
+  /** The model's own ID, which the account's list is keyed by; `model` is what the account launches it with. */
+  readonly modelId: string;
   readonly effort: Effort;
   readonly env: Readonly<Record<string, string>>;
   readonly account: AccountExpectation;
@@ -483,7 +485,7 @@ interface Live {
   readonly expiresAt: string | null;
   /** The picture limits of the account this session runs on, which it keeps even if the project's changes. */
   readonly limits: PictureLimits;
-  /** The account and model it runs on, for a refusal to mark. */
+  /** The account and the model (by its own ID, not the one the account launches it with) it runs on, for a refusal to mark. */
   readonly account: AccountId;
   readonly model: string;
   /** Why the daemon ended it, when it did; the session's exit reason otherwise comes from Claude Code. */
@@ -1282,7 +1284,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       expiresAt: ready?.credentialsExpireAt ?? null,
       limits,
       account: launch.account.accountId,
-      model: launch.model,
+      model: launch.modelId,
       endReason: null,
       done: Promise.resolve(),
     };

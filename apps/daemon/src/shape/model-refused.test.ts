@@ -13,7 +13,7 @@ afterEach(async () => {
 
 describe('a conversation whose model the account refuses', () => {
   it('marks the model unusable on the project’s account and tells the builder', async () => {
-    f = createServiceFixture();
+    f = createServiceFixture({ launchId: (model) => `us.anthropic.${model}` });
     const shapeId = f.c.shape.id;
     const accountId = f.c.project.accountId;
     f.state.write((ctx) =>
@@ -21,7 +21,7 @@ describe('a conversation whose model the account refuses', () => {
         {
           model: 'claude-opus-5-5',
           family: null,
-          launchId: 'claude-opus-5-5',
+          launchId: 'us.anthropic.claude-opus-5-5',
           efforts: [],
           inputPrice: null,
           outputPrice: null,
@@ -40,6 +40,6 @@ describe('a conversation whose model the account refuses', () => {
         .view(shapeId)
         .messages.map((m) => m.body)
         .join('\n'),
-    ).toMatch(/cannot run the model claude-opus-5-5/);
+    ).toMatch(/cannot run the model us\.anthropic\.claude-opus-5-5/);
   });
 });

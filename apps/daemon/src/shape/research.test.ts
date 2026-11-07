@@ -32,6 +32,7 @@ beforeEach(() => {
     launch: () => ({
       cwd: '/repo',
       model: 'claude-opus-5-5',
+      modelId: 'claude-opus-5-5',
       effort: 'high',
       agentModels: SHAPE_AGENT_MODELS,
       env: {},

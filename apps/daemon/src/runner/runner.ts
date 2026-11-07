@@ -1330,20 +1330,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     account: AccountRow,
     accountModels: readonly AccountModelDto[],
   ): WorkstreamStep {
-    const project = getProject(db, row.projectId);
-    const inputs = routingInputs(db, { ...project, accountId: account.id });
-    // A step whose model the account refused starts over in that model's tier.
-    const plannedTier =
-      listModelProfiles(db).find((p) => p.model === step.model)?.tier ?? undefined;
-    const resolved = resolveStep(step, account, inputs.profiles, accountModels, {
-      plannedTier,
-      persona: step.personaId ? getPersona(db, step.personaId) : undefined,
-      task: getTask(db, row.taskId),
-      project,
-      roleSettings: inputs.roleSettings,
-      patterns: inputs.patterns,
-      tierOverrides: inputs.tierOverrides,
-    });
+    const resolved = resolveOn(row, step, account, accountModels);
     // With nothing to run the step keeps what was planned, so a later resolve can say why it changed.
     if (resolved === step || isModelTier(resolved.model)) return resolved;
     opts.state.write((ctx) => {
@@ -1356,6 +1343,29 @@ export function createRunner(opts: RunnerOptions): Runner {
       });
     });
     return resolved;
+  }
+
+  /** The step as it would launch on `account` with the models it lists now, saving nothing. */
+  function resolveOn(
+    row: WorkstreamRow,
+    step: WorkstreamStep,
+    account: AccountRow,
+    accountModels: readonly AccountModelDto[],
+  ): WorkstreamStep {
+    const project = getProject(db, row.projectId);
+    const inputs = routingInputs(db, { ...project, accountId: account.id });
+    // A step whose model the account refused starts over in that model's tier.
+    const plannedTier =
+      listModelProfiles(db).find((p) => p.model === step.model)?.tier ?? undefined;
+    return resolveStep(step, account, inputs.profiles, accountModels, {
+      plannedTier,
+      persona: step.personaId ? getPersona(db, step.personaId) : undefined,
+      task: getTask(db, row.taskId),
+      project,
+      roleSettings: inputs.roleSettings,
+      patterns: inputs.patterns,
+      tierOverrides: inputs.tierOverrides,
+    });
   }
 
   /**
@@ -1371,10 +1381,6 @@ export function createRunner(opts: RunnerOptions): Runner {
   ): 'retry' | 'stop' {
     const row = getWorkstreamRow(db, id);
     const account = getAccountRow(db, ctl.accountId);
-    // A model already marked would be asked for again by whatever chose it: stop rather than loop.
-    const already = listAccountModels(db, account.id).some(
-      (m) => m.model === outcome.model && m.unusable,
-    );
     const marked = opts.state.write((ctx) => {
       try {
         markAccountModelUnusable(ctx, account.id, outcome.model);
@@ -1384,18 +1390,20 @@ export function createRunner(opts: RunnerOptions): Runner {
         return false;
       }
     });
+    // Another lane may have marked the model already: this one retries whenever choosing again, with the
+    // model now unusable, gives another model, and stops only when it would be asked for the same one.
+    const again = resolveOn(row, currentStep(row), account, listAccountModels(db, account.id));
+    const retry = again.model !== outcome.model;
     opts.inbox.flag({
       projectId: row.projectId,
       workstreamId: id,
       title: `${account.label} cannot run ${outcome.model}`,
-      body: already
-        ? `${outcome.message}, though 10db had already marked ${outcome.model} unusable on ${account.label}, so it stopped the task instead of asking for it again.`
-        : marked
-          ? `${outcome.message}. 10db marked ${outcome.model} unusable on ${account.label} until the account's model list changes, and is running the step on the next model of its tier.`
-          : `${outcome.message}. ${account.label} lists no models, so 10db cannot mark ${outcome.model} unusable and stopped the task instead of asking for it again. Name a model for each tier in the account's settings.`,
+      body: retry
+        ? `${outcome.message}. 10db marked ${outcome.model} unusable on ${account.label} until the account's model list changes, and is running the step on the next model of its tier.`
+        : `${outcome.message}. ${marked ? `10db marked ${outcome.model} unusable on ${account.label}, but` : `${account.label} lists no models, so 10db cannot mark ${outcome.model} unusable, and`} it would still choose ${outcome.model} for the step, so it stopped the task instead of asking for it again. Name a model for each tier in the account's settings.`,
       foldKey: `model-refused:${account.id}:${outcome.model}`,
     });
-    if (marked && !already) return 'retry';
+    if (retry) return 'retry';
     opts.state.write((ctx) => {
       failIn(ctx, id, ctl.fence, row, {
         kind: WorkstreamFailure.SessionFailed,

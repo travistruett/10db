@@ -315,6 +315,16 @@ describe('the start checks', () => {
       'sandbox_refused',
     ],
     [
+      // The invalid-request code alone is not a refusal: the message must say the model is unknown.
+      'the thread is an invalid request that names the model but not a refusal of it',
+      {
+        'thread/start': {
+          error: { code: -32600, message: 'gpt-5.6-sol: context window exceeded' },
+        },
+      },
+      'sandbox_refused',
+    ],
+    [
       'the thread runs another profile',
       { 'thread/start': threadOf('gpt-5.6-sol', ':danger-full-access') },
       'sandbox_refused',
@@ -897,6 +907,17 @@ describe('the thread and the first turn', () => {
   it('ends as an ordinary error when the first turn fails with a transient error naming the model', async () => {
     const { handle } = startWith({
       'turn/start': { error: { code: -32603, message: 'gpt-5.6-sol is at capacity' } },
+    });
+    const ended = (await collect(handle)).at(-1);
+    expect(ended).toMatchObject({ type: 'ended', reason: 'error' });
+    expect(JSON.stringify(ended)).not.toContain('refused the model');
+  });
+
+  it('ends as an ordinary error when the first turn is an invalid request naming the model but not refusing it', async () => {
+    const { handle } = startWith({
+      'turn/start': {
+        error: { code: -32600, message: 'gpt-5.6-sol: context window exceeded' },
+      },
     });
     const ended = (await collect(handle)).at(-1);
     expect(ended).toMatchObject({ type: 'ended', reason: 'error' });
