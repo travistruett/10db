@@ -1,5 +1,6 @@
+import { globSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { readRepoFile } from './workspace';
+import { readRepoFile, repoRoot } from './workspace';
 
 // Only the installed app's daemon may call Artificial Analysis: its free quota is shared by the
 // builder's key, and a throwaway daemon with no prior sync would spend it.
@@ -26,6 +27,17 @@ describe('daemons that are not the installed app', () => {
 
   it('pnpm dev leaves the catalogue fetch on', () => {
     expect(readRepoFile('scripts/dev.sh')).not.toMatch(CATALOGUE_OFF);
+  });
+
+  // A test that spawns the daemon's entry builds its own environment, so it inherits nothing.
+  const SPAWNS_DAEMON = /spawn\(process\.execPath, \[[^\]]*(?:src\/main\.ts|daemon\.mjs)/;
+
+  it('every daemon test that spawns the entry turns the catalogue fetch off', () => {
+    const spawners = globSync(['apps/daemon/src/**/*.test.ts', 'apps/daemon/test/**/*.test.ts'], {
+      cwd: repoRoot,
+    }).filter((path) => SPAWNS_DAEMON.test(readRepoFile(path)));
+    expect(spawners.length).toBeGreaterThanOrEqual(4);
+    expect(spawners.filter((path) => !CATALOGUE_OFF.test(readRepoFile(path)))).toEqual([]);
   });
 
   // The judge sends task text and diffs to OpenRouter on the builder's key and spends it.

@@ -1,5 +1,6 @@
 import { CatalogueSource } from '@10db/contracts';
 import { createTestStore } from '@10db/db';
+import { z } from 'zod';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ManualClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
@@ -28,14 +29,15 @@ afterEach(() => {
   close();
 });
 
-type Reply = { status: number; body?: unknown } | 'network-error';
+/** A reply carries a JSON body, or `raw` text that is not JSON. */
+type Reply = { status: number; body?: unknown; raw?: string } | 'network-error';
 function fakeFetch(...replies: Reply[]): typeof fetch {
   return (input) => {
     requested.push(input instanceof Request ? input.url : input.toString());
     const reply = replies.shift() ?? { status: 500 };
     if (reply === 'network-error') return Promise.reject(new TypeError('fetch failed'));
     return Promise.resolve(
-      new Response(JSON.stringify(reply.body ?? {}), { status: reply.status }),
+      new Response(reply.raw ?? JSON.stringify(reply.body ?? {}), { status: reply.status }),
     );
   };
 }
@@ -43,9 +45,10 @@ const ok = (body: unknown = readFixture()): Reply => ({ status: 200, body });
 
 /** The fixture with one more model, so its hash differs. */
 function withExtraModel(): unknown {
-  const raw = structuredClone(readFixture()) as {
-    anthropic: { models: Record<string, unknown> };
-  };
+  const raw = z
+    .object({ anthropic: z.object({ models: z.record(z.string(), z.unknown()) }) })
+    .loose()
+    .parse(structuredClone(readFixture()));
   raw.anthropic.models['claude-new'] = { id: 'claude-new', name: 'New', cost: { output: 3 } };
   return raw;
 }
@@ -60,6 +63,9 @@ const catalogueSync = (
   fetchImpl: typeof fetch,
   snapshot: () => Catalogue | null = () => null,
   store: StateStore = state,
+  onChanged: (c: Catalogue) => void | Promise<void> = (c) => {
+    changed.push(c);
+  },
 ) =>
   createCatalogueSync({
     state: store,
@@ -67,7 +73,7 @@ const catalogueSync = (
     fetch: fetchImpl,
     logger: silentLogger,
     snapshot,
-    onChanged: (c) => changed.push(c),
+    onChanged,
   });
 
 describe('catalogue sync', () => {
@@ -118,7 +124,15 @@ describe('catalogue sync', () => {
     ['a server error', { status: 503 }],
     ['a document that is not an object', ok([])],
     ['a document with none of the providers', ok({ deepinfra: { models: {} } })],
-    ['a body that is not JSON', { status: 200, body: undefined }],
+    ['a body that is not JSON', { status: 200, raw: '<html>' }],
+    [
+      'a document whose every entry fails validation',
+      ok({
+        ...z.record(z.string(), z.unknown()).parse(readFixture()),
+        anthropic: { models: { x: { name: 'x' } } },
+      }),
+    ],
+    ['a document that lists a provider with no models', ok({ anthropic: { models: {} } })],
   ])('keeps the stored copy after %s', async (_name, reply) => {
     const s = catalogueSync(fakeFetch(ok(), reply));
     await s.sync();
@@ -130,6 +144,71 @@ describe('catalogue sync', () => {
       source: CatalogueSource.Fetched,
       models: FIXTURE_MODELS,
     });
+    expect(changed).toHaveLength(0);
+  });
+
+  it.each([
+    [
+      'throws',
+      () => {
+        throw new Error('now');
+      },
+    ],
+    ['rejects', () => Promise.reject(new Error('later'))],
+  ])('delivers the change on the next sync after onChanged %s', async (_name, fail) => {
+    let calls = 0;
+    const s = catalogueSync(
+      fakeFetch(ok(), ok(), ok()),
+      () => null,
+      state,
+      (c) => {
+        calls += 1;
+        if (calls === 1) return fail();
+        changed.push(c);
+        return undefined;
+      },
+    );
+    const first = await s.sync();
+    expect(first.source).toBe(CatalogueSource.Fetched);
+    expect(changed).toHaveLength(0);
+    await s.sync();
+    expect(changed).toHaveLength(1);
+    await s.sync();
+    expect(calls).toBe(2);
+  });
+
+  it('retries a change that was not delivered on the backoff, not a day later', async () => {
+    let calls = 0;
+    const s = catalogueSync(
+      fakeFetch(ok(), ok()),
+      () => null,
+      state,
+      (c) => {
+        calls += 1;
+        if (calls === 1) throw new Error('now');
+        changed.push(c);
+      },
+    );
+    s.start();
+    await armed();
+    clock.advance(15 * MINUTE);
+    await vi.waitFor(() => {
+      expect(changed).toHaveLength(1);
+    });
+    s.stop();
+  });
+
+  it('holds nothing in memory when the write fails, so the catalogue is still absent', async () => {
+    const failing: StateStore = {
+      db: state.db,
+      now: () => state.now(),
+      write: () => {
+        throw new Error('disk full');
+      },
+    };
+    const s = catalogueSync(fakeFetch(ok()), () => null, failing);
+    expect(await s.sync()).toEqual({ fetchedAt: null, source: CatalogueSource.None, models: 0 });
+    expect(s.catalogue()).toBeNull();
     expect(changed).toHaveLength(0);
   });
 
@@ -152,6 +231,9 @@ describe('catalogue sync', () => {
   it('prefers the stored copy to the snapshot', async () => {
     const small = parseCatalogue({
       anthropic: { models: { a: { id: 'a', name: 'A' } } },
+      openai: { models: { b: { id: 'b', name: 'B' } } },
+      'amazon-bedrock': { models: { c: { id: 'c', name: 'C' } } },
+      openrouter: { models: { d: { id: 'd', name: 'D' } } },
     });
     const s = catalogueSync(fakeFetch(ok(), 'network-error'), () => small);
     await s.sync();

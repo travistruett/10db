@@ -102,13 +102,11 @@ const CASES: Case[] = [
     models: [
       claude('opus-5', 'claude-opus', 25, '2026-07-24'),
       claude('opus-5-5', 'claude-opus', 20, '2026-09-22'),
-      claude('haiku-5-5', 'claude-haiku', 4, '2026-10-07'),
+      claude('haiku-5-5', 'claude-haiku', 2.2, '2026-10-07'),
     ],
     expected: {
       'opus-5': [null, Superseded],
       'opus-5-5': [Strongest, Current],
-      // 4 / 20 is 20% of the top, which an older 25 would have made 16%: Balanced either way, so a
-      // price just under the cut shows the top was 20.
       'haiku-5-5': [Balanced, Current],
     },
   },
@@ -167,6 +165,22 @@ const CASES: Case[] = [
       { id: 'new', outputPrice: 5 },
     ],
     expected: { old: [null, Retired], new: [Strongest, Current] },
+  },
+  {
+    name: 'a model with no release date is never superseded',
+    models: [
+      { id: 'dated', family: 'f', releaseDate: '2026-10-01', outputPrice: 10 },
+      { id: 'undated', family: 'f', releaseDate: null, outputPrice: 10 },
+    ],
+    expected: { dated: [Strongest, Current], undated: [Strongest, Current] },
+  },
+  {
+    name: 'a model with no maker is Unknown and sets no top',
+    models: [
+      { id: 'stray', maker: null, outputPrice: 90 },
+      { id: 'known', outputPrice: 10 },
+    ],
+    expected: { stray: [null, Unknown], known: [Strongest, Current] },
   },
   {
     name: 'a model with no family ranks by its own price and supersedes nothing',

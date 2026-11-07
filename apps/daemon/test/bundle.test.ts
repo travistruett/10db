@@ -56,6 +56,8 @@ describe('the bundled daemon', () => {
         TENDB_WORKTREE_ROOT: BUNDLE_WORKTREE_ROOT,
         TENDB_PORT: '0',
         TENDB_LOG_LEVEL: 'warn',
+        // A throwaway daemon never fetches models.dev.
+        TENDB_CATALOGUE: 'off',
       },
       stdio: ['ignore', 'ignore', 'pipe'],
     });

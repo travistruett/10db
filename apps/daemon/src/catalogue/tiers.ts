@@ -11,8 +11,11 @@ export interface DerivedTier {
   status: ModelStatus;
 }
 
-const priced = (m: CatalogueModel): m is CatalogueModel & { outputPrice: number } =>
-  m.outputPrice !== null && m.outputPrice > 0;
+/** A model with a maker and a price, the only kind that can be ranked. */
+type Ranked = CatalogueModel & { maker: string; outputPrice: number };
+
+const rankable = (m: CatalogueModel): m is Ranked =>
+  m.maker !== null && m.outputPrice !== null && m.outputPrice > 0;
 
 /**
  * Tiers from output price, for the offered models only. Within a maker's family only the newest model is
@@ -24,11 +27,11 @@ export function deriveTiers(
   offered: ReadonlySet<string>,
 ): Map<string, DerivedTier> {
   const result = new Map<string, DerivedTier>();
-  const live: (CatalogueModel & { outputPrice: number })[] = [];
+  const live: Ranked[] = [];
   for (const m of models) {
     if (!offered.has(m.id)) continue;
     if (m.deprecated) result.set(m.id, { tier: null, status: ModelStatus.Retired });
-    else if (priced(m)) live.push(m);
+    else if (rankable(m)) live.push(m);
     else result.set(m.id, { tier: null, status: ModelStatus.Unknown });
   }
 
@@ -41,7 +44,7 @@ export function deriveTiers(
   }
 
   const topByMaker = new Map<string, number>();
-  const ranked: (CatalogueModel & { outputPrice: number })[] = [];
+  const ranked: Ranked[] = [];
   for (const m of live) {
     const latest = m.family === null ? undefined : newest.get(familyKey(m));
     if (latest !== undefined && m.releaseDate !== null && m.releaseDate < latest) {
