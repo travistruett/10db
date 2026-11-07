@@ -4,7 +4,7 @@
  * shards a little less even, and no number can leave a file out.
  */
 export const SHARD_WEIGHTS: Readonly<Record<string, number>> = {
-  'apps/daemon/src/delivery/migration-steps.test.ts': 152,
+  'apps/daemon/src/delivery/migration-steps.test.ts': 75,
   'apps/daemon/src/runner/runner.test.ts': 118,
   'apps/daemon/src/delivery/pr-catch-up.test.ts': 109,
   'apps/daemon/src/delivery/batch-card.test.ts': 106,
