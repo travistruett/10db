@@ -11,6 +11,7 @@ import {
   parseWorkflow,
   readWorkflow,
   WorkflowShapeError,
+  workflowCheckNames,
   workflowJobNames,
   workflowPaths,
 } from './workflows';
@@ -36,8 +37,12 @@ function lockedPlaywrightVersion(): string {
   return versions.find((version) => version !== undefined) ?? '';
 }
 
-function gateContainer(): { image?: string | undefined; options?: string | undefined } {
-  const container = readWorkflow(CI).jobs['gate']?.container;
+/** The jobs that run scripts/gate.sh, and the jobs among them that run in the Playwright image. */
+const GATE_JOBS = ['gate-static', 'gate-test', 'gate-e2e'];
+const CONTAINER_JOBS = ['gate-test', 'gate-e2e'];
+
+function containerOf(job: string): { image?: string | undefined; options?: string | undefined } {
+  const container = readWorkflow(CI).jobs[job]?.container;
   return typeof container === 'string' ? { image: container } : (container ?? {});
 }
 
@@ -55,9 +60,9 @@ jobs:
 `;
 
 describe('CI workflow', () => {
-  it('has the five required checks as jobs, and desktop-scope, which decides desktop', () => {
+  it('has the required checks as jobs, and desktop-scope, which decides desktop', () => {
     expect(workflowJobNames(CI)).toEqual([
-      'gate',
+      ...GATE_JOBS,
       'desktop-scope',
       'desktop',
       'policy',
@@ -66,8 +71,47 @@ describe('CI workflow', () => {
     ]);
   });
 
-  it('skips Rust in the Linux gate job, which has no Tauri build libraries', () => {
-    expect(readWorkflow(CI).jobs['gate']?.env?.['GATE_SKIP_RUST']).toBe('1');
+  it('runs every gate step in a required job, so splitting the gate drops none', () => {
+    // Format and lint run in policy, and Rust in desktop on macOS: the Linux jobs have no Tauri
+    // build libraries. A step added to gate.sh fails here until a job runs it.
+    const all = /^ALL_STEPS=\(([^)]*)\)$/m.exec(readRepoFile('scripts/gate.sh'))?.[1]?.split(' ');
+    const jobs = readWorkflow(CI).jobs;
+    const inGateJobs = GATE_JOBS.flatMap((job) =>
+      (jobs[job]?.env?.['GATE_STEPS'] ?? '').split(' ').filter(Boolean),
+    );
+    const runsIn = (job: string) => (jobs[job]?.steps ?? []).map((step) => step.run ?? '');
+    expect(runsIn('policy')).toEqual(
+      expect.arrayContaining(['pnpm -s format:check', 'pnpm -s lint']),
+    );
+    expect(runsIn('desktop')).toContain('make rust-check');
+    // A step that may fail without failing its job no longer blocks a merge.
+    const lenient = [...GATE_JOBS, 'policy', 'desktop'].filter((job) =>
+      [jobs[job], ...(jobs[job]?.steps ?? [])].some((part) => part?.['continue-on-error']),
+    );
+    expect(lenient).toEqual([]);
+    // Format and lint run even after an earlier policy step failed: a fix session reads every
+    // failure at once, and a pull request gets two fixes.
+    const policySteps = jobs['policy']?.steps ?? [];
+    const independent = policySteps.filter((step) => step.if === '${{ !cancelled() }}');
+    expect(independent.map((step) => step.run)).toEqual(['pnpm -s format:check', 'pnpm -s lint']);
+    expect([...inGateJobs, 'format', 'lint', 'rust'].sort()).toEqual([...(all ?? [])].sort());
+  });
+
+  it('splits the tests into shards that together run every file, and reports each failure', () => {
+    // Vitest runs shard i of n only when n is the shard count, so a shard left out of the matrix
+    // would silently drop its files. fail-fast off keeps one failing shard from cancelling the
+    // others, which would hide their failures from a fix session.
+    const job = readWorkflow(CI).jobs['gate-test'];
+    const shards = job?.strategy?.matrix?.shard ?? [];
+    expect(job?.strategy?.['fail-fast']).toBe(false);
+    expect(shards).toEqual(shards.map((_, index) => index + 1));
+    expect(shards.length).toBeGreaterThan(1);
+    expect(job?.env?.['GATE_TEST_ARGS']).toBe(
+      '--shard=${{ matrix.shard }}/' + String(shards.length),
+    );
+    expect(workflowCheckNames(CI).filter((name) => name.startsWith('gate-test'))).toEqual(
+      shards.map((shard) => `gate-test-${String(shard)}`),
+    );
   });
 
   it('runs the gate in the Playwright image of the locked Playwright version, pinned by digest', () => {
@@ -76,9 +120,11 @@ describe('CI workflow', () => {
     const version = lockedPlaywrightVersion();
     expect(version).toMatch(/^\d+\.\d+\.\d+$/);
     const tag = `v${version.replaceAll('.', '\\.')}-noble`;
-    expect(gateContainer().image).toMatch(
-      new RegExp(`^mcr\\.microsoft\\.com/playwright:${tag}@sha256:[0-9a-f]{64}$`),
-    );
+    for (const job of CONTAINER_JOBS) {
+      expect(containerOf(job).image).toMatch(
+        new RegExp(`^mcr\\.microsoft\\.com/playwright:${tag}@sha256:[0-9a-f]{64}$`),
+      );
+    }
   });
 
   it('runs the gate as the runner user, under an init that reaps orphaned processes', () => {
@@ -86,7 +132,9 @@ describe('CI workflow', () => {
     // isolated git config can't carry a safe.directory exception. The recovery, gate runner and
     // login-env tests wait for a killed grandchild to disappear, and without an init the job
     // container's PID 1 leaves it a zombie.
-    expect(gateContainer().options).toBe('--init --user 1001');
+    for (const job of CONTAINER_JOBS) {
+      expect(containerOf(job).options).toBe('--init --user 1001');
+    }
   });
 
   it('bounds every job, so a stalled download fails in minutes instead of holding merges for hours', () => {
@@ -111,6 +159,15 @@ describe('CI workflow', () => {
       (job.if ?? '').includes('github.event.action'),
     );
     expect(skipsOnEvent.map(([name]) => name)).toEqual([]);
+  });
+
+  it('keeps every pull request event out of the concurrency group of a push to main', () => {
+    // An edit to a merged pull request runs with main's ref. Grouped by ref, that run cancels main's
+    // own CI, as editing #541's description did.
+    expect(readWorkflow(CI).concurrency).toEqual({
+      group: 'ci-${{ github.event.pull_request.number || github.ref }}',
+      'cancel-in-progress': true,
+    });
   });
 
   it('runs on merge queue entries, where every required check must report', () => {
@@ -186,16 +243,16 @@ describe('CI workflow', () => {
     }
   });
 
-  it('installs every mise tool the gate tests spawn, so the required gate check can run them', () => {
+  it('installs every mise tool the gate tests spawn, so the required test checks can run them', () => {
     // The gate runs the whole tests/repo project: the hook and policy tests call gitleaks,
     // actionlint and zizmor. mise-action creates shims only for installed tools, so a missing one
-    // exits 127 on the runner. Rust is skipped in this job (GATE_SKIP_RUST) and cargo-deny runs in
+    // exits 127 on the runner. Rust runs in the desktop job and cargo-deny runs in
     // its own job; every other pinned tool belongs here.
     const notNeeded = new Set(['rust', 'cargo-deny']);
     const pinned = [...readRepoFile('mise.toml').matchAll(/^([\w-]+) = /gm)]
       .map((match) => match[1] ?? '')
       .filter((name) => !['min_version', 'lockfile'].includes(name) && !notNeeded.has(name));
-    const miseStep = readWorkflow(CI).jobs['gate']?.steps?.find((step) =>
+    const miseStep = readWorkflow(CI).jobs['gate-test']?.steps?.find((step) =>
       step.uses?.startsWith('jdx/mise-action@'),
     );
     const installArgs = miseStep?.with?.['install_args'];
@@ -204,11 +261,13 @@ describe('CI workflow', () => {
   });
 
   it('installs with a frozen lockfile, then runs the gate, downloading no browser or system package', () => {
-    expect(readRepoFile(CI)).toContain(
-      '      - run: pnpm install --frozen-lockfile\n      - run: bash scripts/gate.sh\n',
-    );
-    const runs = (readWorkflow(CI).jobs['gate']?.steps ?? []).map((step) => step.run ?? '');
-    expect(runs.filter((run) => /playwright install|\bapt(-get)?\b/.test(run))).toEqual([]);
+    for (const job of GATE_JOBS) {
+      const runs = (readWorkflow(CI).jobs[job]?.steps ?? []).map((step) => step.run ?? '');
+      const install = runs.indexOf('pnpm install --frozen-lockfile');
+      expect(install).toBeGreaterThanOrEqual(0);
+      expect(runs[install + 1]).toBe('bash scripts/gate.sh');
+      expect(runs.filter((run) => /playwright install|\bapt(-get)?\b/.test(run))).toEqual([]);
+    }
   });
 });
 

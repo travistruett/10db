@@ -2,7 +2,8 @@
 # Runs every repository check and ends with one summary line, which gives each step's seconds in the order
 # the steps ran. Each step's output goes to .gate/<step>.log.
 # GATE_STEPS="lint test" limits the run (used by tests and for quick reruns). GATE_SKIP_RUST=1
-# reports rust as skipped even when cargo is installed (the Ubuntu CI job: no Tauri system libraries).
+# reports rust as skipped even when cargo is installed (a Linux machine with no Tauri system libraries).
+# GATE_TEST_ARGS="--shard=1/4" adds arguments to the test step, split on spaces (CI's test shards).
 # Inside a sandbox (TENDB_SANDBOX=1, as a gate 10db runs has it; any other value runs it) e2e is
 # reported as skipped. Each failing step gets a line naming the command that reruns it and its log
 # ("FAILED lint: pnpm lint (log .gate/lint.log)"), which 10db's fix brief reads; with CI set, each
@@ -15,6 +16,7 @@ mkdir -p .gate
 
 ALL_STEPS=(format lint typecheck test build e2e drift knip rust)
 read -r -a steps <<< "${GATE_STEPS:-${ALL_STEPS[*]}}"
+read -r -a test_args <<< "${GATE_TEST_ARGS:-}"
 start=$SECONDS
 # One entry per step, passed or failed: "lint 31s" or "rust skipped".
 steps_run=()
@@ -52,7 +54,8 @@ for step in "${steps[@]}"; do
     format) run_step format pnpm -s format:check ;;
     lint) run_step lint pnpm -s lint ;;
     typecheck) run_step typecheck pnpm -s typecheck ;;
-    test) run_step test pnpm -s test ;;
+    # bash 3.2 treats expanding an empty array as unbound under set -u.
+    test) run_step test pnpm -s test ${test_args[@]+"${test_args[@]}"} ;;
     build) run_step build pnpm -s build ;;
     e2e)
       # WebKit runs its page, network and GPU processes as XPC services that launchd starts outside

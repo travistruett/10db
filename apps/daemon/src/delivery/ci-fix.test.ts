@@ -180,6 +180,26 @@ describe('starting a fix when a required check fails', () => {
     expect(fixBatches(root)).toHaveLength(1);
   });
 
+  it('carries the log of every gate job when they all fail, and names any more without one', async () => {
+    const { root } = await shippedRoot();
+    const shards = [1, 2, 3, 4, 5, 6].map((shard) => `gate-test-${String(shard)}`);
+    const names = ['gate-static', ...shards];
+    const failing = [...names, 'gate-e2e'].map((name, index) => job(name, String(100 + index)));
+    const beyond = job('desktop', '200');
+    fails(root.prUrl ?? '', ...failing, beyond);
+    for (const check of [...failing, beyond]) {
+      h.gh.setJobLog(check.jobId ?? '', { kind: 'ready', log: `${check.name} broke\n` });
+    }
+
+    await begin(watcher());
+
+    const { description } = h.only(fixTasks());
+    for (const check of failing) expect(description).toContain(`${check.name} broke`);
+    expect(description).toContain('Also failing, with no log here:');
+    expect(description).toContain('desktop');
+    expect(description).not.toContain('desktop broke');
+  });
+
   it('makes no second fix on a second round, after a restart, or after the fix ended on the same head', async () => {
     const { root } = await shippedRoot();
     fails(root.prUrl ?? '', job('build'));

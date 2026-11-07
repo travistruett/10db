@@ -133,7 +133,7 @@ describe('git hook variables', () => {
     };
   }
 
-  it('never reach make check when pre-push runs from a linked worktree', () => {
+  it('never reach make precheck when pre-push runs from a linked worktree', () => {
     const repo = createThrowawayRepo('10db-hook-env');
     cleanup.push(repo);
     const origin = createBareRepo('10db-hook-env-origin');
@@ -145,11 +145,11 @@ describe('git hook variables', () => {
     cpSync(resolve(repoRoot, 'scripts/hooks'), join(repo.dir, 'scripts/hooks'), {
       recursive: true,
     });
-    // A stand-in make, first on PATH, that records the environment `make check` was given. It
+    // A stand-in make, first on PATH, that records the environment `make precheck` was given. It
     // needs no make installed, and the CI gate's container has none.
     const fakeMake = join(records, 'bin', 'make');
     mkdirSync(dirname(fakeMake));
-    writeFileSync(fakeMake, '#!/bin/sh\n[ "$1" = check ] || exit 2\nenv > "$HOOK_ENV_RECORD"\n');
+    writeFileSync(fakeMake, '#!/bin/sh\n[ "$1" = precheck ] || exit 2\nenv > "$HOOK_ENV_RECORD"\n');
     chmodSync(fakeMake, 0o755);
     repo.git('add', 'lefthook.yml', 'scripts/hooks');
     repo.commit('chore(repo): init');

@@ -24,28 +24,23 @@ on:
 permissions: {}
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # By pull request number, not ref alone: an edit to a merged pull request runs with main's ref, and
+  # would otherwise cancel main's own run.
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  gate:
+  # The gate is split so that a pull request gets its first failure in minutes and each job can be
+  # rerun alone (decisions/2026-11-06-ci-splits-the-gate-into-required-jobs.md). Each job is a required
+  # check of its own, so 10db reads the failing job's log and cancelled state directly. Format and
+  # lint run in policy, and Rust in desktop; `make gate` still runs every step in one place.
+  gate-static:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 15
     permissions:
       contents: read
-    # Microsoft's Playwright image for the version pnpm-lock.yaml pins ships WebKit and its system
-    # libraries, so no run downloads them from the Ubuntu mirror; bump the tag and digest with
-    # @playwright/test. uid 1001 is the runner user that owns the checkout, so git trusts it
-    # without safe.directory, which the tests' isolated git config would hide. --init reaps the
-    # orphaned processes the recovery tests wait on. The image's git is 2.43.0, older than the 2.50
-    # developers run, so .claude/rules/testing.md lists the git config the fixtures must set.
-    container:
-      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea
-      options: --init --user 1001
     env:
-      # The Tauri crate needs the WebKitGTK development libraries to build on Linux, and this job
-      # has none. Rust is checked in the desktop job on macOS.
-      GATE_SKIP_RUST: '1'
+      GATE_STEPS: typecheck build drift knip
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -53,9 +48,67 @@ jobs:
       - uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
         with:
           version: 2026.10.25
-          # gate.sh runs all of tests/repo: the hook and policy tests spawn gitleaks, actionlint and
-          # zizmor, and mise-action creates shims only for installed tools.
+          install_args: node pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: bash scripts/gate.sh
+      - if: failure()
+        run: for f in .gate/*.log; do echo "::group::$f"; cat "$f"; echo "::endgroup::"; done
+
+  gate-test:
+    name: gate-test-${{ matrix.shard }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      # One failing shard must not cancel the others: a fix session reads every failure at once.
+      fail-fast: false
+      matrix:
+        # The ruleset requires one check per shard, so a new shard count is a ruleset change.
+        shard: [1, 2, 3, 4, 5, 6]
+    # Microsoft's Playwright image for the version pnpm-lock.yaml pins ships WebKit and its system
+    # libraries, so no run downloads them from the Ubuntu mirror; bump the tag and digest with
+    # @playwright/test. uid 1001 is the runner user that owns the checkout, so git trusts it
+    # without safe.directory, which the tests' isolated git config would hide. --init reaps the
+    # orphaned processes the recovery tests wait on. The image's git is 2.43.0, older than the 2.50
+    # developers run, so .claude/rules/testing.md lists the git config the fixtures must set.
+    container: &playwright
+      image: mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea
+      options: --init --user 1001
+    env:
+      GATE_STEPS: test
+      GATE_TEST_ARGS: --shard=${{ matrix.shard }}/6
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
+        with:
+          version: 2026.10.25
+          # tests/repo runs here: the hook and policy tests spawn gitleaks, actionlint and zizmor, and
+          # mise-action creates shims only for installed tools.
           install_args: node pnpm gitleaks actionlint zizmor
+      - run: pnpm install --frozen-lockfile
+      - run: bash scripts/gate.sh
+      - if: failure()
+        run: for f in .gate/*.log; do echo "::group::$f"; cat "$f"; echo "::endgroup::"; done
+
+  gate-e2e:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    container: *playwright
+    env:
+      GATE_STEPS: e2e
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
+        with:
+          version: 2026.10.25
+          install_args: node pnpm
       - run: pnpm install --frozen-lockfile
       - run: bash scripts/gate.sh
       - if: failure()
@@ -115,7 +168,7 @@ jobs:
         with:
           workspaces: apps/desktop/src-tauri
       - run: pnpm install --frozen-lockfile
-      # The gate job runs on Linux, where the real Seatbelt tests skip: run them (the gate's and a repo
+      # The gate jobs run on Linux, where the real Seatbelt tests skip: run them (the gate's and a repo
       # MCP server's), with the sandbox module's own tests, on macOS.
       - run: pnpm --filter @10db/daemon exec vitest run test/gate-sandbox.seatbelt.test.ts test/mcp-sandbox.seatbelt.test.ts src/sandbox
       # The self-update against macOS's own pgrep and pkill, which neither Linux nor a lane's sandbox has.
@@ -148,8 +201,12 @@ jobs:
           BASE_SHA: ${{ github.event.merge_group.base_sha || github.event.pull_request.base.sha || github.event.before }}
           HEAD_SHA: ${{ github.event.merge_group.head_sha || github.event.pull_request.head.sha || github.sha }}
         run: bash scripts/policy.sh "$BASE_SHA" "$HEAD_SHA"
-      - run: pnpm -s format:check
-      - run: pnpm -s lint
+      # Run even after an earlier step failed: these are the gate's format and lint, and a fix session
+      # reads every failure at once.
+      - if: ${{ !cancelled() }}
+        run: pnpm -s format:check
+      - if: ${{ !cancelled() }}
+        run: pnpm -s lint
       - run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check
 
   dependency-review:
