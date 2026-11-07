@@ -10,6 +10,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createMemoryKeychain } from '../../test/fixtures';
 import { readModelsDevFixture } from '../../test/models-dev-fixture';
 import { createAccountLists, parseCatalogue } from '../catalogue';
+import { ManualClock } from '../clock';
 import { createLauncher } from '../environment';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { capturingLogger } from '../../test/fixtures';
@@ -23,6 +24,7 @@ import {
 import { createListRefresh, type ListRefresh } from './list-refresh';
 import { createStartGate } from './start-gate';
 
+let clock: ManualClock;
 let store: Store;
 let close: () => void;
 let state: StateStore;
@@ -33,7 +35,8 @@ let refresh: ListRefresh;
 let logger: ReturnType<typeof capturingLogger>;
 
 beforeEach(() => {
-  ({ store, close } = createTestStore());
+  clock = new ManualClock(new Date(2026, 10, 6));
+  ({ store, close } = createTestStore(() => clock.now()));
   state = createStateStore(store, createEventBus());
   behaviour = new Map();
   probed = [];
@@ -55,6 +58,7 @@ beforeEach(() => {
   };
   refresh = createListRefresh({
     state,
+    clock,
     adapter,
     launcher: createLauncher({
       base: { PATH: '/bin' },
@@ -111,6 +115,75 @@ describe('reading every account list', () => {
     behaviour.set(a, { models: [OPUS], email: undefined, subscriptionType: undefined });
     await refresh.readAll();
     expect(stored(a)).toEqual([]);
+  });
+
+  it('reads one account for a caller that just signed it in', async () => {
+    const a = subscription('A');
+    const b = subscription('B');
+    behaviour.set(a, [OPUS]);
+    behaviour.set(b, [HAIKU]);
+    await refresh.readOne(a);
+    expect(probed).toEqual([a]);
+    expect(stored(a)).toEqual(['claude-opus-5-5']);
+  });
+
+  it.each<[string, number, number]>([
+    ['a list read an hour ago is left alone', 60 * 60_000, 0],
+    ['a list read a day ago is read again', 24 * 60 * 60_000, 1],
+  ])('at a session start, %s', async (_name, age, probes) => {
+    const a = subscription('A');
+    behaviour.set(a, [OPUS]);
+    await refresh.readOne(a);
+    probed.length = 0;
+    clock.advance(age);
+    await refresh.readIfStale(a);
+    expect(probed).toHaveLength(probes);
+  });
+
+  it('at a session start, reads an account that has never been read', async () => {
+    const a = subscription('A');
+    behaviour.set(a, [OPUS]);
+    await refresh.readIfStale(a);
+    expect(stored(a)).toEqual(['claude-opus-5-5']);
+  });
+
+  it('at a session start, does not probe again within the day an account that listed nothing', async () => {
+    const a = subscription('A');
+    behaviour.set(a, {});
+    await refresh.readIfStale(a);
+    await refresh.readIfStale(a);
+    expect(probed).toEqual([a]);
+    clock.advance(24 * 60 * 60_000);
+    await refresh.readIfStale(a);
+    expect(probed).toEqual([a, a]);
+  });
+
+  it('after a failed fetch reads only the accounts whose list is a day old', async () => {
+    const a = subscription('A');
+    const b = subscription('B');
+    behaviour.set(a, [OPUS]);
+    behaviour.set(b, [HAIKU]);
+    await refresh.readAll();
+    clock.advance(23 * 60 * 60_000);
+    await refresh.readOne(b);
+    probed.length = 0;
+    clock.advance(60 * 60_000);
+    await refresh.readAll({ staleOnly: true });
+    expect(probed).toEqual([a]);
+  });
+
+  it('stops between accounts once it is stopped', async () => {
+    const a = subscription('A');
+    const b = subscription('B');
+    behaviour.set(a, [OPUS]);
+    behaviour.set(b, [HAIKU]);
+    const read = refresh.readAll();
+    refresh.stop();
+    await read;
+    expect(probed.length).toBeLessThan(2);
+    probed.length = 0;
+    await refresh.readAll();
+    expect(probed).toEqual([]);
   });
 
   it('leaves out an archived account', async () => {

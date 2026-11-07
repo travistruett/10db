@@ -495,7 +495,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         reconcileProfiles(ctx, changed);
       });
     },
-    afterSync: () => refreshAccountModels(),
+    afterSync: (fetched) => refreshAccountModels(fetched),
   });
   const accountLists = createAccountLists({
     state,
@@ -973,6 +973,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   const listRefresh = createListRefresh({
     state,
+    clock,
     adapter,
     launcher,
     startGate,
@@ -983,8 +984,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // What runs after every fetch of the catalogue: each account's list is read again through the identity probe, then
   // the profiles are rebuilt from what the accounts now offer. Scores for the models that changed are read after the
   // profiles exist, so a new model has a row to put them on.
-  async function refreshAccountModels(): Promise<void> {
-    await listRefresh.readAll();
+  async function refreshAccountModels(fetched: boolean): Promise<void> {
+    // After a failed fetch only accounts not read in the last day are read, so a retry loop does not probe them all.
+    await listRefresh.readAll({ staleOnly: !fetched });
     const current = catalogue.catalogue();
     if (current !== null)
       state.write((ctx) => {
@@ -1005,6 +1007,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     launcher,
     adapter,
     lists: accountLists,
+    listRefresh,
     startGate,
     runtime: accounts,
     pauses: accountPauses,
@@ -1181,6 +1184,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       ...accounts,
       prepare: (account, projectId) => {
         preparer.prepare(account, projectId);
+      },
+      readList: (id) => {
+        void listRefresh.readIfStale(id);
       },
     },
     connecting: () => accountService.connecting(),
@@ -1607,6 +1613,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       await Promise.all([deliveryJobs.stop(), selfUpdateStopped]);
       benchmarks.stop();
       catalogue.stop();
+      listRefresh.stop();
       accountPauses.stop();
       moveBack.stop();
       nightly.cancel();

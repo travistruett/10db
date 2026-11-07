@@ -2,8 +2,9 @@ import { AccountKind, Provider, type AccountId } from '@10db/contracts';
 import {
   createTestStore,
   listAccountModels,
-  listEventsAfter,
   listModelProfiles,
+  markAccountModelUnusable,
+  schema,
   seedAccount,
   type Store,
 } from '@10db/db';
@@ -78,23 +79,30 @@ describe('recording an account list', () => {
     ).toBe(true);
   });
 
-  it('keeps the stored list and its time when the read gave no list', () => {
+  it.each<[string, readonly SeenModel[] | undefined]>([
+    ['gave no list', undefined],
+    ['gave an empty list, as Codex does with every model hidden', []],
+  ])('keeps the stored list, its time and its marks when the read %s', (_name, read) => {
     record([OPUS]);
+    store.write((ctx) => {
+      markAccountModelUnusable(ctx, id, 'claude-opus-5-5');
+    });
     const before = listAccountModels(store.db, id);
     clock.advance(60 * 60_000);
-    record(undefined);
+    record(read);
     expect(listAccountModels(store.db, id)).toEqual(before);
   });
 
-  it('replaces the list with the new one and writes profiles again only for a list that changed', () => {
+  it('builds profiles again only for a list that changed', () => {
     record([OPUS]);
-    const afterFirst = listEventsAfter(store.db, 0, 1000).length;
+    // Emptied by hand: a rebuild would bring the rows back.
+    store.db.delete(schema.modelProfiles).run();
     clock.advance(60_000);
     record([OPUS]);
-    expect(listEventsAfter(store.db, 0, 1000)).toHaveLength(afterFirst);
+    expect(listModelProfiles(store.db)).toEqual([]);
     record([HAIKU]);
+    expect(profileModels()).toEqual(['claude-haiku-5-5']);
     expect(stored()).toEqual(['claude-haiku-5-5']);
-    expect(profileModels()).toEqual(expect.arrayContaining(['claude-haiku-5-5']));
   });
 
   it('writes nothing while there is no catalogue to join to', () => {

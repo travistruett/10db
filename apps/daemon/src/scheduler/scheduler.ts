@@ -41,7 +41,13 @@ export interface SchedulerOptions {
     isRunning(id: WorkstreamId): boolean;
   };
   readonly accounts: Pick<AccountRuntime, 'blocked' | 'isPaused'> &
-    Pick<AccountPreparer, 'prepare'>;
+    Pick<AccountPreparer, 'prepare'> & {
+      /**
+       * A session may start on this ready account: its model list is read if it is a day old. Asked once per
+       * account per tick; it returns at once and the read goes on behind it.
+       */
+      readList?(id: AccountId): void;
+    };
   readonly clock: Clock;
   readonly instanceId: string;
   readonly caps: { readonly global: number };
@@ -166,6 +172,7 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
           blockedThisTick.add(asked);
           continue;
         }
+        opts.accounts.readList?.(account.id);
         open.add(account.id);
       }
       if (!overCaps && (byProject.get(project.id) ?? 0) >= project.maxLanes) continue;

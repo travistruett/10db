@@ -37,7 +37,7 @@ export type CatalogueProvider = z.infer<typeof CatalogueProvider>;
 
 export const Catalogue = z.object({
   providers: z.record(z.string(), CatalogueProvider),
-  /** Covers IDs, prices, statuses and families only, so a change to anything else is not a change. */
+  /** Covers IDs, prices, statuses, families, release dates and efforts only, so a change to anything else is not a change. */
   hash: z.string().min(1),
   /** Entries models.dev listed that failed validation and were left out. */
   skipped: z.int().min(0),

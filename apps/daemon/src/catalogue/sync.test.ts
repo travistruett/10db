@@ -66,7 +66,7 @@ const catalogueSync = (
   onChanged: (c: Catalogue) => void | Promise<void> = (c) => {
     changed.push(c);
   },
-  afterSync: () => Promise<void> = () => Promise.resolve(),
+  afterSync: (fetched: boolean) => Promise<void> = () => Promise.resolve(),
 ) =>
   createCatalogueSync({
     state: store,
@@ -265,20 +265,23 @@ describe('catalogue sync', () => {
       expect(seenAfter).toEqual([1]);
     });
 
-    it('runs when the fetch failed, so the accounts still refresh against the last catalogue', async () => {
-      let runs = 0;
+    it.each<[string, Reply, boolean]>([
+      ['worked', ok(), true],
+      ['failed, so the accounts refresh against the last catalogue', 'network-error', false],
+    ])('runs when the fetch %s, and says whether it fetched', async (_name, reply, fetched) => {
+      const told: boolean[] = [];
       const s = catalogueSync(
-        fakeFetch('network-error'),
+        fakeFetch(reply),
         () => null,
         state,
         undefined,
-        () => {
-          runs += 1;
+        (didFetch) => {
+          told.push(didFetch);
           return Promise.resolve();
         },
       );
       await s.sync();
-      expect(runs).toBe(1);
+      expect(told).toEqual([fetched]);
     });
 
     it('does not reject the sync or stop the daily timer when it throws', async () => {

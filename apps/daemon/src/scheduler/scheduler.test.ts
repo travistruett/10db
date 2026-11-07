@@ -57,6 +57,8 @@ let branchReads: string[];
 /** While set, a branch read waits for it: a tick stays inside `branchSnapshot`. */
 let branchGate: Promise<void> | null;
 let prepared: { accountId: AccountId; projectId: ProjectId }[];
+/** The accounts the scheduler asked to have their model list read, as a session was about to start on them. */
+let listed: AccountId[];
 let wrongBranch: { batchId: string; current: string | null }[];
 let wrongBranchAt: string[];
 let missing: { batchId: string; path: string }[];
@@ -90,6 +92,7 @@ beforeEach(() => {
   wrongBranchAt = [];
   missing = [];
   prepared = [];
+  listed = [];
 });
 afterEach(() => {
   close();
@@ -117,6 +120,9 @@ function scheduler(caps = { global: 4 }, awaited: ReadonlySet<WorkstreamId> = ne
       ...accounts,
       prepare: (account, projectId) => {
         prepared.push({ accountId: account.id, projectId });
+      },
+      readList: (id) => {
+        listed.push(id);
       },
     },
     branches: {
@@ -743,6 +749,18 @@ describe('accounts', () => {
     expect(await scheduler().tick()).toBe(0);
     expect(prepared.map((p) => p.accountId)).toEqual([sub.id, keyed.id]);
     expect(getWorkstream(state.db, waiting.workstream.id).state).toBe('QUEUED');
+  });
+
+  it('asks for the model list once a tick for a ready account a session can start on, not for an unready one', async () => {
+    const key = metered('Shared', { laneCap: 2 });
+    const a = queue({ accountId: key.id, maxLanes: 3 });
+    add(a.project, ['ui']);
+    const b = queue({ accountId: key.id, maxLanes: 3 });
+    add(b.project, ['ui']);
+    const unready = seedAccount(store, { kind: 'anthropic_api_key', label: 'No secret yet' });
+    queue({ accountId: unready.id });
+    await scheduler().tick();
+    expect(listed).toEqual([key.id]);
   });
 
   it('caps lanes per account across two projects', async () => {

@@ -22,6 +22,20 @@ const changed = (provider: string, id: string, patch: Partial<CatalogueModel>): 
   },
 });
 
+/** The fixture with its Bedrock copies moved to another region prefix. */
+const inRegion = (prefix: string): Catalogue => ({
+  ...fixture,
+  providers: {
+    ...fixture.providers,
+    'amazon-bedrock': {
+      models: (fixture.providers['amazon-bedrock']?.models ?? []).map((m) => ({
+        ...m,
+        id: m.id.replace(/^us\./, prefix),
+      })),
+    },
+  },
+});
+
 const seen = (id: string, resolvedId: string | null, efforts: Effort[] = ALL): SeenModel => ({
   id,
   resolvedId,
@@ -102,11 +116,17 @@ const CASES: Case[] = [
   {
     name: 'a gateway: the maker price for a model with an entry, none and no family for one without',
     kind: Gateway,
-    models: [seen('claude-opus-5-5', 'claude-opus-5-5'), seen('house-model', null)],
+    models: [seen('claude-opus-5-5', 'claude-opus-5-5'), seen('house-model', 'house-model')],
     expected: [
       row('claude-opus-5-5', 'claude-opus-5-5', 'claude-opus', [4, 20]),
       row('house-model', 'house-model', null, null),
     ],
+  },
+  {
+    name: 'a row with no resolved model beside resolved ones is dropped, not kept under its alias',
+    kind: ClaudeSubscription,
+    models: [seen('sonnet', null), seen('opus', 'claude-opus-5-5')],
+    expected: [row('claude-opus-5-5', 'claude-opus-5-5', 'claude-opus', null)],
   },
   {
     name: 'a model named twice: once, the first row kept',
@@ -118,10 +138,37 @@ const CASES: Case[] = [
     expected: [row('claude-sonnet-5-5', 'claude-sonnet-5-5', 'claude-sonnet', null, ['low'])],
   },
   {
-    name: 'Bedrock: its own prices, and the newest model of a family the list lacks, from the efforts the catalogue names',
+    name: 'Bedrock: its own prices, and a newer model of a family the list holds, from the efforts the catalogue names',
     kind: Bedrock,
     models: BEDROCK_LIST,
     expected: [BEDROCK_OPUS, BEDROCK_HAIKU_4_5, BEDROCK_HAIKU_5_5],
+  },
+  ...['eu.', 'global.'].map((prefix): Case => ({
+    name: `Bedrock: the addition follows the account's own ${prefix} prefix`,
+    kind: Bedrock,
+    models: [
+      seen(`${prefix}anthropic.claude-opus-5-5`, `${prefix}anthropic.claude-opus-5-5`),
+      seen('haiku', `${prefix}anthropic.claude-haiku-4-5-20251001-v1:0`, []),
+    ],
+    catalogue: inRegion(prefix),
+    expected: [
+      row('claude-opus-5-5', `${prefix}anthropic.claude-opus-5-5`, 'claude-opus', [4.4, 22]),
+      row(
+        'claude-haiku-4-5-20251001',
+        `${prefix}anthropic.claude-haiku-4-5-20251001-v1:0`,
+        'claude-haiku',
+        [1.1, 5.5],
+        [],
+      ),
+      { ...BEDROCK_HAIKU_5_5, launchId: `${prefix}anthropic.claude-haiku-5-5` },
+    ],
+  })),
+  {
+    name: 'Bedrock: a newer model whose maker entry is deprecated is not added',
+    kind: Bedrock,
+    models: BEDROCK_LIST,
+    catalogue: changed('anthropic', 'claude-haiku-5-5', { deprecated: true }),
+    expected: [BEDROCK_OPUS, BEDROCK_HAIKU_4_5],
   },
   {
     name: 'Bedrock: a family whose newest model the list already holds gets no addition',

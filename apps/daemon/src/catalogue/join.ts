@@ -23,8 +23,12 @@ const BEDROCK_VERSION = /-v\d+(:\d+)?$/;
 function canonicalId(id: string, catalogue: Catalogue): string {
   const parts = id.split('.');
   const vendor = parts.findIndex((part) => Object.hasOwn(catalogue.providers, part));
-  const bare = vendor === -1 ? id : parts.slice(vendor + 1).join('.');
-  return bare.replace(BEDROCK_VERSION, '');
+  // A version suffix is Bedrock's only where a vendor segment says the ID is Bedrock-style.
+  if (vendor === -1) return id;
+  return parts
+    .slice(vendor + 1)
+    .join('.')
+    .replace(BEDROCK_VERSION, '');
 }
 
 /** Case, a vendor prefix before a slash, and dots against hyphens do not tell two IDs apart. */
@@ -52,4 +56,26 @@ export function joinModel(
   if (alike.length === 1) return alike[0] ?? null;
   if (alike.length > 1) return null;
   return catalogue.providers[BEDROCK]?.models.find((m) => m.id === id) ?? null;
+}
+
+/** Whether a runtime can run a model: yes, no, or the catalogue cannot tell. */
+export type Runnability = 'runs' | 'refused' | 'unknown';
+
+/**
+ * Whether the provider's runtime can run the model an account lists, judged apart from the join. A model that
+ * joins runs when its maker is the runtime's, and is refused when the maker is another or the catalogue cannot
+ * name it. One that joins nothing is still refused when another provider of the catalogue lists it, by its exact
+ * ID, its canonical ID or its `vendor/` ID; otherwise it is unknown.
+ */
+export function runnability(id: string, provider: Provider, catalogue: Catalogue): Runnability {
+  const entry = joinModel(id, provider, catalogue);
+  const maker = RUNTIME_MAKER[provider];
+  if (entry) return entry.maker === maker ? 'runs' : 'refused';
+  const [vendor, rest] = id.includes('/') ? [id.split('/')[0], id.slice(id.indexOf('/') + 1)] : [];
+  for (const [name, { models }] of Object.entries(catalogue.providers)) {
+    if (name === maker) continue;
+    const named = [id, canonicalId(id, catalogue), ...(vendor === name && rest ? [rest] : [])];
+    if (models.some((m) => named.includes(m.id))) return 'refused';
+  }
+  return 'unknown';
 }

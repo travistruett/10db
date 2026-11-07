@@ -32,6 +32,7 @@ import { ManualClock } from '../clock';
 import { AccountLaunchError, createLauncher, KeychainError, type Launcher } from '../environment';
 import { createEventBus, createStateStore } from '../events';
 import { FakeAdapter, type SeenAccount } from '../sessions';
+import { createListRefresh } from './list-refresh';
 import type { AccountPause } from './pauses';
 import { createAccountService, type AccountService } from './service';
 import { createStartGate, type StartGate } from './start-gate';
@@ -77,6 +78,11 @@ beforeEach(() => {
   const launcher = createLauncher({ base: {}, clientApp: 'test', keychain });
   probeFor = (row) => launcher.probe(row);
   const state = createStateStore(test.store, bus);
+  const lists = createAccountLists({
+    state,
+    catalogue: () => parseCatalogue(readModelsDevFixture()),
+    logger,
+  });
   service = createAccountService({
     state: {
       db: state.db,
@@ -93,9 +99,15 @@ beforeEach(() => {
     logger,
     liveLanes: (id) => live.get(id) ?? 0,
     adapter,
-    lists: createAccountLists({
+    lists,
+    listRefresh: createListRefresh({
       state,
-      catalogue: () => parseCatalogue(readModelsDevFixture()),
+      clock,
+      adapter,
+      launcher: { probe: (row) => probeFor(row) },
+      startGate: gate,
+      lists,
+      dataDir: dir.path,
       logger,
     }),
     startGate: gate,
@@ -358,6 +370,28 @@ describe('connect', () => {
     ]);
     expect(saves).toBeGreaterThan(0);
   });
+
+  it.each<[string, { ok: true } | { ok: false; message: string }, string[]]>([
+    ['a finished sign-in', { ok: true }, ['claude-opus-5-5']],
+    ['a failed sign-in', { ok: false, message: 'The sign-in took too long.' }, []],
+  ])(
+    'reads the list for %s with no one asking for the identity',
+    async (_name, outcome, expected) => {
+      const account = signIn();
+      adapter.probeSeen = {
+        ...adapter.probeSeen,
+        models: [{ id: 'opus', resolvedId: 'claude-opus-5-5', efforts: ['low'] }],
+      };
+      await service.connect(account.id);
+      adapter.logins[0]?.end(outcome);
+      await waitFor(() => service.connecting() === null, 2_000);
+      await waitFor(
+        () => expected.length === 0 || listAccountModels(store.db, account.id).length > 0,
+        2_000,
+      );
+      expect(listAccountModels(store.db, account.id).map((m) => m.model)).toEqual(expected);
+    },
+  );
 
   it('marks a sign-in the builder cancelled as cancelled, and one that failed as not', async () => {
     const account = signIn();

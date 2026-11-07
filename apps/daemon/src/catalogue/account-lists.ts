@@ -10,7 +10,7 @@ import type { Catalogue } from './source';
 export interface AccountLists {
   /**
    * Stores the list a probe read for the account and, when it differs from the stored one, builds profiles from
-   * it. A probe that read no list leaves the stored list and its time alone. The caller has already checked the
+   * it. A probe that read no list, or an empty one, leaves the stored list and its time alone. The caller has already checked the
    * account: a signed-out process still answers a listing, so an unchecked list proves nothing. It never throws.
    */
   record(
@@ -28,7 +28,8 @@ export function createAccountLists(deps: {
   return {
     record(account, seen) {
       const catalogue = deps.catalogue();
-      if (seen.models === undefined || catalogue === null) return;
+      // An empty list is no list: an agent that hides every model, or lists none, would wipe the last good one.
+      if (seen.models === undefined || seen.models.length === 0 || catalogue === null) return;
       const models = seen.models;
       try {
         deps.state.write((ctx) => {

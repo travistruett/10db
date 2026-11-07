@@ -112,7 +112,10 @@ export function offerFromList(
   const provider = providerOf(kind);
   const rows = new Map<string, NewAccountModel>();
   const listed = new Map<string, { entry: CatalogueModel | null; launchId: string }>();
+  // An alias with no concrete model cannot be joined; beside rows that resolved, it is left out.
+  const someResolved = models.some((m) => m.resolvedId !== null);
   for (const m of models) {
+    if (someResolved && m.resolvedId === null) continue;
     const launchId = m.resolvedId ?? m.id;
     const entry = joinModel(launchId, provider, catalogue);
     const model = entry?.id ?? launchId;

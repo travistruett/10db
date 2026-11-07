@@ -118,11 +118,11 @@ export function createAccountPreparer(opts: {
       raise(projectId, credentialsCard(account, refusal));
       return;
     }
-    opts.lists.record(account, seen);
     if (!seen.email) {
       raise(projectId, signInCard(account));
       return;
     }
+    opts.lists.record(account, seen);
     if (defaultAccountId(opts.state.db) === account.id) {
       // The default account's directory holds the builder's current login (accounts spec §3); the card names it.
       const email = seen.email;

@@ -108,6 +108,12 @@ const CASES: Case[] = [
     provider: Claude,
     expected: ['amazon-bedrock', 'openai.gpt-6.1-sol'],
   },
+  {
+    name: 'a version suffix with no vendor segment',
+    id: 'claude-opus-5-v1',
+    provider: Claude,
+    expected: null,
+  },
   { name: 'a Claude Code alias', id: 'sonnet', provider: Claude, expected: null },
   {
     name: 'a name that is only part of an ID',

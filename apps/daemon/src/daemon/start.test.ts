@@ -39,7 +39,6 @@ import {
   getWorkstream,
   listAccountModels,
   listAccounts,
-  listModelProfiles,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CATALOGUE_URL } from '../catalogue';
@@ -321,7 +320,8 @@ describe('startDaemon', () => {
           (w) => w.taskId === task.id && w.state === 'DONE',
         ),
       );
-      expect(adapter.probes).toHaveLength(1);
+      // The preparer's probe, then the read of the model list as the session starts.
+      expect(adapter.probes).toHaveLength(2);
       expect(getAccount(running.state.db, project.accountId).expectedIdentity).toBe(
         'builder@example.com',
       );
@@ -1471,9 +1471,7 @@ describe('startDaemon', () => {
 
     it('builds disabled profiles from each account list after the fetch, beside the seeded ones, and a second call joins a run', async () => {
       const { adapter, fetches, running } = await startWithList(true);
-      await waitFor(() =>
-        listModelProfiles(running.state.db).some((p) => p.model === 'claude-opus-5-5'),
-      );
+      await waitFor(() => listAccountModels(running.state.db).length > 0);
       expect(listAccountModels(running.state.db).map((m) => m.model)).toEqual(['claude-opus-5-5']);
       expect(findModelProfile(running.state.db, 'claude', 'claude-opus-5-5', 'low')).toMatchObject({
         enabled: false,

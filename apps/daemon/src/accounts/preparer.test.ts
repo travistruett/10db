@@ -125,6 +125,11 @@ describe('the preparer', () => {
       { email: undefined, subscriptionType: undefined },
       [],
     ],
+    [
+      'a directory that reports a plan but no email, which waits for its sign-in',
+      { email: undefined },
+      [],
+    ],
   ])(
     'keeps the models a probe listed for %s only if the account check passes',
     async (_name, seen, expected) => {

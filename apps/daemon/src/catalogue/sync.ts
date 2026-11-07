@@ -38,9 +38,10 @@ export interface CatalogueSyncDeps {
   readonly onChanged: (catalogue: Catalogue) => void | Promise<void>;
   /**
    * What follows every fetch, whether it worked or not: the accounts' lists are read again against the
-   * catalogue in use. It runs inside the fetch's single flight and a throw is logged and dropped.
+   * catalogue in use. `fetched` says whether the fetch worked, so a retry after a failure can leave alone what
+   * was read lately. It runs inside the fetch's single flight and a throw is logged and dropped.
    */
-  readonly afterSync: () => Promise<void>;
+  readonly afterSync: (fetched: boolean) => Promise<void>;
 }
 
 export interface CatalogueSync {
@@ -156,8 +157,11 @@ export function createCatalogueSync(deps: CatalogueSyncDeps): CatalogueSync {
 
   /** A failure anywhere (the network, the document, the database) keeps the last catalogue and retries. */
   async function run(): Promise<CatalogueStatusDto> {
+    let fetched = false;
     try {
-      failures = (await deliver(await fetchAndStore())) ? 0 : failures + 1;
+      const parsed = await fetchAndStore();
+      fetched = true;
+      failures = (await deliver(parsed)) ? 0 : failures + 1;
     } catch (error) {
       failures += 1;
       deps.logger.warn(
@@ -166,7 +170,7 @@ export function createCatalogueSync(deps: CatalogueSyncDeps): CatalogueSync {
       );
     }
     try {
-      await deps.afterSync();
+      await deps.afterSync(fetched);
     } catch (error) {
       deps.logger.warn(
         { err: error instanceof Error ? error.name : 'error' },
