@@ -137,6 +137,7 @@ export async function createTestEngine(
     Pick<
       RunnerOptions,
       | 'afterSession'
+      | 'modelWait'
       | 'logger'
       | 'skillBody'
       | 'launcher'

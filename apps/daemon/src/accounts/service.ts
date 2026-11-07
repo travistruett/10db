@@ -156,6 +156,8 @@ export function createAccountService(deps: {
   readonly pauses: Pick<AccountPauses, 'pausedFor' | 'resume'>;
   /** An account changed: the scheduler looks again. */
   onSaved(): void;
+  /** An account was created: the model profiles are rebuilt for it from the catalogue already held. */
+  onCreated?(): void;
 }): AccountService {
   const db = deps.state.db;
   const root = join(deps.dataDir, 'accounts');
@@ -229,6 +231,7 @@ export function createAccountService(deps: {
         if (created.configDir !== null) makePrivate(root, created.configDir);
         return created;
       });
+      deps.onCreated?.();
       return { account, signIn: signInOf(account) };
     },
     patch(id, patch) {

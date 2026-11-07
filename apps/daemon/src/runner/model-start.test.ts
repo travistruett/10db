@@ -177,7 +177,18 @@ describe('the model a planned step starts on', () => {
 
 describe('an account whose provider has no model profiles yet', () => {
   it('leaves the step queued without pausing the account, and runs it once the profiles exist', async () => {
-    engine = await createTestEngine({ Alpha: [finish('op-profiles-01')] });
+    const held: { account: string; projectId: string }[] = [];
+    engine = await createTestEngine(
+      { Alpha: [finish('op-profiles-01')] },
+      {},
+      {
+        modelWait: {
+          hold: (account, projectId) => {
+            held.push({ account: account.label, projectId });
+          },
+        },
+      },
+    );
     const { workstream } = engine.addTask('Alpha', ['api'], [], quick);
     // An old database before its first catalogue read: the step is planned, and no profile has been written.
     engine.store.db.delete(schema.modelProfiles).run();
@@ -188,6 +199,8 @@ describe('an account whose provider has no model profiles yet', () => {
     expect(listSessions(engine.store.db, workstream.id)).toHaveLength(0);
     expect(engine.accounts.isPaused(engine.project.accountId)).toBe(false);
     expect(openCards()).toEqual([]);
+    // The scheduler is told, so it does not claim the row again on every tick.
+    expect(held).toEqual([{ account: 'Claude plan', projectId: engine.project.id }]);
 
     seedProfiles(engine.state);
     engine.launch(workstream.id);

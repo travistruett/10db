@@ -2469,7 +2469,7 @@ describe('the account check', () => {
 
   describe('an error at the first reply that names the launched model', () => {
     const LAUNCHED = 'us.anthropic.claude-fable-5-1-v1:0';
-    const BEDROCK = `ValidationException: The provided model identifier is invalid: ${LAUNCHED}.`;
+    const BEDROCK = `ValidationException: The model ${LAUNCHED} does not exist or you do not have access to it.`;
     it.each([
       {
         name: 'a Bedrock validation error is a refused model',
@@ -2481,6 +2481,18 @@ describe('the account check', () => {
         name: 'an overloaded error is not',
         error: 'overloaded' as const,
         text: `${LAUNCHED} is overloaded`,
+        reason: 'completed',
+      },
+      {
+        name: 'a server error naming the model is not',
+        error: 'server_error' as const,
+        text: `500: ${LAUNCHED} does not exist`,
+        reason: 'completed',
+      },
+      {
+        name: 'an invalid max_tokens request naming the model is not',
+        error: 'invalid_request' as const,
+        text: `max_tokens is too large for ${LAUNCHED}`,
         reason: 'completed',
       },
       {

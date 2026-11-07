@@ -115,6 +115,7 @@ import {
   type AccountLimits,
   type AccountPreparer,
   type AccountRuntime,
+  type ModelListWait,
   type StartGate,
 } from '../accounts';
 import type { Clock, Timer } from '../clock';
@@ -244,6 +245,8 @@ export interface RunnerOptions {
   readonly state: StateStore;
   readonly adapter: SessionAdapter;
   readonly inbox: InboxService;
+  /** Told when a step finds no model profile for its account, so the scheduler leaves that account's work alone. */
+  readonly modelWait?: Pick<ModelListWait, 'hold'>;
   readonly git: Git;
   readonly gate: GateRunner;
   /** Brings a batch's base as origin has it now into its branch before each of its gates. */
@@ -783,14 +786,11 @@ export function createRunner(opts: RunnerOptions): Runner {
     row: WorkstreamRow,
     step: WorkstreamStep,
     why: string,
-    leased?: AccountId,
+    leased: AccountId,
   ): { step: WorkstreamStep; moved: boolean } {
     const project = getProject(db, row.projectId);
     // The account the lane ran on, as `resolveOn` reads it, which differs from the project's after a move.
-    const inputs = routingInputs(
-      db,
-      leased === undefined ? project : { ...project, accountId: leased },
-    );
+    const inputs = routingInputs(db, { ...project, accountId: leased });
     const result = retryStep(step, {
       choose: {
         ...inputs,
@@ -1282,6 +1282,8 @@ export function createRunner(opts: RunnerOptions): Runner {
         return;
       case 'awaiting_profiles':
         requeue(id, ctl, 'the model catalogue has not been read yet', 'waiting for model profiles');
+        // Without this the scheduler would claim the row again on every tick.
+        opts.modelWait?.hold(getAccountRow(db, ctl.accountId), row.projectId);
         return;
       case 'unready': {
         requeue(
@@ -3121,7 +3123,14 @@ export function createRunner(opts: RunnerOptions): Runner {
         };
       }
       const target = targetIndex === null ? undefined : row.steps[targetIndex];
-      const up = target ? escalated(row, target, 'the builder sent the work back') : null;
+      const up = target
+        ? escalated(
+            row,
+            target,
+            'the builder sent the work back',
+            getProject(db, row.projectId).accountId,
+          )
+        : null;
       if (up?.moved && target?.profileId)
         recordProfileOutcome(ctx, target.profileId, { firstPass: false, escalated: true });
       transitionWorkstream(ctx, id, {

@@ -27,7 +27,12 @@ import {
   renewLeases,
   transitionWorkstream,
 } from '@10db/db';
-import { unready, type AccountPreparer, type AccountRuntime } from '../accounts';
+import {
+  unready,
+  type AccountPreparer,
+  type AccountRuntime,
+  type ModelListWait,
+} from '../accounts';
 import type { Clock, Timer } from '../clock';
 import { batchLaunchVerdict, claimScopeOf, LaunchVerdict } from '../delivery';
 import type { StateStore } from '../events';
@@ -76,6 +81,8 @@ export interface SchedulerOptions {
    * starts on it until the sign-in is over.
    */
   readonly connecting?: () => { readonly accountId: AccountId } | null;
+  /** Accounts with no model profile yet: their queued work is left alone, not claimed and given back each tick. */
+  readonly modelWait?: Pick<ModelListWait, 'holds'>;
 }
 
 export interface Scheduler {
@@ -159,6 +166,7 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       const project = getProject(db, ws.projectId);
       const account = getAccountRow(db, project.accountId);
       if (account.id === signingIn) continue;
+      if (opts.modelWait?.holds(account.id)) continue;
       if (notReady.has(account.id)) continue;
       if (!open.has(account.id) && unready(account)) {
         opts.accounts.prepare(account, project.id);

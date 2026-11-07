@@ -29,7 +29,10 @@ import { seedSpend, tempDir, waitFor, type TempDir } from '../../test/fixtures';
 import {
   createAccountPauses,
   createAccountRuntime,
+  createModelListWait,
+  MODEL_LIST_WAIT_MS,
   type AccountPauses,
+  type ModelListWait,
   type AccountRuntime,
 } from '../accounts';
 import { ManualClock } from '../clock';
@@ -66,6 +69,8 @@ let missing: { batchId: string; path: string }[];
 let held: boolean;
 /** The account whose browser sign-in holds the slot, as the scheduler's `connecting` reads it. */
 let connecting: AccountId | null;
+/** Holds an account's queued work while its model profiles are missing, as the runner does. */
+let modelWait: ModelListWait;
 
 beforeEach(() => {
   held = false;
@@ -80,6 +85,12 @@ beforeEach(() => {
     inbox,
     stopAccount: () => Promise.resolve(),
     onResume: () => undefined,
+  });
+  modelWait = createModelListWait({
+    clock,
+    inbox,
+    logger: silentLogger,
+    onReleased: () => undefined,
   });
   accounts = createAccountRuntime({ state, clock, inbox, pauses, defaultPauseMs: 30 * 60_000 });
   launched = [];
@@ -105,6 +116,7 @@ function scheduler(caps = { global: 4 }, awaited: ReadonlySet<WorkstreamId> = ne
     caps,
     awaitedHolders: () => awaited,
     held: () => held,
+    modelWait,
     connecting: () => (connecting === null ? null : { accountId: connecting }),
     instanceId: 'daemon-1',
     leaseMs: 60_000,
@@ -213,6 +225,23 @@ describe('scheduler', () => {
     expect(launched).toEqual([]);
     held = false;
     expect(await s.tick()).toBe(2);
+  });
+
+  it('leaves the queued work of an account waiting for its model list alone, and launches it once the wait ends', async () => {
+    const keyed = seedAccount(store, { kind: 'anthropic_api_key', label: 'Keyed' });
+    state.write((ctx) => recordAccountSecret(ctx, keyed.id, 'sha256:0000000000000000'));
+    const waiting = queue();
+    const other = queue({ accountId: keyed.id });
+    modelWait.hold({ id: waiting.project.accountId, label: 'Waiting' }, waiting.project.id);
+    const s = scheduler();
+    expect(await s.tick()).toBe(1);
+    expect(launched.map((l) => l.id)).toEqual([other.workstream.id]);
+    // The held row is not claimed on any later tick either: it stays QUEUED, with no state changes.
+    expect(await s.tick()).toBe(0);
+    expect(getWorkstream(store.db, waiting.workstream.id).state).toBe('QUEUED');
+    clock.advance(MODEL_LIST_WAIT_MS);
+    expect(await s.tick()).toBe(1);
+    expect(launched.map((l) => l.id)).toEqual([other.workstream.id, waiting.workstream.id]);
   });
 
   it('starts nothing on the account whose sign-in is under way, only there, and starts it once the sign-in is over', async () => {

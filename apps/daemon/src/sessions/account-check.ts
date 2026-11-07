@@ -276,25 +276,29 @@ const CREDENTIAL_ERRORS: Readonly<Record<string, AccountProblem>> = {
   account_on_hold: AccountProblem.CannotBill,
 };
 
-/** Assistant errors that say nothing about whether the model can run, whatever text they carry. */
-const NEVER_A_MODEL_REFUSAL: ReadonlySet<string> = new Set([
-  'rate_limit',
-  'overloaded',
-  'max_output_tokens',
-  'verification_required',
-]);
+/** What an error says when it reports that a model is missing or off limits to the account. */
+const MODEL_UNAVAILABLE =
+  /not found|does not exist|doesn['’]t exist|not available|isn['’]t supported|is not supported|no access|(?:don['’]t|do not) have access|not authorized|access denied|accessdenied|unknown model/i;
+
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** Whether `text` names `id` as a whole token, so `claude-opus-5` is not found in `claude-opus-5-5`. */
+function namesToken(text: string, id: string): boolean {
+  // A model ID continues through letters, digits, `-`, `_`, `:`, `/` and a `.` that a character follows.
+  return new RegExp(`(?<![\\w.:/-])${escapeRegExp(id)}(?![\\w:/-]|\\.\\w)`).test(text);
+}
 
 /**
  * Whether an assistant error at a session's first reply means the account cannot run the model it was launched on.
- * Claude Code names that case `model_not_found`, but a gateway or Bedrock reports it as another error whose text
- * names the model (a validation or access error naming the launch ID). A credential, billing, overload or
- * rate-limit error never counts, however it is worded.
+ * Claude Code names that case `model_not_found`. A gateway or Bedrock may report it as an invalid request or an
+ * unknown error instead, so those count only when the text names the launched model ID as a whole token and says
+ * the model is missing or off limits. Every other error (a server error, an overload, a rate limit, a credential or
+ * billing error) never does, whatever it quotes.
  */
 export function isModelRefusal(error: string | undefined, text: string, launched: string): boolean {
-  if (error === undefined) return false;
   if (error === MODEL_NOT_FOUND_ERROR) return true;
-  if (credentialProblem(error) !== null || NEVER_A_MODEL_REFUSAL.has(error)) return false;
-  return text.includes(launched.replace(CONTEXT_SUFFIX, ''));
+  if (error !== 'invalid_request' && error !== 'unknown') return false;
+  return namesToken(text, launched.replace(CONTEXT_SUFFIX, '')) && MODEL_UNAVAILABLE.test(text);
 }
 
 /** An assistant error that is the account's, not the work's. */

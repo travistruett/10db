@@ -572,16 +572,32 @@ describe('the session’s run', () => {
     {
       name: 'a Bedrock validation error naming the launch ID is a refused model',
       error: 'invalid_request' as const,
-      text: 'ValidationException: The provided model identifier is invalid: us.anthropic.claude-fable-5-1-v1:0.',
+      text: 'ValidationException: The model us.anthropic.claude-fable-5-1-v1:0 does not exist or you do not have access to it.',
       refused: true,
+      resume: null,
+    },
+    {
+      name: 'the same error in a resumed conversation, which had its first reply long ago, is not',
+      error: 'invalid_request' as const,
+      text: 'ValidationException: The model us.anthropic.claude-fable-5-1-v1:0 does not exist or you do not have access to it.',
+      refused: false,
+      resume: 'provider-session-1',
+    },
+    {
+      name: 'a server error naming the launch ID is not',
+      error: 'server_error' as const,
+      text: '500: us.anthropic.claude-fable-5-1-v1:0 does not exist',
+      refused: false,
+      resume: null,
     },
     {
       name: 'an overloaded error naming the launch ID is not',
       error: 'overloaded' as const,
       text: 'us.anthropic.claude-fable-5-1-v1:0 is overloaded',
       refused: false,
+      resume: null,
     },
-  ])('$name', async ({ error, text, refused }) => {
+  ])('$name', async ({ error, text, refused, resume }) => {
     const launched = 'us.anthropic.claude-fable-5-1-v1:0';
     const { query } = fakeQuery({
       turns: [
@@ -592,7 +608,10 @@ describe('the session’s run', () => {
         ],
       ],
     });
-    const handle = startShapeSession(spec({ model: launched }), deps(query));
+    const handle = startShapeSession(
+      spec({ model: launched, resumeProviderSessionId: resume }),
+      deps(query),
+    );
     const events = await collect(handle, (e) =>
       e.some((x) => x.type === 'turn_complete' || x.type === 'ended'),
     );

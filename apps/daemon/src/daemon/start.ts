@@ -33,6 +33,7 @@ import {
   deleteJudgeCallsBefore,
   lanesByAccount,
   getAccountRow,
+  listModelProfiles,
   listAccountModels,
   getAppSetting,
   getProject,
@@ -54,6 +55,7 @@ import {
   createAccountPreparer,
   createAccountRuntime,
   createAccountService,
+  createModelListWait,
   createListRefresh,
   createMoveBack,
   createStartGate,
@@ -507,9 +509,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       return snapshot.value;
     },
     onChanged: (changed) => {
-      state.write((ctx) => {
-        reconcileProfiles(ctx, changed);
-      });
+      rebuildProfiles(changed);
     },
     afterSync: (fetched) => refreshAccountModels(fetched),
   });
@@ -618,6 +618,29 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       answerDeadlockCard(item, answer);
     },
   });
+  // A lane that finds no model profile for its account waits for the profiles instead of retrying every tick.
+  const modelWait = createModelListWait({
+    clock,
+    inbox,
+    logger: logger.child({ component: 'catalogue' }),
+    onReleased: () => {
+      scheduler?.requestTick();
+    },
+  });
+  /**
+   * Writes the model profiles from `catalogue` and ends the wait of every account they now cover. The rebuild is
+   * idempotent, so it runs from a fetch, an account list, the catalogue the daemon already holds at start and
+   * when an account is created, with no network.
+   */
+  function rebuildProfiles(from: Catalogue): void {
+    state.write((ctx) => {
+      reconcileProfiles(ctx, from);
+    });
+    modelWait.release((id) => {
+      const provider = providerOf(getAccountRow(db, id).kind);
+      return listModelProfiles(db).some((p) => p.provider === provider);
+    });
+  }
   // Sustained overload holds new lane sessions and gates and raises one card naming what is busy.
   const laneTempDirs = createLaneTempDirs();
   const loadGuard = createLoadMonitor({
@@ -1009,10 +1032,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     forced = false;
     await listRefresh.readAll({ staleOnly: !everyAccount });
     const current = catalogue.catalogue();
-    if (current !== null)
-      state.write((ctx) => {
-        reconcileProfiles(ctx, current);
-      });
+    if (current !== null) rebuildProfiles(current);
     // Scores come last, so every new model has a row to put them on; with no key or benchmarks off nothing is fetched.
     await benchmarks.syncForCatalogue({ force: builderAsked });
   }
@@ -1032,10 +1052,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // fetch: a daemon that never fetches still plans and launches on real models. The rebuild is idempotent, so a
   // fetch that lands later only changes what differs.
   const held = catalogue.catalogue();
-  if (held !== null)
-    state.write((ctx) => {
-      reconcileProfiles(ctx, held);
-    });
+  if (held !== null) rebuildProfiles(held);
   if (modelRefreshOn) catalogue.start();
   const accountService = createAccountService({
     state,
@@ -1054,6 +1071,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     liveLanes: (id) => lanesByAccount(db).get(id) ?? 0,
     onSaved: () => {
       scheduler?.requestTick();
+    },
+    onCreated: () => {
+      const held = catalogue.catalogue();
+      if (held !== null) rebuildProfiles(held);
     },
   });
   // The data directory, and the default account's sign-in wherever the login shell keeps it.
@@ -1199,6 +1220,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     skillBody: (name) => readSkillBody(name, opts.harnessDir ?? HARNESS_PLUGIN_DIR),
     launcher,
     startGate,
+    modelWait,
     accounts: {
       ...accounts,
       prepare: (account, projectId) => {
@@ -1235,6 +1257,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         : {}),
     },
     connecting: () => accountService.connecting(),
+    modelWait,
     clock,
     instanceId,
     logger,

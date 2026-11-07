@@ -412,8 +412,11 @@ export function startShapeSession(
     resolveVerified(true);
   };
 
-  /** Whether an assistant message has come yet: only the first can show the model was refused. */
-  let repliedYet = false;
+  /**
+   * Whether the conversation has had a reply: only its first can show the model was refused. A resumed
+   * conversation has had one, whatever this process has seen.
+   */
+  let repliedYet = spec.resumeProviderSessionId !== null;
   const pump = async (): Promise<void> => {
     try {
       for await (const msg of q) {

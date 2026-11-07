@@ -434,6 +434,32 @@ describe('isModelRefusal', () => {
     ['an authentication error that names the launch ID', 'authentication_failed', LAUNCHED, false],
     ['a billing error that names the launch ID', 'billing_error', LAUNCHED, false],
     ['no error at all', undefined, BEDROCK, false],
+    ['a server error naming the launch ID', 'server_error', `500: ${LAUNCHED} not found`, false],
+    ['an unknown timeout naming the launch ID', 'unknown', `${LAUNCHED}: request timed out`, false],
+    [
+      'an invalid max_tokens request naming the launch ID',
+      'invalid_request',
+      `max_tokens is too large for ${LAUNCHED}`,
+      false,
+    ],
+    [
+      'a not-found phrase and a longer ID that begins with the launch ID',
+      'invalid_request',
+      `Model ${LAUNCHED}-preview does not exist`,
+      false,
+    ],
+    [
+      'a Bedrock-style access error naming the launch ID',
+      'invalid_request',
+      `AccessDeniedException: You don't have access to the model with the specified model ID ${LAUNCHED}.`,
+      true,
+    ],
+    [
+      'a ValidationException with a no-access phrase, the ID ending the sentence',
+      'unknown',
+      `ValidationException: Invocation of model ID ${LAUNCHED}. You do not have access to it.`,
+      true,
+    ],
   ])('%s', (_name, error, text, expected) => {
     expect(isModelRefusal(error, text, LAUNCHED)).toBe(expected);
   });
@@ -442,10 +468,16 @@ describe('isModelRefusal', () => {
     expect(
       isModelRefusal(
         'invalid_request',
-        'Model claude-fable-5-1 is invalid',
+        'Model claude-fable-5-1 does not exist',
         'claude-fable-5-1[1m]',
       ),
     ).toBe(true);
+  });
+
+  it('does not take a model whose ID only begins with the launch ID for the launched model', () => {
+    expect(
+      isModelRefusal('invalid_request', 'Model claude-opus-5-5 does not exist', 'claude-opus-5'),
+    ).toBe(false);
   });
 });
 
