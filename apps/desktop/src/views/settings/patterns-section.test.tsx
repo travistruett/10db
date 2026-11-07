@@ -1,9 +1,4 @@
-import {
-  GlobalModelSettingsInput,
-  ProjectModelSettingsInput,
-  type ModelSettingsDto,
-  type PatternDto,
-} from '@10db/contracts';
+import { ModelSettingsInput, type ModelSettingsDto, type PatternDto } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -50,12 +45,12 @@ function serve(initial: readonly PatternDto[], scope: 'global' | 'project') {
     http.get(daemonUrl('/model-settings'), () => HttpResponse.json(read())),
     http.get(daemonUrl('/projects/:projectId/model-settings'), () => HttpResponse.json(read())),
     http.put(daemonUrl('/model-settings'), async ({ request }) => {
-      const body = GlobalModelSettingsInput.parse(await request.json());
+      const body = ModelSettingsInput.parse(await request.json());
       sent.push(body.patterns);
       return answer(body);
     }),
     http.put(daemonUrl('/projects/:projectId/model-settings'), async ({ request }) => {
-      const body = ProjectModelSettingsInput.parse(await request.json());
+      const body = ModelSettingsInput.parse(await request.json());
       sent.push(body.patterns);
       return answer(body);
     }),

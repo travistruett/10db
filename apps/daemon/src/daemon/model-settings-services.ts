@@ -1,4 +1,9 @@
-import type { ModelSettingsDto, ProjectId, ProjectModelSettingsInput } from '@10db/contracts';
+import {
+  InvalidError,
+  type ModelSettingsDto,
+  type ModelSettingsInput,
+  type ProjectId,
+} from '@10db/contracts';
 import {
   clearRoleSetting,
   getProject,
@@ -28,7 +33,7 @@ function readScope(db: DbReader, projectId: ProjectId | null): ModelSettingsDto 
 function writeScope(
   ctx: WriteContext,
   projectId: ProjectId | null,
-  input: ProjectModelSettingsInput,
+  input: ModelSettingsInput,
 ): ModelSettingsDto {
   for (const { role, setting } of input.roles) {
     if (setting === null) clearRoleSetting(ctx, role, projectId);
@@ -48,7 +53,13 @@ export function createModelSettingsServices(state: StateStore): ModelSettingsApi
     setGlobalModelSettings: (input) => state.write((ctx) => writeScope(ctx, null, input)),
     setProjectModelSettings: (projectId, input) =>
       state.write((ctx) => {
-        getProject(ctx.tx, projectId);
+        const known = new Set(getProject(ctx.tx, projectId).areas.map((area) => area.name));
+        for (const pattern of input.patterns ?? [])
+          for (const area of pattern.match.areas)
+            if (!known.has(area))
+              throw new InvalidError(
+                `${pattern.name} names ${area}, which this project does not have`,
+              );
         return writeScope(ctx, projectId, input);
       }),
   };

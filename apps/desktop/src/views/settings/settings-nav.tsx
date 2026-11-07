@@ -74,7 +74,7 @@ export function SettingsNav() {
             {group === SettingsGroup.Project ? 'Project' : 'Global'}
           </Text>
           {group === SettingsGroup.Project ? <ProjectSwitcher compact /> : null}
-          {SETTINGS_SECTIONS.filter((s) => s.group === group && s.planned === null).map((s) => {
+          {SETTINGS_SECTIONS.filter((s) => s.group === group && s.built).map((s) => {
             const Icon = SECTION_ICON[s.key];
             return (
               <NavLink

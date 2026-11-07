@@ -2,12 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   AccountModelDto,
   CatalogueStatusDto,
-  GlobalModelSettingsInput,
+  ModelSettingsInput,
   ModelRowDto,
   ModelSetting,
   PatternDto,
   PatternMatch,
-  ProjectModelSettingsInput,
   RoleSettingDto,
 } from './catalogue';
 import { mintId } from './ids';
@@ -85,9 +84,9 @@ describe('the model settings a form sends', () => {
       ok: true,
     },
     {
-      name: 'a global role with no setting',
+      name: 'a global role handed back to 10db’s default',
       input: { roles: [{ role: 'review', setting: null }] },
-      ok: false,
+      ok: true,
     },
     {
       name: 'a global list of patterns',
@@ -115,17 +114,17 @@ describe('the model settings a form sends', () => {
       ok: false,
     },
   ])('global: $name parses $ok', ({ input, ok }) => {
-    expect(GlobalModelSettingsInput.safeParse(input).success).toBe(ok);
+    expect(ModelSettingsInput.safeParse(input).success).toBe(ok);
   });
 
   it('lets a project hand a role back to the global setting with null', () => {
-    const parsed = ProjectModelSettingsInput.parse({ roles: [{ role: 'review', setting: null }] });
+    const parsed = ModelSettingsInput.parse({ roles: [{ role: 'review', setting: null }] });
     expect(parsed.roles).toEqual([{ role: 'review', setting: null }]);
     expect(parsed.patterns).toBeUndefined();
   });
 
   it('fills a pattern’s match and trims its name', () => {
-    const parsed = GlobalModelSettingsInput.parse({
+    const parsed = ModelSettingsInput.parse({
       patterns: [{ name: ' Risky ', setting: automatic }],
     });
     expect(parsed.patterns).toEqual([

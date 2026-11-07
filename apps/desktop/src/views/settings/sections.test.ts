@@ -56,6 +56,10 @@ describe('settings sections', () => {
     expect(SETTINGS_SECTIONS.find((s) => s.key === key)?.planned !== null).toBe(planned);
   });
 
+  it('lists every section but Routing rules as built, even Team and Personas and flows, whose editors are still to come', () => {
+    expect(SETTINGS_SECTIONS.filter((s) => !s.built).map((s) => s.key)).toEqual(['routing-rules']);
+  });
+
   it.each([
     { value: 'general', ok: true },
     { value: 'accounts', ok: true },

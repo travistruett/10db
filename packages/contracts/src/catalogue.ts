@@ -94,27 +94,18 @@ const noRoleTwice = (roles: readonly { readonly role: string }[]) =>
   new Set(roles.map((r) => r.role)).size === roles.length;
 
 /**
- * What a form changes in the settings that apply everywhere. A role listed here is set; one left
- * out keeps its setting. `patterns`, when given, replaces the whole list in the order sent.
+ * What a form changes in one scope's settings. A role listed here is set, or, with a null setting,
+ * cleared: a project's role then uses the global setting, and a global role 10db's default. A role
+ * left out keeps its setting. `patterns`, when given, replaces the whole list in the order sent.
  */
-export const GlobalModelSettingsInput = z.object({
-  roles: z
-    .array(z.object({ role: z.enum(StepRole), setting: ModelSetting }))
-    .refine(noRoleTwice, { message: 'A role is set twice' })
-    .default([]),
-  patterns: z.array(PatternInput).optional(),
-});
-export type GlobalModelSettingsInput = z.infer<typeof GlobalModelSettingsInput>;
-
-/** As the global input, but a null setting removes the project's own, so the role uses the global one. */
-export const ProjectModelSettingsInput = z.object({
+export const ModelSettingsInput = z.object({
   roles: z
     .array(z.object({ role: z.enum(StepRole), setting: ModelSetting.nullable() }))
     .refine(noRoleTwice, { message: 'A role is set twice' })
     .default([]),
   patterns: z.array(PatternInput).optional(),
 });
-export type ProjectModelSettingsInput = z.infer<typeof ProjectModelSettingsInput>;
+export type ModelSettingsInput = z.infer<typeof ModelSettingsInput>;
 
 /** A model an account can run, as that account reports it. */
 export const AccountModelDto = z.object({

@@ -55,12 +55,13 @@ describe('SettingsView', () => {
     expect(screen.queryByRole('link', { name: 'Factory' })).toBeNull();
   });
 
-  it('planned sections are hidden', async () => {
+  it('hides a section with nothing built, and lists Team and Personas and flows, which have their model forms', async () => {
     server.use(...baseHandlers());
     renderApp('/settings/general');
     const nav = await screen.findByRole('navigation', { name: 'Settings sections' });
-    for (const label of ['Team', 'Routing rules', 'Personas and flows'])
-      expect(within(nav).queryByRole('link', { name: new RegExp(label) })).toBeNull();
+    expect(within(nav).queryByRole('link', { name: /Routing rules/ })).toBeNull();
+    for (const label of ['Team', 'Personas and flows'])
+      expect(within(nav).getByRole('link', { name: label })).toBeTruthy();
     // Models is built, so it is listed.
     expect(within(nav).getByRole('link', { name: /Models and benchmarks/ })).toBeTruthy();
   });
@@ -82,13 +83,37 @@ describe('SettingsView', () => {
     });
   });
 
-  it('says what a planned section will hold and which plan fills it', async () => {
+  it('says what an unbuilt section will hold and which plan fills it', async () => {
     server.use(...baseHandlers());
-    renderApp('/settings/team');
-    expect(await screen.findByRole('heading', { name: 'Team', level: 3 })).toBeTruthy();
+    renderApp('/settings/routing-rules');
+    expect(await screen.findByRole('heading', { name: 'Routing rules', level: 3 })).toBeTruthy();
     expect(screen.getByText(/Not built yet/)).toBeTruthy();
     expect(screen.getByText(/team editor plan/)).toBeTruthy();
   });
+
+  it.each([
+    {
+      label: 'Team',
+      model: 'Review model',
+      remainder: /Still to come: Which persona runs each role/,
+    },
+    {
+      label: 'Personas and flows',
+      model: 'Review model',
+      remainder: /Still to come: The personas/,
+    },
+  ])(
+    'reaches $label from the nav: its model form, and the rest as a note, not an empty state',
+    async ({ label, model, remainder }) => {
+      server.use(...baseHandlers());
+      renderApp('/settings/general');
+      const nav = await screen.findByRole('navigation', { name: 'Settings sections' });
+      fireEvent.click(within(nav).getByRole('link', { name: label }));
+      expect(await screen.findByRole('combobox', { name: model })).toBeTruthy();
+      expect(screen.getByText(remainder)).toBeTruthy();
+      expect(screen.queryByText(/Not built yet/)).toBeNull();
+    },
+  );
 
   it('asks for a project before showing a project section', async () => {
     server.use(...baseHandlers());

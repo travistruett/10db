@@ -60,6 +60,13 @@ function isOffered(model: ModelRowDto, accountIds: readonly AccountId[] | null):
   return model.availableOn.some((id) => accountIds === null || accountIds.includes(id));
 }
 
+function unlistedLabel(model: string, row: ModelRowDto | undefined, loading: boolean): string {
+  if (loading) return model;
+  if (row?.status === ModelStatus.Superseded) return `${row.name} (superseded)`;
+  if (row?.status === ModelStatus.NotRunnable) return `${row.name} (not runnable)`;
+  return `${row?.name ?? model} (not offered)`;
+}
+
 export interface SettingChoices {
   readonly groups: ComboboxItemGroup<ComboboxItem>[];
   /** Every select value in `groups`, mapped back to its setting. */
@@ -109,13 +116,13 @@ export function settingChoices(input: {
     });
   }
   const { current } = input;
-  // A saved model the accounts no longer offer stays listed; while the list loads it shows by its ID.
-  if (current?.kind === 'model' && !settings.has(settingValue(current)))
+  // A saved model that is not in the list stays there, with the reason; while the list loads it shows by its ID.
+  if (current?.kind === 'model' && !settings.has(settingValue(current))) {
+    const row = (input.models ?? []).find((m) => m.model === current.model);
     groups.push({
       group: 'Current setting',
-      items: [
-        item(current, input.models === null ? current.model : `${current.model} (not offered)`),
-      ],
+      items: [item(current, unlistedLabel(current.model, row, input.models === null))],
     });
+  }
   return { groups, settings };
 }

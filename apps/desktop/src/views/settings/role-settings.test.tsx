@@ -1,9 +1,4 @@
-import {
-  GlobalModelSettingsInput,
-  ProjectModelSettingsInput,
-  type ModelSettingsDto,
-  type RoleSettingDto,
-} from '@10db/contracts';
+import { ModelSettingsInput, type ModelSettingsDto, type RoleSettingDto } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -68,14 +63,14 @@ function serve(opts: { global?: ModelSettingsDto; own?: ModelSettingsDto } = {})
     http.put(daemonUrl('/model-settings'), async ({ request }) => {
       puts.push({
         path: '/model-settings',
-        body: GlobalModelSettingsInput.parse(await request.json()),
+        body: ModelSettingsInput.parse(await request.json()),
       });
       return HttpResponse.json(global);
     }),
     http.put(daemonUrl('/projects/:projectId/model-settings'), async ({ request }) => {
       puts.push({
         path: '/projects/:projectId/model-settings',
-        body: ProjectModelSettingsInput.parse(await request.json()),
+        body: ModelSettingsInput.parse(await request.json()),
       });
       return HttpResponse.json(own);
     }),
@@ -172,8 +167,24 @@ describe('Settings › Team › model by role', () => {
   });
 });
 
+describe('a saved model that is left out of the list', () => {
+  it.each([
+    { model: 'old-a', shown: 'Old A (superseded)' },
+    { model: 'dud-a', shown: 'Dud A (not runnable)' },
+    { model: 'gone', shown: 'Gone (not offered)' },
+  ])('says why $model is not chosen', async ({ model, shown }) => {
+    serve({
+      own: { roles: [role('qa', project.id, { kind: 'model', model })], patterns: [] },
+    });
+    renderWithDaemon(<SectionBody sectionKey={SettingsSectionKey.Team} project={project} />);
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: 'QA model' })).toHaveProperty('value', shown);
+    });
+  });
+});
+
 describe('Settings › Personas and flows › model by role', () => {
-  it('offers the models of every account, and no Use global', async () => {
+  it('offers the models of every account, and 10db’s default in place of Use global', async () => {
     serve();
     renderWithDaemon(
       <SectionBody sectionKey={SettingsSectionKey.PersonasAndFlows} project={project} />,
@@ -181,11 +192,34 @@ describe('Settings › Personas and flows › model by role', () => {
     const list = await openChoices('Review model');
     await waitFor(() => {
       expect(list.getAllByRole('option', { hidden: true }).map((o) => o.textContent)).toEqual([
+        '10db default',
         ...CHOICES,
         'Fast A',
         'Mid A',
         'Top B',
         'House (Unknown)',
+      ]);
+    });
+  });
+
+  it('hands a role back to 10db’s default with null, and shows an unset role as that choice', async () => {
+    const puts = serve({
+      global: { roles: [role('review', null, { kind: 'top_of_tier' })], patterns: [] },
+    });
+    renderWithDaemon(
+      <SectionBody sectionKey={SettingsSectionKey.PersonasAndFlows} project={project} />,
+    );
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: 'Plan model' })).toHaveProperty(
+        'value',
+        '10db default',
+      );
+    });
+    const list = await openChoices('Review model');
+    fireEvent.click(await list.findByRole('option', { name: '10db default', hidden: true }));
+    await waitFor(() => {
+      expect(puts).toEqual([
+        { path: '/model-settings', body: { roles: [{ role: 'review', setting: null }] } },
       ]);
     });
   });

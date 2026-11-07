@@ -1,9 +1,4 @@
-import {
-  ModelSettingsDto,
-  type GlobalModelSettingsInput,
-  type ProjectId,
-  type ProjectModelSettingsInput,
-} from '@10db/contracts';
+import { ModelSettingsDto, type ModelSettingsInput, type ProjectId } from '@10db/contracts';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { readJson } from './client';
 import { useDaemon } from './provider';
@@ -34,7 +29,7 @@ export function useSetGlobalModelSettings() {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (input: GlobalModelSettingsInput) =>
+    mutationFn: async (input: ModelSettingsInput) =>
       readJson(await client['model-settings'].$put({ json: input }), ModelSettingsDto),
     onSuccess: (saved) => {
       queryClient.setQueryData(modelSettingKeys.scope(null), saved);
@@ -47,7 +42,7 @@ export function useSetProjectModelSettings(projectId: ProjectId) {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (input: ProjectModelSettingsInput) =>
+    mutationFn: async (input: ModelSettingsInput) =>
       readJson(
         await client.projects[':projectId']['model-settings'].$put({
           param: { projectId },

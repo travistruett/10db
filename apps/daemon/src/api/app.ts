@@ -49,7 +49,7 @@ import {
   PickSize,
   ProjectId,
   ProjectInput,
-  ProjectModelSettingsInput,
+  ModelSettingsInput,
   ProjectPatch,
   PROTOCOL_VERSION,
   RetryInput,
@@ -57,7 +57,6 @@ import {
   SelfUpdateInput,
   SelfUpdateWaitInput,
   SHAPE_FILE_MAX_BYTES,
-  GlobalModelSettingsInput,
   OneWayPathsDto,
   SmallProposalLimitDto,
   ScreenImageInput,
@@ -873,7 +872,7 @@ export function createApp(deps: ApiDeps) {
     .get('/model-settings', (c) => c.json(deps.services.getModelSettings(null)))
     .put(
       '/model-settings',
-      validator('json', (value): GlobalModelSettingsInput => GlobalModelSettingsInput.parse(value)),
+      validator('json', (value): ModelSettingsInput => ModelSettingsInput.parse(value)),
       (c) => c.json(deps.services.setGlobalModelSettings(c.req.valid('json'))),
     )
     .get('/projects/:projectId/model-settings', (c) =>
@@ -881,9 +880,7 @@ export function createApp(deps: ApiDeps) {
     )
     .put(
       '/projects/:projectId/model-settings',
-      validator('json', (value): ProjectModelSettingsInput =>
-        ProjectModelSettingsInput.parse(value),
-      ),
+      validator('json', (value): ModelSettingsInput => ModelSettingsInput.parse(value)),
       (c) =>
         c.json(
           deps.services.setProjectModelSettings(

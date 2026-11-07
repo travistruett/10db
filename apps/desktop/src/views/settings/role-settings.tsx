@@ -18,52 +18,30 @@ import { SettingRow, SettingsCard } from './setting-row';
 interface RowsProps {
   readonly saved: readonly RoleSettingDto[];
   readonly accountIds: readonly AccountId[] | null;
-  readonly inherits: boolean;
+  /** The choice that removes the role's own setting: Use global in a project, 10db's default everywhere. */
+  readonly noneLabel: string;
+  readonly description: (about: string) => string;
   readonly error: string | null;
   readonly onChange: (role: StepRole, setting: ModelSetting | null) => void;
 }
 
-function RoleRows({ saved, accountIds, inherits, error, onChange }: RowsProps) {
+function RoleRows({ saved, accountIds, noneLabel, description, error, onChange }: RowsProps) {
   return (
     <SettingsCard title="Model by role">
-      {ROLES.map(({ role, label, about }) => {
-        const value = saved.find((s) => s.role === role)?.setting ?? null;
-        return (
-          <SettingRow
-            key={role}
-            label={label}
-            description={
-              inherits
-                ? `${about} Use global follows the setting for every project.`
-                : `${about} Unset, 10db picks for the role.`
-            }
-          >
-            {inherits ? (
-              <ModelSettingSelect
-                hideLabel
-                label={`${label} model`}
-                accountIds={accountIds}
-                value={value}
-                noneLabel="Use global"
-                onChange={(setting) => {
-                  onChange(role, setting);
-                }}
-              />
-            ) : (
-              <ModelSettingSelect
-                hideLabel
-                label={`${label} model`}
-                placeholder="10db picks"
-                accountIds={accountIds}
-                value={value}
-                onChange={(setting) => {
-                  onChange(role, setting);
-                }}
-              />
-            )}
-          </SettingRow>
-        );
-      })}
+      {ROLES.map(({ role, label, about }) => (
+        <SettingRow key={role} label={label} description={description(about)}>
+          <ModelSettingSelect
+            hideLabel
+            label={`${label} model`}
+            accountIds={accountIds}
+            value={saved.find((s) => s.role === role)?.setting ?? null}
+            noneLabel={noneLabel}
+            onChange={(setting) => {
+              onChange(role, setting);
+            }}
+          />
+        </SettingRow>
+      ))}
       {error === null ? null : (
         <Text size="sm" c="red" role="alert" px="md" py="sm">
           {error}
@@ -80,10 +58,11 @@ function GlobalRoleSettings() {
     <RoleRows
       saved={settings.data?.roles ?? []}
       accountIds={null}
-      inherits={false}
+      noneLabel="10db default"
+      description={(about) => `${about} 10db default lets 10db pick for the role.`}
       error={set.error ? `Couldn't save: ${set.error.message}` : null}
       onChange={(role, setting) => {
-        if (setting !== null) set.mutate({ roles: [{ role, setting }] });
+        set.mutate({ roles: [{ role, setting }] });
       }}
     />
   );
@@ -96,7 +75,8 @@ function ProjectRoleSettings({ project }: { readonly project: ProjectDto }) {
     <RoleRows
       saved={settings.data?.roles ?? []}
       accountIds={[project.accountId]}
-      inherits
+      noneLabel="Use global"
+      description={(about) => `${about} Use global follows the setting for every project.`}
       error={set.error ? `Couldn't save: ${set.error.message}` : null}
       onChange={(role, setting) => {
         set.mutate({ roles: [{ role, setting }] });

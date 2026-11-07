@@ -2,9 +2,9 @@ import {
   INSTALL_REPAIRED_NOTICE_KEY,
   mintId,
   RiskTag,
+  TaskPatch,
   type BatchDto,
   type TaskDto,
-  type TaskPatch,
   type WorkstreamDto,
 } from '@10db/contracts';
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
@@ -1435,7 +1435,7 @@ describe('TaskDrawer model setting', () => {
     serve(
       http.get(daemonUrl('/models'), () => HttpResponse.json(offered)),
       http.patch(daemonUrl('/tasks/:taskId'), async ({ request }) => {
-        patched.push((await request.json()) as TaskPatch);
+        patched.push(TaskPatch.parse(await request.json()));
         return HttpResponse.json(taskDto());
       }),
     );

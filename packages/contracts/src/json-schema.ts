@@ -30,14 +30,13 @@ import {
 import {
   AccountModelDto,
   CatalogueStatusDto,
-  GlobalModelSettingsInput,
+  ModelSettingsInput,
   ModelRowDto,
   ModelSetting,
   ModelSettingsDto,
   PatternDto,
   PatternInput,
   PatternMatch,
-  ProjectModelSettingsInput,
   RoleSettingDto,
 } from './catalogue';
 import { AdvertisedBuilderToolInputs, BuilderToolName } from './builder-mcp-tools';
@@ -246,8 +245,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'pattern-match': PatternMatch,
   'pattern-input': PatternInput,
   'model-settings-dto': ModelSettingsDto,
-  'global-model-settings-input': GlobalModelSettingsInput,
-  'project-model-settings-input': ProjectModelSettingsInput,
+  'model-settings-input': ModelSettingsInput,
   'role-setting-dto': RoleSettingDto,
   'model-profile-dto': ModelProfileDto,
   'model-profile-patch': ModelProfilePatch,

@@ -95,15 +95,25 @@ describe('the settings that apply everywhere', () => {
     expect(read.patterns[1]?.match.retryOnly).toBe(true);
   });
 
-  it('leave the patterns alone when a save names none, and refuse to unset a role', async () => {
+  it('leave the patterns alone when a save names none', async () => {
     await api().put('/model-settings', ModelSettingsDto, {
       roles: [{ role: 'review', setting: strongest }],
     });
     expect((await api().get('/model-settings', ModelSettingsDto)).patterns).toHaveLength(1);
-    const refused = await send('PUT', '/model-settings', {
+  });
+
+  it('return a role to 10db’s default with null, which Automatic is not', async () => {
+    await api().put('/model-settings', ModelSettingsDto, {
+      roles: [
+        { role: 'review', setting: strongest },
+        { role: 'plan', setting: automatic },
+      ],
+    });
+    const cleared = await api().put('/model-settings', ModelSettingsDto, {
       roles: [{ role: 'review', setting: null }],
     });
-    expect(refused.status).toBe(400);
+    expect(cleared.roles).toEqual([{ role: 'plan', projectId: null, setting: automatic }]);
+    expect((await api().get('/model-settings', ModelSettingsDto)).roles).toEqual(cleared.roles);
   });
 });
 
@@ -122,6 +132,10 @@ describe('a project’s own settings', () => {
     });
     expect(saved.roles).toEqual([{ role: 'review', projectId: project.id, setting: strongest }]);
     expect(saved.patterns).toMatchObject([{ name: 'Billing', projectId: project.id }]);
+    // A project's patterns leave the global list alone.
+    expect(
+      (await api().get('/model-settings', ModelSettingsDto)).patterns.map((p) => p.name),
+    ).toEqual(['High-risk work']);
     expect(
       (await api().get('/model-settings', ModelSettingsDto)).roles.map((r) => r.setting),
     ).toEqual([automatic]);
@@ -130,6 +144,20 @@ describe('a project’s own settings', () => {
     });
     expect(cleared.roles).toEqual([]);
     expect(cleared.patterns).toHaveLength(1);
+  });
+
+  it('refuse a pattern naming an area the project does not have', async () => {
+    const project = await seedProject();
+    const refused = await send('PUT', `/projects/${project.id}/model-settings`, {
+      roles: [],
+      patterns: [{ name: 'Money', match: { areas: ['billing'] }, setting: strongest }],
+    });
+    expect(refused.status).toBe(400);
+    expect(refused.body).toContain('billing');
+    expect(await api().get(`/projects/${project.id}/model-settings`, ModelSettingsDto)).toEqual({
+      roles: [],
+      patterns: [],
+    });
   });
 
   it('are refused for a project that does not exist', async () => {

@@ -6,7 +6,7 @@ import { DecisionsSection } from './decisions-section';
 import { KeepAwakeSection } from './keep-awake-section';
 import { LanePermissionsSection } from './lane-permissions-section';
 import { PatternsSection } from './patterns-section';
-import { PlannedSection } from './planned-section';
+import { PlannedRemainder, PlannedSection } from './planned-section';
 import { ModelsSection } from './models-section';
 import { NetworkHostsSection } from './network-hosts-section';
 import { OneWayPathsSetting } from './one-way-paths-setting';
@@ -131,7 +131,7 @@ export function SectionBody({
           ) : (
             <NoProject />
           )}
-          <PlannedSection section={section} />
+          <PlannedRemainder section={section} />
         </>
       );
     case SettingsSectionKey.PersonasAndFlows:
@@ -140,7 +140,7 @@ export function SectionBody({
           {heading}
           <RoleSettings project={null} />
           <PatternsSection project={null} />
-          <PlannedSection section={section} />
+          <PlannedRemainder section={section} />
         </>
       );
     case SettingsSectionKey.RoutingRules:
