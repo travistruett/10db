@@ -40,7 +40,7 @@ function lockedPlaywrightVersion(): string {
 
 /** The jobs that run scripts/gate.sh, and the jobs among them that run in the Playwright image. */
 const GATE_JOBS = ['gate-static', 'gate-test', 'gate-e2e'];
-const CONTAINER_JOBS = ['gate-test', 'gate-e2e'];
+const CONTAINER_JOBS = ['gate-e2e'];
 /** The informational jobs that comment on a pull request, which no ruleset may require. */
 const REPORT_JOBS = ['test-report', 'test-report-post'];
 const Permissions = z.record(z.string(), z.string());
@@ -169,7 +169,7 @@ describe('CI workflow', () => {
     );
   });
 
-  it('runs the gate in the Playwright image of the locked Playwright version, pinned by digest', () => {
+  it('runs e2e in the Playwright image of the locked Playwright version, pinned by digest', () => {
     // The image ships the browsers of one Playwright version with their system libraries, so the
     // job downloads neither, and its browsers are found only by that same version.
     const version = lockedPlaywrightVersion();
@@ -182,11 +182,16 @@ describe('CI workflow', () => {
     }
   });
 
-  it('runs the gate as the runner user, under an init that reaps orphaned processes', () => {
+  it('runs the test shards on the runner, with no image to pull', () => {
+    // No unit test opens a browser, and pulling the Playwright image took most of a minute of
+    // every shard. On the runner, its user owns the checkout and systemd reaps orphans.
+    expect(readWorkflow(CI).jobs['gate-test']?.container).toBeUndefined();
+  });
+
+  it('runs e2e as the runner user, under an init that reaps orphaned processes', () => {
     // uid 1001 owns the checkout, and git refuses a repository another user owns; the tests'
-    // isolated git config can't carry a safe.directory exception. The recovery, gate runner and
-    // login-env tests wait for a killed grandchild to disappear, and without an init the job
-    // container's PID 1 leaves it a zombie.
+    // isolated git config can't carry a safe.directory exception. Without an init, the job
+    // container's PID 1 never reaps an orphaned process, which stays a zombie.
     for (const job of CONTAINER_JOBS) {
       expect(containerOf(job).options).toBe('--init --user 1001');
     }
