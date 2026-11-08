@@ -117,7 +117,9 @@ describe('undoing an addition', () => {
       applyHazardAdditions(ctx, project.id, [command('deps', 'make lock')]),
     ).value;
     expect(added).toBeDefined();
-    store.write((ctx) => { undoHazardAddition(ctx, project.id, added?.id ?? ''); });
+    store.write((ctx) => {
+      undoHazardAddition(ctx, project.id, added?.id ?? '');
+    });
     expect(hazard(project.id, 'deps')?.commands).not.toContain('make lock');
     expect(readHazardAssessment(store.db, project.id).additions).toEqual([]);
     const again = store.write((ctx) =>
@@ -132,15 +134,19 @@ describe('undoing an addition', () => {
     const [added] = store.write((ctx) =>
       applyHazardAdditions(ctx, project.id, [glob('exports', 'out/a.json', 'out/a.json')]),
     ).value;
-    store.write((ctx) => { undoHazardAddition(ctx, project.id, added?.id ?? ''); });
+    store.write((ctx) => {
+      undoHazardAddition(ctx, project.id, added?.id ?? '');
+    });
     expect(hazard(project.id, 'exports')).toBeUndefined();
   });
 
   it('refuses an addition that is not listed', () => {
     const project = seedProject(store);
-    expect(() => store.write((ctx) => { undoHazardAddition(ctx, project.id, 'nope'); })).toThrow(
-      /hazard addition nope not found/,
-    );
+    expect(() =>
+      store.write((ctx) => {
+        undoHazardAddition(ctx, project.id, 'nope');
+      }),
+    ).toThrow(/hazard addition nope not found/);
   });
 });
 
@@ -156,7 +162,9 @@ describe('removals the builder agreed to', () => {
   it('takes the entries out, forgets their additions and does not add them back', () => {
     const project = seedProject(store);
     store.write((ctx) => applyHazardAdditions(ctx, project.id, [command('deps', 'make old')]));
-    store.write((ctx) => { applyHazardRemovals(ctx, project.id, [removal('make old')]); });
+    store.write((ctx) => {
+      applyHazardRemovals(ctx, project.id, [removal('make old')]);
+    });
     expect(hazard(project.id, 'deps')?.commands).not.toContain('make old');
     expect(readHazardAssessment(store.db, project.id).additions).toEqual([]);
     const again = store.write((ctx) =>
@@ -168,7 +176,9 @@ describe('removals the builder agreed to', () => {
   it('leaves a kept entry in place and records that the builder kept it', () => {
     const project = seedProject(store);
     store.write((ctx) => applyHazardAdditions(ctx, project.id, [command('deps', 'make old')]));
-    store.write((ctx) => { keepHazards(ctx, project.id, [removal('make old')]); });
+    store.write((ctx) => {
+      keepHazards(ctx, project.id, [removal('make old')]);
+    });
     expect(hazard(project.id, 'deps')?.commands).toContain('make old');
     expect(readHazardAssessment(store.db, project.id).kept).toEqual([
       { hazard: 'deps', kind: 'command', value: 'make old' },

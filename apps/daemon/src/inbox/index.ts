@@ -1,7 +1,6 @@
 export { DockerWhy, raiseDockerOnNote } from './docker-card';
 export { raiseGateHostCards } from './gate-host-card';
 export {
-  applyHazardChoice,
   HazardChoice,
   hazardCardFoldKey,
   hazardRemovalCard,
