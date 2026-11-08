@@ -157,7 +157,7 @@ export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
     'Commit the named paths (and only those) under the repository lock. Returns the commit SHA. Retry with the same opId if unsure it completed.',
   record_evidence: 'Attach verification output: a command you ran, its exit code and a summary.',
   write_handoff:
-    'Write the six-part handoff only after 10db asks you to hand off. 10db adds the git facts. End your turn after calling it. Never call it to finish a step: ending your turn finishes the step.',
+    'Write the six-part handoff when 10db asks you to hand off, or when you must stop with work left: name that work under progress.notDone. 10db adds the git facts. End your turn after calling it. Never call it to finish a step: ending your turn finishes the step, and a handoff that names nothing left ends it too.',
   complete_step:
     'Finish a plan, plan-review, review or QA step: your plan or findings as the summary and, for a review, a verdict. A review role may also send followUps; a step files at most 10 in all through complete_step, however many times you call it, and a call that would pass 10 is refused. They are not counted toward the per-step cap of 10 that propose and file_follow_up share. Implement steps never call this; they end by ending the turn.',
 };
@@ -835,7 +835,7 @@ export function createToolHandlers(
           {
             handoffId: handoff.id,
             instruction:
-              'Handoff recorded. End your turn now; a fresh session will continue from it.',
+              'Handoff recorded. End your turn now. A fresh session continues from it when 10db asked for it or it names work left; otherwise it counts as finishing your step, so a step that records a result with complete_step must still do so.',
           },
           ctx,
         );
