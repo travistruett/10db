@@ -146,7 +146,7 @@ describe('git hook variables', () => {
       recursive: true,
     });
     // A stand-in make, first on PATH, that records the environment `make precheck` was given. It
-    // needs no make installed, and the CI gate's container has none.
+    // needs no make installed, which the Playwright image lacks.
     const fakeMake = join(records, 'bin', 'make');
     mkdirSync(dirname(fakeMake));
     writeFileSync(fakeMake, '#!/bin/sh\n[ "$1" = precheck ] || exit 2\nenv > "$HOOK_ENV_RECORD"\n');

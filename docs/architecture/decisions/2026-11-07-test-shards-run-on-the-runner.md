@@ -16,7 +16,7 @@ Decision 87 put the whole gate in the Playwright image for its browsers. Since t
 still pulled the image before running a test.
 
 **What the pull cost** (Measured, `main` run 42433783704 and pull request #553's run): "Initialize containers" took
-27 to 43 s of each shard job, which ran for 165 to 235 s in all. In one shard's log, 26 of its 27 s were
+26 to 43 s of each shard job, which ran for 165 to 235 s in all. In one shard's log, 26 of its 27 s were
 `docker pull`. A pull request waits for its slowest shard, so this time is on every pull request's critical path.
 
 **The image's other two reasons hold on the runner without it:**
@@ -28,12 +28,16 @@ still pulled the image before running a test.
 
 **What differs on the runner:**
 
-- **git.** The runner's git is GitHub's current one (2.56.0 on image 20261101), not the image's 2.43.0. The
-  fixtures already set every git setting they rely on, so the version should not matter
-  (`.claude/rules/testing.md`). e2e keeps exercising 2.43.
-- **Installed tools.** The runner has tools the image doesn't, such as `make` and `cargo`. A test that skips
-  when a tool is missing may now run, which adds checks and removes none. The pull request's run showed the
-  same tests passing with nothing newly skipped.
+- **git.** The runner's git is GitHub's current one (2.56.0 on image 20261101), not the image's 2.43.0, and it can
+  move whenever GitHub updates the image. The first run on it failed one test, in
+  `apps/daemon/src/folders/inspect.test.ts`, which matched git's own wording for a gitfile that points nowhere.
+  Git 2.43 and 2.50 name the target, and 2.56 names the gitfile. The code passes git's line through, as `RepoRefusal`
+  documents, so the test now names both lines. `.claude/rules/testing.md` says a test must not depend on one
+  version's wording. e2e keeps exercising 2.43.
+- **Installed tools.** The runner has tools the image doesn't, such as `make` and `cargo`. A test that skips when a
+  tool is missing may now run, as the `make install-app` rows in `tests/repo/src/install-app.test.ts` can. That
+  adds checks and removes none. Per-file test counts in the timing artifacts matched those of `main`'s run at the
+  same base (74c252d, run 42435814034), apart from the new row in `tests/repo/src/ci.test.ts`.
 
 Turned down:
 

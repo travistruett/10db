@@ -169,7 +169,7 @@ describe('CI workflow', () => {
     );
   });
 
-  it('runs the gate in the Playwright image of the locked Playwright version, pinned by digest', () => {
+  it('runs e2e in the Playwright image of the locked Playwright version, pinned by digest', () => {
     // The image ships the browsers of one Playwright version with their system libraries, so the
     // job downloads neither, and its browsers are found only by that same version.
     const version = lockedPlaywrightVersion();
@@ -188,11 +188,10 @@ describe('CI workflow', () => {
     expect(readWorkflow(CI).jobs['gate-test']?.container).toBeUndefined();
   });
 
-  it('runs the gate as the runner user, under an init that reaps orphaned processes', () => {
+  it('runs e2e as the runner user, under an init that reaps orphaned processes', () => {
     // uid 1001 owns the checkout, and git refuses a repository another user owns; the tests'
-    // isolated git config can't carry a safe.directory exception. The recovery, gate runner and
-    // login-env tests wait for a killed grandchild to disappear, and without an init the job
-    // container's PID 1 leaves it a zombie.
+    // isolated git config can't carry a safe.directory exception. Without an init, the job
+    // container's PID 1 never reaps an orphaned process, which stays a zombie.
     for (const job of CONTAINER_JOBS) {
       expect(containerOf(job).options).toBe('--init --user 1001');
     }

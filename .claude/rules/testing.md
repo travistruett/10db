@@ -56,13 +56,14 @@
   which races any test that reads its files or removes it. On git 2.43, `receive.autogc` is what
   stops the receive-pack gc.
 - **CI's git differs from local git, so fixtures set the config they rely on.** Developers run
-  Apple Git 2.50. CI's test shards run on the `ubuntu-24.04` runner's own git, which GitHub keeps
-  newer than both, and the e2e step runs in the Playwright image, whose git is 2.43.0
+  Apple Git 2.50. CI's test shards run on the `ubuntu-24.04` runner's own git, which moves when
+  GitHub updates the image, and the e2e step runs in the Playwright image, whose git is 2.43.0
   (`.github/workflows/ci.yml`). They differ: on 2.43 a commit runs
   `git maintenance run --auto --quiet` without `--detach`, and a push runs `git gc --auto` in
   receive-pack. Test repositories ignore global and system config (`isolatedGitEnvironment`), so a
   fixture that depends on a git setting sets it in its own local config and never relies on a
-  version's default.
+  version's default. Git's messages are worded by version too: a test that checks git's own text
+  names every wording CI's gits give, or checks what 10db does with it instead.
 - **No sleeps.** Wait on a condition with a deadline; inject the clock where time matters.
 - **Never pipe test output through `tail` or append `; echo $?`.** It hides failures and exit
   codes.
