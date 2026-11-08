@@ -708,6 +708,7 @@ describe('chooseModel: score, floor and budget', () => {
             launchId: 'mid',
             efforts: [],
             unusable: false,
+            wordingMarkEndsAt: null,
             inputPrice: price === null ? null : price / 5,
             outputPrice: price,
             lastSeenAt: NOW,
