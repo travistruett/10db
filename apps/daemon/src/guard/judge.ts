@@ -4,7 +4,7 @@ import { isAbsolute, join, sep } from 'node:path';
 import { ClaimKind, type AreaDef, type Delivery, type HazardDef } from '@10db/contracts';
 import { z } from 'zod';
 import { isOwnToolResult, pathRefusal, type ProtectedPath } from './account-rules';
-import { commandForms, startsWithWords } from './command-forms';
+import { commandForms, runCommandStarts, startsWithWords } from './command-forms';
 import { ghVerdict } from './gh-rules';
 import { executableTails, FEEDERS } from './wrapped-commands';
 import { gitVerdict } from './git-rules';
@@ -353,6 +353,25 @@ export function shellScripts(words: readonly string[]): string[] {
   return scripts;
 }
 
+/**
+ * The shell command lines a command's words run: the words themselves when a shell heads them, and
+ * a shell a runner chain runs (`docker compose exec -T backend sh -c '…'`, `uv run bash -c '…'`).
+ * A runner's flag the guard has no table for may take a value and move where its command starts,
+ * so behind a runner any shell word with a `-c` flag or a here-string after it counts too.
+ */
+export function shellLines(words: readonly string[]): string[][] {
+  const lines: string[][] = SHELLS.has(commandName(words[0] ?? '')) ? [[...words]] : [];
+  const starts = runCommandStarts(words);
+  if (starts.length === 0) return lines;
+  words.forEach((word, at) => {
+    if (at === 0 || !SHELLS.has(commandName(word))) return;
+    const rest = words.slice(at + 1);
+    const script = rest.some((w) => SHELL_C_FLAG.test(w) || HERE_STRING.test(w));
+    if (starts.includes(at) || script) lines.push(words.slice(at));
+  });
+  return lines;
+}
+
 const DIRECTORY_CHANGES: ReadonlySet<string> = new Set(['cd', 'pushd', 'popd']);
 
 /**
@@ -559,13 +578,14 @@ function judgeShell(
       });
       if (verdict.decision === 'deny') return verdict;
     }
-    if (SHELLS.has(head)) {
-      if (piped) return deny('Piping into a shell runs commands the guard cannot see.');
-      for (const script of shellScripts(words)) {
-        if (depth >= 3) break;
-        const verdict = judgeShell(input, script, depth + 1, inner);
-        if (verdict.decision === 'deny') return verdict;
-      }
+    const shells = shellLines(words);
+    if (shells.length > 0 && piped) {
+      return deny('Piping into a shell runs commands the guard cannot see.');
+    }
+    for (const script of shells.flatMap(shellScripts)) {
+      if (depth >= 3) break;
+      const verdict = judgeShell(input, script, depth + 1, inner);
+      if (verdict.decision === 'deny') return verdict;
     }
     if (head === 'find' && depth < 3) {
       for (const exec of findExecCommands(words)) {

@@ -40,7 +40,8 @@ would help.
 inputs), the shaping flow, Codex, a model picker for the assessment.
 
 **Anti-goals:** running repository code to learn about it (`make -n`, `npm run`, a build); a proposal 10db can't
-explain; changing a project's areas or hazards without the builder's yes; a suggestion with no evidence; model
+explain; changing a project's areas, or removing or loosening a hazard, without the builder's yes (adding a
+hazard is **Built** and applies on its own, §4.5); a suggestion with no evidence; model
 output reaching a stored glob, a claim key or the guard's rules without code-level checks.
 
 ## 2. What areas and hazards are for
@@ -179,6 +180,18 @@ screen, each row with its reason and an Edit link:
    hosts** (shown when the hosts task has landed), **base branch**.
 
 Accept All saves everything. Any row can be edited in place first.
+
+### 4.5 Hazards from the repository (**Built**, ahead of the rest of §4)
+
+The repo-specific part of the hazards (the `make` targets, compose services, package scripts and helper
+scripts a repository uses to change its lockfiles and migrations, as its `AGENTS.md` files and docs say) is
+built without the scan, the system task or `propose_parts`: a daemon function reads a short list of files from
+HEAD's object store, asks the area-naming model with the text as data and no tools, and checks every entry in
+code. Additions apply on their own and are listed in Settings › Areas and hazards with their reason, their file
+and line and an Undo; a removal or narrowing waits on one Inbox card. It runs after a project is added, after a
+commit changes a manifest, lockfile, makefile, compose file or `AGENTS.md`, and from Look again. The record is
+`decisions/2026-11-08-hazards-are-read-from-the-repository-and-additions-apply.md`. Areas, names and reasons for
+parts, the fit score and drift for areas stay **Designed**.
 
 ## 5. The rest of the project
 

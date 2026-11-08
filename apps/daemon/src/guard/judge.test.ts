@@ -1353,6 +1353,60 @@ describe('classifyPath', () => {
   });
 });
 
+describe('classifyPath with the stock hazards', () => {
+  const hazardsOf = (path: string) => classifyPath(path, [], DEFAULT_HAZARDS).hazards;
+
+  it.each([
+    'package.json',
+    'package-lock.json',
+    'npm-shrinkwrap.json',
+    'pnpm-lock.yaml',
+    'yarn.lock',
+    'bun.lock',
+    'bun.lockb',
+    'Cargo.toml',
+    'Cargo.lock',
+    'pyproject.toml',
+    'uv.lock',
+    'poetry.lock',
+    'requirements.txt',
+    'requirements-dev.txt',
+    'requirements/base.txt',
+    'Pipfile',
+    'Pipfile.lock',
+    'go.mod',
+    'go.sum',
+    'Gemfile',
+    'Gemfile.lock',
+  ])('puts %s, at the root and nested, in deps', (file) => {
+    expect(hazardsOf(file)).toEqual(['deps']);
+    expect(hazardsOf(`amps/frontend/${file}`)).toEqual(['deps']);
+    expect(hazardsOf(`a/b/c/${file}`)).toEqual(['deps']);
+  });
+
+  it.each([
+    'drizzle/0001_x.sql',
+    'packages/db/drizzle/meta/_journal.json',
+    'backend/app/migrations/0001_initial.py',
+    'migrations/versions/abc_add_x.py',
+    'alembic/versions/abc_add_x.py',
+    'backend/alembic/versions/abc_add_x.py',
+    'db/migrate/20260101000000_add_x.rb',
+    'api/db/migrate/20260101000000_add_x.rb',
+    'prisma/migrations/20260101_init/migration.sql',
+    'apps/web/prisma/migrations/migration_lock.toml',
+  ])('puts %s in migrations', (file) => {
+    expect(hazardsOf(file)).toEqual(['migrations']);
+  });
+
+  it.each(['requirements.md', 'src/go.ts', 'src/migrate.ts', 'docs/Gemfile.md'])(
+    'leaves %s in no hazard',
+    (file) => {
+      expect(hazardsOf(file)).toEqual([]);
+    },
+  );
+});
+
 describe('classifyPath with dotfiles', () => {
   const REPO_AREA = [{ name: 'repo', globs: ['**'] }];
 
@@ -2364,6 +2418,122 @@ describe('hazardFor agrees with the guard on which commands need a hazard claim'
     { command: 'yarn add x', hazard: 'deps' },
     { command: 'cargo update', hazard: 'deps' },
     { command: 'pnpm db:migrate', hazard: 'migrations' },
+    // Python, Go and Ruby dependency tools, bare and behind runners.
+    { command: 'uv lock', hazard: 'deps' },
+    { command: 'uv add requests', hazard: 'deps' },
+    { command: 'uv remove requests', hazard: 'deps' },
+    { command: 'uv sync', hazard: 'deps' },
+    { command: 'uv pip install requests', hazard: 'deps' },
+    { command: 'poetry add requests', hazard: 'deps' },
+    { command: 'poetry lock', hazard: 'deps' },
+    { command: 'pip install requests', hazard: 'deps' },
+    { command: 'pip install -r requirements.txt', hazard: 'deps' },
+    { command: 'pip3 uninstall requests', hazard: 'deps' },
+    { command: 'pipenv install requests', hazard: 'deps' },
+    { command: 'go get example.com/x', hazard: 'deps' },
+    { command: 'go mod tidy', hazard: 'deps' },
+    { command: 'bundle add rails', hazard: 'deps' },
+    { command: 'bundle install', hazard: 'deps' },
+    { command: 'bundle update', hazard: 'deps' },
+    { command: 'bundle exec bundle add rails', hazard: 'deps' },
+    { command: 'uv run uv lock', hazard: 'deps' },
+    { command: 'poetry run pip install x', hazard: 'deps' },
+    { command: 'docker compose exec -T backend uv lock', hazard: 'deps' },
+    { command: 'docker compose -f dev.yml exec backend uv add x', hazard: 'deps' },
+    { command: 'docker compose exec -e FOO=1 -u root backend pip install x', hazard: 'deps' },
+    { command: 'docker-compose exec backend poetry add x', hazard: 'deps' },
+    { command: 'docker compose run --rm backend uv sync', hazard: 'deps' },
+    { command: 'docker exec -it api_1 uv lock', hazard: 'deps' },
+    { command: 'docker exec -w /app api_1 go get x', hazard: 'deps' },
+    { command: 'docker compose exec web bundle add rails', hazard: 'deps' },
+    { command: 'docker compose exec backend uv run uv lock', hazard: 'deps' },
+    { command: "sh -c 'docker compose exec -T backend uv lock'", hazard: 'deps' },
+    // Migrations: creating them, and applying them to the shared database.
+    { command: 'python manage.py makemigrations', hazard: 'migrations' },
+    { command: 'python3 manage.py makemigrations app', hazard: 'migrations' },
+    { command: './manage.py makemigrations', hazard: 'migrations' },
+    { command: 'python manage.py migrate', hazard: 'migrations' },
+    { command: 'django-admin makemigrations', hazard: 'migrations' },
+    { command: 'alembic revision --autogenerate -m x', hazard: 'migrations' },
+    { command: 'alembic upgrade head', hazard: 'migrations' },
+    { command: 'rails generate migration AddX', hazard: 'migrations' },
+    { command: 'rails db:migrate', hazard: 'migrations' },
+    { command: 'bin/rails db:migrate', hazard: 'migrations' },
+    { command: 'bundle exec rails db:migrate', hazard: 'migrations' },
+    { command: 'prisma migrate dev --name x', hazard: 'migrations' },
+    { command: 'npx prisma migrate dev', hazard: 'migrations' },
+    { command: 'pnpm exec prisma migrate dev', hazard: 'migrations' },
+    { command: 'uv run python manage.py migrate', hazard: 'migrations' },
+    { command: 'poetry run alembic upgrade head', hazard: 'migrations' },
+    {
+      command: 'docker compose exec -T backend python manage.py makemigrations',
+      hazard: 'migrations',
+    },
+    { command: 'docker compose exec backend python manage.py migrate', hazard: 'migrations' },
+    { command: 'docker exec api_1 alembic upgrade head', hazard: 'migrations' },
+    {
+      command: 'docker compose exec backend uv run python manage.py migrate',
+      hazard: 'migrations',
+    },
+    // A preview flag counts only where the program reads it as one; a script gets it as an argument.
+    { command: 'pnpm db:migrate --check', hazard: 'migrations' },
+    { command: 'yarn db:migrate --plan', hazard: 'migrations' },
+    { command: 'npm run db:migrate -- --dry-run', hazard: 'migrations' },
+    { command: 'npm install lodash --check', hazard: 'deps' },
+    { command: 'npm install lodash --plan', hazard: 'deps' },
+    { command: 'python manage.py makemigrations --check', hazard: 'migrations' },
+    { command: 'docker compose exec --dry-run backend uv lock', hazard: 'deps' },
+    { command: 'uv add requests --check', hazard: 'deps' },
+    // A shell a runner starts runs its script like any other shell.
+    { command: "docker compose exec -T backend sh -c 'uv lock'", hazard: 'deps' },
+    {
+      command: 'docker compose exec backend bash -c "cd /app && python manage.py migrate"',
+      hazard: 'migrations',
+    },
+    { command: "docker exec api_1 sh -c 'alembic upgrade head'", hazard: 'migrations' },
+    { command: "docker exec -u root api_1 sh -c 'uv lock'", hazard: 'deps' },
+    { command: "docker exec -i api_1 sh <<< 'uv lock'", hazard: 'deps' },
+    { command: "uv run sh -c 'uv lock'", hazard: 'deps' },
+    { command: "docker compose exec -T backend sh -c 'pytest'", hazard: null },
+    // Read-only checks need no claim.
+    { command: 'npm install --dry-run', hazard: null },
+    { command: 'npm i x --dry-run', hazard: null },
+    { command: 'python manage.py migrate --plan', hazard: null },
+    { command: 'python manage.py migrate --check', hazard: null },
+    { command: 'python manage.py makemigrations --check --dry-run', hazard: null },
+    { command: 'uv sync --check', hazard: null },
+    { command: 'poetry add requests --dry-run', hazard: null },
+    { command: 'cargo add serde --dry-run', hazard: null },
+    { command: 'rake db:migrate --dry-run', hazard: null },
+    {
+      command: 'docker compose exec -T backend python manage.py makemigrations --check --dry-run',
+      hazard: null,
+    },
+    { command: 'python manage.py makemigrations --dry-run', hazard: null },
+    { command: 'python manage.py showmigrations', hazard: null },
+    { command: 'docker compose exec backend python manage.py showmigrations', hazard: null },
+    { command: 'alembic current', hazard: null },
+    { command: 'alembic history', hazard: null },
+    { command: 'rails db:migrate:status', hazard: null },
+    { command: 'prisma migrate status', hazard: null },
+    { command: 'go mod verify', hazard: null },
+    { command: 'go mod graph', hazard: null },
+    { command: 'go build ./...', hazard: null },
+    { command: 'uv lock --check', hazard: null },
+    { command: 'uv tree', hazard: null },
+    { command: 'uv run pytest', hazard: null },
+    { command: 'poetry run pytest', hazard: null },
+    { command: 'poetry show', hazard: null },
+    { command: 'pip list', hazard: null },
+    { command: 'pip install --dry-run requests', hazard: null },
+    { command: 'bundle exec rspec', hazard: null },
+    { command: 'bundle check', hazard: null },
+    { command: 'docker compose exec -T backend pytest', hazard: null },
+    { command: 'docker compose exec -T backend uv run pytest', hazard: null },
+    { command: 'docker compose up -d', hazard: null },
+    { command: 'docker exec api_1 ls', hazard: null },
+    { command: 'docker build -t x .', hazard: null },
+    { command: 'cargo update --dry-run', hazard: null },
     { command: 'pnpm test', hazard: null },
     { command: "sh -c 'pnpm test'", hazard: null },
     { command: 'echo pnpm add x', hazard: null },

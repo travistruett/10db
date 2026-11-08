@@ -30,6 +30,7 @@ import {
   createStore,
   DB_MIGRATIONS_DIR,
   deleteAppSetting,
+  getWorkstreamRow,
   deleteJudgeCallsBefore,
   lanesByAccount,
   getAccountRow,
@@ -129,6 +130,7 @@ import {
 } from '../environment';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { createGit, memoryPinStore, resolveGit } from '../git';
+import { createHazardAssessor, subscribeHazardAssessment } from '../hazards';
 import { createGh, createSystemGhExec, resolveGh, type Gh } from '../github';
 import { createInboxService, createParkAnswers } from '../inbox';
 import { repairKnowledgeIndex } from '../knowledge';
@@ -1373,6 +1375,24 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   watcher?.sync();
 
   const token = opts.uiToken ?? randomBytes(32).toString('base64url');
+  const areaNamer = createAreaNamer({ adapter, launcher, db: state.db, scratchRoot: tmpdir() });
+  // Reads each project's repository for its hazards: when it is added, when a commit changes a
+  // manifest, lockfile, makefile, compose file or AGENTS.md, and when Settings asks. The model gets text
+  // and no tool, like the area namer, and when it is unavailable or slow nothing changes.
+  const hazardAssessor = createHazardAssessor({ state, git, asker: areaNamer, logger });
+  const unsubscribeHazards = subscribeHazardAssessment(
+    bus,
+    {
+      projectOfWorkstream: (id) => {
+        try {
+          return getWorkstreamRow(state.db, id).projectId;
+        } catch {
+          return null;
+        }
+      },
+    },
+    hazardAssessor,
+  );
   const services = createServices({
     state,
     clock,
@@ -1418,7 +1438,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         timeoutMs: delivery.limits.networkTimeoutMs,
       }),
     protectedRoots: [opts.dataDir, ...allSandboxRoots, worktreeRoot],
-    areaNamer: createAreaNamer({ adapter, launcher, db: state.db, scratchRoot: tmpdir() }),
+    areaNamer,
+    hazards: hazardAssessor,
     pinCheckout: (repoPath) => {
       // A checkout git can't read yet is recorded at the first git call that succeeds there.
       git.gitDirs(repoPath).catch(() => undefined);
@@ -1720,6 +1741,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       nightly.cancel();
       unsubscribeLanes();
       unsubscribeYields();
+      unsubscribeHazards();
+      hazardAssessor.stop();
       watcher?.stop();
       keepAwake.stop();
       // A probe in flight writes to the database; the runner can ask for another while it stops.

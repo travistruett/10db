@@ -1626,10 +1626,14 @@ describe('permission broker in a sandboxed lane', () => {
   });
 
   describe('in a project added before the 2026-10-31 stock commands', () => {
-    const latest = new Set(Object.values(STOCK_HAZARD_REVISIONS.at(-1) ?? {}).flat());
+    // The 2026-10-31 revision is the second; a project stored before it lacks it and every later one.
+    const later = STOCK_HAZARD_REVISIONS.slice(1);
+    const laterCommands = new Set(later.flatMap((r) => Object.values(r.commands ?? {}).flat()));
+    const laterGlobs = new Set(later.flatMap((r) => Object.values(r.globs ?? {}).flat()));
     const stored = DEFAULT_HAZARDS.map((h) => ({
       ...h,
-      commands: h.commands.filter((c) => !latest.has(c)),
+      globs: h.globs.filter((g) => !laterGlobs.has(g)),
+      commands: h.commands.filter((c) => !laterCommands.has(c)),
     }));
     const isCard = async (ws: ReturnType<typeof seedWorkstream>, command: string) => {
       const hazards = getProject(state.db, ws.project.id).hazards;

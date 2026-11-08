@@ -60,20 +60,21 @@ export function namingPrompt(candidates: readonly AreaCandidate[]): string {
  * and a strict UTF-8 encoder may refuse the string. With the `u` flag a paired astral character is
  * one code point, so only an unpaired half matches \p{Cs}.
  */
-function oneLine(text: string): string {
+export function oneLine(text: string, max = MAX_REASON): string {
   const line = text
     .replace(/[\p{Cf}\p{Cs}]+/gu, '')
     .replace(/[\s\p{Cc}]+/gu, ' ')
     .trim();
-  if (line.length <= MAX_REASON) return line;
+  if (line.length <= max) return line;
   // Cut on a code point boundary: slicing UTF-16 code units could leave half an astral character.
-  const cut = line.slice(0, MAX_REASON - 1);
+  const cut = line.slice(0, max - 1);
   const last = cut.charCodeAt(cut.length - 1);
   const whole = last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
   return `${whole.trimEnd()}…`;
 }
 
-function modelJson(text: string): unknown {
+/** The first `{` to the last `}` of a model's reply, parsed; null when there is no such JSON. */
+export function modelJson(text: string): unknown {
   const start = text.indexOf('{');
   const end = text.lastIndexOf('}');
   if (start === -1 || end < start) return null;

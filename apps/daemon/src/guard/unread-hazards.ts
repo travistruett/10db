@@ -1,8 +1,15 @@
 import type { HazardDef } from '@10db/contracts';
 import { redirectionViews, shellScripts, SHELLS, withoutRedirections } from './judge';
-import { pnpmFlagKind } from './command-forms';
+import {
+  hazardPatterns,
+  mayStartWith,
+  plainWordReadings,
+  pnpmFlagKind,
+  runCommandStarts,
+  UNREAD_WORD,
+} from './command-forms';
 import { isNumericArithmetic, numericNames } from './numeric-names';
-import { leadingWords, parseShell } from './shell-words';
+import { leadingWords, parseShell, stripCommandPrefixes } from './shell-words';
 import { executableTails, FEEDERS, takesDataArguments } from './wrapped-commands';
 
 /** A character that makes the shell replace a word with text 10db cannot read from the command. */
@@ -19,6 +26,8 @@ const baseName = (word: string): string => word.slice(word.lastIndexOf('/') + 1)
 interface Known {
   readonly programs: ReadonlySet<string>;
   readonly commands: readonly (readonly string[])[];
+  /** The commands, and the commands run through a runner, as `hazardPatterns` gives them. */
+  readonly patterns: readonly (readonly string[])[];
   /** Variables the whole command sets only to numbers. */
   readonly numeric: ReadonlySet<string>;
 }
@@ -97,6 +106,84 @@ function argumentsOnly(line: readonly string[], commands: readonly (readonly str
   );
 }
 
+/** Programs that read their arguments as shell text again, so a word in front of them is a script. */
+const REPARSERS: ReadonlySet<string> = new Set([
+  ...SHELLS,
+  ...FEEDERS,
+  'eval',
+  'watch',
+  'ssh',
+  'su',
+  'sudo',
+  'doas',
+  'flock',
+]);
+/** Package managers whose subcommand words `packageManagerVariants` rewrites. */
+const JS_MANAGERS: ReadonlySet<string> = new Set(['pnpm', 'npm', 'yarn', 'bun', 'npx', 'corepack']);
+/** Programs that run the script or code named by their first operand. */
+const INTERPRETERS: ReadonlySet<string> = new Set([
+  'node',
+  'tsx',
+  'ts-node',
+  'deno',
+  'bun',
+  'python',
+  'python3',
+  'ruby',
+  'perl',
+  'php',
+]);
+
+/**
+ * Whether a word runs the words after it as a command or a script: a shell or `eval`, a wrapper the
+ * guard looks through (`env`, `nice`, `timeout`), or an interpreter whose script is not written out
+ * before the expansion.
+ */
+function runsWhatFollows(word: string, rest: readonly string[]): boolean {
+  if (word.startsWith('-') || word.includes('=')) return false;
+  const name = baseName(word);
+  if (REPARSERS.has(name)) return true;
+  if (stripCommandPrefixes([word, 'x'], { lookThroughRunners: true })[0] !== name) return true;
+  return INTERPRETERS.has(name) && !rest.some((w) => !w.startsWith('-'));
+}
+
+/**
+ * Whether the words the shell expands after a hazard program at `at` can only be arguments to a
+ * command that is no hazard: the literal words before the first expansion, from the hazard program
+ * or from the line's start, can begin no hazard command in any plain reading (runners unwrapped, as
+ * `firstUnread` compares them), no word before it reads its arguments as shell text again, and the
+ * command a runner chain ends in does not run what follows it (`uv run env $x`, `uv run node $F`).
+ */
+function expandsOnlyArguments(line: readonly string[], at: number, known: Known): boolean {
+  const first = line.findIndex((word, i) => i > at && EXPANDING.test(word));
+  if (first < 0) return true;
+  if (line.slice(0, at).some((word) => REPARSERS.has(baseName(word)))) return false;
+  const literal = line.slice(at, first);
+  // A JS package manager rewrites its words (`pnpm run x` is `pnpm x`); `argumentsOnly` reads it.
+  if (line.slice(0, first).some((word) => JS_MANAGERS.has(baseName(word)))) return false;
+  const starts = runCommandStarts(literal);
+  for (const start of starts.length === 0 ? [1] : starts) {
+    for (let i = Math.max(start, 1); i < literal.length; i += 1) {
+      if (runsWhatFollows(literal[i] ?? '', literal.slice(i + 1))) return false;
+    }
+  }
+  // An expansion may be several words, or a flag's value with more words after it.
+  const unread = [UNREAD_WORD, UNREAD_WORD];
+  const fromStart = line.slice(
+    0,
+    line.findIndex((word) => EXPANDING.test(word)),
+  );
+  return [
+    [...literal, ...unread],
+    [...fromStart, ...unread],
+  ].every((words) =>
+    plainWordReadings(words).every((reading) => {
+      const bare = reading.map((plain, i) => (i === 0 ? baseName(plain.word) : plain.word));
+      return !known.patterns.some((pattern) => mayStartWith(bare, pattern));
+    }),
+  );
+}
+
 /** The fail-closed checks on one reading of a segment's words. */
 function readingAsk(words: readonly string[], known: Known, tail: boolean): string | null {
   const hazardPrograms = known.programs;
@@ -112,7 +199,8 @@ function readingAsk(words: readonly string[], known: Known, tail: boolean): stri
     at >= 0 &&
     !takesDataArguments(program) &&
     line.slice(at + 1).some((word) => EXPANDING.test(word)) &&
-    !argumentsOnly(line.slice(at), known.commands)
+    !argumentsOnly(line.slice(at), known.commands) &&
+    !expandsOnlyArguments(line, at, known)
   ) {
     return 'A program with hazard forms is followed by a word the shell expands.';
   }
@@ -135,11 +223,13 @@ function programOf(words: readonly string[]): string {
  * hazard 10db cannot see. Everything else is left to `hazardHit`.
  */
 export function unreadableHazard(command: string, hazards: readonly HazardDef[]): string | null {
+  const commands = hazards.flatMap((hazard) => hazard.commands.map((c) => c.split(' ')));
   return unreadableIn(
     command,
     {
       programs: hazardPrograms(hazards),
-      commands: hazards.flatMap((hazard) => hazard.commands.map((c) => c.split(' '))),
+      commands,
+      patterns: hazardPatterns(commands.map((c) => c.filter((word) => word !== ''))),
       numeric: numericNames(command),
     },
     0,

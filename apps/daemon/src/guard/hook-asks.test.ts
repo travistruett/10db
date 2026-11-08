@@ -372,6 +372,44 @@ describe('a word the shell fills in that can pick the program or the pnpm subcom
   });
 });
 
+describe('a word the shell fills in after a Python, Go or Ruby command that is no hazard is read', () => {
+  it.each([
+    'python -m pytest tests/test_*.py',
+    'uv run pytest -k $NAME',
+    'poetry run pytest tests/*.py',
+    'go test ./... -run $T',
+    'go build -o $OUT ./cmd/x',
+    'bundle exec rspec spec/**/*_spec.rb',
+    'python scripts/gen.py --out $TMPDIR/x',
+    'docker compose exec -T backend python -m pytest tests/*.py',
+  ])('%s', (command) => {
+    expect(bash(command)).toBe('allow');
+  });
+});
+
+describe('a word the shell fills in that can spell a Python, Go or Ruby hazard still asks', () => {
+  it.each([
+    'python manage.py $x',
+    'python $x',
+    'python -c $x',
+    'uv $x',
+    'uv run $x',
+    'uv --directory $D lock',
+    'uv run env $x',
+    'uv run node $F',
+    'uv run sh -c "$x"',
+    'go mod $x',
+    'bundle $x',
+    'pip $x',
+    'docker compose exec -T backend python manage.py $x',
+    'docker compose exec -T backend sh -c "$x"',
+    'watch python -m pytest $x',
+  ])('%s', (command) => {
+    expect(bash(command)).toBe('ask');
+    expect(bash(command, ALL_HAZARDS)).toBe('allow');
+  });
+});
+
 describe('a command 10db cannot read asks while a hazard is unclaimed', () => {
   it.each(['~/bin/foo x', 'echo "unclosed'])('%s', (command) => {
     expect(bash(command)).not.toBe('allow');

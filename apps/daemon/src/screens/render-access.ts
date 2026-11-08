@@ -54,6 +54,7 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/projects/:projectId/shape-jev': 'No screen draws a setting.',
   '/projects/:projectId/one-way-paths': 'No screen draws a setting.',
   '/projects/:projectId/network-hosts': 'No screen draws a setting.',
+  '/projects/:projectId/hazard-assessment': 'No screen draws a setting.',
   '/projects/:projectId/small-proposal-limit': 'No screen draws a setting.',
   '/projects/:projectId/team': 'No screen draws a setting.',
   '/projects/:projectId/routing-rules': 'No screen draws a setting.',

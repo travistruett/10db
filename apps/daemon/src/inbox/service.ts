@@ -59,6 +59,7 @@ import { ESCALATED_KEY, EXACT_WRITE_KEY, mcpGrantRules, storableRule } from '../
 import { proposePlacement } from '../placement';
 import { applyDockerChoice } from './docker-card';
 import { applyGateHostChoice } from './gate-host-card';
+import { applyHazardChoice } from './hazard-card';
 import { applyMcpApproval } from './mcp-approval';
 import { declaredRiskTags, taskFieldsFromProposal } from './proposal-task';
 
@@ -648,6 +649,7 @@ export function createInboxService(deps: {
           applyMcpApproval(ctx, updated, answer);
           applyGateHostChoice(ctx, updated, answer);
           applyDockerChoice(ctx, updated, answer);
+          applyHazardChoice(ctx, updated, answer);
         }
         return updated;
       });

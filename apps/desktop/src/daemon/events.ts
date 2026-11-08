@@ -7,6 +7,7 @@ import { useDaemon } from './provider';
 import { accountKeys, accountLoginKey } from './account-queries';
 import { goalKeys } from './goal-queries';
 import { humanTouchKeys } from './human-touch-queries';
+import { HAZARD_ASSESSMENT_KEY } from './hazard-queries';
 import { modelKeys } from './model-queries';
 import { modelSettingKeys } from './model-settings-queries';
 import { NETWORK_HOSTS_KEY } from './network-host-queries';
@@ -28,7 +29,8 @@ const KNOWLEDGE: readonly QueryKey[] = [['knowledge'], ['proposals'], ['provenan
 
 /** What to refetch when an event about an entity type arrives. */
 export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
-  project: [queryKeys.projects, CANDIDATES],
+  // 10db adds to a project's hazards by itself, so the page that lists the additions follows the project.
+  project: [queryKeys.projects, CANDIDATES, HAZARD_ASSESSMENT_KEY],
   task: [['tasks'], goalKeys.all, CANDIDATES],
   // A goal's strip counts its tasks and takes its status from their runs, batches and cards.
   goal: [goalKeys.all],
