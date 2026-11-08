@@ -4,9 +4,14 @@ import type { WaitObserver } from '../inbox';
 export interface LiveSession {
   readonly signal: AbortSignal;
   readonly observer: WaitObserver;
+  /** A tool's answer told the session to hand off, so a handoff it writes is one 10db asked for. */
+  askedToHandOff(): void;
 }
 
-/** Sessions with a running adapter handle; MCP tools look up their wait observer and abort signal here. */
+/**
+ * Sessions with a running adapter handle; MCP tools look up their wait observer and abort signal here,
+ * and tell the runner when an answer asked the session to hand off.
+ */
 export interface LiveSessions {
   register(id: SessionId, session: LiveSession): void;
   unregister(id: SessionId): void;

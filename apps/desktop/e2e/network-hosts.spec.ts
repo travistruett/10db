@@ -61,7 +61,7 @@ for (const scheme of ['dark', 'light'] as const) {
 
     await field.fill('localhost');
     await page.getByRole('button', { name: 'Add Host' }).click();
-    await expect(page.getByRole('alert')).toContainText('Allow localhost');
+    await expect(page.getByRole('alert').filter({ hasText: 'Allow localhost' })).toBeVisible();
     await expect(field).toHaveValue('localhost');
     await expect(page.getByRole('listitem')).toHaveCount(2);
     await expectAccessible(page, `network hosts refusal, ${scheme}`);

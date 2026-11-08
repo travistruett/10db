@@ -220,6 +220,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
         git: createGit(),
         log: silentLogger,
         waitObserverFor: () => undefined,
+        askedToHandOff: () => undefined,
         sessionSignal: () => undefined,
         shapeTools: () => ({
           see_screen: () =>

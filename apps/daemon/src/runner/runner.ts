@@ -550,6 +550,11 @@ interface Control {
 interface SessionState {
   providerSessionId: string | null;
   handoffRequested: boolean;
+  /**
+   * A tool's answer told the session to hand off if it can't finish (a claim held by a lane the update
+   * drain parked). Unlike `handoffRequested`, it sends no nudge and leaves the lane running.
+   */
+  handoffAskedByTool: boolean;
   /** Why the session was asked to hand off, so a firm nudge uses the same words. */
   handoffCause: HandoffCause;
   /**
@@ -1739,6 +1744,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     const st: SessionState = {
       providerSessionId: resumeId,
       handoffRequested: false,
+      handoffAskedByTool: false,
       handoffCause: 'context',
       briefingBaselinePct: inheritedBaselinePct,
       awaitingBriefingBaseline: briefed && inheritedBaselinePct === null,
@@ -1818,7 +1824,13 @@ export function createRunner(opts: RunnerOptions): Runner {
       },
     };
 
-    opts.live.register(session.id, { signal: abort.signal, observer });
+    opts.live.register(session.id, {
+      signal: abort.signal,
+      observer,
+      askedToHandOff: () => {
+        st.handoffAskedByTool = true;
+      },
+    });
     const fileAccess = laneSession ? fileAccessJudge(laneSession.fileAccess) : null;
     try {
       handle = opts.adapter.start({
@@ -2062,7 +2074,18 @@ export function createRunner(opts: RunnerOptions): Runner {
             const recorded = handoffForSession(db, session.id);
             const resultRecorded = () =>
               currentStep(getWorkstreamRow(db, id)).result?.sessionId === session.id;
-            if (recorded) {
+            // A handoff nobody asked for is a handoff only while the step's work is outstanding. One
+            // written after the work is done (some models call it to say they finished) ends the step,
+            // as ending the turn would. One that 10db asked for stands even with nothing uncommitted: the
+            // session was told to commit first and name what is left.
+            const handoffStands =
+              !!recorded &&
+              (st.handoffRequested ||
+                st.handoffAskedByTool ||
+                !(readOnly
+                  ? resultRecorded()
+                  : (await claimedChanges(getWorkstreamRow(db, id))).length === 0));
+            if (recorded && handoffStands) {
               st.outcome = { kind: 'handoff', handoffId: recorded.id };
               await handle.stop();
             } else if (st.handoffRequested && !st.firmSent) {

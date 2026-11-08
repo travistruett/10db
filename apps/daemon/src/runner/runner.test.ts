@@ -2420,7 +2420,11 @@ describe('runner', () => {
     engine = await createTestEngine(
       {
         Alpha: [
-          [{ do: 'mcp', tool: 'write_handoff', args: handoffArgs('op-cap-0001', 'finish') }, turn],
+          [
+            { do: 'context', percentage: 50 },
+            { do: 'mcp', tool: 'write_handoff', args: handoffArgs('op-cap-0001', 'finish') },
+            turn,
+          ],
           [turn],
         ],
       },
@@ -2641,7 +2645,11 @@ describe('accounts', () => {
     engine = await createTestEngine(
       {
         Alpha: [
-          [{ do: 'mcp', tool: 'write_handoff', args: handoffArgs('op-ready-001', 'finish') }, turn],
+          [
+            { do: 'context', percentage: 50 },
+            { do: 'mcp', tool: 'write_handoff', args: handoffArgs('op-ready-001', 'finish') },
+            turn,
+          ],
           [turn],
         ],
       },
