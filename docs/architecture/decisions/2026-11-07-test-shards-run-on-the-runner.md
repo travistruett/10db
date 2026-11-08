@@ -35,9 +35,10 @@ still pulled the image before running a test.
   documents, so the test now names both lines. `.claude/rules/testing.md` says a test must not depend on one
   version's wording. e2e keeps exercising 2.43.
 - **Installed tools.** The runner has tools the image doesn't, such as `make` and `cargo`. A test that skips when a
-  tool is missing may now run, as the `make install-app` rows in `tests/repo/src/install-app.test.ts` can. That
-  adds checks and removes none. Per-file test counts in the timing artifacts matched those of `main`'s run at the
-  same base (74c252d, run 42435814034), apart from the new row in `tests/repo/src/ci.test.ts`.
+  tool is missing may now run, as the `make install-app` rows in `tests/repo/src/install-app.test.ts` can. No skip
+  condition in the tests turns on when a tool is present. Per-file test counts in the timing artifacts, which
+  include skipped tests, matched those of `main`'s run at the same base (74c252d, run 42435814034), apart from the
+  new row in `tests/repo/src/ci.test.ts`.
 
 Turned down:
 

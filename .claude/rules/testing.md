@@ -63,7 +63,7 @@
   receive-pack. Test repositories ignore global and system config (`isolatedGitEnvironment`), so a
   fixture that depends on a git setting sets it in its own local config and never relies on a
   version's default. Git's messages are worded by version too: a test that checks git's own text
-  names every wording CI's gits give, or checks what 10db does with it instead.
+  names the wording of every git it runs on, or checks what 10db does with the text instead.
 - **No sleeps.** Wait on a condition with a deadline; inject the clock where time matters.
 - **Never pipe test output through `tail` or append `; echo $?`.** It hides failures and exit
   codes.
