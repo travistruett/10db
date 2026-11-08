@@ -379,6 +379,16 @@ describe('editing', () => {
     expect(await within(dialog).findByText(message)).toBeTruthy();
   });
 
+  it('takes a row’s menu out of the page the moment an item is chosen, so the next menu is the only one', async () => {
+    serve({ principles: [principleItem({ projectId: project.id })] });
+    renderApp('/knowledge');
+    await openRowMenu('Actions for testing.no-sleeps', 'Edit…');
+    await screen.findByRole('dialog', { name: 'Edit Principle' });
+    // `hidden` counts a menu that is only fading out: a closing menu must not linger beside the next one.
+    expect(screen.queryAllByRole('menu', { hidden: true })).toHaveLength(0);
+    expect(screen.queryAllByRole('menuitem', { hidden: true })).toHaveLength(0);
+  });
+
   it('offers Edit only on a current record', async () => {
     serve({
       principles: [
