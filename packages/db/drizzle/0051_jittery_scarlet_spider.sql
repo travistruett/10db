@@ -1,0 +1,1 @@
+ALTER TABLE `projects` ADD `move_back_automatic` integer DEFAULT false NOT NULL;

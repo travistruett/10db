@@ -1,5 +1,6 @@
 import {
   AccountPauseReason,
+  EventType,
   ConflictError,
   isMetered,
   ACTIVE_STATES,
@@ -24,17 +25,26 @@ import {
 } from '@10db/db';
 import type { StateStore } from '../events';
 import type { InboxService } from '../inbox';
-import { accountFoldKey, MOVE_BACK_CARD, USAGE_HIGH_CARD } from './cards';
+import { accountFoldKey, MOVE_BACK_CARD, MOVED_CARD, USAGE_HIGH_CARD } from './cards';
 import type { MoveBack } from './move-back';
 import { usageLimitEnd, type AccountPauses } from './pauses';
 import { unready } from './readiness';
 
-export const MoveCause = { Builder: 'builder', UsageLimit: 'usage_limit' } as const;
+export const MoveCause = {
+  Builder: 'builder',
+  UsageLimit: 'usage_limit',
+  /** 10db returns a project to the account it left for its usage limit, once that limit has reset. */
+  MoveBack: 'move_back',
+} as const;
 export type MoveCause = (typeof MoveCause)[keyof typeof MoveCause];
 
-/** Why a project moves: the builder chose to, or its account reached its usage limit. */
+/**
+ * Why a project moves: the builder chose to, its account reached its usage limit, or 10db moves it
+ * back by itself after that limit.
+ */
 export type MoveWhy =
   | { readonly cause: typeof MoveCause.Builder }
+  | { readonly cause: typeof MoveCause.MoveBack }
   | {
       readonly cause: typeof MoveCause.UsageLimit;
       readonly resetsAt: Date | null;
@@ -51,7 +61,8 @@ export interface AccountMoves {
   /**
    * Moves the project, with `patch`'s other fields in the same write. Work in flight follows at each
    * lane's next session. A move off an account at its usage limit, or because of it, is remembered
-   * for the move back. `answering` is the card whose answer this is, which the inbox closes itself.
+   * for the move back; only a move caused by the limit (`MoveCause.UsageLimit`) is moved back by
+   * itself, the builder's own is asked about. `answering` is the card whose answer this is, which the inbox closes itself.
    */
   move(
     projectId: ProjectId,
@@ -111,6 +122,8 @@ export function createAccountMoves(opts: {
   function withdrawMoot(
     project: ProjectDto,
     from: AccountId,
+    to: AccountId,
+    why: MoveWhy,
     answering: InboxItemId | undefined,
   ): void {
     const keys = [
@@ -119,6 +132,8 @@ export function createAccountMoves(opts: {
       ...(project.movedFromAccountId === null
         ? []
         : [accountFoldKey(project.movedFromAccountId, MOVE_BACK_CARD)]),
+      // The card that told the builder 10db moved the project away is moot once it is back.
+      ...(why.cause === MoveCause.MoveBack ? [accountFoldKey(to, MOVED_CARD)] : []),
     ];
     for (const key of keys) {
       const open = findOpenByFoldKey(db, project.id, key);
@@ -144,17 +159,32 @@ export function createAccountMoves(opts: {
         return opts.state.write((ctx) => patchProject(ctx, projectId, { ...patch, accountId: to }));
       const paused = opts.pauses.pausedFor(from);
       const limitEnds = usageLimitEnd(paused);
-      const forLimit = why.cause === MoveCause.UsageLimit || limitEnds !== null;
-      // Null when nobody reported when the limit resets: the move back asks after its default pause.
+      // A move back is the end of a temporary move, never the start of another.
+      const forLimit =
+        why.cause !== MoveCause.MoveBack &&
+        (why.cause === MoveCause.UsageLimit || limitEnds !== null);
+      // Null when nobody reported when the limit resets: the move back waits its default pause.
       const backAt = limitEnds ?? (why.cause === MoveCause.UsageLimit ? why.resetsAt : null);
       const moved = opts.state.write((ctx) => {
         patchProject(ctx, projectId, { ...patch, accountId: to });
-        // Leaving for a limit is temporary: remember where from, and when that limit resets.
+        if (why.cause === MoveCause.MoveBack)
+          ctx.emit({
+            type: EventType.ProjectChanged,
+            entityType: 'project',
+            entityId: projectId,
+            data: { movedBack: { fromAccountId: from, toAccountId: to } },
+          });
+        // Leaving for a limit is temporary: remember where from, and when that limit resets. Only a
+        // move the limit caused is moved back by itself; one the builder made by hand is asked about.
         return forLimit
-          ? setMoveBack(ctx, projectId, { accountId: from, at: backAt?.toISOString() ?? null })
+          ? setMoveBack(ctx, projectId, {
+              accountId: from,
+              at: backAt?.toISOString() ?? null,
+              automatic: why.cause === MoveCause.UsageLimit,
+            })
           : getProject(ctx.tx, projectId);
       });
-      withdrawMoot(project, from, answering);
+      withdrawMoot(project, from, to, why, answering);
       if (why.cause === MoveCause.UsageLimit && why.handOff)
         opts.handOff(projectId, from, `moving to ${getAccountRow(db, to).label}`);
       if (forLimit) opts.moveBack.arm(projectId);
