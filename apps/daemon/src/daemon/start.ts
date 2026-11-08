@@ -69,6 +69,7 @@ import {
   createCatalogueSync,
   readCatalogueSnapshot,
   reconcileProfiles,
+  resumeModelMarks,
   type Catalogue,
 } from '../catalogue';
 import { createJudge, JUDGE_LOG_RETENTION_MS, type JudgeService } from '../judge';
@@ -1196,6 +1197,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       };
     },
   });
+  // The marks from an error's wording that ended, or will end, while the daemon was down.
+  resumeModelMarks({ state, clock });
   const createdRunner = createRunner({
     protectedPaths: guarded,
     laneSandbox,

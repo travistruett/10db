@@ -995,6 +995,8 @@ export const accountModels = sqliteTable(
     launchId: text('launch_id').notNull(),
     efforts: text('efforts', { mode: 'json' }).$type<Effort[]>().notNull(),
     unusable: integer('unusable', { mode: 'boolean' }).notNull().default(false),
+    // When a mark that came from an error's wording alone stops counting; null for a final mark (or none).
+    wordingMarkEndsAt: text('wording_mark_ends_at'),
     inputPrice: real('input_price'),
     outputPrice: real('output_price'),
     lastSeenAt: text('last_seen_at').notNull(),

@@ -5,6 +5,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import {
   AccountKind,
   AccountProblem,
+  ModelMarkBasis,
   Provider,
   providerOf,
   type AccountId,
@@ -113,8 +114,8 @@ export const FakeStep = z.discriminatedUnion('do', [
   z.object({ do: z.literal('background'), tasks: z.array(z.string()) }),
   z.object({ do: z.literal('crash'), message: z.string() }),
   z.object({ do: z.literal('billing_refused'), message: z.string() }),
-  /** The account cannot run the model the session was launched on. */
-  z.object({ do: z.literal('model_refused') }),
+  /** The account cannot run the model the session was launched on; `wording` is an error's text alone. */
+  z.object({ do: z.literal('model_refused'), basis: z.enum(ModelMarkBasis).optional() }),
   z.object({
     do: z.literal('auth_error'),
     error: z.enum([
@@ -304,10 +305,17 @@ export class FakeAdapter implements SessionAdapter {
       reason: SessionEndReason,
       message: string | null,
       refusal?: AccountRefusal,
+      basis?: ModelMarkBasis,
     ): void => {
       if (ended) return;
       ended = true;
-      channel.push({ type: 'ended', reason, message, ...(refusal ? { refusal } : {}) });
+      channel.push({
+        type: 'ended',
+        reason,
+        message,
+        ...(refusal ? { refusal } : {}),
+        ...(basis ? { refusalBasis: basis } : {}),
+      });
       channel.end();
       void mcp?.close();
       finished();
@@ -511,7 +519,12 @@ export class FakeAdapter implements SessionAdapter {
           end(SessionEndReason.BillingRefused, step.message);
           return 'halt';
         case 'model_refused':
-          end(SessionEndReason.ModelRefused, `The account cannot run the model ${spec.model}`);
+          end(
+            SessionEndReason.ModelRefused,
+            `The account cannot run the model ${spec.model}`,
+            undefined,
+            step.basis,
+          );
           return 'halt';
         case 'auth_error':
           end(SessionEndReason.AccountRefused, `Claude Code reported ${step.error}`, {

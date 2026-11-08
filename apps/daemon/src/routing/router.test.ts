@@ -481,6 +481,7 @@ describe('the budget ceiling on an account that pays per token', () => {
     launchId: model,
     efforts: [],
     unusable: false,
+    wordingMarkEndsAt: null,
     inputPrice: outputPrice === null ? null : outputPrice / 5,
     outputPrice,
     lastSeenAt: '2026-11-08T12:00:00.000Z',

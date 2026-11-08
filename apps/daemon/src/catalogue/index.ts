@@ -5,4 +5,5 @@ export { storedModelNames, type NamedModel } from './sync';
 export { createCatalogueSync, type CatalogueSync } from './sync';
 export { createAccountLists, type AccountLists } from './account-lists';
 export { reconcileProfiles } from './profiles';
+export { clearModelMark, markModelUnusable, resumeModelMarks } from './model-marks';
 export { buildModelRows } from './model-rows';

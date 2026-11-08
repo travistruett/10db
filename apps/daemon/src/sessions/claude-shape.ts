@@ -6,7 +6,7 @@ import type {
   SpawnedProcess,
   SpawnOptions,
 } from '@anthropic-ai/claude-agent-sdk';
-import type { AccountRefusal } from '@10db/contracts';
+import type { AccountRefusal, ModelMarkBasis } from '@10db/contracts';
 import { systemClock, type Clock } from '../clock';
 import type { Logger } from '../log';
 import {
@@ -20,7 +20,7 @@ import { createChannel } from './channel';
 import type { QueryFn } from './claude-adapter';
 import {
   mapSdkMessage,
-  refusesModel,
+  modelRefusalOf,
   toHookOutput,
   toPermissionResult,
   toSdkMcpServer,
@@ -246,8 +246,12 @@ export function startShapeSession(
   let started = false;
   /** The tool names the latest init message listed; the repo's MCP servers come after it. */
   let initTools: readonly string[] = [];
-  let failure: { reason: SessionEndReason; message: string; refusal?: AccountRefusal } | null =
-    null;
+  let failure: {
+    reason: SessionEndReason;
+    message: string;
+    refusal?: AccountRefusal;
+    basis?: ModelMarkBasis;
+  } | null = null;
   let resolvePreflight: (ok: boolean) => void = () => undefined;
   const preflightOk = new Promise<boolean>((resolve) => {
     resolvePreflight = resolve;
@@ -268,13 +272,20 @@ export function startShapeSession(
     reason: SessionEndReason,
     message: string | null,
     refusal?: AccountRefusal,
+    basis?: ModelMarkBasis,
   ): void => {
     if (ended) return;
     ended = true;
     resolvePreflight(false);
     resolveVerified(false);
     input.end();
-    events.push({ type: 'ended', reason, message, ...(refusal ? { refusal } : {}) });
+    events.push({
+      type: 'ended',
+      reason,
+      message,
+      ...(refusal ? { refusal } : {}),
+      ...(basis ? { refusalBasis: basis } : {}),
+    });
     events.end();
     markFinished();
   };
@@ -303,8 +314,13 @@ export function startShapeSession(
     ),
   });
 
-  const refuse = (reason: SessionEndReason, message: string, refusal?: AccountRefusal): void => {
-    failure = { reason, message, ...(refusal ? { refusal } : {}) };
+  const refuse = (
+    reason: SessionEndReason,
+    message: string,
+    refusal?: AccountRefusal,
+    basis?: ModelMarkBasis,
+  ): void => {
+    failure = { reason, message, ...(refusal ? { refusal } : {}), ...(basis ? { basis } : {}) };
     resolvePreflight(false);
     resolveVerified(false);
     log.error({ reason: message }, 'shape session refused');
@@ -424,10 +440,13 @@ export function startShapeSession(
         if (msg.type === 'assistant') {
           const firstReply = !repliedYet;
           repliedYet = true;
-          if (refusesModel(msg, spec.model, firstReply)) {
+          const refusal = modelRefusalOf(msg, spec.model, firstReply);
+          if (refusal) {
             refuse(
               SessionEndReason.ModelRefused,
               `Claude Code reported that account "${spec.account.label}" cannot run the model ${spec.model}.`,
+              undefined,
+              refusal,
             );
             continue;
           }
@@ -463,10 +482,11 @@ export function startShapeSession(
         failure ? failure.reason : stopRequested ? 'stopped' : 'completed',
         failure?.message ?? null,
         failure?.refusal,
+        failure?.basis,
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (failure) end(failure.reason, failure.message, failure.refusal);
+      if (failure) end(failure.reason, failure.message, failure.refusal, failure.basis);
       else if (stopRequested) end('stopped', null);
       else end('error', message);
     }
