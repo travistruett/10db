@@ -11,7 +11,11 @@
     "dialog:allow-open",
     {
       "identifier": "opener:allow-open-url",
-      "allow": [{ "url": "https://github.com/*" }, { "url": "https://auth.openai.com/*" }]
+      "allow": [
+        { "url": "https://github.com/*" },
+        { "url": "https://auth.openai.com/*" },
+        { "url": "https://artificialanalysis.ai/*" }
+      ]
     }
   ]
 }

@@ -22,7 +22,9 @@ export function isTauri(): boolean {
 
 /**
  * Opens a web page in the default browser, for the desktop app, whose webview follows no
- * `target="_blank"` link. The capability allows only `https://github.com/*`, besides the sign-in page `openSignInPage` opens.
+ * `target="_blank"` link. The capability allows only `https://github.com/*` and
+ * `https://artificialanalysis.ai/*`, whose credit beside its scores links its site, besides the sign-in page
+ * `openSignInPage` opens.
  */
 export function openInBrowser(url: string): Promise<void> {
   return openUrl(url);
@@ -30,7 +32,7 @@ export function openInBrowser(url: string): Promise<void> {
 
 /**
  * Opens the page an agent names for a browser sign-in. The capability allows only
- * `https://auth.openai.com/*` besides GitHub; a plain browser opens a tab.
+ * `https://auth.openai.com/*` besides GitHub and Artificial Analysis; a plain browser opens a tab.
  */
 export function openSignInPage(url: string): Promise<void> {
   if (isTauri()) return openUrl(url);
