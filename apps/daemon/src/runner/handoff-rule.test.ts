@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import type { HandoffDto } from '@10db/contracts';
 import {
   handoffStands,
   nextUnaskedRun,
   UNASKED_HANDOFF_LIMIT,
+  workLeftIn,
   type HandoffFacts,
 } from './handoff-rule';
 
@@ -69,5 +71,25 @@ describe('nextUnaskedRun', () => {
     const next = nextUnaskedRun(run, gitHead);
     expect(next.run).toEqual({ gitHead, count });
     expect(next.atLimit).toBe(atLimit);
+  });
+});
+
+describe('workLeftIn', () => {
+  const handoff = (notDone: string[], blockers: string[]) =>
+    ({
+      content: { progress: { notDone }, continuity: { blockers } },
+    }) as unknown as HandoffDto; // Only the two fields read here.
+  it.each<[string, string[], string[], string[]]>([
+    ['nothing named', [], [], []],
+    ['work not done', ['the 409 case'], [], ['the 409 case']],
+    [
+      'a blocker, with nothing listed as not done',
+      [],
+      ['src held by a parked lane'],
+      ['src held by a parked lane'],
+    ],
+    ['both', ['the 409 case'], ['a question'], ['the 409 case', 'a question']],
+  ])('%s', (_name, notDone, blockers, left) => {
+    expect(workLeftIn(handoff(notDone, blockers))).toEqual(left);
   });
 });

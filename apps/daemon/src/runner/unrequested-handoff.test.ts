@@ -1,4 +1,4 @@
-import { getWorkstream, listSessions } from '@10db/db';
+import { getWorkstream, listEventsAfter, listSessions } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTestEngine, type TestEngine } from '../../test/engine';
 import { handoffArgs } from '../../test/fixtures';
@@ -47,6 +47,11 @@ const approve = (opId: string) => ({
 const implement = (opId: string) => [write('src/api/a.txt'), commit(opId, ['src/api/a.txt']), turn];
 const exits = (id: Parameters<typeof listSessions>[1]) =>
   listSessions(engine.store.db, id).map((s) => s.exitReason);
+/** The reasons the workstream's transitions give. */
+const reasons = (id: Parameters<typeof listSessions>[1]) =>
+  listEventsAfter(engine.store.db, 0, 1000)
+    .filter((e) => e.type === 'workstream.changed' && e.entityId === id)
+    .map((e) => e.data['reason']);
 
 describe('a handoff written below the threshold', () => {
   it('ends the step when its work is committed and it names nothing left', async () => {
@@ -145,6 +150,40 @@ describe('a handoff written below the threshold', () => {
 
     expect(getWorkstream(engine.store.db, workstream.id).state).toBe('DONE');
     expect(exits(workstream.id)).toEqual(['handoff', 'handoff', 'step_done']);
+    expect(reasons(workstream.id)).toContain(
+      'step complete after 3 handoffs in a row that nobody asked for',
+    );
+  });
+
+  it('counts the run again from nothing after a handoff 10db asked for', async () => {
+    engine = await createTestEngine({
+      Alpha: [
+        [handOff('op-unreq-r1'), turn],
+        [handOff('op-unreq-r2'), turn],
+        [
+          // A fresh session's first reading is its briefing's baseline; the second passes the line.
+          { do: 'context', percentage: 5 },
+          { do: 'context', percentage: 90 },
+          handOff('op-unreq-asked'),
+          turn,
+        ],
+        [handOff('op-unreq-r3'), turn],
+        [handOff('op-unreq-r4'), turn],
+        [write('src/api/a.txt'), commit('op-unreq-12', ['src/api/a.txt']), turn],
+      ],
+    });
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+
+    expect(exits(workstream.id)).toEqual([
+      'handoff',
+      'handoff',
+      'handoff',
+      'handoff',
+      'handoff',
+      'step_done',
+    ]);
   });
 
   it('keeps handing off while each session commits more', async () => {

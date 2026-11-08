@@ -20,9 +20,11 @@ ends so with no result is sent `RESULT_NUDGE` first, as a turn that ends without
 
 Three handoffs in a row that nobody asked for, written at one commit (`UNASKED_HANDOFF_LIMIT`, `nextUnaskedRun`),
 end the step too, as ending the turn would: the gate and the review judge the committed work, and a read-only
-step with no result is rerun once and then failed, as any is. The step's ending says it handed off three times in
-a row. The lane's control state counts the run across its sessions; a commit between handoffs, an asked handoff
-or any other session ending resets it, and a start that runs no session (a move, a refused model) leaves it.
+step with no result is first sent `RESULT_NUDGE`, then rerun once and failed, as any is. An edit step's move to the
+gate gives the reason "step complete after 3 handoffs in a row that nobody asked for", and a read-only step's
+no-result failure says it handed off three times in a row. The lane's control state counts the run across its
+sessions; a commit between handoffs, an asked handoff or any other session ending resets it, and a move (which
+starts no session) or a refused model, retried at once, leaves it.
 
 The `write_handoff` description and reply, the Codex briefing's hand-off line, the update drain's claim refusal
 and the harness's `handoff` skill say a handoff continues only when 10db asked for it or it names work left, and

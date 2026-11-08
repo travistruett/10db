@@ -354,6 +354,8 @@ type Outcome =
   | {
       readonly kind: 'step_done';
       readonly withoutHandoff: boolean;
+      /** Set when a run of handoffs nobody asked for ended the step: how many it held. */
+      readonly unaskedRun: number | null;
       /** How the session ended, in a plain clause: what a step that records no result is failed with. */
       readonly ending: string;
       /** What the session wrote as its last message in its longest turn; '' when it wrote nothing. */
@@ -546,7 +548,7 @@ interface Control {
   endWaits: (() => void) | null;
   /**
    * The step's run of handoffs nobody asked for with no commit between them. Any other session ending
-   * clears it; a session that never started (a move, a refused model) leaves it.
+   * clears it; a move, which starts no session, and a refused model leave it, so the run only grows.
    */
   unaskedHandoffs: UnaskedRun | null;
   done: Promise<void>;
@@ -2109,13 +2111,8 @@ export function createRunner(opts: RunnerOptions): Runner {
               recorded && stands && !asked
                 ? nextUnaskedRun(ctl.unaskedHandoffs, recorded.gitHead)
                 : null;
-            if (unasked?.atLimit) {
-              st.unaskedRunEnded = unasked.run.count;
-              log.warn(
-                { workstreamId: id, handoffs: unasked.run.count },
-                'step ended after a run of handoffs nobody asked for',
-              );
-            }
+            // Set at each turn end, so a later turn that reaches no limit clears it.
+            st.unaskedRunEnded = unasked?.atLimit ? unasked.run.count : null;
             if (recorded && stands && !unasked?.atLimit) {
               ctl.unaskedHandoffs = unasked?.run ?? null;
               st.outcome = { kind: 'handoff', handoffId: recorded.id };
@@ -2152,9 +2149,15 @@ export function createRunner(opts: RunnerOptions): Runner {
               st.resultNudged = true;
               handle.send(RESULT_NUDGE);
             } else {
+              if (st.unaskedRunEnded !== null)
+                log.warn(
+                  { workstreamId: id, handoffs: st.unaskedRunEnded },
+                  'step ended after a run of handoffs nobody asked for',
+                );
               st.outcome = {
                 kind: 'step_done',
                 withoutHandoff: st.handoffRequested,
+                unaskedRun: st.unaskedRunEnded,
                 ending: describeEnding(st),
                 wrote: st.wrote,
               };
@@ -2241,6 +2244,7 @@ export function createRunner(opts: RunnerOptions): Runner {
                   st.outcome = {
                     kind: 'step_done',
                     withoutHandoff: st.handoffRequested,
+                    unaskedRun: st.unaskedRunEnded,
                     ending: describeEnding(st),
                     wrote: st.wrote,
                   };
@@ -2955,7 +2959,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           return;
         }
         const outcome = await runSession(id, ctl);
-        // Only a session that ran ends the run: a move or a refused model started none.
+        // A move starts no session, and a refused model is retried at once: neither ends the run.
         if (
           outcome.kind !== 'handoff' &&
           outcome.kind !== 'moved' &&
@@ -3008,7 +3012,9 @@ export function createRunner(opts: RunnerOptions): Runner {
               patch: { nextAction: { kind: 'verify' } },
               reason: outcome.withoutHandoff
                 ? 'turn ended without the requested handoff'
-                : 'step complete',
+                : outcome.unaskedRun !== null
+                  ? `step complete after ${String(outcome.unaskedRun)} handoffs in a row that nobody asked for`
+                  : 'step complete',
             }),
           );
           continue;
