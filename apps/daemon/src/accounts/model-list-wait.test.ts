@@ -23,7 +23,13 @@ beforeEach(() => {
   });
   logger = capturingLogger();
   released = 0;
-  wait = createModelListWait({
+  wait = startWait();
+});
+
+/** A wait as a daemon starts one, over the store: a second one is the same daemon after a restart. */
+function startWait(): ModelListWait {
+  return createModelListWait({
+    db: store.db,
     clock,
     inbox,
     logger,
@@ -31,7 +37,7 @@ beforeEach(() => {
       released += 1;
     },
   });
-});
+}
 afterEach(() => {
   close();
 });
@@ -94,6 +100,24 @@ describe('a lane waiting for its account’s model list', () => {
     expect(wait.holds(project.accountId)).toBe(false);
     expect(openCards()).toEqual([]);
     expect(released).toBe(1);
+  });
+
+  it('closes a card an earlier daemon left, once the account’s profiles are built', () => {
+    const project = seedProject(store);
+    wait.hold({ id: project.accountId, label: 'Codex plan' }, project.id);
+    expect(openCards()).toHaveLength(1);
+    const restarted = startWait();
+    restarted.release(() => true);
+    expect(openCards()).toEqual([]);
+  });
+
+  it('keeps a card an earlier daemon left while the account still has no profiles', () => {
+    const project = seedProject(store);
+    wait.hold({ id: project.accountId, label: 'Codex plan' }, project.id);
+    const restarted = startWait();
+    restarted.release(() => false);
+    expect(openCards()).toHaveLength(1);
+    expect(restarted.holds(project.accountId)).toBe(false);
   });
 
   it('does nothing when no account is waiting', () => {

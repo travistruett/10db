@@ -87,6 +87,7 @@ beforeEach(() => {
     onResume: () => undefined,
   });
   modelWait = createModelListWait({
+    db: store.db,
     clock,
     inbox,
     logger: silentLogger,

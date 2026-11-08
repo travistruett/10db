@@ -1,4 +1,5 @@
 import type { AccountId, InboxItemId, ProjectId } from '@10db/contracts';
+import { findOpenByFoldKey, listAccounts, listProjects, type DbReader } from '@10db/db';
 import type { Clock } from '../clock';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
@@ -31,6 +32,8 @@ interface Waiting {
 const cardKey = (id: AccountId): string => `model-list-wait:${id}`;
 
 export function createModelListWait(deps: {
+  /** Read once, at creation, for the cards an earlier daemon left open. */
+  readonly db: DbReader;
   readonly clock: Clock;
   readonly inbox: Pick<InboxService, 'flag' | 'resolve'>;
   readonly logger: Pick<Logger, 'info'>;
@@ -38,6 +41,22 @@ export function createModelListWait(deps: {
   readonly onReleased: () => void;
 }): ModelListWait {
   const waiting = new Map<AccountId, Waiting>();
+  // The holds lived in the earlier daemon's memory, but its cards are stored: they are taken on with no hold,
+  // so the first rebuild closes those of an account that has profiles, and a lane that still finds none folds
+  // its new card into the same one.
+  const accounts = listAccounts(deps.db, { includeArchived: true });
+  for (const project of listProjects(deps.db)) {
+    for (const account of accounts) {
+      const card = findOpenByFoldKey(deps.db, project.id, cardKey(account.id));
+      if (card === undefined) continue;
+      const entry = waiting.get(account.id) ?? {
+        since: null,
+        cards: new Map<ProjectId, InboxItemId>(),
+      };
+      entry.cards.set(project.id, card.id);
+      waiting.set(account.id, entry);
+    }
+  }
   return {
     hold(account, projectId) {
       let entry = waiting.get(account.id);
