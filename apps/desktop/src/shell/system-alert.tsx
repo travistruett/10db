@@ -11,13 +11,28 @@ import { syncNeedsBuilder } from './benchmark-sync-urgency';
 export function SystemAlert() {
   const check = useSystemCheck().data;
   if (!check) return null;
-  const missing = check.tools.filter((tool) => tool.required && tool.path === null);
+  const agents = check.agents ?? [];
+  // Claude Code and Codex are 10db's own pinned copies: their state is told by their own alerts below.
+  const missing = check.tools.filter(
+    (tool) =>
+      tool.required && tool.path === null && !agents.some((agent) => agent.tool === tool.name),
+  );
+  const unready = agents.filter((agent) => agent.state !== 'ready');
+  const newer = agents.filter((agent) => agent.newerRelease !== null);
   const warning = check.loginEnv.warning;
   const benchmarkSync =
     check.benchmarkSync && syncNeedsBuilder(check.benchmarkSync) ? check.benchmarkSync : null;
   const versionWarning = check.claudeCode.warning;
   const codexWarning = check.codex.warning;
-  if (missing.length === 0 && !warning && !benchmarkSync && !versionWarning && !codexWarning)
+  if (
+    missing.length === 0 &&
+    unready.length === 0 &&
+    newer.length === 0 &&
+    !warning &&
+    !benchmarkSync &&
+    !versionWarning &&
+    !codexWarning
+  )
     return null;
   const icon = <IconAlertTriangle size={20} stroke={1.5} />;
   const versionAlert = versionWarning ? (
@@ -37,6 +52,41 @@ export function SystemAlert() {
           10db runs it only from /opt/homebrew/bin, /usr/local/bin or /usr/bin (claude also from
           ~/.local/bin), never from your PATH, where a lane could put one. Install it there, then
           restart 10db. Sessions can't start until it is found.
+        </Alert>
+      ))}
+      {unready.map((agent) =>
+        agent.state === 'refused' ? (
+          <Alert
+            key={agent.tool}
+            color="red"
+            icon={icon}
+            title={`${agent.label} ${agent.pinned} can't be used`}
+          >
+            {agent.problem ?? 'Its copy failed the check.'} No session runs on it. Recheck once the
+            cause is fixed.
+          </Alert>
+        ) : (
+          <Alert
+            key={agent.tool}
+            color="blue"
+            icon={icon}
+            title={`${agent.label} ${agent.pinned} is being downloaded`}
+          >
+            10db runs its own copy of {agent.label}, checked against a recorded checksum. Sessions
+            that need it start once it is ready.
+          </Alert>
+        ),
+      )}
+      {newer.map((agent) => (
+        <Alert
+          key={`newer-${agent.tool}`}
+          color="yellow"
+          icon={icon}
+          title={`${agent.label} ${agent.newerRelease ?? ''} is out`}
+        >
+          10db runs {agent.label} {agent.pinned}, the release it is verified on, and doesn't update
+          it by itself. A 10db update that has passed its live test on {agent.newerRelease} moves
+          it.
         </Alert>
       ))}
       {warning && (

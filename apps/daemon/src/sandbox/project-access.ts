@@ -2,6 +2,7 @@ import { existsSync, realpathSync, type Dirent } from 'node:fs';
 import { readdir, realpath } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import type { PermissionRuleDto, ProjectDto } from '@10db/contracts';
+import { pinnedToolsRoot } from '../environment';
 import { foldPathCase } from '../guard';
 import { MISE_SYSTEM_DIRS } from './mise-config';
 import { isSandboxDomain, isSandboxPath, SandboxProfileError } from './profile';
@@ -33,6 +34,12 @@ export interface ProjectAccess {
    * be read-only too; the profile never opens it for writing anyway.
    */
   readonly otherCheckouts: readonly string[];
+  /**
+   * The folder of the pinned agent copies, as written and resolved. No sandboxed process may write it,
+   * even where a checkout holds the data dir it lives in, so a command can't change the Claude Code or
+   * Codex a later session runs.
+   */
+  readonly pinnedTools: readonly string[];
   /** Every registered checkout and every root a lane can write, as written and resolved. */
   readonly writableRoots: readonly string[];
   /**
@@ -218,6 +225,15 @@ export function sandboxRootsOf(
   ];
 }
 
+/** A path as written and, when it exists and differs, its real path. */
+function realAndWritten(path: string): string[] {
+  try {
+    return [...new Set([path, realpathSync(path)])];
+  } catch {
+    return [path];
+  }
+}
+
 /** Every registered checkout and every root a lane writes, as written and resolved: what a project can write. */
 export function projectWritableRoots(
   checkouts: readonly string[],
@@ -278,6 +294,7 @@ export async function projectAccess(
     // dir under any of them.
     gitState: [...new Set([join(checkout, '.git'), gitDir, commonDir, ...otherGitState])],
     otherCheckouts: others.filter((other) => !isEqualOrUnder(checkout, other)),
+    pinnedTools: realAndWritten(pinnedToolsRoot(deps.dataDir)),
     writableRoots: untrustedRoots,
     sandboxRoots: sandboxRootsOf(deps),
   };

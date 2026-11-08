@@ -106,6 +106,55 @@
         ]
       }
     },
+    "agents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "tool": {
+            "type": "string",
+            "enum": [
+              "claude",
+              "codex"
+            ]
+          },
+          "label": {
+            "type": "string"
+          },
+          "pinned": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "fetching",
+              "ready",
+              "refused"
+            ]
+          },
+          "problem": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "newerRelease": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "tool",
+          "label",
+          "pinned",
+          "state",
+          "problem",
+          "newerRelease"
+        ]
+      }
+    },
     "benchmarkSync": {
       "default": null,
       "anyOf": [

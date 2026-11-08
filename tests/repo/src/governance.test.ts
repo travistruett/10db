@@ -552,44 +552,83 @@ describe('community files', () => {
     );
   });
 
-  it('tracks the verified Codex in a PR of its own, with a pattern that still finds the constant', () => {
-    interface Manager {
-      customType: string;
-      managerFilePatterns: string[];
-      matchStrings: string[];
-      depNameTemplate: string;
-    }
-    interface Rule {
-      matchPackageNames?: string[];
-      groupName?: string;
-    }
-    const renovate = JSON.parse(readRepoFile('renovate.json')) as {
-      customManagers?: Manager[];
-      packageRules: Rule[];
-    };
-    const codex = (renovate.customManagers ?? []).filter(
-      (m) => m.depNameTemplate === '@openai/codex',
-    );
-    expect(codex).toHaveLength(1);
-    const [manager] = codex;
-    if (!manager) throw new Error('no Codex manager');
-    // Renovate writes a file pattern as /regex/; the one it names must be the file that holds the constant.
-    const path = 'apps/daemon/src/environment/system-check.ts';
-    const patterns = manager.managerFilePatterns.map((p) => new RegExp(p.slice(1, -1)));
-    expect(patterns.some((p) => p.test(path))).toBe(true);
-    const source = readRepoFile(path);
-    const matches = manager.matchStrings.flatMap((s) => [...source.matchAll(new RegExp(s, 'g'))]);
-    expect(matches).toHaveLength(1);
-    expect(matches[0]?.groups?.['currentValue']).toMatch(/^\d+\.\d+\.\d+$/);
-    // Its own group, and out of the catch-all, which would otherwise batch it with the weekly PR.
-    expect(renovate.packageRules).toContainEqual(
-      expect.objectContaining({ matchPackageNames: ['@openai/codex'], groupName: 'Codex CLI' }),
-    );
-    const catchAll = renovate.packageRules.find(
-      (r) => r.groupName === 'all non-major dependencies',
-    );
-    expect(catchAll?.matchPackageNames).toContain('!@openai/codex');
-  });
+  it.each([
+    {
+      name: 'Codex',
+      dep: '@openai/codex',
+      group: 'Codex CLI',
+      version: 'CODEX_VERIFIED_ON',
+      liveTest: 'TENDB_LIVE_CODEX=1',
+      liveFile: 'test/codex.live.test.ts',
+    },
+    {
+      name: 'Claude Code',
+      dep: '@anthropic-ai/claude-code',
+      group: 'Claude Code CLI',
+      version: 'CLAUDE_CODE_VERIFIED_ON',
+      liveTest: 'TENDB_LIVE_CLAUDE=1',
+      liveFile: 'src/sessions/claude-adapter.live.test.ts',
+    },
+  ])(
+    'moves the pinned $name release and its checksum together in a PR of its own that names the live test',
+    ({ dep, group, version, liveTest, liveFile }) => {
+      interface Manager {
+        customType: string;
+        managerFilePatterns: string[];
+        matchStrings: string[];
+        depNameTemplate: string;
+        autoReplaceStringTemplate: string;
+        datasourceTemplate: string;
+      }
+      interface Rule {
+        matchPackageNames?: string[];
+        groupName?: string;
+        prBodyNotes?: string[];
+      }
+      const renovate = JSON.parse(readRepoFile('renovate.json')) as {
+        customManagers?: Manager[];
+        customDatasources?: Record<string, { transformTemplates: string[] }>;
+        packageRules: Rule[];
+      };
+      const managers = (renovate.customManagers ?? []).filter((m) => m.depNameTemplate === dep);
+      expect(managers).toHaveLength(1);
+      const [manager] = managers;
+      if (!manager) throw new Error(`no ${dep} manager`);
+      // Renovate writes a file pattern as /regex/; the one it names must be the file that holds the pin.
+      const path = 'apps/daemon/src/environment/agent-pins.ts';
+      const patterns = manager.managerFilePatterns.map((p) => new RegExp(p.slice(1, -1)));
+      expect(patterns.some((p) => p.test(path))).toBe(true);
+      const source = readRepoFile(path);
+      const matches = manager.matchStrings.flatMap((s) => [...source.matchAll(new RegExp(s, 'g'))]);
+      expect(matches).toHaveLength(1);
+      const groups = matches[0]?.groups;
+      expect(groups?.['currentValue']).toMatch(/^\d+\.\d+\.\d+$/);
+      expect(groups?.['currentDigest']).toMatch(/^sha512-[A-Za-z0-9+/]{86}==$/);
+      // Renovate rewrites the matched text with this template: it must give the text back as it is
+      // now, or a bump would reformat the file.
+      const rewritten = manager.autoReplaceStringTemplate
+        .replace('{{{newValue}}}', groups?.['currentValue'] ?? '')
+        .replace('{{{newDigest}}}', groups?.['currentDigest'] ?? '');
+      expect(rewritten).toBe(matches[0]?.[0]);
+      expect(rewritten).toContain(version);
+      // Its releases come with the checksum of the build 10db downloads.
+      const datasource = manager.datasourceTemplate.replace('custom.', '');
+      expect(renovate.customDatasources?.[datasource]?.transformTemplates.join('')).toContain(
+        'newDigest',
+      );
+      // Its own group, whose PR says which live test to run, and out of the catch-all, which would
+      // otherwise batch it with the weekly PR.
+      const own = renovate.packageRules.find((r) => r.matchPackageNames?.includes(dep));
+      expect(own?.groupName).toBe(group);
+      const notes = own?.prBodyNotes?.join('\n') ?? '';
+      expect(notes).toContain(liveTest);
+      expect(notes).toContain(liveFile);
+      const catchAll = renovate.packageRules.find(
+        (r) => r.groupName === 'all non-major dependencies',
+      );
+      expect(catchAll?.matchPackageNames).toContain(`!${dep}`);
+    },
+  );
 
   it('leaves the throwaway spikes alone', () => {
     const renovate = JSON.parse(readRepoFile('renovate.json')) as {

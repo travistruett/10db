@@ -1,4 +1,9 @@
-import { AccountProblem, type AccountIdentityDto, type ToolCheck } from '@10db/contracts';
+import {
+  AccountProblem,
+  type AccountIdentityDto,
+  type AgentCopy,
+  type ToolCheck,
+} from '@10db/contracts';
 
 /** The places 10db looks for Claude Code: the install prefixes, then Claude Code's own folders in the home folder. */
 const CLAUDE_LOOKED_IN =
@@ -21,6 +26,8 @@ export interface ClaudeRow extends SetupRow {
 export interface ClaudeRowInput {
   /** Claude Code as the system check found it; undefined while that check hasn't answered. */
   readonly claude: ToolCheck | undefined;
+  /** The pinned Claude Code copy 10db fetches and checks; absent where nothing is managed. */
+  readonly copy?: AgentCopy | undefined;
   /** The identity probe is running. */
   readonly probing: boolean;
   readonly identity: AccountIdentityDto | null;
@@ -42,11 +49,25 @@ function shownOrganization(identity: AccountIdentityDto, email: string | null): 
  * A login 10db hasn't recorded yet still counts as signed in; the account preparer records it.
  */
 export function claudeRow(input: ClaudeRowInput): ClaudeRow {
-  const { claude, probing, identity, error } = input;
+  const { claude, copy, probing, identity, error } = input;
   if (claude === undefined)
     return {
       mark: 'pending',
       detail: 'Looking for Claude Code…',
+      runsAs: null,
+      canAddLogin: false,
+    };
+  if (claude.path === null && copy?.state === 'fetching')
+    return {
+      mark: 'pending',
+      detail: `Downloading Claude Code ${copy.pinned}, the release 10db runs, and checking it against its recorded checksum…`,
+      runsAs: null,
+      canAddLogin: false,
+    };
+  if (claude.path === null && copy?.state === 'refused')
+    return {
+      mark: 'bad',
+      detail: `${copy.problem ?? `Claude Code ${copy.pinned} was refused.`} Recheck once the cause is fixed.`,
       runsAs: null,
       canAddLogin: false,
     };

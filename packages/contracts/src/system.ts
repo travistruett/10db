@@ -22,6 +22,24 @@ export const ToolCheck = z.object({
 });
 export type ToolCheck = z.infer<typeof ToolCheck>;
 
+export const AgentCopyState = { Fetching: 'fetching', Ready: 'ready', Refused: 'refused' } as const;
+export type AgentCopyState = (typeof AgentCopyState)[keyof typeof AgentCopyState];
+
+/**
+ * One agent CLI as 10db runs it: the copy it fetched at the release it is verified on. A copy that is
+ * fetching can't start a session yet; a refused one failed its checksum or its download, and `problem` says why.
+ * `newerRelease` is upstream's newest release when it is later than `pinned`.
+ */
+export const AgentCopy = z.object({
+  tool: z.enum([ToolName.Claude, ToolName.Codex]),
+  label: z.string(),
+  pinned: z.string(),
+  state: z.enum(AgentCopyState),
+  problem: z.string().nullable(),
+  newerRelease: z.string().nullable(),
+});
+export type AgentCopy = z.infer<typeof AgentCopy>;
+
 /**
  * An Artificial Analysis sync that failed and no later sync has cleared. Routing keeps the last good
  * scores meanwhile, so steps can fall back to the project default without any other sign.
@@ -43,6 +61,8 @@ export const SystemCheckDto = z.object({
   /** The Codex version the ChatGPT-plan checks were verified on, and a warning on any other version. */
   codex: z.object({ verifiedOn: z.string(), warning: z.string().nullable() }),
   tools: z.array(ToolCheck),
+  /** The pinned copies of Claude Code and Codex 10db runs; absent where none are managed (tests, fake sessions). */
+  agents: z.array(AgentCopy).optional(),
   benchmarkSync: BenchmarkSyncWarning.nullable().default(null),
 });
 export type SystemCheckDto = z.infer<typeof SystemCheckDto>;

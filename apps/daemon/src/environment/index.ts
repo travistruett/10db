@@ -27,17 +27,26 @@ export { BILLING_SWITCH_VARS, NESTED_SESSION_VARS, stripBillingSwitches } from '
 export { buildNetworkEnv } from './network-env';
 export {
   claudeCodeWarning,
-  CODEX_VERIFIED_ON,
   codexWarning,
-  findClaude,
-  findCodex,
   markGhRequired,
   probeVersion,
   REQUIRED_TOOLS,
   systemCheck,
+  withAgentStatus,
   type GhLoginProbe,
   type ResolvedTools,
 } from './system-check';
+export { AgentTool, CODEX_VERIFIED_ON } from './agent-pins';
+export { pinnedToolsRoot } from './pinned-install';
+export {
+  AUTOUPDATE_OFF,
+  AgentState,
+  ensureAgent,
+  startPinnedTools,
+  type AgentStatus,
+  type AgentTools,
+  type RunningAgentTools,
+} from './pinned-tools';
 export { SECRET_VARIABLES } from './secret-variables';
 export {
   AwsCredentialsError,

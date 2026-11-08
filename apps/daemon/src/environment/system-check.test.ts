@@ -7,10 +7,11 @@ import {
   claudeCodeWarning,
   CODEX_VERIFIED_ON,
   codexWarning,
-  findClaude,
   markGhRequired,
   probeVersion,
   systemCheck,
+  withAgentStatus,
+  type AgentStatus,
   type LoginEnv,
 } from './index';
 
@@ -50,10 +51,10 @@ describe('probeVersion', () => {
 });
 
 describe('systemCheck', () => {
-  it('reports the git and gh the daemon resolved, and claude and docker from install prefixes and their own install dirs, never the login PATH', async () => {
+  it('reports the git and gh the daemon resolved, and docker from install prefixes and its own install dir, never the login PATH, and leaves claude and codex to the pinned copies', async () => {
     // Every tool is also on the login PATH, where a lane could have put it: none of those is run.
-    for (const name of ['claude', 'git', 'gh', 'docker']) tool('bin', name, 'exit 0');
-    const claude = tool('home/.local/bin', 'claude', 'exit 0');
+    for (const name of ['claude', 'codex', 'git', 'gh', 'docker']) tool('bin', name, 'exit 0');
+    tool('home/.local/bin', 'claude', 'exit 0');
     const docker = tool('home/.docker/bin', 'docker', 'exit 0');
     const resolved = { git: '/resolved/bin/git', gh: '/resolved/bin/gh' };
     const login: LoginEnv = {
@@ -69,28 +70,14 @@ describe('systemCheck', () => {
       probe: (path, env) => Promise.resolve(`version of ${path} ${env['PATH'] ?? ''}`),
     });
     const version = (path: string) => `version of ${path} ${join(dir.path, 'bin')}`;
-    const claudePath = prefixed('claude') ?? claude;
     const dockerPath = prefixed('docker') ?? docker;
-    const codexPath = prefixed('codex');
     expect(report).toEqual({
       loginEnv: { source: 'inherited', warning: 'The login shell timed out' },
       claudeCode: { verifiedOn: '2.1.302', warning: null },
       codex: { verifiedOn: CODEX_VERIFIED_ON, warning: null },
       tools: [
-        {
-          name: 'claude',
-          path: claudePath,
-          version: version(claudePath),
-          required: true,
-          signedIn: null,
-        },
-        {
-          name: 'codex',
-          path: codexPath,
-          version: codexPath === null ? null : version(codexPath),
-          required: false,
-          signedIn: null,
-        },
+        { name: 'claude', path: null, version: null, required: true, signedIn: null },
+        { name: 'codex', path: null, version: null, required: false, signedIn: null },
         {
           name: 'git',
           path: resolved.git,
@@ -183,30 +170,97 @@ describe('systemCheck', () => {
   });
 });
 
-describe('findClaude', () => {
-  it.each([
-    { name: "Claude Code's native install", at: '.local/bin' },
-    { name: 'the older local install', at: '.claude/local' },
-  ])('finds claude in $name when no install prefix has it', ({ at }) => {
-    const path = tool(join('home', at), 'claude', 'exit 0');
-    const prefixed = firstExecutable(installCandidates('claude'));
-    expect(findClaude(join(dir.path, 'home'))).toBe(prefixed ?? path);
-  });
-});
-
-describe('systemCheck version warning', () => {
-  it('warns when the installed claude has a newer major version', async () => {
-    tool('home/.local/bin', 'claude', 'exit 0');
+describe('withAgentStatus', () => {
+  const base = async () => {
+    // The builder's own installs, in the places the daemon used to look: neither is run or reported.
+    tool('home/.local/bin', 'claude', 'echo "9.9.9 (Claude Code)"');
+    tool('opt/homebrew/bin', 'codex', 'echo "codex-cli 0.1.0"');
     const login: LoginEnv = { vars: {}, source: 'login_shell', warning: null };
-    const report = await systemCheck(
+    return systemCheck(
       login,
       { git: '/usr/bin/git', gh: null },
       {
         home: join(dir.path, 'home'),
-        probe: (path) => Promise.resolve(path.endsWith('claude') ? '3.0.0 (Claude Code)' : null),
+        probe: () => Promise.resolve('1.0.0'),
       },
     );
-    expect(report.claudeCode.warning).toContain('3.0.0');
+  };
+  const status = (over: Partial<AgentStatus>): AgentStatus => ({
+    tool: 'claude',
+    label: 'Claude Code',
+    pinned: '2.1.302',
+    state: 'ready',
+    path: '/data/tools/claude-2.1.302-darwin-arm64/claude',
+    version: '2.1.302 (Claude Code)',
+    problem: null,
+    newerRelease: null,
+    ...over,
+  });
+
+  it('names the pinned copy and the version it runs for each agent, whatever else is installed', async () => {
+    const checked = withAgentStatus(await base(), [
+      status({}),
+      status({
+        tool: 'codex',
+        label: 'Codex',
+        pinned: CODEX_VERIFIED_ON,
+        path: '/data/tools/codex/bin/codex',
+        version: `codex-cli ${CODEX_VERIFIED_ON}`,
+      }),
+    ]);
+    const row = (name: string) => checked.tools.find((t) => t.name === name);
+    expect(row('claude')).toMatchObject({
+      path: '/data/tools/claude-2.1.302-darwin-arm64/claude',
+      version: '2.1.302 (Claude Code)',
+    });
+    expect(row('codex')).toMatchObject({
+      path: '/data/tools/codex/bin/codex',
+      version: `codex-cli ${CODEX_VERIFIED_ON}`,
+    });
+    expect(checked.claudeCode.warning).toBeNull();
+    expect(checked.codex.warning).toBeNull();
+  });
+
+  it('has no path for an agent whose copy is not ready, and says why', async () => {
+    const checked = withAgentStatus(await base(), [
+      status({
+        state: 'refused',
+        path: null,
+        version: null,
+        problem: 'Claude Code 2.1.302 was refused: checksum mismatch',
+      }),
+      status({ tool: 'codex', label: 'Codex', state: 'fetching', path: null, version: null }),
+    ]);
+    expect(checked.tools.filter((t) => t.name === 'claude' || t.name === 'codex')).toEqual([
+      expect.objectContaining({ name: 'claude', path: null, version: null }),
+      expect.objectContaining({ name: 'codex', path: null, version: null }),
+    ]);
+    expect(checked.agents).toEqual([
+      expect.objectContaining({
+        tool: 'claude',
+        state: 'refused',
+        problem: 'Claude Code 2.1.302 was refused: checksum mismatch',
+      }),
+      expect.objectContaining({ tool: 'codex', state: 'fetching', problem: null }),
+    ]);
+  });
+
+  it('carries the newer upstream release beside the pinned one, and drops it once the pin has caught up', async () => {
+    const newer = withAgentStatus(await base(), [status({ newerRelease: '2.1.319' })]);
+    expect(newer.agents).toEqual([
+      expect.objectContaining({ pinned: '2.1.302', newerRelease: '2.1.319' }),
+    ]);
+    const caughtUp = withAgentStatus(newer, [
+      status({ pinned: '2.1.319', version: '2.1.319 (Claude Code)', newerRelease: null }),
+    ]);
+    expect(caughtUp.agents).toEqual([
+      expect.objectContaining({ pinned: '2.1.319', newerRelease: null }),
+    ]);
+  });
+
+  it('warns when a path given in place of the pinned copy is a newer major version', async () => {
+    const checked = withAgentStatus(await base(), [status({ version: '3.0.0 (Claude Code)' })]);
+    expect(checked.claudeCode.warning).toContain('3.0.0');
   });
 });
 

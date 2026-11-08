@@ -24,7 +24,7 @@ import {
 } from '../../test/fixtures';
 import { ManualClock } from '../clock';
 import { projectAtCheckout } from '../delivery';
-import { SECRET_VARIABLES } from '../environment';
+import { pinnedToolsRoot, SECRET_VARIABLES } from '../environment';
 import { createGit } from '../git';
 import {
   codexLaneTempRoot,
@@ -321,6 +321,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
           commonDir,
           // The main checkout is another registered project here, read-only as a whole.
           checkout,
+          pinnedToolsRoot(dataDir),
         ]);
       } finally {
         session.dispose();
@@ -380,8 +381,33 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       const { allowRead, allowWrite, denyWrite } = session.spec.settings.filesystem;
       expect(allowRead.filter((path) => path.includes('.git'))).toEqual([]);
       expect(allowWrite.filter((path) => path.includes('.git'))).toEqual([]);
-      // The checkout is writable to Claude Code's sandbox; its git dir is not.
-      expect(denyWrite).toEqual([join(checkout, '.git')]);
+      // The checkout is writable to Claude Code's sandbox; its git dir is not, nor are the pinned
+      // agent copies, even where a checkout holds the data dir they live in.
+      expect(denyWrite).toEqual([join(checkout, '.git'), pinnedToolsRoot(dataDir)]);
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it('keeps the pinned agent copies read-only to a lane whose checkout holds the data dir', async () => {
+    const nestedData = join(checkout, 'data');
+    mkdirSync(join(nestedData, 'tools'), { recursive: true });
+    const session = await createLaneSandbox({
+      home,
+      dataDir: nestedData,
+      loginConfigDir: null,
+      tmpRoot,
+      filesRoot,
+      codexLaneTempRoot: lanesRoot,
+      gitDirs: (path) => git.gitDirs(path),
+      systemPrefixes: [],
+      runtime: FAKE_SRT,
+      worktreeRoot: join(nestedData, 'worktrees'),
+    }).forSession(input());
+    try {
+      const { denyWrite } = session.spec.settings.filesystem;
+      // Claude Code opens the checkout for writing, and the folder lies inside it: the deny keeps it shut.
+      expect(denyWrite).toContain(join(realpathSync(nestedData), 'tools'));
     } finally {
       session.dispose();
     }
@@ -392,7 +418,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     try {
       const { allowWrite, denyWrite } = session.spec.settings.filesystem;
       // Claude Code opens the session's directory for writing itself; the deny keeps it shut.
-      expect(denyWrite).toEqual([checkout, join(checkout, '.git')]);
+      expect(denyWrite).toEqual([checkout, join(checkout, '.git'), pinnedToolsRoot(dataDir)]);
       expect(allowWrite).toEqual([session.tmpDir]);
     } finally {
       session.dispose();
@@ -425,6 +451,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
           // Another project is read-only as a whole, not only its git state.
           join(checkout, 'nested'),
           realpathSync(other),
+          pinnedToolsRoot(dataDir),
         ]);
       } finally {
         session.dispose();
@@ -485,6 +512,7 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         expect(session.spec.settings.filesystem.denyWrite).toEqual([
           join(real, '.git'),
           join(real, 'inner-git'),
+          pinnedToolsRoot(dataDir),
         ]);
       } finally {
         session.dispose();

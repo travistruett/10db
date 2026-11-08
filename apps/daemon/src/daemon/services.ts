@@ -83,7 +83,7 @@ import {
   type BatchStarter,
   type Shipper,
 } from '../delivery';
-import { markGhRequired } from '../environment';
+import { markGhRequired, withAgentStatus, type AgentTools } from '../environment';
 import type { EventBus, StateStore } from '../events';
 import { inspectFolder, proposeAreas, type AreaNamer } from '../folders';
 import { adoptGoal } from '../goals';
@@ -121,6 +121,8 @@ export function createServices(deps: {
   readonly keepAwake: KeepAwake;
   /** Probes the tools and gh's login; the services keep its last answer. */
   readonly systemCheck: () => Promise<SystemCheckDto>;
+  /** The pinned Claude Code and Codex, read for each request; null where none are managed. */
+  readonly agents: AgentTools | null;
   readonly benchmarks: BenchmarkSync;
   /** The model catalogue in use, for the model list's names and runnability. */
   readonly catalogue: Pick<CatalogueSync, 'status' | 'catalogue'>;
@@ -339,11 +341,15 @@ export function createServices(deps: {
           if (lastCheck === probing) lastCheck = null;
         });
       }
+      // A recheck fetches again a copy that failed, and asks upstream for its newest release.
+      if (recheck) await deps.agents?.retry();
+      const checked = markGhRequired(
+        await lastCheck,
+        listProjects(db).some((p) => p.delivery === Delivery.PullRequest),
+      );
       return {
-        ...markGhRequired(
-          await lastCheck,
-          listProjects(db).some((p) => p.delivery === Delivery.PullRequest),
-        ),
+        // The pinned copies are read per request: they are fetched in the background and upstream moves on.
+        ...(deps.agents ? withAgentStatus(checked, deps.agents.statuses()) : checked),
         // Read per request: the tool check is kept from the first request until a recheck, but a sync can fail or recover at any time.
         benchmarkSync: syncWarning(deps.benchmarks.status()),
       };

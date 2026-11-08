@@ -37,6 +37,54 @@ const rows: Row[] = [
     },
   },
   {
+    name: 'the pinned copy is still being downloaded',
+    input: {
+      claude: missing,
+      copy: {
+        tool: 'claude',
+        label: 'Claude Code',
+        pinned: '2.1.302',
+        state: 'fetching',
+        problem: null,
+        newerRelease: null,
+      },
+      probing: false,
+      identity: null,
+      error: null,
+    },
+    expected: {
+      mark: 'pending',
+      detail:
+        'Downloading Claude Code 2.1.302, the release 10db runs, and checking it against its recorded checksum…',
+      runsAs: null,
+      canAddLogin: false,
+    },
+  },
+  {
+    name: 'the pinned copy failed its checksum',
+    input: {
+      claude: missing,
+      copy: {
+        tool: 'claude',
+        label: 'Claude Code',
+        pinned: '2.1.302',
+        state: 'refused',
+        problem: 'Claude Code 2.1.302 was refused: the files no longer match',
+        newerRelease: null,
+      },
+      probing: false,
+      identity: null,
+      error: null,
+    },
+    expected: {
+      mark: 'bad',
+      detail:
+        'Claude Code 2.1.302 was refused: the files no longer match Recheck once the cause is fixed.',
+      runsAs: null,
+      canAddLogin: false,
+    },
+  },
+  {
     name: 'a missing claude wins over a running probe',
     input: { claude: missing, probing: true, identity: null, error: null },
     expected: {

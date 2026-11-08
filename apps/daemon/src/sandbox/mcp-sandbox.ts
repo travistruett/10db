@@ -187,7 +187,12 @@ function sandboxOne(
     readList: access.readList,
     extraReads: [envFile, ...access.gitReads],
     extraWrites: [],
-    denyWrites: [...access.gitState, ...access.otherCheckouts, ...SRT_SHARED_TEMP],
+    denyWrites: [
+      ...access.gitState,
+      ...access.otherCheckouts,
+      ...SRT_SHARED_TEMP,
+      ...access.pinnedTools,
+    ],
     sandboxRoots: input.sandboxRoots,
     ownFiles: [envFile],
     // Never, whatever the project's switch: on localhost listen other sandboxes' proxies, and

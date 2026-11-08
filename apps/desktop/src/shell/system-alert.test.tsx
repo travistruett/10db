@@ -75,6 +75,93 @@ describe('SystemAlert benchmark sync', () => {
   );
 });
 
+describe('SystemAlert pinned agent copies', () => {
+  type Agent = NonNullable<SystemCheckDto['agents']>[number];
+  const codex = (over: Partial<Agent>): Agent => ({
+    tool: 'codex',
+    label: 'Codex',
+    pinned: '0.167.0',
+    state: 'ready',
+    problem: null,
+    newerRelease: null,
+    ...over,
+  });
+  function serveAgents(read: () => Agent[]): void {
+    server.use(
+      http.get(daemonUrl('/system'), () =>
+        HttpResponse.json(
+          SystemCheckDto.parse({
+            loginEnv: { source: 'login_shell', warning: null },
+            claudeCode: { verifiedOn: '2.1.302', warning: null },
+            codex: { verifiedOn: '0.167.0', warning: null },
+            tools: [
+              { name: 'claude', path: null, version: null, required: true },
+              { name: 'codex', path: null, version: null, required: false },
+            ],
+            agents: read(),
+          }),
+        ),
+      ),
+      ...baseHandlers(),
+    );
+  }
+
+  it('names the pinned and the released version when a newer release is out, and clears once the pin has caught up', async () => {
+    let agents = [codex({ newerRelease: '0.168.0' })];
+    serveAgents(() => agents);
+    const { queryClient } = renderWithDaemon(<SystemAlert />);
+    expect(await screen.findByText('Codex 0.168.0 is out')).toBeTruthy();
+    expect(
+      screen.getByText(/10db runs Codex 0\.167\.0, the release it is verified on/),
+    ).toBeTruthy();
+
+    agents = [codex({ pinned: '0.168.0' })];
+    await queryClient.invalidateQueries({ queryKey: queryKeys.system });
+    await waitFor(() => {
+      expect(screen.queryByText('Codex 0.168.0 is out')).toBeNull();
+    });
+  });
+
+  it('says which tool was refused and why, and raises no "not found" alert for it', async () => {
+    serveAgents(() => [
+      {
+        tool: 'claude',
+        label: 'Claude Code',
+        pinned: '2.1.302',
+        state: 'ready',
+        problem: null,
+        newerRelease: null,
+      },
+      codex({
+        state: 'refused',
+        problem: 'Codex 0.167.0 was refused: the files no longer match the recorded checksum',
+      }),
+    ]);
+    renderWithDaemon(<SystemAlert />);
+    expect(await screen.findByText("Codex 0.167.0 can't be used")).toBeTruthy();
+    expect(
+      screen.getByText(/was refused: the files no longer match the recorded checksum/),
+    ).toBeTruthy();
+    expect(screen.queryByText(/was not found where 10db looks for it/)).toBeNull();
+  });
+
+  it('says a copy is being downloaded rather than that Claude Code is missing', async () => {
+    serveAgents(() => [
+      {
+        tool: 'claude',
+        label: 'Claude Code',
+        pinned: '2.1.302',
+        state: 'fetching',
+        problem: null,
+        newerRelease: null,
+      },
+    ]);
+    renderWithDaemon(<SystemAlert />);
+    expect(await screen.findByText('Claude Code 2.1.302 is being downloaded')).toBeTruthy();
+    expect(screen.queryByText(/was not found where 10db looks for it/)).toBeNull();
+  });
+});
+
 describe('SystemAlert Codex version', () => {
   // The daemon warns on any version but the verified one, an older one too.
   it('shows the Codex version warning, saying it differs rather than that it is newer', async () => {

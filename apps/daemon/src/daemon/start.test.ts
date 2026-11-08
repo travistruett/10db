@@ -60,7 +60,7 @@ import {
 } from '../../test/fixtures';
 import { ManualClock } from '../clock';
 import { loadEnv } from '../env';
-import { CODEX_VERIFIED_ON, type ResolvedTools } from '../environment';
+import { CODEX_VERIFIED_ON, type AgentStatus, type ResolvedTools } from '../environment';
 import type { CaffeinateSpawner } from '../keep-awake';
 import { FakeAdapter, type FakeScriptBook, type SessionSpec } from '../sessions';
 import {
@@ -1068,6 +1068,72 @@ describe('startDaemon', () => {
     expect(checkedWith).toHaveLength(1);
     expect(prefixed('git')).toContain(checkedWith[0]?.git);
     expect([...prefixed('gh'), null]).toContain(checkedWith[0]?.gh);
+  });
+
+  it('reports the pinned agent copies as they stand for each request, and fetches again on a recheck', async () => {
+    const token = 'e'.repeat(43);
+    const claude: AgentStatus = {
+      tool: 'claude',
+      label: 'Claude Code',
+      pinned: '2.1.302',
+      state: 'fetching',
+      path: null,
+      version: null,
+      problem: null,
+      newerRelease: null,
+    };
+    let statuses: readonly AgentStatus[] = [claude];
+    let retries = 0;
+    daemon = await startDaemon({
+      sandbox: null,
+      dataDir: dir.path,
+      port: 0,
+      adapter: new FakeAdapter({}),
+      logLevel: 'warn',
+      uiToken: token,
+      watch: false,
+      agents: {
+        statuses: () => statuses,
+        retry: () => {
+          retries += 1;
+          return Promise.resolve();
+        },
+      },
+    });
+    const system = async (query = '') =>
+      SystemCheckDto.parse(
+        await (
+          await fetch(`${daemon?.url ?? ''}/system${query}`, {
+            headers: { Authorization: `Bearer ${token}` },
+          })
+        ).json(),
+      );
+    const first = await system();
+    expect(first.agents).toEqual([
+      expect.objectContaining({ state: 'fetching', newerRelease: null }),
+    ]);
+    expect(first.tools.find((t) => t.name === 'claude')?.path).toBeNull();
+    // The tool check is kept, but the copies are read again: ready now, with a newer release out.
+    statuses = [
+      {
+        ...claude,
+        state: 'ready',
+        path: '/data/tools/claude/claude',
+        version: '2.1.302 (Claude Code)',
+        newerRelease: '2.1.319',
+      },
+    ];
+    const second = await system();
+    expect(second.agents).toEqual([
+      expect.objectContaining({ state: 'ready', pinned: '2.1.302', newerRelease: '2.1.319' }),
+    ]);
+    expect(second.tools.find((t) => t.name === 'claude')).toMatchObject({
+      path: '/data/tools/claude/claude',
+      version: '2.1.302 (Claude Code)',
+    });
+    expect(retries).toBe(0);
+    await system('?recheck=1');
+    expect(retries).toBe(1);
   });
 
   it('holds keep-awake and watches the repo while a lane runs, and lets go when it is cancelled', async () => {

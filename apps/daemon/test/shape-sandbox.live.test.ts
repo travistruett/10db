@@ -8,7 +8,14 @@ import { describe, expect, it } from 'vitest';
 import { allSandboxRootsOf, openSandboxRoots, sandboxDepsOf } from '../src/daemon';
 import { createShapePreparer } from '../src/daemon/shape-session-tools';
 import { loadEnv } from '../src/env';
-import { captureLoginEnv, createLauncher, findClaude, systemKeychain } from '../src/environment';
+import {
+  AgentTool,
+  captureLoginEnv,
+  createLauncher,
+  ensureAgent,
+  systemKeychain,
+} from '../src/environment';
+import { defaultDataDir } from '../src/runtime-files';
 import { createEventBus, createStateStore } from '../src/events';
 import { createGit } from '../src/git';
 import { protectedPaths } from '../src/guard';
@@ -50,8 +57,7 @@ const commandOf = (req: ShapeToolRequest): string => {
 describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
   it('runs a read-only command, cards one that is not and keeps it off the checkout, and fans out a code researcher on a named model', async () => {
     const login = await captureLoginEnv({ inherited: process.env });
-    const claudePath = findClaude();
-    if (!claudePath) throw new Error('claude is not installed where 10db looks for it');
+    const claudePath = await ensureAgent(AgentTool.Claude, defaultDataDir());
     const repo = createTempRepo();
     const checkout = realpathSync(repo.path);
     writeFileSync(join(checkout, 'notes.txt'), 'original\n');

@@ -14,14 +14,18 @@ import { EnvError, loadEnv, type DaemonEnv } from './env';
 import {
   AA_KEY_ACCOUNT,
   buildNetworkEnv,
+  AgentState,
+  AgentTool,
   captureLoginEnv,
-  findClaude,
-  findCodex,
+  pinnedToolsRoot,
+  probeVersion,
+  startPinnedTools,
   systemCheck,
   systemKeychain,
   type LoginEnv,
   type GhLoginProbe,
   type ResolvedTools,
+  type RunningAgentTools,
 } from './environment';
 import type { Logger } from './log';
 import {
@@ -35,11 +39,12 @@ import {
   codexLoginStatus,
   createClaudeAdapter,
   createCodexAdapter,
+  createPinnedAdapter,
   createRoutedAdapter,
-  createUnavailableAdapter,
   FakeAdapter,
   loadFakeScriptBook,
   scriptedShapeBehaviour,
+  type AdapterSource,
   type SessionAdapter,
 } from './sessions';
 
@@ -52,12 +57,6 @@ process.on('uncaughtException', (error) => {
   console.error('10db daemon: uncaught exception', error);
   process.exit(1);
 });
-
-const CLAUDE_MISSING =
-  'Claude Code was not found in /opt/homebrew/bin, /usr/local/bin, /usr/bin or ~/.local/bin, where 10db looks for it (never your PATH, where a lane could put one). Install it, or set TENDB_CLAUDE_PATH, then restart 10db.';
-
-const CODEX_MISSING =
-  'Codex was not found in /opt/homebrew/bin, /usr/local/bin or /usr/bin, where 10db looks for it (never your PATH, where a lane could put one). Install it, then restart 10db; only a project on a ChatGPT account needs it.';
 
 // The shell's supervisor stops on 4 instead of restarting into configuration a restart can't fix.
 const EXIT_REFUSED_CONFIG = 4;
@@ -97,6 +96,32 @@ if (login.warning) console.warn(`10db daemon: ${login.warning}`);
 const check = (resolved: ResolvedTools, ghLogin: GhLoginProbe): Promise<SystemCheckDto> =>
   systemCheck(login, resolved, { ghLogin });
 
+// Real sessions run the pinned copies of Claude Code and Codex, fetched into the data dir and checked
+// against the recorded checksums; the builder's own installs are never run. Fake sessions run neither.
+const agents: RunningAgentTools | null = env.TENDB_FAKE_SCRIPTS
+  ? null
+  : startPinnedTools({
+      dataDir,
+      probe: probeVersion,
+      ...(env.TENDB_CLAUDE_PATH ? { overrides: { claude: env.TENDB_CLAUDE_PATH } } : {}),
+    });
+
+/** What an agent's adapter runs on, or why it can't start a session yet. */
+function sourceOf(tool: AgentTool): AdapterSource {
+  const status = agents?.statuses().find((s) => s.tool === tool);
+  if (status?.state === AgentState.Ready && status.path !== null)
+    return { ready: true, path: status.path };
+  if (status?.state === AgentState.Refused)
+    return {
+      ready: false,
+      message: `${status.problem ?? `${status.label} ${status.pinned} was refused`}. No session runs on it; delete the copy under ${pinnedToolsRoot(dataDir)} and restart 10db to fetch it again.`,
+    };
+  return {
+    ready: false,
+    message: `${status?.label ?? tool} ${status?.pinned ?? ''} is still being downloaded and checked; sessions start once it is ready.`,
+  };
+}
+
 function chooseAdapter(): SessionAdapter | ((logger: Logger) => SessionAdapter) {
   if (env.TENDB_FAKE_SCRIPTS) {
     const fake = new FakeAdapter(loadFakeScriptBook(env.TENDB_FAKE_SCRIPTS));
@@ -104,25 +129,27 @@ function chooseAdapter(): SessionAdapter | ((logger: Logger) => SessionAdapter) 
     fake.shapeBehaviour = scriptedShapeBehaviour();
     return fake;
   }
-  const claudePath = env.TENDB_CLAUDE_PATH ?? findClaude();
-  const codexPath = findCodex();
   // Through the daemon's own logger: one shared daemon.log, which the live acceptance checks read.
   return (logger) =>
     createRoutedAdapter({
-      claude: claudePath
-        ? createClaudeAdapter({
+      claude: createPinnedAdapter(
+        () => sourceOf(AgentTool.Claude),
+        (claudePath) =>
+          createClaudeAdapter({
             claudePath,
             pluginDir: resolveHarnessDir(),
             logger: logger.child({ component: 'claude' }),
-          })
-        : createUnavailableAdapter(CLAUDE_MISSING),
-      codex: codexPath
-        ? createCodexAdapter({
+          }),
+      ),
+      codex: createPinnedAdapter(
+        () => sourceOf(AgentTool.Codex),
+        (codexPath) =>
+          createCodexAdapter({
             codexPath,
             logger: logger.child({ component: 'codex' }),
             signInCheck: (sessionEnv) => codexLoginStatus(codexPath, sessionEnv),
-          })
-        : createUnavailableAdapter(CODEX_MISSING),
+          }),
+      ),
     });
 }
 
@@ -145,6 +172,7 @@ try {
     loginEnv: login.vars,
     keychain: systemKeychain,
     systemCheck: check,
+    ...(agents ? { agents } : {}),
     networkEnv: () => buildNetworkEnv(login.vars),
     ...(sqliteBinding ? { sqliteBinding } : {}),
   });
@@ -153,6 +181,7 @@ try {
   const shutdown = (): void => {
     if (stopping) return;
     stopping = true;
+    agents?.stop();
     void daemon.stop().then(() => {
       process.exit(0);
     });

@@ -325,6 +325,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
             ...(input.readOnly === true ? [checkout] : []),
             ...access.gitState,
             ...access.otherCheckouts,
+            ...access.pinnedTools,
           ],
           sandboxRoots,
           ownFiles: [envFile],

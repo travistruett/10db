@@ -48,16 +48,24 @@
       "groupName": "Playwright"
     },
     {
-      "description": "CODEX_VERIFIED_ON is the Codex release 10db's Codex lanes are verified on. Its bump is a PR of its own, because only the live test, which CI never runs, can verify it.",
+      "description": "CODEX_VERIFIED_ON and CODEX_SHA512 are the Codex release 10db runs and the checksum its download must have. Their bump is a PR of its own, because only the live test, which CI never runs, can verify it.",
       "matchPackageNames": ["@openai/codex"],
       "groupName": "Codex CLI",
       "prBodyNotes": [
-        "Before merging: install this Codex (`brew upgrade --cask codex`), then run `TENDB_LIVE_CODEX=1 pnpm --filter @10db/daemon exec vitest run test/codex.live.test.ts`. It must pass; CI never runs it."
+        "Before merging: run `TENDB_LIVE_CODEX=1 pnpm --filter @10db/daemon exec vitest run test/codex.live.test.ts`. It fetches this release into 10db's data dir, checks it against the checksum in this PR, and runs on it. It must pass; CI never runs it."
       ]
     },
     {
-      "description": "Every update that isn't a major version lands in one weekly PR, except Codex's, which needs the live test.",
-      "matchPackageNames": ["*", "!@openai/codex"],
+      "description": "CLAUDE_CODE_VERIFIED_ON and CLAUDE_CODE_SHA512 are the Claude Code release 10db runs and the checksum its download must have. Their bump is a PR of its own, because only the live test, which CI never runs, can verify it.",
+      "matchPackageNames": ["@anthropic-ai/claude-code"],
+      "groupName": "Claude Code CLI",
+      "prBodyNotes": [
+        "Before merging: run `TENDB_LIVE_CLAUDE=1 pnpm --filter @10db/daemon exec vitest run src/sessions/claude-adapter.live.test.ts`. It fetches this release into 10db's data dir, checks it against the checksum in this PR, and runs on it. It must pass; CI never runs it."
+      ]
+    },
+    {
+      "description": "Every update that isn't a major version lands in one weekly PR, except the agent CLIs', which need their live tests.",
+      "matchPackageNames": ["*", "!@openai/codex", "!@anthropic-ai/claude-code"],
       "matchUpdateTypes": ["minor", "patch", "pin", "pinDigest", "digest"],
       "groupName": "all non-major dependencies"
     },
@@ -67,14 +75,48 @@
       "dependencyDashboardApproval": true
     }
   ],
+  "customDatasources": {
+    "codex-darwin-arm64": {
+      "description": "Codex releases on npm, each with the checksum of its darwin-arm64 build, which 10db downloads. Codex publishes the builds as versions of the same package.",
+      "defaultRegistryUrlTemplate": "https://registry.npmjs.org/@openai%2Fcodex",
+      "format": "json",
+      "transformTemplates": [
+        "{ \"releases\": $keys(versions)[$not($contains($, \"-\"))].{ \"version\": $, \"releaseTimestamp\": $lookup($$.time, $), \"newDigest\": $lookup($$.versions, $ & \"-darwin-arm64\").dist.integrity } }"
+      ]
+    },
+    "claude-code-darwin-arm64": {
+      "description": "Claude Code releases on npm, each with the checksum of its darwin-arm64 build, which 10db downloads.",
+      "defaultRegistryUrlTemplate": "https://registry.npmjs.org/@anthropic-ai%2Fclaude-code-darwin-arm64",
+      "format": "json",
+      "transformTemplates": [
+        "{ \"releases\": $keys(versions).{ \"version\": $, \"releaseTimestamp\": $lookup($$.time, $), \"newDigest\": $lookup($$.versions, $).dist.integrity } }"
+      ]
+    }
+  },
   "customManagers": [
     {
       "customType": "regex",
-      "description": "The Codex version 10db's Codex lanes are verified on, read from npm, where Codex is released first.",
-      "managerFilePatterns": ["/^apps/daemon/src/environment/system-check\\.ts$/"],
-      "matchStrings": ["export const CODEX_VERIFIED_ON = '(?<currentValue>[^']+)';"],
+      "description": "The Codex release 10db runs and the checksum of its download, moved together.",
+      "managerFilePatterns": ["/^apps/daemon/src/environment/agent-pins\\.ts$/"],
+      "matchStrings": [
+        "export const CODEX_VERIFIED_ON = '(?<currentValue>[^']+)';\\nexport const CODEX_SHA512 =\\n  '(?<currentDigest>[^']+)';"
+      ],
+      "autoReplaceStringTemplate": "export const CODEX_VERIFIED_ON = '{{{newValue}}}';\nexport const CODEX_SHA512 =\n  '{{{newDigest}}}';",
       "depNameTemplate": "@openai/codex",
-      "datasourceTemplate": "npm"
+      "datasourceTemplate": "custom.codex-darwin-arm64",
+      "versioningTemplate": "semver"
+    },
+    {
+      "customType": "regex",
+      "description": "The Claude Code release 10db runs and the checksum of its download, moved together.",
+      "managerFilePatterns": ["/^apps/daemon/src/environment/agent-pins\\.ts$/"],
+      "matchStrings": [
+        "export const CLAUDE_CODE_VERIFIED_ON = '(?<currentValue>[^']+)';\\nexport const CLAUDE_CODE_SHA512 =\\n  '(?<currentDigest>[^']+)';"
+      ],
+      "autoReplaceStringTemplate": "export const CLAUDE_CODE_VERIFIED_ON = '{{{newValue}}}';\nexport const CLAUDE_CODE_SHA512 =\n  '{{{newDigest}}}';",
+      "depNameTemplate": "@anthropic-ai/claude-code",
+      "datasourceTemplate": "custom.claude-code-darwin-arm64",
+      "versioningTemplate": "semver"
     }
   ]
 }

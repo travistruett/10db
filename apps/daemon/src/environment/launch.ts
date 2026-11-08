@@ -14,11 +14,12 @@ import {
 } from '@10db/contracts';
 import { isAbsolute, join } from 'node:path';
 import type { AccountRow } from '@10db/db';
+import { CLAUDE_CODE_VERIFIED_ON } from './agent-pins';
 import { secretFingerprint, type Keychain } from './keychain';
 import { stripBillingSwitches } from './session-env';
 
-/** The Claude Code version the account variables and `accountInfo()` fields were verified on (spike 12). */
-export const ACCOUNT_NAMES_VERIFIED_ON = '2.1.302';
+/** The Claude Code version the account variables and `accountInfo()` fields were verified on: the pinned release. */
+export const ACCOUNT_NAMES_VERIFIED_ON = CLAUDE_CODE_VERIFIED_ON;
 
 /** A Bedrock session takes its AWS credentials from its account only, never from the login shell. */
 const AWS_LOGIN_VARS: readonly string[] = [
