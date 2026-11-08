@@ -4,7 +4,8 @@ import { isTauri, openInBrowser } from '../../desktop/tauri';
 
 /**
  * A link out of the app: a new tab in a browser, the default browser in the desktop app. The desktop
- * app opens only github.com; for any other address it says so, and the card keeps the URL in its text.
+ * app opens only the sites its opener allows (GitHub and Artificial Analysis here); for any other address it
+ * says so, and the card keeps the URL in its text.
  */
 export function ExternalLink({ url, label }: { readonly url: string; readonly label: string }) {
   const [openFailure, setOpenFailure] = useState<string | null>(null);

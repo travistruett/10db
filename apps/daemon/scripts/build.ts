@@ -72,8 +72,12 @@ cpSync(
   resolve(outDir, 'vendor', 'java-proxy-agent', 'srt-proxy-agent.jar'),
 );
 // The catalogue snapshot a release build fetched (scripts/release/build-macos.sh), if this is one. Any other
-// build carries none, so a snapshot from an earlier release build never ships in a later one.
-const snapshot = z.string().min(1).optional().parse(process.env['TENDB_CATALOGUE_SNAPSHOT']);
+// build carries none, so a snapshot from an earlier release build never ships in a later one. Its own name: the
+// runtime's TENDB_CATALOGUE_SNAPSHOT, set in a developer's shell, must not reach a bundle.
+const snapshot = z
+  .union([z.literal('').transform(() => undefined), z.string().startsWith('/')])
+  .optional()
+  .parse(process.env['TENDB_RELEASE_CATALOGUE_SNAPSHOT']);
 if (snapshot !== undefined) cpSync(snapshot, resolve(outDir, 'catalogue-snapshot.json'));
 cpSync(DB_MIGRATIONS_DIR, resolve(outDir, 'drizzle'), { recursive: true });
 cpSync(HARNESS_PLUGIN_DIR, resolve(outDir, 'harness'), { recursive: true });

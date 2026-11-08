@@ -200,6 +200,26 @@ describe('the bundled daemon', () => {
     expect(existsSync(join(out, 'drizzle', 'meta', '_journal.json'))).toBe(true);
     expect(existsSync(join(out, 'drizzle', 'stale.sql'))).toBe(false);
   }, 120_000);
+
+  it('carries a catalogue snapshot only when a release build names one, never one left before', () => {
+    const out = join(work.path, 'snapshots');
+    mkdirSync(out, { recursive: true });
+    writeFileSync(join(out, 'catalogue-snapshot.json'), '{"left":"by an earlier build"}');
+    const build = (env: Record<string, string>) =>
+      execFileSync('pnpm', ['exec', 'tsx', 'scripts/build.ts', out], {
+        cwd: daemonRoot,
+        stdio: 'pipe',
+        env: { ...process.env, TENDB_RELEASE_CATALOGUE_SNAPSHOT: '', ...env },
+      });
+    build({});
+    expect(existsSync(join(out, 'catalogue-snapshot.json'))).toBe(false);
+    const fresh = join(work.path, 'fresh-snapshot.json');
+    writeFileSync(fresh, '{"fetched":"by this build"}');
+    build({ TENDB_RELEASE_CATALOGUE_SNAPSHOT: fresh });
+    expect(readFileSync(join(out, 'catalogue-snapshot.json'), 'utf8')).toBe(
+      '{"fetched":"by this build"}',
+    );
+  }, 120_000);
   it("ships srt's command line beside the bundle, runnable with no node_modules", () => {
     // The gate runs under it, so the app carries its own copy, which no project can write.
     const appDir = join(work.path, 'srt-app');

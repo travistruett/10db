@@ -26,6 +26,8 @@ export interface ModelListWait {
 interface Waiting {
   /** When the hold began; null once a rebuild has ended it. */
   since: Date | null;
+  /** Whether this daemon has logged a hold of the account; a card taken on from an earlier one is not. */
+  logged: boolean;
   readonly cards: Map<ProjectId, InboxItemId>;
 }
 
@@ -51,6 +53,7 @@ export function createModelListWait(deps: {
       if (card === undefined) continue;
       const entry = waiting.get(account.id) ?? {
         since: null,
+        logged: false,
         cards: new Map<ProjectId, InboxItemId>(),
       };
       entry.cards.set(project.id, card.id);
@@ -61,8 +64,11 @@ export function createModelListWait(deps: {
     hold(account, projectId) {
       let entry = waiting.get(account.id);
       if (entry === undefined) {
-        entry = { since: null, cards: new Map() };
+        entry = { since: null, logged: false, cards: new Map() };
         waiting.set(account.id, entry);
+      }
+      if (!entry.logged) {
+        entry.logged = true;
         deps.logger.info(
           { accountId: account.id },
           'an account has no model profile yet, so its queued work waits for the model list',

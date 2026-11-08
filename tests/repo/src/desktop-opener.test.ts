@@ -1,15 +1,24 @@
 import { describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { readRepoFile } from './workspace';
 
-interface Capability {
-  permissions: (string | { identifier: string; allow?: { url: string }[] })[];
-}
+const Capability = z.object({
+  permissions: z.array(
+    z.union([
+      z.string(),
+      z.object({
+        identifier: z.string(),
+        allow: z.array(z.object({ url: z.string() })).optional(),
+      }),
+    ]),
+  ),
+});
 
 describe("the desktop app's opener", () => {
   it('opens GitHub, OpenAI sign-in pages and Artificial Analysis, and nothing else', () => {
-    const capability = JSON.parse(
-      readRepoFile('apps/desktop/src-tauri/capabilities/default.json'),
-    ) as Capability;
+    const capability = Capability.parse(
+      JSON.parse(readRepoFile('apps/desktop/src-tauri/capabilities/default.json')),
+    );
     const opener = capability.permissions.find(
       (p) => typeof p === 'object' && p.identifier === 'opener:allow-open-url',
     );

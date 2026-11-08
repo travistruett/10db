@@ -282,16 +282,24 @@ const MODEL_UNAVAILABLE =
 
 const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+/** "is not supported", "isn't available" and the like, as one fixed run of words. */
+const UNSUPPORTED = `(?:is not|isn['’]t|not)\\s+(?:currently\\s+)?(?:supported|available)`;
+
 /**
- * Whether `text` says the model itself is not supported or not available: the phrase follows the model's ID, or
- * the word model, in the same clause. A config error says the same of a parameter ("thinking.budget is not
- * supported for model X"), which says nothing about whether the account can run the model.
+ * Whether `text` says the model itself is not supported or not available, as the phrase's subject: right after
+ * its ID (quoted or not, and optionally "model"), or after "the model" or "the model you requested". A config
+ * error says the same of something else ("thinking.budget is not supported for model X", "tool use with model X
+ * is not supported", "X, temperature above 1 is not supported"), which says nothing about whether the account can
+ * run the model, so an ID that follows a preposition is not a subject. Every part is a fixed run, so a long text
+ * is read in linear time.
  */
 function saysModelUnsupported(text: string, id: string): boolean {
-  return new RegExp(
-    `(?:${escapeRegExp(id)}|\\bmodel\\b)[^.;:]*?\\b(?:is not|isn['’]t|not) (?:supported|available)`,
-    'i',
-  ).test(text);
+  const quoted = `['"\`‘’“”]?${escapeRegExp(id)}['"\`‘’“”]?`;
+  const preposition = `(?<!\\b(?:for|with|on|of|to|by|in|via|using)\\s+(?:the\\s+)?(?:model\\s+)?(?:ID\\s+)?)`;
+  return (
+    new RegExp(`${preposition}${quoted}\\s+(?:model\\s+)?${UNSUPPORTED}`, 'i').test(text) ||
+    new RegExp(`\\b(?:the\\s+)?model(?:\\s+you\\s+requested)?\\s+${UNSUPPORTED}`, 'i').test(text)
+  );
 }
 
 /** Whether `text` names `id` as a whole token, so `<model>` is not found in `<model>-<suffix>`. */

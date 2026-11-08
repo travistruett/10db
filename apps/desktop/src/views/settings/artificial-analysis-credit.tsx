@@ -6,7 +6,8 @@ export function ArtificialAnalysisCredit() {
   return (
     <Text size="xs" c="dimmed">
       Scores and speed:{' '}
-      <ExternalLink url="https://artificialanalysis.ai/" label="Artificial Analysis" />
+      <ExternalLink url="https://artificialanalysis.ai/" label="Artificial Analysis" />{' '}
+      (artificialanalysis.ai)
     </Text>
   );
 }

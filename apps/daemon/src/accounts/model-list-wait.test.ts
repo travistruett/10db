@@ -120,6 +120,17 @@ describe('a lane waiting for its account’s model list', () => {
     expect(restarted.holds(project.accountId)).toBe(false);
   });
 
+  it('logs the first hold after a restart once, though the card was taken on', () => {
+    const project = seedProject(store);
+    const account = { id: project.accountId, label: 'Codex plan' };
+    wait.hold(account, project.id);
+    const restarted = startWait();
+    const before = logger.lines().filter((l) => l.includes('model list')).length;
+    restarted.hold(account, project.id);
+    restarted.hold(account, project.id);
+    expect(logger.lines().filter((l) => l.includes('model list')).length - before).toBe(1);
+  });
+
   it('does nothing when no account is waiting', () => {
     wait.release(() => true);
     expect(released).toBe(0);

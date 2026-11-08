@@ -484,8 +484,68 @@ describe('isModelRefusal', () => {
       `${LAUNCHED} isn't supported for this account`,
       true,
     ],
+    [
+      'a parameter of the model, named before it, not supported',
+      'invalid_request',
+      `The thinking budget for model ${LAUNCHED} is not supported`,
+      false,
+    ],
+    [
+      'tool use with the model not supported',
+      'invalid_request',
+      `Tool use with model ${LAUNCHED} is not supported`,
+      false,
+    ],
+    [
+      'a feature named after the model and a comma',
+      'invalid_request',
+      `For model ${LAUNCHED}, extended thinking is not supported`,
+      false,
+    ],
+    [
+      'a setting named after the launch ID and a comma',
+      'invalid_request',
+      `${LAUNCHED}, temperature above 1 is not supported`,
+      false,
+    ],
+    [
+      "a feature of the model's not available",
+      'unknown',
+      `This model's prompt caching is not available (${LAUNCHED})`,
+      false,
+    ],
+    [
+      'a mode of the launch ID not available',
+      'unknown',
+      `${LAUNCHED} batch mode not available`,
+      false,
+    ],
+    [
+      'the requested model not available, its ID after',
+      'invalid_request',
+      `The model you requested is not available: ${LAUNCHED}`,
+      true,
+    ],
+    [
+      'the launch ID, quoted, as the model that is not supported',
+      'invalid_request',
+      `The '${LAUNCHED}' model is not supported when using Codex with a ChatGPT account.`,
+      true,
+    ],
+    [
+      'the launch ID in backticks not available',
+      'unknown',
+      `\`${LAUNCHED}\` is not available`,
+      true,
+    ],
   ])('%s', (_name, error, text, expected) => {
     expect(isModelRefusal(error, text, LAUNCHED)).toBe(expected);
+  });
+
+  it('reads a long error in linear time', () => {
+    const started = performance.now();
+    isModelRefusal('invalid_request', `${LAUNCHED} ${'model '.repeat(20_000)}`, LAUNCHED);
+    expect(performance.now() - started).toBeLessThan(200);
   });
 
   it('matches a launch ID that carries the context suffix without it', () => {

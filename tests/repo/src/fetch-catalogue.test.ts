@@ -144,13 +144,12 @@ describe('what the release carries of the catalogue', () => {
     expect(file).toBe('catalogue-snapshot.json');
     // The release fetches outside the bundle dir and names the file to the daemon's build step.
     expect(readRepoFile('scripts/release/build-macos.sh')).toContain(
-      `export TENDB_CATALOGUE_SNAPSHOT="$out/${file ?? ''}"`,
+      `export TENDB_RELEASE_CATALOGUE_SNAPSHOT="$out/${file ?? ''}"`,
     );
-    // That step removes a snapshot an earlier build left, and copies in only the one it is named.
-    const daemonBuild = readRepoFile('apps/daemon/scripts/build.ts');
-    const removed = /for \(const name of \[([^\]]*)\]\)/.exec(daemonBuild)?.[1] ?? '';
-    expect(removed).toContain(`'${file ?? ''}'`);
-    expect(daemonBuild).toContain('TENDB_CATALOGUE_SNAPSHOT');
+    // That the step carries it, and only it, apps/daemon/test/bundle.test.ts checks through the real build.
+    expect(readRepoFile('apps/daemon/scripts/build.ts')).toContain(
+      'TENDB_RELEASE_CATALOGUE_SNAPSHOT',
+    );
   });
 
   it('fetches before the build and lets a failed fetch stop it', () => {

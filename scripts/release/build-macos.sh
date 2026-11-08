@@ -40,7 +40,7 @@ mkdir -p "$out"
 # which Tauri bundles, and named to the daemon's bundle step, which copies it in and otherwise removes any
 # snapshot an earlier build left there. A failed fetch stops the build (set -e).
 node "$root/scripts/release/fetch-catalogue.mjs" "$out/catalogue-snapshot.json"
-export TENDB_CATALOGUE_SNAPSHOT="$out/catalogue-snapshot.json"
+export TENDB_RELEASE_CATALOGUE_SNAPSHOT="$out/catalogue-snapshot.json"
 
 if [ "$mode" = signed ]; then
   pnpm --filter @10db/desktop tauri build --target "$target" --bundles dmg
