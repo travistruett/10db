@@ -1,5 +1,12 @@
 export { DockerWhy, raiseDockerOnNote } from './docker-card';
 export { raiseGateHostCards } from './gate-host-card';
+export {
+  applyHazardChoice,
+  HazardChoice,
+  hazardCardFoldKey,
+  hazardRemovalCard,
+  pendingHazardRemovals,
+} from './hazard-card';
 export { earlierMcpApproval, requestMcpApproval } from './mcp-approval';
 export { createProjectMcpReader, flagMcpFailure } from './project-mcp-reader';
 export {

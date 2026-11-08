@@ -12,6 +12,7 @@ export * from './goal-digest';
 export * from './goal-removal';
 export * from './goals';
 export * from './handoffs';
+export * from './hazard-assessment';
 export * from './holds';
 export * from './human-touch';
 export * from './inbox';
