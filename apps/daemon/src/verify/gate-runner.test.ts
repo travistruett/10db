@@ -470,8 +470,8 @@ describe('gate runner with a sandbox', () => {
     expect(readFileSync(result.logPath, 'utf8')).toContain(DOCKER_REFUSAL);
   });
 
-  // Value: protects the one field auto-docker's refusal trigger reads; fails_when the runner drops
-  // dockerRefused from its result (the trigger then never fires); why_new: the evidence test above
+  // Value: protects the one field auto-docker's "may need Docker" note reads; fails_when the runner
+  // drops dockerRefused from its result (the note is then never raised); why_new: the evidence test above
   // read only the tail; no_claim: whether the sandbox detects the refusal (gate-sandbox tests).
   it('leaves dockerRefused unset when the sandbox refused nothing', async () => {
     const { sandbox } = recordingSandbox({ dockerRefused: false });

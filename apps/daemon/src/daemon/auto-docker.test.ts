@@ -9,7 +9,7 @@ import {
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createEventBus, createStateStore, type StateStore } from '../events';
-import { createInboxService, type InboxService } from '../inbox';
+import { createInboxService, DockerNeededChoice, type InboxService } from '../inbox';
 import { silentLogger } from '../log';
 import type { GateRequest, GateResult, GateRunner } from '../verify';
 import { autoDocker } from './auto-docker';
@@ -125,45 +125,62 @@ describe('a gate that is seen to call docker', () => {
 });
 
 describe('a gate that fails because Docker was refused', () => {
-  it('turns Docker on, runs the gate again and answers the rerun, with one note', async () => {
+  const needed = () => listInbox(state.db).filter((item) => item.title.includes('may need Docker'));
+
+  it('leaves the switch off, runs once and answers the failed result', async () => {
     results = [refused, ok];
     const result = await wrapped().run(request('pnpm test'));
-    expect(result).toBe(ok);
-    expect(seen.map((r) => r.project.sandboxDocker)).toEqual([false, true]);
-    expect(getProject(state.db, project.id).sandboxDocker).toBe(true);
-    expect(notes()).toHaveLength(1);
-    expect(notes()[0]?.body).toContain('refused');
+    expect(result).toBe(refused);
+    expect(seen.map((r) => r.project.sandboxDocker)).toEqual([false]);
+    expect(getProject(state.db, project.id).sandboxDocker).toBe(false);
+    expect(notes()).toEqual([]);
   });
 
-  it('starts the rerun on the tree the first run tested', async () => {
-    results = [refused, ok];
-    let started = 0;
-    await wrapped().run({
-      ...request('pnpm test'),
-      beforeStart: () => {
-        started++;
-        return Promise.resolve(true);
-      },
-      onStarted: () => {
-        started += 10;
-      },
+  it('leaves one note saying the gate asked for Docker and pointing to the Settings switch', async () => {
+    results = [refused];
+    await wrapped().run(request('pnpm test'));
+    expect(needed()).toHaveLength(1);
+    expect(needed()[0]?.body).toContain('Settings');
+    expect(needed()[0]?.body).toContain('asked for Docker');
+  });
+
+  it('adds no second note for a second refusal', async () => {
+    results = [refused];
+    await wrapped().run(request('pnpm test'));
+    await wrapped().run(request('pnpm test'));
+    expect(needed()).toHaveLength(1);
+  });
+
+  it('raises no new note after the builder answered Keep it off', async () => {
+    results = [refused];
+    await wrapped().run(request('pnpm test'));
+    const first = needed()[0];
+    if (first === undefined) throw new Error('no note');
+    inbox.answer(first.id, { choice: DockerNeededChoice.KeepOff });
+    await wrapped().run(request('pnpm test'));
+    expect(needed()).toHaveLength(1);
+    expect(seen.map((r) => r.project.sandboxDocker)).toEqual([false, false]);
+  });
+
+  it('raises no new note once one was answered, even with the switch off and no opt-out', async () => {
+    results = [refused];
+    await wrapped().run(request('pnpm test'));
+    const first = needed()[0];
+    if (first === undefined) throw new Error('no note');
+    inbox.answer(first.id, { choice: DockerNeededChoice.TurnOn });
+    // Off again with no opt-out recorded, which no Settings path leaves; the answered note stands.
+    store.db.$client
+      .prepare('update projects set sandbox_docker = 0, sandbox_docker_opt_out = 0 where id = ?')
+      .run(project.id);
+    expect(getProject(state.db, project.id)).toMatchObject({
+      sandboxDocker: false,
+      sandboxDockerOptOut: false,
     });
-    // The first run's hooks ran in the real runner. The rerun takes no base update and fires no
-    // second gate-started event: its own hooks only let it start, unless the gate was stopped.
-    expect(await seen[1]?.beforeStart?.()).toBe(true);
-    seen[1]?.onStarted?.();
-    expect(started).toBe(0);
+    await wrapped().run(request('pnpm test'));
+    expect(needed()).toHaveLength(1);
   });
 
-  it('does not start the rerun of a gate that was stopped meanwhile', async () => {
-    results = [refused, ok];
-    const stop = new AbortController();
-    await wrapped().run({ ...request('pnpm test'), signal: stop.signal });
-    stop.abort();
-    expect(await seen[1]?.beforeStart?.()).toBe(false);
-  });
-
-  it('leaves the failure alone when the builder turned Docker off', async () => {
+  it('leaves the failure alone, with no note, when the builder turned Docker off', async () => {
     store.write((ctx) => patchProject(ctx, project.id, { sandboxDocker: false }));
     results = [refused];
     const result = await wrapped().run(request('pnpm test'));
@@ -171,9 +188,10 @@ describe('a gate that fails because Docker was refused', () => {
     expect(seen).toHaveLength(1);
     expect(getProject(state.db, project.id).sandboxDocker).toBe(false);
     expect(notes()).toEqual([]);
+    expect(needed()).toEqual([]);
   });
 
-  it('turns nothing on for a gate that passed or was stopped', async () => {
+  it('leaves no note for a gate that passed, was stopped or timed out', async () => {
     results = [{ ...refused, exitCode: 0 }];
     await wrapped().run(request('pnpm test'));
     results = [{ ...refused, aborted: true }];
@@ -182,13 +200,63 @@ describe('a gate that fails because Docker was refused', () => {
     await wrapped().run(request('pnpm test'));
     expect(getProject(state.db, project.id).sandboxDocker).toBe(false);
     expect(notes()).toEqual([]);
+    expect(needed()).toEqual([]);
   });
 
-  it('runs a rerun that still fails once, and says so once', async () => {
-    results = [refused, refused];
-    const result = await wrapped().run(request('pnpm test'));
-    expect(result).toBe(refused);
-    expect(seen).toHaveLength(2);
+  it('leaves no note for a gate that failed without a refused docker', async () => {
+    results = [{ ...ok, exitCode: 1 }];
+    await wrapped().run(request('pnpm test'));
+    expect(needed()).toEqual([]);
+  });
+
+  it('runs a lane-written docker call without turning the switch on', async () => {
+    // The base shows nothing; the lane's own test is what ran docker.
+    base['Makefile'] = 'gate:\n\tpnpm test\n';
+    results = [refused];
+    await wrapped().run(request('make gate'));
+    expect(seen).toHaveLength(1);
+    expect(getProject(state.db, project.id).sandboxDocker).toBe(false);
+  });
+});
+
+describe('where the base is read from', () => {
+  it('reads origin/<base> only, never the local base branch', async () => {
+    const refs: string[] = [];
+    const reading = autoDocker(runner, {
+      state,
+      inbox,
+      logger: silentLogger,
+      readBase: (_repo, ref, path) => {
+        refs.push(ref);
+        // A file only the local branch has, as a lane commits to it in a local-delivery project.
+        return Promise.resolve(
+          ref === project.baseBranch && path === 'Makefile'
+            ? 'gate:\n\tdocker compose run t\n'
+            : null,
+        );
+      },
+    });
+    await reading.run(request('make gate'));
+    expect(refs.length).toBeGreaterThan(0);
+    expect(new Set(refs)).toEqual(new Set([`origin/${project.baseBranch}`]));
+    expect(getProject(state.db, project.id).sandboxDocker).toBe(false);
+    expect(notes()).toEqual([]);
+  });
+
+  it('still turns Docker on for a file the committed origin base has', async () => {
+    const reading = autoDocker(runner, {
+      state,
+      inbox,
+      logger: silentLogger,
+      readBase: (_repo, ref, path) =>
+        Promise.resolve(
+          ref === `origin/${project.baseBranch}` && path === 'Makefile'
+            ? 'gate:\n\tdocker compose run t\n'
+            : null,
+        ),
+    });
+    await reading.run(request('make gate'));
+    expect(seen[0]?.project.sandboxDocker).toBe(true);
     expect(notes()).toHaveLength(1);
   });
 });

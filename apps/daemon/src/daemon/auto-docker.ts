@@ -1,7 +1,13 @@
 import type { ProjectDto } from '@10db/contracts';
-import { autoEnableDocker, getProject } from '@10db/db';
+import { autoEnableDocker, getProject, hasAnsweredByFoldKey } from '@10db/db';
 import type { StateStore } from '../events';
-import { DockerWhy, raiseDockerOnNote, type InboxService } from '../inbox';
+import {
+  DockerWhy,
+  dockerNeededFoldKey,
+  raiseDockerMayBeNeededNote,
+  raiseDockerOnNote,
+  type InboxService,
+} from '../inbox';
 import type { Logger } from '../log';
 import type { GateRequest, GateRunner } from '../verify';
 import { callsDocker } from './docker-need';
@@ -18,16 +24,16 @@ export interface AutoDockerDeps {
 }
 
 /**
- * Gives every project's gate its Docker switch as it stands now, and turns the switch on when the
- * project needs it, unless the builder turned it off:
+ * Gives every project's gate its Docker switch as it stands now, and turns the switch on only when
+ * the committed `origin/<base>` shows the need, unless the builder turned it off: the gate command,
+ * or the Makefile target or script it runs there, is seen to call docker (`callsDocker`), and the
+ * switch goes on before the gate runs, with the project's one Inbox note (`raiseDockerOnNote`).
  *
- * - the gate command, or the Makefile target or script it runs in the base branch, is seen to call
- *   docker (`callsDocker`): the switch goes on before the gate runs;
- * - the gate failed and the sandbox refused a `docker` it ran: the switch goes on and the gate runs
- *   once more, on the tree it just tested, and its result is the one answered.
- *
- * Each turning on leaves the project's one Inbox note (`raiseDockerOnNote`). A gate that names no
- * project (an install, a generator) runs as it was asked.
+ * A docker call the sandbox refused turns nothing on and reruns nothing: the gate runs lane-written
+ * code, so a lane could cause the refusal. The failed result is the answer, and the project gets one
+ * Inbox note that it may need Docker (`raiseDockerMayBeNeededNote`), whose answers set the switch;
+ * once one was answered, no later refusal raises another. A gate that names no project
+ * (an install, a generator) runs as it was asked.
  */
 export function autoDocker(inner: GateRunner, deps: AutoDockerDeps): GateRunner {
   /** Turns the switch on and says so; false when it was on already or the builder turned it off. */
@@ -40,17 +46,14 @@ export function autoDocker(inner: GateRunner, deps: AutoDockerDeps): GateRunner 
   }
 
   async function seenToCallDocker(project: ProjectDto, command: string): Promise<boolean> {
-    // Reads the base the project's PRs land in: tried as origin's branch, then the local one.
+    // Reads origin's base branch only. The local branch is where a local-delivery project's lanes
+    // commit, so a file only it has is lane-written.
     const read = async (path: string): Promise<string | null> => {
-      for (const ref of [`origin/${project.baseBranch}`, project.baseBranch]) {
-        try {
-          const text = await deps.readBase(project.repoPath, ref, path);
-          if (text !== null) return text;
-        } catch {
-          // This ref isn't there; the next may be.
-        }
+      try {
+        return await deps.readBase(project.repoPath, `origin/${project.baseBranch}`, path);
+      } catch {
+        return null;
       }
-      return null;
     };
     try {
       return await callsDocker(command, read);
@@ -83,15 +86,25 @@ export function autoDocker(inner: GateRunner, deps: AutoDockerDeps): GateRunner 
       if (!on && !project.sandboxDockerOptOut && (await seenToCallDocker(project, request.command)))
         on = turnOn(project, DockerWhy.Called);
       const result = await inner.run(withSwitch(request, on));
-      if (on || result.exitCode === 0 || result.timedOut || result.aborted) return result;
-      if (result.dockerRefused !== true || !turnOn(project, DockerWhy.Refused)) return result;
-      deps.logger.info({ projectId: id }, 'the gate failed on a refused docker; running it again');
-      // The tree is the one the first run tested: no base update, no second gate-started event.
-      return inner.run({
-        ...withSwitch(request, true),
-        beforeStart: () => Promise.resolve(request.signal?.aborted !== true),
-        onStarted: () => undefined,
-      });
+      // A refused docker turns nothing on and reruns nothing: the gate runs lane-written code, so a
+      // lane could cause the refusal. The builder gets one note and decides, unless they already
+      // turned Docker off by hand.
+      const failedOnRefusal =
+        result.exitCode !== 0 &&
+        !result.timedOut &&
+        !result.aborted &&
+        result.dockerRefused === true;
+      // One note per project, ever: once the builder answered one, a later refusal raises none.
+      if (
+        !on &&
+        !project.sandboxDockerOptOut &&
+        failedOnRefusal &&
+        !hasAnsweredByFoldKey(deps.state.db, id, dockerNeededFoldKey(id))
+      ) {
+        raiseDockerMayBeNeededNote(deps, { project: { id: project.id, name: project.name } });
+        deps.logger.info({ projectId: id }, 'the gate failed on a refused docker; left a note');
+      }
+      return result;
     },
   };
 }

@@ -20,21 +20,31 @@
   - `DOCKER_HOST`, `DOCKER_CONTEXT` and `COMPOSE_*` pass through the env allowlist (`deniedEnvNames`'s `also`); a name that reads
     like a secret still does not, and `DOCKER_CONFIG` never does, because it names a directory the CLI reads plugins from.
 - **`sandbox_docker_opt_out`** records that the builder set the switch off by hand (a patch with `sandboxDocker: false`, or the
-  note's Turn it off). A patch with `sandboxDocker: true` clears it. 10db's own turning on (`autoEnableDocker`) does nothing
+  note's Turn it off, or Keep it off on the "may need Docker" card). A patch with `sandboxDocker: true` clears it. 10db's own turning on (`autoEnableDocker`) does nothing
   while it stands, so 10db never turns the switch back on after the builder turned it off.
 - **10db turns it on itself** (`daemon/auto-docker.ts`, wrapped round the shared gate runner for every project's gates; an
-  install or a generator names no project's id and is left alone), when the project has not opted out:
-  1. the gate command, or the Makefile target or script it runs, is seen to call docker (`daemon/docker-need.ts`: the command,
-     `make` and `$(MAKE) -C dir target`, the targets a target needs, a script named in a recipe, a few levels deep, comments
-     ignored). The files are read **from the base branch's commit** (`origin/<base>`, else the local branch), never the working tree;
-  2. the gate failed (not passed, timed out or stopped) and the sandbox refused a `docker` it ran
-     (`GateResult.dockerRefused`): 10db turns the switch on and runs the gate once more, on the tree it just tested (no base
-     update, no second gate-started event), and the rerun's result is the one answered.
+  install or a generator names no project's id and is left alone), when the project has not opted out, and only when the
+  gate command, or the Makefile target or script it runs, is seen to call docker (`daemon/docker-need.ts`: the command,
+  `make` and `$(MAKE) -C dir target`, the targets a target needs, a script named in a recipe, a few levels deep, comments
+  ignored). The files are read **from `origin/<base>`'s commit only**, never the working tree and never the local base
+  branch (a local-delivery project's lanes commit there, so a file only it has is lane-written).
 
-  Each turning on leaves the project's one Inbox card (`inbox/docker-card.ts`, fold key `docker-on:<projectId>`, a flag with
+  The turning on leaves the project's one Inbox card (`inbox/docker-card.ts`, fold key `docker-on:<projectId>`, a flag with
   answers Keep it on and Turn it off) saying that it did, why, and the warning. It is a card rather than the notice of
   `decisions/2026-10-31-notices-not-cards.md` because the task asked for an Inbox note and it has an answer the daemon acts on
   (Turn it off).
+
+- **A refused docker turns nothing on.** When a gate fails (not passes, times out or is stopped) and the sandbox refused a
+  `docker` it ran (`GateResult.dockerRefused`), the switch stays off and the gate is not run again; the failed result is the
+  one answered. The project gets one Inbox card (`raiseDockerMayBeNeededNote`, fold key `docker-needed:<projectId>`)
+  saying the gate ran docker, which the sandbox refused, and failed (`dockerRefused` shows the shim ran, not that it is
+  why the gate failed), and that Settings › General has the switch. Its answers are the builder's decision, applied in the
+  answer's transaction as Settings does: Turn Docker on sets the switch, Keep it off sets it off and so records
+  `sandbox_docker_opt_out`. A project whose builder turned Docker off gets no card, and once the builder answered one
+  (`hasAnsweredByFoldKey`), no later refusal raises another, so the card never comes back
+  (`decisions/2026-10-31-notices-not-cards.md`). This **replaces** an earlier trigger that turned the switch on after a refusal and reran the gate:
+  the gate runs lane-written code, so a lane only had to add a test that runs `docker` to give itself the socket, which can
+  mount any host folder. The earlier acceptance criterion in tsk_01a1bd0f that asked for it is withdrawn.
 
 - Every gate gets the switch as it stands in the database when it starts, whatever the request was built from, so turning it
   on or off takes effect on the next gate without a restart. A lane reads it before each session, as the localhost switch.
@@ -50,13 +60,12 @@
   with it on the gate and lanes are outside the sandbox's file and secrets rules. That is why the switch is off by default and
   the builder can turn it off.
 - **The risk of 10db turning it on itself.** A lane can write the checkout, so a lane could write a test that runs `docker` and
-  have its gate "refused" into turning Docker on. The first trigger reads the base branch's commit, not the working tree, so
-  a lane's edit is not what shows the need there. The second (a refused `docker`) is the builder's own condition ("gate fails only
-  because Docker was refused") and rests on a marker the gate's sandbox writes, which the gate can write itself; it is limited
-  by the one card that says it happened, the builder's off switch that 10db respects, and by being the builder's chosen
-  behaviour. A stricter rule (turn it on only for a need the base shows) was not chosen because it would leave a project whose
-  tests start containers with the failure the task exists to remove.
+  have its gate "refused" into turning Docker on. So the only trigger reads `origin/<base>`'s commit, not the working tree or
+  the local branch, and a lane's edit is not what shows the need. A refused `docker` leaves a note instead (see above): a
+  project whose tests start containers gets a failing gate and a note pointing to the switch, and the builder decides.
 - Turned down: one app-wide switch (the gate sandbox is app-wide, which is the problem); opening `~/.docker` whole (it can hold
-  registry credentials in `auths`); passing `DOCKER_CONFIG`; a notice instead of a card (the note has an answer).
+  registry credentials in `auths`); passing `DOCKER_CONFIG`; a notice instead of a card, for either card (each has answers the daemon acts on); a "may
+  need Docker" note with no answers (a dismiss-only card, which the notices decision rules out, and it would come back
+  after every dismissal).
 - Not verified here: that a Codex lane's own sandbox reaches the socket, and the CLI's behaviour when `~/.docker/buildx` is not
   writable (a `docker compose build` may fail). The profile gives Codex the same sockets as Claude Code; a live run is the check.
