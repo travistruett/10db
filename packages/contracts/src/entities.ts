@@ -411,6 +411,11 @@ export const ProjectDto = z.object({
    * back. Null with a `movedFromAccountId` when nobody said; 10db then asks after its default pause.
    */
   moveBackAt: Timestamp.nullable(),
+  /**
+   * The move was caused by a usage limit, so 10db moves the project back by itself once the limit has
+   * reset. False for a move the builder made by hand: 10db then asks.
+   */
+  moveBackAutomatic: z.boolean(),
   fallbackAccountId: AccountId.nullable(),
   usageHandoffAt: z.number(),
   handoffPct: z.int(),

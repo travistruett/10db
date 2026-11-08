@@ -58,6 +58,7 @@ import {
   createModelListWait,
   createListRefresh,
   createMoveBack,
+  MoveCause,
   createStartGate,
   createUsageReports,
   type AccountLimits,
@@ -954,6 +955,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     pauses: accountPauses,
     reports,
     defaultPauseMs: opts.defaultPauseMs ?? DEFAULTS.defaultPauseMs,
+    back: (projectId, to) => {
+      moves.move(projectId, to, { cause: MoveCause.MoveBack });
+    },
   });
   const moves = createAccountMoves({
     state,

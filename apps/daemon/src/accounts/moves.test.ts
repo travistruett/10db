@@ -17,9 +17,12 @@ import {
   getAccount,
   getAccountRow,
   getProject,
+  listEventsAfter,
   listInbox,
   seedAccount,
   seedProject,
+  setMoveBack,
+  patchProject,
   type Store,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -42,7 +45,7 @@ import {
   type AccountRuntime,
   type MoveBack,
 } from './index';
-import { recordedCard, refusedCard, usageHighCard } from './cards';
+import { movedCard, recordedCard, refusedCard, usageHighCard } from './cards';
 import type { PauseRequest } from './pauses';
 
 const DEFAULT_PAUSE_MS = 30 * 60_000;
@@ -88,6 +91,9 @@ function build(): void {
     pauses,
     reports: createUsageReports({ clock, staleMs: DEFAULT_PAUSE_MS }),
     defaultPauseMs: DEFAULT_PAUSE_MS,
+    back: (projectId, to) => {
+      moves.move(projectId, to, { cause: MoveCause.MoveBack });
+    },
   });
   moves = createAccountMoves({
     state,
@@ -218,7 +224,7 @@ describe('moving a project', () => {
 
   it('stays where it is on Stay, and forgets the move back', () => {
     runtime.rateLimited(plan, inMinutes(60), project.id);
-    inbox.answer(limitCard().id, { choice: CONTINUE });
+    moves.move(project.id, second.id, { cause: MoveCause.Builder });
     clock.advance(60 * 60_000);
     inbox.answer(backCard().id, { choice: AccountCardChoice.Stay });
     expect(getProject(state.db, project.id)).toMatchObject({
@@ -228,10 +234,10 @@ describe('moving a project', () => {
     });
   });
 
-  it('waits while the account it left is still paused, and asks when that pause ends', () => {
+  it('waits while the account the builder left is still paused, and asks when that pause ends', () => {
     const stayer = seedProject(store, { name: 'stayer' });
     runtime.rateLimited(plan, inMinutes(60), project.id);
-    inbox.answer(limitCard().id, { choice: CONTINUE });
+    moves.move(project.id, second.id, { cause: MoveCause.Builder });
     // A session of a project still on the account meets the limit again, later.
     runtime.rateLimited(plan, inMinutes(120), stayer.id);
     clock.advance(60 * 60_000);
@@ -242,27 +248,25 @@ describe('moving a project', () => {
     expect(backCard().projectId).toBe(project.id);
   });
 
-  it('asks after the default pause, and says so, when nobody reported when the limit resets', () => {
-    moves.move(project.id, second.id, {
-      cause: MoveCause.UsageLimit,
-      resetsAt: null,
-      handOff: false,
+  it('asks, and says so, when a move back is due and nobody reported when the limit resets', () => {
+    // A move recorded before the move back was automatic, with no reset time.
+    state.write((ctx) => {
+      patchProject(ctx, project.id, { accountId: second.id });
+      setMoveBack(ctx, project.id, { accountId: plan, at: null });
     });
-    expect(getProject(state.db, project.id)).toMatchObject({
-      movedFromAccountId: plan,
-      moveBackAt: null,
-    });
+    moveBack.arm(project.id);
     clock.advance(DEFAULT_PAUSE_MS - 1);
     expect(
       findOpenByFoldKey(state.db, project.id, accountFoldKey(plan, MOVE_BACK_CARD)),
     ).toBeUndefined();
     clock.advance(1);
     expect(backCard().body).toContain("10db doesn't know whether that limit has reset");
+    expect(getProject(state.db, project.id).accountId).toBe(second.id);
   });
 
-  it('raises a move back that came due while the daemon was down', () => {
+  it('raises the card of a hand move whose move back came due while the daemon was down', () => {
     runtime.rateLimited(plan, inMinutes(60), project.id);
-    inbox.answer(limitCard().id, { choice: CONTINUE });
+    moves.move(project.id, second.id, { cause: MoveCause.Builder });
     moveBack.stop();
     pauses.stop();
     clock.advance(90 * 60_000);
@@ -339,7 +343,7 @@ describe('moving a project', () => {
   it('withdraws an open move-back card when the project moves again', () => {
     const third = seedAccount(store, { kind: 'claude_subscription', label: 'Third plan' });
     runtime.rateLimited(plan, inMinutes(60), project.id);
-    inbox.answer(limitCard().id, { choice: CONTINUE });
+    moves.move(project.id, second.id, { cause: MoveCause.Builder });
     clock.advance(60 * 60_000);
     const back = backCard();
     moves.move(project.id, third.id, { cause: MoveCause.Builder });
@@ -415,23 +419,19 @@ describe('moving a project', () => {
         clock.advance(DEFAULT_PAUSE_MS);
       },
     ],
-  ])(
-    'asks to move back only once the pause holding an account held by %s lifts',
-    (_name, held, lift) => {
-      const back = () =>
-        findOpenByFoldKey(state.db, project.id, accountFoldKey(plan, MOVE_BACK_CARD));
-      pauses.pause(plan, held, { projectId: project.id, card: null });
-      runtime.rateLimited(plan, inMinutes(60), project.id);
-      inbox.answer(limitCard().id, { choice: CONTINUE });
-      // Past the usage limit's reset and the default pause, the account the project left is still held.
-      clock.advance(60 * 60_000);
-      clock.advance(DEFAULT_PAUSE_MS);
-      expect(back()).toBeUndefined();
+  ])('moves back only once the pause holding an account held by %s lifts', (_name, held, lift) => {
+    pauses.pause(plan, held, { projectId: project.id, card: null });
+    runtime.rateLimited(plan, inMinutes(60), project.id);
+    inbox.answer(limitCard().id, { choice: CONTINUE });
+    // Past the usage limit's reset and the default pause, the account the project left is still held.
+    clock.advance(60 * 60_000);
+    clock.advance(DEFAULT_PAUSE_MS);
+    expect(getProject(state.db, project.id).accountId).toBe(second.id);
 
-      lift();
-      expect(back()?.title).toBe('Claude plan is available again: move demo back?');
-    },
-  );
+    lift();
+    expect(getProject(state.db, project.id).accountId).toBe(plan);
+    expect(openCards()).toEqual([]);
+  });
 
   it('closes a limit card when its pause ends, so a later answer moves nothing', () => {
     runtime.rateLimited(plan, inMinutes(60), project.id);
@@ -504,6 +504,166 @@ describe('moving a project', () => {
     runtime.rateLimited(plan, inMinutes(90), project.id);
     expect(() => inbox.answer(card.id, { choice: CONTINUE })).toThrow(InvalidError);
     expect(getProject(state.db, project.id).accountId).toBe(plan);
+  });
+});
+
+describe('moving back by itself', () => {
+  /** The `project.changed` events that name a move back, with the accounts they name. */
+  const movedBackEvents = () =>
+    listEventsAfter(state.db, 0, 10_000).filter(
+      (e) => e.entityId === project.id && e.data['movedBack'] !== undefined,
+    );
+
+  it('returns a project that left for its usage limit once the limit resets, with no card and no hand-off', () => {
+    moves.move(project.id, second.id, {
+      cause: MoveCause.UsageLimit,
+      resetsAt: inMinutes(60),
+      handOff: false,
+    });
+    const movedTicks = ticks;
+    clock.advance(60 * 60_000 - 1);
+    expect(getProject(state.db, project.id).accountId).toBe(second.id);
+    clock.advance(1);
+    expect(getProject(state.db, project.id)).toMatchObject({
+      accountId: plan,
+      movedFromAccountId: null,
+      moveBackAt: null,
+    });
+    expect(openCards()).toEqual([]);
+    expect(handOffs).toEqual([]);
+    // The scheduler looks again, so a lane's next session runs on the plan.
+    expect(ticks).toBe(movedTicks + 1);
+    expect(movedBackEvents().map((e) => e.data['movedBack'])).toEqual([
+      { fromAccountId: second.id, toAccountId: plan },
+    ]);
+  });
+
+  it('returns a project whose limit card the builder answered, which is still a move for the limit', () => {
+    runtime.rateLimited(plan, inMinutes(60), project.id);
+    inbox.answer(limitCard().id, { choice: CONTINUE });
+    clock.advance(60 * 60_000);
+    expect(getProject(state.db, project.id).accountId).toBe(plan);
+    expect(openCards()).toEqual([]);
+  });
+
+  it('returns a project that waited the default pause when nobody reported when the limit resets', () => {
+    moves.move(project.id, second.id, {
+      cause: MoveCause.UsageLimit,
+      resetsAt: null,
+      handOff: false,
+    });
+    clock.advance(DEFAULT_PAUSE_MS - 1);
+    expect(getProject(state.db, project.id).accountId).toBe(second.id);
+    clock.advance(1);
+    expect(getProject(state.db, project.id).accountId).toBe(plan);
+    expect(openCards()).toEqual([]);
+  });
+
+  it('leaves a project the builder moved by hand where it is, and still asks about it', () => {
+    runtime.rateLimited(plan, inMinutes(60), project.id);
+    moves.move(project.id, second.id, { cause: MoveCause.Builder });
+    clock.advance(24 * 60 * 60_000);
+    expect(getProject(state.db, project.id).accountId).toBe(second.id);
+    expect(movedBackEvents()).toEqual([]);
+    expect(backCard().projectId).toBe(project.id);
+  });
+
+  it('leaves a project the builder moved by hand where it is when the account was not at a limit', () => {
+    moves.move(project.id, second.id, { cause: MoveCause.Builder });
+    clock.advance(24 * 60 * 60_000);
+    expect(getProject(state.db, project.id).accountId).toBe(second.id);
+    expect(openCards()).toEqual([]);
+  });
+
+  it('keeps a hand move after an automatic one: the later move decides', () => {
+    const third = seedAccount(store, { kind: 'claude_subscription', label: 'Third plan' });
+    moves.move(project.id, second.id, {
+      cause: MoveCause.UsageLimit,
+      resetsAt: inMinutes(60),
+      handOff: false,
+    });
+    moves.move(project.id, third.id, { cause: MoveCause.Builder });
+    clock.advance(24 * 60 * 60_000);
+    expect(getProject(state.db, project.id).accountId).toBe(third.id);
+    expect(movedBackEvents()).toEqual([]);
+  });
+
+  it('stays on the fallback while the account it left is paused, and goes back when that pause ends', () => {
+    const stayer = seedProject(store, { name: 'stayer' });
+    runtime.rateLimited(plan, inMinutes(60), project.id);
+    inbox.answer(limitCard().id, { choice: CONTINUE });
+    // A session of a project still on the account meets the limit again, later.
+    runtime.rateLimited(plan, inMinutes(120), stayer.id);
+    clock.advance(60 * 60_000);
+    expect(getProject(state.db, project.id).accountId).toBe(second.id);
+    clock.advance(60 * 60_000);
+    expect(getProject(state.db, project.id).accountId).toBe(plan);
+  });
+
+  it('stays on the fallback while the account it left is archived, and forgets the move back', () => {
+    const old = seedAccount(store, { kind: 'claude_subscription', label: 'Old plan' });
+    moves.move(project.id, old.id, { cause: MoveCause.Builder });
+    moves.move(project.id, second.id, {
+      cause: MoveCause.UsageLimit,
+      resetsAt: inMinutes(60),
+      handOff: false,
+    });
+    state.write((ctx) => archiveAccount(ctx, old.id));
+    clock.advance(60 * 60_000);
+    expect(getProject(state.db, project.id)).toMatchObject({
+      accountId: second.id,
+      movedFromAccountId: null,
+    });
+    expect(movedBackEvents()).toEqual([]);
+  });
+
+  it('goes back after the next start when the move back came due while the daemon was stopped', () => {
+    moves.move(project.id, second.id, {
+      cause: MoveCause.UsageLimit,
+      resetsAt: inMinutes(60),
+      handOff: false,
+    });
+    moveBack.stop();
+    pauses.stop();
+    clock.advance(90 * 60_000);
+    expect(getProject(state.db, project.id).accountId).toBe(second.id);
+    build();
+    pauses.restore();
+    moveBack.restore();
+    expect(getProject(state.db, project.id).accountId).toBe(plan);
+    expect(openCards()).toEqual([]);
+  });
+
+  it('does not go back once the builder chose Stay', () => {
+    moves.move(project.id, second.id, {
+      cause: MoveCause.UsageLimit,
+      resetsAt: inMinutes(60),
+      handOff: false,
+    });
+    moves.stay(project.id);
+    clock.advance(60 * 60_000);
+    expect(getProject(state.db, project.id).accountId).toBe(second.id);
+  });
+
+  it('withdraws the card that told the builder about the move', () => {
+    const moved = inbox.flag({
+      projectId: project.id,
+      workstreamId: null,
+      ...movedCard(
+        project,
+        getAccountRow(state.db, plan),
+        getAccount(state.db, second.id),
+        { status: 'rejected', utilization: 1, limitType: 'five_hour', resetsAt: inMinutes(60) },
+        [],
+      ),
+    });
+    moves.move(project.id, second.id, {
+      cause: MoveCause.UsageLimit,
+      resetsAt: inMinutes(60),
+      handOff: false,
+    });
+    clock.advance(60 * 60_000);
+    expect(openCards().map((c) => c.id)).not.toContain(moved.id);
   });
 });
 

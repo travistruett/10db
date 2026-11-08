@@ -383,6 +383,7 @@ describe('worktree mode contracts', () => {
       accountId: mintId('Account'),
       movedFromAccountId: null,
       moveBackAt: null,
+      moveBackAutomatic: false,
       fallbackAccountId: null,
       usageHandoffAt: 0.9,
       handoffPct: 40,
