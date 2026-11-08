@@ -1,6 +1,7 @@
 import {
   ROLE_SCORE,
   ScoreKind,
+  type AccountModelDto,
   type ModelProfileDto,
   type StepRole,
   type WorkstreamStep,
@@ -21,6 +22,11 @@ export interface RouteInput {
    * scores highest, since the builder asked for that pool.
    */
   readonly shortfall: 'refuse' | 'strongest';
+  /**
+   * The account's own list. Where it prices a model, the ceiling is compared with the cost per task scaled to
+   * that price (`costOn`); without it, or for a model it prices at nothing, with the maker's figure.
+   */
+  readonly accountModels?: readonly AccountModelDto[];
 }
 
 export interface RouteChoice {
@@ -54,14 +60,43 @@ function measured(profiles: readonly ModelProfileDto[], kind: ScoreKind): ModelP
   return profiles.filter((p) => score(p, kind) !== null && p.costPerTaskUsd !== null);
 }
 
-const preference = (kind: ScoreKind) => (a: ModelProfileDto, b: ModelProfileDto) =>
-  (a.costPerTaskUsd ?? 0) - (b.costPerTaskUsd ?? 0) ||
-  (b.outputTokensPerSecond ?? 0) - (a.outputTokensPerSecond ?? 0) ||
-  (score(a, kind) ?? 0) - (score(b, kind) ?? 0);
+/**
+ * What a task costs on the account, for comparing with the budget ceiling. AA's cost per task is at the maker's
+ * list price; an account that pays per token and prices its own copy of the model differently scales it by its
+ * output price over the maker's. An account with no price of its own (a subscription, where a ceiling measures how
+ * heavy a model is), a model the account does not list, or one with no maker price keeps the maker's figure.
+ */
+function costOn(
+  p: ModelProfileDto,
+  accountModels: readonly AccountModelDto[] | undefined,
+): number | null {
+  if (p.costPerTaskUsd === null) return null;
+  const own = accountModels?.find((m) => m.model === p.model)?.outputPrice ?? null;
+  if (own === null || p.outputPrice === null || p.outputPrice === 0) return p.costPerTaskUsd;
+  return p.costPerTaskUsd * (own / p.outputPrice);
+}
 
-const withinCeiling = (p: ModelProfileDto, ceiling: number | null) =>
-  ceiling === null || (p.costPerTaskUsd ?? 0) <= ceiling;
+const preference =
+  (kind: ScoreKind, accountModels?: readonly AccountModelDto[]) =>
+  (a: ModelProfileDto, b: ModelProfileDto) =>
+    (costOn(a, accountModels) ?? 0) - (costOn(b, accountModels) ?? 0) ||
+    (b.outputTokensPerSecond ?? 0) - (a.outputTokensPerSecond ?? 0) ||
+    (score(a, kind) ?? 0) - (score(b, kind) ?? 0);
+
+const withinCeiling = (
+  p: ModelProfileDto,
+  ceiling: number | null,
+  accountModels?: readonly AccountModelDto[],
+) => ceiling === null || (costOn(p, accountModels) ?? 0) <= ceiling;
 const dollars = (n: number) => `$${String(n)}`;
+
+/** The cost a reason names beside the ceiling, when the account's price made it differ from the maker's figure. */
+const costNote = (p: ModelProfileDto, accountModels?: readonly AccountModelDto[]): string => {
+  const cost = costOn(p, accountModels);
+  return cost === null || cost === p.costPerTaskUsd
+    ? ''
+    : ` (${dollars(Number(cost.toPrecision(6)))} a task on this account)`;
+};
 
 /**
  * The score a routing call compares on: the role's own, unless some costed profile
@@ -87,29 +122,32 @@ export function route(input: RouteInput): RouteChoice {
   if (candidates.length === 0)
     throw new UnmeasuredError(`No profile has a ${kind} score yet`, kind);
   const minimum = Math.max(input.need, input.floor.minimum);
-  const able = candidates.filter((p) => (score(p, kind) ?? 0) >= minimum).sort(preference(kind));
-  const best = able.find((p) => withinCeiling(p, input.budgetCeiling)) ?? able[0];
+  const priced = input.accountModels;
+  const able = candidates
+    .filter((p) => (score(p, kind) ?? 0) >= minimum)
+    .sort(preference(kind, priced));
+  const best = able.find((p) => withinCeiling(p, input.budgetCeiling, priced)) ?? able[0];
   if (!best) {
     if (input.shortfall === 'refuse')
       throw new NoProfileError(`No profile reaches ${String(minimum)} ${kind}`);
     const strongest = [...candidates].sort(
-      (a, b) => (score(b, kind) ?? 0) - (score(a, kind) ?? 0) || preference(kind)(a, b),
+      (a, b) => (score(b, kind) ?? 0) - (score(a, kind) ?? 0) || preference(kind, priced)(a, b),
     )[0];
     if (!strongest) throw new NoProfileError(`No profile reaches ${String(minimum)} ${kind}`);
     return {
       profile: strongest,
       score: kind,
-      overBudget: !withinCeiling(strongest, input.budgetCeiling),
+      overBudget: !withinCeiling(strongest, input.budgetCeiling, priced),
       reason: `by score: none reaches ${String(minimum)} ${kind}, so the highest scoring`,
     };
   }
-  const overBudget = !withinCeiling(best, input.budgetCeiling);
+  const overBudget = !withinCeiling(best, input.budgetCeiling, priced);
   const fellBack = kind === own ? '' : ` (AA gives no ${own} score; compared on ${kind})`;
   const floor =
     input.floor.why && input.floor.minimum > input.need ? ` (floor: ${input.floor.why})` : '';
   const budget =
     overBudget && input.budgetCeiling !== null
-      ? `; over the budget ceiling of ${dollars(input.budgetCeiling)}`
+      ? `; over the budget ceiling of ${dollars(input.budgetCeiling)}${costNote(best, priced)}`
       : '';
   return {
     profile: best,
@@ -124,6 +162,8 @@ export interface EscalateInput {
   readonly profiles: readonly ModelProfileDto[];
   /** Why the step is being retried, as a phrase: "the gate failed". */
   readonly why: string;
+  /** The account's own list, as on `RouteInput`. */
+  readonly accountModels?: readonly AccountModelDto[];
 }
 
 /** One rung up the role defaults' ladder, for a profile with nothing to compare on; the ceiling has no cost to apply. */
@@ -175,8 +215,8 @@ export function escalateStep(
     (p) => (score(p, step.score) ?? 0) > level,
   );
   const next = stronger
-    .filter((p) => withinCeiling(p, input.budgetCeiling))
-    .sort(preference(step.score))[0];
+    .filter((p) => withinCeiling(p, input.budgetCeiling, input.accountModels))
+    .sort(preference(step.score, input.accountModels))[0];
   if (!next) {
     const limit =
       input.budgetCeiling === null || stronger.length === 0

@@ -818,7 +818,12 @@ export function createRunner(opts: RunnerOptions): Runner {
         task: getTask(db, row.taskId),
         project,
       },
-      escalate: { budgetCeiling: project.budgetCeiling, profiles: inputs.profiles, why },
+      escalate: {
+        budgetCeiling: project.budgetCeiling,
+        profiles: inputs.profiles,
+        ...(inputs.accountModels === undefined ? {} : { accountModels: inputs.accountModels }),
+        why,
+      },
     });
     return { step: result.step, moved: result.escalated };
   }
