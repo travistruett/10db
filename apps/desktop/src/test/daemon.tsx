@@ -87,6 +87,10 @@ export function baseHandlers(
     http.get(daemonUrl('/projects/:projectId/small-proposal-limit', base), () =>
       HttpResponse.json({ limit: 1200 }),
     ),
+    // Settings › Areas and hazards lists what 10db added to the hazards by itself; nothing yet.
+    http.get(daemonUrl('/projects/:projectId/hazard-assessment', base), () =>
+      HttpResponse.json({ additions: [], assessedAt: null, commit: null, pendingRemovals: 0 }),
+    ),
     // The model list and the role settings and patterns of Settings › Team and Personas and flows; none yet.
     http.get(daemonUrl('/models', base), () => HttpResponse.json([])),
     // and what each account offers, which an account's tier overrides read; none yet.

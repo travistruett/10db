@@ -13,6 +13,7 @@ import {
 } from '@mantine/core';
 import { useState } from 'react';
 import { usePatchProject } from '../../daemon/queries';
+import { HazardAdditions } from './hazard-additions';
 import { describePathPattern } from './path-pattern';
 
 interface PathsDraft {
@@ -98,9 +99,22 @@ export function ProjectAreas({ project }: { readonly project: ProjectDto }) {
   const [areas, setAreas] = useState(() => areaDrafts(project));
   const [hazards, setHazards] = useState(() => hazardDrafts(project));
   const [problem, setProblem] = useState<string | null>(null);
-  const changed =
-    JSON.stringify([areas, hazards]) !==
-    JSON.stringify([areaDrafts(project), hazardDrafts(project)]);
+  // 10db adds to the hazards by itself, so the project can change while this page is open. Drafts the
+  // builder has not touched follow it; edited ones stay, with a note that Save would replace the change.
+  const stored = JSON.stringify([areaDrafts(project), hazardDrafts(project)]);
+  const [seen, setSeen] = useState(stored);
+  const [outdated, setOutdated] = useState(false);
+  if (stored !== seen) {
+    setSeen(stored);
+    const current = JSON.stringify([areas, hazards]);
+    if (current === seen) {
+      setAreas(areaDrafts(project));
+      setHazards(hazardDrafts(project));
+    } else if (current !== stored) {
+      setOutdated(true);
+    }
+  }
+  const changed = JSON.stringify([areas, hazards]) !== stored;
 
   const save = () => {
     const result = toPatch(areas, hazards);
@@ -109,6 +123,7 @@ export function ProjectAreas({ project }: { readonly project: ProjectDto }) {
       return;
     }
     setProblem(null);
+    setOutdated(false);
     patch.mutate(result.patch);
   };
   const setArea = (index: number, next: Partial<AreaDraft>) => {
@@ -210,6 +225,23 @@ export function ProjectAreas({ project }: { readonly project: ProjectDto }) {
           migrations. A task that touches one, or runs one of its commands, waits for the task that
           holds it.
         </Text>
+        <HazardAdditions project={project} />
+        {outdated ? (
+          <Alert color="yellow" title="The hazards changed while you were editing">
+            Saving now replaces what changed.{' '}
+            <Button
+              variant="subtle"
+              size="compact-sm"
+              onClick={() => {
+                setAreas(areaDrafts(project));
+                setHazards(hazardDrafts(project));
+                setOutdated(false);
+              }}
+            >
+              Discard my edits and show the latest
+            </Button>
+          </Alert>
+        ) : null}
         {hazards.length === 0 ? <Text c="dimmed">No hazards.</Text> : null}
         {hazards.map((hazard, index) => (
           <Stack key={index} gap={4}>
