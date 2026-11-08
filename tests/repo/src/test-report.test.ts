@@ -352,6 +352,8 @@ describe('scripts/test-report.mjs', () => {
       expect.stringContaining('run download 1 -R owner/repo -p test-timings-*'),
     ]);
     expect(calls.some((args) => args.startsWith(artifacts(4)))).toBe(false);
+    // The report compares with any run on main, green or not.
+    expect(calls.find((args) => args.startsWith(runs))).not.toContain('status=');
     expect(result.stdout).toContain('| Tests added | +1 |');
     expect(result.stdout).toContain('| Seconds added | +0.5 s |');
   });
@@ -361,6 +363,14 @@ describe('scripts/test-report.mjs', () => {
     expect(result.status).toBe(0);
     expect(result.stdout.startsWith(COMMENT_MARKER)).toBe(true);
     expect(result.stdout).toContain('| Test lines per code line | 4.00 (4 test, 1 code) |');
+    expect(result.stdout).toContain('No usable timings from `main`');
+  });
+
+  it('still reports when GitHub lists runs in a shape it does not know', () => {
+    const result = report(() => [
+      { args: runs, stdout: JSON.stringify({ workflow_runs: [{ id: 1 }] }) },
+    ]);
+    expect(result.status).toBe(0);
     expect(result.stdout).toContain('No usable timings from `main`');
   });
 

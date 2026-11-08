@@ -1,4 +1,4 @@
-.PHONY: setup gate check check-changed precheck rust-check deny github-settings live-acceptance install-app rollback-app
+.PHONY: setup gate check check-changed precheck rust-check deny github-settings shard-weights live-acceptance install-app rollback-app
 
 TAURI_DIR := apps/desktop/src-tauri
 # install-app takes REF from the make command line only; a REF exported by the shell is ignored.
@@ -41,6 +41,11 @@ deny:
 ## run by hand once the repository exists, never in CI.
 github-settings:
 	node scripts/github-settings.mjs
+
+## shard-weights: rewrite tests/repo/src/shard-weights.ts from the newest three green runs on main
+## that left every test shard's timings. Needs gh signed in; run by hand and commit the result.
+shard-weights:
+	node scripts/shard-weights.mjs
 
 ## install-app: install 10db as GitHub built it from REF (default main); quit 10db first. Never
 ## builds on this Mac; backs up the database and keeps the current app zipped in 10db-previous.
