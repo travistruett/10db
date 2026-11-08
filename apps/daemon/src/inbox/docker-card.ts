@@ -11,18 +11,17 @@ export const DockerChoice = {
 } as const;
 export type DockerChoice = (typeof DockerChoice)[keyof typeof DockerChoice];
 
-/** Why 10db turned Docker on. */
+/**
+ * Why 10db turned Docker on: only what the committed base branch shows. A docker call a gate ran
+ * and the sandbox refused is not a reason, because lane-written code can make one.
+ */
 export const DockerWhy = {
-  /** A gate ran docker and the sandbox refused it. */
-  Refused: 'refused',
   /** The gate command or its Makefile target was seen to call docker. */
   Called: 'called',
 } as const;
 export type DockerWhy = (typeof DockerWhy)[keyof typeof DockerWhy];
 
 const REASON: Readonly<Record<DockerWhy, string>> = {
-  [DockerWhy.Refused]:
-    'The gate ran docker and the sandbox refused it, so the gate failed. 10db turned Docker on and ran the gate again.',
   [DockerWhy.Called]:
     "The project's gate command (or the Makefile target or script it runs) calls docker, which a sandboxed gate can't run without it.",
 };
@@ -62,6 +61,28 @@ export function raiseDockerOnNote(
     recommendation: DockerChoice.Keep,
     detail: { [DOCKER_DETAIL]: true },
     foldKey: `docker-on:${input.project.id}`,
+  });
+}
+
+/**
+ * The one note a refused docker leaves. A refusal turns nothing on and reruns nothing: the gate runs
+ * lane-written code, so the builder decides whether the project gets Docker. The note says the gate
+ * asked for it and where the switch is; it has no answer the daemon acts on.
+ */
+export function raiseDockerMayBeNeededNote(
+  deps: { readonly inbox: InboxService },
+  input: { readonly project: { readonly id: ProjectId; readonly name: string } },
+): InboxItemDto {
+  return deps.inbox.flag({
+    projectId: input.project.id,
+    workstreamId: null,
+    title: `${input.project.name} may need Docker`,
+    body: [
+      'A gate ran docker and the sandbox refused it, so the gate failed. The gate asked for Docker.',
+      'Docker is off for this project. It can mount any host folder into a container, so a gate or lane with Docker can reach outside the sandbox, and 10db does not turn it on because a gate asked.',
+      'If this project needs it, Settings › General has the switch.',
+    ].join('\n'),
+    foldKey: `docker-needed:${input.project.id}`,
   });
 }
 

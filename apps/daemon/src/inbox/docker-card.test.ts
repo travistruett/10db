@@ -2,7 +2,12 @@ import { InboxState } from '@10db/contracts';
 import { autoEnableDocker, createTestStore, getProject, seedProject, type Store } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createEventBus, createStateStore, type StateStore } from '../events';
-import { DockerChoice, DockerWhy, raiseDockerOnNote } from './docker-card';
+import {
+  DockerChoice,
+  DockerWhy,
+  raiseDockerMayBeNeededNote,
+  raiseDockerOnNote,
+} from './docker-card';
 import { createInboxService, type InboxService } from './service';
 
 let close: () => void;
@@ -29,32 +34,38 @@ function enabled(why: DockerWhy) {
 
 describe('the note that 10db turned Docker on', () => {
   it('says what it did and why, warns that Docker reaches outside the sandbox, and offers to turn it off', () => {
-    const { card, project } = enabled(DockerWhy.Refused);
+    const { card, project } = enabled(DockerWhy.Called);
     expect(card.kind).toBe('flag');
     expect(card.projectId).toBe(project.id);
     expect(card.title).toContain('Docker');
-    expect(card.body).toContain('refused');
+    expect(card.body).toContain('calls docker');
     expect(card.body).toMatch(/mount any host folder/);
     expect(card.options.map((o) => o.label)).toEqual([DockerChoice.Keep, DockerChoice.TurnOff]);
-  });
-
-  it('gives a different reason when the gate was seen to call docker', () => {
-    const { card } = enabled(DockerWhy.Called);
-    expect(card.body).toContain('calls docker');
-    expect(card.body).not.toContain('refused');
   });
 
   it('leaves one note, however many times it is raised for the project', () => {
     const { card, project } = enabled(DockerWhy.Called);
     const again = raiseDockerOnNote(
       { inbox },
-      { project: { id: project.id, name: project.name }, why: DockerWhy.Refused },
+      { project: { id: project.id, name: project.name }, why: DockerWhy.Called },
     );
     expect(again.id).toBe(card.id);
   });
 
+  it('leaves one separate note when a gate asked for Docker, and changes no setting', () => {
+    const project = seedProject(store);
+    const input = { project: { id: project.id, name: project.name } };
+    const card = raiseDockerMayBeNeededNote({ inbox }, input);
+    expect(card.projectId).toBe(project.id);
+    expect(card.title).toContain('may need Docker');
+    expect(card.body).toContain('asked for Docker');
+    expect(card.body).toContain('Settings');
+    expect(raiseDockerMayBeNeededNote({ inbox }, input).id).toBe(card.id);
+    expect(getProject(state.db, project.id).sandboxDocker).toBe(false);
+  });
+
   it('keeps Docker on when the builder answers Keep it on', () => {
-    const { card, project } = enabled(DockerWhy.Refused);
+    const { card, project } = enabled(DockerWhy.Called);
     inbox.answer(card.id, { choice: DockerChoice.Keep });
     expect(getProject(state.db, project.id)).toMatchObject({
       sandboxDocker: true,
@@ -63,7 +74,7 @@ describe('the note that 10db turned Docker on', () => {
   });
 
   it('turns Docker off, as a choice 10db keeps, when the builder answers Turn it off', () => {
-    const { card, project } = enabled(DockerWhy.Refused);
+    const { card, project } = enabled(DockerWhy.Called);
     const answered = inbox.answer(card.id, { choice: DockerChoice.TurnOff });
     expect(answered.state).toBe(InboxState.Resolved);
     expect(getProject(state.db, project.id)).toMatchObject({
