@@ -64,10 +64,26 @@ export function raiseDockerOnNote(
   });
 }
 
+const DOCKER_NEEDED_DETAIL = 'dockerNeeded';
+
+/** The answers the note a refused docker leaves offers; the card shows them as written. */
+export const DockerNeededChoice = {
+  TurnOn: 'Turn Docker on',
+  KeepOff: 'Keep it off',
+} as const;
+export type DockerNeededChoice = (typeof DockerNeededChoice)[keyof typeof DockerNeededChoice];
+
+/** The fold key of a project's note that a gate asked for Docker; one per project, ever. */
+export function dockerNeededFoldKey(projectId: ProjectId): string {
+  return `docker-needed:${projectId}`;
+}
+
 /**
  * The one note a refused docker leaves. A refusal turns nothing on and reruns nothing: the gate runs
- * lane-written code, so the builder decides whether the project gets Docker. The note says the gate
- * asked for it and where the switch is; it has no answer the daemon acts on.
+ * lane-written code, so the builder decides whether the project gets Docker. Both answers are that
+ * decision, made in Settings' terms: Turn Docker on sets the switch, Keep it off records the
+ * builder's opt-out, so the note is not raised again (`auto-docker.ts` also raises none once one was
+ * answered).
  */
 export function raiseDockerMayBeNeededNote(
   deps: { readonly inbox: InboxService },
@@ -78,24 +94,46 @@ export function raiseDockerMayBeNeededNote(
     workstreamId: null,
     title: `${input.project.name} may need Docker`,
     body: [
-      'A gate ran docker and the sandbox refused it, so the gate failed. The gate asked for Docker.',
+      'A gate ran docker, which the sandbox refused, and the gate failed. The gate asked for Docker.',
       'Docker is off for this project. It can mount any host folder into a container, so a gate or lane with Docker can reach outside the sandbox, and 10db does not turn it on because a gate asked.',
-      'If this project needs it, Settings › General has the switch.',
+      'Settings › General has the switch, or answer here.',
     ].join('\n'),
-    foldKey: `docker-needed:${input.project.id}`,
+    options: [
+      {
+        label: DockerNeededChoice.TurnOn,
+        description: 'The gate and every lane in this project can use docker compose',
+      },
+      {
+        label: DockerNeededChoice.KeepOff,
+        description:
+          'Gates and lanes keep the Docker refusal; 10db does not turn it on or ask again',
+      },
+    ],
+    recommendation: null,
+    detail: { [DOCKER_NEEDED_DETAIL]: true },
+    foldKey: dockerNeededFoldKey(input.project.id),
   });
 }
 
 /**
- * Turn it off on the note turns the project's switch off in the answer's own transaction, as the
- * builder's own setting does. Any other card, and Keep it on, is left alone.
+ * An answer on either Docker note sets the project's switch in the answer's own transaction, as the
+ * builder's own setting does: Turn it off and Keep it off turn it off as a choice 10db keeps, Turn
+ * Docker on turns it on. Any other card, and Keep it on, is left alone.
  */
 export function applyDockerChoice(
   ctx: WriteContext,
   item: InboxItemDto,
   answer: InboxAnswer,
 ): void {
-  if (item.kind !== InboxKind.Flag || item.detail?.[DOCKER_DETAIL] !== true) return;
-  if (answer.choice !== DockerChoice.TurnOff) return;
-  patchProject(ctx, item.projectId, { sandboxDocker: false });
+  if (item.kind !== InboxKind.Flag) return;
+  if (item.detail?.[DOCKER_DETAIL] === true) {
+    if (answer.choice === DockerChoice.TurnOff)
+      patchProject(ctx, item.projectId, { sandboxDocker: false });
+    return;
+  }
+  if (item.detail?.[DOCKER_NEEDED_DETAIL] !== true) return;
+  if (answer.choice === DockerNeededChoice.TurnOn)
+    patchProject(ctx, item.projectId, { sandboxDocker: true });
+  else if (answer.choice === DockerNeededChoice.KeepOff)
+    patchProject(ctx, item.projectId, { sandboxDocker: false });
 }

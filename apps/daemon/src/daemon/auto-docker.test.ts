@@ -9,7 +9,7 @@ import {
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createEventBus, createStateStore, type StateStore } from '../events';
-import { createInboxService, type InboxService } from '../inbox';
+import { createInboxService, DockerNeededChoice, type InboxService } from '../inbox';
 import { silentLogger } from '../log';
 import type { GateRequest, GateResult, GateRunner } from '../verify';
 import { autoDocker } from './auto-docker';
@@ -147,6 +147,35 @@ describe('a gate that fails because Docker was refused', () => {
   it('adds no second note for a second refusal', async () => {
     results = [refused];
     await wrapped().run(request('pnpm test'));
+    await wrapped().run(request('pnpm test'));
+    expect(needed()).toHaveLength(1);
+  });
+
+  it('raises no new note after the builder answered Keep it off', async () => {
+    results = [refused];
+    await wrapped().run(request('pnpm test'));
+    const first = needed()[0];
+    if (first === undefined) throw new Error('no note');
+    inbox.answer(first.id, { choice: DockerNeededChoice.KeepOff });
+    await wrapped().run(request('pnpm test'));
+    expect(needed()).toHaveLength(1);
+    expect(seen.map((r) => r.project.sandboxDocker)).toEqual([false, false]);
+  });
+
+  it('raises no new note once one was answered, even with the switch off and no opt-out', async () => {
+    results = [refused];
+    await wrapped().run(request('pnpm test'));
+    const first = needed()[0];
+    if (first === undefined) throw new Error('no note');
+    inbox.answer(first.id, { choice: DockerNeededChoice.TurnOn });
+    // Off again with no opt-out recorded, which no Settings path leaves; the answered note stands.
+    store.db.$client
+      .prepare('update projects set sandbox_docker = 0, sandbox_docker_opt_out = 0 where id = ?')
+      .run(project.id);
+    expect(getProject(state.db, project.id)).toMatchObject({
+      sandboxDocker: false,
+      sandboxDockerOptOut: false,
+    });
     await wrapped().run(request('pnpm test'));
     expect(needed()).toHaveLength(1);
   });

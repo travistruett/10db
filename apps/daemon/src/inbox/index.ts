@@ -1,4 +1,10 @@
-export { DockerWhy, raiseDockerMayBeNeededNote, raiseDockerOnNote } from './docker-card';
+export {
+  DockerNeededChoice,
+  DockerWhy,
+  dockerNeededFoldKey,
+  raiseDockerMayBeNeededNote,
+  raiseDockerOnNote,
+} from './docker-card';
 export { raiseGateHostCards } from './gate-host-card';
 export {
   HazardChoice,

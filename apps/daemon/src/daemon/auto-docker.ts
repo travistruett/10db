@@ -1,8 +1,9 @@
 import type { ProjectDto } from '@10db/contracts';
-import { autoEnableDocker, getProject } from '@10db/db';
+import { autoEnableDocker, getProject, hasAnsweredByFoldKey } from '@10db/db';
 import type { StateStore } from '../events';
 import {
   DockerWhy,
+  dockerNeededFoldKey,
   raiseDockerMayBeNeededNote,
   raiseDockerOnNote,
   type InboxService,
@@ -30,7 +31,8 @@ export interface AutoDockerDeps {
  *
  * A docker call the sandbox refused turns nothing on and reruns nothing: the gate runs lane-written
  * code, so a lane could cause the refusal. The failed result is the answer, and the project gets one
- * Inbox note that it may need Docker (`raiseDockerMayBeNeededNote`). A gate that names no project
+ * Inbox note that it may need Docker (`raiseDockerMayBeNeededNote`), whose answers set the switch;
+ * once one was answered, no later refusal raises another. A gate that names no project
  * (an install, a generator) runs as it was asked.
  */
 export function autoDocker(inner: GateRunner, deps: AutoDockerDeps): GateRunner {
@@ -92,7 +94,13 @@ export function autoDocker(inner: GateRunner, deps: AutoDockerDeps): GateRunner 
         !result.timedOut &&
         !result.aborted &&
         result.dockerRefused === true;
-      if (!on && !project.sandboxDockerOptOut && failedOnRefusal) {
+      // One note per project, ever: once the builder answered one, a later refusal raises none.
+      if (
+        !on &&
+        !project.sandboxDockerOptOut &&
+        failedOnRefusal &&
+        !hasAnsweredByFoldKey(deps.state.db, id, dockerNeededFoldKey(id))
+      ) {
         raiseDockerMayBeNeededNote(deps, { project: { id: project.id, name: project.name } });
         deps.logger.info({ projectId: id }, 'the gate failed on a refused docker; left a note');
       }
