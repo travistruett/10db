@@ -29,6 +29,7 @@ import {
   type AccountId,
   type AccountModelDto,
   type AccountRefusal,
+  type HandoffDto,
   type HandoffId,
   type InboxItemDto,
   type InboxItemId,
@@ -414,6 +415,12 @@ type Outcome =
       readonly providerSessionId: string | null;
     }
   | {
+      /** The step handed off again and again with nobody asking and nothing committed between. */
+      readonly kind: 'handoff_loop';
+      readonly message: string;
+      readonly providerSessionId: string | null;
+    }
+  | {
       readonly kind: 'stopped';
       readonly reason: StopReason;
       readonly providerSessionId: string | null;
@@ -543,7 +550,29 @@ interface Control {
   parked: boolean;
   /** Set while a session runs; ends its inbox waits so later answers go to the card. */
   endWaits: (() => void) | null;
+  /**
+   * The step's run of handoffs nobody asked for with no commit between them: the head they were written
+   * at and how many. Any other session ending clears it.
+   */
+  unaskedHandoffs: { readonly gitHead: string; readonly count: number } | null;
   done: Promise<void>;
+}
+
+/** How many handoffs in a row, nobody asking and no commit between them, stop a step. */
+const UNASKED_HANDOFF_LIMIT = 3;
+
+/**
+ * Counts a handoff nobody asked for into the step's run of them. A run of `UNASKED_HANDOFF_LIMIT` with no
+ * commit between is a session handing off instead of working, which another session would repeat: its
+ * failure message, naming what the last handoff said was left. Null while the run is shorter.
+ */
+function countUnaskedHandoff(ctl: Control, handoff: HandoffDto, role: StepRole): string | null {
+  const run = ctl.unaskedHandoffs;
+  const count = run !== null && run.gitHead === handoff.gitHead ? run.count + 1 : 1;
+  ctl.unaskedHandoffs = { gitHead: handoff.gitHead, count };
+  if (count < UNASKED_HANDOFF_LIMIT) return null;
+  const left = handoff.content.progress.notDone.join('; ').slice(0, 500);
+  return `The ${role} step handed off ${String(count)} times in a row with nobody asking and no commit between, so 10db stopped it instead of starting another session. Its last handoff said this was left: ${left}`;
 }
 
 /** Per-session mutable state, kept in one object so callbacks and the event loop share it. */
@@ -1307,7 +1336,8 @@ export function createRunner(opts: RunnerOptions): Runner {
         return;
       case 'refused':
       case 'background_hung':
-        // A retry would hang the same way, and the work it left is for the builder to see.
+      case 'handoff_loop':
+        // A retry would end the same way, and the work it left is for the builder to see.
         fail(id, ctl.fence, { kind: WorkstreamFailure.SessionFailed, reason: outcome.message });
         return;
       case 'crashed': {
@@ -2074,19 +2104,26 @@ export function createRunner(opts: RunnerOptions): Runner {
             const recorded = handoffForSession(db, session.id);
             const resultRecorded = () =>
               currentStep(getWorkstreamRow(db, id)).result?.sessionId === session.id;
-            // A handoff nobody asked for is a handoff only while the step's work is outstanding. One
-            // written after the work is done (some models call it to say they finished) ends the step,
-            // as ending the turn would. One that 10db asked for stands even with nothing uncommitted: the
-            // session was told to commit first and name what is left.
+            // A handoff nobody asked for stands only while the step's work is outstanding: work the
+            // handoff names as not done, or, in an edit step, changes left uncommitted. One that names
+            // nothing left is the session saying it finished (some models call it for that), so it ends
+            // the step as ending the turn would, and a read-only step with no result is asked for one.
+            // One that 10db asked for stands even with nothing uncommitted: the session was told to
+            // commit first and name what is left.
+            const asked = st.handoffRequested || st.handoffAskedByTool;
+            const leftNamed = (recorded?.content.progress.notDone.length ?? 0) > 0;
             const handoffStands =
               !!recorded &&
-              (st.handoffRequested ||
-                st.handoffAskedByTool ||
-                !(readOnly
-                  ? resultRecorded()
-                  : (await claimedChanges(getWorkstreamRow(db, id))).length === 0));
+              (asked ||
+                (readOnly
+                  ? !resultRecorded() && leftNamed
+                  : leftNamed || (await claimedChanges(getWorkstreamRow(db, id))).length > 0));
             if (recorded && handoffStands) {
-              st.outcome = { kind: 'handoff', handoffId: recorded.id };
+              const loop = asked ? null : countUnaskedHandoff(ctl, recorded, step.role);
+              if (asked) ctl.unaskedHandoffs = null;
+              st.outcome = loop
+                ? { kind: 'handoff_loop', message: loop, providerSessionId: st.providerSessionId }
+                : { kind: 'handoff', handoffId: recorded.id };
               await handle.stop();
             } else if (st.handoffRequested && !st.firmSent) {
               st.firmSent = true;
@@ -2273,6 +2310,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         ended.kind === 'crashed' ||
         ended.kind === 'refused' ||
         ended.kind === 'background_hung' ||
+        ended.kind === 'handoff_loop' ||
         (ended.kind === 'stopped' && ended.reason !== 'cancelled'));
     const outcome: Outcome =
       parkedAfterWait && st.parkedFor
@@ -2923,6 +2961,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           return;
         }
         const outcome = await runSession(id, ctl);
+        if (outcome.kind !== 'handoff') ctl.unaskedHandoffs = null;
         if (outcome.kind === 'handoff' || outcome.kind === 'moved') continue;
         if (outcome.kind === 'model_refused') {
           if (refuseModel(id, ctl, outcome) === 'retry') continue;
@@ -3017,6 +3056,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         holdAbort: null,
         parked: false,
         endWaits: null,
+        unaskedHandoffs: null,
         done: Promise.resolve(),
       };
       active.set(id, ctl);

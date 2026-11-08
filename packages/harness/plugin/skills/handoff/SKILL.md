@@ -12,7 +12,9 @@ step.
    `mcp__10db__commit`. Don't start anything new.
 2. Call `mcp__10db__write_handoff` with all six parts:
    - **objective:** the task, its acceptance criteria and the non-goals;
-   - **progress:** what is done, what is not, and the single next concrete action;
+   - **progress:** what is done, what is not, and the single next concrete action. List
+     every piece of work left under not done: a handoff that names none, unless 10db
+     asked for it, ends the step instead of starting a fresh session;
    - **code state:** a summary of anything uncommitted (10db adds files and commits
      from git itself);
    - **reasoning:** decisions, trade-offs and approaches you rejected, with why;
@@ -21,4 +23,5 @@ step.
      session must know that isn't in the code.
 3. Be specific: name files, functions and commands. "Continue the work" is not a next
    action; "Add the 409 case to `answerInbox` in `src/api/app.ts` and its test" is.
-4. After the handoff is recorded, end your turn. 10db starts the next session.
+4. After the handoff is recorded, end your turn. 10db starts the next session when it
+   asked for the handoff or the handoff names work left.
