@@ -9,6 +9,7 @@ import {
   isModelRefusal,
   missingAccountRefusal,
   modelMatches,
+  modelRefusalBasis,
   noAccountWhy,
   type SeenAccount,
 } from './account-check';
@@ -562,6 +563,56 @@ describe('isModelRefusal', () => {
     expect(
       isModelRefusal('invalid_request', 'Model claude-opus-5-5 does not exist', 'claude-opus-5'),
     ).toBe(false);
+  });
+});
+
+// The wording alone cannot tell a config error that names the model first from a real refusal, so a mark from
+// it is on probation (the account models store ends it); only Claude Code's own model_not_found is final.
+describe('modelRefusalBasis', () => {
+  const LAUNCHED = 'us.anthropic.claude-fable-5-1-v1:0';
+  it.each<[string, string | undefined, string, 'error' | 'wording' | null]>([
+    ['model_not_found, whatever it says', 'model_not_found', 'nothing useful', 'error'],
+    [
+      'a real refusal in this region, as Claude Code sends it',
+      'invalid_request',
+      `API Error: 400 Model ${LAUNCHED} is not available in this region.`,
+      'wording',
+    ],
+    [
+      'a config error: tool use with the model not supported',
+      'invalid_request',
+      `Tool use with model ${LAUNCHED} is not supported`,
+      'wording',
+    ],
+    [
+      'a config error: prompt caching for this model not supported, the ID after',
+      'invalid_request',
+      `Prompt caching for this model is not supported (${LAUNCHED})`,
+      'wording',
+    ],
+    [
+      'a config error: the model not supported for batch requests',
+      'unknown',
+      `Model ${LAUNCHED} is not supported for batch requests`,
+      'wording',
+    ],
+    [
+      'a no-access phrase naming the launch ID',
+      'unknown',
+      `You don't have access to the model with the specified model ID ${LAUNCHED}.`,
+      'wording',
+    ],
+    [
+      'a parameter that is not supported for the model',
+      'invalid_request',
+      `thinking.budget is not supported for model ${LAUNCHED}`,
+      null,
+    ],
+    ['an overloaded error naming the launch ID', 'overloaded', `${LAUNCHED} is overloaded`, null],
+    ['no error at all', undefined, `Model ${LAUNCHED} is not available`, null],
+  ])('%s', (_name, error, text, basis) => {
+    expect(modelRefusalBasis(error, text, LAUNCHED)).toBe(basis);
+    expect(isModelRefusal(error, text, LAUNCHED)).toBe(basis !== null);
   });
 });
 

@@ -1,6 +1,7 @@
 import {
   AccountKind,
   AccountProblem,
+  ModelMarkBasis,
   signsInWithLogin,
   type AccountRefusal,
   type Effort,
@@ -293,8 +294,7 @@ const CLAUSE_REACH = 160;
  * model, in the same clause. It may come wrapped as Claude Code sends it ("API Error: 400 Model X is not
  * available", or a JSON body's "message"). A config error that puts the phrase first ("thinking.budget is not
  * supported for model X") never counts. One that names the model first ("Tool use with model X is not supported")
- * still does: telling those apart needs more than the wording, so such a mark lasts only until the account's list
- * changes.
+ * still does: telling those apart needs more than the wording, so such a mark is on probation (`modelRefusalBasis`).
  */
 function saysModelUnsupported(text: string, id: string): boolean {
   return new RegExp(
@@ -310,17 +310,30 @@ function namesToken(text: string, id: string): boolean {
 }
 
 /**
- * Whether an assistant error at a session's first reply means the account cannot run the model it was launched on.
- * Claude Code names that case `model_not_found`. A gateway or Bedrock may report it as an invalid request or an
- * unknown error instead, so those count only when the text names the launched model ID as a whole token and says
- * the model is missing or off limits. Every other error (a server error, an overload, a rate limit, a credential or
- * billing error) never does, whatever it quotes.
+ * Whether an assistant error at a session's first reply means the account cannot run the model it was launched on,
+ * and what the answer rests on. Claude Code names that case `model_not_found`: `error`, final. A gateway or Bedrock
+ * may report it as an invalid request or an unknown error instead, so those count only when the text names the
+ * launched model ID as a whole token and says the model is missing or off limits: `wording`, which cannot tell a
+ * config error that names the model first ("Tool use with model X is not supported") from a real refusal ("Model X
+ * is not available in this region"), so such a mark ends on its own (`ModelMarkBasis`). Every other error (a server
+ * error, an overload, a rate limit, a credential or billing error) never counts, whatever it quotes.
  */
-export function isModelRefusal(error: string | undefined, text: string, launched: string): boolean {
-  if (error === MODEL_NOT_FOUND_ERROR) return true;
-  if (error !== 'invalid_request' && error !== 'unknown') return false;
+export function modelRefusalBasis(
+  error: string | undefined,
+  text: string,
+  launched: string,
+): ModelMarkBasis | null {
+  if (error === MODEL_NOT_FOUND_ERROR) return ModelMarkBasis.Error;
+  if (error !== 'invalid_request' && error !== 'unknown') return null;
   const id = launched.replace(CONTEXT_SUFFIX, '');
-  return namesToken(text, id) && (MODEL_UNAVAILABLE.test(text) || saysModelUnsupported(text, id));
+  return namesToken(text, id) && (MODEL_UNAVAILABLE.test(text) || saysModelUnsupported(text, id))
+    ? ModelMarkBasis.Wording
+    : null;
+}
+
+/** Whether an assistant error at a session's first reply means the account cannot run the model (see `modelRefusalBasis`). */
+export function isModelRefusal(error: string | undefined, text: string, launched: string): boolean {
+  return modelRefusalBasis(error, text, launched) !== null;
 }
 
 /** An assistant error that is the account's, not the work's. */

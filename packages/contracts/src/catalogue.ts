@@ -52,6 +52,15 @@ export function isPickableModel(status: ModelStatus | null): boolean {
   return status !== ModelStatus.Retired && status !== ModelStatus.NotRunnable;
 }
 
+/**
+ * What an account's refusal of a model rests on. Claude Code's own `model_not_found` is `error`: final until the
+ * account's list changes. An `invalid_request` or `unknown` error whose text names the model is `wording`: the words
+ * alone cannot tell a real refusal from a config error ("Tool use with model X is not supported"), so that mark ends
+ * on its own and one later session settles it.
+ */
+export const ModelMarkBasis = { Error: 'error', Wording: 'wording' } as const;
+export type ModelMarkBasis = ValueOf<typeof ModelMarkBasis>;
+
 const Timestamp = z.iso.datetime();
 
 /** What a step, role or pattern asks of the router: leave it to 10db, a tier, the best, or one model. */
@@ -132,7 +141,14 @@ export const AccountModelDto = z.object({
   /** What the account's CLI is launched with to run this model. */
   launchId: z.string().min(1),
   efforts: z.array(z.enum(Effort)),
+  /** Whether 10db routes around the model on this account now; a mark from an error's wording stops counting at its end. */
   unusable: z.boolean(),
+  /**
+   * When the mark that came from an error's wording alone ends; null when the model is not marked, or its mark is
+   * final (from `model_not_found`, or from wording that a second refusal confirmed). Past it the model is routed
+   * to again, and the next session on it either clears the mark or makes it final.
+   */
+  wordingMarkEndsAt: Timestamp.nullable(),
   /** The price of this account's own offer; null for a flat-rate plan or a gateway with no catalogue entry. */
   inputPrice: z.number().min(0).nullable(),
   /** The price of this account's own offer; null for a flat-rate plan or a gateway with no catalogue entry. */

@@ -34,6 +34,7 @@ function row(model: string, launchId: string, accountId = mintId('Account')): Ac
     launchId,
     efforts: [],
     unusable: false,
+    wordingMarkEndsAt: null,
     inputPrice: null,
     outputPrice: null,
     lastSeenAt: '2026-11-07T00:00:00.000Z',

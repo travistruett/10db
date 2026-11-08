@@ -63,6 +63,7 @@ function offer(accountId: AccountId, over: Partial<AccountModelDto> = {}): Accou
     launchId: 'claude-opus-5-5',
     efforts: ['high'],
     unusable: false,
+    wordingMarkEndsAt: null,
     inputPrice: null,
     outputPrice: null,
     lastSeenAt: AT,

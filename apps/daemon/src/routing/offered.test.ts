@@ -12,6 +12,7 @@ const offer = (model: string, over: Partial<AccountModelDto> = {}): AccountModel
   launchId: model,
   efforts: [],
   unusable: false,
+  wordingMarkEndsAt: null,
   inputPrice: null,
   outputPrice: null,
   lastSeenAt: NOW,

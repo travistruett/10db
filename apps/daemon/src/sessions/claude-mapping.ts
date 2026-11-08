@@ -6,10 +6,10 @@ import type {
   SDKMessage,
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
-import { MAX_STEP_SUMMARY } from '@10db/contracts';
+import { MAX_STEP_SUMMARY, ModelMarkBasis } from '@10db/contracts';
 import type { GuardVerdict } from '../guard';
 import { SandboxedMcpServer } from '../sandbox';
-import { isModelRefusal, MODEL_NOT_FOUND_ERROR } from './account-check';
+import { modelRefusalBasis, MODEL_NOT_FOUND_ERROR } from './account-check';
 import type {
   SessionEvent,
   SessionMcpServer,
@@ -27,18 +27,18 @@ const TURN_TEXT_CHARS = MAX_STEP_SUMMARY;
 const MILLISECONDS_FLOOR = 1e12;
 
 /**
- * Whether an assistant message shows the account cannot run the model the session launched on. The first reply
- * of a session, before any tool ran, may carry any error that names the launched model (see `isModelRefusal`);
- * Claude Code's own `model_not_found` counts wherever it comes.
+ * Whether an assistant message shows the account cannot run the model the session launched on, and what that rests
+ * on; null when it does not. The first reply of a session, before any tool ran, may carry any error that names the
+ * launched model (see `modelRefusalBasis`); Claude Code's own `model_not_found` counts wherever it comes.
  */
-export function refusesModel(
+export function modelRefusalOf(
   msg: SDKAssistantMessage,
   launched: string,
   firstReply: boolean,
-): boolean {
-  if (!firstReply) return msg.error === MODEL_NOT_FOUND_ERROR;
+): ModelMarkBasis | null {
+  if (!firstReply) return msg.error === MODEL_NOT_FOUND_ERROR ? ModelMarkBasis.Error : null;
   const text = msg.message.content.flatMap((block) => (block.type === 'text' ? [block.text] : []));
-  return isModelRefusal(msg.error, text.join('\n'), launched);
+  return modelRefusalBasis(msg.error, text.join('\n'), launched);
 }
 
 /** What a tool call is about, in a few words: the command, or the file it touches. */

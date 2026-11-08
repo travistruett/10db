@@ -343,6 +343,51 @@ describe('the Models page', () => {
     expect(within(high).getAllByText('—').length).toBeGreaterThan(0);
   });
 
+  it('says which accounts marked a model from an error’s wording, and when each mark ends', async () => {
+    const inThirty = new Date(Date.now() + 30 * 60_000).toISOString();
+    const tenAgo = new Date(Date.now() - 10 * 60_000).toISOString();
+    serve({
+      offers: [
+        accountModelDto({
+          accountId: SUBSCRIPTION.id,
+          model: 'alpha-max',
+          unusable: true,
+          wordingMarkEndsAt: inThirty,
+        }),
+        accountModelDto({
+          accountId: KEYED.id,
+          model: 'alpha-max',
+          unusable: false,
+          wordingMarkEndsAt: tenAgo,
+        }),
+      ],
+    });
+    renderWithDaemon(<ModelsSection />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Open Alpha Max' }));
+    const drawer = await screen.findByRole('dialog', { name: 'Alpha Max' });
+    const badges = await within(drawer).findAllByText('Marked from an error’s wording');
+    expect(badges).toHaveLength(2);
+    const [holding, ended] = badges.map((badge) => badge.closest('tr') as HTMLElement);
+    if (!holding || !ended) throw new Error('a mark is not in a row');
+    expect(within(holding).getByText(SUBSCRIPTION.label)).toBeTruthy();
+    expect(within(holding).getByText(/until the mark ends in 30 minutes/)).toBeTruthy();
+    expect(within(holding).queryByText('Refused by this account')).toBeNull();
+    expect(within(ended).getByText(KEYED.label)).toBeTruthy();
+    expect(within(ended).getByText(/mark ended 10 minutes ago/)).toBeTruthy();
+    expect(within(ended).getByText(/next session on it settles it/)).toBeTruthy();
+  });
+
+  it('says a refusal from model_not_found stays until the account’s list changes', async () => {
+    serve({
+      offers: [accountModelDto({ accountId: SUBSCRIPTION.id, model: 'alpha-max', unusable: true })],
+    });
+    renderWithDaemon(<ModelsSection />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Open Alpha Max' }));
+    const drawer = await screen.findByRole('dialog', { name: 'Alpha Max' });
+    expect(await within(drawer).findByText('Refused by this account')).toBeTruthy();
+    expect(within(drawer).queryByText('Marked from an error’s wording')).toBeNull();
+  });
+
   it('says why a model is Unknown when an account has not listed it yet', async () => {
     const unconfirmed = modelRowDto({
       model: 'gamma-new',

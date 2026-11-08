@@ -1,6 +1,7 @@
 import type {
   AccountRefusal,
   Effort,
+  ModelMarkBasis,
   SessionId,
   ShapeId,
   SupportedAccountKind,
@@ -229,6 +230,11 @@ export type SessionEvent =
       readonly reason: SessionEndReason;
       readonly message: string | null;
       readonly refusal?: AccountRefusal;
+      /**
+       * What a `model_refused` end rests on. Absent counts as `error`: final until the account's list changes.
+       * `wording` is an error's text alone, which a later session settles.
+       */
+      readonly refusalBasis?: ModelMarkBasis;
     };
 
 export interface SessionHandle {

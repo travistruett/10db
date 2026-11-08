@@ -12,7 +12,7 @@ import {
   JudgeCallId,
   JudgeDecision,
   JudgeOutcome,
-  NotFoundError,
+  ModelMarkBasis,
   parseFindings,
   PermissionChoice,
   REVIEW_CARD_DETAIL,
@@ -67,7 +67,6 @@ import {
   insertSource,
   listAccountModels,
   listModelProfiles,
-  markAccountModelUnusable,
   latestHandoffForStep,
   latestToolOp,
   listPermissionRules,
@@ -119,6 +118,7 @@ import {
   type ModelListWait,
   type StartGate,
 } from '../accounts';
+import { clearModelMark, markModelUnusable } from '../catalogue';
 import type { Clock, Timer } from '../clock';
 import {
   allCheckouts,
@@ -409,6 +409,8 @@ type Outcome =
       readonly kind: 'model_refused';
       readonly model: string;
       readonly message: string;
+      /** What the refusal rests on: Claude Code's own `model_not_found`, or an error's wording alone. */
+      readonly basis: ModelMarkBasis;
     }
   | {
       /** The session ended its turn with a command running in the background that never finished. */
@@ -578,6 +580,8 @@ interface SessionState {
   resultNudged: boolean;
   /** How the session's last turn ended; null before any turn did. */
   lastTurn: TurnResult | null;
+  /** A turn of the session ended well, so a mark from an error's wording on its model has been cleared. */
+  modelProven: boolean;
   /**
    * The longest last message any turn of the session wrote ('' when none did). A review that ends
    * without recording a verdict has usually written its findings here, and the failure card shows them;
@@ -1409,7 +1413,8 @@ export function createRunner(opts: RunnerOptions): Runner {
 
   /**
    * A session ended because its account cannot run the model. The model is marked unusable on the account
-   * until the account's list changes, and a card says so; the lane then starts over, and the step takes the
+   * until the account's list changes (a mark from an error's wording alone ends sooner: see `ModelMarkBasis`),
+   * and a card says so; the lane then starts over, and the step takes the
    * tier's next model. An account with no row for the model (it lists none) records nothing, so the lane
    * would ask for the same model again: it fails instead.
    */
@@ -1420,22 +1425,22 @@ export function createRunner(opts: RunnerOptions): Runner {
   ): 'retry' | 'stop' {
     const row = getWorkstreamRow(db, id);
     const account = getAccountRow(db, ctl.accountId);
-    const marked = opts.state.write((ctx) => {
-      try {
-        markAccountModelUnusable(ctx, account.id, outcome.model);
-        return true;
-      } catch (error) {
-        if (!(error instanceof NotFoundError)) throw error;
-        return false;
-      }
-    });
+    const mark = markModelUnusable(opts, account.id, outcome.model, outcome.basis);
+    const marked = mark !== null;
     // Another lane may have marked the model already: this one retries whenever choosing again, with the
     // model now unusable, gives another model, and stops only when it would be asked for the same one.
     const again = resolveOn(row, currentStep(row), account, listAccountModels(db, account.id));
     const retry = again.model !== outcome.model;
-    const lead = marked
-      ? `10db marked ${outcome.model} unusable on ${account.label} until the account's model list changes`
-      : `${account.label} no longer lists ${outcome.model}, so 10db could not mark it unusable`;
+    const marking = `10db marked ${outcome.model} unusable on ${account.label}`;
+    const lead =
+      mark === null
+        ? `${account.label} no longer lists ${outcome.model}, so 10db could not mark it unusable`
+        : mark.endsAt !== null
+          ? // The words alone cannot tell a refusal from a config error, so one later session settles the mark.
+            `${marking} until ${mark.endsAt}, because the error’s wording named it; after that one session tries it again, and if it is refused the same way it stays unusable until the account's model list changes`
+          : outcome.basis === ModelMarkBasis.Wording
+            ? `${account.label} refused ${outcome.model} the same way again, so ${marking} until the account's model list changes`
+            : `${marking} until the account's model list changes`;
     // A tier name is no model: the account has none left that 10db may run, and its next session holds it.
     const nothingLeft = isModelTier(again.model);
     opts.inbox.flag({
@@ -1765,6 +1770,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       firmSent: false,
       resultNudged: false,
       lastTurn: null,
+      modelProven: false,
       wrote: '',
       contextPct: null,
       parkedFor: null,
@@ -2075,6 +2081,11 @@ export function createRunner(opts: RunnerOptions): Runner {
             break;
           case 'turn_complete': {
             st.lastTurn = event.result ?? 'success';
+            // The model ran a turn: a mark from an error's wording alone on it was wrong.
+            if (st.lastTurn === 'success' && !st.modelProven) {
+              st.modelProven = true;
+              clearModelMark(opts, ctl.accountId, launchStep.model);
+            }
             if (event.text && event.text.length > st.wrote.length) st.wrote = event.text;
             opts.state.write((ctx) => {
               updateSessionUsage(ctx, session.id, {
@@ -2216,6 +2227,7 @@ export function createRunner(opts: RunnerOptions): Runner {
                     kind: 'model_refused',
                     model: launchStep.model,
                     message: event.message ?? `${account.label} cannot run ${launchStep.model}`,
+                    basis: event.refusalBasis ?? ModelMarkBasis.Error,
                   };
                   break;
                 case SessionEndReason.BillingRefused:

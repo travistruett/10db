@@ -20,6 +20,7 @@ import {
   replaceAccountModels,
   schema,
   seedAccount,
+  WORDING_MARK_MS,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTestEngine, type TestEngine } from '../../test/engine';
@@ -415,5 +416,89 @@ describe('a model the account refuses at the first reply', () => {
     expect(cards).toHaveLength(1);
     expect(cards[0]?.title).toMatch(/^Claude plan cannot run /);
     expect(cards[0]?.body).toMatch(/lists no models/);
+  });
+});
+
+// The words of an error cannot tell "Tool use with model X is not supported" (a config error) from "Model X is
+// not available in this region" (a refusal), so a mark from them ends on its own and one later session settles it.
+describe('a model the account refuses by an error’s wording alone', () => {
+  const wording = { do: 'model_refused' as const, basis: 'wording' as const };
+  const offer = (model: string) =>
+    listAccountModels(engine.store.db, engine.project.accountId).find((m) => m.model === model);
+
+  /** Runs the task to the end and answers the models its sessions started on. */
+  async function runTask(title: string, specs: SessionSpec[]): Promise<string[]> {
+    const before = specs.length;
+    const { workstream } = engine.addTask(title, ['api'], [], quick);
+    engine.launch(workstream.id);
+    await engine.runner.idle();
+    expect(ws(workstream.id).state).toBe('DONE');
+    return specs.slice(before).map((s) => s.model);
+  }
+
+  it('is marked with an end, keeps the model out of later steps until then, and lets a later step use it after', async () => {
+    engine = await createTestEngine({
+      Alpha: [[wording], finish('op-wording-a1')],
+      Beta: [finish('op-wording-b1')],
+      Gamma: [finish('op-wording-g1')],
+    });
+    list(engine.project.accountId, claudeModels());
+    const specs = recordSpecs();
+
+    const [first, second] = await runTask('Alpha', specs);
+    expect(first).toBeDefined();
+    expect(second).not.toBe(first);
+    expect(offer(first ?? '')).toMatchObject({
+      unusable: true,
+      wordingMarkEndsAt: new Date(engine.clock.now().getTime() + WORDING_MARK_MS).toISOString(),
+    });
+    expect(openCards()[0]?.body).toMatch(/error’s wording/);
+
+    // A real refusal is not routed to again while its mark holds.
+    engine.clock.advance(WORDING_MARK_MS - 1);
+    expect(await runTask('Beta', specs)).not.toContain(first);
+    expect(offer(first ?? '')?.unusable).toBe(true);
+
+    // A config error is: the mark ends, a later step runs on the model, and its first good reply clears the mark.
+    engine.clock.advance(1);
+    expect(offer(first ?? '')?.unusable).toBe(false);
+    expect(await runTask('Gamma', specs)).toEqual([first]);
+    expect(offer(first ?? '')).toMatchObject({ unusable: false, wordingMarkEndsAt: null });
+  });
+
+  it('becomes final when the model, tried again, is refused the same way', async () => {
+    engine = await createTestEngine({
+      Alpha: [[wording], finish('op-final-a1')],
+      Beta: [[wording], finish('op-final-b1')],
+      Gamma: [finish('op-final-g1')],
+    });
+    list(engine.project.accountId, claudeModels());
+    const specs = recordSpecs();
+
+    const [first] = await runTask('Alpha', specs);
+    engine.clock.advance(WORDING_MARK_MS);
+    const [again, other] = await runTask('Beta', specs);
+    expect(again).toBe(first);
+    expect(other).not.toBe(first);
+    expect(offer(first ?? '')).toMatchObject({ unusable: true, wordingMarkEndsAt: null });
+
+    engine.clock.advance(100 * WORDING_MARK_MS);
+    expect(await runTask('Gamma', specs)).not.toContain(first);
+    expect(offer(first ?? '')?.unusable).toBe(true);
+  });
+
+  it('stays unusable when it came from model_not_found', async () => {
+    engine = await createTestEngine({
+      Alpha: [[{ do: 'model_refused' }], finish('op-notfound-a1')],
+      Beta: [finish('op-notfound-b1')],
+    });
+    list(engine.project.accountId, claudeModels());
+    const specs = recordSpecs();
+
+    const [first] = await runTask('Alpha', specs);
+    expect(offer(first ?? '')).toMatchObject({ unusable: true, wordingMarkEndsAt: null });
+    engine.clock.advance(100 * WORDING_MARK_MS);
+    expect(await runTask('Beta', specs)).not.toContain(first);
+    expect(offer(first ?? '')?.unusable).toBe(true);
   });
 });

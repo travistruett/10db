@@ -168,6 +168,7 @@ describe('AccountModelDto', () => {
     launchId: 'opus',
     efforts: ['low', 'max'],
     unusable: false,
+    wordingMarkEndsAt: null,
     inputPrice: null,
     outputPrice: null,
     lastSeenAt: '2026-11-06T12:00:00.000Z',

@@ -9,7 +9,7 @@ import {
 import { Badge, Drawer, Group, Stack, Table, Text, Title } from '@mantine/core';
 import { useAccounts } from '../../daemon/account-queries';
 import { useModelOffers, useModelProfiles } from '../../daemon/model-queries';
-import { fromNow } from '../../shell/relative';
+import { absoluteTime, fromNow } from '../../shell/relative';
 import { ArtificialAnalysisCredit } from './artificial-analysis-credit';
 import { formatFirstPass, formatPrice, formatScore, NO_DATA } from './model-format';
 import { STATUS_LABEL, TIER_LABEL } from './model-labels';
@@ -42,6 +42,33 @@ function priceOf(offer: AccountModelDto, account: AccountDto | undefined): strin
     return `${formatPrice(offer.inputPrice)} in · ${formatPrice(offer.outputPrice)} out`;
   // A subscription pays per month, not per token; any other account with no price simply has none listed.
   return account !== undefined && !isMetered(account.kind) ? 'Included in plan' : NO_DATA;
+}
+
+/**
+ * Whether the account refused the model, and on what it rests. A mark from model_not_found lasts until the
+ * account's list changes. One from an error's wording alone ends on its own, because the words cannot tell a
+ * refusal from a config error: it says when, and what the next session on the model settles.
+ */
+function Mark({ offer, now }: { readonly offer: AccountModelDto; readonly now: number }) {
+  if (offer.wordingMarkEndsAt === null)
+    return offer.unusable ? (
+      <Badge size="sm" variant="light" color="gray">
+        Refused by this account
+      </Badge>
+    ) : null;
+  const ends = fromNow(offer.wordingMarkEndsAt, now);
+  return (
+    <Stack gap={2}>
+      <Badge size="sm" variant="light" color="gray">
+        Marked from an error’s wording
+      </Badge>
+      <Text size="xs" c="dimmed" title={absoluteTime(offer.wordingMarkEndsAt)}>
+        {offer.unusable
+          ? `10db keeps away from it until the mark ends ${ends}. A session then tries it again: refused the same way, it stays unusable until the account’s list changes; run well, the mark goes.`
+          : `The mark ended ${ends}, so 10db routes to it again. The next session on it settles it: refused the same way, it stays unusable until the account’s list changes; run well, the mark goes.`}
+      </Text>
+    </Stack>
+  );
 }
 
 function Accounts({
@@ -78,11 +105,7 @@ function Accounts({
                 <Text size="sm" ff="monospace">
                   {offer.launchId}
                 </Text>
-                {offer.unusable ? (
-                  <Badge size="sm" variant="light" color="gray">
-                    Refused by this account
-                  </Badge>
-                ) : null}
+                <Mark offer={offer} now={now} />
               </Table.Td>
               <Table.Td>{priceOf(offer, account)}</Table.Td>
               <Table.Td>{fromNow(offer.lastSeenAt, now)}</Table.Td>

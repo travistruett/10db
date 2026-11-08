@@ -53,6 +53,7 @@ export function accountModelDto(
     launchId: over.model,
     efforts: [],
     unusable: false,
+    wordingMarkEndsAt: null,
     inputPrice: null,
     outputPrice: null,
     lastSeenAt: AT,
