@@ -137,13 +137,18 @@ describe('what the release carries of the catalogue', () => {
     );
   });
 
-  it('writes the snapshot where the daemon reads it, beside its bundle', () => {
+  it('writes the snapshot where the daemon reads it, beside its bundle, from this build only', () => {
     const file = /CATALOGUE_SNAPSHOT_FILE = '([^']+)'/.exec(
       readRepoFile('apps/daemon/src/catalogue/snapshot.ts'),
     )?.[1];
     expect(file).toBe('catalogue-snapshot.json');
+    // The release fetches outside the bundle dir and names the file to the daemon's build step.
     expect(readRepoFile('scripts/release/build-macos.sh')).toContain(
-      `apps/desktop/src-tauri/resources/daemon/${file ?? ''}`,
+      `export TENDB_RELEASE_CATALOGUE_SNAPSHOT="$out/${file ?? ''}"`,
+    );
+    // That the step carries it, and only it, apps/daemon/test/bundle.test.ts checks through the real build.
+    expect(readRepoFile('apps/daemon/scripts/build.ts')).toContain(
+      'TENDB_RELEASE_CATALOGUE_SNAPSHOT',
     );
   });
 

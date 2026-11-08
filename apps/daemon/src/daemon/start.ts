@@ -620,6 +620,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   // A lane that finds no model profile for its account waits for the profiles instead of retrying every tick.
   const modelWait = createModelListWait({
+    db,
     clock,
     inbox,
     logger: logger.child({ component: 'catalogue' }),

@@ -278,9 +278,30 @@ const CREDENTIAL_ERRORS: Readonly<Record<string, AccountProblem>> = {
 
 /** What an error says when it reports that a model is missing or off limits to the account. */
 const MODEL_UNAVAILABLE =
-  /not found|does not exist|doesn['’]t exist|not available|isn['’]t supported|is not supported|no access|(?:don['’]t|do not) have access|not authorized|access denied|accessdenied|unknown model/i;
+  /not found|does not exist|doesn['’]t exist|no access|(?:don['’]t|do not) have access|not authorized|access denied|accessdenied|unknown model/i;
 
 const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** "is not supported", "is currently not available" and the like. */
+const UNSUPPORTED = `(?:is\\s+(?:currently\\s+)?not|isn['’]t|not)\\s+(?:currently\\s+)?(?:supported|available)`;
+
+/** How far, within one clause, the phrase may follow the model: bounded, so a long text is read in linear time. */
+const CLAUSE_REACH = 160;
+
+/**
+ * Whether `text` says the model is not supported or not available: the phrase follows the model's ID, or the word
+ * model, in the same clause. It may come wrapped as Claude Code sends it ("API Error: 400 Model X is not
+ * available", or a JSON body's "message"). A config error that puts the phrase first ("thinking.budget is not
+ * supported for model X") never counts. One that names the model first ("Tool use with model X is not supported")
+ * still does: telling those apart needs more than the wording, so such a mark lasts only until the account's list
+ * changes.
+ */
+function saysModelUnsupported(text: string, id: string): boolean {
+  return new RegExp(
+    `(?:${escapeRegExp(id)}|\\bmodel\\b)[^.;:]{0,${String(CLAUSE_REACH)}}?\\b${UNSUPPORTED}`,
+    'i',
+  ).test(text);
+}
 
 /** Whether `text` names `id` as a whole token, so `<model>` is not found in `<model>-<suffix>`. */
 function namesToken(text: string, id: string): boolean {
@@ -298,7 +319,8 @@ function namesToken(text: string, id: string): boolean {
 export function isModelRefusal(error: string | undefined, text: string, launched: string): boolean {
   if (error === MODEL_NOT_FOUND_ERROR) return true;
   if (error !== 'invalid_request' && error !== 'unknown') return false;
-  return namesToken(text, launched.replace(CONTEXT_SUFFIX, '')) && MODEL_UNAVAILABLE.test(text);
+  const id = launched.replace(CONTEXT_SUFFIX, '');
+  return namesToken(text, id) && (MODEL_UNAVAILABLE.test(text) || saysModelUnsupported(text, id));
 }
 
 /** An assistant error that is the account's, not the work's. */

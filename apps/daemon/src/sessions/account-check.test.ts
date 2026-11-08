@@ -460,8 +460,92 @@ describe('isModelRefusal', () => {
       `ValidationException: Invocation of model ID ${LAUNCHED}. You do not have access to it.`,
       true,
     ],
+    [
+      'a parameter that is not supported for the launch ID',
+      'invalid_request',
+      `thinking.budget is not supported for model ${LAUNCHED}`,
+      false,
+    ],
+    [
+      'a feature that is not available on the launch ID',
+      'unknown',
+      `The extended cache is not available on ${LAUNCHED}`,
+      false,
+    ],
+    [
+      'the launch ID itself not supported',
+      'invalid_request',
+      `Model ${LAUNCHED} is not supported in this region`,
+      true,
+    ],
+    [
+      "the launch ID that isn't supported for the account",
+      'unknown',
+      `${LAUNCHED} isn't supported for this account`,
+      true,
+    ],
+    [
+      'the requested model not available, its ID after',
+      'invalid_request',
+      `The model you requested is not available: ${LAUNCHED}`,
+      true,
+    ],
+    [
+      'the launch ID, quoted, as the model that is not supported',
+      'invalid_request',
+      `The '${LAUNCHED}' model is not supported when using Codex with a ChatGPT account.`,
+      true,
+    ],
+    [
+      'the launch ID in backticks not available',
+      'unknown',
+      `\`${LAUNCHED}\` is not available`,
+      true,
+    ],
+    [
+      'the requested model, named, not supported',
+      'invalid_request',
+      `The requested model ${LAUNCHED} is not supported`,
+      true,
+    ],
+    [
+      'the launch ID currently not available',
+      'unknown',
+      `${LAUNCHED} is currently not available`,
+      true,
+    ],
+    [
+      "Bedrock's on-demand refusal of a model that needs an inference profile",
+      'invalid_request',
+      `Invocation of model ID ${LAUNCHED} with on-demand throughput isn't supported. Retry your request with the ID or ARN of an inference profile that contains this model.`,
+      true,
+    ],
+    [
+      'a refusal as Claude Code sends it, behind its API Error and status',
+      'unknown',
+      `API Error: 400 Model ${LAUNCHED} is not available in this region.`,
+      true,
+    ],
+    [
+      'a refusal in a JSON body behind the status',
+      'invalid_request',
+      `API Error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"Model ${LAUNCHED} is not available"}}`,
+      true,
+    ],
+    [
+      'a refusal as a bare JSON message',
+      'unknown',
+      `{"message":"Model ${LAUNCHED} is not available"}`,
+      true,
+    ],
   ])('%s', (_name, error, text, expected) => {
     expect(isModelRefusal(error, text, LAUNCHED)).toBe(expected);
+  });
+
+  it('reads a long error in linear time', () => {
+    const started = performance.now();
+    isModelRefusal('invalid_request', `${LAUNCHED} ${'model '.repeat(20_000)}`, LAUNCHED);
+    expect(performance.now() - started).toBeLessThan(200);
   });
 
   it('matches a launch ID that carries the context suffix without it', () => {

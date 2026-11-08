@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permissions for the main window. The header drags the window and the window's theme follows the app's color scheme. The opener may open only GitHub pages, such as a batch's pull request, and OpenAI's sign-in page, which Connect opens for a ChatGPT plan account. The dialog may open the folder panel.",
+  "description": "Permissions for the main window. The header drags the window and the window's theme follows the app's color scheme. The opener may open only GitHub pages, such as a batch's pull request, OpenAI's sign-in page, which Connect opens for a ChatGPT plan account, and Artificial Analysis's site, which the credit beside its scores links. The dialog may open the folder panel.",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -11,7 +11,11 @@
     "dialog:allow-open",
     {
       "identifier": "opener:allow-open-url",
-      "allow": [{ "url": "https://github.com/*" }, { "url": "https://auth.openai.com/*" }]
+      "allow": [
+        { "url": "https://github.com/*" },
+        { "url": "https://auth.openai.com/*" },
+        { "url": "https://artificialanalysis.ai/*" }
+      ]
     }
   ]
 }
