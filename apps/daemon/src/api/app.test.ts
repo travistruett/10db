@@ -729,6 +729,13 @@ describe('team, routing and benchmark routes', () => {
       service: 'patchProject',
     },
     {
+      name: 'PATCH /projects/:id with the Docker switch',
+      method: 'PATCH',
+      path: `/projects/${projectId}`,
+      body: { sandboxDocker: true },
+      service: 'patchProject',
+    },
+    {
       name: 'GET /projects/:id/team',
       method: 'GET',
       path: `/projects/${projectId}/team`,
@@ -837,6 +844,12 @@ describe('team, routing and benchmark routes', () => {
       method: 'PATCH',
       path: `/projects/${projectId}`,
       body: { sandboxLoopback: 'on' },
+    },
+    {
+      name: 'a Docker switch that is not a boolean',
+      method: 'PATCH',
+      path: `/projects/${projectId}`,
+      body: { sandboxDocker: 'on' },
     },
     {
       name: 'an allowed command with a flag',

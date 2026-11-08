@@ -159,7 +159,12 @@ export function createWorktreeGenerators(deps: WorktreeDependenciesDeps): Worktr
         return { kind: 'failed', exitCode: 127, timedOut: false, tail, logPath };
       }
       const result = await deps.gate.run({
-        project: { repoPath: path, sandboxLoopback: project.sandboxLoopback },
+        project: {
+          repoPath: path,
+          sandboxLoopback: project.sandboxLoopback,
+          // A generator is the project's own command (a migration made in the compose stack, say).
+          sandboxDocker: project.sandboxDocker,
+        },
         command: generateCommand(pnpm, dirs, migrations),
         logPath,
         timeoutMs: deps.timeoutMs,

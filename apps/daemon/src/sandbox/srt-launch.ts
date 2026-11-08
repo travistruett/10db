@@ -17,9 +17,12 @@ export interface SandboxRuntime {
   readonly cli: string;
 }
 
-/** The names of `env` a sandboxed command may inherit. */
-export function allowlisted(env: Readonly<Record<string, string>>): Record<string, string> {
-  const denied = new Set(deniedEnvNames(env));
+/** The names of `env` a sandboxed command may inherit, and `also` when the caller allows more. */
+export function allowlisted(
+  env: Readonly<Record<string, string>>,
+  also?: ReadonlySet<string>,
+): Record<string, string> {
+  const denied = new Set(deniedEnvNames(env, also));
   return Object.fromEntries(Object.entries(env).filter(([name]) => !denied.has(name)));
 }
 

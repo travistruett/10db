@@ -200,6 +200,7 @@ import { routingInputs, seedTeam } from '../team';
 import { createGateRunner, createGateSlots, limitGates } from '../verify';
 import { CLIENT_APP } from '../version';
 import { createWatcher, systemWatch, type WatchFn } from '../watcher';
+import { autoDocker } from './auto-docker';
 import { createProjectPinStore } from './checkout-pins';
 import {
   createCheckoutTrustedHandler,
@@ -354,6 +355,8 @@ const UI_ORIGINS = ['tauri://localhost', 'http://tauri.localhost'] as const;
 const CLEAN_SHUTDOWN_KEY = 'daemon.clean_shutdown';
 /** How long a Shape tool call may take: propose_plan validates and writes, and answers at once. */
 const SHAPE_TOOL_TIMEOUT_MS = 60_000;
+/** The most of a Makefile or script read from the base to see whether a gate calls docker. */
+const MAX_DOCKER_SCAN_BYTES = 256 * 1024;
 
 /** The session env when none is wired (tests): enough PATH for a gate to find git and test. */
 const DEFAULT_SESSION_PATH = '/usr/bin:/bin';
@@ -810,10 +813,23 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       : null;
   // Shared by every gate: a task's, at its green run, and a batch's, at ship. One limiter caps them
   // all, so the machine never runs more than `limits.gateSlots` at once.
-  const gateRunner = createGateRunner({
-    sandbox: sandboxes?.gate ?? null,
-    logger: logger.child({ component: 'gate' }),
-  });
+  // Every project's gate gets its Docker switch as it stands, and 10db turns it on when the gate
+  // needs Docker (`auto-docker.ts`); an install or a generator names no project and is left alone.
+  const gateRunner = autoDocker(
+    createGateRunner({
+      sandbox: sandboxes?.gate ?? null,
+      logger: logger.child({ component: 'gate' }),
+    }),
+    {
+      state,
+      inbox,
+      logger: logger.child({ component: 'gate' }),
+      readBase: async (repoPath, ref, path) => {
+        const read = await git.fileAt(repoPath, ref, path, MAX_DOCKER_SCAN_BYTES);
+        return read.kind === 'file' ? read.text : null;
+      },
+    },
+  );
   const gateSlots = createGateSlots(limits.gateSlots);
   // A task's gate has no hold here: the runner holds it, for the load and the drain, before it takes
   // its batch's turn and its slot, so a held gate keeps neither.

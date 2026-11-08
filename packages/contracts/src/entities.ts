@@ -559,6 +559,12 @@ export const ProjectInput = z
      */
     sandboxLoopback: z.boolean().default(false),
     /**
+     * Gives the project's gate and lane commands the Docker socket. Docker can mount any host folder
+     * into a container, so a command with it can reach outside the sandbox. Off for a new project;
+     * 10db turns it on itself when the project is seen to need Docker.
+     */
+    sandboxDocker: z.boolean().default(false),
+    /**
      * Where a new task works unless it says otherwise: the one checkout, or a git worktree of its
      * own (pull request delivery only).
      */
@@ -630,6 +636,12 @@ export const ProjectDto = z.object({
   prTitlePrefix: z.string().nullable(),
   allowedCommands: z.array(z.string()),
   sandboxLoopback: z.boolean(),
+  sandboxDocker: z.boolean(),
+  /**
+   * True once the builder has set `sandboxDocker` by hand to off: 10db then never turns it on by
+   * itself. Setting it on by hand clears this.
+   */
+  sandboxDockerOptOut: z.boolean(),
   /**
    * The placement a new task gets unless it names one or its areas propose a copy; changing it
    * moves no existing task. Each task's own placement is `TaskDto.workspaceMode`.
@@ -674,6 +686,8 @@ export const ProjectPatch = z
     usageHandoffAt: UsageHandoffAt,
     allowedCommands: AllowedCommands,
     sandboxLoopback: z.boolean(),
+    /** Setting it off records the builder's choice, which 10db's own turning on never overrides. */
+    sandboxDocker: z.boolean(),
     /** The default for new tasks; it can change while work runs, and moves no existing task. */
     workspaceMode: z.enum(WorkspaceMode),
     worktreeSeed: WorktreeSeed,

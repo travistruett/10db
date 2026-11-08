@@ -365,6 +365,13 @@
       "when": 1794173644621,
       "tag": "0051_jittery_scarlet_spider",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "6",
+      "when": 1794175217812,
+      "tag": "0052_sad_wild_pack",
+      "breakpoints": true
     }
   ]
 }

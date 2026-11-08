@@ -290,6 +290,25 @@ describe('ProjectInput', () => {
     expect(ProjectPatch.safeParse({ sandboxLoopback: 'on' }).success).toBe(false);
   });
 
+  it.each([
+    ['absent', {}, false],
+    ['on', { sandboxDocker: true }, true],
+  ])('reads the Docker switch when it is %s', (_name, given, expected) => {
+    const parsed = ProjectInput.parse({
+      name: 'demo',
+      repoPath: '/tmp/demo',
+      gateCommand: 'make gate',
+      areas: [{ name: 'src', globs: ['src/**'] }],
+      ...given,
+    });
+    expect(parsed.sandboxDocker).toBe(expected);
+  });
+
+  it('patches the Docker switch and rejects a non-boolean one', () => {
+    expect(ProjectPatch.parse({ sandboxDocker: false })).toEqual({ sandboxDocker: false });
+    expect(ProjectPatch.safeParse({ sandboxDocker: 'on' }).success).toBe(false);
+  });
+
   it('rejects a nudge threshold at or below the handoff threshold', () => {
     const result = ProjectInput.safeParse({
       name: 'demo',

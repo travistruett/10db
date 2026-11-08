@@ -248,6 +248,21 @@ describe('buildLaneProfile', () => {
     expect(buildLaneProfile(input({ loopback })).network.allowLocalBinding).toBe(expected);
   });
 
+  it('opens a Docker socket only when given one, beside the temp dir', () => {
+    const given = input({ dockerSockets: ['/var/run/docker.sock'] });
+    expect(buildLaneProfile(given).network.allowUnixSockets).toEqual([
+      given.tmpDir,
+      '/var/run/docker.sock',
+    ]);
+    expect(buildLaneProfile(input()).network.allowUnixSockets).toEqual([input().tmpDir]);
+  });
+
+  it('refuses a Docker socket the profile cannot spell', () => {
+    expect(() => buildLaneProfile(input({ dockerSockets: ['/run/a*b.sock'] }))).toThrow(
+      SandboxProfileError,
+    );
+  });
+
   it('sets the network and credential fields', () => {
     const given = input();
     const profile = buildLaneProfile(given);

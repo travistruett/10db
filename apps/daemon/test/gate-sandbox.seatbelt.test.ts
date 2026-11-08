@@ -340,6 +340,33 @@ describe.skipIf(!SEATBELT)('the gate under the sandbox (Seatbelt)', () => {
     expect(result.exitCode).not.toBe(0);
     expect(result.tail.trimEnd().endsWith(DOCKER_REFUSAL)).toBe(true);
   }, 60_000);
+
+  // Value: protects criterion 2 under the real srt; fails_when srt ignores the gate's
+  // allowUnixSockets, needs the socket's real path or its parent dir readable, or the shim is still
+  // written with the switch on; why_new: the unit rung read only the settings JSON; no_claim: a real
+  // Docker engine (a Unix socket server stands in for it, named by DOCKER_HOST as a builder's is).
+  it("reaches the engine socket and gets no refusing docker only when the project's Docker switch is on", async () => {
+    const engine = join(root, 'agent.sock');
+    const dockerEnv = { ...env(), DOCKER_HOST: `unix://${engine}` };
+    const probes = {
+      'engine-socket': connect(`'${engine}'`),
+      'no-shim': 'test ! -e "$TMPDIR/bin/docker"',
+      'docker-host': `test "$DOCKER_HOST" = 'unix://${engine}'`,
+    };
+    expect(
+      await probe(probes, {
+        project: { repoPath: checkout, sandboxLoopback: false, sandboxDocker: true },
+        env: dockerEnv,
+      }),
+    ).toEqual({ 'engine-socket': 'ok', 'no-shim': 'ok', 'docker-host': 'ok' });
+    expect(
+      await probe(probes, {
+        project: { repoPath: checkout, sandboxLoopback: false, sandboxDocker: false },
+        env: dockerEnv,
+      }),
+    ).toEqual({ 'engine-socket': 'denied', 'no-shim': 'denied', 'docker-host': 'denied' });
+  }, 120_000);
+
   it("opens pnpm's lock files to a package install only", async () => {
     // pnpm opens its lock files read-write; the probe does the same and takes the lock.
     const lock = join(root, 'pnpm-locks', 'all-stores.lock');

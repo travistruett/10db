@@ -250,6 +250,15 @@ const rows: readonly Row[] = [
       fireEvent.click(screen.getByRole('switch', { name: 'Allow localhost', hidden: true })),
     sent: { sandboxLoopback: true },
   },
+  {
+    name: 'Allow Docker',
+    advanced: true,
+    label: 'Allow Docker',
+    line: 'For gates and tasks that run docker compose. Docker can mount any host folder into a container, so a gate or task with Docker can reach outside the sandbox.',
+    change: () =>
+      fireEvent.click(screen.getByRole('switch', { name: 'Allow Docker', hidden: true })),
+    sent: { sandboxDocker: true },
+  },
 ];
 
 afterEach(() => {
