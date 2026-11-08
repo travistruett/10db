@@ -40,7 +40,7 @@ function lockedPlaywrightVersion(): string {
 
 /** The jobs that run scripts/gate.sh, and the jobs among them that run in the Playwright image. */
 const GATE_JOBS = ['gate-static', 'gate-test', 'gate-e2e'];
-const CONTAINER_JOBS = ['gate-test', 'gate-e2e'];
+const CONTAINER_JOBS = ['gate-e2e'];
 /** The informational jobs that comment on a pull request, which no ruleset may require. */
 const REPORT_JOBS = ['test-report', 'test-report-post'];
 const Permissions = z.record(z.string(), z.string());
@@ -180,6 +180,12 @@ describe('CI workflow', () => {
         new RegExp(`^mcr\\.microsoft\\.com/playwright:${tag}@sha256:[0-9a-f]{64}$`),
       );
     }
+  });
+
+  it('runs the test shards on the runner, with no image to pull', () => {
+    // No unit test opens a browser, and pulling the Playwright image took most of a minute of
+    // every shard. On the runner, its user owns the checkout and systemd reaps orphans.
+    expect(readWorkflow(CI).jobs['gate-test']?.container).toBeUndefined();
   });
 
   it('runs the gate as the runner user, under an init that reaps orphaned processes', () => {
