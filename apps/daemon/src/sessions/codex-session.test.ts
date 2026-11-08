@@ -1530,7 +1530,9 @@ describe('codexThreadConfig', () => {
       absent: (w) => [join(w.secrets, 'auth.json')],
     },
     {
-      name: 'a denyWrite link to / opens nothing outside the checkout',
+      // Codex also stops the checkout's writes under this map, since the link's target holds the
+      // checkout: the lane fails closed.
+      name: 'a denyWrite link to / is denied, so it opens nothing',
       build: async (w) => {
         await symlink('/', join(w.checkout, 'slash'));
         return { denyWrite: [join(w.checkout, 'slash')] };
@@ -1581,6 +1583,36 @@ describe('codexThreadConfig', () => {
       },
       expected: (w) => ({ [join(w.home, 'scratch')]: 'read' }),
       absent: () => [],
+    },
+    {
+      name: 'a denyWrite link spelled through an alias of its writable root still gets an entry',
+      build: async (w) => {
+        const scratch = join(w.home, 'scratch');
+        await mkdir(scratch);
+        await symlink(w.home, join(w.checkout, 'home-alias'));
+        await symlink(w.secrets, join(scratch, 'lnk'));
+        return {
+          allowWrite: [scratch],
+          denyRead: ['/', w.secrets],
+          denyWrite: [join(w.checkout, 'home-alias', 'scratch', 'lnk')],
+        };
+      },
+      expected: (w) => ({ [join(w.home, 'scratch', 'lnk')]: 'deny' }),
+      absent: () => [],
+    },
+    {
+      name: 'a read link in one denied tree to a file in another reopens nothing',
+      build: async (w) => {
+        const secret = join(w.home, 'secret');
+        const ssh = join(w.home, 'ssh');
+        await mkdir(secret);
+        await mkdir(ssh);
+        await writeFile(join(ssh, 'id'), 'key');
+        await symlink(join(ssh, 'id'), join(secret, 'tossh'));
+        return { allowRead: [w.home, join(secret, 'tossh')], denyRead: ['/', secret, ssh] };
+      },
+      expected: (w) => ({ [join(w.home, 'ssh')]: 'deny' }),
+      absent: (w) => [join(w.home, 'ssh', 'id'), join(w.home, 'secret', 'tossh')],
     },
   ])('resolves links without opening more: $name', async ({ build, expected, absent }) => {
     const dir = await realpath(await mkdtemp(join(tmpdir(), 'lanelinks-')));

@@ -79,8 +79,10 @@ function filesystemOf(sandbox: LaneSandboxSpec): Record<string, Access> {
     if (isPattern(path) || opensMoreThanItself(path, grants)) continue;
     // A link whose target is in a denied tree the link itself is not in would reopen that tree.
     const real = realOrSelf(path);
-    const intoDenied = realDenyRoots.some((root) => isEqualOrUnder(real, root));
-    if (intoDenied && !denyRoots.some((root) => isEqualOrUnder(path, root))) continue;
+    const reopens = denyRoots.some(
+      (root) => isEqualOrUnder(real, realOrSelf(root)) && !isEqualOrUnder(path, root),
+    );
+    if (reopens) continue;
     grant(path, 'read');
   }
   const writable = [sandbox.checkout, ...allowWrite];
@@ -98,12 +100,15 @@ function filesystemOf(sandbox: LaneSandboxSpec): Record<string, Access> {
     [...entries].some(([key, access]) => access !== 'deny' && isEqualOrUnder(real, key));
   for (const path of denyWrite) {
     const real = realOrSelf(path);
-    // Codex follows a link entry, so a link's own entry is what its target gets: a read of a denied
-    // or unread target would open it, so such a link is denied instead.
-    const link = isLink(path) && writable.some((root) => isEqualOrUnder(path, root));
-    if (link && (realDenyRoots.some((root) => isEqualOrUnder(real, root)) || !readable(real)))
-      put(path, 'deny');
-    else narrow(path, writable, denyRoots);
+    // The link itself, not what it points to: its name under its dir's real path.
+    const own = join(realOrSelf(dirname(path)), basename(path));
+    if (isLink(path) && realWritable.some((root) => isEqualOrUnder(own, root))) {
+      // Codex follows a link entry, so a link's own entry is what its target gets: a read of a denied
+      // or unread target would open it, so such a link is denied instead.
+      if (realDenyRoots.some((root) => isEqualOrUnder(real, root)) || !readable(real))
+        put(own, 'deny');
+      else narrow(own, realWritable, realDenyRoots);
+    } else narrow(path, writable, denyRoots);
     narrow(real, realWritable, realDenyRoots);
   }
   return { [MINIMAL]: 'read', ...Object.fromEntries(entries) };
