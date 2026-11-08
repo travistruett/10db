@@ -34,6 +34,7 @@ export function projectDto(overrides: Partial<ProjectDto> = {}): ProjectDto {
     accountId: DEFAULT_ACCOUNT.id,
     movedFromAccountId: null,
     moveBackAt: null,
+    moveBackAutomatic: false,
     fallbackAccountId: null,
     usageHandoffAt: 0.95,
     handoffPct: 40,

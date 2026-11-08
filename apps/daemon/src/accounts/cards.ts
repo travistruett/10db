@@ -125,7 +125,7 @@ export function usageLimitCard(
     title: `${account.label} usage limit reached`,
     body: `Every lane on ${account.label} is paused ${paused}${
       moves.length > 0
-        ? ` Or continue ${project.name} on another account now: each lane's next session runs there from its latest handoff, and 10db asks whether to move it back once ${account.label} is available again.`
+        ? ` Or continue ${project.name} on another account now: each lane's next session runs there from its latest handoff, and 10db moves it back by itself once ${account.label} is available again.`
         : ''
     }`,
     foldKey: accountFoldKey(account.id, AccountPauseReason.UsageLimit),
@@ -213,7 +213,7 @@ export function usageHighCard(
         : `${account.label} ${standing(report, models)}`,
     body: `A session on ${account.label} reported that it ${standing(report, models)}.${resets} ${
       moves.length > 0
-        ? `Moving asks each lane of ${project.name} on ${account.label} to hand off, then runs its next sessions on the account you pick, and 10db asks whether to move back once the limit resets.`
+        ? `Moving asks each lane of ${project.name} on ${account.label} to hand off, then runs its next sessions on the account you pick, and 10db moves it back by itself once the limit resets.`
         : `No other account can take ${project.name} now, so it stays on ${account.label} until the limit.`
     }`,
     foldKey: accountFoldKey(account.id, USAGE_HIGH_CARD),
@@ -244,7 +244,7 @@ export function movedCard(
     report.status === 'rejected' ? '' : ' after asking its running lanes to hand off';
   return {
     title: `${project.name} moved to ${fallback.label}: ${account.label} ${standing(report, models)}`,
-    body: `A session on ${account.label} reported that it ${standing(report, models)}. ${project.name} names ${accountDisplayName(fallback)} as its fallback, so 10db moved it there${handedOff}. Each lane's next session runs on ${fallback.label} from its latest handoff; work neither committed nor handed off stays behind. 10db asks whether to move back once ${account.label}'s limit resets.`,
+    body: `A session on ${account.label} reported that it ${standing(report, models)}. ${project.name} names ${accountDisplayName(fallback)} as its fallback, so 10db moved it there${handedOff}. Each lane's next session runs on ${fallback.label} from its latest handoff; work neither committed nor handed off stays behind. 10db moves it back by itself once ${account.label}'s limit resets, unless you choose Stay.`,
     foldKey: accountFoldKey(account.id, MOVED_CARD),
     detail: detail(account, null, null, null, {
       moves: [{ choice: AccountCardChoice.MoveBack, accountId: account.id }],

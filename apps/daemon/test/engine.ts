@@ -44,6 +44,7 @@ import {
   createAccountPauses,
   createAccountRuntime,
   createMoveBack,
+  MoveCause,
   createStartGate,
   createUsageReports,
   type AccountLimits,
@@ -224,6 +225,9 @@ export async function createTestEngine(
     pauses,
     reports: usageReportBook,
     defaultPauseMs: 30 * 60_000,
+    back: (projectId, to) => {
+      moves.move(projectId, to, { cause: MoveCause.MoveBack });
+    },
   });
   const moves = createAccountMoves({
     state,

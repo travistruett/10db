@@ -80,6 +80,7 @@ export function insertProject(ctx: WriteContext, input: ProjectInput): ProjectDt
     accountId,
     movedFromAccountId: null,
     moveBackAt: null,
+    moveBackAutomatic: false,
     provider: Provider.Claude,
     createdAt: ctx.now,
     updatedAt: ctx.now,
@@ -216,7 +217,7 @@ export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPat
       ...(changes.landing !== undefined || changes.landingBranch !== undefined
         ? { landing, landingBranch }
         : {}),
-      ...(moving ? { movedFromAccountId: null, moveBackAt: null } : {}),
+      ...(moving ? { movedFromAccountId: null, moveBackAt: null, moveBackAutomatic: false } : {}),
       updatedAt: ctx.now,
     })
     .where(eq(schema.projects.id, id))
@@ -227,12 +228,17 @@ export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPat
 
 /**
  * Records the account a project left for its usage limit and when that limit resets (null when nobody
- * said); a null record forgets it.
+ * said); a null record forgets it. `automatic` marks a move caused by the limit, which 10db reverses
+ * by itself instead of asking.
  */
 export function setMoveBack(
   ctx: WriteContext,
   id: ProjectId,
-  moveBack: { readonly accountId: AccountId; readonly at: string | null } | null,
+  moveBack: {
+    readonly accountId: AccountId;
+    readonly at: string | null;
+    readonly automatic?: boolean;
+  } | null,
 ): ProjectDto {
   getProject(ctx.tx, id);
   ctx.tx
@@ -240,6 +246,7 @@ export function setMoveBack(
     .set({
       movedFromAccountId: moveBack?.accountId ?? null,
       moveBackAt: moveBack?.at ?? null,
+      moveBackAutomatic: moveBack?.automatic ?? false,
       updatedAt: ctx.now,
     })
     .where(eq(schema.projects.id, id))
