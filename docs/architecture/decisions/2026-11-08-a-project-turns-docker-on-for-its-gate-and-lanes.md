@@ -38,6 +38,8 @@
 
 - Every gate gets the switch as it stands in the database when it starts, whatever the request was built from, so turning it
   on or off takes effect on the next gate without a restart. A lane reads it before each session, as the localhost switch.
+- A read-only session (a Plan conversation) never gets the socket or the Docker names, whatever the switch says: it is meant to
+  write only its own temp dir, and a container could write the checkout or mount any host folder.
 
 ## Why
 

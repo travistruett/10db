@@ -465,7 +465,20 @@ describe('gate runner with a sandbox', () => {
     const gate = createGateRunner({ sandbox, logger: silentLogger });
     const result = await gate.run(request({ command: 'echo lots of output; exit 1' }));
     expect(result.exitCode).toBe(1);
+    expect(result.dockerRefused).toBe(true);
     expect(result.tail.trimEnd().endsWith(DOCKER_REFUSAL)).toBe(true);
     expect(readFileSync(result.logPath, 'utf8')).toContain(DOCKER_REFUSAL);
+  });
+
+  // Value: protects the one field auto-docker's refusal trigger reads; fails_when the runner drops
+  // dockerRefused from its result (the trigger then never fires); why_new: the evidence test above
+  // read only the tail; no_claim: whether the sandbox detects the refusal (gate-sandbox tests).
+  it('leaves dockerRefused unset when the sandbox refused nothing', async () => {
+    const { sandbox } = recordingSandbox({ dockerRefused: false });
+    const gate = createGateRunner({ sandbox, logger: silentLogger });
+    const result = await gate.run(request({ command: 'exit 1' }));
+    expect(result.exitCode).toBe(1);
+    expect(result.dockerRefused).toBeUndefined();
+    expect(result.tail).not.toContain(DOCKER_REFUSAL);
   });
 });

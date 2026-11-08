@@ -231,6 +231,41 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     }
   });
 
+  // Value: protects a read-only Plan session from the engine socket; fails_when Docker opens on the
+  // project switch alone (a container can then write the checkout or mount any host folder from a
+  // session that changes nothing); why_new: the switch row above covered only write lanes;
+  // no_claim: how Claude Code itself enforces the read-only checkout.
+  it("gives a read-only session no Docker socket and no Docker names, with the project's switch on", async () => {
+    const session = await sandbox().forSession(
+      input({
+        readOnly: true,
+        project: {
+          id: projectId,
+          repoPath: repo.path,
+          sandboxLoopback: false,
+          sandboxDocker: true,
+          gateCommand: 'make gate',
+        },
+        env: {
+          PATH: '/usr/bin:/bin',
+          HOME: home,
+          DOCKER_HOST: 'unix:///var/run/docker.sock',
+          COMPOSE_PROJECT_NAME: 'amps',
+        },
+      }),
+    );
+    try {
+      expect(session.spec.settings.network.allowUnixSockets).toEqual([session.tmpDir]);
+      expect(session.spec.settings.filesystem.allowRead).not.toContain(
+        join(home, '.docker', 'cli-plugins'),
+      );
+      expect(session.spec.shellEnv['DOCKER_HOST']).toBeUndefined();
+      expect(session.spec.shellEnv['COMPOSE_PROJECT_NAME']).toBeUndefined();
+    } finally {
+      session.dispose();
+    }
+  });
+
   it("makes the project's stored hosts its allowed domains, and its stored read paths readable", async () => {
     const shared = join(root, 'shared');
     mkdirSync(shared);

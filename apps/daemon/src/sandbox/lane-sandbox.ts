@@ -133,6 +133,7 @@ export interface LaneSessionInput {
   /**
    * A session that changes nothing in the checkout, a Plan conversation's: its commands write only
    * its own temp dir, the checkout as a whole being denied over the write Claude Code opens itself.
+   * It never gets the Docker socket, whatever the project's switch says.
    */
   readonly readOnly?: boolean;
 }
@@ -294,8 +295,12 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           },
         });
         // With the project's Docker switch on, the lane's commands may reach the engine (Claude's
-        // sandbox and Codex's both read the profile's sockets); off, they get no socket.
-        const docker = input.project.sandboxDocker ? dockerAccess(deps.home, input.env) : null;
+        // sandbox and Codex's both read the profile's sockets); off, they get no socket. A read-only
+        // session never does: a container could write the checkout or mount any host folder.
+        const docker =
+          input.project.sandboxDocker && input.readOnly !== true
+            ? dockerAccess(deps.home, input.env)
+            : null;
         const dockerNames: ReadonlySet<string> | undefined =
           docker === null ? undefined : new Set(dockerEnvNames(input.env));
         const commandEnv = prepareCommandEnv(tmpDir, deps.home, input.env);
