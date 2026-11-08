@@ -598,9 +598,11 @@ SRT_DEBUG=1 <node> -r ~/.10db/run/10db-mcp-<hex>.cjs <srt.mjs> --settings <seale
     git call, the probe's included, and from gh: they steer Xcode's `/usr/bin/git` shim to another git per
     spawn. `runGit` takes the binary as a required argument, gh runs with that git's directory first on its
     `PATH`, and the system check reports the git and gh the daemon resolved, so no daemon process runs a git
-    found on the login `PATH`. claude and docker are looked for the same way: the install prefixes, then
-    their own install directories in home (`~/.local/bin` and `~/.claude/local` for claude, `~/.docker/bin`
-    for docker), which no lane writes; `TENDB_CLAUDE_PATH` overrides claude's;
+    found on the login `PATH`. docker is looked for the same way: the install prefixes, then `~/.docker/bin`,
+    which no lane writes. claude and codex are 10db's own pinned copies, fetched into `<data dir>/tools`,
+    checked against the checksum recorded in `environment/agent-pins.ts`, read-only and in every sandbox's
+    `denyWrite`; the builder's own installs are never run (`decisions/2026-11-08-10db-runs-pinned-copies-of-codex-and-claude-code.md`).
+    `TENDB_CLAUDE_PATH` runs another claude in place of the pinned one;
   - once a checkout is pinned, every call runs with `GIT_DIR` at the pinned git dir and `GIT_WORK_TREE` at the
     checkout, so git never reads the `.git` gitfile again and a linked worktree's `commondir` comes from the
     read-only git dir; a lane can't swap the gitfile between two calls, and the profile denies writes to it.

@@ -63,6 +63,7 @@ export function useSetupCheck(entered: boolean): SetupCheck {
     ? { ...failed, runsAs: null, canAddLogin: false }
     : claudeRow({
         claude: claudeTool,
+        copy: system.data?.agents?.find((a) => a.tool === ToolName.Claude),
         probing: identity.isPending,
         identity: result,
         error: identity.isError ? identity.error.message : null,

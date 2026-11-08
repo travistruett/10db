@@ -37,6 +37,7 @@ import {
   toSdkMcpServer,
   userMessage,
 } from './claude-mapping';
+import { AUTOUPDATE_OFF } from '../environment';
 import { contextEvent } from './context-event';
 import { startShapeSession } from './claude-shape';
 import { currentToolNames } from './mcp-tool-names';
@@ -88,7 +89,7 @@ export type QueryFn = (params: {
 }) => Query;
 
 export interface ClaudeAdapterOptions {
-  /** The builder's installed claude, from `findClaude` or `TENDB_CLAUDE_PATH`. */
+  /** 10db's pinned Claude Code (`startPinnedTools`), or `TENDB_CLAUDE_PATH` in its place. */
   readonly claudePath: string;
   /** The injected harness plugin directory. */
   readonly pluginDir: string;
@@ -296,8 +297,9 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
           ...spec.env,
           ...sandbox.env,
           CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: laneMode(spec, deps) === 'auto' ? '0' : '1',
+          ...AUTOUPDATE_OFF,
         }
-      : { ...spec.env },
+      : { ...spec.env, ...AUTOUPDATE_OFF },
     pathToClaudeCodeExecutable: deps.claudePath,
     // Never 'user' or 'local': user hooks and plugins stay out (spec §3), and settings.local.json can switch billing.
     // A sandboxed session loads no settings file at all, so the repo can't loosen its sandbox or its permissions.
@@ -998,7 +1000,7 @@ async function probeAccount(
     prompt: input,
     options: {
       cwd: probe.cwd,
-      env: { ...probe.env },
+      env: { ...probe.env, ...AUTOUPDATE_OFF },
       pathToClaudeCodeExecutable: opts.claudePath,
       settingSources: [],
       strictMcpConfig: true,
@@ -1047,7 +1049,7 @@ async function complete(
     prompt: input,
     options: {
       cwd: ask.cwd,
-      env: { ...ask.env },
+      env: { ...ask.env, ...AUTOUPDATE_OFF },
       model: ask.model,
       pathToClaudeCodeExecutable: opts.claudePath,
       settingSources: [],

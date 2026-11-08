@@ -1,8 +1,9 @@
-import { AccountProblem, type AccountIdentityDto, type ToolCheck } from '@10db/contracts';
-
-/** The places 10db looks for Claude Code: the install prefixes, then Claude Code's own folders in the home folder. */
-const CLAUDE_LOOKED_IN =
-  '/opt/homebrew/bin, /usr/local/bin, /usr/bin, ~/.local/bin and ~/.claude/local';
+import {
+  AccountProblem,
+  type AccountIdentityDto,
+  type AgentCopy,
+  type ToolCheck,
+} from '@10db/contracts';
 
 export type SetupMark = 'ok' | 'warn' | 'bad' | 'pending';
 
@@ -21,6 +22,8 @@ export interface ClaudeRow extends SetupRow {
 export interface ClaudeRowInput {
   /** Claude Code as the system check found it; undefined while that check hasn't answered. */
   readonly claude: ToolCheck | undefined;
+  /** The pinned Claude Code copy 10db fetches and checks; absent where nothing is managed. */
+  readonly copy?: AgentCopy | undefined;
   /** The identity probe is running. */
   readonly probing: boolean;
   readonly identity: AccountIdentityDto | null;
@@ -42,7 +45,7 @@ function shownOrganization(identity: AccountIdentityDto, email: string | null): 
  * A login 10db hasn't recorded yet still counts as signed in; the account preparer records it.
  */
 export function claudeRow(input: ClaudeRowInput): ClaudeRow {
-  const { claude, probing, identity, error } = input;
+  const { claude, copy, probing, identity, error } = input;
   if (claude === undefined)
     return {
       mark: 'pending',
@@ -50,10 +53,24 @@ export function claudeRow(input: ClaudeRowInput): ClaudeRow {
       runsAs: null,
       canAddLogin: false,
     };
+  if (claude.path === null && copy?.state === 'fetching')
+    return {
+      mark: 'pending',
+      detail: `Downloading Claude Code ${copy.pinned}, the release 10db runs, and checking it against its recorded checksum…`,
+      runsAs: null,
+      canAddLogin: false,
+    };
+  if (claude.path === null && copy?.state === 'refused')
+    return {
+      mark: 'bad',
+      detail: `${copy.problem ?? `Claude Code ${copy.pinned} was refused.`} Recheck removes this copy and downloads a fresh one, checked against the same recorded checksum.`,
+      runsAs: null,
+      canAddLogin: false,
+    };
   if (claude.path === null) {
     return {
       mark: 'bad',
-      detail: `Not found in ${CLAUDE_LOOKED_IN}. Install Claude Code, then recheck.`,
+      detail: `10db runs its own copy of Claude Code, and none is managed here.`,
       runsAs: null,
       canAddLogin: false,
     };

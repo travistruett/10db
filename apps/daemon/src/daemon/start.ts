@@ -121,6 +121,7 @@ import {
   REQUIRED_TOOLS,
   OPENROUTER_KEY_ACCOUNT,
   unavailableKeychain,
+  type AgentTools,
   type Keychain,
   type GhLoginProbe,
   type ResolvedTools,
@@ -303,6 +304,8 @@ export interface DaemonOptions {
     resolved: ResolvedTools,
     ghLogin: GhLoginProbe,
   ) => Promise<SystemCheckDto>;
+  /** The pinned Claude Code and Codex the daemon runs; the system check reports them. None where nothing is managed (tests). */
+  readonly agents?: AgentTools;
   /** `false` turns the file watcher off (tests that don't need it). */
   readonly watch?: WatchFn | false;
   /**
@@ -378,6 +381,7 @@ function noSystemCheck(): Promise<SystemCheckDto> {
       required: t.required,
       signedIn: null,
     })),
+    agents: [],
     benchmarkSync: null,
   });
 }
@@ -1367,6 +1371,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
             }),
           )
         : noSystemCheck(),
+    agents: opts.agents ?? null,
     benchmarks,
     catalogue,
     refreshModels,

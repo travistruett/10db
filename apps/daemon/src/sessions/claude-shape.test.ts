@@ -225,6 +225,25 @@ describe('a Shape session’s SDK options', () => {
     expect(run.options).not.toHaveProperty('settings.autoMode');
   });
 
+  it.each([
+    ['unsandboxed', null],
+    [
+      'sandboxed',
+      { ...readOnlySandbox, env: { ...readOnlySandbox.env, DISABLE_AUTOUPDATER: '0' } },
+    ],
+  ])(
+    "keeps Claude Code's own updater off when %s, whatever the session env or sandbox says",
+    async (_name, sandbox) => {
+      const { query, run } = fakeQuery();
+      const handle = startShapeSession(
+        spec({ sandbox, env: { PATH: '/usr/bin', DISABLE_AUTOUPDATER: '0' } }),
+        deps(query),
+      );
+      await collect(handle, (e) => e.some((x) => x.type === 'turn_complete'));
+      expect(run.options?.env).toMatchObject({ DISABLE_AUTOUPDATER: '1' });
+    },
+  );
+
   it('hands a call the hook did not settle to the broker, with the directory the hook saw', async () => {
     const seen: ToolRequest[] = [];
     const { query, run } = fakeQuery();

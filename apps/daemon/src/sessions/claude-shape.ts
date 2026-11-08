@@ -8,6 +8,7 @@ import type {
 } from '@anthropic-ai/claude-agent-sdk';
 import type { AccountRefusal, ModelMarkBasis } from '@10db/contracts';
 import { systemClock, type Clock } from '../clock';
+import { AUTOUPDATE_OFF } from '../environment';
 import type { Logger } from '../log';
 import {
   checkAccount,
@@ -88,11 +89,12 @@ function shapeOptions(
     effort: spec.effort,
     ...(spec.resumeProviderSessionId ? { resume: spec.resumeProviderSessionId } : {}),
     // Default mode: Claude Code forces it while the scrub is on, and it keeps the processes outside
-    // the sandbox free of the session's variables.
+    // the sandbox free of the session's variables. The updater switch comes last, so neither env moves
+    // the pinned copy.
     env:
       sandbox === null
-        ? { ...spec.env }
-        : { ...spec.env, ...sandbox.env, CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1' },
+        ? { ...spec.env, ...AUTOUPDATE_OFF }
+        : { ...spec.env, ...sandbox.env, CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1', ...AUTOUPDATE_OFF },
     pathToClaudeCodeExecutable: deps.claudePath,
     // Never the project's, the user's or a local settings file; never a plugin (the harness's skills
     // and personas are for lanes). MCP servers arrive over the control channel, not the command line.

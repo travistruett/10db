@@ -200,7 +200,12 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
           extraReads: [...access.gitReads, ...(lockPath === null ? [] : [lockPath])],
           // srt opens nothing for writing by itself, unlike Claude Code, which opens the checkout.
           extraWrites: [checkout, ...(lockPath === null ? [] : [lockPath])],
-          denyWrites: [...access.gitState, ...access.otherCheckouts, ...SRT_SHARED_TEMP],
+          denyWrites: [
+            ...access.gitState,
+            ...access.otherCheckouts,
+            ...SRT_SHARED_TEMP,
+            ...access.pinnedTools,
+          ],
           // srt reads the settings file before the sandbox starts; the command reads no file here.
           sandboxRoots: access.sandboxRoots,
           ownFiles: [],

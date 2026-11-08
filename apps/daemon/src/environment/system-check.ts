@@ -3,13 +3,12 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { SystemCheckDto, ToolName } from '@10db/contracts';
 import { firstExecutable, installCandidates } from '../git';
+import { CODEX_VERIFIED_ON } from './agent-pins';
 import { ACCOUNT_NAMES_VERIFIED_ON } from './launch';
 import type { LoginEnv } from './login-env';
+import type { AgentStatus } from './pinned-tools';
 
 const VERSION_PROBE_TIMEOUT_MS = 5_000;
-
-/** The Codex version the ChatGPT-plan checks and the app-server protocol 10db reads were verified on. */
-export const CODEX_VERIFIED_ON = '0.167.0';
 
 export const REQUIRED_TOOLS = [
   { name: ToolName.Claude, required: true },
@@ -30,25 +29,37 @@ export function markGhRequired(check: SystemCheckDto, needed: boolean): SystemCh
 }
 
 /**
- * Where claude is looked for: the install prefixes, then Claude Code's own install directories in
- * `home`. Never the login PATH, which can lead with a directory a lane writes.
+ * The claude and codex rows and the pinned copies, from what the daemon runs now. Read for each request,
+ * not kept with the tool check, because a copy is fetched in the background and a newer release can appear
+ * at any time. The builder's own installs are never looked at: lanes run the pinned copies.
  */
-function claudeCandidates(home: string): string[] {
-  return [
-    ...installCandidates('claude'),
-    join(home, '.local', 'bin', 'claude'),
-    join(home, '.claude', 'local', 'claude'),
-  ];
-}
-
-/** The claude the daemon runs sessions with, or null when none is installed where it looks. */
-export function findClaude(home: string = homedir()): string | null {
-  return firstExecutable(claudeCandidates(home));
-}
-
-/** The codex the daemon runs sessions with, found in the install prefixes, never the login PATH; null when none. */
-export function findCodex(): string | null {
-  return firstExecutable(installCandidates('codex'));
+export function withAgentStatus(
+  check: SystemCheckDto,
+  statuses: readonly AgentStatus[],
+): SystemCheckDto {
+  const of = (name: ToolName) => statuses.find((s) => s.tool === name);
+  const tools = check.tools.map((tool) => {
+    const status =
+      tool.name === ToolName.Claude || tool.name === ToolName.Codex ? of(tool.name) : undefined;
+    return status ? { ...tool, path: status.path, version: status.version } : tool;
+  });
+  return {
+    ...check,
+    claudeCode: {
+      ...check.claudeCode,
+      warning: claudeCodeWarning(of(ToolName.Claude)?.version ?? null),
+    },
+    codex: { ...check.codex, warning: codexWarning(of(ToolName.Codex)?.version ?? null) },
+    tools,
+    agents: statuses.map((s) => ({
+      tool: s.tool,
+      label: s.label,
+      pinned: s.pinned,
+      state: s.state,
+      problem: s.problem,
+      newerRelease: s.newerRelease,
+    })),
+  };
 }
 
 /** Docker Desktop links docker into `/usr/local/bin`, or into `~/.docker/bin` for a user install. */
@@ -134,13 +145,13 @@ export async function systemCheck(
   const home = opts.home ?? homedir();
   const probe = opts.probe ?? probeVersion;
   // Each tool is the one the daemon runs, found where no lane writes, so no tool a lane put on the
-  // login PATH runs here, not even for its version.
+  // login PATH runs here, not even for its version. Claude Code and Codex are the pinned copies,
+  // filled in by `withAgentStatus`.
   const pathOf = (name: ToolName): string | null => {
     switch (name) {
       case ToolName.Claude:
-        return findClaude(home);
       case ToolName.Codex:
-        return findCodex();
+        return null;
       case ToolName.Git:
         return resolved.git;
       case ToolName.Gh:

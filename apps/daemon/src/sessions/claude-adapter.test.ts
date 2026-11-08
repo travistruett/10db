@@ -353,6 +353,16 @@ describe('buildQueryOptions', () => {
     expect(options).not.toHaveProperty('mcpServers');
   });
 
+  it("keeps Claude Code's own updater off, whatever the session env or a sandbox says", () => {
+    const loud = spec({ env: { PATH: '/usr/bin', DISABLE_AUTOUPDATER: '0' } });
+    expect(buildQueryOptions(loud, deps).env).toMatchObject({ DISABLE_AUTOUPDATER: '1' });
+    const sandboxed = buildQueryOptions(
+      { ...loud, sandbox: { ...laneSandbox, env: { DISABLE_AUTOUPDATER: '0' } } },
+      deps,
+    );
+    expect(sandboxed.env).toMatchObject({ DISABLE_AUTOUPDATER: '1' });
+  });
+
   it("builds 10db's own MCP server alone when the repo has none", () => {
     expect(buildMcpServers(spec())).toEqual({
       [CLAUDE_MCP_SERVER]: {
@@ -526,7 +536,11 @@ describe('buildQueryOptions', () => {
       cwd: '/repo',
       model: 'claude-sonnet-5-5',
       effort: 'medium',
-      env: { PATH: '/usr/bin:/bin', CLAUDE_AGENT_SDK_CLIENT_APP: '10db/0.1.0' },
+      env: {
+        PATH: '/usr/bin:/bin',
+        CLAUDE_AGENT_SDK_CLIENT_APP: '10db/0.1.0',
+        DISABLE_AUTOUPDATER: '1',
+      },
       pathToClaudeCodeExecutable: '/usr/local/bin/claude',
       settingSources: ['project'],
       strictMcpConfig: true,

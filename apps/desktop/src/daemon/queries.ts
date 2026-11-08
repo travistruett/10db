@@ -224,13 +224,24 @@ export function useKeepAwake() {
   });
 }
 
-/** The daemon's startup check: login-env status and the tools the daemon runs. It changes only on restart. */
+/** How often the pinned agent copies are asked about: quickly while one is being downloaded, rarely after. */
+const AGENT_FETCHING_POLL_MS = 3_000;
+const AGENT_RELEASE_POLL_MS = 10 * 60_000;
+
+/**
+ * The daemon's startup check: login-env status and the tools the daemon runs. The pinned Claude Code and
+ * Codex are read again, since one may be fetching and a newer release can come out while the app is open.
+ */
 export function useSystemCheck() {
   const { client } = useDaemon();
   return useQuery({
     queryKey: queryKeys.system,
     queryFn: async () => readJson(await client.system.$get({ query: {} }), SystemCheckDto),
     staleTime: Infinity,
+    refetchInterval: (query) =>
+      query.state.data?.agents?.some((agent) => agent.state === 'fetching')
+        ? AGENT_FETCHING_POLL_MS
+        : AGENT_RELEASE_POLL_MS,
   });
 }
 

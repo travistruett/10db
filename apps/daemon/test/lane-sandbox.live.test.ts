@@ -32,7 +32,13 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { buildSessionPrompt } from '../src/briefing';
 import { loadEnv } from '../src/env';
-import { captureLoginEnv, createLauncher, findClaude, systemKeychain } from '../src/environment';
+import {
+  AgentTool,
+  captureLoginEnv,
+  createLauncher,
+  ensureAgent,
+  systemKeychain,
+} from '../src/environment';
 import { createEventBus, createStateStore } from '../src/events';
 import { createGit } from '../src/git';
 import { judgePreToolUse, protectedPaths } from '../src/guard';
@@ -267,8 +273,7 @@ async function runLane(opts: {
   readonly claims?: readonly { readonly kind: ClaimKind; readonly name: string }[];
 }): Promise<LaneRun> {
   const login = await captureLoginEnv({ inherited: process.env });
-  const claudePath = findClaude();
-  if (!claudePath) throw new Error('claude is not installed where 10db looks for it');
+  const claudePath = await ensureAgent(AgentTool.Claude);
   const logs = captureLogs();
   const adapter = createClaudeAdapter({
     claudePath,

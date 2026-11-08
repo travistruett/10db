@@ -24,6 +24,41 @@ describe('SystemCheckDto', () => {
     });
   });
 
+  it('reads the pinned copies, with the release that is newer than each pin', () => {
+    const agents = [
+      {
+        tool: 'codex',
+        label: 'Codex',
+        pinned: '0.167.0',
+        state: 'ready',
+        problem: null,
+        newerRelease: '0.168.0',
+      },
+      {
+        tool: 'claude',
+        label: 'Claude Code',
+        pinned: '2.1.302',
+        state: 'refused',
+        problem: 'Claude Code 2.1.302 was refused: the files no longer match',
+        newerRelease: null,
+      },
+    ];
+    const parsed = SystemCheckDto.parse({
+      loginEnv: { source: 'login_shell', warning: null },
+      claudeCode: { verifiedOn: '2.1.302', warning: null },
+      codex: { verifiedOn: '0.167.0', warning: null },
+      tools: [],
+      agents,
+    });
+    expect(parsed.agents).toEqual(agents);
+    expect(
+      SystemCheckDto.safeParse({
+        ...parsed,
+        agents: [{ ...agents[0], state: 'stale' }],
+      }).success,
+    ).toBe(false);
+  });
+
   it('reads a failed Artificial Analysis sync, and refuses an outcome that is not a failure', () => {
     const warning = {
       outcome: 'rate_limited',

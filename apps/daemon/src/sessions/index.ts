@@ -43,3 +43,4 @@ export {
   type RepoMcp,
 } from './project-mcp';
 export { createUnavailableAdapter } from './unavailable-adapter';
+export { createPinnedAdapter, type AdapterSource } from './pinned-adapter';

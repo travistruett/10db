@@ -26,12 +26,59 @@ interface Row {
 
 const rows: Row[] = [
   {
-    name: 'no claude where 10db looks',
+    name: 'no Claude Code copy managed',
     input: { claude: missing, probing: false, identity: null, error: null },
     expected: {
       mark: 'bad',
+      detail: '10db runs its own copy of Claude Code, and none is managed here.',
+      runsAs: null,
+      canAddLogin: false,
+    },
+  },
+  {
+    name: 'the pinned copy is still being downloaded',
+    input: {
+      claude: missing,
+      copy: {
+        tool: 'claude',
+        label: 'Claude Code',
+        pinned: '2.1.302',
+        state: 'fetching',
+        problem: null,
+        newerRelease: null,
+      },
+      probing: false,
+      identity: null,
+      error: null,
+    },
+    expected: {
+      mark: 'pending',
       detail:
-        'Not found in /opt/homebrew/bin, /usr/local/bin, /usr/bin, ~/.local/bin and ~/.claude/local. Install Claude Code, then recheck.',
+        'Downloading Claude Code 2.1.302, the release 10db runs, and checking it against its recorded checksum…',
+      runsAs: null,
+      canAddLogin: false,
+    },
+  },
+  {
+    name: 'the pinned copy failed its checksum',
+    input: {
+      claude: missing,
+      copy: {
+        tool: 'claude',
+        label: 'Claude Code',
+        pinned: '2.1.302',
+        state: 'refused',
+        problem: 'Claude Code 2.1.302 was refused: the files no longer match',
+        newerRelease: null,
+      },
+      probing: false,
+      identity: null,
+      error: null,
+    },
+    expected: {
+      mark: 'bad',
+      detail:
+        'Claude Code 2.1.302 was refused: the files no longer match Recheck removes this copy and downloads a fresh one, checked against the same recorded checksum.',
       runsAs: null,
       canAddLogin: false,
     },
@@ -41,8 +88,7 @@ const rows: Row[] = [
     input: { claude: missing, probing: true, identity: null, error: null },
     expected: {
       mark: 'bad',
-      detail:
-        'Not found in /opt/homebrew/bin, /usr/local/bin, /usr/bin, ~/.local/bin and ~/.claude/local. Install Claude Code, then recheck.',
+      detail: '10db runs its own copy of Claude Code, and none is managed here.',
       runsAs: null,
       canAddLogin: false,
     },

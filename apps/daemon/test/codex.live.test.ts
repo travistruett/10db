@@ -25,7 +25,13 @@ import { parse } from 'smol-toml';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { loadEnv } from '../src/env';
-import { captureLoginEnv, createLauncher, findCodex, type Launcher } from '../src/environment';
+import {
+  AgentTool,
+  captureLoginEnv,
+  createLauncher,
+  ensureAgent,
+  type Launcher,
+} from '../src/environment';
 import { createGit } from '../src/git';
 import { createLogger } from '../src/log';
 import { resolveSandboxRuntime } from '../src/paths';
@@ -700,9 +706,8 @@ describe.skipIf(!live)(
     let open = false;
 
     beforeAll(async () => {
-      const found = findCodex();
-      if (found === null) throw new Error('codex is not installed where 10db looks for it');
-      codexPath = found;
+      // The pinned release, as the daemon runs it: this test is what verifies a bump of that pin.
+      codexPath = await ensureAgent(AgentTool.Codex);
       const login = await captureLoginEnv({ inherited: process.env });
       launcher = createLauncher({
         base: login.vars,

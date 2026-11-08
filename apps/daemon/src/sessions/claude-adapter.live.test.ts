@@ -4,7 +4,13 @@ import { HARNESS_PLUGIN_DIR } from '@10db/harness';
 import { describe, expect, it } from 'vitest';
 import { createTempRepo } from '../../test/fixtures';
 import { loadEnv } from '../env';
-import { captureLoginEnv, createLauncher, findClaude, systemKeychain } from '../environment';
+import {
+  AgentTool,
+  captureLoginEnv,
+  createLauncher,
+  ensureAgent,
+  systemKeychain,
+} from '../environment';
 import { createLogger } from '../log';
 import { createClaudeAdapter } from './index';
 import type { SessionEvent } from './types';
@@ -15,8 +21,8 @@ const live = loadEnv(process.env).TENDB_LIVE_CLAUDE === '1';
 describe.skipIf(!live)('Claude adapter, live', () => {
   it('runs one turn on the real claude, billed to the subscription', async () => {
     const login = await captureLoginEnv({ inherited: process.env });
-    const claudePath = findClaude();
-    if (!claudePath) throw new Error('claude is not installed where 10db looks for it');
+    // The pinned release, as the daemon runs it: this test is what verifies a bump of that pin.
+    const claudePath = await ensureAgent(AgentTool.Claude);
     const repo = createTempRepo();
     const lines: Record<string, unknown>[] = [];
     const logger = createLogger({

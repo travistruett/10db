@@ -30,7 +30,7 @@ const DaemonEnv = z.object({
       return port <= 65535 && port !== 80;
     })
     .optional(),
-  // Absolute path to the claude binary; otherwise it is found on the login shell's PATH.
+  // Absolute path to a claude binary run in place of 10db's pinned Claude Code (tests, dev), unchecked.
   TENDB_CLAUDE_PATH: z.string().startsWith('/').optional(),
   // Where worktrees are made for worktree-mode projects. Absolute: `~` is not expanded.
   TENDB_WORKTREE_ROOT: z.string().startsWith('/').optional(),
