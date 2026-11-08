@@ -1,6 +1,6 @@
 import type { HazardDef } from '@10db/contracts';
-import { commandForms, onlyPreviews, startsWithWords } from './command-forms';
-import { SHELLS, commandOf, shellQuote, shellScripts, redirectionReadings } from './judge';
+import { commandForms, startsWithWords } from './command-forms';
+import { commandOf, shellLines, shellQuote, shellScripts, redirectionReadings } from './judge';
 import { findExecCommands, parseShell } from './shell-words';
 
 /** The deepest `sh -c`, `eval` and `find -exec` nesting the guard follows. */
@@ -29,8 +29,8 @@ export function hazardHit(
     const inner = [...segment.nested, ...segment.hereDocuments].map((body) => ({ body, depth }));
     if (depth < MAX_DEPTH) {
       const deeper = depth + 1;
-      if (SHELLS.has(head)) {
-        inner.push(...shellScripts(words).map((body) => ({ body, depth: deeper })));
+      for (const shell of shellLines(words)) {
+        inner.push(...shellScripts(shell).map((body) => ({ body, depth: deeper })));
       }
       if (head === 'find') {
         const execs = findExecCommands(words).map((exec) => exec.map(shellQuote).join(' '));
@@ -45,7 +45,6 @@ export function hazardHit(
     const readings = redirectionReadings(words).map((reading) => commandForms(reading));
     for (const hazard of hazards) {
       if (
-        !onlyPreviews(words) &&
         hazard.commands.some((c) =>
           readings.some((forms) => forms.bare.some((f) => startsWithWords(f, c.split(' ')))),
         )

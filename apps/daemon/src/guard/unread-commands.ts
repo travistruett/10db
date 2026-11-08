@@ -9,9 +9,15 @@ import {
   NAMEREF_BUILTINS,
   unreadArithmeticIn,
 } from './arithmetic-words';
-import { plainWordReadings, RUNNERS, type Runner } from './command-forms';
+import {
+  hazardPatterns,
+  mayStartWith,
+  ONE_WORD,
+  plainWordReadings,
+  UNREAD_WORD,
+} from './command-forms';
 import { isNumericArithmetic, numericNames } from './numeric-names';
-import { commandOf, SHELL_C_FLAG, shellQuote, shellScripts } from './judge';
+import { commandOf, SHELL_C_FLAG, shellLines, shellQuote, shellScripts } from './judge';
 import {
   commandName,
   findExecCommands,
@@ -47,13 +53,6 @@ export interface Unread {
 
 /** The deepest `sh -c`, `eval` and `find -exec` nesting followed, as in `hazardHit`. */
 const MAX_DEPTH = 3;
-
-/** Stands for an argument the shell expands, which may become any number of words. */
-const UNREAD_WORD = '\u0000';
-/** Stands for a quoted expansion, which the shell passes as exactly one word, whatever it holds. */
-const ONE_WORD = '\u0001';
-/** In a hazard pattern, a word that matches any one word, such as a container's name. */
-const ANY_WORD = '\u0002';
 
 /** A program name the shell runs as written: a path or a name of plain characters, or a test bracket. */
 const PLAIN_PROGRAM = /^(?:[A-Za-z0-9_@+%,:./-]+|\[\[?)$/;
@@ -97,43 +96,11 @@ const SHELLS: ReadonlySet<string> = new Set([
   'tcsh',
 ]);
 
-/**
- * The word sequences that make a command a hazard, as `hazardHit` compares them: each hazard's
- * command, and that command run through a runner such as `pnpm exec`. Taken from the project's
- * hazards, so a custom command is covered the same way as the defaults.
- */
-function hazardPatterns(hazards: readonly HazardDef[]): string[][] {
-  const commands = hazards.flatMap((hazard) =>
+/** The hazards' commands as words, for `hazardPatterns`. */
+function hazardCommands(hazards: readonly HazardDef[]): string[][] {
+  return hazards.flatMap((hazard) =>
     hazard.commands.map((command) => command.split(' ').filter((word) => word !== '')),
   );
-  // A runner's operands (the service or container) are any word.
-  const through = (runner: Runner, rest: readonly (readonly string[])[]): string[][] =>
-    rest.map((c) => [...runner.words, ...Array<string>(runner.operands).fill(ANY_WORD), ...c]);
-  const once = RUNNERS.flatMap((runner) => through(runner, commands));
-  // A container runner may run another runner: `docker compose exec backend uv run python x`.
-  const twice = RUNNERS.filter((runner) => runner.container).flatMap((outer) =>
-    through(
-      outer,
-      RUNNERS.flatMap((inner) => through(inner, commands)),
-    ),
-  );
-  return [...commands, ...once, ...twice];
-}
-
-/**
- * Whether the words may start with the pattern once each unread word is read as whatever fits. An
- * unread word reached before the pattern ends can supply the rest of it. A one-word stand-in that is
- * still a plain word could be a flag or a word of the pattern, so it is unread too; it only helps
- * where a flag's value slot swallows it.
- */
-function mayStartWith(words: readonly string[], pattern: readonly string[]): boolean {
-  for (let at = 0; at < pattern.length; at += 1) {
-    const word = words[at];
-    if (word === undefined) return false;
-    if (word === UNREAD_WORD || word === ONE_WORD) return true;
-    if (pattern[at] !== ANY_WORD && word !== pattern[at]) return false;
-  }
-  return true;
 }
 
 /** The words of a command's arguments without its redirections and their targets. */
@@ -403,11 +370,12 @@ function scanSegment(
       return { reason: UnreadReason.Script, text };
     }
   }
-  if (SHELLS.has(head)) {
-    if (replace !== null && words.slice(1).some((word) => word.includes(replace))) {
+  // A shell heading the command, or one a runner chain runs (`docker compose exec x sh -c '…'`).
+  for (const shell of shellLines(words)) {
+    if (replace !== null && shell.slice(1).some((word) => word.includes(replace))) {
       return { reason: UnreadReason.Script, text };
     }
-    const found = scanShell(words, segment, piped, depth, scanner);
+    const found = scanShell(shell, segment, piped, depth, scanner);
     if (found !== null) return found;
   }
   if (head === 'find') {
@@ -492,7 +460,7 @@ export function firstUnread(command: string, hazards: readonly HazardDef[]): Unr
   // indirect expansion looks up a name it holds, so any of them makes the whole script unread.
   if (declaresIntegerAnywhere(command, 0)) return { reason: UnreadReason.Script, text: command };
   return scanScript(command, 0, {
-    patterns: hazardPatterns(hazards),
+    patterns: hazardPatterns(hazardCommands(hazards)),
     moved: false,
     stdin: false,
     numeric: numericNames(command),

@@ -281,25 +281,29 @@ function packageManagerVariants(plain: readonly string[], words: readonly string
 }
 
 /**
- * Every way a command line can be read, each as one space-joined string: the line as written, the
- * line without flags (in every reading of its unknown flags), and, for a runner such as `npx` or
- * `pnpm exec`, what it runs (with and without that command's own flags).
+ * Every way a command line can be read: the line as written, the line without flags (in every
+ * reading of its unknown flags), and, for a runner such as `npx` or `pnpm exec`, what it runs (with
+ * and without that command's own flags), each as one space-joined string in `lines`. `bare` holds
+ * the flagless readings a hazard command is compared with, less those that only preview (`uv lock
+ * --check`, see `PREVIEWS`).
  */
 export function commandForms(words: readonly string[]): { bare: string[][]; lines: string[] } {
   const bare: string[][] = [];
   const lines = [words.join(' ')];
-  for (const reading of plainWordReadings(words)) {
+  const add = (reading: readonly PlainWord[]): void => {
     const plain = reading.map((p) => p.word);
-    bare.push(plain, ...packageManagerVariants(plain, words));
+    if (!previews(reading, words)) bare.push(plain, ...packageManagerVariants(plain, words));
     lines.push(plain.join(' '));
+  };
+  for (const reading of plainWordReadings(words)) {
+    add(reading);
     // What each runner in a chain runs: `docker compose exec backend uv run python x` is a runner
     // that runs a runner that runs `python x`.
     for (let from = 0; ;) {
       const found = runnerAt(reading, from);
       if (found === undefined) break;
       from += runnerLength(found);
-      bare.push(plain.slice(from), ...packageManagerVariants(plain.slice(from), words));
-      lines.push(plain.slice(from).join(' '));
+      add(reading.slice(from));
       // Raw words from the program the runner runs, so `pnpm dlx vercel --prod` keeps `--prod`.
       lines.push(words.slice(reading[from]?.at ?? words.length).join(' '));
     }
@@ -307,13 +311,137 @@ export function commandForms(words: readonly string[]): { bare: string[][]; line
   return { bare, lines };
 }
 
-/** Flags that make a command only report or preview what it would do. */
-const READ_ONLY_FLAGS: ReadonlySet<string> = new Set(['--dry-run', '--check', '--plan']);
+/**
+ * Where the command a runner chain runs starts, by index in the words, once in each plain reading:
+ * `docker compose exec -T backend sh -c x` runs `sh` at 5. Empty when no runner starts the words.
+ */
+export function runCommandStarts(words: readonly string[]): number[] {
+  const starts = new Set<number>();
+  for (const reading of plainWordReadings(words)) {
+    let from = 0;
+    for (
+      let found = runnerAt(reading, from);
+      found !== undefined;
+      found = runnerAt(reading, from)
+    ) {
+      from += runnerLength(found);
+    }
+    if (from > 0) starts.add(reading[from]?.at ?? words.length);
+  }
+  return [...starts];
+}
+
+/** A hazard command that only reports what it would do when given one of its preview flags. */
+interface Preview {
+  readonly words: readonly string[];
+  readonly flags: ReadonlySet<string>;
+}
+
+const preview = (words: string, flags: string): Preview => ({
+  words: words.split(' '),
+  flags: new Set(flags.split(' ')),
+});
+
+const DJANGO = ['manage.py', 'python manage.py', 'python3 manage.py', 'django-admin'];
 
 /**
- * Whether the command line asks only for a preview or a check (`makemigrations --check --dry-run`,
- * `cargo update --dry-run`), which changes nothing a hazard guards.
+ * The hazard commands whose program reads a flag as a preview that writes nothing. Each is listed
+ * with the program that takes it: a package manager's script (`pnpm db:migrate --check`) gets the
+ * flag as an argument, npm reads an unknown flag as a setting and installs anyway, and Django's
+ * `makemigrations --check` writes the migrations before 4.2, so none of those counts. A flag a
+ * program's older release does not know makes it refuse the line.
  */
-export function onlyPreviews(words: readonly string[]): boolean {
-  return words.some((word) => READ_ONLY_FLAGS.has(word));
+const PREVIEWS: readonly Preview[] = [
+  ...DJANGO.map((django) => preview(`${django} makemigrations`, '--dry-run')),
+  ...DJANGO.map((django) => preview(`${django} migrate`, '--check --plan')),
+  preview('uv lock', '--check --dry-run'),
+  preview('uv sync', '--check --dry-run'),
+  preview('uv pip install', '--dry-run'),
+  preview('npm install', '--dry-run'),
+  preview('npm uninstall', '--dry-run'),
+  preview('npm update', '--dry-run'),
+  preview('cargo add', '--dry-run'),
+  preview('cargo remove', '--dry-run'),
+  preview('cargo update', '--dry-run'),
+  preview('pip install', '--dry-run'),
+  preview('pip3 install', '--dry-run'),
+  ...['add', 'remove', 'lock', 'install', 'update', 'sync'].map((sub) =>
+    preview(`poetry ${sub}`, '--dry-run'),
+  ),
+  preview('rake', '--dry-run -n'),
+];
+
+/**
+ * Whether one plain reading, from its program on, is a hazard command given one of its preview
+ * flags: the flag follows the command's last word, before any `--`, and is no flag's value.
+ */
+function previews(reading: readonly PlainWord[], words: readonly string[]): boolean {
+  const [program] = reading;
+  if (program === undefined) return false;
+  const named = (word: string, at: number): string =>
+    at === 0
+      ? commandName(word)
+      : reading[0]?.word === 'npm' && at === 1
+        ? (NPM_ALIASES.get(word) ?? word)
+        : word;
+  const flags = FLAG_TABLES.get(commandName(program.word));
+  const takesValue = (flag: string): boolean =>
+    flags === undefined ? GENERIC_VALUE_FLAGS.has(flag) : flags.values.has(flag);
+  return PREVIEWS.some((p) => {
+    if (
+      !p.words.every(
+        (word, at) => reading[at] !== undefined && named(reading[at].word, at) === word,
+      )
+    ) {
+      return false;
+    }
+    const last = reading[p.words.length - 1]?.at ?? words.length;
+    for (let at = last + 1; at < words.length && words[at] !== '--'; at += 1) {
+      if (p.flags.has(words[at] ?? '') && !takesValue(words[at - 1] ?? '')) return true;
+    }
+    return false;
+  });
+}
+
+/** In a hazard pattern, a word that matches any one word, such as a container's name. */
+export const ANY_WORD = '\u0002';
+/** Stands for a word 10db cannot read, which may become any words. */
+export const UNREAD_WORD = '\u0000';
+/** Stands for a quoted expansion, which the shell passes as exactly one word, whatever it holds. */
+export const ONE_WORD = '\u0001';
+
+/**
+ * The word sequences that make a command a hazard, as `hazardHit` compares them: each hazard's
+ * command, and that command run through a runner such as `pnpm exec`. Taken from the project's
+ * hazards, so a custom command is covered the same way as the defaults.
+ */
+export function hazardPatterns(commands: readonly (readonly string[])[]): string[][] {
+  // A runner's operands (the service or container) are any word.
+  const through = (runner: Runner, rest: readonly (readonly string[])[]): string[][] =>
+    rest.map((c) => [...runner.words, ...Array<string>(runner.operands).fill(ANY_WORD), ...c]);
+  const once = RUNNERS.flatMap((runner) => through(runner, commands));
+  // A container runner may run another runner: `docker compose exec backend uv run python x`.
+  const twice = RUNNERS.filter((runner) => runner.container).flatMap((outer) =>
+    through(
+      outer,
+      RUNNERS.flatMap((inner) => through(inner, commands)),
+    ),
+  );
+  return [...commands.map((c) => [...c]), ...once, ...twice];
+}
+
+/**
+ * Whether the words may start with the pattern once each unread word is read as whatever fits. An
+ * unread word reached before the pattern ends can supply the rest of it. A one-word stand-in that is
+ * still a plain word could be a flag or a word of the pattern, so it is unread too; it only helps
+ * where a flag's value slot swallows it.
+ */
+export function mayStartWith(words: readonly string[], pattern: readonly string[]): boolean {
+  for (let at = 0; at < pattern.length; at += 1) {
+    const word = words[at];
+    if (word === undefined) return false;
+    if (word === UNREAD_WORD || word === ONE_WORD) return true;
+    if (pattern[at] !== ANY_WORD && word !== pattern[at]) return false;
+  }
+  return true;
 }
