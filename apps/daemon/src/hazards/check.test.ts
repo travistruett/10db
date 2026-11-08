@@ -39,6 +39,7 @@ const input = (over: Partial<CheckInput> = {}): CheckInput => ({
   areaNames: ['repo'],
   gateCommands: ['make gate'],
   kept: [],
+  declined: [],
   ...over,
 });
 
@@ -263,6 +264,25 @@ describe('checking what the model proposed', () => {
         ],
       }),
       input({ kept: [{ hazard: 'deps', kind: 'command', value: 'pnpm add' }] }),
+    );
+    expect(checked).toEqual({ additions: [], removals: [] });
+  });
+
+  it('leaves out what the builder took out before', () => {
+    const checked = checkAssessment(
+      reply({
+        additions: [
+          {
+            hazard: 'deps',
+            kind: 'command',
+            value: 'make backend-lock',
+            reason: 'Locks the backend.',
+            file: 'Makefile',
+            line: 6,
+          },
+        ],
+      }),
+      input({ declined: [{ hazard: 'deps', kind: 'command', value: 'make backend-lock' }] }),
     );
     expect(checked).toEqual({ additions: [], removals: [] });
   });

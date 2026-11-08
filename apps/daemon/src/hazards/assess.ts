@@ -1,5 +1,10 @@
 import type { HazardRemoval, ProjectId } from '@10db/contracts';
-import { applyHazardAdditions, getProject, readHazardAssessment, recordHazardRead } from '@10db/db';
+import {
+  applyHazardAdditions,
+  getProject,
+  reconcileHazardAssessment,
+  recordHazardRead,
+} from '@10db/db';
 import type { StateStore } from '../events';
 import type { AreaNamer } from '../folders';
 import type { Git } from '../git';
@@ -106,16 +111,20 @@ export function createHazardAssessor(deps: AssessorDeps): HazardAssessor {
     const project = getProject(deps.state.db, projectId);
     const text = await readRepoText(deps.git, project.repoPath);
     if (text === null) return fail("10db couldn't read this project's files.");
-    const recorded = readHazardAssessment(deps.state.db, projectId);
+    // What the builder took out in Settings since the last look is declined before anything is proposed.
+    const recorded = deps.state.write((ctx) => reconcileHazardAssessment(ctx, projectId));
     const input: CheckInput = {
       tracked: text.tracked,
       lines: new Map(text.files.map((f) => [f.path, f.lines])),
       hazards: project.hazards,
       areaNames: project.areas.map((a) => a.name),
-      gateCommands: [project.gateCommand, project.precheckCommand].filter(
-        (c): c is string => c !== null,
-      ),
+      gateCommands: [
+        project.gateCommand,
+        project.precheckCommand,
+        project.changedCheckCommand,
+      ].filter((c): c is string => c !== null),
       kept: recorded.kept,
+      declined: recorded.declined,
     };
     const reply = await answer(
       deps.asker,

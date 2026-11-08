@@ -125,6 +125,8 @@ export interface CheckInput {
   readonly gateCommands: readonly string[];
   /** Entries the builder kept after a removal card listed them. */
   readonly kept: readonly { hazard: string; kind: string; value: string }[];
+  /** Entries the builder took out (Undo, an agreed removal, or by hand): never proposed again. */
+  readonly declined: readonly { hazard: string; kind: string; value: string }[];
 }
 
 export interface CheckedAssessment {
@@ -228,7 +230,7 @@ export function checkAssessment(text: string, input: CheckInput): CheckedAssessm
     )
       continue;
     if (
-      input.kept.some(
+      [...input.kept, ...input.declined].some(
         (k) => k.hazard === proposal.hazard && k.kind === proposal.kind && k.value === value,
       )
     )

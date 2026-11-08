@@ -77,10 +77,54 @@ function without(hazard: HazardDef, entry: Entry): HazardDef {
 const stillAHazard = (hazard: HazardDef): boolean => hazard.globs.length > 0;
 
 /**
+ * The state with every recorded addition the hazards no longer hold moved to `declined`: the builder
+ * took it out by hand (in Settings, or by deleting its hazard), and a removal made by hand sticks as
+ * an Undo does.
+ */
+function reconciled(
+  hazards: readonly HazardDef[],
+  state: HazardAssessmentState,
+): HazardAssessmentState {
+  const isHeld = (a: Entry): boolean => {
+    const hazard = hazards.find((h) => h.name === a.hazard);
+    return hazard !== undefined && has(hazard, a);
+  };
+  const gone = state.additions.filter((a) => !isHeld(a)).map(entryOf);
+  if (gone.length === 0) return state;
+  return {
+    ...state,
+    additions: state.additions.filter(isHeld),
+    declined: [...state.declined, ...gone.filter((e) => !holds(state.declined, e))],
+  };
+}
+
+/** The additions the project's hazards still hold, which is what Settings lists as added. */
+export function heldHazardAdditions(db: DbReader, projectId: ProjectId): HazardAdditionDto[] {
+  return reconciled(getProject(db, projectId).hazards, readHazardAssessment(db, projectId))
+    .additions;
+}
+
+/**
+ * Records as declined every addition the builder has since taken out of the hazards by hand, so it
+ * is neither listed as added nor added again. Returns the state as now stored.
+ */
+export function reconcileHazardAssessment(
+  ctx: WriteContext,
+  projectId: ProjectId,
+): HazardAssessmentState {
+  const state = readHazardAssessment(ctx.tx, projectId);
+  const next = reconciled(getProject(ctx.tx, projectId).hazards, state);
+  if (next !== state) write(ctx, projectId, next);
+  return next;
+}
+
+/**
  * Adds each draft to the hazard it names, in the project's own hazard list, and records it with its
- * evidence. A value the hazard already holds, one the builder took out before, and one twice in the
- * batch are left out. A hazard the project lacks is made, held by the whole project, only when the batch
- * gives it a glob; an area's name is never made a hazard. Returns what was added.
+ * evidence. A value the hazard already holds, one the builder took out before (by Undo, an agreed
+ * removal or by hand), and one twice in the batch are left out. A hazard the project lacks is made,
+ * held by the whole project, only from a glob the batch actually adds; a command for a hazard that is
+ * neither held nor made is dropped, so no hazard is ever left with no glob. An area's name is never
+ * made a hazard. Returns what was added, in the order of the drafts.
  */
 export function applyHazardAdditions(
   ctx: WriteContext,
@@ -88,12 +132,20 @@ export function applyHazardAdditions(
   drafts: readonly HazardAdditionDraft[],
 ): HazardAdditionDto[] {
   const project = getProject(ctx.tx, projectId);
-  const state = readHazardAssessment(ctx.tx, projectId);
+  const state = reconcileHazardAssessment(ctx, projectId);
   const areaNames = new Set(project.areas.map((a) => a.name));
   const hazards = project.hazards.map((h) => ({ ...h }));
   const taken: Entry[] = [];
-  const added: HazardAdditionDto[] = [];
-  for (const draft of drafts) {
+  const added: { index: number; addition: HazardAdditionDto }[] = [];
+  // Globs first, so a hazard is made only from a glob that is really added.
+  const order = drafts
+    .map((draft, index) => ({ draft, index }))
+    .sort(
+      (a, b) =>
+        Number(a.draft.kind !== HazardEntryKind.Glob) -
+          Number(b.draft.kind !== HazardEntryKind.Glob) || a.index - b.index,
+    );
+  for (const { draft, index } of order) {
     const entry = entryOf(draft);
     if (holds(state.declined, entry) || holds(taken, entry)) continue;
     if (areaNames.has(draft.hazard)) continue;
@@ -104,28 +156,22 @@ export function applyHazardAdditions(
       else target.commands = [...target.commands, entry.value];
     } else {
       // A hazard needs a path, so a command alone has nothing to start one with.
-      if (!drafts.some((d) => d.hazard === draft.hazard && d.kind === HazardEntryKind.Glob))
-        continue;
+      if (entry.kind !== HazardEntryKind.Glob) continue;
       hazards.push({
         name: draft.hazard,
-        globs: entry.kind === HazardEntryKind.Glob ? [entry.value] : [],
-        commands: entry.kind === HazardEntryKind.Command ? [entry.value] : [],
+        globs: [entry.value],
+        commands: [],
         scope: HazardScope.Project,
       });
     }
     taken.push(entry);
-    added.push({ ...draft, id: randomUUID(), addedAt: ctx.now });
-  }
-  // A hazard made from a command seen before its glob has no globs yet; fill in order.
-  for (const hazard of hazards) {
-    if (hazard.globs.length > 0) continue;
-    const globs = added.filter((a) => a.hazard === hazard.name && a.kind === HazardEntryKind.Glob);
-    hazard.globs = globs.map((g) => g.value);
+    added.push({ index, addition: { ...draft, id: randomUUID(), addedAt: ctx.now } });
   }
   if (added.length === 0) return [];
-  patchProject(ctx, projectId, { hazards });
-  write(ctx, projectId, { ...state, additions: [...state.additions, ...added] });
-  return added;
+  const additions = added.sort((a, b) => a.index - b.index).map((a) => a.addition);
+  patchProject(ctx, projectId, { hazards: hazards.filter(stillAHazard) });
+  write(ctx, projectId, { ...state, additions: [...state.additions, ...additions] });
+  return additions;
 }
 
 function takeOut(
@@ -134,7 +180,7 @@ function takeOut(
   entries: readonly Entry[],
 ): HazardAssessmentState {
   const project = getProject(ctx.tx, projectId);
-  const state = readHazardAssessment(ctx.tx, projectId);
+  const state = reconciled(project.hazards, readHazardAssessment(ctx.tx, projectId));
   const hazards = project.hazards
     .map((h) => entries.filter((e) => e.hazard === h.name).reduce(without, h))
     .filter(stillAHazard);
@@ -143,10 +189,14 @@ function takeOut(
   const gone = new Set(
     project.hazards.map((h) => h.name).filter((n) => !hazards.some((h) => h.name === n)),
   );
+  // What 10db added to a hazard that went with its last glob was taken out too.
+  const out = [...entries, ...state.additions.filter((a) => gone.has(a.hazard)).map(entryOf)];
+  const declined = [...state.declined];
+  for (const entry of out) if (!holds(declined, entry)) declined.push(entry);
   return {
     ...state,
-    additions: state.additions.filter((a) => !holds(entries, entryOf(a)) && !gone.has(a.hazard)),
-    declined: [...state.declined, ...entries.filter((e) => !holds(state.declined, e))],
+    additions: state.additions.filter((a) => !holds(out, entryOf(a))),
+    declined,
     kept: state.kept.filter((k) => !holds(entries, k)),
   };
 }

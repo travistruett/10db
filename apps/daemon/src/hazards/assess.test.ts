@@ -1,6 +1,7 @@
 import {
   createTestStore,
   getProject,
+  patchProject,
   readHazardAssessment,
   seedProject,
   type Store,
@@ -11,6 +12,7 @@ import type { Git } from '../git';
 import { pendingHazardRemovals } from '../inbox';
 import { silentLogger } from '../log';
 import { createHazardAssessor, type HazardAssessor } from './assess';
+import { hazardAssessmentDto } from './dto';
 
 let store: Store;
 let close: () => void;
@@ -130,6 +132,43 @@ describe('assessing a project from its repository', () => {
       { file: 'Makefile', line: 5 },
       { file: 'amps/AGENTS.md', line: 2 },
       { file: 'amps/backend/uv.lock' },
+    ]);
+  });
+
+  it('treats the changed-files check as a check, never a hazard', async () => {
+    const project = seedProject(store, {
+      gateCommand: 'make gate',
+      changedCheckCommand: 'make backend-lock',
+      repoPath: '/tmp/ampsio',
+    });
+    const outcome = await assessor(() => Promise.resolve(ANSWER)).assess(project.id);
+    expect(outcome).toMatchObject({ ok: true, added: 3 });
+    expect(
+      getProject(store.db, project.id).hazards.find((h) => h.name === 'deps')?.commands,
+    ).not.toContain('make backend-lock');
+  });
+
+  it('leaves out what the builder took out in Settings, and no longer lists it as added', async () => {
+    const project = seed();
+    await assessor(() => Promise.resolve(ANSWER)).assess(project.id);
+    const hazards = getProject(store.db, project.id).hazards.map((h) =>
+      h.name === 'deps'
+        ? { ...h, commands: h.commands.filter((c) => c !== 'make backend-lock') }
+        : h,
+    );
+    store.write((ctx) => patchProject(ctx, project.id, { hazards }));
+    const listed = (): string[] =>
+      hazardAssessmentDto(store.db, project.id).additions.map((a) => a.value);
+    expect(listed()).not.toContain('make backend-lock');
+    const outcome = await assessor(() => Promise.resolve(ANSWER)).assess(project.id);
+    expect(outcome).toMatchObject({ ok: true, added: 0, removals: 0 });
+    expect(
+      getProject(store.db, project.id).hazards.find((h) => h.name === 'deps')?.commands,
+    ).not.toContain('make backend-lock');
+    expect(listed()).toEqual([
+      'make migration',
+      'python3 amps/dev_export.py',
+      'amps/backend/uv.lock',
     ]);
   });
 

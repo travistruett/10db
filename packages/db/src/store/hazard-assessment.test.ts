@@ -11,10 +11,11 @@ import {
   applyHazardRemovals,
   keepHazards,
   readHazardAssessment,
+  reconcileHazardAssessment,
   recordHazardRead,
   undoHazardAddition,
 } from './hazard-assessment';
-import { getProject } from './projects';
+import { getProject, patchProject } from './projects';
 import type { Store } from './store';
 import { createTestStore, seedProject } from './test-support';
 
@@ -140,6 +141,29 @@ describe('undoing an addition', () => {
     expect(hazard(project.id, 'exports')).toBeUndefined();
   });
 
+  it('never leaves a hazard with no glob when the only glob of a hazard it made was undone', () => {
+    const project = seedProject(store);
+    const pair = [
+      command('exports', 'python3 amps/dev_export.py'),
+      glob('exports', 'amps/exports/**', 'amps/exports/a.json'),
+    ];
+    const made = store.write((ctx) => applyHazardAdditions(ctx, project.id, pair)).value;
+    const madeGlob = made.find((a) => a.kind === HazardEntryKind.Glob);
+    store.write((ctx) => {
+      undoHazardAddition(ctx, project.id, madeGlob?.id ?? '');
+    });
+    expect(hazard(project.id, 'exports')).toBeUndefined();
+    const again = store.write((ctx) =>
+      applyHazardAdditions(ctx, project.id, [...pair, command('deps', 'make backend-lock')]),
+    ).value;
+    expect(again.map((a) => a.value)).toEqual(['make backend-lock']);
+    expect(hazard(project.id, 'exports')).toBeUndefined();
+    expect(getProject(store.db, project.id).hazards.every((h) => h.globs.length > 0)).toBe(true);
+    expect(readHazardAssessment(store.db, project.id).additions.map((a) => a.value)).toEqual([
+      'make backend-lock',
+    ]);
+  });
+
   it('refuses an addition that is not listed', () => {
     const project = seedProject(store);
     expect(() =>
@@ -147,6 +171,48 @@ describe('undoing an addition', () => {
         undoHazardAddition(ctx, project.id, 'nope');
       }),
     ).toThrow(/hazard addition nope not found/);
+  });
+});
+
+describe('an addition the builder took out by hand', () => {
+  it('stays out, and is no longer listed as added', () => {
+    const project = seedProject(store);
+    store.write((ctx) => applyHazardAdditions(ctx, project.id, [command('deps', 'make lock')]));
+    const hazards = getProject(store.db, project.id).hazards.map((h) =>
+      h.name === 'deps' ? { ...h, commands: h.commands.filter((c) => c !== 'make lock') } : h,
+    );
+    store.write((ctx) => patchProject(ctx, project.id, { hazards }));
+    store.write((ctx) => {
+      reconcileHazardAssessment(ctx, project.id);
+    });
+    expect(readHazardAssessment(store.db, project.id).additions).toEqual([]);
+    const again = store.write((ctx) =>
+      applyHazardAdditions(ctx, project.id, [command('deps', 'make lock')]),
+    ).value;
+    expect(again).toEqual([]);
+    expect(hazard(project.id, 'deps')?.commands).not.toContain('make lock');
+    expect(readHazardAssessment(store.db, project.id).additions).toEqual([]);
+    expect(readHazardAssessment(store.db, project.id).declined).toEqual([
+      { hazard: 'deps', kind: 'command', value: 'make lock' },
+    ]);
+  });
+
+  it('stays out when the whole hazard 10db made was deleted, even without a reconcile first', () => {
+    const project = seedProject(store);
+    store.write((ctx) =>
+      applyHazardAdditions(ctx, project.id, [
+        glob('exports', 'amps/exports/**', 'amps/exports/a.json'),
+      ]),
+    );
+    const hazards = getProject(store.db, project.id).hazards.filter((h) => h.name !== 'exports');
+    store.write((ctx) => patchProject(ctx, project.id, { hazards }));
+    const again = store.write((ctx) =>
+      applyHazardAdditions(ctx, project.id, [
+        glob('exports', 'amps/exports/**', 'amps/exports/a.json'),
+      ]),
+    ).value;
+    expect(again).toEqual([]);
+    expect(hazard(project.id, 'exports')).toBeUndefined();
   });
 });
 
