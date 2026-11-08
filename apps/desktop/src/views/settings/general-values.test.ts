@@ -30,6 +30,11 @@ describe('checkGeneral', () => {
       expected: { ok: true, patch: { sandboxLoopback: true } },
     },
     {
+      name: 'Docker on',
+      change: { sandboxDocker: true },
+      expected: { ok: true, patch: { sandboxDocker: true } },
+    },
+    {
       name: 'holding pull requests for review',
       change: { landing: 'hold' },
       expected: { ok: true, patch: { landing: 'hold' } },
