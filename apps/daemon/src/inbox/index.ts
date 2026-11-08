@@ -1,3 +1,4 @@
+export { DockerWhy, raiseDockerOnNote } from './docker-card';
 export { raiseGateHostCards } from './gate-host-card';
 export { earlierMcpApproval, requestMcpApproval } from './mcp-approval';
 export { createProjectMcpReader, flagMcpFailure } from './project-mcp-reader';

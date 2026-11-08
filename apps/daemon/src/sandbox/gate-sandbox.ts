@@ -2,6 +2,7 @@ import { chmodSync, lstatSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { PermissionRuleDto, ProjectDto } from '@10db/contracts';
 import { prepareCommandEnv } from './command-env';
+import { dockerAccess, dockerEnvNames } from './docker-access';
 import { shellAssignments } from './env-file';
 import { singleQuoted } from './posix-quote';
 import { buildLaneProfile } from './profile';
@@ -45,7 +46,9 @@ const SETTINGS_FILE: SealedFileKind = {
 const DOCKER_MARKER = 'docker-refused';
 
 export interface GateRunInput {
-  readonly project: Pick<ProjectDto, 'repoPath' | 'sandboxLoopback'>;
+  /** A project that leaves `sandboxDocker` out gets no Docker, as one with it off does. */
+  readonly project: Pick<ProjectDto, 'repoPath' | 'sandboxLoopback'> &
+    Partial<Pick<ProjectDto, 'sandboxDocker'>>;
   /** The project env (the login env without billing switches); only allowlisted names reach the gate. */
   readonly env: Readonly<Record<string, string>>;
   /** The project's stored permission rules: their hosts and read paths open as they do for lanes. */
@@ -179,9 +182,15 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
       try {
         const binDir = join(tmpDir, 'bin');
         const marker = join(tmpDir, DOCKER_MARKER);
-        writeDockerShim(binDir, marker);
+        // With the project's Docker switch on the CLI is the real one; off, it refuses.
+        const docker = input.project.sandboxDocker ? dockerAccess(deps.home, input.env) : null;
+        if (docker === null) writeDockerShim(binDir, marker);
+        else mkdirSync(binDir, { mode: 0o700 });
         const commandEnv: Record<string, string> = {
-          ...allowlisted(input.env),
+          ...allowlisted(
+            input.env,
+            docker === null ? undefined : new Set(dockerEnvNames(input.env)),
+          ),
           TMPDIR: tmpDir,
           ...prepareCommandEnv(tmpDir, deps.home, input.env),
           PATH: [binDir, ...(input.env['PATH'] ? [input.env['PATH']] : [])].join(':'),
@@ -197,7 +206,11 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
           toolchainListings: toolchain.listings,
           allowedDomains: access.hosts,
           readList: access.readList,
-          extraReads: [...access.gitReads, ...(lockPath === null ? [] : [lockPath])],
+          extraReads: [
+            ...access.gitReads,
+            ...(lockPath === null ? [] : [lockPath]),
+            ...(docker?.reads ?? []),
+          ],
           // srt opens nothing for writing by itself, unlike Claude Code, which opens the checkout.
           extraWrites: [checkout, ...(lockPath === null ? [] : [lockPath])],
           denyWrites: [
@@ -210,6 +223,7 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
           sandboxRoots: access.sandboxRoots,
           ownFiles: [],
           loopback: input.project.sandboxLoopback,
+          dockerSockets: docker?.sockets ?? [],
           deniedEnvNames: [],
         });
         // Set inside the sandbox, after srt's own variables: `env` there replaces PATH and drops

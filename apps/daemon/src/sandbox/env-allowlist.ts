@@ -40,13 +40,24 @@ const ALLOWED_PREFIXES = ['LC_', 'MISE_', 'pnpm_config_'] as const;
 // A name that reads like a secret is denied even when its prefix or its own name is allowed.
 const SECRET_LOOKING = /TOKEN|AUTH|SECRET|PASSWORD|PASSWD|KEY|CREDENTIAL|COOKIE|SESSION/i;
 
-/** Names in `env` that a sandboxed command must not inherit: everything off the allowlist. */
-export function deniedEnvNames(env: Readonly<Record<string, string>>): string[] {
+/**
+ * Names in `env` that a sandboxed command must not inherit: everything off the allowlist. `also`
+ * names more that the caller allows for this command (a project with Docker on adds `DOCKER_HOST`);
+ * a name that reads like a secret is denied whatever `also` says.
+ */
+export function deniedEnvNames(
+  env: Readonly<Record<string, string>>,
+  also: ReadonlySet<string> = NO_NAMES,
+): string[] {
   return Object.keys(env)
     .filter(
       (name) =>
         SECRET_LOOKING.test(name) ||
-        (!ALLOWED_NAMES.has(name) && !ALLOWED_PREFIXES.some((prefix) => name.startsWith(prefix))),
+        (!ALLOWED_NAMES.has(name) &&
+          !also.has(name) &&
+          !ALLOWED_PREFIXES.some((prefix) => name.startsWith(prefix))),
     )
     .sort();
 }
+
+const NO_NAMES: ReadonlySet<string> = new Set();

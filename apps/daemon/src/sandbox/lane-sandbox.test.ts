@@ -178,13 +178,56 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
   ])("opens localhost when the project's switch is %s", async (_name, sandboxLoopback, binding) => {
     const session = await sandbox().forSession(
       input({
-        project: { id: projectId, repoPath: repo.path, sandboxLoopback, gateCommand: 'make gate' },
+        project: {
+          id: projectId,
+          repoPath: repo.path,
+          sandboxLoopback,
+          sandboxDocker: false,
+          gateCommand: 'make gate',
+        },
       }),
     );
     try {
       expect(session.spec.settings.network.allowLocalBinding).toBe(binding);
     } finally {
       session.dispose();
+    }
+  });
+
+  it("opens the Docker socket and passes the names that find the engine only when the project's switch is on", async () => {
+    const withDocker = (sandboxDocker: boolean): LaneSessionInput =>
+      input({
+        project: {
+          id: projectId,
+          repoPath: repo.path,
+          sandboxLoopback: false,
+          sandboxDocker,
+          gateCommand: 'make gate',
+        },
+        env: {
+          PATH: '/usr/bin:/bin',
+          HOME: home,
+          DOCKER_HOST: 'unix:///var/run/docker.sock',
+          COMPOSE_PROJECT_NAME: 'amps',
+        },
+      });
+    const on = await sandbox().forSession(withDocker(true));
+    const off = await sandbox().forSession(withDocker(false));
+    try {
+      expect(on.spec.settings.network.allowUnixSockets).toEqual(
+        expect.arrayContaining([on.tmpDir, '/var/run/docker.sock']),
+      );
+      expect(on.spec.settings.filesystem.allowRead).toContain(join(home, '.docker', 'cli-plugins'));
+      expect(on.spec.shellEnv['DOCKER_HOST']).toBe('unix:///var/run/docker.sock');
+      expect(on.spec.shellEnv['COMPOSE_PROJECT_NAME']).toBe('amps');
+      expect(on.spec.settings.credentials.envVars.map((v) => v.name)).not.toContain('DOCKER_HOST');
+
+      expect(off.spec.settings.network.allowUnixSockets).toEqual([off.tmpDir]);
+      expect(off.spec.shellEnv['DOCKER_HOST']).toBeUndefined();
+      expect(off.spec.settings.credentials.envVars.map((v) => v.name)).toContain('DOCKER_HOST');
+    } finally {
+      on.dispose();
+      off.dispose();
     }
   });
 

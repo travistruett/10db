@@ -2,6 +2,7 @@ import { realpathSync } from 'node:fs';
 import { Provider, type PermissionRuleDto, type ProjectDto } from '@10db/contracts';
 import type { Clock } from '../clock';
 import { prepareCommandEnv, withoutTempDirPaths } from './command-env';
+import { dockerAccess, dockerEnvNames } from './docker-access';
 import { deniedEnvNames } from './env-allowlist';
 import { createLaneEnvFile, removeLaneEnvFile } from './env-file';
 import { claudeProtectedPaths, SYSTEM_DOC_ROOTS, type FileAccessContext } from './file-access';
@@ -105,7 +106,9 @@ export interface LaneSession {
 }
 
 export interface LaneSessionInput {
-  readonly project: Pick<ProjectDto, 'id' | 'repoPath' | 'sandboxLoopback' | 'gateCommand'>;
+  /** A project that leaves `sandboxDocker` out gets no Docker, as one with it off does. */
+  readonly project: Pick<ProjectDto, 'id' | 'repoPath' | 'sandboxLoopback' | 'gateCommand'> &
+    Partial<Pick<ProjectDto, 'sandboxDocker'>>;
   /** The session's launch env, before the sandbox's own is merged over it. */
   readonly env: Readonly<Record<string, string>>;
   /** The project's and the workstream's stored permission rules. */
@@ -290,6 +293,11 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
             );
           },
         });
+        // With the project's Docker switch on, the lane's commands may reach the engine (Claude's
+        // sandbox and Codex's both read the profile's sockets); off, they get no socket.
+        const docker = input.project.sandboxDocker ? dockerAccess(deps.home, input.env) : null;
+        const dockerNames: ReadonlySet<string> | undefined =
+          docker === null ? undefined : new Set(dockerEnvNames(input.env));
         const commandEnv = prepareCommandEnv(tmpDir, deps.home, input.env);
         // Claude Code strips some of these from a sandboxed command's env; the shell sets every one
         // of them again from this file before each command.
@@ -316,7 +324,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           // A linked worktree's common dir is read for the git a lane runs, never written.
           // The env file is read to set up each command's shell, in case that happens in the sandbox;
           // the files root lies in no protected read, so the grant stays.
-          extraReads: [envFile, ...access.gitReads],
+          extraReads: [envFile, ...access.gitReads, ...(docker?.reads ?? [])],
           // Claude Code opens the checkout for writing itself.
           extraWrites: [],
           // Claude Code would otherwise open the checkout's git state with the checkout, and a
@@ -330,7 +338,8 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           sandboxRoots,
           ownFiles: [envFile],
           loopback: input.project.sandboxLoopback,
-          deniedEnvNames: deniedEnvNames({ ...input.env, ...env }),
+          dockerSockets: docker?.sockets ?? [],
+          deniedEnvNames: deniedEnvNames({ ...input.env, ...env }, dockerNames),
         });
         // The config dir and its ancestors stay readable to the file tools, which open the
         // session's own saved tool results there; the guard, the broker and the kernel hold them.
@@ -355,7 +364,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           settings,
           checkout,
           env,
-          shellEnv: { ...allowlisted(input.env), TMPDIR: tmpDir, ...commandEnv },
+          shellEnv: { ...allowlisted(input.env, dockerNames), TMPDIR: tmpDir, ...commandEnv },
           disallowedTools: [
             ...LANE_DISALLOWED_TOOLS,
             ...deniedToFileTools.flatMap((path) => [

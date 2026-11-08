@@ -26,10 +26,20 @@ export interface GateResult {
    * package install, the install) was blocked.
    */
   readonly blockedHosts: readonly string[];
+  /**
+   * True when the gate ran `docker` and the sandbox refused it (the project's Docker switch was off);
+   * the tail then ends with the refusal. Absent means false.
+   */
+  readonly dockerRefused?: boolean;
 }
 
 export interface GateRequest {
-  readonly project: Pick<ProjectDto, 'repoPath' | 'sandboxLoopback'>;
+  /**
+   * `id` is given by a project's own gates (a task's and a batch's), which lets 10db turn Docker on for
+   * the project when the gate needs it; an install or a generator names no project.
+   */
+  readonly project: Pick<ProjectDto, 'repoPath' | 'sandboxLoopback'> &
+    Partial<Pick<ProjectDto, 'id' | 'sandboxDocker'>>;
   readonly command: string;
   readonly logPath: string;
   readonly timeoutMs: number;
@@ -205,7 +215,8 @@ function runGroup(
       const blockedHosts =
         exitCode === 0 || timedOut || aborted ? [] : [...(filter?.blocked() ?? [])];
       // Said last, so the evidence keeps it however much the gate printed before.
-      if (sandboxed?.dockerRefused()) onData(`\n${DOCKER_REFUSAL}\n`);
+      const dockerRefused = sandboxed?.dockerRefused() === true;
+      if (dockerRefused) onData(`\n${DOCKER_REFUSAL}\n`);
       if (blockedHosts.length > 0)
         onData(
           blockedHostsNote(
@@ -222,6 +233,7 @@ function runGroup(
           logPath,
           timedOut,
           aborted,
+          ...(dockerRefused ? { dockerRefused: true } : {}),
         });
       });
     });
