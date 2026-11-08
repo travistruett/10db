@@ -31,7 +31,6 @@ import {
   ensureAgent,
   systemKeychain,
 } from '../src/environment';
-import { defaultDataDir } from '../src/runtime-files';
 import { createEventBus, createStateStore } from '../src/events';
 import { createGit } from '../src/git';
 import { protectedPaths } from '../src/guard';
@@ -69,7 +68,7 @@ interface Judged {
 describe.skipIf(!live)('a Shape session, live', () => {
   it('lets only the researcher search and fetch, and refuses its reads, on the real SDK', async () => {
     const login = await captureLoginEnv({ inherited: process.env });
-    const claudePath = await ensureAgent(AgentTool.Claude, defaultDataDir());
+    const claudePath = await ensureAgent(AgentTool.Claude);
     const repo = createTempRepo();
     const checkout = realpathSync(repo.path);
     const filesDir = realpathSync(mkdtempSync(join(tmpdir(), '10db-shape-live-files-')));
@@ -190,7 +189,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
 
   it('hands the picture see_screen answers to the model, which alone can say what is on it', async () => {
     const login = await captureLoginEnv({ inherited: process.env });
-    const claudePath = await ensureAgent(AgentTool.Claude, defaultDataDir());
+    const claudePath = await ensureAgent(AgentTool.Claude);
     const repo = createTempRepo();
     const checkout = realpathSync(repo.path);
     const filesDir = realpathSync(mkdtempSync(join(tmpdir(), '10db-shape-live-files-')));
@@ -345,7 +344,7 @@ describe.skipIf(!live)('a Shape session, live', () => {
 
   it('refuses an Edit, a Bash command and a Read outside the checkout on the real SDK', async () => {
     const login = await captureLoginEnv({ inherited: process.env });
-    const claudePath = await ensureAgent(AgentTool.Claude, defaultDataDir());
+    const claudePath = await ensureAgent(AgentTool.Claude);
     const repo = createTempRepo();
     const checkout = realpathSync(repo.path);
     const outsideDir = realpathSync(mkdtempSync(join(tmpdir(), '10db-shape-live-outside-')));
@@ -569,7 +568,7 @@ async function readInSession(
   prompt: string,
 ): Promise<{ transcript: string; reads: readonly ShapeToolRequest[] }> {
   const login = await captureLoginEnv({ inherited: process.env });
-  const claudePath = await ensureAgent(AgentTool.Claude, defaultDataDir());
+  const claudePath = await ensureAgent(AgentTool.Claude);
   const checkout = realpathSync(repoPath);
   const adapter = createClaudeAdapter({
     claudePath,

@@ -1,3 +1,4 @@
+import { chmodSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir } from '../../test/fixtures';
@@ -120,10 +121,80 @@ describe('the pinned agent tools', () => {
     expect(tools.statuses()[0]?.problem).toContain('offline');
     offline = false;
     await tools.retry();
+    await tools.settled();
     expect(tools.statuses().map((s) => s.state)).toEqual(['ready', 'ready']);
     const calls = net.calls();
     await tools.retry();
+    await tools.settled();
     expect(net.calls()).toBe(calls);
+  });
+
+  it('answer a retry during a download at once, and leave that download the only one', async () => {
+    const tarball = buildClaudeTarball(dir.path, 'inflight', '1.2.3');
+    const net = servingTarball(tarball);
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const tools = start({
+      pins: await pins(tarball),
+      install: { ...net, download: async (url, to) => gate.then(() => net.download(url, to)) },
+    });
+    // The download has not finished, yet the retry answers.
+    await tools.retry();
+    expect(tools.statuses().map((s) => s.state)).toEqual(['fetching', 'fetching']);
+    release();
+    await tools.settled();
+    expect(tools.statuses().map((s) => s.state)).toEqual(['ready', 'ready']);
+    expect(net.calls()).toBe(2);
+  });
+
+  it('fetch a fresh copy on a retry in place of one that was refused', async () => {
+    const tarball = buildClaudeTarball(dir.path, 'refetch', '1.2.3');
+    const net = servingTarball(tarball);
+    const tools = start({ pins: await pins(tarball), install: net });
+    await tools.settled();
+    const exe = tools.statuses()[0]?.path ?? '';
+    const copy = join(dir.path, 'data', 'tools', 'claude-1.2.3-darwin-arm64');
+    chmodSync(copy, 0o755);
+    chmodSync(exe, 0o755);
+    writeFileSync(exe, '#!/bin/sh\necho owned\n');
+    running?.stop();
+    const again = start({ pins: await pins(tarball), install: net });
+    await again.settled();
+    expect(again.statuses()[0]?.state).toBe('refused');
+    expect(again.statuses()[0]?.problem).toContain('no longer match');
+    await again.retry();
+    await again.settled();
+    expect(again.statuses()[0]?.state).toBe('ready');
+    expect(readFileSync(exe, 'utf8')).toContain('1.2.3');
+  });
+
+  it('name the tool when its check fails in a way nobody foresaw', async () => {
+    const tarball = buildClaudeTarball(dir.path, 'odd', '1.2.3');
+    const tools = start({
+      pins: await pins(tarball),
+      install: servingTarball(tarball),
+      probe: () => Promise.reject(new Error('EMFILE: too many open files')),
+    });
+    await tools.settled();
+    expect(tools.statuses()[0]?.problem).toBe(
+      'Claude Code 1.2.3 was refused: EMFILE: too many open files',
+    );
+  });
+
+  it('let an older release of a tool go once its pinned copy is ready', async () => {
+    const old = buildClaudeTarball(dir.path, 'old', '1.2.2');
+    const first = start({ pins: await pins(old, '1.2.2'), install: servingTarball(old) });
+    await first.settled();
+    first.stop();
+    const tarball = buildClaudeTarball(dir.path, 'new', '1.2.3');
+    const tools = start({ pins: await pins(tarball), install: servingTarball(tarball) });
+    await tools.settled();
+    expect(readdirSync(join(dir.path, 'data', 'tools')).sort()).toEqual([
+      'claude-1.2.3-darwin-arm64',
+      'codex-1.2.3-darwin-arm64',
+    ]);
   });
 
   it('run a path given in place of the pinned copy, with nothing fetched', async () => {

@@ -15,7 +15,6 @@ import {
   ensureAgent,
   systemKeychain,
 } from '../src/environment';
-import { defaultDataDir } from '../src/runtime-files';
 import { createEventBus, createStateStore } from '../src/events';
 import { createGit } from '../src/git';
 import { protectedPaths } from '../src/guard';
@@ -57,7 +56,7 @@ const commandOf = (req: ShapeToolRequest): string => {
 describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
   it('runs a read-only command, cards one that is not and keeps it off the checkout, and fans out a code researcher on a named model', async () => {
     const login = await captureLoginEnv({ inherited: process.env });
-    const claudePath = await ensureAgent(AgentTool.Claude, defaultDataDir());
+    const claudePath = await ensureAgent(AgentTool.Claude);
     const repo = createTempRepo();
     const checkout = realpathSync(repo.path);
     writeFileSync(join(checkout, 'notes.txt'), 'original\n');

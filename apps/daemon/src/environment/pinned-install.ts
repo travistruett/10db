@@ -264,13 +264,21 @@ export async function installPinned(
     };
     await writeFile(join(unpacked, MANIFEST), `${JSON.stringify(manifest)}\n`, { mode: 0o444 });
     // Moved before it is locked: a read-only folder can't be renamed.
-    await rename(unpacked, pinnedDir(dataDir, pin));
+    try {
+      await rename(unpacked, pinnedDir(dataDir, pin));
+    } catch (error) {
+      // Another install of the same pin got there first: its copy is verified like any other.
+      if (!(await exists(pinnedDir(dataDir, pin)))) throw error;
+    }
   } finally {
     await removePinned(staging);
   }
 }
 
-/** Removes the copies of other releases of the same tool, once the pinned one is in place. */
+/**
+ * Removes the copies of other releases of the same tool, once the pinned one is in place. Only the daemon
+ * calls it, for its own data dir: a live test of a newer pin must not take the copy the running app runs.
+ */
 export async function prunePinned(dataDir: string, pin: AgentPin): Promise<void> {
   const root = pinnedToolsRoot(dataDir);
   const keep = pinnedDir(dataDir, pin);
@@ -278,6 +286,15 @@ export async function prunePinned(dataDir: string, pin: AgentPin): Promise<void>
     const path = join(root, name);
     if (name.startsWith(`${pin.tool}-`) && path !== keep) await removePinned(path);
   }
+}
+
+export interface EnsureOptions {
+  /**
+   * Remove a copy that fails its check and fetch it again, as the builder's recheck does. The fresh
+   * download is checked against the recorded checksum like the first one; without this a refused copy
+   * stays refused.
+   */
+  readonly replaceRefused?: boolean;
 }
 
 /**
@@ -288,13 +305,20 @@ export async function ensurePinned(
   dataDir: string,
   pin: AgentPin,
   deps: InstallDeps,
+  options: EnsureOptions = {},
 ): Promise<string> {
   const dir = pinnedDir(dataDir, pin);
   if (!(await exists(dir))) await installPinned(dataDir, pin, deps);
-  const exe = await verifyPinned(dataDir, pin);
+  let exe: string;
+  try {
+    exe = await verifyPinned(dataDir, pin);
+  } catch (error) {
+    if (!options.replaceRefused || !(error instanceof PinnedToolError)) throw error;
+    await removePinned(dir);
+    await installPinned(dataDir, pin, deps);
+    exe = await verifyPinned(dataDir, pin);
+  }
   // A copy that was verified is made read-only, which also finishes an install that stopped before it.
   await lockDown(dir);
-  // Only a verified current copy lets an older release go.
-  await prunePinned(dataDir, pin);
   return exe;
 }

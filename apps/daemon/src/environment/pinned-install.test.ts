@@ -21,6 +21,7 @@ import {
   pinnedExecutable,
   pinnedToolsRoot,
   PinnedToolError,
+  prunePinned,
   removePinned,
   verifyPinned,
 } from './pinned-install';
@@ -145,14 +146,47 @@ describe('the pinned copy', () => {
     expect((failure as PinnedToolError).message).toContain('has no readable record');
   });
 
-  it('leaves another release of the same tool out once the pinned one is in place', async () => {
+  it('leaves another release of the same tool in place: a live test must not take the running app’s copy', async () => {
     const oldTarball = buildTarball('old', '1.2.2');
     const oldPin = await pinFor(oldTarball, '1.2.2');
     await ensurePinned(dataDir, oldPin, serving(oldTarball));
     const tarball = buildTarball('new', '1.2.3');
     const pin = await pinFor(tarball);
     await ensurePinned(dataDir, pin, serving(tarball));
+    expect(readdirSync(pinnedToolsRoot(dataDir)).sort()).toEqual([
+      'claude-1.2.2-darwin-arm64',
+      'claude-1.2.3-darwin-arm64',
+    ]);
+    await prunePinned(dataDir, pin);
     expect(readdirSync(pinnedToolsRoot(dataDir))).toEqual(['claude-1.2.3-darwin-arm64']);
+  });
+
+  it('is installed once when two installs race: the second finds the first one’s copy', async () => {
+    const tarball = buildTarball('race', '1.2.3');
+    const pin = await pinFor(tarball);
+    const [a, b] = await Promise.all([
+      ensurePinned(dataDir, pin, serving(tarball)),
+      ensurePinned(dataDir, pin, serving(tarball)),
+    ]);
+    expect(a).toBe(pinnedExecutable(dataDir, pin));
+    expect(b).toBe(a);
+    expect(readdirSync(pinnedToolsRoot(dataDir))).toEqual(['claude-1.2.3-darwin-arm64']);
+  });
+
+  it('is fetched again in place of a refused copy when asked to replace it', async () => {
+    const tarball = buildTarball('replaced', '1.2.3 (Claude Code)');
+    const pin = await pinFor(tarball);
+    const net = serving(tarball);
+    const exe = await ensurePinned(dataDir, pin, net);
+    chmodSync(pinnedDir(dataDir, pin), 0o755);
+    chmodSync(exe, 0o755);
+    writeFileSync(exe, '#!/bin/sh\necho owned\n');
+    // Without the ask, the copy stays refused and nothing is fetched.
+    await expect(ensurePinned(dataDir, pin, net)).rejects.toThrow(/no longer match/);
+    expect(net.calls()).toBe(1);
+    await ensurePinned(dataDir, pin, net, { replaceRefused: true });
+    expect(net.calls()).toBe(2);
+    expect(execFileSync(exe, ['--version'], { encoding: 'utf8' })).toBe('1.2.3 (Claude Code)\n');
   });
 
   it('installs a pin whose kept part is a folder, as Codex ships', async () => {

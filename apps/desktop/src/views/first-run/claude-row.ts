@@ -5,10 +5,6 @@ import {
   type ToolCheck,
 } from '@10db/contracts';
 
-/** The places 10db looks for Claude Code: the install prefixes, then Claude Code's own folders in the home folder. */
-const CLAUDE_LOOKED_IN =
-  '/opt/homebrew/bin, /usr/local/bin, /usr/bin, ~/.local/bin and ~/.claude/local';
-
 export type SetupMark = 'ok' | 'warn' | 'bad' | 'pending';
 
 export interface SetupRow {
@@ -67,14 +63,14 @@ export function claudeRow(input: ClaudeRowInput): ClaudeRow {
   if (claude.path === null && copy?.state === 'refused')
     return {
       mark: 'bad',
-      detail: `${copy.problem ?? `Claude Code ${copy.pinned} was refused.`} Recheck once the cause is fixed.`,
+      detail: `${copy.problem ?? `Claude Code ${copy.pinned} was refused.`} Recheck removes this copy and downloads a fresh one, checked against the same recorded checksum.`,
       runsAs: null,
       canAddLogin: false,
     };
   if (claude.path === null) {
     return {
       mark: 'bad',
-      detail: `Not found in ${CLAUDE_LOOKED_IN}. Install Claude Code, then recheck.`,
+      detail: `10db runs its own copy of Claude Code, and none is managed here.`,
       runsAs: null,
       canAddLogin: false,
     };

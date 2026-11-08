@@ -1,6 +1,6 @@
-import { Alert, Stack } from '@mantine/core';
+import { Alert, Button, Stack } from '@mantine/core';
 import { IconAlertTriangle } from '@tabler/icons-react';
-import { useSystemCheck } from '../daemon/queries';
+import { useRecheckSystem, useSystemCheck } from '../daemon/queries';
 import { syncNeedsBuilder } from './benchmark-sync-urgency';
 
 /**
@@ -10,6 +10,7 @@ import { syncNeedsBuilder } from './benchmark-sync-urgency';
  */
 export function SystemAlert() {
   const check = useSystemCheck().data;
+  const recheck = useRecheckSystem();
   if (!check) return null;
   const agents = check.agents ?? [];
   // Claude Code and Codex are 10db's own pinned copies: their state is told by their own alerts below.
@@ -62,8 +63,23 @@ export function SystemAlert() {
             icon={icon}
             title={`${agent.label} ${agent.pinned} can't be used`}
           >
-            {agent.problem ?? 'Its copy failed the check.'} No session runs on it. Recheck once the
-            cause is fixed.
+            <Stack gap="xs" align="flex-start">
+              <span>
+                {agent.problem ?? 'Its copy failed the check.'} No session runs on it. Fetching it
+                again removes this copy and downloads a fresh copy, checked against the same
+                recorded checksum.
+              </span>
+              <Button
+                size="xs"
+                variant="default"
+                loading={recheck.isPending}
+                onClick={() => {
+                  recheck.mutate();
+                }}
+              >
+                Fetch it again
+              </Button>
+            </Stack>
           </Alert>
         ) : (
           <Alert

@@ -26,12 +26,11 @@ interface Row {
 
 const rows: Row[] = [
   {
-    name: 'no claude where 10db looks',
+    name: 'no Claude Code copy managed',
     input: { claude: missing, probing: false, identity: null, error: null },
     expected: {
       mark: 'bad',
-      detail:
-        'Not found in /opt/homebrew/bin, /usr/local/bin, /usr/bin, ~/.local/bin and ~/.claude/local. Install Claude Code, then recheck.',
+      detail: '10db runs its own copy of Claude Code, and none is managed here.',
       runsAs: null,
       canAddLogin: false,
     },
@@ -79,7 +78,7 @@ const rows: Row[] = [
     expected: {
       mark: 'bad',
       detail:
-        'Claude Code 2.1.302 was refused: the files no longer match Recheck once the cause is fixed.',
+        'Claude Code 2.1.302 was refused: the files no longer match Recheck removes this copy and downloads a fresh one, checked against the same recorded checksum.',
       runsAs: null,
       canAddLogin: false,
     },
@@ -89,8 +88,7 @@ const rows: Row[] = [
     input: { claude: missing, probing: true, identity: null, error: null },
     expected: {
       mark: 'bad',
-      detail:
-        'Not found in /opt/homebrew/bin, /usr/local/bin, /usr/bin, ~/.local/bin and ~/.claude/local. Install Claude Code, then recheck.',
+      detail: '10db runs its own copy of Claude Code, and none is managed here.',
       runsAs: null,
       canAddLogin: false,
     },

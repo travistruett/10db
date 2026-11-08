@@ -341,7 +341,8 @@ export function createServices(deps: {
           if (lastCheck === probing) lastCheck = null;
         });
       }
-      // A recheck fetches again a copy that failed, and asks upstream for its newest release.
+      // A recheck starts fetching again a copy that failed and asks upstream for its newest release; the
+      // answer says a copy is fetching rather than waiting on its download.
       if (recheck) await deps.agents?.retry();
       const checked = markGhRequired(
         await lastCheck,

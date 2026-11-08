@@ -32,7 +32,6 @@ import {
   ensureAgent,
   type Launcher,
 } from '../src/environment';
-import { defaultDataDir } from '../src/runtime-files';
 import { createGit } from '../src/git';
 import { createLogger } from '../src/log';
 import { resolveSandboxRuntime } from '../src/paths';
@@ -708,7 +707,7 @@ describe.skipIf(!live)(
 
     beforeAll(async () => {
       // The pinned release, as the daemon runs it: this test is what verifies a bump of that pin.
-      codexPath = await ensureAgent(AgentTool.Codex, defaultDataDir());
+      codexPath = await ensureAgent(AgentTool.Codex);
       const login = await captureLoginEnv({ inherited: process.env });
       launcher = createLauncher({
         base: login.vars,

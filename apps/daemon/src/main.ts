@@ -114,7 +114,7 @@ function sourceOf(tool: AgentTool): AdapterSource {
   if (status?.state === AgentState.Refused)
     return {
       ready: false,
-      message: `${status.problem ?? `${status.label} ${status.pinned} was refused`}. No session runs on it; delete the copy under ${pinnedToolsRoot(dataDir)} and restart 10db to fetch it again.`,
+      message: `${status.problem ?? `${status.label} ${status.pinned} was refused`}. No session runs on it; Recheck in the setup check or the system alert removes the copy under ${pinnedToolsRoot(dataDir)} and fetches it again.`,
     };
   return {
     ready: false,

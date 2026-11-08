@@ -52,7 +52,7 @@
       "matchPackageNames": ["@openai/codex"],
       "groupName": "Codex CLI",
       "prBodyNotes": [
-        "Before merging: run `TENDB_LIVE_CODEX=1 pnpm --filter @10db/daemon exec vitest run test/codex.live.test.ts`. It fetches this release into 10db's data dir, checks it against the checksum in this PR, and runs on it. It must pass; CI never runs it."
+        "Before merging: run `TENDB_LIVE_CODEX=1 pnpm --filter @10db/daemon exec vitest run test/codex.live.test.ts`. It fetches this release into the live tests' own folder (~/Library/Application Support/10db/live-tests/tools, never the copy the running app uses), checks it against the checksum in this PR, and runs on it. It must pass; CI never runs it."
       ]
     },
     {
@@ -60,7 +60,7 @@
       "matchPackageNames": ["@anthropic-ai/claude-code"],
       "groupName": "Claude Code CLI",
       "prBodyNotes": [
-        "Before merging: run `TENDB_LIVE_CLAUDE=1 pnpm --filter @10db/daemon exec vitest run src/sessions/claude-adapter.live.test.ts`. It fetches this release into 10db's data dir, checks it against the checksum in this PR, and runs on it. It must pass; CI never runs it."
+        "Before merging: run `TENDB_LIVE_CLAUDE=1 pnpm --filter @10db/daemon exec vitest run src/sessions/claude-adapter.live.test.ts`. It fetches this release into the live tests' own folder (~/Library/Application Support/10db/live-tests/tools, never the copy the running app uses), checks it against the checksum in this PR, and runs on it. It must pass; CI never runs it."
       ]
     },
     {

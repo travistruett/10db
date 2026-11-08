@@ -39,7 +39,6 @@ import {
   ensureAgent,
   systemKeychain,
 } from '../src/environment';
-import { defaultDataDir } from '../src/runtime-files';
 import { createEventBus, createStateStore } from '../src/events';
 import { createGit } from '../src/git';
 import { judgePreToolUse, protectedPaths } from '../src/guard';
@@ -274,7 +273,7 @@ async function runLane(opts: {
   readonly claims?: readonly { readonly kind: ClaimKind; readonly name: string }[];
 }): Promise<LaneRun> {
   const login = await captureLoginEnv({ inherited: process.env });
-  const claudePath = await ensureAgent(AgentTool.Claude, defaultDataDir());
+  const claudePath = await ensureAgent(AgentTool.Claude);
   const logs = captureLogs();
   const adapter = createClaudeAdapter({
     claudePath,

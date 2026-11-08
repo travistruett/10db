@@ -20,11 +20,14 @@
   `.pin.json` recording the pin and a digest of every file, then locked read-only and renamed into place. At each
   start the copy is verified again: the manifest names this pin and its checksum, the digest still matches, nothing
   on the path is writable by a group or others, and `--version` prints the pinned release. Copies of other releases
-  are removed once the pinned one is verified.
+  are removed by the daemon once the pinned one is verified, and only from its own folder.
 - **A copy that fails is refused.** The adapter for that agent ends every session at once with a message naming
   the tool, the release and why (`PinnedToolError`: checksum, changed files, a writable folder, a version that
-  isn't the pin, a download that failed). The system check carries the same text, and a recheck fetches again a
-  copy that is not ready. While a copy is still downloading, sessions end with a message saying so.
+  isn't the pin, a download that failed). The system check carries the same text. A recheck (the builder's, or the
+  6-hourly one) removes a refused copy and fetches it afresh, checked against the checksum like the first
+  download; a copy that is still fetching is left to finish, one fetch per tool at a time, and the recheck answers
+  at once with the copy shown as fetching. A refused copy is never replaced without that recheck, so the builder
+  sees the refusal first. While a copy is still downloading, sessions end with a message saying so.
 - **The builder's own installs are left alone and never run.** `findClaude` and `findCodex` are gone; a
   `claude` in `~/.local/bin` or a `codex` in `/opt/homebrew/bin` changes nothing 10db runs or reports.
   `TENDB_CLAUDE_PATH` still names a binary to run in place of the pinned Claude Code (tests, dev), unchecked.
@@ -44,7 +47,7 @@
   platform build's release list and `dist.integrity` from the npm registry, so one PR rewrites the version and its
   checksum together. Each has its own group and a PR note naming the live test to run before merging
   (`TENDB_LIVE_CODEX=1 test/codex.live.test.ts`, `TENDB_LIVE_CLAUDE=1 src/sessions/claude-adapter.live.test.ts`).
-  Both live tests fetch the pinned copy and run on it, so they verify the release the PR pins.
+  Both live tests fetch the pinned copy into a folder of their own (`<data dir>/live-tests/tools`, `ensureAgent`) and run on it, so they verify the release the PR pins without touching the copy the running app runs.
 
 ## Why
 

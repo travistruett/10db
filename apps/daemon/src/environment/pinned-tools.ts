@@ -1,10 +1,13 @@
+import { join } from 'node:path';
 import { z } from 'zod';
+import { defaultDataDir } from '../runtime-files';
 import { AGENT_PINS, AgentTool, type AgentPin } from './agent-pins';
 import {
   downloadFile,
   ensurePinned,
   extractWithTar,
   PinnedToolError,
+  prunePinned,
   type InstallDeps,
 } from './pinned-install';
 
@@ -37,7 +40,11 @@ export interface AgentStatus {
 /** What the daemon exposes of its agent CLIs: their status now, and a try again for those not ready. */
 export interface AgentTools {
   statuses(): readonly AgentStatus[];
-  /** Fetches or verifies again every copy that is not ready, and asks upstream for its newest release. */
+  /**
+   * Starts fetching or checking again every copy that is not ready (a refused copy is removed and
+   * fetched afresh; one already fetching is left to finish), and asks upstream for its newest release.
+   * Resolves once that answer is in, without waiting for the downloads.
+   */
   retry(): Promise<void>;
 }
 
@@ -76,11 +83,19 @@ export function isNewerRelease(candidate: string, base: string): boolean {
 }
 
 /**
- * The pinned copy of `tool` under `dataDir`, fetched and verified if need be. The live tests run on it,
- * so a pin is verified on the release it names.
+ * Where the live tests keep their pinned copies: a tools folder of their own beside the app's, so a
+ * live test of a newer pin never touches the copy the running app runs, and the app never prunes theirs.
  */
-export function ensureAgent(tool: AgentTool, dataDir: string): Promise<string> {
-  return ensurePinned(dataDir, AGENT_PINS[tool], {
+export function liveTestDataDir(): string {
+  return join(defaultDataDir(), 'live-tests');
+}
+
+/**
+ * The pinned copy of `tool` under `liveTestDataDir()`, fetched and verified if need be. The live tests
+ * run on it, so a pin is verified on the release it names. Nothing else in that folder is removed.
+ */
+export function ensureAgent(tool: AgentTool): Promise<string> {
+  return ensurePinned(liveTestDataDir(), AGENT_PINS[tool], {
     download: downloadFile,
     extract: extractWithTar,
   });
@@ -132,25 +147,45 @@ export function startPinnedTools(options: PinnedToolsOptions): RunningAgentTools
     if (current) state.set(tool, { ...current, ...next });
   };
 
-  async function prepare(tool: AgentTool): Promise<void> {
+  async function check(tool: AgentTool, replaceRefused: boolean): Promise<void> {
     const override = options.overrides?.[tool];
     const pin = pins[tool];
     try {
-      const path = override ?? (await ensurePinned(options.dataDir, pin, install));
+      const path =
+        override ?? (await ensurePinned(options.dataDir, pin, install, { replaceRefused }));
       const version = await options.probe(path, { PATH: '/usr/bin:/bin', ...AUTOUPDATE_OFF });
       if (version === null)
         throw new PinnedToolError(pin, `${path} does not run: --version failed`);
       if (override === undefined && !version.includes(pin.version))
         throw new PinnedToolError(pin, `${path} reports "${version}", which is not ${pin.version}`);
+      // Only the daemon's own verified copy lets an older release go.
+      if (override === undefined) await prunePinned(options.dataDir, pin);
       settle(tool, { state: AgentState.Ready, path, version, problem: null });
     } catch (error) {
+      const refusal =
+        error instanceof PinnedToolError
+          ? error
+          : new PinnedToolError(pin, error instanceof Error ? error.message : String(error));
       settle(tool, {
         state: AgentState.Refused,
         path: null,
         version: null,
-        problem: error instanceof Error ? error.message : String(error),
+        problem: refusal.message,
       });
     }
+  }
+
+  // One fetch or check per tool at a time: a second would race the first for the same folder.
+  const inFlight = new Map<AgentTool, Promise<void>>();
+  function prepare(tool: AgentTool, replaceRefused = false): Promise<void> {
+    const running = inFlight.get(tool);
+    if (running) return running;
+    settle(tool, { state: AgentState.Fetching });
+    const next = check(tool, replaceRefused).finally(() => {
+      inFlight.delete(tool);
+    });
+    inFlight.set(tool, next);
+    return next;
   }
 
   async function checkReleases(): Promise<void> {
@@ -165,24 +200,24 @@ export function startPinnedTools(options: PinnedToolsOptions): RunningAgentTools
     );
   }
 
-  let working: Promise<unknown> = Promise.all([...tools.map(prepare), checkReleases()]);
+  let working: Promise<unknown> = Promise.all([
+    ...tools.map((tool) => prepare(tool)),
+    checkReleases(),
+  ]);
   const timer = setInterval(() => {
     void retry();
   }, options.releaseCheckMs ?? RELEASE_CHECK_MS);
   timer.unref();
 
   async function retry(): Promise<void> {
-    const again = Promise.all([
-      ...tools
-        .filter((tool) => state.get(tool)?.state !== AgentState.Ready)
-        .map((tool) => {
-          settle(tool, { state: AgentState.Fetching });
-          return prepare(tool);
-        }),
-      checkReleases(),
-    ]);
-    working = again;
-    await again;
+    const fetches = tools
+      .filter((tool) => state.get(tool)?.state !== AgentState.Ready)
+      .map((tool) => prepare(tool, state.get(tool)?.state === AgentState.Refused));
+    const releases = checkReleases();
+    const before = working;
+    working = Promise.all([before, ...fetches, releases]);
+    // A download can take minutes: the answer carries the release check, and says a copy is fetching.
+    await releases;
   }
 
   return {

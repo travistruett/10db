@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir } from '../../test/fixtures';
 import { firstExecutable, installCandidates } from '../git';
 import {
+  ACCOUNT_NAMES_VERIFIED_ON,
   claudeCodeWarning,
   CODEX_VERIFIED_ON,
   codexWarning,
@@ -73,7 +74,7 @@ describe('systemCheck', () => {
     const dockerPath = prefixed('docker') ?? docker;
     expect(report).toEqual({
       loginEnv: { source: 'inherited', warning: 'The login shell timed out' },
-      claudeCode: { verifiedOn: '2.1.302', warning: null },
+      claudeCode: { verifiedOn: ACCOUNT_NAMES_VERIFIED_ON, warning: null },
       codex: { verifiedOn: CODEX_VERIFIED_ON, warning: null },
       tools: [
         { name: 'claude', path: null, version: null, required: true, signedIn: null },
@@ -304,7 +305,7 @@ describe('claudeCodeWarning', () => {
   ])('%s warns: %s', (version, warns) => {
     const warning = claudeCodeWarning(version);
     expect(warning !== null).toBe(warns);
-    if (warning) expect(warning).toContain('2.1.302');
+    if (warning) expect(warning).toContain(ACCOUNT_NAMES_VERIFIED_ON);
   });
 });
 
