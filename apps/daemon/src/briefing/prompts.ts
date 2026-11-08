@@ -248,9 +248,17 @@ const EDIT_RULE = `Change files with the Edit or Write tool, never with an inter
  */
 const CODEX_EDIT_RULE = `Change files with apply_patch, never with an interpreter one-liner${EDIT_RULE_WAYS} apply_patch names each file it changes, so 10db checks each one against your claims before it is written; a command that writes a file names none. Do a multi-line replacement with one apply_patch call.`;
 
+const HAND_OFF_RULE =
+  'If 10db asks you to hand off, finish your current step, call write_handoff, and end your turn.';
+
+/** A Codex model that has finished its work reaches for write_handoff as a way to say so. */
+const CODEX_HAND_OFF_RULE =
+  'Ending your turn is how you finish a step: when the work is done and committed, end your turn without calling write_handoff. Never call write_handoff to finish a step. Call it only after 10db asks you to hand off, and then finish your current step, call write_handoff, and end your turn.';
+
 /** The lines a Codex lane reads in its own words, by the line Claude's briefing has. */
 const CODEX_RULES: ReadonlyMap<string, string> = new Map([
   [EDIT_RULE, CODEX_EDIT_RULE],
+  [HAND_OFF_RULE, CODEX_HAND_OFF_RULE],
   [PLAIN_COMMANDS, plainCommands(CODEX_COMMAND_SHAPE)],
   [READ_ONLY_COMMANDS, readOnlyCommands(CODEX_COMMAND_SHAPE)],
 ]);
@@ -273,7 +281,7 @@ const RULES = [
   // In the brief as well as the persona: a builder's edited persona is never overwritten.
   'A task is about one pull request, design and docs included. When a design or docs change would grow past about 300 lines, stop at a coherent point so what you have stands on its own, and file each remaining section with mcp__10db__file_follow_up (one call each, a new opId): 10db parks it in the Icebox column and names this task in its description.',
   'When the acceptance criteria are met and committed, end your turn.',
-  'If 10db asks you to hand off, finish your current step, call write_handoff, and end your turn.',
+  HAND_OFF_RULE,
 ];
 
 function readOnlyRules(role: StepRole): string[] {

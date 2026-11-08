@@ -269,6 +269,7 @@ export async function createTestEngine(
       log: silentLogger,
       waitObserverFor: (id) => live.get(id)?.observer,
       sessionSignal: (id) => live.get(id)?.signal,
+      askedToHandOff: (id) => live.get(id)?.askedToHandOff(),
     }),
     hostname: '127.0.0.1',
     port: 0,

@@ -59,6 +59,7 @@ beforeEach(async () => {
     git: createGit(),
     log: silentLogger,
     waitObserverFor: () => undefined,
+    askedToHandOff: () => undefined,
     sessionSignal: () => undefined,
     shapeTools: (s) => (shapeTools ? shapeTools(s) : {}),
   });
@@ -216,6 +217,7 @@ describe('a Shape session with no tool set to give it', () => {
       git: createGit(),
       log: silentLogger,
       waitObserverFor: () => undefined,
+      askedToHandOff: () => undefined,
       sessionSignal: () => undefined,
     });
     const { token } = shapeToken();

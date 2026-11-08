@@ -91,6 +91,8 @@ export interface McpDeps {
   readonly log: Logger;
   waitObserverFor(sessionId: SessionId): WaitObserver | undefined;
   sessionSignal(sessionId: SessionId): AbortSignal | undefined;
+  /** Tells the runner a tool's answer asked the session to hand off. */
+  askedToHandOff(sessionId: SessionId): void;
   /** Every session's claim waits; the daemon shares them with the scheduler. */
   readonly claimWaits?: ClaimWaits;
   /** How often a task waiting for a claim looks again; tests shorten it. */
@@ -155,7 +157,7 @@ export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
     'Commit the named paths (and only those) under the repository lock. Returns the commit SHA. Retry with the same opId if unsure it completed.',
   record_evidence: 'Attach verification output: a command you ran, its exit code and a summary.',
   write_handoff:
-    'Write the six-part handoff when 10db asks you to. 10db adds the git facts. End your turn after calling it.',
+    'Write the six-part handoff only after 10db asks you to hand off. 10db adds the git facts. End your turn after calling it. Never call it to finish a step: ending your turn finishes the step.',
   complete_step:
     'Finish a plan, plan-review, review or QA step: your plan or findings as the summary and, for a review, a verdict. A review role may also send followUps; a step files at most 10 in all through complete_step, however many times you call it, and a call that would pass 10 is refused. They are not counted toward the per-step cap of 10 that propose and file_follow_up share. Implement steps never call this; they end by ending the turn.',
 };
@@ -561,7 +563,9 @@ export function createToolHandlers(
           if (refused) return refused;
         }
         // A parked holder is a fact about now, not the call's answer: a retry with the same opId asks again.
-        if (!settled.granted && settled.parked)
+        if (!settled.granted && settled.parked) {
+          // Its instruction asks for a handoff when the session can't finish without the claim.
+          deps.askedToHandOff(sessionId);
           return {
             granted: false,
             waiting: false,
@@ -569,6 +573,7 @@ export function createToolHandlers(
             inboxId: settled.inboxId,
             instruction: settled.instruction,
           };
+        }
         return recordClaim(input.opId, settled);
       } finally {
         clearTimeout(timer);

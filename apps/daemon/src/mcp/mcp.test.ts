@@ -193,6 +193,7 @@ beforeEach(async () => {
     git,
     log: capturingLogger,
     waitObserverFor: () => undefined,
+    askedToHandOff: () => undefined,
     sessionSignal: (id) => {
       const own = sessionStops.get(id);
       return own ? AbortSignal.any([sessionAbort.signal, own.signal]) : sessionAbort.signal;
@@ -2290,6 +2291,7 @@ describe('MCP tools', () => {
       git: { ...git, commit: () => Promise.reject(new Error('disk exploded')) },
       log: capturingLogger,
       waitObserverFor: () => undefined,
+      askedToHandOff: () => undefined,
       sessionSignal: () => undefined,
     });
     const failingServer = serve({ fetch: failing, hostname: '127.0.0.1', port: 0 });
@@ -2364,6 +2366,7 @@ describe('MCP tools', () => {
       git,
       log: capturingLogger,
       waitObserverFor: () => undefined,
+      askedToHandOff: () => undefined,
       sessionSignal: () => abort.signal,
     });
     const parkedServer = serve({ fetch: parkedHandler, hostname: '127.0.0.1', port: 0 });

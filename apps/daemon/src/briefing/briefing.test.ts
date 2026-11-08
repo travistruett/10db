@@ -1007,6 +1007,14 @@ describe('buildSessionPrompt for flow steps', () => {
     const CLAUDE_EDIT =
       'Change files with the Edit or Write tool, never with an interpreter one-liner (`python3 -c`, `node -e`, `perl -pi`, `sed -i`) or shell redirection (`>`, `>>`, a heredoc, `tee`). Edit and Write change the file in your lane without a permission card; a Bash command that writes a file stops on an "Allow Bash?" card and waits for a person, which overnight can be hours. Do a multi-line replacement with one Edit call.';
 
+    it('tells a Codex lane that ending its turn finishes the step, and a handoff is only for 10db to ask', () => {
+      const prompt = buildSessionPrompt(codexInput);
+      expect(prompt).toContain('Never call write_handoff to finish a step');
+      expect(prompt).not.toContain(
+        'If 10db asks you to hand off, finish your current step, call write_handoff, and end your turn.',
+      );
+    });
+
     it('briefs a Codex lane to change files with apply_patch and to ask through 10db', () => {
       const codex = buildSessionPrompt(codexInput);
       expect(codex).toContain('Change files with apply_patch, never with an interpreter one-liner');
