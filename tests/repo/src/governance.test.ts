@@ -552,6 +552,45 @@ describe('community files', () => {
     );
   });
 
+  it('tracks the verified Codex in a PR of its own, with a pattern that still finds the constant', () => {
+    interface Manager {
+      customType: string;
+      managerFilePatterns: string[];
+      matchStrings: string[];
+      depNameTemplate: string;
+    }
+    interface Rule {
+      matchPackageNames?: string[];
+      groupName?: string;
+    }
+    const renovate = JSON.parse(readRepoFile('renovate.json')) as {
+      customManagers?: Manager[];
+      packageRules: Rule[];
+    };
+    const codex = (renovate.customManagers ?? []).filter(
+      (m) => m.depNameTemplate === '@openai/codex',
+    );
+    expect(codex).toHaveLength(1);
+    const [manager] = codex;
+    if (!manager) throw new Error('no Codex manager');
+    // Renovate writes a file pattern as /regex/; the one it names must be the file that holds the constant.
+    const path = 'apps/daemon/src/environment/system-check.ts';
+    const patterns = manager.managerFilePatterns.map((p) => new RegExp(p.slice(1, -1)));
+    expect(patterns.some((p) => p.test(path))).toBe(true);
+    const source = readRepoFile(path);
+    const matches = manager.matchStrings.flatMap((s) => [...source.matchAll(new RegExp(s, 'g'))]);
+    expect(matches).toHaveLength(1);
+    expect(matches[0]?.groups?.['currentValue']).toMatch(/^\d+\.\d+\.\d+$/);
+    // Its own group, and out of the catch-all, which would otherwise batch it with the weekly PR.
+    expect(renovate.packageRules).toContainEqual(
+      expect.objectContaining({ matchPackageNames: ['@openai/codex'], groupName: 'Codex CLI' }),
+    );
+    const catchAll = renovate.packageRules.find(
+      (r) => r.groupName === 'all non-major dependencies',
+    );
+    expect(catchAll?.matchPackageNames).toContain('!@openai/codex');
+  });
+
   it('leaves the throwaway spikes alone', () => {
     const renovate = JSON.parse(readRepoFile('renovate.json')) as {
       packageRules: { matchFileNames?: string[]; enabled?: boolean }[];

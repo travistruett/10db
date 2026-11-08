@@ -8,10 +8,17 @@
 verified on, and Renovate tracks it: a regex custom manager in `renovate.json` reads it against `@openai/codex` on
 npm, and its update is a PR of its own (group "Codex CLI"), outside the weekly non-major group. The PR says to
 install that release and run `TENDB_LIVE_CODEX=1` `test/codex.live.test.ts`, which CI never runs, before it
-merges. Tests name `CODEX_VERIFIED_ON`, never a version literal, so the bump is one line.
+merges. The daemon's tests name `CODEX_VERIFIED_ON`, never a version literal, so the bump is one line; the desktop's
+and the contracts' tests keep a version as fixture data, which no bump has to change. A repo test
+(`tests/repo/src/governance.test.ts`) fails when the manager's pattern no longer finds the constant, which would
+otherwise stop the tracking with no error.
 
 The lane profile's file system map keys every entry by its real path (`filesystemOf` in
-`sessions/codex-lane-permissions.ts`), so a link and its target are one entry, the stricter kept.
+`sessions/codex-lane-permissions.ts`), so a link and its target are one entry, the stricter kept. Every comparison
+between entries is made on real paths too: a read link whose target is in a denied tree the link is not in gets no
+entry, a `denyWrite` narrows a write only inside a writable root and outside every deny, under both its own path and
+its real path, and never lowers a deny. Its own path keeps a `read` entry, so a link under the checkout (a `.git`
+that is a link) can't be swapped. A path that doesn't exist yet takes the real path of the nearest dir that does.
 
 ## Why
 

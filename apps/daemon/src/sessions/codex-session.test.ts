@@ -1,5 +1,6 @@
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { request } from 'node:http';
+import { realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AccountKind, AccountProblem, mintId } from '@10db/contracts';
@@ -1437,7 +1438,8 @@ describe('codexThreadConfig', () => {
       ':minimal': 'read',
       '/usr': 'read',
       '/w/lane': 'write',
-      '/tmp/lane-1': 'write',
+      // A path that doesn't exist yet sits under the real path of its dir: /private/tmp on macOS.
+      [join(realpathSync('/tmp'), 'lane-1')]: 'write',
       '/w/lane/.env.local': 'deny',
       '/w/lane/nested': 'read',
     });
@@ -1491,6 +1493,104 @@ describe('codexThreadConfig', () => {
       expect(keys).not.toContain(open);
       expect(keys).not.toContain(closed);
       expect(keys).not.toContain(await realpath(target));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  /** A lane over a real checkout and a real denied secrets dir, for rows that need real links. */
+  interface LinkWorld {
+    readonly checkout: string;
+    readonly secrets: string;
+    readonly home: string;
+  }
+  it.each<{
+    name: string;
+    build: (w: LinkWorld) => Promise<Partial<LaneSandboxSpec['settings']['filesystem']>>;
+    expected: (w: LinkWorld) => Record<string, string>;
+    absent: (w: LinkWorld) => string[];
+  }>([
+    {
+      name: 'a denyWrite link to a denied dir keeps the deny and the link unwritable',
+      build: async (w) => {
+        await symlink(w.secrets, join(w.checkout, '.git'));
+        return { denyRead: ['/', w.secrets], denyWrite: [join(w.checkout, '.git')] };
+      },
+      expected: (w) => ({ [w.secrets]: 'deny', [join(w.checkout, '.git')]: 'read' }),
+      absent: () => [],
+    },
+    {
+      name: 'a denyWrite link to a file in a denied dir reopens nothing',
+      build: async (w) => {
+        await symlink(join(w.secrets, 'auth.json'), join(w.checkout, 'nested'));
+        return { denyRead: ['/', w.secrets], denyWrite: [join(w.checkout, 'nested')] };
+      },
+      expected: (w) => ({ [w.secrets]: 'deny', [join(w.checkout, 'nested')]: 'read' }),
+      absent: (w) => [join(w.secrets, 'auth.json')],
+    },
+    {
+      name: 'a denyWrite link to / opens nothing outside the checkout',
+      build: async (w) => {
+        await symlink('/', join(w.checkout, 'slash'));
+        return { denyWrite: [join(w.checkout, 'slash')] };
+      },
+      expected: (w) => ({ [join(w.checkout, 'slash')]: 'read' }),
+      absent: () => ['/'],
+    },
+    {
+      name: 'a read link into a denied dir under a granted one reopens nothing',
+      build: async (w) => {
+        const inner = join(w.home, '.codex');
+        await mkdir(inner);
+        await writeFile(join(inner, 'auth.json'), '{}');
+        await symlink(join(inner, 'auth.json'), join(w.home, 'notes'));
+        return { allowRead: [w.home, join(w.home, 'notes')], denyRead: ['/', inner] };
+      },
+      expected: (w) => ({ [w.home]: 'read', [join(w.home, '.codex')]: 'deny' }),
+      absent: (w) => [join(w.home, 'notes'), join(w.home, '.codex', 'auth.json')],
+    },
+    {
+      name: 'a missing path takes the real path of the dir it would be in',
+      build: () =>
+        Promise.resolve({
+          allowWrite: [tmpdir()],
+          denyRead: ['/', join(tmpdir(), 'not-made-yet')],
+        }),
+      expected: () => ({ [join(realpathSync(tmpdir()), 'not-made-yet')]: 'deny' }),
+      absent: () => [],
+    },
+    {
+      name: 'a denyWrite spelled by its real path narrows a write granted through a link',
+      build: async (w) => {
+        const scratch = join(w.home, 'scratch');
+        await mkdir(scratch);
+        await symlink(scratch, join(w.home, 'scratch-link'));
+        return { allowWrite: [join(w.home, 'scratch-link')], denyWrite: [scratch] };
+      },
+      expected: (w) => ({ [join(w.home, 'scratch')]: 'read' }),
+      absent: () => [],
+    },
+  ])('resolves links without opening more: $name', async ({ build, expected, absent }) => {
+    const dir = await realpath(await mkdtemp(join(tmpdir(), 'lanelinks-')));
+    try {
+      const w: LinkWorld = {
+        checkout: join(dir, 'checkout'),
+        secrets: join(dir, 'secrets'),
+        home: join(dir, 'home'),
+      };
+      await mkdir(w.checkout);
+      await mkdir(w.secrets);
+      await mkdir(w.home);
+      await writeFile(join(w.secrets, 'auth.json'), '{}');
+      const filesystem = await build(w);
+      const { filesystem: result } = laneOf(
+        codexThreadConfig(
+          specOf({ sandbox: { ...sandboxWith({ filesystem }), checkout: w.checkout } }),
+        ),
+      );
+      expect(result).toMatchObject(expected(w));
+      const keys = Object.keys(result as Record<string, string>);
+      for (const path of absent(w)) expect(keys).not.toContain(path);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
