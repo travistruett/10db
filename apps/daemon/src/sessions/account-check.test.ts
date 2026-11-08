@@ -538,6 +538,60 @@ describe('isModelRefusal', () => {
       `\`${LAUNCHED}\` is not available`,
       true,
     ],
+    [
+      'a feature of "this model" not supported, the ID in brackets',
+      'invalid_request',
+      `Prompt caching for this model is not supported (${LAUNCHED})`,
+      false,
+    ],
+    [
+      'a feature with "the model" not available, the ID after',
+      'invalid_request',
+      `Extended thinking with the model is not available for ${LAUNCHED}`,
+      false,
+    ],
+    [
+      'a feature for the launch ID as "the X model"',
+      'invalid_request',
+      `Streaming for the ${LAUNCHED} model is not supported`,
+      false,
+    ],
+    [
+      'a feature with the launch ID quoted',
+      'invalid_request',
+      `Tool use with model '${LAUNCHED}' is not supported`,
+      false,
+    ],
+    [
+      'a feature with "this model" and the launch ID',
+      'invalid_request',
+      `Tool use with this model ${LAUNCHED} is not supported`,
+      false,
+    ],
+    [
+      'a feature when calling the launch ID',
+      'invalid_request',
+      `Prompt caching when calling ${LAUNCHED} is not supported`,
+      false,
+    ],
+    [
+      'the requested model, named, not supported',
+      'invalid_request',
+      `The requested model ${LAUNCHED} is not supported`,
+      true,
+    ],
+    [
+      'the launch ID currently not available',
+      'unknown',
+      `${LAUNCHED} is currently not available`,
+      true,
+    ],
+    [
+      "Bedrock's on-demand refusal of a model that needs an inference profile",
+      'invalid_request',
+      `Invocation of model ID ${LAUNCHED} with on-demand throughput isn't supported. Retry your request with the ID or ARN of an inference profile that contains this model.`,
+      true,
+    ],
   ])('%s', (_name, error, text, expected) => {
     expect(isModelRefusal(error, text, LAUNCHED)).toBe(expected);
   });

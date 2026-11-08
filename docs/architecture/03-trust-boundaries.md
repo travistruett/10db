@@ -109,7 +109,7 @@ were made.
 - A Tauri shell and its webview:
   - its CSP allows only loopback;
   - it registers no filesystem, shell or HTTP plugin;
-  - its opener is limited to `https://github.com/*`, `https://auth.openai.com/*` and `https://artificialanalysis.ai/*` (the second is the page a ChatGPT plan account's Connect opens, and the third the site the Artificial Analysis credit beside its scores links; the daemon hands over only an `https` address on that host. A Claude subscription's Connect opens no page from the app. Either login is written by the agent into the account's directory, never read, copied or stored by 10db);
+  - its opener is limited to `https://github.com/*`, `https://auth.openai.com/*` and `https://artificialanalysis.ai/*` (the second is the page a ChatGPT plan account's Connect opens, and the third the site the Artificial Analysis credit beside its scores links; the daemon hands over only an `https` address on `auth.openai.com`. A Claude subscription's Connect opens no page from the app. Either login is written by the agent into the account's directory, never read, copied or stored by 10db);
   - its dialog plugin is registered with `dialog:allow-open` only, and the call site opens the folder panel; the picked path goes to the
     daemon, which inspects it ([the decision](decisions/2026-10-28-folder-inspection.md)).
 - It reads `ui-token` and `daemon.json` from the data directory and hands them to the webview.

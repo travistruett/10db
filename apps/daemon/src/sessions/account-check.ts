@@ -282,23 +282,41 @@ const MODEL_UNAVAILABLE =
 
 const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-/** "is not supported", "isn't available" and the like, as one fixed run of words. */
-const UNSUPPORTED = `(?:is not|isn['’]t|not)\\s+(?:currently\\s+)?(?:supported|available)`;
+/** "is not supported", "is currently not available" and the like, as one fixed run of words. */
+const UNSUPPORTED = `(?:is\\s+(?:currently\\s+)?not|isn['’]t|not)\\s+(?:currently\\s+)?(?:supported|available)`;
 
 /**
- * Whether `text` says the model itself is not supported or not available, as the phrase's subject: right after
- * its ID (quoted or not, and optionally "model"), or after "the model" or "the model you requested". A config
- * error says the same of something else ("thinking.budget is not supported for model X", "tool use with model X
- * is not supported", "X, temperature above 1 is not supported"), which says nothing about whether the account can
- * run the model, so an ID that follows a preposition is not a subject. Every part is a fixed run, so a long text
- * is read in linear time.
+ * Where a sentence starts: the text's start, or after a full stop, `!`, `?` or a colon and the space or line break
+ * that follows. A bare line break is not one: it can fall inside a sentence.
+ */
+const SENTENCE_START = `(?:^|[.!?:]\\s+)`;
+
+/** What may open a sentence before a model is named: "The", "This", "The requested", "Model ID" and the like. */
+const MODEL_OPENING = `(?:(?:the|this)\\s+)?(?:(?:requested|specified)\\s+)?(?:model\\s+)?(?:ID\\s+)?`;
+
+/**
+ * Whether `text` says the model itself is not supported or not available: a sentence that opens with the model
+ * (its ID, quoted or not, or "the model you requested") and goes straight on to say so. A config error puts what
+ * it refuses first ("Tool use with model X is not supported", "Prompt caching for this model is not supported",
+ * "thinking.budget is not supported for model X"), which says nothing about whether the account can run the
+ * model. Bedrock's refusal of a foundation model's on-demand use is matched by its own wording. Every part is a
+ * fixed run, so a long text is read in linear time.
  */
 function saysModelUnsupported(text: string, id: string): boolean {
-  const quoted = `['"\`‘’“”]?${escapeRegExp(id)}['"\`‘’“”]?`;
-  const preposition = `(?<!\\b(?:for|with|on|of|to|by|in|via|using)\\s+(?:the\\s+)?(?:model\\s+)?(?:ID\\s+)?)`;
+  const named = `['"\`‘’“”]?${escapeRegExp(id)}['"\`‘’“”]?`;
   return (
-    new RegExp(`${preposition}${quoted}\\s+(?:model\\s+)?${UNSUPPORTED}`, 'i').test(text) ||
-    new RegExp(`\\b(?:the\\s+)?model(?:\\s+you\\s+requested)?\\s+${UNSUPPORTED}`, 'i').test(text)
+    new RegExp(
+      `${SENTENCE_START}${MODEL_OPENING}${named}\\s+(?:model\\s+)?${UNSUPPORTED}`,
+      'i',
+    ).test(text) ||
+    new RegExp(
+      `${SENTENCE_START}(?:the|this)\\s+model(?:\\s+you\\s+requested)?\\s+${UNSUPPORTED}`,
+      'i',
+    ).test(text) ||
+    new RegExp(
+      `\\bmodel\\s+ID\\s+${escapeRegExp(id)}\\s+with\\s+on-demand\\s+throughput\\s+isn['’]t\\s+supported`,
+      'i',
+    ).test(text)
   );
 }
 
