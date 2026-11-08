@@ -174,6 +174,7 @@ function scored(request: Request, considered: readonly ModelProfileDto[]): Made 
     budgetCeiling: input.project.budgetCeiling,
     profiles: considered,
     shortfall: request.strict ? 'refuse' : 'strongest',
+    ...(input.accountModels === undefined ? {} : { accountModels: input.accountModels }),
   });
   return {
     profile: choice.profile,

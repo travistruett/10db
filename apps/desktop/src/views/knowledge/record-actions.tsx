@@ -36,10 +36,14 @@ const Open = {
 } as const;
 type Open = (typeof Open)[keyof typeof Open];
 
-/** The row's “⋯” menu; the record's own words name it, since a list holds many. */
+/**
+ * The row's “⋯” menu; the record's own words name it, since a list holds many. It leaves the page the
+ * moment it closes: a menu that fades out stays mounted for a moment, and the next one opens beside it,
+ * so two Withdraw… items can be in the page at once.
+ */
 function RowMenu({ label, children }: { readonly label: string; readonly children: ReactNode }) {
   return (
-    <Menu position="bottom-end">
+    <Menu position="bottom-end" transitionProps={{ duration: 0 }}>
       <Menu.Target>
         <ActionIcon variant="subtle" size="sm" aria-label={`Actions for ${label}`}>
           <IconDots size={16} stroke={1.5} />

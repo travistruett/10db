@@ -2476,9 +2476,29 @@ describe('the account check', () => {
     });
     const events = await collect(adapter.start(spec({ model: 'not-a-model' })).events);
     const ended = events.at(-1);
-    expect(ended).toMatchObject({ type: 'ended', reason: 'model_refused' });
+    expect(ended).toMatchObject({ type: 'ended', reason: 'model_refused', refusalBasis: 'error' });
     expect(ended).not.toHaveProperty('refusal');
     expect(endMessage(ended)).toMatch(/not-a-model/);
+  });
+
+  it('says a refused model rests on an error’s wording when the text alone named it', async () => {
+    const launched = 'us.anthropic.claude-fable-5-1-v1:0';
+    const { adapter } = adapterFor({
+      messages: [
+        initMessage('none', undefined, launched),
+        assistantMessage(
+          [textBlock(`Tool use with model ${launched} is not supported`)],
+          'invalid_request',
+        ),
+      ],
+      then: 'hang',
+    });
+    const events = await collect(adapter.start(spec({ model: launched })).events);
+    expect(events.at(-1)).toMatchObject({
+      type: 'ended',
+      reason: 'model_refused',
+      refusalBasis: 'wording',
+    });
   });
 
   describe('an error at the first reply that names the launched model', () => {

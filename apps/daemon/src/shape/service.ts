@@ -4,6 +4,7 @@ import {
   ConflictError,
   EventType,
   InvalidError,
+  ModelMarkBasis,
   NotFoundError,
   providerOf,
   ShapeMessageAuthor,
@@ -51,7 +52,7 @@ import {
   listShapeMessages,
   listShapes,
   listUntoldShapeFiles,
-  markAccountModelUnusable,
+  clearWordingMark,
   markSessionStarted,
   markShapeFilesInline,
   markShapeFilesTold,
@@ -64,6 +65,7 @@ import {
   type ShapeFileRow,
   type WriteContext,
 } from '@10db/db';
+import { markModelUnusable } from '../catalogue';
 import type { Clock, Timer } from '../clock';
 import type { AccountExpectation } from '../environment';
 import type { StateStore } from '../events';
@@ -719,6 +721,9 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
             cachedTokens: event.cachedTokens,
             costUsd: event.costUsd,
           });
+          // The model ran a turn: a mark from an error's wording alone on it was wrong.
+          if ((event.result ?? 'success') === 'success')
+            clearWordingMark(ctx, live.account, live.model);
           // The reply and the usage land together: a turn the transcript shows is a turn counted.
           if (event.text !== undefined && event.text !== '')
             insertShapeMessage(ctx, shapeId, {
@@ -744,7 +749,13 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           endSession(ctx, live.sessionId, live.endReason ?? event.reason);
         });
         if (running) rt.live = null;
-        if (event.reason === 'model_refused') markRefused(live);
+        if (event.reason === 'model_refused')
+          markModelUnusable(
+            { state, clock },
+            live.account,
+            live.model,
+            event.refusalBasis ?? ModelMarkBasis.Error,
+          );
         if (live.endReason === null && event.reason !== 'completed' && event.reason !== 'stopped')
           notice(shapeId, event.message ?? `Claude's session ended (${event.reason}).`);
         if (running) rt.waiting?.({ kind: 'ended' });
@@ -754,18 +765,6 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       case 'background_tasks':
         break;
     }
-  };
-
-  /** The account cannot run the model: it is marked unusable, so the picker stops offering it. */
-  const markRefused = (live: Live): void => {
-    state.write((ctx) => {
-      try {
-        markAccountModelUnusable(ctx, live.account, live.model);
-      } catch (error) {
-        // An account that lists no models has no row to mark.
-        if (!(error instanceof NotFoundError)) throw error;
-      }
-    });
   };
 
   const consume = async (shapeId: ShapeId, rt: Runtime, live: Live): Promise<void> => {

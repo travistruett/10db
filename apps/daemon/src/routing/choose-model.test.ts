@@ -691,6 +691,35 @@ describe('chooseModel: score, floor and budget', () => {
     expect(label(choice.profile ?? failed())).toBe('mid@low');
     expect(choice.overBudget).toBe(false);
   });
+
+  it.each([
+    { name: 'a Bedrock copy 10% dearer than the maker’s', price: 5.5, over: true },
+    { name: 'an account that pays the maker’s price', price: 5, over: false },
+    { name: 'a subscription, which has no price', price: null, over: false },
+  ])('counts what the account pays against the ceiling for $name', ({ price, over }) => {
+    const choice = chooseModel(
+      input({
+        project: { id: PROJECT, budgetCeiling: 1.05 },
+        accountModels: [
+          {
+            accountId: mintId('Account'),
+            model: 'mid',
+            family: null,
+            launchId: 'mid',
+            efforts: [],
+            unusable: false,
+            wordingMarkEndsAt: null,
+            inputPrice: price === null ? null : price / 5,
+            outputPrice: price,
+            lastSeenAt: NOW,
+          },
+        ],
+      }),
+    );
+    expect(label(choice.profile ?? failed())).toBe('mid@high');
+    expect(choice.overBudget).toBe(over);
+    expect(choice.reason.includes('over the budget ceiling of $1.05')).toBe(over);
+  });
 });
 
 function failed(): never {

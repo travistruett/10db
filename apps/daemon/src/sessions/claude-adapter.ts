@@ -11,7 +11,7 @@ import {
   type SpawnedProcess,
   type SpawnOptions,
 } from '@anthropic-ai/claude-agent-sdk';
-import { AccountKind, type AccountRefusal } from '@10db/contracts';
+import { AccountKind, type AccountRefusal, type ModelMarkBasis } from '@10db/contracts';
 import { z } from 'zod';
 import { systemClock, type Clock } from '../clock';
 import type { Logger } from '../log';
@@ -31,7 +31,7 @@ import { startClaudeLogin, type LoginSpawn } from './claude-connect';
 import { seenModelsFrom } from './claude-model-list';
 import {
   mapSdkMessage,
-  refusesModel,
+  modelRefusalOf,
   toHookOutput,
   toPermissionResult,
   toSdkMcpServer,
@@ -451,6 +451,8 @@ function startSession(
   let failureReason: SessionEndReason = SessionEndReason.Error;
   /** The account refusal behind `failure`, when it is the account's. */
   let failureRefusal: AccountRefusal | null = null;
+  /** What a model refusal behind `failure` rests on. */
+  let failureBasis: ModelMarkBasis | null = null;
   /** The answer a failed re-check gave; every later re-check gives it again. */
   let haltOutput: HookJSONOutput | null = null;
   let markFinished: () => void = () => undefined;
@@ -480,6 +482,9 @@ function startSession(
         message,
         ...(failureRefusal && reason === SessionEndReason.AccountRefused
           ? { refusal: failureRefusal }
+          : {}),
+        ...(failureBasis && reason === SessionEndReason.ModelRefused
+          ? { refusalBasis: failureBasis }
           : {}),
       });
     events.end();
@@ -556,10 +561,16 @@ function startSession(
     }),
   });
 
-  const refuse = (reason: SessionEndReason, message: string, refusal?: AccountRefusal): void => {
+  const refuse = (
+    reason: SessionEndReason,
+    message: string,
+    refusal?: AccountRefusal,
+    basis?: ModelMarkBasis,
+  ): void => {
     failure = message;
     failureReason = reason;
     failureRefusal = refusal ?? null;
+    failureBasis = basis ?? null;
     resolvePreflight(false);
     resolveVerified(false);
     log.error({ reason: message }, 'claude session refused');
@@ -759,11 +770,14 @@ function startSession(
         if (msg.type === 'assistant') {
           const firstReply = !repliedYet;
           repliedYet = true;
-          if (refusesModel(msg, spec.model, firstReply)) {
+          const refusal = modelRefusalOf(msg, spec.model, firstReply);
+          if (refusal) {
             // `init.model` echoes even a made-up ID, so only the first reply shows the account cannot run it.
             refuse(
               SessionEndReason.ModelRefused,
               `Claude Code reported that account "${spec.account.label}" cannot run the model ${spec.model}.`,
+              undefined,
+              refusal,
             );
             continue;
           }

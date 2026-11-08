@@ -1,0 +1,1 @@
+ALTER TABLE `account_models` ADD `wording_mark_ends_at` text;

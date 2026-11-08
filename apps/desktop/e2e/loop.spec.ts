@@ -52,6 +52,22 @@ async function expectFullyShown(text: Locator): Promise<void> {
   expect(clipped).toBe(false);
 }
 
+/**
+ * Opens a row's Actions menu and chooses an item. Opening a menu shows one menu: an earlier row's menu
+ * that is still in the page, or a second one for the same row, fails here at once, naming what is
+ * there, instead of as a strict-mode error on whichever item the test happens to look for next.
+ */
+async function chooseAction(page: Page, actions: Locator, item: string): Promise<void> {
+  await actions.click();
+  const menuitem = page.getByRole('menuitem', { name: item });
+  await expect(menuitem).toBeVisible();
+  // Counted once, not retried: a menu that is still leaving the page must fail this, not pass it late.
+  const menus = await page.getByRole('menu').count();
+  const items = await page.getByRole('menuitem', { name: item }).count();
+  expect({ menus, [item]: items }).toEqual({ menus: 1, [item]: 1 });
+  await menuitem.click();
+}
+
 test.describe.configure({ mode: 'serial' });
 
 test('runs a task from the UI to verified done, and a reload loses nothing', async ({
@@ -367,8 +383,11 @@ test('records, edits, retires and withdraws knowledge, and a reload loses nothin
   const principles = page.getByRole('table', { name: 'Principles' });
   await expect(principles.getByText('Never sleep in tests')).toBeVisible();
 
-  await principles.getByRole('button', { name: 'Actions for never-sleep-in-tests' }).click();
-  await page.getByRole('menuitem', { name: 'Edit…' }).click();
+  await chooseAction(
+    page,
+    principles.getByRole('button', { name: 'Actions for never-sleep-in-tests' }),
+    'Edit…',
+  );
   const editPrinciple = page.getByRole('dialog', { name: 'Edit Principle' });
   await expect(editPrinciple.getByLabel('Topic key')).toHaveValue('never-sleep-in-tests');
   await editPrinciple.getByLabel('Statement').fill('Tests never sleep');
@@ -382,8 +401,11 @@ test('records, edits, retires and withdraws knowledge, and a reload loses nothin
   await newPrinciple.getByLabel('Statement').fill('Keep functions small');
   await newPrinciple.getByRole('button', { name: 'Save' }).click();
   await expect(newPrinciple).toBeHidden();
-  await principles.getByRole('button', { name: 'Actions for keep-functions-small' }).click();
-  await page.getByRole('menuitem', { name: 'Edit…' }).click();
+  await chooseAction(
+    page,
+    principles.getByRole('button', { name: 'Actions for keep-functions-small' }),
+    'Edit…',
+  );
   await editPrinciple.getByLabel('Topic key').fill('Not A Key');
   await editPrinciple.getByRole('button', { name: 'Save' }).click();
   await expectFullyShown(editPrinciple.getByRole('alert').getByText(/testing\.no-sleeps\)\.$/));
@@ -417,11 +439,13 @@ test('records, edits, retires and withdraws knowledge, and a reload loses nothin
   await expect(drawer).toBeHidden();
 
   // The older version cannot be withdrawn: its dialog names the newest one.
-  await principles
-    .getByRole('row', { name: /Never sleep in tests/ })
-    .getByRole('button', { name: /^Actions for / })
-    .click();
-  await page.getByRole('menuitem', { name: 'Withdraw…' }).click();
+  await chooseAction(
+    page,
+    principles.getByRole('row', { name: /Never sleep in tests/ }).getByRole('button', {
+      name: /^Actions for /,
+    }),
+    'Withdraw…',
+  );
   const older = page.getByRole('dialog', { name: 'Withdraw Principle' });
   await expect(older.getByText(/has a newer version/)).toBeVisible();
   await expect(older.getByText('Tests never sleep')).toBeVisible();
@@ -429,11 +453,13 @@ test('records, edits, retires and withdraws knowledge, and a reload loses nothin
   await expect(older).toBeHidden();
 
   // Retire the current one with a reason.
-  await principles
-    .getByRole('row', { name: /Tests never sleep/ })
-    .getByRole('button', { name: 'Actions for never-sleep-in-tests' })
-    .click();
-  await page.getByRole('menuitem', { name: 'Retire…' }).click();
+  await chooseAction(
+    page,
+    principles
+      .getByRole('row', { name: /Tests never sleep/ })
+      .getByRole('button', { name: 'Actions for never-sleep-in-tests' }),
+    'Retire…',
+  );
   const retire = page.getByRole('dialog', { name: 'Retire Principle' });
   await retire.getByRole('button', { name: 'Retire' }).click();
   await expect(retire.getByText('Say why.')).toBeVisible();
@@ -454,8 +480,11 @@ test('records, edits, retires and withdraws knowledge, and a reload loses nothin
   const decisions = page.getByRole('table', { name: 'Decisions' });
   await expect(decisions.getByText('Howdy')).toBeVisible();
 
-  await decisions.getByRole('button', { name: 'Actions for "Which greeting style?"' }).click();
-  await page.getByRole('menuitem', { name: 'Edit…' }).click();
+  await chooseAction(
+    page,
+    decisions.getByRole('button', { name: 'Actions for "Which greeting style?"' }),
+    'Edit…',
+  );
   const edit = page.getByRole('dialog', { name: 'Edit Decision' });
   await edit.getByLabel('Choice').fill('Hello');
   await edit.getByRole('button', { name: 'Save' }).click();
@@ -463,11 +492,13 @@ test('records, edits, retires and withdraws knowledge, and a reload loses nothin
   await expect(decisions.getByText('Hello', { exact: true })).toBeVisible();
   await expect(decisions.getByText('Superseded')).toBeVisible();
 
-  await decisions
-    .getByRole('row', { name: /Hello/ })
-    .getByRole('button', { name: 'Actions for "Which greeting style?"' })
-    .click();
-  await page.getByRole('menuitem', { name: 'Withdraw…' }).click();
+  await chooseAction(
+    page,
+    decisions
+      .getByRole('row', { name: /Hello/ })
+      .getByRole('button', { name: 'Actions for "Which greeting style?"' }),
+    'Withdraw…',
+  );
   const withdraw = page.getByRole('dialog', { name: 'Withdraw Decision' });
   await expect(
     withdraw.getByText(/leaves briefings and search\. It stays under History with your reason\./),

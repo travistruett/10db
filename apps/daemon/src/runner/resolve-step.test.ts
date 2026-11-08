@@ -62,6 +62,7 @@ const row = (model: string, over: Partial<AccountModelDto> = {}): AccountModelDt
   launchId: model,
   efforts: [],
   unusable: false,
+  wordingMarkEndsAt: null,
   inputPrice: null,
   outputPrice: null,
   lastSeenAt: NOW,

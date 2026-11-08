@@ -2,9 +2,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ConflictError, NotFoundError, type AccountId } from '@10db/contracts';
 import { listEventsAfter } from './events';
 import {
+  clearWordingMark,
+  endWordingMarks,
   listAccountModels,
   markAccountModelUnusable,
   replaceAccountModels,
+  WORDING_MARK_MS,
   type NewAccountModel,
 } from './account-models';
 import { seedAccount, createTestStore } from './test-support';
@@ -154,5 +157,97 @@ describe('markAccountModelUnusable', () => {
         markAccountModelUnusable(ctx, accountA, 'missing');
       }),
     ).toThrow(NotFoundError);
+  });
+});
+
+// A mark from an error's wording alone cannot tell a config error from a real refusal, so it ends on its own and
+// one later session settles it. Its own store, with a clock the test moves.
+describe('a mark from an error’s wording', () => {
+  let clockMs: number;
+  const start = Date.parse('2026-11-08T10:00:00.000Z');
+  const at = (afterMs: number) => new Date(start + afterMs).toISOString();
+  const offer = () => listAccountModels(store.db, accountA)[0];
+  /** The time passes; the daemon's timer ends the marks whose time has come. */
+  const passTo = (after: number) => {
+    clockMs = start + after;
+    return store.write((ctx) => endWordingMarks(ctx)).value;
+  };
+
+  beforeEach(() => {
+    close();
+    clockMs = start;
+    ({ store, close } = createTestStore(() => new Date(clockMs)));
+    accountA = seedAccount(store, { kind: 'claude_subscription', label: 'A' }).id;
+    store.write((ctx) => {
+      replaceAccountModels(ctx, accountA, [sonnet]);
+    });
+  });
+  const mark = (basis: 'error' | 'wording', after = 0) => {
+    clockMs = start + after;
+    return store.write((ctx) => markAccountModelUnusable(ctx, accountA, 'sonnet', basis)).value;
+  };
+
+  it('keeps the model out of routing until it ends, then lets it be tried again', () => {
+    expect(mark('wording')).toEqual({ endsAt: at(WORDING_MARK_MS), confirmed: false });
+    expect(offer()).toMatchObject({ unusable: true, wordingMarkEndsAt: at(WORDING_MARK_MS) });
+    expect(passTo(WORDING_MARK_MS - 1)).toBe(at(WORDING_MARK_MS));
+    expect(offer()?.unusable).toBe(true);
+    // At its end the mark stays on record, so the drawer can say a session is yet to settle it.
+    expect(passTo(WORDING_MARK_MS)).toBeNull();
+    expect(offer()).toMatchObject({ unusable: false, wordingMarkEndsAt: at(WORDING_MARK_MS) });
+  });
+
+  it('becomes final when the model is refused again after the mark ended', () => {
+    mark('wording');
+    passTo(WORDING_MARK_MS);
+    expect(mark('wording', WORDING_MARK_MS + 5)).toEqual({ endsAt: null, confirmed: true });
+    expect(offer()).toMatchObject({ unusable: true, wordingMarkEndsAt: null });
+    passTo(10 * WORDING_MARK_MS);
+    expect(offer()?.unusable).toBe(true);
+  });
+
+  it('becomes final when the refusal comes after its end, though its timer has not run yet', () => {
+    mark('wording');
+    expect(mark('wording', WORDING_MARK_MS + 5)).toEqual({ endsAt: null, confirmed: true });
+  });
+
+  it('is not extended by a refusal while it is in force', () => {
+    mark('wording');
+    expect(mark('wording', 60_000)).toEqual({ endsAt: at(WORDING_MARK_MS), confirmed: false });
+  });
+
+  it('is cleared by a session that ran on the model once the mark ended', () => {
+    mark('wording');
+    passTo(WORDING_MARK_MS);
+    expect(store.write((ctx) => clearWordingMark(ctx, accountA, 'sonnet')).value).toBe(true);
+    expect(offer()).toMatchObject({ unusable: false, wordingMarkEndsAt: null });
+    expect(store.write((ctx) => clearWordingMark(ctx, accountA, 'sonnet')).value).toBe(false);
+  });
+
+  it('leaves a mark from model_not_found final, whatever comes after', () => {
+    expect(mark('error')).toEqual({ endsAt: null, confirmed: true });
+    mark('wording', WORDING_MARK_MS + 5);
+    expect(store.write((ctx) => clearWordingMark(ctx, accountA, 'sonnet')).value).toBe(false);
+    passTo(10 * WORDING_MARK_MS);
+    expect(offer()).toMatchObject({ unusable: true, wordingMarkEndsAt: null });
+  });
+
+  it('becomes final when model_not_found follows it', () => {
+    mark('wording');
+    mark('error', 60_000);
+    passTo(10 * WORDING_MARK_MS);
+    expect(offer()).toMatchObject({ unusable: true, wordingMarkEndsAt: null });
+  });
+
+  it('survives a list refresh while the offer is unchanged, and goes with a changed one', () => {
+    mark('wording');
+    store.write((ctx) => {
+      replaceAccountModels(ctx, accountA, [{ ...sonnet, inputPrice: 4 }]);
+    });
+    expect(offer()).toMatchObject({ unusable: true, wordingMarkEndsAt: at(WORDING_MARK_MS) });
+    store.write((ctx) => {
+      replaceAccountModels(ctx, accountA, [{ ...sonnet, launchId: 'claude-sonnet-5-1' }]);
+    });
+    expect(offer()).toMatchObject({ unusable: false, wordingMarkEndsAt: null });
   });
 });
