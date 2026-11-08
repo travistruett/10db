@@ -554,6 +554,21 @@ const ROWS: readonly Row[] = [
   { name: 'npm exec with a variable', command: 'npm exec $x', reason: UnreadReason.HazardForm },
   { name: 'cargo with a variable', command: 'cargo $x', reason: UnreadReason.HazardForm },
   {
+    name: 'a command run in a container, with a variable subcommand',
+    command: 'docker compose exec -T backend uv $x',
+    reason: UnreadReason.HazardForm,
+  },
+  {
+    name: 'a command run in a container through uv run, with a variable',
+    command: 'docker exec api_1 uv run python manage.py $x',
+    reason: UnreadReason.HazardForm,
+  },
+  {
+    name: 'a command run in a container that is no hazard',
+    command: 'docker compose exec -T backend pytest tests',
+    reason: null,
+  },
+  {
     name: 'drizzle-kit with a variable',
     command: 'drizzle-kit $x',
     reason: UnreadReason.HazardForm,

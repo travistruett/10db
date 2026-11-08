@@ -4,7 +4,7 @@ import { isAbsolute, join, sep } from 'node:path';
 import { ClaimKind, type AreaDef, type Delivery, type HazardDef } from '@10db/contracts';
 import { z } from 'zod';
 import { isOwnToolResult, pathRefusal, type ProtectedPath } from './account-rules';
-import { commandForms, startsWithWords } from './command-forms';
+import { commandForms, onlyPreviews, startsWithWords } from './command-forms';
 import { ghVerdict } from './gh-rules';
 import { executableTails, FEEDERS } from './wrapped-commands';
 import { gitVerdict } from './git-rules';
@@ -597,6 +597,7 @@ function judgeShell(
     const line = words.join(' ');
     for (const hazard of input.hazards) {
       if (
+        !onlyPreviews(words) &&
         hazard.commands.some((c) =>
           readings.some((forms) => forms.bare.some((f) => startsWithWords(f, c.split(' ')))),
         ) &&

@@ -1,4 +1,9 @@
-import { EventType, STOCK_HAZARD_REVISIONS, type HazardDef } from '@10db/contracts';
+import {
+  EventType,
+  STOCK_HAZARD_REVISIONS,
+  type HazardDef,
+  type StockHazardRevision,
+} from '@10db/contracts';
 import { eq } from 'drizzle-orm';
 import * as schema from '../schema';
 import { getAppSetting, setAppSetting } from './settings';
@@ -7,12 +12,13 @@ import type { WriteContext } from './store';
 /** How many of `STOCK_HAZARD_REVISIONS` this database's projects have had added. */
 export const STOCK_HAZARD_REVISION_KEY = 'hazards.stock_revision';
 
-/** Whether the stored hazards hold any command of the revision: they were stored after it. */
-function holdsRevision(
-  hazards: readonly HazardDef[],
-  revision: (typeof STOCK_HAZARD_REVISIONS)[number],
-): boolean {
-  return hazards.some((h) => (revision[h.name] ?? []).some((c) => h.commands.includes(c)));
+/** Whether the stored hazards hold any command or glob of the revision: they were stored after it. */
+function holdsRevision(hazards: readonly HazardDef[], revision: StockHazardRevision): boolean {
+  return hazards.some(
+    (h) =>
+      (revision.commands?.[h.name] ?? []).some((c) => h.commands.includes(c)) ||
+      (revision.globs?.[h.name] ?? []).some((g) => h.globs.includes(g)),
+  );
 }
 
 /**
@@ -25,10 +31,10 @@ function inferredRevision(hazards: readonly HazardDef[]): number {
 }
 
 /**
- * Adds the stock hazard commands of each revision the database has not had to every project's
- * stored hazard of the same name, after the commands it has, and records that it has them all. A
- * command the builder removed later is not added again, and a hazard the builder renamed, removed
- * or added is left alone. Runs at each daemon start, after the migrations.
+ * Adds the stock hazard commands and globs of each revision the database has not had to every
+ * project's stored hazard of the same name, after the ones it has, and records that it has them
+ * all. A command or glob the builder removed later is not added again, and a hazard the builder
+ * renamed, removed or added is left alone. Runs at each daemon start, after the migrations.
  */
 export function addStockHazardCommands(ctx: WriteContext): void {
   const latest = STOCK_HAZARD_REVISIONS.length;
@@ -43,10 +49,22 @@ export function addStockHazardCommands(ctx: WriteContext): void {
     const from = recorded ?? inferredRevision(project.hazards);
     const revisions = STOCK_HAZARD_REVISIONS.slice(from);
     const hazards = project.hazards.map((hazard) => {
-      const added = revisions
-        .flatMap((r) => r[hazard.name] ?? [])
-        .filter((c, i, all) => !hazard.commands.includes(c) && all.indexOf(c) === i);
-      return added.length === 0 ? hazard : { ...hazard, commands: [...hazard.commands, ...added] };
+      const fresh = (have: readonly string[], listed: readonly string[]): string[] =>
+        listed.filter((c, i) => !have.includes(c) && listed.indexOf(c) === i);
+      const commands = fresh(
+        hazard.commands,
+        revisions.flatMap((r) => r.commands?.[hazard.name] ?? []),
+      );
+      const globs = fresh(
+        hazard.globs,
+        revisions.flatMap((r) => r.globs?.[hazard.name] ?? []),
+      );
+      if (commands.length === 0 && globs.length === 0) return hazard;
+      return {
+        ...hazard,
+        commands: [...hazard.commands, ...commands],
+        globs: [...hazard.globs, ...globs],
+      };
     });
     if (hazards.every((hazard, i) => hazard === project.hazards[i])) continue;
     ctx.tx

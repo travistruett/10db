@@ -9,7 +9,7 @@ import {
   NAMEREF_BUILTINS,
   unreadArithmeticIn,
 } from './arithmetic-words';
-import { plainWordReadings, RUNNERS } from './command-forms';
+import { plainWordReadings, RUNNERS, type Runner } from './command-forms';
 import { isNumericArithmetic, numericNames } from './numeric-names';
 import { commandOf, SHELL_C_FLAG, shellQuote, shellScripts } from './judge';
 import {
@@ -52,6 +52,8 @@ const MAX_DEPTH = 3;
 const UNREAD_WORD = '\u0000';
 /** Stands for a quoted expansion, which the shell passes as exactly one word, whatever it holds. */
 const ONE_WORD = '\u0001';
+/** In a hazard pattern, a word that matches any one word, such as a container's name. */
+const ANY_WORD = '\u0002';
 
 /** A program name the shell runs as written: a path or a name of plain characters, or a test bracket. */
 const PLAIN_PROGRAM = /^(?:[A-Za-z0-9_@+%,:./-]+|\[\[?)$/;
@@ -104,7 +106,18 @@ function hazardPatterns(hazards: readonly HazardDef[]): string[][] {
   const commands = hazards.flatMap((hazard) =>
     hazard.commands.map((command) => command.split(' ').filter((word) => word !== '')),
   );
-  return [...commands, ...RUNNERS.flatMap((runner) => commands.map((c) => [...runner, ...c]))];
+  // A runner's operands (the service or container) are any word.
+  const through = (runner: Runner, rest: readonly (readonly string[])[]): string[][] =>
+    rest.map((c) => [...runner.words, ...Array<string>(runner.operands).fill(ANY_WORD), ...c]);
+  const once = RUNNERS.flatMap((runner) => through(runner, commands));
+  // A container runner may run another runner: `docker compose exec backend uv run python x`.
+  const twice = RUNNERS.filter((runner) => runner.container).flatMap((outer) =>
+    through(
+      outer,
+      RUNNERS.flatMap((inner) => through(inner, commands)),
+    ),
+  );
+  return [...commands, ...once, ...twice];
 }
 
 /**
@@ -118,7 +131,7 @@ function mayStartWith(words: readonly string[], pattern: readonly string[]): boo
     const word = words[at];
     if (word === undefined) return false;
     if (word === UNREAD_WORD || word === ONE_WORD) return true;
-    if (word !== pattern[at]) return false;
+    if (pattern[at] !== ANY_WORD && word !== pattern[at]) return false;
   }
   return true;
 }

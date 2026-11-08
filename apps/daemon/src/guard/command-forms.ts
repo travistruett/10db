@@ -81,19 +81,61 @@ export function pnpmFlagKind(flag: string): 'value' | 'boolean' | 'unknown' {
 /** The most readings of one command tried; past it, an unknown flag is read as taking no value. */
 const MAX_READINGS = 64;
 
-/** Runners whose remaining words are themselves a command (`pnpm exec drizzle-kit generate`). */
-export const RUNNERS: readonly (readonly string[])[] = [
-  ['npx'],
-  ['pnpm', 'exec'],
-  ['pnpm', 'dlx'],
-  ['npm', 'exec'],
-  ['yarn', 'dlx'],
+/** A runner: the words that name it, then the operands it takes before the command it runs. */
+export interface Runner {
+  readonly words: readonly string[];
+  /** Plain words after `words` that name where the command runs, such as a service or container. */
+  readonly operands: number;
+  /** Runs the command in a container, so the command it runs may be a runner too. */
+  readonly container?: true;
+}
+
+const runner = (words: string, operands = 0, container?: true): Runner => ({
+  words: words.split(' '),
+  operands,
+  ...(container ? { container } : {}),
+});
+
+/**
+ * Runners whose remaining words are themselves a command (`pnpm exec drizzle-kit generate`,
+ * `docker compose exec -T backend uv lock`, `uv run python manage.py migrate`). A runner's own
+ * flags are dropped with the other flags, so `-T` and `--rm` do not show.
+ */
+export const RUNNERS: readonly Runner[] = [
+  runner('npx'),
+  runner('pnpm exec'),
+  runner('pnpm dlx'),
+  runner('npm exec'),
+  runner('yarn dlx'),
+  runner('uv run'),
+  runner('poetry run'),
+  runner('bundle exec'),
+  runner('docker compose exec', 1, true),
+  runner('docker compose run', 1, true),
+  runner('docker-compose exec', 1, true),
+  runner('docker-compose run', 1, true),
+  runner('docker container exec', 1, true),
+  runner('docker exec', 1, true),
 ];
+
+/** How many plain words a runner takes in all: its own and its operands. */
+const runnerLength = (r: Runner): number => r.words.length + r.operands;
 
 /** A word that is neither a flag nor a flag value, with its index in the command. */
 interface PlainWord {
   readonly word: string;
   readonly at: number;
+}
+
+/** The runner the plain words start with, at `from`, if any. */
+function runnerAt(plain: readonly PlainWord[], from: number): Runner | undefined {
+  const first = plain[from];
+  if (first === undefined) return undefined;
+  const name = commandName(first.word);
+  return RUNNERS.find(
+    (r) =>
+      r.words[0] === name && r.words.every((word, i) => i === 0 || plain[from + i]?.word === word),
+  );
 }
 
 /** The program the plain words so far belong to, after any runner (`pnpm exec drizzle-kit` is drizzle-kit). */
@@ -102,12 +144,9 @@ function programOf(plain: readonly PlainWord[]): string | null {
   for (;;) {
     const first = plain[at];
     if (first === undefined) return null;
-    const name = commandName(first.word);
-    const runner = RUNNERS.find(
-      (r) => r[0] === name && r.every((word, i) => i === 0 || plain[at + i]?.word === word),
-    );
-    if (runner === undefined) return name;
-    at += runner.length;
+    const found = runnerAt(plain, at);
+    if (found === undefined) return commandName(first.word);
+    at += runnerLength(found);
   }
 }
 
@@ -253,14 +292,28 @@ export function commandForms(words: readonly string[]): { bare: string[][]; line
     const plain = reading.map((p) => p.word);
     bare.push(plain, ...packageManagerVariants(plain, words));
     lines.push(plain.join(' '));
-    const runner = RUNNERS.find((r) => startsWithWords(plain, r));
-    if (runner) {
-      bare.push(plain.slice(runner.length));
-      lines.push(plain.slice(runner.length).join(' '));
+    // What each runner in a chain runs: `docker compose exec backend uv run python x` is a runner
+    // that runs a runner that runs `python x`.
+    for (let from = 0; ;) {
+      const found = runnerAt(reading, from);
+      if (found === undefined) break;
+      from += runnerLength(found);
+      bare.push(plain.slice(from), ...packageManagerVariants(plain.slice(from), words));
+      lines.push(plain.slice(from).join(' '));
       // Raw words from the program the runner runs, so `pnpm dlx vercel --prod` keeps `--prod`.
-      const program = reading[runner.length];
-      lines.push(words.slice(program?.at ?? words.length).join(' '));
+      lines.push(words.slice(reading[from]?.at ?? words.length).join(' '));
     }
   }
   return { bare, lines };
+}
+
+/** Flags that make a command only report or preview what it would do. */
+const READ_ONLY_FLAGS: ReadonlySet<string> = new Set(['--dry-run', '--check', '--plan']);
+
+/**
+ * Whether the command line asks only for a preview or a check (`makemigrations --check --dry-run`,
+ * `cargo update --dry-run`), which changes nothing a hazard guards.
+ */
+export function onlyPreviews(words: readonly string[]): boolean {
+  return words.some((word) => READ_ONLY_FLAGS.has(word));
 }

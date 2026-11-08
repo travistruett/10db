@@ -1,5 +1,5 @@
 import type { HazardDef } from '@10db/contracts';
-import { commandForms, startsWithWords } from './command-forms';
+import { commandForms, onlyPreviews, startsWithWords } from './command-forms';
 import { SHELLS, commandOf, shellQuote, shellScripts, redirectionReadings } from './judge';
 import { findExecCommands, parseShell } from './shell-words';
 
@@ -45,6 +45,7 @@ export function hazardHit(
     const readings = redirectionReadings(words).map((reading) => commandForms(reading));
     for (const hazard of hazards) {
       if (
+        !onlyPreviews(words) &&
         hazard.commands.some((c) =>
           readings.some((forms) => forms.bare.some((f) => startsWithWords(f, c.split(' ')))),
         )

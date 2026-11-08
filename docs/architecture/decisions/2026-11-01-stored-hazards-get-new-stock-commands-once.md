@@ -23,6 +23,22 @@ auto mode those commands went to Claude Code's classifier instead of a card.
   than the recorded count. A hazard the builder renamed, removed or added is left alone; whole hazards are
   never added.
 
+## Update, 2026-11-08: globs, more stacks, container runners
+
+- A revision is now `{ commands?, globs? }`, each keyed by hazard name, so a release can add stock globs
+  too. `addStockHazardCommands` adds both, and the inferred count for an unrecorded database looks at both.
+  The third revision adds the lockfile and manifest globs of npm, pnpm, yarn, bun, uv, Poetry, pip, Go and
+  Bundler at any depth (`amps/frontend/pnpm-lock.yaml` was missed by the root-only `pnpm-lock.yaml`), the
+  Alembic, Rails and Prisma migration folders, and the writing commands of uv, Poetry, pip, Go modules and
+  Bundler, and the commands that create or apply migrations (Django, Alembic, Rails, Prisma).
+- The guard reads `docker compose exec|run [flags] <service>`, `docker exec [flags] <container>`,
+  `uv run`, `poetry run` and `bundle exec` as runners (`RUNNERS` in `guard/command-forms.ts`), so
+  `docker compose exec -T backend uv lock` is the `uv lock` hazard command. A container runner's command
+  may be another runner.
+- A command line with `--dry-run`, `--check` or `--plan` only previews, so it needs no hazard claim
+  (`makemigrations --check --dry-run`, `cargo update --dry-run`). Read-only commands such as
+  `go mod verify` and `showmigrations` are not on a hazard's list.
+
 ## Why
 
 - Reading the defaults plus a project's own additions at each read can't keep a builder's removal without

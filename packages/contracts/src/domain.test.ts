@@ -146,9 +146,16 @@ describe('stock hazard revisions', () => {
     harness: [],
   };
 
+  // The stock globs of the first release.
+  const FIRST_GLOBS: Record<string, string[]> = {
+    migrations: ['**/migrations/**', '**/drizzle/**'],
+    deps: ['**/package.json', 'pnpm-lock.yaml', '**/Cargo.toml', '**/Cargo.lock'],
+    harness: ['AGENTS.md', '**/AGENTS.md', '.claude/**', '.codex/**'],
+  };
+
   it('add up, with the first release, to exactly the stock commands of each hazard', () => {
     for (const hazard of DEFAULT_HAZARDS) {
-      const added = STOCK_HAZARD_REVISIONS.flatMap((r) => r[hazard.name] ?? []);
+      const added = STOCK_HAZARD_REVISIONS.flatMap((r) => r.commands?.[hazard.name] ?? []);
       expect(new Set(added).size, hazard.name).toBe(added.length);
       expect([...(FIRST[hazard.name] ?? []), ...added].sort(), hazard.name).toEqual(
         [...hazard.commands].sort(),
@@ -156,10 +163,24 @@ describe('stock hazard revisions', () => {
     }
   });
 
+  it('add up, with the first release, to exactly the stock globs of each hazard', () => {
+    for (const hazard of DEFAULT_HAZARDS) {
+      const added = STOCK_HAZARD_REVISIONS.flatMap((r) => r.globs?.[hazard.name] ?? []);
+      expect(new Set(added).size, hazard.name).toBe(added.length);
+      expect([...(FIRST_GLOBS[hazard.name] ?? []), ...added].sort(), hazard.name).toEqual(
+        [...hazard.globs].sort(),
+      );
+    }
+  });
+
   it('name only stock hazards', () => {
     const names = new Set(DEFAULT_HAZARDS.map((h) => h.name));
     for (const revision of STOCK_HAZARD_REVISIONS)
-      for (const name of Object.keys(revision)) expect(names).toContain(name);
+      for (const name of [
+        ...Object.keys(revision.commands ?? {}),
+        ...Object.keys(revision.globs ?? {}),
+      ])
+        expect(names).toContain(name);
   });
 });
 

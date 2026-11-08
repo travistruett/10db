@@ -17,10 +17,18 @@ afterEach(() => {
 
 /** The stock hazards as a project stored them before the first `revisions` revisions. */
 function stockBefore(revisions: number): HazardDef[] {
-  const later = new Set(
-    STOCK_HAZARD_REVISIONS.slice(revisions).flatMap((r) => Object.values(r).flat()),
-  );
-  return DEFAULT_HAZARDS.map((h) => ({ ...h, commands: h.commands.filter((c) => !later.has(c)) }));
+  const later = STOCK_HAZARD_REVISIONS.slice(revisions);
+  const laterCommands = new Set(later.flatMap((r) => Object.values(r.commands ?? {}).flat()));
+  const laterGlobs = new Set(later.flatMap((r) => Object.values(r.globs ?? {}).flat()));
+  return DEFAULT_HAZARDS.map((h) => ({
+    ...h,
+    globs: h.globs.filter((g) => !laterGlobs.has(g)),
+    commands: h.commands.filter((c) => !laterCommands.has(c)),
+  }));
+}
+
+function globs(hazards: readonly HazardDef[], name: string): readonly string[] {
+  return hazards.find((h) => h.name === name)?.globs ?? [];
 }
 
 function commands(hazards: readonly HazardDef[], name: string): readonly string[] {
@@ -76,6 +84,64 @@ describe('adding the newer stock hazard commands', () => {
     // A project added at the latest revision, before 10db recorded one, that dropped `bun add`.
     const hazards = DEFAULT_HAZARDS.map((h) =>
       h.name === 'deps' ? { ...h, commands: h.commands.filter((c) => c !== 'bun add') } : h,
+    );
+    const project = seedProject(store, { hazards });
+    store.write((ctx) => {
+      addStockHazardCommands(ctx);
+    });
+    expect(getProject(store.db, project.id).hazards).toEqual(hazards);
+  });
+
+  it('gives a project stored before the latest revision every stock glob, after its own', () => {
+    const before = stockBefore(LATEST - 1);
+    const old = seedProject(store, { hazards: before });
+    store.write((ctx) => {
+      addStockHazardCommands(ctx);
+    });
+    const hazards = getProject(store.db, old.id).hazards;
+    for (const stock of DEFAULT_HAZARDS)
+      expect([...globs(hazards, stock.name)].sort()).toEqual([...stock.globs].sort());
+    expect(globs(hazards, 'deps').slice(0, globs(before, 'deps').length)).toEqual(
+      globs(before, 'deps'),
+    );
+  });
+
+  it('gives a project stored at the first release the lockfile and migration globs', () => {
+    const first = seedProject(store, { hazards: stockBefore(0) });
+    store.write((ctx) => {
+      addStockHazardCommands(ctx);
+    });
+    const hazards = getProject(store.db, first.id).hazards;
+    expect(globs(hazards, 'deps')).toEqual(expect.arrayContaining(['**/uv.lock', '**/go.mod']));
+    expect(globs(hazards, 'migrations')).toEqual(
+      expect.arrayContaining(['**/db/migrate/**', '**/alembic/versions/**']),
+    );
+    expect(commands(hazards, 'migrations')).toEqual(
+      expect.arrayContaining(['alembic upgrade', 'rails db:migrate']),
+    );
+  });
+
+  it('keeps a glob removed after the revisions were added removed on every later start', () => {
+    const project = seedProject(store, { hazards: stockBefore(LATEST - 1) });
+    store.write((ctx) => {
+      addStockHazardCommands(ctx);
+    });
+    const trimmed = getProject(store.db, project.id).hazards.map((h) =>
+      h.name === 'deps' ? { ...h, globs: h.globs.filter((g) => g !== '**/go.sum') } : h,
+    );
+    store.write((ctx) => {
+      patchProject(ctx, project.id, { hazards: trimmed });
+    });
+    store.write((ctx) => {
+      addStockHazardCommands(ctx);
+    });
+    expect(globs(getProject(store.db, project.id).hazards, 'deps')).not.toContain('**/go.sum');
+  });
+
+  it('keeps a glob removed before the revisions were tracked removed', () => {
+    // A project added at the latest revision, before 10db recorded one, that dropped `**/go.sum`.
+    const hazards = DEFAULT_HAZARDS.map((h) =>
+      h.name === 'deps' ? { ...h, globs: h.globs.filter((g) => g !== '**/go.sum') } : h,
     );
     const project = seedProject(store, { hazards });
     store.write((ctx) => {
