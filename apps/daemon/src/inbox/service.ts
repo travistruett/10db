@@ -57,6 +57,7 @@ import { applyPrincipleCard, proposeStandingRules, recordAnswerDecision } from '
 import type { Logger } from '../log';
 import { ESCALATED_KEY, EXACT_WRITE_KEY, mcpGrantRules, storableRule } from '../permissions';
 import { proposePlacement } from '../placement';
+import { applyDockerChoice } from './docker-card';
 import { applyGateHostChoice } from './gate-host-card';
 import { applyMcpApproval } from './mcp-approval';
 import { declaredRiskTags, taskFieldsFromProposal } from './proposal-task';
@@ -646,6 +647,7 @@ export function createInboxService(deps: {
         if (item.kind === InboxKind.Flag) {
           applyMcpApproval(ctx, updated, answer);
           applyGateHostChoice(ctx, updated, answer);
+          applyDockerChoice(ctx, updated, answer);
         }
         return updated;
       });

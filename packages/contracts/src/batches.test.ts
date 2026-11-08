@@ -398,6 +398,8 @@ describe('worktree mode contracts', () => {
       prTitlePrefix: null,
       allowedCommands: [],
       sandboxLoopback: false,
+      sandboxDocker: false,
+      sandboxDockerOptOut: false,
       workspaceMode: 'shared',
       worktreeSeed: ['node_modules'],
       isolate: ['migrations', 'deps'],

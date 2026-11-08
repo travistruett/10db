@@ -13,7 +13,13 @@ import * as schema from '../schema';
 import { seedDefaultAccount } from './accounts';
 import { insertBatch } from './batches';
 import { listEventsAfter } from './events';
-import { getProject, insertProject, listProjects, patchProject } from './projects';
+import {
+  autoEnableDocker,
+  getProject,
+  insertProject,
+  listProjects,
+  patchProject,
+} from './projects';
 import type { Store, WriteContext } from './store';
 import { deriveBoardStatus, getTask, insertTask, listTasks, setTaskStatus } from './tasks';
 import { createTestStore, seedProject } from './test-support';
@@ -125,6 +131,43 @@ describe('projects', () => {
     expect(
       seedProject(store, { repoPath: '/tmp/loopback', sandboxLoopback: true }).sandboxLoopback,
     ).toBe(true);
+  });
+
+  it('starts a project without Docker and keeps a patched switch', () => {
+    const project = seedProject(store);
+    expect(getProject(store.db, project.id)).toMatchObject({
+      sandboxDocker: false,
+      sandboxDockerOptOut: false,
+    });
+    store.write((ctx) => patchProject(ctx, project.id, { sandboxDocker: true }));
+    expect(getProject(store.db, project.id).sandboxDocker).toBe(true);
+    expect(seedProject(store, { repoPath: '/tmp/docker', sandboxDocker: true }).sandboxDocker).toBe(
+      true,
+    );
+  });
+
+  it('turns Docker on by itself once, never after the builder turned it off', () => {
+    const project = seedProject(store);
+    const first = store.write((ctx) => autoEnableDocker(ctx, project.id)).value;
+    expect(first).toMatchObject({ sandboxDocker: true, sandboxDockerOptOut: false });
+    // Already on: nothing to do, and nothing to tell.
+    expect(store.write((ctx) => autoEnableDocker(ctx, project.id)).value).toBeNull();
+
+    // The builder turns it off: that is a choice 10db keeps.
+    store.write((ctx) => patchProject(ctx, project.id, { sandboxDocker: false }));
+    expect(getProject(store.db, project.id)).toMatchObject({
+      sandboxDocker: false,
+      sandboxDockerOptOut: true,
+    });
+    expect(store.write((ctx) => autoEnableDocker(ctx, project.id)).value).toBeNull();
+    expect(getProject(store.db, project.id).sandboxDocker).toBe(false);
+
+    // Turning it on again is the builder's choice too, and clears the refusal.
+    store.write((ctx) => patchProject(ctx, project.id, { sandboxDocker: true }));
+    expect(getProject(store.db, project.id)).toMatchObject({
+      sandboxDocker: true,
+      sandboxDockerOptOut: false,
+    });
   });
 
   it('replaces the allowed commands on a patch and leaves the other fields alone', () => {

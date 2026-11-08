@@ -80,6 +80,7 @@ export function insertProject(ctx: WriteContext, input: ProjectInput): ProjectDt
     accountId,
     movedFromAccountId: null,
     moveBackAt: null,
+    sandboxDockerOptOut: false,
     moveBackAutomatic: false,
     provider: Provider.Claude,
     createdAt: ctx.now,
@@ -218,8 +219,28 @@ export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPat
         ? { landing, landingBranch }
         : {}),
       ...(moving ? { movedFromAccountId: null, moveBackAt: null, moveBackAutomatic: false } : {}),
+      // The builder's own switch: turning Docker off is a choice 10db keeps, turning it on clears it.
+      ...(changes.sandboxDocker === undefined
+        ? {}
+        : { sandboxDockerOptOut: !changes.sandboxDocker }),
       updatedAt: ctx.now,
     })
+    .where(eq(schema.projects.id, id))
+    .run();
+  ctx.emit({ type: EventType.ProjectChanged, entityType: 'project', entityId: id });
+  return getProject(ctx.tx, id);
+}
+
+/**
+ * 10db's own turning on of a project's Docker switch. Answers the project when it turned the switch
+ * on, and null when it did nothing: the switch is already on, or the builder turned it off by hand.
+ */
+export function autoEnableDocker(ctx: WriteContext, id: ProjectId): ProjectDto | null {
+  const current = getProject(ctx.tx, id);
+  if (current.sandboxDocker || current.sandboxDockerOptOut) return null;
+  ctx.tx
+    .update(schema.projects)
+    .set({ sandboxDocker: true, updatedAt: ctx.now })
     .where(eq(schema.projects.id, id))
     .run();
   ctx.emit({ type: EventType.ProjectChanged, entityType: 'project', entityId: id });

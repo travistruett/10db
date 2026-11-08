@@ -211,6 +211,12 @@ export const projects = sqliteTable('projects', {
   usageHandoffAt: real('usage_handoff_at').notNull().default(USAGE_HANDOFF_AT),
   /** Lets the lane's sandboxed commands bind and connect on localhost. */
   sandboxLoopback: integer('sandbox_loopback', { mode: 'boolean' }).notNull().default(false),
+  /** Gives the gate's and the lane's commands the Docker socket; 10db may turn it on, the builder either way. */
+  sandboxDocker: integer('sandbox_docker', { mode: 'boolean' }).notNull().default(false),
+  /** The builder turned `sandbox_docker` off by hand: 10db never turns it on by itself again. */
+  sandboxDockerOptOut: integer('sandbox_docker_opt_out', { mode: 'boolean' })
+    .notNull()
+    .default(false),
   handoffPct: integer('handoff_pct').notNull(),
   nudgePct: integer('nudge_pct').notNull(),
   humanWaitMinutes: integer('human_wait_minutes').notNull(),

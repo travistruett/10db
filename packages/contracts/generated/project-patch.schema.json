@@ -223,6 +223,9 @@
     "sandboxLoopback": {
       "type": "boolean"
     },
+    "sandboxDocker": {
+      "type": "boolean"
+    },
     "workspaceMode": {
       "type": "string",
       "enum": [

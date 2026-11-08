@@ -64,6 +64,8 @@ function reseed(current: GeneralValues, seed: GeneralValues, next: GeneralValues
       current.sandboxLoopback === seed.sandboxLoopback
         ? next.sandboxLoopback
         : current.sandboxLoopback,
+    sandboxDocker:
+      current.sandboxDocker === seed.sandboxDocker ? next.sandboxDocker : current.sandboxDocker,
     workspaceMode:
       current.workspaceMode === seed.workspaceMode ? next.workspaceMode : current.workspaceMode,
     worktreeSeed: sameList(current.worktreeSeed, seed.worktreeSeed)
@@ -525,6 +527,20 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
                   checked={values.sandboxLoopback}
                   onChange={(e) => {
                     set({ sandboxLoopback: e.currentTarget.checked });
+                  }}
+                />
+              </Group>
+            </SettingRow>
+            <SettingRow
+              label="Allow Docker"
+              description="For gates and tasks that run docker compose. Docker can mount any host folder into a container, so a gate or task with Docker can reach outside the sandbox."
+            >
+              <Group justify="flex-end">
+                <Switch
+                  aria-label="Allow Docker"
+                  checked={values.sandboxDocker}
+                  onChange={(e) => {
+                    set({ sandboxDocker: e.currentTarget.checked });
                   }}
                 />
               </Group>

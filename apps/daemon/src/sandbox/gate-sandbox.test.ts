@@ -73,7 +73,7 @@ function sandbox(): GateSandbox {
 
 function input(overrides: Partial<GateRunInput> = {}): GateRunInput {
   return {
-    project: { repoPath: repo.path, sandboxLoopback: false },
+    project: { repoPath: repo.path, sandboxLoopback: false, sandboxDocker: false },
     env: {
       PATH: '/usr/bin:/bin',
       HOME: home,
@@ -286,14 +286,17 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
         { toolName: 'SandboxNetworkAccess', pattern: 'bad_host.example' },
         { toolName: 'Bash', pattern: 'curl evil.example' },
       ];
-      await withRun(input({ project: { repoPath: repo.path, sandboxLoopback }, rules }), (run) => {
-        const { network } = settingsOf(run);
-        expect(network['allowedDomains']).toEqual(['registry.npmjs.org']);
-        expect(network['strictAllowlist']).toBe(true);
-        expect(network['allowLocalBinding']).toBe(binding);
-        // Unix sockets only in the run's own temp dir: never Docker's or the SSH agent's.
-        expect(network['allowUnixSockets']).toEqual([run.tmpDir]);
-      });
+      await withRun(
+        input({ project: { repoPath: repo.path, sandboxLoopback, sandboxDocker: false }, rules }),
+        (run) => {
+          const { network } = settingsOf(run);
+          expect(network['allowedDomains']).toEqual(['registry.npmjs.org']);
+          expect(network['strictAllowlist']).toBe(true);
+          expect(network['allowLocalBinding']).toBe(binding);
+          // Unix sockets only in the run's own temp dir: never Docker's or the SSH agent's.
+          expect(network['allowUnixSockets']).toEqual([run.tmpDir]);
+        },
+      );
     },
   );
 
@@ -434,6 +437,49 @@ describe.skipIf(SANDBOXED)('createGateSandbox', () => {
       expect(status).not.toBe(0);
       expect(stderr).toContain(DOCKER_REFUSAL);
       expect(run.dockerRefused()).toBe(true);
+    });
+  });
+
+  describe('with the project’s Docker switch on', () => {
+    const docker = (): GateRunInput =>
+      input({
+        project: { repoPath: repo.path, sandboxLoopback: false, sandboxDocker: true },
+        command: 'docker compose exec -T backend true',
+      });
+
+    it('puts no refusing docker on the PATH, so the CLI runs and its status decides', async () => {
+      await withRun(docker(), (run) => {
+        const { stderr } = runInner(run);
+        expect(stderr).not.toContain(DOCKER_REFUSAL);
+        expect(run.dockerRefused()).toBe(false);
+        expect(existsSync(join(run.tmpDir, 'bin', 'docker'))).toBe(false);
+      });
+    });
+
+    it('opens the engine sockets and what the CLI reads, and passes the names that find the engine', async () => {
+      await withRun(
+        { ...docker(), env: { ...input().env, COMPOSE_PROJECT_NAME: 'amps', DOCKER_CONFIG: '/x' } },
+        (run) => {
+          const settings = settingsOf(run);
+          expect(settings.network['allowUnixSockets']).toEqual(
+            expect.arrayContaining([run.tmpDir, '/var/run/docker.sock']),
+          );
+          expect(settings.filesystem['allowRead']).toEqual(
+            expect.arrayContaining([join(home, '.docker', 'cli-plugins')]),
+          );
+          expect(run.commandEnv['DOCKER_HOST']).toBe('unix:///var/run/docker.sock');
+          expect(run.commandEnv['COMPOSE_PROJECT_NAME']).toBe('amps');
+          // The config dir names plugins the CLI would run: never passed.
+          expect(run.commandEnv['DOCKER_CONFIG']).toBeUndefined();
+        },
+      );
+    });
+
+    it('with the switch off, opens no socket and passes no Docker name', async () => {
+      await withRun(input(), (run) => {
+        expect(settingsOf(run).network['allowUnixSockets']).toEqual([run.tmpDir]);
+        expect(run.commandEnv['DOCKER_HOST']).toBeUndefined();
+      });
     });
   });
 

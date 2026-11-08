@@ -223,6 +223,12 @@
     "sandboxLoopback": {
       "type": "boolean"
     },
+    "sandboxDocker": {
+      "type": "boolean"
+    },
+    "sandboxDockerOptOut": {
+      "type": "boolean"
+    },
     "workspaceMode": {
       "type": "string",
       "enum": [
@@ -282,6 +288,8 @@
     "prTitlePrefix",
     "allowedCommands",
     "sandboxLoopback",
+    "sandboxDocker",
+    "sandboxDockerOptOut",
     "workspaceMode",
     "worktreeSeed",
     "isolate",

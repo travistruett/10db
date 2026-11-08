@@ -190,6 +190,11 @@ export interface LaneProfileInput {
   /** This sandbox's own files in a sandbox root that its commands read, such as its env file. */
   ownFiles: readonly string[];
   loopback: boolean;
+  /**
+   * Docker engine sockets the profile lets commands connect to, from `dockerAccess`; none unless the
+   * project's Docker switch is on. Codex's lane profile takes them as `unix_sockets` too.
+   */
+  dockerSockets?: readonly string[];
   deniedEnvNames: readonly string[];
   /** Mach services the profile opens beyond FSEvents; none for a lane's own commands. */
   machLookups?: readonly string[];
@@ -353,7 +358,7 @@ export function buildLaneProfile(input: LaneProfileInput): LaneSandboxSettings {
       allowedDomains: [...input.allowedDomains],
       ...(input.loopback ? { allowLocalBinding: true } : {}),
       allowMachLookup: ['com.apple.FSEvents', ...(input.machLookups ?? [])],
-      allowUnixSockets: [input.tmpDir],
+      allowUnixSockets: [input.tmpDir, ...(input.dockerSockets ?? [])],
     },
     credentials: {
       envVars: input.deniedEnvNames.map((name) => ({ name, mode: 'deny' as const })),
