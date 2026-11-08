@@ -282,42 +282,25 @@ const MODEL_UNAVAILABLE =
 
 const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-/** "is not supported", "is currently not available" and the like, as one fixed run of words. */
+/** "is not supported", "is currently not available" and the like. */
 const UNSUPPORTED = `(?:is\\s+(?:currently\\s+)?not|isn['’]t|not)\\s+(?:currently\\s+)?(?:supported|available)`;
 
-/**
- * Where a sentence starts: the text's start, or after a full stop, `!`, `?` or a colon and the space or line break
- * that follows. A bare line break is not one: it can fall inside a sentence.
- */
-const SENTENCE_START = `(?:^|[.!?:]\\s+)`;
-
-/** What may open a sentence before a model is named: "The", "This", "The requested", "Model ID" and the like. */
-const MODEL_OPENING = `(?:(?:the|this)\\s+)?(?:(?:requested|specified)\\s+)?(?:model\\s+)?(?:ID\\s+)?`;
+/** How far, within one clause, the phrase may follow the model: bounded, so a long text is read in linear time. */
+const CLAUSE_REACH = 160;
 
 /**
- * Whether `text` says the model itself is not supported or not available: a sentence that opens with the model
- * (its ID, quoted or not, or "the model you requested") and goes straight on to say so. A config error puts what
- * it refuses first ("Tool use with model X is not supported", "Prompt caching for this model is not supported",
- * "thinking.budget is not supported for model X"), which says nothing about whether the account can run the
- * model. Bedrock's refusal of a foundation model's on-demand use is matched by its own wording. Every part is a
- * fixed run, so a long text is read in linear time.
+ * Whether `text` says the model is not supported or not available: the phrase follows the model's ID, or the word
+ * model, in the same clause. It may come wrapped as Claude Code sends it ("API Error: 400 Model X is not
+ * available", or a JSON body's "message"). A config error that puts the phrase first ("thinking.budget is not
+ * supported for model X") never counts. One that names the model first ("Tool use with model X is not supported")
+ * still does: telling those apart needs more than the wording, so such a mark lasts only until the account's list
+ * changes.
  */
 function saysModelUnsupported(text: string, id: string): boolean {
-  const named = `['"\`‘’“”]?${escapeRegExp(id)}['"\`‘’“”]?`;
-  return (
-    new RegExp(
-      `${SENTENCE_START}${MODEL_OPENING}${named}\\s+(?:model\\s+)?${UNSUPPORTED}`,
-      'i',
-    ).test(text) ||
-    new RegExp(
-      `${SENTENCE_START}(?:the|this)\\s+model(?:\\s+you\\s+requested)?\\s+${UNSUPPORTED}`,
-      'i',
-    ).test(text) ||
-    new RegExp(
-      `\\bmodel\\s+ID\\s+${escapeRegExp(id)}\\s+with\\s+on-demand\\s+throughput\\s+isn['’]t\\s+supported`,
-      'i',
-    ).test(text)
-  );
+  return new RegExp(
+    `(?:${escapeRegExp(id)}|\\bmodel\\b)[^.;:]{0,${String(CLAUSE_REACH)}}?\\b${UNSUPPORTED}`,
+    'i',
+  ).test(text);
 }
 
 /** Whether `text` names `id` as a whole token, so `<model>` is not found in `<model>-<suffix>`. */
