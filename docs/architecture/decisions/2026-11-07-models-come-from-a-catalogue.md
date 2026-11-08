@@ -19,9 +19,10 @@ and the points where the build settled a question.
   a fetch works; a release build whose fetch fails fails. The snapshot is not committed.
 - **Tiers.** A model's tier comes from its output price: within a maker, only the newest model of each family is ranked,
   Strongest is 30% or more of the highest price left, Fast is 10% or less, and the rest are Balanced. Only models some
-  account really offers are ranked, so the tiers depend on what is offered: today's ChatGPT tiers rest on the GPT 5.6
-  prices Codex offers, and when Codex offers GPT 6.1, Sol moves to Balanced and Terra to Fast. A builder who disagrees
-  overrides a tier in the account's drawer.
+  account really offers are ranked, so the tiers depend on what is offered: a ChatGPT account's tiers follow the
+  models its installed Codex lists. Codex 0.154 listed GPT 6 Astra and the GPT 5.6 models only; Codex 0.167 lists GPT
+  6.1 too, so Astra is Strongest, 6.1 Sol Balanced, 6.1 Terra and 6 Luna Fast, and 6 Sol and the 5.6 models
+  Superseded. A builder who disagrees overrides a tier in the account's drawer.
 - **No map.** `modelChoice` in an account's settings holds `tierOverrides` (a model ID per tier) and nothing else;
   `modelMap` and `aliases` are gone, and a forward-only migration removed them from stored settings. The account drawer
   shows one dropdown per tier, default Automatic, listing only what that account offers, grouped as on the Models page.
