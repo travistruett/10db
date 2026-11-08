@@ -12,9 +12,10 @@ import {
   type SessionEvent,
   type SessionHandle,
 } from './types';
+import { CODEX_VERIFIED_ON } from '../environment';
 
 const SIGNED_IN = {
-  initialize: { userAgent: 'codex/0.154.0', codexHome: '/h/codex' },
+  initialize: { userAgent: `codex/${CODEX_VERIFIED_ON}`, codexHome: '/h/codex' },
   'account/read': {
     account: { type: 'chatgpt', email: 'me@example.com', planType: 'pro' },
     requiresOpenaiAuth: true,

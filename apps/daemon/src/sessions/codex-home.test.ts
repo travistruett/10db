@@ -63,7 +63,7 @@ describe('codex home', () => {
         memories: false,
         apps: false,
         plugins: false,
-        // Codex 0.154 offers these by default; a lane needs none of them.
+        // Codex offers these by default; a lane needs none of them.
         image_generation: false,
         browser_use: false,
         browser_use_external: false,

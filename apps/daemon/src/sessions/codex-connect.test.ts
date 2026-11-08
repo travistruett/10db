@@ -6,10 +6,11 @@ import { silentLogger } from '../log';
 import { startCodexLogin } from './codex-connect';
 import { fakeAppServer, type FakeAppServer } from './codex-test-support';
 import { AccountLoginError, LOGIN_MS, type AccountLogin } from './types';
+import { CODEX_VERIFIED_ON } from '../environment';
 
 const AUTH_URL = 'https://auth.openai.com/oauth/authorize?state=abc';
 const spec = { cwd: '/d', env: { CODEX_HOME: '/h/codex' }, kind: AccountKind.CodexSignin } as const;
-const INITIALIZE = { userAgent: 'codex/0.154.0', codexHome: '/h/codex' };
+const INITIALIZE = { userAgent: `codex/${CODEX_VERIFIED_ON}`, codexHome: '/h/codex' };
 /** An app-server that exits when it is told to stop, as a real one does. */
 const appServer = (script: Parameters<typeof fakeAppServer>[0]) =>
   fakeAppServer(script, { exitsOn: 'SIGTERM' });

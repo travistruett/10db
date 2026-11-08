@@ -11,6 +11,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
+import { CODEX_VERIFIED_ON } from '../src/environment';
 import { FakeAdapter, type FakeScriptBook } from '../src/sessions';
 import { apiClient, quickFlowId } from './api-client';
 import { FakeGh } from './fake-gh';
@@ -242,7 +243,7 @@ describe('batch delivery through the daemon', () => {
     const check: SystemCheck = SystemCheckDto.parse({
       loginEnv: { source: 'login_shell', warning: null },
       claudeCode: { verifiedOn: '2.1.302', warning: null },
-      codex: { verifiedOn: '0.154.0', warning: null },
+      codex: { verifiedOn: CODEX_VERIFIED_ON, warning: null },
       tools: [{ name: 'gh', path: null, version: null, required: false }],
     });
     const { api } = await start(() => Promise.resolve(check));

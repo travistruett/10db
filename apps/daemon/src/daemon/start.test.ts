@@ -60,7 +60,7 @@ import {
 } from '../../test/fixtures';
 import { ManualClock } from '../clock';
 import { loadEnv } from '../env';
-import type { ResolvedTools } from '../environment';
+import { CODEX_VERIFIED_ON, type ResolvedTools } from '../environment';
 import type { CaffeinateSpawner } from '../keep-awake';
 import { FakeAdapter, type FakeScriptBook, type SessionSpec } from '../sessions';
 import {
@@ -1015,7 +1015,7 @@ describe('startDaemon', () => {
     const check: SystemCheckDto = {
       loginEnv: { source: 'login_shell', warning: null },
       claudeCode: { verifiedOn: '2.1.302', warning: null },
-      codex: { verifiedOn: '0.154.0', warning: null },
+      codex: { verifiedOn: CODEX_VERIFIED_ON, warning: null },
       tools: [
         {
           name: 'git',
@@ -1248,7 +1248,7 @@ describe('startDaemon', () => {
         systemCheck: async (_resolved, ghLogin) => ({
           loginEnv: { source: 'login_shell', warning: null },
           claudeCode: { verifiedOn: '2.1.302', warning: null },
-          codex: { verifiedOn: '0.154.0', warning: null },
+          codex: { verifiedOn: CODEX_VERIFIED_ON, warning: null },
           tools: [
             {
               name: 'gh',

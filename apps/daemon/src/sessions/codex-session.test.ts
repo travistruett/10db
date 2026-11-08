@@ -1,5 +1,6 @@
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { request } from 'node:http';
+import { realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AccountKind, AccountProblem, mintId } from '@10db/contracts';
@@ -27,9 +28,10 @@ import {
 import { fakeAppServer, type FakeAppServer } from './codex-test-support';
 import type { SignInState } from './sign-in-check';
 import type { SessionEvent, SessionHandle, SessionSpec } from './types';
+import { CODEX_VERIFIED_ON } from '../environment';
 
 const FINE = {
-  initialize: { userAgent: 'codex/0.154.0', codexHome: '/h/codex' },
+  initialize: { userAgent: `codex/${CODEX_VERIFIED_ON}`, codexHome: '/h/codex' },
   'account/read': {
     account: { type: 'chatgpt', email: 'me@example.com', planType: 'pro' },
     requiresOpenaiAuth: true,
@@ -1436,7 +1438,8 @@ describe('codexThreadConfig', () => {
       ':minimal': 'read',
       '/usr': 'read',
       '/w/lane': 'write',
-      '/tmp/lane-1': 'write',
+      // A path that doesn't exist yet sits under the real path of its dir: /private/tmp on macOS.
+      [join(realpathSync('/tmp'), 'lane-1')]: 'write',
       '/w/lane/.env.local': 'deny',
       '/w/lane/nested': 'read',
     });
@@ -1467,7 +1470,7 @@ describe('codexThreadConfig', () => {
     expect(result).toMatchObject({ '/w/lane/secret': 'deny' });
   });
 
-  it('drops a read entry that is a link whose target is not granted, and keeps one whose target is', async () => {
+  it('drops a read entry that is a link whose target is not granted, and keeps one entry per real path', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'lanelink-'));
     try {
       const target = join(dir, 'target');
@@ -1483,8 +1486,155 @@ describe('codexThreadConfig', () => {
           specOf({ sandbox: sandboxWith({ filesystem: { allowRead: [granted, open, closed] } }) }),
         ),
       );
-      expect(filesystem).toMatchObject({ [granted]: 'read', [open]: 'read' });
-      expect(filesystem).not.toHaveProperty(closed);
+      const keys = Object.keys(filesystem as Record<string, string>);
+      // A link and its target are one entry, under the real path: Codex repeats every read and deny
+      // entry in its temp-dir rules, and a list with each alias outgrows macOS's sandbox compiler.
+      expect(filesystem).toMatchObject({ [await realpath(granted)]: 'read' });
+      expect(keys).not.toContain(open);
+      expect(keys).not.toContain(closed);
+      expect(keys).not.toContain(await realpath(target));
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  /** A lane over a real checkout and a real denied secrets dir, for rows that need real links. */
+  interface LinkWorld {
+    readonly checkout: string;
+    readonly secrets: string;
+    readonly home: string;
+  }
+  it.each<{
+    name: string;
+    build: (w: LinkWorld) => Promise<Partial<LaneSandboxSpec['settings']['filesystem']>>;
+    expected: (w: LinkWorld) => Record<string, string>;
+    absent: (w: LinkWorld) => string[];
+  }>([
+    {
+      name: 'a denyWrite link to a denied dir keeps the deny and the link unwritable',
+      build: async (w) => {
+        await symlink(w.secrets, join(w.checkout, '.git'));
+        return { denyRead: ['/', w.secrets], denyWrite: [join(w.checkout, '.git')] };
+      },
+      // Codex follows a link entry, so the link's own entry must not be a read of what it points to.
+      expected: (w) => ({ [w.secrets]: 'deny', [join(w.checkout, '.git')]: 'deny' }),
+      absent: () => [],
+    },
+    {
+      name: 'a denyWrite link to a file in a denied dir reopens nothing',
+      build: async (w) => {
+        await symlink(join(w.secrets, 'auth.json'), join(w.checkout, 'nested'));
+        return { denyRead: ['/', w.secrets], denyWrite: [join(w.checkout, 'nested')] };
+      },
+      expected: (w) => ({ [w.secrets]: 'deny', [join(w.checkout, 'nested')]: 'deny' }),
+      absent: (w) => [join(w.secrets, 'auth.json')],
+    },
+    {
+      // Codex also stops the checkout's writes under this map, since the link's target holds the
+      // checkout: the lane fails closed.
+      name: 'a denyWrite link to / is denied, so it opens nothing',
+      build: async (w) => {
+        await symlink('/', join(w.checkout, 'slash'));
+        return { denyWrite: [join(w.checkout, 'slash')] };
+      },
+      expected: (w) => ({ [join(w.checkout, 'slash')]: 'deny' }),
+      absent: () => ['/'],
+    },
+    {
+      name: 'a denyWrite link to a readable git dir elsewhere stays readable, not writable',
+      build: async (w) => {
+        const gitDir = join(w.home, 'repo.git');
+        await mkdir(gitDir);
+        await symlink(gitDir, join(w.checkout, '.git'));
+        return { allowRead: [gitDir], denyWrite: [join(w.checkout, '.git')] };
+      },
+      expected: (w) => ({ [join(w.home, 'repo.git')]: 'read', [join(w.checkout, '.git')]: 'read' }),
+      absent: () => [],
+    },
+    {
+      name: 'a read link into a denied dir under a granted one reopens nothing',
+      build: async (w) => {
+        const inner = join(w.home, '.codex');
+        await mkdir(inner);
+        await writeFile(join(inner, 'auth.json'), '{}');
+        await symlink(join(inner, 'auth.json'), join(w.home, 'notes'));
+        return { allowRead: [w.home, join(w.home, 'notes')], denyRead: ['/', inner] };
+      },
+      expected: (w) => ({ [w.home]: 'read', [join(w.home, '.codex')]: 'deny' }),
+      absent: (w) => [join(w.home, 'notes'), join(w.home, '.codex', 'auth.json')],
+    },
+    {
+      name: 'a missing path takes the real path of the dir it would be in',
+      build: () =>
+        Promise.resolve({
+          allowWrite: [tmpdir()],
+          denyRead: ['/', join(tmpdir(), 'not-made-yet')],
+        }),
+      expected: () => ({ [join(realpathSync(tmpdir()), 'not-made-yet')]: 'deny' }),
+      absent: () => [],
+    },
+    {
+      name: 'a denyWrite spelled by its real path narrows a write granted through a link',
+      build: async (w) => {
+        const scratch = join(w.home, 'scratch');
+        await mkdir(scratch);
+        await symlink(scratch, join(w.home, 'scratch-link'));
+        return { allowWrite: [join(w.home, 'scratch-link')], denyWrite: [scratch] };
+      },
+      expected: (w) => ({ [join(w.home, 'scratch')]: 'read' }),
+      absent: () => [],
+    },
+    {
+      name: 'a denyWrite link spelled through an alias of its writable root still gets an entry',
+      build: async (w) => {
+        const scratch = join(w.home, 'scratch');
+        await mkdir(scratch);
+        await symlink(w.home, join(w.checkout, 'home-alias'));
+        await symlink(w.secrets, join(scratch, 'lnk'));
+        return {
+          allowWrite: [scratch],
+          denyRead: ['/', w.secrets],
+          denyWrite: [join(w.checkout, 'home-alias', 'scratch', 'lnk')],
+        };
+      },
+      expected: (w) => ({ [join(w.home, 'scratch', 'lnk')]: 'deny' }),
+      absent: () => [],
+    },
+    {
+      name: 'a read link in one denied tree to a file in another reopens nothing',
+      build: async (w) => {
+        const secret = join(w.home, 'secret');
+        const ssh = join(w.home, 'ssh');
+        await mkdir(secret);
+        await mkdir(ssh);
+        await writeFile(join(ssh, 'id'), 'key');
+        await symlink(join(ssh, 'id'), join(secret, 'tossh'));
+        return { allowRead: [w.home, join(secret, 'tossh')], denyRead: ['/', secret, ssh] };
+      },
+      expected: (w) => ({ [join(w.home, 'ssh')]: 'deny' }),
+      absent: (w) => [join(w.home, 'ssh', 'id'), join(w.home, 'secret', 'tossh')],
+    },
+  ])('resolves links without opening more: $name', async ({ build, expected, absent }) => {
+    const dir = await realpath(await mkdtemp(join(tmpdir(), 'lanelinks-')));
+    try {
+      const w: LinkWorld = {
+        checkout: join(dir, 'checkout'),
+        secrets: join(dir, 'secrets'),
+        home: join(dir, 'home'),
+      };
+      await mkdir(w.checkout);
+      await mkdir(w.secrets);
+      await mkdir(w.home);
+      await writeFile(join(w.secrets, 'auth.json'), '{}');
+      const filesystem = await build(w);
+      const { filesystem: result } = laneOf(
+        codexThreadConfig(
+          specOf({ sandbox: { ...sandboxWith({ filesystem }), checkout: w.checkout } }),
+        ),
+      );
+      expect(result).toMatchObject(expected(w));
+      const keys = Object.keys(result as Record<string, string>);
+      for (const path of absent(w)) expect(keys).not.toContain(path);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

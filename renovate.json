@@ -48,7 +48,16 @@
       "groupName": "Playwright"
     },
     {
-      "description": "Every update that isn't a major version lands in one weekly PR.",
+      "description": "CODEX_VERIFIED_ON is the Codex release 10db's Codex lanes are verified on. Its bump is a PR of its own, because only the live test, which CI never runs, can verify it.",
+      "matchPackageNames": ["@openai/codex"],
+      "groupName": "Codex CLI",
+      "prBodyNotes": [
+        "Before merging: install this Codex (`brew upgrade --cask codex`), then run `TENDB_LIVE_CODEX=1 pnpm --filter @10db/daemon exec vitest run test/codex.live.test.ts`. It must pass; CI never runs it."
+      ]
+    },
+    {
+      "description": "Every update that isn't a major version lands in one weekly PR, except Codex's, which needs the live test.",
+      "matchPackageNames": ["*", "!@openai/codex"],
       "matchUpdateTypes": ["minor", "patch", "pin", "pinDigest", "digest"],
       "groupName": "all non-major dependencies"
     },
@@ -56,6 +65,16 @@
       "description": "A major version opens a PR only after its box is ticked on the Dependency Dashboard.",
       "matchUpdateTypes": ["major"],
       "dependencyDashboardApproval": true
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "The Codex version 10db's Codex lanes are verified on, read from npm, where Codex is released first.",
+      "managerFilePatterns": ["/^apps/daemon/src/environment/system-check\\.ts$/"],
+      "matchStrings": ["export const CODEX_VERIFIED_ON = '(?<currentValue>[^']+)';"],
+      "depNameTemplate": "@openai/codex",
+      "datasourceTemplate": "npm"
     }
   ]
 }

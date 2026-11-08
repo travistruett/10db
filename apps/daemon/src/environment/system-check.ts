@@ -9,7 +9,7 @@ import type { LoginEnv } from './login-env';
 const VERSION_PROBE_TIMEOUT_MS = 5_000;
 
 /** The Codex version the ChatGPT-plan checks and the app-server protocol 10db reads were verified on. */
-export const CODEX_VERIFIED_ON = '0.154.0';
+export const CODEX_VERIFIED_ON = '0.167.0';
 
 export const REQUIRED_TOOLS = [
   { name: ToolName.Claude, required: true },

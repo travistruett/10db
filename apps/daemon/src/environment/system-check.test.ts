@@ -5,6 +5,7 @@ import { tempDir } from '../../test/fixtures';
 import { firstExecutable, installCandidates } from '../git';
 import {
   claudeCodeWarning,
+  CODEX_VERIFIED_ON,
   codexWarning,
   findClaude,
   markGhRequired,
@@ -74,7 +75,7 @@ describe('systemCheck', () => {
     expect(report).toEqual({
       loginEnv: { source: 'inherited', warning: 'The login shell timed out' },
       claudeCode: { verifiedOn: '2.1.302', warning: null },
-      codex: { verifiedOn: '0.154.0', warning: null },
+      codex: { verifiedOn: CODEX_VERIFIED_ON, warning: null },
       tools: [
         {
           name: 'claude',
@@ -214,7 +215,7 @@ describe('markGhRequired', () => {
     const check = {
       loginEnv: { source: 'login_shell' as const, warning: null },
       claudeCode: { verifiedOn: '2.1.302', warning: null },
-      codex: { verifiedOn: '0.154.0', warning: null },
+      codex: { verifiedOn: CODEX_VERIFIED_ON, warning: null },
       tools: [
         {
           name: 'git' as const,
@@ -255,14 +256,14 @@ describe('claudeCodeWarning', () => {
 
 describe('codexWarning', () => {
   it.each<[string, string | null, boolean]>([
-    ['the verified version', 'codex-cli 0.154.0', false],
-    ['a newer version', 'codex-cli 0.155.0', true],
-    ['an older version', 'codex-cli 0.153.9', true],
+    ['the verified version', `codex-cli ${CODEX_VERIFIED_ON}`, false],
+    ['a newer version', 'codex-cli 999.0.0', true],
+    ['an older version', 'codex-cli 0.0.1', true],
     ['output with no version', 'not a version', false],
     ['no version at all', null, false],
   ])('%s: warns %s', (_name, version, warns) => {
     const warning = codexWarning(version);
     expect(warning !== null).toBe(warns);
-    if (warning) expect(warning).toContain('0.154.0');
+    if (warning) expect(warning).toContain(CODEX_VERIFIED_ON);
   });
 });

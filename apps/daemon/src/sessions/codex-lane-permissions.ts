@@ -1,4 +1,5 @@
 import { lstatSync, realpathSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { isEqualOrUnder, type LaneSandboxSpec } from '../sandbox';
 
 /**
@@ -14,12 +15,16 @@ const MINIMAL = ':minimal';
 /** A pattern the profile holds for Claude Code's sandbox, such as a listing grant; Codex has no match. */
 const isPattern = (path: string): boolean => path.includes('*') || path.includes('[');
 
-/** The real path of `path`, or `path` when it can't be resolved. */
+/**
+ * The real path of `path`. A path that doesn't exist yet is the real path of the nearest dir that does,
+ * with the rest appended, so it still sits under the entries its dirs resolve to.
+ */
 function realOrSelf(path: string): string {
   try {
     return realpathSync(path);
   } catch {
-    return path;
+    const parent = dirname(path);
+    return parent === path ? path : join(realOrSelf(parent), basename(path));
   }
 }
 
@@ -48,25 +53,63 @@ function opensMoreThanItself(path: string, grants: readonly string[]): boolean {
  * The lane profile's file system as Codex's `permissions.lane.filesystem`. Two entries on one path
  * keep the stricter. A `denyWrite` under a writable path narrows it to `read`; anywhere else it gets
  * no entry, so the path stays closed under `:minimal`, where a `read` entry would open it.
+ *
+ * Entries are keyed by real path, so a link and its target are one entry. Codex's sandbox matches real
+ * paths anyway, and it repeats every read and deny entry in the rules for its temp dirs: a list with
+ * each alias of each toolchain install outgrows macOS's sandbox compiler, and then no command runs.
+ * Every comparison between entries is made on real paths too, so a link can't carry a grant into a
+ * denied tree. A `denyWrite` that is a link also keeps an entry on its own path, which sits under the
+ * writable root and would otherwise stay writable, so a lane could swap the link: `read` when the lane
+ * may already read its target, else `deny`.
  */
 function filesystemOf(sandbox: LaneSandboxSpec): Record<string, Access> {
   const { allowRead, allowWrite, denyRead, denyWrite } = sandbox.settings.filesystem;
   const entries = new Map<string, Access>();
-  const grant = (path: string, access: Access): void => {
-    const held = entries.get(path);
-    if (held === undefined || STRICTNESS[access] > STRICTNESS[held]) entries.set(path, access);
+  const put = (key: string, access: Access): void => {
+    const held = entries.get(key);
+    if (held === undefined || STRICTNESS[access] > STRICTNESS[held]) entries.set(key, access);
   };
+  const grant = (path: string, access: Access): void => {
+    put(realOrSelf(path), access);
+  };
+  const denyRoots = denyRead.filter((root) => root !== '/');
+  const realDenyRoots = denyRoots.map(realOrSelf);
   const grants = [...allowRead, sandbox.checkout, ...allowWrite].filter((path) => !isPattern(path));
   for (const path of allowRead) {
-    if (!isPattern(path) && !opensMoreThanItself(path, grants)) grant(path, 'read');
+    if (isPattern(path) || opensMoreThanItself(path, grants)) continue;
+    // A link whose target is in a denied tree the link itself is not in would reopen that tree.
+    const real = realOrSelf(path);
+    const reopens = denyRoots.some(
+      (root) => isEqualOrUnder(real, realOrSelf(root)) && !isEqualOrUnder(path, root),
+    );
+    if (reopens) continue;
+    grant(path, 'read');
   }
   const writable = [sandbox.checkout, ...allowWrite];
+  const realWritable = writable.map(realOrSelf);
   for (const path of writable) grant(path, 'write');
   for (const path of denyRead) if (path !== '/') grant(path, 'deny');
+  /** Narrows a writable path to read: never a path outside the writable roots, and never a deny. */
+  const narrow = (key: string, roots: readonly string[], denied: readonly string[]): void => {
+    if (!roots.some((root) => isEqualOrUnder(key, root))) return;
+    if (denied.some((root) => isEqualOrUnder(key, root)) || entries.get(key) === 'deny') return;
+    entries.set(key, 'read');
+  };
+  /** Whether an entry already lets the lane read `real`, by real path. */
+  const readable = (real: string): boolean =>
+    [...entries].some(([key, access]) => access !== 'deny' && isEqualOrUnder(real, key));
   for (const path of denyWrite) {
-    const denied = denyRead.some((root) => root !== '/' && isEqualOrUnder(path, root));
-    if (!writable.some((root) => isEqualOrUnder(path, root)) || denied) continue;
-    entries.set(path, 'read');
+    const real = realOrSelf(path);
+    // The link itself, not what it points to: its name under its dir's real path.
+    const own = join(realOrSelf(dirname(path)), basename(path));
+    if (isLink(path) && realWritable.some((root) => isEqualOrUnder(own, root))) {
+      // Codex follows a link entry, so a link's own entry is what its target gets: a read of a denied
+      // or unread target would open it, so such a link is denied instead.
+      if (realDenyRoots.some((root) => isEqualOrUnder(real, root)) || !readable(real))
+        put(own, 'deny');
+      else narrow(own, realWritable, realDenyRoots);
+    } else narrow(path, writable, denyRoots);
+    narrow(real, realWritable, realDenyRoots);
   }
   return { [MINIMAL]: 'read', ...Object.fromEntries(entries) };
 }
