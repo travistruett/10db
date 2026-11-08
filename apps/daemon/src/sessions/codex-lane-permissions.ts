@@ -58,8 +58,9 @@ function opensMoreThanItself(path: string, grants: readonly string[]): boolean {
  * paths anyway, and it repeats every read and deny entry in the rules for its temp dirs: a list with
  * each alias of each toolchain install outgrows macOS's sandbox compiler, and then no command runs.
  * Every comparison between entries is made on real paths too, so a link can't carry a grant into a
- * denied tree. A `denyWrite` that is a link also keeps its own path, which sits under the writable root
- * and would otherwise stay writable: a lane could swap the link.
+ * denied tree. A `denyWrite` that is a link also keeps an entry on its own path, which sits under the
+ * writable root and would otherwise stay writable, so a lane could swap the link: `read` when the lane
+ * may already read its target, else `deny`.
  */
 function filesystemOf(sandbox: LaneSandboxSpec): Record<string, Access> {
   const { allowRead, allowWrite, denyRead, denyWrite } = sandbox.settings.filesystem;
@@ -92,9 +93,18 @@ function filesystemOf(sandbox: LaneSandboxSpec): Record<string, Access> {
     if (denied.some((root) => isEqualOrUnder(key, root)) || entries.get(key) === 'deny') return;
     entries.set(key, 'read');
   };
+  /** Whether an entry already lets the lane read `real`, by real path. */
+  const readable = (real: string): boolean =>
+    [...entries].some(([key, access]) => access !== 'deny' && isEqualOrUnder(real, key));
   for (const path of denyWrite) {
-    narrow(path, writable, denyRoots);
-    narrow(realOrSelf(path), realWritable, realDenyRoots);
+    const real = realOrSelf(path);
+    // Codex follows a link entry, so a link's own entry is what its target gets: a read of a denied
+    // or unread target would open it, so such a link is denied instead.
+    const link = isLink(path) && writable.some((root) => isEqualOrUnder(path, root));
+    if (link && (realDenyRoots.some((root) => isEqualOrUnder(real, root)) || !readable(real)))
+      put(path, 'deny');
+    else narrow(path, writable, denyRoots);
+    narrow(real, realWritable, realDenyRoots);
   }
   return { [MINIMAL]: 'read', ...Object.fromEntries(entries) };
 }

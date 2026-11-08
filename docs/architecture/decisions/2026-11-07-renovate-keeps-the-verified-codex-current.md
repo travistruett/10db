@@ -17,8 +17,10 @@ The lane profile's file system map keys every entry by its real path (`filesyste
 `sessions/codex-lane-permissions.ts`), so a link and its target are one entry, the stricter kept. Every comparison
 between entries is made on real paths too: a read link whose target is in a denied tree the link is not in gets no
 entry, a `denyWrite` narrows a write only inside a writable root and outside every deny, under both its own path and
-its real path, and never lowers a deny. Its own path keeps a `read` entry, so a link under the checkout (a `.git`
-that is a link) can't be swapped. A path that doesn't exist yet takes the real path of the nearest dir that does.
+its real path, and never lowers a deny. A `denyWrite` link under a writable root keeps an entry on its own path, so a
+lane can't swap it (a `.git` that is a link): Codex follows a link entry, so it is `read` only when the lane may
+already read the link's target, and `deny` when the target is denied or unread, such as a link to `/`. A path that
+doesn't exist yet takes the real path of the nearest dir that does.
 
 ## Why
 

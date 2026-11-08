@@ -1516,7 +1516,8 @@ describe('codexThreadConfig', () => {
         await symlink(w.secrets, join(w.checkout, '.git'));
         return { denyRead: ['/', w.secrets], denyWrite: [join(w.checkout, '.git')] };
       },
-      expected: (w) => ({ [w.secrets]: 'deny', [join(w.checkout, '.git')]: 'read' }),
+      // Codex follows a link entry, so the link's own entry must not be a read of what it points to.
+      expected: (w) => ({ [w.secrets]: 'deny', [join(w.checkout, '.git')]: 'deny' }),
       absent: () => [],
     },
     {
@@ -1525,7 +1526,7 @@ describe('codexThreadConfig', () => {
         await symlink(join(w.secrets, 'auth.json'), join(w.checkout, 'nested'));
         return { denyRead: ['/', w.secrets], denyWrite: [join(w.checkout, 'nested')] };
       },
-      expected: (w) => ({ [w.secrets]: 'deny', [join(w.checkout, 'nested')]: 'read' }),
+      expected: (w) => ({ [w.secrets]: 'deny', [join(w.checkout, 'nested')]: 'deny' }),
       absent: (w) => [join(w.secrets, 'auth.json')],
     },
     {
@@ -1534,8 +1535,19 @@ describe('codexThreadConfig', () => {
         await symlink('/', join(w.checkout, 'slash'));
         return { denyWrite: [join(w.checkout, 'slash')] };
       },
-      expected: (w) => ({ [join(w.checkout, 'slash')]: 'read' }),
+      expected: (w) => ({ [join(w.checkout, 'slash')]: 'deny' }),
       absent: () => ['/'],
+    },
+    {
+      name: 'a denyWrite link to a readable git dir elsewhere stays readable, not writable',
+      build: async (w) => {
+        const gitDir = join(w.home, 'repo.git');
+        await mkdir(gitDir);
+        await symlink(gitDir, join(w.checkout, '.git'));
+        return { allowRead: [gitDir], denyWrite: [join(w.checkout, '.git')] };
+      },
+      expected: (w) => ({ [join(w.home, 'repo.git')]: 'read', [join(w.checkout, '.git')]: 'read' }),
+      absent: () => [],
     },
     {
       name: 'a read link into a denied dir under a granted one reopens nothing',
