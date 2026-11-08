@@ -377,7 +377,7 @@ describe('the Models page', () => {
     expect(within(ended).getByText(/next session on it settles it/)).toBeTruthy();
   });
 
-  it('says a refusal from model_not_found stays until the account’s list changes', async () => {
+  it('shows a refusal from model_not_found as refused, with no wording mark or end time', async () => {
     serve({
       offers: [accountModelDto({ accountId: SUBSCRIPTION.id, model: 'alpha-max', unusable: true })],
     });
@@ -386,6 +386,7 @@ describe('the Models page', () => {
     const drawer = await screen.findByRole('dialog', { name: 'Alpha Max' });
     expect(await within(drawer).findByText('Refused by this account')).toBeTruthy();
     expect(within(drawer).queryByText('Marked from an error’s wording')).toBeNull();
+    expect(within(drawer).queryByText(/until the mark ends/)).toBeNull();
   });
 
   it('says why a model is Unknown when an account has not listed it yet', async () => {

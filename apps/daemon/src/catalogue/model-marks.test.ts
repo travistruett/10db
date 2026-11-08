@@ -8,9 +8,16 @@ import {
   type Store,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ManualClock } from '../clock';
+import { ManualClock, type Timer } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { clearModelMark, markModelUnusable, resumeModelMarks } from './model-marks';
+
+/** A clock whose timers fire 1 ms before their time, as Node's can against `Date.now()`. */
+class EarlyClock extends ManualClock {
+  override setTimeout(fn: () => void, ms: number): Timer {
+    return super.setTimeout(fn, ms > 1 ? ms - 1 : ms);
+  }
+}
 
 let store: Store;
 let close: () => void;
@@ -52,6 +59,16 @@ describe('markModelUnusable', () => {
     expect(row('b')).toMatchObject({ unusable: true, wordingMarkEndsAt: null });
   });
 
+  it('still ends a mark from wording when its timer fires a little before the time', () => {
+    clock = new EarlyClock(clock.now());
+    markModelUnusable({ state, clock }, id, 'a', ModelMarkBasis.Wording);
+    clock.advance(WORDING_MARK_MS - 1);
+    expect(row('a')?.unusable).toBe(true);
+    clock.advance(1);
+    expect(row('a')?.unusable).toBe(false);
+    expect(clock.pendingTimers()).toBe(0);
+  });
+
   it('answers null for a model the account does not list', () => {
     expect(markModelUnusable({ state, clock }, id, 'missing', ModelMarkBasis.Wording)).toBeNull();
   });
@@ -80,5 +97,16 @@ describe('resumeModelMarks', () => {
     expect(row('b')?.unusable).toBe(true);
     clock.advance(30 * 60_000);
     expect(row('b')?.unusable).toBe(false);
+  });
+
+  it('still ends a found mark when its timer fires a little before the time', () => {
+    markModelUnusable({ state, clock }, id, 'a', ModelMarkBasis.Wording);
+    clock = new EarlyClock(clock.now());
+    resumeModelMarks({ state, clock });
+    clock.advance(WORDING_MARK_MS - 1);
+    expect(row('a')?.unusable).toBe(true);
+    clock.advance(1);
+    expect(row('a')?.unusable).toBe(false);
+    expect(clock.pendingTimers()).toBe(0);
   });
 });

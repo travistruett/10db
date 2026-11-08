@@ -5,7 +5,7 @@ import {
   markAccountModelUnusable,
   type MarkResult,
 } from '@10db/db';
-import type { Clock } from '../clock';
+import { timerAt, type Clock } from '../clock';
 import type { StateStore } from '../events';
 
 interface MarkDeps {
@@ -28,13 +28,12 @@ export function markModelUnusable(
     const result = deps.state.write((ctx) =>
       markAccountModelUnusable(ctx, accountId, model, basis),
     );
+    // timerAt looks at the clock again when its timer fires, so a timer that fires early (or a clock set back)
+    // waits again instead of finding no mark due and leaving this one with no end.
     if (result.endsAt !== null)
-      deps.clock.setTimeout(
-        () => {
-          deps.state.write((ctx) => endWordingMarks(ctx));
-        },
-        Math.max(0, Date.parse(result.endsAt) - deps.clock.now().getTime()),
-      );
+      timerAt(deps.clock, new Date(result.endsAt), () => {
+        deps.state.write((ctx) => endWordingMarks(ctx));
+      });
     return result;
   } catch (error) {
     if (!(error instanceof NotFoundError)) throw error;
@@ -58,10 +57,7 @@ export function clearModelMark(
 export function resumeModelMarks(deps: MarkDeps): void {
   const next = deps.state.write((ctx) => endWordingMarks(ctx));
   if (next === null) return;
-  deps.clock.setTimeout(
-    () => {
-      resumeModelMarks(deps);
-    },
-    Math.max(0, Date.parse(next) - deps.clock.now().getTime()),
-  );
+  timerAt(deps.clock, new Date(next), () => {
+    resumeModelMarks(deps);
+  });
 }
