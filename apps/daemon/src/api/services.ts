@@ -31,6 +31,8 @@ import type {
   FlowPatch,
   FolderInspectResult,
   FoundHostDto,
+  HazardAssessmentDto,
+  HazardLookAgainResult,
   GoalAdoptInput,
   GoalAdoptIssue,
   GoalAdoptPreview,
@@ -389,6 +391,16 @@ export interface ApiServices {
    * file. Allows nothing: the builder allows a host by name, after seeing it.
    */
   scanNetworkHosts(projectId: ProjectId): Promise<FoundHostDto[]>;
+  /** What 10db added to the project's hazards by itself and why, and how many removals wait on the builder. */
+  getHazardAssessment(projectId: ProjectId): HazardAssessmentDto;
+  /**
+   * Reads the project's main checkout again and applies what it shows as the first look did:
+   * additions at once, removals only through the Inbox card. Aborting `signal` (the caller went away)
+   * stops the model question. A model that is unavailable or slow changes nothing.
+   */
+  lookAgainAtHazards(projectId: ProjectId, signal?: AbortSignal): Promise<HazardLookAgainResult>;
+  /** Takes one of 10db's additions back out of its hazard; it is not added again. */
+  undoHazardAddition(projectId: ProjectId, additionId: string): HazardAssessmentDto;
   listPersonas(): PersonaDto[];
   createPersona(input: PersonaInput): PersonaDto;
   patchPersona(id: PersonaId, patch: PersonaPatch): PersonaDto;

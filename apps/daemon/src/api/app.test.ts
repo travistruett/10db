@@ -3,6 +3,8 @@ import {
   ConflictError,
   GoalDigestDto,
   GoalListDto,
+  HazardAssessmentDto,
+  HazardLookAgainResult,
   HealthResponse,
   HumanTouchDto,
   InvalidError,
@@ -69,6 +71,9 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     allowNetworkHost: none,
     removeNetworkHost: none,
     scanNetworkHosts: none,
+    getHazardAssessment: none,
+    lookAgainAtHazards: none,
+    undoHazardAddition: none,
     listPersonas: track('listPersonas'),
     createPersona: track('createPersona'),
     patchPersona: track('patchPersona'),
@@ -1109,6 +1114,37 @@ describe('goal routes', () => {
     expect(ok.status).toBe(200);
     expect(GoalListDto.parse(await ok.json())).toEqual(list);
     expect((await app(services).request('/projects/not-a-project/goals', auth)).status).toBe(400);
+  });
+
+  it("serves a project's hazard assessment, looks again and undoes one addition", async () => {
+    const assessment = { additions: [], assessedAt: null, commit: null, pendingRemovals: 0 };
+    const undone: string[] = [];
+    const services = stubServices({
+      getHazardAssessment: () => assessment,
+      lookAgainAtHazards: () => Promise.resolve({ ok: true, assessment, added: 2 }),
+      undoHazardAddition: (_project, id) => {
+        undone.push(id);
+        return assessment;
+      },
+    });
+    const base = `/projects/${projectId}/hazard-assessment`;
+    const read = await app(services).request(base, auth);
+    expect(HazardAssessmentDto.parse(await read.json())).toEqual(assessment);
+    const look = await app(services).request(`${base}/look-again`, { ...auth, method: 'POST' });
+    expect(HazardLookAgainResult.parse(await look.json())).toEqual({
+      ok: true,
+      assessment,
+      added: 2,
+    });
+    const undo = await app(services).request(`${base}/additions/abc`, {
+      ...auth,
+      method: 'DELETE',
+    });
+    expect(undo.status).toBe(200);
+    expect(undone).toEqual(['abc']);
+    expect(
+      (await app(services).request('/projects/not-a-project/hazard-assessment', auth)).status,
+    ).toBe(400);
   });
 
   it('GET /projects/:projectId/human-touch answers the days of the project asked for', async () => {

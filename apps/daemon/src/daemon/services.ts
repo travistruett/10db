@@ -70,6 +70,7 @@ import {
   runNext,
   setRoutingRules,
   setTeam,
+  undoHazardAddition,
 } from '@10db/db';
 import { MoveCause, type AccountMoves, type AccountService } from '../accounts';
 import type { Clock } from '../clock';
@@ -88,6 +89,7 @@ import type { EventBus, StateStore } from '../events';
 import { inspectFolder, proposeAreas, type AreaNamer } from '../folders';
 import { adoptGoal } from '../goals';
 import type { Git } from '../git';
+import { hazardAssessmentDto, type HazardAssessor } from '../hazards';
 import { earlierMcpApproval, requestMcpApproval, type InboxService } from '../inbox';
 import type { KeepAwake } from '../keep-awake';
 import type { Runner } from '../runner';
@@ -147,6 +149,8 @@ export function createServices(deps: {
   readonly protectedRoots: readonly string[];
   /** Names and merges proposed areas; null leaves them named from their paths. */
   readonly areaNamer: AreaNamer | null;
+  /** Works out each project's hazards from its repository. */
+  readonly hazards: Pick<HazardAssessor, 'assess'>;
   /** Records a new project's checkout as the daemon trusts it (lane sandbox spec D13). */
   readonly pinCheckout: (repoPath: string) => void;
 }): ApiServices & TaskRemovalServices & TaskLookupServices {
@@ -375,6 +379,24 @@ export function createServices(deps: {
       const project = getProject(db, projectId);
       // Only listed: a lane may have written these files, so the builder allows each host by name.
       return unallowedFoundHosts(db, projectId, await findRegistryHosts(project.repoPath));
+    },
+    getHazardAssessment(projectId) {
+      getProject(db, projectId);
+      return hazardAssessmentDto(db, projectId);
+    },
+    async lookAgainAtHazards(projectId, signal) {
+      getProject(db, projectId);
+      const outcome = await deps.hazards.assess(projectId, signal);
+      return outcome.ok
+        ? { ok: true, assessment: hazardAssessmentDto(db, projectId), added: outcome.added }
+        : { ok: false, message: outcome.message };
+    },
+    undoHazardAddition(projectId, additionId) {
+      getProject(db, projectId);
+      deps.state.write((ctx) => {
+        undoHazardAddition(ctx, projectId, additionId);
+      });
+      return hazardAssessmentDto(db, projectId);
     },
     listPersonas: () => listPersonas(db, { includeArchived: true }),
     createPersona: (input) => deps.state.write((ctx) => insertPersona(ctx, input)),

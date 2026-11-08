@@ -724,6 +724,25 @@ export function createApp(deps: ApiDeps) {
     .post('/projects/:projectId/network-hosts/scan', async (c) =>
       c.json(await deps.services.scanNetworkHosts(ProjectId.parse(c.req.param('projectId')))),
     )
+    .get('/projects/:projectId/hazard-assessment', (c) =>
+      c.json(deps.services.getHazardAssessment(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .post('/projects/:projectId/hazard-assessment/look-again', async (c) =>
+      c.json(
+        await deps.services.lookAgainAtHazards(
+          ProjectId.parse(c.req.param('projectId')),
+          c.req.raw.signal,
+        ),
+      ),
+    )
+    .delete('/projects/:projectId/hazard-assessment/additions/:additionId', (c) =>
+      c.json(
+        deps.services.undoHazardAddition(
+          ProjectId.parse(c.req.param('projectId')),
+          c.req.param('additionId'),
+        ),
+      ),
+    )
     .delete('/projects/:projectId/network-hosts/:host', (c) =>
       c.json(
         deps.services.removeNetworkHost(
