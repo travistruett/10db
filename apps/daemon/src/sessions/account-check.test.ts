@@ -460,6 +460,30 @@ describe('isModelRefusal', () => {
       `ValidationException: Invocation of model ID ${LAUNCHED}. You do not have access to it.`,
       true,
     ],
+    [
+      'a parameter that is not supported for the launch ID',
+      'invalid_request',
+      `thinking.budget is not supported for model ${LAUNCHED}`,
+      false,
+    ],
+    [
+      'a feature that is not available on the launch ID',
+      'unknown',
+      `The extended cache is not available on ${LAUNCHED}`,
+      false,
+    ],
+    [
+      'the launch ID itself not supported',
+      'invalid_request',
+      `Model ${LAUNCHED} is not supported in this region`,
+      true,
+    ],
+    [
+      "the launch ID that isn't supported for the account",
+      'unknown',
+      `${LAUNCHED} isn't supported for this account`,
+      true,
+    ],
   ])('%s', (_name, error, text, expected) => {
     expect(isModelRefusal(error, text, LAUNCHED)).toBe(expected);
   });

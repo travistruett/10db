@@ -278,9 +278,21 @@ const CREDENTIAL_ERRORS: Readonly<Record<string, AccountProblem>> = {
 
 /** What an error says when it reports that a model is missing or off limits to the account. */
 const MODEL_UNAVAILABLE =
-  /not found|does not exist|doesn['’]t exist|not available|isn['’]t supported|is not supported|no access|(?:don['’]t|do not) have access|not authorized|access denied|accessdenied|unknown model/i;
+  /not found|does not exist|doesn['’]t exist|no access|(?:don['’]t|do not) have access|not authorized|access denied|accessdenied|unknown model/i;
 
 const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * Whether `text` says the model itself is not supported or not available: the phrase follows the model's ID, or
+ * the word model, in the same clause. A config error says the same of a parameter ("thinking.budget is not
+ * supported for model X"), which says nothing about whether the account can run the model.
+ */
+function saysModelUnsupported(text: string, id: string): boolean {
+  return new RegExp(
+    `(?:${escapeRegExp(id)}|\\bmodel\\b)[^.;:]*?\\b(?:is not|isn['’]t|not) (?:supported|available)`,
+    'i',
+  ).test(text);
+}
 
 /** Whether `text` names `id` as a whole token, so `<model>` is not found in `<model>-<suffix>`. */
 function namesToken(text: string, id: string): boolean {
@@ -298,7 +310,8 @@ function namesToken(text: string, id: string): boolean {
 export function isModelRefusal(error: string | undefined, text: string, launched: string): boolean {
   if (error === MODEL_NOT_FOUND_ERROR) return true;
   if (error !== 'invalid_request' && error !== 'unknown') return false;
-  return namesToken(text, launched.replace(CONTEXT_SUFFIX, '')) && MODEL_UNAVAILABLE.test(text);
+  const id = launched.replace(CONTEXT_SUFFIX, '');
+  return namesToken(text, id) && (MODEL_UNAVAILABLE.test(text) || saysModelUnsupported(text, id));
 }
 
 /** An assistant error that is the account's, not the work's. */
