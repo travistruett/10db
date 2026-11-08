@@ -80,12 +80,8 @@ export function insertProject(ctx: WriteContext, input: ProjectInput): ProjectDt
     accountId,
     movedFromAccountId: null,
     moveBackAt: null,
-<<<<<<< c1cf0fb1bf646613b5a332e63f17899e6d48083a
     sandboxDockerOptOut: false,
-||||||| 75c20f7
-=======
     moveBackAutomatic: false,
->>>>>>> d1308e7917dd186379b5d4a5639895fb1a076734
     provider: Provider.Claude,
     createdAt: ctx.now,
     updatedAt: ctx.now,
@@ -222,17 +218,11 @@ export function patchProject(ctx: WriteContext, id: ProjectId, patch: ProjectPat
       ...(changes.landing !== undefined || changes.landingBranch !== undefined
         ? { landing, landingBranch }
         : {}),
-<<<<<<< c1cf0fb1bf646613b5a332e63f17899e6d48083a
-      ...(moving ? { movedFromAccountId: null, moveBackAt: null } : {}),
+      ...(moving ? { movedFromAccountId: null, moveBackAt: null, moveBackAutomatic: false } : {}),
       // The builder's own switch: turning Docker off is a choice 10db keeps, turning it on clears it.
       ...(changes.sandboxDocker === undefined
         ? {}
         : { sandboxDockerOptOut: !changes.sandboxDocker }),
-||||||| 75c20f7
-      ...(moving ? { movedFromAccountId: null, moveBackAt: null } : {}),
-=======
-      ...(moving ? { movedFromAccountId: null, moveBackAt: null, moveBackAutomatic: false } : {}),
->>>>>>> d1308e7917dd186379b5d4a5639895fb1a076734
       updatedAt: ctx.now,
     })
     .where(eq(schema.projects.id, id))
