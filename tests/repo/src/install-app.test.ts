@@ -82,7 +82,7 @@ describe('install-app.sh arguments', () => {
 
 const hasMake = spawnSync('make', ['--version'], { encoding: 'utf8' }).status === 0;
 
-// CI's gate image (the Playwright Ubuntu image) has no make; the builder's Mac does.
+// The Playwright image the e2e job runs in has no make; the CI runner and the builder's Mac do.
 describe.skipIf(!hasMake)('the make target', () => {
   const dryRun = (args: readonly string[], env: Record<string, string> = {}) =>
     spawnSync('make', ['-n', '-s', 'install-app', ...args], {

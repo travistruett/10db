@@ -53,14 +53,17 @@
   local config before the first commit or push. Otherwise a commit starts
   `git maintenance run --auto`, and a push into the repository starts receive-pack's own auto gc.
   On Apple Git 2.50 both detach and keep writing under the repository after the command returns,
-  which races any test that reads its files or removes it. On CI's git, `receive.autogc` is what
+  which races any test that reads its files or removes it. On git 2.43, `receive.autogc` is what
   stops the receive-pack gc.
-- **CI's git is older than local git, so fixtures set the config they rely on.** The gate runs in
-  the Playwright image, whose git is 2.43.0 on Ubuntu 24.04 (`.github/workflows/ci.yml`); developers
-  run Apple Git 2.50. The two differ: on 2.43 a commit runs `git maintenance run --auto --quiet`
-  without `--detach`, and a push runs `git gc --auto` in receive-pack. Test repositories ignore
-  global and system config (`isolatedGitEnvironment`), so a fixture that depends on a git setting
-  sets it in its own local config and never relies on a version's default.
+- **CI's git differs from local git, so fixtures set the config they rely on.** Developers run
+  Apple Git 2.50. CI's test shards run on the `ubuntu-24.04` runner's own git, which moves when
+  GitHub updates the image, and the e2e step runs in the Playwright image, whose git is 2.43.0
+  (`.github/workflows/ci.yml`). They differ: on 2.43 a commit runs
+  `git maintenance run --auto --quiet` without `--detach`, and a push runs `git gc --auto` in
+  receive-pack. Test repositories ignore global and system config (`isolatedGitEnvironment`), so a
+  fixture that depends on a git setting sets it in its own local config and never relies on a
+  version's default. Git's messages are worded by version too: a test that checks git's own text
+  names the wording of every git it runs on, or checks what 10db does with the text instead.
 - **No sleeps.** Wait on a condition with a deadline; inject the clock where time matters.
 - **Never pipe test output through `tail` or append `; echo $?`.** It hides failures and exit
   codes.

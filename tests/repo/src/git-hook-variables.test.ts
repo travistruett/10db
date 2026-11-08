@@ -145,8 +145,8 @@ describe('git hook variables', () => {
     cpSync(resolve(repoRoot, 'scripts/hooks'), join(repo.dir, 'scripts/hooks'), {
       recursive: true,
     });
-    // A stand-in make, first on PATH, that records the environment `make precheck` was given. It
-    // needs no make installed, and the CI gate's container has none.
+    // A stand-in make, first on PATH, that records the environment `make precheck` was given
+    // instead of running the precheck, and needs no make installed.
     const fakeMake = join(records, 'bin', 'make');
     mkdirSync(dirname(fakeMake));
     writeFileSync(fakeMake, '#!/bin/sh\n[ "$1" = precheck ] || exit 2\nenv > "$HOOK_ENV_RECORD"\n');

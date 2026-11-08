@@ -274,7 +274,13 @@ describe('inspectFolder reads the folder safely', () => {
     expect(got.ok).toBe(false);
     if (!got.ok) {
       expect(got.reason).toBe(FolderRefusalReason.Unreadable);
-      expect(got.message).toContain('/nonexistent/elsewhere');
+      // The message is git's own line, which git words by version: 2.43 and 2.50 name the
+      // gitfile's target, and 2.56 names the gitfile itself.
+      const gitfile = join(realpathSync(dir.path), '.git');
+      expect([
+        'not a git repository: /nonexistent/elsewhere',
+        `gitfile does not point to a valid repository: ${gitfile}`,
+      ]).toContain(got.message);
     }
   });
 
