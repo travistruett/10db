@@ -47,6 +47,7 @@ beforeEach(() => {
     pauses,
     reports: createUsageReports({ clock, staleMs: 30 * 60_000 }),
     defaultPauseMs: 30 * 60_000,
+    back: () => undefined,
   });
 });
 afterEach(() => {

@@ -168,7 +168,7 @@ A project can move to another account in Settings, Billing, even with work in fl
 finishes where it is, and each lane's next session runs on the new account, fresh from its latest handoff;
 work that was neither committed nor handed off stays behind. When an account hits its usage limit, each
 project with work on it gets an inbox card offering to continue on another account (a project whose work queues
-during the pause gets it then, once), and once the limit resets 10db asks whether to move back. Name a fallback account in Billing, and 10db moves a project with work in
+during the pause gets it then, once), and once the limit resets 10db moves the project back by itself (a move you made by hand it asks about). Name a fallback account in Billing, and 10db moves a project with work in
 flight there by itself: on a Claude subscription when it reaches 95% of a usage limit ("Hand off at" in
 Billing changes that), after asking its running lanes to hand off; on any account at the limit itself. The fallback
 must be ready to run, and a metered one needs a monthly cap, because nobody approves that spend.

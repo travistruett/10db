@@ -201,6 +201,8 @@ export const projects = sqliteTable('projects', {
     .references(() => accounts.id),
   /** When that limit resets, as the pause or the session reported it; null when nobody said. */
   moveBackAt: text('move_back_at'),
+  /** The move was caused by a usage limit: 10db moves the project back by itself once the limit resets. */
+  moveBackAutomatic: integer('move_back_automatic', { mode: 'boolean' }).notNull().default(false),
   /** The account 10db moves the project to on its own near its account's usage limit. */
   fallbackAccountId: text('fallback_account_id')
     .$type<AccountId>()

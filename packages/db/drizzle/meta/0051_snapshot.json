@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "a845f3d3-d92b-4775-913a-491fba56e70f",
+  "id": "7fe3623a-2682-441d-b8bf-6bec2025154f",
   "prevId": "251cc5f5-0704-4605-b706-d5d2ec2db133",
   "tables": {
     "aa_models": {
@@ -3080,6 +3080,14 @@
           "notNull": false,
           "autoincrement": false
         },
+        "move_back_automatic": {
+          "name": "move_back_automatic",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
         "fallback_account_id": {
           "name": "fallback_account_id",
           "type": "text",
@@ -3097,22 +3105,6 @@
         },
         "sandbox_loopback": {
           "name": "sandbox_loopback",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
-        },
-        "sandbox_docker": {
-          "name": "sandbox_docker",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
-        },
-        "sandbox_docker_opt_out": {
-          "name": "sandbox_docker_opt_out",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,

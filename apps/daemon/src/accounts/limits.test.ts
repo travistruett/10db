@@ -37,7 +37,6 @@ import {
   createAccountRuntime,
   createMoveBack,
   createUsageReports,
-  MOVE_BACK_CARD,
   MoveCause,
   type AccountLimits,
   type AccountMoves,
@@ -88,6 +87,9 @@ beforeEach(() => {
     pauses,
     reports,
     defaultPauseMs: DEFAULT_PAUSE_MS,
+    back: (projectId, to) => {
+      moves.move(projectId, to, { cause: MoveCause.MoveBack });
+    },
   });
   moves = createAccountMoves({
     state,
@@ -179,10 +181,14 @@ describe('usage thresholds', () => {
       accountId: plan,
       usage: { limitType: 'five_hour', utilization: 0.96 },
     });
-    // The way back is armed: once the limit resets, 10db asks to move the project back.
+    // The way back is armed: once the limit resets, 10db moves the project back by itself, and the
+    // card that told the builder about the move goes with it.
     clock.advance(120 * 60_000);
-    const back = findOpenByFoldKey(state.db, project.id, accountFoldKey(plan, MOVE_BACK_CARD));
-    expect(back?.title).toBe(`${from.label} is available again: move demo back?`);
+    expect(getProject(state.db, project.id)).toMatchObject({
+      accountId: plan,
+      movedFromAccountId: null,
+    });
+    expect(openCards()).toEqual([]);
   });
 
   it('offers a ChatGPT project with no fallback every other account on the card', () => {
@@ -458,15 +464,14 @@ describe('usage thresholds', () => {
       accountId: second.id,
       moveBackAt: null,
     });
-    const back = () =>
-      findOpenByFoldKey(state.db, project.id, accountFoldKey(plan, MOVE_BACK_CARD));
     clock.advance(20 * 60_000);
     // Another session on the account still runs hot.
     limits.usageReported(plan, { ...report(0.97), resetsAt: null });
     clock.advance(10 * 60_000);
-    expect(back()).toBeUndefined();
-    // Nothing heard for half an hour: 10db asks, and says it doesn't know whether the limit reset.
+    expect(getProject(state.db, project.id).accountId).toBe(second.id);
+    // Nothing heard for half an hour: 10db takes the limit to have reset, and moves back.
     clock.advance(30 * 60_000);
-    expect(back()?.body).toContain("10db doesn't know whether that limit has reset");
+    expect(getProject(state.db, project.id).accountId).toBe(plan);
+    expect(openCards()).toEqual([]);
   });
 });

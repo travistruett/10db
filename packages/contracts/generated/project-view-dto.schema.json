@@ -135,6 +135,9 @@
         }
       ]
     },
+    "moveBackAutomatic": {
+      "type": "boolean"
+    },
     "fallbackAccountId": {
       "anyOf": [
         {
@@ -1180,6 +1183,7 @@
     "accountId",
     "movedFromAccountId",
     "moveBackAt",
+    "moveBackAutomatic",
     "fallbackAccountId",
     "usageHandoffAt",
     "handoffPct",
