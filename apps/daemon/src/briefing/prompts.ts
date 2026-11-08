@@ -253,7 +253,7 @@ const HAND_OFF_RULE =
 
 /** A Codex model that has finished its work reaches for write_handoff as a way to say so. */
 const CODEX_HAND_OFF_RULE =
-  'Ending your turn is how you finish a step: when the work is done and committed, end your turn without calling write_handoff. Never call write_handoff to finish a step. Call it only after 10db asks you to hand off, and then finish your current step, call write_handoff, and end your turn.';
+  'Ending your turn is how you finish a step: when the work is done and committed, end your turn without calling write_handoff. Never call write_handoff to finish a step. Call it only when 10db asks you to hand off, or when you must stop with work left, which you name under progress.notDone; then finish your current step, call write_handoff, and end your turn.';
 
 /** The lines a Codex lane reads in its own words, by the line Claude's briefing has. */
 const CODEX_RULES: ReadonlyMap<string, string> = new Map([

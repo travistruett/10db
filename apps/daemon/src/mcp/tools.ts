@@ -835,7 +835,7 @@ export function createToolHandlers(
           {
             handoffId: handoff.id,
             instruction:
-              'Handoff recorded. End your turn now. A fresh session continues from it when 10db asked for it or it names work left; otherwise the step ends.',
+              'Handoff recorded. End your turn now. A fresh session continues from it when 10db asked for it or it names work left; otherwise it counts as finishing your step, so a step that records a result with complete_step must still do so.',
           },
           ctx,
         );

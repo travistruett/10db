@@ -130,7 +130,7 @@ describe('a handoff written below the threshold', () => {
     expect(exits(workstream.id)).toEqual(['step_done', 'step_done']);
   });
 
-  it('fails the step, naming what was left, after three in a row with no commit between', async () => {
+  it('ends the step, as ending the turn would, after three in a row with no commit between', async () => {
     engine = await createTestEngine({
       Alpha: [
         [handOff('op-unreq-loop-1'), turn],
@@ -143,11 +143,8 @@ describe('a handoff written below the threshold', () => {
     engine.launch(workstream.id);
     await engine.runner.idle();
 
-    const failed = getWorkstream(engine.store.db, workstream.id);
-    expect(failed.state).toBe('FAILED');
-    expect(failed.failureReason).toContain('handed off 3 times in a row');
-    expect(failed.failureReason).toContain('second half');
-    expect(exits(workstream.id)).toHaveLength(3);
+    expect(getWorkstream(engine.store.db, workstream.id).state).toBe('DONE');
+    expect(exits(workstream.id)).toEqual(['handoff', 'handoff', 'step_done']);
   });
 
   it('keeps handing off while each session commits more', async () => {

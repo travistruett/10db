@@ -29,7 +29,6 @@ import {
   type AccountId,
   type AccountModelDto,
   type AccountRefusal,
-  type HandoffDto,
   type HandoffId,
   type InboxItemDto,
   type InboxItemId,
@@ -111,6 +110,7 @@ import {
   PackReason,
   RESULT_NUDGE,
 } from '../briefing';
+import { handoffStands, nextUnaskedRun, workLeftIn, type UnaskedRun } from './handoff-rule';
 import {
   unready,
   type AccountLimits,
@@ -415,12 +415,6 @@ type Outcome =
       readonly providerSessionId: string | null;
     }
   | {
-      /** The step handed off again and again with nobody asking and nothing committed between. */
-      readonly kind: 'handoff_loop';
-      readonly message: string;
-      readonly providerSessionId: string | null;
-    }
-  | {
       readonly kind: 'stopped';
       readonly reason: StopReason;
       readonly providerSessionId: string | null;
@@ -551,28 +545,11 @@ interface Control {
   /** Set while a session runs; ends its inbox waits so later answers go to the card. */
   endWaits: (() => void) | null;
   /**
-   * The step's run of handoffs nobody asked for with no commit between them: the head they were written
-   * at and how many. Any other session ending clears it.
+   * The step's run of handoffs nobody asked for with no commit between them. Any other session ending
+   * clears it; a session that never started (a move, a refused model) leaves it.
    */
-  unaskedHandoffs: { readonly gitHead: string; readonly count: number } | null;
+  unaskedHandoffs: UnaskedRun | null;
   done: Promise<void>;
-}
-
-/** How many handoffs in a row, nobody asking and no commit between them, stop a step. */
-const UNASKED_HANDOFF_LIMIT = 3;
-
-/**
- * Counts a handoff nobody asked for into the step's run of them. A run of `UNASKED_HANDOFF_LIMIT` with no
- * commit between is a session handing off instead of working, which another session would repeat: its
- * failure message, naming what the last handoff said was left. Null while the run is shorter.
- */
-function countUnaskedHandoff(ctl: Control, handoff: HandoffDto, role: StepRole): string | null {
-  const run = ctl.unaskedHandoffs;
-  const count = run !== null && run.gitHead === handoff.gitHead ? run.count + 1 : 1;
-  ctl.unaskedHandoffs = { gitHead: handoff.gitHead, count };
-  if (count < UNASKED_HANDOFF_LIMIT) return null;
-  const left = handoff.content.progress.notDone.join('; ').slice(0, 500);
-  return `The ${role} step handed off ${String(count)} times in a row with nobody asking and no commit between, so 10db stopped it instead of starting another session. Its last handoff said this was left: ${left}`;
 }
 
 /** Per-session mutable state, kept in one object so callbacks and the event loop share it. */
@@ -625,6 +602,8 @@ interface SessionState {
   backgroundTimer: Timer | null;
   /** Set by the `started` event; a session that never started has no conversation to resume. */
   started: boolean;
+  /** Set when the session's handoff ended a run of handoffs nobody asked for: how many it held. */
+  unaskedRunEnded: number | null;
   outcome: Outcome | null;
 }
 
@@ -633,15 +612,19 @@ interface SessionState {
  * the share of its context it had used. A session that gave no verdict is failed with this, so the card
  * says whether a retry can help.
  */
-function describeEnding(st: Pick<SessionState, 'lastTurn' | 'contextPct'>): string {
+function describeEnding(
+  st: Pick<SessionState, 'lastTurn' | 'contextPct' | 'unaskedRunEnded'>,
+): string {
   const how =
-    st.lastTurn === null
-      ? 'its session closed before any turn finished'
-      : st.lastTurn === 'max_turns'
-        ? 'its last turn stopped at the turn limit'
-        : st.lastTurn === 'error'
-          ? 'its last turn ended with an error'
-          : 'its last turn ended normally';
+    st.unaskedRunEnded !== null
+      ? `it handed off ${String(st.unaskedRunEnded)} times in a row with nobody asking and no commit between`
+      : st.lastTurn === null
+        ? 'its session closed before any turn finished'
+        : st.lastTurn === 'max_turns'
+          ? 'its last turn stopped at the turn limit'
+          : st.lastTurn === 'error'
+            ? 'its last turn ended with an error'
+            : 'its last turn ended normally';
   const context =
     st.contextPct === null
       ? ''
@@ -1336,8 +1319,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         return;
       case 'refused':
       case 'background_hung':
-      case 'handoff_loop':
-        // A retry would end the same way, and the work it left is for the builder to see.
+        // A retry would hang the same way, and the work it left is for the builder to see.
         fail(id, ctl.fence, { kind: WorkstreamFailure.SessionFailed, reason: outcome.message });
         return;
       case 'crashed': {
@@ -1790,6 +1772,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       heldForBackground: false,
       backgroundTimer: null,
       started: false,
+      unaskedRunEnded: null,
       outcome: null,
     };
     const log = opts.logger.child({ workstreamId: id, sessionId: session.id });
@@ -2104,26 +2087,38 @@ export function createRunner(opts: RunnerOptions): Runner {
             const recorded = handoffForSession(db, session.id);
             const resultRecorded = () =>
               currentStep(getWorkstreamRow(db, id)).result?.sessionId === session.id;
-            // A handoff nobody asked for stands only while the step's work is outstanding: work the
-            // handoff names as not done, or, in an edit step, changes left uncommitted. One that names
-            // nothing left is the session saying it finished (some models call it for that), so it ends
-            // the step as ending the turn would, and a read-only step with no result is asked for one.
-            // One that 10db asked for stands even with nothing uncommitted: the session was told to
-            // commit first and name what is left.
+            // When a handoff starts a fresh session is `handoffStands`; the changes in the claims are
+            // read only when they decide. A run of handoffs nobody asked for, with no commit between,
+            // ends the step at its limit as ending the turn would: the gate and review judge the work.
             const asked = st.handoffRequested || st.handoffAskedByTool;
-            const leftNamed = (recorded?.content.progress.notDone.length ?? 0) > 0;
-            const handoffStands =
-              !!recorded &&
-              (asked ||
-                (readOnly
-                  ? !resultRecorded() && leftNamed
-                  : leftNamed || (await claimedChanges(getWorkstreamRow(db, id))).length > 0));
-            if (recorded && handoffStands) {
-              const loop = asked ? null : countUnaskedHandoff(ctl, recorded, step.role);
-              if (asked) ctl.unaskedHandoffs = null;
-              st.outcome = loop
-                ? { kind: 'handoff_loop', message: loop, providerSessionId: st.providerSessionId }
-                : { kind: 'handoff', handoffId: recorded.id };
+            const left = recorded ? workLeftIn(recorded) : [];
+            const stands =
+              recorded !== null &&
+              handoffStands({
+                asked,
+                readOnly,
+                resultRecorded: readOnly && resultRecorded(),
+                leftNamed: left.length > 0,
+                uncommitted:
+                  !asked &&
+                  !readOnly &&
+                  left.length === 0 &&
+                  (await claimedChanges(getWorkstreamRow(db, id))).length > 0,
+              });
+            const unasked =
+              recorded && stands && !asked
+                ? nextUnaskedRun(ctl.unaskedHandoffs, recorded.gitHead)
+                : null;
+            if (unasked?.atLimit) {
+              st.unaskedRunEnded = unasked.run.count;
+              log.warn(
+                { workstreamId: id, handoffs: unasked.run.count },
+                'step ended after a run of handoffs nobody asked for',
+              );
+            }
+            if (recorded && stands && !unasked?.atLimit) {
+              ctl.unaskedHandoffs = unasked?.run ?? null;
+              st.outcome = { kind: 'handoff', handoffId: recorded.id };
               await handle.stop();
             } else if (st.handoffRequested && !st.firmSent) {
               st.firmSent = true;
@@ -2310,7 +2305,6 @@ export function createRunner(opts: RunnerOptions): Runner {
         ended.kind === 'crashed' ||
         ended.kind === 'refused' ||
         ended.kind === 'background_hung' ||
-        ended.kind === 'handoff_loop' ||
         (ended.kind === 'stopped' && ended.reason !== 'cancelled'));
     const outcome: Outcome =
       parkedAfterWait && st.parkedFor
@@ -2961,7 +2955,13 @@ export function createRunner(opts: RunnerOptions): Runner {
           return;
         }
         const outcome = await runSession(id, ctl);
-        if (outcome.kind !== 'handoff') ctl.unaskedHandoffs = null;
+        // Only a session that ran ends the run: a move or a refused model started none.
+        if (
+          outcome.kind !== 'handoff' &&
+          outcome.kind !== 'moved' &&
+          outcome.kind !== 'model_refused'
+        )
+          ctl.unaskedHandoffs = null;
         if (outcome.kind === 'handoff' || outcome.kind === 'moved') continue;
         if (outcome.kind === 'model_refused') {
           if (refuseModel(id, ctl, outcome) === 'retry') continue;

@@ -428,7 +428,7 @@ function parkedRefusal(a: Asking, heldBy: WorkstreamId): ClaimResult {
     inboxId: null,
     yielded: false,
     parked: true,
-    instruction: `Task "${taskTitleOf(a.state.db, heldBy)}" holds ${a.kind} ${a.name} and is paused until 10db's update has installed, so it will not free it soon. You did not get ${a.kind} ${a.name}. Edit nothing in it. If you can finish without it, carry on. Otherwise commit any changes you have, call write_handoff naming what is left, and end your turn: a fresh session of this step continues after the update and can ask again then.`,
+    instruction: `Task "${taskTitleOf(a.state.db, heldBy)}" holds ${a.kind} ${a.name} and is paused until 10db's update has installed, so it will not free it soon. You did not get ${a.kind} ${a.name}. Edit nothing in it. If you can finish without it, carry on. Otherwise commit any changes you have, call write_handoff naming what is left under progress.notDone, and end your turn: a fresh session of this step continues after the update and can ask again then.`,
   };
 }
 
