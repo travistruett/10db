@@ -167,6 +167,9 @@ describe('deriveAreaCandidates', () => {
       'frontend/app/login/page.tsx',
       ...files('frontend/app/dashboard', ['page.tsx', 'chart.tsx', 'settings/page.tsx']),
       'frontend/app/_components/nav.tsx',
+      'frontend/app/api/users/route.ts',
+      'frontend/app/(hooks)/stripe/route.ts',
+      `${product}/webhooks/route.ts`,
       'backend/pyproject.toml',
       'backend/main.py',
     ];
@@ -212,6 +215,24 @@ describe('deriveAreaCandidates', () => {
         'frontend/app/dashboard',
         'page',
         '/dashboard',
+      ],
+      [
+        'a folder of route handlers beside a route group is no page and has no role',
+        'frontend/app/api',
+        undefined,
+        undefined,
+      ],
+      [
+        'a route group of route handlers alone is no page and has no role',
+        'frontend/app/(hooks)',
+        undefined,
+        undefined,
+      ],
+      [
+        'a folder of route handlers among the screens is no page and has no role',
+        `${product}/webhooks`,
+        undefined,
+        undefined,
       ],
       [
         'a private folder beside a route group is shared',
