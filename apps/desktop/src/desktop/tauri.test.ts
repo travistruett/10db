@@ -73,7 +73,8 @@ describe('openAppPage', () => {
   function recordOpened(): string[] {
     const opened: string[] = [];
     mockIPC((cmd, args) => {
-      if (cmd === 'plugin:opener|open_url') opened.push((args as { url: string }).url);
+      // The mocked IPC payload of the shell's open_app_page command.
+      if (cmd === 'open_app_page') opened.push((args as { url: string }).url);
     });
     return opened;
   }

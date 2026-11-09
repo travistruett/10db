@@ -24,7 +24,7 @@ export function isTauri(): boolean {
  * Opens a web page in the default browser, for the desktop app, whose webview follows no
  * `target="_blank"` link. The capability allows only `https://github.com/*` and
  * `https://artificialanalysis.ai/*`, whose credit beside its scores links its site, besides the sign-in page
- * `openSignInPage` opens and the loopback `http` pages `openAppPage` opens.
+ * `openSignInPage` opens and the loopback pages `openAppPage` opens through the shell's own command.
  */
 export function openInBrowser(url: string): Promise<void> {
   return openUrl(url);
@@ -38,10 +38,10 @@ export class AppPageRefusedError extends Error {
 const LOOPBACK_HOSTNAMES: ReadonlySet<string> = new Set(['localhost', '127.0.0.1', '[::1]']);
 
 /**
- * The address to open for `route` on the project's app, or a refusal. The opener capability
- * is a static file and allows `http` for every loopback host, so this check is what holds a
- * window to one project's address: the app address must be a loopback `http(s)` origin, and the
- * address opened must have exactly that origin.
+ * The address to open for `route` on the project's app, or a refusal. The shell's
+ * `open_app_page` command refuses anything but a loopback address, so this check is what holds
+ * a window to one project's address: the app address must be a loopback `http(s)` origin, and
+ * the address opened must have exactly that origin.
  */
 function appPageUrl(appUrl: string, route: string): string {
   const app = URL.parse(appUrl);
@@ -64,7 +64,7 @@ function appPageUrl(appUrl: string, route: string): string {
  */
 export function openAppPage(appUrl: string, route: string): Promise<void> {
   try {
-    return openUrl(appPageUrl(appUrl, route));
+    return invoke('open_app_page', { url: appPageUrl(appUrl, route) });
   } catch (error) {
     return Promise.reject(error instanceof Error ? error : new Error(String(error)));
   }

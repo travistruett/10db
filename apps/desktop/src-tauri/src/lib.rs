@@ -1,10 +1,12 @@
 //! The 10db desktop shell: a menu-bar app that supervises the daemon and shows its UI.
 
+mod app_page;
 mod connection;
 mod supervisor;
 mod tray;
 
 use tauri::{Manager, RunEvent, State, WindowEvent};
+use tauri_plugin_opener::OpenerExt;
 
 use connection::DaemonConnection;
 use supervisor::Supervisor;
@@ -39,6 +41,18 @@ fn update_tray(
         .map_err(|error| error.to_string())
 }
 
+/// Opens one page of a project's app in the default browser; refuses any address that is not
+/// `http` or `https` on a loopback host. Async so the open runs off the main thread.
+#[tauri::command]
+async fn open_app_page(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    let page = app_page::loopback_page(&url).map_err(|refusal| format!("{url}: {refusal}"))?;
+    // The plugin's Rust API is not held to the scope its commands check, so the scope can stay
+    // free of `http`.
+    app.opener()
+        .open_url(page.as_str(), None::<&str>)
+        .map_err(|error| error.to_string())
+}
+
 fn external_daemon() -> bool {
     std::env::var("TENDB_EXTERNAL_DAEMON").is_ok_and(|value| value == "1")
 }
@@ -59,7 +73,11 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         // The native folder panel, for choosing a project's checkout.
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![daemon_connection, update_tray])
+        .invoke_handler(tauri::generate_handler![
+            daemon_connection,
+            update_tray,
+            open_app_page
+        ])
         .setup(|app| {
             let items = tray::build(app.handle())?;
             app.manage(items);
