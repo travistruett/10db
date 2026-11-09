@@ -1,12 +1,12 @@
-import { SystemCheckDto, type AgentCopy } from '@10db/contracts';
+import { AgentCopyState, SystemCheckDto, ToolName, type AgentCopy } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { fetchingAgents, systemCards, SystemCardKind } from './system-cards';
 
 const agent = (over: Partial<AgentCopy>): AgentCopy => ({
-  tool: 'codex',
+  tool: ToolName.Codex,
   label: 'Codex',
   pinned: '0.167.0',
-  state: 'ready',
+  state: AgentCopyState.Ready,
   problem: null,
   newerRelease: null,
   ...over,
@@ -43,19 +43,23 @@ describe('systemCards', () => {
       // 10db fetches its own copy, so a missing install of a pinned agent is never the builder's to fix.
       name: 'a missing install of an agent 10db pins',
       check: check({
-        tools: [{ name: 'claude', path: null, version: null, required: true, signedIn: null }],
-        agents: [agent({ tool: 'claude', label: 'Claude Code', pinned: '2.1.302' })],
+        tools: [
+          { name: ToolName.Claude, path: null, version: null, required: true, signedIn: null },
+        ],
+        agents: [agent({ tool: ToolName.Claude, label: 'Claude Code', pinned: '2.1.302' })],
       }),
       kinds: [],
     },
     {
       name: 'a refused copy',
-      check: check({ agents: [agent({ state: 'refused', problem: 'changed files' })] }),
+      check: check({
+        agents: [agent({ state: AgentCopyState.Refused, problem: 'changed files' })],
+      }),
       kinds: [SystemCardKind.RefusedCopy],
     },
     {
       name: 'a copy being downloaded',
-      check: check({ agents: [agent({ state: 'fetching' })] }),
+      check: check({ agents: [agent({ state: AgentCopyState.Fetching })] }),
       kinds: [],
     },
     {
@@ -106,7 +110,11 @@ describe('systemCards', () => {
 
 describe('fetchingAgents', () => {
   it('lists only the copies being downloaded', () => {
-    const fetching = agent({ tool: 'claude', label: 'Claude Code', state: 'fetching' });
+    const fetching = agent({
+      tool: ToolName.Claude,
+      label: 'Claude Code',
+      state: AgentCopyState.Fetching,
+    });
     expect(fetchingAgents(check({ agents: [fetching, agent({})] }))).toEqual([fetching]);
     expect(fetchingAgents(undefined)).toEqual([]);
   });

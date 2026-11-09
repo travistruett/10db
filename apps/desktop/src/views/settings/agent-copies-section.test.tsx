@@ -1,14 +1,14 @@
-import { SystemCheckDto, type AgentCopy } from '@10db/contracts';
+import { AgentCopyState, SystemCheckDto, ToolName, type AgentCopy } from '@10db/contracts';
 import { screen, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 
 const claude: AgentCopy = {
-  tool: 'claude',
+  tool: ToolName.Claude,
   label: 'Claude Code',
   pinned: '2.1.302',
-  state: 'ready',
+  state: AgentCopyState.Ready,
   problem: null,
   newerRelease: null,
 };
@@ -52,7 +52,7 @@ describe('Settings › Updates agents', () => {
   it.each([
     {
       name: 'Codex',
-      agent: { ...claude, tool: 'codex' as const, label: 'Codex', pinned: '0.167.0' },
+      agent: { ...claude, tool: ToolName.Codex, label: 'Codex', pinned: '0.167.0' },
       warnings: { codex: 'Codex 0.166.0 is not 0.167.0' },
       warning: /Codex 0\.166\.0 is not 0\.167\.0/,
     },

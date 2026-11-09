@@ -1,4 +1,4 @@
-import { SystemCheckDto, type AgentCopy } from '@10db/contracts';
+import { AgentCopyState, SystemCheckDto, ToolName, type AgentCopy } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -6,10 +6,10 @@ import { queryKeys } from '../../daemon/queries';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 
 const codex = (over: Partial<AgentCopy>): AgentCopy => ({
-  tool: 'codex',
+  tool: ToolName.Codex,
   label: 'Codex',
   pinned: '0.167.0',
-  state: 'ready',
+  state: AgentCopyState.Ready,
   problem: null,
   newerRelease: null,
   ...over,
@@ -43,8 +43,11 @@ describe('10db cards in the Inbox', () => {
         agents: [
           codex(
             rechecked
-              ? { state: 'fetching' }
-              : { state: 'refused', problem: 'Codex 0.167.0 was refused: changed files' },
+              ? { state: AgentCopyState.Fetching }
+              : {
+                  state: AgentCopyState.Refused,
+                  problem: 'Codex 0.167.0 was refused: changed files',
+                },
           ),
         ],
       };

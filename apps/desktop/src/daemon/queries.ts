@@ -9,6 +9,7 @@ import {
   ProjectDto,
   ProjectViewDto,
   RunNextResult,
+  AgentCopyState,
   SystemCheckDto,
   TaskDto,
   TaskStartResult,
@@ -242,7 +243,7 @@ export function useSystemCheck() {
     queryFn: async () => readJson(await client.system.$get({ query: {} }), SystemCheckDto),
     staleTime: Infinity,
     refetchInterval: (query) =>
-      query.state.data?.agents?.some((agent) => agent.state === 'fetching')
+      query.state.data?.agents?.some((agent) => agent.state === AgentCopyState.Fetching)
         ? AGENT_FETCHING_POLL_MS
         : AGENT_RELEASE_POLL_MS,
   });
