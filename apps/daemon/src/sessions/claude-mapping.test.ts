@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { FAKE_SRT, SANDBOXED } from '../../test/fixtures';
 import { sandboxedMcpServer } from '../../test/sandboxed-mcp';
 import {
+  interruptReceipt,
   mapSdkMessage,
   resetsAtToDate,
   SUMMARY_CHARS,
@@ -25,6 +26,8 @@ import {
 import type { SessionMcpServer } from './types';
 
 const ctx = { pid: 4242 };
+const TOOK_FIRST = '01a1b2c3-0000-7000-8000-000000000001';
+const TOOK_SECOND = '01a1b2c3-0000-7000-8000-000000000002';
 
 describe('mapSdkMessage', () => {
   it('maps init to started with the provider session id and pid', () => {
@@ -44,6 +47,24 @@ describe('mapSdkMessage', () => {
       { type: 'activity', kind: 'text', summary: 'Reading the task.' },
       { type: 'activity', kind: 'tool', summary: 'Bash pnpm test' },
       { type: 'activity', kind: 'tool', summary: 'Edit src/a.ts' },
+    ]);
+  });
+
+  it.each<[string, { user_message_uuid?: string; user_message_uuids?: string[] }, string[] | null]>(
+    [
+      [
+        'every uuid the turn took so far',
+        { user_message_uuid: TOOK_SECOND, user_message_uuids: [TOOK_FIRST, TOOK_SECOND] },
+        [TOOK_FIRST, TOOK_SECOND],
+      ],
+      ['the one uuid an older producer stamps', { user_message_uuid: TOOK_FIRST }, [TOOK_FIRST]],
+      ['nothing for a frame with no stamp', {}, null],
+    ],
+  )('maps an assistant message to the uuids its turn consumed: %s', (_name, stamp, uuids) => {
+    const events = mapSdkMessage({ ...assistantMessage([textBlock('On it.')]), ...stamp }, ctx);
+    expect(events).toEqual([
+      { type: 'activity', kind: 'text', summary: 'On it.' },
+      ...(uuids === null ? [] : [{ type: 'consumed', uuids }]),
     ]);
   });
 
@@ -199,6 +220,16 @@ describe('mapSdkMessage', () => {
   });
 });
 
+describe('interruptReceipt', () => {
+  it.each<[string, { still_queued: string[] } | undefined, ReturnType<typeof interruptReceipt>]>([
+    ['the uuids still queued', { still_queued: [TOOK_FIRST] }, { stillQueued: [TOOK_FIRST] }],
+    ['an empty queue', { still_queued: [] }, { stillQueued: [] }],
+    ['no receipt from a Claude Code that does not advertise one', undefined, null],
+  ])('reports %s', (_name, answer, receipt) => {
+    expect(interruptReceipt(answer)).toEqual(receipt);
+  });
+});
+
 describe('resetsAtToDate', () => {
   it.each([
     [undefined, null],
@@ -290,6 +321,14 @@ describe('permission and hook translation', () => {
       parent_tool_use_id: null,
     });
     expect(userMessage('nudge', 'next')).toMatchObject({ priority: 'next' });
+    expect(userMessage('nudge', 'next')).not.toHaveProperty('uuid');
+  });
+
+  it("carries a builder message's uuid as the client uuid a turn that takes it stamps", () => {
+    expect(userMessage('Make it blue', 'next', [], TOOK_FIRST)).toMatchObject({
+      uuid: TOOK_FIRST,
+      priority: 'next',
+    });
   });
 
   it('sends a dropped image as an image content block after the text', () => {

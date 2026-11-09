@@ -51,6 +51,13 @@ export interface SessionSpec {
   readonly sequence: number;
   readonly cwd: string;
   readonly prompt: string;
+  /**
+   * The client uuid the prompt carries, when it holds a builder message: the turn that takes it lists
+   * it in `user_message_uuids`, the evidence it was consumed (Workbench spec §6.3).
+   */
+  readonly promptUuid?: string;
+  /** Pictures that go with the prompt as image blocks. */
+  readonly images?: readonly ShapeImage[];
   readonly model: string;
   readonly effort: Effort;
   readonly resumeProviderSessionId: string | null;
@@ -219,6 +226,14 @@ export type SessionEvent =
   | { readonly type: 'compacted'; readonly trigger: 'manual' | 'auto' }
   | {
       /**
+       * The client uuids of the user messages the running turn has taken in so far, as an assistant
+       * message stamps them: the evidence a message was consumed, not only received.
+       */
+      readonly type: 'consumed';
+      readonly uuids: readonly string[];
+    }
+  | {
+      /**
        * The commands the session started in the background that are still running, replacing the
        * last report (an empty list: none is). A watcher the session did not start is left out.
        */
@@ -237,28 +252,35 @@ export type SessionEvent =
       readonly refusalBasis?: ModelMarkBasis;
     };
 
+/**
+ * What an interrupt reports: the uuids of the messages still queued, which will run unless cancelled,
+ * or null when the agent gives no receipt (a Claude Code without `interrupt_receipt_v1`, or Codex).
+ */
+export type InterruptReceipt = { readonly stillQueued: readonly string[] } | null;
+
 export interface SessionHandle {
   /** Ends with exactly one `ended` event. */
   readonly events: AsyncIterable<SessionEvent>;
-  /** Queues a user message; the agent sees it at its next opportunity. */
-  send(text: string): void;
+  /**
+   * Queues a user message; the agent sees it at its next opportunity. `images` go with it as content
+   * blocks, and `uuid` is the client uuid a turn that takes it lists in `consumed`.
+   */
+  send(text: string, images?: readonly ShapeImage[], uuid?: string): void;
+  /** Interrupts the turn that is running; the session stays open for the next message. */
+  interrupt(): Promise<InterruptReceipt>;
   /** Ends the session cleanly; resolves once `ended` has been emitted. */
   stop(): Promise<void>;
 }
 
-/** A dropped image as Claude sees it: an image content block, base64 (Shape spec §5.4). */
+/** A picture as Claude sees it: an image content block, base64 (Shape spec §5.4). */
 export interface ShapeImage {
   readonly mediaType: 'image/png' | 'image/jpeg' | 'image/webp';
   /** Base64 of the file's bytes. */
   readonly data: string;
 }
 
-export interface ShapeSessionHandle extends SessionHandle {
-  /** Queues a message, with the images dropped since the last one as content blocks. */
-  send(text: string, images?: readonly ShapeImage[]): void;
-  /** Interrupts the turn that is running; the session stays open for the next message. */
-  interrupt(): Promise<void>;
-}
+/** A Plan conversation's session, which takes the same messages and interrupts a lane's does. */
+export type ShapeSessionHandle = SessionHandle;
 
 export interface AccountProbeSpec {
   /** The account's kind, which picks the agent that reports who it is. */

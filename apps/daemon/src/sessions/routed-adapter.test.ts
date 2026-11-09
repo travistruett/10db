@@ -50,6 +50,7 @@ function recording(name: string): SessionAdapter & { readonly calls: string[] } 
       return {
         events: ended(),
         send: () => undefined,
+        interrupt: () => Promise.resolve(null),
         stop: () => Promise.resolve(),
       } satisfies SessionHandle;
     },
@@ -58,7 +59,7 @@ function recording(name: string): SessionAdapter & { readonly calls: string[] } 
       return {
         events: ended(),
         send: () => undefined,
-        interrupt: () => Promise.resolve(),
+        interrupt: () => Promise.resolve(null),
         stop: () => Promise.resolve(),
       } satisfies ShapeSessionHandle;
     },

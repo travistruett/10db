@@ -729,9 +729,21 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
 
   return {
     events,
-    send: (text) => {
+    // A pass is Claude only (Workbench spec W19): Codex takes text, and has no client uuid to stamp.
+    send: (text, images = []) => {
+      if (images.length > 0)
+        log.warn(
+          { images: images.length },
+          'codex takes no pictures; the message went without them',
+        );
       // One at a time, so messages reach Codex in the order they were sent.
       sends = sends.then(() => deliver(text));
+    },
+    // Codex answers an interrupt with no receipt of what is still queued.
+    interrupt: async () => {
+      const turnId = state.turnId;
+      if (!done && threadId !== null && turnId !== null) await interruptTurn(threadId, turnId);
+      return null;
     },
     stop: async () => {
       if (done) return;

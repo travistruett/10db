@@ -156,6 +156,35 @@
               "properties": {
                 "kind": {
                   "type": "string",
+                  "const": "feedback"
+                },
+                "messageId": {
+                  "type": "string",
+                  "pattern": "^tmg_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "providerSessionId": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "kind",
+                "messageId",
+                "providerSessionId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
                   "const": "uncommitted"
                 },
                 "paths": {

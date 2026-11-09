@@ -17,6 +17,7 @@ export { checkAccount, loginIdentity, type SeenAccount, type SeenModel } from '.
 export { AccountLoginError, AccountProbeError, CompletionError, SessionEndReason } from './types';
 export type {
   AccountLogin,
+  InterruptReceipt,
   SessionAdapter,
   SessionEvent,
   ShapeAgentDefinition,

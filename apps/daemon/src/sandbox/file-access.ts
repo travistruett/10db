@@ -20,6 +20,11 @@ export interface FileAccessContext {
   readonly readList: readonly string[];
   /** The system documentation this context reads without asking: `SYSTEM_DOC_ROOTS` for a lane. */
   readonly systemDocRoots?: readonly string[];
+  /**
+   * The pictures pasted into the lane's task's thread, which the data directory holds: a file in it
+   * is read, though the directory sits in a protected path. A search of it is not.
+   */
+  readonly filesDir?: string;
   /** Claude Code's config directory, where it keeps each session's tool results. */
   readonly configDir: string;
   /** The id Claude Code knows the session by; null until a start or resume names it. */
@@ -161,6 +166,11 @@ function spellings(root: string): string[] {
   return real === null || real === root ? [root] : [root, real];
 }
 
+/** True only for a file inside the task's own pictures directory, on a real path. */
+function isUnderOwnFiles(realPath: string, filesDir: string): boolean {
+  return spellings(filesDir).some((dir) => realPath !== dir && isEqualOrUnder(realPath, dir));
+}
+
 /**
  * True only for a file under this session's own `tool-results` directory in Claude Code's config:
  * `<configDir>/projects/<slug>/<providerSessionId>/tool-results/<file>`.
@@ -272,6 +282,7 @@ const READ_STRICTNESS: Record<ReadAccess, number> = {
 
 function judgeRead(real: string, ctx: FileAccessContext, tree: boolean): ReadAccess {
   if (isOwnToolResult(real, ctx)) return 'allowed';
+  if (!tree && ctx.filesDir !== undefined && isUnderOwnFiles(real, ctx.filesDir)) return 'allowed';
   if ((ctx.secretFiles ?? []).some((file) => pathsEqual(real, file))) return 'protected';
   const ownTemp = spellings(ctx.sandboxTemp.own).some((dir) => isEqualOrUnder(real, dir));
   const roots = [...ctx.protectedReads, ...(ownTemp ? [] : ctx.sandboxTemp.roots)].flatMap(

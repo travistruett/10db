@@ -6,11 +6,13 @@ import type {
   SDKMessage,
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
+import type { UUID } from 'node:crypto';
 import { MAX_STEP_SUMMARY, ModelMarkBasis } from '@10db/contracts';
 import type { GuardVerdict } from '../guard';
 import { SandboxedMcpServer } from '../sandbox';
 import { modelRefusalBasis, MODEL_NOT_FOUND_ERROR } from './account-check';
 import type {
+  InterruptReceipt,
   SessionEvent,
   SessionMcpServer,
   ShapeImage,
@@ -100,6 +102,12 @@ export function mapSdkMessage(
         });
       }
     }
+    // A turn stamps the client uuids of every message it has taken in so far: the evidence each was
+    // consumed. An older producer stamps only the one it is answering.
+    const taken =
+      msg.user_message_uuids ??
+      (msg.user_message_uuid === undefined ? [] : [msg.user_message_uuid]);
+    if (taken.length > 0) events.push({ type: 'consumed', uuids: taken });
     if (msg.error === 'rate_limit')
       events.push({
         type: 'rate_limit',
@@ -157,6 +165,13 @@ export function mapSdkMessage(
   return [];
 }
 
+/** What Claude Code's interrupt answered, as a session reports it: null when it gave no receipt. */
+export function interruptReceipt(
+  answer: { readonly still_queued?: readonly string[] } | undefined,
+): InterruptReceipt {
+  return answer?.still_queued === undefined ? null : { stillQueued: [...answer.still_queued] };
+}
+
 export function toPermissionResult(
   decision: ToolDecision,
   input: Record<string, unknown>,
@@ -206,10 +221,19 @@ export function toShapeHookOutput(verdict: ShapeVerdict): HookJSONOutput {
   };
 }
 
+const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const isUuid = (text: string): text is UUID => UUID_TEXT.test(text);
+
+/**
+ * A user message for the session. `uuid` is the client uuid a turn that takes the message stamps in
+ * `user_message_uuids`; text that is no UUID is left off, as Claude Code would refuse it.
+ */
 export function userMessage(
   text: string,
   priority?: 'now' | 'next' | 'later',
   images: readonly ShapeImage[] = [],
+  uuid?: string,
 ): SDKUserMessage {
   return {
     type: 'user',
@@ -232,6 +256,7 @@ export function userMessage(
     },
     parent_tool_use_id: null,
     ...(priority ? { priority } : {}),
+    ...(uuid !== undefined && isUuid(uuid) ? { uuid } : {}),
   };
 }
 

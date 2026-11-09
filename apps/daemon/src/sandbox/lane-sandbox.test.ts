@@ -915,6 +915,36 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     }
   });
 
+  it("lets the file tools read the pictures pasted into the session's own task, and nothing else of the data dir, while its commands read none", async () => {
+    const own = writeIn(dataDir, join('tasks', 'tsk_own', 'files', 'a.png'));
+    const other = writeIn(dataDir, join('tasks', 'tsk_other', 'files', 'a.png'));
+    const db = writeIn(dataDir, 'db.sqlite');
+    const session = await sandbox().forSession(input({ taskFiles: dirname(own) }));
+    try {
+      expect(readAccess(own, session.fileAccess).access).toBe('allowed');
+      expect(readAccess(other, session.fileAccess).access).toBe('protected');
+      expect(readAccess(db, session.fileAccess).access).toBe('protected');
+      expect(
+        readAccess(
+          join(dirname(own), '..', '..', 'tsk_other', 'files', 'a.png'),
+          session.fileAccess,
+        ).access,
+      ).toBe('protected');
+      expect(readAccess(dirname(own), session.fileAccess, true).access).toBe('protected');
+      // Claude Code's own deny would win over every allow, so the data dir leaves its rules; the
+      // guard and the file tools' judge hold it. The commands' profile still closes it whole.
+      expect(
+        session.spec.disallowedTools.filter((rule) => rule.startsWith(`Read(/${dataDir}`)),
+      ).toEqual([]);
+      expect(session.spec.settings.filesystem.denyRead).toContain(dataDir);
+      expect(
+        session.spec.settings.filesystem.allowRead.filter((path) => isEqualOrUnder(path, dataDir)),
+      ).toEqual([]);
+    } finally {
+      session.dispose();
+    }
+  });
+
   it('gives the file tools the worktrees folder, so a path outside the lane’s copy is refused', async () => {
     const worktreeRoot = join(root, 'worktrees');
     const session = await createLaneSandbox({

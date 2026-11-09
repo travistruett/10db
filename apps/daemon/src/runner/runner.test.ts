@@ -5230,6 +5230,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     vi.spyOn(engine.adapter, 'start').mockImplementation(() => ({
       events: refused(),
       send: () => undefined,
+      interrupt: () => Promise.resolve(null),
       stop: () => Promise.resolve(),
     }));
     const { workstream } = engine.addTask('Alpha');

@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { isAbsolute, join, sep } from 'node:path';
 import { ClaimKind, type AreaDef, type Delivery, type HazardDef } from '@10db/contracts';
 import { z } from 'zod';
-import { isOwnToolResult, pathRefusal, type ProtectedPath } from './account-rules';
+import { isOwnFile, isOwnToolResult, pathRefusal, type ProtectedPath } from './account-rules';
 import { commandForms, runCommandStarts, startsWithWords } from './command-forms';
 import { ghVerdict } from './gh-rules';
 import { executableTails, FEEDERS } from './wrapped-commands';
@@ -51,9 +51,14 @@ export interface GuardInput {
   /**
    * The session's own config directory and Claude Code session id. Claude Code saves a large tool
    * output under `<configDir>/projects/*\/<id>/tool-results/` and points the model at it, so Read and
-   * Grep may open that directory.
+   * Grep may open that directory. A lane's `filesDir` holds the pictures pasted into its task's
+   * thread, which Read may open (Workbench spec §13).
    */
-  readonly ownSession?: { readonly configDir: string; readonly providerSessionId: string | null };
+  readonly ownSession?: {
+    readonly configDir: string;
+    readonly providerSessionId: string | null;
+    readonly filesDir?: string;
+  };
   /** Present for a sandboxed lane: refuses reads and writes by the real path they name. */
   readonly fileAccess?: FileAccessJudge;
 }
@@ -666,9 +671,10 @@ export function judgeToolUse(input: GuardInput): GuardVerdict {
     const value = stringField(input.toolInput, field);
     if (value === null) continue;
     const own =
-      (input.toolName === 'Read' || input.toolName === 'Grep') &&
       input.ownSession !== undefined &&
-      isOwnToolResult(input.ownSession, value, from);
+      (((input.toolName === 'Read' || input.toolName === 'Grep') &&
+        isOwnToolResult(input.ownSession, value, from)) ||
+        (input.toolName === 'Read' && isOwnFile(input.ownSession.filesDir, value, from)));
     if (own) continue;
     const refusal = pathRefusal(value, field === 'pattern' ? base : from, input.protectedPaths, {
       contains: searches && (field === 'path' || field === 'pattern'),

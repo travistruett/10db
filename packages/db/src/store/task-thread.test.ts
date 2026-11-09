@@ -10,9 +10,15 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   createTestStore,
   getTaskFile,
+  getTaskMessageRow,
   insertBuilderMessage,
+  insertSystemNotice,
   insertTask,
   listTaskThread,
+  listUndeliveredTaskMessages,
+  markTaskFilesInline,
+  markTaskMessagesDelivered,
+  markTaskMessagesPushed,
   seedProject,
   type Store,
 } from './index';
@@ -111,5 +117,74 @@ describe('a task thread', () => {
     expect(store.db.$client.prepare('select count(*) as n from task_files').get()).toEqual({
       n: 0,
     });
+  });
+
+  it('marks a message pushed, then delivered once, and lists those pushed and not delivered', () => {
+    const add = (id: TaskId, body: string, files = [] as ReturnType<typeof picture>[]) =>
+      store.write((ctx) => insertBuilderMessage(ctx, id, { body, files })).value;
+    const first = add(taskId, 'First', [picture('a.png', 'a')]);
+    const second = add(taskId, 'Second');
+    const unpushed = add(taskId, 'Not handed over yet');
+    const elsewhere = add(otherTaskId, 'Another task');
+    store.write((ctx) => {
+      markTaskMessagesPushed(ctx, [first.id, second.id, elsewhere.id]);
+    });
+    expect(listUndeliveredTaskMessages(store.db, taskId).map((m) => m.body)).toEqual([
+      'First',
+      'Second',
+    ]);
+    expect(
+      listUndeliveredTaskMessages(store.db, taskId)[0]?.files.map((f) => f.storedPath),
+    ).toEqual([picture('a.png', 'a').storedPath]);
+
+    // Another task's message is not this task's to mark, and a mark is made once.
+    const marked = store.write((ctx) =>
+      markTaskMessagesDelivered(ctx, taskId, [second.id, elsewhere.id]),
+    ).value;
+    expect(marked).toEqual([second.id]);
+    const deliveredAt = getTaskMessageRow(store.db, second.id).deliveredAt;
+    expect(deliveredAt).not.toBeNull();
+    expect(store.write((ctx) => markTaskMessagesDelivered(ctx, taskId, [second.id])).value).toEqual(
+      [],
+    );
+    expect(getTaskMessageRow(store.db, second.id).deliveredAt).toBe(deliveredAt);
+    expect(getTaskMessageRow(store.db, elsewhere.id).deliveredAt).toBeNull();
+    expect(listUndeliveredTaskMessages(store.db, taskId).map((m) => m.id)).toEqual([first.id]);
+    expect(getTaskMessageRow(store.db, unpushed.id).pushedAt).toBeNull();
+    expect(() => getTaskMessageRow(store.db, mintId('TaskMessage'))).toThrow(NotFoundError);
+  });
+
+  it("marks the pictures a session holds as blocks, and a fresh session's start clears the rest", () => {
+    const message = store.write((ctx) =>
+      insertBuilderMessage(ctx, taskId, {
+        body: '',
+        files: [picture('a.png', 'a'), picture('b.png', 'b')],
+      }),
+    ).value;
+    const [a, b] = message.files.map((f) => f.id);
+    if (a === undefined || b === undefined) throw new Error('no files');
+    const inline = () => listTaskThread(store.db, taskId)[0]?.files.map((f) => f.inlineSent);
+    store.write((ctx) => {
+      markTaskFilesInline(ctx, taskId, [a], false);
+    });
+    expect(inline()).toEqual([true, false]);
+    store.write((ctx) => {
+      markTaskFilesInline(ctx, taskId, [b], true);
+    });
+    expect(inline()).toEqual([false, true]);
+  });
+
+  it('writes a notice of its own to the thread, from the system', () => {
+    const notice = store.write((ctx) => insertSystemNotice(ctx, taskId, 'Started a fresh session'));
+    expect(listTaskThread(store.db, taskId)).toEqual([
+      expect.objectContaining({
+        id: notice.value.id,
+        author: TaskMessageAuthor.System,
+        kind: TaskMessageKind.Notice,
+        body: 'Started a fresh session',
+        files: [],
+      }),
+    ]);
+    expect(notice.events.map((e) => e.type)).toEqual([EventType.TaskMessageAdded]);
   });
 });

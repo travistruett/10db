@@ -23,7 +23,14 @@ const login = tempDir('login claude');
 const CONFIG = join(data.path, 'accounts', 'acc_1', 'claude');
 const OWN_RESULTS = join(CONFIG, 'projects', '-repo', 'sess_own', 'tool-results');
 const OTHER_RESULTS = join(CONFIG, 'projects', '-repo', 'sess_other', 'tool-results');
+const OWN_FILES = join(data.path, 'tasks', 'tsk_own', 'files');
+const OTHER_FILES = join(data.path, 'tasks', 'tsk_other', 'files');
 beforeAll(() => {
+  mkdirSync(OWN_FILES, { recursive: true });
+  mkdirSync(OTHER_FILES, { recursive: true });
+  writeFileSync(join(OWN_FILES, 'shot.png'), 'png');
+  writeFileSync(join(OTHER_FILES, 'shot.png'), 'png');
+  symlinkSync(join(CONFIG, '.claude.json'), join(OWN_FILES, 'escape.png'));
   mkdirSync(OWN_RESULTS, { recursive: true });
   mkdirSync(OTHER_RESULTS, { recursive: true });
   writeFileSync(join(OWN_RESULTS, 'out.txt'), 'big');
@@ -77,7 +84,7 @@ function judge(
     claims,
     readOnly,
     protectedPaths: guarded(),
-    ownSession: { configDir: CONFIG, providerSessionId: 'sess_own' },
+    ownSession: { configDir: CONFIG, providerSessionId: 'sess_own', filesDir: OWN_FILES },
   });
 }
 const bash = (command: string, claims?: Claims) => judge('Bash', { command }, claims);
@@ -2327,6 +2334,26 @@ describe('account isolation', () => {
       tool: 'Glob',
       input: () => ({ pattern: '../link-data/**', path: 'src' }),
     },
+    {
+      name: "Read of another task's pasted picture",
+      tool: 'Read',
+      input: () => ({ file_path: join(OTHER_FILES, 'shot.png') }),
+    },
+    {
+      name: "Read of another task's picture through .. from the task's own",
+      tool: 'Read',
+      input: () => ({ file_path: join(OWN_FILES, '..', '..', 'tsk_other', 'files', 'shot.png') }),
+    },
+    {
+      name: "Read of the task's pictures through a link out of them",
+      tool: 'Read',
+      input: () => ({ file_path: join(OWN_FILES, 'escape.png') }),
+    },
+    {
+      name: "Grep in the task's own pictures, which only Read opens",
+      tool: 'Grep',
+      input: () => ({ pattern: 'png', path: OWN_FILES }),
+    },
   ])('denies $name on a protected path in both step kinds', ({ tool, input }) => {
     for (const readOnly of [false, true]) {
       const verdict = judge(tool, input(), [{ kind: 'area', name: 'api' }], readOnly);
@@ -2345,6 +2372,11 @@ describe('account isolation', () => {
       name: "Grep in the session's own saved output",
       tool: 'Grep',
       input: () => ({ pattern: 'big', path: OWN_RESULTS }),
+    },
+    {
+      name: "Read of a picture pasted into the session's own task",
+      tool: 'Read',
+      input: () => ({ file_path: join(OWN_FILES, 'shot.png') }),
     },
     {
       name: 'Grep with a regex that looks like a path',

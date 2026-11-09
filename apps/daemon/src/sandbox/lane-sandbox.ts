@@ -136,6 +136,11 @@ export interface LaneSessionInput {
    * It never gets the Docker socket, whatever the project's switch says.
    */
   readonly readOnly?: boolean;
+  /**
+   * The pictures pasted into the lane's task's thread, which its file tools may read though the data
+   * directory holds them (Workbench spec §13). Its commands read none. Plan has no task, so none.
+   */
+  readonly taskFiles?: string;
 }
 
 export interface LaneSandbox {
@@ -348,8 +353,11 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
         });
         // The config dir and its ancestors stay readable to the file tools, which open the
         // session's own saved tool results there; the guard, the broker and the kernel hold them.
+        // So do the task's pictures and theirs, which the file tools open to read them.
         const deniedToFileTools = protectedList.filter(
-          (path) => !isEqualOrUnder(input.configDir, path),
+          (path) =>
+            !isEqualOrUnder(input.configDir, path) &&
+            !(input.taskFiles !== undefined && isEqualOrUnder(input.taskFiles, path)),
         );
         mcp = sandboxMcpServers({
           access,
@@ -398,6 +406,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           secretFiles,
           readList,
           systemDocRoots: SYSTEM_DOC_ROOTS,
+          ...(input.taskFiles === undefined ? {} : { filesDir: input.taskFiles }),
           configDir: input.configDir,
           // Every root lanes write and the files root: another lane's temp dir, in either lanes'
           // root, and a file that holds a sandbox are never a lane's to read or write.

@@ -105,6 +105,18 @@ export function mintId<K extends IdKind>(kind: K): IdOf<K> {
   return ID_SCHEMAS[kind].parse(`${ID_PREFIX[kind]}_${uuidv7()}`) as IdOf<K>;
 }
 
+/** The UUID after an ID's prefix: what a row carries as its own id to a system that takes a UUID. */
+export function idUuid(id: IdOf<IdKind>): string {
+  return id.slice(id.indexOf('_') + 1);
+}
+
+/** The ID of `kind` whose UUID is `uuid`, as `idUuid` gave it; null for text that is not one. */
+export function idOfUuid<K extends IdKind>(kind: K, uuid: string): IdOf<K> | null {
+  const parsed = ID_SCHEMAS[kind].safeParse(`${ID_PREFIX[kind]}_${uuid}`);
+  // The schema for K has just accepted the text, so the cast is the boundary, as in `mintId`.
+  return parsed.success ? (parsed.data as IdOf<K>) : null;
+}
+
 export const ProjectId = ID_SCHEMAS.Project;
 export type ProjectId = IdOf<'Project'>;
 export const TaskId = ID_SCHEMAS.Task;

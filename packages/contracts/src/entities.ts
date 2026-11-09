@@ -18,6 +18,7 @@ import {
   ProjectId,
   SessionId,
   TaskId,
+  TaskMessageId,
   WorkstreamId,
 } from './ids';
 import {
@@ -833,6 +834,15 @@ export const NextAction = z.discriminatedUnion('kind', [
     providerSessionId: z.string().min(1).nullable(),
   }),
   z.object({ kind: z.literal('fix'), evidenceId: EvidenceId }),
+  /**
+   * A builder message from the task's thread to act on: the provider session is resumed and handed
+   * it, or, with none, a fresh session starts from the thread's digest and then the message.
+   */
+  z.object({
+    kind: z.literal('feedback'),
+    messageId: TaskMessageId,
+    providerSessionId: z.string().min(1).nullable(),
+  }),
   /** The step ended with these changes in its claims uncommitted; the next session commits them. */
   z.object({ kind: z.literal('uncommitted'), paths: z.array(z.string().min(1)).min(1) }),
   /**

@@ -25,6 +25,7 @@ import {
   type AccountLoginOutcome,
   type AccountProbeSpec,
   type CompletionSpec,
+  type InterruptReceipt,
   type SessionAdapter,
   type SessionEvent,
   type SessionHandle,
@@ -96,6 +97,11 @@ export const FakeStep = z.discriminatedUnion('do', [
   z.object({ do: z.literal('tool'), toolName: z.string(), input: z.record(z.string(), Json) }),
   z.object({ do: z.literal('mcp'), tool: z.string(), args: z.record(z.string(), Json) }),
   z.object({ do: z.literal('await_message'), contains: z.string() }),
+  /**
+   * A turn takes in every message the session holds that it has not taken yet, the prompt's first:
+   * their client uuids come as `consumed`, as an assistant message stamps `user_message_uuids`.
+   */
+  z.object({ do: z.literal('consume') }),
   z.object({
     do: z.literal('turn_complete'),
     result: z.enum(['success', 'max_turns', 'error']).optional(),
@@ -152,16 +158,29 @@ export interface FakeObservation {
 /** Stands in for Claude Code at the adapter boundary; scripts drive every event. */
 export class FakeAdapter implements SessionAdapter {
   readonly observations: FakeObservation[] = [];
-  /** Every message the runner sent a session, in order. */
-  readonly sent: { sessionId: SessionId; text: string }[] = [];
+  /** Every message the runner sent a session, in order, with how many images and the uuid it carried. */
+  readonly sent: { sessionId: SessionId; text: string; images: number; uuid: string | null }[] = [];
   readonly prompts: {
     sessionId: SessionId;
     sequence: number;
     title: string;
     prompt: string;
+    /** The prompt's client uuid, and how many images went with it. */
+    promptUuid: string | null;
+    images: number;
     resume: string | null;
     accountId: AccountId;
   }[] = [];
+  /** Every lane session's interrupt, in order, with what it answered. */
+  readonly interrupts: { sessionId: SessionId; receipt: InterruptReceipt }[] = [];
+  /**
+   * What a lane session's interrupt answers, from the uuids of the messages no turn has taken yet: by
+   * default all of them as still queued, as a Claude Code that advertises `interrupt_receipt_v1` does;
+   * null stands for one that answers nothing.
+   */
+  interruptReceipt: (untaken: readonly string[]) => InterruptReceipt = (untaken) => ({
+    stillQueued: [...untaken],
+  });
 
   /** What a session reports for its account, over what it expects; tests set it to stage a mismatch. */
   seen: (spec: SessionSpec) => Partial<SeenAccount> & { readonly model?: string } = () => ({});
@@ -277,7 +296,12 @@ export class FakeAdapter implements SessionAdapter {
         refusal,
       });
       refused.end();
-      return { events: refused, send: () => undefined, stop: () => Promise.resolve() };
+      return {
+        events: refused,
+        send: () => undefined,
+        interrupt: () => Promise.resolve(null),
+        stop: () => Promise.resolve(),
+      };
     }
     const title = Object.keys(this.book).find((t) => spec.prompt.includes(`Task: ${t}\n`)) ?? '';
     const steps = this.book[title]?.[spec.sequence - 1];
@@ -286,6 +310,8 @@ export class FakeAdapter implements SessionAdapter {
       sequence: spec.sequence,
       title,
       prompt: spec.prompt,
+      promptUuid: spec.promptUuid ?? null,
+      images: spec.images?.length ?? 0,
       resume: spec.resumeProviderSessionId,
       accountId: spec.account.accountId,
     });
@@ -293,6 +319,8 @@ export class FakeAdapter implements SessionAdapter {
     const channel = createChannel<SessionEvent>();
     const abort = new AbortController();
     const messages: string[] = [];
+    /** The client uuids of the messages the session holds that no turn has taken yet, the prompt's first. */
+    const untaken: string[] = spec.promptUuid === undefined ? [] : [spec.promptUuid];
     let messageWaiter: (() => void) | null = null;
     let ended = false;
     let mcp: Client | null = null;
@@ -473,6 +501,11 @@ export class FakeAdapter implements SessionAdapter {
             if (woke === 'stopped') return 'halt';
           }
         }
+        case 'consume': {
+          const uuids = untaken.splice(0);
+          if (uuids.length > 0) channel.push({ type: 'consumed', uuids });
+          return 'continue';
+        }
         case 'turn_complete':
           channel.push({
             type: 'turn_complete',
@@ -578,13 +611,23 @@ export class FakeAdapter implements SessionAdapter {
       }
     })();
 
+    const interrupts = this.interrupts;
+    const receiptFor = (untakenNow: readonly string[]): InterruptReceipt =>
+      this.interruptReceipt(untakenNow);
     return {
       events: channel,
-      send(text) {
-        sent.push({ sessionId: spec.sessionId, text });
+      send(text, images = [], uuid) {
+        sent.push({ sessionId: spec.sessionId, text, images: images.length, uuid: uuid ?? null });
         messages.push(text);
+        if (uuid !== undefined) untaken.push(uuid);
         messageWaiter?.();
         messageWaiter = null;
+      },
+      interrupt() {
+        // What no turn has taken yet stays queued and runs next, as far as the receipt says.
+        const receipt = receiptFor(untaken);
+        interrupts.push({ sessionId: spec.sessionId, receipt });
+        return Promise.resolve(receipt);
       },
       async stop() {
         abort.abort();

@@ -70,6 +70,11 @@ export interface PromptInput {
   readonly renumbered?: string | null;
   /** What the batch's notice says of migrations a merge of its base lost, while any are missing. */
   readonly uncarried?: string | null;
+  /**
+   * For a `feedback` action: the builder's message as the session reads it, and the thread's digest a
+   * session with no conversation to resume starts from (null for one that resumes it).
+   */
+  readonly feedback?: { readonly message: string; readonly digest: string | null };
 }
 
 /** An Inbox card the builder answered, as a reviewer is shown it. */
@@ -405,6 +410,7 @@ export function briefedFromHandoff(
     case 'continue_from_handoff':
       return true;
     case 'answer':
+    case 'feedback':
       return action.providerSessionId === null;
     case 'fix':
       return evidence !== null && handoff.createdAt > evidence.createdAt;
@@ -481,6 +487,19 @@ function actionSection(input: PromptInput): string {
         ...(input.evidence ? [gateFailure(input.evidence, input.step.tools)] : []),
         answer,
       ].join('\n\n');
+    }
+    case 'feedback': {
+      const message = input.feedback?.message ?? "The builder wrote in the task's thread.";
+      if (input.action.providerSessionId !== null) return message;
+      // No conversation to resume: a fresh session starts from the handoff, then the thread's digest,
+      // then the builder's message (Workbench spec §6.3).
+      const brief =
+        input.handoff && briefedFromHandoff(input.action, input.handoff, input.evidence)
+          ? fromHandoff(input.handoff)
+          : 'The previous session left no handoff, so inspect git status first.';
+      return [brief, ...(input.feedback?.digest ? [input.feedback.digest] : []), message].join(
+        '\n\n',
+      );
     }
     case 'fix': {
       const gate = input.evidence

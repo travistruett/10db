@@ -57,6 +57,7 @@ import {
   getProject,
   getSessionByProviderId,
   getTask,
+  getTaskMessageRow,
   getWorkstream,
   getWorkstreamRow,
   handoffForSession,
@@ -65,6 +66,7 @@ import {
   insertRetryLimitFollowUp,
   insertSession,
   insertSource,
+  insertSystemNotice,
   listAccountModels,
   listModelProfiles,
   latestHandoffForStep,
@@ -72,7 +74,11 @@ import {
   listPermissionRules,
   listSessions,
   listEvidence,
+  listTaskFileRows,
+  listUndeliveredTaskMessages,
   markSessionStarted,
+  markTaskFilesInline,
+  markTaskMessagesPushed,
   answeredCardsForTask,
   deniedPermissionsForWorkstream,
   openItemsForWorkstream,
@@ -196,6 +202,8 @@ import {
   type GateRunner,
   type Hold,
 } from '../verify';
+import { pictureLimitsFor } from '../screens';
+import { buildThreadDigest, FRESH_SESSION_NOTICE, taskFilesDir } from '../thread';
 import { findClaimed } from '../watcher';
 import type { LiveSessions } from './live-sessions';
 import { checkedCommits, raiseBuilderCheck, waitsForCheck } from './builder-check';
@@ -207,7 +215,14 @@ import {
   reviewSizeRule,
   reviewSizeState,
 } from './review-size';
-import { nextActionAfterCrash, nextActionOnAnotherAccount } from './next-action';
+import { createLaneMessages, outgoingMessage } from './lane-messages';
+import {
+  nextActionAfterCrash,
+  nextActionOnAnotherAccount,
+  resumedSessionOf,
+  withUndelivered,
+} from './next-action';
+import { threadInlineBytes } from './thread-pictures';
 
 /**
  * A continuation session starts with the briefing already in context. If that baseline is near or over
@@ -692,6 +707,15 @@ export function createRunner(opts: RunnerOptions): Runner {
   }
 
   /**
+   * `next`, once a session of the workstream has ended: a builder message it was handed and no turn
+   * took starts the next session as `feedback`, so it is not lost (Workbench spec §6.3).
+   */
+  function carryingUndelivered(reader: DbReader, id: WorkstreamId, next: NextAction): NextAction {
+    const untaken = listUndeliveredTaskMessages(reader, getWorkstreamRow(reader, id).taskId)[0];
+    return withUndelivered(next, untaken?.id ?? null);
+  }
+
+  /**
    * A conversation lives in the config directory of the account its session ran on, so once the
    * project has moved the lane can't resume it: its next action becomes a fresh start on the
    * project's account (accounts spec §6). The new action is saved with the session row, so a lane
@@ -703,8 +727,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     row: WorkstreamRow,
   ): NextAction | null {
     const action = row.nextAction;
-    const resumeId =
-      action.kind === 'resume' || action.kind === 'answer' ? action.providerSessionId : null;
+    const resumeId = resumedSessionOf(action);
     if (resumeId === null) return null;
     const ranOn = getSessionByProviderId(db, id, resumeId)?.accountId;
     if (ranOn === undefined || ranOn === ctl.accountId) return null;
@@ -1260,13 +1283,17 @@ export function createRunner(opts: RunnerOptions): Runner {
           });
         return;
       case 'paused': {
-        const nextAction: NextAction = outcome.providerSessionId
-          ? {
-              kind: 'resume',
-              providerSessionId: outcome.providerSessionId,
-              reason: 'the usage limit reset',
-            }
-          : freshAction(db, id);
+        const nextAction = carryingUndelivered(
+          db,
+          id,
+          outcome.providerSessionId
+            ? {
+                kind: 'resume',
+                providerSessionId: outcome.providerSessionId,
+                reason: 'the usage limit reset',
+              }
+            : freshAction(db, id),
+        );
         opts.state.write((ctx) => {
           transitionWorkstream(ctx, id, {
             to: S.PausedLimit,
@@ -1286,15 +1313,17 @@ export function createRunner(opts: RunnerOptions): Runner {
             // The next action is kept: the lane resumes exactly where it stopped once the account does.
             patch: {
               pausedUntil: outcome.until?.toISOString() ?? null,
-              ...(outcome.providerSessionId
-                ? {
-                    nextAction: {
+              nextAction: carryingUndelivered(
+                ctx.tx,
+                id,
+                outcome.providerSessionId
+                  ? {
                       kind: 'resume',
                       providerSessionId: outcome.providerSessionId,
                       reason: 'the account resumed',
-                    },
-                  }
-                : {}),
+                    }
+                  : getWorkstreamRow(ctx.tx, id).nextAction,
+              ),
             },
             reason: outcome.refusal
               ? `account refused: ${outcome.refusal.problem}`
@@ -1342,10 +1371,14 @@ export function createRunner(opts: RunnerOptions): Runner {
           });
           return;
         }
-        const nextAction = nextActionAfterCrash(
-          row.nextAction,
-          outcome.providerSessionId,
-          latestHandoffForStep(db, row),
+        const nextAction = carryingUndelivered(
+          db,
+          id,
+          nextActionAfterCrash(
+            row.nextAction,
+            outcome.providerSessionId,
+            latestHandoffForStep(db, row),
+          ),
         );
         opts.state.write((ctx) => {
           transitionWorkstream(ctx, id, {
@@ -1498,10 +1531,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     // A stop that landed while the head was read finds no handle to stop, so it is honoured here.
     // A stop before any session launched leaves the saved action as it is, so the provider session it
     // names stays the one the lane resumes.
-    const savedResumeId =
-      row.nextAction.kind === 'resume' || row.nextAction.kind === 'answer'
-        ? row.nextAction.providerSessionId
-        : null;
+    const savedResumeId = resumedSessionOf(row.nextAction);
     if (ctl.stopReason)
       return { kind: 'stopped', reason: ctl.stopReason, providerSessionId: savedResumeId };
     // So does a move: the account the lane read before the await may not be the project's now.
@@ -1523,8 +1553,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       if (getProject(db, row.projectId).accountId !== ctl.accountId) return { kind: 'moved' };
     }
     const answeredItem = action.kind === 'answer' ? getInboxItem(db, action.inboxId) : null;
-    const resumeId =
-      action.kind === 'resume' || action.kind === 'answer' ? action.providerSessionId : null;
+    const resumeId = resumedSessionOf(action);
     const claims = () => activeClaims(db, id).map((c) => ({ kind: c.kind, name: c.name }));
     const permission =
       answeredItem?.kind === InboxKind.Permission ? permissionAnswer(answeredItem) : null;
@@ -1551,6 +1580,29 @@ export function createRunner(opts: RunnerOptions): Runner {
     const account = getAccountRow(db, ctl.accountId);
     const provider = providerOf(account.kind);
     const skills = persona?.skills ?? [];
+    // A builder message to act on (Workbench spec §6.3): a resumed session is handed it, and a fresh
+    // one starts from the handoff, then the thread's digest, then the message. Its pictures go as
+    // blocks while they fit the account's limits and what the thread's budget has left.
+    const limits = pictureLimitsFor(account.kind);
+    const feedback = action.kind === 'feedback' ? getTaskMessageRow(db, action.messageId) : null;
+    const fed =
+      feedback === null
+        ? null
+        : outgoingMessage(
+            feedback,
+            resumeId === null ? 0 : threadInlineBytes(listTaskFileRows(db, task.id), limits),
+            limits,
+          );
+    const digest =
+      feedback === null || resumeId !== null
+        ? null
+        : buildThreadDigest(db, task, {
+            after:
+              contextPack.handoff && briefedFromHandoff(action, contextPack.handoff, evidence)
+                ? contextPack.handoff.createdAt
+                : null,
+            before: feedback.id,
+          });
     const prompt = buildSessionPrompt({
       provider,
       sandboxed: Boolean(opts.laneSandbox),
@@ -1598,6 +1650,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         action.kind === 'resume'
           ? { reason: action.reason, lastOp: latestToolOp(db, id)?.opId ?? null }
           : null,
+      ...(fed === null ? {} : { feedback: { message: fed.text, digest } }),
     });
     const { token, hash } = mintSessionToken();
     const notReady = unready(account);
@@ -1674,6 +1727,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           checkouts: allCheckouts(db),
           mcpServers: mcpServers.stdio,
           provider,
+          taskFiles: taskFilesDir(opts.dataDir, task.id),
           ...(account.kind === AccountKind.CodexSignin ? { tempRoot: opts.codexLaneTempRoot } : {}),
         });
       } catch (error) {
@@ -1741,6 +1795,10 @@ export function createRunner(opts: RunnerOptions): Runner {
           baseHead,
           ...(fresh ? { nextAction: fresh } : {}),
         });
+        // A fresh session holds no picture an earlier one was sent, and the thread says it started.
+        if (resumeId === null) markTaskFilesInline(ctx, task.id, [], true);
+        if (feedback !== null && resumeId === null)
+          insertSystemNotice(ctx, task.id, FRESH_SESSION_NOTICE);
         // Every session's prompt carries the pack (spec §9); a resumed conversation gets it again.
         ctx.emit(
           contextPackedEvent(
@@ -1865,6 +1923,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         sequence: session.sequence,
         cwd: checkout,
         prompt: mcpNote ? `${prompt}\n\n${mcpNote}` : prompt,
+        ...(fed === null ? {} : { promptUuid: fed.uuid, images: fed.images }),
         model: launch.model,
         effort: launchStep.effort,
         resumeProviderSessionId: resumeId,
@@ -1905,6 +1964,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             ownSession: {
               configDir,
               providerSessionId: st.providerSessionId ?? resumeId,
+              filesDir: taskFilesDir(opts.dataDir, task.id),
             },
             ...(fileAccess ? { fileAccess } : {}),
           }),
@@ -1930,6 +1990,15 @@ export function createRunner(opts: RunnerOptions): Runner {
       throw error;
     }
     ctl.handle = handle;
+    const messages = createLaneMessages({ state: opts.state, taskId: task.id, handle, limits });
+    if (feedback !== null && fed !== null)
+      opts.state.write((ctx) => {
+        markTaskMessagesPushed(ctx, [feedback.id]);
+        markTaskFilesInline(ctx, task.id, fed.blocks, false);
+      });
+    // A message an earlier session was handed and no turn took goes to this one too (§12).
+    for (const untaken of listUndeliveredTaskMessages(db, task.id))
+      if (untaken.id !== feedback?.id) messages.push(untaken);
     /** Asks the session to hand off, once: its context filled, or its account neared its usage limit. */
     const requestHandoff = (cause: HandoffCause, reason: string): void => {
       if (st.handoffRequested || st.outcome) return;
@@ -2038,6 +2107,18 @@ export function createRunner(opts: RunnerOptions): Runner {
               st.firmSent = true;
               handle.send(NUDGES[st.handoffCause].firm);
             }
+            break;
+          }
+          case 'consumed': {
+            const taken = messages.consumed(event.uuids);
+            if (taken.length === 0) break;
+            // The message this session was started for is taken: a crash from here resumes the
+            // session without handing it the message again.
+            opts.state.write((ctx) => {
+              const next = getWorkstreamRow(ctx.tx, id).nextAction;
+              if (next.kind === 'feedback' && taken.includes(next.messageId))
+                patchWorkstream(ctx, id, ctl.fence, { nextAction: freshAction(ctx.tx, id) });
+            });
             break;
           }
           case 'compacted': {
@@ -2343,7 +2424,12 @@ export function createRunner(opts: RunnerOptions): Runner {
         // Progress resets the crash count, so the limit counts consecutive failures (spec §5.4).
         ...(progressed ? { recoveryAttempts: 0 } : {}),
         ...(outcome.kind === 'handoff'
-          ? { nextAction: { kind: 'continue_from_handoff', handoffId: outcome.handoffId } }
+          ? {
+              nextAction: carryingUndelivered(ctx.tx, id, {
+                kind: 'continue_from_handoff',
+                handoffId: outcome.handoffId,
+              }),
+            }
           : {}),
       });
     });

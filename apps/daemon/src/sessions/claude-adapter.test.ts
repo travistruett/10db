@@ -79,6 +79,8 @@ interface Script {
   /** What accountInfo() answers; a pending promise holds the billing preflight open. */
   readonly account?: AccountInfo | Promise<AccountInfo>;
   readonly interruptHangs?: boolean;
+  /** What interrupt() answers: a receipt, as a Claude Code with `interrupt_receipt_v1` gives; none by default. */
+  readonly interruptAnswer?: { readonly still_queued: string[] };
   /** What supportedModels() answers; 'reject' fails it. */
   readonly models?: readonly unknown[] | 'reject';
   /** What mcpServerStatus() answers. */
@@ -189,7 +191,7 @@ function fakeQuery(scripts: Script | readonly Script[]): { query: QueryFn; recor
         record.interrupts += 1;
         return script.interruptHangs
           ? new Promise<undefined>(() => undefined)
-          : Promise.resolve(undefined);
+          : Promise.resolve(script.interruptAnswer);
       },
       accountInfo: () => {
         record.order.push('accountInfo');
@@ -2160,6 +2162,43 @@ describe('createClaudeAdapter', () => {
       parent_tool_use_id: null,
       priority: 'next',
     });
+  });
+
+  it("hands a builder message's pictures to Claude Code as image blocks under its uuid, and reports what an interrupt left queued", async () => {
+    const first = '01a1b2c3-0000-7000-8000-00000000000a';
+    const later = '01a1b2c3-0000-7000-8000-00000000000b';
+    const { adapter, record } = adapterFor({
+      messages: [initMessage()],
+      then: 'hang',
+      interruptAnswer: { still_queued: [later] },
+    });
+    const picture = { mediaType: 'image/png', data: 'iVBORw0K' } as const;
+    const block = {
+      type: 'image',
+      source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0K' },
+    };
+    const handle = adapter.start(spec({ promptUuid: first, images: [picture] }));
+    const done = collect(handle.events);
+    handle.send('And the footer', [picture], later);
+    await vi.waitFor(() => {
+      expect(record.inputs).toHaveLength(2);
+    });
+    expect(record.inputs[0]).toEqual({
+      type: 'user',
+      message: { role: 'user', content: [{ type: 'text', text: 'Task: Alpha\nDo it.' }, block] },
+      parent_tool_use_id: null,
+      uuid: first,
+    });
+    expect(record.inputs[1]).toEqual({
+      type: 'user',
+      message: { role: 'user', content: [{ type: 'text', text: 'And the footer' }, block] },
+      parent_tool_use_id: null,
+      priority: 'next',
+      uuid: later,
+    });
+    expect(await handle.interrupt()).toEqual({ stillQueued: [later] });
+    await handle.stop();
+    await done;
   });
 
   it('stops cleanly: interrupt, input ends, ended stopped, and stop resolves after ended', async () => {

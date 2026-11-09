@@ -1,10 +1,19 @@
-import { mintId, type EvidenceId, type HandoffDto, type NextAction } from '@10db/contracts';
+import {
+  mintId,
+  type EvidenceId,
+  type HandoffDto,
+  type NextAction,
+  type TaskMessageId,
+} from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { nextActionAfterCrash, nextActionOnAnotherAccount } from './index';
+import { withUndelivered } from './next-action';
 
 const handoff = { id: mintId('Handoff') } as HandoffDto;
 const inboxId = mintId('InboxItem');
 const evidenceId = mintId('Evidence');
+const messageId = mintId('TaskMessage');
+const laterId = mintId('TaskMessage');
 
 describe('nextActionAfterCrash', () => {
   it.each<[string, NextAction, string | null, HandoffDto | null, NextAction['kind']]>([
@@ -49,6 +58,24 @@ describe('nextActionAfterCrash with builder input', () => {
       { kind: 'answer', inboxId, providerSessionId: 'p1' },
       null,
       { kind: 'answer', inboxId, providerSessionId: 'p1' },
+    ],
+    [
+      "keeps the builder's message, resuming the fresh session that crashed before taking it",
+      { kind: 'feedback', messageId, providerSessionId: null },
+      'p2',
+      { kind: 'feedback', messageId, providerSessionId: 'p2' },
+    ],
+    [
+      "keeps the builder's message for a fresh session when the crashed one reported no provider session",
+      { kind: 'feedback', messageId, providerSessionId: null },
+      null,
+      { kind: 'feedback', messageId, providerSessionId: null },
+    ],
+    [
+      "starts the builder's message afresh from the digest when its resumed session crashed",
+      { kind: 'feedback', messageId, providerSessionId: 'p1' },
+      'p1',
+      { kind: 'feedback', messageId, providerSessionId: null },
     ],
     [
       'keeps a fix with its gate evidence',
@@ -123,6 +150,13 @@ describe('nextActionOnAnotherAccount', () => {
       evidenceId,
       { kind: 'answer', inboxId, providerSessionId: null },
     ],
+    [
+      "takes the builder's message to a fresh session, whose first message is the digest and it",
+      { kind: 'feedback', messageId, providerSessionId: 'p1' },
+      handoff,
+      evidenceId,
+      { kind: 'feedback', messageId, providerSessionId: null },
+    ],
     ['leaves a start alone', { kind: 'start' }, handoff, null, { kind: 'start' }],
     [
       'leaves uncommitted changes alone',
@@ -155,5 +189,50 @@ describe('nextActionOnAnotherAccount', () => {
     ],
   ])('%s', (_name, previous, latest, failedGate, expected) => {
     expect(nextActionOnAnotherAccount(previous, latest, failedGate)).toEqual(expected);
+  });
+});
+
+describe('withUndelivered', () => {
+  it.each<[string, NextAction, TaskMessageId | null, NextAction]>([
+    [
+      'leaves the action alone when every message was taken',
+      { kind: 'start' },
+      null,
+      { kind: 'start' },
+    ],
+    [
+      'resumes the session with the message it never took',
+      { kind: 'resume', providerSessionId: 'p1', reason: 'the session crashed' },
+      messageId,
+      { kind: 'feedback', messageId, providerSessionId: 'p1' },
+    ],
+    [
+      'starts fresh with the message when the session cannot be resumed',
+      { kind: 'start' },
+      messageId,
+      { kind: 'feedback', messageId, providerSessionId: null },
+    ],
+    [
+      'starts fresh from the handoff with the message the handed-off session never took',
+      { kind: 'continue_from_handoff', handoffId: handoff.id },
+      messageId,
+      { kind: 'feedback', messageId, providerSessionId: null },
+    ],
+    [
+      'names the oldest message not taken, keeping the session a feedback would resume',
+      { kind: 'feedback', messageId: laterId, providerSessionId: 'p1' },
+      messageId,
+      { kind: 'feedback', messageId, providerSessionId: 'p1' },
+    ],
+    [
+      'keeps an answer, whose session is handed the message after it',
+      { kind: 'answer', inboxId, providerSessionId: 'p1' },
+      messageId,
+      { kind: 'answer', inboxId, providerSessionId: 'p1' },
+    ],
+    ['keeps verification', { kind: 'verify' }, messageId, { kind: 'verify' }],
+    ['keeps a fix', { kind: 'fix', evidenceId }, messageId, { kind: 'fix', evidenceId }],
+  ])('%s', (_name, next, undelivered, expected) => {
+    expect(withUndelivered(next, undelivered)).toEqual(expected);
   });
 });
