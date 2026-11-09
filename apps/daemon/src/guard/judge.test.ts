@@ -239,6 +239,83 @@ describe('file edits', () => {
     ).toBe('deny');
   });
 
+  // Workbench spec §7.3: in a pass a page's file is the page's, even when a shared area or a hazard
+  // the lane holds also matches it.
+  it.each<{
+    name: string;
+    inPass: boolean;
+    claims: Claims;
+    path: string;
+    decision: 'allow' | 'deny';
+    reason?: string;
+  }>([
+    {
+      name: 'in a pass, a page file under a held shared area is denied, naming the page',
+      inPass: true,
+      claims: [{ kind: 'area', name: 'src' }],
+      path: 'src/settings/page.tsx',
+      decision: 'deny',
+      reason: 'page "settings"',
+    },
+    {
+      name: 'in a pass, a page file under a held hazard is denied before the hazard allows it',
+      inPass: true,
+      claims: [
+        { kind: 'area', name: 'src' },
+        { kind: 'hazard', name: 'deps' },
+      ],
+      path: 'src/settings/package.json',
+      decision: 'deny',
+      reason: 'page "settings"',
+    },
+    {
+      name: 'in a pass, a page file is allowed to the lane holding that page',
+      inPass: true,
+      claims: [{ kind: 'area', name: 'settings' }],
+      path: 'src/settings/page.tsx',
+      decision: 'allow',
+    },
+    {
+      name: 'in a pass, a hazard under a held page still needs the hazard',
+      inPass: true,
+      claims: [{ kind: 'area', name: 'settings' }],
+      path: 'src/settings/package.json',
+      decision: 'deny',
+      reason: 'hazard',
+    },
+    {
+      name: 'in a pass, a shared file is allowed under the held shared area',
+      inPass: true,
+      claims: [{ kind: 'area', name: 'src' }],
+      path: 'src/lib/button.tsx',
+      decision: 'allow',
+    },
+    {
+      name: 'outside a pass, a page file under a held shared area is allowed as before',
+      inPass: false,
+      claims: [{ kind: 'area', name: 'src' }],
+      path: 'src/settings/page.tsx',
+      decision: 'allow',
+    },
+  ])('$name', ({ inPass, claims, path, decision, reason }) => {
+    const verdict = judgeToolUse({
+      toolName: 'Edit',
+      toolInput: { file_path: path, old_string: 'a', new_string: 'b' },
+      repoPath: repo.path,
+      areas: [
+        { name: 'settings', globs: ['src/settings/**'], role: 'page', route: '/settings' },
+        { name: 'src', globs: ['src/**'], role: 'shared' },
+      ],
+      hazards: DEFAULT_HAZARDS,
+      claims,
+      readOnly: false,
+      inPass,
+      protectedPaths: guarded(),
+    });
+    expect(verdict.decision).toBe(decision);
+    if (reason && verdict.decision === 'deny') expect(verdict.reason).toContain(reason);
+  });
+
   it.each<{ name: string; path: string; skip?: boolean }>([
     { name: 'a path below a regular file (ENOTDIR)', path: 'src/api/a.ts/x' },
     {

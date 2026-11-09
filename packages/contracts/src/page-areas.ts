@@ -64,3 +64,59 @@ export function areaRolesProblem(areas: readonly RoledArea[]): string | null {
     'A file belongs to one page, so narrow one of them or mark it shared'
   );
 }
+
+/** What the pass rules read of a task. */
+interface PassTask {
+  readonly title: string;
+  readonly areas: readonly string[];
+}
+
+/**
+ * The areas a task in a pass holds for its life, claimed when the pass opens: its pages, and any
+ * area with no role, which a pass holds as a page. A shared area is asked for a turn at a time, and a
+ * name that is no area (a hazard) is held as it is outside a pass.
+ */
+export function passHeldAreas(
+  areas: readonly RoledArea[],
+  task: Pick<PassTask, 'areas'>,
+): string[] {
+  return task.areas.filter((name) => {
+    const area = areas.find((a) => a.name === name);
+    return area !== undefined && area.role !== AreaRole.Shared;
+  });
+}
+
+/**
+ * Why these tasks cannot open a pass together, in words, or null: each must name a page area, and
+ * no two may hold the same area or pages that can share a file, since a file belongs to one page.
+ */
+export function passPagesProblem(
+  areas: readonly RoledArea[],
+  tasks: readonly PassTask[],
+): string | null {
+  const isPage = (name: string): boolean =>
+    areas.some((a) => a.name === name && a.role === AreaRole.Page);
+  for (const task of tasks)
+    if (!task.areas.some(isPage))
+      return `${task.title} names no page area; a task in a pass works on at least one page`;
+  for (const [n, first] of tasks.entries()) {
+    for (const second of tasks.slice(n + 1)) {
+      const held = passHeldAreas(areas, second);
+      const same = passHeldAreas(areas, first).find((name) => held.includes(name));
+      if (same !== undefined)
+        return `"${first.title}" and "${second.title}" both hold ${same}; a file belongs to one task in a pass`;
+      const pagesOf = (task: PassTask) => areas.filter((a) => task.areas.includes(a.name));
+      for (const one of pagesOf(first)) {
+        for (const other of pagesOf(second)) {
+          const overlap = pageOverlap([one, other]);
+          if (overlap !== null)
+            return (
+              `"${first.title}" and "${second.title}" hold pages that can share a file: ` +
+              `${overlap.firstGlob} and ${overlap.secondGlob} both match one`
+            );
+        }
+      }
+    }
+  }
+  return null;
+}

@@ -19,6 +19,7 @@
         "task.created",
         "task.changed",
         "task.message_added",
+        "pass.opened",
         "workstream.created",
         "workstream.changed",
         "session.started",

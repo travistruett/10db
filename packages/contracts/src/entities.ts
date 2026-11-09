@@ -14,6 +14,7 @@ import {
   HandoffId,
   InboxItemId,
   LandingGroupId,
+  PassId,
   PermissionRuleId,
   ProjectId,
   SessionId,
@@ -780,6 +781,8 @@ export const TaskDto = z.object({
    * so one pull request. Absent or null for a task that lands alone.
    */
   landingGroupId: LandingGroupId.nullable().optional(),
+  /** The Workbench pass the task is in; absent or null for a task outside every pass. */
+  passId: PassId.nullable().optional(),
   /** The builder's own model setting for this task; null is no override, and Automatic is a setting. */
   modelSetting: ModelSetting.nullable(),
   createdAt: Timestamp,

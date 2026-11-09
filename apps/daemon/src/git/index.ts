@@ -14,6 +14,7 @@ export {
   type CheckoutPlace,
   type FolderAt,
   type Git,
+  type PassBranch,
   type ResolvedConflict,
   type SwitchBack,
 } from './git';

@@ -212,6 +212,30 @@ export interface MergedCommitInput {
   readonly message: string;
 }
 
+export interface PassBranchInput {
+  readonly repo: string;
+  /** The pass's branch to make at HEAD's commit; it must not exist yet. */
+  readonly branch: string;
+  /** Where the commit holding the folder's dirt is kept: a new ref under `refs/10db/`. */
+  readonly dirtRef: string;
+  readonly message: string;
+}
+
+/** Where `openPassBranch` found the folder, and what in it differed from that commit. */
+export interface PassBranch {
+  /** The branch HEAD named. */
+  readonly returnBranch: string;
+  /** The commit it was at, where the pass's branch now is. */
+  readonly startSha: string;
+  /**
+   * Every path whose content on disk differs from `startSha`, untracked ones git doesn't ignore
+   * included, sorted, with the blob of its content on disk; null for a file deleted from the folder.
+   */
+  readonly dirt: readonly { readonly path: string; readonly blob: string | null }[];
+  /** The unsigned commit on `startSha` whose tree holds that dirt, kept at `dirtRef`. */
+  readonly dirtCommit: string;
+}
+
 export interface MergeIntoBranchInput {
   /** The checkout that has `branch` checked out. */
   readonly repo: string;
@@ -411,6 +435,26 @@ export interface Git {
    * text, holds none.
    */
   conflictMarkers(repo: string, paths: readonly string[], rev?: string): Promise<string[]>;
+  /**
+   * Opens a Workbench pass in the checkout: records every path that differs from HEAD's commit, its
+   * content written as git objects held by an unsigned commit at `dirtRef`, then makes `branch` at
+   * that commit and points HEAD at it. No file and no index entry is written, so uncommitted work stays
+   * as it is. Refused on a detached HEAD, a HEAD with no commit, a branch or ref that already exists,
+   * and when HEAD moved meanwhile, which leaves nothing behind.
+   */
+  openPassBranch(input: PassBranchInput): Promise<PassBranch>;
+  /**
+   * Takes back an `openPassBranch` nothing was built on: while HEAD names `branch` and both it and
+   * `returnBranch` are still at `startSha`, HEAD names `returnBranch` again and `branch` and `dirtRef`
+   * go. No file is written. Anything else is left as it is, and the answer says whether it was undone.
+   */
+  undoPassBranch(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly returnBranch: string;
+    readonly startSha: string;
+    readonly dirtRef: string;
+  }): Promise<boolean>;
   /** Keeps `text` at `ref`, under `refs/10db/`, as a blob nothing else names; it is set, whatever it held. */
   keepNote(repo: string, ref: string, text: string): Promise<void>;
   /** The text `keepNote` kept at `ref`; null when the ref is gone or names no blob. */
@@ -1861,6 +1905,127 @@ export function createGit(opts: GitOptions = {}): Git {
     });
   }
 
+  /** The paths a private index differs from `tip` by, each with its blob; null for one it lacks. */
+  async function indexChanges(
+    c: Pinned,
+    env: { GIT_INDEX_FILE: string; GIT_LITERAL_PATHSPECS: string },
+    tip: string,
+  ): Promise<{ path: string; blob: string | null }[]> {
+    const fields = (
+      await git(c, ['diff-index', '--cached', '--raw', '--no-renames', '-z', tip], { env })
+    ).split('\0');
+    const found: { path: string; blob: string | null }[] = [];
+    for (let at = 0; at + 1 < fields.length; at += 2) {
+      const [, , mode, , blob, status] = (fields[at] ?? '').split(/[: ]/);
+      const path = fields[at + 1];
+      if (path === undefined || path === '' || blob === undefined) continue;
+      // A nested repository is no file of the folder's: its content is its own.
+      if (mode === GitMode.Gitlink) continue;
+      found.push({ path, blob: status === 'D' ? null : blob });
+    }
+    return found.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  }
+
+  async function openPassBranch(input: PassBranchInput): Promise<PassBranch> {
+    if (!input.dirtRef.startsWith(KEPT_REF_PREFIX))
+      throw new InvalidError(`${input.dirtRef} is not under ${KEPT_REF_PREFIX}`);
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const startSha = await revParse(c, 'HEAD^{commit}');
+      if (startSha === null) throw new InvalidError(`${c.real} has no commit yet`);
+      const returnBranch = await currentBranch(c);
+      if (returnBranch === null)
+        throw new InvalidError(
+          `${c.real} is on a detached HEAD; a pass needs a branch to return the folder to`,
+        );
+      const ref = `refs/heads/${input.branch}`;
+      if ((await revParse(c, ref)) !== null)
+        throw new InvalidError(`A branch named ${input.branch} already exists`);
+      const paths = await changes(c);
+      const { tree, dirt } = await withPrivateIndex(c, startSha, async (env) => {
+        if (paths.length > 0) await git(c, ['add', '-A', '--', ...paths], { env });
+        return {
+          tree: (await git(c, ['write-tree'], { env })).trim(),
+          dirt: await indexChanges(c, env, startSha),
+        };
+      });
+      // Never pushed, so never signed.
+      const dirtCommit = (
+        await git(c, ['commit-tree', '--no-gpg-sign', tree, '-p', startSha], {
+          input: `${input.message}\n`,
+        })
+      ).trim();
+      const zero = '0'.repeat(startSha.length);
+      try {
+        await git(c, [
+          'update-ref',
+          '--no-deref',
+          '-m',
+          '10db: pass dirt',
+          input.dirtRef,
+          dirtCommit,
+          zero,
+        ]);
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        throw new InvalidError(`${input.dirtRef} already exists`);
+      }
+      const undo = async (): Promise<void> => {
+        await git(c, ['update-ref', '-d', input.dirtRef, dirtCommit]).catch(() => undefined);
+        await git(c, ['update-ref', '-d', ref, startSha]).catch(() => undefined);
+      };
+      try {
+        await git(c, ['update-ref', '--no-deref', '-m', '10db: pass', ref, startSha, zero]);
+      } catch (error) {
+        await undo();
+        if (!(error instanceof GitError)) throw error;
+        throw new InvalidError(
+          `A branch named ${input.branch} already exists, or the name is not valid`,
+        );
+      }
+      // A commit or a switch the builder made while the dirt was read: the pass would start elsewhere.
+      if (
+        (await currentBranch(c)) !== returnBranch ||
+        (await revParse(c, 'HEAD^{commit}')) !== startSha
+      ) {
+        await undo();
+        throw new InvalidError(`${c.real} moved while the pass was opening; open it again`);
+      }
+      // The branch is at HEAD's own commit, so naming it moves no file and no index entry.
+      await git(c, ['symbolic-ref', '-m', '10db: pass', 'HEAD', ref]);
+      return { returnBranch, startSha, dirt, dirtCommit };
+    });
+  }
+
+  async function undoPassBranch(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly returnBranch: string;
+    readonly startSha: string;
+    readonly dirtRef: string;
+  }): Promise<boolean> {
+    if (!input.dirtRef.startsWith(KEPT_REF_PREFIX))
+      throw new InvalidError(`${input.dirtRef} is not under ${KEPT_REF_PREFIX}`);
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const ref = `refs/heads/${input.branch}`;
+      if ((await currentBranch(c)) !== input.branch) return false;
+      if ((await revParse(c, `${ref}^{commit}`)) !== input.startSha) return false;
+      if ((await revParse(c, `refs/heads/${input.returnBranch}^{commit}`)) !== input.startSha)
+        return false;
+      await git(c, [
+        'symbolic-ref',
+        '-m',
+        '10db: pass undone',
+        'HEAD',
+        `refs/heads/${input.returnBranch}`,
+      ]);
+      await git(c, ['update-ref', '-d', ref, input.startSha]).catch(() => undefined);
+      await git(c, ['update-ref', '--no-deref', '-d', input.dirtRef]).catch(() => undefined);
+      return true;
+    });
+  }
+
   /** One fetch of `branch` into `origin/<branch>`, from origin's pinned fetch URL. */
   async function fetchOnce(repo: string, branch: string, net: NetworkCall): Promise<NetworkRun> {
     const c = await pinned(repo);
@@ -2779,6 +2944,8 @@ export function createGit(opts: GitOptions = {}): Git {
     mergeIntoBranch,
     revertCommits,
     mergedCommit,
+    openPassBranch,
+    undoPassBranch,
     async conflictMarkers(repo, paths, rev = 'HEAD') {
       const c = await pinned(repo);
       const found: string[] = [];

@@ -177,3 +177,28 @@ describe('judgePreToolUse', () => {
     ).toBe('deny');
   });
 });
+
+describe('judgePreToolUse in a pass', () => {
+  it("denies a write to a page's file under a held shared area, naming the page", () => {
+    const verdict = judgePreToolUse({
+      toolName: 'Write',
+      toolInput: { file_path: 'src/settings/page.tsx', content: 'x' },
+      repoPath: repo.path,
+      areas: [
+        { name: 'settings', globs: ['src/settings/**'], role: 'page', route: '/settings' },
+        { name: 'src', globs: ['src/**'], role: 'shared' },
+      ],
+      hazards: DEFAULT_HAZARDS,
+      claims: [{ kind: ClaimKind.Area, name: 'src' }],
+      readOnly: false,
+      inPass: true,
+      protectedPaths: protectedPaths({
+        dataDir: data.path,
+        home: homedir(),
+        loginConfigDir: login.path,
+      }),
+    });
+    expect(verdict.decision).toBe('deny');
+    if (verdict.decision === 'deny') expect(verdict.reason).toContain('page "settings"');
+  });
+});

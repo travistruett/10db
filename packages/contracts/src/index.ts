@@ -29,6 +29,7 @@ export * from './landing';
 export * from './mcp-tools';
 export * from './model-profiles';
 export * from './page-areas';
+export * from './passes';
 export * from './picker';
 export * from './review-rounds';
 export * from './sign-in-url';

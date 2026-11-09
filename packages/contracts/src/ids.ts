@@ -50,6 +50,7 @@ const ID_SCHEMAS = {
   Pattern: idSchema('pat', 'PatternId'),
   TaskMessage: idSchema('tmg', 'TaskMessageId'),
   TaskFile: idSchema('tfl', 'TaskFileId'),
+  Pass: idSchema('pas', 'PassId'),
 } as const;
 
 const ID_PREFIX = {
@@ -91,6 +92,7 @@ const ID_PREFIX = {
   Pattern: 'pat',
   TaskMessage: 'tmg',
   TaskFile: 'tfl',
+  Pass: 'pas',
 } as const satisfies Record<keyof typeof ID_SCHEMAS, string>;
 
 export type IdKind = keyof typeof ID_SCHEMAS;
@@ -179,5 +181,7 @@ export const TaskMessageId = ID_SCHEMAS.TaskMessage;
 export type TaskMessageId = IdOf<'TaskMessage'>;
 export const TaskFileId = ID_SCHEMAS.TaskFile;
 export type TaskFileId = IdOf<'TaskFile'>;
+export const PassId = ID_SCHEMAS.Pass;
+export type PassId = IdOf<'Pass'>;
 export const AccountId = ID_SCHEMAS.Account;
 export type AccountId = IdOf<'Account'>;

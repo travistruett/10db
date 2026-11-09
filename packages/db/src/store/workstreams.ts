@@ -17,6 +17,7 @@ import {
   TaskStatus,
   WorkstreamState,
   type AccountId,
+  type PassId,
   type BatchId,
   fitNotice,
   type NextAction,
@@ -479,8 +480,11 @@ export function clearLease(ctx: WriteContext, id: WorkstreamId): void {
 
 export interface LaneCounts {
   readonly global: number;
+  /** A project's lanes outside its passes: what its `maxLanes` holds. */
   readonly byProject: ReadonlyMap<ProjectId, number>;
   readonly byAccount: ReadonlyMap<AccountId, number>;
+  /** A pass's lanes, held to its page cap instead of the project's `maxLanes` (W11). */
+  readonly byPass: ReadonlyMap<PassId, number>;
 }
 
 /** Which workstreams hold a lane: those in a lane state, and one waiting on a card with its session still live. */
@@ -494,23 +498,31 @@ function holdsLane(): SQL | undefined {
   );
 }
 
+/**
+ * The lanes held now: every one counts for the daemon and its project's account; a pass task's lane
+ * counts for its pass and not for its project.
+ */
 export function countLanes(db: DbReader): LaneCounts {
   const rows = db
     .select({
       projectId: schema.workstreams.projectId,
       accountId: schema.projects.accountId,
+      passId: schema.tasks.passId,
     })
     .from(schema.workstreams)
     .innerJoin(schema.projects, eq(schema.projects.id, schema.workstreams.projectId))
+    .innerJoin(schema.tasks, eq(schema.tasks.id, schema.workstreams.taskId))
     .where(holdsLane())
     .all();
   const byProject = new Map<ProjectId, number>();
   const byAccount = new Map<AccountId, number>();
+  const byPass = new Map<PassId, number>();
   for (const r of rows) {
-    byProject.set(r.projectId, (byProject.get(r.projectId) ?? 0) + 1);
+    if (r.passId === null) byProject.set(r.projectId, (byProject.get(r.projectId) ?? 0) + 1);
+    else byPass.set(r.passId, (byPass.get(r.passId) ?? 0) + 1);
     byAccount.set(r.accountId, (byAccount.get(r.accountId) ?? 0) + 1);
   }
-  return { global: rows.length, byProject, byAccount };
+  return { global: rows.length, byProject, byAccount, byPass };
 }
 
 /**

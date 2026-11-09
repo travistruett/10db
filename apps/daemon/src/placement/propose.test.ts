@@ -8,6 +8,7 @@ interface Row {
     readonly delivery?: Delivery;
     readonly workspaceMode?: WorkspaceMode;
     readonly isolate?: readonly string[];
+    readonly passHoldsFolder?: boolean;
   };
   readonly task: {
     readonly areas?: readonly string[];
@@ -105,6 +106,34 @@ const rows: readonly Row[] = [
     name: 'no match takes an explicit shared in a worktree project',
     project: { workspaceMode: 'worktree' },
     task: { areas: ['app'], workspaceMode: 'shared' },
+    mode: 'shared',
+    reason: null,
+  },
+  {
+    name: 'a pass holding Your folder sends an explicit shared to a copy',
+    project: { passHoldsFolder: true },
+    task: { areas: ['app'], workspaceMode: 'shared' },
+    mode: 'worktree',
+    reason: 'Your folder is in a Workbench pass',
+  },
+  {
+    name: 'a pass holding Your folder sends a shared default to a copy',
+    project: { passHoldsFolder: true },
+    task: { areas: ['app'] },
+    mode: 'worktree',
+    reason: 'Your folder is in a Workbench pass',
+  },
+  {
+    name: 'a pass holding Your folder keeps the isolate reason',
+    project: { passHoldsFolder: true },
+    task: { areas: ['migrations'] },
+    mode: 'worktree',
+    reason: 'touches migrations',
+  },
+  {
+    name: 'a pass holding Your folder leaves a local project shared: its tasks wait instead',
+    project: { delivery: 'local', passHoldsFolder: true },
+    task: { areas: ['app'] },
     mode: 'shared',
     reason: null,
   },

@@ -1,7 +1,17 @@
 import { rmSync } from 'node:fs';
-import type { AccountId, BatchId, BatchState, ProjectId, WorkstreamId } from '@10db/contracts';
 import {
+  mintId,
+  type AccountId,
+  type BatchId,
+  type BatchState,
+  type ProjectId,
+  type WorkstreamId,
+} from '@10db/contracts';
+import {
+  acquireClaims,
+  activeClaims,
   countLanes,
+  insertPass,
   countMidSession,
   createTestStore,
   listBoardColumns,
@@ -555,6 +565,112 @@ describe('scheduler', () => {
     s.stop();
     await s.idle();
     expect(getWorkstreamRow(store.db, a.workstream.id).leaseExpiresAt).not.toBe(before);
+  });
+});
+
+// Workbench spec §5.2, §5.3 (W9), §5.5, §12: a pass's tasks are launched by the pass's own turns,
+// never by the scheduler, and while a pass holds Your folder ordinary work waits for it there.
+describe('Workbench passes', () => {
+  const PAGES = [
+    { name: 'settings', globs: ['src/settings/**'], role: 'page' as const, route: '/settings' },
+    { name: 'api', globs: ['api/**'] },
+  ];
+
+  /** A pass holding the folder, with one task on the settings page, claimed as the pass claims it. */
+  function openPass(project: ReturnType<typeof seedProject>) {
+    const task = state.write((ctx) =>
+      insertTask(ctx, project.id, {
+        title: 'Settings: UI work',
+        acceptanceCriteria: ['x'],
+        areas: ['settings'],
+      }),
+    );
+    return state.write((ctx) => {
+      const { pass, batch } = insertPass(ctx, {
+        id: mintId('Pass'),
+        projectId: project.id,
+        name: 'Polish',
+        pageCap: 4,
+        returnBranch: 'main',
+        startSha: 'a'.repeat(40),
+        branch: '10db/polish-abc123',
+        baseBranch: 'main',
+        repo: null,
+        taskIds: [task.id],
+        dirt: [],
+      });
+      const ws = insertWorkstream(ctx, task.id, {
+        batchId: batch.id,
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      });
+      const claimed = acquireClaims(ctx, {
+        projectId: project.id,
+        workstreamId: ws.id,
+        requests: [{ kind: 'area', name: 'settings' }],
+        leaseExpiresAt: clock.now().toISOString(),
+      });
+      if (!claimed.ok) throw new Error('the page was not claimed');
+      return { pass, batch, task, workstream: ws };
+    });
+  }
+
+  it('never launches an open pass task, and its page claim holds across a restart with no session', async () => {
+    const project = seedProject(store, { areas: PAGES });
+    const opened = openPass(project);
+    expect(await scheduler().tick()).toBe(0);
+    expect(getWorkstream(store.db, opened.workstream.id).state).toBe('QUEUED');
+
+    await recoverOnStartup({
+      state,
+      inbox,
+      git: createGit(),
+      processes: systemProcesses,
+      maxRecoveryAttempts: 3,
+      logger: silentLogger,
+      cleanShutdown: false,
+    });
+    const s = scheduler();
+    s.start();
+    clock.advance(20_000);
+    s.stop();
+    await s.idle();
+    expect(launched).toEqual([]);
+    expect(getWorkstream(store.db, opened.workstream.id)).toMatchObject({
+      state: 'QUEUED',
+      currentSessionId: null,
+    });
+    const [claim] = activeClaims(store.db, opened.workstream.id);
+    expect(claim?.name).toBe('settings');
+    // The heartbeat renews it, as it renews every live workstream's claims.
+    expect(claim?.leaseExpiresAt).not.toBe(clock.now().toISOString());
+    expect(Date.parse(claim?.leaseExpiresAt ?? '')).toBeGreaterThan(clock.now().getTime());
+  });
+
+  it('holds ordinary work in Your folder while a pass holds it, saying so, and launches it once the pass settles', async () => {
+    const project = seedProject(store, { areas: PAGES });
+    openPass(project);
+    const ordinary = add(project, ['api']);
+    expect(await scheduler().tick()).toBe(0);
+    expect(getWorkstream(store.db, ordinary.workstream.id).notice?.line).toBe(
+      'Waits for the Workbench pass to close',
+    );
+    // A closed pass still holds the folder until its work is in the base. The test has one pass.
+    store.db.update(schema.passes).set({ state: 'CLOSED' }).run();
+    expect(await scheduler().tick()).toBe(0);
+    store.db.update(schema.passes).set({ state: 'SETTLED' }).run();
+    expect(await scheduler().tick()).toBe(1);
+    expect(launched.map((l) => l.id)).toEqual([ordinary.workstream.id]);
+    expect(getWorkstream(store.db, ordinary.workstream.id).notice).toBeNull();
+  });
+
+  it("leaves a pass's lanes out of its project's lane limit", async () => {
+    const project = seedProject(store, { areas: PAGES, maxLanes: 1 });
+    const opened = openPass(project);
+    moveWorkstream(opened.workstream.id, 'STARTING');
+    store.db.update(schema.passes).set({ state: 'SETTLED' }).run();
+    const ordinary = add(project, ['api']);
+    expect(await scheduler().tick()).toBe(1);
+    expect(launched.map((l) => l.id)).toEqual([ordinary.workstream.id]);
   });
 });
 
