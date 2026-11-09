@@ -1120,7 +1120,7 @@ describe('knowledge on cards', () => {
     await screen.findByText('No sleeps in tests');
     const card = selectedCard();
     expect(within(card).getByText(/Never sleep in tests/)).toBeTruthy();
-    expect(await within(card).findByText('Policy')).toBeTruthy();
+    expect(await within(card).findByText('Rule')).toBeTruthy();
     expect(await within(card).findByRole('radio', { name: /This Area \(api\)/ })).toBeTruthy();
     const names = ['This Project', 'All Projects', 'This Area (api)', 'Reject'];
     for (const name of names) {
@@ -1206,7 +1206,7 @@ describe('knowledge on cards', () => {
     if ((act === 'check' || act === 'you' || act === 'area') && !box.checked) fireEvent.click(box);
     if (act === 'you' || act === 'area') {
       fireEvent.click(screen.getByRole('combobox', { name: 'Decision applies to' }));
-      const name = act === 'you' ? 'All Projects' : 'Area: api';
+      const name = act === 'you' ? 'All Projects' : 'Only in api';
       fireEvent.click(await screen.findByRole('option', { name, hidden: true }));
     }
     fireEvent.click(screen.getByRole('button', { name: /Send answer/ }));

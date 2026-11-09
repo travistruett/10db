@@ -6,6 +6,7 @@ import {
 } from '@10db/contracts';
 import { Select } from '@mantine/core';
 import { SCOPE_ALL_PROJECTS, SCOPE_THIS_PROJECT } from './knowledge-labels';
+import { areaScopeLabel, scopeAreas } from './knowledge-areas';
 
 const AREA_PREFIX = 'area:';
 
@@ -72,9 +73,9 @@ export function TargetSelect({
       data={[
         { value: KnowledgeScope.Project, label: `${SCOPE_THIS_PROJECT} (${project.name})` },
         { value: KnowledgeScope.You, label: SCOPE_ALL_PROJECTS },
-        ...project.areas.map((a) => ({
-          value: `${AREA_PREFIX}${a.name}`,
-          label: `Area: ${a.name}`,
+        ...scopeAreas(project.areas).map((name) => ({
+          value: `${AREA_PREFIX}${name}`,
+          label: areaScopeLabel(name),
         })),
       ]}
       value={targetValue(value)}

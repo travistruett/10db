@@ -40,6 +40,7 @@ import {
   ProposalActions,
 } from './record-actions';
 import { ProvenanceDrawer } from './provenance-drawer';
+import { scopeAreas } from './knowledge-areas';
 
 /** Long enough to skip a request per keystroke, short enough to feel live. */
 const SEARCH_DEBOUNCE_MS = 250;
@@ -167,7 +168,7 @@ function ProjectKnowledge({
     q,
     history: shelf === KnowledgeShelf.Past,
   });
-  const areas = project.areas.map((a) => a.name);
+  const areas = scopeAreas(project.areas);
   const principleControls: ListControls = {
     shelves: [
       { shelf: KnowledgeShelf.Pending, count: pending },

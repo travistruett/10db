@@ -111,7 +111,7 @@ export function PrincipleList({
     },
     {
       accessor: 'principleKind',
-      title: 'Kind',
+      title: 'Type',
       width: 120,
       sortable: true,
       resizable: true,
@@ -119,7 +119,7 @@ export function PrincipleList({
       filtering: kinds.length > 0,
       filter: (
         <MultiSelect
-          aria-label="Kinds shown"
+          aria-label="Types shown"
           data={KIND_CHOICES}
           value={[...kinds]}
           onChange={(next) => {

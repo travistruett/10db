@@ -5,10 +5,11 @@
 
 ## Decision
 
-- **Two tabs, each with shelves.** Knowledge has a Principles tab and a Decisions tab. A shelf control in each
-  tab's one toolbar row picks what the list holds: Pending (principle proposals, with their count; principles
-  only), Current, and Past (superseded, retired and withdrawn). The Proposals tab and the History switch are gone.
-  The search, the scope select and New Principle or New Decision share that row.
+- **Two tabs, each with shelves.** Knowledge has a Principles tab and a Decisions tab, with New Principle or New
+  Decision on the tab row. The first column's filter picks what the list holds: Pending (principle proposals,
+  with their count; principles only), Current, and Past (superseded, retired and withdrawn), and holds the
+  search; the Scope column's filter holds the scope. A banner says when proposals wait. The Proposals tab and
+  the History switch are gone.
 - **Only principle proposals are under Pending.** A proposal of a task, a task change or a note is answered in the
   Inbox and no longer listed in Knowledge.
 - **The lists are `mantine-datatable` tables** (pinned at 9.4.0, which supports Mantine 9). Columns resize and
@@ -17,10 +18,18 @@
   badge (orange policy, blue heuristic, gray belief), State is shown only under Past, and the topic key is not
   shown.
 - **The principle form asks for no topic key.** A new principle takes its key from its statement
-  (`topicKeyFrom`); Edit and Accept keep the key of what they started from, so saving replaces that record.
-  Kind is three cards, each saying what it does to an agent: a policy is a rule every session is briefed with,
-  a heuristic a preference briefed after policies, a belief context agents find by search and are never
-  briefed with.
+  (`topicKeyFrom`); Edit and Accept keep the key of what they started from. Because a key decides what a
+  principle replaces, New Principle and Accept ask the daemon by a dry run first, and a save that would replace
+  a current principle names it and waits for Replace: an agent's proposal can't quietly replace a principle.
+- **The kinds read Rule, Preference and Background.** The stored values stay `policy`, `heuristic` and `belief`
+  (the API, the MCP tools and orgtools use them). The form offers them as three cards under "How agents use
+  it", each saying what it does: a rule every session is briefed with, a preference briefed after rules,
+  background agents find by search and are never briefed with.
+- **Remove… replaces Retire… and Withdraw….** On a current principle it asks why: no longer applies retires
+  it; recorded by mistake withdraws it, which can make an older version current again. A decision or an older
+  version is withdrawn.
+- **Scopes read All Projects, This Project and Only in <area>,** and an area that covers the whole repository
+  is not offered as a scope, since it says no more than This Project.
 
 ## Why
 
@@ -37,3 +46,7 @@ Turned down:
 - **Keeping the topic key as an advanced field.** Replacing a principle is what Edit… does; no other use of the
   field was found.
 - **Column reordering.** The drag handles cluttered every header, and the lists have few columns.
+- **Renaming the stored kinds or the `you` scope.** Every record, route and MCP tool carries them; only the
+  words shown change.
+- **Paging in this change.** The lists still read at most 100 records; server-side paging, filtering and
+  sorting is its own change.

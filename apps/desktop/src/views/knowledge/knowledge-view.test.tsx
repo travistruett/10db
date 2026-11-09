@@ -92,11 +92,11 @@ describe('KnowledgeView', () => {
     expect(rows).toHaveLength(2);
     expect(within(rows[0] ?? table).getByText('Never sleep in tests')).toBeTruthy();
     expect(within(rows[0] ?? table).getByText('api')).toBeTruthy();
-    expect(within(rows[0] ?? table).getByText('Policy')).toBeTruthy();
+    expect(within(rows[0] ?? table).getByText('Rule')).toBeTruthy();
     expect(within(rows[0] ?? table).getByTitle('13 Oct 2026')).toBeTruthy();
     expect(within(rows[1] ?? table).getByText('Prefer small PRs')).toBeTruthy();
     expect(within(rows[1] ?? table).getByText('All Projects')).toBeTruthy();
-    expect(within(rows[1] ?? table).getByText('Heuristic')).toBeTruthy();
+    expect(within(rows[1] ?? table).getByText('Preference')).toBeTruthy();
     expect(asked.at(-1)?.get('kind')).toBe('principle');
   });
 
@@ -310,7 +310,7 @@ describe('KnowledgeView', () => {
     // Under Current, none of these past records is shown.
     expect(await screen.findByText(/^No principles yet/)).toBeTruthy();
     expect(asked.at(-1)?.get('history')).toBe('0');
-    await chooseScope('api');
+    await chooseScope('Only in api');
     await waitFor(() => {
       expect(asked.at(-1)?.get('scope')).toBe('area');
     });
@@ -355,7 +355,7 @@ describe('KnowledgeView', () => {
     const table = await screen.findByRole('table', { name: 'Proposals' });
     expect(within(table).getByText('Never sleep in tests')).toBeTruthy();
     expect(within(table).getByText('Two flaky runs came from sleeps.')).toBeTruthy();
-    expect(within(table).getByText('Policy')).toBeTruthy();
+    expect(within(table).getByText('Rule')).toBeTruthy();
   });
 
   describe('under Pending', () => {
@@ -449,7 +449,7 @@ describe('KnowledgeView', () => {
       await waitFor(() => {
         expect(shown()).toEqual(['Whole project']);
       });
-      await chooseScope('api');
+      await chooseScope('Only in api');
       await waitFor(() => {
         expect(shown()).toEqual(['For the api']);
       });

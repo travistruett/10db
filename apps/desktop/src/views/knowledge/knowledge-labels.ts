@@ -9,18 +9,18 @@ import type { MantineColor } from '@mantine/core';
 import dayjs from 'dayjs';
 
 export const PRINCIPLE_KIND_LABELS: Readonly<Record<PrincipleKind, string>> = {
-  [PrincipleKind.Policy]: 'Policy',
-  [PrincipleKind.Heuristic]: 'Heuristic',
-  [PrincipleKind.Belief]: 'Belief',
+  [PrincipleKind.Policy]: 'Rule',
+  [PrincipleKind.Heuristic]: 'Preference',
+  [PrincipleKind.Belief]: 'Background',
 };
 
 /** What each kind does to an agent, as the context pack treats it: policies and heuristics brief every session, beliefs never. */
 export const PRINCIPLE_KIND_DESCRIPTIONS: Readonly<Record<PrincipleKind, string>> = {
-  [PrincipleKind.Policy]: 'A rule agents must follow. Every session is briefed with it.',
+  [PrincipleKind.Policy]: 'Agents must follow it. Every session is briefed with it.',
   [PrincipleKind.Heuristic]:
-    'A preference agents follow unless the task gives a reason not to. Briefed after policies.',
+    'Agents follow it unless the task gives a reason not to. Briefed after rules.',
   [PrincipleKind.Belief]:
-    'Context about how things are. Agents find it when they search; sessions are not briefed with it.',
+    'Context, not an instruction. Agents find it when they search; sessions are not briefed with it.',
 };
 
 /** A policy is the loud one, a heuristic quieter, a belief only context. */

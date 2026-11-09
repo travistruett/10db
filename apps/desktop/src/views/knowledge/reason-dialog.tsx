@@ -3,12 +3,13 @@ import { useId, useState, type ReactNode, type SyntheticEvent } from 'react';
 import { FormModal } from '../../shell/form-modal';
 
 /**
- * Retire, Withdraw and Reject: what the act does, then the builder's words. A retire and a withdrawal
- * need a reason, which Past keeps beside the record; rejecting a proposal takes an optional note.
+ * Remove and Reject: any choice the act asks first, what it does, then the builder's words. A removal
+ * needs a reason, which Past keeps beside the record; rejecting a proposal takes an optional note.
  * The caller mounts it when the builder opens it, so the text starts empty.
  */
 export function ReasonDialog({
   title,
+  choice,
   intro,
   submitLabel,
   required,
@@ -19,6 +20,8 @@ export function ReasonDialog({
   onClose,
 }: {
   readonly title: string;
+  /** A choice that decides what the act does, shown above what it does. */
+  readonly choice?: ReactNode;
   /** What the act does to the record. */
   readonly intro: ReactNode;
   readonly submitLabel: string;
@@ -63,6 +66,7 @@ export function ReasonDialog({
     >
       <form id={formId} onSubmit={submit} noValidate>
         <Stack gap="sm">
+          {choice}
           <Text size="sm">{intro}</Text>
           <Textarea
             label={required ? 'Reason' : 'Note (optional)'}

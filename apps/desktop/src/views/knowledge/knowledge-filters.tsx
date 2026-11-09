@@ -3,6 +3,7 @@ import { SegmentedControl, Select, Stack, TextInput } from '@mantine/core';
 import { IconSearch } from '@tabler/icons-react';
 import { SCOPE_ALL_PROJECTS, SCOPE_THIS_PROJECT } from './knowledge-labels';
 import { isShelf, KnowledgeShelf, SHELF_LABELS } from './knowledge-shelf';
+import { areaScopeLabel } from './knowledge-areas';
 
 export interface FilterState {
   readonly scope: KnowledgeScope | null;
@@ -104,7 +105,7 @@ export function ScopeFilter({ controls }: { readonly controls: ListControls }) {
         { value: ALL, label: 'Any Scope' },
         { value: KnowledgeScope.You, label: SCOPE_ALL_PROJECTS },
         { value: KnowledgeScope.Project, label: SCOPE_THIS_PROJECT },
-        ...areas.map((name) => ({ value: `${AREA_PREFIX}${name}`, label: name })),
+        ...areas.map((name) => ({ value: `${AREA_PREFIX}${name}`, label: areaScopeLabel(name) })),
       ]}
       value={scopeValue(filters)}
       onChange={(next) => {

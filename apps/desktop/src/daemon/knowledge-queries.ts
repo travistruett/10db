@@ -11,6 +11,7 @@ import {
   type DecisionEdit,
   type DecisionId,
   type DecisionWrite,
+  type KnowledgeItemDto,
   type KnowledgeScope,
   type PrincipleEdit,
   type PrincipleId,
@@ -253,6 +254,36 @@ export function useWithdrawDecision() {
         DecisionItem,
       ),
   );
+}
+
+/**
+ * What saving a new principle, or accepting a proposal, would replace: the current principle with the same
+ * topic key at the same scope, by a dry run that writes nothing; null when it replaces nothing. A refusal
+ * is left to the real write to say.
+ */
+export function usePrincipleReplacePreview() {
+  const { client } = useDaemon();
+  return {
+    create: async (projectId: ProjectId, input: PrincipleWrite): Promise<KnowledgeItemDto | null> =>
+      readJson(
+        await client.projects[':projectId'].principles.$post({
+          param: { projectId },
+          json: { ...input, dryRun: true },
+        }),
+        KnowledgeDryRunDto,
+      ).then((answer) => answer.replaces),
+    accept: async (
+      id: ProposalId,
+      input: ProposalVerdictAccept,
+    ): Promise<KnowledgeItemDto | null> =>
+      readJson(
+        await client.proposals[':id'].accept.$post({
+          param: { id },
+          json: { ...input, dryRun: true },
+        }),
+        KnowledgeDryRunDto,
+      ).then((answer) => answer.replaces),
+  };
 }
 
 export function useCreatePrinciple(projectId: ProjectId) {

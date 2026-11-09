@@ -118,7 +118,7 @@ export function ProposalList({
     },
     {
       accessor: 'kind',
-      title: 'Kind',
+      title: 'Type',
       width: 120,
       sortable: true,
       resizable: true,
