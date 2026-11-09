@@ -4,7 +4,7 @@ import {
   type PrincipleId,
   type ProjectViewDto,
 } from '@10db/contracts';
-import { Badge, Group, Stack, Tabs, Text, Title, VisuallyHidden } from '@mantine/core';
+import { Badge, Stack, Tabs, Text, Title, VisuallyHidden } from '@mantine/core';
 import { useDebouncedValue } from '@mantine/hooks';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useState } from 'react';
@@ -17,9 +17,10 @@ import {
 } from '../../daemon/knowledge-queries';
 import { useSelectedProject } from '../../shell/selected-project';
 import { DecisionList } from './decision-list';
-import { KnowledgeFilters, NO_FILTERS, type FilterState } from './knowledge-filters';
+import { KnowledgeToolbar, NO_FILTERS, type FilterState } from './knowledge-filters';
+import { isPast, KnowledgeShelf } from './knowledge-shelf';
 import { PrincipleList } from './principle-list';
-import { ProposalList } from './proposal-list';
+import { pendingPrinciples, ProposalList } from './proposal-list';
 import {
   DecisionActions,
   NewDecisionButton,
@@ -32,29 +33,31 @@ import { ProvenanceDrawer } from './provenance-drawer';
 /** Long enough to skip a request per keystroke, short enough to feel live. */
 const SEARCH_DEBOUNCE_MS = 250;
 
-type KnowledgeTab = 'principles' | 'decisions' | 'proposals';
+const KnowledgeTab = { Principles: 'principles', Decisions: 'decisions' } as const;
+type KnowledgeTab = (typeof KnowledgeTab)[keyof typeof KnowledgeTab];
 
+const TABS: readonly string[] = Object.values(KnowledgeTab);
 function isKnowledgeTab(value: string | null): value is KnowledgeTab {
-  return value === 'principles' || value === 'decisions' || value === 'proposals';
+  return value !== null && TABS.includes(value);
 }
 
-function ProposalsTab({ project }: { readonly project: ProjectViewDto }) {
-  const count = useProposals(project.id).data?.length ?? 0;
+/** The Principles tab, with the number of proposals waiting under Pending. */
+function PrinciplesTab({ pending }: { readonly pending: number }) {
   return (
     <Tabs.Tab
-      value="proposals"
+      value={KnowledgeTab.Principles}
       rightSection={
-        count > 0 ? (
+        pending > 0 ? (
           <Badge size="sm" circle>
             {/* The name computation drops a leading space inside VisuallyHidden, so the number is
                 hidden from assistive tech and the hidden text carries the whole phrase. */}
-            <span aria-hidden="true">{count}</span>
-            <VisuallyHidden>{String(count)}</VisuallyHidden>
+            <span aria-hidden="true">{pending}</span>
+            <VisuallyHidden>{`${String(pending)} pending`}</VisuallyHidden>
           </Badge>
         ) : undefined
       }
     >
-      Proposals
+      Principles
     </Tabs.Tab>
   );
 }
@@ -68,77 +71,103 @@ function ProjectKnowledge({
   readonly linkedPrinciple: PrincipleId | null;
 }) {
   const navigate = useNavigate();
-  // State, not the prop: closing the drawer drops the id from the URL, and the tab must stay.
+  // State, not the prop: closing the drawer drops the id from the URL, and the shelf must stay.
   const [linked] = useState<RecordRef | null>(
     linkedPrinciple ? { kind: KnowledgeItemKind.Principle, id: linkedPrinciple } : null,
   );
-  const [chosenTab, setChosenTab] = useState<KnowledgeTab | null>(null);
+  const [tab, setTab] = useState<KnowledgeTab>(KnowledgeTab.Principles);
+  const [chosenShelf, setChosenShelf] = useState<KnowledgeShelf | null>(null);
+  const [decisionShelf, setDecisionShelf] = useState<KnowledgeShelf>(KnowledgeShelf.Current);
   const [filters, setFilters] = useState<FilterState>(NO_FILTERS);
   const [q] = useDebouncedValue(filters.q, SEARCH_DEBOUNCE_MS);
   const [traced, setTraced] = useState<TracedRecord | RecordRef | null>(linked);
-  // A linked principle still waiting for a verdict sits in Proposals, a decided one in Principles.
+  const pending = pendingPrinciples(useProposals(project.id).data ?? []).length;
+  // A linked principle still waiting for a verdict sits under Pending, a decided one under Current or Past.
   const linkedState = useProvenance(linked).data?.state;
-  const tab = chosenTab ?? (linkedState === KnowledgeState.Proposed ? 'proposals' : 'principles');
-  const filter: KnowledgeFilter = {
+  const principleShelf =
+    chosenShelf ??
+    (linkedState === KnowledgeState.Proposed
+      ? KnowledgeShelf.Pending
+      : linkedState !== undefined && isPast(linkedState)
+        ? KnowledgeShelf.Past
+        : KnowledgeShelf.Current);
+  const filterFor = (shelf: KnowledgeShelf): KnowledgeFilter => ({
     projectId: project.id,
     scope: filters.scope,
     area: filters.area,
     q,
-    history: filters.history,
-  };
+    history: shelf === KnowledgeShelf.Past,
+  });
+  const areas = project.areas.map((a) => a.name);
   return (
     <>
       <Tabs
         value={tab}
         onChange={(next) => {
-          if (isKnowledgeTab(next)) setChosenTab(next);
+          if (isKnowledgeTab(next)) setTab(next);
         }}
         keepMounted={false}
       >
         <Tabs.List>
-          <Tabs.Tab value="principles">Principles</Tabs.Tab>
-          <Tabs.Tab value="decisions">Decisions</Tabs.Tab>
-          <ProposalsTab project={project} />
+          <PrinciplesTab pending={pending} />
+          <Tabs.Tab value={KnowledgeTab.Decisions}>Decisions</Tabs.Tab>
         </Tabs.List>
-        {/* One set of filters for every tab, so switching tabs keeps what was typed. */}
-        <Group pt="md" pb="sm">
-          <KnowledgeFilters
-            value={filters}
-            areas={project.areas.map((a) => a.name)}
-            historyDisabled={tab === 'proposals'}
-            onChange={setFilters}
-          />
-        </Group>
-        <Tabs.Panel value="principles">
-          <Stack>
-            <Group justify="flex-end">
-              <NewPrincipleButton project={project} />
-            </Group>
-            <PrincipleList
-              filter={filter}
-              onTrace={setTraced}
-              actions={(principle) => <PrincipleActions project={project} principle={principle} />}
+        <Tabs.Panel value={KnowledgeTab.Principles} pt="md">
+          <Stack gap="sm">
+            {/* One set of filters for both tabs, so switching tabs keeps what was typed. */}
+            <KnowledgeToolbar
+              shelves={[
+                { shelf: KnowledgeShelf.Pending, count: pending },
+                { shelf: KnowledgeShelf.Current, count: null },
+                { shelf: KnowledgeShelf.Past, count: null },
+              ]}
+              shelf={principleShelf}
+              onShelf={setChosenShelf}
+              value={filters}
+              areas={areas}
+              onChange={setFilters}
+              action={<NewPrincipleButton project={project} />}
             />
+            {principleShelf === KnowledgeShelf.Pending ? (
+              <ProposalList
+                projectId={project.id}
+                filter={{ ...filters, q }}
+                onTrace={setTraced}
+                actions={(proposal) => <ProposalActions project={project} proposal={proposal} />}
+              />
+            ) : (
+              <PrincipleList
+                filter={filterFor(principleShelf)}
+                past={principleShelf === KnowledgeShelf.Past}
+                onTrace={setTraced}
+                actions={(principle) => (
+                  <PrincipleActions project={project} principle={principle} />
+                )}
+              />
+            )}
           </Stack>
         </Tabs.Panel>
-        <Tabs.Panel value="decisions">
-          <Stack>
-            <Group justify="flex-end">
-              <NewDecisionButton project={project} />
-            </Group>
+        <Tabs.Panel value={KnowledgeTab.Decisions} pt="md">
+          <Stack gap="sm">
+            <KnowledgeToolbar
+              shelves={[
+                { shelf: KnowledgeShelf.Current, count: null },
+                { shelf: KnowledgeShelf.Past, count: null },
+              ]}
+              shelf={decisionShelf}
+              onShelf={setDecisionShelf}
+              value={filters}
+              areas={areas}
+              onChange={setFilters}
+              action={<NewDecisionButton project={project} />}
+            />
             <DecisionList
-              filter={filter}
+              filter={filterFor(decisionShelf)}
+              past={decisionShelf === KnowledgeShelf.Past}
               onTrace={setTraced}
               actions={(decision) => <DecisionActions project={project} decision={decision} />}
             />
           </Stack>
-        </Tabs.Panel>
-        <Tabs.Panel value="proposals">
-          <ProposalList
-            projectId={project.id}
-            filter={{ ...filters, q }}
-            actions={(proposal) => <ProposalActions project={project} proposal={proposal} />}
-          />
         </Tabs.Panel>
       </Tabs>
       <ProvenanceDrawer

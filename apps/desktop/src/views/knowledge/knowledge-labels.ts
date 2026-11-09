@@ -1,38 +1,58 @@
 import {
   KnowledgeScope,
+  KnowledgeState,
+  PrincipleKind,
   SourceKind,
-  type KnowledgeState,
-  type PrincipleKind,
   type ProvenanceDto,
 } from '@10db/contracts';
 import type { MantineColor } from '@mantine/core';
 import dayjs from 'dayjs';
 
 export const PRINCIPLE_KIND_LABELS: Readonly<Record<PrincipleKind, string>> = {
-  policy: 'Policy',
-  heuristic: 'Heuristic',
-  belief: 'Belief',
+  [PrincipleKind.Policy]: 'Policy',
+  [PrincipleKind.Heuristic]: 'Heuristic',
+  [PrincipleKind.Belief]: 'Belief',
+};
+
+/** What each kind does to an agent, as the context pack treats it: policies and heuristics brief every session, beliefs never. */
+export const PRINCIPLE_KIND_DESCRIPTIONS: Readonly<Record<PrincipleKind, string>> = {
+  [PrincipleKind.Policy]: 'A rule agents must follow. Every session is briefed with it.',
+  [PrincipleKind.Heuristic]:
+    'A preference agents follow unless the task gives a reason not to. Briefed after policies.',
+  [PrincipleKind.Belief]:
+    'Context about how things are. Agents find it when they search; sessions are not briefed with it.',
+};
+
+/** A policy is the loud one, a heuristic quieter, a belief only context. */
+export const PRINCIPLE_KIND_COLORS: Readonly<Record<PrincipleKind, MantineColor>> = {
+  [PrincipleKind.Policy]: 'orange',
+  [PrincipleKind.Heuristic]: 'blue',
+  [PrincipleKind.Belief]: 'gray',
 };
 
 /** Policies first, then heuristics, then beliefs: the order the context pack uses. */
-export const PRINCIPLE_KIND_ORDER: readonly PrincipleKind[] = ['policy', 'heuristic', 'belief'];
+export const PRINCIPLE_KIND_ORDER: readonly PrincipleKind[] = [
+  PrincipleKind.Policy,
+  PrincipleKind.Heuristic,
+  PrincipleKind.Belief,
+];
 
 export const STATE_LABELS: Readonly<Record<KnowledgeState, string>> = {
-  proposed: 'Proposed',
-  current: 'Current',
-  superseded: 'Superseded',
-  retired: 'Retired',
-  withdrawn: 'Withdrawn',
+  [KnowledgeState.Proposed]: 'Proposed',
+  [KnowledgeState.Current]: 'Current',
+  [KnowledgeState.Superseded]: 'Superseded',
+  [KnowledgeState.Retired]: 'Retired',
+  [KnowledgeState.Withdrawn]: 'Withdrawn',
 };
 
 // DESIGN.md: yellow waits on a human, green is done or ready, gray is out of play. A withdrawn record
 // is out of play too; red would read as a failure.
 export const STATE_COLORS: Readonly<Record<KnowledgeState, MantineColor>> = {
-  proposed: 'yellow',
-  current: 'green',
-  superseded: 'gray',
-  retired: 'gray',
-  withdrawn: 'gray',
+  [KnowledgeState.Proposed]: 'yellow',
+  [KnowledgeState.Current]: 'green',
+  [KnowledgeState.Superseded]: 'gray',
+  [KnowledgeState.Retired]: 'gray',
+  [KnowledgeState.Withdrawn]: 'gray',
 };
 
 /** "You", "Project", or the area's own name. */
@@ -46,6 +66,11 @@ export function scopeText(r: {
 }
 
 export const dateText = (iso: string): string => dayjs(iso).format('D MMM YYYY');
+/** A table cell's date: day and month this year, the year too before it. */
+export function shortDateText(iso: string, now: Date = new Date()): string {
+  const day = dayjs(iso);
+  return day.year() === now.getFullYear() ? day.format('D MMM') : day.format('D MMM YYYY');
+}
 export const dateTimeText = (iso: string): string => dayjs(iso).format('D MMM YYYY, HH:mm');
 
 /** The builder is `me` in the daemon's records; an agent is `agent:<session>`. */

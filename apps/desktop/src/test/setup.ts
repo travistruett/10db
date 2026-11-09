@@ -21,11 +21,12 @@ afterAll(() => {
 });
 
 // jsdom has no matchMedia or ResizeObserver; Mantine reads both. Mantine never calls the deprecated
-// addListener and removeListener, so the stub leaves them out.
+// addListener and removeListener, so the stub leaves them out. An empty query matches, as in a browser:
+// mantine-datatable asks it for every column without a `visibleMediaQuery`, and hides the cell otherwise.
 Object.defineProperty(window, 'matchMedia', {
   writable: true,
   value: (query: string): Omit<MediaQueryList, 'addListener' | 'removeListener'> => ({
-    matches: false,
+    matches: query.trim() === '',
     media: query,
     onchange: null,
     addEventListener: () => undefined,

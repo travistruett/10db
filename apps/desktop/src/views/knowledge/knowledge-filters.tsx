@@ -1,15 +1,16 @@
 import { clampKnowledgeSearch, KNOWLEDGE_SEARCH_MAX_LENGTH, KnowledgeScope } from '@10db/contracts';
-import { Group, Select, Switch, TextInput } from '@mantine/core';
+import { Group, SegmentedControl, Select, TextInput } from '@mantine/core';
 import { IconSearch } from '@tabler/icons-react';
+import type { ReactNode } from 'react';
+import { isShelf, SHELF_LABELS, type KnowledgeShelf } from './knowledge-shelf';
 
 export interface FilterState {
   readonly scope: KnowledgeScope | null;
   readonly area: string | null;
   readonly q: string;
-  readonly history: boolean;
 }
 
-export const NO_FILTERS: FilterState = { scope: null, area: null, q: '', history: false };
+export const NO_FILTERS: FilterState = { scope: null, area: null, q: '' };
 
 const ALL = 'all';
 const AREA_PREFIX = 'area:';
@@ -28,59 +29,80 @@ function scopeFrom(value: string | null): Pick<FilterState, 'scope' | 'area'> {
   return { scope: null, area: null };
 }
 
-/** Search, scope and History for the Principles and Decisions tabs. */
-export function KnowledgeFilters({
+export interface ShelfChoice {
+  readonly shelf: KnowledgeShelf;
+  /** How many records wait there, said beside its name; null says nothing. */
+  readonly count: number | null;
+}
+
+/**
+ * One row above a list: the shelf, search and scope on the left, the list's own action (New Principle,
+ * New Decision) on the right.
+ */
+export function KnowledgeToolbar({
+  shelves,
+  shelf,
+  onShelf,
   value,
   areas,
-  historyDisabled,
   onChange,
+  action,
 }: {
+  readonly shelves: readonly ShelfChoice[];
+  readonly shelf: KnowledgeShelf;
+  readonly onShelf: (next: KnowledgeShelf) => void;
   readonly value: FilterState;
   readonly areas: readonly string[];
-  /** Pending proposals have no history. */
-  readonly historyDisabled: boolean;
   readonly onChange: (next: FilterState) => void;
+  readonly action: ReactNode;
 }) {
   return (
-    <Group align="center" gap="sm">
-      <TextInput
-        aria-label="Search"
-        placeholder="Search"
-        size="sm"
-        w={260}
-        maxLength={KNOWLEDGE_SEARCH_MAX_LENGTH}
-        leftSection={<IconSearch size={16} stroke={1.5} />}
-        value={value.q}
-        onChange={(e) => {
-          // maxLength may count graphemes in the Tauri webview (WebKit), so cap in code as well.
-          onChange({ ...value, q: clampKnowledgeSearch(e.currentTarget.value) });
-        }}
-      />
-      <Select
-        aria-label="Scope"
-        size="sm"
-        w={180}
-        allowDeselect={false}
-        checkIconPosition="right"
-        data={[
-          { value: ALL, label: 'All scopes' },
-          { value: KnowledgeScope.You, label: 'You' },
-          { value: KnowledgeScope.Project, label: 'Project' },
-          ...areas.map((name) => ({ value: `${AREA_PREFIX}${name}`, label: name })),
-        ]}
-        value={scopeValue(value)}
-        onChange={(next) => {
-          onChange({ ...value, ...scopeFrom(next) });
-        }}
-      />
-      <Switch
-        label="History"
-        disabled={historyDisabled}
-        checked={value.history}
-        onChange={(e) => {
-          onChange({ ...value, history: e.currentTarget.checked });
-        }}
-      />
+    <Group justify="space-between" align="center" gap="sm" wrap="nowrap">
+      <Group align="center" gap="sm" wrap="nowrap">
+        <SegmentedControl
+          aria-label="Show"
+          size="sm"
+          value={shelf}
+          onChange={(next) => {
+            if (isShelf(next)) onShelf(next);
+          }}
+          data={shelves.map(({ shelf: s, count }) => ({
+            value: s,
+            label: count ? `${SHELF_LABELS[s]} ${String(count)}` : SHELF_LABELS[s],
+          }))}
+        />
+        <TextInput
+          aria-label="Search"
+          placeholder="Search"
+          size="sm"
+          w={240}
+          maxLength={KNOWLEDGE_SEARCH_MAX_LENGTH}
+          leftSection={<IconSearch size={16} stroke={1.5} />}
+          value={value.q}
+          onChange={(e) => {
+            // maxLength may count graphemes in the Tauri webview (WebKit), so cap in code as well.
+            onChange({ ...value, q: clampKnowledgeSearch(e.currentTarget.value) });
+          }}
+        />
+        <Select
+          aria-label="Scope"
+          size="sm"
+          w={160}
+          allowDeselect={false}
+          checkIconPosition="right"
+          data={[
+            { value: ALL, label: 'All scopes' },
+            { value: KnowledgeScope.You, label: 'You' },
+            { value: KnowledgeScope.Project, label: 'Project' },
+            ...areas.map((name) => ({ value: `${AREA_PREFIX}${name}`, label: name })),
+          ]}
+          value={scopeValue(value)}
+          onChange={(next) => {
+            onChange({ ...value, ...scopeFrom(next) });
+          }}
+        />
+      </Group>
+      {action}
     </Group>
   );
 }

@@ -118,7 +118,7 @@ function WithdrawReason({
       title={isDecision ? 'Withdraw Decision' : 'Withdraw Principle'}
       intro={
         <>
-          {`“${target.label}” leaves briefings and search. It stays under History with your reason.`}
+          {`“${target.label}” leaves briefings and search. It stays under Past with your reason.`}
           {restores
             ? ` “${wordsOf(restores)}” becomes current again, and returns to briefings and search.`
             : null}
@@ -158,7 +158,7 @@ function WithdrawReason({
 }
 
 /**
- * Withdraw…: the record leaves briefings and search and stays under History with the reason. Asked
+ * Withdraw…: the record leaves briefings and search and stays under Past with the reason. Asked
  * of an older version, it says which record to withdraw instead and offers it.
  */
 export function WithdrawDialog({

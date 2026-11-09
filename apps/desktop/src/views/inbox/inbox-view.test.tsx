@@ -1380,7 +1380,7 @@ describe('a resolved answer that proposed a principle', () => {
     expect(rows[1]?.textContent).not.toContain('principle');
   });
 
-  it('opens a principle still waiting for a verdict, over the Proposals tab', async () => {
+  it('opens a principle still waiting for a verdict, under Pending', async () => {
     serveResolved([answered]);
     serveProvenance(
       provenanceDto({ id: principleId, state: 'proposed', text: 'Never add Redis for queues.' }),
@@ -1389,7 +1389,7 @@ describe('a resolved answer that proposed a principle', () => {
     const drawer = await openDrawer();
     expect(await within(drawer).findByText('Never add Redis for queues.')).toBeTruthy();
     await waitFor(() => {
-      expect(selectedTab()).toContain('Proposals');
+      expect(screen.getByRole('radio', { name: /^Pending/ })).toHaveProperty('checked', true);
     });
   });
 
@@ -1446,7 +1446,7 @@ describe('a resolved answer that proposed a principle', () => {
     expect(asked).not.toContain(selected.id);
   });
 
-  it('forgets the link once the drawer closes, and keeps the tab it opened on', async () => {
+  it('forgets the link once the drawer closes, and keeps the shelf it opened on', async () => {
     serveResolved([answered]);
     serveProvenance(provenanceDto({ id: principleId, state: 'proposed' }));
     const { router } = renderApp('/inbox');
@@ -1454,13 +1454,13 @@ describe('a resolved answer that proposed a principle', () => {
     fireEvent.click(await screen.findByRole('link', { name: 'Open in Knowledge' }));
     const drawer = await openDrawer();
     await waitFor(() => {
-      expect(selectedTab()).toContain('Proposals');
+      expect(screen.getByRole('radio', { name: /^Pending/ })).toHaveProperty('checked', true);
     });
     fireEvent.click(within(drawer).getByRole('button', { name: 'Close' }));
     await waitFor(() => {
       expect(router.state.location.search).toEqual({});
     });
-    expect(selectedTab()).toContain('Proposals');
+    expect(screen.getByRole('radio', { name: /^Pending/ })).toHaveProperty('checked', true);
   });
 
   it('gives each principle its own link when an answer proposed several', async () => {

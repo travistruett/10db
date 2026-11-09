@@ -32,6 +32,7 @@
     "dayjs": "1.11.23",
     "hono": "4.13.16",
     "html-to-image": "1.11.13",
+    "mantine-datatable": "9.4.0",
     "mermaid": "12.2.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",

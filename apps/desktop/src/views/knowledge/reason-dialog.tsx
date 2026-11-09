@@ -4,7 +4,7 @@ import { FormModal } from '../../shell/form-modal';
 
 /**
  * Retire, Withdraw and Reject: what the act does, then the builder's words. A retire and a withdrawal
- * need a reason, which History keeps beside the record; rejecting a proposal takes an optional note.
+ * need a reason, which Past keeps beside the record; rejecting a proposal takes an optional note.
  * The caller mounts it when the builder opens it, so the text starts empty.
  */
 export function ReasonDialog({

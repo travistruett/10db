@@ -1,5 +1,5 @@
-import { ActionIcon, Alert, Badge, Group, Loader, Text } from '@mantine/core';
-import { IconInfoCircle, IconSearchOff } from '@tabler/icons-react';
+import { Alert, Badge, Group, Loader, Text } from '@mantine/core';
+import { IconSearchOff } from '@tabler/icons-react';
 import type { KnowledgeState } from '@10db/contracts';
 import type { UseQueryResult } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
@@ -15,26 +15,6 @@ export function StateBadge({ state }: { readonly state: KnowledgeState }) {
   );
 }
 
-/** Opens a record's provenance. */
-export function TraceButton({
-  label,
-  onClick,
-}: {
-  readonly label: string;
-  readonly onClick: () => void;
-}) {
-  return (
-    <ActionIcon
-      variant="subtle"
-      size="sm"
-      aria-label={`Where ${label} came from`}
-      onClick={onClick}
-    >
-      <IconInfoCircle size={16} stroke={1.5} />
-    </ActionIcon>
-  );
-}
-
 /**
  * What stands in for a list that has not arrived, failed, was cut short or is empty. Renders `children`
  * (the table) only when there are rows.
@@ -43,12 +23,15 @@ export function ListStates({
   query,
   what,
   empty,
+  shown,
   children,
 }: {
   readonly query: UseQueryResult<KnowledgeAnswer>;
   /** "principles" / "decisions", for the messages. */
   readonly what: string;
   readonly empty: string;
+  /** How many of the answer's records the list shows once the shelf and column filters apply. */
+  readonly shown: number;
   readonly children: ReactNode;
 }) {
   if (query.isError)
@@ -59,6 +42,7 @@ export function ListStates({
     );
   if (query.isPending) return <Loader size="sm" aria-label={`Loading ${what}`} />;
   const { items, truncated, search, searched: searching } = query.data;
+  const none = shown === 0;
   // An empty answer to the previous filter says nothing about the new one: wait for it rather than
   // claim that nothing exists or nothing matched.
   if (query.isPlaceholderData && items.length === 0)
@@ -75,10 +59,10 @@ export function ListStates({
         </Group>
       ) : null}
       {/* An empty answer to a search the index could not run is not "no match": the line above says why. */}
-      {items.length === 0 && (search.available || !searching) ? (
+      {none && (search.available || !searching) ? (
         <Text c="dimmed">{searching ? `No ${what} match.` : empty}</Text>
       ) : null}
-      {items.length > 0 ? children : null}
+      {none ? null : children}
       {truncated ? (
         <Text size="xs" c="dimmed">
           More matched than are shown. Search or filter to narrow them.

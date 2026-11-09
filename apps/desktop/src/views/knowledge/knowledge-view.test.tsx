@@ -105,7 +105,7 @@ describe('KnowledgeView', () => {
     expect(within(rows[0] ?? table).getByText('Never sleep in tests')).toBeTruthy();
     expect(within(rows[0] ?? table).getByText('api')).toBeTruthy();
     expect(within(rows[0] ?? table).getByText('Policy')).toBeTruthy();
-    expect(within(rows[0] ?? table).getByText('13 Oct 2026')).toBeTruthy();
+    expect(within(rows[0] ?? table).getByTitle('13 Oct 2026')).toBeTruthy();
     expect(within(rows[1] ?? table).getByText('Prefer small PRs')).toBeTruthy();
     expect(within(rows[1] ?? table).getByText('You')).toBeTruthy();
     expect(within(rows[1] ?? table).getByText('Heuristic')).toBeTruthy();
@@ -316,7 +316,7 @@ describe('KnowledgeView', () => {
     expect(screen.getByText('Search is unavailable: x')).toBeTruthy();
   });
 
-  it('filters by You, Project or one area, and shows history with each record’s state', async () => {
+  it('filters by You, Project or one area, and shows past records with each one’s state', async () => {
     const { asked } = serve({
       principles: [
         principleItem({ state: 'superseded', statement: 'Old rule' }),
@@ -325,7 +325,8 @@ describe('KnowledgeView', () => {
       ],
     });
     renderApp('/knowledge');
-    await screen.findByRole('table', { name: 'Principles' });
+    // Under Current, none of these past records is shown.
+    expect(await screen.findByText(/^No principles yet/)).toBeTruthy();
     expect(asked.at(-1)?.get('history')).toBe('0');
     await chooseScope('api');
     await waitFor(() => {
@@ -337,7 +338,7 @@ describe('KnowledgeView', () => {
       expect(asked.at(-1)?.get('scope')).toBe('you');
     });
     expect(asked.at(-1)?.get('area')).toBeNull();
-    fireEvent.click(screen.getByRole('switch', { name: 'History' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Past' }));
     await waitFor(() => {
       expect(asked.at(-1)?.get('history')).toBe('1');
     });
@@ -359,21 +360,23 @@ describe('KnowledgeView', () => {
     expect(within(table).getByText('Which icons?')).toBeTruthy();
     expect(within(table).getByText('Tabler')).toBeTruthy();
     expect(within(table).getByText('ui')).toBeTruthy();
-    expect(within(table).getByText('13 Oct 2026')).toBeTruthy();
-    expect(within(table).getByText('Current')).toBeTruthy();
+    expect(within(table).getByTitle('13 Oct 2026')).toBeTruthy();
+    // Every record under Current is current, so the column that would say so is left out.
+    expect(within(table).queryByText('Current')).toBeNull();
   });
 
-  it('counts pending proposals on their tab and shows what each proposes', async () => {
+  it('counts pending proposals on the Principles tab and under Pending, and shows what each proposes', async () => {
     serve({ proposals: [proposalDto()] });
     renderApp('/knowledge');
-    fireEvent.click(await screen.findByRole('tab', { name: /^Proposals\s*1$/ }));
-    expect(await screen.findByText('No sleeps in tests')).toBeTruthy();
-    expect(screen.getByText('Never sleep in tests')).toBeTruthy();
-    expect(screen.getByText('Two flaky runs came from sleeps.')).toBeTruthy();
-    expect(screen.getByText('Proposed')).toBeTruthy();
+    expect(await screen.findByRole('tab', { name: /^Principles\s*1 pending$/ })).toBeTruthy();
+    fireEvent.click(await screen.findByRole('radio', { name: 'Pending 1' }));
+    const table = await screen.findByRole('table', { name: 'Proposals' });
+    expect(within(table).getByText('Never sleep in tests')).toBeTruthy();
+    expect(within(table).getByText('Two flaky runs came from sleeps.')).toBeTruthy();
+    expect(within(table).getByText('Policy')).toBeTruthy();
   });
 
-  describe('on the Proposals tab', () => {
+  describe('under Pending', () => {
     /** A principle proposal for one place. */
     const placed = (
       title: string,
@@ -382,7 +385,7 @@ describe('KnowledgeView', () => {
     ): ProposalDto => {
       const proposal = proposalDto({ title, body });
       if (proposal.principle === null) throw new Error('the fixture proposes a principle');
-      return { ...proposal, principle: { ...proposal.principle, ...place } };
+      return { ...proposal, principle: { ...proposal.principle, ...place, statement: title } };
     };
     const proposals = [
       placed('Mine', { scope: 'you', area: null }),
@@ -401,10 +404,14 @@ describe('KnowledgeView', () => {
         .map((row) => row.querySelector('p')?.textContent);
     };
 
+    /** A note is answered in the Inbox, so Pending lists only the principles. */
+    const principles = proposals.filter((p) => p.principle !== null);
+
     async function openProposals() {
-      fireEvent.click(await screen.findByRole('tab', { name: /^Proposals/ }));
+      fireEvent.click(await screen.findByRole('tab', { name: /^Principles/ }));
+      fireEvent.click(await screen.findByRole('radio', { name: /^Pending/ }));
       await waitFor(() => {
-        expect(shown()).toHaveLength(proposals.length);
+        expect(shown()).toHaveLength(principles.length);
       });
     }
 
@@ -458,7 +465,7 @@ describe('KnowledgeView', () => {
       await openProposals();
     });
 
-    it('narrows to You, Project or one area, and counts anything but a principle as Project', async () => {
+    it('narrows to You, Project or one area', async () => {
       serve({ proposals });
       renderApp('/knowledge');
       await openProposals();
@@ -468,7 +475,7 @@ describe('KnowledgeView', () => {
       });
       await chooseScope('Project');
       await waitFor(() => {
-        expect(shown()).toEqual(['Whole project', 'A note']);
+        expect(shown()).toEqual(['Whole project']);
       });
       await chooseScope('api');
       await waitFor(() => {
@@ -527,7 +534,7 @@ describe('KnowledgeView', () => {
       fireEvent.change(screen.getByRole('textbox', { name: 'Search' }), {
         target: { value: 'rule' },
       });
-      fireEvent.click(screen.getByRole('switch', { name: 'History' }));
+      fireEvent.click(screen.getByRole('radio', { name: 'Past' }));
       await waitFor(() => {
         expect(asked.at(-1)?.params.get('q')).toBe('rule');
       });
@@ -545,7 +552,7 @@ describe('KnowledgeView', () => {
         'true',
       );
       expect(screen.getByRole('textbox', { name: 'Search' })).toHaveProperty('value', '');
-      expect(screen.getByRole('switch', { name: 'History' })).toHaveProperty('checked', false);
+      expect(screen.getByRole('radio', { name: 'Current' })).toHaveProperty('checked', true);
       const list = asked.filter((a) => a.path.endsWith('/knowledge'));
       expect(list.every((a) => a.projectId === beta.id)).toBe(true);
       expect(list.at(-1)?.params.get('q') ?? '').toBe('');
@@ -703,6 +710,8 @@ describe('KnowledgeView', () => {
       ),
     );
     renderApp('/knowledge');
+    // A retired principle is under Past.
+    fireEvent.click(await screen.findByRole('radio', { name: 'Past' }));
     fireEvent.click(await screen.findByRole('button', { name: /Where .* came from/ }));
     const drawer = await screen.findByRole('dialog', { name: 'Where it came from' });
     expect(await within(drawer).findByText(/Retired by an agent on 16 Oct 2026/)).toBeTruthy();
@@ -735,6 +744,7 @@ describe('KnowledgeView', () => {
         ),
       );
       renderApp('/knowledge');
+      fireEvent.click(await screen.findByRole('radio', { name: 'Past' }));
       fireEvent.click(await screen.findByRole('button', { name: /Where .* came from/ }));
       const drawer = await screen.findByRole('dialog', { name: 'Where it came from' });
       for (const verb of ['Retired', 'Withdrawn', 'Confirmed']) {

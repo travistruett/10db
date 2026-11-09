@@ -117,7 +117,6 @@ export function NewPrincipleButton({ project }: { readonly project: ProjectViewD
           project={project}
           title="New Principle"
           submitLabel="Save"
-          keyHint="A current principle with the same key and scope is replaced by this one."
           pending={create.isPending}
           error={create.error?.message ?? null}
           onSubmit={({ target, ...text }) => {
@@ -131,7 +130,7 @@ export function NewPrincipleButton({ project }: { readonly project: ProjectViewD
 }
 
 /**
- * A decision row's menu. Edit writes a successor and moves this one to History; Withdraw… is offered on
+ * A decision row's menu. Edit writes a successor and moves this one to Past; Withdraw… is offered on
  * an older version too, where its dialog says which record to withdraw instead.
  */
 export function DecisionActions({
@@ -230,7 +229,7 @@ export function PrincipleActions({
   };
   return (
     <>
-      <RowMenu label={principle.topicKey}>
+      <RowMenu label={`"${principle.statement}"`}>
         {current ? (
           <>
             <Menu.Item
@@ -263,7 +262,6 @@ export function PrincipleActions({
           project={project}
           title="Edit Principle"
           submitLabel="Save"
-          keyHint="Saving replaces this principle. Change the key only to rename it."
           initial={{
             target: recordTarget(principle, project.id),
             statement: principle.statement,
@@ -287,7 +285,7 @@ export function PrincipleActions({
       {open === Open.Retire ? (
         <ReasonDialog
           title="Retire Principle"
-          intro={`“${principle.statement}” stops being briefed and searched. It stays under History with your reason.`}
+          intro={`“${principle.statement}” stops being briefed and searched. It stays under Past with your reason.`}
           submitLabel="Retire"
           required
           pending={retire.isPending}
@@ -358,7 +356,6 @@ export function ProposalActions({
           project={project}
           title="Accept Proposal"
           submitLabel="Accept"
-          keyHint="Accepting replaces a current principle with the same key and scope."
           initial={{
             target: recordTarget(principle, project.id),
             statement: principle.statement,

@@ -46,7 +46,7 @@ A decision or a principle has a **target**: `you` (no project; it applies in eve
 
 ## The Knowledge view
 
-A top-level view at `/knowledge` with Principles, Decisions and Proposals tabs, search, a scope select, a History switch and a provenance drawer; it records, edits, retires, withdraws and decides proposals, and says in one line when search is unavailable. (`decisions/2026-11-03-knowledge-is-a-top-level-view-with-three-tabs.md`)
+A top-level view at `/knowledge` with Principles and Decisions tabs, each with a Pending (principles only), Current and Past shelf, search, a scope select and a provenance drawer; it records, edits, retires, withdraws and decides proposals, and says in one line when search is unavailable. (`decisions/2026-11-03-knowledge-is-a-top-level-view-with-three-tabs.md`, `decisions/2026-11-08-knowledge-is-two-tabs-with-shelves.md`)
 
 ## Invariants
 
