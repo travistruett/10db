@@ -1,5 +1,6 @@
-import { AppShell, Badge, Divider, Group, NavLink, VisuallyHidden } from '@mantine/core';
+import { AppShell, Badge, Group, NavLink, Stack, Text, VisuallyHidden } from '@mantine/core';
 import {
+  IconAdjustments,
   IconBulb,
   IconBuildingFactory2,
   IconInbox,
@@ -14,7 +15,6 @@ import { useRenderMode } from '../screens/render-context';
 import { RenderLayout } from '../screens/render-layout';
 import { ScreenRenderHost } from '../screens/screen-render-host';
 import { AgentDownloadStatus } from './agent-download-status';
-import { BuildCommit } from './build-commit';
 import { ColorSchemeToggle } from './color-scheme-toggle';
 import { DaemonStatus } from './daemon-status';
 import { KeepAwakeControl } from './keep-awake-control';
@@ -22,17 +22,22 @@ import { ProjectSwitcher } from './project-switcher';
 import { useOpenInboxCount } from '../views/inbox/inbox-count';
 import { FirstRun } from '../views/first-run/first-run';
 import { SettingsNav } from '../views/settings/settings-nav';
+import { firstGlobalSection, SettingsSectionKey } from '../views/settings/sections';
 import { ReconnectingBanner } from './reconnecting-banner';
 import { useSelectedProject } from './selected-project';
 import { ShapeNav } from './shape-nav';
 
-const NAV = [
-  { to: '/board', label: 'Board', icon: IconLayoutKanban },
-  { to: '/factory', label: 'Factory', icon: IconBuildingFactory2 },
-  { to: '/shape', label: 'Plan', icon: IconRoute },
+/** What needs the builder and what is running, across every project. */
+const GLOBAL_NAV = [
   { to: '/inbox', label: 'Inbox', icon: IconInbox },
+  { to: '/factory', label: 'Factory', icon: IconBuildingFactory2 },
+] as const;
+
+/** How the selected project's work is shaped; Plan sits among them as `ShapeNav`. */
+const PROJECT_NAV = [
+  { to: '/board', label: 'Board', icon: IconLayoutKanban },
+  { to: '/shape', label: 'Plan', icon: IconRoute },
   { to: '/knowledge', label: 'Knowledge', icon: IconBulb },
-  { to: '/settings', label: 'Settings', icon: IconSettings },
 ] as const;
 
 function InboxBadge({ count }: { readonly count: number }) {
@@ -78,7 +83,6 @@ function FullLayout() {
       <AppShell.Header data-tauri-drag-region>
         <Group h="100%" px="md" gap="sm" justify="flex-end" data-tauri-drag-region>
           <AgentDownloadStatus />
-          <BuildCommit />
           <DaemonStatus />
           <KeepAwakeControl />
           <ColorSchemeToggle />
@@ -100,25 +104,71 @@ function FullLayout() {
           <SettingsNav />
         ) : (
           <>
-            <ProjectSwitcher />
-            <Divider my="xs" />
-            {NAV.map(({ to, label, icon: Icon }) =>
-              to === '/shape' ? (
-                <ShapeNav key={to} pathname={pathname} />
-              ) : (
+            {/* Global first, then the selected project's views, then app-wide Settings at the foot:
+                the same order the Settings sidebar uses. */}
+            <AppShell.Section grow>
+              <Stack gap={2}>
+                {GLOBAL_NAV.map(({ to, label, icon: Icon }) => (
+                  <NavLink
+                    key={to}
+                    component={Link}
+                    to={to}
+                    active={pathname === to || pathname.startsWith(`${to}/`)}
+                    label={label}
+                    leftSection={<Icon size={16} stroke={1.5} />}
+                    rightSection={
+                      to === '/inbox' && openCards > 0 ? (
+                        <InboxBadge count={openCards} />
+                      ) : undefined
+                    }
+                  />
+                ))}
+              </Stack>
+              <Stack gap={2} mt="lg">
+                <Text size="xs" fw={600} c="dimmed" px="sm" pb={4}>
+                  Project
+                </Text>
+                <ProjectSwitcher compact />
+                {PROJECT_NAV.map(({ to, label, icon: Icon }) =>
+                  to === '/shape' ? (
+                    <ShapeNav key={to} pathname={pathname} />
+                  ) : (
+                    <NavLink
+                      key={to}
+                      component={Link}
+                      to={to}
+                      active={pathname === to || pathname.startsWith(`${to}/`)}
+                      label={label}
+                      leftSection={<Icon size={16} stroke={1.5} />}
+                    />
+                  ),
+                )}
                 <NavLink
-                  key={to}
-                  component={Link}
-                  to={to}
-                  active={pathname === to || pathname.startsWith(`${to}/`)}
-                  label={label}
-                  leftSection={<Icon size={16} stroke={1.5} />}
-                  rightSection={
-                    to === '/inbox' && openCards > 0 ? <InboxBadge count={openCards} /> : undefined
-                  }
+                  label="Project Settings"
+                  leftSection={<IconAdjustments size={16} stroke={1.5} />}
+                  renderRoot={(props) => (
+                    <Link
+                      {...props}
+                      to="/settings/$section"
+                      params={{ section: SettingsSectionKey.General }}
+                    />
+                  )}
                 />
-              ),
-            )}
+              </Stack>
+            </AppShell.Section>
+            <AppShell.Section>
+              <NavLink
+                label="Settings"
+                leftSection={<IconSettings size={16} stroke={1.5} />}
+                renderRoot={(props) => (
+                  <Link
+                    {...props}
+                    to="/settings/$section"
+                    params={{ section: firstGlobalSection() }}
+                  />
+                )}
+              />
+            </AppShell.Section>
           </>
         )}
       </AppShell.Navbar>

@@ -1641,3 +1641,61 @@ describe('FactoryView human-touch panel', () => {
     expect(await screen.findByText("Couldn't load how often a person was needed")).toBeTruthy();
   });
 });
+
+describe('FactoryView across projects', () => {
+  const alpha = projectViewDto({ name: 'alpha' });
+  const beta = projectViewDto({ name: 'beta' });
+
+  /** Two projects, each answering GET /goals with one goal of its own. */
+  function twoProjects(): void {
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([alpha, beta])),
+      http.get(daemonUrl('/projects/:projectId/goals'), ({ params }) =>
+        HttpResponse.json(
+          goalListDto(
+            goal(params['projectId'] === beta.id ? 'Beta goal' : 'Alpha goal', 'running'),
+          ),
+        ),
+      ),
+    );
+  }
+
+  it('lists every project’s goals under its name, whichever project is selected', async () => {
+    twoProjects();
+    renderApp('/factory');
+    const alphaGroup = await screen.findByRole('group', { name: 'alpha' });
+    const betaGroup = await screen.findByRole('group', { name: 'beta' });
+    expect(await within(alphaGroup).findByRole('button', { name: /^Alpha goal/ })).toBeTruthy();
+    expect(await within(betaGroup).findByRole('button', { name: /^Beta goal/ })).toBeTruthy();
+    // Human touch is one project's; with every project shown it says to choose one.
+    expect(
+      screen.getByText('Choose a project to see how often a person was needed in it.'),
+    ).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Human touch' })).toBeNull();
+  });
+
+  it('narrows to one project by its own filter, which shows what it is set to', async () => {
+    twoProjects();
+    renderApp(`/factory?project=${beta.id}`);
+    expect(await screen.findByRole('group', { name: 'beta' })).toBeTruthy();
+    expect(screen.queryByRole('group', { name: 'alpha' })).toBeNull();
+    expect(screen.getByRole('combobox', { name: 'Project' })).toBe(
+      screen.getByDisplayValue('beta'),
+    );
+    expect(await screen.findByRole('heading', { name: 'Human touch' })).toBeTruthy();
+  });
+
+  it('makes a project the selected one when the builder acts in its group, so Plan Work… plans there', async () => {
+    twoProjects();
+    const { router } = renderApp('/factory');
+    await screen.findByRole('button', { name: 'Project: alpha. Switch project' });
+    const betaGroup = await screen.findByRole('group', { name: 'beta' });
+    fireEvent.click(within(betaGroup).getByRole('link', { name: 'Plan Work…' }));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/shape');
+    });
+    expect(
+      await screen.findByRole('button', { name: 'Project: beta. Switch project' }),
+    ).toBeTruthy();
+  });
+});

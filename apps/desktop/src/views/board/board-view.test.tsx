@@ -1499,7 +1499,7 @@ describe('BoardView', () => {
     expect(cardsViewport?.contains(more)).toBe(false);
   });
 
-  it('keeps a column scrollbar in a strip of its own, beside the cards, on hover only', async () => {
+  it('draws no column scrollbar and keeps no strip for one, so the cards sit evenly inset', async () => {
     const project = projectDto();
     const done = Array.from({ length: 22 }, (_, i) =>
       taskDto({
@@ -1517,8 +1517,13 @@ describe('BoardView', () => {
     renderApp('/board');
     const list = await screen.findByRole('list', { name: 'Done tasks' });
     const viewport = list.closest('[data-scrollbars="y"]');
-    // 'y' reserves the strip always, so cards keep their width when the scrollbar fades in.
-    expect(viewport?.getAttribute('data-offset-scrollbars')).toBe('y');
+    expect(viewport).not.toBeNull();
+    expect(viewport?.hasAttribute('data-offset-scrollbars')).toBe(false);
+    // Mantine renders a 'never' scrollbar as an element marked hidden; a hover one isn't rendered until hovered.
+    const scrollbars = [
+      ...(viewport?.parentElement?.querySelectorAll('.mantine-ScrollArea-scrollbar') ?? []),
+    ];
+    expect(scrollbars.map((bar) => bar.getAttribute('data-hidden'))).toEqual(['true']);
   });
 
   it('Ready ends in Add Task, which opens New Task', async () => {

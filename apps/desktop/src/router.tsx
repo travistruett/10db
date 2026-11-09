@@ -1,4 +1,4 @@
-import { GoalId, PrincipleId, ShapeId, TaskId } from '@10db/contracts';
+import { GoalId, PrincipleId, ProjectId, ShapeId, TaskId } from '@10db/contracts';
 import {
   createRootRoute,
   createRoute,
@@ -86,13 +86,19 @@ const indexRoute = createRoute({
     throw redirect({ to: '/factory' });
   },
 });
+/** A global view's project filter: absent shows every project. */
+function projectFilter(search: Record<string, unknown>): { project?: ProjectId } {
+  const project = ProjectId.safeParse(search['project']);
+  return project.success ? { project: project.data } : {};
+}
+
 const factoryRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/factory',
   // `goal` opens that goal's row, so the Board's "Open in Factory" lands on the goal expanded.
-  validateSearch: (search: Record<string, unknown>): { goal?: GoalId } => {
+  validateSearch: (search: Record<string, unknown>): { goal?: GoalId; project?: ProjectId } => {
     const goal = GoalId.safeParse(search['goal']);
-    return goal.success ? { goal: goal.data } : {};
+    return { ...(goal.success ? { goal: goal.data } : {}), ...projectFilter(search) };
   },
   component: FactoryPage,
 });
@@ -115,6 +121,7 @@ const shapeRoute = createRoute({
 const inboxRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/inbox',
+  validateSearch: projectFilter,
   component: InboxPage,
 });
 const knowledgeRoute = createRoute({

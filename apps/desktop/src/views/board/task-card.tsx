@@ -192,6 +192,8 @@ export function TaskCard({
       withBorder
       radius="md"
       p="sm"
+      shadow="xs"
+      bg="var(--tendb-color-card)"
       data-testid="task-card"
       {...(colored ? { 'data-state-color': state.color } : {})}
       style={
@@ -200,7 +202,8 @@ export function TaskCard({
               borderColor: `var(--mantine-color-${state.color}-filled)`,
               borderWidth: waiting ? 2 : 1,
             }
-          : { borderWidth: 1 }
+          : // A queued card's border is its own fill: the tone lifts it off the column, not a line.
+            { borderColor: 'var(--tendb-color-card)', borderWidth: 1 }
       }
     >
       <Stack gap="xs">
