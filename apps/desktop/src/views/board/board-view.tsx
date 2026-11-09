@@ -298,7 +298,12 @@ function BoardColumns({
                     variant="default"
                     size="xs"
                     fullWidth
-                    style={{ borderStyle: 'dashed' }}
+                    // An unfilled dashed slot, so it never reads as a card; hovered, it takes a card's tone.
+                    style={{
+                      borderStyle: 'dashed',
+                      '--button-bg': 'transparent',
+                      '--button-hover': 'var(--tendb-color-card)',
+                    }}
                     onClick={onAddTask}
                   >
                     Add Task

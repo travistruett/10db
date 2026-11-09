@@ -1,12 +1,25 @@
-import { ActionIcon, Group, Paper, ScrollArea, Stack, Text, VisuallyHidden } from '@mantine/core';
+import {
+  ActionIcon,
+  Box,
+  Group,
+  Paper,
+  ScrollArea,
+  Stack,
+  Text,
+  VisuallyHidden,
+} from '@mantine/core';
 import { IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
 import type { ReactNode } from 'react';
+import { useHiddenEdges } from '../../shell/use-hidden-edges';
+import { EdgeFade } from './edge-fade';
 
 /** An open column flexes between these widths, so the board fills the window and a card has room. */
 export const COLUMN_MIN_WIDTH = 260;
 export const COLUMN_MAX_WIDTH = 380;
 /** A collapsed column's width: room for the count and the label turned on its side. */
 export const RAIL_WIDTH = 44;
+/** How far the cards fade at an end of the list with more cards past it. */
+const LIST_FADE_DEPTH = 24;
 
 export interface BoardColumnProps {
   readonly label: string;
@@ -40,11 +53,21 @@ export function BoardColumn({
   rail = false,
   onToggle,
 }: BoardColumnProps) {
-  const border = `1px ${count === 0 ? 'dashed' : 'solid'} var(--mantine-color-default-border)`;
+  const { ref: listViewportRef, edges, onScroll } = useHiddenEdges();
+  // A column with cards is a recessed tray under them; an empty one is an unfilled dashed slot.
+  const empty = count === 0;
+  const border = empty
+    ? '1px dashed var(--mantine-color-default-border)'
+    : '1px solid var(--tendb-color-column-border)';
+  const surface = targeted
+    ? 'var(--mantine-color-blue-light)'
+    : empty
+      ? 'transparent'
+      : 'var(--tendb-color-column)';
   const outline = {
     // A drop target is outlined in the primary color, drawn inside so the column keeps its size.
     boxShadow: targeted ? 'inset 0 0 0 2px var(--mantine-color-blue-filled)' : 'none',
-    background: targeted ? 'var(--mantine-color-blue-light)' : undefined,
+    background: surface,
     transition: 'box-shadow 150ms ease, background-color 150ms ease',
   };
   const tasks = (
@@ -107,14 +130,14 @@ export function BoardColumn({
       }}
     >
       <Stack gap={0} h="100%">
-        {/* The band has a fixed height, in the controls' color, so every header reads as one row. */}
+        {/* The band has a fixed height and a tone of its own, so every header reads as one row. */}
         <Group
           justify="space-between"
           wrap="nowrap"
           h={40}
           px="sm"
-          bg="var(--mantine-color-default)"
-          style={{ flex: 'none', borderBottom: border }}
+          bg="var(--tendb-color-column-header)"
+          style={{ flex: 'none' }}
         >
           <Text fw={600} size="sm">
             {label}
@@ -136,36 +159,45 @@ export function BoardColumn({
             ) : null}
           </Group>
         </Group>
-        <Stack gap="xs" p="xs" flex={1} mih={0}>
+        <Stack gap="xs" p="lg" flex={1} mih={0}>
           {count === 0 ? (
             <Text size="xs" c="dimmed">
               {hint}
             </Text>
           ) : null}
-          {/* Only the cards scroll; the hint above and the footer below stay in view. The scrollbar shows on hover in a strip of its own beside the cards ('y' always reserves it, so cards never change width). */}
-          <ScrollArea
-            type="hover"
-            scrollbars="y"
-            offsetScrollbars="y"
-            flex={1}
-            mih={0}
-            styles={{ content: { minHeight: '100%' } }}
-          >
-            <Stack
-              component="ul"
-              ref={listRef}
-              gap="xs"
-              m={0}
-              p={0}
-              mih="100%"
-              style={{ listStyle: 'none' }}
-              aria-label={`${label} tasks`}
+          {/* Only the cards scroll; the hint above and the footer below stay in view. The scrollbar is never drawn, so the cards keep the same inset on all sides; an end fades into the column while cards are hidden past it. */}
+          <Box pos="relative" flex={1} mih={0}>
+            <ScrollArea
+              type="never"
+              scrollbars="y"
+              h="100%"
+              viewportRef={listViewportRef}
+              onScrollPositionChange={onScroll}
+              styles={{ content: { minHeight: '100%' } }}
             >
-              {children}
-            </Stack>
-          </ScrollArea>
-          {footer}
+              <Stack
+                component="ul"
+                ref={listRef}
+                gap="xs"
+                m={0}
+                p={0}
+                mih="100%"
+                style={{ listStyle: 'none' }}
+                aria-label={`${label} tasks`}
+              >
+                {children}
+              </Stack>
+            </ScrollArea>
+            <EdgeFade side="top" shown={edges.top} color={surface} depth={LIST_FADE_DEPTH} />
+            <EdgeFade side="bottom" shown={edges.bottom} color={surface} depth={LIST_FADE_DEPTH} />
+          </Box>
         </Stack>
+        {/* The footer sits wider and lower than the cards, set apart from them by the list's own padding. */}
+        {footer ? (
+          <Box px="xs" pb="xs" style={{ flex: 'none' }}>
+            {footer}
+          </Box>
+        ) : null}
       </Stack>
     </Paper>
   );

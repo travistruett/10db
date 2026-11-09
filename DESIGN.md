@@ -41,8 +41,18 @@ favors legibility and calm over decoration.
   takes a list of small labelled badges, so a new kind is another entry in the list: a shared branch (the
   batch has more than one task), CI passed or failed on a shipped pull request, waits on (the titles of the
   unfinished dependencies are its tooltip) and Cancelled.
+- **Board depth:** depth comes from tone, not lines, and every tone is a Selenized background. A column
+  with cards is a recessed tray (`--tendb-color-column`) under a header band of its own tone, with a soft
+  `bg_1` edge; an empty column or rail is an unfilled dashed slot. Cards are the raised tone
+  (`--tendb-color-card`) with no outline of their own. The pair swaps between schemes, because Selenized
+  dark lightens from `bg_0` and Selenized light darkens: in dark the tray is `bg_0` and the card `bg_1`, in
+  light the tray is `bg_1` and the card `bg_0`. The cards sit 20 px in from every side of the tray. The
+  list draws no scrollbar; an end of it fades into the tray while cards are hidden past it, as the board's
+  own sides fade while columns are. A column's footer (Add Task, Show All) sits 10 px from the tray's
+  edges, wider than the cards, and Add Task is an unfilled dashed slot that takes the card tone on hover,
+  so it never reads as a card.
 - **Card state:** the card's border takes the status color (blue running, yellow waiting on you, orange
-  paused, red failed, green done); queued keeps the plain border. No fill, no left stripe, no pulsing. A
+  paused, red failed, green done); a queued card's border is its own tone, so it shows none. No fill, no left stripe, no pulsing. A
   card waiting on the builder is the most prominent: a full 2 px yellow border. The card writes the state
   as a line with a dot, such as "Waiting on you: answer in Inbox", only when the color is yellow, red or
   orange, because only then does the builder have something to do or read. A failed task's line is the
