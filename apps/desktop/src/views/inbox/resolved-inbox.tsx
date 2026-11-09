@@ -4,11 +4,14 @@ import {
   CardResolution,
   ProposedPrinciples,
   type InboxItemDto,
+  type ProjectId,
 } from '@10db/contracts';
 import { Alert, Anchor, Badge, Group, Paper, Stack, Text } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
 import { useResolvedInbox } from '../../daemon/queries';
+import { ProjectLabel } from '../../shell/project-label';
 import { useSelectedProject } from '../../shell/selected-project';
+import { inProject } from './in-project';
 import { KIND_LABELS, optionLabel } from './permission-labels';
 
 /** The builder's answer as the card offered it; a choice no option matches reads as it was stored. */
@@ -34,12 +37,14 @@ function proposedBy(item: InboxItemDto): ProposedPrinciples | [] {
 }
 
 /** The inbox's resolved view: cards that were answered, dismissed, or closed by 10db, newest first. */
-export function ResolvedInbox() {
+export function ResolvedInbox({ project }: { readonly project: ProjectId | undefined }) {
   const resolved = useResolvedInbox();
   const { select } = useSelectedProject();
   // The daemon sends the most recent ones (RESOLVED_SHOWN); sorted here too, so the order never
   // depends on the response's.
-  const items = [...(resolved.data ?? [])].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const items = inProject(resolved.data ?? [], project).sort((a, b) =>
+    b.updatedAt.localeCompare(a.updatedAt),
+  );
   return (
     <Stack gap="xs">
       {resolved.isError ? (
@@ -58,6 +63,7 @@ export function ResolvedInbox() {
               <Badge size="sm" variant="light" color="gray" style={{ flexShrink: 0 }}>
                 {KIND_LABELS[item.kind]}
               </Badge>
+              <ProjectLabel projectId={item.projectId} />
               <Stack gap={2} style={{ minWidth: 0 }}>
                 <Text size="sm" lineClamp={2} title={item.title}>
                   {item.title}

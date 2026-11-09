@@ -1494,3 +1494,38 @@ describe('a resolved answer that proposed a principle', () => {
     expect(row?.textContent).not.toContain('principle');
   });
 });
+
+describe('Inbox across projects', () => {
+  const alpha = projectViewDto({ name: 'alpha' });
+  const beta = projectViewDto({ name: 'beta' });
+  const cards = [
+    inboxItemDto({ projectId: alpha.id, title: 'Alpha question?' }),
+    inboxItemDto({ projectId: beta.id, title: 'Beta question?' }),
+  ];
+
+  function twoProjects(): void {
+    inbox(cards);
+    server.use(http.get(daemonUrl('/projects'), () => HttpResponse.json([alpha, beta])));
+  }
+
+  it('shows every project’s cards, each naming its project', async () => {
+    twoProjects();
+    renderApp('/inbox');
+    // A card's header row holds its kind, its project and its title.
+    const header = async (title: string) => (await screen.findByText(title)).parentElement;
+    expect((await header('Alpha question?'))?.textContent).toContain('alpha');
+    expect((await header('Beta question?'))?.textContent).toContain('beta');
+    expect(screen.getByRole('radio', { name: 'Open 2' })).toBeTruthy();
+  });
+
+  it('narrows the cards and the Open count by its own project filter', async () => {
+    twoProjects();
+    renderApp(`/inbox?project=${beta.id}`);
+    expect(await screen.findByText('Beta question?')).toBeTruthy();
+    expect(screen.queryByText('Alpha question?')).toBeNull();
+    expect(screen.getByRole('radio', { name: 'Open 1' })).toBeTruthy();
+    expect(screen.getByRole('combobox', { name: 'Project' })).toBe(
+      screen.getByDisplayValue('beta'),
+    );
+  });
+});

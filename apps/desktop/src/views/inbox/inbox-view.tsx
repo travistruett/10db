@@ -4,12 +4,22 @@ import {
   type DecisionRecording,
   type InboxAnswer,
   type InboxItemDto,
+  type ProjectId,
 } from '@10db/contracts';
 import { Alert, Group, SegmentedControl, Stack, Text, Title } from '@mantine/core';
 import { useQueryClient } from '@tanstack/react-query';
+import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useRef, useState } from 'react';
 import { DaemonRequestError } from '../../daemon/client';
-import { queryKeys, useAnswerInbox, useInbox, useSystemCheck } from '../../daemon/queries';
+import {
+  queryKeys,
+  useAnswerInbox,
+  useInbox,
+  useProjects,
+  useSystemCheck,
+} from '../../daemon/queries';
+import { ProjectFilter } from '../../shell/project-filter';
+import { inProject } from './in-project';
 import { InboxCard } from './inbox-card';
 import { inboxRows, isDismissable, type InboxRow } from './inbox-rows';
 import { InboxShortcuts } from './inbox-shortcuts';
@@ -45,9 +55,15 @@ export function InboxView() {
   const [tab, setTab] = useState<Tab>('open');
   const [helpOpen, setHelpOpen] = useState(false);
   const inbox = useInbox();
+  const projects = useProjects();
+  const { project } = useSearch({ from: '/inbox' });
+  const navigate = useNavigate({ from: '/inbox' });
+  // 10db's own cards are the app's, not a project's, so they show under every filter.
   const cards = systemCards(useSystemCheck().data);
   // The header is drawn here once, the same for both views, so switching moves nothing in it.
-  const openCount = inbox.isSuccess ? inboxRows(inbox.data).length + cards.length : null;
+  const openCount = inbox.isSuccess
+    ? inboxRows(inProject(inbox.data, project)).length + cards.length
+    : null;
   // Each view is its own component, so the open view's keys are only live while it is shown.
   return (
     <Stack>
@@ -66,41 +82,53 @@ export function InboxView() {
             ]}
           />
         </Group>
-        <InboxShortcuts
-          opened={helpOpen}
-          onOpen={() => {
-            setHelpOpen(true);
-          }}
-          onClose={() => {
-            setHelpOpen(false);
-          }}
-        />
+        <Group gap="sm">
+          <ProjectFilter
+            projects={projects.data ?? []}
+            value={project ?? null}
+            onChange={(next) => {
+              void navigate({ search: next === null ? {} : { project: next } });
+            }}
+          />
+          <InboxShortcuts
+            opened={helpOpen}
+            onOpen={() => {
+              setHelpOpen(true);
+            }}
+            onClose={() => {
+              setHelpOpen(false);
+            }}
+          />
+        </Group>
       </Group>
       {tab === 'open' ? (
         <OpenInbox
+          project={project}
           systemCards={cards}
           onHelp={() => {
             setHelpOpen(true);
           }}
         />
       ) : (
-        <ResolvedInbox />
+        <ResolvedInbox project={project} />
       )}
     </Stack>
   );
 }
 
 function OpenInbox({
+  project,
   systemCards: ownCards,
   onHelp,
 }: {
+  readonly project: ProjectId | undefined;
   readonly systemCards: readonly SystemCard[];
   readonly onHelp: () => void;
 }) {
   const inbox = useInbox();
   const answer = useAnswerInbox();
   const queryClient = useQueryClient();
-  const rows = inboxRows(inbox.data ?? []);
+  const rows = inboxRows(inProject(inbox.data ?? [], project));
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   // A failed dismiss belongs to its row, which may not be the open one, so it never touches the draft.

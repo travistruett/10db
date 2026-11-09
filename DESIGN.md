@@ -95,7 +95,7 @@ favors legibility and calm over decoration.
   the Board's In review column: a task whose pull request is open is in review, never done. Green is only
   for work that has merged: a goal with open pull requests is Shipping, in blue, never green. A goal's
   Decisions are those its own tasks recorded, not every decision in the project.
-- **Factory is one list, not cards:** goals are rows of one list separated by hairline dividers, and the open
+- **Factory is one list per project, not cards:** every project's goals show, each project under its mark and name with its own Plan Work…, narrowed by Factory's Project filter (`?project=`); Human touch shows once one project is chosen. Acting in a project's group makes it the selected project first, so its links open there. Within a project, goals are rows of one list separated by hairline dividers, and the open
   goal's area takes the `bg_1` fill. Rows take no borders and no shadows; cards stay the Board's draggable
   things. Each row is a button (`aria-expanded`) over a `role="region"`: title, status dot and one line, collapsed
   until opened, one open at a time. Order: failed, waiting on you, waiting on someone, paused, running,

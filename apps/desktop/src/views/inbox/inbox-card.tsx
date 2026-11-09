@@ -24,6 +24,7 @@ import {
 } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
 import type { KeyboardEvent, RefObject } from 'react';
+import { ProjectLabel } from '../../shell/project-label';
 import { ExternalLink } from '../board/pull-request-link';
 import { BatchCardActions } from './batch-card-actions';
 import { CheckCard } from './check-card';
@@ -130,6 +131,8 @@ export function InboxCard({
       {review ? 'MCP server' : KIND_LABELS[item.kind]}
     </Badge>
   );
+  // The Inbox lists every project, so each card says whose it is.
+  const where = <ProjectLabel projectId={item.projectId} />;
   const times =
     count > 1 ? (
       <Badge size="sm" variant="default" style={{ flexShrink: 0 }}>
@@ -155,6 +158,7 @@ export function InboxCard({
         <UnstyledButton onClick={onSelect} p="sm" style={{ flex: 1, minWidth: 0 }}>
           <Group gap="sm" wrap="nowrap">
             {kind}
+            {where}
             {times}
             <Text size="sm" lineClamp={1} title={item.title} style={{ minWidth: 0 }}>
               {item.title}
@@ -194,6 +198,7 @@ export function InboxCard({
         header={
           <Group gap="sm" wrap="nowrap">
             {kind}
+            {where}
             {times}
             <Text fw={600} style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
               {item.title}
@@ -221,6 +226,7 @@ export function InboxCard({
       <Stack gap="sm">
         <Group gap="sm" wrap="nowrap">
           {kind}
+          {where}
           {principle ? (
             <Badge size="sm" variant="outline" style={{ flexShrink: 0 }}>
               {PRINCIPLE_KIND_LABELS[principle.kind]}
