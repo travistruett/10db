@@ -3,6 +3,7 @@ import { USAGE_HANDOFF_AT, USAGE_HANDOFF_MAX, USAGE_HANDOFF_MIN } from './accoun
 import { AllowedCommands } from './allowed-commands';
 import { ModelSetting } from './catalogue';
 import { BranchName, PrTitlePrefix } from './git-names';
+import { AreaRole, AreaRoute, areaRolesProblem } from './page-areas';
 import {
   AccountId,
   BatchId,
@@ -86,8 +87,16 @@ const GlobbedDef = z.object({ name: Name, globs: z.array(z.string().min(1)).min(
  * falls back to its widest rule: a path no other area matches falls in it, so a file added later
  * (a new package, a first dotfile) is in an area. A path another area matches is never in it. A
  * project has at most one (`atMostOneCatchAll`); absent or false is an ordinary area.
+ *
+ * `role` says whether the area is a page of the project's app or code pages share; absent, the area
+ * behaves as it always has. `route` is the path that shows a page, on a page only. Two pages may not
+ * share a file (`areaRolesProblem`, checked on create and on patch).
  */
-export const AreaDef = GlobbedDef.extend({ catchAll: z.boolean().optional() });
+export const AreaDef = GlobbedDef.extend({
+  catchAll: z.boolean().optional(),
+  role: z.enum(AreaRole).optional(),
+  route: AreaRoute.optional(),
+});
 export type AreaDef = z.infer<typeof AreaDef>;
 
 /** The refusal for a project with two catch-all areas. */
@@ -98,6 +107,12 @@ export function atMostOneCatchAll(
   areas: readonly Pick<AreaDef, 'catchAll'>[] | undefined,
 ): boolean {
   return (areas ?? []).filter((a) => a.catchAll === true).length <= 1;
+}
+
+/** Adds the areas' role and route problem, if any, to a project being parsed. */
+function checkAreaRoles(areas: readonly AreaDef[] | undefined, ctx: z.RefinementCtx): void {
+  const problem = areaRolesProblem(areas ?? []);
+  if (problem !== null) ctx.addIssue({ code: 'custom', message: problem, path: ['areas'] });
 }
 
 /**
@@ -587,6 +602,9 @@ export const ProjectInput = z
     path: ['precheckCommand'],
   })
   .refine((p) => atMostOneCatchAll(p.areas), { message: ONE_CATCH_ALL, path: ['areas'] })
+  .superRefine((p, ctx) => {
+    checkAreaRoles(p.areas, ctx);
+  })
   .refine(
     (p) => p.workspaceMode !== WorkspaceMode.Worktree || p.delivery === Delivery.PullRequest,
     {
@@ -696,6 +714,9 @@ export const ProjectPatch = z
   .partial()
   .refine((p) => Object.keys(p).length > 0, { message: 'Change at least one field' })
   .refine((p) => atMostOneCatchAll(p.areas), { message: ONE_CATCH_ALL, path: ['areas'] })
+  .superRefine((p, ctx) => {
+    checkAreaRoles(p.areas, ctx);
+  })
   .refine(
     (p) => {
       const names = [...(p.areas ?? []), ...(p.hazards ?? [])].map((d) => d.name);

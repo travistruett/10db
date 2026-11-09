@@ -374,6 +374,78 @@ describe('MCP tool inputs', () => {
   });
 });
 
+describe("an area's role and route", () => {
+  const project = { name: 'demo', repoPath: '/tmp/demo', gateCommand: 'make gate' };
+  const people = { name: 'people', globs: ['app/people/**'], role: 'page', route: '/people' };
+  const settings = { name: 'settings', globs: ['app/settings/**'], role: 'page' };
+  const src = { name: 'src', globs: ['app/**'], role: 'shared' };
+  const issues = (areas: unknown[]) => {
+    const created = ProjectInput.safeParse({ ...project, areas });
+    const patched = ProjectPatch.safeParse({ areas });
+    return [created, patched].map((r) => r.error?.issues.map((i) => i.message).join('; ') ?? '');
+  };
+
+  it('is optional: an area without one parses as before, with neither field', () => {
+    const plain = { name: 'api', globs: ['api/**'] };
+    const parsed = ProjectInput.parse({ ...project, areas: [plain] }).areas[0];
+    expect(parsed).toEqual(plain);
+    expect(parsed).not.toHaveProperty('role');
+    expect(parsed).not.toHaveProperty('route');
+  });
+
+  it('is kept when a project is made or patched with one', () => {
+    const areas = [people, settings, src];
+    expect(ProjectInput.parse({ ...project, areas }).areas).toEqual(areas);
+    expect(ProjectPatch.parse({ areas }).areas).toEqual(areas);
+  });
+
+  it.each([
+    [
+      'two pages that can share a file',
+      [people, { ...settings, globs: ['app/**/*.tsx'] }],
+      'people',
+    ],
+    ['a route on a shared area', [{ ...src, route: '/' }], 'Only a page has a route'],
+    [
+      'a route on an area with no role',
+      [{ name: 'api', globs: ['api/**'], route: '/api' }],
+      'Only a page',
+    ],
+    ['a route that is not a path', [{ ...people, route: 'people' }], '/'],
+    ['a role that is neither', [{ ...people, role: 'screen' }], ''],
+  ])('refuses %s, on create and on patch', (_name, areas, message) => {
+    for (const problem of issues(areas)) {
+      expect(problem).not.toBe('');
+      expect(problem).toContain(message);
+    }
+  });
+
+  it.each([
+    ['a page and a shared area over its files', [people, src]],
+    ['two pages in sibling folders', [people, settings]],
+    [
+      'two areas with no role that overlap',
+      [
+        { name: 'a', globs: ['**'] },
+        { name: 'b', globs: ['b/**'] },
+      ],
+    ],
+    [
+      'a page that is the catch-all, which never shares a file',
+      [people, { ...settings, globs: ['**'], catchAll: true }],
+    ],
+  ])('allows %s', (_name, areas) => {
+    expect(issues(areas)).toEqual(['', '']);
+  });
+
+  it('names both pages and the globs that meet', () => {
+    const [problem] = issues([people, { ...settings, globs: ['app/**/*.tsx'] }]);
+    expect(problem).toContain('"people" and "settings"');
+    expect(problem).toContain('app/people/**');
+    expect(problem).toContain('app/**/*.tsx');
+  });
+});
+
 describe('the catch-all area', () => {
   const project = {
     name: 'demo',

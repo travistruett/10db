@@ -875,6 +875,27 @@ describe('team, routing and benchmark routes', () => {
       body: { allowedCommands: ['node'] },
     },
     {
+      name: 'two page areas that can share a file',
+      method: 'PATCH',
+      path: `/projects/${projectId}`,
+      body: {
+        areas: [
+          { name: 'people', globs: ['app/people/**'], role: 'page', route: '/people' },
+          { name: 'pages', globs: ['app/**/page.tsx'], role: 'page' },
+        ],
+      },
+    },
+    {
+      name: 'a route on an area that is not a page',
+      method: 'POST',
+      path: '/projects',
+      body: {
+        name: 'demo',
+        repoPath: '/tmp/demo',
+        areas: [{ name: 'ui', globs: ['ui/**'], role: 'shared', route: '/' }],
+      },
+    },
+    {
       name: 'a PATCH /projects/:id seed name with a slash',
       method: 'PATCH',
       path: `/projects/${projectId}`,

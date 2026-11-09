@@ -1,4 +1,5 @@
 import { matchesGlob, posix } from 'node:path';
+import { AreaRole } from '@10db/contracts';
 import { isLooseGlob, literalGlob } from './literal-glob';
 
 /** What kind of place a candidate area is, which decides what may merge with it. */
@@ -14,6 +15,13 @@ export const AreaCandidateKind = {
 } as const;
 export type AreaCandidateKind = (typeof AreaCandidateKind)[keyof typeof AreaCandidateKind];
 
+/** What a candidate is to the app: a page and the path that shows it, or code pages share. */
+interface Roled {
+  readonly role?: AreaRole;
+  /** On a page: the path in the app that shows it. */
+  readonly route?: string;
+}
+
 /** The folders something holds: some with everything below them, some for their own files only. */
 interface Holder {
   /** Folders held with every file below them. */
@@ -23,7 +31,7 @@ interface Holder {
 }
 
 /** A place in the repository that could be an area, before anyone has named it. */
-export interface AreaCandidate extends Holder {
+export interface AreaCandidate extends Holder, Roled {
   readonly kind: AreaCandidateKind;
   /** The path that names the candidate (`.` for the top of the repository). */
   readonly label: string;
@@ -99,19 +107,34 @@ const holdsUnit = (dir: Dir): boolean =>
 const isRouteGroup = (name: string) => /^\(.+\)$/u.test(name);
 
 /** Where in the repository a draft candidate lives: whole folders and folders' own files. */
-interface Draft extends Holder {
+interface Draft extends Holder, Roled {
   readonly kind: AreaCandidateKind;
   readonly label: string;
   readonly trees: string[];
   readonly directs: string[];
 }
 
-const draftOf = (kind: AreaCandidateKind, label: string, tree: string): Draft => ({
-  kind,
-  label,
-  trees: [tree],
-  directs: [],
-});
+const draftOf = (
+  kind: AreaCandidateKind,
+  label: string,
+  tree: string,
+  roled: Roled = {},
+): Draft => ({ kind, label, trees: [tree], directs: [], ...roled });
+
+const SHARED: Roled = { role: AreaRole.Shared };
+
+/**
+ * A screen's role and route from its folders below the app's route folder. Route groups (`(shop)`)
+ * leave the path; a private folder (`_parts`) is no screen, so it is shared code. A dynamic name
+ * (`[id]`) or a parallel route slot (`@modal`) is a page no single path shows.
+ */
+function screenRole(below: readonly string[]): Roled {
+  if (below.some((name) => name.startsWith('_'))) return SHARED;
+  const names = below.filter((name) => !isRouteGroup(name));
+  if (names.some((name) => name.startsWith('[') || name.startsWith('@')))
+    return { role: AreaRole.Page };
+  return { role: AreaRole.Page, route: `/${names.join('/')}` };
+}
 
 /** The folders `steps` below `dir`, one for each step, or null when one step is missing. */
 function descend(dir: Dir, steps: readonly string[]): Dir[] | null {
@@ -171,7 +194,9 @@ function splitRoutes(unit: Dir, { routes, between }: RouteRoot): Draft[] {
     label: unit.path,
     trees: [],
     directs: way.map((dir) => dir.path),
+    ...SHARED,
   };
+  const below = (dir: Dir) => dir.path.slice(routes.path.length + 1).split('/');
   for (const [name, child] of routes.dirs) {
     if (!isRouteGroup(name)) {
       own.trees.push(child.path);
@@ -179,7 +204,10 @@ function splitRoutes(unit: Dir, { routes, between }: RouteRoot): Draft[] {
     }
     const screens = screensOf(child);
     if (screens === null) {
-      drafts.push(draftOf(AreaCandidateKind.Route, child.path, child.path));
+      // A group of few screens is one page, which no single path shows.
+      drafts.push(
+        draftOf(AreaCandidateKind.Route, child.path, child.path, { role: AreaRole.Page }),
+      );
       continue;
     }
     const left: Draft = {
@@ -187,9 +215,12 @@ function splitRoutes(unit: Dir, { routes, between }: RouteRoot): Draft[] {
       label: child.path,
       trees: [],
       directs: [child.path, ...screens.passed.map((d) => d.path), screens.container.path],
+      ...SHARED,
     };
     for (const screen of screens.container.dirs.values())
-      drafts.push(draftOf(AreaCandidateKind.Route, screen.path, screen.path));
+      drafts.push(
+        draftOf(AreaCandidateKind.Route, screen.path, screen.path, screenRole(below(screen))),
+      );
     drafts.push(left);
   }
   for (const [n, dir] of way.slice(0, -1).entries()) {
@@ -197,7 +228,7 @@ function splitRoutes(unit: Dir, { routes, between }: RouteRoot): Draft[] {
     for (const child of dir.dirs.values()) {
       if (child === next) continue;
       if (child.total >= MIN_FILES)
-        drafts.push(draftOf(AreaCandidateKind.Folder, child.path, child.path));
+        drafts.push(draftOf(AreaCandidateKind.Folder, child.path, child.path, SHARED));
       else own.trees.push(child.path);
     }
   }
@@ -418,6 +449,7 @@ export function deriveAreaCandidates(files: readonly string[]): AreaCandidate[] 
       files: holding.files,
       trees: [...draft.trees],
       directs: [...draft.directs],
+      ...roledOf([draft]),
     });
   }
   return looseGlobs.size === 0
@@ -544,7 +576,19 @@ function mergeGroups(
         files: members.reduce((sum, m) => sum + m.files, 0),
         trees: members.flatMap((m) => m.trees),
         directs: members.flatMap((m) => m.directs),
+        ...roledOf(members),
       },
     ];
   });
+}
+
+/**
+ * The role and route of an area made of `members`: their role when they all have the same one, else
+ * none; a route only when one member is the whole area, since two screens are no single path.
+ */
+export function roledOf(members: readonly Roled[]): Roled {
+  const [first, ...others] = members;
+  if (first?.role === undefined || others.some((m) => m.role !== first.role)) return {};
+  if (others.length > 0 || first.route === undefined) return { role: first.role };
+  return { role: first.role, route: first.route };
 }

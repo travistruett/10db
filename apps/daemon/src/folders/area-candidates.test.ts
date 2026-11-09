@@ -1,5 +1,5 @@
 import { matchesGlob } from 'node:path';
-import { PathPattern } from '@10db/contracts';
+import { areaRolesProblem, PathPattern } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { AreaCandidateKind, deriveAreaCandidates, mergeCoupledCandidates } from './area-candidates';
 
@@ -22,6 +22,7 @@ function expectEachFileInOneCandidate(tracked: readonly string[], context = ''):
     candidates.reduce((sum, c) => sum + c.files, 0),
     context,
   ).toBe(tracked.length);
+  expect(areaRolesProblem(candidates.map((c) => ({ ...c, name: c.label }))), context).toBeNull();
 }
 
 /** xorshift32: the same layouts on every run, so a failure names a seed that shows it again. */
@@ -145,6 +146,63 @@ describe('deriveAreaCandidates', () => {
     expect(memos?.globs).toEqual(['frontend/app/(product)/app/memos/**']);
     for (const file of tracked)
       expect(candidates.filter((c) => covered(c.globs, file)).length, file).toBe(1);
+  });
+
+  describe('the role and route each candidate of a framework app is proposed with', () => {
+    const product = 'frontend/app/(product)/app';
+    const tracked = [
+      'frontend/package.json',
+      'frontend/app/layout.tsx',
+      'frontend/app/(marketing)/page.tsx',
+      'frontend/app/(marketing)/pricing/page.tsx',
+      ...files('frontend/lib', ['a.ts', 'b.ts', 'c.ts']),
+      `${product}/layout.tsx`,
+      `${product}/memos/page.tsx`,
+      `${product}/settings/page.tsx`,
+      `${product}/[orgId]/page.tsx`,
+      `${product}/_parts/panel.tsx`,
+      `${product}/@modal/page.tsx`,
+      'backend/pyproject.toml',
+      'backend/main.py',
+    ];
+    const candidates = deriveAreaCandidates(tracked);
+    it.each([
+      [
+        'a screen is a page at its path, without its route groups',
+        `${product}/memos`,
+        'page',
+        '/app/memos',
+      ],
+      ['a dynamic screen is a page with no single route', `${product}/[orgId]`, 'page', undefined],
+      [
+        'a parallel route slot is a page with no single route',
+        `${product}/@modal`,
+        'page',
+        undefined,
+      ],
+      ['a private folder among the screens is shared', `${product}/_parts`, 'shared', undefined],
+      [
+        'a route group of few screens is one page with no single route',
+        'frontend/app/(marketing)',
+        'page',
+        undefined,
+      ],
+      [
+        "a route group's own files (its layout) are shared",
+        'frontend/app/(product)',
+        'shared',
+        undefined,
+      ],
+      ["the app's own files (the root layout) are shared", 'frontend', 'shared', undefined],
+      ['a folder beside the routes is shared', 'frontend/lib', 'shared', undefined],
+      ['a package with no routes has no role', 'backend', undefined, undefined],
+      ['the top of the repository has no role', '.', undefined, undefined],
+    ])('%s', (_name, label, role, route) => {
+      const found = candidates.find((c) => c.label === label);
+      expect(found, label).toBeDefined();
+      expect(found?.role).toBe(role);
+      expect(found?.route).toBe(route);
+    });
   });
 
   it.each([
@@ -424,6 +482,26 @@ describe('mergeCoupledCandidates', () => {
     const commits = Array.from({ length: 6 }, () => ['[orgId]/a.ts', '[teamId]/b.ts']);
     const merged = mergeCoupledCandidates(candidates, commits);
     expect(merged.map((c) => c.label)).toContain('[orgId] + [teamId]');
+  });
+
+  it('makes merged screens one page with no single route, and a page merged with shared code no role', () => {
+    const product = 'web/app/(product)';
+    const candidates = deriveAreaCandidates([
+      'web/package.json',
+      ...['memos', 'settings', 'people'].map((s) => `${product}/${s}/page.tsx`),
+      ...files('web/lib', ['a.ts', 'b.ts', 'c.ts']),
+    ]);
+    const together = (a: string, b: string) => Array.from({ length: 6 }, () => [a, b]);
+    const merged = mergeCoupledCandidates(candidates, [
+      ...together(`${product}/memos/page.tsx`, `${product}/settings/page.tsx`),
+      ...together(`${product}/people/page.tsx`, 'web/lib/a.ts'),
+    ]);
+    const pages = merged.find((c) => c.label === `${product}/memos + ${product}/settings`);
+    expect(pages?.role).toBe('page');
+    expect(pages).not.toHaveProperty('route');
+    const mixed = merged.find((c) => c.label.includes(`${product}/people`));
+    expect(mixed?.label).toContain('web/lib');
+    expect(mixed).not.toHaveProperty('role');
   });
 
   it('never merges two units, however often they change together', () => {

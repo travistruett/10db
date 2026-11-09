@@ -146,6 +146,19 @@
           },
           "catchAll": {
             "type": "boolean"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "page",
+              "shared"
+            ]
+          },
+          "route": {
+            "type": "string",
+            "maxLength": 500,
+            "format": "starts_with",
+            "pattern": "^\\/.*"
           }
         },
         "required": [
