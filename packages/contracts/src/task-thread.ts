@@ -22,6 +22,8 @@ export const TASK_MESSAGE_MAX_CHARS = 20_000;
 /** One picture is held to what one file dropped into a Plan conversation may be. */
 export const TASK_PICTURE_MAX_BYTES = SHAPE_FILE_MAX_BYTES;
 export const TASK_MESSAGE_PICTURES_MAX = 10;
+/** A pasted picture's name, as it is kept and shown, is at most this many characters. */
+export const TASK_PICTURE_NAME_MAX_CHARS = 255;
 /** What a message's pictures may weigh together: the daemon reads a message whole before it keeps it. */
 export const TASK_MESSAGE_PICTURES_MAX_BYTES = 2 * TASK_PICTURE_MAX_BYTES;
 

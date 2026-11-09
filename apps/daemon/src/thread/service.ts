@@ -49,8 +49,11 @@ export interface ThreadService {
   taskPicture(
     taskId: TaskId,
     fileId: TaskFileId,
-  ): { readonly bytes: Uint8Array; readonly mediaType: TaskPictureKind };
+  ): { readonly bytes: Uint8Array<ArrayBuffer>; readonly mediaType: TaskPictureKind };
 }
+
+const isMissingFile = (error: unknown) =>
+  error instanceof Error && 'code' in error && error.code === 'ENOENT';
 
 export function createThreadService(deps: {
   readonly state: StateStore;
@@ -109,7 +112,13 @@ export function createThreadService(deps: {
     taskPicture(taskId, fileId) {
       const row = getTaskFile(state.db, fileId);
       if (row.taskId !== taskId) throw new NotFoundError('task file', fileId);
-      return { bytes: readFileSync(row.storedPath), mediaType: row.mediaType };
+      try {
+        return { bytes: readFileSync(row.storedPath), mediaType: row.mediaType };
+      } catch (error) {
+        // A picture removed from the data directory by hand is gone, not a fault of the daemon.
+        if (isMissingFile(error)) throw new NotFoundError('task file', fileId);
+        throw error;
+      }
     },
   };
 }

@@ -253,7 +253,7 @@ const DRAFTING =
 
 const DESCRIPTIONS: Record<BuilderToolName, string> = {
   [BuilderToolName.ListProjects]:
-    'Lists 10db projects with their ids, areas (the names a task may use; the one marked catchAll holds every file that no other area holds, such as a new package or folder), hazards, isolate (the area and hazard names whose tasks get a separate copy), board columns (ids for move_task), default flow and delivery mode.',
+    'Lists 10db projects with their ids, areas (the names a task may use; the one marked catchAll holds every file that no other area holds, such as a new package or folder; role page is a screen of the app, with the route that shows it when one path does, and role shared is code pages share), hazards, isolate (the area and hazard names whose tasks get a separate copy), board columns (ids for move_task), default flow and delivery mode.',
   [BuilderToolName.ListFlows]:
     'Lists the flows, the step sequences a task can run through, with their ids. Omit flowId on create_task for the default.',
   [BuilderToolName.ListTasks]:

@@ -29,6 +29,12 @@ describe('globsOverlap', () => {
     ['dot names, which an area glob takes like any other', '**', '.github/x', true],
     ['an extglob, read as any one name, wider than it is', 'src/@(a|b)/**', 'src/c/x', true],
     ['an extglob against another depth', 'src/@(a|b)', 'lib/a', false],
+    ['a POSIX class alone, read as any character', 'app/[[:alpha:]]x/**', 'app/ax/**', true],
+    ['a POSIX class beside other members', 'app/[[:alpha:]_]*/**', 'app/people/**', true],
+    ['two POSIX classes in one class', 'app/[[:alpha:][:digit:]]/**', 'app/7/**', true],
+    ['a POSIX class at another depth', 'app/[[:alpha:]_]', 'app/people/x', false],
+    ['an accent composed and decomposed', 'app/caf\u00e9/**', 'app/cafe\u0301/**', true],
+    ['an accent decomposed in capitals', 'app/CAFE\u0301/**', 'app/caf\u00e9/x', true],
   ] as const)('%s: %s and %s → %s', (_name, a, b, overlap) => {
     expect(globsOverlap(a, b)).toBe(overlap);
     expect(globsOverlap(b, a)).toBe(overlap);

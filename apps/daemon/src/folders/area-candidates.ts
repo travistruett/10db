@@ -1,5 +1,5 @@
 import { matchesGlob, posix } from 'node:path';
-import { AreaRole } from '@10db/contracts';
+import { AreaRole, AreaRoute } from '@10db/contracts';
 import { isLooseGlob, literalGlob } from './literal-glob';
 
 /** What kind of place a candidate area is, which decides what may merge with it. */
@@ -126,14 +126,19 @@ const SHARED: Roled = { role: AreaRole.Shared };
 /**
  * A screen's role and route from its folders below the app's route folder. Route groups (`(shop)`)
  * leave the path; a private folder (`_parts`) is no screen, so it is shared code. A dynamic name
- * (`[id]`) or a parallel route slot (`@modal`) is a page no single path shows.
+ * (`[id]`), a parallel route slot (`@modal`), an intercepting route (`(.)photo`) or a path no route
+ * can be (one with a space) is a page no single path shows.
  */
 function screenRole(below: readonly string[]): Roled {
   if (below.some((name) => name.startsWith('_'))) return SHARED;
   const names = below.filter((name) => !isRouteGroup(name));
-  if (names.some((name) => name.startsWith('[') || name.startsWith('@')))
+  const route = `/${names.join('/')}`;
+  if (
+    names.some((name) => name.startsWith('[') || name.startsWith('@') || name.startsWith('(')) ||
+    !AreaRoute.safeParse(route).success
+  )
     return { role: AreaRole.Page };
-  return { role: AreaRole.Page, route: `/${names.join('/')}` };
+  return { role: AreaRole.Page, route };
 }
 
 /** The folders `steps` below `dir`, one for each step, or null when one step is missing. */
@@ -183,8 +188,9 @@ function screensOf(group: Dir): { container: Dir; passed: Dir[] } | null {
 }
 
 /**
- * A framework app split by route group and screen. The app and each folder on the way to its routes
- * keep their own files, and their other folders stand beside the screens.
+ * A framework app split by route group and screen. A route folder beside the groups is a screen too,
+ * with every folder below it. The app and each folder on the way to its routes keep their own files,
+ * which are shared, and their other folders stand beside the screens.
  */
 function splitRoutes(unit: Dir, { routes, between }: RouteRoot): Draft[] {
   const drafts: Draft[] = [];
@@ -199,7 +205,7 @@ function splitRoutes(unit: Dir, { routes, between }: RouteRoot): Draft[] {
   const below = (dir: Dir) => dir.path.slice(routes.path.length + 1).split('/');
   for (const [name, child] of routes.dirs) {
     if (!isRouteGroup(name)) {
-      own.trees.push(child.path);
+      drafts.push(draftOf(AreaCandidateKind.Route, child.path, child.path, screenRole([name])));
       continue;
     }
     const screens = screensOf(child);
