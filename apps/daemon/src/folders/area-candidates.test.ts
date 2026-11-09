@@ -162,10 +162,21 @@ describe('deriveAreaCandidates', () => {
       `${product}/[orgId]/page.tsx`,
       `${product}/_parts/panel.tsx`,
       `${product}/@modal/page.tsx`,
+      `${product}/my page/page.tsx`,
+      `${product}/(.)photo/page.tsx`,
+      'frontend/app/login/page.tsx',
+      ...files('frontend/app/dashboard', ['page.tsx', 'chart.tsx', 'settings/page.tsx']),
+      'frontend/app/_components/nav.tsx',
+      'frontend/app/api/users/route.ts',
+      'frontend/app/(hooks)/stripe/route.ts',
+      `${product}/webhooks/route.ts`,
       'backend/pyproject.toml',
       'backend/main.py',
     ];
     const candidates = deriveAreaCandidates(tracked);
+    it('gives every file to one candidate, and no two pages a file', () => {
+      expectEachFileInOneCandidate(tracked);
+    });
     it.each([
       [
         'a screen is a page at its path, without its route groups',
@@ -181,6 +192,54 @@ describe('deriveAreaCandidates', () => {
         undefined,
       ],
       ['a private folder among the screens is shared', `${product}/_parts`, 'shared', undefined],
+      [
+        'a screen whose path no route can be (a space) is a page with no route',
+        `${product}/my page`,
+        'page',
+        undefined,
+      ],
+      [
+        'an intercepting route is a page with no single route',
+        `${product}/(.)photo`,
+        'page',
+        undefined,
+      ],
+      [
+        'a plain route folder beside a route group is a page at its path',
+        'frontend/app/login',
+        'page',
+        '/login',
+      ],
+      [
+        'a plain route folder beside a route group is one page with the screens below it',
+        'frontend/app/dashboard',
+        'page',
+        '/dashboard',
+      ],
+      [
+        'a folder of route handlers beside a route group is no page and has no role',
+        'frontend/app/api',
+        undefined,
+        undefined,
+      ],
+      [
+        'a route group of route handlers alone is no page and has no role',
+        'frontend/app/(hooks)',
+        undefined,
+        undefined,
+      ],
+      [
+        'a folder of route handlers among the screens is no page and has no role',
+        `${product}/webhooks`,
+        undefined,
+        undefined,
+      ],
+      [
+        'a private folder beside a route group is shared',
+        'frontend/app/_components',
+        'shared',
+        undefined,
+      ],
       [
         'a route group of few screens is one page with no single route',
         'frontend/app/(marketing)',

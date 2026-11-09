@@ -330,7 +330,7 @@ export interface ApiServices {
   taskPicture(
     taskId: TaskId,
     fileId: TaskFileId,
-  ): { readonly bytes: Uint8Array; readonly mediaType: TaskPictureKind };
+  ): { readonly bytes: Uint8Array<ArrayBuffer>; readonly mediaType: TaskPictureKind };
   /** `start_shape`: a conversation from a terminal session, listed at once; starts no turn. */
   startShape(input: StartShapeInput): ShapeDto;
   /** Settings › Decisions: the Sizing hit rate and each Shape decision's shadow agreement. */

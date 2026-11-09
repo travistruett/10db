@@ -1043,8 +1043,7 @@ export function createApp(deps: ApiDeps) {
         TaskId.parse(c.req.param('taskId')),
         TaskFileId.parse(c.req.param('fileId')),
       );
-      // Read whole from a file, so its buffer is a plain ArrayBuffer.
-      return c.body(picture.bytes as Uint8Array<ArrayBuffer>, 200, {
+      return c.body(picture.bytes, 200, {
         'content-type': picture.mediaType,
         'cache-control': 'private, max-age=31536000, immutable',
         'x-content-type-options': 'nosniff',

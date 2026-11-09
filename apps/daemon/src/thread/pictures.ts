@@ -7,6 +7,7 @@ import {
   ShapeFileKind,
   shapeFileKind,
   TASK_PICTURE_MAX_BYTES,
+  TASK_PICTURE_NAME_MAX_CHARS,
   type TaskId,
   type TaskPictureKind,
 } from '@10db/contracts';
@@ -43,6 +44,10 @@ export function checkPicture(file: {
   readonly bytes: Uint8Array;
 }): CheckedPicture {
   const name = safeFileName(file.name);
+  if (name.length > TASK_PICTURE_NAME_MAX_CHARS)
+    throw new InvalidError(
+      `A picture's name is at most ${String(TASK_PICTURE_NAME_MAX_CHARS)} characters`,
+    );
   const kind = shapeFileKind(name);
   if (kind === null || !isShapeImage(kind))
     throw new InvalidError(`${name} can't be added: paste a PNG, JPEG or WebP picture`);

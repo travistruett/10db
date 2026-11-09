@@ -2,16 +2,22 @@
  * Whether two area globs can match the same file, judged from the globs alone, so a file added later
  * counts too. It reads globs as an area glob is matched (`areaMatches` in the daemon's guard): `*`,
  * `?` and a class take a dot name like any other character, `**` takes any number of folders but at
- * the end of a glob takes at least one name, and case is folded, as macOS folds it. What it cannot
- * read exactly it reads wider, so it may say two globs overlap when they do not, never the reverse:
- * an extglob (`@(a|b)`) is any one name, a POSIX class (`[[:alpha:]]`) any character, and a brace
- * range (`{1..9}`) `*`.
+ * the end of a glob takes at least one name, and accents are composed and case folded, as macOS
+ * folds them. What it cannot read exactly it reads wider, so it may say two globs overlap when they do
+ * not, never the reverse: an extglob (`@(a|b)`) is any one name, a class holding a POSIX class
+ * (`[[:alpha:]_]`) any character, and a brace range (`{1..9}`) `*`.
  */
 export function globsOverlap(a: string, b: string): boolean {
-  const left = expandBraces(a.toLowerCase()).map(segmentsOf);
-  const right = expandBraces(b.toLowerCase()).map(segmentsOf);
+  const left = expandBraces(foldCase(a)).map(segmentsOf);
+  const right = expandBraces(foldCase(b)).map(segmentsOf);
   return left.some((x) => right.some((y) => segmentsOverlap(x, y)));
 }
+
+/**
+ * A glob as the guard compares paths (`foldPathCase`): composed to NFC, so an accent written as one code
+ * point or as a letter and a combining mark is one character, then lowercased.
+ */
+const foldCase = (glob: string) => glob.normalize('NFC').toLowerCase();
 
 /** A range of code points, both ends included. */
 type Span = readonly [number, number];
@@ -87,18 +93,25 @@ function expandBraces(glob: string): string[] {
 /** A `(` after one of these starts an extglob such as `@(a|b)`. */
 const EXTGLOB_MARKS: ReadonlySet<string> = new Set(['?', '*', '+', '@', '!']);
 
-/** The class that starts just after a `[` at `start`, and the index of its `]`; null when it never closes. */
+/**
+ * The class that starts just after a `[` at `start`, and the index of its `]`; null when it never closes.
+ * A class holding a POSIX class (`[[:alpha:]_]`) is read as any character.
+ */
 function classAt(name: string, start: number): { matcher: CharMatcher; end: number } | null {
   let i = start;
   const negated = name[i] === '!' || name[i] === '^';
   if (negated) i += 1;
   const spans: Span[] = [];
+  let posix = false;
   for (let first = true; i < name.length; i += 1, first = false) {
     const ch = name[i] ?? '';
-    if (ch === ']' && !first) return { matcher: { kind: 'class', negated, spans }, end: i };
-    if (ch === '[' && name[i + 1] === ':') {
-      const end = name.indexOf(']]', i);
-      return end === -1 ? null : { matcher: ANY_CHAR, end: end + 1 };
+    if (ch === ']' && !first)
+      return { matcher: posix ? ANY_CHAR : { kind: 'class', negated, spans }, end: i };
+    const posixEnd = ch === '[' && name[i + 1] === ':' ? name.indexOf(':]', i + 2) : -1;
+    if (posixEnd !== -1) {
+      posix = true;
+      i = posixEnd + 1;
+      continue;
     }
     const low = ch.codePointAt(0) ?? 0;
     const high = name[i + 2];

@@ -190,13 +190,16 @@ describe('the builder MCP endpoint', () => {
     expect(projects[0]?.['columns']).toContainEqual({ id: column.id, name: 'Later' });
   });
 
-  it('marks the catch-all area in list_projects and leaves the others unmarked', async () => {
+  it('marks the catch-all area and each area role and route in list_projects, and leaves the others unmarked', async () => {
     await api().post('/projects', ProjectDto, {
       name: 'proposed',
       repoPath: repo.path,
       gateCommand: 'true',
       areas: [
         { name: 'src', globs: ['src/**'] },
+        { name: 'people', globs: ['app/people/**'], role: 'page', route: '/people' },
+        { name: 'feed', globs: ['app/[id]/**'], role: 'page' },
+        { name: 'components', globs: ['components/**'], role: 'shared' },
         { name: 'root', globs: ['*', '.*'], catchAll: true },
       ],
     });
@@ -205,6 +208,9 @@ describe('the builder MCP endpoint', () => {
       .parse(await callJson('list_projects'));
     expect(projects[0]?.areas).toEqual([
       { name: 'src', globs: ['src/**'] },
+      { name: 'people', globs: ['app/people/**'], role: 'page', route: '/people' },
+      { name: 'feed', globs: ['app/[id]/**'], role: 'page' },
+      { name: 'components', globs: ['components/**'], role: 'shared' },
       { name: 'root', globs: ['*', '.*'], catchAll: true },
     ]);
   });

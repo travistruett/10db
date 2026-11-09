@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { mintId, TaskMessageDto, TaskThreadDto, type TaskId } from '@10db/contracts';
-import { createTestStore, insertTask, seedProject } from '@10db/db';
+import { createTestStore, insertTask, seedProject, type Store } from '@10db/db';
 import { defineWebSocketHelper } from 'hono/ws';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -22,13 +22,18 @@ const TOKEN = 'ui';
 const auth = { Authorization: `Bearer ${TOKEN}` };
 
 let close: () => void;
+let store: Store;
 let data: TempDir;
 let app: ReturnType<typeof createApp>;
 let taskId: TaskId;
 let otherTaskId: TaskId;
+/** What the API answered 500 for; a test that expects one takes it out. */
+let unexpected: unknown[];
 beforeEach(() => {
+  unexpected = [];
   const test = createTestStore();
   close = test.close;
+  store = test.store;
   data = tempDir('thread');
   const project = seedProject(test.store, { name: 'alpha' });
   const task = (title: string) =>
@@ -50,11 +55,12 @@ beforeEach(() => {
     upgradeWebSocket: defineWebSocketHelper(() => undefined as never) as never,
     mcp: () => Promise.resolve(new Response()),
     onUnexpectedError: (error) => {
-      throw error;
+      unexpected.push(error);
     },
   });
 });
 afterEach(() => {
+  expect(unexpected).toEqual([]);
   close();
   data.cleanup();
 });
@@ -105,6 +111,7 @@ describe('a task thread over HTTP', () => {
     expect(new Uint8Array(await picture.arrayBuffer())).toEqual(PNG);
 
     // Under the task's own directory, readable by the daemon's user alone, and no temporary left.
+    expect(statSync(filesDir(taskId)).mode & 0o777).toBe(0o700);
     const kept = readdirSync(filesDir(taskId));
     expect(kept).toHaveLength(1);
     expect(statSync(join(filesDir(taskId), kept[0] ?? '')).mode & 0o777).toBe(0o600);
@@ -158,6 +165,14 @@ describe('a task thread over HTTP', () => {
       400,
       'at most 10 pictures',
     ],
+    [
+      'a picture whose name is longer than a name may be',
+      'own',
+      'see this',
+      [{ name: `${'a'.repeat(252)}.png`, bytes: PNG }],
+      400,
+      "A picture's name is at most 255 characters",
+    ],
     ['an unknown task', 'unknown', 'hello', [{ name: 'shot.png', bytes: PNG }], 404, 'not found'],
   ] satisfies [string, 'own' | 'unknown', string | null, Picture[], number, string][])(
     'refuses %s and keeps nothing',
@@ -173,6 +188,51 @@ describe('a task thread over HTTP', () => {
         ).toEqual([]);
     },
   );
+
+  it('takes a picture whose name is as long as a name may be', async () => {
+    const res = await post(taskId, 'see this', [{ name: `${'a'.repeat(251)}.png`, bytes: PNG }]);
+    expect(res.status).toBe(201);
+  });
+
+  /** Every write to the database fails from now on, as it would on a full disk. */
+  const refuseWrites = () => {
+    store.db.$client.exec(
+      "CREATE TRIGGER refuse_messages BEFORE INSERT ON task_messages BEGIN SELECT RAISE(ABORT, 'disk full'); END",
+    );
+  };
+
+  it('removes the pictures it kept when the write of their message fails', async () => {
+    refuseWrites();
+    const res = await post(taskId, 'see these', [
+      { name: 'shot.png', bytes: PNG },
+      { name: 'a.jpg', bytes: new Uint8Array(jpegOfSize(10, 10)) },
+    ]);
+    expect(res.status).toBe(500);
+    expect(unexpected.splice(0)).toEqual([expect.objectContaining({ message: 'disk full' })]);
+    expect(readdirSync(filesDir(taskId))).toEqual([]);
+  });
+
+  it('keeps a picture an earlier message holds when a later message of the same picture fails', async () => {
+    const first = TaskMessageDto.parse(
+      await (await post(taskId, 'one', [{ name: 'shot.png', bytes: PNG }])).json(),
+    );
+    expect((await post(taskId, 'two', [{ name: 'again.png', bytes: PNG }])).status).toBe(201);
+    refuseWrites();
+    expect((await post(taskId, 'three', [{ name: 'third.png', bytes: PNG }])).status).toBe(500);
+    expect(unexpected.splice(0)).toEqual([expect.objectContaining({ message: 'disk full' })]);
+    const picture = await get(`/tasks/${taskId}/thread/pictures/${first.files[0]?.id ?? ''}`);
+    expect(picture.status).toBe(200);
+    expect(new Uint8Array(await picture.arrayBuffer())).toEqual(PNG);
+  });
+
+  it('answers 404 for a picture whose file is gone', async () => {
+    const posted = TaskMessageDto.parse(
+      await (await post(taskId, 'mine', [{ name: 'shot.png', bytes: PNG }])).json(),
+    );
+    rmSync(filesDir(taskId), { recursive: true });
+    const res = await get(`/tasks/${taskId}/thread/pictures/${posted.files[0]?.id ?? ''}`);
+    expect(res.status).toBe(404);
+  });
 
   it('serves a picture to its own task alone', async () => {
     const posted = TaskMessageDto.parse(
