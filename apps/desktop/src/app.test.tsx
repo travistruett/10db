@@ -65,7 +65,7 @@ describe('App shell', () => {
     expect(screen.queryByRole('img', { name: /daemon/i })).toBeNull();
   });
 
-  it('warns when a required tool is missing or the login shell could not be read', async () => {
+  it('counts a missing tool and an unreadable login shell on the Inbox link, with nothing above the view', async () => {
     server.use(
       http.get(daemonUrl('/system'), () =>
         HttpResponse.json({
@@ -86,35 +86,10 @@ describe('App shell', () => {
       ...baseHandlers(),
     );
     renderApp('/factory');
-    expect(await screen.findByText('claude was not found where 10db looks for it')).toBeTruthy();
-    expect(screen.getByText(/The login shell timed out after 10 s/)).toBeTruthy();
-    // docker is optional, so its absence is not an alert.
-    expect(screen.queryByText('docker was not found where 10db looks for it')).toBeNull();
-  });
-
-  it('warns when Claude Code is newer than the account checks were verified on', async () => {
-    server.use(
-      http.get(daemonUrl('/system'), () =>
-        HttpResponse.json({
-          loginEnv: { source: 'login_shell', warning: null },
-          claudeCode: {
-            verifiedOn: '2.1.302',
-            warning: 'Claude Code 3.0.0 is a newer major version.',
-          },
-          codex: { verifiedOn: '0.154.0', warning: null },
-          tools: [
-            { name: 'claude', path: '/bin/claude', version: '3.0.0 (Claude Code)', required: true },
-            { name: 'git', path: '/usr/bin/git', version: 'git version 2.50.0', required: true },
-          ],
-        }),
-      ),
-      ...baseHandlers(),
-    );
-    renderApp('/factory');
-    expect(
-      await screen.findByText("This Claude Code is newer than 10db's account checks"),
-    ).toBeTruthy();
-    expect(screen.getByText('Claude Code 3.0.0 is a newer major version.')).toBeTruthy();
+    // docker is optional, so its absence is not counted.
+    expect(await screen.findByRole('link', { name: /Inbox.*2 open cards/ })).toBeTruthy();
+    expect(screen.queryByText('claude was not found where 10db looks for it')).toBeNull();
+    expect(screen.queryByText(/The login shell timed out after 10 s/)).toBeNull();
   });
 
   it('shows the open-card count on the Inbox link', async () => {

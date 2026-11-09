@@ -122,7 +122,7 @@ async function seedProject(request: Page['request']): Promise<string> {
 /** The columns' minimum height, as the Board declares it. */
 const COLUMNS_MIN_HEIGHT = 320;
 
-/** Puts a banner of this height above the Board, as a system alert does, and waits for it to lay out. */
+/** Puts a banner of this height above the Board, as the reconnecting banner does, and waits for it to lay out. */
 async function addBannerAbove(page: Page, height: number): Promise<void> {
   await page.evaluate((px: number) => {
     const banner = document.createElement('div');
@@ -195,7 +195,7 @@ const SIZES = [
 /** What the columns' header, hint and footer need above the declared minimum height. */
 const CONTENT_ALLOWANCE = 30;
 
-/** Taller than any real alert stack on its own, so the columns cannot fit beside it. */
+/** Taller than any real banner on its own, so the columns cannot fit beside it. */
 const TALL_BANNER = 300;
 
 test.describe.configure({ mode: 'serial' });

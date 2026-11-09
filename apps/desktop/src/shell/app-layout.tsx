@@ -9,23 +9,22 @@ import {
 } from '@tabler/icons-react';
 import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
 import { useDaemonStatus } from '../daemon/provider';
-import { useInbox } from '../daemon/queries';
 import { useDesktopSync } from '../desktop/sync';
 import { useRenderMode } from '../screens/render-context';
 import { RenderLayout } from '../screens/render-layout';
 import { ScreenRenderHost } from '../screens/screen-render-host';
+import { AgentDownloadStatus } from './agent-download-status';
 import { BuildCommit } from './build-commit';
 import { ColorSchemeToggle } from './color-scheme-toggle';
 import { DaemonStatus } from './daemon-status';
 import { KeepAwakeControl } from './keep-awake-control';
 import { ProjectSwitcher } from './project-switcher';
-import { inboxRowCount } from '../views/inbox/inbox-rows';
+import { useOpenInboxCount } from '../views/inbox/inbox-count';
 import { FirstRun } from '../views/first-run/first-run';
 import { SettingsNav } from '../views/settings/settings-nav';
 import { ReconnectingBanner } from './reconnecting-banner';
 import { useSelectedProject } from './selected-project';
 import { ShapeNav } from './shape-nav';
-import { SystemAlert } from './system-alert';
 
 const NAV = [
   { to: '/board', label: 'Board', icon: IconLayoutKanban },
@@ -57,7 +56,7 @@ function FullLayout() {
   const status = useDaemonStatus();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const inSettings = pathname === '/settings' || pathname.startsWith('/settings/');
-  const openCards = inboxRowCount(useInbox().data ?? []);
+  const openCards = useOpenInboxCount();
   const { projects, select } = useSelectedProject();
   const navigate = useNavigate();
   // The first run replaces the shell only once the list has loaded empty on a live connection; while
@@ -78,6 +77,7 @@ function FullLayout() {
           the header's empty space drags the window. */}
       <AppShell.Header data-tauri-drag-region>
         <Group h="100%" px="md" gap="sm" justify="flex-end" data-tauri-drag-region>
+          <AgentDownloadStatus />
           <BuildCommit />
           <DaemonStatus />
           <KeepAwakeControl />
@@ -122,11 +122,11 @@ function FullLayout() {
           </>
         )}
       </AppShell.Navbar>
-      {/* A column, so a view can take the height the alerts above it leave rather than assume it. */}
+      {/* A column, so a view can take the height the reconnecting banner leaves rather than assume it.
+          Nothing else goes above a view: what needs the builder is a card in the Inbox. */}
       <AppShell.Main style={{ display: 'flex', flexDirection: 'column' }}>
         {status.kind === 'connected' && <ScreenRenderHost />}
         {status.kind === 'reconnecting' && <ReconnectingBanner since={status.since} />}
-        <SystemAlert />
         <Outlet />
       </AppShell.Main>
     </AppShell>
