@@ -14,7 +14,6 @@ import { useRenderMode } from '../screens/render-context';
 import { RenderLayout } from '../screens/render-layout';
 import { ScreenRenderHost } from '../screens/screen-render-host';
 import { AgentDownloadStatus } from './agent-download-status';
-import { BuildCommit } from './build-commit';
 import { ColorSchemeToggle } from './color-scheme-toggle';
 import { DaemonStatus } from './daemon-status';
 import { KeepAwakeControl } from './keep-awake-control';
@@ -78,7 +77,6 @@ function FullLayout() {
       <AppShell.Header data-tauri-drag-region>
         <Group h="100%" px="md" gap="sm" justify="flex-end" data-tauri-drag-region>
           <AgentDownloadStatus />
-          <BuildCommit />
           <DaemonStatus />
           <KeepAwakeControl />
           <ColorSchemeToggle />
