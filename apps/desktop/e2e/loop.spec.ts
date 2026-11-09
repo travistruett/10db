@@ -362,6 +362,18 @@ test('runs a task from the UI to verified done, and a reload loses nothing', asy
   await expectAccessible(page, 'settings, accounts, light');
 });
 
+/** Shows a Knowledge list's shelf, chosen in its first column's filter. */
+async function showShelf(page: Page, column: string, shelf: 'Current' | 'Past'): Promise<void> {
+  await page.getByRole('button', { name: `Filter ${column}` }).click();
+  // The segment's radio is hidden under its label, which is what a click lands on.
+  await page.locator('label', { hasText: new RegExp(`^${shelf}$`) }).click();
+  const pastNote = page.getByText(/^Showing past /);
+  await (shelf === 'Past' ? expect(pastNote).toBeVisible() : expect(pastNote).toBeHidden());
+  // Past adds the State column, which redraws the headers and closes the filter; Current leaves it open.
+  if ((await page.getByRole('radio', { name: shelf, exact: true }).count()) > 0)
+    await page.keyboard.press('Escape');
+}
+
 test('records, edits, retires and withdraws knowledge, and a reload loses nothing', async ({
   page,
 }) => {
@@ -370,13 +382,11 @@ test('records, edits, retires and withdraws knowledge, and a reload loses nothin
   await open(page, 'Knowledge');
   await expectAccessible(page, 'knowledge, principles, dark');
 
-  // A policy for the project, written by the builder, then edited: the old text moves to History.
+  // A rule for the project, written by the builder, then edited: the old text moves to Past.
   await page.getByRole('button', { name: 'New Principle' }).click();
   const newPrinciple = page.getByRole('dialog', { name: 'New Principle' });
   await newPrinciple.getByLabel('Statement').fill('Never sleep in tests');
-  await newPrinciple.getByLabel('Kind').click();
-  await page.getByRole('option', { name: 'Policy' }).click();
-  await expect(newPrinciple.getByLabel('Topic key')).toHaveValue('never-sleep-in-tests');
+  await newPrinciple.getByRole('radio', { name: /^Rule/ }).click();
   await expectAccessible(page, 'knowledge, new principle, dark');
   await newPrinciple.getByRole('button', { name: 'Save' }).click();
   await expect(newPrinciple).toBeHidden();
@@ -385,88 +395,73 @@ test('records, edits, retires and withdraws knowledge, and a reload loses nothin
 
   await chooseAction(
     page,
-    principles.getByRole('button', { name: 'Actions for never-sleep-in-tests' }),
+    principles.getByRole('button', { name: 'Actions for "Never sleep in tests"' }),
     'Edit…',
   );
   const editPrinciple = page.getByRole('dialog', { name: 'Edit Principle' });
-  await expect(editPrinciple.getByLabel('Topic key')).toHaveValue('never-sleep-in-tests');
   await editPrinciple.getByLabel('Statement').fill('Tests never sleep');
   await editPrinciple.getByRole('button', { name: 'Save' }).click();
   await expect(editPrinciple).toBeHidden();
   await expect(principles.getByText('Tests never sleep')).toBeVisible();
   await expect(principles.getByText('Never sleep in tests')).toBeHidden();
 
-  // A key another principle holds is refused, and a dialog's messages are readable without a hover.
+  // A new principle on a current one's topic names what it replaces before anything is written.
   await page.getByRole('button', { name: 'New Principle' }).click();
-  await newPrinciple.getByLabel('Statement').fill('Keep functions small');
+  await newPrinciple.getByLabel('Statement').fill('Never sleep in tests');
+  await newPrinciple.getByRole('radio', { name: /^Rule/ }).click();
   await newPrinciple.getByRole('button', { name: 'Save' }).click();
+  await expectFullyShown(newPrinciple.getByText(/“Tests never sleep” has the same topic/));
+  await expectAccessible(page, 'knowledge, replaces, dark');
+  await newPrinciple.getByRole('button', { name: 'Cancel' }).click();
   await expect(newPrinciple).toBeHidden();
-  await chooseAction(
-    page,
-    principles.getByRole('button', { name: 'Actions for keep-functions-small' }),
-    'Edit…',
-  );
-  await editPrinciple.getByLabel('Topic key').fill('Not A Key');
-  await editPrinciple.getByRole('button', { name: 'Save' }).click();
-  await expectFullyShown(editPrinciple.getByRole('alert').getByText(/testing\.no-sleeps\)\.$/));
-  await editPrinciple.getByLabel('Topic key').fill('never-sleep-in-tests');
-  await editPrinciple.getByRole('button', { name: 'Save' }).click();
-  await expectFullyShown(
-    editPrinciple
-      .getByRole('alert')
-      .getByText(/already holds the key never-sleep-in-tests .* supersede or retire it first$/),
-  );
-  await editPrinciple.getByRole('button', { name: 'Cancel' }).click();
-  await expect(editPrinciple).toBeHidden();
 
-  await page.getByRole('switch', { name: 'History' }).check();
+  await showShelf(page, 'Principle', 'Past');
   await expect(principles.getByText('Superseded')).toBeVisible();
   await expect(principles.getByText('Never sleep in tests')).toBeVisible();
+  await expectAccessible(page, 'knowledge, past principles, dark');
 
   // Each version's provenance links to the other.
   await principles
-    .getByRole('row', { name: /Tests never sleep/ })
+    .getByRole('row', { name: /Never sleep in tests/ })
     .getByRole('button', { name: /^Where .* came from$/ })
     .click();
   const drawer = page.getByRole('dialog', { name: 'Where it came from' });
   await expect(drawer.getByText('The app')).toBeVisible();
-  await drawer.getByRole('button', { name: 'Replaced: Never sleep in tests' }).click();
+  await drawer.getByRole('button', { name: 'Replaced by: Tests never sleep' }).click();
   await expect(
-    drawer.getByRole('button', { name: 'Replaced by: Tests never sleep' }),
+    drawer.getByRole('button', { name: 'Replaced: Never sleep in tests' }),
   ).toBeVisible();
   await expectAccessible(page, 'knowledge, provenance, dark');
   await page.keyboard.press('Escape');
   await expect(drawer).toBeHidden();
 
-  // The older version cannot be withdrawn: its dialog names the newest one.
+  // The older version cannot be removed: its dialog names the newest one.
   await chooseAction(
     page,
-    principles.getByRole('row', { name: /Never sleep in tests/ }).getByRole('button', {
-      name: /^Actions for /,
-    }),
-    'Withdraw…',
+    principles.getByRole('button', { name: 'Actions for "Never sleep in tests"' }),
+    'Remove…',
   );
-  const older = page.getByRole('dialog', { name: 'Withdraw Principle' });
+  const older = page.getByRole('dialog', { name: 'Remove Principle' });
   await expect(older.getByText(/has a newer version/)).toBeVisible();
   await expect(older.getByText('Tests never sleep')).toBeVisible();
   await older.getByRole('button', { name: 'Cancel' }).click();
   await expect(older).toBeHidden();
 
-  // Retire the current one with a reason.
+  // Retire the current one: it no longer applies, and says why.
+  await showShelf(page, 'Principle', 'Current');
   await chooseAction(
     page,
-    principles
-      .getByRole('row', { name: /Tests never sleep/ })
-      .getByRole('button', { name: 'Actions for never-sleep-in-tests' }),
-    'Retire…',
+    principles.getByRole('button', { name: 'Actions for "Tests never sleep"' }),
+    'Remove…',
   );
-  const retire = page.getByRole('dialog', { name: 'Retire Principle' });
-  await retire.getByRole('button', { name: 'Retire' }).click();
+  const retire = page.getByRole('dialog', { name: 'Remove Principle' });
+  await retire.getByRole('radio', { name: 'It no longer applies' }).check();
+  await retire.getByRole('button', { name: 'Remove' }).click();
   await expect(retire.getByText('Say why.')).toBeVisible();
   await retire.getByLabel('Reason').fill('Fake timers make waiting free');
-  await retire.getByRole('button', { name: 'Retire' }).click();
+  await retire.getByRole('button', { name: 'Remove' }).click();
   await expect(retire).toBeHidden();
-  await expect(principles.getByText('Retired')).toBeVisible();
+  await expect(principles.getByText('Tests never sleep')).toBeHidden();
 
   // A decision at the project, edited, then the edit withdrawn: the first answer is current again.
   await page.getByRole('tab', { name: 'Decisions' }).click();
@@ -490,36 +485,39 @@ test('records, edits, retires and withdraws knowledge, and a reload loses nothin
   await edit.getByRole('button', { name: 'Save' }).click();
   await expect(edit).toBeHidden();
   await expect(decisions.getByText('Hello', { exact: true })).toBeVisible();
-  await expect(decisions.getByText('Superseded')).toBeVisible();
+  await expect(decisions.getByText('Howdy')).toBeHidden();
 
   await chooseAction(
     page,
-    decisions
-      .getByRole('row', { name: /Hello/ })
-      .getByRole('button', { name: 'Actions for "Which greeting style?"' }),
-    'Withdraw…',
+    decisions.getByRole('button', { name: 'Actions for "Which greeting style?"' }),
+    'Remove…',
   );
-  const withdraw = page.getByRole('dialog', { name: 'Withdraw Decision' });
+  const withdraw = page.getByRole('dialog', { name: 'Remove Decision' });
   await expect(
-    withdraw.getByText(/leaves briefings and search\. It stays under History with your reason\./),
+    withdraw.getByText(/“Which greeting style\? → Howdy” becomes current again/),
   ).toBeVisible();
   await withdraw.getByLabel('Reason').fill('Hello is too formal');
-  await withdraw.getByRole('button', { name: 'Withdraw' }).click();
+  await withdraw.getByRole('button', { name: 'Remove' }).click();
   await expect(withdraw).toBeHidden();
-  await expect(decisions.getByText('Withdrawn')).toBeVisible();
-  await expect(decisions.getByRole('row', { name: /Howdy/ }).getByText('Current')).toBeVisible();
+  await expect(decisions.getByText('Howdy')).toBeVisible();
+  await expect(decisions.getByText('Hello', { exact: true })).toBeHidden();
 
   // Reopening the window loses nothing: every record, its state and its history.
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Knowledge', level: 2 })).toBeVisible();
-  await page.getByRole('switch', { name: 'History' }).check();
   const reloadedPrinciples = page.getByRole('table', { name: 'Principles' });
-  await expect(reloadedPrinciples.getByText('Retired')).toBeVisible();
-  await expect(reloadedPrinciples.getByText('Superseded')).toBeVisible();
+  await showShelf(page, 'Principle', 'Past');
+  await expect(
+    reloadedPrinciples.getByRole('row', { name: /Tests never sleep/ }).getByText('Retired'),
+  ).toBeVisible();
+  await expect(
+    reloadedPrinciples.getByRole('row', { name: /Never sleep in tests/ }).getByText('Superseded'),
+  ).toBeVisible();
   await page.getByRole('tab', { name: 'Decisions' }).click();
   const reloadedDecisions = page.getByRole('table', { name: 'Decisions' });
-  await expect(reloadedDecisions.getByText('Withdrawn')).toBeVisible();
+  await expect(reloadedDecisions.getByText('Howdy')).toBeVisible();
+  await showShelf(page, 'Decision', 'Past');
   await expect(
-    reloadedDecisions.getByRole('row', { name: /Howdy/ }).getByText('Current'),
+    reloadedDecisions.getByRole('row', { name: /Hello/ }).getByText('Withdrawn'),
   ).toBeVisible();
 });

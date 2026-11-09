@@ -5,9 +5,11 @@ import {
   DataTable,
   useDataTableColumns,
   type DataTableColumn,
+  type DataTablePaginationProps,
   type DataTableSortStatus,
 } from 'mantine-datatable';
 import type { ReactNode } from 'react';
+import { withColumnHeader } from './column-header';
 import { PRINCIPLE_KIND_COLORS, PRINCIPLE_KIND_LABELS } from './knowledge-labels';
 import { PAGE_SIZES, type Paging } from './knowledge-paging';
 import './knowledge-table.css';
@@ -121,8 +123,27 @@ export interface TablePage extends Paging {
   readonly total: number;
 }
 
+/** The pager under a list with a daemon page and at least one record; none otherwise. */
+function pagerProps(paging: TablePage | undefined): DataTablePaginationProps {
+  if (paging === undefined || paging.total === 0) return {};
+  return {
+    totalRecords: paging.total,
+    recordsPerPage: paging.pageSize,
+    page: paging.page,
+    onPageChange: paging.onPage,
+    recordsPerPageOptions: [...PAGE_SIZES],
+    onRecordsPerPageChange: paging.onPageSize,
+    recordsPerPageLabel: 'Per page',
+    paginationText: ({ from, to, totalRecords }) =>
+      `${String(from)}–${String(to)} of ${String(totalRecords)}`,
+    getPaginationControlProps: (control) => ({ 'aria-label': PAGER_CONTROLS[control] }),
+    getPaginationItemProps: (page) => ({ 'aria-label': `Page ${String(page)}` }),
+  };
+}
+
 /**
- * A Knowledge list as a table. Columns resize and sort, the first column's and Scope's filters narrow it,
+ * A Knowledge list as a table. Columns resize and sort, the first column's and Scope's filters narrow it
+ * (`withColumnHeader` draws the headers that sort or filter),
  * the Columns menu in the corner hides and shows columns, and the layout is kept per list in the window's
  * storage under `storeKey`. Clicking a row opens it. The daemon sorts and pages it: `records` is one page
  * and the pager below asks for another. An empty list still draws its header, so its filters stay in
@@ -179,15 +200,12 @@ export function KnowledgeTable<T>({
   const shown = columns.map((c): DataTableColumn<T> => {
     const accessor = String(c.accessor);
     const width = stored.get(accessor)?.width ?? c.width;
+    // The Columns menu hides and shows columns, so mantine-datatable's own unnamed hide button is left off.
     const drawn = {
-      ...c,
+      ...withColumnHeader(c, sort, onSort),
       ...(width === undefined ? {} : { width }),
       hidden: c.toggleable === true && off.has(accessor),
-      // A filter stays open while the list it narrows changes under it; Mantine otherwise closes a
-      // popover whose header it reads as out of view, mid-word.
-      ...(c.filter === undefined
-        ? {}
-        : { filterPopoverProps: { hideDetached: false, ...c.filterPopoverProps } }),
+      toggleable: false,
     };
     return accessor === ACTIONS_COLUMN
       ? { ...drawn, title: <ColumnsMenu choices={choices} onToggle={toggle} /> }
@@ -218,32 +236,7 @@ export function KnowledgeTable<T>({
             },
           }
         : {})}
-      sortStatus={sort}
-      onSortStatusChange={onSort}
-      {...(paging !== undefined && paging.total > 0
-        ? {
-            totalRecords: paging.total,
-            recordsPerPage: paging.pageSize,
-            page: paging.page,
-            onPageChange: paging.onPage,
-            recordsPerPageOptions: PAGE_SIZES,
-            onRecordsPerPageChange: paging.onPageSize,
-            recordsPerPageLabel: 'Per page',
-            paginationText: ({
-              from,
-              to,
-              totalRecords,
-            }: {
-              from: number;
-              to: number;
-              totalRecords: number;
-            }) => `${String(from)}–${String(to)} of ${String(totalRecords)}`,
-            getPaginationControlProps: (control: keyof typeof PAGER_CONTROLS) => ({
-              'aria-label': PAGER_CONTROLS[control],
-            }),
-            getPaginationItemProps: (page: number) => ({ 'aria-label': `Page ${String(page)}` }),
-          }
-        : {})}
+      {...pagerProps(paging)}
     />
   );
 }

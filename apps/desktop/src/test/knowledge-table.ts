@@ -1,24 +1,18 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 
 /** The first column of every Knowledge list (a principle's or proposal's statement, a decision's question): its filter holds the shelf and the search. */
-const FIRST_COLUMN = ['statement', 'question'];
-const SCOPE_COLUMN = ['scope'];
-const TYPE_COLUMN = ['principleKind'];
+const FIRST_COLUMN = ['Principle', 'Proposal', 'Decision'];
+const SCOPE_COLUMN = ['Scope'];
+const TYPE_COLUMN = ['Type'];
 
-/**
- * The filter button in the header of the first column whose accessor is one of `accessors`. A sortable
- * header is a button rather than a column header to assistive tech, so it is found by its accessor; and
- * mantine-datatable gives the filter's button no name, so it is found by its class.
- */
-async function filterButton(accessors: readonly string[]): Promise<HTMLElement> {
+/** The filter button in the header of the first column titled one of `titles`, found by its name. */
+async function filterButton(titles: readonly string[]): Promise<HTMLElement> {
   return waitFor(() => {
-    for (const accessor of accessors) {
-      const button = document.querySelector(
-        `th[data-accessor="${accessor}"] .mantine-datatable-header-cell-filter-action-icon`,
-      );
-      if (button instanceof HTMLElement) return button;
+    for (const title of titles) {
+      const button = screen.queryByRole('button', { name: `Filter ${title}` });
+      if (button) return button;
     }
-    throw new Error(`no filter on ${accessors.join(' or ')}`);
+    throw new Error(`no filter on ${titles.join(' or ')}`);
   });
 }
 
@@ -101,9 +95,7 @@ export async function chooseTypes(names: readonly string[]): Promise<void> {
     fireEvent.click(within(list).getByRole('option', { name, hidden: true }));
 }
 
-/** Sorts the table by the column with this accessor, as a click on its header does. */
-export function sortBy(accessor: string): void {
-  const header = document.querySelector(`th[data-accessor="${accessor}"]`);
-  if (!(header instanceof HTMLElement)) throw new Error(`no column ${accessor}`);
-  fireEvent.click(header);
+/** Sorts the table by the column with this title, as a click on its header's sort button does. */
+export function sortBy(title: string): void {
+  fireEvent.click(screen.getByRole('button', { name: new RegExp(`^Sort by ${title}`) }));
 }

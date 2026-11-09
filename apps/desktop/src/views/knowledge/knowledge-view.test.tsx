@@ -147,12 +147,33 @@ describe('KnowledgeView', () => {
     await waitFor(() => {
       expect(asked.at(-1)?.get('page')).toBe('2');
     });
-    sortBy('createdAt');
+    sortBy('Date');
     await waitFor(() => {
       expect(asked.at(-1)?.get('sort')).toBe('createdAt');
     });
     expect(asked.at(-1)?.get('page')).toBe('1');
     expect(asked.at(-1)?.getAll('kind')).toEqual(['policy', 'belief']);
+  });
+
+  it('names every header control and nests none inside another', async () => {
+    serve({ principles: [principleItem()] });
+    renderApp('/knowledge');
+    const table = await screen.findByRole('table', { name: 'Principles' });
+    const head = table.querySelector('thead');
+    if (head === null) throw new Error('the table has no header');
+    expect(head.querySelectorAll('th[role="button"], th[tabindex]')).toHaveLength(0);
+    const names = within(head)
+      .getAllByRole('button')
+      .map((b) => b.getAttribute('aria-label') ?? b.textContent);
+    expect(names).toEqual([
+      'Filter Principle',
+      'Sort by Type, ascending',
+      'Filter Type',
+      'Sort by Scope',
+      'Filter Scope',
+      'Sort by Date',
+      'Columns',
+    ]);
   });
 
   it('searches as you type', async () => {
