@@ -1,4 +1,4 @@
-import { KnowledgeState } from '@10db/contracts';
+import { KnowledgeListShelf, PAST_KNOWLEDGE_STATES, type KnowledgeState } from '@10db/contracts';
 
 /**
  * Which records a list shows: principle proposals waiting on the builder, what is current, or what no
@@ -6,8 +6,8 @@ import { KnowledgeState } from '@10db/contracts';
  */
 export const KnowledgeShelf = {
   Pending: 'pending',
-  Current: 'current',
-  Past: 'past',
+  Current: KnowledgeListShelf.Current,
+  Past: KnowledgeListShelf.Past,
 } as const;
 export type KnowledgeShelf = (typeof KnowledgeShelf)[keyof typeof KnowledgeShelf];
 
@@ -17,15 +17,14 @@ export const SHELF_LABELS: Readonly<Record<KnowledgeShelf, string>> = {
   [KnowledgeShelf.Past]: 'Past',
 };
 
-const PAST_STATES: readonly KnowledgeState[] = [
-  KnowledgeState.Superseded,
-  KnowledgeState.Retired,
-  KnowledgeState.Withdrawn,
-];
-
 /** A record on the Past shelf: one that no longer applies. */
 export function isPast(state: KnowledgeState): boolean {
-  return PAST_STATES.includes(state);
+  return PAST_KNOWLEDGE_STATES.includes(state);
+}
+
+/** The list route's shelf for a shelf the list route serves; Pending is the proposals'. */
+export function listShelf(shelf: KnowledgeShelf): KnowledgeListShelf {
+  return shelf === KnowledgeShelf.Past ? KnowledgeListShelf.Past : KnowledgeListShelf.Current;
 }
 
 const SHELVES: readonly string[] = Object.values(KnowledgeShelf);

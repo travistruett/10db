@@ -36,14 +36,17 @@ const SUCCESSOR = sql`(SELECT s.id FROM decisions s WHERE s.supersedes_id = d.id
 /** True for a current decision: not withdrawn and not replaced by a live successor (SQL over alias `d`). */
 export const currentDecisionSql = sql`(d.withdrawn_at IS NULL AND ${SUCCESSOR} IS NULL)`;
 
+/** A decision's state, derived from its tombstone and its successor (SQL over alias `d`). */
+export const decisionStateSql = sql`CASE WHEN d.withdrawn_at IS NOT NULL THEN ${KnowledgeState.Withdrawn}
+         WHEN ${SUCCESSOR} IS NOT NULL THEN ${KnowledgeState.Superseded}
+         ELSE ${KnowledgeState.Current} END`;
+
 // Column aliases match DecisionDto, so each row parses as one; the state is derived here, never stored.
 const SELECT_DECISION = sql`
   SELECT d.id AS id, d.project_id AS projectId, d.scope AS scope, d.area AS area,
     d.question AS question, d.choice AS choice, d.rationale AS rationale, d.decided_by AS decidedBy,
     d.supersedes_id AS supersedesId, ${SUCCESSOR} AS supersededById,
-    CASE WHEN d.withdrawn_at IS NOT NULL THEN ${KnowledgeState.Withdrawn}
-         WHEN ${SUCCESSOR} IS NOT NULL THEN ${KnowledgeState.Superseded}
-         ELSE ${KnowledgeState.Current} END AS state,
+    ${decisionStateSql} AS state,
     d.source_id AS sourceId, d.withdrawn_at AS withdrawnAt, d.withdrawn_by AS withdrawnBy,
     d.withdrawn_reason AS withdrawnReason,
     d.created_at AS createdAt, d.updated_at AS updatedAt

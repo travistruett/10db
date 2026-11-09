@@ -411,7 +411,7 @@ describe('principle records', () => {
     expect(findRecords(c.store.db, c.project.id, 'sleep', 10).map((r) => r.id)).toEqual([second]);
   });
 
-  it('answers the replaced principle superseded from GET knowledge with history on, and leaves it out without', async () => {
+  it('answers the replaced principle superseded from GET knowledge with every state asked for, and leaves it out without', async () => {
     const m = c.say();
     propose({ records: [principleOf(m, 'first', { topicKey: 'tests.sleep' })] });
     const first = must(converted('first').results[0]?.principleId, 'the first principle');
@@ -448,8 +448,8 @@ describe('principle records', () => {
       return KnowledgeListDto.parse(await res.json());
     };
 
-    const withHistory = await get('?history=1');
-    expect(withHistory.items.map((i) => [i.id, i.state])).toEqual(
+    const everyState = await get('?shelf=all');
+    expect(everyState.items.map((i) => [i.id, i.state])).toEqual(
       expect.arrayContaining([
         [first, 'superseded'],
         [second, 'current'],

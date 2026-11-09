@@ -475,8 +475,9 @@ export interface ApiServices {
   /** Lifts a refused or monthly-cap pause and answers the pauses still in force; a usage-limit pause is a conflict. */
   resumeAccount(id: AccountId): AccountPauseDto[];
   /**
-   * A project's decisions and principles together, builder-wide ones included. With `q` and a broken
-   * search index the list is empty and `search.available` is false. Throws NotFoundError for an unknown
+   * One page of a project's decisions and principles together, builder-wide ones included, with how
+   * many match in all. With `q` and a broken search index the list is empty and `search.available` is
+   * false. Throws NotFoundError for an unknown
    * project and InvalidError for an area it lacks.
    */
   listKnowledge(projectId: ProjectId, query: KnowledgeListQuery): KnowledgeListDto;

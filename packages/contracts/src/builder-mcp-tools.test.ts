@@ -266,13 +266,16 @@ describe('the knowledge tools', () => {
     expect(BuilderToolInputs.supersede_knowledge.safeParse({ choice: 'c' }).success).toBe(false);
   });
 
-  it('search_knowledge takes history as a boolean and a project', () => {
+  it('search_knowledge takes a shelf, a page and a project', () => {
     expect(
-      BuilderToolInputs.search_knowledge.parse({ projectId, q: 'queue', history: true }),
-    ).toEqual({ projectId, q: 'queue', history: true });
-    expect(
-      BuilderToolInputs.search_knowledge.safeParse({ projectId, history: 'yes' }).success,
-    ).toBe(false);
+      BuilderToolInputs.search_knowledge.parse({ projectId, q: 'queue', shelf: 'past', page: 2 }),
+    ).toEqual({ projectId, q: 'queue', shelf: 'past', page: 2 });
+    expect(BuilderToolInputs.search_knowledge.safeParse({ projectId, shelf: 'old' }).success).toBe(
+      false,
+    );
+    expect(BuilderToolInputs.search_knowledge.safeParse({ projectId, history: true }).success).toBe(
+      false,
+    );
   });
 
   it('list_proposals defaults to the pending ones', () => {

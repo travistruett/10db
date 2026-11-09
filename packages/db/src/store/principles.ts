@@ -29,16 +29,19 @@ const SUCCESSOR = sql`(SELECT s.id FROM principles s WHERE s.supersedes_id = p.i
 /** True for a current principle: confirmed, not withdrawn, not superseded (SQL over alias `p`). */
 export const currentPrincipleSql = sql`(p.withdrawn_at IS NULL AND p.status = ${PrincipleStatus.Confirmed} AND ${SUCCESSOR} IS NULL)`;
 
+/** A principle's state, derived from its status, tombstones and successor (SQL over alias `p`). */
+export const principleStateSql = sql`CASE WHEN p.withdrawn_at IS NOT NULL THEN ${KnowledgeState.Withdrawn}
+         WHEN p.status = ${PrincipleStatus.Proposed} THEN ${KnowledgeState.Proposed}
+         WHEN ${SUCCESSOR} IS NOT NULL THEN ${KnowledgeState.Superseded}
+         WHEN p.status = ${PrincipleStatus.Retired} THEN ${KnowledgeState.Retired}
+         ELSE ${KnowledgeState.Current} END`;
+
 // Column aliases match PrincipleDto, so each row parses as one; the state is derived here, never stored.
 const SELECT_PRINCIPLE = sql`
   SELECT p.id AS id, p.project_id AS projectId, p.scope AS scope, p.area AS area,
     p.statement AS statement, p.rationale AS rationale, p.kind AS kind, p.topic_key AS topicKey,
     p.status AS status,
-    CASE WHEN p.withdrawn_at IS NOT NULL THEN ${KnowledgeState.Withdrawn}
-         WHEN p.status = ${PrincipleStatus.Proposed} THEN ${KnowledgeState.Proposed}
-         WHEN ${SUCCESSOR} IS NOT NULL THEN ${KnowledgeState.Superseded}
-         WHEN p.status = ${PrincipleStatus.Retired} THEN ${KnowledgeState.Retired}
-         ELSE ${KnowledgeState.Current} END AS state,
+    ${principleStateSql} AS state,
     p.supersedes_id AS supersedesId, ${SUCCESSOR} AS supersededById, p.source_id AS sourceId,
     p.source_quote AS sourceQuote, p.speaker AS speaker, p.confirmed_by AS confirmedBy,
     p.confirmed_at AS confirmedAt, p.retired_at AS retiredAt, p.retired_by AS retiredBy,

@@ -145,7 +145,7 @@ describe('one list for decisions and principles', () => {
     }
   });
 
-  it('filters by text, kind, scope, area and history', async () => {
+  it('filters by text, kind, scope, area and shelf', async () => {
     const { project, call } = await start();
     const base = `/projects/${project.id}`;
     const d = (
@@ -182,9 +182,11 @@ describe('one list for decisions and principles', () => {
       (await call('GET', `${base}/knowledge${query}`)).body.items.map((i: Body) => i.id).toSorted();
     expect(await ids('?q=queue')).toEqual([d.id]);
     expect(await ids('?q=sleep')).toEqual([next.id]);
-    expect(await ids('?q=sleep&history=1')).toEqual([old.id, next.id].toSorted());
+    expect(await ids('?q=sleep&shelf=all')).toEqual([old.id, next.id].toSorted());
+    expect(await ids('?q=sleep&shelf=past')).toEqual([old.id]);
     expect(await ids('?kind=decision')).toEqual([d.id]);
     expect(await ids('?kind=heuristic')).toEqual([area.id]);
+    expect(await ids('?kind=decision&kind=heuristic')).toEqual([d.id, area.id].toSorted());
     expect(await ids('?scope=area&area=api')).toEqual([area.id]);
     expect(await ids('?scope=you')).toEqual([]);
   });
@@ -192,6 +194,7 @@ describe('one list for decisions and principles', () => {
   it.each([
     ['an area the project lacks', '?area=billing', 400, /billing/],
     ['an unknown kind', '?kind=rule', 400, /kind/],
+    ['a page larger than the largest', '?pageSize=101', 400, /pageSize/],
     ['an unknown parameter', '?quer=x', 400, /quer/],
   ])('answers 400 for %s', async (_name, query, status, message) => {
     const { project, call } = await start();
@@ -292,7 +295,7 @@ describe('writing and reading back', () => {
     });
     const states = async () =>
       Object.fromEntries(
-        (await call('GET', `${base}/knowledge?q=queue&history=1`)).body.items.map((i: Body) => [
+        (await call('GET', `${base}/knowledge?q=queue&shelf=all`)).body.items.map((i: Body) => [
           i.id,
           i.state,
         ]),
@@ -403,7 +406,7 @@ describe('writing and reading back', () => {
     const withdrawn = await call('POST', `/principles/${b.id}/withdraw`, { reason: 'wrong' });
     expect(withdrawn.body).toMatchObject({ state: 'withdrawn', withdrawnReason: 'wrong' });
     expect((await call('GET', `${base}/knowledge`)).body.items).toEqual([]);
-    const all = (await call('GET', `${base}/knowledge?history=1`)).body.items;
+    const all = (await call('GET', `${base}/knowledge?shelf=all`)).body.items;
     expect(all.map((i: KnowledgeItemDto) => i.state).toSorted()).toEqual(['retired', 'withdrawn']);
     const again = await call('POST', `/principles/${a.id}/retire`, { reason: 'twice' });
     expect(again.status).toBe(409);
@@ -548,7 +551,7 @@ describe('a 409 names the live record', () => {
 
 describe('dry runs of a retire or a withdrawal', () => {
   const snapshot = async (call: Caller, base: string) => ({
-    list: (await call('GET', `${base}/knowledge?history=1`)).body,
+    list: (await call('GET', `${base}/knowledge?shelf=all`)).body,
     sources: sourceCount(running()),
   });
 
@@ -678,7 +681,7 @@ describe('a source on every write', () => {
       withdrawn: { by: 'me', reason: 'wrong', source: shown },
     });
     expect((await call('GET', `${base}/knowledge`)).body.items).toEqual([]);
-    const history = (await call('GET', `${base}/knowledge?history=1`)).body.items;
+    const history = (await call('GET', `${base}/knowledge?shelf=all`)).body.items;
     expect(history.map((i: Body) => i.state).toSorted()).toEqual(['retired', 'withdrawn']);
   });
 
@@ -732,7 +735,7 @@ describe('a source on every write', () => {
       confirmedSource: null,
       withdrawn: { reason: 'no', source: shown },
     });
-    const found = await call('GET', `/projects/${project.id}/knowledge?q=sleep&history=1`);
+    const found = await call('GET', `/projects/${project.id}/knowledge?q=sleep&shelf=all`);
     expect(found.body.items.map((i: Body) => i.state)).toEqual(['withdrawn']);
   });
 
@@ -766,7 +769,7 @@ describe('an unknown project', () => {
     const { project, call } = await start();
     const res = await call('POST', `/projects/${mintId('Project')}/${collection}`, body);
     expect(res.status).toBe(404);
-    expect((await call('GET', `/projects/${project.id}/knowledge?history=1`)).body.items).toEqual(
+    expect((await call('GET', `/projects/${project.id}/knowledge?shelf=all`)).body.items).toEqual(
       [],
     );
     const dry = await call('POST', `/projects/${mintId('Project')}/${collection}`, {
@@ -796,7 +799,7 @@ describe('dry runs', () => {
       })
     ).body;
     const before = {
-      list: (await call('GET', `${base}/knowledge?history=1`)).body,
+      list: (await call('GET', `${base}/knowledge?shelf=all`)).body,
       sources: sourceCount(running()),
     };
     const create = await call('POST', `${base}/principles`, {
@@ -845,7 +848,7 @@ describe('dry runs', () => {
       replaces: { id: old.id },
     });
     expect({
-      list: (await call('GET', `${base}/knowledge?history=1`)).body,
+      list: (await call('GET', `${base}/knowledge?shelf=all`)).body,
       sources: sourceCount(running()),
     }).toEqual(before);
   });

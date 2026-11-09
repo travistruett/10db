@@ -48,5 +48,6 @@ Turned down:
 - **Column reordering.** The drag handles cluttered every header, and the lists have few columns.
 - **Renaming the stored kinds or the `you` scope.** Every record, route and MCP tool carries them; only the
   words shown change.
-- **Paging in this change.** The lists still read at most 100 records; server-side paging, filtering and
-  sorting is its own change.
+- **Paging, filtering and sorting in the browser.** The lists are paged where they are read: the daemon
+  narrows, sorts, pages and counts them, and the table shows its own pager
+  (`decisions/2026-11-08-knowledge-lists-are-paged-where-they-are-read.md`).

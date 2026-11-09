@@ -1,4 +1,11 @@
-import { KnowledgeItemKind, PrincipleKind, type PrincipleItem } from '@10db/contracts';
+import {
+  isSearch,
+  KnowledgeItemKind,
+  KnowledgeSort,
+  PrincipleKind,
+  SortDirection,
+  type PrincipleItem,
+} from '@10db/contracts';
 import { MultiSelect, Stack, Text } from '@mantine/core';
 import type { DataTableColumn, DataTableSortStatus } from 'mantine-datatable';
 import { useState, type ReactNode } from 'react';
@@ -10,16 +17,9 @@ import {
   ShelfSearchFilter,
   type ListControls,
 } from './knowledge-filters';
-import {
-  dateText,
-  PRINCIPLE_KIND_LABELS,
-  PRINCIPLE_KIND_ORDER,
-  scopeText,
-  shortDateText,
-  STATE_LABELS,
-} from './knowledge-labels';
-import { isPast, KnowledgeShelf } from './knowledge-shelf';
-import { sortRows, type Comparators } from './knowledge-sort';
+import { dateText, PRINCIPLE_KIND_LABELS, scopeText, shortDateText } from './knowledge-labels';
+import { orderOf, usePaging, type SortColumns } from './knowledge-paging';
+import { KnowledgeShelf } from './knowledge-shelf';
 import {
   ACTIONS_COLUMN,
   ActionsCell,
@@ -35,12 +35,11 @@ const BY_KIND: DataTableSortStatus<PrincipleItem> = {
   direction: 'asc',
 };
 
-const COMPARATORS: Comparators<PrincipleItem> = {
-  principleKind: (a, b) =>
-    PRINCIPLE_KIND_ORDER.indexOf(a.principleKind) - PRINCIPLE_KIND_ORDER.indexOf(b.principleKind),
-  scope: (a, b) => scopeText(a).localeCompare(scopeText(b)),
-  createdAt: (a, b) => a.createdAt.localeCompare(b.createdAt),
-  state: (a, b) => STATE_LABELS[a.state].localeCompare(STATE_LABELS[b.state]),
+const SORTS: SortColumns = {
+  principleKind: KnowledgeSort.Kind,
+  scope: KnowledgeSort.Scope,
+  createdAt: KnowledgeSort.CreatedAt,
+  state: KnowledgeSort.State,
 };
 
 const KIND_CHOICES = Object.values(PrincipleKind).map((k) => ({
@@ -52,8 +51,9 @@ const KINDS: readonly string[] = Object.values(PrincipleKind);
 const isKind = (v: string): v is PrincipleKind => KINDS.includes(v);
 
 /**
- * The principles of the project in scope, current or past. Policies lead unless a search is typed, when
- * the best match does; any column can re-sort them.
+ * The principles of the project in scope, current or past, a page at a time. Policies lead unless a
+ * search is typed, when the best match does; any column can re-sort them. The daemon narrows, sorts and
+ * pages them.
  */
 export function PrincipleList({
   filter,
@@ -67,20 +67,24 @@ export function PrincipleList({
   /** The row's menu. */
   readonly actions: (principle: PrincipleItem) => ReactNode;
 }) {
-  const principles = useKnowledgePrinciples(filter);
   const [sort, setSort] = useState<DataTableSortStatus<PrincipleItem> | null>(null);
   const [kinds, setKinds] = useState<readonly PrincipleKind[]>([]);
   const past = controls.shelf === KnowledgeShelf.Past;
-  // Whether the rows answer a search is read from the answer, not the filter: rows standing in for a
-  // pending answer keep their order.
-  const searched = principles.data?.searched ?? false;
-  const shown = (principles.data?.items ?? []).filter(
-    (i): i is PrincipleItem =>
-      i.kind === KnowledgeItemKind.Principle &&
-      isPast(i.state) === past &&
-      (kinds.length === 0 || kinds.includes(i.principleKind)),
+  const order =
+    sort === null && !isSearch(filter.q)
+      ? { by: KnowledgeSort.Kind, dir: SortDirection.Asc }
+      : orderOf(sort, SORTS);
+  const paging = usePaging(JSON.stringify([filter, order, kinds]));
+  const principles = useKnowledgePrinciples(filter, {
+    page: paging.page,
+    pageSize: paging.pageSize,
+    sort: order,
+    kinds,
+  });
+  const answer = principles.data;
+  const rows = (answer?.items ?? []).filter(
+    (i): i is PrincipleItem => i.kind === KnowledgeItemKind.Principle,
   );
-  const rows = sortRows(shown, sort ?? (searched ? null : BY_KIND), COMPARATORS);
   const open = (p: PrincipleItem): void => {
     onTrace({ kind: p.kind, id: p.id, label: p.statement });
   };
@@ -184,6 +188,7 @@ export function PrincipleList({
         onOpen={open}
         sort={sort ?? BY_KIND}
         onSort={setSort}
+        paging={{ ...paging, total: answer?.total ?? 0, page: answer?.page ?? paging.page }}
         empty={emptyText(
           principles.data,
           'principles',

@@ -30,9 +30,9 @@ export function emptyText(
 }
 
 /**
- * What stands in for a list that has not arrived or failed, and the lines around it when search is
- * unavailable or the answer was cut short. Otherwise it draws `children`, the table, which says itself
- * when it is empty so its filters stay in reach.
+ * What stands in for a list that has not arrived or failed, and the line above it when search is
+ * unavailable. Otherwise it draws `children`, the table, which says itself when it is empty so its
+ * filters stay in reach.
  */
 export function ListStates({
   query,
@@ -51,7 +51,7 @@ export function ListStates({
       </Alert>
     );
   if (query.isPending) return <Loader size="sm" aria-label={`Loading ${what}`} />;
-  const { items, truncated, search } = query.data;
+  const { items, search } = query.data;
   // An empty answer to the previous filter says nothing about the new one: wait for it rather than
   // claim that nothing exists or nothing matched.
   if (query.isPlaceholderData && items.length === 0)
@@ -68,11 +68,6 @@ export function ListStates({
         </Group>
       ) : null}
       {children}
-      {truncated ? (
-        <Text size="xs" c="dimmed">
-          More matched than are shown. Search or filter to narrow them.
-        </Text>
-      ) : null}
     </>
   );
 }

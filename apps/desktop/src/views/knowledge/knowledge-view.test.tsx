@@ -14,11 +14,19 @@ import { daemonEvent, projectViewDto } from '../../test/fixtures';
 import {
   decisionItem,
   knowledgeList,
+  knowledgePage,
   principleItem,
   proposalDto,
   provenanceDto,
 } from '../../test/knowledge-fixtures';
-import { chooseScope, chooseShelf, openColumnFilter, typeSearch } from '../../test/knowledge-table';
+import {
+  chooseScope,
+  chooseShelf,
+  chooseTypes,
+  openColumnFilter,
+  sortBy,
+  typeSearch,
+} from '../../test/knowledge-table';
 
 const project = projectViewDto({
   areas: [
@@ -44,7 +52,7 @@ function serve(data: Partial<Served> = {}) {
       const params = new URL(request.url).searchParams;
       asked.push(params);
       const items = params.get('kind') === 'decision' ? served.decisions : served.principles;
-      return HttpResponse.json(knowledgeList(items));
+      return HttpResponse.json(knowledgePage(items, params));
     }),
     http.get(daemonUrl('/projects/:projectId/proposals'), () =>
       HttpResponse.json(served.proposals),
@@ -67,9 +75,15 @@ describe('KnowledgeView', () => {
     expect(await screen.findByRole('heading', { name: 'Knowledge', level: 2 })).toBeTruthy();
   });
 
-  it('lists principles, policies first, with scope, kind and date', async () => {
+  it('asks for principles policies first, and lists them with scope, kind and date', async () => {
     const { asked } = serve({
       principles: [
+        principleItem({
+          statement: 'Never sleep in tests',
+          scope: 'area',
+          area: 'api',
+          createdAt: '2026-10-13T12:00:00.000Z',
+        }),
         principleItem({
           statement: 'Prefer small PRs',
           principleKind: 'heuristic',
@@ -77,12 +91,6 @@ describe('KnowledgeView', () => {
           scope: 'you',
           projectId: null,
           createdAt: '2026-09-01T10:00:00.000Z',
-        }),
-        principleItem({
-          statement: 'Never sleep in tests',
-          scope: 'area',
-          area: 'api',
-          createdAt: '2026-10-13T12:00:00.000Z',
         }),
       ],
     });
@@ -97,7 +105,54 @@ describe('KnowledgeView', () => {
     expect(within(rows[1] ?? table).getByText('Prefer small PRs')).toBeTruthy();
     expect(within(rows[1] ?? table).getByText('All Projects')).toBeTruthy();
     expect(within(rows[1] ?? table).getByText('Preference')).toBeTruthy();
-    expect(asked.at(-1)?.get('kind')).toBe('principle');
+    expect(asked.at(-1)?.getAll('kind')).toEqual(['principle']);
+    expect(asked.at(-1)?.get('sort')).toBe('kind');
+    expect(asked.at(-1)?.get('dir')).toBe('asc');
+    expect(asked.at(-1)?.get('page')).toBe('1');
+    expect(asked.at(-1)?.get('pageSize')).toBe('25');
+  });
+
+  it('asks for the next page and shows it, with how many there are in all', async () => {
+    const principles = Array.from({ length: 30 }, (_, i) =>
+      principleItem({ statement: `Rule ${String(i + 1)}`, topicKey: `rule.${String(i + 1)}` }),
+    );
+    const { asked } = serve({ principles });
+    renderApp('/knowledge');
+    expect(await screen.findByText('Rule 1')).toBeTruthy();
+    expect(screen.getByText('1–25 of 30')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Page 2' }));
+    expect(await screen.findByText('Rule 26')).toBeTruthy();
+    expect(asked.at(-1)?.get('page')).toBe('2');
+    expect(screen.queryByText('Rule 1')).toBeNull();
+    expect(screen.getByText('26–30 of 30')).toBeTruthy();
+  });
+
+  it('asks the daemon for the types chosen and the order clicked, from the first page again', async () => {
+    const principles = Array.from({ length: 30 }, (_, i) =>
+      principleItem({ statement: `Rule ${String(i + 1)}`, topicKey: `rule.${String(i + 1)}` }),
+    );
+    const { asked } = serve({ principles });
+    renderApp('/knowledge');
+    await screen.findByText('Rule 1');
+    fireEvent.click(screen.getByRole('button', { name: 'Page 2' }));
+    await waitFor(() => {
+      expect(asked.at(-1)?.get('page')).toBe('2');
+    });
+    await chooseTypes(['Rule', 'Background']);
+    await waitFor(() => {
+      expect(asked.at(-1)?.getAll('kind')).toEqual(['policy', 'belief']);
+    });
+    expect(asked.at(-1)?.get('page')).toBe('1');
+    fireEvent.click(screen.getByRole('button', { name: 'Page 2' }));
+    await waitFor(() => {
+      expect(asked.at(-1)?.get('page')).toBe('2');
+    });
+    sortBy('createdAt');
+    await waitFor(() => {
+      expect(asked.at(-1)?.get('sort')).toBe('createdAt');
+    });
+    expect(asked.at(-1)?.get('page')).toBe('1');
+    expect(asked.at(-1)?.getAll('kind')).toEqual(['policy', 'belief']);
   });
 
   it('searches as you type', async () => {
@@ -185,13 +240,14 @@ describe('KnowledgeView', () => {
       http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
       http.get(daemonUrl('/projects/:projectId/knowledge'), async ({ request }) => {
         calls += 1;
-        if (new URL(request.url).searchParams.has('q')) await gate;
-        return HttpResponse.json(
-          knowledgeList([
-            principleItem({ statement: 'Prefer small PRs', principleKind: 'heuristic' }),
-            principleItem({ statement: 'Never sleep in tests', principleKind: 'policy' }),
-          ]),
-        );
+        const rows = [
+          principleItem({ statement: 'Prefer small PRs', principleKind: 'heuristic' }),
+          principleItem({ statement: 'Never sleep in tests', principleKind: 'policy' }),
+        ];
+        if (!new URL(request.url).searchParams.has('q'))
+          return HttpResponse.json(knowledgeList(rows.toReversed()));
+        await gate;
+        return HttpResponse.json(knowledgeList(rows));
       }),
       http.get(daemonUrl('/projects/:projectId/proposals'), () => HttpResponse.json([])),
       ...baseHandlers(),
@@ -309,7 +365,7 @@ describe('KnowledgeView', () => {
     renderApp('/knowledge');
     // Under Current, none of these past records is shown.
     expect(await screen.findByText(/^No principles yet/)).toBeTruthy();
-    expect(asked.at(-1)?.get('history')).toBe('0');
+    expect(asked.at(-1)?.get('shelf')).toBe('current');
     await chooseScope('Only in api');
     await waitFor(() => {
       expect(asked.at(-1)?.get('scope')).toBe('area');
@@ -322,7 +378,7 @@ describe('KnowledgeView', () => {
     expect(asked.at(-1)?.get('area')).toBeNull();
     await chooseShelf('Past');
     await waitFor(() => {
-      expect(asked.at(-1)?.get('history')).toBe('1');
+      expect(asked.at(-1)?.get('shelf')).toBe('past');
     });
     const table = await screen.findByRole('table', { name: 'Principles' });
     expect(within(table).getByText('Superseded')).toBeTruthy();
@@ -529,7 +585,7 @@ describe('KnowledgeView', () => {
       const list = asked.filter((a) => a.path.endsWith('/knowledge'));
       expect(list.every((a) => a.projectId === beta.id)).toBe(true);
       expect(list.at(-1)?.params.get('q') ?? '').toBe('');
-      expect(list.at(-1)?.params.get('history')).toBe('0');
+      expect(list.at(-1)?.params.get('shelf')).toBe('current');
       await waitFor(() => {
         expect(asked.some((a) => a.path.endsWith('/proposals'))).toBe(true);
       });

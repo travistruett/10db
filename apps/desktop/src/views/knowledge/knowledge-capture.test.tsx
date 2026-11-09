@@ -13,7 +13,7 @@ import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 import { inboxItemDto, projectViewDto } from '../../test/fixtures';
 import {
   decisionItem,
-  knowledgeList,
+  knowledgePage,
   principleItem,
   proposalDto,
   provenanceDto,
@@ -74,7 +74,10 @@ function serve(data: Partial<Served> = {}, replies: Record<string, Reply> = {}) 
     http.get(daemonUrl('/projects/:projectId/knowledge'), ({ request }) => {
       const kind = new URL(request.url).searchParams.get('kind');
       return HttpResponse.json(
-        knowledgeList(kind === 'decision' ? served.decisions : served.principles),
+        knowledgePage(
+          kind === 'decision' ? served.decisions : served.principles,
+          new URL(request.url).searchParams,
+        ),
       );
     }),
     http.get(daemonUrl('/projects/:projectId/proposals'), () =>

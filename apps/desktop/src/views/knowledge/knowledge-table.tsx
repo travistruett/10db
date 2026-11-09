@@ -9,6 +9,7 @@ import {
 } from 'mantine-datatable';
 import type { ReactNode } from 'react';
 import { PRINCIPLE_KIND_COLORS, PRINCIPLE_KIND_LABELS } from './knowledge-labels';
+import { PAGE_SIZES, type Paging } from './knowledge-paging';
 import './knowledge-table.css';
 
 /** The accessor of a list's last column, the row's menu, whose header holds the Columns menu. */
@@ -106,11 +107,26 @@ function ColumnsMenu({
   );
 }
 
+/** The names of the pager's arrows, which Mantine leaves unnamed. */
+const PAGER_CONTROLS: Readonly<Record<'first' | 'last' | 'previous' | 'next', string>> = {
+  first: 'First page',
+  last: 'Last page',
+  previous: 'Previous page',
+  next: 'Next page',
+};
+
+/** One page of a list as the daemon answered it, and how to ask for another. */
+export interface TablePage extends Paging {
+  /** How many records the list holds on every page together. */
+  readonly total: number;
+}
+
 /**
  * A Knowledge list as a table. Columns resize and sort, the first column's and Scope's filters narrow it,
  * the Columns menu in the corner hides and shows columns, and the layout is kept per list in the window's
- * storage under `storeKey`. Clicking a row opens it. An empty list still draws its header, so its filters
- * stay in reach, and says `empty` in its body.
+ * storage under `storeKey`. Clicking a row opens it. The daemon sorts and pages it: `records` is one page
+ * and the pager below asks for another. An empty list still draws its header, so its filters stay in
+ * reach, and says `empty` in its body.
  */
 export function KnowledgeTable<T>({
   label,
@@ -121,6 +137,7 @@ export function KnowledgeTable<T>({
   onOpen,
   sort,
   onSort,
+  paging,
   empty,
 }: {
   readonly label: string;
@@ -131,6 +148,8 @@ export function KnowledgeTable<T>({
   readonly onOpen?: (record: T) => void;
   readonly sort: DataTableSortStatus<T>;
   readonly onSort: (next: DataTableSortStatus<T>) => void;
+  /** The daemon's page; without one the table lists every record it is given. */
+  readonly paging?: TablePage;
   readonly empty: ReactNode;
 }) {
   const { effectiveColumns, columnsToggle, setColumnsToggle } = useDataTableColumns<T>({
@@ -201,6 +220,30 @@ export function KnowledgeTable<T>({
         : {})}
       sortStatus={sort}
       onSortStatusChange={onSort}
+      {...(paging !== undefined && paging.total > 0
+        ? {
+            totalRecords: paging.total,
+            recordsPerPage: paging.pageSize,
+            page: paging.page,
+            onPageChange: paging.onPage,
+            recordsPerPageOptions: PAGE_SIZES,
+            onRecordsPerPageChange: paging.onPageSize,
+            recordsPerPageLabel: 'Per page',
+            paginationText: ({
+              from,
+              to,
+              totalRecords,
+            }: {
+              from: number;
+              to: number;
+              totalRecords: number;
+            }) => `${String(from)}–${String(to)} of ${String(totalRecords)}`,
+            getPaginationControlProps: (control: keyof typeof PAGER_CONTROLS) => ({
+              'aria-label': PAGER_CONTROLS[control],
+            }),
+            getPaginationItemProps: (page: number) => ({ 'aria-label': `Page ${String(page)}` }),
+          }
+        : {})}
     />
   );
 }

@@ -1743,7 +1743,7 @@ describe('knowledge routes', () => {
   it.each([
     [
       'GET',
-      `/projects/${pid}/knowledge?q=queue&history=1&kind=policy&limit=5`,
+      `/projects/${pid}/knowledge?q=queue&shelf=all&kind=policy&kind=belief&page=2&pageSize=5`,
       undefined,
       'listKnowledge',
     ],

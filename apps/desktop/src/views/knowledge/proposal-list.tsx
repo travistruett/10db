@@ -2,6 +2,7 @@ import {
   KnowledgeItemKind,
   KnowledgeScope,
   matchesSearch,
+  PRINCIPLE_KIND_ORDER,
   type PrincipleDto,
   type ProposalDto,
 } from '@10db/contracts';
@@ -16,7 +17,7 @@ import {
   type FilterState,
   type ListControls,
 } from './knowledge-filters';
-import { dateText, PRINCIPLE_KIND_ORDER, scopeText, shortDateText } from './knowledge-labels';
+import { dateText, scopeText, shortDateText } from './knowledge-labels';
 import { sortRows, type Comparators } from './knowledge-sort';
 import {
   ACTIONS_COLUMN,

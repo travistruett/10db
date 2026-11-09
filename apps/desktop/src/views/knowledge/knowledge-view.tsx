@@ -29,7 +29,7 @@ import {
 import { useSelectedProject } from '../../shell/selected-project';
 import { DecisionList } from './decision-list';
 import { NO_FILTERS, type FilterState, type ListControls } from './knowledge-filters';
-import { isPast, KnowledgeShelf } from './knowledge-shelf';
+import { isPast, KnowledgeShelf, listShelf } from './knowledge-shelf';
 import { PrincipleList } from './principle-list';
 import { pendingPrinciples, ProposalList } from './proposal-list';
 import {
@@ -166,7 +166,7 @@ function ProjectKnowledge({
     scope: filters.scope,
     area: filters.area,
     q,
-    history: shelf === KnowledgeShelf.Past,
+    shelf: listShelf(shelf),
   });
   const areas = scopeAreas(project.areas);
   const principleControls: ListControls = {

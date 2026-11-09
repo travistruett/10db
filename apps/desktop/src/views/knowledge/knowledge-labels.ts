@@ -30,13 +30,6 @@ export const PRINCIPLE_KIND_COLORS: Readonly<Record<PrincipleKind, MantineColor>
   [PrincipleKind.Belief]: 'gray',
 };
 
-/** Policies first, then heuristics, then beliefs: the order the context pack uses. */
-export const PRINCIPLE_KIND_ORDER: readonly PrincipleKind[] = [
-  PrincipleKind.Policy,
-  PrincipleKind.Heuristic,
-  PrincipleKind.Belief,
-];
-
 export const STATE_LABELS: Readonly<Record<KnowledgeState, string>> = {
   [KnowledgeState.Proposed]: 'Proposed',
   [KnowledgeState.Current]: 'Current',

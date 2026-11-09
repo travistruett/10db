@@ -1,4 +1,4 @@
-import { KnowledgeItemKind, type DecisionItem } from '@10db/contracts';
+import { KnowledgeItemKind, KnowledgeSort, type DecisionItem } from '@10db/contracts';
 import { Stack, Text } from '@mantine/core';
 import type { DataTableColumn, DataTableSortStatus } from 'mantine-datatable';
 import { useState, type ReactNode } from 'react';
@@ -13,9 +13,9 @@ import {
   ShelfSearchFilter,
   type ListControls,
 } from './knowledge-filters';
-import { dateText, scopeText, shortDateText, STATE_LABELS } from './knowledge-labels';
-import { isPast, KnowledgeShelf } from './knowledge-shelf';
-import { sortRows, type Comparators } from './knowledge-sort';
+import { dateText, scopeText, shortDateText } from './knowledge-labels';
+import { orderOf, usePaging, type SortColumns } from './knowledge-paging';
+import { KnowledgeShelf } from './knowledge-shelf';
 import { ACTIONS_COLUMN, ActionsCell, KnowledgeTable, OpenRecordText } from './knowledge-table';
 import { emptyText, ListStates, StateBadge } from './record-cells';
 
@@ -25,13 +25,16 @@ const NEWEST: DataTableSortStatus<DecisionItem> = {
   direction: 'desc',
 };
 
-const COMPARATORS: Comparators<DecisionItem> = {
-  scope: (a, b) => scopeText(a).localeCompare(scopeText(b)),
-  createdAt: (a, b) => a.createdAt.localeCompare(b.createdAt),
-  state: (a, b) => STATE_LABELS[a.state].localeCompare(STATE_LABELS[b.state]),
+const SORTS: SortColumns = {
+  scope: KnowledgeSort.Scope,
+  createdAt: KnowledgeSort.CreatedAt,
+  state: KnowledgeSort.State,
 };
 
-/** Recorded decisions of the project in scope, current or past: newest first, or best match first with a search. */
+/**
+ * Recorded decisions of the project in scope, current or past, a page at a time: newest first, or best
+ * match first with a search. The daemon narrows, sorts and pages them.
+ */
 export function DecisionList({
   filter,
   controls,
@@ -44,13 +47,20 @@ export function DecisionList({
   /** The row's menu. */
   readonly actions: (decision: DecisionItem) => ReactNode;
 }) {
-  const decisions = useKnowledgeDecisions(filter);
   const [sort, setSort] = useState<DataTableSortStatus<DecisionItem> | null>(null);
   const past = controls.shelf === KnowledgeShelf.Past;
-  const shown = (decisions.data?.items ?? []).filter(
-    (i): i is DecisionItem => i.kind === KnowledgeItemKind.Decision && isPast(i.state) === past,
+  const order = orderOf(sort, SORTS);
+  const paging = usePaging(JSON.stringify([filter, order]));
+  const decisions = useKnowledgeDecisions(filter, {
+    page: paging.page,
+    pageSize: paging.pageSize,
+    sort: order,
+    kinds: [],
+  });
+  const answer = decisions.data;
+  const rows = (answer?.items ?? []).filter(
+    (i): i is DecisionItem => i.kind === KnowledgeItemKind.Decision,
   );
-  const rows = sortRows(shown, sort, COMPARATORS);
   const open = (d: DecisionItem): void => {
     onTrace({ kind: d.kind, id: d.id, label: d.question });
   };
@@ -132,6 +142,7 @@ export function DecisionList({
         onOpen={open}
         sort={sort ?? NEWEST}
         onSort={setSort}
+        paging={{ ...paging, total: answer?.total ?? 0, page: answer?.page ?? paging.page }}
         empty={emptyText(
           decisions.data,
           'decisions',

@@ -3,6 +3,7 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 /** The first column of every Knowledge list (a principle's or proposal's statement, a decision's question): its filter holds the shelf and the search. */
 const FIRST_COLUMN = ['statement', 'question'];
 const SCOPE_COLUMN = ['scope'];
+const TYPE_COLUMN = ['principleKind'];
 
 /**
  * The filter button in the header of the first column whose accessor is one of `accessors`. A sortable
@@ -78,4 +79,31 @@ export async function chooseScope(name: string): Promise<void> {
     return el;
   });
   fireEvent.click(within(list).getByRole('option', { name, hidden: true }));
+}
+
+/** Picks each of `names` in the Type column's filter. Its list stays open between picks. */
+export async function chooseTypes(names: readonly string[]): Promise<void> {
+  const input = await withFilterOpen(
+    TYPE_COLUMN,
+    () => screen.queryAllByLabelText('Types shown').find((el) => el.tagName === 'INPUT') ?? null,
+  );
+  const options = () => {
+    const id = input.getAttribute('aria-controls');
+    return id === null ? null : document.getElementById(id);
+  };
+  if (options() === null) fireEvent.click(input);
+  const list = await waitFor(() => {
+    const el = options();
+    if (el === null) throw new Error('the type list is not open');
+    return el;
+  });
+  for (const name of names)
+    fireEvent.click(within(list).getByRole('option', { name, hidden: true }));
+}
+
+/** Sorts the table by the column with this accessor, as a click on its header does. */
+export function sortBy(accessor: string): void {
+  const header = document.querySelector(`th[data-accessor="${accessor}"]`);
+  if (!(header instanceof HTMLElement)) throw new Error(`no column ${accessor}`);
+  fireEvent.click(header);
 }
