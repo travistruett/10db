@@ -7,6 +7,7 @@ import {
 } from '@10db/contracts';
 import { Checkbox, Group, Select } from '@mantine/core';
 import { useProjects } from '../../daemon/queries';
+import { SCOPE_ALL_PROJECTS, SCOPE_THIS_PROJECT } from '../knowledge/knowledge-labels';
 
 const AREA_PREFIX = 'area:';
 
@@ -56,8 +57,8 @@ export function RecordDecision({
           w={220}
           allowDeselect={false}
           data={[
-            { value: KnowledgeScope.Project, label: 'This project' },
-            { value: KnowledgeScope.You, label: 'All my projects' },
+            { value: KnowledgeScope.Project, label: SCOPE_THIS_PROJECT },
+            { value: KnowledgeScope.You, label: SCOPE_ALL_PROJECTS },
             ...areas.map((a) => ({ value: `${AREA_PREFIX}${a.name}`, label: `Area: ${a.name}` })),
           ]}
           value={valueOf(value)}

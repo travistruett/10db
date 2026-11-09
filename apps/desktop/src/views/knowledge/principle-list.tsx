@@ -5,6 +5,12 @@ import { useState, type ReactNode } from 'react';
 import { useKnowledgePrinciples, type KnowledgeFilter } from '../../daemon/knowledge-queries';
 import type { TracedRecord } from '../../daemon/knowledge-queries';
 import {
+  firstColumnFiltering,
+  ScopeFilter,
+  ShelfSearchFilter,
+  type ListControls,
+} from './knowledge-filters';
+import {
   dateText,
   PRINCIPLE_KIND_LABELS,
   PRINCIPLE_KIND_ORDER,
@@ -12,10 +18,16 @@ import {
   shortDateText,
   STATE_LABELS,
 } from './knowledge-labels';
-import { isPast } from './knowledge-shelf';
+import { isPast, KnowledgeShelf } from './knowledge-shelf';
 import { sortRows, type Comparators } from './knowledge-sort';
-import { ActionsCell, KindBadge, KnowledgeTable, OpenRecordText } from './knowledge-table';
-import { ListStates, StateBadge } from './record-cells';
+import {
+  ACTIONS_COLUMN,
+  ActionsCell,
+  KindBadge,
+  KnowledgeTable,
+  OpenRecordText,
+} from './knowledge-table';
+import { emptyText, ListStates, StateBadge } from './record-cells';
 
 /** Policies first, then heuristics and beliefs, as the context pack orders them. */
 const BY_KIND: DataTableSortStatus<PrincipleItem> = {
@@ -45,13 +57,12 @@ const isKind = (v: string): v is PrincipleKind => KINDS.includes(v);
  */
 export function PrincipleList({
   filter,
-  past,
+  controls,
   onTrace,
   actions,
 }: {
   readonly filter: KnowledgeFilter;
-  /** The Past shelf: only what no longer applies, with its state said. */
-  readonly past: boolean;
+  readonly controls: ListControls;
   readonly onTrace: (record: TracedRecord) => void;
   /** The row's menu. */
   readonly actions: (principle: PrincipleItem) => ReactNode;
@@ -59,6 +70,7 @@ export function PrincipleList({
   const principles = useKnowledgePrinciples(filter);
   const [sort, setSort] = useState<DataTableSortStatus<PrincipleItem> | null>(null);
   const [kinds, setKinds] = useState<readonly PrincipleKind[]>([]);
+  const past = controls.shelf === KnowledgeShelf.Past;
   // Whether the rows answer a search is read from the answer, not the filter: rows standing in for a
   // pending answer keep their order.
   const searched = principles.data?.searched ?? false;
@@ -77,6 +89,8 @@ export function PrincipleList({
       accessor: 'statement',
       title: 'Principle',
       resizable: true,
+      filtering: firstColumnFiltering(controls),
+      filter: <ShelfSearchFilter controls={controls} />,
       render: (p) => (
         <Stack gap={4}>
           <OpenRecordText
@@ -121,10 +135,12 @@ export function PrincipleList({
     {
       accessor: 'scope',
       title: 'Scope',
-      width: 120,
+      width: 140,
       sortable: true,
       resizable: true,
       toggleable: true,
+      filtering: controls.filters.scope !== null,
+      filter: <ScopeFilter controls={controls} />,
       render: (p) => scopeText(p),
     },
     {
@@ -151,23 +167,14 @@ export function PrincipleList({
         ]
       : []),
     {
-      accessor: 'actions',
+      accessor: ACTIONS_COLUMN,
       title: '',
       width: 56,
       render: (p) => <ActionsCell>{actions(p)}</ActionsCell>,
     },
   ];
   return (
-    <ListStates
-      query={principles}
-      what="principles"
-      empty={
-        past
-          ? 'Nothing here yet. A principle moves here once it is replaced, retired or withdrawn.'
-          : 'No principles yet. Agents propose them and you confirm them under Pending or in the Inbox.'
-      }
-      shown={rows.length}
-    >
+    <ListStates query={principles} what="principles">
       <KnowledgeTable
         label="Principles"
         storeKey="knowledge-principles"
@@ -177,6 +184,14 @@ export function PrincipleList({
         onOpen={open}
         sort={sort ?? BY_KIND}
         onSort={setSort}
+        empty={emptyText(
+          principles.data,
+          'principles',
+          past
+            ? 'Nothing here yet. A principle moves here once it is replaced, retired or withdrawn.'
+            : 'No principles yet. Agents propose them and you confirm them under Pending or in the Inbox.',
+          kinds.length > 0,
+        )}
       />
     </ListStates>
   );

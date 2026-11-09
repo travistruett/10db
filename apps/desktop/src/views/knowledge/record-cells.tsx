@@ -16,22 +16,32 @@ export function StateBadge({ state }: { readonly state: KnowledgeState }) {
 }
 
 /**
- * What stands in for a list that has not arrived, failed, was cut short or is empty. Renders `children`
- * (the table) only when there are rows.
+ * What a list says in its body when no row is shown. A search the index could not run says nothing:
+ * the line `ListStates` draws above says why.
+ */
+export function emptyText(
+  answer: KnowledgeAnswer | undefined,
+  what: string,
+  empty: string,
+  narrowed: boolean,
+): string {
+  if (answer && !answer.search.available && answer.searched) return '';
+  return (answer?.searched ?? false) || narrowed ? `No ${what} match.` : empty;
+}
+
+/**
+ * What stands in for a list that has not arrived or failed, and the lines around it when search is
+ * unavailable or the answer was cut short. Otherwise it draws `children`, the table, which says itself
+ * when it is empty so its filters stay in reach.
  */
 export function ListStates({
   query,
   what,
-  empty,
-  shown,
   children,
 }: {
   readonly query: UseQueryResult<KnowledgeAnswer>;
   /** "principles" / "decisions", for the messages. */
   readonly what: string;
-  readonly empty: string;
-  /** How many of the answer's records the list shows once the shelf and column filters apply. */
-  readonly shown: number;
   readonly children: ReactNode;
 }) {
   if (query.isError)
@@ -41,8 +51,7 @@ export function ListStates({
       </Alert>
     );
   if (query.isPending) return <Loader size="sm" aria-label={`Loading ${what}`} />;
-  const { items, truncated, search, searched: searching } = query.data;
-  const none = shown === 0;
+  const { items, truncated, search } = query.data;
   // An empty answer to the previous filter says nothing about the new one: wait for it rather than
   // claim that nothing exists or nothing matched.
   if (query.isPlaceholderData && items.length === 0)
@@ -58,11 +67,7 @@ export function ListStates({
           </Text>
         </Group>
       ) : null}
-      {/* An empty answer to a search the index could not run is not "no match": the line above says why. */}
-      {none && (search.available || !searching) ? (
-        <Text c="dimmed">{searching ? `No ${what} match.` : empty}</Text>
-      ) : null}
-      {none ? null : children}
+      {children}
       {truncated ? (
         <Text size="xs" c="dimmed">
           More matched than are shown. Search or filter to narrow them.

@@ -18,6 +18,7 @@ import {
   proposalDto,
   provenanceDto,
 } from '../../test/knowledge-fixtures';
+import { chooseShelf } from '../../test/knowledge-table';
 
 const project = projectViewDto({ areas: [{ name: 'api', globs: ['src/api/**'] }] });
 
@@ -263,7 +264,7 @@ describe('recording', () => {
     // Each kind says what it does to an agent.
     expect(within(dialog).getByText(/Every session is briefed with it\./)).toBeTruthy();
     fireEvent.click(within(dialog).getByRole('radio', { name: /^Policy/ }));
-    await choose(dialog, 'Applies to', 'You, in every project');
+    await choose(dialog, 'Applies to', 'All Projects');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
     await waitFor(() => {
       expect(posted).toEqual([
@@ -321,7 +322,7 @@ describe('editing', () => {
     fireEvent.change(within(dialog).getByLabelText('Statement'), {
       target: { value: 'Tests never sleep' },
     });
-    await choose(dialog, 'Applies to', 'You, in every project');
+    await choose(dialog, 'Applies to', 'All Projects');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
     await waitFor(() => {
       expect(posted).toEqual([
@@ -372,7 +373,7 @@ describe('editing', () => {
       ],
     });
     renderApp('/knowledge');
-    fireEvent.click(await screen.findByRole('radio', { name: 'Past' }));
+    await chooseShelf('Past');
     fireEvent.click(await screen.findByRole('button', { name: 'Actions for "Old rule"' }));
     expect(await screen.findByRole('menuitem', { name: 'Withdraw…' })).toBeTruthy();
     expect(screen.queryByRole('menuitem', { name: 'Edit…' })).toBeNull();
@@ -677,7 +678,7 @@ describe('retiring and withdrawing', () => {
       ),
     );
     await openDecisions();
-    fireEvent.click(await screen.findByRole('radio', { name: 'Past' }));
+    await chooseShelf('Past');
     await openRowMenu('Actions for "Which queue?"', 'Withdraw…');
     const dialog = await screen.findByRole('dialog', { name: 'Withdraw Decision' });
     expect(await within(dialog).findByText(/has a newer version/)).toBeTruthy();
@@ -726,7 +727,7 @@ describe('retiring and withdrawing', () => {
       ),
     );
     await openDecisions();
-    fireEvent.click(await screen.findByRole('radio', { name: 'Past' }));
+    await chooseShelf('Past');
     await openRowMenu('Actions for "Which queue?"', 'Withdraw…');
     const dialog = await screen.findByRole('dialog', { name: 'Withdraw Decision' });
     expect(await within(dialog).findByText(/has a newer version/)).toBeTruthy();
@@ -746,7 +747,7 @@ describe('proposals', () => {
   it('accepts a proposal after changing its statement, kind and scope', async () => {
     const { posted, inboxReads } = serve({ proposals: [proposalDto({ projectId: project.id })] });
     renderApp('/knowledge');
-    fireEvent.click(await screen.findByRole('radio', { name: /^Pending/ }));
+    await chooseShelf(/^Pending/);
     await waitFor(() => {
       expect(inboxReads.count).toBeGreaterThan(0);
     });
@@ -760,7 +761,7 @@ describe('proposals', () => {
       target: { value: 'Tests never sleep' },
     });
     fireEvent.click(within(dialog).getByRole('radio', { name: /^Heuristic/ }));
-    await choose(dialog, 'Applies to', 'You, in every project');
+    await choose(dialog, 'Applies to', 'All Projects');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Accept' }));
     await waitFor(() => {
       expect(posted).toHaveLength(1);
@@ -781,7 +782,7 @@ describe('proposals', () => {
   it('rejects a proposal with a note, or without one', async () => {
     const { posted } = serve({ proposals: [proposalDto({ projectId: project.id })] });
     renderApp('/knowledge');
-    fireEvent.click(await screen.findByRole('radio', { name: /^Pending/ }));
+    await chooseShelf(/^Pending/);
     fireEvent.click(await screen.findByRole('button', { name: 'Reject…' }));
     const dialog = await screen.findByRole('dialog', { name: 'Reject Proposal' });
     fireEvent.change(within(dialog).getByLabelText('Note (optional)'), {
@@ -808,7 +809,7 @@ describe('proposals', () => {
       { accept: refusal(409, 'Proposal prp_x is already accepted') },
     );
     renderApp('/knowledge');
-    fireEvent.click(await screen.findByRole('radio', { name: /^Pending/ }));
+    await chooseShelf(/^Pending/);
     fireEvent.click(await screen.findByRole('button', { name: 'Accept…' }));
     const dialog = await screen.findByRole('dialog', { name: 'Accept Proposal' });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Accept' }));
@@ -820,7 +821,7 @@ describe('proposals', () => {
       proposals: [proposalDto({ projectId: project.id, kind: 'note', principle: null })],
     });
     renderApp('/knowledge');
-    fireEvent.click(await screen.findByRole('radio', { name: /^Pending/ }));
+    await chooseShelf(/^Pending/);
     expect(await screen.findByText('No proposals wait for you.')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Accept…' })).toBeNull();
   });

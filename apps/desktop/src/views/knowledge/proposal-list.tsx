@@ -9,10 +9,22 @@ import { Alert, Loader, Stack, Text } from '@mantine/core';
 import type { DataTableColumn, DataTableSortStatus } from 'mantine-datatable';
 import { useState, type ReactNode } from 'react';
 import { useProposals, type TracedRecord } from '../../daemon/knowledge-queries';
-import type { FilterState } from './knowledge-filters';
+import {
+  firstColumnFiltering,
+  ScopeFilter,
+  ShelfSearchFilter,
+  type FilterState,
+  type ListControls,
+} from './knowledge-filters';
 import { dateText, PRINCIPLE_KIND_ORDER, scopeText, shortDateText } from './knowledge-labels';
 import { sortRows, type Comparators } from './knowledge-sort';
-import { ActionsCell, KindBadge, KnowledgeTable, OpenRecordText } from './knowledge-table';
+import {
+  ACTIONS_COLUMN,
+  ActionsCell,
+  KindBadge,
+  KnowledgeTable,
+  OpenRecordText,
+} from './knowledge-table';
 
 /** A principle proposal and the principle it would confirm. */
 interface PendingRow {
@@ -51,11 +63,14 @@ const COMPARATORS: Comparators<PendingRow> = {
 export function ProposalList({
   projectId,
   filter,
+  controls,
   onTrace,
   actions,
 }: {
   readonly projectId: ProposalDto['projectId'];
+  /** Search and scope, the search already debounced. */
   readonly filter: FilterState;
+  readonly controls: ListControls;
   readonly onTrace: (record: TracedRecord) => void;
   /** Accept and Reject for a proposal. */
   readonly actions: (proposal: ProposalDto) => ReactNode;
@@ -75,12 +90,6 @@ export function ProposalList({
     sort,
     COMPARATORS,
   );
-  if (rows.length === 0)
-    return (
-      <Text c="dimmed">
-        {pending.length === 0 ? 'No proposals wait for you.' : 'No proposal matches.'}
-      </Text>
-    );
   const open = ({ principle }: PendingRow): void => {
     onTrace({ kind: KnowledgeItemKind.Principle, id: principle.id, label: principle.statement });
   };
@@ -89,6 +98,8 @@ export function ProposalList({
       accessor: 'statement',
       title: 'Proposal',
       resizable: true,
+      filtering: firstColumnFiltering(controls),
+      filter: <ShelfSearchFilter controls={controls} />,
       render: (row) => (
         <Stack gap={4}>
           <OpenRecordText
@@ -117,10 +128,12 @@ export function ProposalList({
     {
       accessor: 'scope',
       title: 'Scope',
-      width: 120,
+      width: 140,
       sortable: true,
       resizable: true,
       toggleable: true,
+      filtering: controls.filters.scope !== null,
+      filter: <ScopeFilter controls={controls} />,
       render: (row) => scopeText(row.principle),
     },
     {
@@ -138,7 +151,7 @@ export function ProposalList({
       ),
     },
     {
-      accessor: 'actions',
+      accessor: ACTIONS_COLUMN,
       title: '',
       width: 190,
       render: (row) => <ActionsCell>{actions(row.proposal)}</ActionsCell>,
@@ -154,6 +167,7 @@ export function ProposalList({
       onOpen={open}
       sort={sort ?? NEWEST}
       onSort={setSort}
+      empty={pending.length === 0 ? 'No proposals wait for you.' : 'No proposal matches.'}
     />
   );
 }

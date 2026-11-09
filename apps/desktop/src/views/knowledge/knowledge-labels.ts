@@ -55,14 +55,19 @@ export const STATE_COLORS: Readonly<Record<KnowledgeState, MantineColor>> = {
   [KnowledgeState.Withdrawn]: 'gray',
 };
 
-/** "You", "Project", or the area's own name. */
+/** The scope a record applies to, said the same wherever it is shown or chosen. */
+export const SCOPE_ALL_PROJECTS = 'All Projects';
+export const SCOPE_THIS_PROJECT = 'This Project';
+export const SCOPE_THIS_AREA = 'This Area';
+
+/** "All Projects", "This Project", or the area's own name. */
 export function scopeText(r: {
   readonly scope: KnowledgeScope;
   readonly area: string | null;
 }): string {
-  if (r.scope === KnowledgeScope.You) return 'You';
+  if (r.scope === KnowledgeScope.You) return SCOPE_ALL_PROJECTS;
   if (r.scope === KnowledgeScope.Area && r.area !== null) return r.area;
-  return 'Project';
+  return SCOPE_THIS_PROJECT;
 }
 
 export const dateText = (iso: string): string => dayjs(iso).format('D MMM YYYY');

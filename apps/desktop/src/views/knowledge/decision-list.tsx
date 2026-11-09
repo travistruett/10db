@@ -7,11 +7,17 @@ import {
   type KnowledgeFilter,
   type TracedRecord,
 } from '../../daemon/knowledge-queries';
+import {
+  firstColumnFiltering,
+  ScopeFilter,
+  ShelfSearchFilter,
+  type ListControls,
+} from './knowledge-filters';
 import { dateText, scopeText, shortDateText, STATE_LABELS } from './knowledge-labels';
-import { isPast } from './knowledge-shelf';
+import { isPast, KnowledgeShelf } from './knowledge-shelf';
 import { sortRows, type Comparators } from './knowledge-sort';
-import { ActionsCell, KnowledgeTable, OpenRecordText } from './knowledge-table';
-import { ListStates, StateBadge } from './record-cells';
+import { ACTIONS_COLUMN, ActionsCell, KnowledgeTable, OpenRecordText } from './knowledge-table';
+import { emptyText, ListStates, StateBadge } from './record-cells';
 
 /** The daemon's own order: newest first. */
 const NEWEST: DataTableSortStatus<DecisionItem> = {
@@ -28,19 +34,19 @@ const COMPARATORS: Comparators<DecisionItem> = {
 /** Recorded decisions of the project in scope, current or past: newest first, or best match first with a search. */
 export function DecisionList({
   filter,
-  past,
+  controls,
   onTrace,
   actions,
 }: {
   readonly filter: KnowledgeFilter;
-  /** The Past shelf: only what no longer applies, with its state said. */
-  readonly past: boolean;
+  readonly controls: ListControls;
   readonly onTrace: (record: TracedRecord) => void;
   /** The row's menu. */
   readonly actions: (decision: DecisionItem) => ReactNode;
 }) {
   const decisions = useKnowledgeDecisions(filter);
   const [sort, setSort] = useState<DataTableSortStatus<DecisionItem> | null>(null);
+  const past = controls.shelf === KnowledgeShelf.Past;
   const shown = (decisions.data?.items ?? []).filter(
     (i): i is DecisionItem => i.kind === KnowledgeItemKind.Decision && isPast(i.state) === past,
   );
@@ -53,6 +59,8 @@ export function DecisionList({
       accessor: 'question',
       title: 'Decision',
       resizable: true,
+      filtering: firstColumnFiltering(controls),
+      filter: <ShelfSearchFilter controls={controls} />,
       render: (d) => (
         <Stack gap={4}>
           <OpenRecordText
@@ -75,10 +83,12 @@ export function DecisionList({
     {
       accessor: 'scope',
       title: 'Scope',
-      width: 120,
+      width: 140,
       sortable: true,
       resizable: true,
       toggleable: true,
+      filtering: controls.filters.scope !== null,
+      filter: <ScopeFilter controls={controls} />,
       render: (d) => scopeText(d),
     },
     {
@@ -105,23 +115,14 @@ export function DecisionList({
         ]
       : []),
     {
-      accessor: 'actions',
+      accessor: ACTIONS_COLUMN,
       title: '',
       width: 56,
       render: (d) => <ActionsCell>{actions(d)}</ActionsCell>,
     },
   ];
   return (
-    <ListStates
-      query={decisions}
-      what="decisions"
-      empty={
-        past
-          ? 'Nothing here yet. A decision moves here once it is replaced or withdrawn.'
-          : 'No decisions yet. Answers in the Inbox and the choices agents make on their own are recorded here.'
-      }
-      shown={rows.length}
-    >
+    <ListStates query={decisions} what="decisions">
       <KnowledgeTable
         label="Decisions"
         storeKey="knowledge-decisions"
@@ -131,6 +132,14 @@ export function DecisionList({
         onOpen={open}
         sort={sort ?? NEWEST}
         onSort={setSort}
+        empty={emptyText(
+          decisions.data,
+          'decisions',
+          past
+            ? 'Nothing here yet. A decision moves here once it is replaced or withdrawn.'
+            : 'No decisions yet. Answers in the Inbox and the choices agents make on their own are recorded here.',
+          false,
+        )}
       />
     </ListStates>
   );

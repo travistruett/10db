@@ -5,6 +5,7 @@ import {
   type ProjectViewDto,
 } from '@10db/contracts';
 import { Select } from '@mantine/core';
+import { SCOPE_ALL_PROJECTS, SCOPE_THIS_PROJECT } from './knowledge-labels';
 
 const AREA_PREFIX = 'area:';
 
@@ -53,7 +54,7 @@ export function placeOf(target: KnowledgeTarget): {
     : { scope: target.scope };
 }
 
-/** Where a record applies: You, the project, or one of its areas. */
+/** Where a record applies: all projects, the project, or one of its areas. */
 export function TargetSelect({
   project,
   value,
@@ -69,8 +70,8 @@ export function TargetSelect({
       allowDeselect={false}
       checkIconPosition="right"
       data={[
-        { value: KnowledgeScope.Project, label: `This project (${project.name})` },
-        { value: KnowledgeScope.You, label: 'You, in every project' },
+        { value: KnowledgeScope.Project, label: `${SCOPE_THIS_PROJECT} (${project.name})` },
+        { value: KnowledgeScope.You, label: SCOPE_ALL_PROJECTS },
         ...project.areas.map((a) => ({
           value: `${AREA_PREFIX}${a.name}`,
           label: `Area: ${a.name}`,
