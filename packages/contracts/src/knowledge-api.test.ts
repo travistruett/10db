@@ -17,28 +17,40 @@ const paths = (r: { success: boolean; error?: { issues: { path: PropertyKey[] }[
   r.error?.issues.map((i) => i.path.join('.'));
 
 describe('the knowledge list query', () => {
-  it('defaults to current records, 100 of them', () => {
-    expect(KnowledgeListQuery.parse({})).toEqual({ history: false, limit: 100 });
+  const DEFAULTS = { kind: [], shelf: 'current', dir: 'asc', page: 1, pageSize: 25 };
+
+  it('defaults to the first page of 25 current records', () => {
+    expect(KnowledgeListQuery.parse({})).toEqual(DEFAULTS);
   });
 
   it.each([
-    ['history=1', { history: '1' }, { history: true, limit: 100 }],
-    ['a kind of principle', { kind: 'policy' }, { kind: 'policy', history: false, limit: 100 }],
+    ['the past shelf', { shelf: 'past' }, { shelf: 'past' }],
+    ['every state', { shelf: 'all' }, { shelf: 'all' }],
+    ['a kind of principle', { kind: 'policy' }, { kind: ['policy'] }],
     [
-      'a text and a scope',
-      { q: ' queue ', scope: 'you' },
-      { q: 'queue', scope: 'you', history: false, limit: 100 },
+      'a repeated kind, once each',
+      { kind: ['policy', 'belief', 'policy'] },
+      { kind: ['policy', 'belief'] },
     ],
+    ['a text and a scope', { q: ' queue ', scope: 'you' }, { q: 'queue', scope: 'you' }],
+    ['a page and its size', { page: '3', pageSize: '100' }, { page: 3, pageSize: 100 }],
+    ['a sort and its direction', { sort: 'kind', dir: 'desc' }, { sort: 'kind', dir: 'desc' }],
   ])('reads %s', (_name, input, out) => {
-    expect(KnowledgeListQuery.parse(input)).toEqual(out);
+    expect(KnowledgeListQuery.parse(input)).toEqual({ ...DEFAULTS, ...out });
   });
 
   it.each([
     ['an unknown kind', { kind: 'rule' }, 'kind'],
+    ['an unknown kind among several', { kind: ['policy', 'rule'] }, 'kind'],
     ['an unknown scope', { scope: 'team' }, 'scope'],
-    ['history=yes', { history: 'yes' }, 'history'],
+    ['an unknown shelf', { shelf: 'pending' }, 'shelf'],
+    ['the history flag the shelf replaced', { history: '1' }, ''],
+    ['the limit pages replaced', { limit: '10' }, ''],
     ['a misspelt parameter', { quer: 'x' }, ''],
-    ['a limit of 0', { limit: '0' }, 'limit'],
+    ['page 0', { page: '0' }, 'page'],
+    ['a page of 101', { pageSize: '101' }, 'pageSize'],
+    ['an unknown sort', { sort: 'rank' }, 'sort'],
+    ['an unknown direction', { dir: 'up' }, 'dir'],
   ])('refuses %s, naming it', (_name, input, path) => {
     const r = KnowledgeListQuery.safeParse(input);
     expect(r.success).toBe(false);

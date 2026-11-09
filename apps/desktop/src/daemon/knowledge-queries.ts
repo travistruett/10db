@@ -8,12 +8,17 @@ import {
   PrincipleItem,
   ProposalDto,
   ProvenanceDto,
+  SortDirection,
   type DecisionEdit,
   type DecisionId,
   type DecisionWrite,
+  type KnowledgeItemDto,
+  type KnowledgeListShelf,
   type KnowledgeScope,
+  type KnowledgeSort,
   type PrincipleEdit,
   type PrincipleId,
+  type PrincipleKind,
   type PrincipleWrite,
   type ProjectId,
   type ProposalId,
@@ -32,33 +37,42 @@ export interface KnowledgeFilter {
   readonly scope: KnowledgeScope | null;
   readonly area: string | null;
   readonly q: string;
-  readonly history: boolean;
+  readonly shelf: KnowledgeListShelf;
+}
+
+/** Which page of a list, in what order, and for principles which kinds; no kind is every kind. */
+export interface KnowledgePageRequest {
+  readonly page: number;
+  readonly pageSize: number;
+  /** null leaves the order to the daemon: the best match first with a search, else the newest. */
+  readonly sort: { readonly by: KnowledgeSort; readonly dir: SortDirection } | null;
+  readonly kinds: readonly PrincipleKind[];
 }
 
 /** Query keys; `decision`, `principle` and `proposal` events invalidate by their first element. */
 export const knowledgeKeys = {
   all: ['knowledge'],
-  list: (kind: KnowledgeItemKind, f: KnowledgeFilter) => ['knowledge', kind, f] as const,
+  list: (kind: KnowledgeItemKind, f: KnowledgeFilter, page: KnowledgePageRequest) =>
+    ['knowledge', kind, f, page] as const,
   proposals: (projectId: ProjectId) => ['proposals', projectId] as const,
   provenance: (id: DecisionId | PrincipleId) => ['provenance', id] as const,
 } as const;
 
-/** The most the list route answers; past it the view says the list is cut short. */
-const LIST_LIMIT = 500;
-
 /**
- * The list route's answer, and whether it answered a search. While a changed filter loads, the previous
- * answer stands in, so what a list shows (its order, its empty state) follows the answer, not the new filter.
+ * The list route's answer, and whether it answered a search. While a changed filter or page loads, the
+ * previous answer stands in, so what a list shows (its rows, its empty state) follows the answer, not the
+ * new filter.
  */
 export type KnowledgeAnswer = KnowledgeListDto & { readonly searched: boolean };
 
-function useKnowledge(kind: KnowledgeItemKind, f: KnowledgeFilter) {
+function useKnowledge(kind: KnowledgeItemKind, f: KnowledgeFilter, page: KnowledgePageRequest) {
   const { client } = useDaemon();
   const q = f.q.trim();
   return useQuery({
-    queryKey: knowledgeKeys.list(kind, f),
-    // A new search, scope or History is a new key; the last answer stays up (and keeps its scroll) until
-    // the new one lands. Another project's rows never stand in: the view starts afresh on a switch.
+    queryKey: knowledgeKeys.list(kind, f, page),
+    // A new search, scope, shelf, sort or page is a new key; the last answer stays up (and keeps its
+    // scroll) until the new one lands. Another project's rows never stand in: the view starts afresh on
+    // a switch.
     placeholderData: (previous, previousQuery) =>
       previousQuery?.queryKey[2].projectId === f.projectId ? previous : undefined,
     queryFn: async (): Promise<KnowledgeAnswer> => ({
@@ -66,9 +80,16 @@ function useKnowledge(kind: KnowledgeItemKind, f: KnowledgeFilter) {
         await client.projects[':projectId'].knowledge.$get({
           param: { projectId: f.projectId },
           query: {
-            kind,
-            limit: String(LIST_LIMIT),
-            history: f.history ? '1' : '0',
+            kind:
+              kind === KnowledgeItemKind.Principle && page.kinds.length > 0
+                ? [...page.kinds]
+                : kind,
+            shelf: f.shelf,
+            page: String(page.page),
+            pageSize: String(page.pageSize),
+            // The route's type asks for a direction always; it applies only beside a sort.
+            dir: page.sort?.dir ?? SortDirection.Asc,
+            ...(page.sort ? { sort: page.sort.by } : {}),
             ...(f.scope ? { scope: f.scope } : {}),
             ...(f.area ? { area: f.area } : {}),
             ...(q ? { q } : {}),
@@ -81,10 +102,10 @@ function useKnowledge(kind: KnowledgeItemKind, f: KnowledgeFilter) {
   });
 }
 
-export const useKnowledgePrinciples = (f: KnowledgeFilter) =>
-  useKnowledge(KnowledgeItemKind.Principle, f);
-export const useKnowledgeDecisions = (f: KnowledgeFilter) =>
-  useKnowledge(KnowledgeItemKind.Decision, f);
+export const useKnowledgePrinciples = (f: KnowledgeFilter, page: KnowledgePageRequest) =>
+  useKnowledge(KnowledgeItemKind.Principle, f, page);
+export const useKnowledgeDecisions = (f: KnowledgeFilter, page: KnowledgePageRequest) =>
+  useKnowledge(KnowledgeItemKind.Decision, f, page);
 
 const Proposals = z.array(ProposalDto);
 
@@ -253,6 +274,36 @@ export function useWithdrawDecision() {
         DecisionItem,
       ),
   );
+}
+
+/**
+ * What saving a new principle, or accepting a proposal, would replace: the current principle with the same
+ * topic key at the same scope, by a dry run that writes nothing; null when it replaces nothing. A refusal
+ * is left to the real write to say.
+ */
+export function usePrincipleReplacePreview() {
+  const { client } = useDaemon();
+  return {
+    create: async (projectId: ProjectId, input: PrincipleWrite): Promise<KnowledgeItemDto | null> =>
+      readJson(
+        await client.projects[':projectId'].principles.$post({
+          param: { projectId },
+          json: { ...input, dryRun: true },
+        }),
+        KnowledgeDryRunDto,
+      ).then((answer) => answer.replaces),
+    accept: async (
+      id: ProposalId,
+      input: ProposalVerdictAccept,
+    ): Promise<KnowledgeItemDto | null> =>
+      readJson(
+        await client.proposals[':id'].accept.$post({
+          param: { id },
+          json: { ...input, dryRun: true },
+        }),
+        KnowledgeDryRunDto,
+      ).then((answer) => answer.replaces),
+  };
 }
 
 export function useCreatePrinciple(projectId: ProjectId) {

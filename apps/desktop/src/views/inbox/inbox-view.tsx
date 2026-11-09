@@ -9,12 +9,14 @@ import { Alert, Group, SegmentedControl, Stack, Text, Title } from '@mantine/cor
 import { useQueryClient } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
 import { DaemonRequestError } from '../../daemon/client';
-import { queryKeys, useAnswerInbox, useInbox } from '../../daemon/queries';
+import { queryKeys, useAnswerInbox, useInbox, useSystemCheck } from '../../daemon/queries';
 import { InboxCard } from './inbox-card';
 import { inboxRows, isDismissable, type InboxRow } from './inbox-rows';
 import { InboxShortcuts } from './inbox-shortcuts';
 import { defaultRecording } from './record-decision';
 import { ResolvedInbox } from './resolved-inbox';
+import { SystemCardList } from './system-card-list';
+import { systemCards, type SystemCard } from './system-cards';
 import { useInboxKeys } from './use-inbox-keys';
 
 /** Flag cards have no options; the daemon accepts any choice and closes them. */
@@ -43,8 +45,9 @@ export function InboxView() {
   const [tab, setTab] = useState<Tab>('open');
   const [helpOpen, setHelpOpen] = useState(false);
   const inbox = useInbox();
+  const cards = systemCards(useSystemCheck().data);
   // The header is drawn here once, the same for both views, so switching moves nothing in it.
-  const openCount = inbox.isSuccess ? inboxRows(inbox.data).length : null;
+  const openCount = inbox.isSuccess ? inboxRows(inbox.data).length + cards.length : null;
   // Each view is its own component, so the open view's keys are only live while it is shown.
   return (
     <Stack>
@@ -75,6 +78,7 @@ export function InboxView() {
       </Group>
       {tab === 'open' ? (
         <OpenInbox
+          systemCards={cards}
           onHelp={() => {
             setHelpOpen(true);
           }}
@@ -86,7 +90,13 @@ export function InboxView() {
   );
 }
 
-function OpenInbox({ onHelp }: { readonly onHelp: () => void }) {
+function OpenInbox({
+  systemCards: ownCards,
+  onHelp,
+}: {
+  readonly systemCards: readonly SystemCard[];
+  readonly onHelp: () => void;
+}) {
   const inbox = useInbox();
   const answer = useAnswerInbox();
   const queryClient = useQueryClient();
@@ -234,7 +244,8 @@ function OpenInbox({ onHelp }: { readonly onHelp: () => void }) {
           {inbox.error.message}
         </Alert>
       ) : null}
-      {inbox.isSuccess && rows.length === 0 ? (
+      <SystemCardList cards={ownCards} />
+      {inbox.isSuccess && rows.length === 0 && ownCards.length === 0 ? (
         <Text c="dimmed">Nothing needs you right now.</Text>
       ) : null}
       {rows.length > 0 ? (

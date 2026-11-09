@@ -1,7 +1,11 @@
 import {
   DecisionItem,
+  KNOWLEDGE_PAGE_SIZE,
   KnowledgeListDto,
+  KnowledgeListShelf,
+  KnowledgeState,
   mintId,
+  PAST_KNOWLEDGE_STATES,
   PrincipleItem,
   ProposalDto,
   ProvenanceDto,
@@ -66,16 +70,39 @@ export function principleItem(overrides: Partial<PrincipleItem> = {}): Principle
   });
 }
 
-/** The list answer for `GET /projects/:id/knowledge`. */
+/** The list answer for `GET /projects/:id/knowledge`: one page holding `items`. */
 export function knowledgeList(
   items: KnowledgeListDto['items'] = [],
   overrides: Partial<KnowledgeListDto> = {},
 ): KnowledgeListDto {
   return KnowledgeListDto.parse({
     items,
-    truncated: false,
+    total: items.length,
+    page: 1,
+    pageSize: KNOWLEDGE_PAGE_SIZE,
     search: { available: true, message: null },
     ...overrides,
+  });
+}
+
+/**
+ * What the daemon answers a list request over `records`, in their order: the shelf's records (Past
+ * holds the superseded, retired and withdrawn ones, Current the current ones), one page of them.
+ */
+export function knowledgePage(
+  records: KnowledgeListDto['items'],
+  params: URLSearchParams,
+): KnowledgeListDto {
+  const past = params.get('shelf') === KnowledgeListShelf.Past;
+  const shelved = records.filter((r) =>
+    past ? PAST_KNOWLEDGE_STATES.includes(r.state) : r.state === KnowledgeState.Current,
+  );
+  const pageSize = Number(params.get('pageSize') ?? KNOWLEDGE_PAGE_SIZE);
+  const page = Number(params.get('page') ?? 1);
+  return knowledgeList(shelved.slice((page - 1) * pageSize, page * pageSize), {
+    total: shelved.length,
+    page,
+    pageSize,
   });
 }
 

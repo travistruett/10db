@@ -1,20 +1,33 @@
 import {
   KnowledgeListQuery,
+  KnowledgeListShelf,
+  KnowledgeSort,
   mintId,
+  PrincipleStatus,
+  SortDirection,
   type DecisionWrite,
   type KnowledgeListDto,
   type KnowledgeSearchState,
   type PrincipleWrite,
   type ProjectDto,
 } from '@10db/contracts';
-import { createTestStore, seedProject, type Store } from '@10db/db';
+import {
+  createTestStore,
+  insertPrinciple,
+  insertSource,
+  seedProject,
+  withdrawDecision,
+  type Store,
+} from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   createPrinciple,
   knowledgeList,
   recordDecision,
+  retirePrincipleRecord,
   supersedeDecisionRecord,
   supersedePrincipleRecord,
+  withdrawPrincipleRecord,
 } from './records';
 
 let store: Store;
@@ -22,7 +35,9 @@ let close: () => void;
 let project: ProjectDto;
 let other: ProjectDto;
 beforeEach(() => {
-  ({ store, close } = createTestStore());
+  // Each write a second after the last, so the newest-first order is the order of writing.
+  let tick = 0;
+  ({ store, close } = createTestStore(() => new Date(Date.UTC(2026, 9, 1) + (tick += 1) * 1000)));
   project = seedProject(store, { name: 'demo', areas: [{ name: 'api', globs: ['src/api/**'] }] });
   other = seedProject(store, { name: 'other' });
 });
@@ -31,7 +46,7 @@ afterEach(() => {
 });
 
 const available: KnowledgeSearchState = { available: true, message: null };
-const list = (over: Record<string, string> = {}, search = available): KnowledgeListDto =>
+const list = (over: Record<string, string | string[]> = {}, search = available): KnowledgeListDto =>
   store.write((ctx) => knowledgeList(ctx.tx, project.id, KnowledgeListQuery.parse(over), search))
     .value;
 const ids = (l: KnowledgeListDto) => l.items.map((i) => i.id);
@@ -81,7 +96,7 @@ describe('the combined list', () => {
       rationale: 'Redis is there',
       state: 'current',
     });
-    expect(result).toMatchObject({ truncated: false, search: available });
+    expect(result).toMatchObject({ total: 3, page: 1, pageSize: 25, search: available });
     // another project sees the builder-wide ones and its own, none of this project's
     expect(
       store
@@ -91,7 +106,7 @@ describe('the combined list', () => {
     ).toEqual([theirs.id, mine.id, p.id].toSorted());
   });
 
-  it('searches both kinds by text, filters by kind, scope and area, and shows history on request', () => {
+  it('searches both kinds by text, filters by kind, scope and area, and shows every state on request', () => {
     const d = decide();
     const old = principle();
     const next = principle({ statement: 'Never sleep or poll in tests' });
@@ -104,11 +119,11 @@ describe('the combined list', () => {
     });
     expect(ids(list({ q: 'queue' }))).toEqual([d.id]);
     expect(ids(list({ q: 'sleep' }))).toEqual([next.id]);
-    expect(ids(list({ q: 'sleep', history: '1' })).toSorted()).toEqual(
+    expect(ids(list({ q: 'sleep', shelf: 'all' })).toSorted()).toEqual(
       [old.id, next.id].toSorted(),
     );
     expect(
-      list({ q: 'sleep', history: '1' })
+      list({ q: 'sleep', shelf: 'all' })
         .items.map((i) => i.state)
         .toSorted(),
     ).toEqual(['current', 'superseded']);
@@ -145,13 +160,6 @@ describe('the combined list', () => {
     expect(list({ q }, unavailable).items).toHaveLength(2);
   });
 
-  it('truncates at the limit and says so', () => {
-    for (let i = 0; i < 3; i += 1) decide({ question: `Question ${String(i)}?` });
-    const result = list({ limit: '2' });
-    expect(result.items).toHaveLength(2);
-    expect(result.truncated).toBe(true);
-  });
-
   it('answers 400 naming an area the project lacks, and 404 for an unknown project', () => {
     expect(() => list({ area: 'billing' })).toThrow(/area: demo has no area named billing/);
     expect(() =>
@@ -167,6 +175,209 @@ describe('the combined list', () => {
     expect(ids(list({}, unavailable))).toEqual([d.id]);
     expect(list({}, unavailable).search).toEqual(unavailable);
     expect(list({ q: 'queue' }, unavailable)).toMatchObject({ items: [], search: unavailable });
+  });
+});
+
+describe('one page of the list', () => {
+  /** Every id of each page of `size`, page by page, as far as the total reaches. */
+  const pages = (size: number, over: Record<string, string | string[]> = {}) => {
+    const out: string[][] = [];
+    for (
+      let page = 1;
+      out.length * size < list({ ...over, pageSize: String(size) }).total;
+      page += 1
+    )
+      out.push(ids(list({ ...over, page: String(page), pageSize: String(size) })));
+    return out;
+  };
+
+  it.each([
+    { page: '1', shown: [4, 3], answered: 1 },
+    { page: '2', shown: [2, 1], answered: 2 },
+    { page: '3', shown: [0], answered: 3 },
+    { page: '9', shown: [0], answered: 3 },
+  ])('answers page $page of five, newest first, with the total', ({ page, shown, answered }) => {
+    const made = [0, 1, 2, 3, 4].map((i) => decide({ question: `Question ${String(i)}?` }).id);
+    const result = list({ page, pageSize: '2' });
+    expect(ids(result)).toEqual(shown.map((i) => made[i]));
+    expect(result).toMatchObject({ total: 5, page: answered, pageSize: 2 });
+  });
+
+  it('pages decisions and principles as one list, a page holding both kinds', () => {
+    const d0 = decide({ question: 'First?' }).id;
+    const p1 = principle({ topicKey: 'a', statement: 'Rule a' }).id;
+    const d2 = decide({ question: 'Third?' }).id;
+    const p3 = principle({ topicKey: 'b', statement: 'Rule b' }).id;
+    const d4 = decide({ question: 'Fifth?' }).id;
+    expect(pages(2)).toEqual([[d4, p3], [d2, p1], [d0]]);
+  });
+
+  it('pages a search over both kinds as the whole ranked list, each kind’s best match in turn', () => {
+    for (let i = 0; i < 3; i += 1) decide({ question: `Which queue ${String(i)}?` });
+    for (let i = 0; i < 2; i += 1)
+      principle({ topicKey: `queue.${String(i)}`, statement: `Drain the queue ${String(i)}` });
+    decide({ question: 'Which editor?', choice: 'vim', rationale: 'habit' });
+    const whole = list({ q: 'queue', pageSize: '100' });
+    expect(whole.total).toBe(5);
+    expect(whole.items.map((i) => i.kind)).toEqual([
+      'decision',
+      'principle',
+      'decision',
+      'principle',
+      'decision',
+    ]);
+    expect(pages(2, { q: 'queue' })).toEqual([
+      ids(whole).slice(0, 2),
+      ids(whole).slice(2, 4),
+      ids(whole).slice(4),
+    ]);
+    expect(list({ q: 'queue', page: '2', pageSize: '2' }).total).toBe(5);
+    expect(pages(1, { q: 'queue', kind: 'decision' }).flat()).toEqual(
+      ids(whole).filter((id) => id.startsWith('dec_')),
+    );
+  });
+
+  describe('by shelf', () => {
+    /** One record in each state, of both kinds; the ids by state. */
+    const everyState = () => {
+      const current = principle({ topicKey: 'a', statement: 'Rule a' });
+      const replaced = principle({ topicKey: 'b', statement: 'Rule b' });
+      const successor = store.write((ctx) =>
+        supersedePrincipleRecord(ctx, replaced.id, { statement: 'Rule b, again' }),
+      ).value;
+      const retired = principle({ topicKey: 'c', statement: 'Rule c' });
+      store.write((ctx) => retirePrincipleRecord(ctx, retired.id, 'ended', undefined));
+      const withdrawn = principle({ topicKey: 'd', statement: 'Rule d' });
+      store.write((ctx) => withdrawPrincipleRecord(ctx, withdrawn.id, 'a typo', undefined));
+      const proposed = store.write((ctx) =>
+        insertPrinciple(ctx, {
+          target: { scope: 'project', projectId: project.id },
+          statement: 'Rule e',
+          kind: 'policy',
+          topicKey: 'e',
+          status: PrincipleStatus.Proposed,
+          sourceId: insertSource(ctx, 'agent', {}),
+          sourceQuote: null,
+          speaker: 'agent:x',
+          confirmedBy: null,
+        }),
+      ).value;
+      const decision = decide();
+      const oldDecision = decide({ question: 'Which logger?' });
+      const newDecision = store.write((ctx) =>
+        supersedeDecisionRecord(ctx, oldDecision.id, { choice: 'pino' }),
+      ).value;
+      const withdrawnDecision = decide({ question: 'Which font?' });
+      store.write((ctx) => {
+        withdrawDecision(ctx, withdrawnDecision.id, { by: 'me', reason: 'a typo' });
+      });
+      return {
+        current: [current.id, successor.id, decision.id, newDecision.id],
+        past: [replaced.id, retired.id, withdrawn.id, oldDecision.id, withdrawnDecision.id],
+        proposed: [proposed.id],
+      };
+    };
+
+    it.each([
+      { shelf: KnowledgeListShelf.Current, holds: ['current'] as const },
+      { shelf: KnowledgeListShelf.Past, holds: ['past'] as const },
+      { shelf: KnowledgeListShelf.All, holds: ['current', 'past', 'proposed'] as const },
+    ])('holds only the $shelf records, and counts them', ({ shelf, holds }) => {
+      const made = everyState();
+      const expected = holds.flatMap((h) => made[h]).toSorted();
+      const result = list({ shelf });
+      expect(ids(result).toSorted()).toEqual(expected);
+      expect(result.total).toBe(expected.length);
+    });
+  });
+
+  it.each<{ name: string; kind: string | string[]; shown: ('d' | 'p' | 'h' | 'b')[] }>([
+    { name: 'two kinds of principle', kind: ['policy', 'belief'], shown: ['p', 'b'] },
+    { name: 'decisions and one kind', kind: ['decision', 'belief'], shown: ['d', 'b'] },
+    { name: 'every principle', kind: ['principle', 'belief'], shown: ['p', 'h', 'b'] },
+    { name: 'one kind', kind: 'heuristic', shown: ['h'] },
+  ])('narrows to $name', ({ kind, shown }) => {
+    const made = {
+      d: decide().id,
+      p: principle({ topicKey: 'p', statement: 'A rule', kind: 'policy' }).id,
+      h: principle({ topicKey: 'h', statement: 'A preference', kind: 'heuristic' }).id,
+      b: principle({ topicKey: 'b', statement: 'Some background', kind: 'belief' }).id,
+    };
+    const result = list({ kind });
+    expect(ids(result).toSorted()).toEqual(shown.map((k) => made[k]).toSorted());
+    expect(result.total).toBe(shown.length);
+  });
+
+  describe('sorted', () => {
+    /** Written oldest first: a belief, a builder-wide heuristic, an api policy, a decision, a policy. */
+    const records = () => ({
+      belief: principle({ topicKey: 'b', statement: 'Queues are slow', kind: 'belief' }).id,
+      mine: principle({
+        scope: 'you',
+        topicKey: 'h',
+        statement: 'Prefer a queue',
+        kind: 'heuristic',
+      }).id,
+      api: principle({
+        scope: 'area',
+        area: 'api',
+        topicKey: 'p.api',
+        statement: 'Validate queue input',
+        kind: 'policy',
+      }).id,
+      decision: decide().id,
+      policy: principle({ topicKey: 'p', statement: 'Never drop a queue item', kind: 'policy' }).id,
+    });
+    type Name = keyof ReturnType<typeof records>;
+
+    it.each<{ name: string; query: Record<string, string>; order: Name[] }>([
+      {
+        name: 'newest first by default',
+        query: {},
+        order: ['policy', 'decision', 'api', 'mine', 'belief'],
+      },
+      {
+        name: 'by date, oldest first',
+        query: { sort: KnowledgeSort.CreatedAt, dir: SortDirection.Asc },
+        order: ['belief', 'mine', 'api', 'decision', 'policy'],
+      },
+      {
+        name: 'by kind, policies first and the newest of a kind first',
+        query: { sort: KnowledgeSort.Kind, dir: SortDirection.Asc },
+        order: ['policy', 'api', 'mine', 'belief', 'decision'],
+      },
+      {
+        name: 'by kind, reversed, ties still newest first',
+        query: { sort: KnowledgeSort.Kind, dir: SortDirection.Desc },
+        order: ['decision', 'belief', 'mine', 'policy', 'api'],
+      },
+      {
+        name: 'by scope: builder-wide, project, then area',
+        query: { sort: KnowledgeSort.Scope, dir: SortDirection.Asc },
+        order: ['mine', 'policy', 'decision', 'belief', 'api'],
+      },
+      {
+        name: 'by date with a search, the sort beating the rank',
+        query: { q: 'queue', sort: KnowledgeSort.CreatedAt, dir: SortDirection.Asc },
+        order: ['belief', 'mine', 'api', 'decision', 'policy'],
+      },
+    ])('$name', ({ query, order }) => {
+      const made = records();
+      expect(ids(list(query))).toEqual(order.map((n) => made[n]));
+    });
+
+    it('by state, by the state’s name', () => {
+      const a = principle({ topicKey: 'a', statement: 'Rule a' });
+      store.write((ctx) => retirePrincipleRecord(ctx, a.id, 'ended', undefined));
+      const b = principle({ topicKey: 'b', statement: 'Rule b' });
+      const c = principle({ topicKey: 'c', statement: 'Rule c' });
+      store.write((ctx) => withdrawPrincipleRecord(ctx, c.id, 'a typo', undefined));
+      const states = (dir: SortDirection) =>
+        list({ shelf: 'all', sort: KnowledgeSort.State, dir }).items.map((i) => i.state);
+      expect(ids(list({ shelf: 'all', sort: KnowledgeSort.State }))).toEqual([b.id, a.id, c.id]);
+      expect(states(SortDirection.Asc)).toEqual(['current', 'retired', 'withdrawn']);
+      expect(states(SortDirection.Desc)).toEqual(['withdrawn', 'retired', 'current']);
+    });
   });
 });
 
@@ -269,7 +480,7 @@ describe('superseding', () => {
       supersedesId: old.id,
       state: 'current',
     });
-    expect(ids(list({ q: 'sleep', history: '1' }))).toEqual([old.id]);
+    expect(ids(list({ q: 'sleep', shelf: 'past' }))).toEqual([old.id]);
     expect(ids(list({ q: 'wait' }))).toEqual([next.id]);
   });
 

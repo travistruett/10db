@@ -2,7 +2,9 @@ import {
   ConflictError,
   InvalidError,
   isSearch,
+  KnowledgeItemKind,
   KnowledgeScope,
+  PRINCIPLE_KIND_ORDER,
   PrincipleKind,
   PrincipleStatus,
   SearchMatch,
@@ -12,8 +14,8 @@ import {
   type DecisionEdit,
   type DecisionItem,
   type DecisionWrite,
-  type KnowledgeItemDto,
   type KnowledgeListDto,
+  type KnowledgeListKind,
   type KnowledgeListQuery,
   type KnowledgeSearchState,
   type KnowledgeSource,
@@ -34,12 +36,9 @@ import {
   insertDecision,
   insertPrinciple,
   insertSource,
-  listDecisions,
-  listPrinciples,
+  pageKnowledge,
   pendingProposalOf,
   retirePrinciple,
-  searchDecisionIds,
-  searchPrincipleIds,
   supersedeDecision,
   supersedePrinciple,
   withdrawDecision,
@@ -114,7 +113,23 @@ export function resolveTarget(
   return { scope, projectId, area };
 }
 
-/** Decisions and principles together, narrowed; the best matches first with `q`, else the newest. */
+/** The kinds of record a list's `kind` names: none names every kind. */
+function listedKinds(kinds: readonly KnowledgeListKind[]): {
+  readonly decisions: boolean;
+  readonly principleKinds: readonly PrincipleKind[];
+} {
+  if (kinds.length === 0) return { decisions: true, principleKinds: PRINCIPLE_KIND_ORDER };
+  const decisions = kinds.includes(KnowledgeItemKind.Decision);
+  const principleKinds = kinds.includes(KnowledgeItemKind.Principle)
+    ? PRINCIPLE_KIND_ORDER
+    : PRINCIPLE_KIND_ORDER.filter((k) => kinds.includes(k));
+  return { decisions, principleKinds };
+}
+
+/**
+ * One page of decisions and principles together, narrowed, with how many match in all. With no sort
+ * the best matches come first with `q` (each kind's best in turn), else the newest.
+ */
 export function knowledgeList(
   db: DbReader,
   projectId: ProjectId,
@@ -124,77 +139,32 @@ export function knowledgeList(
   const project = getProject(db, projectId);
   if (q.area !== undefined && !project.areas.some((a) => a.name === q.area))
     throw new InvalidError(`area: ${project.name} has no area named ${q.area}`);
-  const wantDecisions = q.kind === undefined || q.kind === 'decision';
-  const wantPrinciples = q.kind !== 'decision';
-  const principleKind = Object.values(PrincipleKind).find((k) => k === q.kind);
-  const searching = isSearch(q.q ?? '');
-  if (searching && !search.available) return { items: [], truncated: false, search };
-  const narrow = {
+  const text = q.q ?? '';
+  const searching = isSearch(text);
+  if (searching && !search.available)
+    return { items: [], total: 0, page: 1, pageSize: q.pageSize, search };
+  const found = pageKnowledge(db, {
     projectId,
-    ...(q.scope ? { scope: q.scope } : {}),
-    ...(q.area ? { area: q.area } : {}),
+    scope: q.scope,
+    area: q.area,
+    ...listedKinds(q.kind),
+    shelf: q.shelf,
+    search: searching ? { text, match: q.match ?? SearchMatch.AllPrefixes } : null,
+    sort: q.sort === undefined ? null : { by: q.sort, dir: q.dir },
+    page: q.page,
+    pageSize: q.pageSize,
+  });
+  return {
+    items: found.rows.map((row) =>
+      row.kind === KnowledgeItemKind.Decision
+        ? decisionItem(row.decision)
+        : principleItem(row.principle),
+    ),
+    total: found.total,
+    page: found.page,
+    pageSize: q.pageSize,
+    search,
   };
-  const match = q.match ?? SearchMatch.AllPrefixes;
-  // One more than the limit of each kind tells whether more matched.
-  const take = q.limit + 1;
-  let decisions: DecisionItem[] = [];
-  let principles: PrincipleItem[] = [];
-  if (wantDecisions) {
-    const found = searching
-      ? listDecisions(db, {
-          ...narrow,
-          history: true,
-          ids: searchDecisionIds(db, {
-            ...narrow,
-            query: q.q ?? '',
-            match,
-            limit: take,
-            history: q.history,
-          }),
-        })
-      : listDecisions(db, { ...narrow, history: q.history });
-    decisions = found.map(decisionItem);
-  }
-  if (wantPrinciples) {
-    const kind = principleKind ? { kind: principleKind } : {};
-    const found = searching
-      ? listPrinciples(db, {
-          ...narrow,
-          ...kind,
-          history: true,
-          ids: searchPrincipleIds(db, {
-            ...narrow,
-            ...kind,
-            query: q.q ?? '',
-            match,
-            limit: take,
-            history: q.history,
-          }),
-        })
-      : listPrinciples(db, { ...narrow, ...kind, history: q.history });
-    principles = found.map(principleItem);
-  }
-  const merged: KnowledgeItemDto[] = searching
-    ? interleave(decisions, principles)
-    : [...decisions, ...principles].toSorted(
-        (a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id),
-      );
-  return { items: merged.slice(0, q.limit), truncated: merged.length > q.limit, search };
-}
-
-/** Best match of each kind first, then the second best of each, so neither kind buries the other. */
-function interleave(
-  a: readonly KnowledgeItemDto[],
-  b: readonly KnowledgeItemDto[],
-): KnowledgeItemDto[] {
-  const out: KnowledgeItemDto[] = [];
-  for (let i = 0; i < Math.max(a.length, b.length); i += 1) {
-    const x = a[i];
-    const y = b[i];
-    if (x) out.push(x);
-    if (y) out.push(y);
-  }
-  return out;
 }
 
 /**

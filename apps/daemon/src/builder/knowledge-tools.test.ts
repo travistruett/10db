@@ -1,6 +1,7 @@
 import {
   BuilderToolName,
   DomainError,
+  KnowledgeListQuery,
   refusalText,
   type DecisionItem,
   type KnowledgeListDto,
@@ -125,7 +126,7 @@ describe('find_knowledge', () => {
     const p = principle();
     const viaTool = find({ q: 'queue' });
     expect(viaTool).toEqual(
-      provenance.listKnowledge(project.id, { q: 'queue', history: false, limit: 100 }),
+      provenance.listKnowledge(project.id, KnowledgeListQuery.parse({ q: 'queue' })),
     );
     expect(ids(viaTool)).toEqual([d.id]);
     expect(ids(find({ q: 'sleep' }))).toEqual([p.id]);
@@ -139,14 +140,26 @@ describe('find_knowledge', () => {
     expect(ids(find({ q: 'which queue should we use' }))).toEqual([d.id]);
   });
 
-  it('leaves out replaced records until history is asked for', () => {
+  it('leaves out replaced records until the past or every state is asked for', () => {
     const first = decide();
     const second = call(BuilderToolName.SupersedeKnowledge, {
       id: first.id,
       choice: 'pg-boss',
     }) as DecisionItem;
     expect(ids(find())).toEqual([second.id]);
-    expect(ids(find({ history: true })).toSorted()).toEqual([first.id, second.id].toSorted());
+    expect(ids(find({ shelf: 'past' }))).toEqual([first.id]);
+    expect(ids(find({ shelf: 'all' })).toSorted()).toEqual([first.id, second.id].toSorted());
+  });
+
+  it('answers one page and the total, the next page holding the rest', () => {
+    const older = decide();
+    const newer = principle();
+    expect(find({ pageSize: 1 })).toMatchObject({ total: 2, page: 1, pageSize: 1 });
+    expect(ids(find({ pageSize: 1 }))).toEqual([newer.id]);
+    expect(ids(find({ pageSize: 1, page: 2 }))).toEqual([older.id]);
+    expect(
+      refusal(BuilderToolName.SearchKnowledge, { projectId: project.id, pageSize: 101 }),
+    ).toMatch(/pageSize/);
   });
 
   it('refuses an unknown area in the API’s words', () => {
@@ -186,7 +199,7 @@ describe('recording', () => {
     expect(() => principle({ scope: 'area', area: 'billing' })).toThrow(
       'area: demo has no area named billing',
     );
-    expect(ids(find({ history: true }))).toEqual([]);
+    expect(ids(find({ shelf: 'all' }))).toEqual([]);
   });
 
   it('names a field the API refuses', () => {
@@ -246,7 +259,7 @@ describe('superseding, retiring and withdrawing', () => {
     }) as PrincipleItem;
     expect(retired.state).toBe('retired');
     expect(ids(find())).toEqual([]);
-    expect(ids(find({ history: true }))).toEqual([p.id]);
+    expect(ids(find({ shelf: 'all' }))).toEqual([p.id]);
     expect(provenance.principleProvenance(p.id)).toMatchObject({
       retired: {
         reason: 'The queue was removed.',

@@ -79,17 +79,22 @@ accepted` (or `rejected`).
 
 One call answers a project's decisions and principles together, **builder-wide (`you`) records included**.
 
-| Query     | Default        | Meaning                                                                                                                                                 |
-| --------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `q`       | none           | Search text, read against a decision's question, choice and rationale, or a principle's statement and topic key. Best match first.                      |
-| `match`   | `all_prefixes` | `all_prefixes`: every word of `q` starts a word of the record, so `que lib` finds "queue library". `any_word`: the record shares any whole word of `q`. |
-| `kind`    | both           | `decision`, `principle`, or one principle kind (`policy`, `heuristic`, `belief`; this leaves decisions out).                                            |
-| `scope`   | all            | `you`, `project` or `area`.                                                                                                                             |
-| `area`    | all            | One area's records. An area the project lacks is a 400 naming it.                                                                                       |
-| `history` | `0`            | `1` also returns superseded, retired, withdrawn and proposed records. Default: current records only.                                                    |
-| `limit`   | `100`          | 1 to 500.                                                                                                                                               |
+| Query      | Default        | Meaning                                                                                                                                                        |
+| ---------- | -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `q`        | none           | Search text, read against a decision's question, choice and rationale, or a principle's statement and topic key. Best match first.                             |
+| `match`    | `all_prefixes` | `all_prefixes`: every word of `q` starts a word of the record, so `que lib` finds "queue library". `any_word`: the record shares any whole word of `q`.        |
+| `kind`     | both           | `decision`, `principle`, or one principle kind (`policy`, `heuristic`, `belief`; this leaves decisions out). Repeat it for several: `kind=policy&kind=belief`. |
+| `scope`    | all            | `you`, `project` or `area`.                                                                                                                                    |
+| `area`     | all            | One area's records. An area the project lacks is a 400 naming it.                                                                                              |
+| `shelf`    | `current`      | `current`; `past`: superseded, retired and withdrawn records, never proposed ones; `all`: every state, proposed included.                                      |
+| `sort`     | none           | `createdAt`; `kind`: policies, heuristics, beliefs, then decisions; `scope`: `you`, `project`, then `area` by name; `state`: by the state's name.              |
+| `dir`      | `asc`          | `asc` or `desc`, for `sort`.                                                                                                                                   |
+| `page`     | `1`            | Which page, from 1. A page past the end answers the last page.                                                                                                 |
+| `pageSize` | `25`           | 1 to 100.                                                                                                                                                      |
 
-Without `q` the newest come first; with `q` the best matches of each kind alternate, so neither buries the other. A `q` with no letter or digit, such as `-`, is no search.
+Without `sort` or `q` the newest come first; with `q` the best matches of each kind alternate, so neither buries
+the other. A `sort` applies with `q` too; ties go to the newest. A `q` with no letter or digit, such as `-`, is no
+search. The daemon narrows, sorts, pages and counts in one query, so no page costs more than its records.
 
 ```json
 {
@@ -143,15 +148,18 @@ Without `q` the newest come first; with `q` the best matches of each kind altern
       "updatedAt": "2026-11-03T09:00:00.000Z"
     }
   ],
-  "truncated": false,
+  "total": 2,
+  "page": 1,
+  "pageSize": 25,
   "search": { "available": true, "message": null }
 }
 ```
 
 Every item has `kind` (`decision` or `principle`), `id`, `scope`, `area`, `state`, `createdAt` and its text: a
 decision's `question`, `choice` and `rationale`; a principle's `statement`, `principleKind`, `topicKey` and
-`rationale` (null when none was given). `projectId` is null for a `you` record. `truncated` is true when more
-matched than `limit`. `me` in `decidedBy`, `speaker` and `confirmedBy` is the builder; an agent shows as
+`rationale` (null when none was given). `projectId` is null for a `you` record. `total` is how many records match
+on every page together, and `page` the page answered; ask for the next while `page × pageSize` is under `total`.
+`me` in `decidedBy`, `speaker` and `confirmedBy` is the builder; an agent shows as
 `agent:<session>`, and a decision that came from a Shape conversation has `decidedBy: "builder"`.
 
 **Search can be unavailable.** If a search index was damaged and the daemon could not rebuild it at start,
@@ -191,7 +199,7 @@ be superseded (the current one is dec_b)`. A withdrawn decision says the same of
 ### Withdraw a decision
 
 `POST /decisions/:id/withdraw` → **200** with the decision item, now `withdrawn`, with `withdrawnAt`,
-`withdrawnBy` (who) and `withdrawnReason`. Nothing is deleted: the tombstone shows with `history=1`.
+`withdrawnBy` (who) and `withdrawnReason`. Nothing is deleted: the tombstone shows with `shelf=past`.
 
 | Field    | Required | Meaning                                                                   |
 | -------- | -------- | ------------------------------------------------------------------------- |

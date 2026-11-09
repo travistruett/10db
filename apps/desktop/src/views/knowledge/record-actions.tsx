@@ -12,10 +12,10 @@ import { IconDots } from '@tabler/icons-react';
 import { useState, type ReactNode } from 'react';
 import {
   useAcceptProposal,
+  usePrincipleReplacePreview,
   useCreatePrinciple,
   useRecordDecision,
   useRejectProposal,
-  useRetirePrinciple,
   useSupersedeDecision,
   useSupersedePrinciple,
 } from '../../daemon/knowledge-queries';
@@ -23,14 +23,13 @@ import { DecisionDialog } from './decision-dialog';
 import { PrincipleDialog } from './principle-dialog';
 import { ReasonDialog } from './reason-dialog';
 import { placeOf, recordTarget } from './target-select';
-import { WithdrawDialog } from './withdraw-dialog';
+import { RemoveDialog } from './remove-dialog';
 
 /** Which dialog a row or a proposal has open. */
 const Open = {
   None: 'none',
   Edit: 'edit',
-  Retire: 'retire',
-  Withdraw: 'withdraw',
+  Remove: 'remove',
   Accept: 'accept',
   Reject: 'reject',
 } as const;
@@ -39,7 +38,7 @@ type Open = (typeof Open)[keyof typeof Open];
 /**
  * The row's “⋯” menu; the record's own words name it, since a list holds many. It leaves the page the
  * moment it closes: a menu that fades out stays mounted for a moment, and the next one opens beside it,
- * so two Withdraw… items can be in the page at once.
+ * so two Remove… items can be in the page at once.
  */
 function RowMenu({ label, children }: { readonly label: string; readonly children: ReactNode }) {
   return (
@@ -98,6 +97,7 @@ export function NewDecisionButton({ project }: { readonly project: ProjectViewDt
 export function NewPrincipleButton({ project }: { readonly project: ProjectViewDto }) {
   const [open, setOpen] = useState(false);
   const create = useCreatePrinciple(project.id);
+  const previews = usePrincipleReplacePreview();
   const close = () => {
     create.reset();
     setOpen(false);
@@ -117,9 +117,11 @@ export function NewPrincipleButton({ project }: { readonly project: ProjectViewD
           project={project}
           title="New Principle"
           submitLabel="Save"
-          keyHint="A current principle with the same key and scope is replaced by this one."
           pending={create.isPending}
           error={create.error?.message ?? null}
+          preview={({ target, ...text }) =>
+            previews.create(project.id, { ...placeOf(target), ...text })
+          }
           onSubmit={({ target, ...text }) => {
             create.mutate({ ...placeOf(target), ...text }, { onSuccess: close });
           }}
@@ -131,8 +133,8 @@ export function NewPrincipleButton({ project }: { readonly project: ProjectViewD
 }
 
 /**
- * A decision row's menu. Edit writes a successor and moves this one to History; Withdraw… is offered on
- * an older version too, where its dialog says which record to withdraw instead.
+ * A decision row's menu. Edit writes a successor and moves this one to Past; Remove… is offered on
+ * an older version too, where its dialog says which record to remove instead.
  */
 export function DecisionActions({
   project,
@@ -164,10 +166,10 @@ export function DecisionActions({
         <Menu.Item
           color="red"
           onClick={() => {
-            setOpen(Open.Withdraw);
+            setOpen(Open.Remove);
           }}
         >
-          Withdraw…
+          Remove…
         </Menu.Item>
       </RowMenu>
       {open === Open.Edit ? (
@@ -195,8 +197,8 @@ export function DecisionActions({
           onClose={close}
         />
       ) : null}
-      {open === Open.Withdraw ? (
-        <WithdrawDialog
+      {open === Open.Remove ? (
+        <RemoveDialog
           record={{
             kind: KnowledgeItemKind.Decision,
             id: decision.id,
@@ -210,7 +212,7 @@ export function DecisionActions({
   );
 }
 
-/** A principle row's menu: Edit (a successor that keeps the key unless changed), Retire… and Withdraw…. */
+/** A principle row's menu: Edit… (a successor that keeps the key) and Remove…, which asks why. */
 export function PrincipleActions({
   project,
   principle,
@@ -220,17 +222,15 @@ export function PrincipleActions({
 }) {
   const [open, setOpen] = useState<Open>(Open.None);
   const supersede = useSupersedePrinciple();
-  const retire = useRetirePrinciple();
   const current = principle.state === KnowledgeState.Current;
   if (!current && principle.state !== KnowledgeState.Superseded) return null;
   const close = () => {
     supersede.reset();
-    retire.reset();
     setOpen(Open.None);
   };
   return (
     <>
-      <RowMenu label={principle.topicKey}>
+      <RowMenu label={`"${principle.statement}"`}>
         {current ? (
           <>
             <Menu.Item
@@ -240,22 +240,15 @@ export function PrincipleActions({
             >
               Edit…
             </Menu.Item>
-            <Menu.Item
-              onClick={() => {
-                setOpen(Open.Retire);
-              }}
-            >
-              Retire…
-            </Menu.Item>
           </>
         ) : null}
         <Menu.Item
           color="red"
           onClick={() => {
-            setOpen(Open.Withdraw);
+            setOpen(Open.Remove);
           }}
         >
-          Withdraw…
+          Remove…
         </Menu.Item>
       </RowMenu>
       {open === Open.Edit ? (
@@ -263,7 +256,6 @@ export function PrincipleActions({
           project={project}
           title="Edit Principle"
           submitLabel="Save"
-          keyHint="Saving replaces this principle. Change the key only to rename it."
           initial={{
             target: recordTarget(principle, project.id),
             statement: principle.statement,
@@ -284,22 +276,8 @@ export function PrincipleActions({
           onClose={close}
         />
       ) : null}
-      {open === Open.Retire ? (
-        <ReasonDialog
-          title="Retire Principle"
-          intro={`“${principle.statement}” stops being briefed and searched. It stays under History with your reason.`}
-          submitLabel="Retire"
-          required
-          pending={retire.isPending}
-          error={retire.error?.message ?? null}
-          onSubmit={(reason) => {
-            retire.mutate({ id: principle.id, reason }, { onSuccess: close });
-          }}
-          onClose={close}
-        />
-      ) : null}
-      {open === Open.Withdraw ? (
-        <WithdrawDialog
+      {open === Open.Remove ? (
+        <RemoveDialog
           record={{
             kind: KnowledgeItemKind.Principle,
             id: principle.id,
@@ -326,6 +304,7 @@ export function ProposalActions({
 }) {
   const [open, setOpen] = useState<Open>(Open.None);
   const accept = useAcceptProposal();
+  const previews = usePrincipleReplacePreview();
   const reject = useRejectProposal();
   const principle = proposal.principle;
   if (principle === null) return null;
@@ -358,7 +337,6 @@ export function ProposalActions({
           project={project}
           title="Accept Proposal"
           submitLabel="Accept"
-          keyHint="Accepting replaces a current principle with the same key and scope."
           initial={{
             target: recordTarget(principle, project.id),
             statement: principle.statement,
@@ -367,6 +345,9 @@ export function ProposalActions({
           }}
           pending={accept.isPending}
           error={accept.error?.message ?? null}
+          preview={({ target, ...text }) =>
+            previews.accept(proposal.id, { ...placeOf(target), ...text })
+          }
           onSubmit={({ target, ...text }) => {
             accept.mutate(
               { id: proposal.id, input: { ...placeOf(target), ...text } },

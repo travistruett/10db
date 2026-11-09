@@ -9,6 +9,7 @@ import {
   ProjectDto,
   ProjectViewDto,
   RunNextResult,
+  AgentCopyState,
   SystemCheckDto,
   TaskDto,
   TaskStartResult,
@@ -231,15 +232,18 @@ const AGENT_RELEASE_POLL_MS = 10 * 60_000;
 /**
  * The daemon's startup check: login-env status and the tools the daemon runs. The pinned Claude Code and
  * Codex are read again, since one may be fetching and a newer release can come out while the app is open.
+ * A screen's frame never asks: its token may not read `/system`, and the refusal would fail the screen.
  */
 export function useSystemCheck() {
   const { client } = useDaemon();
+  const frame = useRenderMode() !== null;
   return useQuery({
     queryKey: queryKeys.system,
+    enabled: !frame,
     queryFn: async () => readJson(await client.system.$get({ query: {} }), SystemCheckDto),
     staleTime: Infinity,
     refetchInterval: (query) =>
-      query.state.data?.agents?.some((agent) => agent.state === 'fetching')
+      query.state.data?.agents?.some((agent) => agent.state === AgentCopyState.Fetching)
         ? AGENT_FETCHING_POLL_MS
         : AGENT_RELEASE_POLL_MS,
   });

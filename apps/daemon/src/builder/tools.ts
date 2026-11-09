@@ -242,15 +242,11 @@ export function createBuilderTools(
     // Knowledge: the same services as the knowledge routes, parsed by the same schemas, so a
     // refusal is the API's. The builder's MCP server and the quote are the source of every write.
     [BuilderToolName.SearchKnowledge]: (args) => {
-      const { projectId, history, ...query } = BuilderToolInputs.search_knowledge.parse(args);
+      const { projectId, ...query } = BuilderToolInputs.search_knowledge.parse(args);
       return services.listKnowledge(
         projectId,
         // Its text comes from Claude, often a whole question, not from someone typing in the view.
-        KnowledgeListQuery.parse({
-          ...defined(query),
-          match: SearchMatch.AnyWord,
-          history: history === true ? '1' : '0',
-        }),
+        KnowledgeListQuery.parse({ ...defined(query), match: SearchMatch.AnyWord }),
       );
     },
     [BuilderToolName.SaveDecision]: (args) => {

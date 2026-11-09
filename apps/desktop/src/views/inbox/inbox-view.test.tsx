@@ -1055,9 +1055,9 @@ describe('the resolved view', () => {
     fireEvent.click(await screen.findByRole('radio', { name: /^Resolved/ }));
     await screen.findAllByTestId('resolved-card');
     for (const words of [
-      'Answered: This project',
-      'Answered: All my projects',
-      'Answered: This area',
+      'Answered: This Project',
+      'Answered: All Projects',
+      'Answered: This Area',
       'Answered: Reject',
       'Answered: Allow once',
       'Answered: Violet',
@@ -1120,9 +1120,9 @@ describe('knowledge on cards', () => {
     await screen.findByText('No sleeps in tests');
     const card = selectedCard();
     expect(within(card).getByText(/Never sleep in tests/)).toBeTruthy();
-    expect(await within(card).findByText('Policy')).toBeTruthy();
-    expect(await within(card).findByRole('radio', { name: /This area \(api\)/ })).toBeTruthy();
-    const names = ['This project', 'All my projects', 'This area (api)', 'Reject'];
+    expect(await within(card).findByText('Rule')).toBeTruthy();
+    expect(await within(card).findByRole('radio', { name: /This Area \(api\)/ })).toBeTruthy();
+    const names = ['This Project', 'All Projects', 'This Area (api)', 'Reject'];
     for (const name of names) {
       expect(within(card).getByText(name)).toBeTruthy();
     }
@@ -1134,7 +1134,7 @@ describe('knowledge on cards', () => {
     const { answers } = inbox([principleCard]);
     serveProject();
     renderApp('/inbox');
-    fireEvent.click(await screen.findByRole('radio', { name: /All my projects/ }));
+    fireEvent.click(await screen.findByRole('radio', { name: /All Projects/ }));
     expect(screen.queryByRole('checkbox', { name: 'Record as a decision' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /Send answer/ }));
     await waitFor(() => {
@@ -1146,8 +1146,8 @@ describe('knowledge on cards', () => {
     inbox([principleCard]);
     serveProject([]);
     renderApp('/inbox');
-    expect(await screen.findByRole('radio', { name: /This area/ })).toBeTruthy();
-    expect(screen.queryByRole('radio', { name: /This area \(/ })).toBeNull();
+    expect(await screen.findByRole('radio', { name: /This Area/ })).toBeTruthy();
+    expect(screen.queryByRole('radio', { name: /This Area \(/ })).toBeNull();
   });
 
   const queue = (category: InboxItemDto['category']): InboxItemDto =>
@@ -1206,7 +1206,7 @@ describe('knowledge on cards', () => {
     if ((act === 'check' || act === 'you' || act === 'area') && !box.checked) fireEvent.click(box);
     if (act === 'you' || act === 'area') {
       fireEvent.click(screen.getByRole('combobox', { name: 'Decision applies to' }));
-      const name = act === 'you' ? 'All my projects' : 'Area: api';
+      const name = act === 'you' ? 'All Projects' : 'Only in api';
       fireEvent.click(await screen.findByRole('option', { name, hidden: true }));
     }
     fireEvent.click(screen.getByRole('button', { name: /Send answer/ }));
@@ -1380,7 +1380,7 @@ describe('a resolved answer that proposed a principle', () => {
     expect(rows[1]?.textContent).not.toContain('principle');
   });
 
-  it('opens a principle still waiting for a verdict, over the Proposals tab', async () => {
+  it('opens a principle still waiting for a verdict, under Pending', async () => {
     serveResolved([answered]);
     serveProvenance(
       provenanceDto({ id: principleId, state: 'proposed', text: 'Never add Redis for queues.' }),
@@ -1389,7 +1389,7 @@ describe('a resolved answer that proposed a principle', () => {
     const drawer = await openDrawer();
     expect(await within(drawer).findByText('Never add Redis for queues.')).toBeTruthy();
     await waitFor(() => {
-      expect(selectedTab()).toContain('Proposals');
+      expect(screen.getByText(/^Showing proposed principles/)).toBeTruthy();
     });
   });
 
@@ -1446,7 +1446,7 @@ describe('a resolved answer that proposed a principle', () => {
     expect(asked).not.toContain(selected.id);
   });
 
-  it('forgets the link once the drawer closes, and keeps the tab it opened on', async () => {
+  it('forgets the link once the drawer closes, and keeps the shelf it opened on', async () => {
     serveResolved([answered]);
     serveProvenance(provenanceDto({ id: principleId, state: 'proposed' }));
     const { router } = renderApp('/inbox');
@@ -1454,13 +1454,13 @@ describe('a resolved answer that proposed a principle', () => {
     fireEvent.click(await screen.findByRole('link', { name: 'Open in Knowledge' }));
     const drawer = await openDrawer();
     await waitFor(() => {
-      expect(selectedTab()).toContain('Proposals');
+      expect(screen.getByText(/^Showing proposed principles/)).toBeTruthy();
     });
     fireEvent.click(within(drawer).getByRole('button', { name: 'Close' }));
     await waitFor(() => {
       expect(router.state.location.search).toEqual({});
     });
-    expect(selectedTab()).toContain('Proposals');
+    expect(screen.getByText(/^Showing proposed principles/)).toBeTruthy();
   });
 
   it('gives each principle its own link when an answer proposed several', async () => {

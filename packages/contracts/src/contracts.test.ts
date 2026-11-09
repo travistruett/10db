@@ -46,8 +46,8 @@ describe('HealthResponse', () => {
 });
 
 describe('PROTOCOL_VERSION', () => {
-  it('is 6: a project may have no gate command', () => {
-    expect(PROTOCOL_VERSION).toBe(6);
+  it('is 7: the knowledge list answers one page and its total', () => {
+    expect(PROTOCOL_VERSION).toBe(7);
   });
 });
 

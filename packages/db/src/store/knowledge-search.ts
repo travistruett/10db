@@ -34,6 +34,21 @@ function ftsQuery(text: string, match: SearchMatch = SearchMatch.AnyWord): strin
     : terms.map((t) => `"${t}"`).join(' OR ');
 }
 
+/**
+ * The rows of an index's table that match `text`, each with its `rank` (lower is better), as a
+ * subquery to join on `rowid`; null when the text holds no word.
+ */
+export function rankedMatchesSql(
+  index: KnowledgeIndex,
+  text: string,
+  match: SearchMatch,
+): SQL | null {
+  const query = ftsQuery(text, match);
+  if (query === null) return null;
+  const name = sql.raw(index);
+  return sql`SELECT rowid AS rowid, bm25(${name}) AS rank FROM ${name} WHERE ${name} MATCH ${query}`;
+}
+
 export interface SearchQuery {
   readonly projectId: ProjectId;
   readonly query: string;

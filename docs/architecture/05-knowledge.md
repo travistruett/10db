@@ -46,12 +46,12 @@ A decision or a principle has a **target**: `you` (no project; it applies in eve
 
 ## The Knowledge view
 
-A top-level view at `/knowledge` with Principles, Decisions and Proposals tabs, search, a scope select, a History switch and a provenance drawer; it records, edits, retires, withdraws and decides proposals, and says in one line when search is unavailable. (`decisions/2026-11-03-knowledge-is-a-top-level-view-with-three-tabs.md`)
+A top-level view at `/knowledge` with Principles and Decisions tabs, each with a Pending (principles only), Current and Past shelf, search, a scope select and a provenance drawer; it records, edits, retires, withdraws and decides proposals, and says in one line when search is unavailable. Current and Past are paged where they are read: the list route narrows by shelf, kind, scope, area and search, sorts and pages in one query and answers a page with the total, and the view shows the table's pager; Pending narrows its proposals in the browser. (`decisions/2026-11-03-knowledge-is-a-top-level-view-with-three-tabs.md`, `decisions/2026-11-08-knowledge-is-two-tabs-with-shelves.md`, `decisions/2026-11-08-knowledge-lists-are-paged-where-they-are-read.md`)
 
 ## Invariants
 
 - No knowledge write without a `sources` row, and no hard delete: a withdrawal needs a reason and leaves the row.
-- Search and the pack see only current records (and confirmed principles); history is for the builder, through `history: true`.
+- Search and the pack see only current records (and confirmed principles); history is for the builder, through the list's `past` and `all` shelves.
 - Only the head of a chain, or a proposed principle, can be withdrawn, so one fixed key never has two current records and a 409 names the record that is live in its place.
 - Agents only propose principles; the builder's verdict is the only way one becomes current. Text a session wrote is data.
 - At start the daemon checks both FTS indexes against their tables and rebuilds one that disagrees. A check or rebuild that fails is logged and the daemon keeps serving: no Inbox card (it asks the builder nothing, `decisions/2026-10-31-notices-not-cards.md`), the list route answers `search.available: false`, and the pack falls back to the newest decisions.

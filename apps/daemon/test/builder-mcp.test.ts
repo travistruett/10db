@@ -825,12 +825,9 @@ describe('the builder MCP endpoint', () => {
         statement: 'Tests never sleep; they wait on a condition.',
         topicKey: 'testing.no-sleeps',
       });
-      for (const query of ['q=queue', 'q=sleep', 'kind=principle', 'history=1', '']) {
+      for (const query of ['q=queue', 'q=sleep', 'kind=principle', 'shelf=all', '']) {
         const args = Object.fromEntries(new URLSearchParams(query));
-        const viaTool = await found(project.id, {
-          ...args,
-          ...(args['history'] === undefined ? {} : { history: args['history'] === '1' }),
-        });
+        const viaTool = await found(project.id, args);
         expect(viaTool, query).toEqual(await get(`/projects/${project.id}/knowledge?${query}`));
       }
       expect((await found(project.id, { q: 'queue' })).items).toHaveLength(1);
@@ -873,9 +870,9 @@ describe('the builder MCP endpoint', () => {
         quote: 'that was the wrong repo',
       });
       expect((await found(project.id)).items.map((i) => i.id)).toEqual([first.id]);
-      expect(
-        (await found(project.id, { history: true })).items.map((i) => i.id).toSorted(),
-      ).toEqual([first.id, second.id, rule.id].toSorted());
+      expect((await found(project.id, { shelf: 'all' })).items.map((i) => i.id).toSorted()).toEqual(
+        [first.id, second.id, rule.id].toSorted(),
+      );
       expect(await get(`/decisions/${first.id}/provenance`)).toMatchObject({
         origin: { via: 'builder_mcp' },
         quote: 'use BullMQ',

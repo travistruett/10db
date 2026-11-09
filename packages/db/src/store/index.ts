@@ -17,6 +17,7 @@ export * from './holds';
 export * from './human-touch';
 export * from './inbox';
 export * from './knowledge';
+export * from './knowledge-list';
 export * from './knowledge-search';
 export * from './principles';
 export * from './landing-groups';

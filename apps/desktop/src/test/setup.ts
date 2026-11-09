@@ -21,11 +21,12 @@ afterAll(() => {
 });
 
 // jsdom has no matchMedia or ResizeObserver; Mantine reads both. Mantine never calls the deprecated
-// addListener and removeListener, so the stub leaves them out.
+// addListener and removeListener, so the stub leaves them out. An empty query matches, as in a browser:
+// mantine-datatable asks it for every column without a `visibleMediaQuery`, and hides the cell otherwise.
 Object.defineProperty(window, 'matchMedia', {
   writable: true,
   value: (query: string): Omit<MediaQueryList, 'addListener' | 'removeListener'> => ({
-    matches: false,
+    matches: query.trim() === '',
     media: query,
     onchange: null,
     addEventListener: () => undefined,
@@ -56,6 +57,8 @@ Object.defineProperty(document, 'fonts', {
 
 // jsdom does no layout and has no scrollIntoView; Mantine's Select scrolls the active option into view.
 Element.prototype.scrollIntoView = () => undefined;
+// Nor an element's scrollTo; mantine-datatable scrolls a table back to its top on a new page.
+Element.prototype.scrollTo = () => undefined;
 
 // jsdom's elements measure 0, and a virtual list with no height mounts nothing. A ScrollArea's viewport
 // gets a height, so the Shape transcript draws its blocks in every view test.

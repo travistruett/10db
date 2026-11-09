@@ -1263,13 +1263,13 @@ describe('FactoryView benchmark sync note', () => {
     },
   );
 
-  it('leaves a refused key to the alert above the view', async () => {
+  it('leaves a refused key to its card in the Inbox', async () => {
     serve(systemCheck({ outcome: 'unauthorized', message: 'Artificial Analysis refused the key' }));
     renderApp('/factory');
 
-    const alert = await screen.findByRole('alert');
-    expect(within(alert).getByText('Artificial Analysis refused the key')).toBeTruthy();
-    expect(screen.queryByText(/Routing uses the last good scores\.$/)).toBeNull();
+    expect(await screen.findByRole('link', { name: /Inbox.*1 open card/ })).toBeTruthy();
+    expect(screen.queryByText(/Artificial Analysis refused the key/)).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 });
 

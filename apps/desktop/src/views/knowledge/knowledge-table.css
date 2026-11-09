@@ -1,0 +1,4 @@
+/* Columns are hidden and shown from the Columns menu in the table's corner, not by an × on every header. */
+.mantine-datatable-header-cell-toggleable-icon {
+  display: none;
+}

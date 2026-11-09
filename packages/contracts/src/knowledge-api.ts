@@ -10,7 +10,7 @@ import {
   DecisionInput,
 } from './knowledge';
 import { SearchMatch } from './knowledge-search';
-import { KnowledgeScope, PrincipleKind, ProposalStatus } from './states';
+import { KnowledgeScope, KnowledgeState, PrincipleKind, ProposalStatus } from './states';
 
 // The builder-facing knowledge routes (docs/knowledge-api.md): one list of a project's decisions and
 // principles together, writes that name a place instead of a target object, dry runs and a source.
@@ -66,10 +66,18 @@ export const KnowledgeSearchState = z.object({
 });
 export type KnowledgeSearchState = z.infer<typeof KnowledgeSearchState>;
 
+/** The largest page the list answers, and the one it answers when none is asked for. */
+export const KNOWLEDGE_PAGE_SIZE_MAX = 100;
+export const KNOWLEDGE_PAGE_SIZE = 25;
+
+/** One page of the list, and how many records match in all. */
 export const KnowledgeListDto = z.object({
   items: z.array(KnowledgeItemDto),
-  /** True when more matched than `limit`. */
-  truncated: z.boolean(),
+  /** How many records match the filters, on every page together. */
+  total: z.number().int().nonnegative(),
+  /** The page answered: the one asked for, or the last one when that was past the end. */
+  page: z.number().int().positive(),
+  pageSize: z.number().int().positive().max(KNOWLEDGE_PAGE_SIZE_MAX),
   search: KnowledgeSearchState,
 });
 export type KnowledgeListDto = z.infer<typeof KnowledgeListDto>;
@@ -82,7 +90,41 @@ export const KnowledgeListKind = z.enum([
 ]);
 export type KnowledgeListKind = z.infer<typeof KnowledgeListKind>;
 
-export const KNOWLEDGE_LIST_LIMIT = 100;
+/**
+ * Which records the list holds by their state: the current ones, the past ones (superseded, retired
+ * or withdrawn, never proposed), or all of them, proposed ones included.
+ */
+export const KnowledgeListShelf = { Current: 'current', Past: 'past', All: 'all' } as const;
+export type KnowledgeListShelf = (typeof KnowledgeListShelf)[keyof typeof KnowledgeListShelf];
+
+/** The states of a record that no longer applies: the Past shelf. */
+export const PAST_KNOWLEDGE_STATES: readonly KnowledgeState[] = [
+  KnowledgeState.Superseded,
+  KnowledgeState.Retired,
+  KnowledgeState.Withdrawn,
+];
+
+/** How strongly a principle binds, strongest first: the order a sort by kind follows. */
+export const PRINCIPLE_KIND_ORDER: readonly PrincipleKind[] = [
+  PrincipleKind.Policy,
+  PrincipleKind.Heuristic,
+  PrincipleKind.Belief,
+];
+
+/**
+ * What the list can be sorted by. `kind` follows `PRINCIPLE_KIND_ORDER` with decisions after beliefs;
+ * `scope` goes builder-wide, project, then area by name; `state` goes by the state's name.
+ */
+export const KnowledgeSort = {
+  CreatedAt: 'createdAt',
+  Kind: 'kind',
+  Scope: 'scope',
+  State: 'state',
+} as const;
+export type KnowledgeSort = (typeof KnowledgeSort)[keyof typeof KnowledgeSort];
+
+export const SortDirection = { Asc: 'asc', Desc: 'desc' } as const;
+export type SortDirection = (typeof SortDirection)[keyof typeof SortDirection];
 
 /** The most `q` may hold, in UTF-16 code units (what zod's `max` counts), not characters. */
 export const KNOWLEDGE_SEARCH_MAX_LENGTH = 200;
@@ -101,18 +143,30 @@ export function clampKnowledgeSearch(text: string): string {
   return text.slice(0, end);
 }
 
-/** The query string of `GET /projects/:projectId/knowledge`. */
+/**
+ * The query string of `GET /projects/:projectId/knowledge`. `kind` may repeat, and the list holds
+ * what any of them names. With no `sort`, a search answers the best match first and a list without
+ * one the newest first; a `sort` applies with a search too, ties going to the newest.
+ */
 export const KnowledgeListQuery = z.strictObject({
   q: z.string().trim().max(KNOWLEDGE_SEARCH_MAX_LENGTH).optional(),
   match: z.enum(SearchMatch).optional(),
-  kind: KnowledgeListKind.optional(),
+  kind: z
+    .union([KnowledgeListKind, z.array(KnowledgeListKind)])
+    .optional()
+    .transform((v): KnowledgeListKind[] => (v === undefined ? [] : [...new Set([v].flat())])),
   scope: z.enum(KnowledgeScope).optional(),
   area: AreaName.optional(),
-  history: z
-    .enum(['0', '1'])
-    .default('0')
-    .transform((v) => v === '1'),
-  limit: z.coerce.number().int().min(1).max(500).default(KNOWLEDGE_LIST_LIMIT),
+  shelf: z.enum(KnowledgeListShelf).default(KnowledgeListShelf.Current),
+  sort: z.enum(KnowledgeSort).optional(),
+  dir: z.enum(SortDirection).default(SortDirection.Asc),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(KNOWLEDGE_PAGE_SIZE_MAX)
+    .default(KNOWLEDGE_PAGE_SIZE),
 });
 export type KnowledgeListQuery = z.output<typeof KnowledgeListQuery>;
 

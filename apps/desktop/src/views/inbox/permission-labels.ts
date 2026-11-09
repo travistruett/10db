@@ -8,6 +8,11 @@ import {
   type InboxOption,
 } from '@10db/contracts';
 import { MCP_APPROVAL_LABELS, mcpReview } from './mcp-approval';
+import {
+  SCOPE_ALL_PROJECTS,
+  SCOPE_THIS_AREA,
+  SCOPE_THIS_PROJECT,
+} from '../knowledge/knowledge-labels';
 
 /** The daemon stores permission choices as stable values; the builder reads words. */
 export const PERMISSION_LABELS: Readonly<Record<PermissionChoice, string>> = {
@@ -31,9 +36,9 @@ function permissionWords(item: InboxItemDto, choice: PermissionChoice): string {
 
 /** A principle proposal card's choices, in words; the area one gets its area's name (`optionLabel`). */
 export const PRINCIPLE_VERDICT_LABELS: Readonly<Record<PrincipleVerdict, string>> = {
-  [PrincipleVerdict.AcceptProject]: 'This project',
-  [PrincipleVerdict.AcceptYou]: 'All my projects',
-  [PrincipleVerdict.AcceptArea]: 'This area',
+  [PrincipleVerdict.AcceptProject]: SCOPE_THIS_PROJECT,
+  [PrincipleVerdict.AcceptYou]: SCOPE_ALL_PROJECTS,
+  [PrincipleVerdict.AcceptArea]: SCOPE_THIS_AREA,
   [PrincipleVerdict.Reject]: 'Reject',
 };
 

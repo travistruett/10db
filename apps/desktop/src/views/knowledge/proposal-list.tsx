@@ -1,53 +1,83 @@
 import {
+  KnowledgeItemKind,
   KnowledgeScope,
-  KnowledgeState,
   matchesSearch,
+  PRINCIPLE_KIND_ORDER,
+  type PrincipleDto,
   type ProposalDto,
-  type ProposalKind,
 } from '@10db/contracts';
-import { Alert, Loader, Stack, Table, Text, VisuallyHidden } from '@mantine/core';
-import type { ReactNode } from 'react';
-import { useProposals } from '../../daemon/knowledge-queries';
-import type { FilterState } from './knowledge-filters';
-import { dateText, PRINCIPLE_KIND_LABELS, scopeText } from './knowledge-labels';
-import { StateBadge } from './record-cells';
+import { Alert, Loader, Stack, Text } from '@mantine/core';
+import type { DataTableColumn, DataTableSortStatus } from 'mantine-datatable';
+import { useState, type ReactNode } from 'react';
+import { useProposals, type TracedRecord } from '../../daemon/knowledge-queries';
+import {
+  firstColumnFiltering,
+  ScopeFilter,
+  ShelfSearchFilter,
+  type FilterState,
+  type ListControls,
+} from './knowledge-filters';
+import { dateText, scopeText, shortDateText } from './knowledge-labels';
+import { sortRows, type Comparators } from './knowledge-sort';
+import {
+  ACTIONS_COLUMN,
+  ActionsCell,
+  KindBadge,
+  KnowledgeTable,
+  OpenRecordText,
+} from './knowledge-table';
 
-const KIND_LABELS: Readonly<Record<ProposalKind, string>> = {
-  new_task: 'Task',
-  change_task: 'Task change',
-  principle: 'Principle',
-  note: 'Note',
-};
-
-/** A principle proposal is for a place; any other proposal is about the project. */
-function placeOf(p: ProposalDto): { scope: KnowledgeScope; area: string | null } {
-  return p.principle ?? { scope: KnowledgeScope.Project, area: null };
+/** A principle proposal and the principle it would confirm. */
+interface PendingRow {
+  readonly proposal: ProposalDto;
+  readonly principle: PrincipleDto;
 }
 
-/** Search and scope narrow pending proposals the way they narrow the lists; History has no meaning for them. */
-function matches(p: ProposalDto, filter: FilterState): boolean {
-  const place = placeOf(p);
-  if (filter.scope !== null && place.scope !== filter.scope) return false;
-  if (filter.scope === KnowledgeScope.Area && place.area !== filter.area) return false;
-  // The same rule as the daemon's search of the other tabs: every word starts some word of the text.
+/** Principle proposals: the only ones Knowledge decides. Every other proposal is answered in the Inbox. */
+export function pendingPrinciples(proposals: readonly ProposalDto[]): PendingRow[] {
+  return proposals.flatMap((proposal) =>
+    proposal.principle ? [{ proposal, principle: proposal.principle }] : [],
+  );
+}
+
+/** Search and scope narrow pending principles the way they narrow the lists. */
+function matches({ proposal, principle }: PendingRow, filter: FilterState): boolean {
+  if (filter.scope !== null && principle.scope !== filter.scope) return false;
+  if (filter.scope === KnowledgeScope.Area && principle.area !== filter.area) return false;
+  // The same rule as the daemon's search of the other shelves: every word starts some word of the text.
   return matchesSearch(
-    [p.title, p.body, p.principle?.statement, p.principle?.topicKey].join(' '),
+    [proposal.title, proposal.body, principle.statement, principle.topicKey].join(' '),
     filter.q,
   );
 }
 
-/** Pending proposals. Their text comes from agents and answers, so it is shown as text only. */
+const NEWEST: DataTableSortStatus<PendingRow> = { columnAccessor: 'createdAt', direction: 'desc' };
+
+const COMPARATORS: Comparators<PendingRow> = {
+  kind: (a, b) =>
+    PRINCIPLE_KIND_ORDER.indexOf(a.principle.kind) - PRINCIPLE_KIND_ORDER.indexOf(b.principle.kind),
+  scope: (a, b) => scopeText(a.principle).localeCompare(scopeText(b.principle)),
+  createdAt: (a, b) => a.proposal.createdAt.localeCompare(b.proposal.createdAt),
+};
+
+/** Principles agents and answers proposed, waiting on the builder. Their text is shown as text only. */
 export function ProposalList({
   projectId,
   filter,
+  controls,
+  onTrace,
   actions,
 }: {
   readonly projectId: ProposalDto['projectId'];
+  /** Search and scope, the search already debounced. */
   readonly filter: FilterState;
+  readonly controls: ListControls;
+  readonly onTrace: (record: TracedRecord) => void;
   /** Accept and Reject for a proposal. */
   readonly actions: (proposal: ProposalDto) => ReactNode;
 }) {
   const proposals = useProposals(projectId);
+  const [sort, setSort] = useState<DataTableSortStatus<PendingRow> | null>(null);
   if (proposals.isError)
     return (
       <Alert color="red" title="Couldn't load the proposals">
@@ -55,58 +85,90 @@ export function ProposalList({
       </Alert>
     );
   if (proposals.isPending) return <Loader size="sm" aria-label="Loading proposals" />;
-  const rows = proposals.data.filter((p) => matches(p, filter));
-  if (rows.length === 0)
-    return (
-      <Text c="dimmed">
-        {proposals.data.length === 0 ? 'No proposals wait for you.' : 'No proposal matches.'}
-      </Text>
-    );
+  const pending = pendingPrinciples(proposals.data);
+  const rows = sortRows(
+    pending.filter((row) => matches(row, filter)),
+    sort,
+    COMPARATORS,
+  );
+  const open = ({ principle }: PendingRow): void => {
+    onTrace({ kind: KnowledgeItemKind.Principle, id: principle.id, label: principle.statement });
+  };
+  const columns: DataTableColumn<PendingRow>[] = [
+    {
+      accessor: 'statement',
+      title: 'Proposal',
+      resizable: true,
+      filtering: firstColumnFiltering(controls),
+      filter: <ShelfSearchFilter controls={controls} />,
+      render: (row) => (
+        <Stack gap={4}>
+          <OpenRecordText
+            label={row.principle.statement}
+            onOpen={() => {
+              open(row);
+            }}
+          >
+            {row.principle.statement}
+          </OpenRecordText>
+          <Text size="xs" c="dimmed" lineClamp={2} style={{ whiteSpace: 'pre-wrap' }}>
+            {row.proposal.body}
+          </Text>
+        </Stack>
+      ),
+    },
+    {
+      accessor: 'kind',
+      title: 'Type',
+      width: 120,
+      sortable: true,
+      resizable: true,
+      toggleable: true,
+      render: (row) => <KindBadge kind={row.principle.kind} />,
+    },
+    {
+      accessor: 'scope',
+      title: 'Scope',
+      width: 140,
+      sortable: true,
+      resizable: true,
+      toggleable: true,
+      filtering: controls.filters.scope !== null,
+      filter: <ScopeFilter controls={controls} />,
+      render: (row) => scopeText(row.principle),
+    },
+    {
+      accessor: 'createdAt',
+      title: 'Date',
+      width: 110,
+      noWrap: true,
+      sortable: true,
+      resizable: true,
+      toggleable: true,
+      render: (row) => (
+        <span title={dateText(row.proposal.createdAt)}>
+          {shortDateText(row.proposal.createdAt)}
+        </span>
+      ),
+    },
+    {
+      accessor: ACTIONS_COLUMN,
+      title: '',
+      width: 190,
+      render: (row) => <ActionsCell>{actions(row.proposal)}</ActionsCell>,
+    },
+  ];
   return (
-    <Stack gap="xs">
-      <Text size="xs" c="dimmed">
-        Accept or reject a proposal here or in the Inbox; either closes its card.
-      </Text>
-      <Table aria-label="Proposals" verticalSpacing="xs">
-        <Table.Thead>
-          <Table.Tr>
-            <Table.Th>Proposal</Table.Th>
-            <Table.Th>Kind</Table.Th>
-            <Table.Th>Scope</Table.Th>
-            <Table.Th>Date</Table.Th>
-            <Table.Th>State</Table.Th>
-            <Table.Th>
-              <VisuallyHidden>Actions</VisuallyHidden>
-            </Table.Th>
-          </Table.Tr>
-        </Table.Thead>
-        <Table.Tbody>
-          {rows.map((p) => (
-            <Table.Tr key={p.id}>
-              <Table.Td w="100%">
-                <Stack gap={2}>
-                  <Text size="sm" fw={500}>
-                    {p.title}
-                  </Text>
-                  {p.principle ? <Text size="sm">{p.principle.statement}</Text> : null}
-                  <Text size="xs" c="dimmed" lineClamp={3} style={{ whiteSpace: 'pre-wrap' }}>
-                    {p.body}
-                  </Text>
-                </Stack>
-              </Table.Td>
-              <Table.Td>
-                {p.principle ? PRINCIPLE_KIND_LABELS[p.principle.kind] : KIND_LABELS[p.kind]}
-              </Table.Td>
-              <Table.Td>{scopeText(placeOf(p))}</Table.Td>
-              <Table.Td>{dateText(p.createdAt)}</Table.Td>
-              <Table.Td>
-                <StateBadge state={KnowledgeState.Proposed} />
-              </Table.Td>
-              <Table.Td>{actions(p)}</Table.Td>
-            </Table.Tr>
-          ))}
-        </Table.Tbody>
-      </Table>
-    </Stack>
+    <KnowledgeTable
+      label="Proposals"
+      storeKey="knowledge-proposals"
+      records={rows}
+      columns={columns}
+      idOf={(row) => row.proposal.id}
+      onOpen={open}
+      sort={sort ?? NEWEST}
+      onSort={setSort}
+      empty={pending.length === 0 ? 'No proposals wait for you.' : 'No proposal matches.'}
+    />
   );
 }

@@ -14,10 +14,19 @@ import { daemonEvent, projectViewDto } from '../../test/fixtures';
 import {
   decisionItem,
   knowledgeList,
+  knowledgePage,
   principleItem,
   proposalDto,
   provenanceDto,
 } from '../../test/knowledge-fixtures';
+import {
+  chooseScope,
+  chooseShelf,
+  chooseTypes,
+  openColumnFilter,
+  sortBy,
+  typeSearch,
+} from '../../test/knowledge-table';
 
 const project = projectViewDto({
   areas: [
@@ -43,7 +52,7 @@ function serve(data: Partial<Served> = {}) {
       const params = new URL(request.url).searchParams;
       asked.push(params);
       const items = params.get('kind') === 'decision' ? served.decisions : served.principles;
-      return HttpResponse.json(knowledgeList(items));
+      return HttpResponse.json(knowledgePage(items, params));
     }),
     http.get(daemonUrl('/projects/:projectId/proposals'), () =>
       HttpResponse.json(served.proposals),
@@ -56,19 +65,6 @@ function serve(data: Partial<Served> = {}) {
   return { asked, served, sockets };
 }
 
-async function chooseScope(name: string) {
-  const input = (await screen.findAllByLabelText('Scope')).find((el) => el.tagName === 'INPUT');
-  if (!input) throw new Error('no scope filter');
-  fireEvent.click(input);
-  const id = input.getAttribute('aria-controls');
-  const list = await waitFor(() => {
-    const el = id === null ? null : document.getElementById(id);
-    expect(el).not.toBeNull();
-    return el ?? document.body;
-  });
-  fireEvent.click(within(list).getByRole('option', { name, hidden: true }));
-}
-
 describe('KnowledgeView', () => {
   it('is in the navigation between Inbox and Settings', async () => {
     serve();
@@ -79,9 +75,15 @@ describe('KnowledgeView', () => {
     expect(await screen.findByRole('heading', { name: 'Knowledge', level: 2 })).toBeTruthy();
   });
 
-  it('lists principles, policies first, with scope, kind and date', async () => {
+  it('asks for principles policies first, and lists them with scope, kind and date', async () => {
     const { asked } = serve({
       principles: [
+        principleItem({
+          statement: 'Never sleep in tests',
+          scope: 'area',
+          area: 'api',
+          createdAt: '2026-10-13T12:00:00.000Z',
+        }),
         principleItem({
           statement: 'Prefer small PRs',
           principleKind: 'heuristic',
@@ -89,12 +91,6 @@ describe('KnowledgeView', () => {
           scope: 'you',
           projectId: null,
           createdAt: '2026-09-01T10:00:00.000Z',
-        }),
-        principleItem({
-          statement: 'Never sleep in tests',
-          scope: 'area',
-          area: 'api',
-          createdAt: '2026-10-13T12:00:00.000Z',
         }),
       ],
     });
@@ -104,21 +100,87 @@ describe('KnowledgeView', () => {
     expect(rows).toHaveLength(2);
     expect(within(rows[0] ?? table).getByText('Never sleep in tests')).toBeTruthy();
     expect(within(rows[0] ?? table).getByText('api')).toBeTruthy();
-    expect(within(rows[0] ?? table).getByText('Policy')).toBeTruthy();
-    expect(within(rows[0] ?? table).getByText('13 Oct 2026')).toBeTruthy();
+    expect(within(rows[0] ?? table).getByText('Rule')).toBeTruthy();
+    expect(within(rows[0] ?? table).getByTitle('13 Oct 2026')).toBeTruthy();
     expect(within(rows[1] ?? table).getByText('Prefer small PRs')).toBeTruthy();
-    expect(within(rows[1] ?? table).getByText('You')).toBeTruthy();
-    expect(within(rows[1] ?? table).getByText('Heuristic')).toBeTruthy();
-    expect(asked.at(-1)?.get('kind')).toBe('principle');
+    expect(within(rows[1] ?? table).getByText('All Projects')).toBeTruthy();
+    expect(within(rows[1] ?? table).getByText('Preference')).toBeTruthy();
+    expect(asked.at(-1)?.getAll('kind')).toEqual(['principle']);
+    expect(asked.at(-1)?.get('sort')).toBe('kind');
+    expect(asked.at(-1)?.get('dir')).toBe('asc');
+    expect(asked.at(-1)?.get('page')).toBe('1');
+    expect(asked.at(-1)?.get('pageSize')).toBe('25');
+  });
+
+  it('asks for the next page and shows it, with how many there are in all', async () => {
+    const principles = Array.from({ length: 30 }, (_, i) =>
+      principleItem({ statement: `Rule ${String(i + 1)}`, topicKey: `rule.${String(i + 1)}` }),
+    );
+    const { asked } = serve({ principles });
+    renderApp('/knowledge');
+    expect(await screen.findByText('Rule 1')).toBeTruthy();
+    expect(screen.getByText('1–25 of 30')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Page 2' }));
+    expect(await screen.findByText('Rule 26')).toBeTruthy();
+    expect(asked.at(-1)?.get('page')).toBe('2');
+    expect(screen.queryByText('Rule 1')).toBeNull();
+    expect(screen.getByText('26–30 of 30')).toBeTruthy();
+  });
+
+  it('asks the daemon for the types chosen and the order clicked, from the first page again', async () => {
+    const principles = Array.from({ length: 30 }, (_, i) =>
+      principleItem({ statement: `Rule ${String(i + 1)}`, topicKey: `rule.${String(i + 1)}` }),
+    );
+    const { asked } = serve({ principles });
+    renderApp('/knowledge');
+    await screen.findByText('Rule 1');
+    fireEvent.click(screen.getByRole('button', { name: 'Page 2' }));
+    await waitFor(() => {
+      expect(asked.at(-1)?.get('page')).toBe('2');
+    });
+    await chooseTypes(['Rule', 'Background']);
+    await waitFor(() => {
+      expect(asked.at(-1)?.getAll('kind')).toEqual(['policy', 'belief']);
+    });
+    expect(asked.at(-1)?.get('page')).toBe('1');
+    fireEvent.click(screen.getByRole('button', { name: 'Page 2' }));
+    await waitFor(() => {
+      expect(asked.at(-1)?.get('page')).toBe('2');
+    });
+    sortBy('Date');
+    await waitFor(() => {
+      expect(asked.at(-1)?.get('sort')).toBe('createdAt');
+    });
+    expect(asked.at(-1)?.get('page')).toBe('1');
+    expect(asked.at(-1)?.getAll('kind')).toEqual(['policy', 'belief']);
+  });
+
+  it('names every header control and nests none inside another', async () => {
+    serve({ principles: [principleItem()] });
+    renderApp('/knowledge');
+    const table = await screen.findByRole('table', { name: 'Principles' });
+    const head = table.querySelector('thead');
+    if (head === null) throw new Error('the table has no header');
+    expect(head.querySelectorAll('th[role="button"], th[tabindex]')).toHaveLength(0);
+    const names = within(head)
+      .getAllByRole('button')
+      .map((b) => b.getAttribute('aria-label') ?? b.textContent);
+    expect(names).toEqual([
+      'Filter Principle',
+      'Sort by Type, ascending',
+      'Filter Type',
+      'Sort by Scope',
+      'Filter Scope',
+      'Sort by Date',
+      'Columns',
+    ]);
   });
 
   it('searches as you type', async () => {
     const { asked } = serve({ principles: [principleItem()] });
     renderApp('/knowledge');
     await screen.findByRole('table', { name: 'Principles' });
-    fireEvent.change(screen.getByRole('textbox', { name: 'Search' }), {
-      target: { value: 'sleep' },
-    });
+    await typeSearch('sleep');
     await waitFor(() => {
       expect(asked.at(-1)?.get('q')).toBe('sleep');
     });
@@ -142,9 +204,7 @@ describe('KnowledgeView', () => {
     );
     renderApp('/knowledge');
     await screen.findByRole('table', { name: 'Principles' });
-    fireEvent.change(screen.getByRole('textbox', { name: 'Search' }), {
-      target: { value: 'sleep' },
-    });
+    await typeSearch('sleep');
     await waitFor(() => {
       expect(calls).toBeGreaterThan(1);
     });
@@ -179,9 +239,7 @@ describe('KnowledgeView', () => {
     );
     renderApp('/knowledge');
     expect(await screen.findByText(/^No principles yet/)).toBeTruthy();
-    fireEvent.change(screen.getByRole('textbox', { name: 'Search' }), {
-      target: { value: 'sleep' },
-    });
+    await typeSearch('sleep');
     await waitFor(() => {
       expect(calls).toBeGreaterThan(1);
     });
@@ -203,13 +261,14 @@ describe('KnowledgeView', () => {
       http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
       http.get(daemonUrl('/projects/:projectId/knowledge'), async ({ request }) => {
         calls += 1;
-        if (new URL(request.url).searchParams.has('q')) await gate;
-        return HttpResponse.json(
-          knowledgeList([
-            principleItem({ statement: 'Prefer small PRs', principleKind: 'heuristic' }),
-            principleItem({ statement: 'Never sleep in tests', principleKind: 'policy' }),
-          ]),
-        );
+        const rows = [
+          principleItem({ statement: 'Prefer small PRs', principleKind: 'heuristic' }),
+          principleItem({ statement: 'Never sleep in tests', principleKind: 'policy' }),
+        ];
+        if (!new URL(request.url).searchParams.has('q'))
+          return HttpResponse.json(knowledgeList(rows.toReversed()));
+        await gate;
+        return HttpResponse.json(knowledgeList(rows));
       }),
       http.get(daemonUrl('/projects/:projectId/proposals'), () => HttpResponse.json([])),
       ...baseHandlers(),
@@ -223,9 +282,7 @@ describe('KnowledgeView', () => {
     await screen.findByRole('table', { name: 'Principles' });
     const before = order();
     expect(before[0]).toContain('Never sleep');
-    fireEvent.change(screen.getByRole('textbox', { name: 'Search' }), {
-      target: { value: 'sleep' },
-    });
+    await typeSearch('sleep');
     await waitFor(() => {
       expect(calls).toBeGreaterThan(1);
     });
@@ -241,7 +298,8 @@ describe('KnowledgeView', () => {
     serve({ principles: [principleItem()] });
     renderApp('/knowledge');
     await screen.findByRole('table', { name: 'Principles' });
-    expect(screen.getByRole('textbox', { name: 'Search' }).getAttribute('maxlength')).toBe(
+    await openColumnFilter();
+    expect((await screen.findByRole('textbox', { name: 'Search' })).getAttribute('maxlength')).toBe(
       String(KNOWLEDGE_SEARCH_MAX_LENGTH),
     );
   });
@@ -250,7 +308,8 @@ describe('KnowledgeView', () => {
     serve({ principles: [principleItem()] });
     renderApp('/knowledge');
     await screen.findByRole('table', { name: 'Principles' });
-    const box = screen.getByRole('textbox', { name: 'Search' });
+    await openColumnFilter();
+    const box = await screen.findByRole('textbox', { name: 'Search' });
     fireEvent.change(box, { target: { value: '😀'.repeat(200) } });
     expect((box as HTMLInputElement).value.length).toBeLessThanOrEqual(KNOWLEDGE_SEARCH_MAX_LENGTH);
     expect((box as HTMLInputElement).value.length).toBeGreaterThan(0);
@@ -288,13 +347,13 @@ describe('KnowledgeView', () => {
     );
     renderApp('/knowledge');
     await screen.findByRole('table', { name: 'Principles' });
-    fireEvent.change(screen.getByRole('textbox', { name: 'Search' }), {
-      target: { value: 'sleep' },
-    });
+    await typeSearch('sleep');
     expect(await screen.findByText('Search is unavailable: x')).toBeTruthy();
+    // The table stays, so its filters stay in reach, with no row and no claim that nothing matched.
     await waitFor(() => {
-      expect(screen.queryByRole('table', { name: 'Principles' })).toBeNull();
+      expect(screen.queryByText('Never sleep in tests')).toBeNull();
     });
+    expect(screen.getByRole('table', { name: 'Principles' })).toBeTruthy();
     expect(screen.queryByText('No principles match.')).toBeNull();
   });
 
@@ -316,7 +375,7 @@ describe('KnowledgeView', () => {
     expect(screen.getByText('Search is unavailable: x')).toBeTruthy();
   });
 
-  it('filters by You, Project or one area, and shows history with each record’s state', async () => {
+  it('filters by You, Project or one area, and shows past records with each one’s state', async () => {
     const { asked } = serve({
       principles: [
         principleItem({ state: 'superseded', statement: 'Old rule' }),
@@ -325,21 +384,22 @@ describe('KnowledgeView', () => {
       ],
     });
     renderApp('/knowledge');
-    await screen.findByRole('table', { name: 'Principles' });
-    expect(asked.at(-1)?.get('history')).toBe('0');
-    await chooseScope('api');
+    // Under Current, none of these past records is shown.
+    expect(await screen.findByText(/^No principles yet/)).toBeTruthy();
+    expect(asked.at(-1)?.get('shelf')).toBe('current');
+    await chooseScope('Only in api');
     await waitFor(() => {
       expect(asked.at(-1)?.get('scope')).toBe('area');
     });
     expect(asked.at(-1)?.get('area')).toBe('api');
-    await chooseScope('You');
+    await chooseScope('All Projects');
     await waitFor(() => {
       expect(asked.at(-1)?.get('scope')).toBe('you');
     });
     expect(asked.at(-1)?.get('area')).toBeNull();
-    fireEvent.click(screen.getByRole('switch', { name: 'History' }));
+    await chooseShelf('Past');
     await waitFor(() => {
-      expect(asked.at(-1)?.get('history')).toBe('1');
+      expect(asked.at(-1)?.get('shelf')).toBe('past');
     });
     const table = await screen.findByRole('table', { name: 'Principles' });
     expect(within(table).getByText('Superseded')).toBeTruthy();
@@ -359,21 +419,23 @@ describe('KnowledgeView', () => {
     expect(within(table).getByText('Which icons?')).toBeTruthy();
     expect(within(table).getByText('Tabler')).toBeTruthy();
     expect(within(table).getByText('ui')).toBeTruthy();
-    expect(within(table).getByText('13 Oct 2026')).toBeTruthy();
-    expect(within(table).getByText('Current')).toBeTruthy();
+    expect(within(table).getByTitle('13 Oct 2026')).toBeTruthy();
+    // Every record under Current is current, so the column that would say so is left out.
+    expect(within(table).queryByText('Current')).toBeNull();
   });
 
-  it('counts pending proposals on their tab and shows what each proposes', async () => {
+  it('counts pending proposals on the Principles tab and under Pending, and shows what each proposes', async () => {
     serve({ proposals: [proposalDto()] });
     renderApp('/knowledge');
-    fireEvent.click(await screen.findByRole('tab', { name: /^Proposals\s*1$/ }));
-    expect(await screen.findByText('No sleeps in tests')).toBeTruthy();
-    expect(screen.getByText('Never sleep in tests')).toBeTruthy();
-    expect(screen.getByText('Two flaky runs came from sleeps.')).toBeTruthy();
-    expect(screen.getByText('Proposed')).toBeTruthy();
+    expect(await screen.findByRole('tab', { name: /^Principles\s*1 pending$/ })).toBeTruthy();
+    await chooseShelf('Pending 1');
+    const table = await screen.findByRole('table', { name: 'Proposals' });
+    expect(within(table).getByText('Never sleep in tests')).toBeTruthy();
+    expect(within(table).getByText('Two flaky runs came from sleeps.')).toBeTruthy();
+    expect(within(table).getByText('Rule')).toBeTruthy();
   });
 
-  describe('on the Proposals tab', () => {
+  describe('under Pending', () => {
     /** A principle proposal for one place. */
     const placed = (
       title: string,
@@ -382,7 +444,7 @@ describe('KnowledgeView', () => {
     ): ProposalDto => {
       const proposal = proposalDto({ title, body });
       if (proposal.principle === null) throw new Error('the fixture proposes a principle');
-      return { ...proposal, principle: { ...proposal.principle, ...place } };
+      return { ...proposal, principle: { ...proposal.principle, ...place, statement: title } };
     };
     const proposals = [
       placed('Mine', { scope: 'you', area: null }),
@@ -401,10 +463,14 @@ describe('KnowledgeView', () => {
         .map((row) => row.querySelector('p')?.textContent);
     };
 
+    /** A note is answered in the Inbox, so Pending lists only the principles. */
+    const principles = proposals.filter((p) => p.principle !== null);
+
     async function openProposals() {
-      fireEvent.click(await screen.findByRole('tab', { name: /^Proposals/ }));
+      fireEvent.click(await screen.findByRole('tab', { name: /^Principles/ }));
+      await chooseShelf(/^Pending/);
       await waitFor(() => {
-        expect(shown()).toHaveLength(proposals.length);
+        expect(shown()).toHaveLength(principles.length);
       });
     }
 
@@ -412,15 +478,11 @@ describe('KnowledgeView', () => {
       serve({ proposals });
       renderApp('/knowledge');
       await openProposals();
-      fireEvent.change(screen.getByRole('textbox', { name: 'Search' }), {
-        target: { value: 'FREEZE deploy' },
-      });
+      await typeSearch('FREEZE deploy');
       await waitFor(() => {
         expect(shown()).toEqual(['Whole project']);
       });
-      fireEvent.change(screen.getByRole('textbox', { name: 'Search' }), {
-        target: { value: 'nothing says this' },
-      });
+      await typeSearch('nothing says this');
       expect(await screen.findByText('No proposal matches.')).toBeTruthy();
     });
 
@@ -428,15 +490,11 @@ describe('KnowledgeView', () => {
       serve({ proposals });
       renderApp('/knowledge');
       await openProposals();
-      fireEvent.change(screen.getByRole('textbox', { name: 'Search' }), {
-        target: { value: 'dep free' },
-      });
+      await typeSearch('dep free');
       await waitFor(() => {
         expect(shown()).toEqual(['Whole project']);
       });
-      fireEvent.change(screen.getByRole('textbox', { name: 'Search' }), {
-        target: { value: 'eeze' },
-      });
+      await typeSearch('eeze');
       expect(await screen.findByText('No proposal matches.')).toBeTruthy();
     });
 
@@ -444,9 +502,7 @@ describe('KnowledgeView', () => {
       const { asked } = serve({ proposals });
       renderApp('/knowledge');
       expect(await screen.findByText(/^No principles yet/)).toBeTruthy();
-      fireEvent.change(screen.getByRole('textbox', { name: 'Search' }), {
-        target: { value: '-' },
-      });
+      await typeSearch('-');
       await waitFor(() => {
         expect(asked.at(-1)?.get('q')).toBe('-');
       });
@@ -458,19 +514,19 @@ describe('KnowledgeView', () => {
       await openProposals();
     });
 
-    it('narrows to You, Project or one area, and counts anything but a principle as Project', async () => {
+    it('narrows to You, Project or one area', async () => {
       serve({ proposals });
       renderApp('/knowledge');
       await openProposals();
-      await chooseScope('You');
+      await chooseScope('All Projects');
       await waitFor(() => {
         expect(shown()).toEqual(['Mine']);
       });
-      await chooseScope('Project');
+      await chooseScope('This Project');
       await waitFor(() => {
-        expect(shown()).toEqual(['Whole project', 'A note']);
+        expect(shown()).toEqual(['Whole project']);
       });
-      await chooseScope('api');
+      await chooseScope('Only in api');
       await waitFor(() => {
         expect(shown()).toEqual(['For the api']);
       });
@@ -524,10 +580,8 @@ describe('KnowledgeView', () => {
       const asked = serveBoth();
       renderApp('/knowledge');
       expect(await screen.findByText('Alpha rule')).toBeTruthy();
-      fireEvent.change(screen.getByRole('textbox', { name: 'Search' }), {
-        target: { value: 'rule' },
-      });
-      fireEvent.click(screen.getByRole('switch', { name: 'History' }));
+      await typeSearch('rule');
+      await chooseShelf('Past');
       await waitFor(() => {
         expect(asked.at(-1)?.params.get('q')).toBe('rule');
       });
@@ -544,12 +598,15 @@ describe('KnowledgeView', () => {
       expect(screen.getByRole('tab', { name: 'Principles' }).getAttribute('aria-selected')).toBe(
         'true',
       );
-      expect(screen.getByRole('textbox', { name: 'Search' })).toHaveProperty('value', '');
-      expect(screen.getByRole('switch', { name: 'History' })).toHaveProperty('checked', false);
+      // The new project's view starts afresh: Current, with no search and no line saying otherwise.
+      expect(screen.queryByText(/^Showing past/)).toBeNull();
+      await openColumnFilter();
+      expect(await screen.findByRole('textbox', { name: 'Search' })).toHaveProperty('value', '');
+      expect(screen.getByRole('radio', { name: 'Current' })).toHaveProperty('checked', true);
       const list = asked.filter((a) => a.path.endsWith('/knowledge'));
       expect(list.every((a) => a.projectId === beta.id)).toBe(true);
       expect(list.at(-1)?.params.get('q') ?? '').toBe('');
-      expect(list.at(-1)?.params.get('history')).toBe('0');
+      expect(list.at(-1)?.params.get('shelf')).toBe('current');
       await waitFor(() => {
         expect(asked.some((a) => a.path.endsWith('/proposals'))).toBe(true);
       });
@@ -703,6 +760,8 @@ describe('KnowledgeView', () => {
       ),
     );
     renderApp('/knowledge');
+    // A retired principle is under Past.
+    await chooseShelf('Past');
     fireEvent.click(await screen.findByRole('button', { name: /Where .* came from/ }));
     const drawer = await screen.findByRole('dialog', { name: 'Where it came from' });
     expect(await within(drawer).findByText(/Retired by an agent on 16 Oct 2026/)).toBeTruthy();
@@ -735,6 +794,7 @@ describe('KnowledgeView', () => {
         ),
       );
       renderApp('/knowledge');
+      await chooseShelf('Past');
       fireEvent.click(await screen.findByRole('button', { name: /Where .* came from/ }));
       const drawer = await screen.findByRole('dialog', { name: 'Where it came from' });
       for (const verb of ['Retired', 'Withdrawn', 'Confirmed']) {
