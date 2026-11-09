@@ -140,6 +140,14 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   body scrolls.
 - **Navigation:** nav links take the `md` radius, so their hover and active fills are rounded pills
   inset from the sidebar's edge. The fill marks where you are; no outline on each item.
+- **Scope follows the question, not the screen**
+  (`docs/architecture/decisions/2026-11-09-scope-follows-the-question.md`). A view that answers "what needs
+  me?" or "what is running, and on what?" is global: the Inbox and Factory. They show every project and
+  narrow by a visible project filter, never by the project chosen elsewhere. A view of how one repo's work
+  is shaped belongs to a project: Board, Plan, Knowledge and the project's settings. The sidebar reads in
+  that order: Inbox and Factory; then a "Project" label over the project switcher and that project's Board,
+  Plan, Knowledge and Project Settings; then app-wide Settings at the foot. The Settings sidebar keeps the
+  same order (Back to Board, the project's sections, then Global).
 - **Tables:** the identifying column (a name, a title) takes the spare width; numeric columns are
   right-aligned.
 - **Accessibility:** jsx-a11y strict passes; every interactive control is reachable by keyboard and

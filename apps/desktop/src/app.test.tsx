@@ -15,6 +15,40 @@ const healthy = () =>
   );
 
 describe('App shell', () => {
+  it('orders the sidebar global views first, then the project and its views, then app-wide Settings', async () => {
+    server.use(...baseHandlers());
+    renderApp('/factory');
+    const nav = await screen.findByRole('navigation');
+    await screen.findByRole('button', { name: /Switch project/ });
+    // In document order: the sidebar's links and buttons, each by its accessible name.
+    const order = [...nav.querySelectorAll('a, button')].map((element) => {
+      const name = element.getAttribute('aria-label') ?? element.textContent.trim();
+      return name.endsWith('Switch project') ? 'switcher' : name;
+    });
+    expect(order).toEqual([
+      'Inbox',
+      'Factory',
+      'switcher',
+      'Board',
+      'Plan',
+      'Knowledge',
+      'Project Settings',
+      'Settings',
+    ]);
+  });
+
+  it.each([
+    ['Project Settings', '/settings/general'],
+    ['Settings', '/settings/keep-awake'],
+  ])('opens %s at %s', async (link, path) => {
+    server.use(...baseHandlers());
+    const { router } = renderApp('/factory');
+    fireEvent.click(await screen.findByRole('link', { name: link }));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(path);
+    });
+  });
+
   it('shows no daemon status in the header while connected', async () => {
     server.use(...baseHandlers());
     renderApp('/factory');
