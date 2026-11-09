@@ -10,6 +10,8 @@ export const EventType = {
   ProjectCreated: 'project.created',
   TaskCreated: 'task.created',
   TaskChanged: 'task.changed',
+  /** A message joined a task's thread; `data.messageId` names it. */
+  TaskMessageAdded: 'task.message_added',
   WorkstreamCreated: 'workstream.created',
   WorkstreamChanged: 'workstream.changed',
   SessionStarted: 'session.started',

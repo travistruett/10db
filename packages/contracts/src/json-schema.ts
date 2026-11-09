@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { TaskFileDto, TaskMessageDto, TaskMessageInput, TaskThreadDto } from './task-thread';
 import {
   BatchDto,
   BatchStartInput,
@@ -313,6 +314,10 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'shape-dismiss-input': ShapeDismissInput,
   'shape-model-input': ShapeModelInput,
   'shape-models-dto': ShapeModelsDto,
+  'task-file-dto': TaskFileDto,
+  'task-message-dto': TaskMessageDto,
+  'task-message-input': TaskMessageInput,
+  'task-thread-dto': TaskThreadDto,
   ...mcpSchemas,
   ...builderMcpSchemas,
   ...shapeMcpSchemas,

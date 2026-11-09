@@ -106,6 +106,7 @@ import {
 } from '../permissions';
 import { findRegistryHosts } from '../registries';
 import { proposeCandidates, resolveStepPlan, startTaskWithPlan } from '../team';
+import type { ThreadService } from '../thread';
 import type { JudgeApiServices } from './judge-services';
 import type { KnowledgeApiServices } from './knowledge-services';
 import { createModelSettingsServices } from './model-settings-services';
@@ -135,6 +136,7 @@ export function createServices(deps: {
   readonly judge: JudgeApiServices;
   readonly shape: ShapeApiServices;
   readonly knowledge: KnowledgeApiServices;
+  readonly thread: ThreadService;
   readonly starter: BatchStarter;
   readonly shipper: Shipper;
   readonly accounts: AccountService;
@@ -411,6 +413,7 @@ export function createServices(deps: {
     ...createModelSettingsServices(deps.state),
     ...deps.shape,
     ...deps.knowledge,
+    ...deps.thread,
     benchmarkStatus: () => deps.benchmarks.status(),
     syncBenchmarks: () => deps.benchmarks.sync(),
     listAaModels: () => listAaModels(db),

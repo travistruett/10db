@@ -199,6 +199,7 @@ import {
 } from '../self-update';
 import type { SessionAdapter } from '../sessions';
 import { routingInputs, seedTeam } from '../team';
+import { createThreadService } from '../thread';
 import { createGateRunner, createGateSlots, limitGates } from '../verify';
 import { CLIENT_APP } from '../version';
 import { createWatcher, systemWatch, type WatchFn } from '../watcher';
@@ -1423,6 +1424,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       off: opts.judgeOff === true,
     }),
     shape: createShapeServices({ shape, state, clock }),
+    thread: createThreadService({ state, dataDir: opts.dataDir }),
     knowledge: createKnowledgeServices({
       state,
       searchAvailable: knowledgeIndex.failed.length === 0,

@@ -101,7 +101,11 @@ import type {
   StartTaskInput,
   SystemCheckDto,
   TaskDto,
+  TaskFileId,
   TaskId,
+  TaskMessageDto,
+  TaskPictureKind,
+  TaskThreadDto,
   TaskInput,
   RunNextResult,
   TaskMove,
@@ -308,6 +312,25 @@ export interface ApiServices {
     shapeId: ShapeId,
     file: { readonly name: string; readonly mediaType: string; readonly bytes: Uint8Array },
   ): ShapeFileDto;
+  /** A task's thread, oldest first; throws NotFoundError for an unknown task. */
+  taskThread(taskId: TaskId): TaskThreadDto;
+  /**
+   * Keeps the builder's message and its pasted pictures. Throws NotFoundError for an unknown task and
+   * InvalidError, naming what is refused, for an empty message or a file that is no PNG, JPEG or
+   * WebP by its bytes.
+   */
+  postTaskMessage(
+    taskId: TaskId,
+    input: {
+      readonly text: string;
+      readonly pictures: readonly { readonly name: string; readonly bytes: Uint8Array }[];
+    },
+  ): TaskMessageDto;
+  /** A pasted picture's bytes; throws NotFoundError for one that is not this task's. */
+  taskPicture(
+    taskId: TaskId,
+    fileId: TaskFileId,
+  ): { readonly bytes: Uint8Array; readonly mediaType: TaskPictureKind };
   /** `start_shape`: a conversation from a terminal session, listed at once; starts no turn. */
   startShape(input: StartShapeInput): ShapeDto;
   /** Settings › Decisions: the Sizing hit rate and each Shape decision's shadow agreement. */

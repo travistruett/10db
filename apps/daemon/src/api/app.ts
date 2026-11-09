@@ -77,8 +77,11 @@ import {
   ShapeJevSettingDto,
   StartTaskInput,
   SystemCheckDto,
+  TaskFileId,
   TaskId,
   TaskInput,
+  TaskMessageInput,
+  TASK_MESSAGE_PICTURES_MAX_BYTES,
   TaskMove,
   TaskPatch,
   TeamInput,
@@ -190,8 +193,26 @@ const bodyLimiter = bodyLimit({ maxSize: MAX_BODY_BYTES });
 // A dropped file is the one body that may be larger: up to 20 MB, and a little over so the service
 // can name the limit in its refusal.
 const fileBodyLimit = bodyLimit({ maxSize: SHAPE_FILE_MAX_BYTES + 1024 });
+const TASK_THREAD_PATH = /^\/tasks\/[^/]+\/thread$/;
+// A builder's message carries its pictures in the one request, and a little over so the service can
+// name the limit.
+const messageBodyLimit = bodyLimit({ maxSize: TASK_MESSAGE_PICTURES_MAX_BYTES + 1024 * 1024 });
 const limitBody: MiddlewareHandler = (c, next) =>
-  (SHAPE_FILE_PATH.test(c.req.path) ? fileBodyLimit : bodyLimiter)(c, next);
+  (SHAPE_FILE_PATH.test(c.req.path)
+    ? fileBodyLimit
+    : TASK_THREAD_PATH.test(c.req.path)
+      ? messageBodyLimit
+      : bodyLimiter)(c, next);
+
+/** A builder's message as a multipart form: a `text` part and a `picture` part for each picture. */
+const TaskMessageForm = z.object({
+  text: TaskMessageInput.shape.text.default(''),
+  picture: z
+    .union([z.instanceof(File), z.array(z.instanceof(File))])
+    .optional()
+    .transform((parts) => (parts === undefined ? [] : [parts].flat())),
+});
+type TaskMessageForm = z.infer<typeof TaskMessageForm>;
 
 export function createApp(deps: ApiDeps) {
   const app = new Hono()
@@ -996,6 +1017,39 @@ export function createApp(deps: ApiDeps) {
           ),
         ),
     )
+    // A task's thread (Workbench spec §4.3): the builder's messages and the pictures pasted with them.
+    .get('/tasks/:taskId/thread', (c) =>
+      c.json(deps.services.taskThread(TaskId.parse(c.req.param('taskId')))),
+    )
+    .post(
+      '/tasks/:taskId/thread',
+      validator('form', (value): TaskMessageForm => TaskMessageForm.parse(value)),
+      async (c) => {
+        const { text, picture } = c.req.valid('form');
+        const pictures = await Promise.all(
+          picture.map(async (file) => ({
+            name: file.name,
+            bytes: new Uint8Array(await file.arrayBuffer()),
+          })),
+        );
+        return c.json(
+          deps.services.postTaskMessage(TaskId.parse(c.req.param('taskId')), { text, pictures }),
+          201,
+        );
+      },
+    )
+    .get('/tasks/:taskId/thread/pictures/:fileId', (c) => {
+      const picture = deps.services.taskPicture(
+        TaskId.parse(c.req.param('taskId')),
+        TaskFileId.parse(c.req.param('fileId')),
+      );
+      // Read whole from a file, so its buffer is a plain ArrayBuffer.
+      return c.body(picture.bytes as Uint8Array<ArrayBuffer>, 200, {
+        'content-type': picture.mediaType,
+        'cache-control': 'private, max-age=31536000, immutable',
+        'x-content-type-options': 'nosniff',
+      });
+    })
     .get('/tasks/:taskId/step-plan', (c) =>
       c.json(deps.services.stepPlan(TaskId.parse(c.req.param('taskId')))),
     )

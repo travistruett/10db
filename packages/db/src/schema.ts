@@ -78,7 +78,12 @@ import type {
   StepRole,
   SupportedAccountKind,
   TaskId,
+  TaskFileId,
   TaskLanding,
+  TaskMessageAuthor,
+  TaskMessageId,
+  TaskMessageKind,
+  TaskPictureKind,
   TaskStatus,
   ToolAccess,
   ToolOpId,
@@ -1290,6 +1295,55 @@ export const shapeFiles = sqliteTable(
     createdAt: createdAt(),
   },
   (t) => [index('shape_files_shape_idx').on(t.shapeId, t.id)],
+);
+
+/**
+ * A task's thread (Workbench spec §4.3, §6.3): the builder's messages, the agent's replies and the
+ * notices, oldest first by id.
+ */
+export const taskMessages = sqliteTable(
+  'task_messages',
+  {
+    id: text('id').$type<TaskMessageId>().primaryKey(),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .notNull()
+      .references(() => tasks.id),
+    author: text('author').$type<TaskMessageAuthor>().notNull(),
+    kind: text('kind').$type<TaskMessageKind>().notNull(),
+    body: text('body').notNull(),
+    createdAt: createdAt(),
+    /** When it was handed to the session; that alone proves nothing reached a turn. */
+    pushedAt: text('pushed_at'),
+    /** When a turn took it in; a message pushed and not delivered is sent again. */
+    deliveredAt: text('delivered_at'),
+  },
+  (t) => [index('task_messages_task_idx').on(t.taskId, t.id)],
+);
+
+/** A picture the builder pasted into a task's thread, kept under the data directory by its hash. */
+export const taskFiles = sqliteTable(
+  'task_files',
+  {
+    id: text('id').$type<TaskFileId>().primaryKey(),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .notNull()
+      .references(() => tasks.id),
+    messageId: text('message_id')
+      .$type<TaskMessageId>()
+      .notNull()
+      .references(() => taskMessages.id),
+    name: text('name').notNull(),
+    mediaType: text('media_type').$type<TaskPictureKind>().notNull(),
+    size: integer('size').notNull(),
+    sha256: text('sha256').notNull(),
+    storedPath: text('stored_path').notNull(),
+    /** Whether the live session's history holds it as an image block, as `shape_files.inline_sent`. */
+    inlineSent: integer('inline_sent', { mode: 'boolean' }).notNull().default(false),
+    createdAt: createdAt(),
+  },
+  (t) => [index('task_files_task_idx').on(t.taskId, t.id)],
 );
 
 /**

@@ -18,6 +18,7 @@
         "project.created",
         "task.created",
         "task.changed",
+        "task.message_added",
         "workstream.created",
         "workstream.changed",
         "session.started",

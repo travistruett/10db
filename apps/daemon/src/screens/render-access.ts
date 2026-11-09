@@ -47,6 +47,10 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/health': 'Open to every caller; it needs no token.',
   '/shapes/:shapeId/screens/:name':
     "A kept screenshot is for the conversation's transcript, not for a screen.",
+  '/tasks/:taskId/thread':
+    "A task's thread is the builder's own words to an agent, and no screen Plan draws shows it.",
+  '/tasks/:taskId/thread/pictures/:fileId':
+    "A picture pasted into a task's thread is for that thread, not for a screen.",
   '/events': 'The event log is not a screen; the window draws once and does not follow it.',
   '/events/head': 'The event log is not a screen; the window draws once and does not follow it.',
   '/events/stream':

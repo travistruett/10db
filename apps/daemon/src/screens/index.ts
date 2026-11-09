@@ -2,6 +2,7 @@
 // checks what comes back and holds the window's token to reads (render-access.ts).
 
 export { createScreenBroker, type ScreenOutcome } from './broker';
+export { refuseMislabelledBytes, safeFileName } from './file-check';
 export { readImageSize } from './image-check';
 export {
   STRICTEST_LIMITS,

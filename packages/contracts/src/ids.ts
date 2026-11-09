@@ -48,6 +48,8 @@ const ID_SCHEMAS = {
   ShapeAttachment: idSchema('sat', 'ShapeAttachmentId'),
   LandingGroup: idSchema('lgp', 'LandingGroupId'),
   Pattern: idSchema('pat', 'PatternId'),
+  TaskMessage: idSchema('tmg', 'TaskMessageId'),
+  TaskFile: idSchema('tfl', 'TaskFileId'),
 } as const;
 
 const ID_PREFIX = {
@@ -87,6 +89,8 @@ const ID_PREFIX = {
   ShapeAttachment: 'sat',
   LandingGroup: 'lgp',
   Pattern: 'pat',
+  TaskMessage: 'tmg',
+  TaskFile: 'tfl',
 } as const satisfies Record<keyof typeof ID_SCHEMAS, string>;
 
 export type IdKind = keyof typeof ID_SCHEMAS;
@@ -171,5 +175,9 @@ export const LandingGroupId = ID_SCHEMAS.LandingGroup;
 export type LandingGroupId = IdOf<'LandingGroup'>;
 export const PatternId = ID_SCHEMAS.Pattern;
 export type PatternId = IdOf<'Pattern'>;
+export const TaskMessageId = ID_SCHEMAS.TaskMessage;
+export type TaskMessageId = IdOf<'TaskMessage'>;
+export const TaskFileId = ID_SCHEMAS.TaskFile;
+export type TaskFileId = IdOf<'TaskFile'>;
 export const AccountId = ID_SCHEMAS.Account;
 export type AccountId = IdOf<'Account'>;
