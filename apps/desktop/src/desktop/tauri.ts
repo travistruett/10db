@@ -24,10 +24,50 @@ export function isTauri(): boolean {
  * Opens a web page in the default browser, for the desktop app, whose webview follows no
  * `target="_blank"` link. The capability allows only `https://github.com/*` and
  * `https://artificialanalysis.ai/*`, whose credit beside its scores links its site, besides the sign-in page
- * `openSignInPage` opens.
+ * `openSignInPage` opens and the loopback pages `openAppPage` opens through the shell's own command.
  */
 export function openInBrowser(url: string): Promise<void> {
   return openUrl(url);
+}
+
+/** Thrown when a page address is not the selected project's own loopback app address. */
+export class AppPageRefusedError extends Error {
+  override readonly name = 'AppPageRefusedError';
+}
+
+const LOOPBACK_HOSTNAMES: ReadonlySet<string> = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+/**
+ * The address to open for `route` on the project's app, or a refusal. The shell's
+ * `open_app_page` command refuses anything but a loopback address, so this check is what holds
+ * a window to one project's address: the app address must be a loopback `http(s)` origin, and
+ * the address opened must have exactly that origin.
+ */
+function appPageUrl(appUrl: string, route: string): string {
+  const app = URL.parse(appUrl);
+  if (app === null || (app.protocol !== 'http:' && app.protocol !== 'https:')) {
+    throw new AppPageRefusedError(`${appUrl} is not an http address`);
+  }
+  if (!LOOPBACK_HOSTNAMES.has(app.hostname) && !app.hostname.endsWith('.localhost')) {
+    throw new AppPageRefusedError(`${app.origin} is not a loopback address`);
+  }
+  const page = route.startsWith('/') ? URL.parse(route, app.origin) : null;
+  if (page?.origin !== app.origin) {
+    throw new AppPageRefusedError(`${route} is not a page of ${app.origin}`);
+  }
+  return page.href;
+}
+
+/**
+ * Opens one page of the selected project's app in the default browser. Refuses (rejects with
+ * `AppPageRefusedError`) unless `appUrl` is a loopback `http(s)` origin and `route` stays on it.
+ */
+export function openAppPage(appUrl: string, route: string): Promise<void> {
+  try {
+    return invoke('open_app_page', { url: appPageUrl(appUrl, route) });
+  } catch (error) {
+    return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+  }
 }
 
 /**
