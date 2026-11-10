@@ -27,7 +27,7 @@ import {
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { ManualClock } from '../clock';
-import { PrState } from '../github';
+import { GhError, PrState } from '../github';
 import {
   answerPassMoveCard,
   createPrWatch,
@@ -414,6 +414,51 @@ describe('a pass stacked on a closed one (D24)', () => {
     await h.jobs.idle();
     expect(h.cards().filter((c) => c.detail?.['kind'] === 'pass_retarget')).toEqual([]);
     expect(getPassProgress(h.store.db, b.passId).notices).toEqual([]);
+  });
+
+  const baseOf = async (url: string) =>
+    (await h.gh.prView({ repo: 'acme/widgets', ref: url }))?.baseRef;
+  const retargetCards = () => h.cards().filter((c) => c.detail?.['kind'] === 'pass_retarget');
+
+  it('when a Retarget answered does not go through, the next look retargets it, and asks nothing again', async () => {
+    const a = await closedPass();
+    const b = await stacked(a);
+    h.gh.setState(a.url, PrState.Closed);
+    await watchRound();
+    const card = h.only(retargetCards());
+    h.gh.failNext.set('prEditBase', new GhError('failed', 'HTTP 502: Bad Gateway'));
+
+    h.inbox.answer(card.id, { choice: PASS_RETARGET_CHOICE });
+    answerPassMoveCard(h.ctx, card, { choice: PASS_RETARGET_CHOICE });
+    await h.jobs.idle();
+    expect(await baseOf(b.url)).toBe(a.branch);
+
+    // A restart looks at the closed pass again: the answer stands, so it is carried out, not asked.
+    resumePassSettles(h.ctx);
+    await h.jobs.idle();
+
+    expect(await baseOf(b.url)).toBe('main');
+    expect(retargetCards()).toEqual([]);
+    expect(getPassProgress(h.store.db, b.passId).notices).toEqual([]);
+    resumePassSettles(h.ctx);
+    await h.jobs.idle();
+    expect(edits(b.url)).toHaveLength(2);
+  });
+
+  it('when the stacked pull request was retargeted by hand, its card and notice go at the next look', async () => {
+    const a = await closedPass();
+    const b = await stacked(a);
+    h.gh.setState(a.url, PrState.Closed);
+    await watchRound();
+    expect(retargetCards()).toHaveLength(1);
+
+    await h.gh.prEditBase({ repo: 'acme/widgets', url: b.url, base: 'main' });
+    resumePassSettles(h.ctx);
+    await h.jobs.idle();
+
+    expect(retargetCards()).toEqual([]);
+    expect(getPassProgress(h.store.db, b.passId).notices).toEqual([]);
+    expect(edits(b.url)).toHaveLength(1);
   });
 
   it('when the stacked pass is abandoned at its start, the closed pass offers Move again', async () => {

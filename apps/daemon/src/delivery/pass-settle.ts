@@ -168,7 +168,7 @@ export async function settleClosedPass(
     // The stacked pass moves the branch at its own close; this pass waits, or settles once merged.
     withdraw(ctx.state, ctx.inbox, pass.projectId, [passMoveKey(pass.id)]);
     if (pr?.state === PullRequestState.Merged) await followStackedMerge(ctx, pass, above, signal);
-    else if (pr?.state === PullRequestState.Closed) offerRetarget(ctx, pass, above);
+    else if (pr?.state === PullRequestState.Closed) await offerRetarget(ctx, pass, above, signal);
     return;
   }
   if (pr?.state === PullRequestState.Closed) {

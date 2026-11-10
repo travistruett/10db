@@ -1,4 +1,5 @@
 import {
+  InboxState,
   PASS_RETARGET_CHOICE,
   PassNoticeKind,
   PassRetargetDetail,
@@ -17,6 +18,7 @@ import {
   getPassProgress,
   getPassPullRequest,
   getProject,
+  listInbox,
   listPassesIn,
   setPassNotice,
   setStackedOn,
@@ -197,17 +199,54 @@ function retargetCard(above: PassDto, below: PassDto, base: string, prUrl: strin
   };
 }
 
-/** The pass below a stacked one closed unmerged: the stacked pass's header says so and offers Retarget. */
-export function offerRetarget(ctx: DeliveryContext, below: PassDto, above: PassDto): void {
+/** The branch the stacked pass's pull request targets on GitHub; null when it has none. */
+async function prBaseOf(
+  ctx: DeliveryContext,
+  above: PassDto,
+  signal: AbortSignal,
+): Promise<string | null> {
+  const batch = getBatch(ctx.state.db, above.batchId);
+  const pr = getPassPullRequest(ctx.state.db, above.id);
+  if (pr === null || batch.repo === null) return null;
+  const seen = await ctx.gh.prView({ repo: batch.repo, ref: pr.url }, ghCall(ctx, signal));
+  return seen?.baseRef ?? null;
+}
+
+/** Whether the builder answered the stacked pass's Retarget card with Retarget. */
+function retargetChosen(db: DbReader, above: PassDto): boolean {
+  return listInbox(db, {
+    projectId: above.projectId,
+    states: [InboxState.Answered, InboxState.Delivering, InboxState.Resolved],
+  }).some((item) => item.answer !== null && retargetAnswered(item, item.answer) === above.id);
+}
+
+/**
+ * The pass below a stacked one closed unmerged: the stacked pass's header says so and offers
+ * Retarget. Where its pull request is based on GitHub decides, not the answer alone: one based on
+ * the base already (retargeted, by 10db or by hand) clears the card and the notice; one a Retarget
+ * answered did not move (a failed edit, a restart) is retargeted now; any other answer, or an open
+ * card, is left as it is.
+ */
+export async function offerRetarget(
+  ctx: DeliveryContext,
+  below: PassDto,
+  above: PassDto,
+  signal: AbortSignal,
+): Promise<void> {
   const db = ctx.state.db;
-  // Retargeted already, or looked at again with the card open: nothing new to say.
   const key = passRetargetKey(above.id);
-  if (
-    hasAnsweredByFoldKey(db, above.projectId, key) ||
-    findOpenByFoldKey(db, above.projectId, key) !== undefined
-  )
-    return;
   const base = getBatch(db, above.batchId).baseBranch;
+  if ((await prBaseOf(ctx, above, signal)) === base) {
+    withdraw(ctx.state, ctx.inbox, above.projectId, [key]);
+    ctx.state.write((w) => clearPassNotice(w, above.id, STACK_NOTICE));
+    return;
+  }
+  if (findOpenByFoldKey(db, above.projectId, key) !== undefined) return;
+  if (retargetChosen(db, above)) {
+    await retargetStackedPass(ctx, above.id, signal);
+    return;
+  }
+  if (hasAnsweredByFoldKey(db, above.projectId, key)) return;
   raise(
     ctx.inbox,
     above.projectId,
