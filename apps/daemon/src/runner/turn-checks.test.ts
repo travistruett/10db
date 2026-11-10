@@ -269,6 +269,39 @@ describe('the check after each turn', () => {
     expect(header()).toMatchObject([{ sendable: true }]);
   });
 
+  it("keeps a newer check's pid when a stopped check ends after it started", async () => {
+    await world(() => checkScript('src/settings/page.tsx'));
+    touch('hold');
+    let first = 0;
+    let letFirstAnswer = (): void => undefined;
+    const firstAnswer = new Promise<void>((resolve) => {
+      letFirstAnswer = resolve;
+    });
+    // ps answers the first check late, after the next one has started and been recorded.
+    const turnChecks = await start(async (pid) => {
+      if (first === 0) {
+        first = pid;
+        await firstAnswer;
+      }
+      return systemProcesses.identify(pid);
+    });
+    await readyTurn(w.settings, 'src/settings/page.tsx');
+    await waitFor(() => first !== 0);
+
+    const stopped = turnChecks.stop(passId());
+    await readyTurn(w.people, 'src/people/page.tsx');
+    const [newer] = await waitFor(() => {
+      const pids = listPassCheckPids(w.h.store.db);
+      return pids.length === 1 ? pids : undefined;
+    });
+    letFirstAnswer();
+    await stopped;
+
+    expect(newer?.pid).not.toBe(first);
+    expect(listPassCheckPids(w.h.store.db).map((p) => p.pid)).toEqual([newer?.pid]);
+    touch('go');
+  });
+
   it('stops a check a stopped daemon left running before recovery settles a Ready turn, which is checked once', async () => {
     const orphan = await orphanGateGroup();
     try {

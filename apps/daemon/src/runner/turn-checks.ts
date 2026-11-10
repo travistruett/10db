@@ -197,6 +197,8 @@ function createTurnChecks(deps: TurnChecksDeps): TurnChecks {
       `pass-${passId}-check-${String(deps.clock.now().getTime())}.log`,
     );
     let recording: Promise<void> = Promise.resolve();
+    /** The pid this run recorded on the pass, which only this run clears. */
+    const recorded: { pid: number | null } = { pid: null };
     let result: GateResult;
     try {
       result = await deps.gate.run({
@@ -215,10 +217,12 @@ function createTurnChecks(deps: TurnChecksDeps): TurnChecks {
           recording = deps
             .identifyProcess(pid)
             .then((start) => {
-              if (start !== null)
-                deps.state.write((w) => {
-                  setPassCheckPid(w, passId, { pid, start });
-                });
+              // A run stopped meanwhile is gone, and a newer one may have recorded its own.
+              if (start === null || stopped()) return;
+              deps.state.write((w) => {
+                setPassCheckPid(w, passId, { pid, start });
+              });
+              recorded.pid = pid;
             })
             .catch((error: unknown) => {
               deps.logger.warn({ passId, err: message(error) }, 'turn check pid not recorded');
@@ -226,11 +230,15 @@ function createTurnChecks(deps: TurnChecksDeps): TurnChecks {
         },
       });
     } finally {
-      // The pid is cleared only once its recording has landed, so a late one never outlives it.
+      // Cleared once its recording has landed, so a late one never outlives it, and only while the
+      // pass still names this run's pid.
       await recording;
-      deps.state.write((w) => {
-        setPassCheckPid(w, passId, null);
-      });
+      const own = recorded.pid;
+      if (own !== null)
+        deps.state.write((w) => {
+          if (listPassCheckPids(w.tx).some((c) => c.passId === passId && c.pid === own))
+            setPassCheckPid(w, passId, null);
+        });
     }
     if (result.aborted || stopped()) return;
     const turnIds = turns.map((t) => t.turnId);
