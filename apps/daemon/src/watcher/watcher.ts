@@ -26,6 +26,7 @@ import {
   listInbox,
   latestPassTurn,
   listPassDirt,
+  listSharedChanges,
   listPassTasks,
   listPermissionRules,
   listProjects,
@@ -311,7 +312,8 @@ export function createWatcher(deps: {
 
   /**
    * `paths` without each that still holds what the project's pass accounts for in Your folder `root`
-   * (`accountedAt`): the folder's dirt from before the pass is no write made in it. An entry counts as
+   * (`accountedAt`): the folder's dirt from before the pass, and a shared change its turn kept and whose
+   * hold let the area go, are no write made in it. An entry counts as
    * held only when its mode and content both match, so an executable bit or a link holding the same
    * bytes is a write. A sensitive path is kept, as is every path when git can't read either side.
    */
@@ -322,7 +324,11 @@ export function createWatcher(deps: {
   ): Promise<string[]> {
     const pass = findOpenPass(db, project.id);
     if (!pass) return [...paths];
-    const revs = accountedAt({ dirtRef: passDirtRef(pass.id), dirt: listPassDirt(db, pass.id) });
+    const revs = accountedAt({
+      dirtRef: passDirtRef(pass.id),
+      dirt: listPassDirt(db, pass.id),
+      shared: listSharedChanges(db, pass.id),
+    });
     const named = paths.filter((rel) => revs.has(rel) && !isSensitivePath(rel));
     if (named.length === 0) return [...paths];
     const byRev = new Map<string, string[]>();

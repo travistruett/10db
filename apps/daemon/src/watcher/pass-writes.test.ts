@@ -1,6 +1,6 @@
 import { ClaimKind, mintId, type ProjectDto } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { passWrites, type PassLane } from './pass-writes';
+import { accountedAt, passWrites, type PassLane } from './pass-writes';
 
 // Workbench spec §6.4: what the watcher raises for a write in Your folder while a pass holds its tasks.
 
@@ -75,5 +75,54 @@ describe('passWrites', () => {
       foreign: sorted.foreign,
       working: sorted.working.map((l) => l.title),
     }).toEqual(want);
+  });
+});
+
+// Workbench spec §5.1, §7.2: the commit that holds what the pass accounts for at each path of Your folder.
+const DIRT = 'refs/10db/passes/pas_1/dirt';
+const change = (seq: number, sha: string, paths: string[]) => ({ seq, sha, paths });
+
+const accountedRows: {
+  readonly name: string;
+  readonly dirt: readonly string[];
+  readonly shared: readonly ReturnType<typeof change>[];
+  readonly want: Record<string, string>;
+}[] = [
+  {
+    name: 'a path of the dirt is held by the dirt commit',
+    dirt: ['README.md'],
+    shared: [],
+    want: { 'README.md': DIRT },
+  },
+  {
+    name: 'a shared change that set a path of the dirt holds it instead',
+    dirt: ['src/kit/button.ts'],
+    shared: [change(1, 'a1', ['src/kit/button.ts'])],
+    want: { 'src/kit/button.ts': 'a1' },
+  },
+  {
+    name: 'the newest change holds a path, whatever order the chain is read in',
+    dirt: [],
+    shared: [
+      change(2, 'b2', ['src/kit/button.ts']),
+      change(1, 'a1', ['src/kit/button.ts', 'src/kit/x.ts']),
+    ],
+    want: { 'src/kit/button.ts': 'b2', 'src/kit/x.ts': 'a1' },
+  },
+  {
+    name: 'a drop that put a path back holds it',
+    dirt: [],
+    shared: [change(1, 'a1', ['src/kit/button.ts']), change(2, 'd2', ['src/kit/button.ts'])],
+    want: { 'src/kit/button.ts': 'd2' },
+  },
+];
+
+describe('accountedAt', () => {
+  it.each(accountedRows)('$name', ({ dirt, shared, want }) => {
+    expect(
+      Object.fromEntries(
+        accountedAt({ dirtRef: DIRT, dirt: dirt.map((path) => ({ path })), shared }),
+      ),
+    ).toEqual(want);
   });
 });

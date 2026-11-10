@@ -43,6 +43,7 @@ import {
   insertWorkstream,
   listInbox,
   listPermissionRules,
+  openHolds,
   getProject,
   patchBatch,
   patchProject,
@@ -65,10 +66,12 @@ import {
 } from '../../test/fixtures';
 import { ManualClock, systemClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
+import { openPassWorld, type PassWorld } from '../../test/pass-world';
 import { passDirtRef } from '../delivery';
 import { createGit } from '../git';
 import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger, type Logger } from '../log';
+import { grantSharedHold, keepHold } from '../pass';
 import { editResult } from '../permissions';
 import { ANSWERED_CARDS_READ, stampOrReason, writeStamp } from './allowed-writes';
 import { STRAY_BULK_THRESHOLD } from './strays';
@@ -1228,6 +1231,68 @@ describe('a Workbench pass in Your folder', () => {
     watcher.sync();
     await write('docs/notes.md');
     expect(flags().map((f) => f.body)).toEqual(['docs/notes.md\nWritten while Gamma was working']);
+  });
+});
+
+// Workbench spec §7.2: a pass task's shared area is held for one turn, and the turn's end keeps what it
+// changed on the pass's chain and lets the area go; the change stays in Your folder until it lands.
+describe("a pass's shared change, kept as its turn ended", () => {
+  let w: PassWorld;
+  let folder: FakeWatch;
+  let passWatcher: Watcher;
+  afterEach(() => {
+    passWatcher.stop();
+    w.close();
+  });
+
+  const strayBodies = (): string[] =>
+    listInbox(w.h.store.db, { states: ['OPEN'] })
+      .filter((i) => i.kind === 'flag')
+      .map((i) => i.body);
+
+  it('raises no stray card once its hold let the area go, at a session end or in a batch, and does for a write made since', async () => {
+    w = await openPassWorld();
+    folder = fakeWatch();
+    passWatcher = createWatcher({
+      state: w.h.state,
+      bus: w.h.bus,
+      inbox: w.h.inbox,
+      git: w.h.git,
+      logger: silentLogger,
+      clock: new ManualClock(),
+      watch: folder.watch,
+      batchMs: 500,
+    });
+    const settings = w.runOf(w.settings);
+    const turn = w.startTurn(w.settings);
+    const granted = await grantSharedHold(w.deps, { workstreamId: settings, area: 'src' });
+    if (!granted?.ok) throw new Error('src was not granted');
+    w.write('src/button.ts', 'button\n');
+    const [hold] = openHolds(w.h.store.db, w.opened.pass.id);
+    if (!hold) throw new Error('no hold');
+    // The turn's end keeps the hold and releases its claim, then ends the turn Ready.
+    await keepHold(w.deps, { claimId: hold.claimId });
+    w.endTurn(turn);
+    w.ready(w.settings);
+    // People works meanwhile.
+    w.h.state.write((ctx) => {
+      for (const to of [WorkstreamState.Starting, WorkstreamState.Running])
+        transitionWorkstream(ctx, w.runOf(w.people), { to, fence: null });
+    });
+
+    expect(await passWatcher.stepEnd(settings)).toEqual([]);
+    passWatcher.sync();
+    const emitHere = (rel: string) => {
+      folder.open.get(w.h.repo)?.onChange(rel);
+    };
+    emitHere('src/button.ts');
+    await passWatcher.flush();
+    expect(strayBodies()).toEqual([]);
+
+    w.write('src/button.ts', 'wider\n');
+    emitHere('src/button.ts');
+    await passWatcher.flush();
+    expect(strayBodies()).toEqual([expect.stringMatching(/^src\/button\.ts\nWritten while /)]);
   });
 });
 

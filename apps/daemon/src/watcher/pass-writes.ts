@@ -1,4 +1,10 @@
-import type { ClaimKind, PassDirtEntry, ProjectDto, WorkstreamId } from '@10db/contracts';
+import type {
+  ClaimKind,
+  PassDirtEntry,
+  PassSharedChangeDto,
+  ProjectDto,
+  WorkstreamId,
+} from '@10db/contracts';
 import { findClaimed } from './strays';
 
 // Workbench spec §6.4: while a pass holds its tasks, a write in Your folder inside a page is the
@@ -50,13 +56,20 @@ export function passWrites(input: {
 
 /**
  * The commit that holds what each path of Your folder holds while the pass accounts for it, by path:
- * the pass's dirt commit for a path its open recorded (spec §5.1). A path still holding that commit's
- * entry, mode and content alike, is no write made in the pass, whatever claim covers it.
+ * the newest change on the pass's shared chain that sets it (spec §7.2: its turn's end kept it and let
+ * the area go, and it stays in the folder until it lands; a drop is the newest when it put the path
+ * back), else the pass's dirt commit for a path its open recorded (spec §5.1). A path still holding
+ * that commit's entry, mode and content alike, is no write made in the pass, whatever claim covers it.
  */
 export function accountedAt(input: {
   /** The pass's dirt commit, whose tree holds the folder's dirt as the open found it. */
   readonly dirtRef: string;
   readonly dirt: readonly Pick<PassDirtEntry, 'path'>[];
+  /** The pass's shared chain, drops included. */
+  readonly shared: readonly Pick<PassSharedChangeDto, 'seq' | 'sha' | 'paths'>[];
 }): Map<string, string> {
-  return new Map(input.dirt.map((entry) => [entry.path, input.dirtRef]));
+  const at = new Map(input.dirt.map((entry) => [entry.path, input.dirtRef]));
+  for (const change of [...input.shared].sort((a, b) => a.seq - b.seq))
+    for (const path of change.paths) at.set(path, change.sha);
+  return at;
 }
