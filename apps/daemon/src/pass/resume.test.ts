@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { InboxState, TakeOutStep } from '@10db/contracts';
-import { getTask, lastTakeOut, listInbox } from '@10db/db';
+import { AbandonStep, InboxState, TakeOutStep } from '@10db/contracts';
+import { abandonPassAndBatch, getTask, lastTakeOut, listInbox, setAbandonStep } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openPassWorld, type PassWorld } from '../../test/pass-world';
 import { answerPassCard, keepTurnWork, resumePassWork, takeOutSteps, TakeOutWithin } from './index';
@@ -67,6 +67,30 @@ describe('resumePassWork', () => {
     expect(w.h.git$('symbolic-ref', '--short', 'HEAD')).toBe('main');
     const [again] = folderCards(w);
     expect(again?.body).toContain('src/people/page.tsx');
+  });
+
+  it("switches nothing for a pass that no longer holds the folder, and says when the pass's branch is gone", async () => {
+    w = await openPassWorld();
+    w.h.git$('switch', '-q', 'main');
+    await resumePassWork(deps(w));
+    const [card] = folderCards(w);
+    if (!card) throw new Error('no folder card');
+
+    w.h.git$('branch', '-D', w.branch);
+    answerPassCard(w.deps, card, { choice: `Switch to ${w.branch}` });
+    await w.h.jobs.idle();
+    expect(w.h.git$('symbolic-ref', '--short', 'HEAD')).toBe('main');
+    expect(folderCards(w)[0]?.body).toContain("the pass's branch is gone");
+
+    w.h.git$('branch', w.branch, w.opened.pass.startSha);
+    w.h.state.write((ctx) => {
+      setAbandonStep(ctx, w.opened.pass.id, AbandonStep.Abandoning);
+      abandonPassAndBatch(ctx, w.opened.pass.id);
+    });
+    answerPassCard(w.deps, card, { choice: `Switch to ${w.branch}` });
+    await w.h.jobs.idle();
+    expect(w.h.git$('symbolic-ref', '--short', 'HEAD')).toBe('main');
+    expect(folderCards(w)).toEqual([]);
   });
 
   it('goes on with a take-out the daemon stopped in', async () => {

@@ -51,6 +51,11 @@ export async function putBackKeptWork(
   const left: string[] = [];
   for (const path of files) {
     const now = onDisk.get(path) ?? null;
+    // Already the kept version: put back by a run a restart cut short.
+    if (now === (await git.blobAt(repo, kept.keptSha, path))) {
+      applied.push(path);
+      continue;
+    }
     const asLeft = await git.blobAt(repo, touched.has(path) ? kept.keptBaseSha : before, path);
     if (now === asLeft) {
       const done = await git.restoreFiles(
@@ -69,6 +74,7 @@ export async function putBackKeptWork(
     });
     (merged === 'merged' ? applied : left).push(path);
   }
+  await git.refreshIndex(repo, applied);
   await keepPutBackWork(deps, taskId, applied);
   deps.state.write((ctx) => {
     setTaskKeptWork(ctx, taskId, null);

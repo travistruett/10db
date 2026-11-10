@@ -54,6 +54,14 @@ export function raiseFolderCard(
   );
 }
 
+/** Withdraws the pass's folder card, if one is open. */
+export function withdrawFolderCard(deps: PassWorkDeps, pass: PassDto): void {
+  deps.state.write((ctx) => {
+    const card = findOpenByFoldKey(ctx.tx, pass.projectId, passFolderCardKey(pass.id));
+    if (card) withdrawCard(ctx, card.id);
+  });
+}
+
 /**
  * Whether HEAD names the pass's branch. When it does not, the pass's one folder card is raised, or
  * kept as it is; once it does again, the card is withdrawn.
@@ -65,10 +73,7 @@ export async function passFolderOn(deps: PassWorkDeps, passId: PassId): Promise<
   const { repoPath } = getProject(db, pass.projectId);
   const found = await deps.git.currentBranch(repoPath);
   if (found === branch) {
-    deps.state.write((ctx) => {
-      const card = findOpenByFoldKey(ctx.tx, pass.projectId, passFolderCardKey(passId));
-      if (card) withdrawCard(ctx, card.id);
-    });
+    withdrawFolderCard(deps, pass);
     return true;
   }
   raiseFolderCard(deps, pass, found);

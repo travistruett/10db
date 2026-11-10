@@ -646,9 +646,9 @@ export interface Git {
     readonly sha: string;
   }): Promise<boolean>;
   /**
-   * Refreshes the stat data of the folder's own index after 10db wrote `paths`, so the builder's git
-   * reads an unchanged file as unchanged; staged content is not touched. False when another git held
-   * the index.
+   * Refreshes the stat data of the folder's own index for `paths` alone, after 10db wrote them, so the
+   * builder's git reads an unchanged file as unchanged; staged content and every other entry are not
+   * touched, and a path the index lacks is passed over. False when another git held the index.
    */
   refreshIndex(repo: string, paths: readonly string[]): Promise<boolean>;
   /** Keeps `text` at `ref`, under `refs/10db/`, as a blob nothing else names; it is set, whatever it held. */
@@ -2333,8 +2333,10 @@ export function createGit(opts: GitOptions = {}): Git {
       const held = await revParse(c, `${input.ref}^{commit}`);
       if (held !== null) {
         const { key, value } = input.trailer;
+        // Only the ref's own commit: an older one of the chain is not a rerun's answer, since the
+        // work kept after it would read as undone.
         const found = await findCommitByTrailer(c, held, key, value);
-        if (found !== null) return { sha: found, base: tip, made: true };
+        if (found === held) return { sha: found, base: tip, made: true };
       }
       if (held !== input.parent) throw new KeptRefMovedError(input.ref, input.parent, held);
       // HEAD names the branch, so what differs from HEAD is what differs from the tip; an ignored
@@ -2624,15 +2626,20 @@ export function createGit(opts: GitOptions = {}): Git {
   }
 
   async function refreshIndex(repo: string, paths: readonly string[]): Promise<boolean> {
-    if (paths.length === 0) return true;
+    const named = paths.map(checkPathName);
+    if (named.length === 0) return true;
     const c = await pinned(repo);
+    const env = { GIT_LITERAL_PATHSPECS: '1' };
     try {
-      await git(c, ['update-index', '-q', '--ignore-submodules', '--refresh']);
+      // `add --refresh` refuses a path the index does not hold, and stages nothing.
+      const tracked = (await git(c, ['ls-files', '-z', '--', ...named], { env }))
+        .split('\0')
+        .filter(Boolean);
+      if (tracked.length > 0) await git(c, ['add', '--refresh', '--', ...tracked], { env });
       return true;
     } catch (error) {
       if (!(error instanceof GitError)) throw error;
-      // Exit 1 is a file that still differs, which a refresh leaves to `status`.
-      return error.exitCode === 1;
+      return false;
     }
   }
 

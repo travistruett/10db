@@ -138,6 +138,18 @@ describe('keepWork', () => {
     expect(rawGit('rev-parse', REF)).toBe(first.sha);
   });
 
+  it("never answers an older commit of the chain as a rerun's own while the ref holds a newer one", async () => {
+    write('src/settings/page.tsx', 'turn one\n');
+    const first = await keep(['src/settings/page.tsx'], null);
+    write('src/settings/page.tsx', 'turn two\n');
+    const second = await keep(['src/settings/page.tsx'], first.sha, 'ptn_2');
+    expect(await keep(['src/settings/page.tsx'], second.sha)).toEqual({
+      sha: second.sha,
+      base: tip,
+      made: false,
+    });
+  });
+
   it('moves the ref only from the parent it was given', async () => {
     write('src/settings/page.tsx', 'turn one\n');
     const first = await keep(['src/settings/page.tsx'], null);

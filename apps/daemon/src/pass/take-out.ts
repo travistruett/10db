@@ -256,11 +256,13 @@ export async function takeOutSteps(
       const expect = await Promise.all(
         putBack.map(async (path) => ({ path, blob: await git.blobAt(repo, keptSha, path) })),
       );
-      ({ left } = await git.restoreFiles(
+      const restored = await git.restoreFiles(
         repo,
         putBack.map((path) => ({ path, from: touched.has(path) ? keptBaseSha : before })),
         expect,
-      ));
+      );
+      ({ left } = restored);
+      await git.refreshIndex(repo, restored.written);
     }
     const changed = left;
     row = deps.state.write((ctx) => {

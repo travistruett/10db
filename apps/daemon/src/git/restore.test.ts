@@ -173,8 +173,14 @@ describe('refreshIndex', () => {
     utimesSync(join(repo.path, 'src/a.ts'), later, later);
     expect(indexed()).not.toBe(String(Math.floor(later.getTime() / 1000)));
 
-    expect(await git.refreshIndex(repo.path, ['src/a.ts'])).toBe(true);
+    write('src/b.ts', 'one\ntwo\nthree\nfour\nfive\n');
+    utimesSync(join(repo.path, 'src/b.ts'), later, later);
+    const stale = /mtime: (\d+):/.exec(rawGit('ls-files', '--debug', 'src/b.ts'))?.[1];
+
+    expect(await git.refreshIndex(repo.path, ['src/a.ts', 'src/gone.ts'])).toBe(true);
     expect(indexed()).toBe(String(Math.floor(later.getTime() / 1000)));
+    // Only the paths named: another file's entry is left for the builder's own git.
+    expect(/mtime: (\d+):/.exec(rawGit('ls-files', '--debug', 'src/b.ts'))?.[1]).toBe(stale);
   });
 });
 

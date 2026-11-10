@@ -84,6 +84,8 @@ function expectTakenOut(world: PassWorld): void {
   expect(read(world, 'src/settings/page.tsx')).toBe('edited before the pass\n');
   expect(read(world, 'src/settings/old.tsx')).toBe('old\n');
   expect(existsSync(join(world.h.repo, 'src/settings/new.tsx'))).toBe(false);
+  // The folder's own index was refreshed for the file put back as HEAD has it.
+  expect(world.h.git$('diff-files', '--name-only')).not.toContain('src/settings/old.tsx');
   // Its work, the hand edit and the untracked file included, is at its own ref.
   const ref = keptRef(task.id);
   expect(world.h.git$('show', `${ref}:src/settings/new.tsx`)).toBe(

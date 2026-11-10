@@ -1,7 +1,7 @@
-import { PassId, type InboxAnswer, type InboxItemDto } from '@10db/contracts';
-import { findPass, getProject } from '@10db/db';
+import { passHoldsFolder, PassId, type InboxAnswer, type InboxItemDto } from '@10db/contracts';
+import { findPass, getPass, getProject } from '@10db/db';
 import { jobKey, JobQueue } from '../delivery';
-import type { SwitchBack } from '../git';
+import { GitError, type SwitchBack } from '../git';
 import {
   PASS_CARD_DETAIL,
   PASS_CARD_KIND,
@@ -9,6 +9,7 @@ import {
   passFolderOn,
   raiseFolderCard,
   switchBackLabel,
+  withdrawFolderCard,
 } from './folder';
 import { passBranch, type PassWorkDeps } from './kept-work';
 
@@ -33,36 +34,45 @@ function refusal(outcome: Exclude<SwitchBack, { kind: 'switched' }>): string {
 /**
  * Acts on the answer to a pass's card before the inbox records it. The folder card's switch runs as
  * a job under the project's delivery key: the built switch, keeping uncommitted changes the switch
- * does not write. A refusal raises the card again with the reason; a folder back on the pass's branch
- * loses its card.
+ * does not write. A refusal, or a branch that cannot be read, raises the card again with the reason;
+ * a folder back on the pass's branch loses its card, as does a pass that no longer holds the folder,
+ * whose branch is no place to switch to.
  */
 export function answerPassCard(deps: PassWorkDeps, item: InboxItemDto, answer: InboxAnswer): void {
   // The detail is JSON read back from the database: a boundary, so parse it.
   const passId = PassId.safeParse(item.detail?.[PASS_CARD_DETAIL]);
   if (!passId.success || item.detail?.[PASS_CARD_KIND] !== PassCardKind.Folder) return;
   const db = deps.state.db;
-  const pass = findPass(db, passId.data);
-  if (!pass) return;
-  const branch = passBranch(db, pass);
-  if (answer.choice !== switchBackLabel(branch)) return;
+  const found = findPass(db, passId.data);
+  if (!found) return;
   deps.jobs.run(
-    jobKey({ projectId: pass.projectId, worktreePath: null }, JobQueue.Cut),
+    jobKey({ projectId: found.projectId, worktreePath: null }, JobQueue.Cut),
     async () => {
-      const repo = getProject(db, pass.projectId).repoPath;
-      const found = await deps.git.currentBranch(repo);
-      if (found === null) {
-        raiseFolderCard(deps, pass, found, 'check out a branch first: 10db switches only from one');
+      const pass = getPass(db, found.id);
+      if (!passHoldsFolder(pass.state)) {
+        withdrawFolderCard(deps, pass);
         return;
       }
-      if (found !== branch) {
-        const outcome = await deps.git.switchBack(
-          repo,
-          found,
-          { branch, sha: await deps.git.commitAt(repo, branch) },
-          { keepChanges: true },
-        );
+      const branch = passBranch(db, pass);
+      if (answer.choice !== switchBackLabel(branch)) return;
+      const repo = getProject(db, pass.projectId).repoPath;
+      const on = await deps.git.currentBranch(repo);
+      if (on === null) {
+        raiseFolderCard(deps, pass, on, 'check out a branch first: 10db switches only from one');
+        return;
+      }
+      if (on !== branch) {
+        const sha = await deps.git.commitAt(repo, branch).catch((error: unknown) => {
+          if (error instanceof GitError) return null;
+          throw error;
+        });
+        if (sha === null) {
+          raiseFolderCard(deps, pass, on, refusal({ kind: 'gone' }));
+          return;
+        }
+        const outcome = await deps.git.switchBack(repo, on, { branch, sha }, { keepChanges: true });
         if (outcome.kind !== 'switched') {
-          raiseFolderCard(deps, pass, found, refusal(outcome));
+          raiseFolderCard(deps, pass, on, refusal(outcome));
           return;
         }
       }

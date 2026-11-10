@@ -7,6 +7,7 @@ import {
   getTaskKeptWork,
   listTaskThreadRows,
   setAbandonStep,
+  setTaskKeptWork,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openPassWorld, type PassWorld } from '../../test/pass-world';
@@ -69,6 +70,22 @@ describe('putBackKeptWork', () => {
     expect(getTaskKeptWork(w.h.store.db, w.settings.id)).toBeNull();
     expect(w.h.git$('for-each-ref', keptRef(w.settings.id))).not.toBe('');
     expect(lastNotice()).toBe('Put back its saved Workbench work: 3 files.');
+  });
+
+  it('finds every file it already put back on a rerun after a restart cut it short', async () => {
+    await takenOut();
+    const saved = getTaskKeptWork(w.h.store.db, w.settings.id);
+    await putBack();
+    // The daemon died before the write that ends the put-back.
+    w.h.state.write((ctx) => {
+      setTaskKeptWork(ctx, w.settings.id, saved);
+    });
+
+    expect(await putBack()).toEqual({
+      applied: ['src/settings/long.tsx', 'src/settings/new.tsx', 'src/settings/old.tsx'],
+      left: [],
+    });
+    expect(getTaskKeptWork(w.h.store.db, w.settings.id)).toBeNull();
   });
 
   it('merges a file changed since three ways, and names one that does not merge', async () => {
