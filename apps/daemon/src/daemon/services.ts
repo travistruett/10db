@@ -70,6 +70,7 @@ import {
   listTasks,
   listWorkstreams,
   moveTask,
+  listPassTasks,
   openPassTurn,
   passHoldingTask,
   patchBoardColumn,
@@ -346,17 +347,20 @@ export function createServices(deps: {
           name: input.name,
           taskIds: input.taskIds,
           ...(input.pageCap === undefined ? {} : { pageCap: input.pageCap }),
+          ...(input.pages === undefined ? {} : { pages: input.pages }),
+          ...(input.goalId === undefined ? {} : { goalId: input.goalId }),
         });
       } catch (error) {
         if (error instanceof GitError)
           throw new ConflictError(`Your folder could not be opened for a pass: ${error.message}`);
         throw error;
       }
-      // Each page's first turn starts from a message: the builder's, else the task's description.
+      // Each page's first turn starts from a message: the builder's, else the task's description. A
+      // page the open made a task for has none, so it waits for the builder's first word.
       deps.state.write((ctx) => {
-        for (const taskId of input.taskIds) {
-          const body = input.firstMessage ?? getTask(ctx.tx, taskId).description;
-          if (body.trim() !== '') insertBuilderMessage(ctx, taskId, { body, files: [] });
+        for (const task of listPassTasks(ctx.tx, opened.pass.id)) {
+          const body = input.firstMessage ?? task.description;
+          if (body.trim() !== '') insertBuilderMessage(ctx, task.id, { body, files: [] });
         }
       });
       deps.scheduler.requestTick();

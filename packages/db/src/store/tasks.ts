@@ -244,6 +244,34 @@ export function insertGoalTask(
   });
 }
 
+/**
+ * Writes the task a Workbench pass makes for one of its pages (spec §4.2), in the caller's write: the
+ * page area alone, no brief and no acceptance criteria, in Your folder, and one of `goalId`'s tasks
+ * when one is named. It costs nothing until the builder speaks to it.
+ */
+export function insertPassPageTask(
+  ctx: WriteContext,
+  projectId: ProjectId,
+  input: { readonly title: string; readonly area: string; readonly goalId: GoalId | null },
+): TaskDto {
+  const project = getProject(ctx.tx, projectId);
+  refuseUnknownAreas(project, [input.area]);
+  return writeTask(ctx, projectId, {
+    title: Title.parse(input.title),
+    description: '',
+    acceptanceCriteria: [],
+    areas: [input.area],
+    dependsOn: [],
+    riskTags: [],
+    flowId: null,
+    landing: taskLandingFor(project),
+    workspaceMode: WorkspaceMode.Shared,
+    reason: null,
+    proposalId: null,
+    ...(input.goalId === null ? {} : { goalId: input.goalId }),
+  });
+}
+
 const NO_COPY_WITHOUT_PULL_REQUESTS =
   'A separate copy needs pull request delivery; in this project every task works in your folder';
 

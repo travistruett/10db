@@ -16,6 +16,7 @@ import {
   StepRole,
   TaskStatus,
   type BatchDto,
+  type GoalId,
   type Notice,
   type PassDirtEntry,
   type PassDto,
@@ -31,17 +32,20 @@ import {
   copyHazardNames,
   findOpenPass,
   findUnfinishedBatch,
+  getGoal,
   getProject,
   getTask,
   getTaskKeptWork,
   getPass,
   getWorkstreamRow,
   insertPass,
+  insertPassPageTask,
   listBatches,
   listPassDirt,
   passHoldingTask,
   setWorkstreamNotice,
   type DbReader,
+  type WriteContext,
 } from '@10db/db';
 import { githubRepoOf } from '../github';
 import { insertPlannedWorkstream, resolveStepPlan } from '../team';
@@ -58,6 +62,10 @@ export interface PassOpenInput {
   readonly taskIds: readonly TaskId[];
   /** How many pages it holds, 4 when absent, 6 at most (W11). */
   readonly pageCap?: number;
+  /** Page areas each made a task "<Page>: UI work" in the open's own write. */
+  readonly pages?: readonly string[];
+  /** The goal those new tasks join; null or absent for none. */
+  readonly goalId?: GoalId | null;
 }
 
 /** What a put-back of a task's saved work did: the files it wrote, and those it left and named. */
@@ -136,15 +144,22 @@ function passPlan(db: DbReader, task: TaskDto): StepPlanDto {
 }
 
 /** Throws what refuses these tasks a pass in the project, read from the database; writes nothing. */
-function refuseOpen(db: DbReader, project: ProjectDto, tasks: readonly TaskDto[], pageCap: number) {
+function refuseOpen(
+  db: DbReader,
+  project: ProjectDto,
+  tasks: readonly TaskDto[],
+  pageCap: number,
+  newPages: readonly NewPageTask[],
+) {
   if (!project.areas.some((a) => a.role === AreaRole.Page))
     throw new ConflictError(
       `${project.name} has no page area; mark the areas that are pages in Settings › Areas and hazards first`,
     );
-  if (tasks.length === 0) throw new InvalidError('A pass needs at least one task');
-  if (tasks.length > pageCap)
+  const count = tasks.length + newPages.length;
+  if (count === 0) throw new InvalidError('A pass needs at least one task');
+  if (count > pageCap)
     throw new InvalidError(
-      `A pass holds ${String(pageCap)} pages; ${String(tasks.length)} tasks were named`,
+      `A pass holds ${String(pageCap)} pages; ${String(count)} tasks and pages were named`,
     );
   for (const task of tasks) {
     if (task.projectId !== project.id)
@@ -159,7 +174,7 @@ function refuseOpen(db: DbReader, project: ProjectDto, tasks: readonly TaskDto[]
     if (latest && ACTIVE_STATES.includes(latest.state))
       throw new ConflictError(`Task ${task.title} is running; it can join a pass once it stops`);
   }
-  const pages = passPagesProblem(project.areas, tasks);
+  const pages = passPagesProblem(project.areas, [...tasks, ...newPages]);
   if (pages !== null) throw new InvalidError(pages);
   const open = findOpenPass(db, project.id);
   if (open)
@@ -217,7 +232,8 @@ export async function openPass(
     throw new InvalidError(`A pass holds from 1 to ${String(PASS_PAGE_CAP_MAX)} pages`);
   const pageCap = cap.data;
   const tasks = input.taskIds.map((id) => getTask(db, id));
-  refuseOpen(db, project, tasks, pageCap);
+  const newPages = newPageTasks(db, project, input.pages ?? [], input.goalId ?? null);
+  refuseOpen(db, project, tasks, pageCap, newPages);
   const id = mintId('Pass');
   const branch = passBranchName(input.name, id);
   const dirtRef = passDirtRef(id);
@@ -251,6 +267,7 @@ export async function openPass(
       written = ctx.state.write((w) => {
         const stray = returnBranchProblem(w.tx, project, start.returnBranch);
         if (stray !== null) throw new ConflictError(stray);
+        const pageTasks = [...tasks, ...writePageTasks(w, project, newPages)];
         const made = insertPass(w, {
           id,
           projectId: project.id,
@@ -261,12 +278,12 @@ export async function openPass(
           branch,
           baseBranch: project.baseBranch,
           repo,
-          taskIds: tasks.map((t) => t.id),
+          taskIds: pageTasks.map((t) => t.id),
           dirt: start.dirt,
         });
         const leaseExpiresAt = new Date(ctx.clock.now().getTime() + deps.leaseMs).toISOString();
         const waiting: PassPageWait[] = [];
-        for (const task of tasks) {
+        for (const task of pageTasks) {
           const ws = insertPlannedWorkstream(w, task.id, passPlan(w.tx, task), made.batch.id);
           const claimed = acquireClaims(w, {
             projectId: project.id,
@@ -360,4 +377,50 @@ export async function openPass(
       return null;
     }
   }
+}
+
+/** A page the open makes a task for: its title and its one page area, and the goal it joins. */
+interface NewPageTask {
+  readonly title: string;
+  readonly areas: readonly [string];
+  readonly goalId: GoalId | null;
+}
+
+/** "Settings: UI work": the title of the task a pass makes for a page (spec §4.2). */
+function pageTaskTitle(area: string): string {
+  return `${area.charAt(0).toUpperCase()}${area.slice(1)}: UI work`;
+}
+
+/**
+ * The tasks the open makes for `pages`, read and refused before anything is queued: each must be a
+ * page area of the project, and the goal, when named, one of the project's.
+ */
+function newPageTasks(
+  db: DbReader,
+  project: ProjectDto,
+  pages: readonly string[],
+  goalId: GoalId | null,
+): NewPageTask[] {
+  if (goalId !== null && getGoal(db, goalId).projectId !== project.id)
+    throw new InvalidError(`The goal belongs to another project than ${project.name}`);
+  return pages.map((page) => {
+    if (!project.areas.some((a) => a.name === page && a.role === AreaRole.Page))
+      throw new InvalidError(`${page} is not a page area of ${project.name}`);
+    return { title: pageTaskTitle(page), areas: [page], goalId };
+  });
+}
+
+/** Writes the new pages' tasks in the open's write, so a refusal after it leaves none of them. */
+function writePageTasks(
+  w: WriteContext,
+  project: ProjectDto,
+  pages: readonly NewPageTask[],
+): TaskDto[] {
+  return pages.map((page) =>
+    insertPassPageTask(w, project.id, {
+      title: page.title,
+      area: page.areas[0],
+      goalId: page.goalId,
+    }),
+  );
 }

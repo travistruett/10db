@@ -8,6 +8,7 @@ import {
   TaskDto,
   type ProjectInput,
 } from '@10db/contracts';
+import { insertGoal, listTaskThread, schema } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
@@ -17,7 +18,10 @@ import { startDaemonWithProfiles } from './daemon-with-profiles';
 import { createTempRepo, isolatedGitEnv, tempDir } from './fixtures';
 
 // Workbench spec §4.2, §4.3, §5: the routes the Workbench reads and acts through, over HTTP on a real
-// repository and database. No page here is sent a message, so no session starts.
+// repository and database. A page that starts takes its message and waits for one never sent.
+
+/** A page's session: it takes the message it was started for, then waits. */
+const WAITS = [[{ do: 'consume' }, { do: 'await_message', contains: 'never sent' }]] as const;
 
 const PAGES: ProjectInput['areas'] = [
   { name: 'settings', globs: ['src/settings/**'], role: 'page', route: '/settings' },
@@ -28,6 +32,8 @@ const PAGES: ProjectInput['areas'] = [
 let data: { path: string; cleanup(): void };
 let repo: { path: string; cleanup(): void };
 let daemon: RunningDaemon;
+/** Other repositories a test made, removed after it. */
+const repos: { cleanup(): void }[] = [];
 beforeEach(async () => {
   data = tempDir('workbench api');
   repo = createTempRepo();
@@ -35,7 +41,10 @@ beforeEach(async () => {
     sandbox: null,
     dataDir: data.path,
     port: 0,
-    adapter: new FakeAdapter({}),
+    adapter: new FakeAdapter({
+      'Settings: UI work': WAITS.map((s) => [...s]),
+      'People: UI work': WAITS.map((s) => [...s]),
+    }),
     logLevel: 'debug',
     caffeinate: () => null,
     watch: false,
@@ -45,6 +54,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   await daemon.stop();
+  for (const other of repos.splice(0)) other.cleanup();
   repo.cleanup();
   data.cleanup();
 });
@@ -138,5 +148,146 @@ describe('GET /projects/:projectId/pass-start', () => {
     ]);
     expect(start.lacks.map((l) => l.kind)).toContain('docker_off');
     expect(start.refusal).toBeNull();
+  });
+});
+
+/** The builder messages of the task's thread, oldest first. */
+const builderMessages = (taskId: TaskDto['id']) =>
+  listTaskThread(daemon.state.db, taskId)
+    .filter((m) => m.author === 'builder')
+    .map((m) => m.body);
+
+/** A draft goal of the project with one task, whose id Work on This sends. */
+function goalOf(project: ProjectDto) {
+  return daemon.state.write(
+    (ctx) =>
+      insertGoal(ctx, project.id, {
+        brief: {
+          title: 'Settings rework',
+          objective: 'Rework the settings.',
+          tasks: [{ key: 'a', title: 'Rework the settings', areas: ['settings'] }],
+        },
+      }).goal,
+  );
+}
+
+const uiTasks = (project: ProjectDto) =>
+  daemon.state.db
+    .select()
+    .from(schema.tasks)
+    .all()
+    .filter((t) => t.projectId === project.id && t.title.endsWith(': UI work'));
+
+describe('POST /projects/:projectId/passes with pages', () => {
+  it('makes a task with no brief for each page, linked to the goal, in the pass, and sends none a message', async () => {
+    const project = await projectWith(PAGES);
+    const goal = goalOf(project);
+
+    const opened = await api().post(`/projects/${project.id}/passes`, PassOpenedDto, {
+      name: 'Settings and people',
+      taskIds: [],
+      pages: ['settings', 'people'],
+      goalId: goal.id,
+    });
+
+    const view = await api().get(`/passes/${opened.pass.id}`, PassViewDto);
+    expect(view.pages.map((p) => [p.title, p.area])).toEqual([
+      ['Settings: UI work', 'settings'],
+      ['People: UI work', 'people'],
+    ]);
+    const made = await api().get(`/projects/${project.id}/tasks`, z.array(TaskDto));
+    for (const page of view.pages) {
+      const task = made.find((t) => t.id === page.taskId);
+      expect(task).toMatchObject({
+        description: '',
+        acceptanceCriteria: [],
+        areas: [page.area],
+        goalId: goal.id,
+        passId: opened.pass.id,
+        workspaceMode: 'shared',
+      });
+      expect(builderMessages(page.taskId)).toEqual([]);
+    }
+    expect(rawGit('symbolic-ref', '--short', 'HEAD')).toBe(opened.batch.branch);
+  });
+
+  it("sends the builder's first message to each new page, beside a task that joins", async () => {
+    const project = await projectWith(PAGES);
+    const people = await taskOn(project, 'People: tidy', ['people']);
+
+    const opened = await api().post(`/projects/${project.id}/passes`, PassOpenedDto, {
+      name: 'Polish',
+      taskIds: [people.id],
+      pages: ['settings'],
+      firstMessage: 'These feel cramped',
+    });
+
+    const view = await api().get(`/passes/${opened.pass.id}`, PassViewDto);
+    expect(view.pages.map((p) => [p.title, builderMessages(p.taskId)])).toEqual([
+      ['People: tidy', ['These feel cramped']],
+      ['Settings: UI work', ['These feel cramped']],
+    ]);
+  });
+
+  it.each<{
+    name: string;
+    status: number;
+    arrange: (project: ProjectDto) => Promise<Record<string, unknown>> | Record<string, unknown>;
+  }>([
+    { name: 'an area that is not a page', status: 400, arrange: () => ({ pages: ['src'] }) },
+    { name: 'an unknown page', status: 400, arrange: () => ({ pages: ['billing'] }) },
+    {
+      name: 'more pages than the pass holds',
+      status: 400,
+      arrange: () => ({ pages: ['settings', 'people'], pageCap: 1 }),
+    },
+    {
+      name: 'a page named twice',
+      status: 400,
+      arrange: () => ({ pages: ['settings', 'settings'] }),
+    },
+    {
+      name: 'a page a joining task holds',
+      status: 400,
+      arrange: async (project) => ({
+        taskIds: [(await taskOn(project, 'Settings: tidy', ['settings'])).id],
+        pages: ['settings'],
+      }),
+    },
+    {
+      name: "another project's goal",
+      status: 400,
+      arrange: async () => {
+        const other = createTempRepo();
+        repos.push(other);
+        const elsewhere = await projectWith(PAGES, 'other', other.path);
+        return { pages: ['settings'], goalId: goalOf(elsewhere).id };
+      },
+    },
+    {
+      name: 'a folder on a 10db branch no task names, refused in the write',
+      status: 409,
+      arrange: () => {
+        rawGit('switch', '-q', '-c', '10db/stray-abc123');
+        return { pages: ['settings', 'people'] };
+      },
+    },
+  ])('refuses $name with $status, leaving no task and no pass', async ({ arrange, status }) => {
+    const project = await projectWith(PAGES);
+    const head = rawGit('symbolic-ref', '--short', 'HEAD');
+    const extra = await arrange(project);
+    const branch = rawGit('symbolic-ref', '--short', 'HEAD');
+
+    const res = await send('POST', `/projects/${project.id}/passes`, {
+      name: 'Polish',
+      taskIds: [],
+      ...extra,
+    });
+
+    expect(res.status).toBe(status);
+    expect(uiTasks(project)).toEqual([]);
+    expect(daemon.state.db.select().from(schema.passes).all()).toEqual([]);
+    expect(rawGit('symbolic-ref', '--short', 'HEAD')).toBe(branch);
+    expect(head).toBe('main');
   });
 });
