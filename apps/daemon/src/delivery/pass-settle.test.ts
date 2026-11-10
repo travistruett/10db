@@ -32,6 +32,7 @@ import {
   answerPassMoveCard,
   createPrWatch,
   openPass,
+  removeMergedBranches,
   resumePassSettles,
   subscribePassSettles,
   type PrWatch,
@@ -228,6 +229,22 @@ describe('a closed pass', () => {
     expect(getPass(h.store.db, c.passId).state).toBe(PassState.Closed);
     expect(h.git$('rev-parse', 'refs/heads/main')).toBe(c.tip);
     expect(h.only(moveCards(c.passId)).detail).toMatchObject({ reason });
+  });
+
+  it("keeps a closed pass's branch through the merged-branch sweep, so Move after drift still settles it", async () => {
+    const c = await closedPass();
+    h.teammatePush('main', 'src/people/page.tsx', 'people\n');
+    h.gh.setState(c.url, PrState.Merged);
+    h.gh.setHead(c.url, c.tip);
+    await watchRound();
+    expect(h.only(moveCards(c.passId)).detail).toMatchObject({ reason: 'drift' });
+
+    await removeMergedBranches(h.ctx, new AbortController().signal);
+
+    expect(h.git$('rev-parse', `refs/heads/${c.branch}`)).toBe(c.tip);
+    expect(h.git$('rev-parse', `refs/remotes/origin/${c.branch}`)).toBe(c.tip);
+    await answerMove(h.only(moveCards(c.passId)));
+    expect(getPass(h.store.db, c.passId).state).toBe(PassState.Settled);
   });
 
   it('after a restart, raises no second card, keeps the folder held, and realigns when the merge is read', async () => {
