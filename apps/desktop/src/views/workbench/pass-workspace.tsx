@@ -1,11 +1,14 @@
 import { Box, Flex, Title } from '@mantine/core';
 import { useViewportSize } from '@mantine/hooks';
 import { useNow } from '../../shell/relative';
+import { liveLine } from './live-line';
+import { PageStatus } from './page-status';
 import type { PassWorkspaceProps } from './pass-workspace-props';
 import { QueueList } from './queue-list';
 import { queueRows, shownRow } from './queue-rows';
 import { Thread } from './thread';
 import { WorkbenchLayout, workbenchLayout } from './workbench-layout';
+import { WorkingLine } from './working-line';
 
 /** The queue's width beside the thread in the wide layout. */
 const QUEUE_WIDTH_PX = 280;
@@ -48,6 +51,9 @@ export function PassWorkspace({ view, inbox, selected, onSelect }: PassWorkspace
           </Title>
           <Box style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
             <Thread page={shown.page} turns={[]} />
+            {shown.status === PageStatus.Working && shown.page.turn?.endedAt === null ? (
+              <WorkingLine line={liveLine(shown.page.turn, now)} />
+            ) : null}
           </Box>
         </Box>
       )}

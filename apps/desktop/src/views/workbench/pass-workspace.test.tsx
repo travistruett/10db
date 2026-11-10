@@ -1,5 +1,5 @@
 import type { TaskId } from '@10db/contracts';
-import { fireEvent, screen, within } from '@testing-library/react';
+import { act, fireEvent, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { baseHandlers, renderWithDaemon, server } from '../../test/daemon';
 import { projectViewDto } from '../../test/fixtures';
@@ -89,5 +89,29 @@ describe('PassWorkspace queue', () => {
       row.style.color === 'var(--mantine-color-dimmed)' ? 'dimmed' : 'plain',
     );
     expect(dimmed).toEqual(['plain', 'plain', 'plain', 'dimmed', 'dimmed', 'dimmed']);
+  });
+});
+
+describe('PassWorkspace working line', () => {
+  it('ends a working page’s thread with what the agent does, and ticks the minutes without announcing', async () => {
+    vi.useFakeTimers({
+      toFake: ['Date', 'setInterval', 'clearInterval'],
+      now: Date.parse(PASS_NOW),
+    });
+    await renderWorkspace((pages) => pages.working.taskId);
+    const thread = screen.getByRole('region', { name: 'Billing' });
+    expect(within(thread).getByText('Working · 4 min · editing settings/page.tsx')).toBeTruthy();
+    expect(within(thread).getByText('1 file changed so far')).toBeTruthy();
+    expect(within(thread).queryByRole('status')).toBeNull();
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(within(thread).getByText('Working · 5 min · editing settings/page.tsx')).toBeTruthy();
+  });
+
+  it('draws no working line on a page that is not working', async () => {
+    await renderWorkspace((pages) => pages.ready.taskId);
+    const thread = screen.getByRole('region', { name: 'Settings' });
+    expect(within(thread).queryByText(/^Working/)).toBeNull();
   });
 });
