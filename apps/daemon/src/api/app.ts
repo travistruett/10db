@@ -58,6 +58,8 @@ import {
   SelfUpdateWaitInput,
   SHAPE_FILE_MAX_BYTES,
   OneWayPathsDto,
+  PassId,
+  PassOpenRequest,
   SmallProposalLimitDto,
   ScreenImageInput,
   ScreenRefusalInput,
@@ -698,6 +700,20 @@ export function createApp(deps: ApiDeps) {
           deps.services.startBatch(ProjectId.parse(c.req.param('projectId')), c.req.valid('json')),
           202,
         ),
+    )
+    .post(
+      '/projects/:projectId/passes',
+      validator('json', (value): PassOpenRequest => PassOpenRequest.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.openPass(
+            ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('json'),
+          ),
+        ),
+    )
+    .get('/passes/:passId', (c) =>
+      c.json(deps.services.passView(PassId.parse(c.req.param('passId')))),
     )
     .post('/batches/:batchId/ship', (c) =>
       c.json(deps.services.shipBatch(BatchId.parse(c.req.param('batchId')))),

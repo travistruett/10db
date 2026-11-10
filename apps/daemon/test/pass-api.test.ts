@@ -2,25 +2,34 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  AccountCreatedDto,
   mintId,
   PASS_SIGN_OFF_CHOICE,
+  PassOpenedDto,
+  PassViewDto,
   ProjectDto,
   TaskDto,
   WorkstreamChangesDto,
+  WorkstreamDto,
   type PassCheckDetail,
+  type ProjectInput,
 } from '@10db/contracts';
 import {
   endPassTurn,
   getInboxItem,
+  insertBatch,
   getWorkstreamRow,
   insertInboxItem,
   insertPass,
   insertPassTurn,
   insertWorkstream,
   listEvidence,
+  listTaskThread,
   patchWorkstream,
+  schema,
   setPassTurnKept,
   settlePassTurn,
+  transitionBatch,
   transitionWorkstream,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -31,7 +40,8 @@ import { apiClient } from './api-client';
 import { createTempRepo, isolatedGitEnv, tempDir } from './fixtures';
 import { startDaemonWithProfiles } from './daemon-with-profiles';
 
-// Workbench spec §6.1: a pass page is never approved or sent back; its Ready item answers only with
+// Workbench spec §5.1, §6.1: a pass opens over HTTP with each page's first message written, so its
+// first turn has one; a pass page is never approved or sent back, its Ready item answers only with
 // Sign Off, and what the builder is shown is the turn's kept commit.
 
 let data: { path: string; cleanup(): void };
@@ -239,5 +249,162 @@ describe('a Ready pass page', () => {
       files: [{ path: 'src/settings/page.tsx', added: 1, removed: 0 }],
     });
     expect(changes.diff).toContain('+tidied');
+  });
+});
+
+const PAGES: ProjectInput['areas'] = [
+  { name: 'settings', globs: ['src/settings/**'], role: 'page', route: '/settings' },
+  { name: 'people', globs: ['src/people/**'], role: 'page', route: '/people' },
+  { name: 'src', globs: ['src/**'], role: 'shared' },
+];
+
+async function projectWith(areas: ProjectInput['areas']) {
+  return api().post('/projects', ProjectDto, {
+    name: 'demo',
+    repoPath: repo.path,
+    gateCommand: null,
+    areas,
+  });
+}
+
+async function taskOn(project: ProjectDto, title: string, areas: string[], description = '') {
+  return api().post(`/projects/${project.id}/tasks`, TaskDto, {
+    title,
+    description,
+    acceptanceCriteria: ['x'],
+    areas,
+    dependsOn: [],
+  });
+}
+
+/** The builder messages of the task's thread, oldest first. */
+const firstMessages = (task: TaskDto) =>
+  listTaskThread(daemon.state.db, task.id)
+    .filter((m) => m.author === 'builder')
+    .map((m) => m.body);
+
+describe('POST /projects/:projectId/passes', () => {
+  it("opens a pass on the folder with each page's first message, and the pass reads back", async () => {
+    const project = await projectWith(PAGES);
+    const settings = await taskOn(project, 'Settings: tidy', ['settings'], 'Tidy the form');
+    const people = await taskOn(project, 'People: tidy', ['people']);
+
+    const opened = await api().post(`/projects/${project.id}/passes`, PassOpenedDto, {
+      name: 'Polish pages',
+      taskIds: [settings.id, people.id],
+    });
+
+    expect(opened.pass).toMatchObject({ state: 'OPEN', returnBranch: 'main' });
+    expect(rawGit('symbolic-ref', '--short', 'HEAD')).toBe(opened.batch.branch);
+    // A task with a description starts from it; one without has nothing to start from.
+    expect(firstMessages(settings)).toEqual(['Tidy the form']);
+    expect(firstMessages(people)).toEqual([]);
+    const view = await api().get(`/passes/${opened.pass.id}`, PassViewDto);
+    expect(view.pass.id).toBe(opened.pass.id);
+    expect(view.pages.map((p) => [p.taskId, p.area])).toEqual([
+      [settings.id, 'settings'],
+      [people.id, 'people'],
+    ]);
+  });
+
+  it("sends the builder's first message to every page, over a task's description", async () => {
+    const project = await projectWith(PAGES);
+    const settings = await taskOn(project, 'Settings: tidy', ['settings'], 'Tidy the form');
+    const people = await taskOn(project, 'People: tidy', ['people']);
+
+    await api().post(`/projects/${project.id}/passes`, PassOpenedDto, {
+      name: 'Polish pages',
+      taskIds: [settings.id, people.id],
+      firstMessage: 'Make the spacing even',
+    });
+
+    expect(firstMessages(settings)).toEqual(['Make the spacing even']);
+    expect(firstMessages(people)).toEqual(['Make the spacing even']);
+  });
+
+  it.each<{
+    name: string;
+    status: number;
+    arrange: () => Promise<{ project: ProjectDto; taskIds: string[]; pageCap?: number }>;
+  }>([
+    {
+      name: 'a project with no page area',
+      status: 409,
+      arrange: async () => {
+        const project = await projectWith([{ name: 'src', globs: ['src/**'] }]);
+        const task = await taskOn(project, 'Tidy', ['src']);
+        return { project, taskIds: [task.id] };
+      },
+    },
+    {
+      name: 'a task that is running',
+      status: 409,
+      arrange: async () => {
+        const project = await projectWith(PAGES);
+        const task = await taskOn(project, 'Settings: tidy', ['settings']);
+        await api().post(`/tasks/${task.id}/start`, WorkstreamDto);
+        return { project, taskIds: [task.id] };
+      },
+    },
+    {
+      name: 'an unfinished batch in Your folder',
+      status: 409,
+      arrange: async () => {
+        const project = await projectWith(PAGES);
+        const task = await taskOn(project, 'Settings: tidy', ['settings']);
+        daemon.state.write((ctx) => {
+          const batch = insertBatch(ctx, {
+            projectId: project.id,
+            title: 'Earlier',
+            baseBranch: 'main',
+          });
+          transitionBatch(ctx, batch.id, { to: 'OPEN' });
+        });
+        return { project, taskIds: [task.id] };
+      },
+    },
+    {
+      name: 'more pages than the pass holds',
+      status: 400,
+      arrange: async () => {
+        const project = await projectWith(PAGES);
+        const settings = await taskOn(project, 'Settings: tidy', ['settings']);
+        const people = await taskOn(project, 'People: tidy', ['people']);
+        return { project, taskIds: [settings.id, people.id], pageCap: 1 };
+      },
+    },
+    {
+      name: 'a project on a ChatGPT account',
+      status: 409,
+      arrange: async () => {
+        const project = await projectWith(PAGES);
+        const task = await taskOn(project, 'Settings: tidy', ['settings']);
+        const { account } = await api().post('/accounts', AccountCreatedDto, {
+          kind: 'codex_signin',
+          label: 'ChatGPT plan',
+        });
+        await api().patch(`/projects/${project.id}`, ProjectDto, { accountId: account.id });
+        return { project, taskIds: [task.id] };
+      },
+    },
+  ])('refuses $name with $status, opening nothing', async ({ arrange, status }) => {
+    const { project, taskIds, pageCap } = await arrange();
+
+    const res = await post(`/projects/${project.id}/passes`, {
+      name: 'Polish',
+      taskIds,
+      ...(pageCap === undefined ? {} : { pageCap }),
+      firstMessage: 'Tidy it',
+    });
+
+    expect(res.status).toBe(status);
+    expect(daemon.state.db.select().from(schema.passes).all()).toEqual([]);
+    expect(rawGit('symbolic-ref', '--short', 'HEAD')).toBe('main');
+    for (const id of taskIds)
+      expect(
+        listTaskThread(daemon.state.db, TaskDto.shape.id.parse(id)).filter(
+          (m) => m.author === 'builder',
+        ),
+      ).toEqual([]);
   });
 });

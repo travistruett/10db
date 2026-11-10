@@ -5,11 +5,14 @@ import {
   CatalogueAttempt,
   type CatalogueStatusDto,
   type BatchId,
+  ConflictError,
   Delivery,
   InvalidError,
   type McpServerStatusDto,
   ProjectInput,
   ProjectLanding,
+  Provider,
+  providerOf,
   type ProjectDto,
   type ProjectPatch,
   WorkstreamState,
@@ -23,6 +26,7 @@ import {
   closeTask,
   reopenTask,
   deleteBoardColumn,
+  getAccountRow,
   getGoal,
   getMcpApproval,
   getProject,
@@ -33,6 +37,7 @@ import {
   getWorkstream,
   holdTask,
   insertBoardColumn,
+  insertBuilderMessage,
   insertFlow,
   insertPerson,
   insertPersona,
@@ -82,15 +87,18 @@ import {
   createFailedRestarts,
   workstreamChanges,
   type BatchStarter,
+  type PassOpened,
+  type PassOpenInput,
   type Shipper,
 } from '../delivery';
 import { markGhRequired, withAgentStatus, type AgentTools } from '../environment';
 import type { EventBus, StateStore } from '../events';
 import { inspectFolder, proposeAreas, type AreaNamer } from '../folders';
 import { adoptGoal } from '../goals';
-import type { Git } from '../git';
+import { GitError, type Git } from '../git';
 import { hazardAssessmentDto, type HazardAssessor } from '../hazards';
 import { earlierMcpApproval, requestMcpApproval, type InboxService } from '../inbox';
+import { passView } from '../pass';
 import type { KeepAwake } from '../keep-awake';
 import type { Runner } from '../runner';
 import type { Scheduler } from '../scheduler';
@@ -138,6 +146,8 @@ export function createServices(deps: {
   readonly knowledge: KnowledgeApiServices;
   readonly thread: ThreadService;
   readonly starter: BatchStarter;
+  /** Opens a pass in the project's delivery queue (`openPass` with its lease and put-back). */
+  readonly openPass: (input: PassOpenInput) => Promise<PassOpened>;
   readonly shipper: Shipper;
   readonly accounts: AccountService;
   readonly moves: Pick<AccountMoves, 'move'>;
@@ -303,6 +313,38 @@ export function createServices(deps: {
     startBatch: (projectId, input) => deps.starter.startBatch(projectId, input),
     // The store lists oldest first; the API answers newest first.
     listBatches: (projectId) => listBatches(db, { projectId }).reverse(),
+    async openPass(projectId, input) {
+      const project = getProject(db, projectId);
+      const account = getAccountRow(db, project.accountId);
+      // A pass's page waits until a turn is seen to take the builder's message (Workbench spec W19).
+      if (providerOf(account.kind) === Provider.Codex)
+        throw new ConflictError(
+          `${project.name} runs on the ChatGPT account "${account.label}", which cannot show that a turn took the builder's message; move the project to a Claude account to open a pass`,
+        );
+      let opened: PassOpened;
+      try {
+        opened = await deps.openPass({
+          projectId,
+          name: input.name,
+          taskIds: input.taskIds,
+          ...(input.pageCap === undefined ? {} : { pageCap: input.pageCap }),
+        });
+      } catch (error) {
+        if (error instanceof GitError)
+          throw new ConflictError(`Your folder could not be opened for a pass: ${error.message}`);
+        throw error;
+      }
+      // Each page's first turn starts from a message: the builder's, else the task's description.
+      deps.state.write((ctx) => {
+        for (const taskId of input.taskIds) {
+          const body = input.firstMessage ?? getTask(ctx.tx, taskId).description;
+          if (body.trim() !== '') insertBuilderMessage(ctx, taskId, { body, files: [] });
+        }
+      });
+      deps.scheduler.requestTick();
+      return { ...opened, dirt: [...opened.dirt], waiting: [...opened.waiting] };
+    },
+    passView: (passId) => passView(db, passId),
     listGoals: (projectId) => listGoalSummaries(db, projectId),
     humanTouch: (projectId) => {
       getProject(db, projectId);

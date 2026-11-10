@@ -108,6 +108,8 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     stepPlan: track('stepPlan'),
     startBatch: track('startBatch'),
     listBatches: track('listBatches'),
+    openPass: track('openPass'),
+    passView: track('passView'),
     listGoals: track('listGoals'),
     humanTouch: track('humanTouch'),
     openGoalDigest: track('openGoalDigest'),

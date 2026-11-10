@@ -62,6 +62,10 @@ import type {
   ModelProfileId,
   ModelProfilePatch,
   DecisionId,
+  PassId,
+  PassOpenedDto,
+  PassOpenRequest,
+  PassViewDto,
   PersonaDto,
   PersonaId,
   PersonaInput,
@@ -238,6 +242,14 @@ export interface ApiServices {
   startBatch(projectId: ProjectId, input: BatchStartInput): BatchDto[];
   /** Every batch of the project, newest first: a finished task's pull request can sit in an old batch. */
   listBatches(projectId: ProjectId): BatchDto[];
+  /**
+   * Opens a Workbench pass on the project's folder and writes each page's first message: the one
+   * given, else the task's description when it has one. Refused (409) on a ChatGPT account, whose
+   * sessions cannot show that a turn took a message, and for whatever the open itself refuses.
+   */
+  openPass(projectId: ProjectId, input: PassOpenRequest): Promise<PassOpenedDto>;
+  /** The pass as the Workbench reads it: its pages and every turn's timing. */
+  passView(passId: PassId): PassViewDto;
   /**
    * The project's goals, each with its digest and count of new items since the builder last opened
    * it, and the Ungrouped group. Leaves every view mark as it was.

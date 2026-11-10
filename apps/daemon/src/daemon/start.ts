@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { serve, upgradeWebSocket, type WebSocketServerLike } from '@hono/node-server';
 import {
   BRAINSTORM_REFUSED_ON_CHATGPT,
+  ConflictError,
   EventType,
   InvalidError,
   PROTOCOL_VERSION,
@@ -105,6 +106,7 @@ import {
   flagWorktreeMissing,
   flagWrongBranch,
   moveRetiredLandings,
+  openPass,
   readPnpmVersion,
   recoverBatches,
   removeMergedBranches,
@@ -113,6 +115,7 @@ import {
   subscribeShipTrigger,
   type DeliveryContext,
   type DeliveryLimits,
+  type PassOpenDeps,
 } from '../delivery';
 import type { LogLevel } from '../env';
 import {
@@ -1394,6 +1397,12 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     hazardAssessor,
   );
+  // A task has saved work only once a take-out has kept it, which the pass module does and puts back.
+  const passOpenDeps: PassOpenDeps = {
+    leaseMs: opts.leaseMs ?? DEFAULTS.leaseMs,
+    putBack: () =>
+      Promise.reject(new ConflictError('This daemon has no put-back of saved work wired')),
+  };
   const services = createServices({
     state,
     clock,
@@ -1430,6 +1439,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       searchAvailable: knowledgeIndex.failed.length === 0,
     }),
     starter,
+    openPass: (input) => openPass(delivery, input, passOpenDeps),
     shipper,
     accounts: accountService,
     worktreeRoot,
