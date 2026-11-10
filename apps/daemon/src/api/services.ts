@@ -66,6 +66,8 @@ import type {
   PassOpenedDto,
   PassOpenRequest,
   PassViewDto,
+  TakeOutRequest,
+  TakeOutResultDto,
   PersonaDto,
   PersonaId,
   PersonaInput,
@@ -250,6 +252,12 @@ export interface ApiServices {
   openPass(projectId: ProjectId, input: PassOpenRequest): Promise<PassOpenedDto>;
   /** The pass as the Workbench reads it: its pages and every turn's timing. */
   passView(passId: PassId): PassViewDto;
+  /**
+   * Takes a page out of its pass (spec §5.4): its agent stopped, its work kept with the task, its files
+   * put back as they were without it, and the task back on the Board. Refused (409) while the pass is
+   * not open or does not hold the task; answers `tookOut: false` when the page's files kept changing.
+   */
+  takeOutPage(passId: PassId, taskId: TaskId, input: TakeOutRequest): Promise<TakeOutResultDto>;
   /**
    * The project's goals, each with its digest and count of new items since the builder last opened
    * it, and the Ungrouped group. Leaves every view mark as it was.

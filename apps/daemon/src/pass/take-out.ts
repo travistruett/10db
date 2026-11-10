@@ -1,6 +1,7 @@
 import {
   ConflictError,
   isTerminal,
+  PassState,
   SharedChoiceKind,
   TakeOutStep,
   TaskStatus,
@@ -171,6 +172,11 @@ export async function takeOutSteps(
     deps.state.write((ctx) => {
       const pass = passHoldingTask(ctx.tx, getTask(ctx.tx, task.id));
       if (!pass) throw new ConflictError(`${task.title} is in no open pass`);
+      // The builder's own ask is taken only while the pass is open; an Abandon or a close takes its own.
+      if (input.within === TakeOutWithin.Alone && pass.state !== PassState.Open)
+        throw new ConflictError(
+          `Pass "${pass.name}" is ${pass.state.toLowerCase()}: a page is taken out only while it is open`,
+        );
       return insertTakeOut(ctx, {
         taskId: task.id,
         passId: pass.id,

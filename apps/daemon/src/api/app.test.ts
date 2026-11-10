@@ -110,6 +110,7 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     listBatches: track('listBatches'),
     openPass: track('openPass'),
     passView: track('passView'),
+    takeOutPage: track('takeOutPage'),
     listGoals: track('listGoals'),
     humanTouch: track('humanTouch'),
     openGoalDigest: track('openGoalDigest'),
@@ -780,6 +781,13 @@ describe('team, routing and benchmark routes', () => {
       path: `/tasks/${taskId}`,
       body: { riskTags: ['auth'] },
       service: 'patchTask',
+    },
+    {
+      name: 'POST /passes/:id/tasks/:id/take-out',
+      method: 'POST',
+      path: `/passes/${mintId('Pass')}/tasks/${taskId}/take-out`,
+      body: { shared: [{ seq: 0, choice: 'keep' }] },
+      service: 'takeOutPage',
     },
     {
       name: 'GET /tasks/:id/step-plan',

@@ -79,6 +79,7 @@ import {
   ShapeJevSettingDto,
   StartTaskInput,
   SystemCheckDto,
+  TakeOutRequest,
   TaskFileId,
   TaskId,
   TaskInput,
@@ -726,6 +727,18 @@ export function createApp(deps: ApiDeps) {
     )
     .get('/passes/:passId', (c) =>
       c.json(deps.services.passView(PassId.parse(c.req.param('passId')))),
+    )
+    .post(
+      '/passes/:passId/tasks/:taskId/take-out',
+      validator('json', (value): TakeOutRequest => TakeOutRequest.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.takeOutPage(
+            PassId.parse(c.req.param('passId')),
+            TaskId.parse(c.req.param('taskId')),
+            c.req.valid('json'),
+          ),
+        ),
     )
     .post('/batches/:batchId/ship', (c) =>
       c.json(deps.services.shipBatch(BatchId.parse(c.req.param('batchId')))),

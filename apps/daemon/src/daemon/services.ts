@@ -18,6 +18,7 @@ import {
   type ProjectPatch,
   WorkstreamState,
   type SystemCheckDto,
+  type TakeOutResultDto,
   type TaskLanding,
   type WorkstreamId,
 } from '@10db/contracts';
@@ -33,6 +34,7 @@ import {
   getProject,
   getSmallProposalLimit,
   setSmallProposalLimit,
+  getPass,
   getTask,
   getTeam,
   getWorkstream,
@@ -101,7 +103,7 @@ import { adoptGoal } from '../goals';
 import { GitError, type Git } from '../git';
 import { hazardAssessmentDto, type HazardAssessor } from '../hazards';
 import { earlierMcpApproval, requestMcpApproval, type InboxService } from '../inbox';
-import { passView } from '../pass';
+import { passView, TakeOutWithin, type TakeOutInput } from '../pass';
 import type { KeepAwake } from '../keep-awake';
 import type { Runner } from '../runner';
 import type { Scheduler } from '../scheduler';
@@ -151,6 +153,8 @@ export function createServices(deps: {
   readonly starter: BatchStarter;
   /** Opens a pass in the project's delivery queue (`openPass` with its lease and put-back). */
   readonly openPass: (input: PassOpenInput) => Promise<PassOpened>;
+  /** Takes a task out of its pass in the project's delivery queue, stopping its lane through the runner. */
+  readonly takeOut: (input: TakeOutInput) => Promise<TakeOutResultDto>;
   readonly shipper: Shipper;
   readonly accounts: AccountService;
   readonly moves: Pick<AccountMoves, 'move'>;
@@ -348,6 +352,21 @@ export function createServices(deps: {
       return { ...opened, dirt: [...opened.dirt], waiting: [...opened.waiting] };
     },
     passView: (passId) => passView(db, passId),
+    takeOutPage(passId, taskId, input) {
+      const pass = getPass(db, passId);
+      const task = getTask(db, taskId);
+      if (pass.state !== PassState.Open)
+        throw new ConflictError(
+          `Pass "${pass.name}" is ${pass.state.toLowerCase()}: a page is taken out only while it is open`,
+        );
+      if (passHoldingTask(db, task)?.id !== passId)
+        throw new ConflictError(`${task.title} is not a page of pass "${pass.name}"`);
+      return deps.takeOut({
+        taskId,
+        within: TakeOutWithin.Alone,
+        ...(input.shared === undefined ? {} : { shared: input.shared }),
+      });
+    },
     async stopPage(taskId) {
       const task = getTask(db, taskId);
       const pass = passHoldingTask(db, task);

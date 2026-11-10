@@ -8,6 +8,7 @@ import {
   PassOpenedDto,
   PassViewDto,
   ProjectDto,
+  TakeOutResultDto,
   TaskDto,
   WorkstreamChangesDto,
   WorkstreamDto,
@@ -653,3 +654,36 @@ describe("a pass's saved work and start-up over HTTP", () => {
 
 const listPassTurnsOf = (passId: PassDto['id']) =>
   listPassTurns(daemon.state.db, passId).map((t) => [t.seq, t.endedAt === null]);
+
+describe('POST /passes/:passId/tasks/:taskId/take-out', () => {
+  const takeOutOf = (pass: { id: PassDto['id'] }, task: TaskDto) =>
+    post(`/passes/${pass.id}/tasks/${task.id}/take-out`, {});
+
+  it('takes a working page out: its last turn kept with the task, nothing Ready, and no session after', async () => {
+    const { task, pass } = await openedPage(WORKING);
+    await waitFor(() => existsSync(join(repo.path, PAGE_FILE)));
+
+    const res = await takeOutOf(pass, task);
+
+    expect(res.status).toBe(200);
+    const result = TakeOutResultDto.parse(res.body);
+    expect(result).toMatchObject({ tookOut: true, stillChanging: [], left: [] });
+    expect(rawGit('show', `refs/10db/kept/${task.id}:${PAGE_FILE}`)).toBe('half');
+    expect(existsSync(join(repo.path, PAGE_FILE))).toBe(false);
+    expect(latestPassTurn(daemon.state.db, task.id)?.ending).toBe('stopped');
+    expect(listInbox(daemon.state.db, {}).filter((i) => i.kind === 'check')).toEqual([]);
+    expect(getTaskRow(task).passId).toBeNull();
+    expect(runOf(task).state).toBe('CANCELLED');
+  });
+
+  it('refuses with 409 while the pass is not open, or for a task it does not hold', async () => {
+    const { task, pass, project } = await openedPage(WORKING);
+    await waitFor(() => existsSync(join(repo.path, PAGE_FILE)));
+    const other = await taskOn(project, 'People: elsewhere', ['people']);
+    expect((await takeOutOf(pass, other)).status).toBe(409);
+
+    daemon.state.db.update(schema.passes).set({ state: 'ABANDONING' }).run();
+    expect((await takeOutOf(pass, task)).status).toBe(409);
+    expect(getTaskRow(task).passId).toBe(pass.id);
+  });
+});

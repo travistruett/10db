@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  AbandonStep,
   isTerminal,
   mintId,
   TakeOutStep,
@@ -21,6 +22,7 @@ import {
   lastTakeOut,
   listTaskThreadRows,
   seedProject,
+  setAbandonStep,
   setTaskKeptWork,
   transitionWorkstream,
   type Store,
@@ -142,6 +144,19 @@ describe('takeOut', () => {
     await takeOutSteps(takeOutDeps(w), { taskId: w.settings.id, within: TakeOutWithin.Alone });
     expect(read(w, 'src/settings/page.tsx')).toBe('landed on the pass branch\n');
     expect(getTaskKeptWork(w.h.store.db, w.settings.id)?.keptBaseSha).toBe(landed);
+  });
+
+  it('refuses a take-out asked for alone once the pass is no longer open, writing no row', async () => {
+    stopped = [];
+    w = await openPassWorld();
+    w.h.state.write((ctx) => {
+      setAbandonStep(ctx, w.opened.pass.id, AbandonStep.Abandoning);
+    });
+    await expect(
+      takeOutSteps(takeOutDeps(w), { taskId: w.settings.id, within: TakeOutWithin.Alone }),
+    ).rejects.toThrow(/abandoning/);
+    expect(lastTakeOut(w.h.store.db, w.settings.id)).toBeUndefined();
+    expect(stopped).toEqual([]);
   });
 
   it('leaves saved work from an earlier take-out as it is when the page made none since', async () => {

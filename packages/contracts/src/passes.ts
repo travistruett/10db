@@ -300,6 +300,10 @@ export const PassOpenedDto = z.object({
 });
 export type PassOpenedDto = z.infer<typeof PassOpenedDto>;
 
+/** `POST /passes/:passId/tasks/:taskId/take-out`: what becomes of each shared change not landed; Keep by default. */
+export const TakeOutRequest = z.object({ shared: z.array(SharedChoice).optional() });
+export type TakeOutRequest = z.infer<typeof TakeOutRequest>;
+
 /** What a take-out did (spec §5.4). */
 export const TakeOutResultDto = z.object({
   taskId: TaskId,

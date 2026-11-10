@@ -148,7 +148,14 @@ import {
   forgetEndedYields,
   withdrawStaleClaimWaits,
 } from '../mcp';
-import { answerPassCard, putBackKeptWork, resumePassWork, type PassWorkDeps } from '../pass';
+import {
+  answerPassCard,
+  putBackKeptWork,
+  resumePassWork,
+  takeOut,
+  type PassWorkDeps,
+  type TakeOutDeps,
+} from '../pass';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
 import { chooseModel, offeredModels, PLAN_NEED } from '../routing';
 import { createScreenBroker, createScreens, renderMayRead } from '../screens';
@@ -1334,8 +1341,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger,
     cleanShutdown,
   });
+  // A pass's take-outs and Abandon stop its lanes through the runner.
+  const passTakeOuts: TakeOutDeps = {
+    ...passWork,
+    stopLane: (id) => createdRunner.stopPassLane(id),
+  };
   // Each open pass goes on from its rows: its folder card, a put-back and take-outs cut short.
-  await resumePassWork({ ...passWork, stopLane: (id) => createdRunner.stopPassLane(id) });
+  await resumePassWork(passTakeOuts);
   // The previous daemon's claim waits ended with it; their cards would name holders nobody waits for.
   withdrawStaleClaimWaits(state, inbox);
   accountPauses.restore();
@@ -1458,6 +1470,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     }),
     starter,
     openPass: (input) => openPass(delivery, input, passOpenDeps),
+    takeOut: (input) => takeOut(passTakeOuts, input),
     shipper,
     accounts: accountService,
     worktreeRoot,

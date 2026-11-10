@@ -9,6 +9,7 @@ import {
   PassTurnDto,
   PassViewDto,
   SharedChoice,
+  TakeOutRequest,
   TakeOutResultDto,
 } from './passes';
 import {
@@ -335,6 +336,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'pass-check-detail': PassCheckDetail,
   'pass-open-request': PassOpenRequest,
   'pass-opened-dto': PassOpenedDto,
+  'take-out-request': TakeOutRequest,
   'take-out-result-dto': TakeOutResultDto,
   'pass-abandoned-dto': PassAbandonedDto,
   'shared-choice': SharedChoice,
