@@ -131,6 +131,8 @@ async function lacksOf(
   }
   if (project.appUrl === null)
     lacks.push({ kind: PassLackKind.NoAppUrl, count: null, branch: null });
+  if (project.changedCheckCommand === null)
+    lacks.push({ kind: PassLackKind.NoChangedCheck, count: null, branch: null });
   return lacks;
 }
 

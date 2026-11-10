@@ -121,12 +121,18 @@ describe('the Start Pass preview', () => {
     expect((await preview()).lacks).toEqual([
       { kind: 'ahead_of_base', count: 2, branch: 'main' },
       { kind: 'no_app_url', count: null, branch: null },
+      { kind: 'no_changed_check', count: null, branch: null },
     ]);
   });
 
-  it('says nothing is lacking with the branch at the base and an app address set', async () => {
+  it('says nothing is lacking with the branch at the base, an app address and a changed-files check set', async () => {
     harness();
-    h.state.write((ctx) => patchProject(ctx, h.project.id, { appUrl: 'http://localhost:3000' }));
+    h.state.write((ctx) =>
+      patchProject(ctx, h.project.id, {
+        appUrl: 'http://localhost:3000',
+        changedCheckCommand: 'make check-changed',
+      }),
+    );
 
     expect((await preview()).lacks).toEqual([]);
   });

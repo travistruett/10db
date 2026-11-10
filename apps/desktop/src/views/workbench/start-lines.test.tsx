@@ -31,6 +31,7 @@ const SHARED = "Files under settings count as settings', not as shared src.";
 const DOCKER = 'Docker is off: the gate needs it.';
 const AHEAD = 'build has 4 commits origin/main lacks: the pull request will carry them.';
 const NO_APP = 'No app address: Open Page has nowhere to go.';
+const UNCHECKED = 'No changed-files check: turns run unchecked.';
 
 describe('StartLines', () => {
   it.each<{ name: string; ticks: PickTicks; start: Partial<PassStartDto>; lines: string[] }>([
@@ -50,15 +51,16 @@ describe('StartLines', () => {
           { kind: 'docker_off', count: null, branch: null },
           { kind: 'ahead_of_base', count: 4, branch: 'build' },
           { kind: 'no_app_url', count: null, branch: null },
+          { kind: 'no_changed_check', count: null, branch: null },
         ],
       },
-      lines: [DOCKER, AHEAD, NO_APP],
+      lines: [DOCKER, AHEAD, NO_APP, UNCHECKED],
     },
   ])('says $name, and nothing else', async ({ ticks, start, lines }) => {
     await renderWithRouter(
       <StartLines ticks={ticks} start={{ ...quiet, ...start }} project={project} />,
     );
-    const said = [DIRT, OTHER, SHARED, DOCKER, AHEAD, NO_APP].filter(
+    const said = [DIRT, OTHER, SHARED, DOCKER, AHEAD, NO_APP, UNCHECKED].filter(
       (line) => screen.queryByText(line) !== null,
     );
     expect(said).toEqual(lines);
@@ -67,6 +69,7 @@ describe('StartLines', () => {
   it.each([
     { kind: 'docker_off', line: DOCKER },
     { kind: 'no_app_url', line: NO_APP },
+    { kind: 'no_changed_check', line: UNCHECKED },
   ] as const)('links $kind to Settings › General', async ({ kind, line }) => {
     const { router } = await renderWithRouter(
       <StartLines

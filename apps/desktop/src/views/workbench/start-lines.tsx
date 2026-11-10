@@ -33,6 +33,8 @@ function lackLine(
       };
     case PassLackKind.NoAppUrl:
       return { text: 'No app address: Open Page has nowhere to go.', settings: true };
+    case PassLackKind.NoChangedCheck:
+      return { text: 'No changed-files check: turns run unchecked.', settings: true };
   }
 }
 

@@ -21,6 +21,8 @@ export const PassLackKind = {
   AheadOfBase: 'ahead_of_base',
   /** No app address is set, so Open Page has nowhere to go. */
   NoAppUrl: 'no_app_url',
+  /** No changed-files check is set, so a page's turns run unchecked (spec §8.1). */
+  NoChangedCheck: 'no_changed_check',
 } as const;
 export type PassLackKind = (typeof PassLackKind)[keyof typeof PassLackKind];
 

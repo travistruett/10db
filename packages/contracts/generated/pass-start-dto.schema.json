@@ -82,7 +82,8 @@
             "enum": [
               "docker_off",
               "ahead_of_base",
-              "no_app_url"
+              "no_app_url",
+              "no_changed_check"
             ]
           },
           "count": {

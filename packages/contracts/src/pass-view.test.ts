@@ -38,6 +38,7 @@ describe("the Workbench's start, join and rename", () => {
       lacks: [
         { kind: 'ahead_of_base', count: 4, branch: 'build' },
         { kind: 'docker_off', count: null, branch: null },
+        { kind: 'no_changed_check', count: null, branch: null },
       ],
       refusal: null,
     };
