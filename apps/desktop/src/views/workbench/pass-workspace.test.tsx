@@ -8,6 +8,8 @@ import { projectViewDto } from '../../test/fixtures';
 import { multipartParts, useNodeMultipart } from '../../test/multipart';
 import {
   askItem,
+  minutesBeforeNow,
+  pageTurn,
   PASS_NOW,
   passHandlers,
   pagesByStatus,
@@ -278,5 +280,48 @@ describe('PassWorkspace keys', () => {
     });
     expect(writeText).toHaveBeenCalledWith('http://localhost:8800/settings');
     Reflect.deleteProperty(navigator, 'clipboard');
+  });
+});
+
+describe('PassWorkspace announcer', () => {
+  it('says nothing for the pass it opened on, then says a page becoming ready, never a tick', async () => {
+    vi.useFakeTimers({
+      toFake: ['Date', 'setInterval', 'clearInterval'],
+      now: Date.parse(PASS_NOW),
+    });
+    const pages = pagesByStatus();
+    const ui = (billing: typeof pages.working) => (
+      <PassWorkspace
+        view={passViewDto({
+          pages: [...Object.values(pages).filter((p) => p !== pages.working), billing],
+        })}
+        inbox={[askItem(pages.asks)]}
+        project={projectViewDto()}
+        selected={pages.working.taskId}
+        onSelect={vi.fn()}
+      />
+    );
+    const { rerender } = renderWithDaemon(ui(pages.working));
+    const region = await screen.findByRole('status', { name: 'Workbench announcements' });
+    expect(region.getAttribute('aria-live')).toBe('polite');
+    expect(region.textContent).toBe('');
+    act(() => {
+      vi.advanceTimersByTime(60_000);
+    });
+    expect(region.textContent).toBe('');
+    rerender(
+      ui({
+        ...pages.working,
+        state: 'WAITING_HUMAN',
+        nextActionKind: 'pass_review',
+        turn: pageTurn({
+          startedMinutesAgo: 5,
+          endedAt: minutesBeforeNow(0),
+          readyAt: minutesBeforeNow(0),
+        }),
+      }),
+    );
+    expect(region.textContent).toBe('Billing is ready');
+    expect(screen.getAllByRole('status')).toHaveLength(1);
   });
 });

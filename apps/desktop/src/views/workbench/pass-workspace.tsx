@@ -3,6 +3,7 @@ import { Box, Flex } from '@mantine/core';
 import { useViewportSize } from '@mantine/hooks';
 import { useRef, useState } from 'react';
 import { useNow } from '../../shell/relative';
+import { Announcer } from './announcer';
 import { EMPTY_DRAFT, type Draft } from './drafts';
 import { PagePane } from './page-pane';
 import type { PassWorkspaceProps } from './pass-workspace-props';
@@ -69,6 +70,7 @@ export function PassWorkspace({ view, inbox, project, selected, onSelect }: Pass
         }}
       >
         <QueueList rows={rows} current={shown?.page.taskId ?? null} onSelect={onSelect} />
+        <Announcer rows={rows} />
       </Box>
       {shown === null ? null : (
         <PagePane
