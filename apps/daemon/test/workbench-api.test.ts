@@ -8,7 +8,13 @@ import {
   TaskDto,
   type ProjectInput,
 } from '@10db/contracts';
-import { insertGoal, listTaskThread, schema } from '@10db/db';
+import {
+  insertGoal,
+  insertWorkstream,
+  listTaskThread,
+  schema,
+  transitionWorkstream,
+} from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
@@ -289,5 +295,95 @@ describe('POST /projects/:projectId/passes with pages', () => {
     expect(daemon.state.db.select().from(schema.passes).all()).toEqual([]);
     expect(rawGit('symbolic-ref', '--short', 'HEAD')).toBe(branch);
     expect(head).toBe('main');
+  });
+});
+
+describe('POST /passes/:passId/pages', () => {
+  it('adds a page and an open task to the pass, and answers the pass as the Workbench reads it', async () => {
+    const project = await projectWith(PAGES);
+    const settings = await taskOn(project, 'Settings: tidy', ['settings']);
+    const opened = await openOn(project, [settings]);
+    const people = await taskOn(project, 'People: tidy', ['people']);
+
+    const view = await api().post(`/passes/${opened.pass.id}/pages`, PassViewDto, {
+      pages: [],
+      taskIds: [people.id],
+      firstMessage: null,
+    });
+
+    expect(view.pages.map((p) => p.title)).toEqual(['Settings: tidy', 'People: tidy']);
+    expect(builderMessages(people.id)).toEqual([]);
+  });
+
+  it.each<{
+    name: string;
+    status: number;
+    arrange: (project: ProjectDto) => Promise<{ passId: string; body: Record<string, unknown> }>;
+  }>([
+    {
+      name: 'a page the pass has',
+      status: 400,
+      arrange: async (project) => {
+        const opened = await openOn(project, [
+          await taskOn(project, 'Settings: tidy', ['settings']),
+        ]);
+        return { passId: opened.pass.id, body: { pages: ['settings'] } };
+      },
+    },
+    {
+      name: "a page past the pass's cap",
+      status: 409,
+      arrange: async (project) => {
+        const opened = await api().post(`/projects/${project.id}/passes`, PassOpenedDto, {
+          name: 'Polish',
+          taskIds: [],
+          pages: ['settings'],
+          pageCap: 1,
+        });
+        return { passId: opened.pass.id, body: { pages: ['people'] } };
+      },
+    },
+    {
+      name: 'a pass that is abandoned',
+      status: 409,
+      arrange: async (project) => {
+        const opened = await openOn(project, [
+          await taskOn(project, 'Settings: tidy', ['settings']),
+        ]);
+        await api().post(`/passes/${opened.pass.id}/abandon`, PassAbandonedDto);
+        return { passId: opened.pass.id, body: { pages: ['people'] } };
+      },
+    },
+    {
+      name: 'a task that is running',
+      status: 409,
+      arrange: async (project) => {
+        const opened = await openOn(project, [
+          await taskOn(project, 'Settings: tidy', ['settings']),
+        ]);
+        const people = await taskOn(project, 'People: tidy', ['people']);
+        daemon.state.write((ctx) => {
+          const ws = insertWorkstream(ctx, people.id, {
+            first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+          });
+          transitionWorkstream(ctx, ws.id, { to: 'STARTING', fence: null });
+        });
+        return { passId: opened.pass.id, body: { taskIds: [people.id] } };
+      },
+    },
+  ])('refuses $name with $status, adding nothing', async ({ arrange, status }) => {
+    const project = await projectWith(PAGES);
+    const { passId, body } = await arrange(project);
+    const before = daemon.state.db.select().from(schema.tasks).all();
+
+    const res = await send('POST', `/passes/${passId}/pages`, {
+      pages: [],
+      taskIds: [],
+      firstMessage: null,
+      ...body,
+    });
+
+    expect(res.status).toBe(status);
+    expect(daemon.state.db.select().from(schema.tasks).all()).toEqual(before);
   });
 });

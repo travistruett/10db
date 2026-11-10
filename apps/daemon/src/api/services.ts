@@ -65,6 +65,7 @@ import type {
   PassId,
   PassOpenedDto,
   PassAbandonedDto,
+  PassJoinRequest,
   PassOpenRequest,
   PassStartDto,
   PassViewDto,
@@ -270,6 +271,12 @@ export interface ApiServices {
   livePasses(): PassViewDto[];
   /** What Start Pass shows before a pass opens on the project; reads the folder with git. */
   passStart(projectId: ProjectId): Promise<PassStartDto>;
+  /**
+   * Add Page: a task for each page named and the open tasks named join the open pass, each sent the
+   * builder's first message only when there is one. Refused (409) while the pass is not open or full,
+   * or for a task that can't join; (400) for a page it can't take.
+   */
+  addPassPages(passId: PassId, input: PassJoinRequest): Promise<PassViewDto>;
   /**
    * The project's goals, each with its digest and count of new items since the builder last opened
    * it, and the Ungrouped group. Leaves every view mark as it was.

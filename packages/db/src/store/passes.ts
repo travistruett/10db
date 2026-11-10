@@ -226,6 +226,38 @@ export function listPassTasks(db: DbReader, passId: PassId): TaskDto[] {
 }
 
 /**
+ * Adds open tasks to an open pass (Add Page), in the caller's write: each task's `pass_id`, and one
+ * `pass.changed` naming them. Refused for a pass that is not open, a task of another project or one a
+ * pass still holds; the caller makes each task's run in the pass's batch.
+ */
+export function joinPass(ctx: WriteContext, passId: PassId, taskIds: readonly TaskId[]): void {
+  const pass = getPass(ctx.tx, passId);
+  if (pass.state !== PassState.Open)
+    throw new ConflictError(
+      `Pass "${pass.name}" is ${pass.state.toLowerCase()}: a page joins only an open pass`,
+    );
+  for (const taskId of taskIds) {
+    const task = getTask(ctx.tx, taskId);
+    if (task.projectId !== pass.projectId)
+      throw new ConflictError(`Task ${task.title} belongs to another project`);
+    const holding = passHoldingTask(ctx.tx, task);
+    if (holding) throw new ConflictError(`Task ${task.title} is already in pass "${holding.name}"`);
+    ctx.tx
+      .update(schema.tasks)
+      .set({ passId, updatedAt: ctx.now })
+      .where(eq(schema.tasks.id, taskId))
+      .run();
+    ctx.emit({ type: EventType.TaskChanged, entityType: 'task', entityId: taskId });
+  }
+  ctx.emit({
+    type: EventType.PassChanged,
+    entityType: 'pass',
+    entityId: passId,
+    data: { joined: [...taskIds] },
+  });
+}
+
+/**
  * Ends the task's membership of its pass (a take-out, an Abandon, a close): the pass no longer holds
  * it, so the scheduler, `countLanes` and the guard treat it as ordinary work. A task in no pass is left
  * as it is.

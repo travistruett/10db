@@ -20,12 +20,18 @@ export { DEFAULT_DELIVERY_LIMITS, type DeliveryContext, type DeliveryLimits } fr
 export { createDeliveryJobs, jobKey, JobQueue, type DeliveryJobs } from './jobs';
 export { createBatchStarter, type BatchStarter } from './start';
 export {
+  newPageTasks,
   openPass,
   passBranchName,
   passDirtRef,
+  refusePassTask,
+  startPassTasks,
+  writePageTasks,
+  type NewPageTask,
   type PassOpenDeps,
   type PassOpened,
   type PassOpenInput,
+  type PassPageWait,
   type PutBackKeptWork,
 } from './pass-open';
 export { createFailedRestarts } from './restart';

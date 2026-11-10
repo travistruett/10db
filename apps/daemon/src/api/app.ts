@@ -59,6 +59,7 @@ import {
   SHAPE_FILE_MAX_BYTES,
   OneWayPathsDto,
   PassId,
+  PassJoinRequest,
   PassOpenRequest,
   SmallProposalLimitDto,
   ScreenImageInput,
@@ -748,6 +749,17 @@ export function createApp(deps: ApiDeps) {
       '/passes',
       validator('query', (query) => z.object({ live: z.literal('true') }).parse(query)),
       (c) => c.json(deps.services.livePasses()),
+    )
+    .post(
+      '/passes/:passId/pages',
+      validator('json', (value): PassJoinRequest => PassJoinRequest.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.addPassPages(
+            PassId.parse(c.req.param('passId')),
+            c.req.valid('json'),
+          ),
+        ),
     )
     .get('/projects/:projectId/pass-start', async (c) =>
       c.json(await deps.services.passStart(ProjectId.parse(c.req.param('projectId')))),

@@ -25,6 +25,7 @@ import {
   insertPass,
   insertTask,
   insertWorkstream,
+  joinPass,
   leavePass,
   listPassDirt,
   listLivePasses,
@@ -309,6 +310,61 @@ describe('countLanes with a pass', () => {
     const lanes = countLanes(store.db);
     expect(lanes.byProject.get(project.id)).toBe(1);
     expect(lanes.byPass.get(pass.id)).toBeUndefined();
+  });
+});
+
+describe('joining a pass', () => {
+  it('adds the tasks to the open pass, saying so, and the pass holds them', () => {
+    const { pass } = store.write((ctx) => insertPass(ctx, passInput([task()]))).value;
+    const joining = task(project, 'People: UI work');
+
+    const { events } = store.write((ctx) => {
+      joinPass(ctx, pass.id, [joining]);
+    });
+
+    expect(passHoldingTask(store.db, getTask(store.db, joining))?.id).toBe(pass.id);
+    expect(listPassTasks(store.db, pass.id).map((t) => t.id)).toContain(joining);
+    expect(events.map((e) => [e.type, e.entityId])).toEqual([
+      [EventType.TaskChanged, joining],
+      [EventType.PassChanged, pass.id],
+    ]);
+  });
+
+  it.each<{ name: string; arrange: (passId: PassId) => TaskId; refusal: RegExp }>([
+    {
+      name: 'a pass that is not open',
+      arrange: (passId) => {
+        endPass(passId, PassState.Abandoning);
+        return task();
+      },
+      refusal: /is abandoning: a page joins only an open pass/,
+    },
+    {
+      name: 'a task the pass holds already',
+      arrange: (passId) => {
+        const [held] = listPassTasks(store.db, passId);
+        if (!held) throw new Error('the pass holds one task');
+        return held.id;
+      },
+      refusal: /is already in pass "Polish settings"/,
+    },
+    {
+      name: 'a task of another project',
+      arrange: () =>
+        task(seedProject(store, { name: 'other', areas: [{ name: 'settings', globs: ['s/**'] }] })),
+      refusal: /belongs to another project/,
+    },
+  ])('refuses $name, joining nothing', ({ arrange, refusal }) => {
+    const { pass } = store.write((ctx) => insertPass(ctx, passInput([task()]))).value;
+    const joining = arrange(pass.id);
+    const before = getTask(store.db, joining).passId ?? null;
+
+    expect(() =>
+      store.write((ctx) => {
+        joinPass(ctx, pass.id, [joining]);
+      }),
+    ).toThrow(refusal);
+    expect(getTask(store.db, joining).passId ?? null).toBe(before);
   });
 });
 

@@ -114,6 +114,7 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     abandonPass: track('abandonPass'),
     livePasses: track('livePasses'),
     passStart: track('passStart'),
+    addPassPages: track('addPassPages'),
     listGoals: track('listGoals'),
     humanTouch: track('humanTouch'),
     openGoalDigest: track('openGoalDigest'),

@@ -16,6 +16,7 @@ import {
   StepRole,
   TaskStatus,
   type BatchDto,
+  type BatchId,
   type GoalId,
   type Notice,
   type PassDirtEntry,
@@ -161,19 +162,7 @@ function refuseOpen(
     throw new InvalidError(
       `A pass holds ${String(pageCap)} pages; ${String(count)} tasks and pages were named`,
     );
-  for (const task of tasks) {
-    if (task.projectId !== project.id)
-      throw new InvalidError(`Task ${task.title} belongs to another project`);
-    if (task.status !== TaskStatus.Open)
-      throw new ConflictError(`Task ${task.title} is ${task.status}`);
-    if (task.boardColumnId !== null)
-      throw new ConflictError(`Task ${task.title} is parked; move it to Backlog or Ready first`);
-    const holding = passHoldingTask(db, task);
-    if (holding) throw new ConflictError(`Task ${task.title} is already in pass "${holding.name}"`);
-    const latest = task.workstreamId ? getWorkstreamRow(db, task.workstreamId) : null;
-    if (latest && ACTIVE_STATES.includes(latest.state))
-      throw new ConflictError(`Task ${task.title} is running; it can join a pass once it stops`);
-  }
+  for (const task of tasks) refusePassTask(db, project, task);
   const pages = passPagesProblem(project.areas, [...tasks, ...newPages]);
   if (pages !== null) throw new InvalidError(pages);
   const open = findOpenPass(db, project.id);
@@ -282,24 +271,7 @@ export async function openPass(
           dirt: start.dirt,
         });
         const leaseExpiresAt = new Date(ctx.clock.now().getTime() + deps.leaseMs).toISOString();
-        const waiting: PassPageWait[] = [];
-        for (const task of pageTasks) {
-          const ws = insertPlannedWorkstream(w, task.id, passPlan(w.tx, task), made.batch.id);
-          const claimed = acquireClaims(w, {
-            projectId: project.id,
-            workstreamId: ws.id,
-            requests: passHeldAreas(project.areas, task).map((name) => ({
-              kind: ClaimKind.Area,
-              name,
-            })),
-            copyHazards: copyHazardNames(project),
-            leaseExpiresAt,
-          });
-          if (claimed.ok) continue;
-          const holder = getTask(w.tx, getWorkstreamRow(w.tx, claimed.conflict.heldBy).taskId);
-          waiting.push({ taskId: task.id, area: claimed.conflict.name, heldBy: holder.id });
-          setWorkstreamNotice(w, ws.id, pageWaitNotice(claimed.conflict.name, holder));
-        }
+        const waiting = startPassTasks(w, project, made.batch.id, pageTasks, leaseExpiresAt);
         return { ...made, waiting };
       });
     } catch (error) {
@@ -380,7 +352,7 @@ export async function openPass(
 }
 
 /** A page the open makes a task for: its title and its one page area, and the goal it joins. */
-interface NewPageTask {
+export interface NewPageTask {
   readonly title: string;
   readonly areas: readonly [string];
   readonly goalId: GoalId | null;
@@ -392,10 +364,10 @@ function pageTaskTitle(area: string): string {
 }
 
 /**
- * The tasks the open makes for `pages`, read and refused before anything is queued: each must be a
- * page area of the project, and the goal, when named, one of the project's.
+ * The tasks a pass makes for `pages`, read and refused before anything is queued: each must be a page
+ * area of the project, and the goal, when named, one of the project's.
  */
-function newPageTasks(
+export function newPageTasks(
   db: DbReader,
   project: ProjectDto,
   pages: readonly string[],
@@ -410,8 +382,8 @@ function newPageTasks(
   });
 }
 
-/** Writes the new pages' tasks in the open's write, so a refusal after it leaves none of them. */
-function writePageTasks(
+/** Writes the new pages' tasks in the caller's write, so a refusal after it leaves none of them. */
+export function writePageTasks(
   w: WriteContext,
   project: ProjectDto,
   pages: readonly NewPageTask[],
@@ -423,4 +395,52 @@ function writePageTasks(
       goalId: page.goalId,
     }),
   );
+}
+
+/** Throws what refuses an open task a place in a pass of the project, read from the database. */
+export function refusePassTask(db: DbReader, project: ProjectDto, task: TaskDto): void {
+  if (task.projectId !== project.id)
+    throw new InvalidError(`Task ${task.title} belongs to another project`);
+  if (task.status !== TaskStatus.Open)
+    throw new ConflictError(`Task ${task.title} is ${task.status}`);
+  if (task.boardColumnId !== null)
+    throw new ConflictError(`Task ${task.title} is parked; move it to Backlog or Ready first`);
+  const holding = passHoldingTask(db, task);
+  if (holding) throw new ConflictError(`Task ${task.title} is already in pass "${holding.name}"`);
+  const latest = task.workstreamId ? getWorkstreamRow(db, task.workstreamId) : null;
+  if (latest && ACTIVE_STATES.includes(latest.state))
+    throw new ConflictError(`Task ${task.title} is running; it can join a pass once it stops`);
+}
+
+/**
+ * Gives each task of the pass its run in the pass's batch, on the implement step alone, and claims its
+ * pages through `acquireClaims`, as the scheduler claims them, in the caller's write. A page another
+ * task holds makes that task wait with the holder named; the waits are returned.
+ */
+export function startPassTasks(
+  w: WriteContext,
+  project: ProjectDto,
+  batchId: BatchId,
+  tasks: readonly TaskDto[],
+  leaseExpiresAt: string,
+): PassPageWait[] {
+  const waiting: PassPageWait[] = [];
+  for (const task of tasks) {
+    const ws = insertPlannedWorkstream(w, task.id, passPlan(w.tx, task), batchId);
+    const claimed = acquireClaims(w, {
+      projectId: project.id,
+      workstreamId: ws.id,
+      requests: passHeldAreas(project.areas, task).map((name) => ({
+        kind: ClaimKind.Area,
+        name,
+      })),
+      copyHazards: copyHazardNames(project),
+      leaseExpiresAt,
+    });
+    if (claimed.ok) continue;
+    const holder = getTask(w.tx, getWorkstreamRow(w.tx, claimed.conflict.heldBy).taskId);
+    waiting.push({ taskId: task.id, area: claimed.conflict.name, heldBy: holder.id });
+    setWorkstreamNotice(w, ws.id, pageWaitNotice(claimed.conflict.name, holder));
+  }
+  return waiting;
 }

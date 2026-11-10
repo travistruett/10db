@@ -20,6 +20,7 @@ import {
   type SystemCheckDto,
   type PassAbandonedDto,
   type PassId,
+  type PassJoinRequest,
   type TakeOutResultDto,
   type TaskLanding,
   type WorkstreamId,
@@ -111,6 +112,7 @@ import {
   passStartPreview,
   passView,
   TakeOutWithin,
+  type PassJoined,
   type TakeOutInput,
 } from '../pass';
 import type { KeepAwake } from '../keep-awake';
@@ -167,6 +169,8 @@ export function createServices(deps: {
   readonly takeOut: (input: TakeOutInput) => Promise<TakeOutResultDto>;
   /** Abandons a pass in the project's delivery queue, stopping its lanes through the runner. */
   readonly abandonPass: (passId: PassId) => Promise<PassAbandonedDto>;
+  /** Adds pages to an open pass in the project's delivery queue (`joinPass` with its lease and put-back). */
+  readonly joinPass: (passId: PassId, input: PassJoinRequest) => Promise<PassJoined>;
   readonly shipper: Shipper;
   readonly accounts: AccountService;
   readonly moves: Pick<AccountMoves, 'move'>;
@@ -396,6 +400,11 @@ export function createServices(deps: {
         { db, git: deps.git, gateCallsDocker: (project) => gateCallsDocker(deps.git, project) },
         projectId,
       ),
+    async addPassPages(passId, input) {
+      await deps.joinPass(passId, input);
+      deps.scheduler.requestTick();
+      return passView(db, passId);
+    },
     async stopPage(taskId) {
       const task = getTask(db, taskId);
       const pass = passHoldingTask(db, task);
