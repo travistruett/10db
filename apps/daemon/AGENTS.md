@@ -135,7 +135,7 @@ The fake adapter (`sessions/fake-adapter.ts`) is the test boundary for Claude Co
   or a Your-folder task naming a page area whose route loads, no `[`/`:` segment; every route × the project's
   matrix). The before rule (`before-rule.ts`): a before is asked only while the task has no pass turn (a pass
   page) or no session (any other task) and no kept work, and dropped when a session of the task reported a
-  Write, Edit, MultiEdit, NotebookEdit or any Bash call at or before the shot's end. A task's first launch
+  Write, Edit, MultiEdit, NotebookEdit or any Bash call (Codex's `command` and `apply_patch`) at or before the shot's end, or when a Codex session of the task started by then (Codex reports a call only once it ran); the write check runs when the before is asked too, so none that could never be kept is asked or waited on. A task's first launch
   waits for its before at most `BEFORE_WAIT_MS` (20 s) through `RunnerOptions.awaitBeforePicture`, before its
   session exists; a stop ends the wait. Files (`picture-files.ts`): `<data dir>/screens/<2 hex>/<sha256>.png`,
   0600 (directories 0700), written under a temporary name and renamed before the row; a turn picture the store
@@ -144,8 +144,8 @@ The fake adapter (`sessions/fake-adapter.ts`) is the test boundary for Claude Co
   on, for at most 60 s; its log holds a token, so it is `<data dir>/browser/<project id>/login-<ms>.log`, made
   0600 before the command writes it and deleted once read; the address is never logged. The storage state is
   `<data dir>/browser/<project id>/state.json` (0600, temp and rename), read back through zod
-  (`storage-state.ts`). A capture signs in when no state is kept, and once again when a page lands elsewhere; a
-  page still elsewhere says so once on the task's thread (`ELSEWHERE_NOTICE`) and on the status line. Each
+  (`storage-state.ts`). The state is forgotten when the app address or the dev login command changes. A capture signs in when no state is kept, and once again when a page lands elsewhere; a
+  page still elsewhere says so once on the task's thread (`ELSEWHERE_NOTICE`) and on the status line. A route still elsewhere after a fresh sign-in is not signed in for again for that task, and a dev login stopped with its capture leaves the last sign-in as it was. No picture is taken before the API listens (`PicturesDeps.daemonPort`), nor of an app address on its port, checked again before each sign-in and shot. A refused fetch of the browser is tried again on the next ask after ten minutes, or when a pass opens. Start-up holds back the afters of a pass it finds closing or being abandoned, and removes dev login logs a stopped daemon left. Each
   capture logs its route, outcome, milliseconds and bytes. `GET /tasks/:taskId/screens`, `GET
 /screens/:screenId` (a PNG, private and immutable; 404 once pruned) and `GET /projects/:projectId/pictures`
   are refused to screens. `DaemonOptions.pictures` is `{ kind: 'pinned' }` from the entry point; tests give a
