@@ -6,35 +6,49 @@ export class DeadlineError extends Error {
 }
 
 /**
- * Runs `work` and settles within `ms` whatever it does: past the deadline it calls `stop` (which ends
- * what the work waits on) and rejects with a `DeadlineError`, without waiting for the work.
+ * Runs `work` and settles within `ms`, or as soon as `signal` aborts, whatever the work does: it then
+ * calls `stop` (which ends what the work waits on) and rejects, with a `DeadlineError` or the
+ * signal's reason, without waiting for the work. A signal aborted already never starts it.
  */
 export function withDeadline<T>(
   clock: Clock,
   ms: number,
   work: () => Promise<T>,
   stop: () => void,
+  signal?: AbortSignal,
 ): Promise<T> {
   return new Promise<T>((resolve, reject) => {
+    const asError = (reason: unknown): Error =>
+      reason instanceof Error ? reason : new Error(String(reason));
+    if (signal?.aborted === true) {
+      reject(asError(signal.reason));
+      return;
+    }
     let done = false;
-    const timer = clock.setTimeout(() => {
-      if (done) return;
+    const finish = (): boolean => {
+      if (done) return false;
       done = true;
+      timer.cancel();
+      signal?.removeEventListener('abort', aborted);
+      return true;
+    };
+    const aborted = (): void => {
+      if (!finish()) return;
+      stop();
+      reject(asError(signal?.reason));
+    };
+    const timer = clock.setTimeout(() => {
+      if (!finish()) return;
       stop();
       reject(new DeadlineError(`ran past ${String(Math.round(ms / 1000))} s`));
     }, ms);
+    signal?.addEventListener('abort', aborted, { once: true });
     work().then(
       (value) => {
-        if (done) return;
-        done = true;
-        timer.cancel();
-        resolve(value);
+        if (finish()) resolve(value);
       },
       (error: unknown) => {
-        if (done) return;
-        done = true;
-        timer.cancel();
-        reject(error instanceof Error ? error : new Error(String(error)));
+        if (finish()) reject(asError(error));
       },
     );
   });

@@ -134,21 +134,20 @@ async function inContext<T>(
   const stop = (): void => {
     void context.close().catch(() => undefined);
   };
-  run.signal.addEventListener('abort', stop, { once: true });
   try {
+    // The signal is watched by the race itself: once a context closes under it, a pending Playwright
+    // call may never settle. An abort while the context was being made is seen here too.
     return await withDeadline(
       run.clock,
       run.deadlineMs,
       async () => {
         await guard(context, run.appUrl, run.logger);
-        const result = await fn(context);
-        run.signal.throwIfAborted();
-        return result;
+        return fn(context);
       },
       stop,
+      run.signal,
     );
   } finally {
-    run.signal.removeEventListener('abort', stop);
     await withDeadline(
       run.clock,
       CLOSE_TIMEOUT_MS,
@@ -196,6 +195,8 @@ export function createPlaywrightCamera(
       });
       const url = routeUrl(appUrl, route);
       if (url === null) return failed(`${route} is not a route on ${appUrl}`);
+      // Aborted already: never wait for the browser, nor launch it.
+      signal.throwIfAborted();
       const shot = host.use((browser, proxy) =>
         inContext(
           runOf(browser, proxy, appUrl, signal),
@@ -249,6 +250,7 @@ export function createPlaywrightCamera(
       if (target.origin !== appUrl) {
         throw new SignInError(`the dev login's address is not on ${appUrl}`);
       }
+      signal.throwIfAborted();
       const signedIn = host.use((browser, proxy) =>
         inContext(runOf(browser, proxy, appUrl, signal), {}, async (context) => {
           const page = await context.newPage();

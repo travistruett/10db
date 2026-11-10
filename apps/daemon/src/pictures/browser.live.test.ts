@@ -492,6 +492,34 @@ describe.skipIf(!live)('the pinned browser, live', () => {
     expect((await shoot('/clean')).outcome).toBe(ShotOutcome.Clean);
   }, 90_000);
 
+  it('stops a shot aborted at any moment, long before its page would have loaded', async () => {
+    // Launched already: a launch under way runs to its end.
+    await shoot('/clean');
+    for (const delay of [0, 2, 5, 10, 20, 40]) {
+      const controller = new AbortController();
+      const started = Date.now();
+      const shot = camera.shoot({
+        appUrl,
+        route: '/ws-ok',
+        viewport: VIEWPORT,
+        theme: 'default',
+        storageState: null,
+        signal: controller.signal,
+      });
+      setTimeout(() => {
+        controller.abort();
+      }, delay);
+      await expect(shot).rejects.toThrow(/abort/i);
+      // The page holds its load for 2 s; an abort that went unseen would wait it out.
+      expect(Date.now() - started).toBeLessThan(1_500);
+    }
+    const aborted = new AbortController();
+    aborted.abort();
+    await expect(camera.signIn({ appUrl, url: '/login', signal: aborted.signal })).rejects.toThrow(
+      /abort/i,
+    );
+  }, 60_000);
+
   it('says the app did not answer, for a shot and for a sign-in', async () => {
     const closed = createServer();
     const port = await listen(closed, '127.0.0.1', 0);

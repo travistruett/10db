@@ -50,4 +50,43 @@ describe('withDeadline', () => {
     ).rejects.toThrow('net::ERR_ABORTED');
     expect(clock.pendingTimers()).toBe(0);
   });
+
+  it('settles with the abort when the signal aborts, and tells the work to stop', async () => {
+    const clock = new ManualClock();
+    const controller = new AbortController();
+    let stopped = 0;
+    const settled = withDeadline(
+      clock,
+      1_000,
+      () => new Promise<string>(() => undefined),
+      () => {
+        stopped += 1;
+      },
+      controller.signal,
+    );
+    controller.abort();
+    await expect(settled).rejects.toThrow(/abort/i);
+    expect(stopped).toBe(1);
+    expect(clock.pendingTimers()).toBe(0);
+  });
+
+  it('never starts the work for a signal aborted already', async () => {
+    const clock = new ManualClock();
+    const controller = new AbortController();
+    controller.abort();
+    let started = 0;
+    await expect(
+      withDeadline(
+        clock,
+        1_000,
+        () => {
+          started += 1;
+          return Promise.resolve('shot');
+        },
+        () => undefined,
+        controller.signal,
+      ),
+    ).rejects.toThrow(/abort/i);
+    expect(started).toBe(0);
+  });
 });
