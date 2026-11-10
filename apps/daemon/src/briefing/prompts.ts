@@ -320,7 +320,7 @@ const PASS_RULES = [
 
 /** Told to a session whose pages 10db pictures for the builder (Workbench spec §10 "Which pages"). */
 const PICTURES_RULE =
-  "10db takes pictures of your task's pages for the builder, by their routes. When a page you changed has no route of its own here (a route with a parameter, or a change only in shared code), name it with report_pages, such as /people/42: at most four routes a turn.";
+  "10db takes pictures of your task's pages for the builder, by their routes. When a page you changed has no route of its own here (a route with a parameter, or a change only in shared code), name it with report_pages: a page area's route with its parameter filled in, such as /people/42 for /people/[id]. Any other path is refused; at most four routes a turn.";
 
 function readOnlyRules(role: StepRole): string[] {
   return [

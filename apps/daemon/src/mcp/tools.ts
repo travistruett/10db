@@ -180,7 +180,7 @@ export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
     'Commit the named paths (and only those) under the repository lock. Returns the commit SHA. Retry with the same opId if unsure it completed.',
   record_evidence: 'Attach verification output: a command you ran, its exit code and a summary.',
   report_pages:
-    "Name the app's routes this turn's pictures should load, beside the page areas your task names: a route with a parameter (/people/42), or the pages a change only in shared code shows. Each is a path on the project's app address; at most four a turn (a task outside a Workbench pass: a run). 10db only takes pictures for the builder; nothing is sent back to you.",
+    "Name the app's routes this turn's pictures should load, beyond the page areas your task names: a page area's route with its parameter filled in (/people/42 for /people/[id]), or the pages a change only in shared code shows. Only a page area's route is loaded, a parameter standing for one segment, with any query kept; any other path is refused. At most four a turn (a task outside a Workbench pass: a run); a read-only step can't call it. 10db only takes pictures for the builder; nothing is sent back to you.",
   write_handoff:
     'Write the six-part handoff when 10db asks you to hand off, or when you must stop with work left: name that work under progress.notDone. 10db adds the git facts. End your turn after calling it. Never call it to finish a step: ending your turn finishes the step, and a handoff that names nothing left ends it too.',
   complete_step:
@@ -890,10 +890,16 @@ export function createToolHandlers(
               ? listTaskPageReports(ctx.tx, { taskId: task.id, turnId })
               : listTaskPageReports(ctx.tx, { taskId: task.id, workstreamId })
           ).map((r) => r.route);
+          const readOnly =
+            currentStep(getWorkstreamRow(ctx.tx, workstreamId)).tools === ToolAccess.ReadOnly;
           const judged = judgeReportedRoutes({
             appUrl: project.appUrl,
-            refusal:
-              inPass || task.workspaceMode === WorkspaceMode.Shared
+            areaRoutes: project.areas.flatMap((a) =>
+              a.role === AreaRole.Page && a.route !== undefined ? [a.route] : [],
+            ),
+            refusal: readOnly
+              ? 'This step is read-only; only an implement step names pages for pictures.'
+              : inPass || task.workspaceMode === WorkspaceMode.Shared
                 ? null
                 : 'Pictures are taken only of tasks in Your folder; this task runs in a separate copy.',
             per: inPass ? 'turn' : 'run',

@@ -1,21 +1,80 @@
-import { WorkspaceMode, type TaskDto, type WorkstreamId } from '@10db/contracts';
-import { insertSession, insertWorkstream, listTaskPageReports, patchProject } from '@10db/db';
+import {
+  WorkspaceMode,
+  type TaskDto,
+  type WorkstreamId,
+  type WorkstreamStep,
+} from '@10db/contracts';
+import {
+  insertSession,
+  insertWorkstream,
+  listTaskPageReports,
+  patchProject,
+  patchWorkstream,
+} from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
-import { openPassWorld, type PassWorld } from '../../test/pass-world';
+import { PASS_PROJECT, openPassWorld, type PassWorld } from '../../test/pass-world';
 import { silentLogger } from '../log';
 import { ClaimWaits } from './claim-wait';
+import { matchesAreaRoute } from './report-pages';
 import { createToolHandlers } from './tools';
 
 // Workbench spec §10 "Which pages": an agent names routes its pictures should load with
-// report_pages, a path on the app's address each, at most four a turn (a pass page) or a run (a task
-// outside a pass); the rest are refused, each with why. Real pass, folder and database.
+// report_pages. The browser loads them signed in as the builder, so a route is kept only when it is
+// a page area's route, a parameter segment standing for one concrete segment; at most four a turn
+// (a pass page) or a run (a task outside a pass); the rest are refused, each with why.
 
 const APP = 'http://localhost:8800';
 
-let w: PassWorld;
-afterEach(() => {
-  w.close();
+describe('matchesAreaRoute', () => {
+  it.each([
+    { name: 'the exact route', area: '/people', route: '/people', matches: true },
+    {
+      name: 'a parameter as one segment',
+      area: '/people/[id]',
+      route: '/people/42',
+      matches: true,
+    },
+    { name: 'a colon parameter', area: '/org/:org/teams', route: '/org/acme/teams', matches: true },
+    {
+      name: 'a catch-all as one segment',
+      area: '/docs/[...slug]',
+      route: '/docs/intro',
+      matches: true,
+    },
+    {
+      name: 'a query string kept',
+      area: '/people/[id]',
+      route: '/people/42?tab=notes',
+      matches: true,
+    },
+    {
+      name: "the path of an area route's query",
+      area: '/settings?tab=all',
+      route: '/settings',
+      matches: true,
+    },
+    { name: 'a deeper path', area: '/people/[id]', route: '/people/42/delete', matches: false },
+    { name: 'a sibling path', area: '/people', route: '/peoples', matches: false },
+    { name: 'another page', area: '/people', route: '/admin', matches: false },
+    { name: 'a parameter left empty', area: '/people/[id]', route: '/people/', matches: false },
+    { name: 'the parameter itself', area: '/people/[id]', route: '/people/[id]', matches: false },
+    { name: 'a .. segment', area: '/people/[id]', route: '/people/..', matches: false },
+    { name: 'a .. inside a longer path', area: '/a/[x]/[y]', route: '/a/../admin', matches: false },
+    { name: 'an encoded ..', area: '/people/[id]', route: '/people/%2e%2e', matches: false },
+    {
+      name: 'an encoded slash',
+      area: '/people/[id]',
+      route: '/people/42%2Fdelete',
+      matches: false,
+    },
+    { name: 'an encoded backslash', area: '/people/[id]', route: '/people/42%5Cx', matches: false },
+    { name: 'a bad escape', area: '/people/[id]', route: '/people/%zz', matches: false },
+  ])('$name: $matches', ({ area, route, matches }) => {
+    expect(matchesAreaRoute(area, route)).toBe(matches);
+  });
 });
+
+let w: PassWorld;
 
 /** The lane tools of `workstreamId`'s session, as its MCP server builds them. */
 function toolsOf(world: PassWorld, workstreamId: WorkstreamId) {
@@ -46,8 +105,16 @@ function toolsOf(world: PassWorld, workstreamId: WorkstreamId) {
   );
 }
 
+/** The pass world, with a page whose route takes a parameter. */
 async function world(appUrl: string | null = APP): Promise<void> {
-  w = await openPassWorld();
+  w = await openPassWorld({
+    project: {
+      areas: [
+        ...(PASS_PROJECT.areas ?? []),
+        { name: 'person', globs: ['src/person/**'], role: 'page', route: '/people/[id]' },
+      ],
+    },
+  });
   w.h.state.write((ctx) => patchProject(ctx, w.h.project.id, { appUrl }));
 }
 
@@ -60,22 +127,52 @@ function ordinaryRun(mode: WorkspaceMode): { task: TaskDto; run: WorkstreamId } 
   return { task, run };
 }
 
+const step = (role: 'implement' | 'review'): WorkstreamStep => ({
+  role,
+  personaId: null,
+  personaName: role,
+  tools: role === 'implement' ? 'edit' : 'read_only',
+  score: role === 'implement' ? 'coding' : 'intelligence',
+  profileId: null,
+  model: 'sonnet',
+  effort: 'medium',
+  need: 40,
+  reason: 'test',
+  overBudget: false,
+  pinned: false,
+  status: 'running',
+  attempts: 0,
+  startedAt: null,
+  sessionFloor: 0,
+  result: null,
+  earlier: [],
+  sentBack: 0,
+  setting: null,
+});
+
 describe('report_pages', () => {
-  it('keeps routes on the app for the turn, and refuses the rest, each with why', async () => {
+  afterEach(() => {
+    w.close();
+  });
+
+  it("keeps a page area's routes for the turn, and refuses the rest, each with why", async () => {
     await world();
     const turn = w.startTurn(w.people);
     const tools = toolsOf(w, w.runOf(w.people));
     const out = await tools.report_pages({
       opId: 'op-pages-01',
-      routes: ['/people/42', 'people', '/people/[id]', `${APP}/people`],
+      routes: ['/people/42', 'people', '/people/[id]', '/api/people/42/delete'],
     });
     expect(out.accepted).toEqual(['/people/42']);
-    expect(out.refused.map((r) => r.route)).toEqual(['people', '/people/[id]', `${APP}/people`]);
-    expect(out.refused.map((r) => r.reason)).toEqual([
-      expect.stringMatching(/path on the app/),
-      expect.stringMatching(/parameter filled in/),
-      expect.stringMatching(/path on the app/),
+    expect(out.refused.map((r) => r.route)).toEqual([
+      'people',
+      '/people/[id]',
+      '/api/people/42/delete',
     ]);
+    const reasons = out.refused.map((r) => r.reason);
+    expect(reasons[0]).toMatch(/path on the app/);
+    expect(reasons[1]).toMatch(/parameter filled in/);
+    expect(reasons[2]).toMatch(/not a page area's route/);
     expect(
       listTaskPageReports(w.h.store.db, { taskId: w.people.id, turnId: turn.id }).map(
         (r) => r.route,
@@ -83,7 +180,7 @@ describe('report_pages', () => {
     ).toEqual(['/people/42']);
 
     // The same call again answers the same and keeps nothing more.
-    expect(await tools.report_pages({ opId: 'op-pages-01', routes: ['/x'] })).toEqual(out);
+    expect(await tools.report_pages({ opId: 'op-pages-01', routes: ['/people/7'] })).toEqual(out);
     expect(
       listTaskPageReports(w.h.store.db, { taskId: w.people.id, turnId: turn.id }),
     ).toHaveLength(1);
@@ -93,25 +190,34 @@ describe('report_pages', () => {
     await world();
     const turn = w.startTurn(w.people);
     const tools = toolsOf(w, w.runOf(w.people));
-    await tools.report_pages({ opId: 'op-pages-01', routes: ['/a', '/b', '/c'] });
-    const out = await tools.report_pages({ opId: 'op-pages-02', routes: ['/a', '/d', '/e'] });
-    expect(out.accepted).toEqual(['/a', '/d']);
-    expect(out.refused.map((r) => r.route)).toEqual(['/e']);
+    await tools.report_pages({
+      opId: 'op-pages-01',
+      routes: ['/people/1', '/people/2', '/people/3'],
+    });
+    const out = await tools.report_pages({
+      opId: 'op-pages-02',
+      routes: ['/people/1', '/people/4', '/people/5'],
+    });
+    expect(out.accepted).toEqual(['/people/1', '/people/4']);
+    expect(out.refused.map((r) => r.route)).toEqual(['/people/5']);
     expect(out.refused[0]?.reason).toMatch(/four routes/);
     expect(
       listTaskPageReports(w.h.store.db, { taskId: w.people.id, turnId: turn.id }).map(
         (r) => r.route,
       ),
-    ).toEqual(['/a', '/b', '/c', '/d']);
+    ).toEqual(['/people/1', '/people/2', '/people/3', '/people/4']);
   });
 
   it("counts an ordinary task's routes over its run", async () => {
     await world();
     const { task, run } = ordinaryRun(WorkspaceMode.Shared);
     const tools = toolsOf(w, run);
-    await tools.report_pages({ opId: 'op-pages-01', routes: ['/a', '/b', '/c', '/d'] });
-    const out = await tools.report_pages({ opId: 'op-pages-02', routes: ['/e'] });
-    expect(out.refused.map((r) => r.route)).toEqual(['/e']);
+    await tools.report_pages({
+      opId: 'op-pages-01',
+      routes: ['/people/1', '/people/2', '/people/3', '/people/4'],
+    });
+    const out = await tools.report_pages({ opId: 'op-pages-02', routes: ['/people/5'] });
+    expect(out.refused.map((r) => r.route)).toEqual(['/people/5']);
     expect(out.refused[0]?.reason).toMatch(/four routes/);
     expect(listTaskPageReports(w.h.store.db, { taskId: task.id, workstreamId: run })).toHaveLength(
       4,
@@ -130,9 +236,21 @@ describe('report_pages', () => {
     await world(appUrl);
     const run = mode === null ? w.runOf(w.people) : ordinaryRun(mode).run;
     if (mode === null) w.startTurn(w.people);
-    const out = await toolsOf(w, run).report_pages({ opId: 'op-pages-01', routes: ['/a'] });
+    const out = await toolsOf(w, run).report_pages({ opId: 'op-pages-01', routes: ['/people'] });
     expect(out.accepted).toEqual([]);
-    expect(out.refused.map((r) => r.route)).toEqual(['/a']);
+    expect(out.refused.map((r) => r.route)).toEqual(['/people']);
     expect(out.refused[0]?.reason).toMatch(why);
+  });
+
+  it('refuses every route in a read-only step, and keeps none', async () => {
+    await world();
+    const { task, run } = ordinaryRun(WorkspaceMode.Shared);
+    w.h.state.write((ctx) => {
+      patchWorkstream(ctx, run, null, { steps: [step('implement'), step('review')], stepIndex: 1 });
+    });
+    const out = await toolsOf(w, run).report_pages({ opId: 'op-pages-01', routes: ['/people'] });
+    expect(out.accepted).toEqual([]);
+    expect(out.refused[0]?.reason).toMatch(/read-only/);
+    expect(listTaskPageReports(w.h.store.db, { taskId: task.id, workstreamId: run })).toEqual([]);
   });
 });
