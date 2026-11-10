@@ -86,6 +86,12 @@ describe('the capture queue', () => {
       waiting: [beforeA, afterA],
     },
     {
+      name: 'a before or after asked again while it loads is the same request',
+      events: [ask(beforeA), START, ask(beforeA)],
+      waiting: [],
+      loading: beforeA,
+    },
+    {
       name: "the task's next turn drops its waiting turn picture",
       events: [ask(turnA1), ask(turnB), { kind: 'turn_started', taskId: a }],
       waiting: [turnB],

@@ -10,7 +10,7 @@ import {
   type TaskScreenDto,
   type TaskScreenId,
 } from '@10db/contracts';
-import { and, asc, desc, eq, isNull } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, isNull, lte, sql } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { DbReader, WriteContext } from './store';
 import { getTask } from './tasks';
@@ -140,4 +140,82 @@ export function hashNamed(db: DbReader, sha256: string): boolean {
       .where(and(eq(schema.taskScreens.sha256, sha256), isNull(schema.taskScreens.prunedAt)))
       .get() !== undefined
   );
+}
+
+/** Whether the task has an unpruned picture of `kind`. */
+export function hasTaskScreen(db: DbReader, taskId: TaskId, kind: ScreenKind): boolean {
+  return (
+    db
+      .select({ id: schema.taskScreens.id })
+      .from(schema.taskScreens)
+      .where(
+        and(
+          eq(schema.taskScreens.taskId, taskId),
+          eq(schema.taskScreens.kind, kind),
+          isNull(schema.taskScreens.prunedAt),
+        ),
+      )
+      .get() !== undefined
+  );
+}
+
+/** What the before rule reads of a task: its pass turns and sessions on every run, and its kept work. */
+export function taskStartFacts(
+  db: DbReader,
+  taskId: TaskId,
+): { readonly turns: number; readonly sessions: number; readonly keptWorkSha: string | null } {
+  const turns =
+    db
+      .select({ n: count() })
+      .from(schema.passTurns)
+      .where(eq(schema.passTurns.taskId, taskId))
+      .get()?.n ?? 0;
+  const sessions =
+    db
+      .select({ n: count() })
+      .from(schema.sessions)
+      .innerJoin(schema.workstreams, eq(schema.workstreams.id, schema.sessions.workstreamId))
+      .where(eq(schema.workstreams.taskId, taskId))
+      .get()?.n ?? 0;
+  const task = getTask(db, taskId);
+  const keptWorkSha =
+    db
+      .select({ sha: schema.tasks.keptWorkSha })
+      .from(schema.tasks)
+      .where(eq(schema.tasks.id, task.id))
+      .get()?.sha ?? null;
+  return { turns, sessions, keptWorkSha };
+}
+
+/** The tool calls the task's sessions reported up to `until`, on every run, oldest first. */
+export function listTaskToolCalls(
+  db: DbReader,
+  taskId: TaskId,
+  until: string,
+): { readonly tool: string; readonly at: string }[] {
+  const sessions = db
+    .select({ id: schema.sessions.id })
+    .from(schema.sessions)
+    .innerJoin(schema.workstreams, eq(schema.workstreams.id, schema.sessions.workstreamId))
+    .where(eq(schema.workstreams.taskId, taskId))
+    .all()
+    .map((s) => s.id);
+  if (sessions.length === 0) return [];
+  return db
+    .select({
+      tool: sql<string | null>`json_extract(${schema.events.data}, '$.tool.name')`,
+      at: schema.events.at,
+    })
+    .from(schema.events)
+    .where(
+      and(
+        eq(schema.events.entityType, 'session'),
+        inArray(schema.events.entityId, sessions),
+        eq(schema.events.type, EventType.SessionActivity),
+        lte(schema.events.at, until),
+      ),
+    )
+    .orderBy(asc(schema.events.seq))
+    .all()
+    .flatMap((r) => (r.tool === null ? [] : [{ tool: r.tool, at: r.at }]));
 }

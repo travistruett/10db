@@ -8,6 +8,7 @@ import {
   type PassTurnId,
   type ProjectDto,
   type TaskId,
+  type WorkstreamId,
 } from '@10db/contracts';
 import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -16,7 +17,11 @@ import {
   createTestStore,
   getTaskScreenRow,
   hashNamed,
+  hasTaskScreen,
   insertBuilderMessage,
+  insertSession,
+  listTaskToolCalls,
+  taskStartFacts,
   insertPass,
   insertPassTurn,
   insertTask,
@@ -36,6 +41,7 @@ let close: () => void;
 let project: ProjectDto;
 let taskId: TaskId;
 let turnIds: PassTurnId[];
+let runId: WorkstreamId;
 let clock = new Date('2026-11-10T12:00:00.000Z');
 
 const HASH_A = 'a'.repeat(64);
@@ -72,6 +78,7 @@ beforeEach(() => {
       first: { model: 'claude-sonnet-5-5', effort: 'medium' },
     }),
   ).value.id;
+  runId = workstreamId;
   turnIds = [];
   for (let i = 0; i < 3; i += 1) {
     const turn = store.write((ctx) => {
@@ -247,5 +254,68 @@ describe("a project's picture settings", () => {
   it('starts with the default matrix and no dev login', () => {
     expect(project.screens).toEqual(SCREENS_MATRIX_DEFAULT);
     expect(project.devLoginCommand).toBeNull();
+  });
+});
+
+describe('what the before rule reads', () => {
+  it("counts the task's turns and sessions on every run", () => {
+    expect(taskStartFacts(store.db, taskId)).toEqual({ turns: 3, sessions: 0, keptWorkSha: null });
+    store.write((ctx) =>
+      insertSession(ctx, {
+        workstreamId: runId,
+        provider: 'claude',
+        model: 'm',
+        effort: 'low',
+        mode: 'managed',
+        mcpTokenHash: mintId('Session'),
+      }),
+    );
+    expect(taskStartFacts(store.db, taskId).sessions).toBe(1);
+  });
+
+  it("lists the task's tool calls up to a time", () => {
+    const session = store.write((ctx) =>
+      insertSession(ctx, {
+        workstreamId: runId,
+        provider: 'claude',
+        model: 'm',
+        effort: 'low',
+        mode: 'managed',
+        mcpTokenHash: mintId('Session'),
+      }),
+    ).value;
+    const call = (tool: string | null) => {
+      later();
+      store.write((ctx) => {
+        ctx.emit({
+          type: EventType.SessionActivity,
+          entityType: 'session',
+          entityId: session.id,
+          data: {
+            workstreamId: runId,
+            kind: tool === null ? 'text' : 'tool',
+            summary: 'x',
+            tool: tool === null ? null : { name: tool, target: 'x' },
+            turn: null,
+          },
+        });
+      });
+      return clock.toISOString();
+    };
+    const read = call('Read');
+    call(null);
+    const write = call('Write');
+    call('Bash');
+    expect(listTaskToolCalls(store.db, taskId, write)).toEqual([
+      { tool: 'Read', at: read },
+      { tool: 'Write', at: write },
+    ]);
+  });
+
+  it('says whether the task has a picture of a kind', () => {
+    expect(hasTaskScreen(store.db, taskId, ScreenKind.Before)).toBe(false);
+    insert({ kind: ScreenKind.Before });
+    expect(hasTaskScreen(store.db, taskId, ScreenKind.Before)).toBe(true);
+    expect(hasTaskScreen(store.db, taskId, ScreenKind.After)).toBe(false);
   });
 });

@@ -64,3 +64,22 @@ export interface PageCamera {
   status(): BrowserStatus;
   close(): Promise<void>;
 }
+
+/** A camera with no browser behind it: refused, saying why; it takes no picture and signs nothing in. */
+export function refusedCamera(problem: string): PageCamera {
+  return {
+    shoot: (input) =>
+      Promise.resolve({
+        outcome: ShotOutcome.Failed,
+        png: null,
+        width: input.viewport.width,
+        height: input.viewport.height,
+        landedUrl: null,
+        overlayText: null,
+        reason: problem,
+      }),
+    signIn: () => Promise.reject(new Error(problem)),
+    status: () => ({ state: 'refused', problem }),
+    close: () => Promise.resolve(),
+  };
+}

@@ -100,7 +100,11 @@ function ask(queue: CaptureQueue, request: CaptureRequest): CaptureStep {
         request,
       ],
     });
-  if (queue.waiting.some((r) => sameAsk(r, request))) return step(queue);
+  if (
+    queue.waiting.some((r) => sameAsk(r, request)) ||
+    (queue.loading !== null && sameAsk(queue.loading, request))
+  )
+    return step(queue);
   return step({ ...queue, waiting: [...queue.waiting, request] });
 }
 
