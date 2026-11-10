@@ -3961,7 +3961,7 @@ export function createGit(opts: GitOptions = {}): Git {
     const target = withRealParent(path);
     const root = opts.worktreeRoot;
     if (!root) throw new WorktreeNotOursError(path, 'no worktree root is configured');
-    let present: ReturnType<typeof lstatSync> | null = null;
+    let present: ReturnType<typeof lstatSync> | null;
     try {
       present = lstatSync(target);
     } catch {
@@ -3987,7 +3987,9 @@ export function createGit(opts: GitOptions = {}): Git {
         samePath(comparablePath(e.path), target),
       );
       if (!entry) {
-        if (present) throw new WorktreeNotOursError(path, 'git lists no worktree there');
+        // Read again under the lock: a removal that held it before this one leaves nothing there.
+        if (existsAsEntry(target))
+          throw new WorktreeNotOursError(path, 'git lists no worktree there');
         pins.delete(target);
         return 'absent';
       }

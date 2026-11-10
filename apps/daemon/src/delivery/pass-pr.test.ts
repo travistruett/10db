@@ -10,6 +10,7 @@ import {
 } from '@10db/contracts';
 import { AbandonStep } from '@10db/contracts';
 import {
+  abandonPassAndBatch,
   findFlowByName,
   setAbandonStep,
   setPassNotice,
@@ -806,9 +807,13 @@ describe('Open Pull Request', () => {
 
 describe('a restart during an Open Pull Request gate', () => {
   // Identifies the process with `ps`, which is setuid: no sandbox can run it.
-  it.skipIf(SANDBOXED)(
-    "reaps the gate the pass's open batch recorded and removes the scratch worktree and branch it left",
-    async () => {
+  it.skipIf(SANDBOXED).each([
+    { name: 'open', abandoned: false },
+    // An Abandon start-up went on with before recovery: the batch is ABANDONED by then.
+    { name: 'abandoned', abandoned: true },
+  ])(
+    "reaps the gate the pass's $name batch recorded and removes the scratch worktree and branch it left",
+    async ({ abandoned }) => {
       setup();
       const { passId, settings } = await openedPass();
       const tip = signOff(settings, 'src/settings/page.tsx', 'signed off\n');
@@ -827,6 +832,11 @@ describe('a restart during an Open Pull Request gate', () => {
         h.state.write((w) =>
           patchBatch(w, batchId, { gatePid: gate.pid, gatePidStart: gate.startedAt }),
         );
+        if (abandoned)
+          h.state.write((w) => {
+            setAbandonStep(w, passId, AbandonStep.Abandoning);
+            abandonPassAndBatch(w, passId);
+          });
 
         await recoverBatches({
           state: h.state,
@@ -842,7 +852,7 @@ describe('a restart during an Open Pull Request gate', () => {
         await gate.exited;
         await waitFor(() => !alive(gate.grandchildPid));
         expect(getBatchRow(h.store.db, batchId)).toMatchObject({
-          state: 'OPEN',
+          state: abandoned ? 'ABANDONED' : 'OPEN',
           gatePid: null,
           gatePidStart: null,
         });
