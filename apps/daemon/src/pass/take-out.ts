@@ -29,6 +29,7 @@ import {
   releaseClaims,
   setTaskKeptWork,
   setTaskStatus,
+  settleTurnsLeaving,
   transitionWorkstream,
   type PassTakeOutRow,
   type TaskKeptWork,
@@ -81,8 +82,8 @@ const listed = (paths: readonly string[]): string => paths.map((p) => `- ${p}`).
 /**
  * Step 5 of a take-out, in the caller's write: the task's run is cancelled from whatever state it is
  * in (a queued one would start an ordinary session in the folder the moment the pass let go of it),
- * its claims released, the task leaves the pass for the Board, open, with its kept work recorded, and
- * the thread says so.
+ * its claims released, every turn of it ended and settled with nothing Ready, the task leaves the
+ * pass for the Board, open, with its kept work recorded, and the thread says so.
  */
 export function leavePassForBoard(
   ctx: WriteContext,
@@ -108,6 +109,8 @@ export function leavePassForBoard(
     releaseClaims(ctx, run);
     clearLease(ctx, run);
   }
+  // No turn of the task is left for a later run of it to finish.
+  settleTurnsLeaving(ctx, input.taskId);
   leavePass(ctx, input.taskId);
   if (task.status !== TaskStatus.Open) setTaskStatus(ctx, input.taskId, TaskStatus.Open);
   setTaskKeptWork(ctx, input.taskId, input.kept);

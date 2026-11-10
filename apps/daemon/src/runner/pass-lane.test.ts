@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  AbandonStep,
   ConflictError,
   InvalidError,
   mintId,
@@ -12,11 +13,15 @@ import {
   type WorkstreamId,
 } from '@10db/contracts';
 import {
+  abandonPassAndBatch,
   acquireClaims,
+  getPass,
+  getTask,
   getWorkstreamRow,
   insertBuilderMessage,
   insertPass,
   insertPassTurn,
+  insertTakeOut,
   insertTask,
   insertWorkstream,
   listInbox,
@@ -29,6 +34,7 @@ import {
   openPassTurn,
   patchProject,
   patchWorkstream,
+  setAbandonStep,
   type WorkstreamRow,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -39,7 +45,7 @@ import { silentLogger } from '../log';
 import { recoverOnStartup, systemProcesses } from '../recovery';
 import { untakenMessages } from './lane-messages';
 import { finishEndedTurn } from './pass-turn';
-import type { PassWorkDeps } from '../pass';
+import { resumePassWork, type PassWorkDeps } from '../pass';
 import { DEFAULT_RUNNER_LIMITS } from './runner';
 import { handoffArgs, isolatedGitEnv, waitFor } from '../../test/fixtures';
 import type { FakeScriptBook } from '../sessions';
@@ -1049,4 +1055,105 @@ describe('a pass page across a restart', () => {
       listInbox(engine.store.db, {}).filter((i) => i.title.startsWith('Turn failed')),
     ).toHaveLength(1);
   });
+});
+
+// Workbench spec §5.4, §12: a take-out or an Abandon a restart cut short goes on at start-up, after
+// recovery, stopping its lanes through the runner itself, and leaves no turn of the task to finish.
+describe('a take-out or Abandon across a restart', () => {
+  /** The daemon stops; `whileDown` writes what it kept; recovery, then the pass work goes on. */
+  async function restartWith(whileDown: () => void): Promise<void> {
+    await engine.runner.stopAll('shutdown');
+    whileDown();
+    const work = passWork();
+    await recoverOnStartup({
+      ...work,
+      processes: systemProcesses,
+      maxRecoveryAttempts: 3,
+      cleanShutdown: false,
+    });
+    await resumePassWork({ ...work, stopLane: (id) => engine.runner.stopPassLane(id) });
+    await work.jobs.idle();
+  }
+
+  it.each<{ name: string; down: (task: TaskDto, pass: PassDto) => void }>([
+    {
+      name: 'a take-out of a page whose turn is open',
+      down: (task, pass) => {
+        engine.state.write((ctx) =>
+          insertTakeOut(ctx, { taskId: task.id, passId: pass.id, drops: [] }),
+        );
+      },
+    },
+    {
+      name: "an Abandon, with the page's turn ended but not kept and Your folder off the pass's branch",
+      down: (task, pass) => {
+        engine.state.write((ctx) => {
+          const open = openPassTurn(ctx.tx, task.id);
+          if (!open) throw new Error('no open turn');
+          endPassTurn(ctx, open.id, { ending: 'ready', replyBody: 'Tidied.' });
+          setAbandonStep(ctx, pass.id, AbandonStep.Abandoning);
+        });
+        git('switch', '-q', 'main');
+      },
+    },
+  ])(
+    '$name: the task leaves with every turn settled, and a later pass runs it',
+    async ({ down }) => {
+      const { task, pass, id } = await openPage([working]);
+      await waitFor(wrote);
+      await restartWith(() => {
+        down(task, pass);
+      });
+
+      const db = engine.store.db;
+      expect(getTask(db, task.id).passId).toBeNull();
+      expect(row(id).state).toBe('CANCELLED');
+      expect(
+        listPassTurns(db, pass.id).map((t) => [
+          t.endedAt !== null,
+          t.settledAt !== null,
+          t.readyAt,
+        ]),
+      ).toEqual([[true, true, null]]);
+
+      // A later pass takes the task, once the first has ended, and runs a turn of its own.
+      git('switch', '-q', '-c', '10db/again-def456');
+      const later = engine.state.write((ctx) => {
+        if (getPass(ctx.tx, pass.id).state === 'OPEN') {
+          setAbandonStep(ctx, pass.id, AbandonStep.Abandoning);
+          abandonPassAndBatch(ctx, pass.id);
+        }
+        const opened = insertPass(ctx, {
+          id: mintId('Pass'),
+          projectId: engine.project.id,
+          name: 'Again',
+          pageCap: 4,
+          returnBranch: 'main',
+          startSha: git('rev-parse', 'HEAD'),
+          branch: '10db/again-def456',
+          baseBranch: 'main',
+          repo: null,
+          taskIds: [task.id],
+          dirt: [],
+        });
+        const ws = insertWorkstream(ctx, task.id, {
+          batchId: opened.batch.id,
+          first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        });
+        insertBuilderMessage(ctx, task.id, { body: 'Tidy it again', files: [] });
+        return { pass: opened.pass, id: ws.id };
+      });
+      engine.launch(later.id);
+      // Its session takes the message and works the page in a turn of its own: the earlier run's
+      // turns are nothing for it to finish.
+      await waitFor(
+        () => engine.adapter.observations.filter((o) => o.kind === 'tool_allowed').length === 2,
+      );
+      expect(row(later.id).state).toBe('RUNNING');
+      expect(untakenMessages(db, task.id)).toEqual([]);
+      expect(
+        listPassTurns(db, later.pass.id).map((t) => [t.seq, t.workstreamId, t.endedAt]),
+      ).toEqual([[2, later.id, null]]);
+    },
+  );
 });
