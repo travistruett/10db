@@ -1,10 +1,12 @@
 import { routeUrl, ScreenTheme, type AppUrl } from '@10db/contracts';
 import type { Browser, BrowserContext, Page, Response } from 'playwright-core';
+import { systemClock, type Clock } from '../clock';
 import type { Logger } from '../log';
 import { NO_ANSWER, NO_ANSWER_HEADER, type AppProxy } from './app-proxy';
 import type { BrowserHost } from './browser-host';
 import { ShotOutcome, type PageCamera, type Shot } from './camera';
 import { requestAllowed } from './origin-guard';
+import { DeadlineError, withDeadline } from './deadline';
 import { addressForLog, loadFailure } from './load-failure';
 import { capOverlayText, OVERLAY_SELECTORS } from './overlay';
 import { shotOutcome, type PageLoad } from './shot-outcome';
@@ -14,6 +16,10 @@ import { StorageState } from './storage-state';
 const LOAD_TIMEOUT_MS = 30_000;
 /** How long a loaded page gets to go quiet, and its fonts to load, before it is shot anyway. */
 const SETTLE_TIMEOUT_MS = 5_000;
+/** How long one shot or sign-in may take in all, whatever the page does. */
+export const SHOT_DEADLINE_MS = 90_000;
+/** How long closing a context may take before it is left to the browser. */
+const CLOSE_TIMEOUT_MS = 10_000;
 /** How long reading an overlay's text may take. */
 const OVERLAY_READ_MS = 1_000;
 
@@ -97,22 +103,30 @@ async function load(page: Page, url: string): Promise<PageLoad> {
   return { error: null, landedUrl: page.url(), status, overlayText: await overlayOn(page) };
 }
 
+/** What one shot or sign-in runs with. */
+interface ContextRun {
+  readonly browser: Browser;
+  readonly proxy: AppProxy;
+  readonly appUrl: AppUrl;
+  readonly signal: AbortSignal;
+  readonly logger: Logger;
+  readonly clock: Clock;
+  readonly deadlineMs: number;
+}
+
 /**
- * Runs `fn` in a fresh context with the proxy letting `appUrl` through, closing the context when it
- * ends or `signal` aborts. Every context refuses downloads, blocks service workers and records nothing.
+ * Runs `fn` in a fresh context with the proxy letting the app through, and settles within the run's
+ * deadline whatever the page does: past it, or when `signal` aborts, the context is closed. Every
+ * context refuses downloads, blocks service workers and records nothing.
  */
 async function inContext<T>(
-  browser: Browser,
-  proxy: AppProxy,
-  appUrl: AppUrl,
-  signal: AbortSignal,
-  logger: Logger,
+  run: ContextRun,
   options: Parameters<Browser['newContext']>[0],
   fn: (context: BrowserContext) => Promise<T>,
 ): Promise<T> {
-  signal.throwIfAborted();
-  proxy.allow(appUrl);
-  const context = await browser.newContext({
+  run.signal.throwIfAborted();
+  run.proxy.allow(run.appUrl);
+  const context = await run.browser.newContext({
     ...options,
     acceptDownloads: false,
     serviceWorkers: 'block',
@@ -120,21 +134,55 @@ async function inContext<T>(
   const stop = (): void => {
     void context.close().catch(() => undefined);
   };
-  signal.addEventListener('abort', stop, { once: true });
+  run.signal.addEventListener('abort', stop, { once: true });
   try {
-    await guard(context, appUrl, logger);
-    const result = await fn(context);
-    signal.throwIfAborted();
-    return result;
+    return await withDeadline(
+      run.clock,
+      run.deadlineMs,
+      async () => {
+        await guard(context, run.appUrl, run.logger);
+        const result = await fn(context);
+        run.signal.throwIfAborted();
+        return result;
+      },
+      stop,
+    );
   } finally {
-    signal.removeEventListener('abort', stop);
-    await context.close().catch(() => undefined);
+    run.signal.removeEventListener('abort', stop);
+    await withDeadline(
+      run.clock,
+      CLOSE_TIMEOUT_MS,
+      () => context.close(),
+      () => undefined,
+    ).catch(() => undefined);
   }
 }
 
+export interface PlaywrightCameraOptions {
+  readonly clock?: Clock;
+  /** How long one shot or sign-in may take, from its fresh context to its answer. */
+  readonly deadlineMs?: number;
+}
+
 /** The camera on the daemon's pinned Chromium. One shot or sign-in runs at a time (`BrowserHost.use`). */
-export function createPlaywrightCamera(host: BrowserHost<Browser>, logger: Logger): PageCamera {
+export function createPlaywrightCamera(
+  host: BrowserHost<Browser>,
+  logger: Logger,
+  options: PlaywrightCameraOptions = {},
+): PageCamera {
   const log = logger.child({ module: 'pictures' });
+  const clock = options.clock ?? systemClock;
+  const deadlineMs = options.deadlineMs ?? SHOT_DEADLINE_MS;
+  const settleLine = `did not settle within ${String(Math.round(deadlineMs / 1000))} s`;
+  const runOf = (browser: Browser, proxy: AppProxy, appUrl: AppUrl, signal: AbortSignal) => ({
+    browser,
+    proxy,
+    appUrl,
+    signal,
+    logger: log,
+    clock,
+    deadlineMs,
+  });
   return {
     async shoot({ appUrl, route, viewport, theme, storageState, signal }) {
       const failed = (reason: string, landedUrl: string | null = null): Shot => ({
@@ -148,13 +196,9 @@ export function createPlaywrightCamera(host: BrowserHost<Browser>, logger: Logge
       });
       const url = routeUrl(appUrl, route);
       if (url === null) return failed(`${route} is not a route on ${appUrl}`);
-      return host.use((browser, proxy) =>
+      const shot = host.use((browser, proxy) =>
         inContext(
-          browser,
-          proxy,
-          appUrl,
-          signal,
-          log,
+          runOf(browser, proxy, appUrl, signal),
           {
             viewport: { width: viewport.width, height: viewport.height },
             deviceScaleFactor: 1,
@@ -187,6 +231,12 @@ export function createPlaywrightCamera(host: BrowserHost<Browser>, logger: Logge
           },
         ),
       );
+      try {
+        return await shot;
+      } catch (error) {
+        if (error instanceof DeadlineError) return failed(`the page ${settleLine}`);
+        throw error;
+      }
     },
 
     async signIn({ appUrl, url, signal }) {
@@ -199,8 +249,8 @@ export function createPlaywrightCamera(host: BrowserHost<Browser>, logger: Logge
       if (target.origin !== appUrl) {
         throw new SignInError(`the dev login's address is not on ${appUrl}`);
       }
-      return host.use((browser, proxy) =>
-        inContext(browser, proxy, appUrl, signal, log, {}, async (context) => {
+      const signedIn = host.use((browser, proxy) =>
+        inContext(runOf(browser, proxy, appUrl, signal), {}, async (context) => {
           const page = await context.newPage();
           let response: Response | null;
           try {
@@ -232,6 +282,14 @@ export function createPlaywrightCamera(host: BrowserHost<Browser>, logger: Logge
           return StorageState.parse(await context.storageState());
         }),
       );
+      try {
+        return await signedIn;
+      } catch (error) {
+        if (error instanceof DeadlineError) {
+          throw new SignInError(`the dev login's address ${settleLine}`);
+        }
+        throw error;
+      }
     },
 
     status: () => host.status(),

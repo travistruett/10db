@@ -5,6 +5,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type { AppUrl } from '@10db/contracts';
+import type { Browser } from 'playwright-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { WebSocketServer } from 'ws';
 import { tempDir, waitForAsync, type TempDir } from '../../test/fixtures';
@@ -14,7 +15,7 @@ import { downloadFile, ensurePinned, extractZipWithTar, liveTestDataDir } from '
 import type { Logger } from '../log';
 import { createLedgerSweep, systemProcessTable, type LedgerSweep } from '../sandbox';
 import { BROWSER_PIN } from './browser-pin';
-import { createBrowserHost } from './browser-host';
+import { createBrowserHost, type BrowserHost } from './browser-host';
 import { ShotOutcome, type PageCamera } from './camera';
 import { launchChromium } from './playwright';
 import { createPlaywrightCamera } from './playwright-camera';
@@ -153,6 +154,14 @@ function appHandler(daemonPort: number, udpPort: number) {
           ),
         );
         return;
+      case 'loop':
+        html(
+          page(
+            '<h1>Busy</h1>',
+            "<script>addEventListener('load', () => { setTimeout(() => { for (;;) {} }, 50); });</script>",
+          ),
+        );
+        return;
       case 'boom':
         html(page('<h1>Internal Server Error</h1>'), 500);
         return;
@@ -281,6 +290,7 @@ describe.skipIf(!live)('the pinned browser, live', () => {
   let exe: string;
   let sweep: LedgerSweep;
   let camera: PageCamera;
+  let host: BrowserHost<Browser>;
   let daemon: Awaited<ReturnType<typeof countingDaemon>>;
   let app: Server;
   let appUrl: AppUrl;
@@ -300,7 +310,7 @@ describe.skipIf(!live)('the pinned browser, live', () => {
     mkdirSync(ledgerRoot);
     sweep = createLedgerSweep(ledgerRoot, { table: systemProcessTable });
     const logger = recordingLogger(logs);
-    const host = createBrowserHost({
+    host = createBrowserHost({
       dataDir: join(dir.path, 'data'),
       ledgers: { sweep, root: ledgerRoot },
       processes: { table: systemProcessTable },
@@ -461,6 +471,26 @@ describe.skipIf(!live)('the pinned browser, live', () => {
     expect(all.filter((p) => p.args.includes('--no-sandbox'))).toEqual([]);
     expect(renderers.filter((p) => !p.args.includes('--seatbelt-client='))).toEqual([]);
   }, 60_000);
+
+  it('settles a shot and a sign-in of a page that never stops running, and shoots again after', async () => {
+    const hasty = createPlaywrightCamera(host, recordingLogger(logs), { deadlineMs: 8_000 });
+    const started = Date.now();
+    const shot = await hasty.shoot({
+      appUrl,
+      route: '/loop',
+      viewport: VIEWPORT,
+      theme: 'default',
+      storageState: null,
+      signal: new AbortController().signal,
+    });
+    expect(shot).toMatchObject({ outcome: ShotOutcome.Failed, png: null });
+    expect(shot.reason).toMatch(/did not settle/);
+    await expect(
+      hasty.signIn({ appUrl, url: '/loop', signal: new AbortController().signal }),
+    ).rejects.toThrow(/did not settle/);
+    expect(Date.now() - started).toBeLessThan(40_000);
+    expect((await shoot('/clean')).outcome).toBe(ShotOutcome.Clean);
+  }, 90_000);
 
   it('says the app did not answer, for a shot and for a sign-in', async () => {
     const closed = createServer();
