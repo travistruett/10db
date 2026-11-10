@@ -1123,6 +1123,22 @@ describe('a Workbench pass in Your folder', () => {
       carded: ['README.md', 'docs/before.md', 'docs/edited.md'],
     },
     {
+      name: 'a file edited since, with the dirt ref moved to a commit that holds the edit',
+      since: ({ id }) => {
+        writeFileSync(join(repo.path, 'docs', 'edited.md'), 'later');
+        const env = { ...isolatedGitEnv(), GIT_INDEX_FILE: join(repo.path, '.git', 'moved-index') };
+        const git = (...args: string[]) =>
+          execFileSync('git', ['-C', repo.path, ...args], { env })
+            .toString()
+            .trim();
+        git('read-tree', passDirtRef(id));
+        git('update-index', '--add', 'docs/edited.md');
+        const moved = git('commit-tree', '-p', passDirtRef(id), '-m', 'moved', git('write-tree'));
+        git('update-ref', passDirtRef(id), moved);
+      },
+      carded: ['docs/edited.md'],
+    },
+    {
       name: 'a file the folder did not hold',
       since: () => {
         touch('docs/notes.md');

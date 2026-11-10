@@ -313,7 +313,8 @@ export function createWatcher(deps: {
   /**
    * `paths` without each that still holds what the project's pass accounts for in Your folder `root`
    * (`accountedAt`): the folder's dirt from before the pass, and a shared change its turn kept and whose
-   * hold let the area go, are no write made in it. An entry counts as
+   * hold let the area go, are no write made in it. The content must be the one the database recorded,
+   * and the mode the one its commit holds. An entry counts as
    * held only when its mode and content both match, so an executable bit or a link holding the same
    * bytes is a write. A sensitive path is kept, as is every path when git can't read either side.
    */
@@ -324,25 +325,27 @@ export function createWatcher(deps: {
   ): Promise<string[]> {
     const pass = findOpenPass(db, project.id);
     if (!pass) return [...paths];
-    const revs = accountedAt({
+    const accounted = accountedAt({
       dirtRef: passDirtRef(pass.id),
       dirt: listPassDirt(db, pass.id),
       shared: listSharedChanges(db, pass.id),
     });
-    const named = paths.filter((rel) => revs.has(rel) && !isSensitivePath(rel));
+    const named = paths.filter((rel) => accounted.has(rel) && !isSensitivePath(rel));
     if (named.length === 0) return [...paths];
-    const byRev = new Map<string, string[]>();
+    const byCommit = new Map<string, string[]>();
     for (const rel of named) {
-      const rev = revs.get(rel);
-      if (rev !== undefined) byRev.set(rev, [...(byRev.get(rev) ?? []), rel]);
+      const at = accounted.get(rel)?.at;
+      if (at !== undefined) byCommit.set(at, [...(byCommit.get(at) ?? []), rel]);
     }
     const same = new Set<string>();
     try {
       const onDisk = new Map((await deps.git.hashOnDisk(root, named)).map((f) => [f.path, f]));
-      for (const [rev, group] of byRev)
-        for (const kept of await deps.git.blobsAt(root, rev, group)) {
+      for (const [at, group] of byCommit)
+        for (const kept of await deps.git.blobsAt(root, at, group)) {
           const disk = onDisk.get(kept.path);
-          if (disk?.blob === kept.blob && disk.mode === kept.mode) same.add(kept.path);
+          const want = accounted.get(kept.path);
+          if (disk === undefined || want === undefined) continue;
+          if (disk.blob === want.blob && disk.mode === kept.mode) same.add(kept.path);
         }
     } catch (error) {
       deps.logger.warn({ root, err: String(error) }, 'could not read what the pass recorded');

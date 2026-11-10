@@ -80,7 +80,12 @@ describe('passWrites', () => {
 
 // Workbench spec §5.1, §7.2: the commit that holds what the pass accounts for at each path of Your folder.
 const DIRT = 'refs/10db/passes/pas_1/dirt';
-const change = (seq: number, sha: string, paths: string[]) => ({ seq, sha, paths });
+const change = (seq: number, sha: string, paths: string[]) => ({
+  seq,
+  sha,
+  paths,
+  blobs: Object.fromEntries(paths.map((path) => [path, `${sha}-blob`])),
+});
 
 const accountedRows: {
   readonly name: string;
@@ -121,8 +126,21 @@ describe('accountedAt', () => {
   it.each(accountedRows)('$name', ({ dirt, shared, want }) => {
     expect(
       Object.fromEntries(
-        accountedAt({ dirtRef: DIRT, dirt: dirt.map((path) => ({ path })), shared }),
+        [
+          ...accountedAt({
+            dirtRef: DIRT,
+            dirt: dirt.map((path) => ({ path, blob: 'dirt-blob' })),
+            shared,
+          }),
+        ].map(([path, { at, blob }]) => [path, `${at} ${String(blob)}`]),
       ),
-    ).toEqual(want);
+    ).toEqual(
+      Object.fromEntries(
+        Object.entries(want).map(([path, at]) => [
+          path,
+          `${at} ${at === DIRT ? 'dirt-blob' : `${at}-blob`}`,
+        ]),
+      ),
+    );
   });
 });

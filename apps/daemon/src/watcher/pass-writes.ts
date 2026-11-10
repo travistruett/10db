@@ -54,22 +54,34 @@ export function passWrites(input: {
   };
 }
 
+/** What the pass accounts for at a path of Your folder. */
+export interface Accounted {
+  /** The commit whose entry gives the path's mode (`Git.blobsAt`). */
+  readonly at: string;
+  /** The content the database recorded for the path; null for a file that is not there. */
+  readonly blob: string | null;
+}
+
 /**
- * The commit that holds what each path of Your folder holds while the pass accounts for it, by path:
- * the newest change on the pass's shared chain that sets it (spec §7.2: its turn's end kept it and let
- * the area go, and it stays in the folder until it lands; a drop is the newest when it put the path
- * back), else the pass's dirt commit for a path its open recorded (spec §5.1). A path still holding
- * that commit's entry, mode and content alike, is no write made in the pass, whatever claim covers it.
+ * What the pass accounts for at each path of Your folder, by path: the newest change on the pass's
+ * shared chain that sets it (spec §7.2: its turn's end kept it and let the area go, and it stays in the
+ * folder until it lands; a drop is the newest when it put the path back), else what the pass's open
+ * recorded of the folder's dirt (spec §5.1). The content is the database's; only the mode is read from
+ * the commit, so a ref moved since accounts for nothing new. A path still holding both is no write made
+ * in the pass, whatever claim covers it.
  */
 export function accountedAt(input: {
   /** The pass's dirt commit, whose tree holds the folder's dirt as the open found it. */
   readonly dirtRef: string;
-  readonly dirt: readonly Pick<PassDirtEntry, 'path'>[];
+  readonly dirt: readonly PassDirtEntry[];
   /** The pass's shared chain, drops included. */
-  readonly shared: readonly Pick<PassSharedChangeDto, 'seq' | 'sha' | 'paths'>[];
-}): Map<string, string> {
-  const at = new Map(input.dirt.map((entry) => [entry.path, input.dirtRef]));
+  readonly shared: readonly Pick<PassSharedChangeDto, 'seq' | 'sha' | 'paths' | 'blobs'>[];
+}): Map<string, Accounted> {
+  const at = new Map<string, Accounted>(
+    input.dirt.map((entry) => [entry.path, { at: input.dirtRef, blob: entry.blob }]),
+  );
   for (const change of [...input.shared].sort((a, b) => a.seq - b.seq))
-    for (const path of change.paths) at.set(path, change.sha);
+    for (const path of change.paths)
+      at.set(path, { at: change.sha, blob: change.blobs[path] ?? null });
   return at;
 }
