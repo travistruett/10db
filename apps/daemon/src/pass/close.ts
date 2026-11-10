@@ -255,9 +255,9 @@ async function settlesAtClose(deps: CloseDeps, pass: PassDto): Promise<boolean> 
  * worktree on the tip; 4 once Your folder is on the pass's branch, the other unfinished pages are
  * taken out, inside the close, so files that keep changing are left and named; 5 where the gate runs
  * in the folder, it runs now; 6 the branch is pushed and its pull request made ready, never set to
- * merge itself; 7 D8's fast-forward; 8 one write ships the batch and closes the pass, settled where
- * nothing waits for a merge, after the signed-off pages' kept refs go. A gate that fails or is
- * aborted ends the job.
+ * merge itself; 7 D8's fast-forward, its step recorded before the move; 8 one write ships the batch
+ * and closes the pass, settled where nothing waits for a merge, after the signed-off pages' kept
+ * refs go. A gate that fails or is aborted ends the job.
  */
 export async function closeSteps(
   deps: CloseDeps,
@@ -401,9 +401,15 @@ export async function closeSteps(
 
   if (step() < CloseStep.FastForwarded) {
     await folderBack(deps, passId, signal, true);
+    closing();
+    // Recorded before the move: from here an Abandon is refused, so none takes over a pass whose
+    // return branch has moved. A rerun moves it again, done where it finds it done.
+    record(CloseStep.FastForwarded);
+  }
+  if (step() < CloseStep.Closed) {
+    await folderBack(deps, passId, signal, true);
     pass = closing();
     await fastForwardReturn(deps, pass);
-    record(CloseStep.FastForwarded);
   }
 
   pass = closing();

@@ -1,6 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  AbandonStep,
+  ConflictError,
   PassClosePageChoice,
   SharedChoiceKind,
   type PassCloseRequest,
@@ -19,6 +21,7 @@ import {
   openHolds,
   patchProject,
   schema,
+  setAbandonStep,
   setClosePlan,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -472,6 +475,35 @@ describe('Close Pass', () => {
     expect(passState()).toBe('CLOSED');
     expect(read('src/people/page.tsx')).toBe('people\n');
     expect(getTask(w.h.store.db, w.people.id).passId).toBeNull();
+  });
+
+  it('refuses an Abandon once its fast-forward may have moved the return branch', async () => {
+    await world({ gateCommand: 'true' });
+    await twoTurns();
+    let abandon: unknown = null;
+    const deps = closeDeps();
+    await confirm({
+      ...deps,
+      git: {
+        ...deps.git,
+        moveBranchCas: async (i) => {
+          const moved = await deps.git.moveBranchCas(i);
+          // The builder asks to Abandon just as the return branch moves.
+          try {
+            w.h.state.write((ctx) => {
+              setAbandonStep(ctx, w.opened.pass.id, AbandonStep.Abandoning);
+            });
+          } catch (error) {
+            abandon = error;
+          }
+          return moved;
+        },
+      },
+    });
+
+    expect(abandon).toBeInstanceOf(ConflictError);
+    expect(passState()).toBe('CLOSED');
+    expect(w.h.git$('rev-parse', 'main')).toBe(w.h.git$('rev-parse', w.branch));
   });
 
   it(
