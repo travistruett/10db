@@ -18,6 +18,7 @@ import {
   ProposalId,
   ProposalKind,
   QuestionCategory,
+  SHARED_ASK_REPLY_CHOICE,
   SharedAskDetail,
   Urgency,
   type CardResolution,
@@ -624,6 +625,15 @@ export function createInboxService(deps: {
           throw new InboxAnswerRefused('Send Back needs a note saying what to change');
         }
       }
+      // A reply to a shared-area question is the builder's words to the agent: it needs some.
+      if (
+        current.kind === InboxKind.Question &&
+        current.state === InboxState.Open &&
+        answer.choice === SHARED_ASK_REPLY_CHOICE &&
+        SharedAskDetail.safeParse(current.detail).success &&
+        (answer.note ?? '').trim() === ''
+      )
+        throw new InboxAnswerRefused('Reply needs a note saying what to tell the agent');
       let afterCommit: (() => void) | undefined;
       const answered = deps.state.write((ctx) => {
         const item = getInboxItem(ctx.tx, id);

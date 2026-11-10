@@ -1,4 +1,5 @@
 import {
+  InboxAnswerRefused,
   SHARED_ASK_ALLOW_CHOICE,
   SHARED_ASK_KEEP_CHOICE,
   SHARED_ASK_REPLY_CHOICE,
@@ -295,5 +296,25 @@ describe("the builder's question before a second task changes a shared area", ()
 
     // The same opId asks again, since the holder is still there: nothing kept answers it.
     expect(await ask(tools)).toMatchObject({ granted: false, waiting: true });
+  });
+
+  it('refuses a reply with no words, and passes a note given with Keep It to This Page on', async () => {
+    w = await openPassWorld();
+    await settingsChangedSrc();
+    const tools = laneTools(w, w.people, new ClaimWaits(), 30);
+    const first = await ask(tools);
+    if (first.granted || first.inboxId === null) throw new Error('no question');
+    const card = first.inboxId;
+
+    expect(() => w.h.inbox.answer(card, { choice: SHARED_ASK_REPLY_CHOICE, note: '  ' })).toThrow(
+      InboxAnswerRefused,
+    );
+    expect(getInboxItem(w.h.store.db, card).state).toBe('OPEN');
+
+    const answer = ask(tools);
+    w.h.inbox.answer(card, { choice: SHARED_ASK_KEEP_CHOICE, note: 'Style it in the page' });
+    const kept = await answer;
+    if (kept.granted) throw new Error('granted');
+    expect(kept.instruction).toMatch(/The builder added: "Style it in the page"/);
   });
 });
