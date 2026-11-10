@@ -123,6 +123,15 @@ describe('projects', () => {
     expect(getProject(store.db, project.id).allowedCommands).toEqual([]);
   });
 
+  it('starts a project with no app address, keeps a patched one and clears it', () => {
+    const project = seedProject(store);
+    expect(getProject(store.db, project.id).appUrl).toBeNull();
+    store.write((ctx) => patchProject(ctx, project.id, { appUrl: 'http://localhost:5173' }));
+    expect(getProject(store.db, project.id).appUrl).toBe('http://localhost:5173');
+    store.write((ctx) => patchProject(ctx, project.id, { appUrl: null }));
+    expect(getProject(store.db, project.id).appUrl).toBeNull();
+  });
+
   it('starts a project without localhost and keeps a patched switch', () => {
     const project = seedProject(store);
     expect(getProject(store.db, project.id).sandboxLoopback).toBe(false);

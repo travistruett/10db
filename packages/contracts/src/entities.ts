@@ -745,6 +745,8 @@ export const ProjectPatch = z
     workspaceMode: z.enum(WorkspaceMode),
     worktreeSeed: WorktreeSeed,
     isolate: Isolate,
+    /** Where Open Page goes; null forgets it. */
+    appUrl: AppUrl.nullable(),
   })
   .partial()
   .refine((p) => Object.keys(p).length > 0, { message: 'Change at least one field' })
