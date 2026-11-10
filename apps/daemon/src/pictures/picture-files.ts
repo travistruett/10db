@@ -14,7 +14,7 @@ const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 const TEMP_SUFFIX = '.part';
 
 /** Where the pictures of every task are kept: `<dataDir>/screens/<2 hex>/<sha256>.png`. */
-export const screensDir = (dataDir: string): string => join(dataDir, 'screens');
+const screensDir = (dataDir: string): string => join(dataDir, 'screens');
 
 const pictureDir = (dataDir: string, sha256: string): string =>
   join(screensDir(dataDir), sha256.slice(0, 2));
@@ -71,22 +71,28 @@ export function keepScreen(
   if (size === null) throw new InvalidError('The browser answered a picture that is not a PNG');
   const { png, ...shown } = screen;
   const file = writePicture(dataDir, png);
-  const kept = state.write((ctx) =>
-    insertTaskScreen(ctx, {
-      ...shown,
-      sha256: file.sha256,
-      size: png.length,
-      width: size.width,
-      height: size.height,
-      storedPath: file.storedPath,
-    }),
-  );
+  let kept: TaskScreenDto | null;
+  try {
+    kept = state.write((ctx) =>
+      insertTaskScreen(ctx, {
+        ...shown,
+        sha256: file.sha256,
+        size: png.length,
+        width: size.width,
+        height: size.height,
+        storedPath: file.storedPath,
+      }),
+    );
+  } catch (error) {
+    removeUnnamed(state.db, dataDir, file.sha256);
+    throw error;
+  }
   if (kept === null) removeUnnamed(state.db, dataDir, file.sha256);
   return kept;
 }
 
 /** Removes the file of `sha256` when no unpruned row names it; answers whether it did. */
-export function removeUnnamed(db: DbReader, dataDir: string, sha256: string): boolean {
+function removeUnnamed(db: DbReader, dataDir: string, sha256: string): boolean {
   if (hashNamed(db, sha256)) return false;
   const path = picturePath(dataDir, sha256);
   if (!existsSync(path)) return false;
