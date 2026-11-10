@@ -13,7 +13,7 @@ import {
   withdrawFolderCard,
 } from './folder';
 import { passBranch, type PassWorkDeps } from './kept-work';
-import { moveToLabel, raiseAbandonCard, withdrawAbandonCard } from './abandon';
+import { abandonLeftFiles, moveToLabel, raiseAbandonCard, withdrawAbandonCard } from './abandon';
 
 const PassCardKindSchema = z.enum(PassCardKind);
 
@@ -70,7 +70,7 @@ async function moveHome(deps: PassWorkDeps, passId: PassId, choice: string): Pro
   const on = await deps.git.currentBranch(repo);
   const { prUrl } = getBatch(db, pass.batchId);
   const again = (why: string): void => {
-    raiseAbandonCard(deps, pass, { on, left: [], pullRequest: prUrl, why });
+    raiseAbandonCard(deps, pass, { on, left: abandonLeftFiles(db, pass), pullRequest: prUrl, why });
   };
   if (on === null) {
     again('check out a branch first: 10db switches only from one');

@@ -36,6 +36,7 @@ afterEach(() => {
 const deps = (world: PassWorld) => ({
   ...world.deps,
   stopLane: (): Promise<void> => Promise.resolve(),
+  wrote: (): Promise<void> => Promise.resolve(),
 });
 
 const folderCards = (world: PassWorld) =>
@@ -181,7 +182,11 @@ describe('resumePassWork', () => {
     ).rejects.toThrow('the daemon died');
     expect(lastTakeOut(w.h.store.db, w.settings.id)?.step).toBe(TakeOutStep.Checked);
 
-    const restarted = { ...w.restart(), stopLane: (): Promise<void> => Promise.resolve() };
+    const restarted = {
+      ...w.restart(),
+      stopLane: (): Promise<void> => Promise.resolve(),
+      wrote: (): Promise<void> => Promise.resolve(),
+    };
     await resumePassWork(restarted);
     await restarted.jobs.idle();
 

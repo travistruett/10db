@@ -16,6 +16,7 @@ import {
   type BatchId,
   type AccountId,
   type PassDto,
+  type PassId,
   type ProjectDto,
   type TaskDto,
   type WorkstreamDto,
@@ -28,6 +29,7 @@ import {
   copyHazardNames,
   countLanes,
   dependenciesDone,
+  findOpenPass,
   getBatch,
   getAccountRow,
   getProject,
@@ -36,6 +38,7 @@ import {
   getWorkstreamRow,
   lastTakeOut,
   listBatches,
+  listProjects,
   listWorkstreams,
   latestPassTurn,
   passHoldingFolder,
@@ -56,6 +59,7 @@ import { batchLaunchVerdict, claimScopeOf, LaunchVerdict } from '../delivery';
 import type { StateStore } from '../events';
 import { existsAsEntry, GitTrustError } from '../git';
 import type { Logger } from '../log';
+import { folderCardOpen, folderSeenOn } from '../pass';
 import { untakenMessages } from '../runner';
 import { roomForLane } from './lane-room';
 import { passLaunch, PassLaunch } from './pass-launch';
@@ -196,6 +200,7 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
     pass: PassDto,
     project: ProjectDto,
     snapshot: CheckoutSnapshot,
+    folderHeld: Set<PassId>,
   ): boolean {
     const takeOut = lastTakeOut(db, task.id);
     const read = snapshot.branches.has(project.repoPath);
@@ -217,7 +222,26 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
     });
     if (verdict !== PassLaunch.Launch)
       opts.logger.debug({ workstreamId: ws.id, passId: pass.id, verdict }, 'pass page held');
+    // A page with a turn to run that Your folder holds back: the pass's card says why.
+    if (verdict === PassLaunch.FolderOff && read) folderHeld.add(pass.id);
     return verdict === PassLaunch.Launch;
+  }
+
+  /**
+   * Each open pass's folder card by this tick's read of Your folder (Workbench spec §5.1, §12): raised
+   * once for a pass whose page has a turn to run and the folder off the pass's branch, and withdrawn
+   * once the folder is back on it, whatever its pages wait for. A folder this tick did not read
+   * changes nothing.
+   */
+  function showPassFolders(snapshot: CheckoutSnapshot, folderHeld: ReadonlySet<PassId>): void {
+    for (const project of listProjects(db)) {
+      const pass = findOpenPass(db, project.id);
+      if (pass?.state !== PassState.Open || !snapshot.branches.has(project.repoPath)) continue;
+      const found = snapshot.branches.get(project.repoPath) ?? null;
+      const on = found === getBatch(db, pass.batchId).branch;
+      if (on || folderHeld.has(pass.id) || folderCardOpen(db, pass))
+        folderSeenOn(opts, pass, found);
+    }
   }
 
   /** A pass task's sessions open between turns, each holding a lane, with when its turn ended. */
@@ -314,6 +338,8 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       waitForSession(ws.id, working);
     };
     const line = listWorkstreams(db, { states: [WorkstreamState.Queued] }).toSorted(queueOrder);
+    // Open passes whose page this tick held for Your folder being off the pass's branch.
+    const folderHeld = new Set<PassId>();
     for (const ws of line) {
       const overCaps = awaited.has(ws.id);
       // At the daemon-wide cap ordinary work waits, unless a warm pass session could close for it;
@@ -333,7 +359,7 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       // A pass task runs a turn only when its pass's rows say so (Workbench spec §5.5), while the
       // pass holds it.
       const inPass = passHoldingTask(db, task) ?? null;
-      if (inPass && !passPageRuns(ws, task, inPass, project, snapshot)) continue;
+      if (inPass && !passPageRuns(ws, task, inPass, project, snapshot, folderHeld)) continue;
       const batch = ws.batchId ? getBatch(db, ws.batchId) : null;
       // Nothing else runs in Your folder while a pass holds it (W9): the task waits, saying so.
       const holding =
@@ -450,6 +476,7 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       launched += 1;
       opts.runner.launch(ws.id, fence);
     }
+    showPassFolders(snapshot, folderHeld);
     return launched;
   }
 
@@ -478,6 +505,12 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
         continue;
       if (existsAsEntry(batch.worktreePath)) checkouts.add(batch.worktreePath);
       else missing.add(batch.worktreePath);
+    }
+    // A pass's folder card is withdrawn once Your folder is back, though no page of it is queued.
+    for (const project of listProjects(db)) {
+      const pass = findOpenPass(db, project.id);
+      if (pass?.state === PassState.Open && folderCardOpen(db, pass))
+        checkouts.add(project.repoPath);
     }
     const branches = new Map<string, string | null>();
     for (const path of checkouts) {

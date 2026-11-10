@@ -124,7 +124,7 @@ describe('a take-out that drops a shared change', () => {
     });
 
     const result = await takeOut(
-      { ...w.deps, stopLane: () => Promise.resolve() },
+      { ...w.deps, stopLane: () => Promise.resolve(), wrote: () => Promise.resolve() },
       { taskId: w.settings.id, within: TakeOutWithin.Alone, shared: [{ seq, choice: 'drop' }] },
     );
 
@@ -142,7 +142,7 @@ describe('a take-out that drops a shared change', () => {
     w.write('src/button.ts', 'a button the builder changed\n');
 
     await takeOut(
-      { ...w.deps, stopLane: () => Promise.resolve() },
+      { ...w.deps, stopLane: () => Promise.resolve(), wrote: () => Promise.resolve() },
       { taskId: w.settings.id, within: TakeOutWithin.Alone, shared: [{ seq, choice: 'drop' }] },
     );
 

@@ -45,10 +45,13 @@ import {
   MIGRATIONS_RENUMBERED_NOTICE_KEY,
   MIGRATIONS_UNCARRIED_NOTICE_KEY,
   PASS_RETRY_TURN_CHOICE,
+  PassState,
   PassTurnEnding,
   PassTurnId,
   Provider,
   providerOf,
+  TakeOutStep,
+  type PassId,
   type TaskId,
 } from '@10db/contracts';
 import {
@@ -76,6 +79,7 @@ import {
   insertSession,
   insertSource,
   insertSystemNotice,
+  lastTakeOut,
   listAccountModels,
   listModelProfiles,
   latestHandoffForStep,
@@ -178,7 +182,13 @@ import {
 } from '../inbox';
 import type { Logger } from '../log';
 import { mintSessionToken } from '../mcp';
-import { closeHoldsOf, foldHandEdits, keepTurnWork, type PassWorkDeps } from '../pass';
+import {
+  closeHoldsOf,
+  foldHandEdits,
+  keepTurnWork,
+  passFolderOn,
+  type PassWorkDeps,
+} from '../pass';
 import { allowedToolsFor, laneAutoMode, storableRule } from '../permissions';
 import { takeFoundHostsReading } from '../registries';
 import { retryStep } from '../routing';
@@ -817,6 +827,24 @@ export function createRunner(opts: RunnerOptions): Runner {
   function disarmIdleClose(ctl: Control): void {
     ctl.idleTimer?.cancel();
     ctl.idleTimer = null;
+  }
+
+  /**
+   * Keeps what the builder changed by hand since the page's last turn with the page (Workbench spec
+   * §6.4), before a turn opens, and answers what the agent's next message starts with. An edit that
+   * cannot be kept now (Your folder off the pass's branch) is kept with the turn's work instead, and
+   * the message goes without its note.
+   */
+  async function foldForTurn(id: WorkstreamId): Promise<string | null> {
+    try {
+      return (await foldHandEdits(passWork, { workstreamId: id })).agentNote;
+    } catch (error) {
+      opts.logger.warn(
+        { workstreamId: id, err: error instanceof Error ? error.message : String(error) },
+        "the builder's hand edits were not folded; the message goes without its note",
+      );
+      return null;
+    }
   }
 
   /** The provider session the workstream's last session ran, or null when none started. */
@@ -1879,84 +1907,6 @@ export function createRunner(opts: RunnerOptions): Runner {
         message: `The builder's message in this task's thread needs a Claude session, and the project's account "${account.label}" runs Codex, which cannot show that a turn took the message. Move the project to a Claude account and retry.`,
         providerSessionId: savedResumeId,
       };
-    const fed =
-      feedback === null
-        ? null
-        : resumeId === null
-          ? // A fresh session holds no picture: its start clears every mark an earlier one left.
-            outgoingMessage(
-              {
-                ...feedback,
-                files: feedback.files.map((file) => ({ ...file, inlineSent: false })),
-              },
-              0,
-              limits,
-            )
-          : outgoingMessage(
-              feedback,
-              threadInlineBytes(listTaskFileRows(db, task.id), limits),
-              limits,
-            );
-    const digest =
-      feedback === null || resumeId !== null
-        ? null
-        : buildThreadDigest(db, task, {
-            after:
-              contextPack.handoff && briefedFromHandoff(action, contextPack.handoff, evidence)
-                ? contextPack.handoff.createdAt
-                : null,
-            before: feedback.id,
-          });
-    const prompt = buildSessionPrompt({
-      provider,
-      inPass: pass !== null,
-      sandboxed: Boolean(opts.laneSandbox),
-      denials: denialsToTell(),
-      answeredCards: answeredCardsForTask(db, row.taskId),
-      renumbered: noticeBody(MIGRATIONS_RENUMBERED_NOTICE_KEY),
-      uncarried: uncarried === undefined ? null : uncarriedSaid(uncarried),
-      task,
-      claims: claims(),
-      action,
-      handoff: contextPack.handoff,
-      answer: permission?.prompt ?? contextPack.pendingAnswer,
-      contextPack,
-      step: {
-        index: row.stepIndex,
-        count: Math.max(row.steps.length, 1),
-        role: step.role,
-        personaName: step.personaName,
-        instructions: persona?.instructions ?? null,
-        skills,
-        // A Codex session has no plugin to load a skill from.
-        ...(provider === Provider.Codex
-          ? {
-              skillBodies: skills.flatMap((name) => {
-                const body = opts.skillBody(name);
-                if (body === null) {
-                  opts.logger.warn(
-                    { workstreamId: id, skill: name },
-                    'a skill has no text to brief a Codex session with',
-                  );
-                  return [];
-                }
-                return [body];
-              }),
-            }
-          : {}),
-        tools: step.tools,
-      },
-      priorResults,
-      previousResult: readOnly ? step.result : null,
-      earlierResults: step.earlier,
-      revisedBy: reviser ? { role: reviser.role, personaName: reviser.personaName } : null,
-      evidence,
-      recovery:
-        action.kind === 'resume'
-          ? { reason: action.reason, lastOp: latestToolOp(db, id)?.opId ?? null }
-          : null,
-      ...(fed === null ? {} : { feedback: { message: fed.text, digest } }),
-    });
     const { token, hash } = mintSessionToken();
     const notReady = unready(account);
     if (notReady) return { kind: 'unready', refusal: notReady, providerSessionId: null };
@@ -2081,6 +2031,102 @@ export function createRunner(opts: RunnerOptions): Runner {
       releaseStart();
       return { kind: 'moved' };
     }
+    // A turn this session opens folds the builder's hand edits first, as a message into a warm
+    // session does; a turn already open folds nothing, since an edit then is kept with the turn.
+    // It runs after every refusal of the launch, so the fold's note goes with the session it was
+    // made for: a later launch would find nothing left to fold.
+    const handNote = pass && !openPassTurn(db, task.id) ? await foldForTurn(id) : null;
+    const stoppedFolding = stopRequested(ctl);
+    if (stoppedFolding) {
+      dispose();
+      releaseStart();
+      return { kind: 'stopped', reason: stoppedFolding, providerSessionId: savedResumeId };
+    }
+    const fed =
+      feedback === null
+        ? null
+        : resumeId === null
+          ? // A fresh session holds no picture: its start clears every mark an earlier one left.
+            outgoingMessage(
+              {
+                ...feedback,
+                files: feedback.files.map((file) => ({ ...file, inlineSent: false })),
+              },
+              0,
+              limits,
+            )
+          : outgoingMessage(
+              feedback,
+              threadInlineBytes(listTaskFileRows(db, task.id), limits),
+              limits,
+            );
+    const digest =
+      feedback === null || resumeId !== null
+        ? null
+        : buildThreadDigest(db, task, {
+            after:
+              contextPack.handoff && briefedFromHandoff(action, contextPack.handoff, evidence)
+                ? contextPack.handoff.createdAt
+                : null,
+            before: feedback.id,
+          });
+    const prompt = buildSessionPrompt({
+      provider,
+      inPass: pass !== null,
+      sandboxed: Boolean(opts.laneSandbox),
+      denials: denialsToTell(),
+      answeredCards: answeredCardsForTask(db, row.taskId),
+      renumbered: noticeBody(MIGRATIONS_RENUMBERED_NOTICE_KEY),
+      uncarried: uncarried === undefined ? null : uncarriedSaid(uncarried),
+      task,
+      claims: claims(),
+      action,
+      handoff: contextPack.handoff,
+      answer: permission?.prompt ?? contextPack.pendingAnswer,
+      contextPack,
+      step: {
+        index: row.stepIndex,
+        count: Math.max(row.steps.length, 1),
+        role: step.role,
+        personaName: step.personaName,
+        instructions: persona?.instructions ?? null,
+        skills,
+        // A Codex session has no plugin to load a skill from.
+        ...(provider === Provider.Codex
+          ? {
+              skillBodies: skills.flatMap((name) => {
+                const body = opts.skillBody(name);
+                if (body === null) {
+                  opts.logger.warn(
+                    { workstreamId: id, skill: name },
+                    'a skill has no text to brief a Codex session with',
+                  );
+                  return [];
+                }
+                return [body];
+              }),
+            }
+          : {}),
+        tools: step.tools,
+      },
+      priorResults,
+      previousResult: readOnly ? step.result : null,
+      earlierResults: step.earlier,
+      revisedBy: reviser ? { role: reviser.role, personaName: reviser.personaName } : null,
+      evidence,
+      recovery:
+        action.kind === 'resume'
+          ? { reason: action.reason, lastOp: latestToolOp(db, id)?.opId ?? null }
+          : null,
+      ...(fed === null
+        ? {}
+        : {
+            feedback: {
+              message: handNote === null ? fed.text : `${handNote}\n\n${fed.text}`,
+              digest,
+            },
+          }),
+    });
     let session: ReturnType<typeof insertSession>;
     try {
       session = opts.state.write((ctx) => {
@@ -2322,7 +2368,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     // writes is handed to it at once.
     for (const message of untaken) messages.push(message);
     if (pass) {
-      messages.pushUntaken();
+      messages.pushUntaken(fed === null ? handNote : null);
       ctl.messages = messages;
     }
     /**
@@ -3725,31 +3771,59 @@ export function createRunner(opts: RunnerOptions): Runner {
     async deliverMessage(taskId, messageId, { redo }) {
       const id = getTask(db, taskId).workstreamId;
       if (id === null) throw new ConflictError(`Task ${taskId} has no run to hand the message to`);
-      /** A page its pass no longer holds takes no message, whatever was kept for it. */
+      /**
+       * A page takes a message only while its pass holds it and is open and the page is not being
+       * taken out, read again after each wait: one leaving meanwhile takes none, whatever was kept
+       * for it, and the thread takes the message back.
+       */
       const stillAPage = (): void => {
-        if (!passOfWorkstream(db, id))
-          throw new ConflictError(`${getTask(db, taskId).title} is no longer in a Workbench pass`);
+        const pass = passOfWorkstream(db, id);
+        const title = getTask(db, taskId).title;
+        if (!pass) throw new ConflictError(`${title} is no longer in a Workbench pass`);
+        if (pass.state !== PassState.Open)
+          throw new ConflictError(
+            `Workbench pass "${pass.name}" is ${pass.state.toLowerCase()}; its pages take no message`,
+          );
+        const takeOut = lastTakeOut(db, taskId);
+        if (takeOut?.passId === pass.id && takeOut.step < TakeOutStep.Done)
+          throw new ConflictError(`${title} is being taken out of its pass`);
       };
       stillAPage();
       const ctl = active.get(id);
       const lane = ctl?.messages ?? null;
       if (ctl && lane && ctl.stopReason === null) {
         disarmIdleClose(ctl);
+        // A turn starts only while Your folder is on the pass's branch: off it, the page's warm
+        // session closes and the message waits untaken, queued with the pass's folder card, so the
+        // page goes on by itself once the folder is back (Workbench spec §5.1, §12).
+        const pass = passOfWorkstream(db, id);
+        // A folder that cannot be read is left to the turn's own keep, which refuses off the branch.
+        const folderOn = (passId: PassId): Promise<boolean> =>
+          passFolderOn(passWork, passId).catch((error: unknown) => {
+            opts.logger.warn(
+              { workstreamId: id, err: error instanceof Error ? error.message : String(error) },
+              "Your folder's branch could not be read; the message goes on",
+            );
+            return true;
+          });
+        if (pass && !openPassTurn(db, taskId) && !(await folderOn(pass.id))) {
+          // A stop that landed while the branch was read closes the session already.
+          if (stopRequested(ctl) === null) {
+            ctl.stopReason = 'closed';
+            opts.logger.info(
+              { workstreamId: id },
+              'warm session closed: Your folder is off the pass',
+            );
+            await ctl.handle?.stop();
+          }
+          await ctl.done;
+          stillAPage();
+          return;
+        }
         // Stop and Redo: the interrupted turn goes on with the message. Its end is not Ready, as
         // no turn's is while the message waits untaken.
         if (redo && openPassTurn(db, taskId)) await lane.interrupt();
-        // What the builder changed by hand since the last turn is kept with the page, and the
-        // agent is told before it reads the message. An edit that cannot be kept now (Your folder
-        // off the pass's branch) is kept with the turn's work instead, and the message goes on.
-        let note: string | null = null;
-        try {
-          note = (await foldHandEdits(passWork, { workstreamId: id })).agentNote;
-        } catch (error) {
-          opts.logger.warn(
-            { workstreamId: id, err: error instanceof Error ? error.message : String(error) },
-            "the builder's hand edits were not folded; the message goes without its note",
-          );
-        }
+        const note = await foldForTurn(id);
         stillAPage();
         // A stop that landed meanwhile (the builder's, a take-out's, an idle close) ends this
         // session: the message stays untaken for the next one.
@@ -3823,13 +3897,24 @@ export function createRunner(opts: RunnerOptions): Runner {
       if (answer.choice !== PASS_RETRY_TURN_CHOICE)
         throw new InvalidError(`A failed turn is answered with ${PASS_RETRY_TURN_CHOICE}`);
       const id = target.workstreamId;
-      if (!passOfWorkstream(db, id))
-        throw new ConflictError(
-          'The task is no longer in a Workbench pass, so its turn is not retried',
-        );
       const providerSessionId = lastProviderSession(id);
       opts.state.write((ctx) => {
+        const pass = passOfWorkstream(ctx.tx, id);
+        if (!pass)
+          throw new ConflictError(
+            'The task is no longer in a Workbench pass, so its turn is not retried',
+          );
+        // A turn opened now would leave with the task, and run in its next pass unasked.
+        if (pass.state !== PassState.Open)
+          throw new ConflictError(
+            `Workbench pass "${pass.name}" is ${pass.state.toLowerCase()}; its turns are not retried`,
+          );
         const row = getWorkstreamRow(ctx.tx, id);
+        const takeOut = lastTakeOut(ctx.tx, row.taskId);
+        if (takeOut?.passId === pass.id && takeOut.step < TakeOutStep.Done)
+          throw new ConflictError(
+            'The page is being taken out of its pass, so its turn is not retried',
+          );
         if (
           row.state !== S.WaitingHuman ||
           row.nextAction.kind !== 'pass_review' ||

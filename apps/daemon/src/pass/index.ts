@@ -9,7 +9,7 @@ export {
   type PassWorkDeps,
 } from './kept-work';
 export { answerPassCard } from './cards';
-export { passFolderOn } from './folder';
+export { folderCardOpen, folderSeenOn, passFolderOn } from './folder';
 export { foldHandEdits } from './hand-edits';
 export {
   takeOut,

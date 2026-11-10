@@ -11,7 +11,10 @@ session was handed has not been taken, the turn is not over and the next complet
 ends in one function every ending runs (`endTurnSteps`: `ready`, `stopped` or `failed`): its end and the agent's
 reply in one write, its page work kept (`keepTurnWork`), then one write that settles it. The session stays open
 and the next builder message goes into it; a warm session closes after ten idle minutes
-(`RunnerLimits.warmIdleMs`) or yields its lane to work with no room, and the next message resumes it.
+(`RunnerLimits.warmIdleMs`) or yields its lane to work with no room, and the next message resumes it. A message
+to a warm session with no turn open while Your folder is off the pass's branch is held, not refused: the session
+closes, the message waits untaken with the pass's folder card, and the page goes on by itself once the folder is
+back, so no turn runs on a branch the builder switched to and the builder's words are not lost.
 
 A handoff asked of a pass lane between turns closes the session and sends nothing; a working one is nudged as any
 lane is, and a run of handoffs nobody asked for is keyed by the task's kept commit. A pass lane never goes

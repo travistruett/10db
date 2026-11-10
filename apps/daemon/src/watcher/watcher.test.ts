@@ -999,13 +999,51 @@ describe('a Workbench pass in Your folder', () => {
     ]);
   });
 
-  it("at a session's end, cards a write outside every claim as the ending lane's or a working one's", async () => {
+  it("at a session's end between turns, cards no write outside every claim: no lane was working", async () => {
     const { alpha } = pass(WorkstreamState.Queued);
     touch('src/api/a.ts');
     touch('docs/notes.md');
-    // Alpha's session ends between turns: its shell may have written outside every claim.
-    expect(await watcher.stepEnd(alpha.id)).toEqual(['docs/notes.md']);
-    expect(flags().map((f) => f.body)).toEqual(['docs/notes.md\nWritten while Alpha was working']);
+    // Alpha's warm session closes long after its turn: the write is the builder's.
+    expect(await watcher.stepEnd(alpha.id)).toEqual([]);
+    expect(flags()).toEqual([]);
+  });
+
+  it("at a session's end with its turn open, cards a write outside every claim as the ending lane's", async () => {
+    const gamma = state.write((ctx) => {
+      const task = insertTask(ctx, project.id, {
+        title: 'Gamma',
+        acceptanceCriteria: ['ok'],
+        areas: ['api'],
+      });
+      const { batch } = insertPass(ctx, {
+        id: mintId('Pass'),
+        projectId: project.id,
+        name: 'Polish',
+        pageCap: 4,
+        returnBranch: 'main',
+        startSha: 'a'.repeat(40),
+        branch: '10db/polish-abc123',
+        baseBranch: 'main',
+        repo: null,
+        taskIds: [task.id],
+        dirt: [],
+      });
+      const ws = insertWorkstream(ctx, task.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        batchId: batch.id,
+      });
+      // Its session crashed mid-turn: queued to resume, the turn still open.
+      insertPassTurn(ctx, {
+        taskId: task.id,
+        workstreamId: ws.id,
+        sessionId: null,
+        messageId: null,
+      });
+      return ws;
+    });
+    touch('docs/notes.md');
+    expect(await watcher.stepEnd(gamma.id)).toEqual(['docs/notes.md']);
+    expect(flags().map((f) => f.body)).toEqual(['docs/notes.md\nWritten while Gamma was working']);
   });
 
   it('cards a write outside every claim that arrives just after a lane of the pass ended its turn', async () => {

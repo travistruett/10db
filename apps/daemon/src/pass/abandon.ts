@@ -20,10 +20,11 @@ import {
   listSharedChanges,
   openHolds,
   setAbandonStep,
+  type DbReader,
 } from '@10db/db';
 import { jobKey, JobQueue } from '../delivery';
 import { flagCard, withdrawCard } from '../inbox';
-import { PASS_CARD_DETAIL, PASS_CARD_KIND, PassCardKind } from './folder';
+import { PASS_CARD_DETAIL, PASS_CARD_KIND, PassCardKind, withdrawFolderCard } from './folder';
 import { passBranch, type PassWorkDeps } from './kept-work';
 import { keepHold } from './shared-chain';
 import { dropShared } from './shared-drop';
@@ -46,8 +47,7 @@ interface LeftFile {
 }
 
 /** What the pass's take-outs put back and left, read from their rows. */
-function takenOut(deps: TakeOutDeps, pass: PassDto) {
-  const db = deps.state.db;
+function takenOut(db: DbReader, pass: PassDto) {
   const rows = listPassTakeOuts(db, pass.id).filter((row) => row.step === TakeOutStep.Done);
   return {
     reverted: rows.map((row) => row.taskId),
@@ -56,6 +56,11 @@ function takenOut(deps: TakeOutDeps, pass: PassDto) {
     ),
     rows,
   };
+}
+
+/** Each file the pass's take-outs left as it was, with its page, as the Abandon's card names them. */
+export function abandonLeftFiles(db: DbReader, pass: PassDto): readonly LeftFile[] {
+  return takenOut(db, pass).left;
 }
 
 /**
@@ -181,14 +186,21 @@ export async function abandonPassSteps(
     record(AbandonStep.SessionsStopped);
   }
   if (before(AbandonStep.SharedDropped)) {
+    // A folder off the pass's branch holds another branch's files: the take-outs leave them as
+    // they are, and so does this step, so an Abandon still finishes.
+    const pass = getPass(db, passId);
+    const repo = getProject(db, pass.projectId).repoPath;
+    const onBranch = (await deps.git.currentBranch(repo)) === passBranch(db, pass);
     // A hold a stopped turn left open is kept first, so what it changed is dropped too.
-    for (const hold of openHolds(db, passId)) await keepHold(deps, { claimId: hold.claimId });
+    for (const hold of onBranch ? openHolds(db, passId) : [])
+      await keepHold(deps, { claimId: hold.claimId });
     const unlanded = listSharedChanges(db, passId)
       .filter((c) => c.dropOf === null && c.droppedBy === null && c.landedSha === null)
       .filter((c) => c.paths.length > 0)
       .map((c) => c.seq)
       .sort((a, b) => b - a);
-    for (const seq of unlanded) await dropShared(deps, { passId, seq, force: true });
+    for (const seq of onBranch ? unlanded : [])
+      await dropShared(deps, { passId, seq, force: true });
     record(AbandonStep.SharedDropped);
   }
   if (before(AbandonStep.PagesTakenOut)) {
@@ -211,10 +223,12 @@ export async function abandonPassSteps(
   }
 
   const pass = getPass(db, passId);
+  // An abandoned pass waits for no folder: its card about one is over.
+  withdrawFolderCard(deps, pass);
   const { git } = deps;
   const repo = getProject(db, pass.projectId).repoPath;
   const branch = passBranch(db, pass);
-  const taken = takenOut(deps, pass);
+  const taken = takenOut(db, pass);
   const dropped = await droppedShared(deps, pass);
   const done = { ...taken, left: [...dropped.left, ...taken.left] };
   const pullRequest = getBatch(db, pass.batchId).prUrl;

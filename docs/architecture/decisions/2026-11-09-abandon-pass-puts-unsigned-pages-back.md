@@ -16,6 +16,10 @@ the folder's own index is refreshed for what step 5 wrote. Steps 2, 4 and 6 are 
 ships, shared changes and sign-off are built.
 
 It always finishes: a file that keeps changing is left after three tries and named on its card with its page.
+With Your folder off the pass's branch (the builder switched it), nothing of a page can be kept and its files
+belong to another branch, so step 5 keeps each page's last kept commit, writes none of its files, says so on the
+task's thread and goes on; the pass's folder card is withdrawn with the pass. A task leaving the pass ends its
+open turn as stopped and settles every turn of it, so a later pass finds none to finish.
 Where the folder ends is decided by the branch: if the pass's branch is still at `start_sha`, HEAD is pointed back
 at the return branch, writing no file; otherwise it stays on the branch that holds the landed work, and one card
 says so, offering Move to the return branch through the built switch, which keeps uncommitted changes and
