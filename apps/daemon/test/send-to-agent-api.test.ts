@@ -6,10 +6,9 @@ import {
   TaskMessageAuthor,
   TaskMessageDto,
 } from '@10db/contracts';
-import { insertSystemNotice, listTaskThread } from '@10db/db';
+import { insertSystemNotice, listTaskThread, offerToAgent } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { RunningDaemon } from '../src/daemon';
-import { offerToAgent } from '../src/delivery';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
 import { createTempRepo, tempDir } from './fixtures';

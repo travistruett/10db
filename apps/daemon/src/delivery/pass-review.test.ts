@@ -10,14 +10,19 @@ import {
   type TaskDto,
   type TaskId,
 } from '@10db/contracts';
-import { findFlowByName, getPassProgress, listTaskThread, patchProject } from '@10db/db';
+import {
+  findFlowByName,
+  getPassProgress,
+  listTaskThread,
+  offeredText,
+  patchProject,
+} from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { tempDir } from '../../test/fixtures';
 import type { SessionAdapter } from '../sessions';
 import { openPass, type PutBackKeptWork } from './index';
 import { findingTargets, reviewPassTip, type PassReviewDeps } from './pass-review';
-import { offeredText } from './send-to-agent';
 
 // Workbench spec §8.3, D19, D21: the one review of a pass's pull request reads its diff once, and
 // each finding is offered to the page whose file it names, else in the pass's header; nothing is

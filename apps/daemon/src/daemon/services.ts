@@ -90,6 +90,7 @@ import {
   setRoutingRules,
   setTeam,
   undoHazardAddition,
+  offeredText,
 } from '@10db/db';
 import { MoveCause, type AccountMoves, type AccountService } from '../accounts';
 import type { Clock } from '../clock';
@@ -103,7 +104,6 @@ import {
   type BatchStarter,
   type PassOpened,
   type PassOpenInput,
-  offeredText,
   type PassPullRequests,
   type Shipper,
 } from '../delivery';

@@ -31,7 +31,6 @@ export {
 } from './pass-open';
 export { createPassPullRequests, passGateKind, type PassPullRequests } from './pass-pr';
 export { createKeptWorkGate, subscribeKeptWorkLanding } from './kept-work-start';
-export { offeredText, offerToAgent } from './send-to-agent';
 export { answerPassMoveCard, resumePassSettles, subscribePassSettles } from './pass-settle';
 export { createFailedRestarts } from './restart';
 export { stepCheck } from './local-check';

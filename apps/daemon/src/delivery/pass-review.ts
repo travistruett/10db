@@ -27,6 +27,7 @@ import {
   setPassNotice,
   setReviewedSha,
   type DbReader,
+  offerToAgent,
 } from '@10db/db';
 import { passReviewPrompt } from '../briefing';
 import { classifyPath } from '../guard';
@@ -41,7 +42,6 @@ import {
   type DiffSince,
   type ReviewLeft,
 } from './review-left';
-import { offerToAgent } from './send-to-agent';
 
 // Workbench spec §8.3, D21: a pass runs no review step per turn. When its pull request is opened, the
 // project's review step reads the pull request's diff once, beside the gate, and each finding is

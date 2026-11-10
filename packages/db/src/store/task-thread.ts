@@ -13,7 +13,9 @@ import {
   type TaskPictureKind,
 } from '@10db/contracts';
 import { and, asc, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
+import { z } from 'zod';
 import * as schema from '../schema';
+import { getAppSetting, setAppSetting } from './settings';
 import type { DbReader, WriteContext } from './store';
 import { getTask } from './tasks';
 
@@ -47,7 +49,14 @@ const toFileDto = (row: TaskFileRow): TaskFileDto => ({
   createdAt: row.createdAt,
 });
 
-const toMessageDto = (row: MessageRow, files: readonly TaskFileRow[]): TaskMessageDto => ({
+/** Where the text Send to Agent sends for a notice is kept, by the notice's id. */
+const sendToAgentKey = (id: TaskMessageId): string => `send_to_agent.${id}`;
+
+const toMessageDto = (
+  row: MessageRow,
+  files: readonly TaskFileRow[],
+  sendable = false,
+): TaskMessageDto => ({
   id: row.id,
   taskId: row.taskId,
   author: row.author,
@@ -57,6 +66,7 @@ const toMessageDto = (row: MessageRow, files: readonly TaskFileRow[]): TaskMessa
   pushedAt: row.pushedAt,
   deliveredAt: row.deliveredAt,
   files: files.map(toFileDto),
+  sendable,
 });
 
 /** Appends the builder's message and its pictures to a task's thread, in the caller's write. */
@@ -157,9 +167,41 @@ export function listTaskThreadRows(db: DbReader, taskId: TaskId): TaskMessageRow
     .map((row) => ({ ...row, files: files.filter((f) => f.messageId === row.id) }));
 }
 
-/** A task's thread, oldest first, each message with its pictures. */
+/** A task's thread, oldest first, each message with its pictures and whether it offers Send to Agent. */
 export function listTaskThread(db: DbReader, taskId: TaskId): TaskMessageDto[] {
-  return listTaskThreadRows(db, taskId).map((row) => toMessageDto(row, row.files));
+  const rows = listTaskThreadRows(db, taskId);
+  const keys = rows
+    .filter((r) => r.kind === TaskMessageKind.Notice)
+    .map((r) => sendToAgentKey(r.id));
+  const offered = new Set(
+    keys.length === 0
+      ? []
+      : db
+          .select({ key: schema.appSettings.key })
+          .from(schema.appSettings)
+          .where(inArray(schema.appSettings.key, keys))
+          .all()
+          .map((s) => s.key),
+  );
+  return rows.map((row) => toMessageDto(row, row.files, offered.has(sendToAgentKey(row.id))));
+}
+
+/**
+ * Offers thread notice `id` with Send to Agent (spec §8.1, §8.3, D19), which will send `text` as the
+ * builder's message, in the caller's write.
+ */
+export function offerToAgent(ctx: WriteContext, id: TaskMessageId, text: string): void {
+  setAppSetting(ctx, sendToAgentKey(id), text);
+}
+
+/** The text Send to Agent sends for thread notice `id`; null when it offers none. */
+export function offeredText(db: DbReader, id: TaskMessageId): string | null {
+  // Read from the database: parsed, as at every boundary.
+  const stored = z
+    .string()
+    .min(1)
+    .safeParse(getAppSetting(db, sendToAgentKey(id)));
+  return stored.success ? stored.data : null;
 }
 
 /** Every picture pasted into a task's thread, oldest first. */
