@@ -110,11 +110,11 @@ describe('HeaderNotices', () => {
   });
 
   it.each([
-    { state: 'OPEN', send: true, retarget: true },
-    { state: 'CLOSING', send: false, retarget: false },
-    { state: 'ABANDONING', send: false, retarget: false },
-    // A closed pass's Retarget card is still the daemon's to take; its pages take no message.
-    { state: 'CLOSED', send: false, retarget: true },
+    { state: 'OPEN', send: 'enabled', retarget: true },
+    { state: 'CLOSING', send: 'disabled', retarget: false },
+    { state: 'ABANDONING', send: 'disabled', retarget: false },
+    // A closed pass's Retarget card is still the daemon's to take; it holds no page to send to.
+    { state: 'CLOSED', send: 'hidden', retarget: true },
   ] as const)(
     'while the pass is $state, offers Send to Agent: $send, Retarget: $retarget',
     async ({ state, send, retarget }) => {
@@ -131,14 +131,13 @@ describe('HeaderNotices', () => {
         passNotice({ id: 'stack', kind: 'stack_unmerged', sendable: false, cardId: card.id }),
       ];
       renderWithDaemon(<HeaderNotices view={{ ...view, notices }} inbox={[card]} />);
-      expect(await screen.findByRole('button', { name: 'Send to Agent' })).toHaveProperty(
-        'disabled',
-        !send,
-      );
-      expect(screen.getByRole('button', { name: 'Retarget to main' })).toHaveProperty(
+      expect(await screen.findByRole('button', { name: 'Retarget to main' })).toHaveProperty(
         'disabled',
         !retarget,
       );
+      const sendButton = screen.queryByRole('button', { name: 'Send to Agent' });
+      if (send === 'hidden') expect(sendButton).toBeNull();
+      else expect(sendButton).toHaveProperty('disabled', send === 'disabled');
     },
   );
 

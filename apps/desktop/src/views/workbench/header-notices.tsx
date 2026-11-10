@@ -4,6 +4,7 @@ import {
   PassNoticeKind,
   PassState,
   PassRetargetDetail,
+  passHoldsTasks,
   type InboxItemDto,
   type PassNotice,
   type PassViewDto,
@@ -20,9 +21,13 @@ import { useAnswerPassCard, useSendToAgent } from '../../daemon/pass-close-queri
 const COLOR: Readonly<Record<PassNoticeKind, 'red' | 'yellow'>> = {
   [PassNoticeKind.Checks]: 'red',
   [PassNoticeKind.GateFailed]: 'red',
+  [PassNoticeKind.PrNotOpened]: 'red',
+  [PassNoticeKind.ReviewFailed]: 'red',
+  [PassNoticeKind.Close]: 'red',
   [PassNoticeKind.PrClosed]: 'yellow',
   [PassNoticeKind.Finding]: 'yellow',
   [PassNoticeKind.StackUnmerged]: 'yellow',
+  [PassNoticeKind.StackMerged]: 'yellow',
 };
 
 /** The open Retarget card a notice names, with the base it retargets to; null without one. */
@@ -40,13 +45,13 @@ interface NoticeRowProps {
   readonly notice: PassNotice;
   readonly pages: PassViewDto['pages'];
   readonly inbox: readonly InboxItemDto[];
-  /** A page takes a message only while the pass is open. */
-  readonly canSend: boolean;
+  /** Send to Agent is offered while the pass holds pages, and a page takes a message only while it is open. */
+  readonly sendTo: 'offered' | 'waiting' | 'none';
   /** A Retarget card is answered while the pass is open or closed, never mid-close or mid-abandon. */
   readonly canRetarget: boolean;
 }
 
-function NoticeRow({ notice, pages, inbox, canSend, canRetarget }: NoticeRowProps) {
+function NoticeRow({ notice, pages, inbox, sendTo, canRetarget }: NoticeRowProps) {
   const send = useSendToAgent();
   const answer = useAnswerPassCard();
   const card = retargetCard(notice, inbox);
@@ -91,14 +96,14 @@ function NoticeRow({ notice, pages, inbox, canSend, canRetarget }: NoticeRowProp
           {`Retarget to ${card.base}`}
         </Button>
       )}
-      {notice.sendable && pages.length > 0 ? (
+      {notice.sendable && sendTo !== 'none' && pages.length > 0 ? (
         <Menu position="bottom-end" withinPortal>
           <Menu.Target>
             <Button
               variant="default"
               size="xs"
               loading={send.isPending}
-              disabled={!canSend}
+              disabled={sendTo !== 'offered'}
               style={{ flex: 'none' }}
             >
               Send to Agent
@@ -148,7 +153,7 @@ export function HeaderNotices({ view, inbox }: HeaderNoticesProps) {
           notice={notice}
           pages={view.pages}
           inbox={inbox}
-          canSend={state === PassState.Open}
+          sendTo={state === PassState.Open ? 'offered' : passHoldsTasks(state) ? 'waiting' : 'none'}
           canRetarget={state === PassState.Open || state === PassState.Closed}
         />
       ))}
