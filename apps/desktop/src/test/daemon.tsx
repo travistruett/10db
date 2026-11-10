@@ -8,8 +8,13 @@ import {
 } from '@10db/contracts';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { createMemoryHistory } from '@tanstack/react-router';
-import { render } from '@testing-library/react';
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRouter,
+  RouterProvider,
+} from '@tanstack/react-router';
+import { act, render } from '@testing-library/react';
 import { delay, http, HttpResponse, ws, type HttpHandler, type WebSocketHandler } from 'msw';
 import { setupServer } from 'msw/node';
 import type { ReactElement } from 'react';
@@ -207,4 +212,18 @@ export function renderWithDaemon(
     </MantineProvider>,
   );
   return { queryClient };
+}
+
+/**
+ * One component inside the providers and a router of its own at `/`, for a view that talks to the
+ * daemon and links elsewhere in the app; following a link changes the router's location only.
+ */
+export async function renderWithDaemonAndRouter(ui: ReactElement, opts: RenderOptions = {}) {
+  const router = createRouter({
+    routeTree: createRootRoute({ component: () => ui }),
+    history: createMemoryHistory({ initialEntries: ['/'] }),
+  });
+  await act(() => router.load());
+  const { queryClient } = renderWithDaemon(<RouterProvider router={router} />, opts);
+  return { queryClient, router };
 }

@@ -109,7 +109,7 @@ export interface ProposePagesModalProps {
 export function ProposePagesModal({ project, opened, onClose, propose }: ProposePagesModalProps) {
   const [drafts, setDrafts] = useState<PageDraft[]>([]);
   const proposal = useMutation({
-    mutationFn: propose,
+    mutationFn: () => propose(),
     onSuccess: (answer) => {
       setDrafts(draftsOf(answer));
     },
