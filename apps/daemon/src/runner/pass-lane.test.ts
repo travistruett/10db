@@ -45,6 +45,7 @@ import { createDeliveryJobs } from '../delivery';
 import { createGit } from '../git';
 import { silentLogger } from '../log';
 import { recoverOnStartup, systemProcesses } from '../recovery';
+import { createScheduler } from '../scheduler';
 import { untakenMessages } from './lane-messages';
 import { finishEndedTurn } from './pass-turn';
 import { resumePassWork, type PassWorkDeps } from '../pass';
@@ -349,8 +350,30 @@ describe("a builder message's hand-over to a warm session", () => {
       ),
     ).toHaveLength(1);
 
+    // The scheduler holds the page while the folder is away, and runs it once it is back.
+    const folderCards = () =>
+      listInbox(engine.store.db, { states: ['OPEN'] }).filter(
+        (i) => i.detail?.['passCard'] === 'folder',
+      );
+    const scheduler = createScheduler({
+      state: engine.state,
+      clock: engine.clock,
+      caps: { global: 4 },
+      instanceId: 'test-daemon',
+      leaseMs: 60_000,
+      tickMs: 2_000,
+      logger: silentLogger,
+      runner: engine.runner,
+      accounts: { ...engine.accounts, prepare: () => undefined },
+      branches: createGit(),
+      onWrongBranch: () => undefined,
+      onWorktreeMissing: () => undefined,
+    });
+    expect(await scheduler.tick()).toBe(0);
+    expect(folderCards()).toHaveLength(1);
     git('switch', '-q', '10db/polish-abc123');
-    engine.launch(id);
+    expect(await scheduler.tick()).toBe(1);
+    expect(folderCards()).toEqual([]);
     await waitFor(isReady(id, 2));
     expect(engine.adapter.prompts[1]?.prompt).toContain('Bigger please');
     expect(engine.adapter.prompts[1]?.prompt).toContain(
