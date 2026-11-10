@@ -1344,9 +1344,14 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger,
     cleanShutdown,
   });
-  // A pass's take-outs and Abandon stop its lanes through the runner.
+  // A pass's take-outs and Abandon stop its lanes through the runner, and tell the watcher which
+  // files their put-back wrote.
   const stopLane: StopPassLane = (id) => createdRunner.stopPassLane(id);
-  const passTakeOuts: TakeOutDeps = { ...passWork, stopLane };
+  const passTakeOuts: TakeOutDeps = {
+    ...passWork,
+    stopLane,
+    wrote: (repo, paths) => watcher?.daemonWrote(repo, paths) ?? Promise.resolve(),
+  };
   // Each open pass goes on from its rows: its folder card, a put-back and take-outs cut short.
   await resumePassWork(passTakeOuts);
   // The previous daemon's claim waits ended with it; their cards would name holders nobody waits for.

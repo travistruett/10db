@@ -18,10 +18,11 @@ import {
   listPassTakeOuts,
   listPassTasks,
   setAbandonStep,
+  type DbReader,
 } from '@10db/db';
 import { jobKey, JobQueue } from '../delivery';
 import { flagCard, withdrawCard } from '../inbox';
-import { PASS_CARD_DETAIL, PASS_CARD_KIND, PassCardKind } from './folder';
+import { PASS_CARD_DETAIL, PASS_CARD_KIND, PassCardKind, withdrawFolderCard } from './folder';
 import { passBranch, type PassWorkDeps } from './kept-work';
 import { takeOutSteps, TakeOutWithin, type TakeOutDeps } from './take-out';
 
@@ -42,8 +43,7 @@ interface LeftFile {
 }
 
 /** What the pass's take-outs put back and left, read from their rows. */
-function takenOut(deps: TakeOutDeps, pass: PassDto) {
-  const db = deps.state.db;
+function takenOut(db: DbReader, pass: PassDto) {
   const rows = listPassTakeOuts(db, pass.id).filter((row) => row.step === TakeOutStep.Done);
   return {
     reverted: rows.map((row) => row.taskId),
@@ -52,6 +52,11 @@ function takenOut(deps: TakeOutDeps, pass: PassDto) {
     ),
     rows,
   };
+}
+
+/** Each file the pass's take-outs left as it was, with its page, as the Abandon's card names them. */
+export function abandonLeftFiles(db: DbReader, pass: PassDto): readonly LeftFile[] {
+  return takenOut(db, pass).left;
 }
 
 /**
@@ -171,10 +176,12 @@ export async function abandonPassSteps(
   }
 
   const pass = getPass(db, passId);
+  // An abandoned pass waits for no folder: its card about one is over.
+  withdrawFolderCard(deps, pass);
   const { git } = deps;
   const repo = getProject(db, pass.projectId).repoPath;
   const branch = passBranch(db, pass);
-  const done = takenOut(deps, pass);
+  const done = takenOut(db, pass);
   const pullRequest = getBatch(db, pass.batchId).prUrl;
   if (before(AbandonStep.IndexRefreshed)) {
     // Nothing landed, so the branch it came from holds the same commit: naming it moves no file.

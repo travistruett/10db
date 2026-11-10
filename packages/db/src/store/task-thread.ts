@@ -96,6 +96,55 @@ export function insertBuilderMessage(
   return toMessageDto(message, files);
 }
 
+/**
+ * Takes back a builder message no session was handed, with its pictures' rows, in the caller's write:
+ * a page that refused it keeps nothing of it. Answers the pictures' stored paths, which the caller
+ * removes once no other row names them; null, removing nothing, for a message a session was handed
+ * or a turn took.
+ */
+export function deleteUnsentBuilderMessage(
+  ctx: WriteContext,
+  taskId: TaskId,
+  id: TaskMessageId,
+): string[] | null {
+  const message = ctx.tx
+    .select()
+    .from(schema.taskMessages)
+    .where(and(eq(schema.taskMessages.id, id), eq(schema.taskMessages.taskId, taskId)))
+    .get();
+  if (!message) throw new NotFoundError('task message', id);
+  if (
+    message.author !== TaskMessageAuthor.Builder ||
+    message.pushedAt !== null ||
+    message.deliveredAt !== null ||
+    message.turnId !== null
+  )
+    return null;
+  const files = ctx.tx
+    .select()
+    .from(schema.taskFiles)
+    .where(eq(schema.taskFiles.messageId, id))
+    .all();
+  ctx.tx.delete(schema.taskFiles).where(eq(schema.taskFiles.messageId, id)).run();
+  ctx.tx.delete(schema.taskMessages).where(eq(schema.taskMessages.id, id)).run();
+  const task = getTask(ctx.tx, taskId);
+  ctx.emit({
+    type: EventType.TaskChanged,
+    entityType: 'task',
+    entityId: taskId,
+    data: { projectId: task.projectId, removedMessageId: id },
+  });
+  const stillNamed = new Set(
+    ctx.tx
+      .select({ storedPath: schema.taskFiles.storedPath })
+      .from(schema.taskFiles)
+      .where(eq(schema.taskFiles.taskId, taskId))
+      .all()
+      .map((f) => f.storedPath),
+  );
+  return files.map((f) => f.storedPath).filter((path) => !stillNamed.has(path));
+}
+
 /** A task's thread, oldest first, each message with its pictures and where they are kept. */
 export function listTaskThreadRows(db: DbReader, taskId: TaskId): TaskMessageRow[] {
   const files = listTaskFileRows(db, taskId);

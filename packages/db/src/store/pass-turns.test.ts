@@ -1,7 +1,9 @@
 import {
+  AbandonStep,
   EventType,
   mintId,
   PassTurnEnding,
+  WorkstreamState,
   TaskMessageAuthor,
   TaskMessageKind,
   type PassDto,
@@ -31,8 +33,14 @@ import {
   markPassTurnAnswered,
   openPassTurn,
   seedProject,
+  abandonPassAndBatch,
+  clearPassTurnAnswered,
+  leavePass,
+  setAbandonStep,
   setPassTurnKept,
   settlePassTurn,
+  settleTurnsLeaving,
+  transitionWorkstream,
   type Store,
 } from './index';
 
@@ -295,6 +303,15 @@ describe("a pass task's turns", () => {
     store.write((ctx) => {
       markPassTurnAnswered(ctx, first.id);
     });
+    // Taken back with the message that answered it, and answered again by the next.
+    store.write((ctx) => {
+      clearPassTurnAnswered(ctx, first.id);
+    });
+    expect(latestPassTurn(store.db, taskId)?.answeredAt).toBeNull();
+    later(1);
+    store.write((ctx) => {
+      markPassTurnAnswered(ctx, first.id);
+    });
     const answeredAt = clock.toISOString();
     later(2);
     store.write((ctx) => {
@@ -307,5 +324,65 @@ describe("a pass task's turns", () => {
       [2, null],
     ]);
     expect(latestPassTurn(store.db, taskId)?.id).toBe(second.id);
+  });
+
+  it("ends a task's open turn as stopped and settles every turn as it leaves its pass, none Ready", () => {
+    const ended = startTurn().value;
+    store.write((ctx) =>
+      endPassTurn(ctx, ended.id, { ending: PassTurnEnding.Ready, replyBody: 'done' }),
+    );
+    const open = startTurn().value;
+    later(1);
+
+    const { events } = store.write((ctx) => {
+      settleTurnsLeaving(ctx, taskId);
+    });
+
+    expect(listTurnsEndedUnsettled(store.db)).toEqual([]);
+    expect(
+      listPassTurns(store.db, pass.id).map((t) => [t.id, t.ending, t.settledAt, t.readyAt]),
+    ).toEqual([
+      [ended.id, PassTurnEnding.Ready, clock.toISOString(), null],
+      [open.id, PassTurnEnding.Stopped, clock.toISOString(), null],
+    ]);
+    expect(events.map((e) => e.type)).not.toContain(EventType.PassPageReady);
+  });
+
+  it("reads the latest turn of the task's current run only, never an earlier run's", () => {
+    // A turn of the task's run in a pass it has since left, ended and never carried through.
+    const earlier = startTurn().value;
+    store.write((ctx) => {
+      endPassTurn(ctx, earlier.id, { ending: PassTurnEnding.Ready, replyBody: null });
+      transitionWorkstream(ctx, workstreamId, { to: WorkstreamState.Cancelled, fence: null });
+      leavePass(ctx, taskId);
+      setAbandonStep(ctx, pass.id, AbandonStep.Abandoning);
+      abandonPassAndBatch(ctx, pass.id);
+    });
+    const later = store.write((ctx) => {
+      const next = insertPass(ctx, {
+        id: mintId('Pass'),
+        projectId: project.id,
+        name: 'Again',
+        pageCap: 4,
+        returnBranch: 'main',
+        startSha: 'a'.repeat(40),
+        branch: '10db/again-def456',
+        baseBranch: 'main',
+        repo: null,
+        taskIds: [taskId],
+        dirt: [],
+      });
+      return insertWorkstream(ctx, taskId, {
+        batchId: next.batch.id,
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      });
+    }).value;
+
+    expect(latestPassTurn(store.db, taskId)).toBeUndefined();
+    const turn = store.write((ctx) =>
+      insertPassTurn(ctx, { taskId, workstreamId: later.id, sessionId: null, messageId: null }),
+    ).value;
+    expect(turn.seq).toBe(2);
+    expect(latestPassTurn(store.db, taskId)?.id).toBe(turn.id);
   });
 });

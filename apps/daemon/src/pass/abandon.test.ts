@@ -7,7 +7,15 @@ import {
   WorkstreamState,
   type WorkstreamId,
 } from '@10db/contracts';
-import { getBatch, getPass, getTask, getWorkstreamRow, listInbox, setAbandonStep } from '@10db/db';
+import {
+  getBatch,
+  getPass,
+  getTask,
+  getWorkstreamRow,
+  listInbox,
+  listTaskThreadRows,
+  setAbandonStep,
+} from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openPassWorld, type PassWorld } from '../../test/pass-world';
 import { openPass } from '../delivery';
@@ -17,6 +25,7 @@ import {
   answerPassCard,
   keepTurnWork,
   keptRef,
+  passFolderOn,
   resumePassWork,
   takeOutSteps,
   TakeOutWithin,
@@ -38,6 +47,7 @@ const deps = (base: PassWorkDeps = w.deps, git: Git = base.git) => ({
   ...base,
   git,
   stopLane: (): Promise<void> => Promise.resolve(),
+  wrote: (): Promise<void> => Promise.resolve(),
 });
 const abandonCards = () =>
   listInbox(w.h.store.db, { states: [InboxState.Open] }).filter(
@@ -269,6 +279,69 @@ describe('abandonPass', () => {
     });
   });
 
+  describe("with Your folder off the pass's branch, it still finishes", () => {
+    const rows: {
+      readonly name: string;
+      readonly run: (world: PassWorld) => Promise<void>;
+    }[] = [
+      {
+        name: 'at once',
+        run: async (world) => {
+          await abandonPass(deps(world.deps), world.opened.pass.id);
+        },
+      },
+      {
+        name: 'after a restart cut it short',
+        run: async (world) => {
+          world.h.state.write((ctx) => {
+            setAbandonStep(ctx, world.opened.pass.id, AbandonStep.Abandoning);
+          });
+          const restarted = deps(world.restart());
+          await resumePassWork(restarted);
+          await restarted.jobs.idle();
+        },
+      },
+    ];
+    it.each(rows)('$name', async ({ run }) => {
+      w = await worked();
+      // The builder switched to the branch the pass came from, taking the pages' files along; the
+      // pass's folder card says so.
+      w.h.git$('switch', '-q', 'main');
+      await passFolderOn(w.deps, w.opened.pass.id);
+
+      await run(w);
+
+      const db = w.h.store.db;
+      expect(getPass(db, w.opened.pass.id).state).toBe(PassState.Abandoned);
+      for (const task of [w.settings, w.people]) {
+        expect(getTask(db, task.id)).toMatchObject({ passId: null, status: 'open' });
+        expect(getWorkstreamRow(db, w.runOf(task)).state).toBe(WorkstreamState.Cancelled);
+      }
+      // No file is written on a branch the pass does not own: each stays as the builder has it.
+      expect(read('src/settings/page.tsx')).toBe('edited before the pass\nand in the turn\n');
+      expect(existsSync(join(w.h.repo, 'src/settings/old.tsx'))).toBe(false);
+      expect(read('src/people/new.tsx')).toBe('added by People\n');
+      // What the turn kept stays with its task.
+      expect(w.h.git$('show', `${keptRef(w.settings.id)}:src/settings/page.tsx`)).toBe(
+        'edited before the pass\nand in the turn',
+      );
+      expect(w.h.git$('symbolic-ref', '--short', 'HEAD')).toBe('main');
+      // An abandoned pass waits for no folder.
+      expect(
+        listInbox(db, { states: [InboxState.Open] }).filter(
+          (item) => item.detail?.['passCard'] === 'folder',
+        ),
+      ).toEqual([]);
+      expect(
+        listTaskThreadRows(db, w.settings.id)
+          .filter((m) => m.kind === 'notice')
+          .map((m) => m.body),
+      ).toContain(
+        "Your folder was on main, not on the pass's branch, so the page's files were left as they are.",
+      );
+    });
+  });
+
   it('leaves the folder on the branch that holds landed work, with a card whose answer moves it home', async () => {
     w = await openPassWorld();
     // A page landed on the pass's branch, as a sign-off will.
@@ -293,6 +366,36 @@ describe('abandonPass', () => {
     expect(read('src/settings/page.tsx')).toBe('settings\n');
     expect(read('src/shared.ts')).toBe('an uncommitted edit\n');
     expect(abandonCards()).toEqual([]);
+  });
+
+  it('keeps naming the files it left when a Move on its card is refused', async () => {
+    w = await openPassWorld();
+    // A page landed on the pass's branch, as a sign-off will, so the folder stays there.
+    w.h.commit('src/settings/page.tsx', 'landed\n');
+    w.write('src/people/page.tsx', 'people, by its page\n');
+    let n = 0;
+    const racing: Git = {
+      ...w.deps.git,
+      hashOnDisk: (repo, paths) => {
+        n += 1;
+        w.write('src/people/page.tsx', `written again (${String(n)})\n`);
+        return w.deps.git.hashOnDisk(repo, paths);
+      },
+    };
+    await abandonPass(deps(w.deps, racing), w.opened.pass.id);
+    const [card] = abandonCards();
+    if (!card) throw new Error('no Abandon card');
+    const left = `- src/people/page.tsx (${w.people.title})`;
+    expect(card.body).toContain(left);
+
+    // An uncommitted edit lies where the switch writes, so the Move is refused.
+    w.write('src/settings/page.tsx', 'an uncommitted edit\n');
+    answerPassCard(w.deps, card, { choice: 'Move to main' });
+    await w.h.jobs.idle();
+
+    const [again] = abandonCards();
+    expect(again?.body).toContain('10db could not move it');
+    expect(again?.body).toContain(left);
   });
 
   it('finishes when a page keeps changing, leaving its files and naming them on the card with the page', async () => {
