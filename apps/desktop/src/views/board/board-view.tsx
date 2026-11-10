@@ -354,6 +354,7 @@ function BoardColumns({
           }}
           renderMenu={(task) => {
             const { workstream: ws, batch } = runOf(task);
+            const passPage = batch?.passId != null;
             // A pass's batch ships with its pass and is abandoned with it, never on its own.
             const canAbandon =
               batch !== undefined &&
@@ -364,7 +365,8 @@ function BoardColumns({
                 task={task}
                 latest={ws?.state}
                 shippedAnywayClosed={shippedAnywayAndClosed(ws, batch)}
-                hold={holdOption(task, ws)}
+                // A pass's page is held and stopped from the Workbench (Take Out), never from here.
+                hold={passPage ? null : holdOption(task, ws)}
                 onHold={() => {
                   actions.hold(task.id);
                 }}
@@ -386,7 +388,7 @@ function BoardColumns({
                       },
                     }
                   : {})}
-                {...(ws && canCancelRun(task, ws)
+                {...(ws && !passPage && canCancelRun(task, ws)
                   ? {
                       onCancelRun: () => {
                         setCancelling(ws);

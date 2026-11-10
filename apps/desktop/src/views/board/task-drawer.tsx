@@ -319,12 +319,13 @@ export function TaskDrawer({
           task={task}
           columnName={columnName}
           workstream={workstream}
-          holdable={holdOption(task, workstream)}
+          // A pass's page is held and stopped from the Workbench (Take Out), never from here.
+          holdable={batch?.passId == null ? holdOption(task, workstream) : null}
           batch={batch}
           batches={batches}
           place={place}
           onClosed={onClose}
-          {...(onCancelRun ? { onCancelRun } : {})}
+          {...(onCancelRun && batch?.passId == null ? { onCancelRun } : {})}
         />
         <TaskNotices
           notices={[...taskNotices(workstream, batch), ...taskHistory(workstream, batch)]}

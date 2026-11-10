@@ -408,6 +408,17 @@ describe('BoardView', () => {
       ),
     ).toBeTruthy();
     expect(within(drawer).getByRole('button', { name: 'Open Workbench' })).toBeTruthy();
+    // Its run is the Workbench's: no Hold and no Cancel Run, in the drawer or on the card's menu.
+    for (const action of [/^Hold/, 'Cancel Run'])
+      expect(within(drawer).queryByRole('button', { name: action })).toBeNull();
+    fireEvent.click(
+      screen.getByRole('button', { name: 'Actions for Billing: UI work', hidden: true }),
+    );
+    const menu = await screen.findByRole('menu', { hidden: true });
+    expect(within(menu).getAllByRole('menuitem', { hidden: true }).length).toBeGreaterThan(0);
+    for (const action of [/^Hold/, 'Cancel Run'])
+      expect(within(menu).queryByRole('menuitem', { name: action, hidden: true })).toBeNull();
+    fireEvent.keyDown(menu, { key: 'Escape' });
 
     // The task taken out is not in the pass: no branch of the pass, nothing to abandon.
     fireEvent.click(screen.getByRole('button', { name: /^Home: UI work/ }));
