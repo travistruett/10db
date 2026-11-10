@@ -45,6 +45,7 @@ import {
   listTaskThread,
   patchWorkstream,
   schema,
+  setClosePlan,
   setPassTurnKept,
   setTaskKeptWork,
   settlePassTurn,
@@ -678,6 +679,30 @@ describe('Close Pass over HTTP', () => {
     await waitFor(() => getPass(daemon.state.db, pass.id).state === 'SETTLED');
     expect(latestPassTurn(daemon.state.db, task.id)?.ending).toBe('stopped');
     expect(listInbox(daemon.state.db, {}).filter((i) => i.kind === 'check')).toEqual([]);
+    expect(rawGit('symbolic-ref', '--short', 'HEAD')).toBe('main');
+    expect(existsSync(join(repo.path, PAGE_FILE))).toBe(false);
+    expect(rawGit('show', `refs/10db/kept/${task.id}:${PAGE_FILE}`)).toBe('half');
+  });
+});
+
+describe('a closing pass at start-up', () => {
+  it('goes on with a close the daemon stopped before its job ran, and settles it', async () => {
+    const { task, pass } = await openedPage(WORKING);
+    await waitFor(() => existsSync(join(repo.path, PAGE_FILE)));
+    // The close was confirmed, and the daemon stopped before its job began.
+    daemon.state.write((ctx) => {
+      setClosePlan(ctx, pass.id, {
+        token: 't',
+        pages: [{ taskId: task.id, choice: 'take_out' }],
+        files: [],
+        shared: [],
+      });
+    });
+    await daemon.stop();
+
+    daemon = await startDaemon();
+
+    await waitFor(() => getPass(daemon.state.db, pass.id).state === 'SETTLED', 20_000);
     expect(rawGit('symbolic-ref', '--short', 'HEAD')).toBe('main');
     expect(existsSync(join(repo.path, PAGE_FILE))).toBe(false);
     expect(rawGit('show', `refs/10db/kept/${task.id}:${PAGE_FILE}`)).toBe('half');
