@@ -35,7 +35,9 @@ import {
   createTestStore,
   getAppSetting,
   insertBatch,
+  endPassTurn,
   insertPass,
+  insertPassTurn,
   insertPermissionRule,
   insertTask,
   insertWorkstream,
@@ -997,19 +999,57 @@ describe('a Workbench pass in Your folder', () => {
     ]);
   });
 
-  it("at a session's end, cards a write outside every claim only while a lane works", async () => {
-    const { alpha, beta } = pass(WorkstreamState.Queued);
+  it("at a session's end, cards a write outside every claim as the ending lane's or a working one's", async () => {
+    const { alpha } = pass(WorkstreamState.Queued);
     touch('src/api/a.ts');
     touch('docs/notes.md');
-    expect(await watcher.stepEnd(alpha.id)).toEqual([]);
-    expect(flags()).toEqual([]);
+    // Alpha's session ends between turns: its shell may have written outside every claim.
+    expect(await watcher.stepEnd(alpha.id)).toEqual(['docs/notes.md']);
+    expect(flags().map((f) => f.body)).toEqual(['docs/notes.md\nWritten while Alpha was working']);
+  });
 
+  it('cards a write outside every claim that arrives just after a lane of the pass ended its turn', async () => {
     state.write((ctx) => {
-      transitionWorkstream(ctx, beta.id, { to: WorkstreamState.Starting, fence: null });
-      transitionWorkstream(ctx, beta.id, { to: WorkstreamState.Running, fence: null });
+      const task = insertTask(ctx, project.id, {
+        title: 'Gamma',
+        acceptanceCriteria: ['ok'],
+        areas: ['api'],
+      });
+      const { batch } = insertPass(ctx, {
+        id: mintId('Pass'),
+        projectId: project.id,
+        name: 'Polish',
+        pageCap: 4,
+        returnBranch: 'main',
+        startSha: 'a'.repeat(40),
+        branch: '10db/polish-abc123',
+        baseBranch: 'main',
+        repo: null,
+        taskIds: [task.id],
+        dirt: [],
+      });
+      const ws = insertWorkstream(ctx, task.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        batchId: batch.id,
+      });
+      const turn = insertPassTurn(ctx, {
+        taskId: task.id,
+        workstreamId: ws.id,
+        sessionId: null,
+        messageId: null,
+      });
+      endPassTurn(ctx, turn.id, { ending: 'ready', replyBody: null });
+      // Ready: waiting for the builder, its session open.
+      for (const to of [
+        WorkstreamState.Starting,
+        WorkstreamState.Running,
+        WorkstreamState.WaitingHuman,
+      ])
+        transitionWorkstream(ctx, ws.id, { to, fence: null });
     });
-    expect(await watcher.stepEnd(beta.id)).toEqual(['docs/notes.md']);
-    expect(flags().map((f) => f.body)).toEqual(['docs/notes.md\nWritten while Beta was working']);
+    watcher.sync();
+    await write('docs/notes.md');
+    expect(flags().map((f) => f.body)).toEqual(['docs/notes.md\nWritten while Gamma was working']);
   });
 });
 

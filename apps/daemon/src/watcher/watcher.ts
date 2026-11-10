@@ -24,6 +24,7 @@ import {
   getWorkstream,
   getWorkstreamRow,
   listInbox,
+  latestPassTurn,
   listPassTasks,
   listPermissionRules,
   listProjects,
@@ -72,6 +73,11 @@ import {
 } from './strays';
 
 const WATCH_BATCH_MS = 500;
+/**
+ * How long past a pass turn's end, beyond the batch window, a write outside every claim may still be
+ * that turn's: erring toward naming the lane, since its shell's writes are not seen by the hook.
+ */
+const TURN_END_SLACK_MS = 5_000;
 const BULK_LISTED = 20;
 /** The app setting that holds the writes a permission card excused, so a restart keeps them. */
 const EXCUSED_WRITES_SETTING = 'watcher.excusedWrites';
@@ -260,20 +266,32 @@ export function createWatcher(deps: {
 
   /**
    * The lanes of the project's pass, while one holds its tasks (open, closing or abandoning), when
-   * `batchId` is Your folder's (null): the pass works there alone. Null otherwise.
+   * `batchId` is Your folder's (null): the pass works there alone. Null otherwise. A lane counts as
+   * working while it runs, when it is `ending` (its session's end is being read), and when its last
+   * turn ended so recently that a write it made may have waited out the batch window since.
    */
-  function passLanes(project: ProjectDto, batchId: BatchId | null): PassLane[] | null {
+  function passLanes(
+    project: ProjectDto,
+    batchId: BatchId | null,
+    ending: WorkstreamId | null = null,
+  ): PassLane[] | null {
     if (batchId !== null) return null;
     const pass = findOpenPass(db, project.id);
     if (!pass) return null;
+    const recent = new Date(deps.state.now()).getTime() - batchMs - TURN_END_SLACK_MS;
     return listPassTasks(db, pass.id).flatMap((task) => {
       if (task.workstreamId === null) return [];
       const ws = getWorkstreamRow(db, task.workstreamId);
+      const endedAt = latestPassTurn(db, task.id)?.endedAt;
       return [
         {
           id: ws.id,
           title: task.title,
-          working: ws.state === WorkstreamState.Running || ws.state === WorkstreamState.HandingOff,
+          working:
+            ws.state === WorkstreamState.Running ||
+            ws.state === WorkstreamState.HandingOff ||
+            ws.id === ending ||
+            (endedAt != null && new Date(endedAt).getTime() >= recent),
           claims: activeClaims(db, ws.id).map((c) => ({ kind: c.kind, name: c.name })),
         },
       ];
@@ -981,7 +999,8 @@ export function createWatcher(deps: {
         STEP_END_CLAIM_STATES,
         workstreamId,
       );
-      const lanes = passLanes(project, batchId);
+      // The ending lane's own write outside every claim is carded: its shell may have made it.
+      const lanes = passLanes(project, batchId, workstreamId);
       const inPass = lanes === null ? null : passWrites({ project, lanes, strays, foreign: [] });
       // A write that can change what runs is flagged even inside the workstream's own claim.
       const written = [
