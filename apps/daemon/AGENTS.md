@@ -39,8 +39,12 @@ serves agents over MCP, and runs Claude Code sessions and, for a `codex_signin` 
   command line (`@anthropic-ai/sandbox-runtime`) into `srt.mjs`, copies srt's Java proxy agent to
   `vendor/java-proxy-agent/srt-proxy-agent.jar`, where srt looks before it runs `npm root -g` unsandboxed from
   the gate's checkout, and copies migrations (`drizzle/`) and the
-  SQLite addon (`better_sqlite3.node`) beside it. Nothing stays external: the Tauri sidecar runs the bundle
-  from a directory with no node_modules.
+  SQLite addon (`better_sqlite3.node`) beside it. The Tauri sidecar runs the bundle from a directory with no
+  node_modules above it, so only one package stays external: `playwright-core`, which reads its own
+  `package.json` and `browsers.json` from disk, is copied whole to `node_modules/playwright-core` beside
+  `daemon.mjs` and loaded by a dynamic import (`pictures/playwright.ts`) when a picture is first taken. The
+  build removes that `node_modules` first, so a stale copy never survives; `test/bundle.test.ts` checks the
+  copy's version and that `daemon.mjs`'s directory resolves it.
   `better-sqlite3` is still a daemon dependency: the build copies its addon, and
   `test/crash-recovery.test.ts` opens the database with it directly.
 - `pnpm --filter @10db/daemon dev` runs from source with tsx and loads `apps/daemon/.env` when it
