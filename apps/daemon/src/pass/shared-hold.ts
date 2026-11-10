@@ -1,7 +1,12 @@
 import type { ClaimId, PassDto, PassId } from '@10db/contracts';
 import { getProject, listPassTasks, passPageAreas, type DbReader } from '@10db/db';
 import { classifyPath } from '../guard';
-import { PassFolderOffBranchError } from '../git';
+import {
+  KeptRefMovedError,
+  PassFolderOffBranchError,
+  type ChainCommit,
+  type ChainCommitInput,
+} from '../git';
 import { pageMatcher, passBranch, readKeptRef, type PassWorkDeps } from './kept-work';
 
 // Workbench spec §7.2, §7.3: a pass task's shared area is held one turn at a time. At the grant the
@@ -79,4 +84,27 @@ export async function sharedPathsDiffering(
     (await git.blobsAt(input.repo, input.against, candidates)).map((f) => [f.path, f.blob]),
   );
   return onDisk.filter((f) => there.get(f.path) !== f.blob).map((f) => f.path);
+}
+
+/** How many times a change follows other turn ends that moved the chain before it gives up. */
+const CHAIN_TRIES = 8;
+
+/**
+ * One change on the pass's chain (`Git.chainCommit`) on the tip read just before, read again and
+ * tried again while other keeps or drops move it, up to `CHAIN_TRIES` times.
+ */
+export async function extendChain(
+  deps: SharedDeps,
+  input: Omit<ChainCommitInput, 'expect'>,
+): Promise<ChainCommit> {
+  for (let tries = 1; ; tries += 1) {
+    try {
+      return await deps.git.chainCommit({
+        ...input,
+        expect: await readKeptRef(deps.git, input.repo, input.ref),
+      });
+    } catch (error) {
+      if (!(error instanceof KeptRefMovedError) || tries >= CHAIN_TRIES) throw error;
+    }
+  }
 }
