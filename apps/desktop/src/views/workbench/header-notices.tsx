@@ -2,6 +2,7 @@ import {
   InboxState,
   PASS_RETARGET_CHOICE,
   PassNoticeKind,
+  PassState,
   PassRetargetDetail,
   type InboxItemDto,
   type PassNotice,
@@ -39,9 +40,13 @@ interface NoticeRowProps {
   readonly notice: PassNotice;
   readonly pages: PassViewDto['pages'];
   readonly inbox: readonly InboxItemDto[];
+  /** A page takes a message only while the pass is open. */
+  readonly canSend: boolean;
+  /** A Retarget card is answered while the pass is open or closed, never mid-close or mid-abandon. */
+  readonly canRetarget: boolean;
 }
 
-function NoticeRow({ notice, pages, inbox }: NoticeRowProps) {
+function NoticeRow({ notice, pages, inbox, canSend, canRetarget }: NoticeRowProps) {
   const send = useSendToAgent();
   const answer = useAnswerPassCard();
   const card = retargetCard(notice, inbox);
@@ -78,6 +83,7 @@ function NoticeRow({ notice, pages, inbox }: NoticeRowProps) {
           variant="default"
           size="xs"
           loading={answer.isPending}
+          disabled={!canRetarget}
           onClick={() => {
             answer.mutate({ itemId: card.item.id, choice: PASS_RETARGET_CHOICE });
           }}
@@ -88,7 +94,13 @@ function NoticeRow({ notice, pages, inbox }: NoticeRowProps) {
       {notice.sendable && pages.length > 0 ? (
         <Menu position="bottom-end" withinPortal>
           <Menu.Target>
-            <Button variant="default" size="xs" loading={send.isPending} style={{ flex: 'none' }}>
+            <Button
+              variant="default"
+              size="xs"
+              loading={send.isPending}
+              disabled={!canSend}
+              style={{ flex: 'none' }}
+            >
               Send to Agent
             </Button>
           </Menu.Target>
@@ -120,6 +132,7 @@ export interface HeaderNoticesProps {
 /** The pass's header notices, oldest first; nothing while it has none. */
 export function HeaderNotices({ view, inbox }: HeaderNoticesProps) {
   if (view.notices.length === 0) return null;
+  const state = view.pass.state;
   return (
     <Stack
       component="ul"
@@ -130,7 +143,14 @@ export function HeaderNotices({ view, inbox }: HeaderNoticesProps) {
       style={{ listStyle: 'none' }}
     >
       {view.notices.map((notice) => (
-        <NoticeRow key={notice.id} notice={notice} pages={view.pages} inbox={inbox} />
+        <NoticeRow
+          key={notice.id}
+          notice={notice}
+          pages={view.pages}
+          inbox={inbox}
+          canSend={state === PassState.Open}
+          canRetarget={state === PassState.Open || state === PassState.Closed}
+        />
       ))}
     </Stack>
   );

@@ -128,7 +128,12 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
     return (
       <Stack gap="md">
         <Title order={2}>Workbench</Title>
-        {live === null ? null : <ClosedPassLine view={live} inbox={inbox} />}
+        {live === null ? null : (
+          <>
+            <ClosedPassLine view={live} inbox={inbox} />
+            <HeaderNotices view={live} inbox={inbox} />
+          </>
+        )}
         {start === undefined ? (
           loading
         ) : (

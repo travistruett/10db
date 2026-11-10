@@ -7,6 +7,7 @@ import {
   PASS_NOW,
   pagesByStatus,
   pagesProposalDto,
+  passNotice,
   passStartDto,
   passViewDto,
 } from '../../test/pass-fixtures';
@@ -84,12 +85,16 @@ describe('WorkbenchScreen', () => {
   });
 
   it('with a closed pass waiting to settle, says so in one line above the picker', async () => {
-    await draw({ live: passViewDto({ pass: { state: 'CLOSED' } }) });
+    const notice = passNotice();
+    await draw({ live: passViewDto({ pass: { state: 'CLOSED' }, rest: { notices: [notice] } }) });
     expect(
       await screen.findByText('Settings pass closed; it settles once its pull request merges.'),
     ).toBeTruthy();
     expect(screen.getByRole('checkbox', { name: /^settings/ })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'More pass actions' })).toBeNull();
+    // Its notices stay in sight, and its pages take no message.
+    expect(screen.getByText(notice.text)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Send to Agent' })).toHaveProperty('disabled', true);
   });
 
   it('waits for the picker until what Start Pass says has loaded', async () => {

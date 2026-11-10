@@ -87,6 +87,39 @@ describe('HeaderNotices', () => {
     });
   });
 
+  it.each([
+    { state: 'OPEN', send: true, retarget: true },
+    { state: 'CLOSING', send: false, retarget: false },
+    { state: 'ABANDONING', send: false, retarget: false },
+    // A closed pass's Retarget card is still the daemon's to take; its pages take no message.
+    { state: 'CLOSED', send: false, retarget: true },
+  ] as const)(
+    'while the pass is $state, offers Send to Agent: $send, Retarget: $retarget',
+    async ({ state, send, retarget }) => {
+      record();
+      const view = passViewDto({ pass: { state } });
+      const card = passCard(view, {
+        kind: 'pass_retarget',
+        passId: view.pass.id,
+        stackedOn: mintId('Pass'),
+        base: 'main',
+      });
+      const notices = [
+        passNotice(),
+        passNotice({ id: 'stack', kind: 'stack_unmerged', sendable: false, cardId: card.id }),
+      ];
+      renderWithDaemon(<HeaderNotices view={{ ...view, notices }} inbox={[card]} />);
+      expect(await screen.findByRole('button', { name: 'Send to Agent' })).toHaveProperty(
+        'disabled',
+        !send,
+      );
+      expect(screen.getByRole('button', { name: 'Retarget to main' })).toHaveProperty(
+        'disabled',
+        !retarget,
+      );
+    },
+  );
+
   it('draws nothing while the pass has no notice', () => {
     record();
     renderWithDaemon(<HeaderNotices view={passViewDto()} inbox={[]} />);
