@@ -9,6 +9,7 @@ import type {
 import { Button, Group, Stack, Text, Textarea } from '@mantine/core';
 import { useState } from 'react';
 import { PagePicker } from './page-picker';
+import { StartLines } from './start-lines';
 import { joinableTasks, openRequest, type PickTicks } from './start-pass-rules';
 
 export interface StartPassProps {
@@ -41,6 +42,7 @@ export function StartPass(props: StartPassProps) {
   }));
   const [bothering, setBothering] = useState('');
   const count = ticks.pages.length + ticks.tasks.length;
+  const refusal = error ?? start.refusal?.message ?? null;
   return (
     <Stack gap="lg" maw={640}>
       <Text>Work through pages with the agents, live.</Text>
@@ -63,14 +65,16 @@ export function StartPass(props: StartPassProps) {
           setBothering(event.currentTarget.value);
         }}
       />
+      <StartLines ticks={ticks} start={start} project={project} />
       <Group justify="flex-end" gap="sm" wrap="nowrap" mt="xl" data-start-bar>
-        {error === null ? null : (
+        {refusal === null ? null : (
           <Text size="sm" c="red" role="alert">
-            {error}
+            {refusal}
           </Text>
         )}
         <Button
-          disabled={count === 0}
+          // The daemon would refuse to open now, for the reason beside the button.
+          disabled={count === 0 || start.refusal !== null}
           loading={starting}
           onClick={() => {
             onStart(openRequest(ticks, bothering, goalId));

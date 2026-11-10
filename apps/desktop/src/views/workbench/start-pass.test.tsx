@@ -9,7 +9,7 @@ import { fireEvent, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { minutesBeforeNow, PASS_NOW, passStartDto } from '../../test/pass-fixtures';
 import { projectViewDto, taskDto } from '../../test/fixtures';
-import { renderWithTheme } from '../../test/theme';
+import { renderWithRouter } from '../../test/theme';
 import { StartPass, type StartPassProps } from './start-pass';
 
 const areas: AreaDef[] = [
@@ -47,9 +47,9 @@ const peopleTask = taskDto({
   areas: ['people'],
 });
 
-function draw(overrides: Partial<StartPassProps> = {}) {
+async function draw(overrides: Partial<StartPassProps> = {}) {
   const onStart = vi.fn<(request: PassOpenRequest) => void>();
-  renderWithTheme(
+  await renderWithRouter(
     <StartPass
       project={project}
       start={start}
@@ -70,8 +70,8 @@ const row = (name: string) => screen.getByRole('checkbox', { name: new RegExp(`^
 const startButton = () => screen.getByRole('button', { name: /^Start Pass/ });
 
 describe('StartPass', () => {
-  it('lists the pages with route and last change, then the open UI tasks, under its purpose', () => {
-    draw();
+  it('lists the pages with route and last change, then the open UI tasks, under its purpose', async () => {
+    await draw();
     expect(screen.getByText('Work through pages with the agents, live.')).toBeTruthy();
     const pages = screen.getByRole('group', { name: 'Pages' });
     expect(within(pages).getByText('/settings · changed 1d ago')).toBeTruthy();
@@ -82,8 +82,8 @@ describe('StartPass', () => {
     expect(startButton()).toHaveProperty('disabled', true);
   });
 
-  it('starts the ticked page and task with the message, counting them on the button', () => {
-    const { onStart } = draw();
+  it('starts the ticked page and task with the message, counting them on the button', async () => {
+    const { onStart } = await draw();
     fireEvent.click(row('settings'));
     fireEvent.click(row('The people list breathes'));
     fireEvent.change(screen.getByLabelText("What's bothering you?"), {
@@ -102,8 +102,8 @@ describe('StartPass', () => {
     });
   });
 
-  it('disables a page another ticked row holds or can share a file with, saying why', () => {
-    draw();
+  it('disables a page another ticked row holds or can share a file with, saying why', async () => {
+    await draw();
     fireEvent.click(row('settings'));
     expect(row('forms')).toHaveProperty('disabled', true);
     expect(
@@ -116,8 +116,8 @@ describe('StartPass', () => {
     expect(screen.getByText('The people list breathes works on people')).toBeTruthy();
   });
 
-  it('narrows both lists by the filter', () => {
-    draw();
+  it('narrows both lists by the filter', async () => {
+    await draw();
     fireEvent.change(screen.getByLabelText('Filter pages and tasks'), {
       target: { value: 'peo' },
     });
@@ -126,9 +126,12 @@ describe('StartPass', () => {
     expect(row('The people list breathes')).toBeTruthy();
   });
 
-  it('starts ticked with the tasks a link names, and the goal it came from', () => {
+  it('starts ticked with the tasks a link names, and the goal it came from', async () => {
     const goalId = mintId('Goal');
-    const { onStart } = draw({ initial: { pages: ['billing'], taskIds: [peopleTask.id] }, goalId });
+    const { onStart } = await draw({
+      initial: { pages: ['billing'], taskIds: [peopleTask.id] },
+      goalId,
+    });
     expect(row('billing')).toHaveProperty('checked', true);
     expect(row('The people list breathes')).toHaveProperty('checked', true);
     fireEvent.click(startButton());
@@ -139,9 +142,31 @@ describe('StartPass', () => {
     });
   });
 
-  it("says the daemon's refusal beside Start Pass", () => {
-    draw({ error: 'A lane is running in the folder: Fix login' });
+  it("says the daemon's refusal beside Start Pass", async () => {
+    await draw({ error: 'A lane is running in the folder: Fix login' });
     const refusal = screen.getByText('A lane is running in the folder: Fix login');
     expect(refusal.closest('[data-start-bar]')?.contains(startButton())).toBe(true);
+  });
+
+  it('says why a pass cannot open now and keeps Start Pass disabled', async () => {
+    await draw({
+      start: {
+        ...start,
+        refusal: {
+          code: 'detached_head',
+          message: 'The folder is on no branch: check one out first.',
+        },
+      },
+    });
+    fireEvent.click(row('settings'));
+    expect(screen.getByText('The folder is on no branch: check one out first.')).toBeTruthy();
+    expect(startButton()).toHaveProperty('disabled', true);
+  });
+
+  it('says what the ticked pages take in above the button', async () => {
+    await draw();
+    expect(screen.queryByText(/settings: 3 files already changed/)).toBeNull();
+    fireEvent.click(row('settings'));
+    expect(screen.getByText(/settings: 3 files already changed/)).toBeTruthy();
   });
 });

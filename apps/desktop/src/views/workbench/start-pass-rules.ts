@@ -137,3 +137,25 @@ export function openRequest(
     ...(goalId === null ? {} : { goalId }),
   };
 }
+
+/**
+ * Each ticked page a shared area can also match, by name. A file under a page counts as the page's in
+ * a pass (spec §7.3), so Start Pass says so rather than refusing.
+ */
+export function sharedOverlaps(
+  pages: readonly string[],
+  areas: readonly AreaDef[],
+): { readonly page: string; readonly shared: string }[] {
+  const shared = areas.filter((area) => area.role === AreaRole.Shared);
+  return pages.flatMap((page) => {
+    const own = areas.find((area) => area.name === page);
+    return shared
+      .filter((area) => sharedGlobs(own, area) !== null)
+      .map((area) => ({ page, shared: area.name }));
+  });
+}
+
+/** Every page the ticks hold: the ticked pages, then each ticked task's. */
+export function tickedPages(ticks: PickTicks): string[] {
+  return [...ticks.pages, ...ticks.tasks.flatMap((task) => task.pages)];
+}
