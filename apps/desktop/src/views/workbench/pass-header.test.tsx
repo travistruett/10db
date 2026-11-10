@@ -47,7 +47,7 @@ function draw(view: PassViewDto, overrides: Partial<PassHeaderProps> = {}) {
     inbox: [],
     now,
     onAddPage: vi.fn(),
-    onOpenPullRequest: vi.fn(),
+    pullRequest: <button type="button">Open Pull Request</button>,
     onClose: vi.fn(),
     onRename: vi.fn(),
     onAbandon: vi.fn(),
@@ -77,6 +77,12 @@ describe('PassHeader', () => {
     fireEvent.click(menu());
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Abandon Pass…', hidden: true }));
     expect(props.onAbandon).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows Open Pull Request once a page is signed off', () => {
+    const { ready, working } = pagesByStatus();
+    draw(passViewDto({ pages: [ready, { ...working, signOff: 'done' }] }));
+    expect(screen.getByRole('button', { name: 'Open Pull Request' })).toBeTruthy();
   });
 
   it.each([

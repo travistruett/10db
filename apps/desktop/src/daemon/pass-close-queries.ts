@@ -1,4 +1,6 @@
 import {
+  PassPullRequestDto,
+  PassPullRequestPreviewDto,
   PassSignOffDto,
   TakeOutPreviewDto,
   TaskMessageDto,
@@ -126,6 +128,33 @@ export function useAnswerPassCard() {
       readJson(
         await client.inbox[':id'].answer.$post({ param: { id: itemId }, json: { choice } }),
         z.unknown(),
+      ),
+    onSuccess: refetch,
+  });
+}
+
+/** What Open Pull Request would do, read before it is offered; under `passKeys.all`, so pass events reread it. */
+export function usePullRequestPreview(passId: PassId) {
+  const client = usePassCloseClient();
+  return useQuery({
+    queryKey: [...passKeys.all, 'pull-request', passId],
+    queryFn: async () =>
+      readJson(
+        await client.passes[':passId']['pull-request'].$get({ param: { passId } }),
+        PassPullRequestPreviewDto,
+      ),
+  });
+}
+
+/** Open Pull Request: pushes the signed-off pages and opens a draft, or updates the one open. */
+export function useOpenPullRequest() {
+  const client = usePassCloseClient();
+  const refetch = useRefetchPasses();
+  return useMutation({
+    mutationFn: async (passId: PassId) =>
+      readJson(
+        await client.passes[':passId']['pull-request'].$post({ param: { passId } }),
+        PassPullRequestDto,
       ),
     onSuccess: refetch,
   });

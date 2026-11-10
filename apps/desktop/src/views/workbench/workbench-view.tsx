@@ -33,6 +33,7 @@ import { AddPageModal } from './add-page-modal';
 import { HeaderNotices } from './header-notices';
 import { PassHeader } from './pass-header';
 import { PassWorkspace } from './pass-workspace';
+import { PrButton } from './pr-button';
 import { queueRows } from './queue-rows';
 import type { PassWorkspaceProps } from './pass-workspace-props';
 import { NoPageAreas, ProposePagesModal } from './propose-pages-modal';
@@ -154,6 +155,7 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
         onAddPage={() => {
           setDialog('add-page');
         }}
+        pullRequest={<PrButton view={live} />}
         onRename={() => {
           setDialog('rename');
         }}
