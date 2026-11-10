@@ -66,6 +66,8 @@ import type {
   PassOpenedDto,
   PassAbandonedDto,
   PassOpenRequest,
+  PassPullRequestDto,
+  PassPullRequestPreviewDto,
   PassViewDto,
   TakeOutRequest,
   TakeOutResultDto,
@@ -265,6 +267,14 @@ export interface ApiServices {
    * neither open nor already abandoning.
    */
   abandonPass(passId: PassId): Promise<PassAbandonedDto>;
+  /** Whether Open Pull Request is offered for the pass (spec §8.3), why not, and what it would do. */
+  passPullRequest(passId: PassId): Promise<PassPullRequestPreviewDto>;
+  /**
+   * Pushes the pass's branch and opens its draft pull request in the background, then gates and
+   * reviews what it pushed. Refused (409) when it is not offered: nothing signed off, no origin or gh,
+   * or the pass not open.
+   */
+  openPassPullRequest(passId: PassId): Promise<PassPullRequestDto>;
   /**
    * The project's goals, each with its digest and count of new items since the builder last opened
    * it, and the Ungrouped group. Leaves every view mark as it was.

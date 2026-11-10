@@ -27,6 +27,7 @@ import { returnCheckout } from './checkout-return';
 import { raise, type DeliveryContext } from './context';
 import { settleLeftOutCards } from './left-out-settle';
 import { recoverUnopenedPasses } from './pass-recover';
+import { removeScratchLeftovers } from './scratch-gate';
 import type { Shipper } from './ship';
 import type { BatchStarter } from './start';
 import { retireWorktree } from './worktree-cleanup';
@@ -180,8 +181,12 @@ export async function recoverBatches(deps: {
     report.deleted.push(batch.id);
   }
 
-  // 2. Orphaned shipping gates.
-  for (const batch of listBatches(db, { states: [BatchState.Shipping] })) {
+  // 2. Orphaned shipping gates, and the gate a Workbench pass runs on its pushed tip while it is open
+  // (or failed, after a close's gate failed).
+  for (const batch of listBatches(db, {
+    states: [BatchState.Shipping, BatchState.Open, BatchState.Failed],
+  })) {
+    if (batch.state !== BatchState.Shipping && batch.passId == null) continue;
     const row = getBatchRow(db, batch.id);
     if (row.gatePid === null || row.gatePidStart === null) continue;
     await deps.processes.terminate({ pid: row.gatePid, startedAt: row.gatePidStart, group: true });
@@ -263,6 +268,9 @@ export async function recoverBatches(deps: {
       })),
     );
   }
+
+  // 6a. The scratch gate branches of passes, whose worktrees the sweep just removed.
+  if (deps.worktrees) await removeScratchLeftovers(deps.worktrees.ctx);
 
   // 6b. Abandoned batches whose worktree is gone but whose branch was never settled get their branch
   // deleted or offered, after step 5 retired what it could. Then one card for the 10db branches no

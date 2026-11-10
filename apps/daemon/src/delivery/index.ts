@@ -28,6 +28,7 @@ export {
   type PassOpenInput,
   type PutBackKeptWork,
 } from './pass-open';
+export { createPassPullRequests, type PassPullRequests, type PassShipDeps } from './pass-pr';
 export { createFailedRestarts } from './restart';
 export { stepCheck } from './local-check';
 export { fileFlakyTests, flakeNote, rerunFlaky, type FlakyTest } from './flaky-tests';

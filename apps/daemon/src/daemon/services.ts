@@ -96,6 +96,7 @@ import {
   type BatchStarter,
   type PassOpened,
   type PassOpenInput,
+  type PassPullRequests,
   type Shipper,
 } from '../delivery';
 import { markGhRequired, withAgentStatus, type AgentTools } from '../environment';
@@ -159,6 +160,8 @@ export function createServices(deps: {
   readonly takeOut: (input: TakeOutInput) => Promise<TakeOutResultDto>;
   /** Abandons a pass in the project's delivery queue, stopping its lanes through the runner. */
   readonly abandonPass: (passId: PassId) => Promise<PassAbandonedDto>;
+  /** A pass's pull request: its preview, and Open Pull Request. */
+  readonly passPullRequests: Pick<PassPullRequests, 'preview' | 'open'>;
   readonly shipper: Shipper;
   readonly accounts: AccountService;
   readonly moves: Pick<AccountMoves, 'move'>;
@@ -368,7 +371,7 @@ export function createServices(deps: {
       return deps.takeOut({
         taskId,
         within: TakeOutWithin.Alone,
-        ...(input.shared === undefined ? {} : { shared: input.shared }),
+        shared: input.shared,
       });
     },
     abandonPass(passId) {
@@ -379,6 +382,8 @@ export function createServices(deps: {
         );
       return deps.abandonPass(passId);
     },
+    passPullRequest: (passId) => deps.passPullRequests.preview(passId),
+    openPassPullRequest: (passId) => deps.passPullRequests.open(passId),
     async stopPage(taskId) {
       const task = getTask(db, taskId);
       const pass = passHoldingTask(db, task);
