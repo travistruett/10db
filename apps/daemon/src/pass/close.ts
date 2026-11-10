@@ -182,6 +182,12 @@ export const gateFailedKey = (passId: PassId): string => `pass-gate:${passId}`;
 /** The header notice that says why a close is stuck, cleared once it goes on. */
 const CLOSE_NOTICE = 'close';
 
+/**
+ * The header notice that the close pushed but could not make its pull request ready: the close goes
+ * on, and the notice stays for the builder to finish it on GitHub.
+ */
+const PR_READY_NOTICE = 'close-pr-ready';
+
 const errorText = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
@@ -411,8 +417,8 @@ export async function closeSteps(
         // The branch is pushed; the pull request is GitHub's to finish, and the close goes on.
         deps.state.write((ctx) => {
           setPassNotice(ctx, passId, {
-            id: CLOSE_NOTICE,
-            kind: PassNoticeKind.Close,
+            id: PR_READY_NOTICE,
+            kind: PassNoticeKind.PrNotOpened,
             text: `The pass's branch is pushed, but its pull request could not be made ready for review: ${errorText(error)}. Open or mark it on GitHub.`,
             sendable: false,
             cardId: null,

@@ -315,11 +315,14 @@ export const PassNoticeKind = {
   PrClosed: 'pr_closed',
   /** The gate on the pushed tip failed, or could not run. */
   GateFailed: 'gate_failed',
-  /** Open Pull Request's push or pull request did not go through. */
+  /**
+   * Open Pull Request's push or pull request did not go through, or a close's pull request could not
+   * be made ready or its follow-on opened.
+   */
   PrNotOpened: 'pr_not_opened',
   /** The one review of the pull request could not run. */
   ReviewFailed: 'review_failed',
-  /** The close stopped on an error, or left its pull request to finish on GitHub. */
+  /** The close stopped on an error, and goes on with Continue Close; nothing else has this kind. */
   Close: 'close',
 } as const;
 export type PassNoticeKind = (typeof PassNoticeKind)[keyof typeof PassNoticeKind];

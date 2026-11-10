@@ -1,4 +1,4 @@
-import type { PassViewDto } from '@10db/contracts';
+import type { PassNotice, PassViewDto } from '@10db/contracts';
 import { fireEvent, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { projectViewDto } from '../../test/fixtures';
@@ -122,24 +122,53 @@ describe('PassHeader', () => {
     expect(props.onAbandon).toHaveBeenCalledTimes(1);
   });
 
-  it('while a close has stopped on an error, shows no step under way', () => {
+  it.each<{ name: string; notice: PassNotice; underWay: boolean }>([
+    {
+      name: 'its close stopped on an error, shows no step under way',
+      notice: {
+        id: 'close',
+        kind: 'close',
+        text: "The close stopped while taking out pages. 10db's log has the detail.",
+        sendable: false,
+        cardId: null,
+        at: PASS_NOW,
+      },
+      underWay: false,
+    },
+    {
+      name: 'its pull request could not be made ready, still shows the step under way',
+      notice: {
+        id: 'close-pr-ready',
+        kind: 'pr_not_opened',
+        text: "The pass's branch is pushed, but its pull request could not be made ready for review.",
+        sendable: false,
+        cardId: null,
+        at: PASS_NOW,
+      },
+      underWay: true,
+    },
+    {
+      name: 'its follow-on pull request did not open, still shows the step under way',
+      notice: {
+        id: 'follow-on',
+        kind: 'pr_not_opened',
+        text: 'The pull request merged while the pass was open, and the pages did not reach a follow-on pull request.',
+        sendable: false,
+        cardId: null,
+        at: PASS_NOW,
+      },
+      underWay: true,
+    },
+  ])('while closing with a notice that $name', ({ notice, underWay }) => {
     const { ready } = pagesByStatus();
-    const stopped = {
-      id: 'close',
-      kind: 'close',
-      text: "The close stopped while taking out pages. 10db's log has the detail.",
-      sendable: false,
-      cardId: null,
-      at: PASS_NOW,
-    } as const;
     draw(
       passViewDto({
         pass: { state: 'CLOSING' },
         pages: [ready],
-        rest: { closeStep: 4, notices: [stopped] },
+        rest: { closeStep: 4, notices: [notice] },
       }),
     );
-    expect(screen.queryByText(/…$/)).toBeNull();
+    expect(screen.queryAllByText('Running the gate in your folder…').length > 0).toBe(underWay);
   });
 
   it('while abandoning, keeps Abandon in reach, so a stalled Abandon can be asked again', async () => {

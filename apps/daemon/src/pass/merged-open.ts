@@ -108,7 +108,7 @@ export async function followOnPush(
     deps.state.write((ctx) => {
       setPassNotice(ctx, passId, {
         id: FOLLOW_ON_NOTICE,
-        kind: PassNoticeKind.Close,
+        kind: PassNoticeKind.PrNotOpened,
         text: `The pull request merged while the pass was open, and the pages signed off after its last push did not reach a follow-on pull request: ${errorText(error)}. Open one on GitHub from ${branch}.`,
         sendable: false,
         cardId: null,

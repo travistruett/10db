@@ -371,6 +371,25 @@ describe('Close Pass', () => {
     },
   );
 
+  it('closes when its pull request cannot be made ready, saying so in a notice that is no stopped close', async () => {
+    await world({ gateCommand: 'true' });
+    await twoTurns();
+    const deps = closeDeps();
+    await confirm({
+      ...deps,
+      ship: {
+        ...deps.ship,
+        ensurePassPr: (i, signal) =>
+          i.ready ? Promise.reject(new Error('GitHub is down')) : deps.ship.ensurePassPr(i, signal),
+      },
+    });
+
+    expect(passState()).toBe('CLOSED');
+    const said = getPassProgress(w.h.store.db, w.opened.pass.id).notices;
+    expect(said.map((n) => [n.id, n.kind])).toEqual([['close-pr-ready', 'pr_not_opened']]);
+    expect(said[0]?.text).toMatch(/could not be made ready for review: GitHub is down/);
+  });
+
   it('closes by the fast-forward alone with no origin, and settles at once', async () => {
     await world({ gateCommand: null });
     await twoTurns();
