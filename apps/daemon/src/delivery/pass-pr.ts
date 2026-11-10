@@ -121,6 +121,8 @@ function signedOff(db: DbReader, passId: PassId): string[] {
 }
 
 const GATE_NOTICE = 'gate';
+/** The header notice that says Open Pull Request did not finish. */
+const PR_OPEN_NOTICE = 'pr-open';
 
 const message = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
@@ -387,6 +389,7 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
           const sha = await deps.git.branchTip(project.repoPath, branch);
           if (sha === null) return;
           await ensurePassPr({ passId, ready: false }, signal);
+          deps.state.write((w) => clearPassNotice(w, passId, PR_OPEN_NOTICE));
           checks.start({
             passId,
             sha,
@@ -399,7 +402,19 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
             { passId: pass.id, err: message(error) },
             'pass pull request not opened',
           );
-          throw error;
+          // A function, so the check after the awaits is not narrowed away by the one before them.
+          const stopped = (): boolean => signal.aborted;
+          if (stopped()) return;
+          deps.state.write((w) => {
+            setPassNotice(w, passId, {
+              id: PR_OPEN_NOTICE,
+              kind: PassNoticeKind.PrNotOpened,
+              text: `Open Pull Request did not finish: ${message(error)}`,
+              sendable: false,
+              cardId: null,
+              at: w.now,
+            });
+          });
         }
       });
       return { url: shown.existing?.url ?? null, base: shown.base, gate: shown.gate, review };

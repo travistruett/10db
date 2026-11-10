@@ -1,4 +1,5 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
   PassGateState,
@@ -8,8 +9,10 @@ import {
   type TaskDto,
 } from '@10db/contracts';
 import {
+  findFlowByName,
   getBatch,
   getBatchRow,
+  patchProject,
   patchBatch,
   getPass,
   getPassChecks,
@@ -21,11 +24,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { silentLogger } from '../log';
 import { systemProcesses } from '../recovery';
+import { GhError } from '../github';
+import { CompletionError } from '../sessions';
 import { createGateRunner } from '../verify';
 import { SANDBOXED, waitFor } from '../../test/fixtures';
 import { alive, orphanGateGroup } from '../../test/orphan-gate';
 import { openPass, recoverBatches, type PutBackKeptWork } from './index';
 import { createPassPullRequests, type PassPullRequests } from './pass-pr';
+import type { PassReviewDeps } from './pass-review';
 import { scratchBranchName } from './scratch-gate';
 import { worktreeLockReason } from './worktree-cut';
 import { madeWorktreeRoot, worktreePathFor } from './worktree-path';
@@ -52,7 +58,10 @@ afterEach(async () => {
   h.close();
 });
 
-function setup(project: Partial<ProjectInput> = {}, opts: { holdShips?: () => boolean } = {}) {
+function setup(
+  project: Partial<ProjectInput> = {},
+  opts: { holdShips?: () => boolean; review?: PassReviewDeps } = {},
+) {
   h = createDeliveryHarness({ ...PAGES, gateCommand: GATE, ...project });
   prs = createPassPullRequests({
     ...h.ctx,
@@ -60,7 +69,7 @@ function setup(project: Partial<ProjectInput> = {}, opts: { holdShips?: () => bo
     dataDir: h.dataDir,
     sessionEnv: () => ({ PATH: '/usr/bin:/bin' }),
     identifyProcess: (pid) => systemProcesses.identify(pid),
-    review: null,
+    review: opts.review ?? null,
     ...(opts.holdShips ? { holdShips: opts.holdShips } : {}),
   });
   h.commit('src/settings/page.tsx', 'settings\n');
@@ -95,6 +104,7 @@ function signOff(task: TaskDto, path: string, content: string): string {
 }
 
 const gateState = (passId: PassId) => getPassChecks(h.store.db, passId).gate.state;
+const notices = (passId: PassId) => getPassProgress(h.store.db, passId).notices;
 const batchOf = (passId: PassId) => getPass(h.store.db, passId).batchId;
 
 describe('Open Pull Request', () => {
@@ -201,6 +211,57 @@ describe('Open Pull Request', () => {
       expect.objectContaining({ id: 'gate', kind: PassNoticeKind.GateFailed, sendable: true }),
     ]);
     expect(getBatch(h.store.db, batchOf(passId)).state).toBe('OPEN');
+  });
+
+  it('says in the header when the push or the pull request did not go through, until one does', async () => {
+    setup();
+    const { passId, settings } = await openedPass();
+    signOff(settings, 'src/settings/page.tsx', 'signed off\n');
+    h.gh.failNext.set(
+      'prCreate',
+      new GhError('failed', 'HTTP 422: No commits between main and it'),
+    );
+
+    await prs.open(passId);
+    await h.jobs.idle();
+
+    expect(notices(passId)).toEqual([
+      expect.objectContaining({
+        id: 'pr-open',
+        kind: PassNoticeKind.PrNotOpened,
+        text: expect.stringContaining('No commits between') as unknown,
+      }),
+    ]);
+    await prs.open(passId);
+    await h.jobs.idle();
+    expect(h.gh.prCreates()).toHaveLength(1);
+    expect(notices(passId).filter((n) => n.id === 'pr-open')).toEqual([]);
+  });
+
+  it('says in the header when the review could not ask its model', async () => {
+    setup(
+      { gateCommand: null },
+      {
+        review: {
+          adapter: { complete: () => Promise.reject(new CompletionError('The model failed.')) },
+          launch: (_account, model) => ({ model, env: {}, expect: { kind: 'any' } as never }),
+          scratchRoot: tmpdir(),
+        },
+      },
+    );
+    const standard = findFlowByName(h.store.db, 'standard');
+    if (standard) h.state.write((w) => patchProject(w, h.project.id, { flowId: standard.id }));
+    const { passId, settings } = await openedPass();
+    signOff(settings, 'src/settings/page.tsx', 'signed off\n');
+
+    expect(await prs.open(passId)).toMatchObject({ review: 'started' });
+    await h.jobs.idle();
+
+    await vi.waitFor(() => {
+      expect(notices(passId)).toEqual([
+        expect.objectContaining({ id: 'review', kind: PassNoticeKind.ReviewFailed }),
+      ]);
+    });
   });
 
   it('opens a draft on a local project too, its gate not run until the close', async () => {

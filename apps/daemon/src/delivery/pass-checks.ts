@@ -1,4 +1,5 @@
-import type { PassId } from '@10db/contracts';
+import { PassNoticeKind, type PassId } from '@10db/contracts';
+import { clearPassNotice, setPassNotice } from '@10db/db';
 import type { DeliveryContext } from './context';
 import { reviewPassTip, type PassReviewDeps } from './pass-review';
 
@@ -45,7 +46,21 @@ export interface PassChecks {
 const message = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
+/** The header notices that say the gate or the one review could not run. */
+const GATE_NOTICE = 'gate';
+const REVIEW_NOTICE = 'review';
+
 export function createPassChecks(deps: PassChecksDeps): PassChecks {
+  /** Puts a notice the builder reads, but cannot send, in the pass's header. */
+  function tell(
+    passId: PassId,
+    notice: { readonly id: string; readonly kind: PassNoticeKind; readonly text: string },
+  ): void {
+    deps.state.write((w) => {
+      setPassNotice(w, passId, { ...notice, sendable: false, cardId: null, at: w.now });
+    });
+  }
+
   const running = new Map<
     PassId,
     { readonly abort: AbortController; readonly done: Promise<void> }
@@ -71,18 +86,35 @@ export function createPassChecks(deps: PassChecksDeps): PassChecks {
               { passId: input.passId, sha: input.sha, err: message(error) },
               'pass gate not run',
             );
+            if (!signal.aborted)
+              tell(input.passId, {
+                id: GATE_NOTICE,
+                kind: PassNoticeKind.GateFailed,
+                text: `The gate on ${input.sha.slice(0, 7)} could not run: ${message(error)}`,
+              });
           })
         : null,
       input.review && review
         ? reviewPassTip(
             { ...deps, ...review },
             { passId: input.passId, sha: input.sha, baseRef: input.baseRef, signal },
-          ).catch((error: unknown) => {
-            deps.logger.warn(
-              { passId: input.passId, sha: input.sha, err: message(error) },
-              'pass pull request not reviewed',
-            );
-          })
+          ).then(
+            () => {
+              deps.state.write((w) => clearPassNotice(w, input.passId, REVIEW_NOTICE));
+            },
+            (error: unknown) => {
+              deps.logger.warn(
+                { passId: input.passId, sha: input.sha, err: message(error) },
+                'pass pull request not reviewed',
+              );
+              if (!signal.aborted)
+                tell(input.passId, {
+                  id: REVIEW_NOTICE,
+                  kind: PassNoticeKind.ReviewFailed,
+                  text: `The review of ${input.sha.slice(0, 7)} could not run: ${message(error)}. The next Open Pull Request asks again.`,
+                });
+            },
+          )
         : null,
     ]);
   }

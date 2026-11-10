@@ -765,7 +765,9 @@
               "stack_unmerged",
               "stack_merged",
               "pr_closed",
-              "gate_failed"
+              "gate_failed",
+              "pr_not_opened",
+              "review_failed"
             ]
           },
           "text": {

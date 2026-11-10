@@ -311,8 +311,12 @@ export const PassNoticeKind = {
   StackMerged: 'stack_merged',
   /** The pass's pull request closed without merging while the pass was open. */
   PrClosed: 'pr_closed',
-  /** The gate on the pushed tip failed. */
+  /** The gate on the pushed tip failed, or could not run. */
   GateFailed: 'gate_failed',
+  /** Open Pull Request's push or pull request did not go through. */
+  PrNotOpened: 'pr_not_opened',
+  /** The one review of the pull request could not run. */
+  ReviewFailed: 'review_failed',
 } as const;
 export type PassNoticeKind = (typeof PassNoticeKind)[keyof typeof PassNoticeKind];
 
