@@ -1,5 +1,6 @@
 import { CloseStep, PassState } from '@10db/contracts';
-import { Group, Loader, Text } from '@mantine/core';
+import { Group, Loader, Text, VisuallyHidden } from '@mantine/core';
+import { useState } from 'react';
 
 /** What a closing pass does next, by the last close step that finished (spec §5.4). */
 function closingLine(step: CloseStep | null): string {
@@ -44,14 +45,27 @@ export interface CloseProgressProps {
   readonly step: CloseStep | null;
 }
 
-/** The pass's close or abandon under way (Workbench spec §5.4), said once under the header line. */
+/**
+ * The pass's close or abandon under way (Workbench spec §5.4), said under the header line as each
+ * step goes. Only its first line is announced: a close has up to seven steps, and a live region that
+ * spoke each would chatter.
+ */
 export function CloseProgress({ state, step }: CloseProgressProps) {
   const line = closeProgressLine(state, step);
-  if (line === null) return null;
+  // The first line of this close or abandon, held until the pass is neither.
+  const [announced, setAnnounced] = useState<string | null>(line);
+  if (line === null && announced !== null) setAnnounced(null);
+  if (line !== null && announced === null) setAnnounced(line);
   return (
-    <Group gap="xs" role="status" wrap="nowrap">
-      <Loader size="xs" />
-      <Text size="sm">{line}</Text>
-    </Group>
+    <>
+      {/* Always present, so a screen reader hears the line that fills it. */}
+      <VisuallyHidden role="status">{announced}</VisuallyHidden>
+      {line === null ? null : (
+        <Group gap="xs" wrap="nowrap">
+          <Loader size="xs" />
+          <Text size="sm">{line}</Text>
+        </Group>
+      )}
+    </>
   );
 }

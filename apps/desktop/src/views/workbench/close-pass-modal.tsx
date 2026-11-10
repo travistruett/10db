@@ -70,9 +70,7 @@ function CloseLists({ view, preview, choices, onChoices, disabled }: ListsProps)
                 <Stack gap={6}>
                   <Group gap="sm" wrap="nowrap" justify="space-between">
                     <Stack gap={0} style={{ minWidth: 0 }}>
-                      <Text size="sm" id={`close-page-${page.taskId}`}>
-                        {area}
-                      </Text>
+                      <Text size="sm">{area}</Text>
                       {page.working ? (
                         <Text size="xs" c="dimmed">
                           Working · will be stopped
@@ -80,7 +78,7 @@ function CloseLists({ view, preview, choices, onChoices, disabled }: ListsProps)
                       ) : null}
                     </Stack>
                     <Select
-                      aria-label={area}
+                      aria-label={`What happens to ${area}`}
                       size="xs"
                       w={150}
                       allowDeselect={false}
@@ -137,7 +135,7 @@ function CloseLists({ view, preview, choices, onChoices, disabled }: ListsProps)
                 ) : null}
               </Stack>
               <Select
-                aria-label={file.path}
+                aria-label={`Where ${file.path} goes`}
                 size="xs"
                 w={150}
                 allowDeselect={false}

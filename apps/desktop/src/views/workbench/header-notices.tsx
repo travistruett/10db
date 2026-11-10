@@ -69,7 +69,7 @@ function NoticeRow({ notice, pages, inbox, canSend, canRetarget }: NoticeRowProp
         {notice.text}
       </Text>
       {failure === null ? null : (
-        <Text size="xs" c="red">
+        <Text size="xs" c="red" role="alert">
           {failure}
         </Text>
       )}

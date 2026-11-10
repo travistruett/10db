@@ -72,13 +72,9 @@ function draw(view: PassViewDto) {
   return onClose;
 }
 
-/** The select labelled `label`, beside any group of the same name. */
+/** The select labelled `label`: the only control of that name. */
 function select(dialog: HTMLElement, label: string): HTMLElement {
-  const input = within(dialog)
-    .getAllByLabelText(label)
-    .find((el) => el.tagName === 'INPUT');
-  if (input === undefined) throw new Error(`no select for ${label}`);
-  return input;
+  return within(dialog).getByLabelText(label);
 }
 
 /** Picks `option` in the select labelled `label`. */
@@ -119,8 +115,8 @@ describe('ClosePassModal', () => {
     // Opening the modal stops nothing and sends nothing.
     expect(sent).toEqual([]);
     expect(asked).toEqual([view.pass.id]);
-    await choose(dialog, 'Settings', 'Sign Off Now');
-    await choose(dialog, 'src/app.css', 'Add to Settings');
+    await choose(dialog, 'What happens to Settings', 'Sign Off Now');
+    await choose(dialog, 'Where src/app.css goes', 'Add to Settings');
     fireEvent.click(within(billing).getByRole('radio', { name: 'Drop' }));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Close Pass' }));
     await waitFor(() => {
@@ -164,7 +160,7 @@ describe('ClosePassModal', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Close Pass' });
     const billing = await within(dialog).findByRole('group', { name: 'Billing' });
     // Choices made before the lists changed carry over to the lists shown again.
-    await choose(dialog, 'Settings', 'Sign Off Now');
+    await choose(dialog, 'What happens to Settings', 'Sign Off Now');
     fireEvent.click(within(billing).getByRole('radio', { name: 'Drop' }));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Close Pass' }));
     // Said beside Close Pass, where the second click lands, and announced.
@@ -174,7 +170,7 @@ describe('ClosePassModal', () => {
         'The lists changed since you looked: src/new.css is a new edit no page owns. Check them and close again.',
       ),
     ).toBeTruthy();
-    expect(select(dialog, 'src/new.css')).toBeTruthy();
+    expect(select(dialog, 'Where src/new.css goes')).toBeTruthy();
     expect(onClose).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Close Pass' }));
     await waitFor(() => {

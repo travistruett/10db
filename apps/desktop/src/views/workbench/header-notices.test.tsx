@@ -52,6 +52,28 @@ describe('HeaderNotices', () => {
     expect(await within(shown).findByText('Sent to Billing')).toBeTruthy();
   });
 
+  it("announces the daemon's refusal of a Send to Agent", async () => {
+    record();
+    server.use(
+      http.post(daemonUrl('/tasks/:taskId/thread/:messageId/send-to-agent'), () =>
+        HttpResponse.json(
+          { error: 'conflict', message: 'That notice offers nothing to send to the agent' },
+          { status: 409 },
+        ),
+      ),
+    );
+    const { ready } = pagesByStatus();
+    const view = passViewDto({ pages: [ready], rest: { notices: [passNotice()] } });
+    renderWithDaemon(<HeaderNotices view={view} inbox={[]} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Send to Agent' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Settings', hidden: true }));
+    expect(
+      await within(await screen.findByRole('alert')).findByText(
+        'That notice offers nothing to send to the agent',
+      ),
+    ).toBeTruthy();
+  });
+
   it('offers no Send to Agent on a notice that is not sendable', async () => {
     record();
     const notice = passNotice({ id: 'pr-closed', kind: 'pr_closed', sendable: false });

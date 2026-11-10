@@ -1,6 +1,9 @@
 import { CloseStep, PassState } from '@10db/contracts';
+import { fireEvent, screen } from '@testing-library/react';
+import { useState } from 'react';
 import { describe, expect, it } from 'vitest';
-import { closeProgressLine } from './close-progress';
+import { renderWithTheme } from '../../test/theme';
+import { CloseProgress, closeProgressLine } from './close-progress';
 
 describe('closeProgressLine', () => {
   it.each<{ name: string; state: PassState; step: CloseStep | null; line: string | null }>([
@@ -57,5 +60,34 @@ describe('closeProgressLine', () => {
     { name: 'closed', state: PassState.Closed, step: CloseStep.Closed, line: null },
   ])('$name', ({ state, step, line }) => {
     expect(closeProgressLine(state, step)).toBe(line);
+  });
+});
+
+/** The progress of a close that has landed, with a button that moves it on to after the folder gate. */
+function Closing() {
+  const [step, setStep] = useState<CloseStep>(CloseStep.Landed);
+  return (
+    <>
+      <CloseProgress state={PassState.Closing} step={step} />
+      <button
+        type="button"
+        onClick={() => {
+          setStep(CloseStep.FolderGated);
+        }}
+      >
+        Next step
+      </button>
+    </>
+  );
+}
+
+describe('CloseProgress', () => {
+  it('announces the close once, while its line follows each step', () => {
+    renderWithTheme(<Closing />);
+    fireEvent.click(screen.getByRole('button', { name: 'Next step' }));
+    expect(screen.getAllByRole('status').map((status) => status.textContent)).toEqual([
+      'Running the gate…',
+    ]);
+    expect(screen.getByText('Pushing…')).toBeTruthy();
   });
 });
