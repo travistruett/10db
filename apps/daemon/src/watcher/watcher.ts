@@ -267,8 +267,10 @@ export function createWatcher(deps: {
   /**
    * The lanes of the project's pass, while one holds its tasks (open, closing or abandoning), when
    * `batchId` is Your folder's (null): the pass works there alone. Null otherwise. A lane counts as
-   * working while it runs, when it is `ending` (its session's end is being read), and when its last
-   * turn ended so recently that a write it made may have waited out the batch window since.
+   * working while it runs, when it is `ending` (its session's end is being read) with its turn still
+   * open, and when its last turn ended so recently that a write it made may have waited out the
+   * batch window since. A warm session that closes between turns made no write: its agent was not
+   * working.
    */
   function passLanes(
     project: ProjectDto,
@@ -282,7 +284,8 @@ export function createWatcher(deps: {
     return listPassTasks(db, pass.id).flatMap((task) => {
       if (task.workstreamId === null) return [];
       const ws = getWorkstreamRow(db, task.workstreamId);
-      const endedAt = latestPassTurn(db, task.id)?.endedAt;
+      const latest = latestPassTurn(db, task.id);
+      const endedAt = latest?.endedAt ?? null;
       return [
         {
           id: ws.id,
@@ -290,8 +293,8 @@ export function createWatcher(deps: {
           working:
             ws.state === WorkstreamState.Running ||
             ws.state === WorkstreamState.HandingOff ||
-            ws.id === ending ||
-            (endedAt != null && new Date(endedAt).getTime() >= recent),
+            (ws.id === ending && latest !== undefined && endedAt === null) ||
+            (endedAt !== null && new Date(endedAt).getTime() >= recent),
           claims: activeClaims(db, ws.id).map((c) => ({ kind: c.kind, name: c.name })),
         },
       ];
