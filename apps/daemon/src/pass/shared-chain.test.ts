@@ -6,6 +6,7 @@ import {
   listSharedChanges,
   listTaskThread,
   openHolds,
+  schema,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { isolatedGitEnv } from '../../test/fixtures';
@@ -158,8 +159,11 @@ describe('keepHold', () => {
     expect(w.h.git$('rev-parse', `${tip}^`)).toBe(landed[0]?.landedSha);
     expect(w.h.git$('show', '--name-only', '--format=', `${tip}^`)).toBe('src/button.ts');
     expect(w.h.git$('show', '--name-only', '--format=', tip)).toBe('styles/app.css');
-    // Landing again lands nothing twice.
+    // Landing again lands nothing twice, even after a stop between the commits and their rows.
     expect(await landSharedChanges(w.deps, { passId: w.opened.pass.id, upTo: 2 })).toEqual([]);
+    w.h.store.db.update(schema.passes).set({ sharedLanded: 0 }).run();
+    w.h.store.db.update(schema.passSharedChanges).set({ landedSha: null }).run();
+    expect(await landSharedChanges(w.deps, { passId: w.opened.pass.id, upTo: 2 })).toEqual(landed);
     expect(w.h.git$('rev-parse', w.branch)).toBe(tip);
   });
 });

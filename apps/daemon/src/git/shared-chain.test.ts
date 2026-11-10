@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTempRepo, isolatedGitEnv, type TempDir } from '../../test/fixtures';
-import { createGit, KeptRefMovedError } from './index';
+import { createGit, KeptRefMovedError, PassFolderOffBranchError } from './index';
 
 // Workbench spec §7.2: a shared hold's record is an unsigned commit of the folder's content, and the
 // pass's shared chain moves by compare-and-swap, one unsigned commit per change, never an empty one.
@@ -162,5 +162,63 @@ describe('blobsAt and keepRef', () => {
     const ref = 'refs/10db/passes/pas_1/holds/clm_1';
     await git.keepRef(repo.path, ref, start);
     expect(rawGit('rev-parse', ref)).toBe(start);
+  });
+});
+
+describe('landPaths', () => {
+  const land = (from: string, paths: readonly string[], opId = 'shared-pas_1-1') =>
+    git.landPaths({
+      repo: repo.path,
+      branch: '10db/polish',
+      from,
+      paths,
+      message: 'Shared change 1 of Settings',
+      opId,
+    });
+
+  it('lands the paths as the commit has them, writing no file, and the index follows', async () => {
+    write('src/shared.ts', 'kept\n');
+    const kept = await chain(null, ['src/shared.ts']);
+    if (kept.sha === null) throw new Error('nothing kept');
+    write('src/shared.ts', 'kept, then edited again\n');
+
+    const landed = await land(kept.sha, ['src/shared.ts']);
+
+    expect(landed.alreadyLanded).toBe(false);
+    expect(rawGit('rev-parse', '10db/polish')).toBe(landed.sha);
+    expect(rawGit('rev-parse', '10db/polish^')).toBe(start);
+    expect(rawGit('show', '10db/polish:src/shared.ts')).toBe('kept');
+    expect(readFileSync(join(repo.path, 'src/shared.ts'), 'utf8')).toBe(
+      'kept, then edited again\n',
+    );
+    // The index holds what landed: the later edit is unstaged, nothing is staged.
+    expect(rawGit('status', '--porcelain', '--', 'src/shared.ts')).toBe('M src/shared.ts');
+  });
+
+  it('answers a rerun with the commit its opId made, and makes none for nothing to land', async () => {
+    write('src/shared.ts', 'kept\n');
+    const kept = await chain(null, ['src/shared.ts']);
+    if (kept.sha === null) throw new Error('nothing kept');
+    const landed = await land(kept.sha, ['src/shared.ts']);
+
+    expect(await land(kept.sha, ['src/shared.ts'])).toEqual({
+      sha: landed.sha,
+      alreadyLanded: true,
+    });
+    expect(await land(kept.sha, ['src/shared.ts'], 'shared-pas_1-2')).toEqual({
+      sha: null,
+      alreadyLanded: false,
+    });
+    expect(rawGit('rev-parse', '10db/polish')).toBe(landed.sha);
+  });
+
+  it('is refused while HEAD is off the branch, and moves nothing', async () => {
+    write('src/shared.ts', 'kept\n');
+    const kept = await chain(null, ['src/shared.ts']);
+    if (kept.sha === null) throw new Error('nothing kept');
+    rawGit('switch', '-q', 'main');
+
+    await expect(land(kept.sha, ['src/shared.ts'])).rejects.toThrow(PassFolderOffBranchError);
+    expect(rawGit('rev-parse', '10db/polish')).toBe(start);
   });
 });
