@@ -27,6 +27,7 @@ import { createGateRunner } from '../verify';
 import { createPassCloses, type CloseDeps, type PassCloses } from './close';
 import { closeGateOf } from './close-lists';
 import { keepTurnWork, putBackKeptWork, subscribeMergedPasses } from './index';
+import { followOnPush, mergedClosePlan } from './merged-open';
 
 // Workbench spec §5.4, call 6: a pull request that merges while its pass is open closes the pass,
 // with no gate and no push: its unfinished pages are taken out and carry over to a follow-on pass
@@ -212,6 +213,45 @@ describe('a pull request that merges while its pass is open', () => {
 
     expect(getPass(w.h.store.db, w.opened.pass.id).state).toBe(PassState.Closed);
     expect(followOnCard()).toBeDefined();
+  });
+
+  it('opens the follow-on pull request after a restart cut its push short', async () => {
+    const { deps } = await world();
+    unsubscribe();
+    settingsSignedOff();
+    w.h.commit('src/people/page.tsx', 'people, signed off\n');
+    w.h.settle(w.runOf(w.people), 'DONE');
+    const { url } = await opened();
+    w.h.commit('src/settings/old.tsx', 'signed off later\n');
+    merged(url);
+    const plan = mergedClosePlan(w.h.store.db, w.opened.pass.id);
+    // The daemon stops just after the push reached origin.
+    const stopping = new AbortController();
+    const cut = createPassPullRequests({
+      ...w.h.ctx,
+      git: {
+        ...w.h.git,
+        push: async (...args) => {
+          await w.h.git.push(...args);
+          stopping.abort();
+          throw new Error('the daemon stopped');
+        },
+      },
+      gate: createGateRunner({ sandbox: null, logger: silentLogger }),
+      dataDir: w.h.dataDir,
+      sessionEnv: () => ({ PATH: '/usr/bin:/bin' }),
+      identifyProcess: (pid) => systemProcesses.identify(pid),
+      review: null,
+    });
+    await expect(
+      followOnPush({ ...deps, ship: cut }, w.opened.pass.id, plan, stopping.signal),
+    ).rejects.toThrow();
+    await cut.stop();
+
+    await followOnPush(deps, w.opened.pass.id, plan, new AbortController().signal);
+
+    expect(w.h.gh.prCreates()).toHaveLength(2);
+    expect(getPassPullRequest(w.h.store.db, w.opened.pass.id)?.url).not.toBe(url);
   });
 
   it('refuses a Close Pass once merged, and closes it by itself', async () => {

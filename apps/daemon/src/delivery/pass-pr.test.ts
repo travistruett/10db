@@ -29,7 +29,7 @@ import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery
 import { silentLogger } from '../log';
 import { systemProcesses } from '../recovery';
 import type { Git } from '../git';
-import { GhError } from '../github';
+import { GhError, PrState } from '../github';
 import { CompletionError } from '../sessions';
 import { createGateRunner } from '../verify';
 import { SANDBOXED, waitFor } from '../../test/fixtures';
@@ -235,6 +235,34 @@ describe('Open Pull Request', () => {
     expect(h.origin$('rev-parse', `refs/heads/${branch}`)).toBe(tip);
     expect(h.gh.prCreates()).toHaveLength(1);
     expect(h.gh.body(url)).toContain('- People page');
+  });
+
+  it('opens a follow-on pull request when GitHub merged the one it has before the watch read it', async () => {
+    setup();
+    const { passId, settings, people } = await openedPass();
+    signOff(settings, 'src/settings/page.tsx', 'signed off\n');
+    const signal = new AbortController().signal;
+    await prs.pushPassBranch(passId, signal);
+    const first = await prs.ensurePassPr({ passId, ready: false }, signal);
+    if (first === null) throw new Error('no pull request');
+    h.gh.setState(first.url, PrState.Merged);
+    signOff(people, 'src/people/page.tsx', 'people\n// signed\n');
+
+    await prs.pushPassBranch(passId, signal);
+    const next = await prs.ensurePassPr({ passId, ready: true }, signal);
+
+    expect(next?.url).not.toBe(first.url);
+    expect(getPassPullRequest(h.store.db, passId)?.url).toBe(next?.url);
+    expect(h.gh.prCreates()).toHaveLength(2);
+    // The merged pull request is neither edited nor marked ready: its branch's new commits are in no
+    // pull request but the follow-on.
+    expect(
+      h.gh.calls.filter(
+        (c) =>
+          (c.method === 'prReady' || c.method === 'prEditBody') &&
+          JSON.stringify(c.args).includes(first.url),
+      ),
+    ).toEqual([]);
   });
 
   it('marks a failed gate in the header and the body, and the batch stays open', async () => {
