@@ -17,7 +17,7 @@ import {
 import { act, render } from '@testing-library/react';
 import { delay, http, HttpResponse, ws, type HttpHandler, type WebSocketHandler } from 'msw';
 import { setupServer } from 'msw/node';
-import type { ReactElement } from 'react';
+import type { ReactElement, ReactNode } from 'react';
 import { App } from '../app';
 import type { ConnectionResolver, DaemonConnection } from '../daemon/connection';
 import { DaemonProvider, type DaemonIntervals } from '../daemon/provider';
@@ -189,13 +189,13 @@ export function renderApp(
   return { router, queryClient };
 }
 
-/** One component inside the providers, without the router or shell. */
+/** One component inside the providers, without the router or shell; `rerender` keeps the providers. */
 export function renderWithDaemon(
   ui: ReactElement,
   opts: RenderOptions = {},
-): { queryClient: QueryClient } {
+): { queryClient: QueryClient; rerender: (ui: ReactElement) => void } {
   const queryClient = testQueryClient();
-  render(
+  const wrapper = ({ children }: { readonly children: ReactNode }) => (
     <MantineProvider
       theme={theme}
       cssVariablesResolver={cssVariablesResolver}
@@ -206,12 +206,13 @@ export function renderWithDaemon(
           resolve={opts.resolve ?? resolveTest}
           {...(opts.intervals ? { intervals: opts.intervals } : {})}
         >
-          {ui}
+          {children}
         </DaemonProvider>
       </QueryClientProvider>
-    </MantineProvider>,
+    </MantineProvider>
   );
-  return { queryClient };
+  const { rerender } = render(ui, { wrapper });
+  return { queryClient, rerender };
 }
 
 /**
