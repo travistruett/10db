@@ -1,4 +1,4 @@
-import { mintId, PASS_RETARGET_CHOICE, TaskId } from '@10db/contracts';
+import { mintId, PASS_RETARGET_CHOICE, PassCloseContinueDto, TaskId } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -180,6 +180,81 @@ describe('HeaderNotices', () => {
     );
     const shown = await screen.findByRole('listitem');
     expect(within(shown).queryByRole('button', { name: 'Show More' })).toBeNull();
+  });
+
+  /** A close that stopped, as its notice reads, while the pass is in `state`. */
+  const stopped = (state: 'OPEN' | 'CLOSING' | 'CLOSED') => {
+    const view = passViewDto({ pass: { state } });
+    const notice = passNotice({
+      id: 'close',
+      kind: 'close',
+      text: 'The close stopped: git failed. Close Pass goes on from where it stopped.',
+      sendable: false,
+    });
+    return { view: { ...view, notices: [notice] }, notice };
+  };
+
+  it.each([
+    { state: 'OPEN', offered: false },
+    { state: 'CLOSING', offered: true },
+    { state: 'CLOSED', offered: false },
+  ] as const)(
+    'offers Continue Close on a stopped close while the pass is $state: $offered',
+    async ({ state, offered }) => {
+      record();
+      const { view } = stopped(state);
+      renderWithDaemon(<HeaderNotices view={view} inbox={[]} />);
+      await screen.findByRole('listitem');
+      expect(screen.queryByRole('button', { name: 'Continue Close' }) !== null).toBe(offered);
+    },
+  );
+
+  it('offers no Continue Close on any other notice of a closing pass', async () => {
+    record();
+    renderWithDaemon(
+      <HeaderNotices
+        view={passViewDto({ pass: { state: 'CLOSING' }, rest: { notices: [passNotice()] } })}
+        inbox={[]}
+      />,
+    );
+    await screen.findByRole('listitem');
+    expect(screen.queryByRole('button', { name: 'Continue Close' })).toBeNull();
+  });
+
+  it("continues the close from where it stopped, and says the daemon's refusal", async () => {
+    record();
+    const posted: string[] = [];
+    let status = 202;
+    const { view } = stopped('CLOSING');
+    server.use(
+      http.post(daemonUrl('/passes/:passId/close/continue'), ({ params }) => {
+        posted.push(String(params['passId']));
+        return status === 202
+          ? HttpResponse.json(PassCloseContinueDto.parse({ outcome: 'closing', pass: view.pass }), {
+              status,
+            })
+          : HttpResponse.json(
+              { error: 'conflict', message: 'The pass is not closing' },
+              { status },
+            );
+      }),
+    );
+    renderWithDaemon(<HeaderNotices view={view} inbox={[]} />);
+    const shown = await screen.findByRole('listitem');
+    fireEvent.click(within(shown).getByRole('button', { name: 'Continue Close' }));
+    await waitFor(() => {
+      expect(posted).toEqual([view.pass.id]);
+    });
+    const again = within(shown).getByRole('button', { name: 'Continue Close' });
+    await waitFor(() => {
+      expect(again).toHaveProperty('disabled', false);
+    });
+    status = 409;
+    fireEvent.click(again);
+    expect(
+      await within(await within(shown).findByRole('alert')).findByText('The pass is not closing'),
+    ).toBeTruthy();
+    expect(posted).toEqual([view.pass.id, view.pass.id]);
   });
 
   it('draws nothing while the pass has no notice', () => {
