@@ -100,7 +100,6 @@ describe('POST /tasks/:taskId/thread/:messageId/send-to-agent', () => {
       line,
       command: 'make check-changed',
       exitCode: 2,
-      timedOut: false,
       output: `${'src/settings/page.tsx:1:1 - error TS2322\n'.repeat(2000)}Found 2000 errors.\n`,
     });
     const notice = daemon.state.write((ctx) => {

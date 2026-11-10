@@ -54,7 +54,7 @@ export const TURN_CHECK_TIMEOUT_MS = 10 * 60_000;
 const LOG_TAIL_BYTES = 64 * 1024;
 
 /** The header's one notice of the pass's turn check. */
-export const TURN_CHECK_NOTICE = 'turn-check';
+const TURN_CHECK_NOTICE = 'turn-check';
 
 /** The exit code of a gate whose sandbox could not start (`verify/gate-runner.ts`). */
 const UNSTARTED_EXIT = 126;
@@ -95,6 +95,10 @@ function unrunText(result: GateResult): string {
   return `The changed-files check after a turn could not run${why === '' ? '' : `: ${why}`}`;
 }
 
+/** A timeout in words: seconds under a minute, else whole minutes. */
+const duration = (ms: number): string =>
+  ms < 60_000 ? `${String(ms / 1000)} s` : `${String(Math.round(ms / 60_000))} min`;
+
 /** The end of the check's log, where a failure is said; the tail it reported when it can't be read. */
 async function outputOf(result: GateResult): Promise<string> {
   try {
@@ -114,7 +118,11 @@ function rootsOf(repoPath: string): string[] {
   }
 }
 
-export function createTurnChecks(deps: TurnChecksDeps): TurnChecks {
+function createTurnChecks(
+  deps: TurnChecksDeps,
+  /** Resolves once start-up lets checks run; until then the queue records asks and runs none. */
+  begun: Promise<void>,
+): TurnChecks {
   const db = deps.state.db;
   const queues = new Map<PassId, CheckQueueState>();
   const runs = new Map<
@@ -185,6 +193,12 @@ export function createTurnChecks(deps: TurnChecksDeps): TurnChecks {
   }
 
   async function check(passId: PassId, turns: readonly TurnAsk[], signal: AbortSignal) {
+    await Promise.race([
+      begun,
+      new Promise((resolve) => {
+        signal.addEventListener('abort', resolve, { once: true });
+      }),
+    ]);
     const project = checkedProject(passId);
     const command = project?.changedCheckCommand ?? null;
     // A function, so the checks after the awaits are not narrowed away by the one before them.
@@ -197,6 +211,8 @@ export function createTurnChecks(deps: TurnChecksDeps): TurnChecks {
       `pass-${passId}-check-${String(deps.clock.now().getTime())}.log`,
     );
     let recording: Promise<void> = Promise.resolve();
+    /** The pid this run recorded on the pass, which only this run clears. */
+    const recorded: { pid: number | null } = { pid: null };
     let result: GateResult;
     try {
       result = await deps.gate.run({
@@ -210,20 +226,33 @@ export function createTurnChecks(deps: TurnChecksDeps): TurnChecks {
         checkouts: allCheckouts(db),
         signal,
         onSpawn: (pid) => {
-          recording = deps.identifyProcess(pid).then((start) => {
-            if (start !== null)
+          // Caught as it is made: a pid that can't be read or written is only logged, and the
+          // check runs on unrecorded.
+          recording = deps
+            .identifyProcess(pid)
+            .then((start) => {
+              // A run stopped meanwhile is gone, and a newer one may have recorded its own.
+              if (start === null || stopped()) return;
               deps.state.write((w) => {
                 setPassCheckPid(w, passId, { pid, start });
               });
-          });
+              recorded.pid = pid;
+            })
+            .catch((error: unknown) => {
+              deps.logger.warn({ passId, err: message(error) }, 'turn check pid not recorded');
+            });
         },
       });
     } finally {
-      // The pid is cleared only once its recording has landed, so a late one never outlives it.
-      await recording.catch(() => undefined);
-      deps.state.write((w) => {
-        setPassCheckPid(w, passId, null);
-      });
+      // Cleared once its recording has landed, so a late one never outlives it, and only while the
+      // pass still names this run's pid.
+      await recording;
+      const own = recorded.pid;
+      if (own !== null)
+        deps.state.write((w) => {
+          if (listPassCheckPids(w.tx).some((c) => c.passId === passId && c.pid === own))
+            setPassCheckPid(w, passId, null);
+        });
     }
     if (result.aborted || stopped()) return;
     const turnIds = turns.map((t) => t.turnId);
@@ -231,10 +260,20 @@ export function createTurnChecks(deps: TurnChecksDeps): TurnChecks {
       whileOpen(passId, (w) => {
         markTurnsChecked(w, turnIds, PassTurnCheck.Passed);
         clearPassNotice(w, passId, TURN_CHECK_NOTICE);
+        takeBackOffers(w, passId);
       });
       return;
     }
-    if ((result.exitCode === UNSTARTED_EXIT && !result.timedOut) || result.dockerRefused === true) {
+    // Plan §3.1: a check that timed out, could not start or had Docker refused says so and
+    // offers nothing; its turns stay unchecked.
+    if (result.timedOut) {
+      tell(
+        passId,
+        `The changed-files check after a turn timed out after ${duration(deps.timeoutMs)}`,
+      );
+      return;
+    }
+    if (result.exitCode === UNSTARTED_EXIT || result.dockerRefused === true) {
       tell(passId, unrunText(result));
       return;
     }
@@ -263,11 +302,10 @@ export function createTurnChecks(deps: TurnChecksDeps): TurnChecks {
           line,
           command,
           exitCode: result.exitCode,
-          timedOut: result.timedOut,
           output,
         });
+      takeBackOffers(w, passId);
       for (const target of threads) {
-        withdrawOlderOffers(w, target.taskId);
         const line = checkNoticeLine(target.paths);
         const notice = insertSystemNotice(w, target.taskId, line);
         offerToAgent(w, notice.id, offer(line));
@@ -284,15 +322,19 @@ export function createTurnChecks(deps: TurnChecksDeps): TurnChecks {
     });
   }
 
-  /** A newer failure replaces the task's older check offers: only the latest is sent. */
-  function withdrawOlderOffers(w: WriteContext, taskId: TaskId): void {
-    for (const said of listTaskThread(w.tx, taskId))
-      if (
-        said.author === TaskMessageAuthor.System &&
-        said.sendable &&
-        said.body.startsWith(CHECK_FAILED)
-      )
-        takeOffer(w, said.id);
+  /**
+   * Plan call 7: a newer result takes back every unsent check offer on the pass's pages, so only
+   * what the latest check said can be sent.
+   */
+  function takeBackOffers(w: WriteContext, passId: PassId): void {
+    for (const task of listPassTasks(w.tx, passId))
+      for (const said of listTaskThread(w.tx, task.id))
+        if (
+          said.author === TaskMessageAuthor.System &&
+          said.sendable &&
+          said.body.startsWith(CHECK_FAILED)
+        )
+          takeOffer(w, said.id);
   }
 
   async function stop(passId: PassId): Promise<void> {
@@ -320,7 +362,7 @@ export function createTurnChecks(deps: TurnChecksDeps): TurnChecks {
  * Asks for a check when a page's turn ends Ready (in the runner or in recovery's finish), and stops
  * a pass's check once the pass is no longer open.
  */
-export function subscribeTurnChecks(bus: EventBus, db: DbReader, checks: TurnChecks): () => void {
+function subscribeTurnChecks(bus: EventBus, db: DbReader, checks: TurnChecks): () => void {
   return bus.subscribe((event) => {
     if (event.type === EventType.PassPageReady) {
       const passId = PassId.safeParse(event.entityId);
@@ -365,12 +407,18 @@ export interface CheckTerminator {
 
 /**
  * At start-up, before recovery settles any turn: stops every turn check a stopped daemon left
- * running and clears its pid, then follows Ready turns. Recovery's own Ready turns are checked, and
- * a new check never runs beside a left one or takes its pid's place.
+ * running and clears its pid, then follows Ready turns. Recovery's own Ready turns are asked for, and
+ * a new check never runs beside a left one or takes its pid's place. No check runs until `begin`,
+ * which start-up calls once the batches' recovery has stopped the gates the last daemon left, so a
+ * check never runs beside an orphaned ship or pass gate either.
  */
 export async function startTurnChecks(
   deps: TurnChecksDeps & { readonly bus: EventBus; readonly processes: CheckTerminator },
-): Promise<{ readonly checks: TurnChecks; readonly unsubscribe: () => void }> {
+): Promise<{
+  readonly checks: TurnChecks;
+  readonly unsubscribe: () => void;
+  readonly begin: () => void;
+}> {
   for (const left of listPassCheckPids(deps.state.db)) {
     await deps.processes.terminate({ pid: left.pid, startedAt: left.start, group: true });
     deps.state.write((w) => {
@@ -378,6 +426,14 @@ export async function startTurnChecks(
     });
     deps.logger.info({ passId: left.passId }, 'stopped a turn check a stopped daemon left running');
   }
-  const checks = createTurnChecks(deps);
-  return { checks, unsubscribe: subscribeTurnChecks(deps.bus, deps.state.db, checks) };
+  let begin = (): void => undefined;
+  const begun = new Promise<void>((resolve) => {
+    begin = resolve;
+  });
+  const checks = createTurnChecks(deps, begun);
+  return {
+    checks,
+    unsubscribe: subscribeTurnChecks(deps.bus, deps.state.db, checks),
+    begin,
+  };
 }

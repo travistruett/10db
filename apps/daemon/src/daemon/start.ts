@@ -1380,7 +1380,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // gates' limiter and its shared slots. Started before recovery, which settles turns a stopped daemon
   // ended and so raises their Ready: a check that daemon left running is stopped first, so a new one
   // never runs beside it or takes its pid's place.
-  const { checks: turnChecks, unsubscribe: unsubscribeTurnChecks } = await startTurnChecks({
+  const {
+    checks: turnChecks,
+    unsubscribe: unsubscribeTurnChecks,
+    begin: beginTurnChecks,
+  } = await startTurnChecks({
     state,
     git,
     gate: shipGate,
@@ -1479,6 +1483,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger: logger.child({ component: 'delivery' }),
     worktrees: { ctx: delivery, root: worktreeRoot },
   });
+  // The batches' recovery has stopped the gates the last daemon left: the checks recovery's Ready
+  // turns asked for may run now.
+  beginTurnChecks();
   // Tasks made for a branch that is gone from origin land in their project's default now. It asks
   // origin, so it runs beside the start (an offline start waits on no timeout) and ends with it.
   const retiredLandingsAbort = new AbortController();

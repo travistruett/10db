@@ -28,14 +28,21 @@ const PATH_CHAR = /[A-Za-z0-9_.\-/@+~$]/;
 const isPathChar = (char: string | undefined): boolean =>
   char !== undefined && PATH_CHAR.test(char);
 
+/** Whether a path may end at `end`: nothing of a path follows, or a full stop ending a sentence. */
+function endsPath(output: string, end: number): boolean {
+  const next = output[end];
+  if (next === '.') return !isPathChar(output[end + 1]);
+  return !isPathChar(next);
+}
+
 /**
- * Whether `output` holds `path` whole: nothing of a path right after it, and before it nothing of a
- * path, `./`, or one of the folder's own absolute paths.
+ * Whether `output` holds `path` whole: after it nothing of a path (a sentence's full stop may
+ * follow), and before it nothing of a path, `./`, or one of the folder's own absolute paths.
  */
 function names(output: string, path: string, roots: readonly string[]): boolean {
   const prefixes = ['', './', ...roots.map((root) => `${root.replace(/\/+$/, '')}/`)];
   for (let at = output.indexOf(path); at !== -1; at = output.indexOf(path, at + 1)) {
-    if (isPathChar(output[at + path.length])) continue;
+    if (!endsPath(output, at + path.length)) continue;
     const before = output.slice(0, at);
     const whole = prefixes.some(
       (prefix) => before.endsWith(prefix) && !isPathChar(before[before.length - prefix.length - 1]),
@@ -111,11 +118,9 @@ export function checkOffer(input: {
   readonly line: string;
   readonly command: string;
   readonly exitCode: number;
-  readonly timedOut: boolean;
   readonly output: string;
 }): string {
-  const ended = input.timedOut ? 'timed out' : `exited ${String(input.exitCode)}`;
-  const head = `${input.line}\n\n\`${input.command}\` ${ended}.\n\n\`\`\`\n`;
+  const head = `${input.line}\n\n\`${input.command}\` exited ${String(input.exitCode)}.\n\n\`\`\`\n`;
   const foot = '```';
   // One for the newline the output may need before the fence.
   const room = TASK_MESSAGE_MAX_CHARS - head.length - foot.length - 1;

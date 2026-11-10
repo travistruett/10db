@@ -31,10 +31,10 @@ import { silentLogger } from '../log';
 import { closeGateOf, createPassCloses, joinPass } from '../pass';
 import { systemProcesses } from '../recovery';
 import { createGateRunner, createGateSlots, limitGates } from '../verify';
+import { SandboxProfileError, type GateSandbox } from '../sandbox';
 import { endTurnSteps, finishEndedTurn } from './pass-turn';
 import {
   startTurnChecks,
-  TURN_CHECK_NOTICE,
   TURN_CHECK_TIMEOUT_MS,
   withTurnChecks,
   type TurnChecks,
@@ -46,7 +46,7 @@ import {
 
 let w: PassWorld;
 let dir: TempDir;
-let started: { checks: TurnChecks; unsubscribe: () => void } | null = null;
+let started: Awaited<ReturnType<typeof startTurnChecks>> | null = null;
 let prs: PassPullRequests | null = null;
 afterEach(async () => {
   started?.unsubscribe();
@@ -113,12 +113,18 @@ async function world(command: () => string, more: { pages?: string[] } = {}) {
 
 /** The service as start-up builds it: one gate slot, the real runner, the system's processes. */
 async function start(
-  identify: (pid: number) => Promise<string | null> = (pid) => systemProcesses.identify(pid),
+  opts: {
+    readonly identify?: (pid: number) => Promise<string | null>;
+    readonly timeoutMs?: number;
+    readonly sandbox?: GateSandbox;
+    /** False leaves the checks held, as start-up does until its recovery has run. */
+    readonly begin?: boolean;
+  } = {},
 ): Promise<TurnChecks> {
   started = await startTurnChecks({
     state: w.h.state,
     git: w.h.git,
-    gate: limitGates(createGateRunner({ sandbox: null, logger: silentLogger }), {
+    gate: limitGates(createGateRunner({ sandbox: opts.sandbox ?? null, logger: silentLogger }), {
       slots: createGateSlots(1),
       clock: w.h.ctx.clock,
       logger: silentLogger,
@@ -127,11 +133,12 @@ async function start(
     clock: w.h.ctx.clock,
     dataDir: w.h.dataDir,
     sessionEnv: () => ({ PATH: '/usr/bin:/bin' }),
-    identifyProcess: identify,
-    timeoutMs: TURN_CHECK_TIMEOUT_MS,
+    identifyProcess: opts.identify ?? ((pid) => systemProcesses.identify(pid)),
+    timeoutMs: opts.timeoutMs ?? TURN_CHECK_TIMEOUT_MS,
     bus: w.h.bus,
     processes: systemProcesses,
   });
+  if (opts.begin !== false) started.begin();
   return started.checks;
 }
 
@@ -167,7 +174,9 @@ async function readyTurn(task: TaskDto, path: string): Promise<void> {
 
 const passId = () => w.opened.pass.id;
 const header = () =>
-  getPassProgress(w.h.store.db, passId()).notices.filter((n) => n.id === TURN_CHECK_NOTICE);
+  getPassProgress(w.h.store.db, passId()).notices.filter(
+    (n) => n.kind === PassNoticeKind.TurnCheck,
+  );
 const checkNotices = (task: TaskDto) =>
   listTaskThread(w.h.store.db, task.id).filter(
     (m) => m.author === TaskMessageAuthor.System && m.body.startsWith('Check failed'),
@@ -221,22 +230,40 @@ describe('the check after each turn', () => {
     expect(attempts()).toEqual(before);
     expect(listPassCheckPids(w.h.store.db)).toEqual([]);
 
-    // A check that passes clears the header and leaves the threads' offers.
+    // A check that passes clears the header and takes back every offer.
     touch('pass');
     await readyTurn(w.people, 'src/people/page.tsx');
     await waitFor(() => checks().at(-1) === 'passed');
     expect(header()).toEqual([]);
-    expect(checkNotices(w.settings).map((m) => m.sendable)).toEqual([false, true]);
+    expect(checkNotices(w.settings).map((m) => m.sendable)).toEqual([false, false]);
     expect(lines('runs')).toHaveLength(3);
+  });
+
+  it('holds a Ready asked during start-up until start-up has stopped what the last daemon left', async () => {
+    await world(() =>
+      checkScript('src/settings/page.tsx', '$([ -f "$D/begun" ] && echo after || echo before)'),
+    );
+    await start({ begin: false });
+
+    await readyTurn(w.settings, 'src/settings/page.tsx');
+    // A check that ran now would say "before"; a held one has not run.
+    await waitFor(() => lines('runs').length > 0, 1_000).catch(() => undefined);
+    touch('begun');
+    started?.begin();
+    await waitFor(() => checks().at(-1) === 'failed');
+
+    expect(lines('runs')).toEqual(['after']);
   });
 
   it('says in the header that a run that threw could not run, offering nothing, and the next Ready runs', async () => {
     await world(() => checkScript('src/settings/page.tsx'));
     let psRefuses = true;
     // ps could not be asked for the check's process: the runner kills the group and rejects.
-    await start((pid) => {
-      if (psRefuses) throw new Error('ps is not there');
-      return systemProcesses.identify(pid);
+    await start({
+      identify: (pid) => {
+        if (psRefuses) throw new Error('ps is not there');
+        return systemProcesses.identify(pid);
+      },
     });
 
     await readyTurn(w.settings, 'src/settings/page.tsx');
@@ -255,6 +282,126 @@ describe('the check after each turn', () => {
     await readyTurn(w.people, 'src/people/page.tsx');
     await waitFor(() => checks().at(-1) === 'failed');
     expect(header()).toMatchObject([{ sendable: true }]);
+  });
+
+  it("takes back an older failure's offers on every page, not only the pages the newer one names", async () => {
+    await world(() => checkScript('$(cat "$D/names")'));
+    await start();
+    writeFileSync(join(dir.path, 'names'), 'src/settings/page.tsx');
+    await readyTurn(w.settings, 'src/settings/page.tsx');
+    await waitFor(() => checks().at(-1) === 'failed');
+    expect(checkNotices(w.settings).map((m) => m.sendable)).toEqual([true]);
+
+    writeFileSync(join(dir.path, 'names'), 'src/people/page.tsx');
+    await readyTurn(w.people, 'src/people/page.tsx');
+    await waitFor(() => checks().filter((c) => c === 'failed').length === 2);
+
+    expect(checkNotices(w.settings).map((m) => m.sendable)).toEqual([false]);
+    expect(checkNotices(w.people).map((m) => m.sendable)).toEqual([true]);
+  });
+
+  it.each<{
+    name: string;
+    hold?: boolean;
+    timeoutMs?: number;
+    sandbox?: () => GateSandbox;
+    text: string;
+  }>([
+    {
+      name: 'a check that timed out',
+      hold: true,
+      timeoutMs: 300,
+      text: 'The changed-files check after a turn timed out after 0.3 s',
+    },
+    {
+      name: 'a check whose sandbox could not start (exit 126)',
+      sandbox: () => ({
+        forRun: () => Promise.reject(new SandboxProfileError('network', 'no such host list')),
+      }),
+      text: "The changed-files check after a turn could not run: 10db could not start the gate's sandbox: no such host list",
+    },
+    {
+      name: 'a check whose docker call the sandbox refused',
+      sandbox: () => ({
+        forRun: (input) =>
+          Promise.resolve({
+            file: '/bin/sh',
+            args: ['-c', input.command],
+            env: { PATH: '/usr/bin:/bin' },
+            cwd: input.project.repoPath,
+            tmpDir: input.project.repoPath,
+            commandEnv: {},
+            commandLines: 1,
+            dockerRefused: () => true,
+            dispose: () => Promise.resolve(),
+          }),
+      }),
+      text: 'The changed-files check after a turn could not run: Docker is off for this project',
+    },
+  ])(
+    'says in the header, offering nothing, that $name, and leaves the turn unchecked',
+    async ({ hold, timeoutMs, sandbox, text }) => {
+      await world(() => checkScript('src/settings/page.tsx'));
+      if (hold === true) touch('hold');
+      await start({
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
+        ...(sandbox === undefined ? {} : { sandbox: sandbox() }),
+      });
+
+      await readyTurn(w.settings, 'src/settings/page.tsx');
+      await waitFor(() => header().length === 1);
+
+      expect(header()).toMatchObject([{ kind: PassNoticeKind.TurnCheck, sendable: false, text }]);
+      expect(checks()).toEqual(['none']);
+      expect(checkNotices(w.settings)).toEqual([]);
+      touch('go');
+    },
+  );
+
+  it('runs and reports a check whose process group ps could not be asked for, recording no pid', async () => {
+    await world(() => checkScript('src/settings/page.tsx'));
+    await start({ identify: () => Promise.reject(new Error('ps failed')) });
+
+    await readyTurn(w.settings, 'src/settings/page.tsx');
+    await waitFor(() => checks().at(-1) === 'failed');
+
+    expect(listPassCheckPids(w.h.store.db)).toEqual([]);
+    expect(header()).toMatchObject([{ sendable: true }]);
+  });
+
+  it("keeps a newer check's pid when a stopped check ends after it started", async () => {
+    await world(() => checkScript('src/settings/page.tsx'));
+    touch('hold');
+    let first = 0;
+    let letFirstAnswer = (): void => undefined;
+    const firstAnswer = new Promise<void>((resolve) => {
+      letFirstAnswer = resolve;
+    });
+    // ps answers the first check late, after the next one has started and been recorded.
+    const turnChecks = await start({
+      identify: async (pid) => {
+        if (first === 0) {
+          first = pid;
+          await firstAnswer;
+        }
+        return systemProcesses.identify(pid);
+      },
+    });
+    await readyTurn(w.settings, 'src/settings/page.tsx');
+    await waitFor(() => first !== 0);
+
+    const stopped = turnChecks.stop(passId());
+    await readyTurn(w.people, 'src/people/page.tsx');
+    const [newer] = await waitFor(() => {
+      const pids = listPassCheckPids(w.h.store.db);
+      return pids.length === 1 ? pids : undefined;
+    });
+    letFirstAnswer();
+    await stopped;
+
+    expect(newer?.pid).not.toBe(first);
+    expect(listPassCheckPids(w.h.store.db).map((p) => p.pid)).toEqual([newer?.pid]);
+    touch('go');
   });
 
   it('stops a check a stopped daemon left running before recovery settles a Ready turn, which is checked once', async () => {
@@ -290,7 +437,7 @@ describe('the check after each turn', () => {
     }
   });
 
-  it('stops a running check when Close Pass begins, and its late result writes nothing', async () => {
+  it("stops a running check through the close's own stop, and its late result writes nothing", async () => {
     await world(() => checkScript('src/settings/page.tsx'));
     touch('hold');
     const turnChecks = await start();
@@ -300,6 +447,8 @@ describe('the check after each turn', () => {
       const pids = listPassCheckPids(w.h.store.db);
       return pids.length === 1 ? pids : undefined;
     });
+    // No longer following the pass's state: only the close's stopPassChecks can stop the check.
+    started?.unsubscribe();
     prs = createPassPullRequests({
       ...w.h.ctx,
       state: w.h.state,

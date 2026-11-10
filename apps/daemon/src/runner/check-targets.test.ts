@@ -58,6 +58,15 @@ describe('where a failed check goes', () => {
       ],
     },
     {
+      name: 'a path that ends a sentence, before a space or at the end',
+      output: 'Fix src/settings/page.tsx. Then src/people/page.tsx.',
+      named: ['src/people/page.tsx', 'src/settings/page.tsx'],
+      threads: [
+        { taskId: settings, paths: ['src/settings/page.tsx'] },
+        { taskId: people, paths: ['src/people/page.tsx'] },
+      ],
+    },
+    {
       name: 'a path under another directory is not the path',
       output: 'packages/web/src/settings/page.tsx:1:1 error',
       named: [],
@@ -132,14 +141,12 @@ describe("a failed check's words", () => {
       line: 'Check failed: names `src/settings/page.tsx`',
       command: 'make check-changed',
       exitCode: 2,
-      timedOut: false,
       output: tail,
     });
     const short = checkOffer({
       line: 'Check failed after a turn: it names no changed file',
       command: 'make check-changed',
-      exitCode: 124,
-      timedOut: true,
+      exitCode: 1,
       output: 'stuck\n',
     });
 
@@ -151,7 +158,7 @@ describe("a failed check's words", () => {
       [
         'Check failed after a turn: it names no changed file',
         '',
-        '`make check-changed` timed out.',
+        '`make check-changed` exited 1.',
         '',
         '```',
         'stuck',

@@ -52,12 +52,21 @@ import {
   transitionBatch,
   transitionWorkstream,
 } from '@10db/db';
+import {
+  createStore,
+  listPassCheckPids,
+  openDatabase,
+  openPassTurn,
+  setPassCheckPid,
+} from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
+import { createEventBus, createStateStore } from '../src/events';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
 import { createTempRepo, isolatedGitEnv, tempDir, waitFor } from './fixtures';
+import { alive, orphanGateGroup } from './orphan-gate';
 import { startDaemonWithProfiles } from './daemon-with-profiles';
 
 // Workbench spec §5.1, §6.1: a pass opens over HTTP with each page's first message written, so its
@@ -711,6 +720,40 @@ describe('a closing pass at start-up', () => {
     expect(rawGit('symbolic-ref', '--short', 'HEAD')).toBe('main');
     expect(existsSync(join(repo.path, PAGE_FILE))).toBe(false);
     expect(rawGit('show', `refs/10db/kept/${task.id}:${PAGE_FILE}`)).toBe('half');
+  });
+});
+
+describe("a page's turn check at start-up", () => {
+  it('stops the check the stopped daemon left, then checks the Ready turn recovery settles, once', async () => {
+    const orphan = await orphanGateGroup();
+    const runs = join(data.path, 'check-runs');
+    try {
+      // The check says whether the left one still runs as it starts.
+      const { task, pass } = await openedPage(WORKING, {
+        changedCheckCommand: `(kill -0 ${String(orphan.pid)} 2>/dev/null && echo alive || echo dead) >> '${runs}'`,
+      });
+      await waitFor(() => existsSync(join(repo.path, PAGE_FILE)));
+      await daemon.stop();
+      // The daemon stopped between the turn's end and its settling, with a check running.
+      const db = openDatabase(join(data.path, '10db.sqlite'));
+      const state = createStateStore(createStore(db), createEventBus());
+      state.write((ctx) => {
+        const open = openPassTurn(ctx.tx, task.id);
+        if (!open) throw new Error('no open turn');
+        endPassTurn(ctx, open.id, { ending: 'ready', replyBody: 'Tidied.' });
+        setPassCheckPid(ctx, pass.id, { pid: orphan.pid, start: orphan.startedAt });
+      });
+      db.$client.close();
+
+      daemon = await startDaemon();
+
+      await waitFor(() => latestPassTurn(daemon.state.db, task.id)?.check === 'passed', 20_000);
+      expect(readFileSync(runs, 'utf8').split('\n').filter(Boolean)).toEqual(['dead']);
+      expect(alive(orphan.pid)).toBe(false);
+      expect(listPassCheckPids(daemon.state.db)).toEqual([]);
+    } finally {
+      orphan.cleanup();
+    }
   });
 });
 
