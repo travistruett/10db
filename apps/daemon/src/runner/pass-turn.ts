@@ -127,6 +127,11 @@ function settleTurn(
     if (!pass) throw new ConflictError(`${task.title} is in no open pass`);
     switch (turn.ending) {
       case PassTurnEnding.Ready: {
+        // A message that came as this turn ended has opened the next one: the page works on, and
+        // that turn's end raises its Ready.
+        if (openPassTurn(ctx.tx, row.taskId)) return;
+        // A page never has two open Ready items.
+        withdrawPageItems(ctx, id);
         toWaitingHuman(ctx, id, settle.fence);
         const item = raisePassCheck(ctx, {
           pass,
@@ -193,7 +198,9 @@ function settleTurn(
  * Ends the page's turn (spec §6.2) in its order, for every ending: the end and the agent's reply in
  * one write; the page's work kept; then the turn settled. A failed page with no turn open gets one
  * for the message it was given, so Retry Turn has a message to send again. Does nothing when no
- * turn is open and it did not fail.
+ * turn is open and it did not fail, and a turn is not over, so nothing is done, while a builder
+ * message no turn has taken is kept (step 1): it is on its way into the session, whether or not it
+ * has been handed over yet. True when a turn ended.
  */
 export async function endTurnSteps(
   deps: PassWorkDeps,
@@ -202,10 +209,12 @@ export async function endTurnSteps(
     readonly ending: PassTurnEnding;
     readonly reply: string | null;
   },
-): Promise<void> {
+): Promise<boolean> {
   const db = deps.state.db;
   const { taskId } = getWorkstreamRow(db, input.workstreamId);
   const ended = deps.state.write((ctx) => {
+    if (input.ending === PassTurnEnding.Ready && untakenMessages(ctx.tx, taskId).length > 0)
+      return undefined;
     const open =
       openPassTurn(ctx.tx, taskId) ??
       (input.ending === PassTurnEnding.Failed
@@ -220,8 +229,9 @@ export async function endTurnSteps(
     // A shared change the turn made is kept, and its areas released, before this write.
     return endPassTurn(ctx, open.id, { ending: input.ending, replyBody: input.reply });
   });
-  if (!ended) return;
+  if (!ended) return false;
   await finishEndedTurn(deps, ended, input);
+  return true;
 }
 
 /**

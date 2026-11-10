@@ -11,10 +11,12 @@ import {
   getWorkstreamRow,
   insertBuilderMessage,
   insertPass,
+  insertPassTurn,
   insertTask,
   insertWorkstream,
   listInbox,
   listPassTurns,
+  listSessions,
   endPassTurn,
   listTaskThread,
   openPassTurn,
@@ -29,6 +31,8 @@ import { createGit } from '../git';
 import { silentLogger } from '../log';
 import { recoverOnStartup, systemProcesses } from '../recovery';
 import { untakenMessages } from './lane-messages';
+import { finishEndedTurn } from './pass-turn';
+import type { PassWorkDeps } from '../pass';
 import { DEFAULT_RUNNER_LIMITS } from './runner';
 import { handoffArgs, isolatedGitEnv, waitFor } from '../../test/fixtures';
 import type { FakeScriptBook } from '../sessions';
@@ -109,10 +113,30 @@ async function openPage(
 const row = (id: WorkstreamId): WorkstreamRow => getWorkstreamRow(engine.store.db, id);
 const readyItems = () =>
   listInbox(engine.store.db, {}).filter((i) => PassCheckDetail.safeParse(i.detail).success);
+const isWaiting = (id: WorkstreamId) =>
+  row(id).state === 'WAITING_HUMAN' && row(id).nextAction.kind === 'pass_review';
 const isReady = (id: WorkstreamId, items: number) => () =>
-  row(id).state === 'WAITING_HUMAN' &&
-  row(id).nextAction.kind === 'pass_review' &&
-  readyItems().length === items;
+  isWaiting(id) && readyItems().length === items;
+
+/** A session that takes the message, writes the page and works on until it is stopped. */
+const working: FakeStep[] = [
+  { do: 'consume' },
+  { do: 'tool', toolName: 'Write', input: { file_path: PAGE_FILE, content: 'one\n' } },
+  { do: 'await_message', contains: 'never sent' },
+];
+
+/** What a pass task's turns keep their work with, as the runner's are. */
+const passWork = (): PassWorkDeps => ({
+  state: engine.state,
+  git: createGit(),
+  inbox: engine.inbox,
+  jobs: createDeliveryJobs(silentLogger),
+  logger: silentLogger,
+  clock: engine.clock,
+});
+
+/** The agent has written the page in its turn. */
+const wrote = () => engine.adapter.observations.some((o) => o.kind === 'tool_allowed');
 
 /** The builder writes to the page, as the thread's route does. */
 async function write(task: TaskDto, body: string): Promise<void> {
@@ -179,21 +203,33 @@ describe('a pass task turn by turn', () => {
     expect(row(id)).toMatchObject({ state: 'WAITING_HUMAN', attempt: 0 });
   });
 
-  it('a message pushed as a turn ends holds the page out of Ready until the next turn ends', async () => {
+  it('a message kept as a turn ends, before it is handed over, holds the page out of Ready until the next turn ends', async () => {
     const { task, pass, id } = await openPage([
       [
         { do: 'consume' },
         { do: 'tool', toolName: 'Write', input: { file_path: PAGE_FILE, content: 'one\n' } },
-        // The builder writes now: the turn is ending and has not taken it.
-        { do: 'await_message', contains: 'Also' },
+        { do: 'await_signal', name: 'end the turn' },
         { do: 'turn_complete', text: 'Tidied the form.' },
+        { do: 'await_message', contains: 'Also' },
         ...turn('two\n', 'Made it bigger too.'),
         { do: 'await_message', contains: 'never sent' },
       ],
     ]);
-    await waitFor(() => listPassTurns(engine.store.db, pass.id).length === 1);
-    await write(task, 'Also make it bigger');
-    await waitFor(isReady(id, 1));
+    await waitFor(wrote);
+    // The builder's message is kept, as the thread's route keeps it, and the turn ends before the
+    // runner hands it over (while it folds the builder's hand edits).
+    const message = engine.state.write((ctx) =>
+      insertBuilderMessage(ctx, task.id, { body: 'Also make it bigger', files: [] }),
+    );
+    engine.adapter.signal('end the turn');
+    await waitFor(() => listSessions(engine.store.db, id)[0]?.inputTokens === 1000);
+    await engine.runner.deliverMessage(task.id, message.id, { redo: false });
+    await waitFor(
+      () =>
+        isWaiting(id) &&
+        untakenMessages(engine.store.db, task.id).length === 0 &&
+        !openPassTurn(engine.store.db, task.id),
+    );
 
     // One turn, Ready once, when the turn that took the message ended.
     const turns = listPassTurns(engine.store.db, pass.id);
@@ -206,6 +242,36 @@ describe('a pass task turn by turn', () => {
         .filter((m) => m.author === 'agent')
         .map((m) => m.body),
     ).toEqual(['Made it bigger too.']);
+  });
+
+  it('raises no Ready for a turn whose end the next turn overtook before it was settled', async () => {
+    const { task, pass, id } = await openPage([working]);
+    await waitFor(wrote);
+    await engine.runner.stopAll('shutdown');
+    // The turn ended; a message then opened the next turn while the first one's work was kept.
+    const ended = engine.state.write((ctx) => {
+      const open = openPassTurn(ctx.tx, task.id);
+      if (!open) throw new Error('no open turn');
+      const done = endPassTurn(ctx, open.id, { ending: 'ready', replyBody: 'Tidied.' });
+      const next = insertBuilderMessage(ctx, task.id, { body: 'Also bigger', files: [] });
+      insertPassTurn(ctx, {
+        taskId: task.id,
+        workstreamId: id,
+        sessionId: null,
+        messageId: next.id,
+      });
+      return done;
+    });
+    await finishEndedTurn(passWork(), ended, { fence: null, providerSessionId: null, reason: '' });
+
+    expect(
+      listPassTurns(engine.store.db, pass.id).map((t) => [t.seq, t.ending, t.settledAt !== null]),
+    ).toEqual([
+      [1, 'ready', true],
+      [2, null, false],
+    ]);
+    expect(readyItems()).toEqual([]);
+    expect(row(id).state).not.toBe('WAITING_HUMAN');
   });
 
   it('a message folded mid-turn: the page is Ready when that turn ends', async () => {
@@ -604,12 +670,6 @@ describe('a pass page across a restart', () => {
       cleanShutdown: false,
     });
   }
-  const working: FakeStep[] = [
-    { do: 'consume' },
-    { do: 'tool', toolName: 'Write', input: { file_path: PAGE_FILE, content: 'one\n' } },
-    { do: 'await_message', contains: 'never sent' },
-  ];
-  const wrote = () => engine.adapter.observations.some((o) => o.kind === 'tool_allowed');
 
   it('keeps a Ready page waiting on its Ready item', async () => {
     const { id } = await openPage([
