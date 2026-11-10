@@ -5,6 +5,7 @@ import {
   abandonPassAndBatch,
   activeClaims,
   getTask,
+  getTaskKeptWork,
   lastTakeOut,
   listInbox,
   listSharedChanges,
@@ -20,6 +21,7 @@ import {
   answerPassCard,
   grantSharedHold,
   holdRef,
+  joinPass,
   keepHold,
   keepTurnWork,
   resumePassWork,
@@ -220,5 +222,30 @@ describe('resumePassWork', () => {
     expect(lastTakeOut(w.h.store.db, w.settings.id)?.step).toBe(TakeOutStep.Done);
     expect(getTask(w.h.store.db, w.settings.id).passId).toBeNull();
     expect(readFileSync(join(w.h.repo, 'src/settings/page.tsx'), 'utf8')).toBe('settings\n');
+  });
+
+  it('puts back the saved work of a page Add Page put back into the pass it was taken out of', async () => {
+    w = await openPassWorld();
+    w.write('src/settings/page.tsx', 'the turn\n');
+    await takeOutSteps(deps(w), { taskId: w.settings.id, within: TakeOutWithin.Alone });
+    // The daemon stopped before the join's put-back wrote a file.
+    await joinPass(
+      w.h.ctx,
+      w.opened.pass.id,
+      { pages: [], taskIds: [w.settings.id], firstMessage: null },
+      { leaseMs: 60_000, putBack: () => Promise.reject(new Error('the daemon died')) },
+    );
+    expect(readFileSync(join(w.h.repo, 'src/settings/page.tsx'), 'utf8')).toBe('settings\n');
+
+    const restarted = {
+      ...w.restart(),
+      stopLane: (): Promise<void> => Promise.resolve(),
+      wrote: (): Promise<void> => Promise.resolve(),
+    };
+    await resumePassWork(restarted);
+    await restarted.jobs.idle();
+
+    expect(readFileSync(join(w.h.repo, 'src/settings/page.tsx'), 'utf8')).toBe('the turn\n');
+    expect(getTaskKeptWork(w.h.store.db, w.settings.id)).toBeNull();
   });
 });
