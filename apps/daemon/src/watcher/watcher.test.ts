@@ -14,11 +14,13 @@ import {
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
+  AbandonStep,
   ClaimKind,
   EventType,
   mintId,
   WorkstreamState,
   type BatchId,
+  type PassId,
   type InboxItemDto,
   type ProjectDto,
   type TaskDto,
@@ -26,12 +28,14 @@ import {
   type WorkstreamId,
 } from '@10db/contracts';
 import {
+  abandonPassAndBatch,
   acquireClaims,
   claimRequestsForTask,
   copyHazardNames,
   createTestStore,
   getAppSetting,
   insertBatch,
+  insertPass,
   insertPermissionRule,
   insertTask,
   insertWorkstream,
@@ -45,6 +49,7 @@ import {
   transitionBatch,
   releaseClaims,
   seedProject,
+  setAbandonStep,
   transitionWorkstream,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -902,6 +907,109 @@ describe('watcher', () => {
       }),
     ]);
     expect(flags()[0]?.detail).toMatchObject({ path: 'docs/stray.md' });
+  });
+});
+
+// Workbench spec §6.4: while a pass holds its tasks, the builder's writes in Your folder raise no card.
+describe('a Workbench pass in Your folder', () => {
+  /** A pass on Alpha (`api`, Ready) and Beta (`ui`), each claiming its page as a pass does at open. */
+  function pass(beta: WorkstreamState): { alpha: WorkstreamDto; beta: WorkstreamDto; id: PassId } {
+    const a = seedWorkstream(base, { project, title: 'Alpha', areas: ['api'] });
+    const b = seedWorkstream(base, { project, title: 'Beta', areas: ['ui'] });
+    const id = mintId('Pass');
+    state.write((ctx) => {
+      insertPass(ctx, {
+        id,
+        projectId: project.id,
+        name: 'Polish',
+        pageCap: 4,
+        returnBranch: 'main',
+        startSha: execFileSync('git', ['-C', repo.path, 'rev-parse', 'HEAD'], {
+          env: isolatedGitEnv(),
+        })
+          .toString()
+          .trim(),
+        branch: '10db/polish-abc123',
+        baseBranch: 'main',
+        repo: null,
+        taskIds: [a.task.id, b.task.id],
+        dirt: [],
+      });
+      for (const seeded of [a, b])
+        acquireClaims(ctx, {
+          projectId: project.id,
+          workstreamId: seeded.workstream.id,
+          requests: claimRequestsForTask(seeded.task, project),
+          leaseExpiresAt: '2999-01-01T00:00:00.000Z',
+        });
+      const to = (ws: WorkstreamDto, states: readonly WorkstreamState[]) => {
+        for (const s of states) transitionWorkstream(ctx, ws.id, { to: s, fence: null });
+      };
+      to(a.workstream, [
+        WorkstreamState.Starting,
+        WorkstreamState.Running,
+        WorkstreamState.WaitingHuman,
+      ]);
+      if (beta === WorkstreamState.Running)
+        to(b.workstream, [WorkstreamState.Starting, WorkstreamState.Running]);
+    });
+    return { alpha: a.workstream, beta: b.workstream, id };
+  }
+
+  const write = async (...rels: string[]) => {
+    for (const rel of rels) {
+      touch(rel);
+      emit(rel);
+    }
+    await watcher.flush();
+  };
+
+  it("raises no card for a write to a Ready page's files or outside every claim while no lane works, and does once the pass has ended", async () => {
+    const { id } = pass(WorkstreamState.Queued);
+    watcher.sync();
+    await write('src/api/a.ts', 'src/ui/b.tsx', 'docs/notes.md');
+    expect(flags()).toEqual([]);
+
+    state.write((ctx) => {
+      setAbandonStep(ctx, id, AbandonStep.Abandoning);
+      abandonPassAndBatch(ctx, id);
+    });
+    await write('src/api/a.ts', 'docs/notes.md');
+    expect(flags().map((f) => [f.title, f.body])).toEqual(
+      expect.arrayContaining([
+        ["Write inside another workstream's claim", 'src/api/a.ts'],
+        ['Write outside every claim', 'docs/notes.md'],
+      ]),
+    );
+    expect(flags()).toHaveLength(2);
+  });
+
+  it('raises the stray card for a write outside every claim while a lane works, naming it', async () => {
+    const { beta } = pass(WorkstreamState.Running);
+    watcher.sync();
+    await write('src/api/a.ts', 'docs/notes.md');
+    expect(flags()).toEqual([
+      expect.objectContaining({
+        title: 'Write outside every claim',
+        body: 'docs/notes.md\nWritten while Beta was working',
+        targets: [{ workstreamId: beta.id, sessionId: null }],
+      }),
+    ]);
+  });
+
+  it("at a session's end, cards a write outside every claim only while a lane works", async () => {
+    const { alpha, beta } = pass(WorkstreamState.Queued);
+    touch('src/api/a.ts');
+    touch('docs/notes.md');
+    expect(await watcher.stepEnd(alpha.id)).toEqual([]);
+    expect(flags()).toEqual([]);
+
+    state.write((ctx) => {
+      transitionWorkstream(ctx, beta.id, { to: WorkstreamState.Starting, fence: null });
+      transitionWorkstream(ctx, beta.id, { to: WorkstreamState.Running, fence: null });
+    });
+    expect(await watcher.stepEnd(beta.id)).toEqual(['docs/notes.md']);
+    expect(flags().map((f) => f.body)).toEqual(['docs/notes.md\nWritten while Beta was working']);
   });
 });
 

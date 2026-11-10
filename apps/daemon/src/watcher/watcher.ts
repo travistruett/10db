@@ -17,12 +17,14 @@ import {
 import {
   activeClaims,
   copyHazardNames,
+  findOpenPass,
   getAppSetting,
   getBatch,
   getProject,
   getWorkstream,
   getWorkstreamRow,
   listInbox,
+  listPassTasks,
   listPermissionRules,
   listProjects,
   listWorkstreamCommitShas,
@@ -55,6 +57,7 @@ import {
   writeStamp,
 } from './allowed-writes';
 import { filesUnderBounded as filesUnder } from './dir-files';
+import { passWrites, type PassLane } from './pass-writes';
 import {
   bulkFoldKey,
   findForeignClaimWrites,
@@ -217,9 +220,16 @@ export function createWatcher(deps: {
     strays: readonly string[],
     candidates: readonly WorkstreamId[],
     owner: WorkstreamId | null,
+    /** The pass's lanes that were working when the write was seen, which the card names. */
+    working: readonly PassLane[] = [],
   ): void {
     if (strays.length === 0) return;
     const workstreamId = owner ?? (candidates.length === 1 ? (candidates[0] ?? null) : null);
+    const titles = working.map((lane) => lane.title);
+    const during =
+      titles.length === 0
+        ? ''
+        : `\nWritten while ${titles.join(' and ')} ${titles.length === 1 ? 'was' : 'were'} working`;
     // A write that can change what runs gets its own card, so a bulk card never buries it.
     const { sensitive, ordinary } = splitSensitive(strays, (rel) => rel);
     const single = (rel: string): void => {
@@ -227,7 +237,7 @@ export function createWatcher(deps: {
         projectId: project.id,
         workstreamId,
         title: STRAY_TITLE,
-        body: labelled(site, rel),
+        body: `${labelled(site, rel)}${during}`,
         detail: { path: rel, candidates: [...candidates] },
         foldKey: strayFoldKey(site.scope, rel),
       });
@@ -239,13 +249,35 @@ export function createWatcher(deps: {
         projectId: project.id,
         workstreamId,
         title: `${String(ordinary.length)} writes outside every claim`,
-        body: `${listed.map((rel) => labelled(site, rel)).join('\n')}\n…and ${String(ordinary.length - listed.length)} more`,
+        body: `${listed.map((rel) => labelled(site, rel)).join('\n')}\n…and ${String(ordinary.length - listed.length)} more${during}`,
         detail: { count: ordinary.length, paths: listed, candidates: [...candidates] },
         foldKey: bulkFoldKey(site.scope),
       });
       return;
     }
     ordinary.forEach(single);
+  }
+
+  /**
+   * The lanes of the project's pass, while one holds its tasks (open, closing or abandoning), when
+   * `batchId` is Your folder's (null): the pass works there alone. Null otherwise.
+   */
+  function passLanes(project: ProjectDto, batchId: BatchId | null): PassLane[] | null {
+    if (batchId !== null) return null;
+    const pass = findOpenPass(db, project.id);
+    if (!pass) return null;
+    return listPassTasks(db, pass.id).flatMap((task) => {
+      if (task.workstreamId === null) return [];
+      const ws = getWorkstreamRow(db, task.workstreamId);
+      return [
+        {
+          id: ws.id,
+          title: task.title,
+          working: ws.state === WorkstreamState.Running || ws.state === WorkstreamState.HandingOff,
+          claims: activeClaims(db, ws.id).map((c) => ({ kind: c.kind, name: c.name })),
+        },
+      ];
+    });
   }
 
   /**
@@ -787,9 +819,20 @@ export function createWatcher(deps: {
       if (bookkeeping.length > 0) logBookkeeping(projectId, entry.root, rel, bookkeeping);
       else if (isSensitivePath(rel)) hidden.push(rel);
     }
-    const outside = new Set([...strays, ...hidden]);
+    const lanes = passLanes(project, batchId);
+    const inPass =
+      lanes === null
+        ? null
+        : passWrites({
+            project,
+            lanes,
+            strays,
+            foreign: reported.filter((rel) => !strays.includes(rel) && !hidden.includes(rel)),
+          });
+    const outside = new Set([...(inPass?.strays ?? strays), ...hidden]);
+    const raisedFor = inPass === null ? candidates : inPass.working.map((lane) => lane.id);
     // A write the builder allowed through its permission card needs no second card.
-    const allowed = await allowedWrites(projectId, entry.root, [...outside], candidates);
+    const allowed = await allowedWrites(projectId, entry.root, [...outside], raisedFor);
     // A directory the allowed write created holds only that write, so it is allowed with it. The files of
     // every such directory go through one allowedWrites call, so a batch makes at most two calls, whatever
     // the number of directories, and waits at most four budgets (STAMP_BUDGET_MS each) for its reads.
@@ -802,7 +845,7 @@ export function createWatcher(deps: {
       projectId,
       entry.root,
       [...new Set(directories.flatMap(({ files }) => files))],
-      candidates,
+      raisedFor,
     );
     for (const { rel, files } of directories)
       if (files.every((f) => fileAllowed.has(f))) allowed.add(rel);
@@ -810,14 +853,16 @@ export function createWatcher(deps: {
       project,
       site,
       [...outside].filter((rel) => !allowed.has(rel)),
-      candidates,
+      raisedFor,
       null,
+      inPass?.working,
     );
     raiseForeign(
       project,
       site,
       batchId,
-      reported.filter((rel) => !outside.has(rel)),
+      inPass?.foreign.filter((rel) => !outside.has(rel)) ??
+        reported.filter((rel) => !outside.has(rel)),
     );
   }
 
@@ -936,8 +981,12 @@ export function createWatcher(deps: {
         STEP_END_CLAIM_STATES,
         workstreamId,
       );
+      const lanes = passLanes(project, batchId);
+      const inPass = lanes === null ? null : passWrites({ project, lanes, strays, foreign: [] });
       // A write that can change what runs is flagged even inside the workstream's own claim.
-      const written = [...new Set([...strays, ...changed.filter(isSensitivePath)])];
+      const written = [
+        ...new Set([...(inPass?.strays ?? strays), ...changed.filter(isSensitivePath)]),
+      ];
       // Not a write its permission card allowed: the builder decided about that one already.
       const allowed = await allowedWrites(ws.projectId, root, written, [workstreamId]);
       // Nor a file still showing the write another running lane's card excused: a stamp that matches means
@@ -963,7 +1012,14 @@ export function createWatcher(deps: {
         }),
       );
       const flagged = undecided.filter((rel) => !stillOthers.has(rel));
-      raise(project, siteOf(project, batchId, root), flagged, candidates, workstreamId);
+      raise(
+        project,
+        siteOf(project, batchId, root),
+        flagged,
+        candidates,
+        workstreamId,
+        inPass?.working,
+      );
       return flagged;
     },
 
