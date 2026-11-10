@@ -193,6 +193,9 @@ import {
   type Runner,
   type RunnerLimits,
   type StopPassLane,
+  startTurnChecks,
+  TURN_CHECK_TIMEOUT_MS,
+  withTurnChecks,
 } from '../runner';
 import { resolveSandboxRuntime } from '../paths';
 import {
@@ -1373,6 +1376,26 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   });
   scheduler = createdScheduler;
 
+  // The changed-files check after a page's turn (Workbench spec §8.1): advice, through the shipping
+  // gates' limiter and its shared slots. Started before recovery, which settles turns a stopped daemon
+  // ended and so raises their Ready: a check that daemon left running is stopped first, so a new one
+  // never runs beside it or takes its pid's place.
+  const { checks: turnChecks, unsubscribe: unsubscribeTurnChecks } = await startTurnChecks({
+    state,
+    git,
+    gate: shipGate,
+    bus,
+    processes,
+    logger: logger.child({ component: 'gate' }),
+    clock,
+    dataDir: opts.dataDir,
+    sessionEnv: () => launcher.projectEnv(),
+    identifyProcess: (pid) => processes.identify(pid),
+    timeoutMs: Math.min(TURN_CHECK_TIMEOUT_MS, limits.gateTimeoutMs),
+  });
+  // What the close and Abandon stop of a pass's checks: its pull request's, then its turn check.
+  const passShip = withTurnChecks(passPullRequests, turnChecks);
+
   const cleanShutdown = getAppSetting(db, CLEAN_SHUTDOWN_KEY) !== undefined;
   state.write((ctx) => {
     deleteAppSetting(ctx, CLEAN_SHUTDOWN_KEY);
@@ -1426,7 +1449,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // carried over to a follow-on pass.
   const passCloses = createPassCloses({
     ...passTakeOuts,
-    ship: passPullRequests,
+    ship: passShip,
     gateWhere: (pass) => closeGateOf(passGateKind(getProject(state.db, pass.projectId))),
     openFollowOn: (input) => openPass(delivery, input, passOpenDeps),
   });
@@ -1435,7 +1458,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const passAbandons: AbandonDeps = {
     ...passTakeOuts,
     stopShip: async (passId) => {
-      await passPullRequests.stopPassChecks(passId);
+      await passShip.stopPassChecks(passId);
       await passCloses.abort(passId);
     },
   };
@@ -1883,8 +1906,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       await systemTempSwept;
       backupsAbort.abort();
       await rootsKeptOutOfBackups;
-      // A pass's gate and review on its pushed tip run outside the delivery jobs.
-      await passPullRequests.stop();
+      // A pass's gate and review on its pushed tip run outside the delivery jobs, as its turn checks do.
+      unsubscribeTurnChecks();
+      await Promise.all([passPullRequests.stop(), turnChecks.stopAll()]);
       // A gate that waits must not start because shutdown freed the slot of the one it killed.
       gateSlots.close();
       // Aborts a shipping gate and any git or gh child; the batch stays SHIPPING for recovery.

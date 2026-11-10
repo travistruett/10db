@@ -9,6 +9,7 @@ import {
 import { insertSystemNotice, listTaskThread, offerToAgent } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { RunningDaemon } from '../src/daemon';
+import { checkNoticeLine, checkOffer } from '../src/runner/check-targets';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
 import { createTempRepo, tempDir } from './fixtures';
@@ -90,6 +91,32 @@ describe('POST /tasks/:taskId/thread/:messageId/send-to-agent', () => {
       false,
     );
     expect((await send(taskId, notice.id)).status).toBe(409);
+  });
+
+  it("sends a failed turn check's offer whole, however long the check's output was", async () => {
+    const taskId = await task();
+    const line = checkNoticeLine(['src/settings/page.tsx']);
+    const offer = checkOffer({
+      line,
+      command: 'make check-changed',
+      exitCode: 2,
+      timedOut: false,
+      output: `${'src/settings/page.tsx:1:1 - error TS2322\n'.repeat(2000)}Found 2000 errors.\n`,
+    });
+    const notice = daemon.state.write((ctx) => {
+      const made = insertSystemNotice(ctx, taskId, line);
+      offerToAgent(ctx, made.id, offer);
+      return made;
+    });
+
+    const res = await send(taskId, notice.id);
+
+    expect(res.status).toBe(201);
+    expect(TaskMessageDto.parse(await res.json())).toMatchObject({
+      author: TaskMessageAuthor.Builder,
+      body: offer,
+    });
+    expect(offer.endsWith('Found 2000 errors.\n```')).toBe(true);
   });
 
   it('refuses a notice that offers nothing to send, and an unknown one, sending nothing', async () => {

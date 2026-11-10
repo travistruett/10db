@@ -88,6 +88,9 @@ export function checkTargets(input: {
   return { named, threads: [...new Set(told)].map((taskId) => ({ taskId, paths: [] })) };
 }
 
+/** How every failed check's thread notice starts, so a newer one can find the older ones. */
+export const CHECK_FAILED = 'Check failed';
+
 /** The most of a notice's first line, so the output keeps the room. */
 const LINE_MAX = 1000;
 
@@ -95,8 +98,8 @@ const LINE_MAX = 1000;
 export function checkNoticeLine(paths: readonly string[]): string {
   const line =
     paths.length === 0
-      ? 'Check failed after a turn: it names no changed file'
-      : `Check failed: names ${paths.map((path) => `\`${path}\``).join(', ')}`;
+      ? `${CHECK_FAILED} after a turn: it names no changed file`
+      : `${CHECK_FAILED}: names ${paths.map((path) => `\`${path}\``).join(', ')}`;
   return line.length <= LINE_MAX ? line : `${line.slice(0, LINE_MAX - 1)}…`;
 }
 
