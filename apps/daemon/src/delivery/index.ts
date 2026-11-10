@@ -26,7 +26,6 @@ export {
   type PassOpenDeps,
   type PassOpened,
   type PassOpenInput,
-  type PassPageWait,
   type PutBackKeptWork,
 } from './pass-open';
 export { createFailedRestarts } from './restart';

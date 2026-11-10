@@ -172,6 +172,7 @@ import {
   DEFAULT_RUNNER_LIMITS,
   type Runner,
   type RunnerLimits,
+  type StopPassLane,
 } from '../runner';
 import { resolveSandboxRuntime } from '../paths';
 import {
@@ -1343,10 +1344,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     cleanShutdown,
   });
   // A pass's take-outs and Abandon stop its lanes through the runner.
-  const passTakeOuts: TakeOutDeps = {
-    ...passWork,
-    stopLane: (id) => createdRunner.stopPassLane(id),
-  };
+  const stopLane: StopPassLane = (id) => createdRunner.stopPassLane(id);
+  const passTakeOuts: TakeOutDeps = { ...passWork, stopLane };
   // Each open pass goes on from its rows: its folder card, a put-back and take-outs cut short.
   await resumePassWork(passTakeOuts);
   // The previous daemon's claim waits ended with it; their cards would name holders nobody waits for.
