@@ -30,9 +30,11 @@ import {
   closeHoldsOf,
   dropShared,
   grantSharedHold,
+  joinPass,
   keepTurnWork,
   keptRef,
   passFolderOn,
+  putBackKeptWork,
   resumePassWork,
   takeOutSteps,
   TakeOutWithin,
@@ -336,6 +338,64 @@ describe('abandonPass', () => {
 
       expectAbandoned(w);
       expect(getPass(w.h.store.db, w.opened.pass.id)).toMatchObject({ state: PassState.Abandoned });
+    });
+  });
+
+  describe('with a page taken out and put back by Add Page, it still finishes', () => {
+    /** Settings' turn edits its page; the page is taken out, then Add Page puts it back. */
+    async function takenOutAndBack(): Promise<void> {
+      w = await openPassWorld();
+      const turn = w.startTurn(w.settings);
+      w.write('src/settings/page.tsx', 'settings, the turn\n');
+      await keepTurnWork(w.deps, { workstreamId: w.runOf(w.settings), turnId: turn.id });
+      w.endTurn(turn);
+      await takeOutSteps(deps(), { taskId: w.settings.id, within: TakeOutWithin.Alone });
+      await joinPass(
+        w.h.ctx,
+        w.opened.pass.id,
+        { pages: [], taskIds: [w.settings.id], firstMessage: null },
+        { leaseMs: 60_000, putBack: (input) => putBackKeptWork(w.deps, input) },
+      );
+      expect(read('src/settings/page.tsx')).toBe('settings, the turn\n');
+    }
+
+    function expectBothOut(): void {
+      const db = w.h.store.db;
+      expect(getPass(db, w.opened.pass.id).state).toBe(PassState.Abandoned);
+      for (const task of [w.settings, w.people]) {
+        expect(getTask(db, task.id)).toMatchObject({ passId: null, status: 'open' });
+        expect(getWorkstreamRow(db, w.runOf(task)).state).toBe(WorkstreamState.Cancelled);
+      }
+      expect(read('src/settings/page.tsx')).toBe('settings\n');
+      expect(w.h.git$('show', `${keptRef(w.settings.id)}:src/settings/page.tsx`)).toBe(
+        'settings, the turn',
+      );
+      expect(w.h.git$('symbolic-ref', '--short', 'HEAD')).toBe('main');
+    }
+
+    it.each([
+      { name: 'in one daemon', restart: false },
+      { name: 'after a restart', restart: true },
+    ])('$name', async ({ restart }) => {
+      await takenOutAndBack();
+      const result = await abandonPass(deps(restart ? w.restart() : w.deps), w.opened.pass.id);
+      expectBothOut();
+      expect(result.reverted).toEqual(expect.arrayContaining([w.settings.id, w.people.id]));
+    });
+
+    it('when a restart finds the Abandon stopped at its take-outs', async () => {
+      await takenOutAndBack();
+      // Where an Abandon that failed on the page's earlier take-out left the pass.
+      w.h.state.write((ctx) => {
+        setAbandonStep(ctx, w.opened.pass.id, AbandonStep.Abandoning);
+        setAbandonStep(ctx, w.opened.pass.id, AbandonStep.SharedDropped);
+      });
+
+      const restarted = deps(w.restart());
+      await resumePassWork(restarted);
+      await restarted.jobs.idle();
+
+      expectBothOut();
     });
   });
 

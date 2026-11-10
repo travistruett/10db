@@ -30,11 +30,20 @@ function getTakeOut(db: DbReader, key: TakeOutKey): PassTakeOutRow {
   return row;
 }
 
-/** Writes a take-out before its first step, with the shared changes chosen Drop. */
+/**
+ * Writes a take-out before its first step, with the shared changes chosen Drop. A task Add Page put
+ * back into the same pass is taken out again on a fresh row: the finished one told of a take-out
+ * whose saved work the put-back has already used. Refused while the task's take-out is unfinished,
+ * which goes on from its own row.
+ */
 export function insertTakeOut(
   ctx: WriteContext,
   input: TakeOutKey & { readonly drops: readonly number[] },
 ): PassTakeOutRow {
+  const earlier = ctx.tx.select().from(schema.passTakeOuts).where(keyed(input)).get();
+  if (earlier && earlier.step < TakeOutStep.Done)
+    throw new ConflictError(`A take-out of task ${input.taskId} is already under way`);
+  if (earlier) deleteTakeOut(ctx, input);
   const row: PassTakeOutRow = {
     taskId: input.taskId,
     passId: input.passId,

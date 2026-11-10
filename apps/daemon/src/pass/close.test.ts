@@ -48,7 +48,15 @@ import {
 } from './close';
 import { closeGateOf } from './close-lists';
 import { folderCardOpen } from './folder';
-import { grantSharedHold, keepHold, keepTurnWork, startAbandon, type PassWorkDeps } from './index';
+import {
+  grantSharedHold,
+  joinPass,
+  keepHold,
+  keepTurnWork,
+  putBackKeptWork,
+  startAbandon,
+  type PassWorkDeps,
+} from './index';
 import { signOffRefusal, startSignOff } from './sign-off';
 
 // Workbench spec §5.4, §5.5, §12: Close Pass signs off the pages set to it, lands what is kept, gates,
@@ -212,6 +220,62 @@ describe('Close Pass', () => {
     expect(landed()).toEqual(['Settings: UI work']);
     expect(w.h.git$('symbolic-ref', '--short', 'HEAD')).toBe(w.branch);
     expect(getTask(w.h.store.db, w.people.id).passId === null).toBe(takenOut);
+  });
+
+  describe('after its failed gate took a page out and Add Page put it back', () => {
+    const ends = [
+      {
+        name: 'an Abandon finishes',
+        end: async (deps: CloseDeps) => {
+          await startAbandon(deps, w.opened.pass.id);
+          return 'ABANDONED';
+        },
+      },
+      {
+        name: 'the next close finishes',
+        end: async (deps: CloseDeps) => {
+          deps.state.write((ctx) => patchProject(ctx, w.h.project.id, { gateCommand: 'true' }));
+          const closes = createPassCloses(deps);
+          const shown = await closes.preview(w.opened.pass.id);
+          await closes.close(w.opened.pass.id, {
+            token: shown.token,
+            pages: [{ taskId: w.people.id, choice: PassClosePageChoice.TakeOut }],
+            files: [],
+            shared: [],
+          });
+          await deps.jobs.idle();
+          expect(getPassProgress(deps.state.db, w.opened.pass.id).notices).toEqual([]);
+          return 'SETTLED';
+        },
+      },
+    ];
+    it.each(
+      ends.flatMap((row) => [
+        { ...row, restart: false, name: `${row.name} in one daemon` },
+        { ...row, restart: true, name: `${row.name} after a restart` },
+      ]),
+    )('$name', async ({ end, restart }) => {
+      await world({ gateCommand: 'false', delivery: 'local' });
+      await twoTurns();
+      await confirm(closeDeps());
+      expect(getTask(w.h.store.db, w.people.id).passId).toBeNull();
+      await joinPass(
+        w.h.ctx,
+        w.opened.pass.id,
+        { pages: [], taskIds: [w.people.id], firstMessage: null },
+        { leaseMs: 60_000, putBack: (input) => putBackKeptWork(w.deps, input) },
+      );
+      expect(read('src/people/page.tsx')).toBe('People: UI work work\n');
+
+      const state = await end(closeDeps(restart ? w.restart() : w.deps));
+
+      expect(passState()).toBe(state);
+      expect(getTask(w.h.store.db, w.people.id)).toMatchObject({ passId: null, status: 'open' });
+      expect(read('src/people/page.tsx')).toBe('people\n');
+      expect(w.h.git$('show', `refs/10db/kept/${w.people.id}:src/people/page.tsx`)).toBe(
+        'People: UI work work',
+      );
+    });
   });
 
   it("opens a waiting sign-off's Ready item again when the close that took it over reopens the pass", async () => {
