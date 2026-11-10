@@ -649,6 +649,20 @@ export const AppUrl = z
   );
 export type AppUrl = z.infer<typeof AppUrl>;
 
+/** Said when an app address names the daemon's own port: a page loaded there would reach 10db's API. */
+export const APP_URL_IS_DAEMON =
+  "That is 10db's own address: an app address names your dev server's port";
+
+/**
+ * Whether the app address is on the port the daemon listens on. Every app address is a loopback
+ * origin, so its port alone says it would reach the daemon's API.
+ */
+export function isDaemonAddress(appUrl: AppUrl, daemonPort: number): boolean {
+  const url = new URL(appUrl);
+  const port = url.port === '' ? (url.protocol === 'https:' ? 443 : 80) : Number(url.port);
+  return port === daemonPort;
+}
+
 /** The dev login command as the builder types it; a blank one is no command. */
 const DevLoginCommand = z
   .string()

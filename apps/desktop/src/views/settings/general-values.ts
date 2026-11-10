@@ -1,5 +1,7 @@
 import {
   allowedCommandProblem,
+  APP_URL_IS_DAEMON,
+  isDaemonAddress,
   AllowedCommands,
   AppUrl,
   BranchName,
@@ -176,8 +178,15 @@ function parseAllowedCommands(text: string): { commands: string[]; error: string
   };
 }
 
-/** Client-side checks with the daemon's rules, and the patch of what differs from the project. */
-export function checkGeneral(project: ProjectDto, values: GeneralValues): GeneralCheck {
+/**
+ * Client-side checks with the daemon's rules, and the patch of what differs from the project.
+ * `daemonPort` is the port the window talks to the daemon on, which no app address may name.
+ */
+export function checkGeneral(
+  project: ProjectDto,
+  values: GeneralValues,
+  daemonPort: number | null = null,
+): GeneralCheck {
   const errors: GeneralErrors = {};
   const name = values.name.trim();
   const gateCommand = values.gateCommand.trim();
@@ -215,6 +224,12 @@ export function checkGeneral(project: ProjectDto, values: GeneralValues): Genera
   const appUrl = appUrlText === '' ? null : AppUrl.safeParse(appUrlText);
   if (appUrl !== null && !appUrl.success)
     errors.appUrl = appUrl.error.issues[0]?.message ?? 'Enter an address on this Mac';
+  else if (
+    appUrl?.success === true &&
+    daemonPort !== null &&
+    isDaemonAddress(appUrl.data, daemonPort)
+  )
+    errors.appUrl = APP_URL_IS_DAEMON;
   const screens = checkScreens(values.screens);
   if ('error' in screens) errors.screens = screens.error;
   if (Object.keys(errors).length > 0) return { ok: false, errors };

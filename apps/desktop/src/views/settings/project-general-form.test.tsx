@@ -75,7 +75,7 @@ const rows: readonly Row[] = [
   {
     name: 'App address',
     label: 'App address',
-    line: "Where your dev server answers, such as http://localhost:5173. The Workbench's Open Page opens a page's route here.",
+    line: "Where your dev server answers, such as http://localhost:5173. The Workbench's Open Page opens a page's route here, and pictures of pages are taken here; an https server with a self-signed certificate gets no pictures.",
     change: () => type('App address', 'http://localhost:5173'),
     sent: { appUrl: 'http://localhost:5173' },
   },

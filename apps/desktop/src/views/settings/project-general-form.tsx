@@ -16,6 +16,7 @@ import {
 import { useDisclosure } from '@mantine/hooks';
 import { IconChevronDown, IconCircleCheck } from '@tabler/icons-react';
 import { useEffect, useRef, useState } from 'react';
+import { useDaemon } from '../../daemon/provider';
 import { usePatchProject } from '../../daemon/queries';
 import {
   checkGeneral,
@@ -102,12 +103,23 @@ const sameList = (a: readonly string[], b: readonly string[]) =>
 
 const asNumber = (value: number | string): number | '' => (typeof value === 'number' ? value : '');
 
+/** The port of the daemon's address, which an app address may not name; null for one with none. */
+function daemonPortOf(url: string): number | null {
+  try {
+    const parsed = new URL(url);
+    return parsed.port === '' ? null : Number(parsed.port);
+  } catch {
+    return null;
+  }
+}
+
 /** Monospace for the typed value only; `ff` on an input would set its label in monospace too. */
 const MONO_INPUT = { input: { fontFamily: 'var(--mantine-font-family-monospace)' } };
 
 /** The project's editable fields (spec §10 Settings): saved as one patch of what changed. */
 export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }) {
   const patch = usePatchProject(project.id);
+  const { connection } = useDaemon();
   const [values, setValues] = useState<GeneralValues>(() => generalValues(project));
   // The values the untouched fields were last seeded from; a field still equal to its seed follows the project.
   const [seed, setSeed] = useState<GeneralValues>(() => generalValues(project));
@@ -135,7 +147,7 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
   };
 
   function save() {
-    const checked = checkGeneral(project, values);
+    const checked = checkGeneral(project, values, daemonPortOf(connection.url));
     if (!checked.ok) {
       setErrors(checked.errors);
       // A mistake in a field inside the collapsed card would otherwise stop Save with nothing to see.
@@ -227,7 +239,7 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
         </SettingRow>
         <SettingRow
           label="App address"
-          description="Where your dev server answers, such as http://localhost:5173. The Workbench's Open Page opens a page's route here."
+          description="Where your dev server answers, such as http://localhost:5173. The Workbench's Open Page opens a page's route here, and pictures of pages are taken here; an https server with a self-signed certificate gets no pictures."
         >
           <TextInput
             aria-label="App address"

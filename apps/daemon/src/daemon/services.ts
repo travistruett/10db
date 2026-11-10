@@ -8,6 +8,8 @@ import {
   ConflictError,
   Delivery,
   InvalidError,
+  isDaemonAddress,
+  APP_URL_IS_DAEMON,
   type McpServerStatusDto,
   ProjectInput,
   PassState,
@@ -183,6 +185,8 @@ export function createServices(deps: {
   readonly knowledge: KnowledgeApiServices;
   readonly thread: ThreadService;
   readonly pictures: Pictures;
+  /** The port the API listens on; null until it does. */
+  readonly daemonPort: () => number | null;
   readonly starter: BatchStarter;
   /** Opens a pass in the project's delivery queue (`openPass` with its lease and put-back). */
   readonly openPass: (input: PassOpenInput) => Promise<PassOpened>;
@@ -662,6 +666,10 @@ export function createServices(deps: {
       return catalogueStatus();
     },
     async patchProject(id, patch) {
+      // A page loaded at 10db's own port would reach its API with the dev session.
+      const port = deps.daemonPort();
+      if (patch.appUrl != null && port !== null && isDaemonAddress(patch.appUrl, port))
+        throw new InvalidError(APP_URL_IS_DAEMON);
       await refuseMissingDefaultBranch(getProject(db, id), patch);
       return patch.accountId === undefined
         ? deps.state.write((ctx) => patchProject(ctx, id, patch))

@@ -1,4 +1,4 @@
-import { mintId } from '@10db/contracts';
+import { APP_URL_IS_DAEMON, mintId } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { projectDto } from '../../test/fixtures';
 import { checkGeneral, generalValues, type GeneralValues } from './general-values';
@@ -276,6 +276,17 @@ describe('checkGeneral', () => {
     expect(checkGeneral(capped, { ...generalValues(capped), budgetCeiling: '' })).toEqual({
       ok: true,
       patch: { budgetCeiling: null },
+    });
+  });
+
+  it("refuses an app address on the daemon's own port", () => {
+    expect(checkGeneral(project, { ...base, appUrl: 'http://localhost:4317' }, 4317)).toEqual({
+      ok: false,
+      errors: { appUrl: APP_URL_IS_DAEMON },
+    });
+    expect(checkGeneral(project, { ...base, appUrl: 'http://localhost:4318' }, 4317)).toEqual({
+      ok: true,
+      patch: { appUrl: 'http://localhost:4318' },
     });
   });
 

@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import {
+  APP_URL_IS_DAEMON,
   BrowserState,
+  isDaemonAddress,
   EventType,
   NotFoundError,
   PassId,
@@ -73,6 +75,8 @@ export interface PicturesDeps {
   readonly state: StateStore;
   readonly bus: EventBus;
   readonly camera: PageCamera;
+  /** The port the daemon's API listens on, which no app address may name; null until it listens. */
+  readonly daemonPort: () => number | null;
   /** Starts fetching the pinned browser when it is not there yet; returns at once. */
   readonly prepareBrowser: () => void;
   readonly git: Pick<Git, 'head'>;
@@ -194,6 +198,12 @@ export function startPictures(deps: PicturesDeps): Pictures {
       });
   }
 
+  /** An app address on the daemon's own port: a page there would reach 10db's API, so none is shot. */
+  function onDaemon(appUrl: AppUrl): boolean {
+    const port = deps.daemonPort();
+    return port !== null && isDaemonAddress(appUrl, port);
+  }
+
   /** Asks a before for the task when it takes pictures, has none, and has started nothing. */
   function askBefore(task: TaskDto, passId: PassId | null): void {
     const project = getProject(db, task.projectId);
@@ -260,7 +270,7 @@ export function startPictures(deps: PicturesDeps): Pictures {
     const project = getProject(db, request.projectId);
     const task = getTask(db, request.taskId);
     const appUrl = project.appUrl;
-    if (appUrl === null) return 0;
+    if (appUrl === null || onDaemon(appUrl)) return 0;
     const inPass = request.passId !== null;
     if (
       request.kind === ScreenKind.Before &&
@@ -472,7 +482,12 @@ export function startPictures(deps: PicturesDeps): Pictures {
       });
     },
     status(projectId) {
-      getProject(db, projectId);
+      const { appUrl } = getProject(db, projectId);
+      if (appUrl !== null && onDaemon(appUrl))
+        return {
+          browser: { state: BrowserState.Refused, problem: APP_URL_IS_DAEMON },
+          signIn: signIns.get(projectId) ?? null,
+        };
       const browser = deps.camera.status();
       return {
         browser: { state: browser.state, problem: browser.problem },

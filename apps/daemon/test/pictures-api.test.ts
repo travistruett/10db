@@ -1,4 +1,5 @@
 import {
+  APP_URL_IS_DAEMON,
   EventType,
   PassOpenedDto,
   PicturesStatusDto,
@@ -140,6 +141,26 @@ describe("a task's pictures over HTTP", () => {
       browser: { state: 'ready', problem: null },
       signIn: null,
     });
+  });
+});
+
+describe("the daemon's own address", () => {
+  it('is refused as an app address', async () => {
+    const made = await api().post('/projects', ProjectDto, {
+      name: 'demo',
+      repoPath: repo.path,
+      gateCommand: null,
+      areas: [PEOPLE],
+    });
+    const port = new URL(daemon.url).port;
+    const res = await fetch(`${daemon.url}/projects/${made.id}`, {
+      method: 'PATCH',
+      headers: { Authorization: `Bearer ${daemon.token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ appUrl: `http://localhost:${port}` }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain(APP_URL_IS_DAEMON);
+    expect((await api().get('/projects', ProjectDto.array()))[0]?.appUrl).toBeNull();
   });
 });
 

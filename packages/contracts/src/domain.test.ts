@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   AppUrl,
+  isDaemonAddress,
   DEFAULT_HAZARDS,
   EvidenceDto,
   FollowUpInput,
@@ -654,6 +655,19 @@ describe("a project's app address", () => {
     ['localhost:8800', false],
   ])('%s is a loopback origin: %s', (url, ok) => {
     expect(AppUrl.safeParse(url).success).toBe(ok);
+  });
+
+  it.each([
+    ['http://localhost:4317', 4317, true],
+    ['http://127.0.0.1:4317', 4317, true],
+    ['http://[::1]:4317', 4317, true],
+    ['http://ampsio.localhost:4317', 4317, true],
+    ['http://localhost:8800', 4317, false],
+    ['http://localhost', 80, true],
+    ['https://localhost', 443, true],
+    ['http://localhost', 443, false],
+  ])("%s on a daemon listening on %i is the daemon's own: %s", (url, port, own) => {
+    expect(isDaemonAddress(AppUrl.parse(url), port)).toBe(own);
   });
 });
 

@@ -1,4 +1,5 @@
 import {
+  APP_URL_IS_DAEMON,
   EventType,
   mintId,
   PassClosePageChoice,
@@ -40,6 +41,7 @@ let logs: LogCapture;
 let pictures: Pictures | null = null;
 let prepared = 0;
 let clock: ManualClock;
+let daemonPort: number | null = null;
 
 afterEach(async () => {
   await pictures?.stop();
@@ -54,6 +56,7 @@ async function world(project: { devLoginCommand?: string } = {}): Promise<void> 
   w.h.state.write((ctx) => patchProject(ctx, w.h.project.id, { appUrl: APP, ...project }));
   cam = new FakeCamera();
   clock = new ManualClock(new Date('2026-11-10T12:00:00.000Z'));
+  daemonPort = null;
   logs = captureLogs();
   prepared = 0;
 }
@@ -63,6 +66,7 @@ function start(): Pictures {
     state: w.h.state,
     bus: w.h.bus,
     camera: cam,
+    daemonPort: () => daemonPort,
     prepareBrowser: () => {
       prepared += 1;
     },
@@ -284,6 +288,20 @@ describe('signing in', () => {
     expect(cam.signIns).toEqual([`${APP}/login`]);
     expect(kinds(w.settings)).toEqual(['turn1']);
     expect(p.status(w.h.project.id).signIn?.problem).toBeNull();
+  });
+});
+
+describe("the daemon's own address", () => {
+  it("takes no picture of an app address on the daemon's own port, and says why", async () => {
+    await world();
+    daemonPort = 8800;
+    const p = start();
+    await ended(2);
+    expect(cam.shots).toEqual([]);
+    expect(p.status(w.h.project.id).browser).toEqual({
+      state: 'refused',
+      problem: APP_URL_IS_DAEMON,
+    });
   });
 });
 

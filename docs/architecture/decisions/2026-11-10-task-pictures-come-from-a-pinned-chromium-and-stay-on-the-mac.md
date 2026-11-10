@@ -83,6 +83,13 @@ src/pictures/browser.live.test.ts` fetches the pin into the live tests' own fold
   written under a temporary name and renamed before its row; a turn picture with the same hash as the last one
   of its route, viewport and theme is not kept. One capture runs at a time; one a turn, a take-out, a close,
   an Abandon or a changed app address overtakes writes nothing.
+- **The app address is never the daemon's.** Every app address is a loopback origin, and the proxy lets the
+  app's host and port through, so an address on the daemon's own port would hand a page signed in with the dev
+  session the daemon's API. `PATCH /projects/:id` and Settings refuse one (`isDaemonAddress`), and the
+  pictures service takes no picture of one and says why, should the daemon's port change under a stored
+  address.
+- **An https app with a self-signed certificate gets no pictures.** Certificate errors are not ignored, so every
+  shot of such a server fails; Settings' help for the app address says so.
 - **Nothing leaves the Mac.** Pictures are shown in the Workbench's thread and the task drawer, read by id with
   the UI's token; a screen's render token is refused them. They are not uploaded to a pull request and not sent
   to a model: they can show the builder's own data.
