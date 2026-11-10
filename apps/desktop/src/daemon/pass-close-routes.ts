@@ -21,7 +21,8 @@ type Route<Method extends string, Path extends string, In extends object = objec
 >;
 
 type PassCloseRouteSchema = Route<'post', '/passes/:passId/tasks/:taskId/sign-off'> &
-  Route<'delete', '/passes/:passId/tasks/:taskId/sign-off'>;
+  Route<'delete', '/passes/:passId/tasks/:taskId/sign-off'> &
+  Route<'get', '/passes/:passId/tasks/:taskId/take-out'>;
 
 /** The typed client for these routes, sending what `DaemonClient` sends. */
 export function createPassCloseRoutesClient(conn: DaemonConnection) {

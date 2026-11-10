@@ -1,5 +1,5 @@
-import { PassSignOffDto, type PassId, type TaskId } from '@10db/contracts';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { PassSignOffDto, TakeOutPreviewDto, type PassId, type TaskId } from '@10db/contracts';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import { readJson } from './client';
 import { createPassCloseRoutesClient } from './pass-close-routes';
@@ -31,6 +31,25 @@ function useRefetchPasses() {
 /** The typed client of the routes `AppType` does not declare yet, over this window's connection. */
 function usePassCloseClient() {
   return createPassCloseRoutesClient(useDaemon().connection);
+}
+
+/** What Take Out… asks about first: the page's shared changes that have not landed. */
+export function useTakeOutPreview({ passId, taskId }: PassPage) {
+  const client = usePassCloseClient();
+  return useQuery({
+    // Not under `passKeys.all`: the take-out it leads to refetches the passes, and a page gone from the
+    // pass has nothing to preview. Each Take Out… reads it afresh, and the daemon refuses a Drop no
+    // longer offered.
+    queryKey: ['take-out-preview', passId, taskId],
+    staleTime: 0,
+    queryFn: async () =>
+      readJson(
+        await client.passes[':passId'].tasks[':taskId']['take-out'].$get({
+          param: { passId, taskId },
+        }),
+        TakeOutPreviewDto,
+      ),
+  });
 }
 
 /** Sign Off: the page lands now, or waits for the turn whose shared change it needs. */

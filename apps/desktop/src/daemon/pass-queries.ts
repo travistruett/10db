@@ -22,6 +22,7 @@ import {
   type PassRename,
   type PassTurnId,
   type ProjectId,
+  type SharedChoice,
   type TaskId,
 } from '@10db/contracts';
 import {
@@ -277,16 +278,27 @@ export function useAbandonPass() {
   });
 }
 
-/** Take Out: the page leaves the pass, its work kept with its task. Every shared change is kept. */
+/**
+ * Take Out: the page leaves the pass, its work kept with its task, each of its unlanded shared changes
+ * kept or dropped as `shared` says; one not named is kept.
+ */
 export function useTakeOutPage() {
   const { client } = useDaemon();
   const refetch = useRefetchAfter(['tasks'], queryKeys.inbox);
   return useMutation({
-    mutationFn: async ({ passId, taskId }: { passId: PassId; taskId: TaskId }) =>
+    mutationFn: async ({
+      passId,
+      taskId,
+      shared,
+    }: {
+      passId: PassId;
+      taskId: TaskId;
+      shared: readonly SharedChoice[];
+    }) =>
       readJson(
         await client.passes[':passId'].tasks[':taskId']['take-out'].$post({
           param: { passId, taskId },
-          json: { shared: [] },
+          json: { shared: [...shared] },
         }),
         TakeOutResultDto,
       ),
