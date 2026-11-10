@@ -238,11 +238,17 @@ function appHandler(daemonPort: number, udpPort: number) {
       case 'login-away':
         toDaemon('localhost', '/stolen-login');
         return;
-      case 'whoami': {
-        const signedIn = (req.headers.cookie ?? '').includes(`session=${SECRET}`);
-        html(page(`<h1>${signedIn ? 'Signed in' : 'Signed out'}</h1>`));
+      case 'whoami':
+        if ((req.headers.cookie ?? '').includes(`session=${SECRET}`)) {
+          html(page('<h1>Signed in</h1>'));
+        } else {
+          res.writeHead(302, { location: '/signin' });
+          res.end();
+        }
         return;
-      }
+      case 'signin':
+        html(page('<h1>Sign in</h1>'));
+        return;
       default:
         html(page('<h1>Not found</h1>'), 404);
     }
@@ -565,6 +571,8 @@ describe.skipIf(!live)('the pinned browser, live', () => {
       signal: new AbortController().signal,
     });
     expect(state.cookies.find((c) => c.name === 'session')?.value).toBe(SECRET);
+    // Signed out, the app sends the page to its sign-in; signed in, it shows it.
+    expect((await shoot('/whoami')).outcome).toBe(ShotOutcome.Elsewhere);
     const shot = await shoot('/whoami', state);
     expect(shot.outcome).toBe(ShotOutcome.Clean);
     const processes = await browserProcesses(exe);
