@@ -7,6 +7,7 @@ import {
   PullRequestState,
   TaskStatus,
   type PassCloseRequest,
+  type PassDto,
   type PassFollowOnDetail,
   type PassId,
   type TaskId,
@@ -133,6 +134,14 @@ export function carryOverDue(db: DbReader, passId: PassId): boolean {
   );
 }
 
+/** The commits on the pass's branch since its last push, oldest first; none with no push. */
+async function unpushedCommits(deps: CloseDeps, pass: PassDto): Promise<string[]> {
+  const repo = getProject(deps.state.db, pass.projectId).repoPath;
+  const branch = passBranch(deps.state.db, pass);
+  const pushed = await deps.git.trackingTip(repo, branch);
+  return pushed === null ? [] : deps.git.commitsSince(repo, pushed, branch);
+}
+
 /**
  * After a merged close, outside the delivery key: the pages it took out carry over to a follow-on
  * pass, opened as Start Pass opens one, which stacks on the closed pass and puts their kept work
@@ -161,6 +170,7 @@ export async function carryOver(deps: CloseDeps, passId: PassId): Promise<void> 
             projectId: pass.projectId,
             name: `${pass.name} (continued)`,
             taskIds: free.map((task) => task.id),
+            pageCap: pass.pageCap,
           })
         ).pass.id;
       } catch (error) {
@@ -177,6 +187,10 @@ export async function carryOver(deps: CloseDeps, passId: PassId): Promise<void> 
     prUrl,
     carried: carried.map((task) => task.id),
   };
+  // With no follow-on pass to ride, the pages signed off after the last push are on the branch
+  // alone: the card names them, since nothing pushes them.
+  const unpushed =
+    carried.length > 0 && followOnPassId === null ? await unpushedCommits(deps, pass) : [];
   const titles = carried.map((task) => `"${task.title}"`).join(', ');
   const carriedLine =
     carried.length === 0
@@ -190,6 +204,11 @@ export async function carryOver(deps: CloseDeps, passId: PassId): Promise<void> 
     `The pull request of Workbench pass "${pass.name}" merged while the pass was open, so 10db closed it.`,
     ...carriedLine,
     ...(prUrl === null ? [] : [`The pages signed off after the last push are in ${prUrl}.`]),
+    ...(unpushed.length === 0
+      ? []
+      : [
+          `The pages signed off after the last push are on ${passBranch(db, pass)}, not pushed: ${unpushed.map((sha) => sha.slice(0, 7)).join(', ')}. Push it and open a pull request from it on GitHub.`,
+        ]),
   ].join(' ');
   deps.state.write((ctx) =>
     flagCard(ctx, {

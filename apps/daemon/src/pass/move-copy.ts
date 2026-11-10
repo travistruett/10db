@@ -1,5 +1,6 @@
 import {
   Delivery,
+  InboxState,
   PASS_MOVE_TO_COPY_CHOICE,
   PASS_NOT_NOW_CHOICE,
   PassMoveToCopyDetail,
@@ -14,8 +15,10 @@ import {
   type WorkstreamId,
 } from '@10db/contracts';
 import {
+  findOpenByFoldKey,
   getTask,
   insertSystemNotice,
+  listInbox,
   passHoldingTask,
   placeTaskByRule,
   type DbReader,
@@ -61,11 +64,34 @@ export function slowPageLine(name: string): string {
 }
 
 /** What the agent is told when its ask for hazard `name` waits for the builder's move. */
-export function moveToCopyInstruction(name: string): string {
-  return `The ${name} hazard runs in a separate copy, not in the Workbench pass's folder, and the builder is asked whether to move this task to one. Don't change any file of the ${name} hazard: finish what you can without it, end your turn and say what is left.`;
+export function moveToCopyInstruction(name: string, notNow = false): string {
+  return notNow
+    ? `The ${name} hazard runs in a separate copy, not in the Workbench pass's folder, and the builder chose Not Now: this task stays in the pass without it. Don't change any file of the ${name} hazard: finish what you can without it, end your turn and say what is left.`
+    : `The ${name} hazard runs in a separate copy, not in the Workbench pass's folder, and the builder is asked whether to move this task to one. Don't change any file of the ${name} hazard: finish what you can without it, end your turn and say what is left.`;
 }
 
-/** Raises, or refreshes, the task's one Move to a Separate Copy card, in the caller's write. */
+/** The task's Move card in `pass` the builder answered Not Now: the page is asked no more. */
+function notNowAnswered(db: DbReader, pass: PassDto, taskId: TaskId): InboxItemDto | undefined {
+  return listInbox(db, {
+    projectId: pass.projectId,
+    states: [InboxState.Answered, InboxState.Delivering, InboxState.Resolved],
+  }).find((item) => {
+    // The detail is JSON read back from the database: a boundary, so parse it.
+    const detail = PassMoveToCopyDetail.safeParse(item.detail);
+    return (
+      detail.success &&
+      detail.data.passId === pass.id &&
+      detail.data.taskId === taskId &&
+      item.answer?.choice === PASS_NOT_NOW_CHOICE
+    );
+  });
+}
+
+/**
+ * Raises, or refreshes, the task's one Move to a Separate Copy card, in the caller's write; a new
+ * card puts one line on the page's thread. Once the builder answered Not Now in this pass, no card
+ * is raised again: the answered one is named, with `notNow`.
+ */
 export function askMoveToCopy(
   ctx: WriteContext,
   input: {
@@ -74,8 +100,12 @@ export function askMoveToCopy(
     readonly workstreamId: WorkstreamId;
     readonly hazard: string;
   },
-): InboxItemId {
+): { readonly inboxId: InboxItemId; readonly notNow: boolean } {
+  const answered = notNowAnswered(ctx.tx, input.pass, input.taskId);
+  if (answered !== undefined) return { inboxId: answered.id, notNow: true };
   const task = getTask(ctx.tx, input.taskId);
+  const key = moveToCopyKey(input.taskId);
+  const raised = findOpenByFoldKey(ctx.tx, input.pass.projectId, key) === undefined;
   const detail: PassMoveToCopyDetail = {
     kind: 'pass_move_to_copy',
     passId: input.pass.id,
@@ -83,12 +113,12 @@ export function askMoveToCopy(
     workstreamId: input.workstreamId,
     hazard: input.hazard,
   };
-  return flagCard(ctx, {
+  const card = flagCard(ctx, {
     projectId: input.pass.projectId,
     workstreamId: input.workstreamId,
     title: `Move "${task.title}" to a separate copy?`,
     body: `"${task.title}" asked for the ${input.hazard} hazard, which runs in a separate copy, not in Your folder while Workbench pass "${input.pass.name}" is open. Move takes the page out of the pass with its work kept and starts the task in a separate copy, its work put back there. Not Now leaves it in the pass without the hazard.`,
-    foldKey: moveToCopyKey(input.taskId),
+    foldKey: key,
     refresh: true,
     detail,
     options: [
@@ -98,7 +128,14 @@ export function askMoveToCopy(
       },
       { label: PASS_NOT_NOW_CHOICE, description: 'Leaves the page in the pass without the hazard' },
     ],
-  }).id;
+  });
+  if (raised)
+    insertSystemNotice(
+      ctx,
+      input.taskId,
+      `The agent asked for the ${input.hazard} hazard, which runs in a separate copy: "Move to a Separate Copy" waits in the Inbox.`,
+    );
+  return { inboxId: card.id, notNow: false };
 }
 
 /** What the move needs: a take-out's, and the start of a task in a separate copy. */

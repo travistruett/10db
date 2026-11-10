@@ -36,6 +36,7 @@ import {
   openHolds,
   type DbReader,
 } from '@10db/db';
+import { signingOff } from './sign-off';
 
 // Workbench spec §4.3, §4.5, §6.1: what the Workbench reads of a pass, built from its rows alone.
 
@@ -73,8 +74,8 @@ function failureOf(db: DbReader, run: WorkstreamDto | null): PassPageDto['failur
 }
 
 /**
- * Where the page is in its sign-off, as its rows say: waiting on another page's hold, or done once its
- * run is. A sign-off landing now is a job's, not a row's, so the view never reads it as such.
+ * Where the page is in its sign-off, as its rows say: waiting on another page's hold, signing off while
+ * its Ready item is closed by its Sign Off, or done once its run is.
  */
 function signOffOf(
   db: DbReader,
@@ -86,6 +87,8 @@ function signOffOf(
       signOff: PassSignOff.Waiting,
       waitsFor: { taskId: wait.waitsForTaskId, title: getTask(db, wait.waitsForTaskId).title },
     };
+  if (run !== null && signingOff(db, run.id))
+    return { signOff: PassSignOff.SigningOff, waitsFor: null };
   return {
     signOff: run?.state === WorkstreamState.Done ? PassSignOff.Done : PassSignOff.None,
     waitsFor: null,

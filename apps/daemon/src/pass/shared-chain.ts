@@ -165,18 +165,26 @@ export async function keepOrLetGo(
     if (error instanceof PassFolderOffBranchError) throw error;
     const why = error instanceof Error ? error.message : String(error);
     deps.logger?.warn({ claimId, err: why }, 'a shared hold could not be kept; it is let go');
-    deps.state.write((ctx) => {
-      const hold = getHold(ctx.tx, claimId);
-      if (hold.closedAt !== null) return;
-      closeHold(ctx, claimId, { empty: true });
-      releaseClaim(ctx, claimId);
-      insertSystemNotice(
-        ctx,
-        hold.taskId,
-        `What this page changed in shared ${hold.area} during its turn could not be kept (${why}), so it is not a shared change: its files stay in the folder as they are.`,
-      );
-    });
+    letGoHold(deps, claimId, why);
   }
+}
+
+/**
+ * Lets an open hold go without keeping it: closed as empty and its claim released in one write, with
+ * a line on its page's thread saying why, its files left in the folder as they are.
+ */
+export function letGoHold(deps: Pick<SharedDeps, 'state'>, claimId: ClaimId, why: string): void {
+  deps.state.write((ctx) => {
+    const hold = getHold(ctx.tx, claimId);
+    if (hold.closedAt !== null) return;
+    closeHold(ctx, claimId, { empty: true });
+    releaseClaim(ctx, claimId);
+    insertSystemNotice(
+      ctx,
+      hold.taskId,
+      `What this page changed in shared ${hold.area} during its turn could not be kept (${why}), so it is not a shared change: its files stay in the folder as they are.`,
+    );
+  });
 }
 
 /** The open holds of a workstream, by number. */
@@ -219,20 +227,21 @@ export function sharedNeeded(
 /**
  * `Git.landPaths`, once more from the new tip when a hand-typed git moved the branch between the
  * landing's read of it and its compare-and-swap (spec §9.2, §18); the order of landings is unchanged.
+ * Only a race on the second landing raises the refusal's card.
  */
 export async function landOnBranch(
   git: Git,
   input: Parameters<Git['landPaths']>[0],
 ): Promise<LandedPaths> {
   try {
-    return await git.landPaths(input);
+    return await git.landPaths({ ...input, willRetry: true });
   } catch (error) {
     const raced =
       error instanceof GitTrustError &&
       error.detail.kind === GitTrustFailure.Ref &&
       error.detail.reason === 'raced';
     if (!raced) throw error;
-    return git.landPaths(input);
+    return git.landPaths({ ...input, willRetry: false });
   }
 }
 

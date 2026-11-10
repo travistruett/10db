@@ -30,6 +30,7 @@ import type { Card } from './cards';
 import {
   followLocalRecord,
   followStackedMerge,
+  localStackedAbove,
   offerRetarget,
   passMoveKey,
   retargetAnswered,
@@ -394,10 +395,21 @@ async function resumeBelow(
   await settleClosedPass(ctx, belowId, signal, { news: true });
 }
 
-/** At start-up: each closed pass is looked at again, its card raised once and its merge followed. */
+/**
+ * At start-up: each closed pass is looked at again, its card raised once and its merge followed; and
+ * each settled pass of a `local` project whose record merged or closed under a pass stacked on it,
+ * so a retarget a stop cut short is made.
+ */
 export function resumePassSettles(ctx: DeliveryContext): void {
-  for (const pass of listPassesIn(ctx.state.db, PassState.Closed))
+  const db = ctx.state.db;
+  for (const pass of listPassesIn(db, PassState.Closed))
     queuePassSettle(ctx, pass.id, settleClosedPass);
+  for (const pass of listPassesIn(db, PassState.Settled)) {
+    if (getProject(db, pass.projectId).delivery === Delivery.PullRequest) continue;
+    const record = getPassPullRequest(db, pass.id)?.state;
+    if (record !== PullRequestState.Merged && record !== PullRequestState.Closed) continue;
+    if (localStackedAbove(db, pass) !== undefined) queuePassSettle(ctx, pass.id, settleClosedPass);
+  }
 }
 
 /**

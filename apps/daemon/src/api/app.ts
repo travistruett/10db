@@ -820,6 +820,9 @@ export function createApp(deps: ApiDeps) {
           await deps.services.closePass(PassId.parse(c.req.param('passId')), c.req.valid('json')),
         ),
     )
+    .post('/passes/:passId/close/continue', (c) =>
+      c.json(deps.services.continueClose(PassId.parse(c.req.param('passId'))), 202),
+    )
     .post('/passes/:passId/tasks/:taskId/sign-off', (c) =>
       c.json(
         deps.services.signOffPage(

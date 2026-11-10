@@ -1687,7 +1687,23 @@ describe('a message to a signed-off page', () => {
       nextAction: { kind: 'feedback', providerSessionId: null },
     });
     expect(getTask(engine.store.db, task.id).status).toBe('open');
-    engine.launch(again);
+    // The scheduler claims the page for the new run and launches it.
+    const scheduler = createScheduler({
+      state: engine.state,
+      clock: engine.clock,
+      caps: { global: 4 },
+      instanceId: 'test-daemon',
+      leaseMs: 60_000,
+      tickMs: 2_000,
+      logger: silentLogger,
+      runner: engine.runner,
+      accounts: { ...engine.accounts, prepare: () => undefined },
+      branches: createGit(),
+      onWrongBranch: () => undefined,
+      onWorktreeMissing: () => undefined,
+      keptWork: { ready: () => true },
+    });
+    expect(await scheduler.tick()).toBe(1);
     await waitFor(isReady(again, 2));
     askSignOff(deps, pass.id, task.id);
     await deps.jobs.idle();

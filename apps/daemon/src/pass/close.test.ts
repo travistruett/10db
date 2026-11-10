@@ -2,7 +2,10 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   AbandonStep,
+  CloseStep,
   ConflictError,
+  InboxState,
+  PASS_SIGN_OFF_CHOICE,
   PassClosePageChoice,
   SharedChoiceKind,
   type PassCloseRequest,
@@ -12,6 +15,7 @@ import {
 import {
   findOpenByFoldKey,
   getBatch,
+  getInboxItem,
   getPass,
   getPassChecks,
   getPassProgress,
@@ -19,10 +23,13 @@ import {
   getTask,
   getWorkstreamRow,
   openHolds,
+  openPassTurn,
   patchProject,
   schema,
   setAbandonStep,
   setClosePlan,
+  setCloseStep,
+  updateInboxItem,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { waitFor } from '../../test/fixtures';
@@ -37,10 +44,12 @@ import {
   gateFailedKey,
   type CloseDeps,
   type CloseShip,
+  type PassCloses,
 } from './close';
 import { closeGateOf } from './close-lists';
 import { folderCardOpen } from './folder';
 import { grantSharedHold, keepHold, keepTurnWork, startAbandon, type PassWorkDeps } from './index';
+import { signOffRefusal, startSignOff } from './sign-off';
 
 // Workbench spec §5.4, §5.5, §12: Close Pass signs off the pages set to it, lands what is kept, gates,
 // takes the other pages out, pushes, fast-forwards the folder's branch and closes, step by recorded
@@ -205,6 +214,49 @@ describe('Close Pass', () => {
     expect(getTask(w.h.store.db, w.people.id).passId === null).toBe(takenOut);
   });
 
+  it("opens a waiting sign-off's Ready item again when the close that took it over reopens the pass", async () => {
+    await world({ gateCommand: 'false' });
+    // People's turn holds src and has written to it; Settings was built with it.
+    w.startTurn(w.people);
+    const granted = await grantSharedHold(w.deps, { workstreamId: w.runOf(w.people), area: 'src' });
+    if (!granted?.ok) throw new Error('src was not granted');
+    w.write('src/button.ts', 'button\n');
+    const turn = w.startTurn(w.settings);
+    w.write('src/settings/page.tsx', 'tidied\n');
+    w.endTurn(turn);
+    await keepTurnWork(w.deps, { workstreamId: w.runOf(w.settings), turnId: turn.id });
+    w.ready(w.settings);
+    // Sign Off on the Ready card closes it; the sign-off waits for People's hold.
+    const row = getWorkstreamRow(w.h.store.db, w.runOf(w.settings));
+    if (row.nextAction.kind !== 'pass_review') throw new Error('not Ready');
+    const card = row.nextAction.inboxId;
+    w.h.state.write((ctx) =>
+      updateInboxItem(ctx, card, {
+        state: InboxState.Resolved,
+        answer: { choice: PASS_SIGN_OFF_CHOICE },
+      }),
+    );
+    expect(startSignOff({ ...w.deps, stopLane: stopped }, w.settings.id).state).toBe('waiting');
+    await w.h.jobs.idle();
+
+    const closes = createPassCloses(closeDeps());
+    const shown = await closes.preview(w.opened.pass.id);
+    await closes.close(w.opened.pass.id, {
+      token: shown.token,
+      pages: [
+        { taskId: w.settings.id, choice: PassClosePageChoice.TakeOut },
+        { taskId: w.people.id, choice: PassClosePageChoice.TakeOut },
+      ],
+      files: [],
+      shared: [],
+    });
+    await w.h.jobs.idle();
+
+    expect(passState()).toBe('OPEN');
+    expect(getInboxItem(w.h.store.db, card).state).toBe('OPEN');
+    expect(signOffRefusal(w.h.store.db, w.opened.pass.id, w.settings.id)).toBeNull();
+  });
+
   // Two closes, each with a scratch gate: longer than one test's default under a full run's load.
   it(
     'lands, at the next close, a shared change chosen Drop when the gate failed before its take-out',
@@ -355,7 +407,7 @@ describe('Close Pass', () => {
       },
       notice: /^The close stopped: the gate was stopped before it finished\./,
     },
-  ])('goes on when Close Pass is asked again after $name', async ({ ship, notice }) => {
+  ])('goes on with Continue Close after $name', async ({ ship, notice }) => {
     await world({ gateCommand: 'true' });
     await twoTurns();
     const deps = closeDeps();
@@ -365,18 +417,51 @@ describe('Close Pass', () => {
       (n) => n.id === 'close',
     );
     expect(stuck?.text).toMatch(notice);
+    expect(stuck?.text).toMatch(/Continue Close goes on from where it stopped/);
 
-    const again = await closes.close(w.opened.pass.id, {
-      token: '',
-      pages: [],
-      files: [],
-      shared: [],
-    });
+    const again = closes.continueClose(w.opened.pass.id);
     await w.h.jobs.idle();
 
     expect(again.outcome).toBe('closing');
     expect(passState()).toBe('CLOSED');
     expect(landed()).toEqual(['Settings: UI work']);
+    expect(getPassProgress(w.h.store.db, w.opened.pass.id).notices).toEqual([]);
+    // Only a closing pass is continued.
+    expect(() => closes.continueClose(w.opened.pass.id)).toThrow(ConflictError);
+  });
+
+  it('goes on when Close Pass is asked again while its job is stopping on an error', async () => {
+    await world({ gateCommand: 'true' });
+    await twoTurns();
+    const deps = closeDeps();
+    let failed = false;
+    let again: Promise<unknown> = Promise.resolve();
+    const closes: PassCloses = createPassCloses({
+      ...deps,
+      ship: {
+        ...deps.ship,
+        pushPassBranch: (passId, signal) => {
+          if (failed) return deps.ship.pushPassBranch(passId, signal);
+          failed = true;
+          // The builder asks again just as the push fails, before the job has stopped.
+          again = closes.close(passId, { token: '', pages: [], files: [], shared: [] });
+          return Promise.reject(new Error('origin is offline'));
+        },
+      },
+    });
+    const shown = await closes.preview(w.opened.pass.id);
+    await closes.close(w.opened.pass.id, {
+      token: shown.token,
+      pages: [{ taskId: w.settings.id, choice: PassClosePageChoice.SignOff }],
+      files: [],
+      shared: [],
+    });
+    await w.h.jobs.idle();
+    await again;
+    await w.h.jobs.idle();
+
+    expect(await again).toMatchObject({ outcome: 'closing' });
+    expect(passState()).toBe('CLOSED');
     expect(getPassProgress(w.h.store.db, w.opened.pass.id).notices).toEqual([]);
   });
 
@@ -482,6 +567,82 @@ describe('Close Pass', () => {
     expect(passState()).toBe('CLOSED');
     expect(read('src/people/page.tsx')).toBe('people\n');
     expect(getTask(w.h.store.db, w.people.id).passId).toBeNull();
+  });
+
+  it.each([
+    {
+      name: 'a Drop of a change the page set to Sign Off Now is built with once its turn is kept',
+      stop: async () => {
+        // Settings' turn was open when the close was asked: stopping it keeps the turn, built with
+        // every shared change granted so far.
+        const turn = openPassTurn(w.h.store.db, w.settings.id);
+        if (turn === undefined) throw new Error('no open turn');
+        w.endTurn(turn);
+        await keepTurnWork(w.deps, { workstreamId: w.runOf(w.settings), turnId: turn.id });
+      },
+      refused: /Shared change 1 cannot be dropped: Settings: UI work is set to Sign Off Now/,
+    },
+    {
+      name: 'Sign Off Now for a page whose run failed as it stopped',
+      stop: () => {
+        w.h.settle(w.runOf(w.settings), 'FAILED');
+        return Promise.resolve();
+      },
+      refused: /Settings: UI work cannot be signed off now: its run failed/,
+    },
+  ])('refuses, after the agents stop, $name', async ({ stop, refused }) => {
+    await world({ gateCommand: 'true' });
+    await sharedTurn(w.people, 'src/button.ts');
+    w.startTurn(w.settings);
+    w.write('src/settings/page.tsx', 'mid-turn\n');
+    let stopped = false;
+    const closes = createPassCloses({
+      ...closeDeps(),
+      stopLane: async (ws) => {
+        if (ws !== w.runOf(w.settings) || stopped) return;
+        stopped = true;
+        await stop();
+      },
+    });
+    const shown = await closes.preview(w.opened.pass.id);
+
+    await expect(
+      closes.close(w.opened.pass.id, {
+        token: shown.token,
+        pages: [
+          { taskId: w.settings.id, choice: PassClosePageChoice.SignOff },
+          { taskId: w.people.id, choice: PassClosePageChoice.TakeOut },
+        ],
+        files: [],
+        shared: [{ seq: 1, choice: SharedChoiceKind.Drop }],
+      }),
+    ).rejects.toThrow(refused);
+
+    expect(passState()).toBe('OPEN');
+    expect(getPassProgress(w.h.store.db, w.opened.pass.id).closePlan).toBeNull();
+  });
+
+  it('offers no Abandon in its stuck notice once its fast-forward may have moved the return branch', async () => {
+    await world({ gateCommand: null });
+    await twoTurns();
+    w.h.git$('remote', 'remove', 'origin');
+    w.h.state.write((ctx) => {
+      setClosePlan(ctx, w.opened.pass.id, { token: 't', pages: [], files: [], shared: [] });
+      setCloseStep(ctx, w.opened.pass.id, CloseStep.FastForwarded);
+    });
+    // The builder went back to the return branch and deleted the pass's branch.
+    w.h.git$('switch', '-q', 'main');
+    w.h.git$('branch', '-D', w.branch);
+
+    createPassCloses(closeDeps()).resume();
+    await w.h.jobs.idle();
+
+    expect(passState()).toBe('CLOSING');
+    const stuck = getPassProgress(w.h.store.db, w.opened.pass.id).notices.find(
+      (n) => n.id === 'close',
+    );
+    expect(stuck?.text).toMatch(/^The close stopped: /);
+    expect(stuck?.text).not.toMatch(/Abandon/);
   });
 
   it('refuses an Abandon once its fast-forward may have moved the return branch', async () => {

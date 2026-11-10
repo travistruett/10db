@@ -135,3 +135,11 @@ export const PassCloseAnswerDto = z.discriminatedUnion('outcome', [
   }),
 ]);
 export type PassCloseAnswerDto = z.infer<typeof PassCloseAnswerDto>;
+
+/**
+ * What `POST /passes/:passId/close/continue` answers (202): the close of a closing pass whose job
+ * stopped on an error goes on from its recorded step, on the plan it was confirmed with. Refused (409)
+ * for a pass that is not closing.
+ */
+export const PassCloseContinueDto = z.object({ outcome: z.literal('closing'), pass: PassDto });
+export type PassCloseContinueDto = z.infer<typeof PassCloseContinueDto>;

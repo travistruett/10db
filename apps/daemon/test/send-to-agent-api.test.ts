@@ -85,6 +85,11 @@ describe('POST /tasks/:taskId/thread/:messageId/send-to-agent', () => {
       [TaskMessageAuthor.System, finding],
       [TaskMessageAuthor.Builder, finding],
     ]);
+    // Sent once: the notice offers nothing more, and a second send is refused.
+    expect(listTaskThread(daemon.state.db, taskId).find((m) => m.id === notice.id)?.sendable).toBe(
+      false,
+    );
+    expect((await send(taskId, notice.id)).status).toBe(409);
   });
 
   it('refuses a notice that offers nothing to send, and an unknown one, sending nothing', async () => {

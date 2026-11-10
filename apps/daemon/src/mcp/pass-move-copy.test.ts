@@ -8,7 +8,6 @@ import {
   type TaskDto,
 } from '@10db/contracts';
 import {
-  acquireClaims,
   activeClaims,
   getBatch,
   getInboxItem,
@@ -107,29 +106,14 @@ describe('a pass lane asking for the deps hazard', () => {
       PASS_MOVE_TO_COPY_CHOICE,
       PASS_NOT_NOW_CHOICE,
     ]);
-  });
-
-  it('is granted to a lane that holds it already, as its launch claimed it', async () => {
-    w = await openPassWorld();
-    w.h.state.write((c) =>
-      acquireClaims(c, {
-        projectId: w.h.project.id,
-        workstreamId: w.runOf(w.settings),
-        requests: [{ kind: 'hazard', name: 'deps' }],
-        leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
-      }),
-    );
-    const tools = laneTools(w, w.settings);
-
-    const answer = await tools.request_claim({
-      opId: 'op-deps-1',
-      kind: 'hazard',
-      name: 'deps',
-      reason: 'add a date library',
-    });
-
-    expect(answer.granted).toBe(true);
-    expect(w.h.cards()).toEqual([]);
+    // The page's thread says so once, for the card, not once per ask.
+    expect(
+      listTaskThread(w.h.store.db, w.settings.id)
+        .map((m) => m.body)
+        .filter((body) => body.includes('Move to a Separate Copy')),
+    ).toEqual([
+      'The agent asked for the deps hazard, which runs in a separate copy: "Move to a Separate Copy" waits in the Inbox.',
+    ]);
   });
 
   it('is granted as today on a project with no copies, and the thread says the page will be slow', async () => {
@@ -219,5 +203,31 @@ describe("the Move to a Separate Copy card's answer", () => {
 
     expect(getTask(w.h.store.db, w.settings.id).passId).toBe(w.opened.pass.id);
     expect(w.runOf(w.settings)).toBe(run);
+  });
+
+  it('asks no more after Not Now: a later ask is refused with no new card', async () => {
+    w = await openPassWorld();
+    const tools = laneTools(w, w.settings);
+    const refused = await tools.request_claim({
+      opId: 'op-deps-1',
+      kind: 'hazard',
+      name: 'deps',
+      reason: 'add a date library',
+    });
+    if (refused.granted || refused.inboxId === null) throw new Error('no card');
+    w.h.inbox.answer(refused.inboxId, { choice: PASS_NOT_NOW_CHOICE });
+
+    const again = await tools.request_claim({
+      opId: 'op-deps-2',
+      kind: 'hazard',
+      name: 'deps',
+      reason: 'add it after all',
+    });
+
+    if (again.granted) throw new Error('deps was granted in the folder');
+    expect(again.inboxId).toBe(refused.inboxId);
+    expect(again.instruction).toMatch(/builder chose Not Now/);
+    expect(w.h.cards()).toEqual([]);
+    expect(hazardsHeld(w, w.settings)).toEqual([]);
   });
 });
