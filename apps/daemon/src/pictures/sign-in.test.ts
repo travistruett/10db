@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AppUrl, mintId, type ProjectId } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -6,7 +6,7 @@ import { tempDir, type TempDir } from '../../test/fixtures';
 import { silentLogger } from '../log';
 import { createGateRunner, type GateRequest, type GateRunner } from '../verify';
 import type { PageCamera } from './camera';
-import { browserDir, parseLoginUrl, signIn, type SignInDeps } from './sign-in';
+import { devLoginProblem, parseLoginUrl, signIn, type SignInDeps } from './sign-in';
 import { readStorageState } from './storage-state';
 
 // Workbench spec §10, §13; plan B3: the dev login runs under the gate's runner with no project id, so
@@ -15,6 +15,35 @@ import { readStorageState } from './storage-state';
 
 const APP = AppUrl.parse('http://localhost:8800');
 const TOKEN_URL = 'http://localhost:8800/api/auth/dev-login/tok-123/';
+
+describe('devLoginProblem', () => {
+  const ran = { exitCode: 0, timedOut: false, aborted: false };
+  it.each([
+    { name: 'a run that passed', result: ran, problem: null },
+    {
+      name: 'a run that failed',
+      result: { ...ran, exitCode: 3 },
+      problem: 'The dev login command failed (exit 3)',
+    },
+    {
+      name: 'a run the sandbox refused Docker',
+      result: { ...ran, exitCode: 1, dockerRefused: true },
+      problem: 'The dev login needs Docker: turn on Allow Docker in Settings › General',
+    },
+    {
+      name: 'a run that timed out',
+      result: { ...ran, exitCode: 124, timedOut: true },
+      problem: 'The dev login command did not finish in 60 seconds',
+    },
+    {
+      name: 'a run that was stopped',
+      result: { ...ran, exitCode: 130, aborted: true },
+      problem: 'The dev login was stopped',
+    },
+  ])('$name', ({ result, problem }) => {
+    expect(devLoginProblem(result)).toBe(problem);
+  });
+});
 
 describe('parseLoginUrl', () => {
   it.each([
@@ -131,7 +160,7 @@ describe('signIn', () => {
     );
     expect(result).toEqual({ ok: true, state: STATE });
     expect(opened).toEqual([TOKEN_URL]);
-    const at = browserDir(dir.path, projectId);
+    const at = join(dir.path, 'browser', projectId);
     expect(seenLogs).toEqual([{ path: join(at, 'login-1700000000000.log'), mode: 0o600 }]);
     expect(statSync(at).mode & 0o777).toBe(0o700);
     // No project id: the dev login never turns the project's Docker on; the switch goes as stored.
@@ -168,7 +197,7 @@ describe('signIn', () => {
     );
     expect(result).toEqual({ ok: false, problem });
     expect(opened).toEqual([]);
-    expect(readdirSync(browserDir(dir.path, projectId))).toEqual([]);
+    expect(readdirSync(join(dir.path, 'browser', projectId))).toEqual([]);
     expect(readStorageState(dir.path, projectId)).toBeNull();
   });
 
@@ -183,44 +212,12 @@ describe('signIn', () => {
     );
     expect(result.ok).toBe(false);
     expect(JSON.stringify(result)).not.toContain('tok-123');
-    expect(readdirSync(browserDir(dir.path, projectId))).toEqual([]);
-  });
-
-  it('says the dev login needs Docker when the sandbox refused it', async () => {
-    const refusing: GateRunner = {
-      run(request) {
-        writeFileSync(request.logPath, 'docker: refused\n');
-        return Promise.resolve({
-          exitCode: 1,
-          durationMs: 1,
-          tail: '',
-          logPath: request.logPath,
-          timedOut: false,
-          aborted: false,
-          blockedHosts: [],
-          dockerRefused: true,
-        });
-      },
-    };
-    const result = await signIn(
-      deps(
-        refusing,
-        camera(() => Promise.resolve(STATE)),
-      ),
-      { ...project('docker compose exec web ./manage.py dev_login'), sandboxDocker: false },
-      new AbortController().signal,
-    );
-    expect(result).toEqual({
-      ok: false,
-      problem: 'The dev login needs Docker: turn on Allow Docker in Settings › General',
-    });
-    expect(existsSync(join(browserDir(dir.path, projectId), 'state.json'))).toBe(false);
-    expect(readdirSync(browserDir(dir.path, projectId))).toEqual([]);
+    expect(readdirSync(join(dir.path, 'browser', projectId))).toEqual([]);
   });
 
   it('reads a stored state back, and no state from a file that is not one', () => {
     expect(readStorageState(dir.path, projectId)).toBeNull();
-    const at = browserDir(dir.path, projectId);
+    const at = join(dir.path, 'browser', projectId);
     mkdirSync(at, { recursive: true });
     writeFileSync(join(at, 'state.json'), '{"cookies": "no"}');
     expect(readStorageState(dir.path, projectId)).toBeNull();
