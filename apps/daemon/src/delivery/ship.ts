@@ -1259,6 +1259,9 @@ export function createShipper(deps: ShipperDeps): Shipper {
     const moved = deps.state.write((w) => {
       const batch = getBatch(w.tx, batchId);
       if (batch.state !== BatchState.Open) return false;
+      // A pass's batch ships only when the pass closes: signing off its last page lands a commit and
+      // nothing more (Workbench spec §5.5).
+      if (batch.passId != null) return false;
       const current = members(w.tx, batchId);
       const left = current
         .filter((m) => superseded(w.tx, m) && committed(w.tx, m) && !leftOut(m))
@@ -1303,8 +1306,20 @@ export function createShipper(deps: ShipperDeps): Shipper {
       );
   }
 
+  /**
+   * A pass's batch ships when its pass closes and ends with its pass's own Abandon, never by a ship
+   * or an Abandon of the batch itself.
+   */
+  function refusePassBatch(batch: BatchDto): void {
+    if (batch.passId != null)
+      throw new ConflictError(
+        `Batch "${batch.title}" is a Workbench pass's; it ships when the pass closes and is abandoned with the pass`,
+      );
+  }
+
   function ship(batchId: BatchId): BatchDto {
     const batch = getBatch(db, batchId);
+    refusePassBatch(batch);
     const unfinished = unfinishedWork(batch);
     switch (batch.state) {
       case BatchState.Open: {
@@ -2256,6 +2271,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
     },
     shipWithout(batchId, workstreamId, kept) {
       const batch = getBatch(db, batchId);
+      refusePassBatch(batch);
       if (batch.state !== BatchState.Open && batch.state !== BatchState.Failed)
         throw new ConflictError(
           `Batch "${batch.title}" is ${batch.state.toLowerCase()}; only an open or failed batch ships`,
@@ -2278,6 +2294,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
     },
     abandon(batchId) {
       const batch = getBatch(db, batchId);
+      refusePassBatch(batch);
       if (batch.state !== BatchState.Open && batch.state !== BatchState.Failed)
         throw new ConflictError(
           `Batch "${batch.title}" is ${batch.state.toLowerCase()}; only an open or failed batch can be abandoned`,

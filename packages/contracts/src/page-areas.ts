@@ -34,19 +34,30 @@ interface PageOverlap {
 }
 
 /**
+ * The globs of two areas that can match the same file, or null. The catch-all is left out: it holds
+ * only files no other area matches, so it shares none.
+ */
+function areasOverlap(first: RoledArea, second: RoledArea): PageOverlap | null {
+  if (first.catchAll === true || second.catchAll === true) return null;
+  for (const firstGlob of first.globs) {
+    const secondGlob = second.globs.find((g) => globsOverlap(firstGlob, g));
+    if (secondGlob !== undefined)
+      return { first: first.name, second: second.name, firstGlob, secondGlob };
+  }
+  return null;
+}
+
+/**
  * The first two page areas that can share a file, or null. A file belongs to one page, so two pages
  * may not overlap; a page may overlap a shared area, whose claim never covers a page's files in a
- * pass. The catch-all is left out: it holds only files no other area matches, so it shares none.
+ * pass.
  */
 function pageOverlap(areas: readonly RoledArea[]): PageOverlap | null {
-  const pages = areas.filter((a) => a.role === AreaRole.Page && a.catchAll !== true);
+  const pages = areas.filter((a) => a.role === AreaRole.Page);
   for (const [n, first] of pages.entries()) {
     for (const second of pages.slice(n + 1)) {
-      for (const firstGlob of first.globs) {
-        const secondGlob = second.globs.find((g) => globsOverlap(firstGlob, g));
-        if (secondGlob !== undefined)
-          return { first: first.name, second: second.name, firstGlob, secondGlob };
-      }
+      const overlap = areasOverlap(first, second);
+      if (overlap !== null) return overlap;
     }
   }
   return null;
@@ -63,4 +74,64 @@ export function areaRolesProblem(areas: readonly RoledArea[]): string | null {
     `${overlap.firstGlob} and ${overlap.secondGlob} both match one. ` +
     'A file belongs to one page, so narrow one of them or mark it shared'
   );
+}
+
+/** What the pass rules read of a task. */
+interface PassTask {
+  readonly title: string;
+  readonly areas: readonly string[];
+}
+
+/**
+ * The areas a task in a pass holds for its life, claimed when the pass opens: its pages, and any
+ * area with no role, which a pass holds as a page. A shared area is asked for a turn at a time, and a
+ * name that is no area (a hazard) is held as it is outside a pass.
+ */
+export function passHeldAreas(
+  areas: readonly RoledArea[],
+  task: Pick<PassTask, 'areas'>,
+): string[] {
+  return task.areas.filter((name) => {
+    const area = areas.find((a) => a.name === name);
+    return area !== undefined && area.role !== AreaRole.Shared;
+  });
+}
+
+/**
+ * Why these tasks cannot open a pass together, in words, or null: each must name a page area, and
+ * no two may hold the same area or areas that can share a file, since a file belongs to one task. An
+ * area with no role is held for the task's life as a page is, so it counts as one here.
+ */
+export function passPagesProblem(
+  areas: readonly RoledArea[],
+  tasks: readonly PassTask[],
+): string | null {
+  const isPage = (name: string): boolean =>
+    areas.some((a) => a.name === name && a.role === AreaRole.Page);
+  for (const task of tasks)
+    if (!task.areas.some(isPage))
+      return `${task.title} names no page area; a task in a pass works on at least one page`;
+  for (const [n, first] of tasks.entries()) {
+    for (const second of tasks.slice(n + 1)) {
+      const held = passHeldAreas(areas, second);
+      const same = passHeldAreas(areas, first).find((name) => held.includes(name));
+      if (same !== undefined)
+        return `"${first.title}" and "${second.title}" both hold ${same}; a file belongs to one task in a pass`;
+      const heldOf = (task: PassTask) => {
+        const names = passHeldAreas(areas, task);
+        return areas.filter((a) => names.includes(a.name));
+      };
+      for (const one of heldOf(first)) {
+        for (const other of heldOf(second)) {
+          const overlap = areasOverlap(one, other);
+          if (overlap !== null)
+            return (
+              `"${first.title}" and "${second.title}" hold areas that can share a file: ` +
+              `${overlap.firstGlob} and ${overlap.secondGlob} both match one`
+            );
+        }
+      }
+    }
+  }
+  return null;
 }

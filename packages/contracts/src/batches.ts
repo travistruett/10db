@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { Notice, ProjectDto, Title, WorkstreamDto } from './entities';
-import { BatchId, ProjectId, TaskId } from './ids';
+import { BatchId, PassId, ProjectId, TaskId } from './ids';
 import {
   BatchFailure,
   BatchState,
@@ -90,6 +90,8 @@ export const BatchDto = z.object({
   ciFixHead: z.string().nullable().default(null),
   /** Why 10db stopped fixing the pull request's failing checks; null while it has not. */
   ciStopped: z.enum(CiStopped).nullable().default(null),
+  /** The Workbench pass whose batch this is; absent or null for any other batch. */
+  passId: PassId.nullable().optional(),
   gateExitCode: z.int().nullable(),
   gateLogPath: z.string().nullable(),
   failure: z.enum(BatchFailure).nullable(),

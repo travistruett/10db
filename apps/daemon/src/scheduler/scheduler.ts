@@ -2,11 +2,14 @@ import {
   BatchState,
   Delivery,
   isTerminal,
+  PASS_FOLDER_WAIT_LINE,
+  PASS_FOLDER_WAIT_NOTICE_KEY,
   queueOrder,
   WorkstreamState,
   type BatchDto,
   type BatchId,
   type AccountId,
+  type PassDto,
   type WorkstreamId,
 } from '@10db/contracts';
 import {
@@ -23,8 +26,11 @@ import {
   getWorkstreamRow,
   listBatches,
   listWorkstreams,
+  passHoldingFolder,
+  passHoldingTask,
   renewClaimLeases,
   renewLeases,
+  setWorkstreamNotice,
   transitionWorkstream,
 } from '@10db/db';
 import {
@@ -38,6 +44,7 @@ import { batchLaunchVerdict, claimScopeOf, LaunchVerdict } from '../delivery';
 import type { StateStore } from '../events';
 import { existsAsEntry, GitTrustError } from '../git';
 import type { Logger } from '../log';
+import { roomForLane } from './lane-room';
 
 export interface SchedulerOptions {
   readonly state: StateStore;
@@ -140,6 +147,32 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
     }
   }
 
+  /**
+   * Shows on a task in Your folder that it waits for the pass holding the folder; written once, and
+   * never over another notice: a parked, left-out or reverted run's notice says what the builder
+   * must know, and the run's card says it waits.
+   */
+  function waitForPass(id: WorkstreamId, pass: PassDto): void {
+    if (getWorkstreamRow(db, id).notice !== null) return;
+    opts.state.write((ctx) => {
+      if (getWorkstreamRow(ctx.tx, id).notice !== null) return;
+      setWorkstreamNotice(ctx, id, {
+        key: PASS_FOLDER_WAIT_NOTICE_KEY,
+        tone: 'info',
+        line: PASS_FOLDER_WAIT_LINE,
+        body: `Your folder is in the Workbench pass "${pass.name}". This task starts there once the pass has closed and its work is in the base.`,
+      });
+    });
+  }
+
+  /** Takes down the pass's wait once the run no longer waits for it; any other notice stays. */
+  function endPassWait(id: WorkstreamId): void {
+    opts.state.write((ctx) => {
+      if (getWorkstreamRow(ctx.tx, id).notice?.key === PASS_FOLDER_WAIT_NOTICE_KEY)
+        setWorkstreamNotice(ctx, id, null);
+    });
+  }
+
   function launchQueued(snapshot: CheckoutSnapshot): number {
     if (opts.held?.()) return 0;
     const signingIn = opts.connecting?.()?.accountId ?? null;
@@ -147,6 +180,7 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
     let global = lanes.global;
     const byProject = new Map(lanes.byProject);
     const byAccount = new Map(lanes.byAccount);
+    const byPass = new Map(lanes.byPass);
     // Accounts a cap check found open this tick: it reads the month's spend, so it runs once per account.
     const open = new Set<AccountId>();
     // Accounts that can't start a session yet: the preparer is asked once per account per tick.
@@ -163,7 +197,19 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       // A runner that just re-queued this row is still unwinding; launch() would refuse it and
       // leave it STARTING with a lane. Its lane-freed callback ticks again once it has exited.
       if (opts.runner.isRunning(ws.id)) continue;
+      const task = getTask(db, ws.taskId);
+      // A pass task is launched by its pass's own turns, never from the queue (Workbench spec §5.5),
+      // while the pass holds it.
+      if (passHoldingTask(db, task)) continue;
       const project = getProject(db, ws.projectId);
+      const batch = ws.batchId ? getBatch(db, ws.batchId) : null;
+      // Nothing else runs in Your folder while a pass holds it (W9): the task waits, saying so.
+      const pass = batch?.worktreePath == null ? passHoldingFolder(db, project.id) : undefined;
+      if (pass) {
+        waitForPass(ws.id, pass);
+        continue;
+      }
+      if (ws.notice?.key === PASS_FOLDER_WAIT_NOTICE_KEY) endPassWait(ws.id);
       const account = getAccountRow(db, project.accountId);
       if (account.id === signingIn) continue;
       if (opts.modelWait?.holds(account.id)) continue;
@@ -183,9 +229,18 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
         opts.accounts.readList?.(account.id);
         open.add(account.id);
       }
-      if (!overCaps && (byProject.get(project.id) ?? 0) >= project.maxLanes) continue;
-      if (!overCaps && (byAccount.get(account.id) ?? 0) >= account.laneCap) continue;
-      const batch = ws.batchId ? getBatch(db, ws.batchId) : null;
+      const room = roomForLane(
+        { global, byProject, byAccount, byPass },
+        {
+          projectId: project.id,
+          accountId: account.id,
+          pass: null,
+          global: opts.caps.global,
+          maxLanes: project.maxLanes,
+          accountCap: account.laneCap,
+        },
+      );
+      if (!overCaps && !room) continue;
       if (project.delivery === Delivery.PullRequest) {
         const checkout = batch?.worktreePath ?? project.repoPath;
         // A worktree that isn't on disk holds the batch's work with one card; it never launches.
@@ -209,7 +264,6 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
         if (batch) warned.delete(batch.id);
       }
       if (!dependenciesDone(db, ws.taskId)) continue;
-      const task = getTask(db, ws.taskId);
       // A parked task never launches, whatever its queue holds.
       if (task.boardColumnId !== null) continue;
       const leaseUntil = new Date(opts.clock.now().getTime() + opts.leaseMs).toISOString();

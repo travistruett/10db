@@ -26,6 +26,7 @@ import { forgetStartSiblings } from './start-siblings';
 import { returnCheckout } from './checkout-return';
 import { raise, type DeliveryContext } from './context';
 import { settleLeftOutCards } from './left-out-settle';
+import { recoverUnopenedPasses } from './pass-recover';
 import type { Shipper } from './ship';
 import type { BatchStarter } from './start';
 import { retireWorktree } from './worktree-cleanup';
@@ -138,6 +139,9 @@ export async function recoverBatches(deps: {
     }
   }
 
+  // 0. A pass the daemon stopped opening after its branch was made and before its row was written.
+  await recoverUnopenedPasses(deps);
+
   // 1. CUTTING rows: what git lists at the worktree path goes; an unlisted directory only when empty.
   // A row the restart interrupted is then cut again, as it is, so its tasks keep their place in line.
   // One that can't be (something is left that only a person can settle, or an earlier daemon's row
@@ -185,8 +189,10 @@ export async function recoverBatches(deps: {
   }
 
   // 3. OPEN and SHIPPING batches, each in its checkout. A FAILED one stays as it is: its card
-  // offers Retry, which makes a worktree whole again.
+  // offers Retry, which makes a worktree whole again. A pass's batch is its pass's to recover: the
+  // folder may be off its branch by the builder's own switch, and its ship is the pass's close.
   for (const batch of listBatches(db, { states: [BatchState.Open, BatchState.Shipping] })) {
+    if (batch.passId != null) continue;
     const checkout = batchCheckout(db, batch);
     let card: Card | null = null;
     if (batch.worktreePath !== null && !existsAsEntry(batch.worktreePath)) {

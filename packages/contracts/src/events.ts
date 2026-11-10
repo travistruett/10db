@@ -12,6 +12,8 @@ export const EventType = {
   TaskChanged: 'task.changed',
   /** A message joined a task's thread; `data.messageId` names it. */
   TaskMessageAdded: 'task.message_added',
+  /** A Workbench pass opened in Your folder; `data.batchId` names its batch. */
+  PassOpened: 'pass.opened',
   WorkstreamCreated: 'workstream.created',
   WorkstreamChanged: 'workstream.changed',
   SessionStarted: 'session.started',

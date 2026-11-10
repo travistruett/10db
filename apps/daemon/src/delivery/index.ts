@@ -19,6 +19,14 @@ export { ensureWorktreeWhole } from './worktree-repair';
 export { DEFAULT_DELIVERY_LIMITS, type DeliveryContext, type DeliveryLimits } from './context';
 export { createDeliveryJobs, jobKey, JobQueue, type DeliveryJobs } from './jobs';
 export { createBatchStarter, type BatchStarter } from './start';
+export {
+  openPass,
+  passBranchName,
+  passDirtRef,
+  type PassOpened,
+  type PassOpenInput,
+  type PassPageWait,
+} from './pass-open';
 export { createFailedRestarts } from './restart';
 export { stepCheck } from './local-check';
 export { fileFlakyTests, flakeNote, rerunFlaky, type FlakyTest } from './flaky-tests';

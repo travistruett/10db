@@ -17,6 +17,7 @@ import {
   type CiStopped,
   type LandingGroupId,
   type Notice,
+  type PassId,
   type ProjectId,
   type PullRequestMergeBlocked,
   type PullRequestStatusDto,
@@ -95,6 +96,7 @@ function toBatchDto(row: BatchRow): BatchDto {
     ciFixOf: row.ciFixOf,
     ciFixHead: row.ciFixHead,
     ciStopped: row.ciStopped,
+    passId: row.passId,
     gateExitCode: row.gateExitCode,
     gateLogPath: row.gateLogPath,
     failure: row.failure,
@@ -279,7 +281,10 @@ export function listBatches(
     .map(toBatchDto);
 }
 
-/** A new batch is CUTTING: the row exists before any git side effect (batch delivery spec §5). */
+/**
+ * A new batch is CUTTING: the row exists before any git side effect (batch delivery spec §5). A pass's
+ * batch is the exception: the pass made its branch first, so it is OPEN from the start.
+ */
 export function insertBatch(
   ctx: WriteContext,
   input: {
@@ -293,6 +298,16 @@ export function insertBatch(
     readonly worktreePath?: string;
     /** A CI fix batch names the root batch it fixes and the pull request head it fixes. */
     readonly ciFix?: { readonly of: BatchId; readonly head: string };
+    /**
+     * A Workbench pass's batch: made OPEN on the branch the pass already made at the folder's HEAD,
+     * which is its base commit, since nothing is cut for it.
+     */
+    readonly pass?: {
+      readonly id: PassId;
+      readonly branch: string;
+      readonly baseSha: string;
+      readonly repo: string | null;
+    };
   },
 ): BatchDto {
   if (input.worktreePath === undefined) {
@@ -307,12 +322,12 @@ export function insertBatch(
     id: input.id ?? mintId('Batch'),
     projectId: input.projectId,
     title: input.title,
-    state: BatchState.Cutting,
-    branch: null,
+    state: input.pass ? BatchState.Open : BatchState.Cutting,
+    branch: input.pass?.branch ?? null,
     baseBranch: input.baseBranch,
     autoMerge: input.autoMerge ?? true,
-    baseSha: null,
-    repo: null,
+    baseSha: input.pass?.baseSha ?? null,
+    repo: input.pass?.repo ?? null,
     prUrl: null,
     gateExitCode: null,
     gateLogPath: null,
@@ -332,12 +347,13 @@ export function insertBatch(
     ciFixOf: input.ciFix?.of ?? null,
     ciFixHead: input.ciFix?.head ?? null,
     ciStopped: null,
+    passId: input.pass?.id ?? null,
     notices: [],
     createdAt: ctx.now,
     updatedAt: ctx.now,
   };
   ctx.tx.insert(schema.batches).values(row).run();
-  emitBatch(ctx, row.id, { from: null, to: BatchState.Cutting, reason: null });
+  emitBatch(ctx, row.id, { from: null, to: row.state, reason: null });
   return toBatchDto(row);
 }
 

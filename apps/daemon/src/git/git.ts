@@ -11,7 +11,8 @@ import {
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, normalize, posix, resolve, sep } from 'node:path';
-import { InvalidError } from '@10db/contracts';
+import { BRANCH_PREFIX, InvalidError } from '@10db/contracts';
+import { z } from 'zod';
 import { realPathOf, resolveInRepo } from '../guard';
 import { bookkeepingEntryAt, leftOutOfCommits } from './claude-code-bookkeeping';
 import {
@@ -51,6 +52,25 @@ const OP_TRAILER = '10db-Op';
 const OP_TRAILER_LINE = new RegExp(`^${OP_TRAILER}:`, 'm');
 const OP_SEARCH_DEPTH = 200;
 const OBJECT_ID = /^[0-9a-f]{40}([0-9a-f]{24})?$/;
+
+/** One record of `diff-index --raw`, as git printed it. */
+const IndexChange = z.object({
+  path: z.string().min(1),
+  mode: z.string().regex(/^[0-7]{6}$/),
+  blob: z.string().regex(OBJECT_ID),
+  status: z.string().min(1),
+});
+
+/** What a pass's dirt commit records, as `log` printed its parent and trailers. */
+const PassDirtTrailers = z.object({
+  startSha: z.string().regex(OBJECT_ID),
+  branch: z
+    .string()
+    .startsWith(BRANCH_PREFIX)
+    .regex(/^[^,\s]+$/),
+  returnBranch: z.string().regex(/^[^,\s]+$/),
+});
+
 /**
  * Config on every daemon git call beside `DAEMON_GIT_CONFIG`: no attributes file, git's own checks on
  * paths that would be `.git` on HFS+ or NTFS, and no submodule recursion.
@@ -210,6 +230,63 @@ export interface MergedCommitInput {
   /** A ref under `refs/10db/` that keeps the commit reachable; it is set, whatever it held. */
   readonly ref: string;
   readonly message: string;
+}
+
+export interface PassBranchInput {
+  readonly repo: string;
+  /** The pass's branch to make at HEAD's commit; it must not exist yet. */
+  readonly branch: string;
+  /** Where the commit holding the folder's dirt is kept: a new ref under `refs/10db/`. */
+  readonly dirtRef: string;
+  readonly message: string;
+}
+
+/** What a pass's dirt commit says of where the pass opened, read back from its ref. */
+export interface PassDirtRecord {
+  /** The ref that keeps the commit, `refs/10db/passes/<pass id>/dirt`. */
+  readonly ref: string;
+  /** The pass's branch, under `10db/`. */
+  readonly branch: string;
+  /** The branch HEAD named when the pass opened. */
+  readonly returnBranch: string;
+  /** The commit the pass opened at: the dirt commit's parent. */
+  readonly startSha: string;
+}
+
+/** The trailers a dirt commit carries, so a pass a stop left with no row can be taken back. */
+const PASS_BRANCH_TRAILER = '10db-Pass-Branch';
+const RETURN_BRANCH_TRAILER = '10db-Return-Branch';
+
+/** What git leaves in a worktree's git dir while an operation waits for the builder to finish it. */
+const OPERATIONS_IN_PROGRESS = [
+  { entry: 'MERGE_HEAD', what: 'a merge', end: 'git merge --continue or git merge --abort' },
+  {
+    entry: 'CHERRY_PICK_HEAD',
+    what: 'a cherry-pick',
+    end: 'git cherry-pick --continue or git cherry-pick --abort',
+  },
+  { entry: 'REVERT_HEAD', what: 'a revert', end: 'git revert --continue or git revert --abort' },
+  { entry: 'rebase-merge', what: 'a rebase', end: 'git rebase --continue or git rebase --abort' },
+  {
+    entry: 'rebase-apply',
+    what: 'a rebase or git am',
+    end: 'git rebase --continue, git am --continue, or their --abort',
+  },
+] as const;
+
+/** Where `openPassBranch` found the folder, and what in it differed from that commit. */
+export interface PassBranch {
+  /** The branch HEAD named. */
+  readonly returnBranch: string;
+  /** The commit it was at, where the pass's branch now is. */
+  readonly startSha: string;
+  /**
+   * Every path whose content on disk differs from `startSha`, untracked ones git doesn't ignore
+   * included, sorted, with the blob of its content on disk; null for a file deleted from the folder.
+   */
+  readonly dirt: readonly { readonly path: string; readonly blob: string | null }[];
+  /** The unsigned commit on `startSha` whose tree holds that dirt, kept at `dirtRef`. */
+  readonly dirtCommit: string;
 }
 
 export interface MergeIntoBranchInput {
@@ -411,6 +488,32 @@ export interface Git {
    * text, holds none.
    */
   conflictMarkers(repo: string, paths: readonly string[], rev?: string): Promise<string[]>;
+  /**
+   * Opens a Workbench pass in the checkout: records every path that differs from HEAD's commit, its
+   * content written as git objects held by an unsigned commit at `dirtRef`, then makes `branch` at
+   * that commit and points HEAD at it. No file and no index entry is written, so uncommitted work stays
+   * as it is. Refused on a detached HEAD, a HEAD with no commit, a branch or ref that already exists,
+   * and when HEAD moved meanwhile, which leaves nothing behind.
+   */
+  openPassBranch(input: PassBranchInput): Promise<PassBranch>;
+  /**
+   * Takes back an `openPassBranch` nothing was built on: while HEAD names `branch` and both it and
+   * `returnBranch` are still at `startSha`, HEAD names `returnBranch` again and `branch` and `dirtRef`
+   * go; when `branch` was never made, only `dirtRef` goes. No file is written. Anything else is left
+   * as it is, and the answer says whether it was undone.
+   */
+  undoPassBranch(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly returnBranch: string;
+    readonly startSha: string;
+    readonly dirtRef: string;
+  }): Promise<boolean>;
+  /**
+   * Every pass dirt commit kept under `refs/10db/passes/`, with the branches its trailers name; one
+   * whose trailers or parent don't read as `openPassBranch` writes them is left out.
+   */
+  passDirtRecords(repo: string): Promise<PassDirtRecord[]>;
   /** Keeps `text` at `ref`, under `refs/10db/`, as a blob nothing else names; it is set, whatever it held. */
   keepNote(repo: string, ref: string, text: string): Promise<void>;
   /** The text `keepNote` kept at `ref`; null when the ref is gone or names no blob. */
@@ -1861,6 +1964,189 @@ export function createGit(opts: GitOptions = {}): Git {
     });
   }
 
+  /**
+   * The paths a private index differs from `tip` by, each with its blob; null for one it lacks.
+   * Refused for a path the index now holds as a nested repository, whose content the record can't
+   * hold.
+   */
+  async function indexChanges(
+    c: Pinned,
+    env: { GIT_INDEX_FILE: string; GIT_LITERAL_PATHSPECS: string },
+    tip: string,
+  ): Promise<{ path: string; blob: string | null }[]> {
+    const fields = (
+      await git(c, ['diff-index', '--cached', '--raw', '--no-renames', '-z', tip], { env })
+    ).split('\0');
+    const found: { path: string; blob: string | null }[] = [];
+    for (let at = 0; at + 1 < fields.length; at += 2) {
+      const [, , mode, , blob, status] = (fields[at] ?? '').split(/[: ]/);
+      const parsed = IndexChange.safeParse({ path: fields[at + 1], mode, blob, status });
+      if (!parsed.success)
+        throw new GitError(['diff-index'], 'diff-index printed a record 10db cannot read', null);
+      const change = parsed.data;
+      if (change.mode === GitMode.Gitlink)
+        throw new InvalidError(
+          `${change.path} became a nested repository while the pass was opening; open it again`,
+        );
+      found.push({ path: change.path, blob: change.status === 'D' ? null : change.blob });
+    }
+    return found.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  }
+
+  async function openPassBranch(input: PassBranchInput): Promise<PassBranch> {
+    if (!input.dirtRef.startsWith(KEPT_REF_PREFIX))
+      throw new InvalidError(`${input.dirtRef} is not under ${KEPT_REF_PREFIX}`);
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      // Checked first: a rebase leaves HEAD detached, and saying so would hide why.
+      const busy = OPERATIONS_IN_PROGRESS.find(({ entry }) =>
+        existsAsEntry(join(c.dirs.gitDir, entry)),
+      );
+      if (busy)
+        throw new InvalidError(
+          `${c.real} is in the middle of ${busy.what}; finish it or stop it (${busy.end}) before opening a pass`,
+        );
+      const startSha = await revParse(c, 'HEAD^{commit}');
+      if (startSha === null) throw new InvalidError(`${c.real} has no commit yet`);
+      const returnBranch = await currentBranch(c);
+      if (returnBranch === null)
+        throw new InvalidError(
+          `${c.real} is on a detached HEAD; a pass needs a branch to return the folder to`,
+        );
+      const ref = `refs/heads/${input.branch}`;
+      if ((await revParse(c, ref)) !== null)
+        throw new InvalidError(`A branch named ${input.branch} already exists`);
+      // A nested repository is no file of the folder's: its content is its own. git refuses to add
+      // one with no commit and keeps one with a commit as a submodule entry, so neither is named, and
+      // the dirt and its commit's tree leave it out alike.
+      const paths = (await changes(c)).filter(
+        (path) => !path.endsWith('/') && embeddedRepository(c.real, path) === null,
+      );
+      const { tree, dirt } = await withPrivateIndex(c, startSha, async (env) => {
+        // On stdin, so no number of paths runs into the limit on a command's arguments.
+        if (paths.length > 0)
+          await git(c, ['add', '-A', '--pathspec-from-file=-', '--pathspec-file-nul'], {
+            env,
+            input: `${paths.join('\0')}\0`,
+          });
+        return {
+          tree: (await git(c, ['write-tree'], { env })).trim(),
+          dirt: await indexChanges(c, env, startSha),
+        };
+      });
+      // Never pushed, so never signed. The trailers say where the pass opened, for start-up to take
+      // back a pass the daemon stopped opening before its row was written.
+      const dirtCommit = (
+        await git(c, ['commit-tree', '--no-gpg-sign', tree, '-p', startSha], {
+          input: `${input.message}\n\n${PASS_BRANCH_TRAILER}: ${input.branch}\n${RETURN_BRANCH_TRAILER}: ${returnBranch}\n`,
+        })
+      ).trim();
+      const zero = '0'.repeat(startSha.length);
+      try {
+        await git(c, [
+          'update-ref',
+          '--no-deref',
+          '-m',
+          '10db: pass dirt',
+          input.dirtRef,
+          dirtCommit,
+          zero,
+        ]);
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        throw new InvalidError(`${input.dirtRef} already exists`);
+      }
+      const undo = async (): Promise<void> => {
+        await git(c, ['update-ref', '-d', input.dirtRef, dirtCommit]).catch(() => undefined);
+        await git(c, ['update-ref', '-d', ref, startSha]).catch(() => undefined);
+      };
+      try {
+        await git(c, ['update-ref', '--no-deref', '-m', '10db: pass', ref, startSha, zero]);
+      } catch (error) {
+        await undo();
+        if (!(error instanceof GitError)) throw error;
+        throw new InvalidError(
+          `A branch named ${input.branch} already exists, or the name is not valid`,
+        );
+      }
+      // A commit or a switch the builder made while the dirt was read: the pass would start elsewhere.
+      if (
+        (await currentBranch(c)) !== returnBranch ||
+        (await revParse(c, 'HEAD^{commit}')) !== startSha
+      ) {
+        await undo();
+        throw new InvalidError(`${c.real} moved while the pass was opening; open it again`);
+      }
+      // The branch is at HEAD's own commit, so naming it moves no file and no index entry.
+      await git(c, ['symbolic-ref', '-m', '10db: pass', 'HEAD', ref]);
+      return { returnBranch, startSha, dirt, dirtCommit };
+    });
+  }
+
+  async function undoPassBranch(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly returnBranch: string;
+    readonly startSha: string;
+    readonly dirtRef: string;
+  }): Promise<boolean> {
+    if (!input.dirtRef.startsWith(KEPT_REF_PREFIX))
+      throw new InvalidError(`${input.dirtRef} is not under ${KEPT_REF_PREFIX}`);
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const ref = `refs/heads/${input.branch}`;
+      // Stopped before the branch was made: HEAD never moved, and the dirt's record is all there is.
+      if ((await revParse(c, ref)) === null) {
+        await git(c, ['update-ref', '--no-deref', '-d', input.dirtRef]).catch(() => undefined);
+        return true;
+      }
+      if ((await currentBranch(c)) !== input.branch) return false;
+      if ((await revParse(c, `${ref}^{commit}`)) !== input.startSha) return false;
+      if ((await revParse(c, `refs/heads/${input.returnBranch}^{commit}`)) !== input.startSha)
+        return false;
+      await git(c, [
+        'symbolic-ref',
+        '-m',
+        '10db: pass undone',
+        'HEAD',
+        `refs/heads/${input.returnBranch}`,
+      ]);
+      await git(c, ['update-ref', '-d', ref, input.startSha]).catch(() => undefined);
+      await git(c, ['update-ref', '--no-deref', '-d', input.dirtRef]).catch(() => undefined);
+      return true;
+    });
+  }
+
+  async function passDirtRecords(repo: string): Promise<PassDirtRecord[]> {
+    const c = await pinned(repo);
+    const refs = await git(c, [
+      'for-each-ref',
+      '--format=%(refname)%00%(objectname)',
+      `${KEPT_REF_PREFIX}passes/`,
+    ]);
+    const found: PassDirtRecord[] = [];
+    for (const line of refs.split('\n').filter(Boolean)) {
+      const [ref = '', sha = ''] = line.split('\0');
+      if (!ref.endsWith('/dirt') || !OBJECT_ID.test(sha)) continue;
+      const trailer = (key: string): string => `%(trailers:key=${key},valueonly,separator=%x2c)`;
+      const [startSha, branch, returnBranch] = (
+        await git(c, [
+          'log',
+          '-1',
+          '--no-show-signature',
+          `--format=%P%x1f${trailer(PASS_BRANCH_TRAILER)}%x1f${trailer(RETURN_BRANCH_TRAILER)}`,
+          sha,
+        ])
+      )
+        .trim()
+        .split('\x1f')
+        .map((field) => field.trim());
+      const record = PassDirtTrailers.safeParse({ startSha, branch, returnBranch });
+      if (record.success) found.push({ ref, ...record.data });
+    }
+    return found;
+  }
+
   /** One fetch of `branch` into `origin/<branch>`, from origin's pinned fetch URL. */
   async function fetchOnce(repo: string, branch: string, net: NetworkCall): Promise<NetworkRun> {
     const c = await pinned(repo);
@@ -2779,6 +3065,9 @@ export function createGit(opts: GitOptions = {}): Git {
     mergeIntoBranch,
     revertCommits,
     mergedCommit,
+    openPassBranch,
+    undoPassBranch,
+    passDirtRecords,
     async conflictMarkers(repo, paths, rev = 'HEAD') {
       const c = await pinned(repo);
       const found: string[] = [];

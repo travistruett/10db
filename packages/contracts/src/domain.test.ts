@@ -9,6 +9,8 @@ import {
   McpToolInputs,
   mintId,
   NextAction,
+  passHeldAreas,
+  passPagesProblem,
   ProjectInput,
   ProjectPatch,
   STOCK_HAZARD_REVISIONS,
@@ -371,6 +373,92 @@ describe('MCP tool inputs', () => {
       continuity: { blockers: [], pendingQuestions: [], backgroundJobs: [], notes: '' },
     };
     expect(HandoffInput.safeParse(handoff).success).toBe(false);
+  });
+});
+
+describe('the pages of a pass', () => {
+  const areas = [
+    { name: 'people', globs: ['app/people/**'], role: 'page' as const, route: '/people' },
+    { name: 'settings', globs: ['app/settings/**'], role: 'page' as const },
+    { name: 'wide', globs: ['app/**/*.tsx'], role: 'page' as const },
+    { name: 'src', globs: ['app/**'], role: 'shared' as const },
+    { name: 'api', globs: ['api/**'] },
+    { name: 'api-users', globs: ['api/users/**'] },
+    { name: 'people-legacy', globs: ['app/people/legacy/**'] },
+  ];
+  it.each<{ name: string; tasks: { title: string; areas: string[] }[]; problem: string | null }>([
+    {
+      name: 'two tasks on two pages',
+      tasks: [
+        { title: 'People', areas: ['people'] },
+        { title: 'Settings', areas: ['settings', 'src'] },
+      ],
+      problem: null,
+    },
+    {
+      name: 'a task naming no page area',
+      tasks: [{ title: 'Shared only', areas: ['src', 'api'] }],
+      problem: 'Shared only names no page area',
+    },
+    {
+      name: 'two tasks on the same page',
+      tasks: [
+        { title: 'People', areas: ['people'] },
+        { title: 'People again', areas: ['people'] },
+      ],
+      problem: '"People" and "People again" both hold people',
+    },
+    {
+      name: 'two tasks on the same area with no role, which a pass holds as a page',
+      tasks: [
+        { title: 'People', areas: ['people', 'api'] },
+        { title: 'Settings', areas: ['settings', 'api'] },
+      ],
+      problem: '"People" and "Settings" both hold api',
+    },
+    {
+      name: 'two tasks on pages whose globs can share a file',
+      tasks: [
+        { title: 'People', areas: ['people'] },
+        { title: 'Everything', areas: ['wide'] },
+      ],
+      problem: 'app/people/** and app/**/*.tsx',
+    },
+    {
+      name: 'two tasks on areas with no role whose globs can share a file, both held for life',
+      tasks: [
+        { title: 'People', areas: ['people', 'api'] },
+        { title: 'Settings', areas: ['settings', 'api-users'] },
+      ],
+      problem: 'api/** and api/users/**',
+    },
+    {
+      name: "a page and another task's area with no role that can share a file",
+      tasks: [
+        { title: 'People', areas: ['people'] },
+        { title: 'Settings', areas: ['settings', 'people-legacy'] },
+      ],
+      problem: 'app/people/** and app/people/legacy/**',
+    },
+    {
+      name: 'two tasks on one shared area: held a turn at a time, never at open',
+      tasks: [
+        { title: 'People', areas: ['people', 'src'] },
+        { title: 'Settings', areas: ['settings', 'src'] },
+      ],
+      problem: null,
+    },
+  ])('$name', ({ tasks, problem }) => {
+    const found = passPagesProblem(areas, tasks);
+    if (problem === null) expect(found).toBeNull();
+    else expect(found).toContain(problem);
+  });
+
+  it('holds a page and an area with no role at open, and never a shared area or a hazard', () => {
+    expect(passHeldAreas(areas, { areas: ['people', 'src', 'api', 'deps'] })).toEqual([
+      'people',
+      'api',
+    ]);
   });
 });
 

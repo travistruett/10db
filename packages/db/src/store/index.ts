@@ -27,6 +27,7 @@ export * from './shape-shadow';
 export * from './mcp-approvals';
 export * from './model-profiles';
 export * from './model-settings';
+export * from './passes';
 export * from './permission-rules';
 export * from './projects';
 export * from './routing-rules';

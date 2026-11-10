@@ -1,7 +1,7 @@
 import { lstatSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join, sep } from 'node:path';
-import { ClaimKind, type AreaDef, type Delivery, type HazardDef } from '@10db/contracts';
+import { AreaRole, ClaimKind, type AreaDef, type Delivery, type HazardDef } from '@10db/contracts';
 import { z } from 'zod';
 import { isOwnFile, isOwnToolResult, pathRefusal, type ProtectedPath } from './account-rules';
 import { commandForms, runCommandStarts, startsWithWords } from './command-forms';
@@ -44,6 +44,11 @@ export interface GuardInput {
   readonly claims: readonly { readonly kind: ClaimKind; readonly name: string }[];
   /** A read-only step: file writes and writing shell commands are refused, claims or not. */
   readonly readOnly: boolean;
+  /**
+   * The lane is a Workbench pass's: a file under a page area is the page's alone, so only the lane
+   * holding that page may write it, whatever shared area or hazard it holds that also matches.
+   */
+  readonly inPass?: boolean;
   /** The project's delivery; absent means local. In pull-request projects only the daemon pushes. */
   readonly delivery?: Delivery;
   /** Paths the file tools may not touch: the data directory and the default account's sign-in. */
@@ -125,8 +130,25 @@ function claimed(input: GuardInput, kind: ClaimKind, name: string): boolean {
   return input.claims.some((c) => c.kind === kind && c.name === name);
 }
 
+/** In a pass, the page a path belongs to that the lane does not hold, or null (spec §7.3). */
+function unheldPage(input: GuardInput, areas: readonly string[]): string | null {
+  if (input.inPass !== true) return null;
+  const pages = areas.filter((name) =>
+    input.areas.some((a) => a.name === name && a.role === AreaRole.Page),
+  );
+  if (pages.length === 0 || pages.some((p) => claimed(input, ClaimKind.Area, p))) return null;
+  return pages[0] ?? null;
+}
+
 function judgeRelative(input: GuardInput, rel: string): GuardVerdict {
   const hit = classifyPath(rel, input.areas, input.hazards);
+  // Checked before a held hazard allows the path: holding a hazard or a shared area that also
+  // matches a page's file is not holding the page.
+  const page = unheldPage(input, hit.areas);
+  if (page !== null)
+    return deny(
+      `${rel} belongs to page "${page}", which this task does not hold in the pass. Leave it to the task that holds that page.`,
+    );
   const missingHazard = hit.hazards.find((h) => !claimed(input, ClaimKind.Hazard, h));
   if (missingHazard) {
     return deny(

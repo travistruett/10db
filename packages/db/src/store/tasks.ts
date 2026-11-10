@@ -607,6 +607,7 @@ function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto
     workstreamId: latest?.id ?? null,
     goalId: row.goalId,
     landingGroupId: row.landingGroupId,
+    passId: row.passId,
     modelSetting: row.modelSetting,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -979,6 +980,26 @@ export function patchTask(
       // The patch is the builder's placement control: the reason says so, replacing a proposed one.
       ...(fields.workspaceMode === undefined ? {} : { placementReason: BUILDER_CHOSE_PLACEMENT }),
       ...(moved ?? {}),
+      updatedAt: ctx.now,
+    })
+    .where(eq(schema.tasks.id, id))
+    .run();
+  ctx.emit({ type: EventType.TaskChanged, entityType: 'task', entityId: id });
+  return getTask(ctx.tx, id);
+}
+
+/**
+ * Places a task where the placement rule proposes when it starts, with the rule's reason: a start
+ * while a Workbench pass holds Your folder sends a folder task to a separate copy. Refused as the
+ * builder's own placement change is, for a task that can no longer move.
+ */
+export function placeTaskByRule(ctx: WriteContext, id: TaskId, proposed: Placement): TaskDto {
+  checkPlacementCanChange(ctx.tx, getTask(ctx.tx, id));
+  ctx.tx
+    .update(schema.tasks)
+    .set({
+      workspaceMode: proposed.workspaceMode,
+      placementReason: proposed.reason,
       updatedAt: ctx.now,
     })
     .where(eq(schema.tasks.id, id))

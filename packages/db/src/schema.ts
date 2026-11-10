@@ -47,6 +47,8 @@ import type {
   ModelSetting,
   ModelStatus,
   ModelTier,
+  PassId,
+  PassState,
   PatternId,
   PatternMatch,
   ModelProfileId,
@@ -319,6 +321,10 @@ export const batches = sqliteTable(
     ciFixHead: text('ci_fix_head'),
     /** Why 10db stopped fixing the pull request's failing checks. */
     ciStopped: text('ci_stopped').$type<CiStopped>(),
+    /** The Workbench pass whose batch this is; null for any other batch. */
+    passId: text('pass_id')
+      .$type<PassId>()
+      .references((): AnySQLiteColumn => passes.id),
     /** What stands about the batch that its tasks show (a conflict with the base); no card is raised for it. */
     notices: text('notices', { mode: 'json' })
       .$type<Notice[]>()
@@ -336,6 +342,9 @@ export const batches = sqliteTable(
     uniqueIndex('batches_one_unfinished')
       .on(t.projectId)
       .where(sql`state IN ('CUTTING', 'OPEN', 'SHIPPING', 'FAILED') AND worktree_path IS NULL`),
+    uniqueIndex('batches_pass_idx')
+      .on(t.passId)
+      .where(sql`pass_id IS NOT NULL`),
   ],
 );
 
@@ -409,6 +418,10 @@ export const tasks = sqliteTable(
       .references((): AnySQLiteColumn => landingGroups.id),
     /** The builder's own model setting for the task; null is no override. */
     modelSetting: text('model_setting', { mode: 'json' }).$type<ModelSetting>(),
+    /** The Workbench pass the task is in; null for a task outside every pass. */
+    passId: text('pass_id')
+      .$type<PassId>()
+      .references((): AnySQLiteColumn => passes.id),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -1554,4 +1567,60 @@ export const shapeShadowAnswers = sqliteTable(
     createdAt: createdAt(),
   },
   (t) => [primaryKey({ columns: [t.messageId, t.decision] })],
+);
+
+/**
+ * A Workbench pass (spec §5, §11): the builder works through pages with the agents, live in Your
+ * folder, on a branch of its own made at the folder's HEAD. Its one batch carries the branch, the
+ * base commit and the pull request. One pass per project is open, closing or abandoning at a time.
+ */
+export const passes = sqliteTable(
+  'passes',
+  {
+    id: text('id').$type<PassId>().primaryKey(),
+    projectId: text('project_id')
+      .$type<ProjectId>()
+      .notNull()
+      .references(() => projects.id),
+    name: text('name').notNull(),
+    state: text('state').$type<PassState>().notNull(),
+    /** Written in the same write as the pass, once its batch row exists; null only inside that write. */
+    batchId: text('batch_id')
+      .$type<BatchId>()
+      .references((): AnySQLiteColumn => batches.id),
+    /** How many pages the pass holds, and so how many of its lanes run (W11). */
+    pageCap: integer('page_cap').notNull().default(4),
+    /** The branch HEAD named when the pass opened. */
+    returnBranch: text('return_branch').notNull(),
+    /** The commit HEAD was at when the pass opened; the pass's branch starts here. */
+    startSha: text('start_sha').notNull(),
+    openedAt: text('opened_at').notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index('passes_project_idx').on(t.projectId),
+    uniqueIndex('passes_one_open')
+      .on(t.projectId)
+      .where(sql`state IN ('OPEN', 'CLOSING', 'ABANDONING')`),
+  ],
+);
+
+/**
+ * The folder's dirt when a pass opened: each path that differed from its start, with the hash of its
+ * content on disk, or null for a file deleted from the folder. The content itself is held by an
+ * unsigned commit at `refs/10db/passes/<pass id>/dirt`. A record, written once.
+ */
+export const passDirt = sqliteTable(
+  'pass_dirt',
+  {
+    passId: text('pass_id')
+      .$type<PassId>()
+      .notNull()
+      .references(() => passes.id),
+    path: text('path').notNull(),
+    blob: text('blob'),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.passId, t.path] })],
 );
