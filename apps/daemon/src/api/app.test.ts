@@ -512,6 +512,29 @@ describe('API', () => {
     expect(await res.text()).toContain('Fix login');
   });
 
+  it("passes a project's app address to the patch, and refuses one that is not on this Mac", async () => {
+    const sent: unknown[] = [];
+    const services = stubServices({
+      // The route's contract is what is under test: the service records the patch and refuses it.
+      patchProject: (_id, patch) => {
+        sent.push(patch);
+        throw new ConflictError('recorded');
+      },
+    });
+    const patch = (appUrl: string | null) =>
+      app(services).request(`/projects/${mintId('Project')}`, {
+        method: 'PATCH',
+        ...json,
+        body: JSON.stringify({ appUrl }),
+      });
+    expect((await patch('http://localhost:5173')).status).toBe(409);
+    expect((await patch(null)).status).toBe(409);
+    const refused = await patch('http://example.com');
+    expect(refused.status).toBe(400);
+    expect(await refused.text()).toContain('An app address is an http origin on this Mac');
+    expect(sent).toEqual([{ appUrl: 'http://localhost:5173' }, { appUrl: null }]);
+  });
+
   it('answers 500 for an unexpected error and reports that error to the hook', async () => {
     const boom = new Error('boom');
     const seen: unknown[] = [];

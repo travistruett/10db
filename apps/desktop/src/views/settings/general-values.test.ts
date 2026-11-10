@@ -35,6 +35,21 @@ describe('checkGeneral', () => {
       expected: { ok: true, patch: { sandboxDocker: true } },
     },
     {
+      name: 'an app address, trimmed',
+      change: { appUrl: ' http://localhost:5173 ' },
+      expected: { ok: true, patch: { appUrl: 'http://localhost:5173' } },
+    },
+    {
+      name: 'an app address off this Mac',
+      change: { appUrl: 'http://example.com' },
+      expected: {
+        ok: false,
+        errors: {
+          appUrl: 'An app address is an http origin on this Mac, such as http://localhost:8800',
+        },
+      },
+    },
+    {
       name: 'holding pull requests for review',
       change: { landing: 'hold' },
       expected: { ok: true, patch: { landing: 'hold' } },
@@ -202,6 +217,15 @@ describe('checkGeneral', () => {
     expect(checkGeneral(capped, { ...generalValues(capped), budgetCeiling: '' })).toEqual({
       ok: true,
       patch: { budgetCeiling: null },
+    });
+  });
+
+  it('forgets the app address when the field is emptied', () => {
+    const served = projectDto({ appUrl: 'http://localhost:5173' });
+    expect(generalValues(served).appUrl).toBe('http://localhost:5173');
+    expect(checkGeneral(served, { ...generalValues(served), appUrl: ' ' })).toEqual({
+      ok: true,
+      patch: { appUrl: null },
     });
   });
 

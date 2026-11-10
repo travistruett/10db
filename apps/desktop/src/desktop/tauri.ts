@@ -41,9 +41,9 @@ const LOOPBACK_HOSTNAMES: ReadonlySet<string> = new Set(['localhost', '127.0.0.1
  * The address to open for `route` on the project's app, or a refusal. The shell's
  * `open_app_page` command refuses anything but a loopback address, so this check is what holds
  * a window to one project's address: the app address must be a loopback `http(s)` origin, and
- * the address opened must have exactly that origin.
+ * the address opened must have exactly that origin. Throws `AppPageRefusedError`.
  */
-function appPageUrl(appUrl: string, route: string): string {
+export function appPageUrl(appUrl: string, route: string): string {
   const app = URL.parse(appUrl);
   if (app === null || (app.protocol !== 'http:' && app.protocol !== 'https:')) {
     throw new AppPageRefusedError(`${appUrl} is not an http address`);
@@ -59,12 +59,18 @@ function appPageUrl(appUrl: string, route: string): string {
 }
 
 /**
- * Opens one page of the selected project's app in the default browser. Refuses (rejects with
- * `AppPageRefusedError`) unless `appUrl` is a loopback `http(s)` origin and `route` stays on it.
+ * Opens one page of the selected project's app in the default browser; a plain browser opens a tab.
+ * Refuses (rejects with `AppPageRefusedError`) unless `appUrl` is a loopback `http(s)` origin and
+ * `route` stays on it.
  */
 export function openAppPage(appUrl: string, route: string): Promise<void> {
   try {
-    return invoke('open_app_page', { url: appPageUrl(appUrl, route) });
+    const url = appPageUrl(appUrl, route);
+    if (isTauri()) return invoke('open_app_page', { url });
+    const opened = window.open(url, '_blank');
+    if (opened === null) return Promise.reject(new Error('the browser blocked the page'));
+    opened.opener = null;
+    return Promise.resolve();
   } catch (error) {
     return Promise.reject(error instanceof Error ? error : new Error(String(error)));
   }

@@ -72,6 +72,7 @@ function reseed(current: GeneralValues, seed: GeneralValues, next: GeneralValues
       ? next.worktreeSeed
       : current.worktreeSeed,
     isolate: sameList(current.isolate, seed.isolate) ? next.isolate : current.isolate,
+    appUrl: current.appUrl === seed.appUrl ? next.appUrl : current.appUrl,
   };
 }
 
@@ -211,6 +212,21 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
             error={errors.precheckCommand}
             onChange={(e) => {
               set({ precheckCommand: e.currentTarget.value });
+            }}
+          />
+        </SettingRow>
+        <SettingRow
+          label="App address"
+          description="Where your dev server answers, such as http://localhost:5173. The Workbench's Open Page opens a page's route here."
+        >
+          <TextInput
+            aria-label="App address"
+            placeholder="http://localhost:5173"
+            styles={MONO_INPUT}
+            value={values.appUrl}
+            error={errors.appUrl}
+            onChange={(e) => {
+              set({ appUrl: e.currentTarget.value });
             }}
           />
         </SettingRow>

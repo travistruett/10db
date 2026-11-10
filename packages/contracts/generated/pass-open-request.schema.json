@@ -8,13 +8,31 @@
       "maxLength": 200
     },
     "taskIds": {
-      "minItems": 1,
       "maxItems": 6,
       "type": "array",
       "items": {
         "type": "string",
         "pattern": "^tsk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
       }
+    },
+    "pages": {
+      "maxItems": 6,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "goalId": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^gol_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
     },
     "pageCap": {
       "type": "integer",

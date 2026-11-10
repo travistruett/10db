@@ -1,6 +1,8 @@
 import {
   INSTALL_REPAIRED_NOTICE_KEY,
   mintId,
+  PASS_FOLDER_WAIT_LINE,
+  PASS_FOLDER_WAIT_NOTICE_KEY,
   RiskTag,
   TaskPatch,
   type BatchDto,
@@ -45,6 +47,7 @@ interface Opts {
   /** The column the card sits in; "Ready" unless given. */
   readonly columnName?: string;
   readonly onCancelRun?: (workstream: WorkstreamDto) => void;
+  readonly onOpenWorkbench?: () => void;
   /** The project's account, whose models the task's own setting offers. */
   readonly accountId?: typeof DEFAULT_ACCOUNT.id;
 }
@@ -66,6 +69,7 @@ function open(opts: Opts = {}): { closed: () => number } {
       {...(opts.pullRequestBase ? { pullRequestBase: opts.pullRequestBase } : {})}
       {...(opts.placementEditable ? { placementEditable: true } : {})}
       {...(opts.onCancelRun ? { onCancelRun: opts.onCancelRun } : {})}
+      {...(opts.onOpenWorkbench ? { onOpenWorkbench: opts.onOpenWorkbench } : {})}
       {...(opts.accountId ? { accountId: opts.accountId } : {})}
       onClose={() => {
         closes += 1;
@@ -727,6 +731,41 @@ describe('TaskDrawer', () => {
       expect(
         within(d).getByText(/Task "Beta" holds hazard migrations\. Task "Alpha"/),
       ).toBeTruthy();
+    });
+
+    it('links a task waiting for the pass that holds the folder to the Workbench', async () => {
+      serve();
+      let opened = 0;
+      open({
+        workstream: workstreamDto({
+          state: 'QUEUED',
+          notice: {
+            key: PASS_FOLDER_WAIT_NOTICE_KEY,
+            tone: 'info',
+            line: PASS_FOLDER_WAIT_LINE,
+            body: 'Your folder is in the Workbench pass "Settings pass".',
+          },
+        }),
+        onOpenWorkbench: () => {
+          opened += 1;
+        },
+      });
+      const d = await dialog();
+      expect(within(d).getByText(PASS_FOLDER_WAIT_LINE)).toBeTruthy();
+      fireEvent.click(within(d).getByRole('button', { name: 'Open Workbench' }));
+      expect(opened).toBe(1);
+    });
+
+    it.each([
+      { name: 'holds saved Workbench work', keptWork: true },
+      { name: 'holds none', keptWork: false },
+    ])('says so when the task $name', async ({ keptWork }) => {
+      serve();
+      open({ task: { keptWork } });
+      const d = await dialog();
+      expect(
+        within(d).queryByText('Has saved Workbench work: its next start puts it back.') !== null,
+      ).toBe(keptWork);
     });
 
     it("says what the task's batch stands in, with the steps to fix it", async () => {

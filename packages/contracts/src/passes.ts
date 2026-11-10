@@ -3,6 +3,7 @@ import { BatchDto } from './batches';
 import { NextActionKind, Title } from './entities';
 import {
   BatchId,
+  GoalId,
   InboxItemId,
   PassId,
   PassTurnId,
@@ -12,6 +13,7 @@ import {
   TaskMessageId,
   WorkstreamId,
 } from './ids';
+import { PassTurnActivity } from './pass-activity';
 import { WorkstreamState } from './states';
 import { TASK_MESSAGE_MAX_CHARS } from './task-thread';
 
@@ -237,8 +239,8 @@ export const PassPageDto = z.object({
       startedAt: Timestamp,
       endedAt: Timestamp.nullable(),
       readyAt: Timestamp.nullable(),
-      /** What the agent is doing now; filled by the slice that streams it. */
-      activity: z.null(),
+      /** What the agent is doing now, while the turn works; null before it reports a tool. */
+      activity: PassTurnActivity.nullable(),
     })
     .nullable(),
   /** When a usage pause ends, while the run is paused for one. */
@@ -274,14 +276,29 @@ export const PassViewDto = z.object({
 });
 export type PassViewDto = z.infer<typeof PassViewDto>;
 
-/** `POST /projects/:projectId/passes`. */
-export const PassOpenRequest = z.object({
-  name: Title,
-  taskIds: z.array(TaskId).min(1).max(PASS_PAGE_CAP_MAX),
-  pageCap: PassPageCap.optional(),
-  /** Sent to every page as its first message; without it a task with a description starts from that. */
-  firstMessage: z.string().min(1).max(TASK_MESSAGE_MAX_CHARS).optional(),
-});
+/**
+ * `POST /projects/:projectId/passes`: open tasks to join and page areas to make a new task for, one
+ * or more of them together and at most the cap.
+ */
+export const PassOpenRequest = z
+  .object({
+    name: Title,
+    taskIds: z.array(TaskId).max(PASS_PAGE_CAP_MAX),
+    /** Page areas each made a new task, "<Page>: UI work", in the open's write. */
+    pages: z.array(z.string().min(1)).max(PASS_PAGE_CAP_MAX).optional(),
+    /** The goal the new tasks join (Work on This in Factory). */
+    goalId: GoalId.nullable().optional(),
+    pageCap: PassPageCap.optional(),
+    /** Sent to every page as its first message; without it a task with a description starts from that. */
+    firstMessage: z.string().min(1).max(TASK_MESSAGE_MAX_CHARS).optional(),
+  })
+  .refine(
+    (open) => {
+      const pages = open.taskIds.length + (open.pages?.length ?? 0);
+      return pages > 0 && pages <= PASS_PAGE_CAP_MAX;
+    },
+    { message: `A pass holds 1 to ${String(PASS_PAGE_CAP_MAX)} pages` },
+  );
 export type PassOpenRequest = z.infer<typeof PassOpenRequest>;
 
 /** A task whose page another task held when the pass opened: it waits for it. */

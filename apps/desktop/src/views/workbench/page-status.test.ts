@@ -1,0 +1,175 @@
+import { mintId, type InboxItemDto, type PassPageDto } from '@10db/contracts';
+import { describe, expect, it } from 'vitest';
+import { inboxItemDto } from '../../test/fixtures';
+import {
+  askItem,
+  minutesBeforeNow,
+  pageTurn,
+  pagesByStatus,
+  passPageDto,
+  PASS_NOW,
+} from '../../test/pass-fixtures';
+import { clockTime, pageStatus, PageStatus } from './page-status';
+
+const pages = pagesByStatus();
+const now = Date.parse(PASS_NOW);
+
+describe('pageStatus', () => {
+  it.each<{
+    name: string;
+    page: PassPageDto;
+    items?: InboxItemDto[];
+    median?: number | null;
+    status: PageStatus;
+    color: string;
+    line: string;
+    needsYou: boolean;
+  }>([
+    {
+      name: 'a page never spoken to',
+      page: pages.notStarted,
+      status: PageStatus.NotStarted,
+      color: 'gray',
+      line: 'Not started',
+      needsYou: false,
+    },
+    {
+      name: 'a working page, beside the pass median',
+      page: pages.working,
+      median: 6,
+      status: PageStatus.Working,
+      color: 'blue',
+      line: 'Working · 4 min · median 6',
+      needsYou: false,
+    },
+    {
+      name: 'a working page before any turn has ended',
+      page: pages.working,
+      median: null,
+      status: PageStatus.Working,
+      color: 'blue',
+      line: 'Working · 4 min',
+      needsYou: false,
+    },
+    {
+      name: 'a page spoken to whose session is still starting',
+      page: passPageDto({ spokenTo: true, state: 'STARTING' }),
+      status: PageStatus.Working,
+      color: 'blue',
+      line: 'Starting',
+      needsYou: false,
+    },
+    {
+      name: 'a Ready page answered while its session was closed, queued with the message',
+      page: { ...pages.ready, state: 'QUEUED', nextActionKind: 'feedback' },
+      status: PageStatus.Working,
+      color: 'blue',
+      line: 'Starting',
+      needsYou: false,
+    },
+    {
+      name: 'a Ready page',
+      page: pages.ready,
+      status: PageStatus.Ready,
+      color: 'yellow',
+      line: 'Ready · 3 min',
+      needsYou: true,
+    },
+    {
+      name: 'a page Ready this minute',
+      page: {
+        ...pages.ready,
+        turn: pageTurn({ endedAt: PASS_NOW, readyAt: PASS_NOW }),
+      },
+      status: PageStatus.Ready,
+      color: 'yellow',
+      line: 'Ready',
+      needsYou: true,
+    },
+    {
+      name: 'a page whose agent asks a question',
+      page: pages.asks,
+      items: [askItem(pages.asks)],
+      status: PageStatus.Asks,
+      color: 'yellow',
+      line: 'Asks a question',
+      needsYou: true,
+    },
+    {
+      name: 'a page whose agent asks for permission',
+      page: pages.working,
+      items: [askItem(pages.working, { kind: 'permission' })],
+      status: PageStatus.Asks,
+      color: 'yellow',
+      line: 'Asks for permission',
+      needsYou: true,
+    },
+    {
+      name: "another page's question, an answered one, or a check item is not this page's ask",
+      page: pages.working,
+      items: [
+        askItem(pages.ready),
+        askItem(pages.working, { state: 'RESOLVED' }),
+        askItem(pages.working, { kind: 'check' }),
+        inboxItemDto(),
+      ],
+      median: null,
+      status: PageStatus.Working,
+      color: 'blue',
+      line: 'Working · 4 min',
+      needsYou: false,
+    },
+    {
+      name: 'a failed turn, in failureLine’s words, never yellow',
+      page: pages.failed,
+      status: PageStatus.Failed,
+      color: 'red',
+      line: 'The session kept crashing or could not start.',
+      needsYou: true,
+    },
+    {
+      name: 'a failed turn of no known kind',
+      page: { ...pages.failed, failure: { failureKind: null, retryItemId: mintId('InboxItem') } },
+      status: PageStatus.Failed,
+      color: 'red',
+      line: 'The run failed.',
+      needsYou: true,
+    },
+    {
+      name: 'a turn paused for a usage limit, which needs nothing',
+      page: pages.paused,
+      status: PageStatus.Paused,
+      color: 'orange',
+      line: `Paused: usage limit, resumes ${clockTime('2026-11-09T15:40:00.000Z')}`,
+      needsYou: false,
+    },
+    {
+      name: 'a pause with no end known',
+      page: { ...pages.paused, pausedUntil: null },
+      status: PageStatus.Paused,
+      color: 'orange',
+      line: 'Paused: usage limit',
+      needsYou: false,
+    },
+    {
+      name: 'a turn the builder stopped, which waits for the next message',
+      page: passPageDto({
+        state: 'QUEUED',
+        nextActionKind: 'resume',
+        spokenTo: true,
+        turn: pageTurn({ startedMinutesAgo: 5, endedAt: minutesBeforeNow(2) }),
+      }),
+      status: PageStatus.NotStarted,
+      color: 'gray',
+      line: 'Stopped',
+      needsYou: false,
+    },
+  ])('$name', ({ page, items = [], median = 6, status, color, line, needsYou }) => {
+    expect(pageStatus(page, items, { now, medianTurnMinutes: median })).toEqual({
+      status,
+      color,
+      line,
+      needsYou,
+    });
+  });
+});

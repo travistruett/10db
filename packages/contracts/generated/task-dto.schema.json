@@ -201,6 +201,9 @@
         }
       ]
     },
+    "keptWork": {
+      "type": "boolean"
+    },
     "modelSetting": {
       "anyOf": [
         {

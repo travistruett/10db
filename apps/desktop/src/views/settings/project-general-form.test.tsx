@@ -73,6 +73,13 @@ const rows: readonly Row[] = [
     sent: { gateCommand: 'make check' },
   },
   {
+    name: 'App address',
+    label: 'App address',
+    line: "Where your dev server answers, such as http://localhost:5173. The Workbench's Open Page opens a page's route here.",
+    change: () => type('App address', 'http://localhost:5173'),
+    sent: { appUrl: 'http://localhost:5173' },
+  },
+  {
     name: 'Check after each step',
     label: 'Check after each step',
     line: 'Optional. Runs after each step instead of the gate command; the gate command still runs before the push.',
@@ -332,6 +339,23 @@ describe('ProjectGeneralForm', () => {
       }
     },
   );
+
+  it('says on the field why an app address off this Mac is refused, and sends nothing', async () => {
+    const patched = serve(projectDto());
+    renderApp('/settings/general');
+    await open();
+    type('App address', 'http://example.com');
+    save();
+    await waitFor(() => {
+      expect(field('App address').getAttribute('aria-invalid')).toBe('true');
+    });
+    expect(
+      screen.getByText(
+        'An app address is an http origin on this Mac, such as http://localhost:8800',
+      ),
+    ).toBeTruthy();
+    expect(patched).toEqual([]);
+  });
 
   it('clears the gate and shows what an empty one means', async () => {
     const patched = serve(projectDto({ gateCommand: 'make gate' }));

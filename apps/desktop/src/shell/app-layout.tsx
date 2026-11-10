@@ -1,4 +1,15 @@
-import { AppShell, Badge, Group, NavLink, Stack, Text, VisuallyHidden } from '@mantine/core';
+import {
+  AppShell,
+  Badge,
+  Box,
+  Burger,
+  Group,
+  NavLink,
+  Stack,
+  Text,
+  VisuallyHidden,
+} from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
 import {
   IconAdjustments,
   IconBulb,
@@ -7,8 +18,10 @@ import {
   IconLayoutKanban,
   IconRoute,
   IconSettings,
+  IconTools,
 } from '@tabler/icons-react';
 import { Link, Outlet, useNavigate, useRouterState } from '@tanstack/react-router';
+import { useState } from 'react';
 import { useDaemonStatus } from '../daemon/provider';
 import { useDesktopSync } from '../desktop/sync';
 import { useRenderMode } from '../screens/render-context';
@@ -37,8 +50,18 @@ const GLOBAL_NAV = [
 const PROJECT_NAV = [
   { to: '/board', label: 'Board', icon: IconLayoutKanban },
   { to: '/shape', label: 'Plan', icon: IconRoute },
+  { to: '/workbench', label: 'Workbench', icon: IconTools },
   { to: '/knowledge', label: 'Knowledge', icon: IconBulb },
 ] as const;
+
+/**
+ * The Workbench sits beside the builder's browser, often 420 to 520 px wide (Workbench spec §4.3): under
+ * 900 px its sidebar folds away behind a header button. Every other view keeps the shell's own breakpoint.
+ */
+const WORKBENCH_FOLD_QUERY = '(max-width: 899px)';
+
+/** Clears macOS's traffic lights, which sit over the header's left end. */
+const TRAFFIC_LIGHTS_WIDTH = 72;
 
 function InboxBadge({ count }: { readonly count: number }) {
   return (
@@ -64,6 +87,11 @@ function FullLayout() {
   const openCards = useOpenInboxCount();
   const { projects, select } = useSelectedProject();
   const navigate = useNavigate();
+  const narrow = useMediaQuery(WORKBENCH_FOLD_QUERY);
+  const folded = narrow && pathname === '/workbench';
+  // Where the builder opened the folded sidebar; leaving that view folds it again.
+  const [openedOn, setOpenedOn] = useState<string | null>(null);
+  const navHidden = folded && openedOn !== pathname;
   // The first run replaces the shell only once the list has loaded empty on a live connection; while
   // it loads, or the daemon connects or reconnects, the shell shows and its banners say why.
   if (status.kind === 'connected' && projects.isSuccess && projects.data.length === 0) {
@@ -77,20 +105,44 @@ function FullLayout() {
     );
   }
   return (
-    <AppShell header={{ height: 48 }} navbar={{ width: 200, breakpoint: 'sm' }} padding="md">
+    <AppShell
+      header={{ height: 48 }}
+      navbar={{
+        width: 200,
+        breakpoint: 'sm',
+        collapsed: { mobile: navHidden, desktop: navHidden },
+      }}
+      padding="md"
+    >
       {/* The window has no title bar: macOS draws its traffic lights over the header's left end, and
           the header's empty space drags the window. */}
       <AppShell.Header data-tauri-drag-region>
-        <Group h="100%" px="md" gap="sm" justify="flex-end" data-tauri-drag-region>
-          <AgentDownloadStatus />
-          <DaemonStatus />
-          <KeepAwakeControl />
-          <ColorSchemeToggle />
+        <Group h="100%" px="md" gap="sm" justify="space-between" data-tauri-drag-region>
+          <Box pl={TRAFFIC_LIGHTS_WIDTH} data-tauri-drag-region>
+            {folded ? (
+              <Burger
+                size="sm"
+                opened={!navHidden}
+                aria-label={navHidden ? 'Show navigation' : 'Hide navigation'}
+                onClick={() => {
+                  setOpenedOn(navHidden ? pathname : null);
+                }}
+              />
+            ) : null}
+          </Box>
+          <Group gap="sm" data-tauri-drag-region>
+            <AgentDownloadStatus />
+            <DaemonStatus />
+            <KeepAwakeControl />
+            <ColorSchemeToggle />
+          </Group>
         </Group>
       </AppShell.Header>
       {/* The sidebar sits a Selenized step above the content, so the fills that would match the body
           (active and hover states, the dark/gray scale steps) move up one step inside it. */}
       <AppShell.Navbar
+        // A folded sidebar is out of sight, so it is out of the tab order too.
+        inert={navHidden}
         p="xs"
         bg="var(--mantine-color-default)"
         style={{

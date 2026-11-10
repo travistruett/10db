@@ -16,6 +16,8 @@ import { KnowledgeView } from './views/knowledge/knowledge-view';
 import { ShapeView } from './views/shape/shape-view';
 import { isSettingsSectionKey, SettingsSectionKey } from './views/settings/sections';
 import { SettingsView } from './views/settings/settings-view';
+import { workbenchSearch } from './views/workbench/workbench-search';
+import { WorkbenchView } from './views/workbench/workbench-view';
 
 function FactoryPage() {
   return (
@@ -45,6 +47,14 @@ function BoardPage() {
   return (
     <ViewBoundary name="Board">
       <BoardView />
+    </ViewBoundary>
+  );
+}
+
+function WorkbenchPage() {
+  return (
+    <ViewBoundary name="Workbench">
+      <WorkbenchView />
     </ViewBoundary>
   );
 }
@@ -124,6 +134,12 @@ const inboxRoute = createRoute({
   validateSearch: projectFilter,
   component: InboxPage,
 });
+const workbenchRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/workbench',
+  validateSearch: workbenchSearch,
+  component: WorkbenchPage,
+});
 const knowledgeRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/knowledge',
@@ -186,6 +202,7 @@ const routeTree = rootRoute.addChildren([
   newShapeRoute,
   shapeRoute,
   inboxRoute,
+  workbenchRoute,
   knowledgeRoute,
   tasksRoute,
   settingsIndexRoute,
