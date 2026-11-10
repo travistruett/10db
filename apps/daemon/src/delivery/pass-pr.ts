@@ -34,6 +34,7 @@ import { shipCheck } from './local-check';
 import { createPassChecks } from './pass-checks';
 import { passHasReview, REVIEW_CUT_NOTICE, type PassReviewDeps } from './pass-review';
 import { PASS_PR_CLOSED_NOTICE } from './pass-watch';
+import { reviewHasUnread } from './review-left';
 import { readPrTemplate } from './pr-template';
 import { passPrBody, prTitle, titlePrefix, type PassPrCheck } from './pr-text';
 import { gateInScratch, type ScratchGateDeps } from './scratch-gate';
@@ -415,10 +416,13 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
       const branch = batch.branch;
       const tip = branch === null ? null : await deps.git.branchTip(project.repoPath, branch);
       const reviewed = getPassProgress(db, passId).reviewedSha;
+      // A tip read already, with nothing a cut review left unread, is not reviewed again.
+      const unchanged = (sha: string | null): boolean =>
+        getPassProgress(db, passId).reviewedSha === sha && !reviewHasUnread(db, passId);
       const review =
         deps.review === null || !passHasReview(db, passId)
           ? 'none'
-          : reviewed !== null && reviewed === tip
+          : reviewed !== null && unchanged(tip)
             ? 'unchanged'
             : 'started';
       const stillOpen = (): boolean => getPass(db, passId).state === PassState.Open;
@@ -451,7 +455,7 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
             sha,
             gate: gates,
             // Decided on the tip pushed: a page that landed since the request makes it new.
-            review: reviews && getPassProgress(db, passId).reviewedSha !== sha,
+            review: reviews && !unchanged(sha),
             baseRef: `refs/remotes/origin/${shown.base}`,
           });
         } catch (error) {

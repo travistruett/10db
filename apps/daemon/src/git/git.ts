@@ -127,6 +127,20 @@ export interface DiffSince {
   }[];
 }
 
+/** Which files a diff covers: only these, or every file but these. */
+interface DiffPaths {
+  readonly only?: readonly string[];
+  readonly except?: readonly string[];
+}
+
+/** `paths` as pathspecs, each literal, so a name with `*` or `:` is never read as a pattern. */
+function diffPathspecs(paths: DiffPaths | undefined): string[] {
+  return [
+    ...(paths?.only ?? []).map((path) => `:(literal)${path}`),
+    ...(paths?.except ?? []).map((path) => `:(exclude,literal)${path}`),
+  ];
+}
+
 /** What `fileAt` found at a path of a commit. */
 export type FileAt =
   | { readonly kind: 'file'; readonly text: string }
@@ -837,9 +851,16 @@ export interface Git {
   /**
    * The unified diff from `base` to `head`, read with no external diff program and no textconv
    * filter, cut to at most `maxBytes` of UTF-8 on a character boundary, plus the per-file counts
-   * of the whole change. Renames are shown as a delete and an add.
+   * of the whole change. Renames are shown as a delete and an add. With `paths`, only the files it
+   * names, or every file but those, each path matched as spelled.
    */
-  diffSince(repo: string, base: string, head: string, maxBytes: number): Promise<DiffSince>;
+  diffSince(
+    repo: string,
+    base: string,
+    head: string,
+    maxBytes: number,
+    paths?: DiffPaths,
+  ): Promise<DiffSince>;
   /**
    * The commit `rev` names now, as a full object id. A caller that reads many folders and files of one
    * `rev` resolves it once and reads each from the id, so the reads cannot span a branch that moves.
@@ -3883,11 +3904,12 @@ export function createGit(opts: GitOptions = {}): Git {
         .split('\n')
         .filter(Boolean);
     },
-    async diffSince(repo, base, head, maxBytes) {
+    async diffSince(repo, base, head, maxBytes, paths) {
       const c = await pinned(repo);
+      const specs = diffPathspecs(paths);
       const numstat = await git(
         c,
-        ['diff-tree', ...DIFF_FLAGS, '--numstat', '-z', base, head, '--'],
+        ['diff-tree', ...DIFF_FLAGS, '--numstat', '-z', base, head, '--', ...specs],
         {
           config: DIFF_CONFIG,
         },
@@ -3895,7 +3917,7 @@ export function createGit(opts: GitOptions = {}): Git {
       // A few bytes past the cap are read so a character split by the cap is seen whole.
       const text = await gitCapped(
         c,
-        ['diff-tree', ...DIFF_FLAGS, '-p', '--unified=3', base, head, '--'],
+        ['diff-tree', ...DIFF_FLAGS, '-p', '--unified=3', base, head, '--', ...specs],
         maxBytes + UTF8_MAX_BYTES,
         { config: DIFF_CONFIG },
       );

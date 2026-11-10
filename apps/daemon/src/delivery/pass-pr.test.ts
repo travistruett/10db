@@ -609,6 +609,48 @@ describe('Open Pull Request', () => {
     });
     expect(asked).toHaveLength(2);
   });
+
+  it('reviews the same tip again while a cut review left files unread', async () => {
+    const asked: string[] = [];
+    setup(
+      { gateCommand: null },
+      {
+        review: {
+          adapter: {
+            complete: (ask) => {
+              asked.push(ask.prompt);
+              return Promise.resolve('No findings.');
+            },
+          },
+          launch: (_account, model) => ({ model, env: {}, expect: { kind: 'any' } as never }),
+          scratchRoot: tmpdir(),
+        },
+      },
+    );
+    const standard = findFlowByName(h.store.db, 'standard');
+    if (standard) h.state.write((w) => patchProject(w, h.project.id, { flowId: standard.id }));
+    const { passId, settings } = await openedPass();
+    // About 500 kB of diff over five files: more than one review reads.
+    const long = (name: string) => `${`${name} ${'x'.repeat(100)}\n`.repeat(1_000)}${name}-end\n`;
+    for (const name of ['a', 'b', 'c', 'd']) h.commit(`src/settings/${name}.tsx`, long(name));
+    const tip = signOff(settings, 'src/settings/e.tsx', long('e'));
+    await prs.open(passId);
+    await h.jobs.idle();
+    await vi.waitFor(() => {
+      expect(getPassProgress(h.store.db, passId).reviewedSha).toBe(tip);
+    });
+
+    expect(await prs.open(passId)).toMatchObject({ review: 'started' });
+    await h.jobs.idle();
+
+    await vi.waitFor(() => {
+      expect(asked).toHaveLength(2);
+    });
+    expect(asked[1]).toContain('+e-end');
+    await vi.waitFor(() => {
+      expect(notices(passId).filter((n) => n.id === 'review-cut')).toEqual([]);
+    });
+  });
 });
 
 describe('a restart during an Open Pull Request gate', () => {

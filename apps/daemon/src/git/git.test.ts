@@ -1211,6 +1211,27 @@ describe('diffSince', () => {
     ]);
   });
 
+  it.each([
+    {
+      name: 'only the paths named',
+      paths: { only: ['a.txt', 'b *.txt'] },
+      has: ['a.txt', 'b *.txt'],
+    },
+    { name: 'every path but those named', paths: { except: ['a.txt'] }, has: ['b *.txt', 'c.txt'] },
+  ])('diffs $name, each path read as it is spelled', async ({ paths, has }) => {
+    const base = rawGit('rev-parse', 'HEAD');
+    write('a.txt', 'a\n');
+    // A name that reads as a glob: matched as spelled, never as a pattern.
+    write('b *.txt', 'b\n');
+    write('c.txt', 'c\n');
+    commitAll('three files');
+
+    const changes = await git.diffSince(repo.path, base, headOf(), 512 * 1024, paths);
+
+    expect(changes.files.map((f) => f.path).sort()).toEqual(has);
+    expect(changes.diff.match(/^diff --git /gm)).toHaveLength(has.length);
+  });
+
   it('is empty when nothing changed since the base', async () => {
     expect(await git.diffSince(repo.path, headOf(), headOf(), 1024)).toEqual({
       diff: '',
