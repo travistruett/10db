@@ -14,6 +14,7 @@ import {
 } from '@10db/contracts';
 import {
   acquireClaims,
+  claimHolder,
   clearWorkstreamNotices,
   copyHazardNames,
   findOpenByFoldKey,
@@ -24,6 +25,7 @@ import {
   getWorkstreamRow,
   listInbox,
   setWorkstreamNotice,
+  type AcquireResult,
   type ClaimRow,
   type DbReader,
 } from '@10db/db';
@@ -56,6 +58,20 @@ export type ClaimResult =
       readonly parked: boolean;
     };
 
+/**
+ * How a pass lane's shared area is granted (Workbench spec §7.2): after the builder's answer when one
+ * is asked, and then, once the claim is free, by a grant that records the hold with the claim.
+ */
+export interface SharedGrant {
+  /**
+   * Raises the builder's question when the area needs one, or answers null. Its answer is null to go
+   * on to the claim, else the refusal the call answers; it rejects when the session stops waiting.
+   */
+  ask(): { readonly inboxId: InboxItemId; readonly answer: Promise<ClaimResult | null> } | null;
+  /** Grants the free claim with its hold in one write; a task that took it first is the conflict. */
+  grant(): Promise<AcquireResult>;
+}
+
 /** Claims the builder made a task give up to end a claim deadlock, until its agent is told. */
 export interface Yielded {
   readonly claims: readonly { readonly kind: ClaimKind; readonly name: string }[];
@@ -73,6 +89,8 @@ export interface Asking {
   /** Aborts when the session stops, which ends the wait. */
   readonly signal: AbortSignal;
   readonly pollMs: number;
+  /** A pass lane's shared area: asked about first, then granted with its hold. */
+  readonly shared?: SharedGrant;
 }
 
 /** Where a wait in progress stands: who holds the claim now. */
@@ -83,6 +101,8 @@ export interface WaitState {
   heldBy: WorkstreamId | null;
   /** The open deadlock card this wait waits on for the builder's answer, if any. */
   inboxId: InboxItemId | null;
+  /** The open question about a shared area this wait waits on before it asks for the claim, if any. */
+  askId: InboxItemId | null;
 }
 
 /** A wait in progress and how it ends. */
@@ -138,6 +158,7 @@ export class ClaimWaits {
       name: a.name,
       heldBy: null,
       inboxId: null,
+      askId: null,
     };
     const done = claimOrWait(a, state, this).finally(() => {
       this.#live.delete(key);
@@ -314,8 +335,26 @@ const isDeadlockCard = (item: InboxItemDto): boolean =>
 const taskTitleOf = (db: DbReader, workstreamId: WorkstreamId): string =>
   getTask(db, getWorkstream(db, workstreamId).taskId).title;
 
+/**
+ * A shared grant's look, in one read: the conflict with a task holding the claim, the claim itself
+ * when this task holds it already, or null while it is free and the grant decides.
+ */
+function heldNow(a: Asking): AcquireResult | null {
+  const db = a.state.db;
+  const areaScope = claimScopeOf(db, getWorkstreamRow(db, a.workstreamId));
+  const holder = claimHolder(db, {
+    projectId: a.projectId,
+    request: { kind: a.kind, name: a.name },
+    copyHazards: copyHazardNames(getProject(db, a.projectId)),
+    ...(areaScope ? { areaScope } : {}),
+  });
+  if (holder === null) return null;
+  if (holder === a.workstreamId) return tryAcquire(a);
+  return { ok: false, conflict: { kind: a.kind, name: a.name, heldBy: holder } };
+}
+
 /** One try, in one write: the claim shares the workstream's lease, which the scheduler's heartbeat renews. */
-function tryAcquire(a: Asking) {
+function tryAcquire(a: Asking): AcquireResult {
   return a.state.write((ctx) => {
     const row = getWorkstreamRow(ctx.tx, a.workstreamId);
     const areaScope = claimScopeOf(ctx.tx, row);
@@ -475,6 +514,11 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
  * them. Starting to wait on a holder, or on a new one, tells `waits`, so the scheduler can give that
  * holder a lane. Runs synchronously up to its first wait, so `wait` names the holder and card by the
  * time `ClaimWaits.join` returns.
+ *
+ * A pass lane's shared area (`Asking.shared`) asks the builder first when it needs to, and the open
+ * question, named on `wait`, holds the wait until it is answered. It then looks at the claim in the
+ * same synchronous way and waits on a holder as above; only a free claim goes to the grant, which
+ * records the hold before it takes the claim, so it answers asynchronously.
  */
 async function claimOrWait(a: Asking, wait: WaitState, waits: ClaimWaits): Promise<ClaimResult> {
   const noticeKey = waitNoticeKey(a);
@@ -491,6 +535,21 @@ async function claimOrWait(a: Asking, wait: WaitState, waits: ClaimWaits): Promi
     });
   };
   try {
+    const asked = a.shared && heldNow(a)?.ok !== true ? a.shared.ask() : null;
+    if (asked) {
+      wait.askId = asked.inboxId;
+      let refused: ClaimResult | null;
+      try {
+        refused = await asked.answer;
+      } catch {
+        throw new InvalidError(
+          'This session stopped waiting for the builder’s answer and did not get the claim. End your turn.',
+        );
+      } finally {
+        wait.askId = null;
+      }
+      if (refused) return refused;
+    }
     for (;;) {
       if (waits.isCancelled(a.workstreamId))
         throw new InvalidError('The builder cancelled this task. End your turn.');
@@ -500,7 +559,8 @@ async function claimOrWait(a: Asking, wait: WaitState, waits: ClaimWaits): Promi
         );
       const given = waits.pendingYield(a.workstreamId);
       if (given) return yieldRefusal(given, a);
-      const outcome = tryAcquire(a);
+      const outcome =
+        a.shared === undefined ? tryAcquire(a) : (heldNow(a) ?? (await a.shared.grant()));
       if (outcome.ok) {
         withdrawDeadlock(a);
         return grantedFrom(a, outcome.claims);

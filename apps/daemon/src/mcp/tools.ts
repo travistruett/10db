@@ -1,4 +1,5 @@
 import {
+  AreaRole,
   ClaimKind,
   currentStep,
   EventType,
@@ -74,7 +75,7 @@ import {
 import type { InboxService, WaitObserver } from '../inbox';
 import { principleHit, proposePrinciple } from '../knowledge';
 import type { Logger } from '../log';
-import { keepNamedPaths } from '../pass';
+import { grantSharedHold, keepNamedPaths } from '../pass';
 import { afterMarkersResolved, commitResultAsStored, fixingFailedGate, revertOfRun } from '../team';
 import {
   CLAIM_POLL_MS,
@@ -83,6 +84,7 @@ import {
   deadlockWaitInstruction,
   yieldRefusal,
   type ClaimResult,
+  type SharedGrant,
 } from './claim-wait';
 import type { ShapeToolsFor } from './shape-tools';
 
@@ -204,6 +206,21 @@ export function createToolHandlers(
   ): Out<K> => {
     insertToolOp(ctx, { workstreamId, sessionId, opId, tool, result });
     return result;
+  };
+
+  /**
+   * How a pass lane gets a shared area (Workbench spec §7.2): one turn at a time, with a hold that
+   * records what the area held at the grant. Undefined for any other claim.
+   */
+  const sharedGrantOf = (kind: ClaimKind, name: string): SharedGrant | undefined => {
+    if (kind !== ClaimKind.Area) return undefined;
+    const { project, task } = context();
+    if (!passHoldingTask(db, task)) return undefined;
+    if (project.areas.find((a) => a.name === name)?.role !== AreaRole.Shared) return undefined;
+    return {
+      ask: () => null,
+      grant: () => grantSharedHold(deps, { workstreamId, area: name }),
+    };
   };
 
   /** A claim call's settled result, recorded under its opId. */
@@ -514,6 +531,7 @@ export function createToolHandlers(
       // Claims the builder made this task give up are told before anything else is granted.
       const given = claimWaits.pendingYield(workstreamId);
       if (given) return recordClaim(input.opId, yieldRefusal(given, { kind, name: input.name }));
+      const shared = sharedGrantOf(kind, input.name);
       // A claim another task holds is waited for, not given up on. Every call for the claim joins the
       // one wait; a call answers "still waiting" before the session's tool timeout, and is not recorded,
       // so a retry with the same opId joins the wait again.
@@ -527,6 +545,7 @@ export function createToolHandlers(
         reason: input.reason,
         signal: deps.sessionSignal(sessionId) ?? new AbortController().signal,
         pollMs: deps.claimPollMs ?? CLAIM_POLL_MS,
+        ...(shared ? { shared } : {}),
       });
       let timer: NodeJS.Timeout | undefined;
       // The slice listens to no signal: a session that stops ends the wait itself, with its error. It
@@ -539,7 +558,21 @@ export function createToolHandlers(
       try {
         let result = await Promise.race([wait.done, slice]);
         if (result === 'slice') {
-          const { heldBy, inboxId } = wait.state;
+          const { heldBy, inboxId, askId } = wait.state;
+          if (askId !== null) {
+            // The answer may come while no call waits for it: it is kept under the opId then.
+            wait.done.then(
+              (settled) => recordClaim(input.opId, settled),
+              () => undefined,
+            );
+            return {
+              granted: false,
+              waiting: true,
+              heldBy: null,
+              inboxId: askId,
+              instruction: `Waiting for the builder's answer about shared ${kind} ${input.name}; call request_claim again with the same opId, and edit nothing in it until a call returns granted: true.`,
+            };
+          }
           if (heldBy !== null && inboxId !== null)
             return {
               granted: false,
