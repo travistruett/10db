@@ -1,15 +1,21 @@
 import {
   BatchState,
+  ClaimKind,
   Delivery,
   isTerminal,
+  passHeldAreas,
   PASS_FOLDER_WAIT_LINE,
   PASS_FOLDER_WAIT_NOTICE_KEY,
   queueOrder,
+  TakeOutStep,
   WorkstreamState,
   type BatchDto,
   type BatchId,
   type AccountId,
   type PassDto,
+  type ProjectDto,
+  type TaskDto,
+  type WorkstreamDto,
   type WorkstreamId,
 } from '@10db/contracts';
 import {
@@ -24,8 +30,10 @@ import {
   getProject,
   getTask,
   getWorkstreamRow,
+  lastTakeOut,
   listBatches,
   listWorkstreams,
+  openPassTurn,
   passHoldingFolder,
   passHoldingTask,
   renewClaimLeases,
@@ -44,7 +52,9 @@ import { batchLaunchVerdict, claimScopeOf, LaunchVerdict } from '../delivery';
 import type { StateStore } from '../events';
 import { existsAsEntry, GitTrustError } from '../git';
 import type { Logger } from '../log';
+import { untakenMessages } from '../runner';
 import { roomForLane } from './lane-room';
+import { passLaunch, PassLaunch } from './pass-launch';
 
 export interface SchedulerOptions {
   readonly state: StateStore;
@@ -165,6 +175,33 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
     });
   }
 
+  /**
+   * Whether a queued page of the pass has a turn to run now (Workbench spec §5.5): read from its rows
+   * and from this tick's read of Your folder's branch, never from its next action.
+   */
+  function passPageRuns(
+    ws: WorkstreamDto,
+    task: TaskDto,
+    pass: PassDto,
+    project: ProjectDto,
+    snapshot: CheckoutSnapshot,
+  ): boolean {
+    const takeOut = lastTakeOut(db, task.id);
+    const read = snapshot.branches.has(project.repoPath);
+    const verdict = passLaunch({
+      passState: pass.state,
+      takingOut: takeOut?.passId === pass.id && takeOut.step < TakeOutStep.Done,
+      untaken: untakenMessages(db, task.id).length > 0,
+      turnOpen: openPassTurn(db, task.id) !== undefined,
+      folderOn: read
+        ? snapshot.branches.get(project.repoPath) === getBatch(db, pass.batchId).branch
+        : null,
+    });
+    if (verdict !== PassLaunch.Launch)
+      opts.logger.debug({ workstreamId: ws.id, passId: pass.id, verdict }, 'pass page held');
+    return verdict === PassLaunch.Launch;
+  }
+
   /** Takes down the pass's wait once the run no longer waits for it; any other notice stays. */
   function endPassWait(id: WorkstreamId): void {
     opts.state.write((ctx) => {
@@ -198,15 +235,19 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       // leave it STARTING with a lane. Its lane-freed callback ticks again once it has exited.
       if (opts.runner.isRunning(ws.id)) continue;
       const task = getTask(db, ws.taskId);
-      // A pass task is launched by its pass's own turns, never from the queue (Workbench spec §5.5),
-      // while the pass holds it.
-      if (passHoldingTask(db, task)) continue;
       const project = getProject(db, ws.projectId);
+      // A pass task runs a turn only when its pass's rows say so (Workbench spec §5.5), while the
+      // pass holds it.
+      const inPass = passHoldingTask(db, task) ?? null;
+      if (inPass && !passPageRuns(ws, task, inPass, project, snapshot)) continue;
       const batch = ws.batchId ? getBatch(db, ws.batchId) : null;
       // Nothing else runs in Your folder while a pass holds it (W9): the task waits, saying so.
-      const pass = batch?.worktreePath == null ? passHoldingFolder(db, project.id) : undefined;
-      if (pass) {
-        waitForPass(ws.id, pass);
+      const holding =
+        inPass === null && batch?.worktreePath == null
+          ? passHoldingFolder(db, project.id)
+          : undefined;
+      if (holding) {
+        waitForPass(ws.id, holding);
         continue;
       }
       if (ws.notice?.key === PASS_FOLDER_WAIT_NOTICE_KEY) endPassWait(ws.id);
@@ -234,14 +275,15 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
         {
           projectId: project.id,
           accountId: account.id,
-          pass: null,
+          pass: inPass && { id: inPass.id, pageCap: inPass.pageCap },
           global: opts.caps.global,
           maxLanes: project.maxLanes,
           accountCap: account.laneCap,
         },
       );
       if (!overCaps && !room) continue;
-      if (project.delivery === Delivery.PullRequest) {
+      // A pass's folder was read for its branch above; its off-branch card is the pass's own.
+      if (inPass === null && project.delivery === Delivery.PullRequest) {
         const checkout = batch?.worktreePath ?? project.repoPath;
         // A worktree that isn't on disk holds the batch's work with one card; it never launches.
         if (batch && snapshot.missing.has(checkout)) {
@@ -268,11 +310,16 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       if (task.boardColumnId !== null) continue;
       const leaseUntil = new Date(opts.clock.now().getTime() + opts.leaseMs).toISOString();
       const areaScope = claimScopeOf(db, ws);
+      // A page holds its pass's areas for its life; one that waited at the open for a page another
+      // task held claims it here, and runs only once it has it.
+      const requests = inPass
+        ? passHeldAreas(project.areas, task).map((name) => ({ kind: ClaimKind.Area, name }))
+        : claimRequestsForTask(task, project);
       const fence = opts.state.write((ctx) => {
         const claimed = acquireClaims(ctx, {
           projectId: project.id,
           workstreamId: ws.id,
-          requests: claimRequestsForTask(task, project),
+          requests,
           copyHazards: copyHazardNames(project),
           leaseExpiresAt: leaseUntil,
           ...(areaScope ? { areaScope } : {}),
@@ -289,7 +336,8 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       });
       if (fence === null) continue;
       global += 1;
-      byProject.set(project.id, (byProject.get(project.id) ?? 0) + 1);
+      if (inPass) byPass.set(inPass.id, (byPass.get(inPass.id) ?? 0) + 1);
+      else byProject.set(project.id, (byProject.get(project.id) ?? 0) + 1);
       byAccount.set(account.id, (byAccount.get(account.id) ?? 0) + 1);
       launched += 1;
       opts.runner.launch(ws.id, fence);
@@ -298,14 +346,20 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
   }
 
   /**
-   * The branch of each checkout with queued pull-request work, read once per tick. A worktree is read only
-   * while its batch is open and cut, so work in a batch still being cut waits without touching disk.
+   * The branch of each checkout with queued pull-request work or a queued page of a pass, read once per
+   * tick. A worktree is read only while its batch is open and cut, so work in a batch still being cut
+   * waits without touching disk.
    */
   async function branchSnapshot(): Promise<CheckoutSnapshot> {
     const checkouts = new Set<string>();
     const missing = new Set<string>();
     for (const ws of listWorkstreams(db, { states: [WorkstreamState.Queued] })) {
       const project = getProject(db, ws.projectId);
+      // A pass's page runs only while Your folder names the pass's branch, on any delivery.
+      if (passHoldingTask(db, getTask(db, ws.taskId))) {
+        checkouts.add(project.repoPath);
+        continue;
+      }
       if (project.delivery !== Delivery.PullRequest) continue;
       const batch = ws.batchId ? getBatch(db, ws.batchId) : null;
       if (batch?.worktreePath == null) {

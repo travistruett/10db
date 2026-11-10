@@ -3,16 +3,20 @@ import { readFileSync } from 'node:fs';
 import {
   idOfUuid,
   idUuid,
+  TaskMessageAuthor,
+  TaskMessageKind,
   type TaskFileId,
   type TaskId,
   type TaskMessageId,
 } from '@10db/contracts';
 import {
   listTaskFileRows,
+  listTaskThreadRows,
   listUndeliveredTaskMessages,
   markTaskFilesInline,
   markTaskMessagesDelivered,
   markTaskMessagesPushed,
+  type DbReader,
   type TaskMessageRow,
 } from '@10db/db';
 import type { StateStore } from '../events';
@@ -26,6 +30,21 @@ import { blockPictures, threadInlineBytes } from './thread-pictures';
 // which a crash loses and a turn that is ending never reads. Its first push goes under the UUID of
 // its row's id; any later one goes under a uuid of its own, since Claude Code runs no turn for a
 // message under a uuid its transcript already holds (it acknowledges and drops it).
+
+/**
+ * The task's builder messages no turn has taken, pushed to a session or not, oldest first: while there
+ * is one, the builder is waiting for the agent.
+ */
+export function untakenMessages(reader: DbReader, taskId: TaskId): TaskMessageId[] {
+  return listTaskThreadRows(reader, taskId)
+    .filter(
+      (m) =>
+        m.author === TaskMessageAuthor.Builder &&
+        m.kind === TaskMessageKind.Message &&
+        m.deliveredAt === null,
+    )
+    .map((m) => m.id);
+}
 
 /** A builder message as a session takes it: its text, its pictures that go as blocks, its uuid. */
 export interface OutgoingMessage {

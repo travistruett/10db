@@ -23,9 +23,15 @@ import {
   moveTask,
   getWorkstream,
   getWorkstreamRow,
+  advanceTakeOut,
   insertBatch,
+  insertBuilderMessage,
+  insertPassTurn,
+  insertTakeOut,
   insertTask,
   insertWorkstream,
+  leavePass,
+  markTaskMessagesDelivered,
   patchBatch,
   releaseClaims,
   runNext,
@@ -570,8 +576,9 @@ describe('scheduler', () => {
   });
 });
 
-// Workbench spec §5.2, §5.3 (W9), §5.5, §12: a pass's tasks are launched by the pass's own turns,
-// never by the scheduler, and while a pass holds Your folder ordinary work waits for it there.
+// Workbench spec §5.2, §5.3 (W9), §5.5, §12: a pass's task runs a turn when its rows say so (a builder
+// message no turn took, a turn not ended), never from its next action alone, and while a pass holds
+// Your folder ordinary work waits for it there.
 describe('Workbench passes', () => {
   const PAGES = [
     { name: 'settings', globs: ['src/settings/**'], role: 'page' as const, route: '/settings' },
@@ -646,6 +653,168 @@ describe('Workbench passes', () => {
     // The heartbeat renews it, as it renews every live workstream's claims.
     expect(claim?.leaseExpiresAt).not.toBe(clock.now().toISOString());
     expect(Date.parse(claim?.leaseExpiresAt ?? '')).toBeGreaterThan(clock.now().getTime());
+  });
+
+  /** The builder writes to the page's task. */
+  function write(task: { id: Parameters<typeof insertBuilderMessage>[1] }) {
+    return state.write((ctx) => insertBuilderMessage(ctx, task.id, { body: 'Tidy it', files: [] }));
+  }
+
+  /** Your folder on the pass's branch, as the tick reads it. */
+  function onPassBranch(
+    opened: ReturnType<typeof openPass>,
+    project: ReturnType<typeof seedProject>,
+  ) {
+    branchOf.set(project.repoPath, opened.batch.branch);
+  }
+
+  it('runs a page once the builder writes to it, and never before', async () => {
+    const project = seedProject(store, { areas: PAGES });
+    const opened = openPass(project);
+    onPassBranch(opened, project);
+    expect(await scheduler().tick()).toBe(0);
+    write(opened.task);
+    expect(await scheduler().tick()).toBe(1);
+    expect(launched.map((l) => l.id)).toEqual([opened.workstream.id]);
+    expect(countLanes(store.db).byPass.get(opened.pass.id)).toBe(1);
+  });
+
+  it('runs a turn a crash cut short again after each restart, though its message was taken', async () => {
+    const project = seedProject(store, { areas: PAGES });
+    const opened = openPass(project);
+    onPassBranch(opened, project);
+    const message = write(opened.task);
+    for (const restart of [1, 2]) {
+      launched = [];
+      expect(await scheduler().tick()).toBe(1);
+      const [lane] = launched;
+      if (!lane) throw new Error('the page was not launched');
+      state.write((ctx) => {
+        transitionWorkstream(ctx, opened.workstream.id, { to: 'RUNNING', fence: lane.fence });
+        if (restart === 1) {
+          insertPassTurn(ctx, {
+            taskId: opened.task.id,
+            workstreamId: opened.workstream.id,
+            sessionId: null,
+            messageId: message.id,
+          });
+          markTaskMessagesDelivered(ctx, opened.task.id, [message.id]);
+        }
+      });
+      await recoverOnStartup({
+        state,
+        inbox,
+        git: createGit(),
+        processes: systemProcesses,
+        maxRecoveryAttempts: 3,
+        logger: silentLogger,
+        cleanShutdown: false,
+      });
+      expect(getWorkstreamRow(store.db, opened.workstream.id)).toMatchObject({
+        state: 'QUEUED',
+        nextAction: { kind: 'start' },
+      });
+    }
+    launched = [];
+    expect(await scheduler().tick()).toBe(1);
+    expect(launched.map((l) => l.id)).toEqual([opened.workstream.id]);
+  });
+
+  it.each([
+    {
+      name: 'a page being taken out',
+      hold: (opened: ReturnType<typeof openPass>) => {
+        state.write((ctx) => {
+          insertTakeOut(ctx, { taskId: opened.task.id, passId: opened.pass.id, drops: [] });
+          advanceTakeOut(ctx, { taskId: opened.task.id, passId: opened.pass.id }, { step: 3 });
+        });
+      },
+    },
+    {
+      name: 'a page taken out of its pass, its run cancelled',
+      hold: (opened: ReturnType<typeof openPass>) => {
+        state.write((ctx) => {
+          transitionWorkstream(ctx, opened.workstream.id, { to: 'CANCELLED', fence: null });
+          releaseClaims(ctx, opened.workstream.id);
+          leavePass(ctx, opened.task.id);
+        });
+      },
+    },
+    {
+      name: 'a page whose folder was switched to another branch',
+      hold: (_opened: ReturnType<typeof openPass>, project: ReturnType<typeof seedProject>) => {
+        branchOf.set(project.repoPath, 'main');
+      },
+    },
+    {
+      name: 'a page of a pass being abandoned',
+      hold: () => {
+        store.db.update(schema.passes).set({ state: 'ABANDONING' }).run();
+      },
+    },
+  ])('never runs $name, whatever the builder writes', async ({ hold }) => {
+    const project = seedProject(store, { areas: PAGES });
+    const opened = openPass(project);
+    onPassBranch(opened, project);
+    hold(opened, project);
+    write(opened.task);
+    expect(await scheduler().tick()).toBe(0);
+    expect(launched).toEqual([]);
+    // The pass's own card says where the folder is; the batch's wrong-branch card is not raised.
+    expect(wrongBranch).toEqual([]);
+  });
+
+  it('runs a page that waited at the open only once it holds its page', async () => {
+    const project = seedProject(store, { areas: PAGES });
+    // Another task held the settings page when the pass opened.
+    const holder = add(project, ['settings']);
+    state.write((ctx) =>
+      acquireClaims(ctx, {
+        projectId: project.id,
+        workstreamId: holder.workstream.id,
+        requests: [{ kind: 'area', name: 'settings' }],
+        leaseExpiresAt: clock.now().toISOString(),
+      }),
+    );
+    moveWorkstream(holder.workstream.id, 'STARTING');
+    const task = state.write((ctx) =>
+      insertTask(ctx, project.id, {
+        title: 'Settings: UI work',
+        acceptanceCriteria: ['x'],
+        areas: ['settings'],
+      }),
+    );
+    const { batch, ws } = state.write((ctx) => {
+      const opened = insertPass(ctx, {
+        id: mintId('Pass'),
+        projectId: project.id,
+        name: 'Polish',
+        pageCap: 4,
+        returnBranch: 'main',
+        startSha: 'a'.repeat(40),
+        branch: '10db/polish-abc123',
+        baseBranch: 'main',
+        repo: null,
+        taskIds: [task.id],
+        dirt: [],
+      });
+      return {
+        batch: opened.batch,
+        ws: insertWorkstream(ctx, task.id, {
+          batchId: opened.batch.id,
+          first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        }),
+      };
+    });
+    branchOf.set(project.repoPath, batch.branch);
+    write(task);
+    expect(await scheduler().tick()).toBe(0);
+    expect(activeClaims(store.db, ws.id)).toEqual([]);
+    moveWorkstream(holder.workstream.id, 'CANCELLED');
+    state.write((ctx) => releaseClaims(ctx, holder.workstream.id));
+    expect(await scheduler().tick()).toBe(1);
+    expect(launched.map((l) => l.id)).toEqual([ws.id]);
+    expect(activeClaims(store.db, ws.id).map((c) => c.name)).toEqual(['settings']);
   });
 
   it('holds ordinary work in Your folder while a pass holds it, saying so, and launches it once the pass settles', async () => {

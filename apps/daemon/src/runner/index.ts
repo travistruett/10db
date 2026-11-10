@@ -10,3 +10,4 @@ export {
   type RunnerOptions,
 } from './runner';
 export { liveCheckCard, raiseBuilderCheck } from './builder-check';
+export { untakenMessages } from './lane-messages';
