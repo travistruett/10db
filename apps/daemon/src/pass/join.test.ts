@@ -144,15 +144,21 @@ describe('Add Page', () => {
     w.h.state.write((ctx) => {
       setTaskKeptWork(ctx, home.id, { keptSha: 'b'.repeat(40), keptBaseSha: 'a'.repeat(40) });
     });
-    const putBacks: { taskId: string; inPass: boolean }[] = [];
+    const putBacks: { taskId: string; inPass: boolean; messages: string[] }[] = [];
 
-    await join({ taskIds: [home.id] }, ({ taskId }) => {
-      putBacks.push({ taskId, inPass: getTask(w.h.store.db, taskId).passId != null });
+    await join({ taskIds: [home.id], firstMessage: 'Match the settings page' }, ({ taskId }) => {
+      putBacks.push({
+        taskId,
+        inPass: getTask(w.h.store.db, taskId).passId != null,
+        messages: builderMessages(taskId),
+      });
       return Promise.reject(new Error('the folder moved'));
     });
 
-    expect(putBacks).toEqual([{ taskId: home.id, inPass: true }]);
+    // No message yet while the work goes back, so the page can't start on a half-written folder.
+    expect(putBacks).toEqual([{ taskId: home.id, inPass: true, messages: [] }]);
     expect(getTask(w.h.store.db, home.id).passId).toBe(w.opened.pass.id);
+    expect(builderMessages(home.id)).toEqual(['Match the settings page']);
   });
 
   it("writes a joining task's saved work back into the folder on the pass's branch", async () => {

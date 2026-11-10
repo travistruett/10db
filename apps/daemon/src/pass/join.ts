@@ -69,9 +69,10 @@ function refuseJoin(
 /**
  * Adds a task with no brief for each of `pages`, and the open tasks named, to the open pass: in one
  * write, each joins the pass, gets its run in the pass's batch on the implement step alone, and claims
- * its pages, a page another task holds making it wait with the holder named; and, only when the builder
- * wrote one, each is sent `firstMessage`. Then, still in the job, each task with saved work has it put
- * back. Refused while Your folder is off the pass's branch. A refusal rejects and joins nothing.
+ * its pages, a page another task holds making it wait with the holder named. Then, still in the job,
+ * each task with saved work has it put back, and only after that, when the builder wrote one, each is
+ * sent `firstMessage`, so no page starts on a folder half put back. Refused while Your folder is off
+ * the pass's branch. A refusal rejects and joins nothing.
  */
 export async function joinPass(
   ctx: DeliveryContext,
@@ -97,9 +98,6 @@ export async function joinPass(
           const leaseExpiresAt = new Date(ctx.clock.now().getTime() + deps.leaseMs).toISOString();
           const all = ids.map((id) => getTask(w.tx, id));
           const waiting = startPassTasks(w, project, pass.batchId, all, leaseExpiresAt);
-          if (input.firstMessage !== null)
-            for (const id of ids)
-              insertBuilderMessage(w, id, { body: input.firstMessage, files: [] });
           return { joined: ids, waiting };
         });
       } catch (error) {
@@ -107,6 +105,13 @@ export async function joinPass(
         return;
       }
       for (const task of tasks) if (getTaskKeptWork(db, task.id) !== null) await putBack(task.id);
+      // Only once the saved work is back: a message is what lets a page's lane start.
+      const { firstMessage } = input;
+      if (firstMessage !== null)
+        ctx.state.write((w) => {
+          for (const id of joined.joined)
+            insertBuilderMessage(w, id, { body: firstMessage, files: [] });
+        });
       ctx.logger.info({ projectId: project.id, passId, joined: joined.joined }, 'pages joined');
       resolve(joined);
     });
