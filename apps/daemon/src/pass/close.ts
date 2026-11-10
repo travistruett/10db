@@ -108,6 +108,7 @@ export type CloseDeps = TakeOutDeps & {
     readonly projectId: ProjectId;
     readonly name: string;
     readonly taskIds: readonly TaskId[];
+    readonly pageCap: number;
   }) => Promise<{ readonly pass: PassDto }>;
 };
 

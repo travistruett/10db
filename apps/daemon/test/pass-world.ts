@@ -85,6 +85,8 @@ export async function openPassWorld(
     readonly putBack?: PutBackKeptWork;
     /** Laid over the pass project's areas and hazards. */
     readonly project?: Partial<ProjectInput>;
+    /** The pass's page cap; else the default. */
+    readonly pageCap?: number;
   } = {},
 ): Promise<PassWorld> {
   const h = createDeliveryHarness({ ...PASS_PROJECT, ...opts.project });
@@ -103,7 +105,12 @@ export async function openPassWorld(
   const people = h.addTask('People: UI work', { areas: ['people'] });
   const opened = await openPass(
     h.ctx,
-    { projectId: h.project.id, name: 'Polish', taskIds: [settings.id, people.id] },
+    {
+      projectId: h.project.id,
+      name: 'Polish',
+      taskIds: [settings.id, people.id],
+      ...(opts.pageCap === undefined ? {} : { pageCap: opts.pageCap }),
+    },
     { leaseMs: 60_000, putBack: opts.putBack ?? nothingKept },
   );
   const reopened: (() => void)[] = [];

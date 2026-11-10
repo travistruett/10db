@@ -47,11 +47,17 @@ afterEach(async () => {
 });
 
 /** A pass whose gate would fail if it ran, with 7b's real ship over the harness's fake gh. */
-async function world(project: Partial<ProjectInput> = { gateCommand: 'false' }): Promise<{
+async function world(
+  project: Partial<ProjectInput> = { gateCommand: 'false' },
+  opts: { readonly pageCap?: number; readonly followOnRefused?: string } = {},
+): Promise<{
   closes: PassCloses;
   deps: CloseDeps;
 }> {
-  w = await openPassWorld({ project });
+  w = await openPassWorld({
+    project,
+    ...(opts.pageCap === undefined ? {} : { pageCap: opts.pageCap }),
+  });
   prs = createPassPullRequests({
     ...w.h.ctx,
     gate: createGateRunner({ sandbox: null, logger: silentLogger }),
@@ -67,10 +73,12 @@ async function world(project: Partial<ProjectInput> = { gateCommand: 'false' }):
     ship: prs,
     gateWhere: (pass) => closeGateOf(passGateKind(getProject(w.h.store.db, pass.projectId))),
     openFollowOn: (input) =>
-      openPass(w.h.ctx, input, {
-        leaseMs: 60_000,
-        putBack: (put) => putBackKeptWork(w.deps, put),
-      }),
+      opts.followOnRefused === undefined
+        ? openPass(w.h.ctx, input, {
+            leaseMs: 60_000,
+            putBack: (put) => putBackKeptWork(w.deps, put),
+          })
+        : Promise.reject(new Error(opts.followOnRefused)),
   };
   const closes = createPassCloses(deps);
   unsubscribe = subscribeMergedPasses(w.h.bus, w.h.store.db, closes);
@@ -112,7 +120,7 @@ const followOnCard = () =>
 
 describe('a pull request that merges while its pass is open', () => {
   it('closes with no gate or push, and carries the unfinished page and later sign-offs to a stacked follow-on pass', async () => {
-    await world();
+    await world(undefined, { pageCap: 6 });
     settingsSignedOff();
     const { url, pushed } = await opened();
     // A page signed off after the push.
@@ -143,10 +151,30 @@ describe('a pull request that merges while its pass is open', () => {
     expect(b.state).toBe(PassState.Open);
     expect(b.startSha).toBe(tip);
     expect(getPassProgress(db, b.id).stackedOn).toBe(a.id);
+    expect(b.pageCap).toBe(6);
     expect(getTask(db, w.people.id).passId).toBe(b.id);
     // The unfinished page's work is back in the folder, in the follow-on pass.
     expect(w.h.git$('show', `:src/people/page.tsx`)).toBe('people');
     expect(w.h.git$('diff', '--name-only')).toBe('src/people/page.tsx');
+  });
+
+  it('names the branch and the commits not pushed on its card when the follow-on pass does not open', async () => {
+    await world(undefined, { followOnRefused: 'the folder is busy' });
+    settingsSignedOff();
+    const { url } = await opened();
+    const later = w.h.commit('src/settings/old.tsx', 'signed off later\n');
+
+    merged(url);
+    await waitFor(() => followOnCard() !== undefined);
+    await w.h.jobs.idle();
+
+    const card = followOnCard();
+    expect(card?.body).toContain(
+      'went back to the Board with their work kept: the folder is busy.',
+    );
+    expect(card?.body).toContain(
+      `The pages signed off after the last push are on ${w.branch}, not pushed: ${later.slice(0, 7)}.`,
+    );
   });
 
   it('with every page signed off, pushes the later sign-offs and opens a follow-on pull request', async () => {
