@@ -100,6 +100,7 @@ import {
   createPrWatch,
   answerPassMoveCard,
   createPassPullRequests,
+  holdForPutBack,
   createShipper,
   createWorktreeDependencies,
   createWorktreeGenerators,
@@ -113,6 +114,7 @@ import {
   removeMergedBranches,
   resolvePnpm,
   resumePassSettles,
+  subscribeKeptWorkLanding,
   subscribePassSettles,
   subscribePrWatch,
   subscribeShipTrigger,
@@ -906,6 +908,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     onWorkQueued: () => {
       scheduler?.requestTick();
     },
+    // An ordinary start of a taken-out task puts its saved work back in the checkout it runs in.
+    putBack: (input) =>
+      putBackKeptWork({ state, git, inbox, jobs: deliveryJobs, logger, clock }, input),
     worktreeRoot,
     // Not behind the gate slots: waiting out a long gate would hold the cut. Each cut downloads the
     // worktree's whole tree (the run's store is empty), so several cuts at once are several downloads.
@@ -1399,8 +1404,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
   );
   const unsubscribeShip = subscribeShipTrigger(bus, state.db, shipper);
-  // A pass that closes unsettled gets its Move card, and each closed pass is looked at again.
+  // A pass that closes unsettled gets its Move card, and each closed pass is looked at again; a
+  // started task's saved work goes once its work lands.
   const unsubscribePassSettles = subscribePassSettles(bus, delivery);
+  const unsubscribeKeptWork = subscribeKeptWorkLanding(bus, delivery);
   resumePassSettles(delivery);
   // Outside the delivery job queues: a slow or offline gh never holds a cut or a ship.
   const prWatch = createPrWatch({
@@ -1503,6 +1510,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     takeOut: (input) => takeOut(passTakeOuts, input),
     abandonPass: (passId) => abandonPass(passTakeOuts, passId),
     passPullRequests,
+    holdForPutBack: (id) => {
+      holdForPutBack(delivery, id);
+    },
     shipper,
     accounts: accountService,
     worktreeRoot,
@@ -1797,6 +1807,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       });
       unsubscribeShip();
       unsubscribePassSettles();
+      unsubscribeKeptWork();
       unsubscribePrWatch();
       await prWatch.stop();
       retiredLandingsAbort.abort();

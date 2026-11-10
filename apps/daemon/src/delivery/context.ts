@@ -8,6 +8,7 @@ import { flagCard, rewordCard, withdrawCard, type InboxService } from '../inbox'
 import type { Logger } from '../log';
 import type { Card } from './cards';
 import type { DeliveryJobs } from './jobs';
+import type { PutBackKeptWork } from './pass-open';
 import type { WorktreeDependencies } from './worktree-dependencies';
 import type { WorktreeGenerators } from './worktree-generated';
 
@@ -53,6 +54,8 @@ export interface DeliveryContext {
   networkEnv(): Readonly<Record<string, string>>;
   /** Asks the scheduler to look for work: a batch opened, grew or reopened. */
   onWorkQueued(): void;
+  /** Puts a taken-out task's saved Workbench work back in a checkout (the pass module's put-back). */
+  readonly putBack: PutBackKeptWork;
 }
 
 /** What a network call reads of the context: the login environment and the time limits. */
