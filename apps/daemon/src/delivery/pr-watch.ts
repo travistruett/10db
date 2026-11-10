@@ -1052,6 +1052,8 @@ export function createPrWatch(input: {
         ctx.state.write((write) => {
           recordPassPullRequest(write, root, passId, answer(root, read));
         });
+        // A local project's pass stacked on this one follows its record's merge or close.
+        if (read !== null) queuePassSettle(ctx, passId, settleClosedPass);
         continue;
       }
       // The checks GitHub requires of an open pull request's base. A read that fails leaves what the

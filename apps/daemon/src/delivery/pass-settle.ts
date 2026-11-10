@@ -1,4 +1,5 @@
 import {
+  Delivery,
   EventType,
   PASS_MOVE_CHOICE,
   PassId,
@@ -27,6 +28,7 @@ import type { EventBus } from '../events';
 import type { SwitchBack } from '../git';
 import type { Card } from './cards';
 import {
+  followLocalRecord,
   followStackedMerge,
   offerRetarget,
   passMoveKey,
@@ -162,6 +164,14 @@ export async function settleClosedPass(
 ): Promise<void> {
   const db = ctx.state.db;
   const pass = getPass(db, passId);
+  // A local project's pass settled at its close: only a pass stacked on it follows its record.
+  if (
+    pass.state === PassState.Settled &&
+    getProject(db, pass.projectId).delivery !== Delivery.PullRequest
+  ) {
+    await followLocalRecord(ctx, pass, signal);
+    return;
+  }
   if (pass.state !== PassState.Closed) return;
   const pr = getPassPullRequest(db, passId);
   const above = stackedAbove(db, pass);

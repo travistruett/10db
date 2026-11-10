@@ -622,3 +622,79 @@ describe('a pass stacked on a closed one (D24)', () => {
     expect(h.only(moveCards(a.passId)).detail).toMatchObject({ reason: 'closed' });
   });
 });
+
+describe('a pass on a local project (spec §5.3)', () => {
+  /**
+   * Pass A on a local project, its record pull request open, closed and settled at once as 7a's close
+   * leaves it; then pass B opened at the folder's HEAD, its pull request opened.
+   */
+  async function twoLocalPasses() {
+    h = createDeliveryHarness({ ...PAGES, delivery: 'local' });
+    unsubscribe = subscribePassSettles(h.bus, h.ctx);
+    h.commit('src/settings/page.tsx', 'settings\n');
+    h.git$('push', '-q', 'origin', 'main');
+    const first = h.addTask('Settings page', { areas: ['settings'] });
+    const a = await openPass(
+      h.ctx,
+      { projectId: h.project.id, name: 'Polish pages', taskIds: [first.id] },
+      { leaseMs: 60_000, putBack: nothingKept },
+    );
+    const aBranch = a.batch.branch ?? '';
+    const tip = h.commit('src/settings/page.tsx', 'signed off\n');
+    const run = getTask(h.store.db, first.id).workstreamId;
+    if (run !== null) h.settle(run, 'DONE');
+    h.git$('push', '-q', 'origin', aBranch);
+    const aUrl = h.gh.openPr(aBranch, PrState.Open, 'main');
+    h.git$('update-ref', 'refs/heads/main', tip);
+    h.git$('symbolic-ref', 'HEAD', 'refs/heads/main');
+    h.state.write((ctx) => {
+      setPassPullRequest(ctx, a.pass.id, { url: aUrl, draft: false });
+      setClosePlan(ctx, a.pass.id, { token: 't', pages: [], files: [], shared: [] });
+      transitionBatch(ctx, a.batch.id, { to: 'SHIPPING' });
+      transitionBatch(ctx, a.batch.id, { to: 'SHIPPED' });
+      closePass(ctx, a.pass.id, { settled: true });
+    });
+    await h.jobs.idle();
+    const second = h.addTask('People page', { areas: ['people'] });
+    const b = await openPass(
+      h.ctx,
+      { projectId: h.project.id, name: 'More pages', taskIds: [second.id] },
+      { leaseMs: 60_000, putBack: nothingKept },
+    );
+    await h.jobs.idle();
+    const bBranch = b.batch.branch ?? '';
+    h.commit('src/people/page.tsx', 'people\n');
+    h.git$('push', '-q', 'origin', bBranch);
+    const bUrl = h.gh.openPr(bBranch, PrState.Open, aBranch);
+    h.state.write((ctx) => {
+      setPassPullRequest(ctx, b.pass.id, { url: bUrl, draft: true });
+    });
+    return { a: { ...a.pass, branch: aBranch, url: aUrl, tip }, b: { ...b.pass, url: bUrl } };
+  }
+
+  it("bases a later pass's record pull request on the settled pass's branch while that one's is unmerged", async () => {
+    const { a, b } = await twoLocalPasses();
+
+    expect(getPass(h.store.db, a.id).state).toBe(PassState.Settled);
+    expect(b.startSha).toBe(a.tip);
+    expect(getPassProgress(h.store.db, b.id).stackedOn).toBe(a.id);
+    expect(passPrBase(h.store.db, getPass(h.store.db, b.id))).toBe(a.branch);
+  });
+
+  it("retargets the later pull request on the base once the settled pass's merges", async () => {
+    const { a, b } = await twoLocalPasses();
+    h.gh.setState(a.url, PrState.Merged);
+
+    await watchRound();
+
+    expect(passPrBase(h.store.db, getPass(h.store.db, b.id))).toBe('main');
+    expect(
+      h.gh.calls.filter(
+        (c) =>
+          c.method === 'prEditBase' &&
+          (c.args as { readonly url: string; readonly base: string }).url === b.url &&
+          (c.args as { readonly base: string }).base === 'main',
+      ),
+    ).toHaveLength(1);
+  });
+});

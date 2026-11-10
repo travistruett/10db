@@ -106,7 +106,8 @@ export function passGateKind(project: ProjectDto): PassPullRequestGate {
 
 /**
  * The branch the pass's pull request targets (D24): the branch of the closed pass it is stacked on,
- * while that pass's own pull request is still open, else the project's base.
+ * while that pass's own pull request is still open, else the project's base. A `local` project's
+ * pass, settled at its close, counts the same while its record pull request is unmerged.
  */
 export function passPrBase(db: DbReader, pass: PassDto): string {
   const batch = getBatch(db, pass.batchId);
@@ -116,7 +117,12 @@ export function passPrBase(db: DbReader, pass: PassDto): string {
   const pr = getPassPullRequest(db, on);
   const merged = pr?.state === PullRequestState.Merged || pr?.state === PullRequestState.Closed;
   const branch = getBatch(db, below.batchId).branch;
-  return below.state === PassState.Closed && !merged && branch !== null ? branch : batch.baseBranch;
+  // A local project's pass settles at its close: its record pull request still counts (spec §5.3).
+  const holds =
+    below.state === PassState.Closed ||
+    (below.state === PassState.Settled &&
+      getProject(db, below.projectId).delivery !== Delivery.PullRequest);
+  return holds && !merged && branch !== null ? branch : batch.baseBranch;
 }
 
 /** The titles of the pass's signed-off pages, in the order they joined it. */

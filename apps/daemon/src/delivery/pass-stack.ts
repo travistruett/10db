@@ -1,9 +1,11 @@
 import {
+  Delivery,
   InboxState,
   PASS_RETARGET_CHOICE,
   PassNoticeKind,
   PassRetargetDetail,
   PassState,
+  PullRequestState,
   type InboxAnswer,
   type InboxItemDto,
   type PassDto,
@@ -56,17 +58,37 @@ export function stackedAbove(db: DbReader, pass: PassDto): PassDto | undefined {
   return undefined;
 }
 
+/** Whether the pass's pull request is there and has neither merged nor closed. */
+function unmergedPr(db: DbReader, passId: PassId): boolean {
+  const pr = getPassPullRequest(db, passId);
+  return (
+    pr !== null && pr.state !== PullRequestState.Merged && pr.state !== PullRequestState.Closed
+  );
+}
+
 /**
- * In the write that opens pass `passId` (D24): when a pass of the project has closed and not
- * settled, the new pass stacks on the newest of them, whose tip is where the folder's return branch
- * was left, and that pass's Move card waits while the new one is open (`subscribePassSettles`).
+ * The pass a new one stacks on. On a pull request project (D24), the newest pass that has closed
+ * and not settled, whose tip is where the folder's return branch was left. On a `local` project
+ * every pass settles at its close and the new one continues on the same branch (spec §5.3): it
+ * stacks on the newest settled pass while that one's record pull request is unmerged, only so its
+ * own record pull request takes that pass's branch as its base.
+ */
+function passBelow(db: DbReader, pass: PassDto): PassDto | undefined {
+  const others = (state: PassState) =>
+    listPassesIn(db, state).filter((p) => p.projectId === pass.projectId && p.id !== pass.id);
+  if (getProject(db, pass.projectId).delivery === Delivery.PullRequest)
+    return others(PassState.Closed).at(-1);
+  const newest = others(PassState.Settled).at(-1);
+  return newest !== undefined && unmergedPr(db, newest.id) ? newest : undefined;
+}
+
+/**
+ * In the write that opens pass `passId`: the pass it stacks on (`passBelow`), recorded as
+ * `stacked_on`; that pass's Move card waits while the new one is open (`subscribePassSettles`).
  * Answers that pass, or undefined.
  */
 export function stackOn(w: WriteContext, passId: PassId): PassDto | undefined {
-  const pass = getPass(w.tx, passId);
-  const below = listPassesIn(w.tx, PassState.Closed)
-    .filter((p) => p.projectId === pass.projectId && p.id !== passId)
-    .at(-1);
+  const below = passBelow(w.tx, getPass(w.tx, passId));
   if (below === undefined) return undefined;
   setStackedOn(w, passId, below.id);
   return below;
@@ -180,6 +202,32 @@ async function takeBase(
     { passId: above.id, below: below.id, merge: merged.sha, kind: merged.kind },
     'stacked pass took the base in',
   );
+}
+
+/** The pass stacked on `below` on a `local` project: any but an abandoned one, newest first. */
+function localStackedAbove(db: DbReader, below: PassDto): PassDto | undefined {
+  for (const state of [PassState.Open, PassState.Closing, PassState.Closed, PassState.Settled])
+    for (const above of listPassesIn(db, state).reverse())
+      if (above.id !== below.id && getPassProgress(db, above.id).stackedOn === below.id)
+        return above;
+  return undefined;
+}
+
+/**
+ * Spec §5.3 on a `local` project, after a read of a settled pass's record pull request: once it
+ * merges, the record pull request of the pass stacked on it is based on the base; one closed
+ * unmerged offers Retarget, as D24 does.
+ */
+export async function followLocalRecord(
+  ctx: DeliveryContext,
+  below: PassDto,
+  signal: AbortSignal,
+): Promise<void> {
+  const above = localStackedAbove(ctx.state.db, below);
+  if (above === undefined) return;
+  const state = getPassPullRequest(ctx.state.db, below.id)?.state;
+  if (state === PullRequestState.Merged) await retarget(ctx, above, signal);
+  else if (state === PullRequestState.Closed) await offerRetarget(ctx, below, above, signal);
 }
 
 /** D24's card, call 35: the pass this one is stacked on closed unmerged; Retarget bases its pull request on the base. */
