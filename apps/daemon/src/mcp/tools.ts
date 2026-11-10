@@ -232,7 +232,11 @@ export function createToolHandlers(
     return {
       ask: () => {
         const asked = askShared(
-          { ...deps, ...(deps.deliverMessage ? { deliver: deps.deliverMessage } : {}) },
+          {
+            ...deps,
+            logger: deps.log,
+            ...(deps.deliverMessage ? { deliver: deps.deliverMessage } : {}),
+          },
           { workstreamId, sessionId, area: name, reason, signal },
         );
         if (!asked) return null;

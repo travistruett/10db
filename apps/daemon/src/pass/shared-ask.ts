@@ -1,12 +1,14 @@
 import {
   InboxState,
   isParkChoice,
+  PassState,
   SharedAskDetail,
   QuestionCategory,
   SHARED_ASK_ALLOW_CHOICE,
   SHARED_ASK_KEEP_CHOICE,
   SHARED_ASK_REPLY_CHOICE,
   sharedAskFoldKey,
+  TakeOutStep,
   Urgency,
   type InboxAnswer,
   type InboxItemId,
@@ -23,15 +25,19 @@ import {
   getWorkstreamRow,
   insertBuilderMessage,
   insertSystemNotice,
+  lastTakeOut,
+  latestPassTurn,
   listHolds,
   listSharedChanges,
   markTaskMessagesDelivered,
+  markPassTurnAnswered,
   markTaskMessagesPushed,
   openItemsForWorkstream,
   openPassTurn,
   passHoldingTask,
 } from '@10db/db';
 import type { InboxService } from '../inbox';
+import type { Logger } from '../log';
 import type { SharedDeps } from './shared-hold';
 
 // Workbench spec §7.2 step 3 (W5): before a second task of a pass changes a shared area another task
@@ -126,6 +132,7 @@ export function askShared(
     readonly inbox: InboxService;
     /** Hands a builder message to the page's session, starting a turn when none is open. */
     readonly deliver?: (taskId: TaskId, messageId: TaskMessageId) => Promise<void>;
+    readonly logger?: Logger;
   },
   input: {
     readonly workstreamId: WorkstreamId;
@@ -212,6 +219,7 @@ export function askShared(
 function answerOf(
   deps: SharedDeps & {
     readonly deliver?: (taskId: TaskId, messageId: TaskMessageId) => Promise<void>;
+    readonly logger?: Logger;
   },
   input: { readonly taskId: TaskId; readonly area: string },
   given: InboxAnswer,
@@ -230,16 +238,39 @@ function answerOf(
   if (given.choice === SHARED_ASK_REPLY_CHOICE) {
     const words = (given.note ?? '').trim();
     // While the turn is open the call's answer hands the words to the agent, so the message is
-    // delivered with it; once the turn has ended nobody reads that answer, and the message starts
-    // the page's next turn as the builder's own would.
-    const waiting = deps.state.write((ctx) => {
-      const message = insertBuilderMessage(ctx, input.taskId, { body: words, files: [] });
-      if (!openPassTurn(ctx.tx, input.taskId)) return message.id;
-      markTaskMessagesPushed(ctx, [message.id]);
-      markTaskMessagesDelivered(ctx, input.taskId, [message.id]);
-      return null;
+    // delivered with it. Once the turn has ended nobody reads that answer: the words go to the page
+    // as the thread would send them, starting its next turn, while its pass still takes messages.
+    const late = deps.state.write((ctx): { readonly deliver: TaskMessageId } | null => {
+      if (openPassTurn(ctx.tx, input.taskId)) {
+        const message = insertBuilderMessage(ctx, input.taskId, { body: words, files: [] });
+        markTaskMessagesPushed(ctx, [message.id]);
+        markTaskMessagesDelivered(ctx, input.taskId, [message.id]);
+        return null;
+      }
+      const pass = passHoldingTask(ctx.tx, getTask(ctx.tx, input.taskId));
+      const takeOut = lastTakeOut(ctx.tx, input.taskId);
+      if (
+        pass?.state !== PassState.Open ||
+        (takeOut?.passId === pass.id && takeOut.step < TakeOutStep.Done)
+      ) {
+        insertSystemNotice(
+          ctx,
+          input.taskId,
+          `Your reply about shared ${input.area} came after the page's turn ended, when its pass no longer took messages for it, so it was not sent: "${words}"`,
+        );
+        return null;
+      }
+      const latest = latestPassTurn(ctx.tx, input.taskId);
+      if (latest && latest.readyAt !== null) markPassTurnAnswered(ctx, latest.id);
+      return { deliver: insertBuilderMessage(ctx, input.taskId, { body: words, files: [] }).id };
     });
-    if (waiting !== null) void deps.deliver?.(input.taskId, waiting).catch(() => undefined);
+    if (late !== null)
+      void deps.deliver?.(input.taskId, late.deliver).catch((error: unknown) => {
+        deps.logger?.warn(
+          { taskId: input.taskId, err: error instanceof Error ? error.message : String(error) },
+          'a late reply to a shared question was not handed to its page; the next turn takes it',
+        );
+      });
     return {
       allowed: false,
       instruction: `The builder replied instead of giving you shared area ${input.area}: "${words}". You did not get ${input.area}; edit nothing there, and do what the reply says.`,

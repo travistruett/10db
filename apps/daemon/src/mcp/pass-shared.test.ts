@@ -19,6 +19,7 @@ import {
   getWorkstreamRow,
   insertSession,
   insertSignOffWait,
+  insertTakeOut,
   listSharedChanges,
   listTaskThread,
   listTaskThreadRows,
@@ -319,6 +320,38 @@ describe("the builder's question before a second task changes a shared area", ()
     const kept = await answer;
     if (kept.granted) throw new Error('granted');
     expect(kept.instruction).toMatch(/The builder added: "Style it in the page"/);
+  });
+
+  it('sends no late reply to a page being taken out, and says so on its thread', async () => {
+    w = await openPassWorld();
+    await settingsChangedSrc();
+    const delivered: TaskMessageId[] = [];
+    const tools = laneTools(w, w.people, new ClaimWaits(), 30, (_task, id) => {
+      delivered.push(id);
+      return Promise.resolve();
+    });
+    const first = await ask(tools);
+    if (first.granted || first.inboxId === null) throw new Error('no question');
+    const turn = openPassTurn(w.h.store.db, w.people.id);
+    if (!turn) throw new Error('no turn');
+    w.endTurn(turn);
+    w.h.state.write((c) =>
+      insertTakeOut(c, { taskId: w.people.id, passId: w.opened.pass.id, drops: [] }),
+    );
+
+    w.h.inbox.answer(first.inboxId, { choice: SHARED_ASK_REPLY_CHOICE, note: 'Use the page one' });
+    await vi.waitFor(() => {
+      expect(listTaskThread(w.h.store.db, w.people.id).at(-1)?.body).toMatch(
+        /^Your reply about shared src came after the page's turn ended/,
+      );
+    });
+
+    expect(delivered).toEqual([]);
+    expect(
+      listTaskThread(w.h.store.db, w.people.id).some(
+        (m) => m.author === 'builder' && m.body === 'Use the page one',
+      ),
+    ).toBe(false);
   });
 
   it.each<{ name: string; end: (card: InboxItemId) => void; told: RegExp }>([

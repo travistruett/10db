@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { getTask, listSharedChanges, listTaskThread, openHolds } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openPassWorld, type PassWorld } from '../../test/pass-world';
+import { PassFolderOffBranchError } from '../git';
 import {
   dropShared,
   grantSharedHold,
@@ -97,6 +98,20 @@ describe('dropShared', () => {
     expect(read('src/shared.ts')).toBe('settings\npeople\n');
   });
 
+  it('refuses a folder off the pass branch, writing nothing', async () => {
+    w = await openPassWorld();
+    const seq = await sharedTurn(w.settings, () => {
+      w.write('src/button.ts', 'a button\n');
+    });
+    w.h.git$('switch', '-q', 'main');
+
+    await expect(
+      dropShared(w.deps, { passId: w.opened.pass.id, seq, force: true }),
+    ).rejects.toThrow(PassFolderOffBranchError);
+    expect(read('src/button.ts')).toBe('a button\n');
+    expect(listSharedChanges(w.h.store.db, w.opened.pass.id)).toHaveLength(1);
+  });
+
   it("is refused while another page's turn holds the area", async () => {
     w = await openPassWorld();
     const seq = await sharedTurn(w.settings, () => {
@@ -147,6 +162,24 @@ describe('a take-out that drops a shared change', () => {
     expect(existsSync(join(w.h.repo, 'src/button.ts'))).toBe(false);
     expect(listSharedChanges(w.h.store.db, w.opened.pass.id)[0]?.droppedBy).not.toBeNull();
     expect(getTask(w.h.store.db, w.settings.id).passId).toBeNull();
+  });
+
+  it('keeps every hold the page still had open before it leaves, kept on the chain', async () => {
+    w = await openPassWorld();
+    w.startTurn(w.settings);
+    await grantSharedHold(w.deps, { workstreamId: w.runOf(w.settings), area: 'src' });
+    w.write('src/button.ts', 'a button\n');
+
+    await takeOut(
+      { ...w.deps, stopLane: () => Promise.resolve(), wrote: () => Promise.resolve() },
+      { taskId: w.settings.id, within: TakeOutWithin.Alone },
+    );
+
+    expect(openHolds(w.h.store.db, w.opened.pass.id)).toEqual([]);
+    expect(listSharedChanges(w.h.store.db, w.opened.pass.id)).toMatchObject([
+      { seq: 1, paths: ['src/button.ts'], droppedBy: null },
+    ]);
+    expect(read('src/button.ts')).toBe('a button\n');
   });
 
   it('keeps a change whose file changed since it was chosen, and says why', async () => {
