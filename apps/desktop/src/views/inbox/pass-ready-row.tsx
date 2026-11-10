@@ -1,4 +1,4 @@
-import { PassCheckDetail, type InboxItemDto, type TaskId } from '@10db/contracts';
+import { PassCheckDetail, type InboxItemDto, type ProjectId, type TaskId } from '@10db/contracts';
 import {
   Anchor,
   Badge,
@@ -30,6 +30,19 @@ export function passReadyTitle(count: number): string {
 
 /** Opens the Workbench in the pass's project, at one of its pages when given. */
 type OpenWorkbench = (taskId?: TaskId) => void;
+
+/**
+ * Opens the Workbench in a pass's project, at one of its pages when given. The Workbench shows the
+ * selected project's pass, so the pass's project is selected first.
+ */
+export function useOpenPassWorkbench(): (projectId: ProjectId, taskId?: TaskId) => void {
+  const navigate = useNavigate();
+  const { select } = useSelectedProject();
+  return (projectId, taskId) => {
+    select(projectId);
+    void navigate({ to: '/workbench', search: taskId === undefined ? {} : { task: taskId } });
+  };
+}
 
 /** One Ready page of the row: its title, which opens it in the Workbench, and Sign Off for it. */
 function ReadyPage({
@@ -86,12 +99,9 @@ function ReadyPage({
  */
 export function PassReadyRow({ items, selected, onSelect }: PassReadyRowProps) {
   const [first] = items;
-  const navigate = useNavigate();
-  const { select } = useSelectedProject();
-  // The Workbench shows the selected project's pass, so the pass's project is selected first.
+  const openWorkbench = useOpenPassWorkbench();
   const open: OpenWorkbench = (taskId) => {
-    select(first.projectId);
-    void navigate({ to: '/workbench', search: taskId === undefined ? {} : { task: taskId } });
+    openWorkbench(first.projectId, taskId);
   };
   const header = (
     <Group gap="sm" wrap="nowrap">
