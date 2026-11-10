@@ -431,7 +431,7 @@ describe('PassWorkspace page actions', () => {
     {
       name: 'waiting for another page',
       signOff: 'waiting',
-      line: "Signing off · waits for People's turn",
+      line: "Signing off: waiting for People's turn",
       cancel: true,
     },
   ] as const)(
