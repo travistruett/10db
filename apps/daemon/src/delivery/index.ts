@@ -30,6 +30,7 @@ export {
 } from './pass-open';
 export { createPassPullRequests, type PassPullRequests, type PassShipDeps } from './pass-pr';
 export { holdForPutBack, subscribeKeptWorkLanding } from './kept-work-start';
+export { offeredText, offerToAgent } from './send-to-agent';
 export { answerPassMoveCard, resumePassSettles, subscribePassSettles } from './pass-settle';
 export { createFailedRestarts } from './restart';
 export { stepCheck } from './local-check';

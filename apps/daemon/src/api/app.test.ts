@@ -114,6 +114,7 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     abandonPass: track('abandonPass'),
     passPullRequest: track('passPullRequest'),
     openPassPullRequest: track('openPassPullRequest'),
+    sendToAgent: track('sendToAgent'),
     listGoals: track('listGoals'),
     humanTouch: track('humanTouch'),
     openGoalDigest: track('openGoalDigest'),
@@ -812,6 +813,13 @@ describe('team, routing and benchmark routes', () => {
       path: `/passes/${mintId('Pass')}/pull-request`,
       body: undefined,
       service: 'openPassPullRequest',
+    },
+    {
+      name: 'POST /tasks/:id/thread/:id/send-to-agent',
+      method: 'POST',
+      path: `/tasks/${taskId}/thread/checks/send-to-agent`,
+      body: undefined,
+      service: 'sendToAgent',
     },
     {
       name: 'GET /tasks/:id/step-plan',

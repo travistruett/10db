@@ -276,6 +276,12 @@ export interface ApiServices {
    */
   openPassPullRequest(passId: PassId): Promise<PassPullRequestDto>;
   /**
+   * Send to Agent (D19): sends the text a notice offers as the builder's message to the task: a notice
+   * on its thread, or one in the header of the pass holding it, by id. Refused (409) for a notice that
+   * offers nothing to send, and as a message to the task is.
+   */
+  sendToAgent(taskId: TaskId, noticeId: string): Promise<TaskMessageDto>;
+  /**
    * The project's goals, each with its digest and count of new items since the builder last opened
    * it, and the Ungrouped group. Leaves every view mark as it was.
    */

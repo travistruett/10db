@@ -23,6 +23,8 @@ import {
   type PassId,
   type TakeOutResultDto,
   type TaskId,
+  TaskMessageId,
+  TaskMessageKind,
   type TaskLanding,
   type WorkstreamId,
 } from '@10db/contracts';
@@ -39,6 +41,7 @@ import {
   getSmallProposalLimit,
   setSmallProposalLimit,
   getPass,
+  getPassProgress,
   getTask,
   getTeam,
   getWorkstream,
@@ -70,6 +73,7 @@ import {
   listProjectViews,
   listRoutingRules,
   listTasks,
+  listTaskThread,
   listWorkstreams,
   moveTask,
   openPassTurn,
@@ -98,6 +102,7 @@ import {
   type BatchStarter,
   type PassOpened,
   type PassOpenInput,
+  offeredText,
   type PassPullRequests,
   type Shipper,
 } from '../delivery';
@@ -395,6 +400,26 @@ export function createServices(deps: {
     },
     passPullRequest: (passId) => deps.passPullRequests.preview(passId),
     openPassPullRequest: (passId) => deps.passPullRequests.open(passId),
+    async sendToAgent(taskId, noticeId) {
+      const task = getTask(db, taskId);
+      const message = TaskMessageId.safeParse(noticeId);
+      const onThread =
+        message.success &&
+        listTaskThread(db, taskId).some(
+          (m) => m.id === message.data && m.kind === TaskMessageKind.Notice,
+        )
+          ? offeredText(db, message.data)
+          : null;
+      const pass = passHoldingTask(db, task);
+      const inHeader =
+        pass === undefined
+          ? null
+          : (getPassProgress(db, pass.id).notices.find((n) => n.id === noticeId && n.sendable)
+              ?.text ?? null);
+      const text = onThread ?? inHeader;
+      if (text === null) throw new ConflictError('That notice offers nothing to send to the agent');
+      return deps.thread.postTaskMessage(taskId, { text, pictures: [] });
+    },
     async stopPage(taskId) {
       const task = getTask(db, taskId);
       const pass = passHoldingTask(db, task);
