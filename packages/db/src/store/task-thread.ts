@@ -15,7 +15,7 @@ import {
 import { and, asc, eq, inArray, isNotNull, isNull } from 'drizzle-orm';
 import { z } from 'zod';
 import * as schema from '../schema';
-import { getAppSetting, setAppSetting } from './settings';
+import { deleteAppSetting, getAppSetting, setAppSetting } from './settings';
 import type { DbReader, WriteContext } from './store';
 import { getTask } from './tasks';
 
@@ -192,6 +192,16 @@ export function listTaskThread(db: DbReader, taskId: TaskId): TaskMessageDto[] {
  */
 export function offerToAgent(ctx: WriteContext, id: TaskMessageId, text: string): void {
   setAppSetting(ctx, sendToAgentKey(id), text);
+}
+
+/**
+ * Takes thread notice `id`'s Send to Agent offer, in the caller's write: answers the text it sends
+ * and drops the offer, so the notice is sent once; null when it offers none.
+ */
+export function takeOffer(ctx: WriteContext, id: TaskMessageId): string | null {
+  const text = offeredText(ctx.tx, id);
+  if (text !== null) deleteAppSetting(ctx, sendToAgentKey(id));
+  return text;
 }
 
 /** The text Send to Agent sends for thread notice `id`; null when it offers none. */

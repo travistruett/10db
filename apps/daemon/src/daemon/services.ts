@@ -89,8 +89,10 @@ import {
   runNext,
   setRoutingRules,
   setTeam,
+  takeOffer,
   undoHazardAddition,
   offeredText,
+  offerToAgent,
 } from '@10db/db';
 import { MoveCause, type AccountMoves, type AccountService } from '../accounts';
 import type { Clock } from '../clock';
@@ -453,7 +455,19 @@ export function createServices(deps: {
               ?.text ?? null);
       const text = onThread ?? inHeader;
       if (text === null) throw new ConflictError('That notice offers nothing to send to the agent');
-      return deps.thread.postTaskMessage(taskId, { text, pictures: [] });
+      // A thread notice is sent once: its offer is taken as it is sent, and put back if the send fails.
+      const offered = message.success && onThread !== null ? message.data : null;
+      if (offered !== null && deps.state.write((ctx) => takeOffer(ctx, offered)) === null)
+        throw new ConflictError('That notice was sent to the agent already');
+      try {
+        return await deps.thread.postTaskMessage(taskId, { text, pictures: [] });
+      } catch (error) {
+        if (offered !== null)
+          deps.state.write((ctx) => {
+            offerToAgent(ctx, offered, text);
+          });
+        throw error;
+      }
     },
     async stopPage(taskId) {
       const task = getTask(db, taskId);
