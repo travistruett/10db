@@ -7,6 +7,7 @@ import {
 import { Button, Group, Paper, Stack, Text } from '@mantine/core';
 import { useSendToAgent } from '../../daemon/pass-close-queries';
 import { useTaskPicture } from '../../daemon/thread-queries';
+import { CodeSpans } from '../../shell/code-spans';
 import { TurnFiles } from './turn-files';
 
 /** A pasted picture, read with the UI token; its alt text is its file name. */
@@ -64,7 +65,7 @@ function Notice({
   const send = useSendToAgent();
   const text = (
     <Text size="xs" c="dimmed" style={{ whiteSpace: 'pre-wrap', flex: 1, minWidth: 0 }}>
-      {message.body}
+      <CodeSpans text={message.body} />
     </Text>
   );
   // A page takes a message only while its pass is open, so Send to Agent is offered only then.

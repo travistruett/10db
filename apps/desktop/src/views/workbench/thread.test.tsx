@@ -76,6 +76,22 @@ describe('Thread', () => {
     expect(screen.getByText(notice.body).style.color).toBe('var(--mantine-color-dimmed)');
   });
 
+  it('draws a path a notice puts in backticks as code', async () => {
+    const shared = taskMessageDto(page.taskId, {
+      author: 'system',
+      kind: 'notice',
+      body: 'People: UI work changed shared `src/ui/button.ts`.',
+      createdAt: minutesBeforeNow(1),
+    });
+    serve(TaskThreadDto.parse({ taskId: page.taskId, messages: [reply, shared] }));
+    renderWithDaemon(<Thread page={page} turns={[]} openPage={null} canSend />);
+    const path = await screen.findByText('src/ui/button.ts');
+    expect(path.tagName).toBe('CODE');
+    expect(path.parentElement?.textContent).toBe(
+      'People: UI work changed shared src/ui/button.ts.',
+    );
+  });
+
   it('before the first message, says where the page is', async () => {
     serve(TaskThreadDto.parse({ taskId: page.taskId, messages: [] }));
     renderWithDaemon(

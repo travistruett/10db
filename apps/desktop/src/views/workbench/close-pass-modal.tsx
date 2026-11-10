@@ -7,6 +7,7 @@ import {
 import { Box, Button, Group, List, Loader, Select, Stack, Text, Title } from '@mantine/core';
 import { useState, type ReactNode } from 'react';
 import { useClosePass, useClosePreview } from '../../daemon/pass-close-queries';
+import { CodeSpans } from '../../shell/code-spans';
 import { FormModal } from '../../shell/form-modal';
 import {
   closeRequest,
@@ -247,10 +248,12 @@ export function ClosePassModal({ view, onClose }: ClosePassModalProps) {
           <Stack gap={4}>
             {preview.gate.consequence === null ? null : (
               <Text size="sm" c="dimmed">
-                {preview.gate.consequence}
+                <CodeSpans text={preview.gate.consequence} />
               </Text>
             )}
-            <Text size="sm">{preview.summary}</Text>
+            <Text size="sm">
+              <CodeSpans text={preview.summary} />
+            </Text>
           </Stack>
         </Stack>
       )}
