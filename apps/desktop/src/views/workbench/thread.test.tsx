@@ -149,6 +149,34 @@ describe('Thread', () => {
     expect(screen.getByText('/settings')).toBeTruthy();
   });
 
+  it("leads with the goal's earlier pictures of the page, then its own before", async () => {
+    const before = taskScreenDto({ taskId: page.taskId });
+    const earlier = taskScreenDto({ kind: 'after', sha256: 'c'.repeat(64) });
+    serve(TaskThreadDto.parse({ taskId: page.taskId, messages: [message] }));
+    server.use(
+      http.get(daemonUrl('/tasks/:taskId/screens'), () =>
+        HttpResponse.json(
+          TaskScreensDto.parse({ taskId: page.taskId, screens: [before], fromGoal: [earlier] }),
+        ),
+      ),
+      http.get(
+        daemonUrl('/screens/:screenId'),
+        () => new HttpResponse(PNG, { headers: { 'content-type': 'image/png' } }),
+      ),
+    );
+    renderWithDaemon(<Thread page={page} turns={[]} canSend />);
+    const thread = await screen.findByRole('list', { name: 'Thread' });
+    await screen.findByRole('img', { name: 'Settings before, 1440 by 900' });
+    const first = thread.children[0] as HTMLElement;
+    expect(within(first).getByText('Earlier in this goal')).toBeTruthy();
+    expect(
+      (await within(first).findAllByRole('img')).map((img) => img.getAttribute('alt')),
+    ).toEqual([
+      'Settings after sign-off, from an earlier task of this goal, 1440 by 900',
+      'Settings before, 1440 by 900',
+    ]);
+  });
+
   it('draws a path a notice puts in backticks as code', async () => {
     const shared = taskMessageDto(page.taskId, {
       author: 'system',

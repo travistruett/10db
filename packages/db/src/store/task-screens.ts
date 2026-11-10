@@ -5,6 +5,7 @@ import {
   NotFoundError,
   ScreenKind,
   TaskStatus,
+  type GoalId,
   type PassTurnId,
   type ScreenTheme,
   type ScreenViewport,
@@ -289,4 +290,24 @@ export function listTaskCodexStarts(db: DbReader, taskId: TaskId): string[] {
     .orderBy(asc(schema.sessions.startedAt))
     .all()
     .map((s) => s.startedAt);
+}
+
+/** The unpruned befores and afters of the goal's tasks on `route`, oldest first, with each one's task. */
+export function listGoalRouteScreens(db: DbReader, goalId: GoalId, route: string): TaskScreenDto[] {
+  return db
+    .select(columns)
+    .from(schema.taskScreens)
+    .innerJoin(schema.tasks, eq(schema.tasks.id, schema.taskScreens.taskId))
+    .leftJoin(schema.passTurns, eq(schema.passTurns.id, schema.taskScreens.turnId))
+    .where(
+      and(
+        eq(schema.tasks.goalId, goalId),
+        eq(schema.taskScreens.route, route),
+        inArray(schema.taskScreens.kind, [ScreenKind.Before, ScreenKind.After]),
+        isNull(schema.taskScreens.prunedAt),
+      ),
+    )
+    .orderBy(asc(schema.taskScreens.createdAt), asc(schema.taskScreens.id))
+    .all()
+    .map((r) => toDto(r.row, r.turnSeq));
 }

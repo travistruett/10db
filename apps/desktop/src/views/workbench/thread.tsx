@@ -9,7 +9,7 @@ import { useTaskScreens } from '../../daemon/screen-queries';
 import { useTaskThread } from '../../daemon/thread-queries';
 import { turnOfReply } from './reply-turns';
 import { ThreadMessage } from './thread-message';
-import { TurnPictures } from './turn-pictures';
+import { OpeningPictures, TurnPictures } from './turn-pictures';
 
 export interface ThreadProps {
   readonly page: PassPageDto;
@@ -42,11 +42,13 @@ const pageName = (area: string): string => area.charAt(0).toUpperCase() + area.s
 
 /**
  * A page's thread, oldest first: the builder's messages, the agent's replies and the notices. The
- * page's before picture leads it, and each turn's pictures follow its reply.
+ * goal's earlier pictures of the page and its before lead it, and each turn's pictures follow its reply.
  */
 export function Thread({ page, turns, canSend }: ThreadProps) {
   const thread = useTaskThread(page.taskId);
-  const screens = useTaskScreens(page.taskId).data?.screens ?? [];
+  const pictures = useTaskScreens(page.taskId).data;
+  const screens = pictures?.screens ?? [];
+  const fromGoal = pictures?.fromGoal ?? [];
   const name = pageName(page.area);
   const befores = screens.filter((s) => s.kind === ScreenKind.Before);
   if (thread.isError)
@@ -65,7 +67,7 @@ export function Thread({ page, turns, canSend }: ThreadProps) {
   const intro = messages.some((message) => message.kind === TaskMessageKind.Message) ? null : (
     <Stack gap="xs" px="md" pt="sm" align="flex-start">
       <BeforeFirstMessage page={page} />
-      <TurnPictures screens={befores} name={name} />
+      <OpeningPictures fromGoal={fromGoal} befores={befores} name={name} />
     </Stack>
   );
   if (messages.length === 0) return intro;
@@ -81,9 +83,9 @@ export function Thread({ page, turns, canSend }: ThreadProps) {
         py="sm"
         style={{ listStyle: 'none' }}
       >
-        {intro === null && befores.length > 0 && (
+        {intro === null && befores.length + fromGoal.length > 0 && (
           <li>
-            <TurnPictures screens={befores} name={name} />
+            <OpeningPictures fromGoal={fromGoal} befores={befores} name={name} />
           </li>
         )}
         {messages.map((message) => {

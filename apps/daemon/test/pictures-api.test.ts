@@ -9,7 +9,7 @@ import {
   WorkstreamDto,
   mintId,
 } from '@10db/contracts';
-import { latestEventSeq } from '@10db/db';
+import { insertGoal, insertTaskScreen, latestEventSeq } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
@@ -147,6 +147,55 @@ describe("a task's pictures over HTTP", () => {
       browser: { state: 'ready', problem: null },
       signIn: null,
     });
+  });
+});
+
+describe("a goal's pictures", () => {
+  it("leads a goal task's screens with the newest after, else before, of each other task on its route", async () => {
+    const p = await project();
+    const made = daemon.state.write((ctx) =>
+      insertGoal(ctx, p.id, {
+        brief: {
+          title: 'Rework people',
+          objective: 'Rework the people screens.',
+          tasks: ['done', 'started', 'elsewhere', 'next'].map((key) => ({
+            key,
+            title: `People ${key}`,
+            areas: key === 'elsewhere' ? ['src'] : ['people'],
+          })),
+        },
+      }),
+    );
+    const id = (key: string) => {
+      const taskId = made.taskIds.get(key);
+      if (taskId === undefined) throw new Error(`no ${key}`);
+      return taskId;
+    };
+    const shot = (key: string, kind: 'before' | 'after', route = '/people') =>
+      daemon.state.write((ctx) =>
+        insertTaskScreen(ctx, {
+          taskId: id(key),
+          turnId: null,
+          kind,
+          route,
+          viewport: { width: 1440, height: 900 },
+          theme: 'default',
+          sha256: `${key}${kind}`.padEnd(64, '0').replace(/[^0-9a-f]/g, 'a'),
+          size: 1,
+          width: 1440,
+          height: 900,
+          storedPath: `${data.path}/screens/x.png`,
+          keptSha: null,
+        }),
+      );
+    shot('done', 'before');
+    const after = shot('done', 'after');
+    const before = shot('started', 'before');
+    shot('elsewhere', 'after', '/org');
+    shot('next', 'before');
+    const screens = await api().get(`/tasks/${id('next')}/screens`, TaskScreensDto);
+    expect(screens.fromGoal.map((s) => s.id)).toEqual([after?.id, before?.id]);
+    expect(screens.screens.map((s) => s.kind)).toEqual(['before']);
   });
 });
 

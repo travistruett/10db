@@ -21,6 +21,7 @@ import {
   type PicturesStatusDto,
   type ProjectDto,
   type TaskDto,
+  type TaskScreenDto,
   type TaskScreenId,
   type TaskScreensDto,
 } from '@10db/contracts';
@@ -40,6 +41,7 @@ import {
   listTasks,
   listTaskScreens,
   listTaskThread,
+  listGoalRouteScreens,
   listTaskCodexStarts,
   listTaskPageReports,
   listTaskToolCalls,
@@ -259,6 +261,25 @@ export function startPictures(deps: PicturesDeps): Pictures {
     const now = deps.state.now();
     if (wroteBefore(activityOf(task.id, now), now)) return;
     ask({ kind: ScreenKind.Before, projectId: project.id, passId, taskId: task.id, turnId: null });
+  }
+
+  /**
+   * The pictures a goal's task opens with (spec §4.2): for each other task of its goal, the newest
+   * after on this task's page route, else its newest before; oldest first.
+   */
+  function goalPictures(taskId: TaskId): TaskScreenDto[] {
+    const task = getTask(db, taskId);
+    if (task.goalId == null) return [];
+    const route = pageRoute(getProject(db, task.projectId), task);
+    if (route === null) return [];
+    const best = new Map<TaskId, TaskScreenDto>();
+    for (const screen of listGoalRouteScreens(db, task.goalId, route)) {
+      if (screen.taskId === taskId) continue;
+      const held = best.get(screen.taskId);
+      if (held === undefined || screen.kind === ScreenKind.After || held.kind === ScreenKind.Before)
+        best.set(screen.taskId, screen);
+    }
+    return [...best.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
   /** The routes the task's agent reported for a picture of `kind`: its turn's, or its run's for an after. */
@@ -624,7 +645,7 @@ export function startPictures(deps: PicturesDeps): Pictures {
     },
     screens(taskId) {
       getTask(db, taskId);
-      return { taskId, screens: listTaskScreens(db, taskId), fromGoal: [] };
+      return { taskId, screens: listTaskScreens(db, taskId), fromGoal: goalPictures(taskId) };
     },
     screenFile(screenId) {
       const row = getTaskScreenRow(db, screenId);
