@@ -1887,94 +1887,6 @@ export function createRunner(opts: RunnerOptions): Runner {
         message: `The builder's message in this task's thread needs a Claude session, and the project's account "${account.label}" runs Codex, which cannot show that a turn took the message. Move the project to a Claude account and retry.`,
         providerSessionId: savedResumeId,
       };
-    // A turn this session opens folds the builder's hand edits first, as a message into a warm
-    // session does; a turn already open folds nothing, since an edit then is kept with the turn.
-    const handNote = pass && !openPassTurn(db, task.id) ? await foldForTurn(id) : null;
-    const fed =
-      feedback === null
-        ? null
-        : resumeId === null
-          ? // A fresh session holds no picture: its start clears every mark an earlier one left.
-            outgoingMessage(
-              {
-                ...feedback,
-                files: feedback.files.map((file) => ({ ...file, inlineSent: false })),
-              },
-              0,
-              limits,
-            )
-          : outgoingMessage(
-              feedback,
-              threadInlineBytes(listTaskFileRows(db, task.id), limits),
-              limits,
-            );
-    const digest =
-      feedback === null || resumeId !== null
-        ? null
-        : buildThreadDigest(db, task, {
-            after:
-              contextPack.handoff && briefedFromHandoff(action, contextPack.handoff, evidence)
-                ? contextPack.handoff.createdAt
-                : null,
-            before: feedback.id,
-          });
-    const prompt = buildSessionPrompt({
-      provider,
-      inPass: pass !== null,
-      sandboxed: Boolean(opts.laneSandbox),
-      denials: denialsToTell(),
-      answeredCards: answeredCardsForTask(db, row.taskId),
-      renumbered: noticeBody(MIGRATIONS_RENUMBERED_NOTICE_KEY),
-      uncarried: uncarried === undefined ? null : uncarriedSaid(uncarried),
-      task,
-      claims: claims(),
-      action,
-      handoff: contextPack.handoff,
-      answer: permission?.prompt ?? contextPack.pendingAnswer,
-      contextPack,
-      step: {
-        index: row.stepIndex,
-        count: Math.max(row.steps.length, 1),
-        role: step.role,
-        personaName: step.personaName,
-        instructions: persona?.instructions ?? null,
-        skills,
-        // A Codex session has no plugin to load a skill from.
-        ...(provider === Provider.Codex
-          ? {
-              skillBodies: skills.flatMap((name) => {
-                const body = opts.skillBody(name);
-                if (body === null) {
-                  opts.logger.warn(
-                    { workstreamId: id, skill: name },
-                    'a skill has no text to brief a Codex session with',
-                  );
-                  return [];
-                }
-                return [body];
-              }),
-            }
-          : {}),
-        tools: step.tools,
-      },
-      priorResults,
-      previousResult: readOnly ? step.result : null,
-      earlierResults: step.earlier,
-      revisedBy: reviser ? { role: reviser.role, personaName: reviser.personaName } : null,
-      evidence,
-      recovery:
-        action.kind === 'resume'
-          ? { reason: action.reason, lastOp: latestToolOp(db, id)?.opId ?? null }
-          : null,
-      ...(fed === null
-        ? {}
-        : {
-            feedback: {
-              message: handNote === null ? fed.text : `${handNote}\n\n${fed.text}`,
-              digest,
-            },
-          }),
-    });
     const { token, hash } = mintSessionToken();
     const notReady = unready(account);
     if (notReady) return { kind: 'unready', refusal: notReady, providerSessionId: null };
@@ -2099,6 +2011,102 @@ export function createRunner(opts: RunnerOptions): Runner {
       releaseStart();
       return { kind: 'moved' };
     }
+    // A turn this session opens folds the builder's hand edits first, as a message into a warm
+    // session does; a turn already open folds nothing, since an edit then is kept with the turn.
+    // It runs after every refusal of the launch, so the fold's note goes with the session it was
+    // made for: a later launch would find nothing left to fold.
+    const handNote = pass && !openPassTurn(db, task.id) ? await foldForTurn(id) : null;
+    const stoppedFolding = stopRequested(ctl);
+    if (stoppedFolding) {
+      dispose();
+      releaseStart();
+      return { kind: 'stopped', reason: stoppedFolding, providerSessionId: savedResumeId };
+    }
+    const fed =
+      feedback === null
+        ? null
+        : resumeId === null
+          ? // A fresh session holds no picture: its start clears every mark an earlier one left.
+            outgoingMessage(
+              {
+                ...feedback,
+                files: feedback.files.map((file) => ({ ...file, inlineSent: false })),
+              },
+              0,
+              limits,
+            )
+          : outgoingMessage(
+              feedback,
+              threadInlineBytes(listTaskFileRows(db, task.id), limits),
+              limits,
+            );
+    const digest =
+      feedback === null || resumeId !== null
+        ? null
+        : buildThreadDigest(db, task, {
+            after:
+              contextPack.handoff && briefedFromHandoff(action, contextPack.handoff, evidence)
+                ? contextPack.handoff.createdAt
+                : null,
+            before: feedback.id,
+          });
+    const prompt = buildSessionPrompt({
+      provider,
+      inPass: pass !== null,
+      sandboxed: Boolean(opts.laneSandbox),
+      denials: denialsToTell(),
+      answeredCards: answeredCardsForTask(db, row.taskId),
+      renumbered: noticeBody(MIGRATIONS_RENUMBERED_NOTICE_KEY),
+      uncarried: uncarried === undefined ? null : uncarriedSaid(uncarried),
+      task,
+      claims: claims(),
+      action,
+      handoff: contextPack.handoff,
+      answer: permission?.prompt ?? contextPack.pendingAnswer,
+      contextPack,
+      step: {
+        index: row.stepIndex,
+        count: Math.max(row.steps.length, 1),
+        role: step.role,
+        personaName: step.personaName,
+        instructions: persona?.instructions ?? null,
+        skills,
+        // A Codex session has no plugin to load a skill from.
+        ...(provider === Provider.Codex
+          ? {
+              skillBodies: skills.flatMap((name) => {
+                const body = opts.skillBody(name);
+                if (body === null) {
+                  opts.logger.warn(
+                    { workstreamId: id, skill: name },
+                    'a skill has no text to brief a Codex session with',
+                  );
+                  return [];
+                }
+                return [body];
+              }),
+            }
+          : {}),
+        tools: step.tools,
+      },
+      priorResults,
+      previousResult: readOnly ? step.result : null,
+      earlierResults: step.earlier,
+      revisedBy: reviser ? { role: reviser.role, personaName: reviser.personaName } : null,
+      evidence,
+      recovery:
+        action.kind === 'resume'
+          ? { reason: action.reason, lastOp: latestToolOp(db, id)?.opId ?? null }
+          : null,
+      ...(fed === null
+        ? {}
+        : {
+            feedback: {
+              message: handNote === null ? fed.text : `${handNote}\n\n${fed.text}`,
+              digest,
+            },
+          }),
+    });
     let session: ReturnType<typeof insertSession>;
     try {
       session = opts.state.write((ctx) => {

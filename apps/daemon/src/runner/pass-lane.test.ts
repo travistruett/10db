@@ -15,6 +15,7 @@ import {
 import {
   abandonPassAndBatch,
   acquireClaims,
+  getAccountRow,
   getPass,
   getTask,
   getWorkstreamRow,
@@ -32,6 +33,7 @@ import {
   leavePass,
   listWorkstreams,
   openPassTurn,
+  patchAccount,
   patchProject,
   patchWorkstream,
   setAbandonStep,
@@ -398,6 +400,32 @@ describe("the builder's hand edits before a turn that starts a session", () => {
 
     expect(engine.adapter.prompts[1]?.prompt).toContain(`${note}\n- ${PAGE_FILE} +1 −1`);
     expect(handNotices(task)).toHaveLength(1);
+  });
+
+  it('leads the next session with the note when the launch that folded the edit went no further', async () => {
+    let identity: string | null = null;
+    const { id } = await openPage(
+      [[...turn('one\n', 'Tidied the form.'), { do: 'await_message', contains: 'never sent' }]],
+      'Make the form tidy',
+      () => {
+        mkdirSync(join(engine.repoPath, dirname(PAGE_FILE)), { recursive: true });
+        writeFileSync(join(engine.repoPath, PAGE_FILE), 'edited before the first turn\n');
+        // The account is not ready: the launch gives its lane back before any session starts.
+        engine.state.write((ctx) => {
+          identity = getAccountRow(ctx.tx, engine.project.accountId).expectedIdentity;
+          patchAccount(ctx, engine.project.accountId, { expectedIdentity: null });
+        });
+      },
+    );
+    await waitFor(() => !engine.runner.isRunning(id) && row(id).state === 'QUEUED');
+    expect(engine.adapter.prompts).toEqual([]);
+
+    engine.state.write((ctx) => {
+      patchAccount(ctx, engine.project.accountId, { expectedIdentity: identity });
+    });
+    engine.launch(id);
+    await waitFor(isReady(id, 1));
+    expect(engine.adapter.prompts[0]?.prompt).toContain(`${note}\n- ${PAGE_FILE}`);
   });
 
   it('folds an edit made before the first turn into the page, and leads its message with it', async () => {
