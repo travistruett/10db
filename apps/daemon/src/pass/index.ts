@@ -11,4 +11,5 @@ export {
 } from './kept-work';
 export { PassFolderOffBranchError } from '../git';
 export { passFolderOn } from './folder';
+export { foldHandEdits, type HandEditFold } from './hand-edits';
 export { passView } from './view';

@@ -138,7 +138,7 @@ export function pageClaims(db: DbReader, project: ProjectDto, task: TaskDto): re
 }
 
 /** Whether a path is one of the task's page files. */
-function pageMatcher(project: ProjectDto, claims: readonly HeldClaim[]) {
+export function pageMatcher(project: ProjectDto, claims: readonly HeldClaim[]) {
   return (path: string): boolean => findClaimed([path], project, claims).length > 0;
 }
 
