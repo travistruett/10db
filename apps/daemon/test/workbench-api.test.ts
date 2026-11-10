@@ -10,11 +10,13 @@ import {
   PassClosePreviewDto,
   PassDto,
   PassOpenedDto,
+  PassPullRequestPreviewDto,
   PassSignOffDto,
   PassStartDto,
   PassTurnWithFilesDto,
   PassViewDto,
   ProjectDto,
+  TakeOutPreviewDto,
   TakeOutResultDto,
   TaskDto,
   TaskMessageDto,
@@ -687,6 +689,14 @@ describe('the Milestone 1 loop over HTTP, as the desktop sends it', () => {
     const log = await api().get(`/pass-turns/${second.id}/activity`, z.array(TurnActivityDto));
     expect(log.length).toBeGreaterThan(0);
 
+    // Open Pull Request's preview before anything is signed off, and after: the project has no origin.
+    const pullRequest = () =>
+      api().get(`/passes/${passId}/pull-request`, PassPullRequestPreviewDto);
+    expect(await pullRequest()).toMatchObject({
+      offered: false,
+      reason: 'Nothing is signed off yet: the pull request holds signed-off pages only',
+    });
+
     // Sign Off on the Ready page: its session stops and its work lands on the pass's branch.
     const signing = await send('POST', `/passes/${passId}/tasks/${billing}/sign-off`);
     expect(signing.status).toBe(202);
@@ -694,6 +704,10 @@ describe('the Milestone 1 loop over HTTP, as the desktop sends it', () => {
     await waitForAsync(async () => ((await page('billing')).signOff === 'done' ? true : undefined));
     // The folder is on the pass's branch, whose last commit now holds the page.
     expect(rawGit('show', 'HEAD:src/billing/page.tsx')).toBe('b');
+    expect(await pullRequest()).toMatchObject({
+      offered: false,
+      reason: 'demo has no origin, so the pass lands by its close alone',
+    });
 
     // An empty composer's Stop on the page still working.
     const home = await waitForAsync(async () => {
@@ -703,7 +717,10 @@ describe('the Milestone 1 loop over HTTP, as the desktop sends it', () => {
     expect((await send('POST', `/tasks/${home.taskId}/stop`)).status).toBe(204);
     expect(typeof (await page('home')).turn?.endedAt).toBe('string');
 
-    // Take Out… keeps every shared change.
+    // Take Out… reads the page's shared changes first; it has none, and keeps every one.
+    expect(
+      await api().get(`/passes/${passId}/tasks/${home.taskId}/take-out`, TakeOutPreviewDto),
+    ).toEqual({ shared: [] });
     const takeOut = await send('POST', `/passes/${passId}/tasks/${home.taskId}/take-out`, {
       shared: [],
     });
