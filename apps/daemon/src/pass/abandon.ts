@@ -32,6 +32,7 @@ import {
   type WriteContext,
 } from '@10db/db';
 import { jobKey, JobQueue } from '../delivery';
+import { shellWord } from '../git';
 import { flagCard, withdrawCard } from '../inbox';
 import { PASS_CARD_DETAIL, PASS_CARD_KIND, PassCardKind, withdrawFolderCard } from './folder';
 import { passBranch, readKeptRef, type PassWorkDeps } from './kept-work';
@@ -143,7 +144,7 @@ export function raiseAbandonCard(
   const where = input.on ?? 'a detached HEAD';
   const parts = [
     stays
-      ? `Your folder stays on ${branch}, which holds what the pass landed. Merge it into ${pass.returnBranch} with \`git merge ${branch}\`, or move to ${pass.returnBranch}, which takes the landed pages off the screen and keeps them on ${branch}.`
+      ? `Your folder stays on ${branch}, which holds what the pass landed. Merge it into ${pass.returnBranch} with \`git merge ${shellWord(branch)}\`, or move to ${pass.returnBranch}, which takes the landed pages off the screen and keeps them on ${branch}.`
       : `Your folder is on ${where}.`,
   ];
   if (input.left.length > 0)

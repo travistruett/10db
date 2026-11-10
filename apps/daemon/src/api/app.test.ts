@@ -125,6 +125,7 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     openedTurn: track('openedTurn'),
     passClosePreview: track('passClosePreview'),
     closePass: track('closePass'),
+    continueClose: track('continueClose'),
     signOffPage: track('signOffPage'),
     cancelSignOff: track('cancelSignOff'),
     passPullRequest: track('passPullRequest'),
@@ -858,6 +859,13 @@ describe('team, routing and benchmark routes', () => {
       path: `/passes/${mintId('Pass')}/close`,
       body: { token: 't', pages: [], files: [], shared: [] },
       service: 'closePass',
+    },
+    {
+      name: 'POST /passes/:id/close/continue',
+      method: 'POST',
+      path: `/passes/${mintId('Pass')}/close/continue`,
+      body: undefined,
+      service: 'continueClose',
     },
     {
       name: 'POST /passes/:id/tasks/:id/sign-off',

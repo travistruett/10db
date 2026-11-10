@@ -1,5 +1,6 @@
 import {
   EventType,
+  PassState,
   PullRequestChecks,
   PullRequestMergeBlocked,
   PullRequestState,
@@ -14,6 +15,7 @@ import {
   clearBatchNotice,
   findOpenByFoldKey,
   getBatch,
+  getPass,
   listProjects,
   listWatchedPullRequests,
   patchBatch,
@@ -1052,8 +1054,9 @@ export function createPrWatch(input: {
         ctx.state.write((write) => {
           recordPassPullRequest(write, root, passId, answer(root, read));
         });
-        // A local project's pass stacked on this one follows its record's merge or close.
-        if (read !== null) queuePassSettle(ctx, passId, settleClosedPass);
+        // A local project's settled pass: one stacked on it follows its record's merge or close.
+        if (read !== null && getPass(ctx.state.db, passId).state === PassState.Settled)
+          queuePassSettle(ctx, passId, settleClosedPass);
         continue;
       }
       // The checks GitHub requires of an open pull request's base. A read that fails leaves what the

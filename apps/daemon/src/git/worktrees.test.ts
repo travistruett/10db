@@ -235,6 +235,16 @@ describe('removeWorktree', () => {
     expect(pins.get(real(at('a')))).toBeUndefined();
   });
 
+  it('answers absent to the second of two removals asked at once', async () => {
+    await add('a');
+    const both = await Promise.all([
+      git.removeWorktree(main(), at('a')),
+      git.removeWorktree(main(), at('a')),
+    ]);
+    expect(both).toEqual(['removed', 'absent']);
+    expect(await listed()).toEqual([real(main())]);
+  });
+
   it("answers absent for a path git doesn't list and that is gone", async () => {
     await expect(git.removeWorktree(main(), at('nothing'))).resolves.toBe('absent');
   });

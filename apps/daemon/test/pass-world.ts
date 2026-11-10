@@ -1,13 +1,23 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { PassTurnDto, ProjectInput, TaskDto, WorkstreamId } from '@10db/contracts';
+import {
+  PASS_SIGN_OFF_CHOICE,
+  WorkstreamState,
+  type PassTurnDto,
+  type ProjectInput,
+  type TaskDto,
+  type WorkstreamId,
+} from '@10db/contracts';
 import {
   createStore,
   endPassTurn,
   getTask,
+  getWorkstreamRow,
+  insertInboxItem,
   insertPassTurn,
   openDatabase,
   openPassTurn,
+  transitionWorkstream,
 } from '@10db/db';
 import {
   createDeliveryJobs,
@@ -54,6 +64,8 @@ export interface PassWorld {
   startTurn(task: TaskDto): PassTurnDto;
   /** Ends the turn as Ready. */
   endTurn(turn: PassTurnDto): void;
+  /** The page's run waits on the builder with an open `check` item, as a Ready page does. */
+  ready(task: TaskDto): void;
   /**
    * What a daemon started again on the same database and folder works with: a new connection to the
    * database file, and a new event bus, inbox, job queue and git, so nothing the last one held in
@@ -73,6 +85,8 @@ export async function openPassWorld(
     readonly putBack?: PutBackKeptWork;
     /** Laid over the pass project's areas and hazards. */
     readonly project?: Partial<ProjectInput>;
+    /** The pass's page cap; else the default. */
+    readonly pageCap?: number;
   } = {},
 ): Promise<PassWorld> {
   const h = createDeliveryHarness({ ...PASS_PROJECT, ...opts.project });
@@ -91,7 +105,12 @@ export async function openPassWorld(
   const people = h.addTask('People: UI work', { areas: ['people'] });
   const opened = await openPass(
     h.ctx,
-    { projectId: h.project.id, name: 'Polish', taskIds: [settings.id, people.id] },
+    {
+      projectId: h.project.id,
+      name: 'Polish',
+      taskIds: [settings.id, people.id],
+      ...(opts.pageCap === undefined ? {} : { pageCap: opts.pageCap }),
+    },
     { leaseMs: 60_000, putBack: opts.putBack ?? nothingKept },
   );
   const reopened: (() => void)[] = [];
@@ -129,6 +148,35 @@ export async function openPassWorld(
       ),
     endTurn: (turn) => {
       h.state.write((c) => endPassTurn(c, turn.id, { ending: 'ready', replyBody: null }));
+    },
+    ready: (task) => {
+      const ws = runOf(task);
+      h.state.write((ctx) => {
+        // A page waiting on the builder runs again when a message starts its next turn.
+        const path =
+          getWorkstreamRow(ctx.tx, ws).state === WorkstreamState.WaitingHuman
+            ? [WorkstreamState.Running]
+            : [WorkstreamState.Starting, WorkstreamState.Running];
+        for (const to of path) transitionWorkstream(ctx, ws, { to, fence: null });
+        const item = insertInboxItem(ctx, {
+          projectId: h.project.id,
+          kind: 'check',
+          title: `Ready: ${task.title}`,
+          body: 'Ready.',
+          options: [{ label: PASS_SIGN_OFF_CHOICE, description: 'The page is right' }],
+          recommendation: null,
+          category: 'product',
+          urgency: 'normal',
+          detail: null,
+          foldKey: null,
+          targets: [{ workstreamId: ws, sessionId: null }],
+        });
+        transitionWorkstream(ctx, ws, {
+          to: WorkstreamState.WaitingHuman,
+          fence: null,
+          patch: { nextAction: { kind: 'pass_review', inboxId: item.id } },
+        });
+      });
     },
     restart: () => {
       const db = openDatabase(h.store.db.$client.name);

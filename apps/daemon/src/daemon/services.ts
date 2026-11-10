@@ -92,8 +92,10 @@ import {
   runNext,
   setRoutingRules,
   setTeam,
+  takeOffer,
   undoHazardAddition,
   offeredText,
+  offerToAgent,
 } from '@10db/db';
 import { MoveCause, type AccountMoves, type AccountService } from '../accounts';
 import type { Clock } from '../clock';
@@ -193,7 +195,7 @@ export function createServices(deps: {
   /** A pass's pull request: its preview, and Open Pull Request. */
   readonly passPullRequests: Pick<PassPullRequests, 'preview' | 'open'>;
   /** A pass's close: its lists and its confirm, which queues the close in the delivery queue. */
-  readonly closes: Pick<PassCloses, 'preview' | 'close'>;
+  readonly closes: Pick<PassCloses, 'preview' | 'close' | 'continueClose'>;
   /** Signs off a Ready page in the project's delivery queue, stopping its lane through the runner. */
   readonly signOff: (passId: PassId, taskId: TaskId) => PassSignOffDto;
   /** Cancels a page's waiting sign-off. */
@@ -474,6 +476,7 @@ export function createServices(deps: {
       ),
     passClosePreview: (passId) => deps.closes.preview(passId),
     closePass: (passId, input) => deps.closes.close(passId, input),
+    continueClose: (passId) => deps.closes.continueClose(passId),
     signOffPage: (passId, taskId) => deps.signOff(passId, taskId),
     cancelSignOff: (passId, taskId) => {
       deps.cancelSignOff(passId, taskId);
@@ -498,7 +501,19 @@ export function createServices(deps: {
               ?.text ?? null);
       const text = onThread ?? inHeader;
       if (text === null) throw new ConflictError('That notice offers nothing to send to the agent');
-      return deps.thread.postTaskMessage(taskId, { text, pictures: [] });
+      // A thread notice is sent once: its offer is taken as it is sent, and put back if the send fails.
+      const offered = message.success && onThread !== null ? message.data : null;
+      if (offered !== null && deps.state.write((ctx) => takeOffer(ctx, offered)) === null)
+        throw new ConflictError('That notice was sent to the agent already');
+      try {
+        return await deps.thread.postTaskMessage(taskId, { text, pictures: [] });
+      } catch (error) {
+        if (offered !== null)
+          deps.state.write((ctx) => {
+            offerToAgent(ctx, offered, text);
+          });
+        throw error;
+      }
     },
     async stopPage(taskId) {
       const task = getTask(db, taskId);

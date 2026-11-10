@@ -322,6 +322,19 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
       return { url };
     }
     const url = found.url;
+    // GitHub may have merged it before the watch read it: a merged pull request takes no more
+    // commits, so what the branch holds since goes to a follow-on pull request.
+    if ((await deps.gh.prView({ repo, ref: url }, call))?.state === PrState.Merged) {
+      // Merged as the branch is now: nothing is left for a follow-on, and the watch marks it merged.
+      await deps.git.fetch(project.repoPath, batch.baseBranch, networkCall(deps, signal));
+      const base = await deps.git.trackingTip(project.repoPath, batch.baseBranch);
+      if (
+        base !== null &&
+        (await deps.git.filesChangedBetween(project.repoPath, base, sha)).length === 0
+      )
+        return { url };
+      return followOn(pass.id, signal, true);
+    }
     await deps.gh.prEditBody({ repo, url, bodyFile }, call);
     if (i.ready && found.draft !== false) {
       await deps.gh.prReady({ repo, url }, call);
@@ -332,9 +345,22 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
     return { url };
   }
 
-  async function openFollowOnPr(
+  function openFollowOnPr(passId: PassId, signal: AbortSignal): Promise<{ url: string } | null> {
+    return followOn(
+      passId,
+      signal,
+      getPassPullRequest(db, passId)?.state === PullRequestState.Merged,
+    );
+  }
+
+  /**
+   * Pushes the pass's branch and opens a pull request for what it holds beyond the one that merged
+   * (`merged`), which it forgets first; with none merged, ensures the one it has.
+   */
+  async function followOn(
     passId: PassId,
     signal: AbortSignal,
+    merged: boolean,
   ): Promise<{ url: string } | null> {
     const { pass, batch, project } = placeOf(passId);
     const branch = batch.branch;
@@ -357,12 +383,13 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
         theirs: base,
         message: `Merge ${batch.baseBranch}, which holds the merged pull request of pass "${pass.name}", into ${branch}`,
       });
-    await pushPassBranch(passId, signal);
-    // The merged pull request is history: the follow-on takes its place on the batch.
-    if (getPassPullRequest(db, passId)?.state === PullRequestState.Merged)
+    // The merged pull request is history: the follow-on takes its place on the batch. Forgotten
+    // before the push, so a restart between them still opens the follow-on.
+    if (merged)
       deps.state.write((w) => {
         forgetPassPullRequest(w, passId);
       });
+    await pushPassBranch(passId, signal);
     return ensurePassPr({ passId, ready: true }, signal);
   }
 

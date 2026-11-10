@@ -75,10 +75,12 @@ const SHARED = 'Settings: a shared button';
 const SHARED_FILE = 'src/button.ts';
 
 let data: { path: string; cleanup(): void };
+let worktrees: { path: string; cleanup(): void };
 let repo: { path: string; cleanup(): void };
 let daemon: RunningDaemon;
 beforeEach(async () => {
   data = tempDir('pass api');
+  worktrees = tempDir('pass api worktrees');
   repo = createTempRepo();
   daemon = await startDaemon();
 });
@@ -88,6 +90,7 @@ function startDaemon(): Promise<RunningDaemon> {
   return startDaemonWithProfiles({
     sandbox: null,
     dataDir: data.path,
+    worktreeRoot: worktrees.path,
     port: 0,
     adapter: new FakeAdapter({
       [SHARED]: [
@@ -140,6 +143,7 @@ afterEach(async () => {
   await daemon.stop();
   repo.cleanup();
   data.cleanup();
+  worktrees.cleanup();
 });
 
 const api = () => apiClient(daemon.url, daemon.token);
@@ -327,12 +331,13 @@ const PAGES: ProjectInput['areas'] = [
   { name: 'src', globs: ['src/**'], role: 'shared' },
 ];
 
-async function projectWith(areas: ProjectInput['areas']) {
+async function projectWith(areas: ProjectInput['areas'], extra: Partial<ProjectInput> = {}) {
   return api().post('/projects', ProjectDto, {
     name: 'demo',
     repoPath: repo.path,
     gateCommand: null,
     areas,
+    ...extra,
   });
 }
 
@@ -479,15 +484,15 @@ describe('POST /projects/:projectId/passes', () => {
 });
 
 /** A pass opened over HTTP on one page whose task is `title`, its first message sent. */
-async function openedPage(title: string) {
-  const project = await projectWith(PAGES);
-  const task = await taskOn(project, title, ['settings']);
-  const opened = await api().post(`/projects/${project.id}/passes`, PassOpenedDto, {
+async function openedPage(title: string, project: Partial<ProjectInput> = {}) {
+  const made = await projectWith(PAGES, project);
+  const task = await taskOn(made, title, ['settings']);
+  const opened = await api().post(`/projects/${made.id}/passes`, PassOpenedDto, {
     name: 'Polish',
     taskIds: [task.id],
     firstMessage: 'Tidy the form',
   });
-  return { project, task, pass: opened.pass };
+  return { project: made, task, pass: opened.pass };
 }
 
 async function postMessage(task: TaskDto, text: string, path = 'thread') {
@@ -706,6 +711,44 @@ describe('a closing pass at start-up', () => {
     expect(rawGit('symbolic-ref', '--short', 'HEAD')).toBe('main');
     expect(existsSync(join(repo.path, PAGE_FILE))).toBe(false);
     expect(rawGit('show', `refs/10db/kept/${task.id}:${PAGE_FILE}`)).toBe('half');
+  });
+});
+
+describe('a closing pass whose scratch gate a restart cut short', () => {
+  it('runs the gate once, after start-up recovery, with no card for its worktree or branch', async () => {
+    const first = join(data.path, 'first-gate');
+    const runs = join(data.path, 'gate-runs');
+    // The first daemon's gate says where its scratch worktree is and waits to be stopped; the next
+    // one records that it ran and finished.
+    const { task, pass } = await openedPage(WORKING, {
+      delivery: 'pull_request',
+      gateCommand: `if [ ! -e '${first}' ]; then pwd > '${first}'; sleep 60; fi; echo ran >> '${runs}'; sleep 1; echo done >> '${runs}'`,
+    });
+    await waitFor(() => existsSync(join(repo.path, PAGE_FILE)));
+    const shown = await api().get(`/passes/${pass.id}/close`, PassClosePreviewDto);
+    const res = await post(`/passes/${pass.id}/close`, {
+      token: shown.token,
+      pages: [{ taskId: task.id, choice: 'take_out' }],
+      files: [],
+      shared: [],
+    });
+    expect(res.status).toBe(200);
+    await waitFor(() => existsSync(first) && readFileSync(first, 'utf8').trim() !== '', 30_000);
+    const scratch = readFileSync(first, 'utf8').trim();
+    await daemon.stop();
+    // The worktree the stopped gate's crash would have left: locked with the pass's batch, on its
+    // scratch branch.
+    rawGit('worktree', 'add', '-q', '-b', `10db/gate-${pass.id.slice(-6)}`, scratch, pass.startSha);
+    rawGit('worktree', 'lock', '--reason', `10db ${pass.batchId}`, scratch);
+
+    daemon = await startDaemon();
+
+    await waitFor(() => getPass(daemon.state.db, pass.id).state === 'SETTLED', 60_000);
+    expect(readFileSync(runs, 'utf8').split('\n').filter(Boolean)).toEqual(['ran', 'done']);
+    expect(
+      listInbox(daemon.state.db, {}).filter((i) => `${i.title} ${i.body}`.includes('gate-')),
+    ).toEqual([]);
+    expect(existsSync(scratch)).toBe(false);
   });
 });
 

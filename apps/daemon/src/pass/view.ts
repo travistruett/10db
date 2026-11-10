@@ -2,7 +2,6 @@ import {
   AreaRole,
   InboxKind,
   InboxState,
-  PASS_SIGN_OFF_CHOICE,
   passHeldAreas,
   PassSignOff,
   SessionActivityData,
@@ -37,6 +36,7 @@ import {
   openHolds,
   type DbReader,
 } from '@10db/db';
+import { signingOff } from './sign-off';
 
 // Workbench spec §4.3, §4.5, §6.1: what the Workbench reads of a pass, built from its rows alone.
 
@@ -74,22 +74,8 @@ function failureOf(db: DbReader, run: WorkstreamDto | null): PassPageDto['failur
 }
 
 /**
- * The builder's Sign Off closed the page's Ready card and the page has not landed yet. A Sign Off that
- * does not land opens the card again, so the page reads Ready again.
- */
-function signOffUnderWay(db: DbReader, run: WorkstreamDto): boolean {
-  if (run.nextAction.kind !== 'pass_review') return false;
-  const item = getInboxItem(db, run.nextAction.inboxId);
-  return (
-    item.kind === InboxKind.Check &&
-    item.state === InboxState.Resolved &&
-    item.answer?.choice === PASS_SIGN_OFF_CHOICE
-  );
-}
-
-/**
- * Where the page is in its sign-off, as its rows say: waiting on another page's hold, landing while
- * its Ready card is closed by a Sign Off, or done once its run is.
+ * Where the page is in its sign-off, as its rows say: waiting on another page's hold, signing off while
+ * its Ready item is closed by its Sign Off, or done once its run is.
  */
 function signOffOf(
   db: DbReader,
@@ -101,10 +87,10 @@ function signOffOf(
       signOff: PassSignOff.Waiting,
       waitsFor: { taskId: wait.waitsForTaskId, title: getTask(db, wait.waitsForTaskId).title },
     };
-  if (run === null) return { signOff: PassSignOff.None, waitsFor: null };
-  if (run.state === WorkstreamState.Done) return { signOff: PassSignOff.Done, waitsFor: null };
+  if (run !== null && signingOff(db, run.id))
+    return { signOff: PassSignOff.SigningOff, waitsFor: null };
   return {
-    signOff: signOffUnderWay(db, run) ? PassSignOff.SigningOff : PassSignOff.None,
+    signOff: run?.state === WorkstreamState.Done ? PassSignOff.Done : PassSignOff.None,
     waitsFor: null,
   };
 }

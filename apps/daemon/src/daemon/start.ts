@@ -1441,8 +1441,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   };
   // Each open pass goes on from its rows: its folder card, a put-back, take-outs and sign-offs cut short.
   await resumePassWork(passTakeOuts);
-  // A close a restart cut short goes on from its last step.
-  passCloses.resume();
   // The previous daemon's claim waits ended with it; their cards would name holders nobody waits for.
   withdrawStaleClaimWaits(state, inbox);
   accountPauses.restore();
@@ -1472,6 +1470,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const unsubscribePassSettles = subscribePassSettles(bus, delivery);
   const unsubscribeKeptWork = subscribeKeptWorkLanding(bus, delivery);
   resumePassSettles(delivery);
+  // A close a restart cut short goes on from its last step, once recovery has swept what the stopped
+  // daemon left: its scratch gate's worktree and process are its own from here.
+  passCloses.resume();
   // Outside the delivery job queues: a slow or offline gh never holds a cut or a ship.
   const prWatch = createPrWatch({
     ctx: delivery,

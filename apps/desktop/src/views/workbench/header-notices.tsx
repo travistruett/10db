@@ -11,7 +11,11 @@ import {
 import { Button, Group, Menu, Stack, Text } from '@mantine/core';
 import { IconAlertTriangle, IconInfoCircle } from '@tabler/icons-react';
 import { useId, useState } from 'react';
-import { useAnswerPassCard, useSendToAgent } from '../../daemon/pass-close-queries';
+import {
+  useAnswerPassCard,
+  useContinueClose,
+  useSendToAgent,
+} from '../../daemon/pass-close-queries';
 
 // Workbench spec §5.3, §5.5, §8.3, D19, D24: what the pass's header says about its pull request and
 // checks. Nothing here reaches an agent by itself: Send to Agent sends a notice only to the page the
@@ -49,6 +53,9 @@ interface NoticeRowProps {
   readonly canSend: boolean;
   /** A Retarget card is answered while the pass is open or closed, never mid-close or mid-abandon. */
   readonly canRetarget: boolean;
+  /** The pass is closing, so a close that stopped can go on from where it stopped. */
+  readonly closing: boolean;
+  readonly passId: PassViewDto['pass']['id'];
 }
 
 /** A notice's first line, and the lines after it (a failed gate's log tail) or null for one line. */
@@ -59,16 +66,18 @@ function noticeLines(text: string): { readonly first: string; readonly rest: str
   return { first: text.slice(0, end), rest: rest.trim() === '' ? null : rest };
 }
 
-function NoticeRow({ notice, pages, inbox, canSend, canRetarget }: NoticeRowProps) {
+function NoticeRow(props: NoticeRowProps) {
+  const { notice, pages, inbox, canSend, canRetarget, closing, passId } = props;
   const send = useSendToAgent();
   const answer = useAnswerPassCard();
+  const continuing = useContinueClose();
   const card = retargetCard(notice, inbox);
   const color = COLOR[notice.kind];
   const Icon = color === 'red' ? IconAlertTriangle : IconInfoCircle;
   const sentTo = send.isSuccess
     ? pages.find((page) => page.taskId === send.variables.taskId)?.area
     : undefined;
-  const failure = send.error?.message ?? answer.error?.message ?? null;
+  const failure = send.error?.message ?? answer.error?.message ?? continuing.error?.message ?? null;
   const { first, rest } = noticeLines(notice.text);
   const [more, setMore] = useState(false);
   const restId = useId();
@@ -109,6 +118,20 @@ function NoticeRow({ notice, pages, inbox, canSend, canRetarget }: NoticeRowProp
             {`Sent to ${sentTo}`}
           </Text>
         )}
+        {closing && notice.kind === PassNoticeKind.Close ? (
+          // The close's notice says it stopped; Close Pass… is not offered mid-close, so it goes on here.
+          <Button
+            variant="default"
+            size="xs"
+            loading={continuing.isPending}
+            style={{ flex: 'none' }}
+            onClick={() => {
+              continuing.mutate(passId);
+            }}
+          >
+            Continue Close
+          </Button>
+        ) : null}
         {card === null ? null : (
           <Button
             variant="default"
@@ -199,6 +222,8 @@ export function HeaderNotices({ view, inbox }: HeaderNoticesProps) {
           pages={view.pages}
           inbox={inbox}
           canSend={state === PassState.Open}
+          closing={state === PassState.Closing}
+          passId={view.pass.id}
           canRetarget={state === PassState.Open || state === PassState.Closed}
         />
       ))}

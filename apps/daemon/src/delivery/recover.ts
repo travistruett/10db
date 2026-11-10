@@ -182,9 +182,10 @@ export async function recoverBatches(deps: {
   }
 
   // 2. Orphaned shipping gates, and the gate a Workbench pass runs on its pushed tip while it is open
-  // (or failed, after a close's gate failed).
+  // (or failed, after a close's gate failed, or abandoned, by an Abandon start-up went on with
+  // before this step).
   for (const batch of listBatches(db, {
-    states: [BatchState.Shipping, BatchState.Open, BatchState.Failed],
+    states: [BatchState.Shipping, BatchState.Open, BatchState.Failed, BatchState.Abandoned],
   })) {
     if (batch.state !== BatchState.Shipping && batch.passId == null) continue;
     const row = getBatchRow(db, batch.id);

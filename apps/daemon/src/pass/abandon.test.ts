@@ -8,6 +8,7 @@ import {
   type WorkstreamId,
 } from '@10db/contracts';
 import {
+  activeClaims,
   getBatch,
   getPass,
   getTask,
@@ -398,6 +399,10 @@ describe('abandonPass', () => {
         'edited before the pass\nand in the turn',
       );
       expect(w.h.git$('symbolic-ref', '--short', 'HEAD')).toBe('main');
+      // No hold stays open on an abandoned pass: one its turn left is let go, its files left as
+      // they are.
+      expect(openHolds(db, w.opened.pass.id)).toEqual([]);
+      expect(activeClaims(db, w.runOf(w.settings))).toEqual([]);
       // An abandoned pass waits for no folder.
       expect(
         listInbox(db, { states: [InboxState.Open] }).filter(

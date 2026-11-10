@@ -11,6 +11,7 @@ import {
   SharedChoiceKind,
   WorkstreamState,
   type PassCloseAnswerDto,
+  type PassCloseContinueDto,
   type PassClosePreviewDto,
   type PassCloseRequest,
   type PassDto,
@@ -23,7 +24,6 @@ import {
 import {
   clearPassNotice,
   closePass,
-  deleteSignOffWait,
   getBatch,
   getPass,
   getPassProgress,
@@ -32,7 +32,6 @@ import {
   listPassTasks,
   listPassesIn,
   listSharedChanges,
-  listSignOffWaits,
   maxGrantedSeq,
   openHolds,
   reopenClosingPass,
@@ -65,7 +64,7 @@ import {
   mergedWhileOpen,
 } from './merged-open';
 import { keepOrLetGo, landOnBranch, landSharedChanges } from './shared-chain';
-import { signOffSteps, SignOffFrom } from './sign-off';
+import { endSignOffWaits, signOffSteps, SignOffFrom } from './sign-off';
 import { takeOutSteps, TakeOutWithin, type TakeOutDeps } from './take-out';
 import { unfinishedPages } from './unowned';
 
@@ -110,6 +109,7 @@ export type CloseDeps = TakeOutDeps & {
     readonly projectId: ProjectId;
     readonly name: string;
     readonly taskIds: readonly TaskId[];
+    readonly pageCap: number;
   }) => Promise<{ readonly pass: PassDto }>;
 };
 
@@ -465,6 +465,12 @@ export interface PassCloses {
    * the plan it was confirmed with, whatever the request.
    */
   close(passId: PassId, request: PassCloseRequest): Promise<PassCloseAnswerDto>;
+  /**
+   * `POST /passes/:passId/close/continue`: the close of a closing pass goes on from its recorded step,
+   * on the plan it was confirmed with (a job still running runs once more after it ends). Refused
+   * (409) for a pass that is not closing.
+   */
+  continueClose(passId: PassId): PassCloseContinueDto;
   /** Raises the abort of the pass's close job and waits for it to stop. */
   abort(passId: PassId): Promise<void>;
   /**
@@ -481,10 +487,22 @@ export interface PassCloses {
 
 export function createPassCloses(deps: CloseDeps): PassCloses {
   const db = deps.state.db;
-  const running = new Map<PassId, { abort: AbortController; done: Promise<void> }>();
+  const running = new Map<
+    PassId,
+    { abort: AbortController; done: Promise<void>; again: boolean }
+  >();
 
+  /**
+   * Runs the pass's close job. Asked while it runs (a Close Pass as it stops on an error, or a
+   * merged close written after its gate reopened the pass), it runs once more after it ends, while
+   * the pass is still closing.
+   */
   function run(passId: PassId): void {
-    if (running.has(passId)) return;
+    const current = running.get(passId);
+    if (current) {
+      current.again = true;
+      return;
+    }
     const pass = getPass(db, passId);
     const abort = new AbortController();
     const done = new Promise<void>((resolve) => {
@@ -523,20 +541,22 @@ export function createPassCloses(deps: CloseDeps): PassCloses {
               });
             }
           } finally {
+            const again = running.get(passId)?.again === true;
             running.delete(passId);
             resolve();
+            if (again && getPass(db, passId).state === PassState.Closing) run(passId);
           }
         },
       );
     });
-    running.set(passId, { abort, done });
+    running.set(passId, { abort, done, again: false });
   }
 
   function closeMerged(passId: PassId): void {
     const wrote = deps.state.write((ctx) => {
       if (!mergedWhileOpen(ctx.tx, passId)) return false;
       setClosePlan(ctx, passId, mergedClosePlan(ctx.tx, passId));
-      for (const wait of listSignOffWaits(ctx.tx, passId)) deleteSignOffWait(ctx, wait.taskId);
+      endSignOffWaits(ctx, passId);
       return true;
     });
     if (wrote) run(passId);
@@ -575,12 +595,24 @@ export function createPassCloses(deps: CloseDeps): PassCloses {
       const now = await closePreview(deps, passId);
       if (now.token !== request.token)
         return { outcome: 'changed', preview: now, changed: closeChanges(request, now) };
+      // The stop kept each page's turn and may have ended its run: what a page set to Sign Off Now
+      // needs, and whether it can be signed off, are read again from what the stop left.
+      checkCloseRequest(now, request, closePages(db, passId));
       deps.state.write((ctx) => {
         setClosePlan(ctx, passId, request);
-        for (const wait of listSignOffWaits(ctx.tx, passId)) deleteSignOffWait(ctx, wait.taskId);
+        endSignOffWaits(ctx, passId);
       });
       run(passId);
       return { outcome: 'closing', pass: getPass(db, passId) };
+    },
+    continueClose(passId) {
+      const pass = getPass(db, passId);
+      if (pass.state !== PassState.Closing)
+        throw new ConflictError(
+          `Pass "${pass.name}" is ${pass.state.toLowerCase()}: only a closing pass's close goes on`,
+        );
+      run(passId);
+      return { outcome: 'closing', pass };
     },
     async abort(passId) {
       const job = running.get(passId);
@@ -605,12 +637,21 @@ export function createPassCloses(deps: CloseDeps): PassCloses {
   };
 }
 
-/** The header notice of a close that stopped on an error: Close Pass or the next start goes on, or Abandon. */
+/**
+ * The header notice of a close that stopped on an error: Continue Close or the next start goes on, or,
+ * before its fast-forward, Abandon ends it. From step 7 the return branch may have moved, and an
+ * Abandon is refused.
+ */
 function noticeStuck(ctx: WriteContext, passId: PassId, error: unknown): void {
+  const step = getPassProgress(ctx.tx, passId).closeStep ?? 0;
+  const end =
+    step >= CloseStep.FastForwarded
+      ? `its fast-forward may have moved ${getPass(ctx.tx, passId).returnBranch}, so it can no longer be abandoned`
+      : 'Abandon Pass ends it';
   setPassNotice(ctx, passId, {
     id: CLOSE_NOTICE,
     kind: PassNoticeKind.Close,
-    text: `The close stopped: ${errorText(error)}. Close Pass goes on from where it stopped, as 10db does when it next starts; Abandon Pass ends it.`,
+    text: `The close stopped: ${errorText(error)}. Continue Close goes on from where it stopped, as 10db does when it next starts; ${end}.`,
     sendable: false,
     cardId: null,
     at: ctx.now,

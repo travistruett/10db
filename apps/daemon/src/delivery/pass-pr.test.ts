@@ -10,6 +10,7 @@ import {
 } from '@10db/contracts';
 import { AbandonStep } from '@10db/contracts';
 import {
+  abandonPassAndBatch,
   findFlowByName,
   setAbandonStep,
   setPassNotice,
@@ -29,7 +30,7 @@ import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery
 import { silentLogger } from '../log';
 import { systemProcesses } from '../recovery';
 import type { Git } from '../git';
-import { GhError } from '../github';
+import { GhError, PrState } from '../github';
 import { CompletionError } from '../sessions';
 import { createGateRunner } from '../verify';
 import { SANDBOXED, waitFor } from '../../test/fixtures';
@@ -245,6 +246,56 @@ describe('Open Pull Request', () => {
     expect(h.origin$('rev-parse', `refs/heads/${branch}`)).toBe(tip);
     expect(h.gh.prCreates()).toHaveLength(1);
     expect(h.gh.body(url)).toContain('- People page');
+  });
+
+  it('opens a follow-on pull request when GitHub merged the one it has before the watch read it', async () => {
+    setup();
+    const { passId, settings, people } = await openedPass();
+    signOff(settings, 'src/settings/page.tsx', 'signed off\n');
+    const signal = new AbortController().signal;
+    await prs.pushPassBranch(passId, signal);
+    const first = await prs.ensurePassPr({ passId, ready: false }, signal);
+    if (first === null) throw new Error('no pull request');
+    h.gh.setState(first.url, PrState.Merged);
+    signOff(people, 'src/people/page.tsx', 'people\n// signed\n');
+
+    await prs.pushPassBranch(passId, signal);
+    const next = await prs.ensurePassPr({ passId, ready: true }, signal);
+
+    expect(next?.url).not.toBe(first.url);
+    expect(getPassPullRequest(h.store.db, passId)?.url).toBe(next?.url);
+    expect(h.gh.prCreates()).toHaveLength(2);
+    // The merged pull request is neither edited nor marked ready: its branch's new commits are in no
+    // pull request but the follow-on.
+    expect(
+      h.gh.calls.filter(
+        (c) =>
+          (c.method === 'prReady' || c.method === 'prEditBody') &&
+          JSON.stringify(c.args).includes(first.url),
+      ),
+    ).toEqual([]);
+  });
+
+  it('opens no follow-on when GitHub merged the pull request as pushed, with nothing signed off since', async () => {
+    setup();
+    const { passId, settings } = await openedPass();
+    signOff(settings, 'src/settings/page.tsx', 'signed off\n');
+    const signal = new AbortController().signal;
+    await prs.pushPassBranch(passId, signal);
+    const first = await prs.ensurePassPr({ passId, ready: false }, signal);
+    if (first === null) throw new Error('no pull request');
+    const branch = getBatch(h.store.db, batchOf(passId)).branch ?? '';
+    // GitHub squash-merged it as pushed, before the watch read it.
+    const squash = h.origin$('commit-tree', '-p', 'main', '-m', 'squash', `${branch}^{tree}`);
+    h.origin$('update-ref', 'refs/heads/main', squash);
+    h.gh.setState(first.url, PrState.Merged);
+
+    await prs.pushPassBranch(passId, signal);
+    const again = await prs.ensurePassPr({ passId, ready: true }, signal);
+
+    expect(again?.url).toBe(first.url);
+    expect(h.gh.prCreates()).toHaveLength(1);
+    expect(getPassPullRequest(h.store.db, passId)?.url).toBe(first.url);
   });
 
   it('marks a failed gate in the header and the body, and the batch stays open', async () => {
@@ -766,9 +817,13 @@ describe('Open Pull Request', () => {
 
 describe('a restart during an Open Pull Request gate', () => {
   // Identifies the process with `ps`, which is setuid: no sandbox can run it.
-  it.skipIf(SANDBOXED)(
-    "reaps the gate the pass's open batch recorded and removes the scratch worktree and branch it left",
-    async () => {
+  it.skipIf(SANDBOXED).each([
+    { name: 'open', abandoned: false },
+    // An Abandon start-up went on with before recovery: the batch is ABANDONED by then.
+    { name: 'abandoned', abandoned: true },
+  ])(
+    "reaps the gate the pass's $name batch recorded and removes the scratch worktree and branch it left",
+    async ({ abandoned }) => {
       setup();
       const { passId, settings } = await openedPass();
       const tip = signOff(settings, 'src/settings/page.tsx', 'signed off\n');
@@ -787,6 +842,11 @@ describe('a restart during an Open Pull Request gate', () => {
         h.state.write((w) =>
           patchBatch(w, batchId, { gatePid: gate.pid, gatePidStart: gate.startedAt }),
         );
+        if (abandoned)
+          h.state.write((w) => {
+            setAbandonStep(w, passId, AbandonStep.Abandoning);
+            abandonPassAndBatch(w, passId);
+          });
 
         await recoverBatches({
           state: h.state,
@@ -802,7 +862,7 @@ describe('a restart during an Open Pull Request gate', () => {
         await gate.exited;
         await waitFor(() => !alive(gate.grandchildPid));
         expect(getBatchRow(h.store.db, batchId)).toMatchObject({
-          state: 'OPEN',
+          state: abandoned ? 'ABANDONED' : 'OPEN',
           gatePid: null,
           gatePidStart: null,
         });

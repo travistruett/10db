@@ -1,5 +1,6 @@
 import {
   PassCloseAnswerDto,
+  PassCloseContinueDto,
   PassClosePreviewDto,
   PassPullRequestDto,
   PassPullRequestPreviewDto,
@@ -210,6 +211,20 @@ export function useClosePass() {
       readJson(
         await client.passes[':passId'].close.$post({ param: { passId }, json: request }),
         PassCloseAnswerDto,
+      ),
+    onSuccess: refetch,
+  });
+}
+
+/** Continue Close: a close that stopped on an error goes on from its last finished step. */
+export function useContinueClose() {
+  const { client } = useDaemon();
+  const refetch = useRefetchPasses();
+  return useMutation({
+    mutationFn: async (passId: PassId) =>
+      readJson(
+        await client.passes[':passId'].close.continue.$post({ param: { passId } }),
+        PassCloseContinueDto,
       ),
     onSuccess: refetch,
   });
