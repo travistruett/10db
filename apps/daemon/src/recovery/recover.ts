@@ -1,5 +1,6 @@
 import {
   ACTIVE_STATES,
+  PassState,
   EventType,
   WORKSTREAM_FAILED_TITLE_PREFIX,
   WorkstreamFailure,
@@ -240,8 +241,11 @@ export async function recoverOnStartup(opts: {
           reason: 'recovered after restart',
         });
         // Workbench spec §4.3: a page's turn the restart cut short goes on, and its thread says so,
-        // once, in the write that queues it.
-        if (pass && openPassTurn(ctx.tx, row.taskId))
+        // once, in the write that queues it; a closing or abandoning pass takes no turn further.
+        if (
+          passOfWorkstream(ctx.tx, ws.id)?.state === PassState.Open &&
+          openPassTurn(ctx.tx, row.taskId)
+        )
           insertSystemNotice(ctx, row.taskId, RESUMED_AFTER_RESTART);
       }
     });

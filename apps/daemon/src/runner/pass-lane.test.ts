@@ -50,6 +50,7 @@ import {
   patchProject,
   patchWorkstream,
   setAbandonStep,
+  setClosePlan,
   type WorkstreamRow,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -1501,6 +1502,20 @@ describe('a pass page across a restart', () => {
     expect(engine.adapter.sent).toEqual([]);
     // The thread says the turn went on after the restart, once.
     expect(resumedNotes(task)).toBe(1);
+  });
+
+  it('writes no resumed line for a turn cut short while its pass was closing', async () => {
+    const { task, pass, id } = await openPage([working]);
+    await waitFor(wrote);
+    await restart(() => {
+      // The builder confirmed Close Pass just before the daemon died: the close stops the page.
+      engine.state.write((ctx) => {
+        setClosePlan(ctx, pass.id, { token: 't', pages: [], files: [], shared: [] });
+      });
+    });
+
+    expect(row(id).state).not.toBe('RUNNING');
+    expect(resumedNotes(task)).toBe(0);
   });
 
   it("starts a fresh session for a turn whose session cannot be resumed from that turn's message", async () => {
