@@ -36,6 +36,11 @@ export interface Shot {
   readonly overlayText: string | null;
   /** For `failed`: the navigation error or the status. */
   readonly reason: string | null;
+  /**
+   * The browser failed the load, not the app: refused, past the shot's own deadline, stuck, or given no
+   * route. Such a load says nothing about the page, so it never counts as a broken preview.
+   */
+  readonly cameraFailed: boolean;
 }
 
 export interface ShootInput {
@@ -77,6 +82,7 @@ export function refusedCamera(problem: string): PageCamera {
         landedUrl: null,
         overlayText: null,
         reason: problem,
+        cameraFailed: true,
       }),
     signIn: () => Promise.reject(new Error(problem)),
     status: () => ({ state: 'refused', problem }),

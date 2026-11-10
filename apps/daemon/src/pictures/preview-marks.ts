@@ -63,14 +63,17 @@ export interface RouteLoad {
   readonly reason: string | null;
 }
 
+/** One shot of the route, as its load is judged. */
+export type RouteShot = Omit<RouteLoad, 'route'> & { readonly cameraFailed: boolean };
+
 /**
  * The route's loads as one: broken when any shot was (the first broken shot's words), else clean when
- * any shot was, else elsewhere.
+ * any shot was, else elsewhere. A shot the browser itself failed is left out; null when none is left.
  */
-export function routeLoad(
-  route: string,
-  shots: readonly Omit<RouteLoad, 'route'>[],
-): RouteLoad | null {
+export function routeLoad(route: string, all: readonly RouteShot[]): RouteLoad | null {
+  const shots = all
+    .filter((s) => !s.cameraFailed)
+    .map((s) => ({ outcome: s.outcome, overlayText: s.overlayText, reason: s.reason }));
   const broken = shots.find(
     (s) => s.outcome === ShotOutcome.Overlay || s.outcome === ShotOutcome.Failed,
   );

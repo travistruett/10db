@@ -203,7 +203,11 @@ export function createPlaywrightCamera<B extends CameraBrowser>(
   });
   return {
     async shoot({ appUrl, route, viewport, theme, storageState, signal }) {
-      const failed = (reason: string, landedUrl: string | null = null): Shot => ({
+      const failed = (
+        reason: string,
+        landedUrl: string | null = null,
+        cameraFailed = false,
+      ): Shot => ({
         outcome: ShotOutcome.Failed,
         png: null,
         width: viewport.width,
@@ -211,9 +215,10 @@ export function createPlaywrightCamera<B extends CameraBrowser>(
         landedUrl,
         overlayText: null,
         reason,
+        cameraFailed,
       });
       const url = routeUrl(appUrl, route);
-      if (url === null) return failed(`${route} is not a route on ${appUrl}`);
+      if (url === null) return failed(`${route} is not a route on ${appUrl}`, null, true);
       // Aborted already: never wait for the browser, nor launch it.
       signal.throwIfAborted();
       const shot = host.use((browser, proxy) =>
@@ -247,6 +252,7 @@ export function createPlaywrightCamera<B extends CameraBrowser>(
               landedUrl: loaded.landedUrl,
               overlayText: outcome === ShotOutcome.Overlay ? loaded.overlayText : null,
               reason: null,
+              cameraFailed: false,
             };
           },
         ),
@@ -254,9 +260,9 @@ export function createPlaywrightCamera<B extends CameraBrowser>(
       try {
         return await shot;
       } catch (error) {
-        if (error instanceof DeadlineError) return failed(`the page ${settleLine}`);
+        if (error instanceof DeadlineError) return failed(`the page ${settleLine}`, null, true);
         if (error instanceof BrowserStuckError) {
-          return failed('the page would not close, so the browser was closed');
+          return failed('the page would not close, so the browser was closed', null, true);
         }
         throw error;
       }

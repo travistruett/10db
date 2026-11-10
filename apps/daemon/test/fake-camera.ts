@@ -14,7 +14,7 @@ export class FakeCamera implements PageCamera {
   /** The app's look: changes the bytes a clean shot answers. */
   version = 1;
   /** Outcomes to answer, in order, before answering clean. */
-  outcomes: ShotOutcome[] = [];
+  outcomes: (ShotOutcome | 'camera_failed')[] = [];
   /** What an `overlay` answer says the dev server's error overlay shows. */
   overlayText = 'Failed to compile';
   private browser: BrowserStatus = { state: 'ready', problem: null };
@@ -61,7 +61,10 @@ export class FakeCamera implements PageCamera {
         });
       });
     }
-    const outcome = this.outcomes.shift() ?? 'clean';
+    const next = this.outcomes.shift() ?? 'clean';
+    // The browser itself failed the load (refused, past its deadline, stuck), not the app.
+    const cameraFailed = next === 'camera_failed';
+    const outcome = cameraFailed ? 'failed' : next;
     const png =
       outcome === 'clean' || outcome === 'overlay'
         ? pngOfSize(input.viewport.width, input.viewport.height, this.version)
@@ -73,7 +76,12 @@ export class FakeCamera implements PageCamera {
       height: input.viewport.height,
       landedUrl: `${input.appUrl}${input.route}`,
       overlayText: outcome === 'overlay' ? this.overlayText : null,
-      reason: outcome === 'failed' ? 'HTTP 500' : null,
+      reason: cameraFailed
+        ? 'the page did not settle within 60 s'
+        : outcome === 'failed'
+          ? 'HTTP 500'
+          : null,
+      cameraFailed,
     };
   }
   signIn(input: { url: string }): Promise<never> {

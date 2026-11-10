@@ -30,6 +30,7 @@ import { grantSharedHold, passView } from '../pass';
 import { createGateRunner } from '../verify';
 import type { ShotOutcome } from './camera';
 import { startPictures, type Pictures } from './index';
+import { routeLoad } from './preview-marks';
 
 // Workbench spec §8.2, §8.4, plan P3 (S3's shape): a page's turn that loads its route broken after a
 // clean load marks that page, offered to its agent and never sent; two turns running offer a separate
@@ -55,7 +56,7 @@ afterEach(async () => {
 
 /** A pass on Settings and People, its befores taken with `befores` as the camera answers them. */
 async function world(
-  befores: ShotOutcome[] = [],
+  befores: (ShotOutcome | 'camera_failed')[] = [],
   project: Partial<ProjectInput> = {},
 ): Promise<void> {
   dir = tempDir('preview');
@@ -97,7 +98,7 @@ let captures = 2;
  */
 async function turnLoads(
   task: TaskDto,
-  outcome: ShotOutcome,
+  outcome: ShotOutcome | 'camera_failed',
   changed = true,
 ): Promise<PassTurnDto> {
   cam.outcomes = [outcome];
@@ -213,6 +214,15 @@ describe('a page that breaks the preview', () => {
     expect(passView(w.h.store.db, w.opened.pass.id).preview).toBe('clean');
   });
 
+  it('opens no mark when the browser, not the app, failed the load', async () => {
+    captures = 2;
+    await world();
+    await turnLoads(w.settings, 'camera_failed');
+    expect(page(w.settings).preview).toBeNull();
+    expect(passView(w.h.store.db, w.opened.pass.id).preview).toBe('clean');
+    expect(previewNotices(w.settings)).toEqual([]);
+  });
+
   it('offers no copy on a project with no separate copies; the page stays marked', async () => {
     captures = 2;
     await world([], { delivery: 'local' });
@@ -247,5 +257,32 @@ describe('a page that breaks the preview', () => {
     await turnLoads(w.people, 'clean');
     expect(headerNotice()).toEqual([]);
     expect(passView(w.h.store.db, w.opened.pass.id).preview).toBe('clean');
+  });
+});
+
+describe('routeLoad', () => {
+  const shot = (outcome: ShotOutcome, cameraFailed = false) => ({
+    outcome,
+    overlayText: outcome === 'overlay' ? 'Failed to compile' : null,
+    reason: outcome === 'failed' ? 'HTTP 500' : null,
+    cameraFailed,
+  });
+  it.each([
+    { name: 'a clean load', shots: [shot('clean')], outcome: 'clean' },
+    { name: 'a failed document', shots: [shot('clean'), shot('failed')], outcome: 'failed' },
+    { name: 'an overlay', shots: [shot('overlay')], outcome: 'overlay' },
+    {
+      name: 'only a load the browser failed: nothing to judge',
+      shots: [shot('failed', true)],
+      outcome: null,
+    },
+    {
+      name: 'a load the browser failed beside a clean one',
+      shots: [shot('failed', true), shot('clean')],
+      outcome: 'clean',
+    },
+    { name: 'nothing loaded', shots: [], outcome: null },
+  ])('$name', ({ shots, outcome }) => {
+    expect(routeLoad('/settings', shots)?.outcome ?? null).toBe(outcome);
   });
 });

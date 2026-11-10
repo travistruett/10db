@@ -59,7 +59,7 @@ import type { PageCamera, Shot } from './camera';
 import { CAPTURE_IDLE, captureStep, type CaptureEvent, type CaptureRequest } from './capture-queue';
 import { keepScreen, sweepPictureTemps, type ScreenToKeep } from './picture-files';
 import { pageRoute, pictureRoutes, takesPictures, turnChangedSomething } from './picture-routes';
-import { judgePreview, routeLoad, type RouteLoad } from './preview-marks';
+import { judgePreview, routeLoad, type RouteShot } from './preview-marks';
 import { signIn, sweepLoginLogs, type SignInDeps, type SignInProject } from './sign-in';
 import { forgetStorageState, readStorageState, type StorageState } from './storage-state';
 
@@ -384,7 +384,7 @@ export function startPictures(deps: PicturesDeps): Pictures {
     let signedInAgain = false;
     const shots: Omit<ScreenToKeep, 'keptSha'>[] = [];
     const judged = pageRoute(project, task);
-    const loads: Omit<RouteLoad, 'route'>[] = [];
+    const loads: RouteShot[] = [];
     for (const target of targets) {
       const shoot = (state: StorageState | null): Promise<Shot> =>
         shootableAddress(project.id, port) === appUrl
@@ -418,7 +418,12 @@ export function startPictures(deps: PicturesDeps): Pictures {
         'took a picture',
       );
       if (target.route === judged)
-        loads.push({ outcome: shot.outcome, overlayText: shot.overlayText, reason: shot.reason });
+        loads.push({
+          outcome: shot.outcome,
+          overlayText: shot.overlayText,
+          reason: shot.reason,
+          cameraFailed: shot.cameraFailed,
+        });
       if (shot.outcome === 'elsewhere') {
         if (signedInAgain) {
           // Still elsewhere after a fresh sign-in: the route redirects by design for this task.
