@@ -406,6 +406,26 @@ describe('a pass stacked on a closed one (D24)', () => {
     },
   );
 
+  it("when the stacked branch holds the base by a merge that is not 10db's, the return branch is not moved", async () => {
+    const a = await closedPass();
+    const b = await stacked(a);
+    await closeStacked(a, b);
+    const squash = squashOnOrigin(a.tip);
+    h.origin$('update-ref', 'refs/heads/main', squash);
+    h.gh.setState(a.url, PrState.Merged);
+    // By hand: a merge with the base as its first parent, and main put on the base.
+    h.git$('fetch', '-q', 'origin', 'main');
+    const merge = h.git$('commit-tree', '-p', squash, '-p', b.tip, '-m', 'm', `${b.tip}^{tree}`);
+    h.git$('update-ref', `refs/heads/${b.branch}`, merge);
+    h.git$('switch', '-q', '--detach');
+    h.git$('update-ref', 'refs/heads/main', squash, b.tip);
+
+    await watchRound();
+
+    expect(h.git$('rev-parse', `refs/heads/${b.branch}`)).toBe(merge);
+    expect(h.git$('rev-parse', 'refs/heads/main')).toBe(squash);
+  });
+
   it('when the closed pass merges while a third pass is stacked on the closed one above it: the return branch stays where that pass started', async () => {
     const a = await closedPass();
     const b = await stacked(a);

@@ -157,14 +157,14 @@ async function takeBase(
   });
   // A stacked pass that has closed left its return branch at its tip: the branch follows the merge,
   // whose tree is the same, so its realignment still finds it at the tip. A rerun after a crash
-  // between the two finds the branch merged already, and the return branch at the merge's first
-  // parent. Not while a pass is stacked on the closed one: that pass's close moves the return
-  // branch from its own start, which is this tip.
+  // between the two finds the branch merged already: only a merge whose second parent is the base,
+  // as 10db's is, is followed, from its first parent. Not while a pass is stacked on the closed one:
+  // that pass's close moves the return branch from its own start, which is this tip.
   if (above.state === PassState.Closed && stackedAbove(ctx.state.db, above) === undefined) {
+    const parent = (n: 1 | 2) =>
+      ctx.git.commitAt(project.repoPath, `${merged.sha}^${String(n)}`).catch(() => null);
     const from =
-      merged.kind === 'merged'
-        ? before
-        : await ctx.git.commitAt(project.repoPath, `${merged.sha}^1`).catch(() => null);
+      merged.kind === 'merged' ? before : (await parent(2)) === base ? await parent(1) : null;
     if (from !== null)
       await ctx.git.moveBranchCas({
         repo: project.repoPath,
