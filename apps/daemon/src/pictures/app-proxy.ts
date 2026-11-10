@@ -66,14 +66,35 @@ export async function startAppProxy(options: AppProxyOptions = {}): Promise<AppP
         agent: false,
       },
       (answer) => {
-        res.writeHead(answer.statusCode ?? 502, answer.statusMessage, answer.headers);
+        const status = answer.statusCode ?? 0;
+        // The app's own reason phrase is dropped, and a status a response can't carry is no answer:
+        // nothing the app sends may throw here, where an uncaught error would stop the daemon.
+        if (status < 200 || status > 599) {
+          answer.destroy();
+          noAnswer();
+          return;
+        }
+        try {
+          res.writeHead(status, answer.headers);
+        } catch {
+          answer.destroy();
+          noAnswer();
+          return;
+        }
         answer.pipe(res);
       },
     );
-    upstream.on('error', () => {
-      if (!res.headersSent) res.writeHead(502, { 'content-length': '0' });
+    const noAnswer = (): void => {
+      if (!res.headersSent) {
+        try {
+          res.writeHead(502, { 'content-length': '0' });
+        } catch {
+          // Headers already on their way: ending is all that is left.
+        }
+      }
       res.end();
-    });
+    };
+    upstream.on('error', noAnswer);
     req.pipe(upstream);
   });
 

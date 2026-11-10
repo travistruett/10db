@@ -1,4 +1,5 @@
 import { createServer, request, type Server } from 'node:http';
+import { createServer as createNetServer, type Server as NetServer } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { startAppProxy, type AppProxy } from './app-proxy';
 
@@ -18,6 +19,26 @@ async function countingServer(
   const address = server.address();
   if (address === null || typeof address === 'string') throw new Error('no port');
   return { server, port: address.port, hits };
+}
+
+/** An app that answers every request with `answer`, written raw, and then does what `after` says. */
+async function rawApp(
+  answer: string,
+  after: 'close' | 'hold' = 'close',
+): Promise<{ server: NetServer; url: string }> {
+  const server = createNetServer((socket) => {
+    socket.once('data', () => {
+      socket.write(answer);
+      if (after === 'close') socket.end();
+    });
+    socket.on('error', () => undefined);
+  });
+  await new Promise<void>((resolve) => {
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const address = server.address();
+  if (address === null || typeof address === 'string') throw new Error('no port');
+  return { server, url: `http://127.0.0.1:${String(address.port)}` };
 }
 
 /** Sends `GET <target>` to the proxy in absolute form, as Chromium does. */
@@ -136,5 +157,28 @@ describe('the app proxy', () => {
     expect(got.status).toBe(403);
     expect((await tunnel(proxy.port, `127.0.0.1:${String(app.port)}`)).status).toBe(403);
     expect(app.hits).toEqual([]);
+  });
+
+  it.each([
+    ['a status below 100', 'HTTP/1.1 099 Odd\r\nContent-Length: 0\r\n\r\n', 502],
+    ['a status of 000', 'HTTP/1.1 000 Odd\r\nContent-Length: 0\r\n\r\n', 502],
+    // Its own reason phrase is dropped, so the answer passes without it.
+    [
+      'a control byte in the reason phrase',
+      'HTTP/1.1 200 O\u0001K\r\nContent-Length: 2\r\n\r\nok',
+      200,
+    ],
+  ])('never throws on %s, and keeps serving', async (_name, answer, status) => {
+    const bad = await rawApp(answer);
+    try {
+      proxy.allow(bad.url);
+      expect((await viaProxy(proxy.port, `${bad.url}/x`)).status).toBe(status);
+      proxy.allow(`http://127.0.0.1:${String(app.port)}`);
+      expect(
+        (await viaProxy(proxy.port, `http://127.0.0.1:${String(app.port)}/after`)).status,
+      ).toBe(200);
+    } finally {
+      bad.server.close();
+    }
   });
 });
