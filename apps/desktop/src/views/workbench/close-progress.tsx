@@ -86,7 +86,16 @@ export interface CloseProgressProps {
  * spoke each would chatter.
  */
 export function CloseProgress({ state, step, facts }: CloseProgressProps) {
-  const line = closeProgressLine(state, step, facts);
+  // Which pages the close takes out is settled once its sign-offs have landed. Each page taken out
+  // then leaves the view before the step is recorded, so the fact is held from there to the end.
+  const landed = state === PassState.Closing && step !== null && step >= CloseStep.Landed;
+  const [heldTakingOut, setHeldTakingOut] = useState<boolean | null>(null);
+  if (!landed && heldTakingOut !== null) setHeldTakingOut(null);
+  if (landed && heldTakingOut === null) setHeldTakingOut(facts.takingOut);
+  const line = closeProgressLine(state, step, {
+    ...facts,
+    takingOut: heldTakingOut ?? facts.takingOut,
+  });
   // The first line of this close or abandon, held until the pass is neither.
   const [announced, setAnnounced] = useState<string | null>(line);
   if (line === null && announced !== null) setAnnounced(null);

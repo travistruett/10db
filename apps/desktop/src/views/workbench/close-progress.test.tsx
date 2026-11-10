@@ -124,3 +124,36 @@ describe('CloseProgress', () => {
     expect(screen.getByText('Pushing…')).toBeTruthy();
   });
 });
+
+/** A close at its take-out, with a button that removes the last unfinished page from the pass. */
+function TakingOut() {
+  const [takingOut, setTakingOut] = useState(true);
+  return (
+    <>
+      <CloseProgress
+        state={PassState.Closing}
+        step={CloseStep.ScratchGated}
+        facts={{ ...PR, takingOut }}
+      />
+      <button
+        type="button"
+        onClick={() => {
+          setTakingOut(false);
+        }}
+      >
+        Take out the last page
+      </button>
+    </>
+  );
+}
+
+describe('CloseProgress while pages leave', () => {
+  it('still says it takes pages out once the last leaves, before the step is recorded', () => {
+    renderWithTheme(<TakingOut />);
+    const line = (): string | null =>
+      screen.getByText(/…$/, { ignore: '[role="status"]' }).textContent;
+    expect(line()).toBe('Taking out pages…');
+    fireEvent.click(screen.getByRole('button', { name: 'Take out the last page' }));
+    expect(line()).toBe('Taking out pages…');
+  });
+});
