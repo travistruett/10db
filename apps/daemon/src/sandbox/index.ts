@@ -19,12 +19,16 @@ export {
   type SweepReport,
 } from './stale-files';
 export {
+  createLaneProcessWatch,
   createLedgerSweep,
+  createProcessLedger,
+  LaneProcessFailure,
   reapLaneProcessLedgers,
+  removeProcessLedger,
   type LaneProcessSetup,
   type LedgerSweep,
 } from './lane-processes';
-export { systemProcessTable } from './process-table';
+export { systemProcessTable, type ProcessRow } from './process-table';
 export {
   claudeCodeTmpPath,
   codexLaneTempRoot,

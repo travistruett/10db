@@ -1,0 +1,140 @@
+import { createServer, request, type Server } from 'node:http';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { startAppProxy, type AppProxy } from './app-proxy';
+
+/** A loopback server that answers every request with its own name and counts what reached it. */
+async function countingServer(
+  name: string,
+): Promise<{ server: Server; port: number; hits: string[] }> {
+  const hits: string[] = [];
+  const server = createServer((req, res) => {
+    hits.push(`${req.method ?? ''} ${req.url ?? ''}`);
+    res.setHeader('content-type', 'text/plain');
+    res.end(`${name} ${req.url ?? ''}`);
+  });
+  await new Promise<void>((resolve) => {
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const address = server.address();
+  if (address === null || typeof address === 'string') throw new Error('no port');
+  return { server, port: address.port, hits };
+}
+
+/** Sends `GET <target>` to the proxy in absolute form, as Chromium does. */
+function viaProxy(proxyPort: number, target: string): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const req = request(
+      { host: '127.0.0.1', port: proxyPort, method: 'GET', path: target, agent: false },
+      (res) => {
+        let body = '';
+        res.setEncoding('utf8');
+        res.on('data', (chunk: string) => {
+          body += chunk;
+        });
+        res.on('end', () => {
+          resolve({ status: res.statusCode ?? 0, body });
+        });
+      },
+    );
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+/** Asks the proxy for a tunnel; answers its status and, when it opened, what an HTTP request through it got. */
+function tunnel(proxyPort: number, authority: string): Promise<{ status: number; reply: string }> {
+  return new Promise((resolve, reject) => {
+    const req = request({
+      host: '127.0.0.1',
+      port: proxyPort,
+      method: 'CONNECT',
+      path: authority,
+      agent: false,
+    });
+    req.on('connect', (res, socket) => {
+      if (res.statusCode !== 200) {
+        socket.destroy();
+        resolve({ status: res.statusCode ?? 0, reply: '' });
+        return;
+      }
+      let reply = '';
+      socket.setEncoding('utf8');
+      socket.on('data', (chunk: string) => {
+        reply += chunk;
+        if (reply.includes('\r\n\r\n') && reply.endsWith('/tunnelled')) {
+          socket.destroy();
+          resolve({ status: 200, reply });
+        }
+      });
+      socket.write(`GET /tunnelled HTTP/1.1\r\nHost: ${authority}\r\nConnection: close\r\n\r\n`);
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+describe('the app proxy', () => {
+  let app: Awaited<ReturnType<typeof countingServer>>;
+  let other: Awaited<ReturnType<typeof countingServer>>;
+  let proxy: AppProxy;
+  let refused: string[];
+  let tunnels: string[];
+
+  beforeEach(async () => {
+    app = await countingServer('app');
+    other = await countingServer('daemon');
+    refused = [];
+    tunnels = [];
+    proxy = await startAppProxy({
+      onRefused: (target) => {
+        refused.push(target);
+      },
+      onTunnel: (target) => {
+        tunnels.push(target);
+      },
+    });
+    proxy.allow(`http://127.0.0.1:${String(app.port)}`);
+  });
+  afterEach(async () => {
+    await proxy.close();
+    app.server.close();
+    other.server.close();
+  });
+
+  it('forwards a request on the app’s origin', async () => {
+    const got = await viaProxy(proxy.port, `http://127.0.0.1:${String(app.port)}/people?tab=all`);
+    expect(got).toEqual({ status: 200, body: 'app /people?tab=all' });
+    expect(app.hits).toEqual(['GET /people?tab=all']);
+  });
+
+  it('answers 403 for another port, which sees nothing', async () => {
+    const got = await viaProxy(proxy.port, `http://127.0.0.1:${String(other.port)}/tasks`);
+    expect(got.status).toBe(403);
+    expect(other.hits).toEqual([]);
+    expect(refused).toEqual([`GET http://127.0.0.1:${String(other.port)}/tasks`]);
+  });
+
+  it('refuses a request made to it as a server', async () => {
+    const got = await viaProxy(proxy.port, '/people');
+    expect(got.status).toBe(403);
+    expect(app.hits).toEqual([]);
+  });
+
+  it('tunnels a CONNECT to the app, and refuses one to another port', async () => {
+    const opened = await tunnel(proxy.port, `127.0.0.1:${String(app.port)}`);
+    expect(opened.status).toBe(200);
+    expect(opened.reply).toContain('app /tunnelled');
+    expect(tunnels).toEqual([`127.0.0.1:${String(app.port)}`]);
+    const shut = await tunnel(proxy.port, `127.0.0.1:${String(other.port)}`);
+    expect(shut.status).toBe(403);
+    expect(other.hits).toEqual([]);
+  });
+
+  it('lets nothing through while no app is allowed', async () => {
+    proxy.allow(null);
+    const got = await viaProxy(proxy.port, `http://127.0.0.1:${String(app.port)}/`);
+    expect(got.status).toBe(403);
+    expect((await tunnel(proxy.port, `127.0.0.1:${String(app.port)}`)).status).toBe(403);
+    expect(app.hits).toEqual([]);
+  });
+});

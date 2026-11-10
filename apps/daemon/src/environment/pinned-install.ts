@@ -17,7 +17,7 @@ import { join, relative } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { z } from 'zod';
-import { AGENT_PLATFORM, type AgentPin } from './agent-pins';
+import { AGENT_PLATFORM, type PinnedRelease } from './agent-pins';
 
 const TAR = '/usr/bin/tar';
 const DOWNLOAD_TIMEOUT_MS = 15 * 60_000;
@@ -27,8 +27,8 @@ const WRITABLE_BY_OTHERS = 0o022;
 /** A pinned copy that can't be used: the message names the tool and the reason, and is shown to the builder. */
 export class PinnedToolError extends Error {
   override readonly name = 'PinnedToolError';
-  readonly pin: AgentPin;
-  constructor(pin: AgentPin, reason: string) {
+  readonly pin: PinnedRelease;
+  constructor(pin: PinnedRelease, reason: string) {
     super(`${pin.label} ${pin.version} was refused: ${reason}`);
     this.pin = pin;
   }
@@ -37,7 +37,7 @@ export class PinnedToolError extends Error {
 /** Writes the bytes at `url` to `to`. */
 export type Download = (url: string, to: string) => Promise<void>;
 /** Unpacks the kept part of the tarball `file` into `into`. */
-export type Extract = (file: string, into: string, pin: AgentPin) => Promise<void>;
+export type Extract = (file: string, into: string, pin: PinnedRelease) => Promise<void>;
 
 export const downloadFile: Download = async (url, to) => {
   const response = await fetch(url, { signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS) });
@@ -47,12 +47,12 @@ export const downloadFile: Download = async (url, to) => {
   await pipeline(Readable.fromWeb(response.body), createWriteStream(to));
 };
 
-export const extractWithTar: Extract = (file, into, pin) =>
-  new Promise((resolve, reject) => {
+function untar(flags: string, file: string, into: string, pin: PinnedRelease): Promise<void> {
+  return new Promise((resolve, reject) => {
     execFile(
       TAR,
       [
-        '-xzf',
+        flags,
         file,
         '-C',
         into,
@@ -68,6 +68,13 @@ export const extractWithTar: Extract = (file, into, pin) =>
       },
     );
   });
+}
+
+/** Unpacks an npm tarball (gzip). */
+export const extractWithTar: Extract = (file, into, pin) => untar('-xzf', file, into, pin);
+
+/** Unpacks a zip, as Chrome for Testing ships: macOS's tar (bsdtar) reads zip by itself. */
+export const extractZipWithTar: Extract = (file, into, pin) => untar('-xf', file, into, pin);
 
 const Manifest = z.object({
   tool: z.string(),
@@ -153,11 +160,11 @@ export function pinnedToolsRoot(dataDir: string): string {
 }
 
 /** Where one pin's copy lives. */
-export function pinnedDir(dataDir: string, pin: AgentPin): string {
+export function pinnedDir(dataDir: string, pin: PinnedRelease): string {
   return join(pinnedToolsRoot(dataDir), `${pin.tool}-${pin.version}-${AGENT_PLATFORM}`);
 }
 
-export function pinnedExecutable(dataDir: string, pin: AgentPin): string {
+export function pinnedExecutable(dataDir: string, pin: PinnedRelease): string {
   return join(pinnedDir(dataDir, pin), pin.executable);
 }
 
@@ -170,7 +177,7 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
-async function refuseWritableByOthers(pin: AgentPin, path: string): Promise<void> {
+async function refuseWritableByOthers(pin: PinnedRelease, path: string): Promise<void> {
   const info = await stat(path);
   if (info.mode & WRITABLE_BY_OTHERS)
     throw new PinnedToolError(
@@ -184,7 +191,7 @@ async function refuseWritableByOthers(pin: AgentPin, path: string): Promise<void
  * checksum of the tarball it came from, the files still hash to what was installed, and nothing in the
  * path to the executable is writable by anyone but the owner.
  */
-export async function verifyPinned(dataDir: string, pin: AgentPin): Promise<string> {
+export async function verifyPinned(dataDir: string, pin: PinnedRelease): Promise<string> {
   const dir = pinnedDir(dataDir, pin);
   const exe = pinnedExecutable(dataDir, pin);
   let manifest: z.infer<typeof Manifest>;
@@ -222,7 +229,7 @@ export interface InstallDeps {
  */
 export async function installPinned(
   dataDir: string,
-  pin: AgentPin,
+  pin: PinnedRelease,
   deps: InstallDeps,
 ): Promise<void> {
   const root = pinnedToolsRoot(dataDir);
@@ -279,7 +286,7 @@ export async function installPinned(
  * Removes the copies of other releases of the same tool, once the pinned one is in place. Only the daemon
  * calls it, for its own data dir: a live test of a newer pin must not take the copy the running app runs.
  */
-export async function prunePinned(dataDir: string, pin: AgentPin): Promise<void> {
+export async function prunePinned(dataDir: string, pin: PinnedRelease): Promise<void> {
   const root = pinnedToolsRoot(dataDir);
   const keep = pinnedDir(dataDir, pin);
   for (const name of await readdir(root)) {
@@ -303,7 +310,7 @@ export interface EnsureOptions {
  */
 export async function ensurePinned(
   dataDir: string,
-  pin: AgentPin,
+  pin: PinnedRelease,
   deps: InstallDeps,
   options: EnsureOptions = {},
 ): Promise<string> {

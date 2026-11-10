@@ -39,8 +39,12 @@ serves agents over MCP, and runs Claude Code sessions and, for a `codex_signin` 
   command line (`@anthropic-ai/sandbox-runtime`) into `srt.mjs`, copies srt's Java proxy agent to
   `vendor/java-proxy-agent/srt-proxy-agent.jar`, where srt looks before it runs `npm root -g` unsandboxed from
   the gate's checkout, and copies migrations (`drizzle/`) and the
-  SQLite addon (`better_sqlite3.node`) beside it. Nothing stays external: the Tauri sidecar runs the bundle
-  from a directory with no node_modules.
+  SQLite addon (`better_sqlite3.node`) beside it. The Tauri sidecar runs the bundle from a directory with no
+  node_modules above it, so only one package stays external: `playwright-core`, which reads its own
+  `package.json` and `browsers.json` from disk, is copied whole to `node_modules/playwright-core` beside
+  `daemon.mjs` and loaded by a dynamic import (`pictures/playwright.ts`) when a picture is first taken. The
+  build removes that `node_modules` first, so a stale copy never survives; `test/bundle.test.ts` checks the
+  copy's version and that `daemon.mjs`'s directory resolves it.
   `better-sqlite3` is still a daemon dependency: the build copies its addon, and
   `test/crash-recovery.test.ts` opens the database with it directly.
 - `pnpm --filter @10db/daemon dev` runs from source with tsx and loads `apps/daemon/.env` when it
@@ -102,6 +106,20 @@ The fake adapter (`sessions/fake-adapter.ts`) is the test boundary for Claude Co
   Tests inject a scripted `query`; only `claude-adapter.live.test.ts` runs real Claude Code, behind
   `TENDB_LIVE_CLAUDE=1`; `test/codex.live.test.ts` runs the real `codex` binary against a fake Responses server
   behind `TENDB_LIVE_CODEX=1`, in a checkout outside `/tmp`, and never in CI.
+- `pictures/`'s browser (`decisions/2026-11-10-task-pictures-come-from-a-pinned-chromium-and-stay-on-the-mac.md`): only
+  `pictures/playwright.ts` and `pictures/playwright-camera.ts` touch `playwright-core`, and only `playwright.ts`
+  loads it at runtime (a dynamic import). The browser is Chrome for Testing's headless shell at `BROWSER_PIN`
+  (`browser-pin.ts`), which must be the build the pinned `playwright-core`'s `browsers.json` names (a test fails
+  when they part); it is fetched, checked and locked down by `environment/pinned-install.ts` (`PinnedRelease`,
+  `extractZipWithTar`). `browser-host.ts` launches it on first use with the renderer sandbox on, `HOME` and
+  `TMPDIR` only, artifacts under `<data dir>/browser/artifacts`, and every request, loopback included, through
+  `app-proxy.ts`'s proxy as Chromium's own switches (`launchOptions`); it runs one shot or sign-in at a time,
+  holds the browser's processes in a lane process ledger (`browser-ledger.ts`), refuses to launch with no ledger
+  sweep, and closes after five idle minutes. The proxy forwards only the app's origin and a `CONNECT` to its
+  host and port (`origin-guard.ts`, `proxyAllows`); Playwright's routing (`requestAllowed`) is a first check
+  only, because it never sees a redirect's next hop. `shotOutcome` and `OVERLAY_SELECTORS` are pure.
+  `src/pictures/browser.live.test.ts` runs the real headless shell behind `TENDB_LIVE_BROWSER=1`, never in CI;
+  a bump of `BROWSER_PIN` or `playwright-core` passes it first.
 - A session runs in its launch env (the project env plus its account's variables); the gate and the shipping gate get the lanes' allowlist of the project env (the login env with every billing switch stripped), inside their sandbox, and the repo's stdio MCP servers get `PATH`, `HOME` and their approved variables from it, plus the lanes' allowlist inside their sandbox. Nothing from the daemon's own `process.env` reaches a project's commands.
 - Both adapters check a session's account with `sessions/account-check.ts` before the prompt and at the first `init`; a refusal ends the session as `account_refused`, which pauses the account, and a model mismatch fails the workstream. Logs never carry an email or organization.
 - The variables that point git at a repository (`GIT_REPO_ENV_VARS` in `git/`: `GIT_DIR` and the
