@@ -36,9 +36,11 @@ import { silentLogger } from '../log';
 import { createWatcher } from '../watcher';
 import {
   grantSharedHold,
+  joinPass,
   keptRef,
   keepTurnWork,
   passKeptRef,
+  putBackKeptWork,
   takeOut,
   takeOutSteps,
   TakeOutWithin,
@@ -221,6 +223,41 @@ describe('takeOut', () => {
     expect(lastTakeOut(w.h.store.db, w.settings.id)).toBeUndefined();
     expect(stopped).toEqual([]);
   });
+
+  it.each([
+    { name: 'in one daemon', restart: false },
+    { name: 'after a restart', restart: true },
+  ])(
+    'takes a page out again once Add Page has put it back in the same pass, $name',
+    async ({ restart }) => {
+      w = await worked();
+      await takeOut(takeOutDeps(w), { taskId: w.settings.id, within: TakeOutWithin.Alone });
+      await joinPass(
+        w.h.ctx,
+        w.opened.pass.id,
+        { pages: [], taskIds: [w.settings.id], firstMessage: null },
+        { leaseMs: 60_000, putBack: (input) => putBackKeptWork(w.deps, input) },
+      );
+      expect(read(w, 'src/settings/new.tsx')).toBe('added in the turn\nand by hand\n');
+      w.write('src/settings/new.tsx', 'added in the turn\nand by hand\nand after Add Page\n');
+
+      const base = restart ? { ...takeOutDeps(w), ...w.restart() } : takeOutDeps(w);
+      const again = await takeOut(base, { taskId: w.settings.id, within: TakeOutWithin.Alone });
+
+      expect(again.tookOut).toBe(true);
+      const db = w.h.store.db;
+      expect(getTask(db, w.settings.id)).toMatchObject({ passId: null, status: 'open' });
+      expect(lastTakeOut(db, w.settings.id)).toMatchObject({
+        passId: w.opened.pass.id,
+        step: TakeOutStep.Done,
+      });
+      expect(read(w, 'src/settings/page.tsx')).toBe('edited before the pass\n');
+      expect(existsSync(join(w.h.repo, 'src/settings/new.tsx'))).toBe(false);
+      expect(w.h.git$('show', `${keptRef(w.settings.id)}:src/settings/new.tsx`)).toBe(
+        'added in the turn\nand by hand\nand after Add Page',
+      );
+    },
+  );
 
   it('leaves saved work from an earlier take-out as it is when the page made none since', async () => {
     stopped = [];

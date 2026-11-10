@@ -1,6 +1,7 @@
 import {
   InboxKind,
   InboxState,
+  PassNoticeKind,
   PassSignOff,
   PassState,
   type InboxItemDto,
@@ -140,6 +141,7 @@ export function PassHeader(props: PassHeaderProps) {
           delivery: project.delivery,
           gated: project.gateCommand !== null,
           takingOut: view.pages.some((page) => page.signOff !== PassSignOff.Done),
+          stopped: view.notices.some((notice) => notice.kind === PassNoticeKind.Close),
         }}
       />
       {hint === null ? null : (

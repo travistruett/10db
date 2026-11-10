@@ -316,6 +316,28 @@ describe('a pull request that merges while its pass is open', () => {
     expect(getPassPullRequest(w.h.store.db, w.opened.pass.id)?.url).not.toBe(url);
   });
 
+  it('says a follow-on pull request that did not open in a notice that is no stopped close', async () => {
+    const { deps } = await world();
+    unsubscribe();
+    settingsSignedOff();
+    w.h.commit('src/people/page.tsx', 'people, signed off\n');
+    w.h.settle(w.runOf(w.people), 'DONE');
+    const { url } = await opened();
+    w.h.commit('src/settings/old.tsx', 'signed off later\n');
+    merged(url);
+    const plan = mergedClosePlan(w.h.store.db, w.opened.pass.id);
+    const refusing = {
+      ...deps,
+      ship: { ...deps.ship, openFollowOnPr: () => Promise.reject(new Error('GitHub is down')) },
+    };
+
+    await followOnPush(refusing, w.opened.pass.id, plan, new AbortController().signal);
+
+    const said = getPassProgress(w.h.store.db, w.opened.pass.id).notices;
+    expect(said.map((n) => n.kind)).toEqual(['pr_not_opened']);
+    expect(said[0]?.text).toMatch(/did not reach a follow-on pull request: GitHub is down/);
+  });
+
   it.each([
     {
       name: 'closes an open pass whose pull request merged while 10db was stopped',

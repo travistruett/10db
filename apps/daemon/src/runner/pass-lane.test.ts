@@ -50,6 +50,7 @@ import {
   patchProject,
   patchWorkstream,
   setAbandonStep,
+  setClosePlan,
   type WorkstreamRow,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -1385,6 +1386,12 @@ describe("a pass task's handoffs", () => {
 });
 
 describe('a pass page across a restart', () => {
+  /** How many times the task's thread says a turn went on after 10db restarted. */
+  const resumedNotes = (task: TaskDto): number =>
+    listTaskThread(engine.store.db, task.id).filter(
+      (m) => m.body === 'Resumed after 10db restarted',
+    ).length;
+
   /**
    * The daemon stops and starts again: its sessions end, and recovery runs over the rows.
    * `whileDown` writes what the daemon kept before it died and never acted on.
@@ -1466,13 +1473,15 @@ describe('a pass page across a restart', () => {
         nextAction: { kind: 'feedback', messageId: message },
       });
       expect(readyItems().filter((i) => i.state === 'OPEN')).toEqual([]);
+      // No turn was cut short, so none is resumed.
+      expect(resumedNotes(task)).toBe(0);
       engine.launch(id);
       await waitFor(() => isWaiting(id) && untakenMessages(engine.store.db, task.id).length === 0);
     },
   );
 
   it('resumes a turn cut short mid-way, without handing the message over again', async () => {
-    const { id } = await openPage([
+    const { task, id } = await openPage([
       working,
       [...turn('two\n', 'Finished it.'), { do: 'await_message', contains: 'never sent' }],
     ]);
@@ -1491,6 +1500,22 @@ describe('a pass page across a restart', () => {
     expect(engine.adapter.prompts[1]?.resume).not.toBeNull();
     expect(engine.adapter.prompts[1]?.prompt).not.toContain('Make the form tidy');
     expect(engine.adapter.sent).toEqual([]);
+    // The thread says the turn went on after the restart, once.
+    expect(resumedNotes(task)).toBe(1);
+  });
+
+  it('writes no resumed line for a turn cut short while its pass was closing', async () => {
+    const { task, pass, id } = await openPage([working]);
+    await waitFor(wrote);
+    await restart(() => {
+      // The builder confirmed Close Pass just before the daemon died: the close stops the page.
+      engine.state.write((ctx) => {
+        setClosePlan(ctx, pass.id, { token: 't', pages: [], files: [], shared: [] });
+      });
+    });
+
+    expect(row(id).state).not.toBe('RUNNING');
+    expect(resumedNotes(task)).toBe(0);
   });
 
   it("starts a fresh session for a turn whose session cannot be resumed from that turn's message", async () => {
