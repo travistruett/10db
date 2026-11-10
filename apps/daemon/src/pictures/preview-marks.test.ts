@@ -198,6 +198,8 @@ describe('a page that breaks the preview', () => {
       { passId: w.opened.pass.id, taskId: w.settings.id },
     ]);
     expect(previewNotices(w.settings).every((m) => !m.sendable)).toBe(true);
+    // The mended page is offered a separate copy no more.
+    expect(moveCards()).toEqual([]);
     expect(logs.lines().find((l) => l['msg'] === 'the preview mended')).toMatchObject({
       taskId: w.settings.id,
       route: '/settings',

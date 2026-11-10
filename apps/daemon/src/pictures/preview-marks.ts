@@ -35,6 +35,7 @@ import {
 } from '@10db/db';
 import type { StateStore } from '../events';
 import type { Logger } from '../log';
+import { withdrawCard } from '../inbox';
 import { askMoveToCopy } from '../pass';
 import { ShotOutcome } from './camera';
 import { previewStep } from './preview-rule';
@@ -194,6 +195,8 @@ export function judgePreview(deps: PreviewMarksDeps, input: JudgedLoad): void {
         const mended = mendPreviewMark(ctx, mark.id);
         if (mended === null) break;
         if (mended.noticeId !== null) takeOffer(ctx, mended.noticeId);
+        // Its Move to a Separate Copy card, if one waits, is moot once the preview loads again.
+        if (mended.cardId !== null) withdrawCard(ctx, mended.cardId);
         deps.logger.info(
           {
             passId: pass.id,
