@@ -12,11 +12,18 @@ import {
   insertDrop,
   listHolds,
   listSharedChanges,
+  openHolds,
   type DbReader,
 } from '@10db/db';
 import { KeptRefMovedError } from '../git';
 import { readKeptRef } from './kept-work';
-import { onPassBranch, sharedRef, type SharedDeps } from './shared-hold';
+import {
+  onPassBranch,
+  sharedPathOf,
+  sharedPathsDiffering,
+  sharedRef,
+  type SharedDeps,
+} from './shared-hold';
 
 // Workbench spec §7.2 (D17): a page taken out may drop a shared change of its own that has not
 // landed. Its files go back to what they were when its hold was granted, and a drop is appended to
@@ -102,8 +109,12 @@ export async function dropShared(
   const pass = getPass(db, input.passId);
   const repo = getProject(db, pass.projectId).repoPath;
   const change = listSharedChanges(db, pass.id).find((c) => c.seq === input.seq);
-  if (!change)
+  if (!change) {
+    // A hold that changed nothing has no change to drop.
+    if (listHolds(db, pass.id).some((h) => h.seq === input.seq && h.closedAt !== null))
+      return { seq: input.seq, dropSeq: null, paths: [], left: [], refused: null };
     throw new ConflictError(`Pass "${pass.name}" has no shared change ${String(input.seq)}`);
+  }
   const done = (patch: Partial<DropDone>): DropDone => ({
     seq: change.seq,
     dropSeq: null,
@@ -157,7 +168,7 @@ export async function dropShared(
 /**
  * The page's shared changes that have not landed (spec §5.4, §7.2), as a take-out or a close offers
  * Keep and Drop for them: why Drop is not offered, if it is not, and the pages that changed the same
- * paths later.
+ * paths later. A hold of the page that is still open is listed as well.
  */
 export async function sharedUnlanded(
   deps: SharedDeps,
@@ -166,10 +177,12 @@ export async function sharedUnlanded(
   const db = deps.state.db;
   const pass = getPass(db, input.passId);
   const repo = getProject(db, pass.projectId).repoPath;
-  const mine = listSharedChanges(db, pass.id).filter(
-    (c) => c.taskId === input.taskId && unlanded(c),
+  const changes = listSharedChanges(db, pass.id);
+  const holding = openHolds(db, pass.id).filter((h) => h.taskId === input.taskId);
+  const mine = changes.filter(
+    (c) => c.taskId === input.taskId && unlanded(c) && !holding.some((h) => h.seq === c.seq),
   );
-  return Promise.all(
+  const kept = await Promise.all(
     mine.map(async (change) => ({
       seq: change.seq,
       paths: [...change.paths],
@@ -177,4 +190,20 @@ export async function sharedUnlanded(
       laterPages: [...new Set(laterTouching(db, change).map((c) => getTask(db, c.taskId).title))],
     })),
   );
+  // A hold the page's turn is making now is offered too, with the files it has changed so far: the
+  // take-out stops the turn, which keeps it, before it drops it.
+  const inProgress = await Promise.all(
+    holding.map(async (hold) => ({
+      seq: hold.seq,
+      paths: await sharedPathsDiffering(deps, {
+        repo,
+        against: hold.recordSha,
+        shared: sharedPathOf(db, pass, hold.area),
+        also: changes.find((c) => c.seq === hold.seq)?.paths ?? [],
+      }),
+      dropRefusal: null,
+      laterPages: [],
+    })),
+  );
+  return [...kept, ...inProgress].sort((a, b) => a.seq - b.seq);
 }

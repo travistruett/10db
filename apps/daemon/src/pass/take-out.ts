@@ -25,6 +25,7 @@ import {
   insertTakeOut,
   lastTakeOut,
   leavePass,
+  openHolds,
   passHoldingTask,
   releaseClaims,
   setTaskKeptWork,
@@ -36,6 +37,7 @@ import {
 } from '@10db/db';
 import { jobKey, JobQueue, passDirtRef } from '../delivery';
 import { foldHandEdits } from './hand-edits';
+import { keepHold } from './shared-chain';
 import { dropShared } from './shared-drop';
 import {
   keepTurnWork,
@@ -274,6 +276,10 @@ export async function takeOutSteps(
       ({ left } = restored);
       await git.refreshIndex(repo, restored.written);
     }
+    // A hold the stop left open is kept first, so a Drop chosen for it has its change.
+    for (const hold of openHolds(db, pass.id))
+      if (hold.taskId === task.id && row.drops.includes(hold.seq))
+        await keepHold(deps, { claimId: hold.claimId });
     // The shared changes chosen Drop, newest first, so each later one is back before an earlier.
     const kept: string[] = [];
     for (const seq of [...row.drops].sort((a, b) => b - a)) {

@@ -36,6 +36,7 @@ import {
   listEvidence,
   listInbox,
   listPassTurns,
+  listSharedChanges,
   listTaskThread,
   patchWorkstream,
   schema,
@@ -63,6 +64,9 @@ const READY = 'Settings: ready each turn';
 /** A page whose first session is refused, and whose second ends its turn Ready. */
 const REFUSED = 'Settings: refused once';
 const PAGE_FILE = 'src/settings/page.tsx';
+/** A page whose agent holds the shared area, writes a shared button and works on. */
+const SHARED = 'Settings: a shared button';
+const SHARED_FILE = 'src/button.ts';
 
 let data: { path: string; cleanup(): void };
 let repo: { path: string; cleanup(): void };
@@ -80,6 +84,18 @@ function startDaemon(): Promise<RunningDaemon> {
     dataDir: data.path,
     port: 0,
     adapter: new FakeAdapter({
+      [SHARED]: [
+        [
+          { do: 'consume' },
+          {
+            do: 'mcp',
+            tool: 'request_claim',
+            args: { opId: 'op-shared-src', kind: 'area', name: 'src', reason: 'a shared button' },
+          },
+          { do: 'tool', toolName: 'Write', input: { file_path: SHARED_FILE, content: 'button\n' } },
+          { do: 'await_message', contains: 'never sent' },
+        ],
+      ],
       [WORKING]: [
         [
           { do: 'consume' },
@@ -695,6 +711,30 @@ describe('POST /passes/:passId/tasks/:taskId/take-out', () => {
     // Refused before anything ran: no take-out began, and the page works on.
     expect(lastTakeOut(daemon.state.db, task.id)).toBeUndefined();
     expect(getTaskRow(task).passId).toBe(pass.id);
+  });
+
+  it("drops the shared change a working page's turn is making when the builder chooses Drop", async () => {
+    const { task, pass } = await openedPage(SHARED);
+    await waitFor(() => existsSync(join(repo.path, SHARED_FILE)));
+    const preview = await fetch(`${daemon.url}/passes/${pass.id}/tasks/${task.id}/take-out`, {
+      headers: { Authorization: `Bearer ${daemon.token}` },
+    });
+    expect(TakeOutPreviewDto.parse(await preview.json())).toEqual({
+      shared: [{ seq: 1, paths: [SHARED_FILE], dropRefusal: null, laterPages: [] }],
+    });
+
+    const res = await post(`/passes/${pass.id}/tasks/${task.id}/take-out`, {
+      shared: [{ seq: 1, choice: 'drop' }],
+    });
+
+    expect(res.status).toBe(200);
+    expect(TakeOutResultDto.parse(res.body)).toMatchObject({ tookOut: true });
+    expect(existsSync(join(repo.path, SHARED_FILE))).toBe(false);
+    expect(listSharedChanges(daemon.state.db, pass.id)).toMatchObject([
+      { seq: 1, droppedBy: 2 },
+      { seq: 2, dropOf: 1 },
+    ]);
+    expect(getTaskRow(task).passId).toBeNull();
   });
 
   it('refuses with 409 while the pass is not open, or for a task it does not hold', async () => {
