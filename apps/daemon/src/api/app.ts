@@ -61,6 +61,7 @@ import {
   PassId,
   PassJoinRequest,
   PassOpenRequest,
+  PassRename,
   SmallProposalLimitDto,
   ScreenImageInput,
   ScreenRefusalInput,
@@ -760,6 +761,12 @@ export function createApp(deps: ApiDeps) {
             c.req.valid('json'),
           ),
         ),
+    )
+    .patch(
+      '/passes/:passId',
+      validator('json', (value): PassRename => PassRename.parse(value)),
+      (c) =>
+        c.json(deps.services.renamePass(PassId.parse(c.req.param('passId')), c.req.valid('json'))),
     )
     .get('/projects/:projectId/pass-start', async (c) =>
       c.json(await deps.services.passStart(ProjectId.parse(c.req.param('projectId')))),

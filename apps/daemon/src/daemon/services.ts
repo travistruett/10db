@@ -80,6 +80,7 @@ import {
   patchPersona,
   patchProject,
   patchTask,
+  renamePass,
   resumeTask,
   runNext,
   setRoutingRules,
@@ -405,6 +406,7 @@ export function createServices(deps: {
       deps.scheduler.requestTick();
       return passView(db, passId);
     },
+    renamePass: (passId, input) => deps.state.write((ctx) => renamePass(ctx, passId, input.name)),
     async stopPage(taskId) {
       const task = getTask(db, taskId);
       const pass = passHoldingTask(db, task);

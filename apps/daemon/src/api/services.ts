@@ -62,11 +62,13 @@ import type {
   ModelProfileId,
   ModelProfilePatch,
   DecisionId,
+  PassDto,
   PassId,
   PassOpenedDto,
   PassAbandonedDto,
   PassJoinRequest,
   PassOpenRequest,
+  PassRename,
   PassStartDto,
   PassViewDto,
   TakeOutRequest,
@@ -277,6 +279,8 @@ export interface ApiServices {
    * or for a task that can't join; (400) for a page it can't take.
    */
   addPassPages(passId: PassId, input: PassJoinRequest): Promise<PassViewDto>;
+  /** Names the pass anew; refused (409) once it is settled or abandoned. */
+  renamePass(passId: PassId, input: PassRename): PassDto;
   /**
    * The project's goals, each with its digest and count of new items since the builder last opened
    * it, and the Ungrouped group. Leaves every view mark as it was.

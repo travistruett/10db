@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import {
   PassAbandonedDto,
+  PassDto,
   PassOpenedDto,
   PassStartDto,
   PassViewDto,
@@ -385,5 +386,21 @@ describe('POST /passes/:passId/pages', () => {
 
     expect(res.status).toBe(status);
     expect(daemon.state.db.select().from(schema.tasks).all()).toEqual(before);
+  });
+});
+
+describe('PATCH /passes/:passId', () => {
+  it('renames the pass, and refuses an empty name and an abandoned pass', async () => {
+    const project = await projectWith(PAGES);
+    const opened = await openOn(project, [await taskOn(project, 'Settings: tidy', ['settings'])]);
+
+    const renamed = await api().patch(`/passes/${opened.pass.id}`, PassDto, {
+      name: 'Settings, tidied',
+    });
+
+    expect(renamed).toMatchObject({ id: opened.pass.id, name: 'Settings, tidied' });
+    expect((await send('PATCH', `/passes/${opened.pass.id}`, { name: '' })).status).toBe(400);
+    await api().post(`/passes/${opened.pass.id}/abandon`, PassAbandonedDto);
+    expect((await send('PATCH', `/passes/${opened.pass.id}`, { name: 'Later' })).status).toBe(409);
   });
 });

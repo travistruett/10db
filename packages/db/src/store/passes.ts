@@ -258,6 +258,30 @@ export function joinPass(ctx: WriteContext, passId: PassId, taskIds: readonly Ta
 }
 
 /**
+ * Names the pass anew, and its batch, whose title its pull request takes, in the caller's write; the
+ * pass's branch keeps the name it was made with. Refused once the pass is settled or abandoned.
+ */
+export function renamePass(ctx: WriteContext, passId: PassId, name: string): PassDto {
+  const pass = getPass(ctx.tx, passId);
+  if (!passHoldsFolder(pass.state))
+    throw new ConflictError(
+      `Pass "${pass.name}" is ${pass.state.toLowerCase()}: it keeps its name`,
+    );
+  ctx.tx
+    .update(schema.passes)
+    .set({ name, updatedAt: ctx.now })
+    .where(eq(schema.passes.id, passId))
+    .run();
+  ctx.tx
+    .update(schema.batches)
+    .set({ title: name, updatedAt: ctx.now })
+    .where(eq(schema.batches.id, pass.batchId))
+    .run();
+  ctx.emit({ type: EventType.PassChanged, entityType: 'pass', entityId: passId, data: { name } });
+  return getPass(ctx.tx, passId);
+}
+
+/**
  * Ends the task's membership of its pass (a take-out, an Abandon, a close): the pass no longer holds
  * it, so the scheduler, `countLanes` and the guard treat it as ordinary work. A task in no pass is left
  * as it is.

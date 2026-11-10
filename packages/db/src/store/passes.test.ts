@@ -34,6 +34,7 @@ import {
   passHoldingFolder,
   passHoldingTask,
   passPageAreas,
+  renamePass,
   seedProject,
   setAbandonStep,
   setTaskKeptWork,
@@ -365,6 +366,32 @@ describe('joining a pass', () => {
       }),
     ).toThrow(refusal);
     expect(getTask(store.db, joining).passId ?? null).toBe(before);
+  });
+});
+
+describe('renaming a pass', () => {
+  it('names the pass and its batch anew in one write, and leaves the branch as it was', () => {
+    const { pass, batch } = store.write((ctx) => insertPass(ctx, passInput([task()]))).value;
+
+    const { value, events } = store.write((ctx) => renamePass(ctx, pass.id, 'Settings and people'));
+
+    expect(value.name).toBe('Settings and people');
+    expect(getPass(store.db, pass.id).name).toBe('Settings and people');
+    expect(getBatch(store.db, batch.id)).toMatchObject({
+      title: 'Settings and people',
+      branch: batch.branch,
+    });
+    expect(events.map((e) => [e.type, e.entityId])).toEqual([[EventType.PassChanged, pass.id]]);
+  });
+
+  it.each([PassState.Settled, PassState.Abandoned])('refuses a %s pass', (state) => {
+    const { pass } = store.write((ctx) => insertPass(ctx, passInput([task()]))).value;
+    endPass(pass.id, state);
+
+    expect(() => store.write((ctx) => renamePass(ctx, pass.id, 'Later'))).toThrow(
+      `is ${state.toLowerCase()}`,
+    );
+    expect(getPass(store.db, pass.id).name).toBe('Polish settings');
   });
 });
 
