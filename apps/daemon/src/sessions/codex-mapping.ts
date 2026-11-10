@@ -10,6 +10,7 @@ import {
   type RateLimitSnapshot,
 } from './codex-protocol';
 import type { SessionEvent } from './types';
+import { codexCommandTarget, codexPatchTarget } from './tool-target';
 
 export type RateLimitEvent = Extract<SessionEvent, { type: 'rate_limit' }>;
 
@@ -102,6 +103,7 @@ function itemActivity(item: z.infer<typeof ItemCompleted>['item']): SessionEvent
       type: 'activity',
       kind: 'tool',
       summary: command.data.command.slice(0, SUMMARY_CHARS),
+      tool: codexCommandTarget(command.data.command),
     };
   const patch = PatchItem.safeParse(item);
   if (patch.success)
@@ -109,6 +111,7 @@ function itemActivity(item: z.infer<typeof ItemCompleted>['item']): SessionEvent
       type: 'activity',
       kind: 'tool',
       summary: (patch.data.changes[0]?.path ?? 'apply_patch').slice(0, SUMMARY_CHARS),
+      tool: codexPatchTarget(patch.data.changes.map((c) => c.path)),
     };
   const mcp = McpItem.safeParse(item);
   if (mcp.success)
@@ -116,6 +119,7 @@ function itemActivity(item: z.infer<typeof ItemCompleted>['item']): SessionEvent
       type: 'activity',
       kind: 'tool',
       summary: `${mcp.data.server}.${mcp.data.tool}`.slice(0, SUMMARY_CHARS),
+      tool: { name: `${mcp.data.server}.${mcp.data.tool}`, target: null, written: [] },
     };
   const message = MessageItem.safeParse(item);
   if (message.success)

@@ -12,6 +12,7 @@ import type { GuardVerdict } from '../guard';
 import type { LaneSandboxSpec, SandboxedMcpServer } from '../sandbox';
 import type { SeenAccount } from './account-check';
 import type { RemoteMcpServer } from './project-mcp';
+import type { ToolTarget } from './tool-target';
 
 export interface ToolRequest {
   readonly toolName: string;
@@ -196,7 +197,14 @@ export type TurnResult = 'success' | 'max_turns' | 'error';
 
 export type SessionEvent =
   | { readonly type: 'started'; readonly providerSessionId: string; readonly pid: number | null }
-  | { readonly type: 'activity'; readonly kind: 'text' | 'tool'; readonly summary: string }
+  | { readonly type: 'activity'; readonly kind: 'text'; readonly summary: string }
+  | {
+      readonly type: 'activity';
+      readonly kind: 'tool';
+      readonly summary: string;
+      /** What the call aims at and the files it writes. */
+      readonly tool: ToolTarget;
+    }
   | {
       readonly type: 'context';
       readonly percentage: number;

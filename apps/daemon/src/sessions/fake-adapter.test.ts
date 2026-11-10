@@ -73,6 +73,19 @@ describe('FakeAdapter', () => {
     expect(events).toContainEqual({ type: 'activity', kind: 'text', summary: 'second session' });
   });
 
+  it('reports a scripted tool call as activity naming the file it writes', async () => {
+    const adapter = new FakeAdapter({
+      Alpha: [[{ do: 'tool', toolName: 'Write', input: { file_path: 'a.ts', content: 'x' } }]],
+    });
+    const events = await collect(adapter.start(spec()).events);
+    expect(events).toContainEqual({
+      type: 'activity',
+      kind: 'tool',
+      summary: 'Write',
+      tool: { name: 'Write', target: 'a.ts', written: ['a.ts'] },
+    });
+  });
+
   it('crashes a session that has no script', async () => {
     const events = await collect(new FakeAdapter({}).start(spec()).events);
     expect(events.at(-1)).toMatchObject({ type: 'ended', reason: 'error' });
