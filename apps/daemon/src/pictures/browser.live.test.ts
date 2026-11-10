@@ -11,7 +11,8 @@ import { WebSocketServer } from 'ws';
 import { tempDir, waitForAsync, type TempDir } from '../../test/fixtures';
 import { systemClock } from '../clock';
 import { loadEnv } from '../env';
-import { downloadFile, ensurePinned, extractZipWithTar, liveTestDataDir } from '../environment';
+import { downloadFile, ensurePinned, extractZipWithTar } from '../environment';
+import { defaultDataDir } from '../runtime-files';
 import type { Logger } from '../log';
 import { createLedgerSweep, systemProcessTable, type LedgerSweep } from '../sandbox';
 import { BROWSER_PIN } from './browser-pin';
@@ -307,7 +308,9 @@ describe.skipIf(!live)('the pinned browser, live', () => {
 
   beforeAll(async () => {
     // The pinned build, fetched into the live tests' own folder and checked against BROWSER_PIN.
-    exe = await ensurePinned(liveTestDataDir(), BROWSER_PIN, {
+    // The live tests' own tools folder, beside the app's, as the agents' live tests use: a newer pin
+    // tested here never touches the copy the running app runs.
+    exe = await ensurePinned(join(defaultDataDir(), 'live-tests'), BROWSER_PIN, {
       download: downloadFile,
       extract: extractZipWithTar,
     });
