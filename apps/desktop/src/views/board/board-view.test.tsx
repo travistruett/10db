@@ -350,6 +350,73 @@ describe('BoardView', () => {
     });
   });
 
+  it("shows a pass's pages as the Workbench's, and a task taken out of it as its own", async () => {
+    const passId = mintId('Pass');
+    const batch = batchDto({ passId, branch: '10db/settings-pass-0a1b2c3d' });
+    const project = projectViewDto({ id: batch.projectId });
+    const run = (taskTitle: string, state: 'WAITING_HUMAN' | 'RUNNING' | 'CANCELLED') =>
+      workstreamDto({ projectId: project.id, batchId: batch.id, taskTitle, state });
+    const settings = run('Settings: UI work', 'WAITING_HUMAN');
+    const billing = run('Billing: UI work', 'RUNNING');
+    const home = run('Home: UI work', 'CANCELLED');
+    const task = (ws: typeof settings, inPass: boolean) =>
+      taskDto({
+        id: ws.taskId,
+        projectId: project.id,
+        title: ws.taskTitle,
+        boardStatus: inPass ? 'in_progress' : 'ready',
+        workstreamId: ws.id,
+        passId: inPass ? passId : null,
+        keptWork: !inPass,
+      });
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/projects/:projectId/tasks'), () =>
+        HttpResponse.json([task(settings, true), task(billing, true), task(home, false)]),
+      ),
+      http.get(daemonUrl('/projects/:projectId/batches'), () => HttpResponse.json([batch])),
+      http.get(daemonUrl('/workstreams'), () => HttpResponse.json([settings, billing, home])),
+    );
+    renderApp('/board');
+
+    const card = (title: string) => {
+      const found = screen
+        .getAllByTestId('task-card')
+        .find((element) => within(element).queryByText(title) !== null);
+      if (found === undefined) throw new Error(`no card for ${title}`);
+      return found;
+    };
+    await screen.findByRole('button', { name: /^Settings: UI work/ });
+    // A Ready page waits on the builder in the Workbench, not in the Inbox, and shares no branch.
+    expect(
+      within(card('Settings: UI work')).getByText('Waiting on you in the Workbench'),
+    ).toBeTruthy();
+    for (const title of ['Settings: UI work', 'Billing: UI work']) {
+      expect(within(card(title)).getByTestId('indicator-workbench').textContent).toBe('Workbench');
+      expect(within(card(title)).queryByTestId('indicator-shared-branch')).toBeNull();
+    }
+    expect(within(card('Home: UI work')).queryByTestId('indicator-row')).toBeNull();
+
+    // A page's drawer names the pass's branch, offers no Abandon, and points to the Workbench.
+    fireEvent.click(screen.getByRole('button', { name: /^Settings: UI work/ }));
+    let drawer = await screen.findByRole('dialog', { name: 'Task' });
+    expect(within(drawer).getByText('10db/settings-pass-0a1b2c3d')).toBeTruthy();
+    expect(within(drawer).queryByRole('button', { name: 'Abandon' })).toBeNull();
+    expect(
+      within(drawer).getByText(
+        'It ships when the Workbench pass closes, and is abandoned with it.',
+      ),
+    ).toBeTruthy();
+    expect(within(drawer).getByRole('button', { name: 'Open Workbench' })).toBeTruthy();
+
+    // The task taken out is not in the pass: no branch of the pass, nothing to abandon.
+    fireEvent.click(screen.getByRole('button', { name: /^Home: UI work/ }));
+    drawer = await screen.findByRole('dialog', { name: 'Task' });
+    await within(drawer).findByRole('heading', { name: 'Home: UI work' });
+    expect(within(drawer).queryByText('10db/settings-pass-0a1b2c3d')).toBeNull();
+    expect(within(drawer).queryByRole('button', { name: 'Abandon' })).toBeNull();
+  });
+
   /** A batch with two queued tasks in it, as the daemon would answer for the board. */
   function twoTaskBatch(projectId: ProjectId, title: string, overrides: Partial<BatchDto> = {}) {
     const batch = batchDto({ projectId, title, branch: `10db/${title}-0a1b2c3d`, ...overrides });

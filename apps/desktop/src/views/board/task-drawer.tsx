@@ -400,7 +400,12 @@ export function TaskDrawer({
               {batch ? (
                 <Stack gap={4}>
                   <SectionLabel>Delivery</SectionLabel>
-                  <BatchPanel batch={batch} workstreams={workstreams} gateCommand={gateCommand} />
+                  <BatchPanel
+                    batch={batch}
+                    workstreams={workstreams}
+                    gateCommand={gateCommand}
+                    onOpenWorkbench={onOpenWorkbench}
+                  />
                 </Stack>
               ) : null}
               {latestRound ? (

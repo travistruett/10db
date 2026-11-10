@@ -12,6 +12,7 @@ import {
   mintId,
   NotFoundError,
   parseFindings,
+  passHoldsTasks,
   PullRequestState,
   TaskInput,
   TaskHasDependentsError,
@@ -28,6 +29,7 @@ import {
   type GoalId,
   type BoardColumnId,
   type CiStopped,
+  type PassId,
   WorkspaceMode,
   type ProjectDto,
   type ProjectId,
@@ -60,6 +62,8 @@ export interface BoardStatusInput {
     /** Why 10db stopped fixing its failing required checks; null or absent while it has not. */
     readonly ciStopped?: CiStopped | null;
   } | null;
+  /** The task is a page of a pass that still holds it: the Workbench has it, whatever its run says. */
+  readonly inPass?: boolean;
 }
 
 /**
@@ -75,6 +79,7 @@ export function deriveBoardStatus({
   workstreamState,
   batchState = null,
   pullRequest = null,
+  inPass = false,
 }: BoardStatusInput): BoardStatus {
   const column =
     batchState === BatchState.Shipped && pullRequest?.url
@@ -94,6 +99,8 @@ export function deriveBoardStatus({
     case TaskStatus.Open:
       // A run marked failed but shipped anyway is judged by its pull request like a finished one.
       if (workstreamState === WorkstreamState.Failed && shipped) return shipped;
+      // A page waiting on the builder, failed or not yet spoken to is worked on in the Workbench.
+      if (inPass) return BoardStatus.InProgress;
       break;
   }
   if (
@@ -584,6 +591,17 @@ export function mergedDespiteFailure(db: DbReader, taskId: TaskId): boolean {
   );
 }
 
+/** Whether the pass a task names still holds it as a page (`passHoldsTasks`). */
+function passHolds(db: DbReader, passId: PassId | null): boolean {
+  if (passId === null) return false;
+  const pass = db
+    .select({ state: schema.passes.state })
+    .from(schema.passes)
+    .where(eq(schema.passes.id, passId))
+    .get();
+  return pass !== undefined && passHoldsTasks(pass.state);
+}
+
 function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto {
   const deps = db
     .select({ id: schema.taskDeps.dependsOnId })
@@ -631,6 +649,7 @@ function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto
       pullRequest: latest
         ? { url: latest.prUrl, state: latest.prState, ciStopped: latest.ciStopped }
         : null,
+      inPass: passHolds(db, row.passId),
     }),
     workstreamId: latest?.id ?? null,
     goalId: row.goalId,

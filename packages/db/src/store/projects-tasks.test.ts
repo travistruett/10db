@@ -404,6 +404,16 @@ describe('deriveBoardStatus', () => {
       BoardStatus.Ready,
     ],
     [
+      'a Ready page of a pass, which the Workbench holds',
+      { taskStatus: 'open', depsDone: true, workstreamState: 'WAITING_HUMAN', inPass: true },
+      BoardStatus.InProgress,
+    ],
+    [
+      'a failed page of a pass, which the Workbench holds',
+      { taskStatus: 'open', depsDone: true, workstreamState: 'FAILED', inPass: true },
+      BoardStatus.InProgress,
+    ],
+    [
       'done in a batch that is shipping',
       { taskStatus: 'done', depsDone: true, workstreamState: 'DONE', batchState: 'SHIPPING' },
       BoardStatus.InProgress,
