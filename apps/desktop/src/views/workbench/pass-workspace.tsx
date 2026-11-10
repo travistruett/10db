@@ -87,6 +87,12 @@ export function PassWorkspace({ view, inbox, project, selected, onSelect }: Pass
     [WorkbenchKey.Previous]: () => {
       move(-1);
     },
+    // Escape in a field goes back to the shown page's row, where J and K go on.
+    [WorkbenchKey.LeaveField]: () => {
+      const current = queue.current?.querySelector<HTMLButtonElement>('button[aria-current]');
+      const first = queue.current?.querySelector<HTMLButtonElement>('button:not([aria-haspopup])');
+      (current ?? first)?.focus();
+    },
     [WorkbenchKey.NextWaiting]: () => {
       const next = nextWaiting(
         rows.map((row) => ({ taskId: row.page.taskId, status: row.status })),

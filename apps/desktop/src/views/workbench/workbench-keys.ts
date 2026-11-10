@@ -3,8 +3,9 @@ import type { PageStatus } from './page-status';
 import { queueRank } from './queue-order';
 
 // Workbench spec §4.3, §4.6: J and K move through the queue and Enter selects; N goes to the next page
-// that waits on the builder; ⌘L copies the shown page's link. Letters typed into the composer are text,
-// and a region marked with `KEYS_IGNORE_ATTRIBUTE` keeps its own keys. ⌘↩ is the composer's.
+// that waits on the builder; ⌘L copies the shown page's link; Escape leaves the composer for the queue.
+// Letters typed into the composer are text, and a region marked with `KEYS_IGNORE_ATTRIBUTE` keeps its
+// own keys. ⌘↩ is the composer's.
 
 /** Marks a region that handles its own keys; the Workbench's keys skip it. */
 export const KEYS_IGNORE_ATTRIBUTE = 'data-workbench-keys-ignore';
@@ -14,6 +15,7 @@ export const WorkbenchKey = {
   Previous: 'previous',
   NextWaiting: 'next_waiting',
   CopyLink: 'copy_link',
+  LeaveField: 'leave_field',
 } as const;
 export type WorkbenchKey = (typeof WorkbenchKey)[keyof typeof WorkbenchKey];
 
@@ -47,7 +49,8 @@ export function workbenchKey(press: KeyPress, place: KeyPlace): WorkbenchKey | n
   // ⌘L types nothing, so it copies from the composer too.
   if (command && !press.shiftKey && !press.altKey && press.key.toLowerCase() === 'l')
     return WorkbenchKey.CopyLink;
-  if (command || press.altKey || press.shiftKey || place.editing) return null;
+  if (command || press.altKey || press.shiftKey) return null;
+  if (place.editing) return press.key === 'Escape' ? WorkbenchKey.LeaveField : null;
   return LETTERS[press.key] ?? null;
 }
 

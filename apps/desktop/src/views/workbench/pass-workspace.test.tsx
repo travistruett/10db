@@ -861,6 +861,48 @@ describe('PassWorkspace keys', () => {
     expect(onSelect).not.toHaveBeenCalled();
   });
 
+  it('Escape leaves the composer for the shown page’s row, so J moves on from there', async () => {
+    await renderWorkspace();
+    const rows = queueRows();
+    const input = screen.getByRole('textbox', { name: 'Message to People' });
+    input.focus();
+    fireEvent.keyDown(input, { key: 'Escape' });
+    // People asks, so it is the queue's first row and the page shown.
+    expect(document.activeElement).toBe(rows[0]);
+    fireEvent.keyDown(rows[0] ?? document.body, { key: 'j' });
+    expect(document.activeElement).toBe(rows[1]);
+  });
+
+  it('leaves the cursor where it was when the Workbench opens, so J and K work at once', async () => {
+    await renderWorkspace();
+    await screen.findByRole('textbox', { name: 'Message to People' });
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it('keeps the cursor on a row picked from the queue by its keys', async () => {
+    const pages = pagesByStatus();
+    function Selecting() {
+      const [selected, setSelected] = useState<TaskId>(pages.ready.taskId);
+      return (
+        <PassWorkspace
+          view={passViewDto({ pages: Object.values(pages) })}
+          inbox={[]}
+          project={projectViewDto()}
+          selected={selected}
+          onSelect={setSelected}
+        />
+      );
+    }
+    renderWithDaemon(<Selecting />);
+    await screen.findByRole('textbox', { name: 'Message to Settings' });
+    const billing = screen.getByRole('button', { name: /^Billing/ });
+    billing.focus();
+    // Enter on a focused button clicks it.
+    fireEvent.click(billing);
+    await screen.findByRole('textbox', { name: 'Message to Billing' });
+    expect(document.activeElement).toBe(billing);
+  });
+
   it('N selects the next page that waits on the builder', async () => {
     const { pages, onSelect } = await renderWorkspace();
     fireEvent.keyDown(document.body, { key: 'n' });

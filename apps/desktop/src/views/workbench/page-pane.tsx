@@ -10,6 +10,7 @@ import { OpenPageButton } from './open-page-button';
 import { PageAsk } from './page-ask';
 import { usePageActions } from './page-actions';
 import { PageStatus } from './page-status';
+import { QUEUE_ATTRIBUTE } from './queue-list';
 import type { QueueRow } from './queue-rows';
 import { RetryTurn } from './retry-turn';
 import { SignOffLine } from './sign-off-line';
@@ -65,9 +66,15 @@ export function PagePane(props: PagePaneProps) {
       void open.copy();
     },
   });
-  // The cursor goes to the composer of each page shown, so the builder can paste and type at once.
+  // The cursor goes to the composer of each page the builder shows, so they can paste and type at
+  // once; not to the page the Workbench opens on, nor away from a row picked by the queue's keys, so J
+  // and K keep working.
   const input = useRef<HTMLTextAreaElement>(null);
+  const shownBefore = useRef(page.taskId);
   useEffect(() => {
+    if (shownBefore.current === page.taskId) return;
+    shownBefore.current = page.taskId;
+    if (document.activeElement?.closest(`[${QUEUE_ATTRIBUTE}]`)) return;
     input.current?.focus();
   }, [page.taskId]);
   return (

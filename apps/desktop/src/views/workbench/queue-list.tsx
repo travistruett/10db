@@ -13,10 +13,20 @@ export interface QueueListProps {
   readonly onTakeOut: ((taskId: TaskId) => void) | null;
 }
 
+/** Marks the queue, so the page shown leaves the cursor on a row picked by the queue's keys. */
+export const QUEUE_ATTRIBUTE = 'data-workbench-queue';
+
 /** The queue: a labelled list of the pass's pages, one button each, the shown page `aria-current`. */
 export function QueueList({ rows, current, onSelect, onTakeOut }: QueueListProps) {
   return (
-    <Box component="ul" aria-label="Pages in this pass" m={0} p={0} style={{ listStyle: 'none' }}>
+    <Box
+      component="ul"
+      aria-label="Pages in this pass"
+      m={0}
+      p={0}
+      style={{ listStyle: 'none' }}
+      {...{ [QUEUE_ATTRIBUTE]: true }}
+    >
       {rows.map((row) => (
         <li key={row.page.taskId}>
           <QueueRow
