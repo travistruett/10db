@@ -469,6 +469,14 @@ describe('passPrBody', () => {
       says: ['Gate running in a scratch worktree of the pushed commit abcdef1'],
     },
     {
+      name: 'a scratch gate whose result a restart lost',
+      check: { kind: 'scratch', command: 'make gate', sha: SHA, state: 'unknown' },
+      says: [
+        'Gate result unknown in a scratch worktree of the pushed commit abcdef1: 10db restarted after it was asked for; Open Pull Request runs it again. `make gate`',
+      ],
+      not: ['Gate running'],
+    },
+    {
       name: 'a scratch gate that failed',
       check: { kind: 'scratch', command: 'make gate', sha: SHA, state: 'failed' },
       says: ['Gate failed in a scratch worktree of the pushed commit abcdef1: `make gate`'],

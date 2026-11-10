@@ -184,8 +184,11 @@ export type PassPrCheck =
       readonly command: string;
       /** The pushed commit the gate read, and where it is: running, passed or failed. */
       readonly sha: string;
-      /** `not_run`: it was held back or stopped before it finished. */
-      readonly state: 'running' | 'passed' | 'failed' | 'not_run';
+      /**
+       * `not_run`: it was held back or stopped before it finished. `unknown`: this daemon has run no
+       * gate of the pass, as after a restart, so what an earlier one found is not known.
+       */
+      readonly state: 'running' | 'passed' | 'failed' | 'not_run' | 'unknown';
     }
   /** The close's gate in the folder: it read the folder and its running stack, not the commit alone. */
   | {
@@ -253,6 +256,10 @@ function passChecked(
         if (check.state === 'running') return [`Gate running ${where}: \`${check.command}\`.`];
         if (check.state === 'not_run')
           return [`Gate not run ${where}: it was stopped before it finished. \`${check.command}\``];
+        if (check.state === 'unknown')
+          return [
+            `Gate result unknown ${where}: 10db restarted after it was asked for; Open Pull Request runs it again. \`${check.command}\``,
+          ];
         return check.state === 'passed'
           ? [`Gate passed ${where}: \`${check.command}\`.`]
           : [`Gate failed ${where}: \`${check.command}\`. The pass's header in 10db says so.`];

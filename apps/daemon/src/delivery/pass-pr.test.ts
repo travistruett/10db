@@ -59,6 +59,8 @@ const nothingKept: PutBackKeptWork = () => Promise.resolve({ applied: [], left: 
 
 let h: DeliveryHarness;
 let prs: PassPullRequests;
+/** A second `createPassPullRequests` over the same deps, as a restarted daemon makes. */
+let restarted: () => PassPullRequests;
 afterEach(async () => {
   await prs.stop();
   h.close();
@@ -76,15 +78,17 @@ function setup(
     { ...PAGES, gateCommand: GATE, ...project },
     opts.wrapGit ? { wrapGit: opts.wrapGit } : {},
   );
-  prs = createPassPullRequests({
+  const deps = {
     ...h.ctx,
     gate: createGateRunner({ sandbox: null, logger: silentLogger }),
     dataDir: h.dataDir,
     sessionEnv: () => ({ PATH: '/usr/bin:/bin' }),
-    identifyProcess: (pid) => systemProcesses.identify(pid),
+    identifyProcess: (pid: number) => systemProcesses.identify(pid),
     review: opts.review ?? null,
     ...(opts.holdShips ? { holdShips: opts.holdShips } : {}),
-  });
+  };
+  prs = createPassPullRequests(deps);
+  restarted = () => createPassPullRequests(deps);
   h.commit('src/settings/page.tsx', 'settings\n');
   h.commit('src/people/page.tsx', 'people\n');
   h.git$('push', '-q', 'origin', 'main');
@@ -469,6 +473,27 @@ describe('Open Pull Request', () => {
       expect(h.gh.body(url)).toContain('Gate not run');
     });
     expect(h.gh.body(url)).not.toContain('Gate running');
+  });
+
+  it('after a restart, writes no running gate into the body when none runs', async () => {
+    setup();
+    const { passId, settings } = await openedPass();
+    signOff(settings, 'src/settings/page.tsx', 'signed off\n');
+    await prs.open(passId);
+    await h.jobs.idle();
+    await vi.waitFor(
+      () => {
+        expect(gateState(passId)).toBe(PassGateState.Passed);
+      },
+      { timeout: 20_000 },
+    );
+    const url = getPassPullRequest(h.store.db, passId)?.url ?? '';
+
+    // The restarted daemon knows nothing of the gate it ran, and starts none: the close marks it ready.
+    await restarted().ensurePassPr({ passId, ready: true }, new AbortController().signal);
+
+    expect(h.gh.body(url)).not.toContain('Gate running');
+    expect(h.gh.body(url)).toContain('Gate result unknown');
   });
 
   it("clears the header's closed pull request notice once a new one is opened", async () => {

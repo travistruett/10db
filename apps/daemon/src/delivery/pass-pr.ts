@@ -130,7 +130,10 @@ const message = (error: unknown): string =>
 
 export function createPassPullRequests(deps: PassPullRequestDeps): PassPullRequests {
   const db = deps.state.db;
-  /** How each pass's body says it was checked, as its last gate left it. */
+  /**
+   * How each pass's body says it was checked, as its last gate left it, or as the gate Open Pull
+   * Request is about to start. A pass with none here had no gate in this daemon's life.
+   */
   const checked = new Map<PassId, PassPrCheck>();
 
   function checkOf(pass: PassDto, project: ProjectDto, sha: string): PassPrCheck {
@@ -143,7 +146,7 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
       case PassPullRequestGate.FolderAtClose:
         return { kind: 'folder_at_close', command: command ?? '' };
       case PassPullRequestGate.Scratch:
-        return { kind: 'scratch', command: command ?? '', sha, state: 'running' };
+        return { kind: 'scratch', command: command ?? '', sha, state: 'unknown' };
     }
   }
 
@@ -400,6 +403,7 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
             : 'started';
       const stillOpen = (): boolean => getPass(db, passId).state === PassState.Open;
       const reviews = review !== 'none';
+      const gates = shown.gate === PassPullRequestGate.Scratch;
       deps.jobs.run(jobKey(batch, JobQueue.Ship), async (signal) => {
         if (signal.aborted || getPass(db, passId).state !== PassState.Open || branch === null)
           return;
@@ -409,13 +413,21 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
           // An Abandon or a close that took the pass while the branch was pushed: no pull request,
           // and no gate or review, is started for it.
           if (sha === null || !stillOpen()) return;
+          // The gate starts once the pull request is there: its body says the gate is running.
+          if (gates)
+            checked.set(passId, {
+              kind: 'scratch',
+              command: shipCheck(project)?.command ?? '',
+              sha,
+              state: 'running',
+            });
           await ensurePassPr({ passId, ready: false }, signal);
           deps.state.write((w) => clearPassNotice(w, passId, PR_OPEN_NOTICE));
           if (!stillOpen()) return;
           checks.start({
             passId,
             sha,
-            gate: shown.gate === PassPullRequestGate.Scratch,
+            gate: gates,
             // Decided on the tip pushed: a page that landed since the request makes it new.
             review: reviews && getPassProgress(db, passId).reviewedSha !== sha,
             baseRef: `refs/remotes/origin/${shown.base}`,
