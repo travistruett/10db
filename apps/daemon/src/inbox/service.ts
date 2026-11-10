@@ -42,6 +42,7 @@ import {
   getProposalDto,
   getTask,
   getWorkstreamRow,
+  passHoldingTask,
   insertDecision,
   insertInboxItem,
   insertPermissionRule,
@@ -51,6 +52,7 @@ import {
   openItemsForWorkstream,
   resolveProposal,
   updateInboxItem,
+  type DbReader,
   type Json,
   type WriteContext,
 } from '@10db/db';
@@ -221,6 +223,13 @@ function optionsForTargets(
     options,
     [...taskIds].map((id) => getTask(ctx.tx, id).title),
   );
+}
+
+/** Whether a lane's run is of a task that a pass holds as a page. */
+function askedByPassPage(db: DbReader, workstreamId: WorkstreamId | null): boolean {
+  if (workstreamId === null) return false;
+  const task = getTask(db, getWorkstreamRow(db, workstreamId).taskId);
+  return passHoldingTask(db, task) !== undefined;
 }
 
 /** Identical open questions fold into one card; with `foldPerLane`, only one lane's. */
@@ -551,9 +560,12 @@ export function createInboxService(deps: {
 
   const service: InboxService = {
     ask(raw) {
-      // Whatever the lane wrote, a question can be answered by parking the task.
+      // Whatever the lane wrote, a question can be answered by parking the task, except a pass
+      // page's: a page leaves its pass by Take Out, never by parking.
       const input =
-        raw.kind === 'question' ? { ...raw, options: withParkOption(raw.options) } : raw;
+        raw.kind === 'question' && !askedByPassPage(deps.state.db, raw.workstreamId)
+          ? { ...raw, options: withParkOption(raw.options) }
+          : raw;
       const foldKey = input.foldKey ?? foldKeyFor(input);
       // A conversation's card has no target: no workstream waits on it, and its session's waiter below
       // is how the answer reaches it.

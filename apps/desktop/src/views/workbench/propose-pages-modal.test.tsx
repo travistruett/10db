@@ -2,7 +2,13 @@ import type { AreaDef, PagesProposalDto } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
-import { baseHandlers, daemonUrl, renderWithDaemon, server } from '../../test/daemon';
+import {
+  baseHandlers,
+  daemonUrl,
+  renderWithDaemon,
+  renderWithDaemonAndRouter,
+  server,
+} from '../../test/daemon';
 import { projectViewDto } from '../../test/fixtures';
 import { pagesProposalDto } from '../../test/pass-fixtures';
 import { renderWithRouter } from '../../test/theme';
@@ -95,6 +101,31 @@ describe('ProposePagesModal', () => {
         ],
       },
     ]);
+  });
+
+  it('says why there is nothing to save when no page is proposed, and where to add one by hand', async () => {
+    servePatch();
+    const onClose = vi.fn();
+    const { router } = await renderWithDaemonAndRouter(
+      <ProposePagesModal
+        project={project}
+        opened
+        onClose={onClose}
+        propose={() =>
+          Promise.resolve(
+            pagesProposalDto({
+              pages: [],
+              skipped: [{ name: 'admin', reason: 'It has no route of its own' }],
+            }),
+          )
+        }
+      />,
+    );
+    expect(await screen.findByText(/No page areas to propose/)).toBeTruthy();
+    expect(screen.getByText('admin: It has no route of its own')).toBeTruthy();
+    expect(saveButton()).toHaveProperty('disabled', true);
+    fireEvent.click(screen.getByRole('link', { name: 'Settings › Areas and hazards' }));
+    expect(router.state.location.pathname).toBe('/settings/areas');
   });
 
   it('says a failed proposal beside Save, with nothing to save', async () => {

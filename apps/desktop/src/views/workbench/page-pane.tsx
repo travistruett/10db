@@ -10,6 +10,7 @@ import { OpenPageButton } from './open-page-button';
 import { PageAsk } from './page-ask';
 import { usePageActions } from './page-actions';
 import { PageStatus } from './page-status';
+import { QUEUE_ATTRIBUTE } from './queue-list';
 import type { QueueRow } from './queue-rows';
 import { RetryTurn } from './retry-turn';
 import { SignOffLine } from './sign-off-line';
@@ -30,13 +31,15 @@ export interface PagePaneProps {
   readonly openedAt: string | null;
   /** The workspace's clock, in epoch ms. */
   readonly now: number;
+  /** Counts the window gaining focus: each time, the composer takes the cursor. */
+  readonly composerFocus: number;
   readonly draft: Draft;
   readonly onDraft: (draft: Draft) => void;
 }
 
 /** The shown page: its thread, the live line while a turn works, and its composer fixed at the foot. */
 export function PagePane(props: PagePaneProps) {
-  const { passId, appUrl, row, passOpen, openedAt, now, draft, onDraft } = props;
+  const { passId, appUrl, row, passOpen, openedAt, now, composerFocus, draft, onDraft } = props;
   const { page, status } = row;
   const actions = usePageActions(passId, page.taskId);
   const turns = useTurns(page.taskId).data ?? [];
@@ -65,11 +68,21 @@ export function PagePane(props: PagePaneProps) {
       void open.copy();
     },
   });
-  // The cursor goes to the composer of each page shown, so the builder can paste and type at once.
+  // The cursor goes to the composer of each page the builder shows, so they can paste and type at
+  // once; not to the page the Workbench opens on, nor away from a row picked by the queue's keys, so J
+  // and K keep working.
   const input = useRef<HTMLTextAreaElement>(null);
+  const shownBefore = useRef(page.taskId);
+  const focusAsked = useRef(composerFocus);
   useEffect(() => {
-    input.current?.focus();
-  }, [page.taskId]);
+    // The window gaining focus, a notification's click among its ways, asks for the composer outright.
+    const asked = focusAsked.current !== composerFocus;
+    focusAsked.current = composerFocus;
+    const moved = shownBefore.current !== page.taskId;
+    shownBefore.current = page.taskId;
+    if (asked || (moved && !document.activeElement?.closest(`[${QUEUE_ATTRIBUTE}]`)))
+      input.current?.focus();
+  }, [page.taskId, composerFocus]);
   return (
     <Box
       component="section"
@@ -80,7 +93,7 @@ export function PagePane(props: PagePaneProps) {
         {page.area}
       </Title>
       <Box style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-        <Thread page={page} turns={turns} openPage={openPage} canSend={passOpen} />
+        <Thread page={page} turns={turns} canSend={passOpen} />
         {status === PageStatus.Working && page.turn?.endedAt === null ? (
           <WorkingLine
             line={liveLine(page.turn, now)}

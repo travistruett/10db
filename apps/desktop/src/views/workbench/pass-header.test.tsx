@@ -48,6 +48,7 @@ function draw(view: PassViewDto, overrides: Partial<PassHeaderProps> = {}) {
     now,
     onAddPage: vi.fn(),
     pullRequest: <button type="button">Open Pull Request</button>,
+    pullRequestReason: <p>ampsio has no origin</p>,
     onClose: vi.fn(),
     onRename: vi.fn(),
     onAbandon: vi.fn(),
@@ -68,6 +69,7 @@ describe('PassHeader', () => {
     expect(props.onAddPage).toHaveBeenCalledTimes(1);
     // No page is signed off, so there is nothing to open a pull request for.
     expect(screen.queryByRole('button', { name: 'Open Pull Request' })).toBeNull();
+    expect(screen.queryByText('ampsio has no origin')).toBeNull();
     fireEvent.click(menu());
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Close Pass…', hidden: true }));
     expect(props.onClose).toHaveBeenCalledTimes(1);
@@ -79,10 +81,11 @@ describe('PassHeader', () => {
     expect(props.onAbandon).toHaveBeenCalledTimes(1);
   });
 
-  it('shows Open Pull Request once a page is signed off', () => {
+  it('shows Open Pull Request, and why it is not offered, once a page is signed off', () => {
     const { ready, working } = pagesByStatus();
     draw(passViewDto({ pages: [ready, { ...working, signOff: 'done' }] }));
     expect(screen.getByRole('button', { name: 'Open Pull Request' })).toBeTruthy();
+    expect(screen.getByText('ampsio has no origin')).toBeTruthy();
   });
 
   it.each([

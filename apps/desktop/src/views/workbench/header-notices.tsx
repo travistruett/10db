@@ -16,6 +16,7 @@ import {
   useContinueClose,
   useSendToAgent,
 } from '../../daemon/pass-close-queries';
+import { CodeSpans } from '../../shell/code-spans';
 
 // Workbench spec §5.3, §5.5, §8.3, D19, D24: what the pass's header says about its pull request and
 // checks. Nothing here reaches an agent by itself: Send to Agent sends a notice only to the page the
@@ -93,7 +94,7 @@ function NoticeRow(props: NoticeRowProps) {
           aria-hidden
         />
         <Text size="sm" style={{ flex: 1, minWidth: 0 }}>
-          {first}
+          <CodeSpans text={first} />
         </Text>
         {rest === null ? null : (
           <Button

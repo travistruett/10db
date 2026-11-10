@@ -767,7 +767,7 @@ describe('InboxView', () => {
         'Move between cards',
         'Choose an option',
         'Write a note',
-        'Send the answer, or dismiss a flag',
+        'Send the answer, dismiss a flag, or open the Workbench',
         'Send from the note',
         'Show these shortcuts',
       ])
@@ -957,9 +957,9 @@ describe("a Workbench pass's Ready pages", () => {
       },
     });
 
-  it('show as one row naming each page, with no Approve or Send Back', async () => {
+  it('show as one row naming each page, with no Approve or Send Back; Enter opens the Workbench', async () => {
     const { answers } = inbox([ready('Ready: Settings'), ready('Ready: People')]);
-    renderApp('/inbox');
+    const { router } = renderApp('/inbox');
     expect(await screen.findByText('Workbench: 2 pages ready')).toBeTruthy();
     expect(screen.getByRole('radio', { name: 'Open 1' })).toBeTruthy();
     const card = selectedCard();
@@ -969,6 +969,9 @@ describe("a Workbench pass's Ready pages", () => {
     expect(screen.queryByRole('button', { name: /Send Back/ })).toBeNull();
     key('Enter');
     expect(answers).toEqual([]);
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/workbench');
+    });
   });
 });
 

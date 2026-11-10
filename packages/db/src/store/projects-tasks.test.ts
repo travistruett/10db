@@ -404,6 +404,36 @@ describe('deriveBoardStatus', () => {
       BoardStatus.Ready,
     ],
     [
+      'a Ready page of a pass, which the Workbench holds',
+      { taskStatus: 'open', depsDone: true, workstreamState: 'WAITING_HUMAN', inPass: true },
+      BoardStatus.InProgress,
+    ],
+    [
+      'a failed page of a pass, which the Workbench holds',
+      { taskStatus: 'open', depsDone: true, workstreamState: 'FAILED', inPass: true },
+      BoardStatus.InProgress,
+    ],
+    [
+      'a page of a pass paused by a usage limit, blocked as any run',
+      { taskStatus: 'open', depsDone: true, workstreamState: 'PAUSED_LIMIT', inPass: true },
+      BoardStatus.Blocked,
+    ],
+    [
+      'a held page of a pass, blocked as any run',
+      { taskStatus: 'open', depsDone: true, workstreamState: 'HELD', inPass: true },
+      BoardStatus.Blocked,
+    ],
+    [
+      'a page of a pass with no run yet, which the Workbench holds',
+      { taskStatus: 'open', depsDone: true, workstreamState: null, inPass: true },
+      BoardStatus.InProgress,
+    ],
+    [
+      'a page of a pass whose run was cancelled, while the pass still holds it',
+      { taskStatus: 'open', depsDone: true, workstreamState: 'CANCELLED', inPass: true },
+      BoardStatus.InProgress,
+    ],
+    [
       'done in a batch that is shipping',
       { taskStatus: 'done', depsDone: true, workstreamState: 'DONE', batchState: 'SHIPPING' },
       BoardStatus.InProgress,

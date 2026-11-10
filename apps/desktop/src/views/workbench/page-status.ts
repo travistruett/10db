@@ -111,9 +111,9 @@ function workingLine(page: PassPageDto, clock: PageStatusClock): string {
   if (turn === null || (turn.endedAt !== null && page.nextActionKind === 'feedback'))
     return 'Starting';
   const elapsed = `Working · ${String(minutesSince(turn.startedAt, clock.now))} min`;
-  return clock.medianTurnMinutes === null
-    ? elapsed
-    : `${elapsed} · median ${String(clock.medianTurnMinutes)}`;
+  // Turns that ended in under a minute measure nothing yet: "median 0" says no more than nothing.
+  const median = clock.medianTurnMinutes;
+  return median === null || median < 1 ? elapsed : `${elapsed} · median ${String(median)}`;
 }
 
 /** A page's state before any sign-off: what its run, its turn and the Inbox say. */
