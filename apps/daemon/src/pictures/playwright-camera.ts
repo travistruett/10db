@@ -1,9 +1,9 @@
 import { routeUrl, ScreenTheme, type AppUrl } from '@10db/contracts';
-import type { Browser, BrowserContext, Page, Response } from 'playwright-core';
+import type { BrowserContext, BrowserContextOptions, Page, Response } from 'playwright-core';
 import { systemClock, type Clock } from '../clock';
 import type { Logger } from '../log';
 import { NO_ANSWER, NO_ANSWER_HEADER, type AppProxy } from './app-proxy';
-import { BrowserStuckError, type BrowserHost } from './browser-host';
+import { BrowserStuckError, type BrowserHost, type ClosableBrowser } from './browser-host';
 import { ShotOutcome, type PageCamera, type Shot } from './camera';
 import { requestAllowed } from './origin-guard';
 import { DeadlineError, withDeadline } from './deadline';
@@ -28,11 +28,22 @@ export class SignInError extends Error {
   override readonly name = 'SignInError';
 }
 
+/** The part of a Playwright context the camera uses. */
+type CameraContext = Pick<
+  BrowserContext,
+  'close' | 'newPage' | 'route' | 'routeWebSocket' | 'storageState'
+>;
+
+/** The part of Playwright's `Browser` the camera uses. */
+export interface CameraBrowser extends ClosableBrowser {
+  newContext(options?: BrowserContextOptions): Promise<CameraContext>;
+}
+
 /**
  * Lets through only what `requestAllowed` allows, and names in the log what it refused. A redirect's
  * next hop never reaches a route, so the daemon's proxy is what holds; this is the first check.
  */
-async function guard(context: BrowserContext, appUrl: AppUrl, logger: Logger): Promise<void> {
+async function guard(context: CameraContext, appUrl: AppUrl, logger: Logger): Promise<void> {
   await context.route('**/*', async (route, request) => {
     const url = request.url();
     if (requestAllowed(appUrl, url)) {
@@ -105,7 +116,7 @@ async function load(page: Page, url: string): Promise<PageLoad> {
 
 /** What one shot or sign-in runs with. */
 interface ContextRun {
-  readonly browser: Browser;
+  readonly browser: CameraBrowser;
   readonly proxy: AppProxy;
   readonly appUrl: AppUrl;
   readonly signal: AbortSignal;
@@ -121,8 +132,8 @@ interface ContextRun {
  */
 async function inContext<T>(
   run: ContextRun,
-  options: Parameters<Browser['newContext']>[0],
-  fn: (context: BrowserContext) => Promise<T>,
+  options: BrowserContextOptions,
+  fn: (context: CameraContext) => Promise<T>,
 ): Promise<T> {
   run.signal.throwIfAborted();
   run.proxy.allow(run.appUrl);
@@ -131,8 +142,12 @@ async function inContext<T>(
     acceptDownloads: false,
     serviceWorkers: 'block',
   });
+  // One close for the context: Playwright answers a second call at once while the first is still
+  // under way, so only the first one says whether the page went.
+  let closing: Promise<void> | null = null;
+  const close = (): Promise<void> => (closing ??= context.close());
   const stop = (): void => {
-    void context.close().catch(() => undefined);
+    void close().catch(() => undefined);
   };
   try {
     // The signal is watched by the race itself: once a context closes under it, a pending Playwright
@@ -148,13 +163,10 @@ async function inContext<T>(
       run.signal,
     );
   } finally {
-    const closed = await withDeadline(
-      run.clock,
-      CLOSE_TIMEOUT_MS,
-      () => context.close(),
-      () => undefined,
-    ).then(
+    const closed = await withDeadline(run.clock, CLOSE_TIMEOUT_MS, close, () => undefined).then(
       () => true,
+      // A close that fails (its browser gone, or the context closed already) leaves no page running;
+      // only one that never ends does.
       (error: unknown) => !(error instanceof DeadlineError),
     );
     // A page that would not close may still be running, and could reach the next app the proxy
@@ -171,8 +183,8 @@ export interface PlaywrightCameraOptions {
 }
 
 /** The camera on the daemon's pinned Chromium. One shot or sign-in runs at a time (`BrowserHost.use`). */
-export function createPlaywrightCamera(
-  host: BrowserHost<Browser>,
+export function createPlaywrightCamera<B extends CameraBrowser>(
+  host: BrowserHost<B>,
   logger: Logger,
   options: PlaywrightCameraOptions = {},
 ): PageCamera {
@@ -180,7 +192,7 @@ export function createPlaywrightCamera(
   const clock = options.clock ?? systemClock;
   const deadlineMs = options.deadlineMs ?? SHOT_DEADLINE_MS;
   const settleLine = `did not settle within ${String(Math.round(deadlineMs / 1000))} s`;
-  const runOf = (browser: Browser, proxy: AppProxy, appUrl: AppUrl, signal: AbortSignal) => ({
+  const runOf = (browser: CameraBrowser, proxy: AppProxy, appUrl: AppUrl, signal: AbortSignal) => ({
     browser,
     proxy,
     appUrl,
