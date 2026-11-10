@@ -12,7 +12,9 @@ import {
   PassTurnWithFilesDto,
   PassViewDto,
   ProjectDto,
+  TakeOutResultDto,
   TaskDto,
+  TaskMessageDto,
   TurnActivityDto,
   type ProjectInput,
 } from '@10db/contracts';
@@ -32,10 +34,11 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
-import { FakeAdapter } from '../src/sessions';
+import { FakeAdapter, type FakeScriptBook } from '../src/sessions';
 import { apiClient } from './api-client';
 import { startDaemonWithProfiles } from './daemon-with-profiles';
-import { createTempRepo, isolatedGitEnv, tempDir } from './fixtures';
+import { createTempRepo, isolatedGitEnv, tempDir, waitForAsync } from './fixtures';
+import { pngImage } from './png';
 
 // Workbench spec §4.2, §4.3, §5: the routes the Workbench reads and acts through, over HTTP on a real
 // repository and database. A page that starts takes its message and waits for one never sent.
@@ -48,6 +51,44 @@ const PAGES: ProjectInput['areas'] = [
   { name: 'people', globs: ['src/people/**'], role: 'page', route: '/people' },
   { name: 'src', globs: ['src/**'], role: 'shared' },
 ];
+
+/**
+ * The Milestone 1 loop's pages: Billing ends each turn Ready, the second after the builder's message;
+ * Home keeps working until it is stopped.
+ */
+const LOOP_SCRIPTS: FakeScriptBook = {
+  'Billing: UI work': [
+    [
+      { do: 'consume' },
+      {
+        do: 'tool',
+        toolName: 'Write',
+        input: { file_path: 'src/billing/page.tsx', content: 'a\n' },
+      },
+      { do: 'turn_complete', text: 'Tidied the form.' },
+      { do: 'await_message', contains: 'padding too tight' },
+      { do: 'consume' },
+      {
+        do: 'tool',
+        toolName: 'Write',
+        input: { file_path: 'src/billing/page.tsx', content: 'b\n' },
+      },
+      { do: 'turn_complete', text: 'Loosened the padding.' },
+      { do: 'await_message', contains: 'never sent' },
+    ],
+  ],
+  'Home: UI work': [
+    [
+      { do: 'consume' },
+      {
+        do: 'tool',
+        toolName: 'Write',
+        input: { file_path: 'src/home/page.tsx', content: 'half\n' },
+      },
+      { do: 'await_message', contains: 'never sent' },
+    ],
+  ],
+};
 
 let data: { path: string; cleanup(): void };
 let repo: { path: string; cleanup(): void };
@@ -64,6 +105,7 @@ beforeEach(async () => {
     adapter: new FakeAdapter({
       'Settings: UI work': WAITS.map((s) => [...s]),
       'People: UI work': WAITS.map((s) => [...s]),
+      ...LOOP_SCRIPTS,
     }),
     logLevel: 'debug',
     caffeinate: () => null,
@@ -579,5 +621,87 @@ describe("a page's turns over HTTP", () => {
     expect(openedAt).not.toBeNull();
     expect((await api().get(`/passes/${pass.id}`, PassViewDto)).turns[0]?.openedAt).toBe(openedAt);
     expect((await send('POST', `/tasks/${people.id}/turns/${turn.id}/opened`)).status).toBe(409);
+  });
+});
+
+describe('the Milestone 1 loop over HTTP, as the desktop sends it', () => {
+  it('opens a pass on two pages, takes a message with a picture to Ready, stops one, takes one out and abandons', async () => {
+    const project = await projectWith([
+      { name: 'billing', globs: ['src/billing/**'], role: 'page', route: '/billing' },
+      { name: 'home', globs: ['src/home/**'], role: 'page', route: '/' },
+      { name: 'src', globs: ['src/**'], role: 'shared' },
+    ]);
+    const start = await api().get(`/projects/${project.id}/pass-start`, PassStartDto);
+    expect([start.refusal, start.pages.map((p) => p.area)]).toEqual([null, ['billing', 'home']]);
+
+    const opened = await api().post(`/projects/${project.id}/passes`, PassOpenedDto, {
+      name: 'Billing and Home pass',
+      taskIds: [],
+      pages: ['billing', 'home'],
+      firstMessage: 'These feel cramped',
+    });
+    const passId = opened.pass.id;
+    const live = () => api().get('/passes?live=true', z.array(PassViewDto));
+    const page = async (area: string) => {
+      const found = (await live())
+        .find((view) => view.pass.id === passId)
+        ?.pages.find((p) => p.area === area);
+      if (found === undefined) throw new Error(`the pass has no ${area} page`);
+      return found;
+    };
+    const readyTurn = (area: string, seq: number) =>
+      waitForAsync(async () => {
+        const turn = (await page(area)).turn;
+        return turn?.seq === seq && turn.readyAt !== null ? turn : undefined;
+      });
+
+    const first = await readyTurn('billing', 1);
+    const billing = (await page('billing')).taskId;
+    expect((await send('POST', `/tasks/${billing}/turns/${first.id}/opened`)).status).toBe(204);
+
+    // The composer's Send: the words and a picture in one multipart message.
+    const form = new FormData();
+    form.set('text', 'padding too tight');
+    form.append(
+      'picture',
+      new Blob([new Uint8Array(pngImage(1, 1))], { type: 'image/png' }),
+      'cramped.png',
+    );
+    const sent = await fetch(`${daemon.url}/tasks/${billing}/thread`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${daemon.token}` },
+      body: form,
+    });
+    expect(sent.status).toBe(201);
+    expect(TaskMessageDto.parse(await sent.json()).files).toHaveLength(1);
+    const second = await readyTurn('billing', 2);
+    const turns = await api().get(`/tasks/${billing}/turns`, z.array(PassTurnWithFilesDto));
+    expect(turns.map((t) => [t.seq, t.files.map((f) => f.path)])).toEqual([
+      [1, ['src/billing/page.tsx']],
+      [2, ['src/billing/page.tsx']],
+    ]);
+    const log = await api().get(`/pass-turns/${second.id}/activity`, z.array(TurnActivityDto));
+    expect(log.length).toBeGreaterThan(0);
+
+    // An empty composer's Stop on the page still working.
+    const home = await waitForAsync(async () => {
+      const found = await page('home');
+      return found.turn?.activity?.filesTouched.includes('src/home/page.tsx') ? found : undefined;
+    });
+    expect((await send('POST', `/tasks/${home.taskId}/stop`)).status).toBe(204);
+    expect((await page('home')).turn?.endedAt).not.toBeNull();
+
+    // Take Out… keeps every shared change.
+    const takeOut = await send('POST', `/passes/${passId}/tasks/${billing}/take-out`, {
+      shared: [],
+    });
+    expect(takeOut.status).toBe(200);
+    expect(TakeOutResultDto.parse(takeOut.body).tookOut).toBe(true);
+    expect((await live())[0]?.pages.map((p) => p.area)).toEqual(['home']);
+
+    const abandoned = await send('POST', `/passes/${passId}/abandon`);
+    expect(abandoned.status).toBe(200);
+    PassAbandonedDto.parse(abandoned.body);
+    expect(await live()).toEqual([]);
   });
 });
