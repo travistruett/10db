@@ -29,6 +29,7 @@ import {
   setAbandonStep,
   transitionBatch,
   type DbReader,
+  type WriteContext,
 } from '@10db/db';
 import { jobKey, JobQueue } from '../delivery';
 import { flagCard, withdrawCard } from '../inbox';
@@ -184,6 +185,15 @@ export function withdrawAbandonCard(deps: PassWorkDeps, pass: PassDto): void {
 }
 
 /**
+ * Step 1 of an Abandon, in the caller's write: the pass is ABANDONING, and no sign-off is taken from
+ * here on, so one waiting for a hold ends with it.
+ */
+function beginAbandon(ctx: WriteContext, passId: PassId): void {
+  setAbandonStep(ctx, passId, AbandonStep.Abandoning);
+  for (const wait of listSignOffWaits(ctx.tx, passId)) deleteSignOffWait(ctx, wait.taskId);
+}
+
+/**
  * Abandons the pass (spec §5.4) for a caller already holding the project's delivery key, going on
  * from the last step it recorded: 1 the pass is ABANDONING, so no message, sign-off or close is taken;
  * 2 a ship in flight is aborted (the pull request's checks, a close's job) and a shipping batch fails; 3 every session of the pass
@@ -209,11 +219,10 @@ export async function abandonPassSteps(
   const before = (next: AbandonStep): boolean => step === null || step < next;
 
   if (before(AbandonStep.Abandoning) || getPass(db, passId).state === PassState.Open) {
-    record(AbandonStep.Abandoning);
-    // No sign-off is taken from here on: one waiting for a hold ends with the pass.
     deps.state.write((ctx) => {
-      for (const wait of listSignOffWaits(ctx.tx, passId)) deleteSignOffWait(ctx, wait.taskId);
+      beginAbandon(ctx, passId);
     });
+    step = AbandonStep.Abandoning;
   }
   if (before(AbandonStep.ShipAborted)) {
     // A ship in flight is aborted: the pull request's checks and the close's job, each waited for
@@ -315,10 +324,6 @@ export async function abandonPassSteps(
 }
 
 /**
- * Abandons the pass as a job under the project's delivery key, as a pass opens and a page is taken
- * out, so it never interleaves with either. Refused once the pass is neither open nor abandoning.
- */
-/**
  * Abandon Pass from its route (spec §5.4, D23): step 1's write decides, here and now, outside the
  * delivery key, since a close running under that key stops only at its next conditional write; a
  * closing pass is refused once its close has moved the return branch. What ships for the pass is
@@ -326,14 +331,17 @@ export async function abandonPassSteps(
  */
 export async function startAbandon(deps: AbandonDeps, passId: PassId): Promise<PassAbandonedDto> {
   deps.state.write((ctx) => {
-    if (getPass(ctx.tx, passId).state !== PassState.Abandoning)
-      setAbandonStep(ctx, passId, AbandonStep.Abandoning);
+    if (getPass(ctx.tx, passId).state !== PassState.Abandoning) beginAbandon(ctx, passId);
   });
   // A close holds the delivery key the Abandon's job waits for: its abort is raised out here.
   await deps.stopShip?.(passId);
   return abandonPass(deps, passId);
 }
 
+/**
+ * Abandons the pass as a job under the project's delivery key, as a pass opens and a page is taken
+ * out, so it never interleaves with either. Refused once the pass is neither open nor abandoning.
+ */
 export function abandonPass(deps: AbandonDeps, passId: PassId): Promise<PassAbandonedDto> {
   const pass = getPass(deps.state.db, passId);
   return new Promise<PassAbandonedDto>((resolve, reject) => {

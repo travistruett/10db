@@ -38,6 +38,7 @@ import {
   grantSharedHold,
   keepHold,
   keepTurnWork,
+  startAbandon,
   takeOut,
   TakeOutWithin,
 } from './index';
@@ -521,6 +522,24 @@ describe('a waiting sign-off', () => {
       end: () => takeOut(takeOutDeps(), { taskId: w.settings.id, within: TakeOutWithin.Alone }),
     },
     { name: 'an Abandon of the pass', end: () => abandonPass(takeOutDeps(), w.opened.pass.id) },
+    {
+      name: "an Abandon from its route, at the Abandon's first step",
+      end: async () => {
+        let waits = -1;
+        await startAbandon(
+          {
+            ...takeOutDeps(),
+            // Called just after step 1's write, before any page is taken out.
+            stopShip: () => {
+              waits = listSignOffWaits(w.h.store.db, w.opened.pass.id).length;
+              return Promise.resolve();
+            },
+          },
+          w.opened.pass.id,
+        );
+        expect(waits).toBe(0);
+      },
+    },
     {
       name: 'the builder cancelling it',
       end: () => {
