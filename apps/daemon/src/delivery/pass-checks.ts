@@ -1,5 +1,5 @@
-import { PassNoticeKind, type PassId } from '@10db/contracts';
-import { clearPassNotice, setPassNotice } from '@10db/db';
+import { PassNoticeKind, PassState, type PassId } from '@10db/contracts';
+import { clearPassNotice, findPass, setPassNotice } from '@10db/db';
 import type { DeliveryContext } from './context';
 import { reviewPassTip, type PassReviewDeps } from './pass-review';
 
@@ -128,7 +128,9 @@ export function createPassChecks(deps: PassChecksDeps): PassChecks {
           before.abort.abort();
           await before.done;
         }
-        if (!abort.signal.aborted) await run(input, abort.signal);
+        // Checks of a pass no longer open (closed or abandoned while they waited) never start.
+        const open = findPass(deps.state.db, input.passId)?.state === PassState.Open;
+        if (!abort.signal.aborted && open) await run(input, abort.signal);
       })().finally(() => {
         if (running.get(input.passId)?.abort === abort) running.delete(input.passId);
       });

@@ -381,15 +381,19 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
           : reviewed !== null && reviewed === tip
             ? 'unchanged'
             : 'started';
+      const stillOpen = (): boolean => getPass(db, passId).state === PassState.Open;
       deps.jobs.run(jobKey(batch, JobQueue.Ship), async (signal) => {
         if (signal.aborted || getPass(db, passId).state !== PassState.Open || branch === null)
           return;
         try {
           if ((await pushPassBranch(passId, signal)) === 'no_origin') return;
           const sha = await deps.git.branchTip(project.repoPath, branch);
-          if (sha === null) return;
+          // An Abandon or a close that took the pass while the branch was pushed: no pull request,
+          // and no gate or review, is started for it.
+          if (sha === null || !stillOpen()) return;
           await ensurePassPr({ passId, ready: false }, signal);
           deps.state.write((w) => clearPassNotice(w, passId, PR_OPEN_NOTICE));
+          if (!stillOpen()) return;
           checks.start({
             passId,
             sha,

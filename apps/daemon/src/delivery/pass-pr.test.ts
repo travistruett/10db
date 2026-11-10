@@ -8,8 +8,10 @@ import {
   type ProjectInput,
   type TaskDto,
 } from '@10db/contracts';
+import { AbandonStep } from '@10db/contracts';
 import {
   findFlowByName,
+  setAbandonStep,
   getBatch,
   getBatchRow,
   patchProject,
@@ -24,12 +26,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { silentLogger } from '../log';
 import { systemProcesses } from '../recovery';
+import type { Git } from '../git';
 import { GhError } from '../github';
 import { CompletionError } from '../sessions';
 import { createGateRunner } from '../verify';
 import { SANDBOXED, waitFor } from '../../test/fixtures';
 import { alive, orphanGateGroup } from '../../test/orphan-gate';
 import { openPass, recoverBatches, type PutBackKeptWork } from './index';
+import { createPassChecks } from './pass-checks';
 import { createPassPullRequests, type PassPullRequests } from './pass-pr';
 import type { PassReviewDeps } from './pass-review';
 import { scratchBranchName } from './scratch-gate';
@@ -60,9 +64,16 @@ afterEach(async () => {
 
 function setup(
   project: Partial<ProjectInput> = {},
-  opts: { holdShips?: () => boolean; review?: PassReviewDeps } = {},
+  opts: {
+    holdShips?: () => boolean;
+    review?: PassReviewDeps;
+    wrapGit?: (git: Git) => Git;
+  } = {},
 ) {
-  h = createDeliveryHarness({ ...PAGES, gateCommand: GATE, ...project });
+  h = createDeliveryHarness(
+    { ...PAGES, gateCommand: GATE, ...project },
+    opts.wrapGit ? { wrapGit: opts.wrapGit } : {},
+  );
   prs = createPassPullRequests({
     ...h.ctx,
     gate: createGateRunner({ sandbox: null, logger: silentLogger }),
@@ -262,6 +273,60 @@ describe('Open Pull Request', () => {
         expect.objectContaining({ id: 'review', kind: PassNoticeKind.ReviewFailed }),
       ]);
     });
+  });
+
+  it('opens no pull request and starts no gate for a pass abandoned while its branch was pushed', async () => {
+    let abandon: () => void = () => undefined;
+    setup(
+      {},
+      {
+        wrapGit: (git) => ({
+          ...git,
+          push: async (repo, branch, net) => {
+            const run = await git.push(repo, branch, net);
+            abandon();
+            return run;
+          },
+        }),
+      },
+    );
+    const { passId, settings } = await openedPass();
+    signOff(settings, 'src/settings/page.tsx', 'signed off\n');
+    abandon = () => {
+      h.state.write((w) => {
+        setAbandonStep(w, passId, AbandonStep.Abandoning);
+      });
+    };
+
+    await prs.open(passId);
+    await h.jobs.idle();
+    await prs.stopPassChecks(passId);
+
+    expect(h.gh.prCreates()).toEqual([]);
+    expect(h.logs.lines().filter((l) => l['msg'] === 'gate started')).toEqual([]);
+  });
+
+  it('starts no checks for a pass that is no longer open', async () => {
+    setup();
+    const { passId, settings } = await openedPass();
+    signOff(settings, 'src/settings/page.tsx', 'signed off\n');
+    h.state.write((w) => {
+      setAbandonStep(w, passId, AbandonStep.Abandoning);
+    });
+    const gated: string[] = [];
+    const checks = createPassChecks({
+      ...h.ctx,
+      gate: ({ sha }) => {
+        gated.push(sha);
+        return Promise.resolve();
+      },
+      review: null,
+    });
+
+    checks.start({ passId, sha: 'a'.repeat(40), gate: true, review: false, baseRef: null });
+    await checks.stop(passId);
+
+    expect(gated).toEqual([]);
   });
 
   it('opens a draft on a local project too, its gate not run until the close', async () => {
