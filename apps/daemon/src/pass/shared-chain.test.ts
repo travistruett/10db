@@ -104,6 +104,21 @@ describe('keepHold', () => {
     expect(getHold(w.h.store.db, hold.claimId)).toMatchObject({ empty: true });
   });
 
+  it('takes two keeps of one hold at once as one, the second answering as the first kept it', async () => {
+    w = await openPassWorld();
+    const hold = await grant(w.settings, 'src');
+    w.write('src/button.ts', 'button\n');
+
+    const [one, two] = await Promise.all([
+      keepHold(w.deps, { claimId: hold.claimId }),
+      keepHold(w.deps, { claimId: hold.claimId }),
+    ]);
+
+    expect(two.sha).toBe(one.sha);
+    expect(listSharedChanges(w.h.store.db, w.opened.pass.id)).toHaveLength(1);
+    expect(getHold(w.h.store.db, hold.claimId).closedAt).not.toBeNull();
+  });
+
   it('closes a hold that changed nothing as empty, with no chain commit', async () => {
     w = await openPassWorld();
     w.write('src/shared.ts', "the builder's edit\n");

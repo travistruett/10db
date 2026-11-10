@@ -252,7 +252,7 @@ export function createToolHandlers(
           ),
         };
       },
-      grant: () => grantSharedHold(deps, { workstreamId, area: name }),
+      grant: () => grantSharedHold({ ...deps, logger: deps.log }, { workstreamId, area: name }),
       turnOpen: () => turnId !== undefined && openPassTurn(db, task.id)?.id === turnId,
     };
   };

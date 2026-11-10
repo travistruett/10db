@@ -34,6 +34,7 @@ import {
   type DbReader,
 } from '@10db/db';
 import { claimScopeOf } from '../delivery';
+import type { Logger } from '../log';
 import { PassFolderOffBranchError, type ChainCommit } from '../git';
 import { keepNamedPaths, passBranch, passTaskPlace, type PassWorkDeps } from './kept-work';
 import {
@@ -119,6 +120,8 @@ export async function keepHold(
   const sha = made.sha;
   const empty = sha === null || files.length === 0;
   deps.state.write((ctx) => {
+    // Another keep of the hold, at the same turn's end, closed it first: it kept the same files.
+    if (getHold(ctx.tx, hold.claimId).closedAt !== null) return;
     if (sha !== null && (kept !== undefined || files.length > 0))
       upsertSharedChange(ctx, { passId: pass.id, seq: hold.seq, sha, files, dirtyKept });
     if (input.keepOpen === true) return;
@@ -145,13 +148,16 @@ export async function keepHold(
  * a start-up or an Abandon is never stuck on it. A folder off the pass's branch is not such a case:
  * the hold stays open for the folder's return, and the refusal is thrown.
  */
-export async function keepOrLetGo(deps: PassWorkDeps, claimId: ClaimId): Promise<void> {
+export async function keepOrLetGo(
+  deps: SharedDeps & { readonly logger?: Logger },
+  claimId: ClaimId,
+): Promise<void> {
   try {
     await keepHold(deps, { claimId });
   } catch (error) {
     if (error instanceof PassFolderOffBranchError) throw error;
     const why = error instanceof Error ? error.message : String(error);
-    deps.logger.warn({ claimId, err: why }, 'a shared hold could not be kept; it is let go');
+    deps.logger?.warn({ claimId, err: why }, 'a shared hold could not be kept; it is let go');
     deps.state.write((ctx) => {
       const hold = getHold(ctx.tx, claimId);
       if (hold.closedAt !== null) return;
@@ -322,7 +328,7 @@ export async function keepCommitToolPaths(
  * no longer holds is kept first.
  */
 export async function grantSharedHold(
-  deps: SharedDeps,
+  deps: SharedDeps & { readonly logger?: Logger },
   input: { readonly workstreamId: WorkstreamId; readonly area: string },
 ): Promise<AcquireResult | null> {
   const db = deps.state.db;
@@ -336,7 +342,7 @@ export async function grantSharedHold(
       stale.area === input.area &&
       !activeClaims(db, stale.workstreamId).some((c) => c.id === stale.claimId)
     )
-      await keepHold(deps, { claimId: stale.claimId });
+      await keepOrLetGo(deps, stale.claimId);
   const tip = await chainTip(deps, repo, pass);
   const paths = await sharedPathsDiffering(deps, {
     repo,
