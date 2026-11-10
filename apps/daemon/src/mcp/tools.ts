@@ -91,6 +91,7 @@ import {
   passHazardAsk,
   slowPageLine,
 } from '../pass';
+import { pageAreaRoutes } from '../pictures';
 import { afterMarkersResolved, commitResultAsStored, fixingFailedGate, revertOfRun } from '../team';
 import {
   CLAIM_POLL_MS,
@@ -894,9 +895,7 @@ export function createToolHandlers(
             currentStep(getWorkstreamRow(ctx.tx, workstreamId)).tools === ToolAccess.ReadOnly;
           const judged = judgeReportedRoutes({
             appUrl: project.appUrl,
-            areaRoutes: project.areas.flatMap((a) =>
-              a.role === AreaRole.Page && a.route !== undefined ? [a.route] : [],
-            ),
+            areaRoutes: pageAreaRoutes(project.areas),
             refusal: readOnly
               ? 'This step is read-only; only an implement step names pages for pictures.'
               : inPass || task.workspaceMode === WorkspaceMode.Shared
