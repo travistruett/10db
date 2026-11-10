@@ -133,12 +133,41 @@ interface DiffPaths {
   readonly except?: readonly string[];
 }
 
-/** `paths` as pathspecs, each literal, so a name with `*` or `:` is never read as a pattern. */
-function diffPathspecs(paths: DiffPaths | undefined): string[] {
-  return [
-    ...(paths?.only ?? []).map((path) => `:(literal)${path}`),
-    ...(paths?.except ?? []).map((path) => `:(exclude,literal)${path}`),
-  ];
+/** Whether a file of the whole change is one `paths` keeps. */
+function keptBy(paths: DiffPaths): (path: string) => boolean {
+  const only = paths.only === undefined ? null : new Set(paths.only);
+  const except = new Set(paths.except ?? []);
+  return (path) => (only === null || only.has(path)) && !except.has(path);
+}
+
+/** How many files, and how many bytes of their names, one `diff-tree` command names at most. */
+const PATHS_PER_COMMAND = 200;
+const PATH_BYTES_PER_COMMAND = 32 * 1024;
+
+/**
+ * `paths` in turns small enough for one command line, in the order given; each name is a literal
+ * pathspec, so a name with `*` or `:` is never read as a pattern.
+ */
+function pathspecTurns(paths: readonly string[]): string[][] {
+  const turns: string[][] = [];
+  let turn: string[] = [];
+  let bytes = 0;
+  for (const path of paths) {
+    const spec = `:(literal)${path}`;
+    const size = Buffer.byteLength(spec) + 1;
+    if (
+      turn.length > 0 &&
+      (turn.length >= PATHS_PER_COMMAND || bytes + size > PATH_BYTES_PER_COMMAND)
+    ) {
+      turns.push(turn);
+      turn = [];
+      bytes = 0;
+    }
+    turn.push(spec);
+    bytes += size;
+  }
+  if (turn.length > 0) turns.push(turn);
+  return turns;
 }
 
 /** What `fileAt` found at a path of a commit. */
@@ -3906,22 +3935,43 @@ export function createGit(opts: GitOptions = {}): Git {
     },
     async diffSince(repo, base, head, maxBytes, paths) {
       const c = await pinned(repo);
-      const specs = diffPathspecs(paths);
       const numstat = await git(
         c,
-        ['diff-tree', ...DIFF_FLAGS, '--numstat', '-z', base, head, '--', ...specs],
+        ['diff-tree', ...DIFF_FLAGS, '--numstat', '-z', base, head, '--'],
         {
           config: DIFF_CONFIG,
         },
       );
+      const patch = (specs: readonly string[], cap: number) =>
+        gitCapped(
+          c,
+          ['diff-tree', ...DIFF_FLAGS, '-p', '--unified=3', base, head, '--', ...specs],
+          cap,
+          {
+            config: DIFF_CONFIG,
+          },
+        );
       // A few bytes past the cap are read so a character split by the cap is seen whole.
-      const text = await gitCapped(
-        c,
-        ['diff-tree', ...DIFF_FLAGS, '-p', '--unified=3', base, head, '--', ...specs],
-        maxBytes + UTF8_MAX_BYTES,
-        { config: DIFF_CONFIG },
-      );
-      return { ...cutDiff(text, maxBytes), files: parseNumstat(numstat) };
+      const cap = maxBytes + UTF8_MAX_BYTES;
+      if (paths === undefined)
+        return { ...cutDiff(await patch([], cap), maxBytes), files: parseNumstat(numstat) };
+      // The files are picked from the whole change's counts, never named on one command line: the
+      // kept ones are read in turns, in the counts' order, which is the order the text lists them in.
+      const files = parseNumstat(numstat).filter((file) => keptBy(paths)(file.path));
+      const read: Buffer[] = [];
+      let size = 0;
+      let left = false;
+      for (const turn of pathspecTurns(files.map((file) => file.path))) {
+        if (size >= cap) {
+          left = true;
+          break;
+        }
+        const text = await patch(turn, cap - size);
+        read.push(text);
+        size += text.length;
+      }
+      const cut = cutDiff(Buffer.concat(read), maxBytes);
+      return { diff: cut.diff, truncated: cut.truncated || left, files };
     },
     async filtersIn(repo, rev) {
       return filters(await pinned(repo), rev);
