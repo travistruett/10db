@@ -363,6 +363,74 @@ describe('Open Pull Request', () => {
     expect(gated).toEqual([]);
   });
 
+  it('says in the header when the gate could not run at all', async () => {
+    setup();
+    const { passId, settings } = await openedPass();
+    const tip = signOff(settings, 'src/settings/page.tsx', 'signed off\n');
+    const checks = createPassChecks({
+      ...h.ctx,
+      gate: () => Promise.reject(new Error('no room for a scratch worktree')),
+      review: null,
+      reviewed: () => Promise.resolve(),
+    });
+
+    checks.start({ passId, sha: tip, gate: true, review: false, baseRef: null });
+
+    await vi.waitFor(() => {
+      expect(notices(passId)).toEqual([
+        expect.objectContaining({
+          id: 'gate',
+          kind: PassNoticeKind.GateFailed,
+          sendable: false,
+          text: `The gate on ${tip.slice(0, 7)} could not run: no room for a scratch worktree`,
+        }),
+      ]);
+    });
+    await checks.stop(passId);
+  });
+
+  it('logs, and leaves nothing unhandled, when what follows a review fails', async () => {
+    setup({ gateCommand: null });
+    const standard = findFlowByName(h.store.db, 'standard');
+    if (standard) h.state.write((w) => patchProject(w, h.project.id, { flowId: standard.id }));
+    const { passId, settings } = await openedPass();
+    const tip = signOff(settings, 'src/settings/page.tsx', 'signed off\n');
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => {
+      unhandled.push(reason);
+    };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const checks = createPassChecks({
+        ...h.ctx,
+        gate: null,
+        review: {
+          adapter: { complete: () => Promise.resolve('No findings.') },
+          launch: (_account, model) => ({ model, env: {}, expect: { kind: 'any' } as never }),
+          scratchRoot: tmpdir(),
+        },
+        reviewed: () => Promise.reject(new Error('the body file could not be written')),
+      });
+
+      checks.start({ passId, sha: tip, gate: false, review: true, baseRef: null });
+      await vi.waitFor(() => {
+        expect(h.logs.lines()).toContainEqual(
+          expect.objectContaining({
+            msg: 'pass pull request body not updated',
+            err: 'the body file could not be written',
+          }),
+        );
+      });
+      await checks.stop(passId);
+      // An unhandled rejection is reported on a later turn of the event loop.
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(unhandled).toEqual([]);
+      expect(getPassProgress(h.store.db, passId).reviewedSha).toBe(tip);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
   it('opens a draft on a local project too, its gate not run until the close', async () => {
     setup({ delivery: 'local' });
     const { passId, settings } = await openedPass();

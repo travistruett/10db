@@ -103,7 +103,14 @@ export function createPassChecks(deps: PassChecksDeps): PassChecks {
           ).then(
             async (did) => {
               deps.state.write((w) => clearPassNotice(w, input.passId, REVIEW_NOTICE));
-              if (did === 'reviewed') await deps.reviewed(input.passId, input.sha, signal);
+              if (did !== 'reviewed') return;
+              // The review is recorded; only the body's line about it is lost.
+              await deps.reviewed(input.passId, input.sha, signal).catch((error: unknown) => {
+                deps.logger.warn(
+                  { passId: input.passId, sha: input.sha, err: message(error) },
+                  'pass pull request body not updated',
+                );
+              });
             },
             (error: unknown) => {
               deps.logger.warn(
