@@ -108,8 +108,8 @@ export interface SchedulerOptions {
   /** Accounts with no model profile yet: their queued work is left alone, not claimed and given back each tick. */
   readonly modelWait?: Pick<ModelListWait, 'holds'>;
   /**
-   * Whether a run may launch as far as its task's saved Workbench work goes (call 33): false while a
-   * run outside any batch waits for that work to be put back.
+   * Whether a run may launch as far as its task's saved Workbench work goes (call 33): false while
+   * its work is put back in its checkout. Asked last, of a run every other check would launch now.
    */
   readonly keptWork: { ready(run: WorkstreamDto): boolean };
 }
@@ -320,8 +320,6 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
     };
     const line = listWorkstreams(db, { states: [WorkstreamState.Queued] }).toSorted(queueOrder);
     for (const ws of line) {
-      // Before the caps: the put-back it waits for runs whether or not there is room yet.
-      if (!opts.keptWork.ready(ws)) continue;
       const overCaps = awaited.has(ws.id);
       // At the daemon-wide cap ordinary work waits, unless a warm pass session could close for it;
       // a page goes on to say it waits. The room check below decides either.
@@ -419,6 +417,9 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
         makeRoom(ws, { accountId: account.id, pass: inPass });
         continue;
       }
+      // Last, just before the claim: a put-back starts only for a run that would launch now, and
+      // writes the saved work only into the checkout it then launches in.
+      if (!opts.keptWork.ready(ws)) continue;
       const leaseUntil = new Date(opts.clock.now().getTime() + opts.leaseMs).toISOString();
       const areaScope = claimScopeOf(db, ws);
       // A page holds its pass's areas for its life; one that waited at the open for a page another

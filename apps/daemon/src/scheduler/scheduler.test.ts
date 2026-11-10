@@ -7,6 +7,7 @@ import {
   type BatchId,
   type BatchState,
   type ProjectId,
+  type WorkstreamDto,
   type WorkstreamId,
 } from '@10db/contracts';
 import {
@@ -136,10 +137,14 @@ afterEach(() => {
   close();
 });
 
-function scheduler(caps = { global: 4 }, awaited: ReadonlySet<WorkstreamId> = new Set()) {
+function scheduler(
+  caps = { global: 4 },
+  awaited: ReadonlySet<WorkstreamId> = new Set(),
+  // The launch rule for saved Workbench work is the delivery harness's (kept-work-start.test.ts).
+  keptWork: { ready(run: WorkstreamDto): boolean } = { ready: () => true },
+) {
   return createScheduler({
-    // The launch rule for saved Workbench work is the delivery harness's (kept-work-start.test.ts).
-    keptWork: { ready: () => true },
+    keptWork,
     state,
     clock,
     caps,
@@ -518,6 +523,28 @@ describe('scheduler', () => {
     const a = queue();
     add(a.project, ['ui'], [a.task.id]);
     await scheduler().tick();
+    expect(launched.map((l) => l.id)).toEqual([a.workstream.id]);
+  });
+
+  it('asks whether saved work is back only of a run that could launch now, and launches it only on yes', async () => {
+    const a = queue();
+    // Waits for `a`: no put-back is started for a run that could not launch anyway.
+    add(a.project, ['ui'], [a.task.id]);
+    const asked: WorkstreamId[] = [];
+    let back = false;
+    const gate = {
+      ready: (run: WorkstreamDto) => {
+        asked.push(run.id);
+        return back;
+      },
+    };
+
+    expect(await scheduler(undefined, undefined, gate).tick()).toBe(0);
+    expect(asked).toEqual([a.workstream.id]);
+    expect(getWorkstream(store.db, a.workstream.id).state).toBe('QUEUED');
+
+    back = true;
+    expect(await scheduler(undefined, undefined, gate).tick()).toBe(1);
     expect(launched.map((l) => l.id)).toEqual([a.workstream.id]);
   });
 

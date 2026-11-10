@@ -12,10 +12,12 @@ import {
   getProject,
   getTask,
   getTaskKeptWork,
+  getWorkstream,
   getWorkstreamRow,
   listWorkstreams,
   passHoldingFolder,
   passHoldingTask,
+  type DbReader,
 } from '@10db/db';
 import type { EventBus } from '../events';
 import { checkoutOf } from './checkout';
@@ -53,47 +55,61 @@ export async function putBackForStart(
   }
 }
 
-/** What the scheduler asks before it launches a run. */
+/** What the scheduler asks, last, before it launches a run. */
 export interface KeptWorkGate {
   /**
-   * Whether the run may launch as far as its task's saved Workbench work goes. A run whose task has
-   * saved work waits while a job puts the work back in the checkout it runs in (its batch's copy, or
-   * Your folder), once for that run, and launches on the tick after. Runs of a pass, runs of a batch
-   * that is not open yet, and runs W9 holds pass: their own rules hold them, and the work goes back
-   * once they could launch. A restart asks again; the put-back is idempotent.
+   * Whether the run may launch as far as its task's saved Workbench work goes. The scheduler asks it
+   * of a run every other check would launch now. A run whose task has saved work waits while a job
+   * puts the work back in the checkout it runs in (its batch's copy, or Your folder), once for that
+   * run, and launches on the tick after. Runs of a pass, runs of a batch that is not open, and runs
+   * W9 holds pass: their own rules hold them. A restart asks again; the put-back is idempotent.
    */
   ready(run: WorkstreamDto): boolean;
 }
 
 /**
+ * Whether `run` waits for its task's saved work: it is queued, its task has saved work and no pass
+ * holds the task, its batch, if it has one, is open, and no pass holds the Your folder it runs in.
+ */
+function waitsForPutBack(db: DbReader, run: WorkstreamDto): boolean {
+  if (run.state !== WorkstreamState.Queued) return false;
+  const task = getTask(db, run.taskId);
+  if (getTaskKeptWork(db, task.id) === null || passHoldingTask(db, task) !== undefined)
+    return false;
+  const batch = run.batchId === null ? null : getBatch(db, run.batchId);
+  if (batch !== null && batch.state !== BatchState.Open) return false;
+  // In Your folder while a pass holds it, W9 holds the run; its work goes back after.
+  return !(batch?.worktreePath == null && passHoldingFolder(db, run.projectId) !== undefined);
+}
+
+/**
  * Call 33's launch rule, the one invariant for every start: a run never launches before its task's
  * saved work is back in its checkout, whether it was started, started again, joined a batch or was
- * found queued after a restart. Nothing of the saved work's record changes until the run exists and
- * could launch.
+ * found queued after a restart. The put-back's job asks again as it runs, since the run, its batch
+ * or Your folder may have changed since the scheduler asked: a run no longer waiting gets nothing
+ * written, and is asked again if it comes to wait once more.
  */
 export function createKeptWorkGate(ctx: DeliveryContext): KeptWorkGate {
   const db = ctx.state.db;
-  /** Runs whose put-back has run, or is running. */
+  /** Runs whose put-back has run. */
   const back = new Set<WorkstreamId>();
+  /** Runs whose put-back is queued or running. */
   const putting = new Set<WorkstreamId>();
   return {
     ready(run) {
-      if (back.has(run.id)) return true;
-      const task = getTask(db, run.taskId);
-      if (getTaskKeptWork(db, task.id) === null || passHoldingTask(db, task) !== undefined)
-        return true;
-      const batch = run.batchId === null ? null : getBatch(db, run.batchId);
-      if (batch !== null && batch.state !== BatchState.Open) return true;
-      // In Your folder while a pass holds it, W9 holds the run; its work goes back after.
-      if (batch?.worktreePath == null && passHoldingFolder(db, run.projectId) !== undefined)
-        return true;
+      if (back.has(run.id) || !waitsForPutBack(db, run)) return true;
       if (putting.has(run.id)) return false;
       putting.add(run.id);
-      const checkout = checkoutOf(db, run);
+      const batch = run.batchId === null ? null : getBatch(db, run.batchId);
       ctx.jobs.run(
         jobKey(batch ?? { projectId: run.projectId, worktreePath: null }, JobQueue.Cut),
         async () => {
-          await putBackForStart(ctx, [task.id], checkout);
+          const now = getWorkstream(db, run.id);
+          if (!waitsForPutBack(db, now)) {
+            putting.delete(run.id);
+            return;
+          }
+          await putBackForStart(ctx, [now.taskId], checkoutOf(db, now));
           putting.delete(run.id);
           back.add(run.id);
           ctx.onWorkQueued();

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  mintId,
   TaskMessageAuthor,
   WorkspaceMode,
   WorkstreamState,
@@ -12,8 +13,11 @@ import {
   getTask,
   getTaskKeptWork,
   getWorkstream,
+  insertPass,
   listTaskThread,
   setTaskKeptWork,
+  transitionBatch,
+  transitionWorkstream,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
@@ -143,6 +147,74 @@ describe('an ordinary start of a task with saved Workbench work', () => {
     expect(createKeptWorkGate(h.ctx).ready(run)).toBe(true);
     expect(getWorkstream(h.store.db, run.id).state).toBe(WorkstreamState.Queued);
   });
+
+  it.each([
+    {
+      name: 'its run was cancelled',
+      local: true,
+      act: (task: TaskDto) => {
+        const run = getTask(h.store.db, task.id).workstreamId;
+        if (run === null) throw new Error('the task has no run');
+        h.state.write((ctx) => transitionWorkstream(ctx, run, { to: 'CANCELLED', fence: null }));
+      },
+    },
+    {
+      name: 'a pass took Your folder',
+      local: true,
+      act: () => {
+        const other = h.addTask('Home page', { areas: ['ui'] });
+        h.state.write((ctx) =>
+          insertPass(ctx, {
+            id: mintId('Pass'),
+            projectId: h.project.id,
+            name: 'Polish',
+            pageCap: 4,
+            returnBranch: 'main',
+            startSha: h.git$('rev-parse', 'HEAD'),
+            branch: '10db/polish-abc123',
+            baseBranch: 'main',
+            repo: null,
+            taskIds: [other.id],
+            dirt: [],
+          }),
+        );
+      },
+    },
+    {
+      name: 'its batch was abandoned',
+      local: false,
+      act: (task: TaskDto) => {
+        const run = getTask(h.store.db, task.id).workstreamId;
+        const batch = run === null ? null : getWorkstream(h.store.db, run).batchId;
+        if (batch === null) throw new Error('the run has no batch');
+        h.state.write((ctx) => transitionBatch(ctx, batch, { to: 'ABANDONED' }));
+      },
+    },
+  ])(
+    'writes nothing back, and keeps the work saved, when $name before the put-back ran',
+    async ({ local, act }) => {
+      h = local
+        ? createDeliveryHarness({ delivery: 'local' } satisfies Partial<ProjectInput>)
+        : createDeliveryHarness({}, { trigger: false });
+      const task = taskWithSavedWork();
+      if (local) startTaskWithPlan(h.state, task.id);
+      else {
+        h.starter.startTask(task.id);
+        await h.jobs.idle();
+      }
+      const gate = createKeptWorkGate(h.ctx);
+      expect(gate.ready(runOf(task))).toBe(false);
+
+      // What the scheduler asked about changes before the put-back's job runs.
+      act(task);
+      await h.jobs.idle();
+
+      expect(read(h.repo, 'src/api/a.ts')).toBe('a\n');
+      expect(existsSync(join(h.repo, 'src/api/new.ts'))).toBe(false);
+      expect(getTaskKeptWork(h.store.db, task.id)).not.toBeNull();
+      expect(notices(task)).toEqual([]);
+    },
+  );
 
   it("deletes the saved work's ref once the batch holding the work ships", async () => {
     h = createDeliveryHarness();
