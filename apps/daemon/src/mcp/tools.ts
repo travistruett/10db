@@ -227,6 +227,8 @@ export function createToolHandlers(
     const { project, task } = context();
     if (!passHoldingTask(db, task)) return undefined;
     if (project.areas.find((a) => a.name === name)?.role !== AreaRole.Shared) return undefined;
+    // The turn the call is made in: the wait ends with it, though the next turn opens.
+    const turnId = openPassTurn(db, task.id)?.id;
     return {
       ask: () => {
         const asked = askShared(
@@ -251,7 +253,7 @@ export function createToolHandlers(
         };
       },
       grant: () => grantSharedHold(deps, { workstreamId, area: name }),
-      turnOpen: () => openPassTurn(db, task.id) !== undefined,
+      turnOpen: () => turnId !== undefined && openPassTurn(db, task.id)?.id === turnId,
     };
   };
 

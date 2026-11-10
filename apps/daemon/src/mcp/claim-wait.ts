@@ -74,7 +74,10 @@ export interface SharedGrant {
    * null means the lane's turn has ended, so nothing was granted.
    */
   grant(): Promise<AcquireResult | null>;
-  /** Whether the lane's turn is still open: an area is held only for a turn, so a wait ends with it. */
+  /**
+   * Whether the turn the wait began in is still open: an area is held only for a turn, so a wait
+   * ends with that turn, even when the next has opened.
+   */
   turnOpen(): boolean;
 }
 
@@ -113,7 +116,27 @@ async function answerOrTurnEnd(
       if (cardOpen(a, asked.inboxId)) a.inbox.withdraw(asked.inboxId);
       return turnEndedRefusal(a, asked.inboxId);
     }
+    // A question closed with no answer (withdrawn, or cancelled with the run) is never answered.
+    if (!cardOpen(a, asked.inboxId)) {
+      if (getInboxItem(a.state.db, asked.inboxId).answer === null)
+        return withdrawnRefusal(a, asked.inboxId);
+      const given = await answered;
+      if ('error' in given) throw given.error;
+      return given.result;
+    }
   }
+}
+
+/** What a shared wait answers when its question closed with no answer. */
+function withdrawnRefusal(a: Asking, inboxId: InboxItemId): ClaimResult {
+  return {
+    granted: false,
+    heldBy: null,
+    inboxId,
+    yielded: false,
+    parked: false,
+    instruction: `The builder's question about shared ${a.kind} ${a.name} was closed without an answer, so you did not get it. If you still need it, call request_claim with a new opId.`,
+  };
 }
 
 /** Claims the builder made a task give up to end a claim deadlock, until its agent is told. */
@@ -153,6 +176,8 @@ export interface WaitState {
 export interface LiveWait {
   readonly state: WaitState;
   readonly done: Promise<ClaimResult>;
+  /** A shared wait whose turn has ended takes no new call: it is ending, with nothing. */
+  readonly stale: () => boolean;
 }
 
 const DEADLOCK_CARD = 'claim-deadlock';
@@ -195,7 +220,7 @@ export class ClaimWaits {
   join(a: Asking): LiveWait {
     const key = `${a.workstreamId}:${a.kind}:${a.name}`;
     const existing = this.#live.get(key);
-    if (existing) return existing;
+    if (existing && !existing.stale()) return existing;
     const state: WaitState = {
       workstreamId: a.workstreamId,
       kind: a.kind,
@@ -204,13 +229,16 @@ export class ClaimWaits {
       inboxId: null,
       askId: null,
     };
+    const shared = a.shared;
+    const stale = (): boolean => shared !== undefined && !shared.turnOpen();
     const done = claimOrWait(a, state, this).finally(() => {
-      this.#live.delete(key);
+      // A wait that took a stale one's place is not this one's to remove.
+      if (this.#live.get(key) === entry) this.#live.delete(key);
       if (![...this.#live.values()].some((w) => w.state.workstreamId === a.workstreamId))
         this.#cancelled.delete(a.workstreamId);
     });
     done.catch(() => undefined);
-    const entry = { state, done };
+    const entry: LiveWait = { state, done, stale };
     this.#live.set(key, entry);
     return entry;
   }
