@@ -17,7 +17,6 @@ import {
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import { readJson } from './client';
-import { createPassCloseRoutesClient } from './pass-close-routes';
 import { passKeys } from './pass-queries';
 import { useDaemon } from './provider';
 import { queryKeys } from './queries';
@@ -44,14 +43,9 @@ function useRefetchPasses() {
     );
 }
 
-/** The typed client of the routes `AppType` does not declare yet, over this window's connection. */
-function usePassCloseClient() {
-  return createPassCloseRoutesClient(useDaemon().connection);
-}
-
 /** What Take Out… asks about first: the page's shared changes that have not landed. */
 export function useTakeOutPreview({ passId, taskId }: PassPage) {
-  const client = usePassCloseClient();
+  const { client } = useDaemon();
   return useQuery({
     // Not under `passKeys.all`: the take-out it leads to refetches the passes, and a page gone from the
     // pass has nothing to preview. Kept nowhere once the confirm closes, so each Take Out… reads it
@@ -71,7 +65,7 @@ export function useTakeOutPreview({ passId, taskId }: PassPage) {
 
 /** Sign Off: the page lands now, or waits for the turn whose shared change it needs. */
 export function useSignOff() {
-  const client = usePassCloseClient();
+  const { client } = useDaemon();
   const refetch = useRefetchPasses();
   return useMutation({
     mutationFn: async ({ passId, taskId }: PassPage) =>
@@ -87,7 +81,7 @@ export function useSignOff() {
 
 /** Cancel Sign-Off: a sign-off that waits for another page's turn is withdrawn; the page is Ready again. */
 export function useCancelSignOff() {
-  const client = usePassCloseClient();
+  const { client } = useDaemon();
   const refetch = useRefetchPasses();
   return useMutation({
     mutationFn: async ({ passId, taskId }: PassPage) =>
@@ -106,7 +100,7 @@ export function useCancelSignOff() {
  * message. `noticeId` is a header notice's id or a thread notice's message id.
  */
 export function useSendToAgent() {
-  const client = usePassCloseClient();
+  const { client } = useDaemon();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async ({ taskId, noticeId }: { taskId: TaskId; noticeId: string }) =>
@@ -146,7 +140,7 @@ export function useAnswerPassCard() {
  * page signed off or the pull request made, and after an open.
  */
 export function usePullRequestPreview(view: PassViewDto) {
-  const client = usePassCloseClient();
+  const { client } = useDaemon();
   const passId = view.pass.id;
   const signedOff = view.pages.filter((page) => page.signOff === PassSignOff.Done).length;
   return useQuery({
@@ -167,7 +161,7 @@ function pullRequestPreviewKey(passId: PassId) {
 
 /** Open Pull Request: pushes the signed-off pages and opens a draft, or updates the one open. */
 export function useOpenPullRequest() {
-  const client = usePassCloseClient();
+  const { client } = useDaemon();
   const refetch = useRefetchPasses();
   const queryClient = useQueryClient();
   return useMutation({
@@ -189,7 +183,7 @@ export function useOpenPullRequest() {
  * Not under `passKeys.all`: the close it leads to refetches the passes, and a closing pass has no lists.
  */
 export function useClosePreview(passId: PassId) {
-  const client = usePassCloseClient();
+  const { client } = useDaemon();
   return useQuery({
     queryKey: ['close-preview', passId],
     // Kept nowhere once the modal closes: each Close Pass… shows the lists as they are now.
@@ -205,7 +199,7 @@ export function useClosePreview(passId: PassId) {
 
 /** Close Pass: closes on the lists confirmed, or answers them again with what changed. */
 export function useClosePass() {
-  const client = usePassCloseClient();
+  const { client } = useDaemon();
   const refetch = useRefetchPasses();
   return useMutation({
     mutationFn: async ({ passId, request }: { passId: PassId; request: PassCloseRequest }) =>

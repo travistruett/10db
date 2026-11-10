@@ -16,7 +16,7 @@ const readOnlyFetch: typeof fetch = (input, init) => {
 };
 
 /** What every typed client of one connection sends: its token, and only reads for a screen's frame. */
-export function clientOptions(conn: DaemonConnection) {
+function clientOptions(conn: DaemonConnection) {
   return {
     headers: { Authorization: `Bearer ${conn.token}` },
     ...(conn.readOnly === true ? { fetch: readOnlyFetch } : {}),
