@@ -64,7 +64,7 @@ export type TakeOutWithin = (typeof TakeOutWithin)[keyof typeof TakeOutWithin];
 export type StopPassLane = (id: WorkstreamId) => Promise<void>;
 
 /** Tells Your folder's watcher which files 10db just wrote there, so they raise no card. */
-export type DaemonWrote = (repo: string, paths: readonly string[]) => Promise<void>;
+type DaemonWrote = (repo: string, paths: readonly string[]) => Promise<void>;
 
 /** What a take-out needs: the pass's work in the folder, the runner's stop, the watcher's ear. */
 export type TakeOutDeps = PassWorkDeps & {

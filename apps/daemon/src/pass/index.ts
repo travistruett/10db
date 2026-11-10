@@ -16,7 +16,6 @@ export {
   takeOut,
   takeOutSteps,
   TakeOutWithin,
-  type DaemonWrote,
   type TakeOutDeps,
   type TakeOutInput,
 } from './take-out';
