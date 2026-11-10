@@ -129,7 +129,9 @@ export async function startAppProxy(options: AppProxyOptions = {}): Promise<AppP
       return;
     }
     const url = new URL(`http://${target}`);
-    const upstream: Socket = connect(Number(url.port), socketHost(url.hostname), () => {
+    // The port as written: a URL drops 80, the default.
+    const port = Number(/:(\d+)$/.exec(target)?.[1]);
+    const upstream: Socket = connect(port, socketHost(url.hostname), () => {
       options.onTunnel?.(target);
       client.write('HTTP/1.1 200 Connection Established\r\n\r\n');
       if (head.length > 0) upstream.write(head);
