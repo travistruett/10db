@@ -573,6 +573,24 @@ describe("the builder's Stop", () => {
     expect(engine.runner.isRunning(id)).toBe(false);
   });
 
+  it('stops a page whose session is starting, spending no recovery attempt', async () => {
+    const { pass, id } = await openPage([
+      [...turn('one\n', 'Tidied.'), { do: 'await_message', contains: 'never sent' }],
+    ]);
+    // The lane has been granted and has not opened its turn yet.
+    expect(engine.runner.isRunning(id)).toBe(true);
+    expect(listPassTurns(engine.store.db, pass.id)).toEqual([]);
+
+    await engine.runner.stopPassLane(id);
+
+    expect(engine.adapter.prompts).toEqual([]);
+    expect(
+      listPassTurns(engine.store.db, pass.id).map((t) => [t.seq, t.ending, t.settledAt !== null]),
+    ).toEqual([[1, 'stopped', true]]);
+    expect(row(id)).toMatchObject({ state: 'QUEUED', recoveryAttempts: 0, leaseOwner: null });
+    expect(readyItems()).toEqual([]);
+  });
+
   it('resolves at once for a page with no session, changing nothing', async () => {
     const { id } = await openPage([[...turn('one\n', 'Tidied.')]]);
     await waitFor(() => !engine.runner.isRunning(id) && row(id).state === 'WAITING_HUMAN');

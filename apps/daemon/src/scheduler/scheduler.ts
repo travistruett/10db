@@ -7,6 +7,7 @@ import {
   PASS_FOLDER_WAIT_LINE,
   PASS_FOLDER_WAIT_NOTICE_KEY,
   queueOrder,
+  PassTurnEnding,
   TakeOutStep,
   WorkstreamState,
   type BatchDto,
@@ -29,6 +30,7 @@ import {
   getAccountRow,
   getProject,
   getTask,
+  getTaskMessageRow,
   getWorkstreamRow,
   lastTakeOut,
   listBatches,
@@ -191,11 +193,18 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
   ): boolean {
     const takeOut = lastTakeOut(db, task.id);
     const read = snapshot.branches.has(project.repoPath);
+    const latest = latestPassTurn(db, task.id);
+    const untaken = untakenMessages(db, task.id);
+    const stoppedAt = latest?.ending === PassTurnEnding.Stopped ? latest.endedAt : null;
     const verdict = passLaunch({
       passState: pass.state,
       takingOut: takeOut?.passId === pass.id && takeOut.step < TakeOutStep.Done,
-      untaken: untakenMessages(db, task.id).length > 0,
-      turnUnsettled: latestPassTurn(db, task.id)?.settledAt === null,
+      untaken: untaken.length > 0,
+      stopped: stoppedAt !== null,
+      writtenSinceStop:
+        stoppedAt !== null &&
+        untaken.some((messageId) => getTaskMessageRow(db, messageId).createdAt > stoppedAt),
+      turnUnsettled: latest?.settledAt === null,
       folderOn: read
         ? snapshot.branches.get(project.repoPath) === getBatch(db, pass.batchId).branch
         : null,

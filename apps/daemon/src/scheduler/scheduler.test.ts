@@ -738,6 +738,30 @@ describe('Workbench passes', () => {
     expect(launched.map((l) => l.id)).toEqual([opened.workstream.id]);
   });
 
+  it('holds a page the builder stopped until the builder writes to it again, then runs it', async () => {
+    const project = seedProject(store, { areas: PAGES });
+    const opened = openPass(project);
+    onPassBranch(opened, project);
+    const before = write(opened.task);
+    // The builder stopped the turn before it took the message.
+    state.write((ctx) => {
+      const turn = insertPassTurn(ctx, {
+        taskId: opened.task.id,
+        workstreamId: opened.workstream.id,
+        sessionId: null,
+        messageId: before.id,
+      });
+      endPassTurn(ctx, turn.id, { ending: 'stopped', replyBody: null });
+      settlePassTurn(ctx, turn.id);
+    });
+    expect(await scheduler().tick()).toBe(0);
+
+    clock.advance(1_000);
+    write(opened.task);
+    expect(await scheduler().tick()).toBe(1);
+    expect(launched.map((l) => l.id)).toEqual([opened.workstream.id]);
+  });
+
   it.each([
     {
       name: 'a page being taken out',

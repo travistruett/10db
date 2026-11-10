@@ -9,6 +9,7 @@ import {
   type SessionId,
   type TaskMessageId,
   type WorkstreamId,
+  type WorkstreamState,
 } from '@10db/contracts';
 import {
   clearLease,
@@ -39,6 +40,9 @@ import { raisePassCheck, raiseTurnFailed } from './pass-check';
 export function passOfWorkstream(db: DbReader, id: WorkstreamId): PassDto | undefined {
   return passHoldingTask(db, getTask(db, getWorkstreamRow(db, id).taskId));
 }
+
+/** The states of a lane that has been granted and has not parked: its turn may not be open yet. */
+const LAUNCHED: ReadonlySet<WorkstreamState> = new Set([S.Starting, S.Running, S.HandingOff]);
 
 /** Moves the workstream to WAITING_HUMAN from wherever a turn of it can end. */
 function toWaitingHuman(ctx: WriteContext, id: WorkstreamId, fence: number | null): void {
@@ -230,8 +234,9 @@ function settleTurn(
  * one write; the page's work kept; then the turn settled. A turn is not over, and nothing is done,
  * while a builder message no turn has taken is kept (step 1): it is on its way into the session,
  * whether or not it has been handed over yet. A failed page settles the turn that ended and was not
- * settled, if one did, rather than ending another; with none open it gets one for the message it
- * was given, so Retry Turn has a message to send again. True when a turn was carried through.
+ * settled, if one did, rather than ending another; with none, a failed lane or one stopped before
+ * its turn opened gets one for the message it was given, so Retry Turn has a message to send again
+ * and the launch rule sees the stop. True when a turn was carried through.
  */
 export async function endTurnSteps(
   deps: PassWorkDeps,
@@ -249,9 +254,13 @@ export async function endTurnSteps(
     const open = openPassTurn(ctx.tx, taskId);
     // A shared change the turn made is kept, and its areas released, before this write.
     if (open) return endPassTurn(ctx, open.id, { ending: input.ending, replyBody: input.reply });
-    if (input.ending !== PassTurnEnding.Failed) return undefined;
-    const latest = latestPassTurn(ctx.tx, taskId);
-    if (latest && latest.endedAt !== null && latest.settledAt === null) return latest;
+    if (input.ending === PassTurnEnding.Ready) return undefined;
+    if (input.ending === PassTurnEnding.Failed) {
+      const latest = latestPassTurn(ctx.tx, taskId);
+      if (latest && latest.endedAt !== null && latest.settledAt === null) return latest;
+    } else if (!LAUNCHED.has(getWorkstreamRow(ctx.tx, input.workstreamId).state)) return undefined;
+    // The lane was started for a message and stopped or failed before its turn opened: the turn is
+    // opened for it here so how it ended is on the rows the launch rule and Retry Turn read.
     const turn = insertPassTurn(ctx, {
       taskId,
       workstreamId: input.workstreamId,
