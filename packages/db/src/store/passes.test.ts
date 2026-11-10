@@ -381,7 +381,10 @@ describe('renaming a pass', () => {
       title: 'Settings and people',
       branch: batch.branch,
     });
-    expect(events.map((e) => [e.type, e.entityId])).toEqual([[EventType.PassChanged, pass.id]]);
+    expect(events.map((e) => [e.type, e.entityId])).toEqual([
+      [EventType.BatchUpdated, batch.id],
+      [EventType.PassChanged, pass.id],
+    ]);
   });
 
   it.each([PassState.Settled, PassState.Abandoned])('refuses a %s pass', (state) => {
