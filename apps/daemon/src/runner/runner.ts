@@ -3281,8 +3281,8 @@ export function createRunner(opts: RunnerOptions): Runner {
       const row = getWorkstreamRow(db, target.workstreamId);
       if (row.state !== S.WaitingHuman || row.currentSessionId !== null) return;
       // The workstream waits for the builder's check, not for this card; only the check card's own
-      // answer moves it.
-      if (row.nextAction.kind === 'builder_review') return;
+      // answer moves it. A Ready pass page waits for the builder's next message.
+      if (row.nextAction.kind === 'builder_review' || row.nextAction.kind === 'pass_review') return;
       const providerSessionId =
         row.nextAction.kind === 'answer' ? row.nextAction.providerSessionId : null;
       opts.state.write((ctx) =>

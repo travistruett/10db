@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import {
   ConflictError,
   NotFoundError,
+  PassCheckDetail,
   UNFINISHED_BATCH_STATES,
   WorkstreamState,
   type WorkstreamChangesDto,
@@ -37,16 +38,35 @@ function checkedHead(db: DbReader, row: WorkstreamRow): string | null {
 }
 
 /**
+ * What a Ready pass page shows, while the workstream waits on its `check` item: the turn's kept commit
+ * against the pass branch tip it was kept on. A page with no kept commit yet shows that tip alone.
+ */
+function shownKeptWork(db: DbReader, row: WorkstreamRow): { base: string; head: string } | null {
+  if (row.state !== WorkstreamState.WaitingHuman || row.nextAction.kind !== 'pass_review')
+    return null;
+  const { inboxId } = row.nextAction;
+  const item = openItemsForWorkstream(db, row.id).find(
+    (i) => i.id === inboxId && i.kind === 'check',
+  );
+  const parsed = PassCheckDetail.safeParse(item?.detail);
+  if (!parsed.success) return null;
+  return { base: parsed.data.keptBaseSha, head: parsed.data.keptSha ?? parsed.data.keptBaseSha };
+}
+
+/**
  * What a workstream changed: the diff from the head it started at to its head, for the builder to
  * check. The head is read once, from the check card the builder is looking at when there is one and
  * from its checkout (its batch's worktree, else the project's) otherwise, and every part of the
- * answer is read at that one commit.
+ * answer is read at that one commit. A Ready pass page shows its kept commit instead: work kept at a
+ * ref, which no branch carries, so it lists no commits.
  */
 export async function workstreamChanges(
   deps: { readonly db: DbReader; readonly git: Git },
   id: WorkstreamId,
 ): Promise<WorkstreamChangesDto> {
   const row = getWorkstreamRow(deps.db, id);
+  const kept = shownKeptWork(deps.db, row);
+  if (kept) return readChanges(deps.git, checkoutOf(deps.db, row), id, kept.base, kept.head, false);
   if (row.baseHead === null)
     throw new ConflictError(`Workstream ${id} has not started work in a checkout yet`);
   // A worktree's path is cleared only once its batch has finished, so an unfinished batch without
@@ -62,11 +82,31 @@ export async function workstreamChanges(
   const checkout = checkoutOf(deps.db, row);
   if (!existsSync(checkout)) throw new NotFoundError('checkout of workstream', id);
   const baseHead = row.baseHead;
+  let head: string;
   try {
-    const head = checkedHead(deps.db, row) ?? (await deps.git.head(checkout));
+    head = checkedHead(deps.db, row) ?? (await deps.git.head(checkout));
+  } catch (error) {
+    if (error instanceof GitError)
+      throw new ConflictError(`Workstream ${id}'s changes cannot be read: ${error.message}`);
+    throw error;
+  }
+  return readChanges(deps.git, checkout, id, baseHead, head, true);
+}
+
+/** The changes from `baseHead` to `head` in the checkout, with the commits between when asked. */
+async function readChanges(
+  git: Git,
+  checkout: string,
+  id: WorkstreamId,
+  baseHead: string,
+  head: string,
+  withCommits: boolean,
+): Promise<WorkstreamChangesDto> {
+  if (!existsSync(checkout)) throw new NotFoundError('checkout of workstream', id);
+  try {
     const [commits, changes] = await Promise.all([
-      deps.git.commitsSince(checkout, baseHead, head),
-      deps.git.diffSince(checkout, baseHead, head, MAX_CHANGES_DIFF_BYTES),
+      withCommits ? git.commitsSince(checkout, baseHead, head) : Promise.resolve([]),
+      git.diffSince(checkout, baseHead, head, MAX_CHANGES_DIFF_BYTES),
     ]);
     return {
       baseHead,
