@@ -27,7 +27,13 @@ import {
   type WriteContext,
 } from '@10db/db';
 import { withdrawCard } from '../inbox';
-import { keepTurnWork, keptWorkFacts, type KeptWork, type PassWorkDeps } from '../pass';
+import {
+  closeHoldsOf,
+  keepTurnWork,
+  keptWorkFacts,
+  type KeptWork,
+  type PassWorkDeps,
+} from '../pass';
 import { liveCheckCard } from './builder-check';
 import { untakenMessages } from './lane-messages';
 import { raisePassCheck, raiseTurnFailed } from './pass-check';
@@ -252,7 +258,6 @@ export async function endTurnSteps(
     if (input.ending === PassTurnEnding.Ready && untakenMessages(ctx.tx, taskId).length > 0)
       return undefined;
     const open = openPassTurn(ctx.tx, taskId);
-    // A shared change the turn made is kept, and its areas released, before this write.
     if (open) return endPassTurn(ctx, open.id, { ending: input.ending, replyBody: input.reply });
     if (input.ending === PassTurnEnding.Ready) return undefined;
     if (input.ending === PassTurnEnding.Failed) {
@@ -289,9 +294,9 @@ export async function finishEndedTurn(
 }
 
 /**
- * Keeps the turn's work and settles it as `ending`. A Ready needs its kept work for the item it
- * raises; any other ending settles though its work cannot be kept now, so the page is never left
- * working with no runner.
+ * Keeps the turn's shared changes, releasing their areas, and its page work, then settles it as
+ * `ending`. A Ready needs its kept work for the item it raises; any other ending settles though its
+ * work cannot be kept now, so the page is never left working with no runner.
  */
 async function carryThrough(
   deps: PassWorkDeps,
@@ -299,10 +304,14 @@ async function carryThrough(
   ending: PassTurnEnding,
   settle: TurnSettle,
 ): Promise<void> {
-  const keep = () =>
-    turn.keptBaseSha === null
+  // Step 2: what the turn changed in shared areas is kept on the chain, and the areas released,
+  // before its page work is kept.
+  const keep = async () => {
+    await closeHoldsOf(deps, turn.workstreamId);
+    return turn.keptBaseSha === null
       ? keepTurnWork(deps, { workstreamId: turn.workstreamId, turnId: turn.id })
       : keptWorkFacts(deps, turn.taskId);
+  };
   let kept: KeptWork | null;
   if (ending === PassTurnEnding.Ready) kept = await keep();
   else

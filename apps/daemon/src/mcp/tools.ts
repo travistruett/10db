@@ -75,7 +75,7 @@ import {
 import type { InboxService, WaitObserver } from '../inbox';
 import { principleHit, proposePrinciple } from '../knowledge';
 import type { Logger } from '../log';
-import { grantSharedHold, keepNamedPaths } from '../pass';
+import { grantSharedHold, keepCommitToolPaths } from '../pass';
 import { afterMarkersResolved, commitResultAsStored, fixingFailedGate, revertOfRun } from '../team';
 import {
   CLAIM_POLL_MS,
@@ -666,7 +666,7 @@ export function createToolHandlers(
         // A pass lane's work is kept at its task's ref, never committed on the pass's branch.
         const claimed = activeClaims(db, workstreamId).map((c) => ({ kind: c.kind, name: c.name }));
         const inPass = { pages: passPageAreas(db, pass.id) };
-        const kept = await keepNamedPaths(deps, {
+        const kept = await keepCommitToolPaths(deps, {
           workstreamId,
           paths: input.paths,
           opId: input.opId,

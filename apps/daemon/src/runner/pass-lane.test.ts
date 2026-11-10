@@ -13,6 +13,7 @@ import {
 } from '@10db/contracts';
 import {
   acquireClaims,
+  activeClaims,
   getWorkstreamRow,
   insertBuilderMessage,
   insertPass,
@@ -21,6 +22,8 @@ import {
   insertWorkstream,
   listInbox,
   listPassTurns,
+  listSharedChanges,
+  openHolds,
   listSessions,
   endPassTurn,
   listTaskThread,
@@ -83,8 +86,9 @@ async function openPage(
   sessions: FakeStep[][],
   first = 'Make the form tidy',
   beforeLaunch: () => void = () => undefined,
+  project: Parameters<typeof createTestEngine>[1] = PAGE_AREAS,
 ): Promise<{ task: TaskDto; pass: PassDto; id: WorkstreamId }> {
-  engine = await createTestEngine({ [TITLE]: sessions }, PAGE_AREAS);
+  engine = await createTestEngine({ [TITLE]: sessions }, project);
   const branch = '10db/polish-abc123';
   const startSha = git('rev-parse', 'HEAD');
   git('switch', '-q', '-c', branch);
@@ -551,6 +555,59 @@ describe('the guard of a pass lane', () => {
     expect(engine.adapter.observations.some((o) => o.kind === 'tool_allowed' && o.step === 2)).toBe(
       true,
     );
+  });
+});
+
+describe("a pass turn's shared area", () => {
+  const WITH_SHARED = {
+    gateCommand: null,
+    areas: [...PAGE_AREAS.areas, { name: 'src', globs: ['src/**'], role: 'shared' as const }],
+  };
+  /** The agent asks for the shared area, writes a shared file, then ends as `end` says. */
+  const sharedTurn = (end: FakeStep[]): FakeStep[] => [
+    { do: 'consume' },
+    {
+      do: 'mcp',
+      tool: 'request_claim',
+      args: { opId: 'op-shared-src', kind: 'area', name: 'src', reason: 'a shared button' },
+    },
+    { do: 'tool', toolName: 'Write', input: { file_path: 'src/button.ts', content: 'button\n' } },
+    ...end,
+  ];
+
+  it.each<{ name: string; end: FakeStep[]; settled: (id: WorkstreamId) => boolean }>([
+    {
+      name: 'at Ready',
+      end: [
+        { do: 'turn_complete', text: 'Added a button.' },
+        { do: 'await_message', contains: 'never sent' },
+      ],
+      settled: (id) => isWaiting(id) && readyItems().length === 1,
+    },
+    {
+      name: 'at a failed turn',
+      end: [{ do: 'billing_refused', message: 'a billing check refused the session' }],
+      settled: (id) => isWaiting(id) && !engine.runner.isRunning(id),
+    },
+    {
+      name: 'at a usage pause',
+      end: [{ do: 'rate_limit', status: 'rejected', resetsInSeconds: 600 }],
+      settled: (id) => row(id).state === 'PAUSED_LIMIT' && !engine.runner.isRunning(id),
+    },
+  ])('is kept on the chain and released $name', async ({ end, settled }) => {
+    const { pass, id } = await openPage(
+      [sharedTurn(end)],
+      'Make the form tidy',
+      () => undefined,
+      WITH_SHARED,
+    );
+    await waitFor(() => settled(id));
+    await waitFor(() => listSharedChanges(engine.store.db, pass.id).length === 1);
+
+    expect(activeClaims(engine.store.db, id).map((c) => c.name)).not.toContain('src');
+    expect(openHolds(engine.store.db, pass.id)).toEqual([]);
+    expect(listSharedChanges(engine.store.db, pass.id)[0]?.paths).toEqual(['src/button.ts']);
+    expect(git('show', `refs/10db/passes/${pass.id}/shared:src/button.ts`)).toBe('button');
   });
 });
 

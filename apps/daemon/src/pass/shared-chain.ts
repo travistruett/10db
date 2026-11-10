@@ -1,5 +1,6 @@
 import {
   ConflictError,
+  InvalidError,
   type ClaimId,
   type PassHoldDto,
   type PassId,
@@ -26,7 +27,7 @@ import {
   type DbReader,
 } from '@10db/db';
 import { KeptRefMovedError, type ChainCommit } from '../git';
-import { passBranch, readKeptRef, type PassWorkDeps } from './kept-work';
+import { keepNamedPaths, passBranch, readKeptRef, type PassWorkDeps } from './kept-work';
 import { sharedPathOf, sharedPathsDiffering, sharedRef, type SharedDeps } from './shared-hold';
 
 // Workbench spec §7.2: what a hold changed in its shared area is kept as one change on the pass's
@@ -217,4 +218,56 @@ export async function landSharedChanges(
     landed.push({ seq, landedSha: at });
   }
   return landed;
+}
+
+/**
+ * The commit tool of a pass lane (spec §6.2) does steps 2 and 3 early: a shared file of an area the
+ * lane holds now goes to that hold's change, kept and left open, and every other path to the page's
+ * kept commit (`keepNamedPaths`, which refuses one that is not the page's). The guard's judge runs on
+ * each path first. Answers the page's commit when the call named a page file, else the shared
+ * change's; a shared change that holds nothing is refused. The pass's branch never moves.
+ */
+export async function keepCommitToolPaths(
+  deps: SharedDeps,
+  input: {
+    readonly workstreamId: WorkstreamId;
+    readonly paths: readonly string[];
+    readonly opId: string;
+    /** Why the guard would refuse a write to the path, or null when it allows it. */
+    readonly judge: (path: string) => string | null;
+  },
+): Promise<{ readonly sha: string; readonly alreadyCommitted: boolean }> {
+  const db = deps.state.db;
+  const holds = openHoldsOf(db, input.workstreamId);
+  const sharedOf = holds.map((hold) => ({
+    hold,
+    shared: sharedPathOf(db, getPass(db, hold.passId), hold.area),
+  }));
+  const byHold = new Map<ClaimId, string[]>();
+  const page: string[] = [];
+  for (const path of input.paths) {
+    const held = sharedOf.find((s) => s.shared(path))?.hold;
+    if (held === undefined) page.push(path);
+    else byHold.set(held.claimId, [...(byHold.get(held.claimId) ?? []), path]);
+  }
+  for (const path of [...byHold.values()].flat()) {
+    const refused = input.judge(path);
+    if (refused !== null) throw new InvalidError(refused);
+  }
+  const shared: { readonly sha: string; readonly alreadyCommitted: boolean }[] = [];
+  for (const [claimId, paths] of byHold) {
+    const kept = await keepHold(deps, { claimId, keepOpen: true });
+    if (kept.sha === null) throw new InvalidError(`Nothing to commit in ${paths.join(', ')}`);
+    shared.push({ sha: kept.sha, alreadyCommitted: !kept.made });
+  }
+  if (page.length > 0)
+    return keepNamedPaths(deps, {
+      workstreamId: input.workstreamId,
+      paths: page,
+      opId: input.opId,
+      judge: input.judge,
+    });
+  const [first] = shared;
+  if (!first) throw new InvalidError('Name at least one path to commit');
+  return first;
 }

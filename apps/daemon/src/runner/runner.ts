@@ -178,7 +178,7 @@ import {
 } from '../inbox';
 import type { Logger } from '../log';
 import { mintSessionToken } from '../mcp';
-import { foldHandEdits, keepTurnWork, type PassWorkDeps } from '../pass';
+import { closeHoldsOf, foldHandEdits, keepTurnWork, type PassWorkDeps } from '../pass';
 import { allowedToolsFor, laneAutoMode, storableRule } from '../permissions';
 import { takeFoundHostsReading } from '../registries';
 import { retryStep } from '../routing';
@@ -1648,7 +1648,21 @@ export function createRunner(opts: RunnerOptions): Runner {
 
   /** Settles the lane's ending: a pass task's own way first, else as any lane's. */
   async function settleLane(id: WorkstreamId, ctl: Control, outcome: Terminal): Promise<void> {
-    if (!(await settlePage(id, ctl, outcome))) settle(id, ctl, outcome);
+    if (await settlePage(id, ctl, outcome)) return;
+    const pausing =
+      outcome.kind === 'paused' ||
+      outcome.kind === 'held' ||
+      (outcome.kind === 'stopped' && outcome.reason === 'paused');
+    // A pass turn holds no shared area across a usage pause: what it changed is kept on the chain
+    // and the area released, and the resumed turn asks for it again.
+    if (pausing && passOfWorkstream(db, id))
+      await closeHoldsOf(passWork, id).catch((error: unknown) => {
+        opts.logger.warn(
+          { workstreamId: id, err: error instanceof Error ? error.message : String(error) },
+          'the paused turn’s shared changes were not kept; start-up keeps them',
+        );
+      });
+    settle(id, ctl, outcome);
   }
 
   /**

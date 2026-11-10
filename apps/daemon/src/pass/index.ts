@@ -26,6 +26,7 @@ export { passView } from './view';
 export { grantSharedHold, holdRef, sharedRef } from './shared-hold';
 export {
   closeHoldsOf,
+  keepCommitToolPaths,
   keepHold,
   landSharedChanges,
   sharedNeeded,
