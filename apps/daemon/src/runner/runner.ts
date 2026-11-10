@@ -41,6 +41,7 @@ import {
   type TaskMessageId,
   type WorkstreamId,
   type WorkstreamStep,
+  InvalidError,
   MIGRATIONS_RENUMBERED_NOTICE_KEY,
   MIGRATIONS_UNCARRIED_NOTICE_KEY,
   PASS_RETRY_TURN_CHOICE,
@@ -804,7 +805,12 @@ export function createRunner(opts: RunnerOptions): Runner {
     ctl.idleTimer?.cancel();
     ctl.idleTimer = opts.clock.setTimeout(() => {
       ctl.idleTimer = null;
-      void runner.closeWarm(id);
+      runner.closeWarm(id).catch((error: unknown) => {
+        opts.logger.warn(
+          { workstreamId: id, err: error instanceof Error ? error.message : String(error) },
+          'a warm session did not close when idle',
+        );
+      });
     }, opts.limits.warmIdleMs);
   }
 
@@ -3795,10 +3801,13 @@ export function createRunner(opts: RunnerOptions): Runner {
       await ctl.done;
     },
     retryTurn(item, answer) {
-      if (answer.choice !== PASS_RETRY_TURN_CHOICE) return;
       const turnId = PassTurnId.safeParse(item.detail?.[PASS_TURN_DETAIL]);
       const target = item.targets[0];
+      // Another flag is another handler's.
       if (!turnId.success || !target) return;
+      // A failed turn's flag is answered by Retry Turn alone; any other answer leaves it open.
+      if (answer.choice !== PASS_RETRY_TURN_CHOICE)
+        throw new InvalidError(`A failed turn is answered with ${PASS_RETRY_TURN_CHOICE}`);
       const id = target.workstreamId;
       if (!passOfWorkstream(db, id))
         throw new ConflictError(

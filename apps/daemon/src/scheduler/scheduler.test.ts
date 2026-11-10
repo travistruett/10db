@@ -919,7 +919,7 @@ describe('Workbench passes', () => {
     });
     if (warm) running.add(opened.warm.id);
     branchOf.set(project.repoPath, opened.batch.branch);
-    return opened;
+    return { ...opened, project };
   }
 
   it("closes the pass's longest-idle warm session for a page with no room, and launches it once freed", async () => {
@@ -933,6 +933,31 @@ describe('Workbench passes', () => {
     });
     expect(await scheduler().tick()).toBe(1);
     expect(launched.map((l) => l.id)).toEqual([opened.queued.id]);
+  });
+
+  it.each([
+    {
+      name: 'ordinary work in Your folder, which waits for the pass',
+      waiting: (project: ReturnType<typeof seedProject>) => {
+        add(project, ['people']);
+        return 1;
+      },
+    },
+    {
+      name: 'ordinary work of a project at its own lane limit',
+      waiting: () => {
+        const busy = queue({ maxLanes: 1 });
+        moveWorkstream(busy.workstream.id, 'STARTING');
+        add(busy.project, ['api']);
+        return 2;
+      },
+    },
+  ])('closes no warm session at the daemon-wide cap for $name', async ({ waiting }) => {
+    const opened = warmAndWaiting(4);
+    moveWorkstream(opened.queued.id, 'CANCELLED');
+    const cap = waiting(opened.project);
+    expect(await scheduler({ global: cap }).tick()).toBe(0);
+    expect(closed).toEqual([]);
   });
 
   it('says a page waits for a free session when no warm one can close, and drops it once it starts', async () => {

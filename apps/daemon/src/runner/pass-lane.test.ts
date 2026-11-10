@@ -3,6 +3,7 @@ import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   ConflictError,
+  InvalidError,
   mintId,
   PassCheckDetail,
   type PassDto,
@@ -374,7 +375,14 @@ describe('a pass task turn that ends otherwise', () => {
       [1, 'failed'],
     ]);
 
-    engine.inbox.answer(failed?.id ?? mintId('InboxItem'), { choice: 'retry_turn' });
+    // Only Retry Turn answers the flag; any other answer is refused and leaves it open.
+    if (!failed) throw new Error('no failed turn flag');
+    expect(() => {
+      engine.runner.retryTurn(failed, { choice: 'dismiss' });
+    }).toThrow(InvalidError);
+    expect(row(id).nextAction).toEqual({ kind: 'pass_review', inboxId: failed.id });
+
+    engine.inbox.answer(failed.id, { choice: 'retry_turn' });
     expect(row(id)).toMatchObject({ state: 'QUEUED', nextAction: { kind: 'feedback' } });
     engine.launch(id);
     await waitFor(isReady(id, 1));
