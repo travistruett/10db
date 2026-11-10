@@ -13,6 +13,8 @@ import {
   PASS_NOW,
   passHandlers,
   pagesByStatus,
+  passTurnTimingDto,
+  passTurnWithFilesDto,
   passViewDto,
   taskMessageDto,
 } from '../../test/pass-fixtures';
@@ -184,6 +186,145 @@ describe('PassWorkspace composer', () => {
     expect(message('Billing').value).toBe('');
     fireEvent.click(screen.getByRole('button', { name: /^Settings/ }));
     expect(message('Settings').value).toBe('half a thought');
+  });
+});
+
+describe('PassWorkspace page actions', () => {
+  /** What the daemon was sent, by route and task. */
+  function record() {
+    const sent: { route: string; taskId: string; text?: string | undefined }[] = [];
+    server.use(
+      http.post(daemonUrl('/tasks/:taskId/stop'), ({ params }) => {
+        sent.push({ route: 'stop', taskId: String(params['taskId']) });
+        return new HttpResponse(null, { status: 204 });
+      }),
+      http.post(daemonUrl('/tasks/:taskId/thread/redo'), async ({ params, request }) => {
+        const taskId = TaskId.parse(params['taskId']);
+        sent.push({
+          route: 'redo',
+          taskId,
+          text: multipartParts(await request.text()).text['text'],
+        });
+        return HttpResponse.json(taskMessageDto(taskId), { status: 201 });
+      }),
+      http.post(daemonUrl('/tasks/:taskId/turns/:turnId/opened'), ({ params }) => {
+        sent.push({
+          route: `opened ${String(params['turnId'])}`,
+          taskId: String(params['taskId']),
+        });
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    return sent;
+  }
+
+  it('an empty composer stops the working page plainly, sending nothing', async () => {
+    const sent = record();
+    const { pages } = await renderWorkspace((p) => p.working.taskId);
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+    await waitFor(() => {
+      expect(sent).toEqual([{ route: 'stop', taskId: pages.working.taskId }]);
+    });
+  });
+
+  it('Stop and Redo sends the typed words to the working page as its next turn', async () => {
+    await useNodeMultipart();
+    const sent = record();
+    const { pages } = await renderWorkspace((p) => p.working.taskId);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message to Billing' }), {
+      target: { value: 'not that, the header' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Stop and Redo' }));
+    await waitFor(() => {
+      expect(sent).toEqual([
+        { route: 'redo', taskId: pages.working.taskId, text: 'not that, the header' },
+      ]);
+    });
+  });
+
+  it('marks a Ready page’s turn opened once it is shown, and never one already opened', async () => {
+    const sent = record();
+    const { pages } = await renderWorkspace((p) => p.ready.taskId);
+    const turnId = pages.ready.turn?.id ?? '';
+    await waitFor(() => {
+      expect(sent).toEqual([{ route: `opened ${turnId}`, taskId: pages.ready.taskId }]);
+    });
+    sent.length = 0;
+    const ready = pages.ready;
+    renderWithDaemon(
+      <PassWorkspace
+        view={passViewDto({
+          pages: [ready],
+          turns: [
+            passTurnTimingDto({
+              taskId: ready.taskId,
+              seq: ready.turn?.seq ?? 1,
+              readyAt: ready.turn?.readyAt ?? null,
+              openedAt: minutesBeforeNow(1),
+            }),
+          ],
+        })}
+        inbox={[]}
+        project={projectViewDto()}
+        selected={ready.taskId}
+        onSelect={vi.fn()}
+      />,
+    );
+    await screen.findAllByRole('textbox', { name: 'Message to Settings' });
+    expect(sent).toEqual([]);
+  });
+
+  it('offers Sign Off on a Ready page only disabled, saying why, and sends nothing', async () => {
+    const sent = record();
+    await renderWorkspace((p) => p.ready.taskId);
+    const signOff = screen.getByRole('button', { name: 'Sign Off' });
+    expect(signOff.getAttribute('aria-disabled')).toBe('true');
+    fireEvent.click(signOff);
+    fireEvent.mouseEnter(signOff);
+    expect(await screen.findByText(/can't sign off a page yet/)).toBeTruthy();
+    expect(sent.filter((s) => !s.route.startsWith('opened'))).toEqual([]);
+  });
+
+  it("lists under each reply the files its turn changed, read from the page's turns", async () => {
+    const pages = pagesByStatus();
+    const ready = pages.ready;
+    server.use(
+      ...passHandlers({
+        threads: {
+          [ready.taskId]: {
+            taskId: ready.taskId,
+            messages: [
+              taskMessageDto(ready.taskId, {
+                author: 'agent',
+                kind: 'reply',
+                body: 'Tightened the padding',
+                createdAt: minutesBeforeNow(3),
+              }),
+            ],
+          },
+        },
+        turns: {
+          [ready.taskId]: [
+            passTurnWithFilesDto({
+              taskId: ready.taskId,
+              startedAt: minutesBeforeNow(12),
+              files: [{ path: 'src/settings/page.tsx', added: 4, removed: 1 }],
+            }),
+          ],
+        },
+      }),
+    );
+    renderWithDaemon(
+      <PassWorkspace
+        view={passViewDto({ pages: [ready] })}
+        inbox={[]}
+        project={projectViewDto()}
+        selected={ready.taskId}
+        onSelect={vi.fn()}
+      />,
+    );
+    const files = await screen.findByRole('list', { name: 'Files this turn changed' });
+    expect(files.textContent).toContain('src/settings/page.tsx');
   });
 });
 

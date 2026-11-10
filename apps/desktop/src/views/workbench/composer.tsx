@@ -1,4 +1,14 @@
-import { ActionIcon, Box, Button, CloseButton, Group, Stack, Text, Textarea } from '@mantine/core';
+import {
+  ActionIcon,
+  Box,
+  Button,
+  CloseButton,
+  Group,
+  Stack,
+  Text,
+  Textarea,
+  Tooltip,
+} from '@mantine/core';
 import { IconPhotoPlus } from '@tabler/icons-react';
 import {
   useRef,
@@ -21,8 +31,12 @@ export interface PageActions {
   readonly stop: () => Promise<void>;
   /** Stops the turn and starts it again from the draft. */
   readonly redo: (draft: Draft) => Promise<void>;
-  readonly signOff: () => Promise<void>;
+  /** Signs the page off; null while 10db has no sign-off, when the button is shown disabled. */
+  readonly signOff: (() => Promise<void>) | null;
 }
+
+/** Why Sign Off is disabled while 10db has no sign-off. */
+const NO_SIGN_OFF = "10db can't sign off a page yet: take it out of the pass to keep its work.";
 
 export interface ComposerProps {
   /** The page's name, for the placeholder. */
@@ -228,12 +242,27 @@ export function Composer({
               {buttons.stop === 'redo' ? 'Stop and Redo' : 'Stop'}
             </Button>
           )}
-          {buttons.signOff === null ? null : (
+          {buttons.signOff === null ? null : actions.signOff === null ? (
+            // Disabled by data-disabled, not disabled, so the tooltip still opens on hover and focus.
+            <Tooltip label={NO_SIGN_OFF} multiline w={260} withinPortal>
+              <Button
+                variant={buttons.signOff}
+                data-disabled
+                aria-disabled="true"
+                onClick={(event) => {
+                  event.preventDefault();
+                }}
+              >
+                Sign Off
+              </Button>
+            </Tooltip>
+          ) : (
             <Button
               variant={buttons.signOff}
               loading={busy === 'signOff'}
               onClick={() => {
-                void run('signOff', actions.signOff, false);
+                const signOff = actions.signOff;
+                if (signOff !== null) void run('signOff', signOff, false);
               }}
             >
               Sign Off

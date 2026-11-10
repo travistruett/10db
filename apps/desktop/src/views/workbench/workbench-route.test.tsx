@@ -1,4 +1,10 @@
-import { mintId, PassOpenRequest, type AreaDef } from '@10db/contracts';
+import {
+  mintId,
+  PassJoinRequest,
+  PassOpenRequest,
+  PassRename,
+  type AreaDef,
+} from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -104,6 +110,67 @@ describe('WorkbenchView', () => {
     await waitFor(() => {
       expect(router.state.location.search).toEqual({ task: ready.taskId });
     });
+  });
+
+  it.each([
+    {
+      action: 'Add Page',
+      act: async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Add Page' }));
+        const dialog = await screen.findByRole('dialog', { name: 'Add Page' });
+        fireEvent.click(within(dialog).getByRole('checkbox', { name: /^people/ }));
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Add Pages (1)' }));
+      },
+      sent: { method: 'POST', path: 'pages', body: { pages: ['people'], taskIds: [] } },
+    },
+    {
+      action: 'Rename',
+      act: async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'More pass actions' }));
+        fireEvent.click(await screen.findByRole('menuitem', { name: 'Rename', hidden: true }));
+        const dialog = await screen.findByRole('dialog', { name: 'Rename Pass' });
+        fireEvent.change(within(dialog).getByLabelText('Name'), {
+          target: { value: 'Density pass' },
+        });
+        fireEvent.click(within(dialog).getByRole('button', { name: 'Rename' }));
+      },
+      sent: { method: 'PATCH', path: '', body: { name: 'Density pass' } },
+    },
+  ])("$action is sent for the project's open pass", async ({ act, sent }) => {
+    const live = passViewDto({
+      pass: passDto({ projectId: project.id }),
+      pages: [pagesByStatus().ready],
+    });
+    const asked: { method: string; path: string; body: unknown }[] = [];
+    server.use(
+      http.post(daemonUrl('/passes/:passId/pages'), async ({ params, request }) => {
+        asked.push({
+          method: 'POST',
+          path: `${String(params['passId'])}/pages`,
+          body: PassJoinRequest.parse(await request.json()),
+        });
+        return HttpResponse.json(live);
+      }),
+      http.patch(daemonUrl('/passes/:passId'), async ({ params, request }) => {
+        asked.push({
+          method: 'PATCH',
+          path: `${String(params['passId'])}/`,
+          body: PassRename.parse(await request.json()),
+        });
+        return HttpResponse.json(live.pass);
+      }),
+    );
+    open('/workbench', { live: [live] });
+    await screen.findByText(/^ampsio · Settings pass/);
+    await act();
+    await waitFor(() => {
+      expect(asked).toHaveLength(1);
+    });
+    expect(asked[0]).toMatchObject({
+      method: sent.method,
+      path: `${live.pass.id}/${sent.path}`,
+    });
+    expect(asked[0]?.body).toMatchObject(sent.body);
   });
 
   it('with no page area, proposes some through the daemon', async () => {

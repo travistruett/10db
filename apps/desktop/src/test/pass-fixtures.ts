@@ -397,6 +397,11 @@ export function passHandlers(routes: PassRoutes = {}): HttpHandler[] {
     http.get(daemonUrl('/tasks/:taskId/turns'), ({ params }) =>
       HttpResponse.json(routes.turns?.[String(params['taskId'])] ?? []),
     ),
+    // Showing a Ready page marks its turn opened.
+    http.post(
+      daemonUrl('/tasks/:taskId/turns/:turnId/opened'),
+      () => new HttpResponse(null, { status: 204 }),
+    ),
     http.get(daemonUrl('/pass-turns/:turnId/activity'), ({ params }) =>
       HttpResponse.json(routes.activity?.[String(params['turnId'])] ?? []),
     ),
