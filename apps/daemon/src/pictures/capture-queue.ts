@@ -26,6 +26,8 @@ export interface CaptureRequest {
 export interface CaptureQueue {
   readonly waiting: readonly CaptureRequest[];
   readonly loading: CaptureRequest | null;
+  /** The load in flight was aborted and is ending: it is no request any more. */
+  readonly loadingAborted: boolean;
   /** Afters asked while their pass closes or is abandoned, queued once it no longer is. */
   readonly deferred: readonly CaptureRequest[];
   /** Passes CLOSING or ABANDONING. */
@@ -38,6 +40,7 @@ export interface CaptureQueue {
 export const CAPTURE_IDLE: CaptureQueue = {
   waiting: [],
   loading: null,
+  loadingAborted: false,
   deferred: [],
   holding: [],
   browser: 'off',
@@ -81,7 +84,7 @@ function step(
   abort = false,
   started: CaptureRequest | null = null,
 ): CaptureStep {
-  return { queue, abort, started };
+  return { queue: abort ? { ...queue, loadingAborted: true } : queue, abort, started };
 }
 
 function ask(queue: CaptureQueue, request: CaptureRequest): CaptureStep {
@@ -102,7 +105,7 @@ function ask(queue: CaptureQueue, request: CaptureRequest): CaptureStep {
     });
   if (
     queue.waiting.some((r) => sameAsk(r, request)) ||
-    (queue.loading !== null && sameAsk(queue.loading, request))
+    (queue.loading !== null && !queue.loadingAborted && sameAsk(queue.loading, request))
   )
     return step(queue);
   return step({ ...queue, waiting: [...queue.waiting, request] });
@@ -196,9 +199,13 @@ export function captureStep(queue: CaptureQueue, event: CaptureEvent): CaptureSt
         queue.browser === 'refused'
       )
         return step(queue);
-      return step({ ...queue, loading: next, waiting: queue.waiting.slice(1) }, false, next);
+      return step(
+        { ...queue, loading: next, loadingAborted: false, waiting: queue.waiting.slice(1) },
+        false,
+        next,
+      );
     }
     case 'done':
-      return step({ ...queue, loading: null });
+      return step({ ...queue, loading: null, loadingAborted: false });
   }
 }

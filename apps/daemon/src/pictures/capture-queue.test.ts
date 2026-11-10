@@ -92,6 +92,13 @@ describe('the capture queue', () => {
       loading: beforeA,
     },
     {
+      name: 'a before asked again while an aborted load of it ends is a new request',
+      events: [ask(beforeA), START, { kind: 'app_changed', projectId: project }, ask(beforeA)],
+      waiting: [beforeA],
+      loading: beforeA,
+      aborted: true,
+    },
+    {
       name: "the task's next turn drops its waiting turn picture",
       events: [ask(turnA1), ask(turnB), { kind: 'turn_started', taskId: a }],
       waiting: [turnB],
