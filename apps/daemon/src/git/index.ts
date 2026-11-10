@@ -19,6 +19,7 @@ export {
   type FolderAt,
   type Git,
   type KeptCommit,
+  type LandedPaths,
   type PassDirtRecord,
   type ResolvedConflict,
   type SwitchBack,

@@ -1,6 +1,14 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { PassClosePageChoice, type PassCloseRequest, type ProjectInput } from '@10db/contracts';
+import {
+  AbandonStep,
+  ConflictError,
+  PassClosePageChoice,
+  SharedChoiceKind,
+  type PassCloseRequest,
+  type ProjectInput,
+  type TaskDto,
+} from '@10db/contracts';
 import {
   findOpenByFoldKey,
   getBatch,
@@ -10,6 +18,10 @@ import {
   getProject,
   getTask,
   getWorkstreamRow,
+  openHolds,
+  patchProject,
+  schema,
+  setAbandonStep,
   setClosePlan,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -19,10 +31,16 @@ import { createPassPullRequests, passGateKind, type PassPullRequests } from '../
 import { silentLogger } from '../log';
 import { systemProcesses } from '../recovery';
 import { createGateRunner } from '../verify';
-import { closeSteps, createPassCloses, gateFailedKey, type CloseDeps } from './close';
+import {
+  closeSteps,
+  createPassCloses,
+  gateFailedKey,
+  type CloseDeps,
+  type CloseShip,
+} from './close';
 import { closeGateOf } from './close-lists';
 import { folderCardOpen } from './folder';
-import { keepTurnWork, startAbandon, type PassWorkDeps } from './index';
+import { grantSharedHold, keepHold, keepTurnWork, startAbandon, type PassWorkDeps } from './index';
 
 // Workbench spec §5.4, §5.5, §12: Close Pass signs off the pages set to it, lands what is kept, gates,
 // takes the other pages out, pushes, fast-forwards the folder's branch and closes, step by recorded
@@ -80,8 +98,24 @@ async function twoTurns(): Promise<void> {
   }
 }
 
+/** `task` takes a turn holding `src`, in which `path` is written, kept as a turn's end keeps it. */
+async function sharedTurn(task: TaskDto, path: string): Promise<void> {
+  const turn = w.startTurn(task);
+  const granted = await grantSharedHold(w.deps, { workstreamId: w.runOf(task), area: 'src' });
+  if (!granted?.ok) throw new Error('src was not granted');
+  w.write(path, `${task.title} shared\n`);
+  for (const hold of openHolds(w.h.store.db, w.opened.pass.id))
+    await keepHold(w.deps, { claimId: hold.claimId });
+  w.endTurn(turn);
+  await keepTurnWork(w.deps, { workstreamId: w.runOf(task), turnId: turn.id });
+}
+
 /** Close Pass confirmed on the lists as shown: Settings signed off, People taken out. */
-async function confirm(deps: CloseDeps, files: PassCloseRequest['files'] = []) {
+async function confirm(
+  deps: CloseDeps,
+  files: PassCloseRequest['files'] = [],
+  shared: PassCloseRequest['shared'] = [],
+) {
   const closes = createPassCloses(deps);
   const shown = await closes.preview(w.opened.pass.id);
   const answer = await closes.close(w.opened.pass.id, {
@@ -91,7 +125,7 @@ async function confirm(deps: CloseDeps, files: PassCloseRequest['files'] = []) {
       { taskId: w.people.id, choice: PassClosePageChoice.TakeOut },
     ],
     files,
-    shared: [],
+    shared,
   });
   expect(answer.outcome).toBe('closing');
   await w.h.jobs.idle();
@@ -171,6 +205,41 @@ describe('Close Pass', () => {
     expect(getTask(w.h.store.db, w.people.id).passId === null).toBe(takenOut);
   });
 
+  it('lands, at the next close, a shared change chosen Drop when the gate failed before its take-out', async () => {
+    await world({ gateCommand: 'true' });
+    // The gate fails the first time it runs and passes after.
+    const flag = join(w.h.dataDir, 'gate-ran');
+    w.h.state.write((ctx) =>
+      patchProject(ctx, w.h.project.id, {
+        gateCommand: `test -e '${flag}' || { touch '${flag}'; exit 1; }`,
+      }),
+    );
+    await twoTurns();
+    await sharedTurn(w.people, 'src/button.ts');
+
+    await confirm(closeDeps(), [], [{ seq: 1, choice: SharedChoiceKind.Drop }]);
+    expect(passState()).toBe('OPEN');
+
+    // People is signed off at the next close, with its change kept: the change lands before it.
+    const closes = createPassCloses(closeDeps());
+    const shown = await closes.preview(w.opened.pass.id);
+    await closes.close(w.opened.pass.id, {
+      token: shown.token,
+      pages: [{ taskId: w.people.id, choice: PassClosePageChoice.SignOff }],
+      files: [],
+      shared: [],
+    });
+    await w.h.jobs.idle();
+
+    expect(passState()).toBe('CLOSED');
+    expect(landed()).toEqual([
+      'Settings: UI work',
+      'Shared change 1 of People: UI work',
+      'People: UI work',
+    ]);
+    expect(w.h.git$('show', `${w.branch}:src/button.ts`)).toBe('People: UI work shared');
+  });
+
   it('closes by the fast-forward alone with no origin, and settles at once', async () => {
     await world({ gateCommand: null });
     await twoTurns();
@@ -248,6 +317,193 @@ describe('Close Pass', () => {
     expect(folderCardOpen(w.h.store.db, w.opened.pass)).toBe(false);
     expect(w.h.git$('symbolic-ref', '--short', 'HEAD')).toBe('main');
     expect(w.h.git$('rev-parse', 'main')).toBe(tip);
+  });
+
+  it.each([
+    {
+      name: 'its push failed',
+      ship: (real: CloseShip): Partial<CloseShip> => {
+        let failed = false;
+        return {
+          pushPassBranch: (passId, signal) => {
+            if (failed) return real.pushPassBranch(passId, signal);
+            failed = true;
+            return Promise.reject(new Error('origin is offline'));
+          },
+        };
+      },
+      notice: /^The close stopped: origin is offline\./,
+    },
+    {
+      name: 'its gate was stopped by something other than an Abandon',
+      ship: (real: CloseShip): Partial<CloseShip> => {
+        let stopped = false;
+        return {
+          gatePassTip: (i) => {
+            if (stopped) return real.gatePassTip(i);
+            stopped = true;
+            return Promise.resolve({ passed: false, aborted: true, logPath: '', dirtyNamed: [] });
+          },
+        };
+      },
+      notice: /^The close stopped: the gate was stopped before it finished\./,
+    },
+  ])('goes on when Close Pass is asked again after $name', async ({ ship, notice }) => {
+    await world({ gateCommand: 'true' });
+    await twoTurns();
+    const deps = closeDeps();
+    const closes = await confirm({ ...deps, ship: { ...deps.ship, ...ship(deps.ship) } });
+    expect(passState()).toBe('CLOSING');
+    const stuck = getPassProgress(w.h.store.db, w.opened.pass.id).notices.find(
+      (n) => n.id === 'close',
+    );
+    expect(stuck?.text).toMatch(notice);
+
+    const again = await closes.close(w.opened.pass.id, {
+      token: '',
+      pages: [],
+      files: [],
+      shared: [],
+    });
+    await w.h.jobs.idle();
+
+    expect(again.outcome).toBe('closing');
+    expect(passState()).toBe('CLOSED');
+    expect(landed()).toEqual(['Settings: UI work']);
+    expect(getPassProgress(w.h.store.db, w.opened.pass.id).notices).toEqual([]);
+  });
+
+  it("waits with the folder card when Your folder leaves the pass's branch as it lands", async () => {
+    await world({ gateCommand: 'true' });
+    await twoTurns();
+    const deps = closeDeps();
+    let switched = false;
+    const closes = createPassCloses({
+      ...deps,
+      folderPollMs: 20,
+      ship: {
+        ...deps.ship,
+        stopPassChecks: async (passId) => {
+          await deps.ship.stopPassChecks(passId);
+          // The builder switches branch just after the close first found the folder on it.
+          if (!switched) w.h.git$('switch', '-q', 'main');
+          switched = true;
+        },
+      },
+    });
+    const shown = await closes.preview(w.opened.pass.id);
+    await closes.close(w.opened.pass.id, {
+      token: shown.token,
+      pages: [{ taskId: w.settings.id, choice: PassClosePageChoice.SignOff }],
+      files: [],
+      shared: [],
+    });
+
+    await waitFor(() => folderCardOpen(w.h.store.db, w.opened.pass));
+    expect(passState()).toBe('CLOSING');
+    expect(getPassProgress(w.h.store.db, w.opened.pass.id).notices).toEqual([]);
+    w.h.git$('switch', '-q', w.branch);
+    await w.h.jobs.idle();
+
+    expect(passState()).toBe('CLOSED');
+    expect(landed()).toEqual(['Settings: UI work']);
+  });
+
+  it('lets go of a hold it cannot keep, and closes', async () => {
+    await world({ gateCommand: 'true' });
+    await twoTurns();
+    w.startTurn(w.people);
+    const granted = await grantSharedHold(w.deps, { workstreamId: w.runOf(w.people), area: 'src' });
+    if (!granted?.ok) throw new Error('src was not granted');
+    w.write('src/button.ts', 'button\n');
+    const [hold] = openHolds(w.h.store.db, w.opened.pass.id);
+    if (!hold) throw new Error('no hold');
+    w.h.state.write((ctx) => {
+      setClosePlan(ctx, w.opened.pass.id, {
+        token: 't',
+        pages: [{ taskId: w.people.id, choice: PassClosePageChoice.TakeOut }],
+        files: [],
+        shared: [],
+      });
+    });
+    // People's turn held src when the close began, and the hold's record is gone since.
+    w.h.store.db
+      .update(schema.passHolds)
+      .set({ recordSha: '0'.repeat(40) })
+      .run();
+    w.h.git$('update-ref', '-d', `refs/10db/passes/${w.opened.pass.id}/holds/${hold.claimId}`);
+
+    await closeSteps(closeDeps(), w.opened.pass.id, new AbortController().signal);
+
+    expect(passState()).toBe('CLOSED');
+    expect(openHolds(w.h.store.db, w.opened.pass.id)).toEqual([]);
+  });
+
+  it('waits for Your folder before its take-outs, so the pages it takes out are put back', async () => {
+    await world({ gateCommand: 'true' });
+    await twoTurns();
+    const deps = closeDeps();
+    const closes = createPassCloses({
+      ...deps,
+      folderPollMs: 20,
+      ship: {
+        ...deps.ship,
+        gatePassTip: async (i) => {
+          const ran = await deps.ship.gatePassTip(i);
+          // The builder switches branch as the gate finishes, before any page is taken out.
+          w.h.git$('switch', '-q', 'main');
+          return ran;
+        },
+      },
+    });
+    const shown = await closes.preview(w.opened.pass.id);
+    await closes.close(w.opened.pass.id, {
+      token: shown.token,
+      pages: [
+        { taskId: w.settings.id, choice: PassClosePageChoice.SignOff },
+        { taskId: w.people.id, choice: PassClosePageChoice.TakeOut },
+      ],
+      files: [],
+      shared: [],
+    });
+
+    await waitFor(() => folderCardOpen(w.h.store.db, w.opened.pass));
+    expect(getPassProgress(w.h.store.db, w.opened.pass.id).closeStep).toBe(3);
+    w.h.git$('switch', '-q', w.branch);
+    await w.h.jobs.idle();
+
+    expect(passState()).toBe('CLOSED');
+    expect(read('src/people/page.tsx')).toBe('people\n');
+    expect(getTask(w.h.store.db, w.people.id).passId).toBeNull();
+  });
+
+  it('refuses an Abandon once its fast-forward may have moved the return branch', async () => {
+    await world({ gateCommand: 'true' });
+    await twoTurns();
+    let abandon: unknown = null;
+    const deps = closeDeps();
+    await confirm({
+      ...deps,
+      git: {
+        ...deps.git,
+        moveBranchCas: async (i) => {
+          const moved = await deps.git.moveBranchCas(i);
+          // The builder asks to Abandon just as the return branch moves.
+          try {
+            w.h.state.write((ctx) => {
+              setAbandonStep(ctx, w.opened.pass.id, AbandonStep.Abandoning);
+            });
+          } catch (error) {
+            abandon = error;
+          }
+          return moved;
+        },
+      },
+    });
+
+    expect(abandon).toBeInstanceOf(ConflictError);
+    expect(passState()).toBe('CLOSED');
+    expect(w.h.git$('rev-parse', 'main')).toBe(w.h.git$('rev-parse', w.branch));
   });
 
   it(

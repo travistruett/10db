@@ -224,7 +224,7 @@ describe('landPaths', () => {
     expect(rawGit('rev-parse', '10db/polish')).toBe(start);
   });
 
-  it("says the folder's index is stale when another git holds it, after landing the commit", async () => {
+  it("says the folder's index is stale when another git holds it, and its rerun refreshes it", async () => {
     write('src/shared.ts', 'kept\n');
     const kept = await chain(null, ['src/shared.ts']);
     if (kept.sha === null) throw new Error('nothing kept');
@@ -235,5 +235,13 @@ describe('landPaths', () => {
     unlinkSync(join(repo.path, '.git/index.lock'));
     expect(landed.indexStale).toBe(true);
     expect(rawGit('show', '10db/polish:src/shared.ts')).toBe('kept');
+
+    // A rerun after a crash finds the commit, and the index follows it now the other git is done.
+    expect(await land(kept.sha, ['src/shared.ts'])).toEqual({
+      sha: landed.sha,
+      alreadyLanded: true,
+      indexStale: false,
+    });
+    expect(rawGit('status', '--porcelain', '--', 'src/shared.ts')).toBe('');
   });
 });

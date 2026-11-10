@@ -5,6 +5,8 @@ import {
   InboxState,
   PASS_SIGN_OFF_CHOICE,
   PassState,
+  TaskMessageAuthor,
+  TaskMessageKind,
   WorkstreamState as S,
   type PassDto,
   type PassHoldDto,
@@ -44,7 +46,8 @@ import { foldHandEdits } from './hand-edits';
 import { pageMatcher, passBranch, passKeptRef, readKeptRef, type PassWorkDeps } from './kept-work';
 import {
   closeHoldsOf,
-  keepHold,
+  keepOrLetGo,
+  landOnBranch,
   landSharedChanges,
   sharedNeeded,
   type LandedShared,
@@ -158,6 +161,47 @@ const errorText = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
 /**
+ * Opens the page's Ready item again when the Sign Off its answer closed did not land, so the page is
+ * Ready again and the builder can sign it off or send it a message. Only while the run still waits on
+ * that item, closed by its Sign Off.
+ */
+function reopenReady(ctx: WriteContext, ws: WorkstreamId): void {
+  const row = getWorkstreamRow(ctx.tx, ws);
+  if (row.state !== S.WaitingHuman || row.nextAction.kind !== 'pass_review') return;
+  const item = getInboxItem(ctx.tx, row.nextAction.inboxId);
+  if (
+    item.kind === InboxKind.Check &&
+    item.state === InboxState.Resolved &&
+    item.answer?.choice === PASS_SIGN_OFF_CHOICE
+  )
+    updateInboxItem(ctx, item.id, { state: InboxState.Open, answer: null });
+}
+
+/**
+ * Whether a builder message waits for the page's next turn: one no turn has taken, as the runner's
+ * `untakenMessages` reads them (the runner imports this module, so it is read here).
+ */
+function messageWaits(db: DbReader, taskId: TaskId): boolean {
+  return listTaskThreadRows(db, taskId).some(
+    (m) =>
+      m.author === TaskMessageAuthor.Builder &&
+      m.kind === TaskMessageKind.Message &&
+      m.deliveredAt === null,
+  );
+}
+
+/** A sign-off's job failed: the thread says why, and the page is Ready again. */
+function signOffFailed(deps: SignOffDeps, taskId: TaskId, error: unknown): void {
+  deps.logger.warn({ taskId, err: errorText(error) }, 'sign-off failed');
+  deps.state.write((ctx) => {
+    deleteSignOffWait(ctx, taskId);
+    insertSystemNotice(ctx, taskId, `Not signed off: ${errorText(error)}.`);
+    const ws = getTask(ctx.tx, taskId).workstreamId;
+    if (ws !== null) reopenReady(ctx, ws);
+  });
+}
+
+/**
  * Starts the builder's Sign Off on a Ready page as a job under the project's delivery key, and
  * answers what it will do: land now, or wait for another page's turn that holds a shared change the
  * page needs. A page already waiting answers its wait and starts nothing more. The caller has asked
@@ -175,7 +219,7 @@ export function startSignOff(deps: SignOffDeps, taskId: TaskId): PassSignOffDto 
   if (wait) return waitingFor(wait.waitsForTaskId);
   if (task.passId == null) throw new ConflictError(`${task.title} is in no pass`);
   signOff(deps, { taskId, from: SignOffFrom.Page }).catch((error: unknown) => {
-    deps.logger.warn({ taskId, err: errorText(error) }, 'sign-off failed');
+    signOffFailed(deps, taskId, error);
   });
   const holder = othersNeeded(db, task.passId, taskId)[0];
   return holder === undefined
@@ -193,7 +237,10 @@ export function askSignOff(deps: SignOffDeps, passId: PassId, taskId: TaskId): P
   return startSignOff(deps, taskId);
 }
 
-/** Cancels the page's waiting sign-off (`DELETE .../sign-off`); refused when it is not waiting. */
+/**
+ * Cancels the page's waiting sign-off (`DELETE .../sign-off`), the page Ready again; refused when it
+ * is not waiting.
+ */
 export function cancelSignOffWait(deps: PassWorkDeps, passId: PassId, taskId: TaskId): void {
   deps.state.write((ctx) => {
     const task = getTask(ctx.tx, taskId);
@@ -201,6 +248,7 @@ export function cancelSignOffWait(deps: PassWorkDeps, passId: PassId, taskId: Ta
     if (!wait || !deleteSignOffWait(ctx, taskId))
       throw new ConflictError(`${task.title} has no sign-off waiting`);
     insertSystemNotice(ctx, taskId, 'Sign-off cancelled while it waited.');
+    if (task.workstreamId !== null) reopenReady(ctx, task.workstreamId);
   });
 }
 
@@ -322,7 +370,8 @@ export function finishSignOff(
  * page's turn holds makes it wait (a row, and the job ends), except in a close, whose turns have all
  * stopped, which keeps it. Then 1 folds the builder's hand edits; 2 lands the shared changes the page
  * needs, in chain order; 3 lands the page's files as one commit; 4 the folder's index follows; 5 one
- * write ends the run. Every commit has its own operation id, so a rerun makes only what is missing.
+ * write ends the run while the pass is still as the sign-off found it. Every commit has its own
+ * operation id (the page's, from the kept commit it lands), so a rerun makes only what is missing.
  */
 export async function signOffSteps(
   deps: SignOffDeps,
@@ -337,6 +386,7 @@ export async function signOffSteps(
     deps.state.write((ctx) => {
       deleteSignOffWait(ctx, task.id);
       insertSystemNotice(ctx, task.id, `Not signed off: ${reason}.`);
+      if (ws !== null) reopenReady(ctx, ws);
     });
     return { kind: 'not_now', reason };
   };
@@ -365,8 +415,9 @@ export async function signOffSteps(
     });
     return { kind: 'waiting', waitsFor: hold };
   }
-  // A close stopped every turn: a hold still open is kept now, so its change can land.
-  for (const hold of others) await keepHold(deps, { claimId: hold.claimId });
+  // A close stopped every turn: a hold still open is kept now, so its change can land, or let go
+  // when it cannot be kept.
+  for (const hold of others) await keepOrLetGo(deps, hold.claimId);
   const state = getWorkstreamRow(db, ws).state;
   if (signOffPath(state) === null)
     throw new ConflictError(`${task.title} is ${state.toLowerCase()}: it cannot be signed off now`);
@@ -387,13 +438,15 @@ export async function signOffSteps(
     const tip = await deps.git.commitAt(repo, branch);
     const mine = pageMatcher(db, getProject(db, pass.projectId), getTask(db, task.id), pass.id);
     const paths = (await deps.git.filesChangedBetween(repo, tip, kept)).filter(mine);
-    const landed = await deps.git.landPaths({
+    const landed = await landOnBranch(deps.git, {
       repo,
       branch,
       from: kept,
       paths,
       message: signOffMessage(db, pass, task.id),
-      opId: `pass:${pass.id}:sign-off:${ws}`,
+      // The kept commit counts the sign-offs: a rerun after a crash finds its own commit, while a
+      // sign-off after the next turn (a landing whose run did not end) lands that turn's files.
+      opId: `pass:${pass.id}:sign-off:${ws}:${kept}`,
     });
     landedSha = landed.sha;
     indexStale = landed.indexStale;
@@ -402,7 +455,35 @@ export async function signOffSteps(
   }
 
   const at = landedSha;
-  deps.state.write((ctx) => {
+  const refused = deps.state.write((ctx): string | null => {
+    // The pass is read again in this write: an Abandon that took it over as the page landed ends
+    // no run, and a close's Sign Off Now stops there.
+    const now = getPass(ctx.tx, pass.id).state;
+    if (now !== wanted) {
+      const reason = `the pass is ${now.toLowerCase()}`;
+      if (input.from === SignOffFrom.Close) throw new ConflictError(`Not signed off: ${reason}`);
+      deleteSignOffWait(ctx, task.id);
+      insertSystemNotice(ctx, task.id, `Not signed off: ${reason}.`);
+      return reason;
+    }
+    // A message to the page as it landed reopens it, as one after its sign-off would (spec §9.2):
+    // its commits stay on the branch, and the next sign-off lands what the turn adds.
+    if (
+      input.from !== SignOffFrom.Close &&
+      (!isReady(ctx.tx, ws, true) || messageWaits(ctx.tx, task.id))
+    ) {
+      const landedAs =
+        at === null ? '' : ` Its files are on the pass's branch as \`${at.slice(0, 7)}\`.`;
+      const reason = 'the page took a message as it landed';
+      deleteSignOffWait(ctx, task.id);
+      insertSystemNotice(
+        ctx,
+        task.id,
+        `Not signed off: ${reason}.${landedAs} Sign it off again once its turn is done.`,
+      );
+      reopenReady(ctx, ws);
+      return reason;
+    }
     finishSignOff(ctx, {
       passId: pass.id,
       taskId: task.id,
@@ -412,7 +493,9 @@ export async function signOffSteps(
       shared,
       indexStale,
     });
+    return null;
   });
+  if (refused !== null) return { kind: 'not_now', reason: refused };
   // A question the stopped turn left open is about work that is done now.
   deps.inbox.cancelForWorkstream(ws);
   return {
@@ -447,7 +530,7 @@ export function resumeSignOffWaits(deps: SignOffDeps, passId?: PassId): void {
     const pass = getPass(db, wait.passId);
     if (pass.state !== PassState.Open) continue;
     signOff(deps, { taskId: wait.taskId, from: SignOffFrom.Wait }).catch((error: unknown) => {
-      deps.logger.warn({ taskId: wait.taskId, err: errorText(error) }, 'waiting sign-off failed');
+      signOffFailed(deps, wait.taskId, error);
     });
   }
 }

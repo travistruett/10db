@@ -36,6 +36,7 @@ import {
   maxGrantedSeq,
   openHolds,
   reopenClosingPass,
+  rewindSharedLanded,
   setClosePlan,
   setCloseStep,
   setPassNotice,
@@ -43,8 +44,15 @@ import {
   type WriteContext,
 } from '@10db/db';
 import { jobKey, JobQueue } from '../delivery';
+import { PassFolderOffBranchError } from '../git';
 import { flagCard } from '../inbox';
-import { checkCloseRequest, closeChanges, closePreview, type CloseGateWhere } from './close-lists';
+import {
+  checkCloseRequest,
+  closeChanges,
+  closePages,
+  closePreview,
+  type CloseGateWhere,
+} from './close-lists';
 import { fastForwardReturn } from './fast-forward';
 import { passFolderOn } from './folder';
 import { pageMatcher, passBranch, passKeptRef } from './kept-work';
@@ -56,7 +64,7 @@ import {
   mergedClosePlan,
   mergedWhileOpen,
 } from './merged-open';
-import { keepHold, landSharedChanges } from './shared-chain';
+import { keepOrLetGo, landOnBranch, landSharedChanges } from './shared-chain';
 import { signOffSteps, SignOffFrom } from './sign-off';
 import { takeOutSteps, TakeOutWithin, type TakeOutDeps } from './take-out';
 import { unfinishedPages } from './unowned';
@@ -124,15 +132,16 @@ function pause(ms: number, signal: AbortSignal): Promise<void> {
  * Waits while Your folder is off the pass's branch (spec §5.1, §12): the pass's folder card says so,
  * and is withdrawn once the folder is back, when the close goes on. Nothing is landed or moved while
  * the folder holds another branch's files. With `orReturned`, a folder already on the return branch
- * at the pass's tip counts, as a fast-forward cut short between its steps leaves it.
+ * at the pass's tip counts, as a fast-forward cut short between its steps leaves it. Answers whether
+ * it waited.
  */
 async function folderBack(
   deps: CloseDeps,
   passId: PassId,
   signal: AbortSignal,
   orReturned = false,
-): Promise<void> {
-  for (;;) {
+): Promise<boolean> {
+  for (let waited = false; ; waited = true) {
     const pass = getPass(deps.state.db, passId);
     if (pass.state !== PassState.Closing || signal.aborted) throw new CloseStoppedError(passId);
     const repo = getProject(deps.state.db, pass.projectId).repoPath;
@@ -142,8 +151,8 @@ async function folderBack(
       (await deps.git.commitAt(repo, pass.returnBranch)) ===
         (await deps.git.commitAt(repo, passBranch(deps.state.db, pass)))
     )
-      return;
-    if (await passFolderOn(deps, passId)) return;
+      return waited;
+    if (await passFolderOn(deps, passId)) return waited;
     await pause(deps.folderPollMs ?? CLOSE_FOLDER_POLL_MS, signal);
   }
 }
@@ -153,6 +162,17 @@ export class CloseStoppedError extends DomainError {
   override readonly name = 'CloseStoppedError';
   constructor(passId: PassId) {
     super('conflict', `Pass ${passId} is no longer closing`);
+  }
+}
+
+/**
+ * The close's gate was stopped before it finished by something other than an Abandon (an update
+ * draining the gates): the close stops with its notice, and Close Pass runs it again.
+ */
+class CloseGateStoppedError extends DomainError {
+  override readonly name = 'CloseGateStoppedError';
+  constructor() {
+    super('conflict', 'the gate was stopped before it finished');
   }
 }
 
@@ -186,8 +206,9 @@ async function namedInLog(
 
 /**
  * A close's gate failed (spec §5.4, call 17): in one write the batch goes `SHIPPING → FAILED → OPEN`
- * and the pass back to `OPEN` with no close step, and a card names the pages the failure names. It
- * offers no Retry: the next Close Pass runs the gate again. Nothing below the gate has happened.
+ * and the pass back to `OPEN` with no close step, its landed mark before any shared change still to
+ * land, and a card names the pages the failure names. It offers no Retry: the next Close Pass runs
+ * the gate again. Nothing below the gate has happened.
  */
 async function failGate(
   deps: CloseDeps,
@@ -211,6 +232,9 @@ async function failGate(
       : 'in Your folder, after the pages set to Take Out were taken out, so the pass is open again without them; their work is kept with their tasks';
   deps.state.write((ctx) => {
     if (!reopenClosingPass(ctx, pass.id)) return;
+    // A change chosen Drop was passed over at step 2 and its take-out has not dropped it: it lands
+    // with the next sign-off or close that needs it.
+    rewindSharedLanded(ctx, pass.id);
     const batch = getBatch(ctx.tx, pass.batchId);
     if (batch.state === BatchState.Shipping)
       transitionBatch(ctx, batch.id, { to: BatchState.Failed, reason: 'the close gate failed' });
@@ -245,11 +269,12 @@ async function settlesAtClose(deps: CloseDeps, pass: PassDto): Promise<boolean> 
  * step its row records: 2 the pass's checks stop, every session stops again, the pages set to Sign
  * Off Now are signed off in the plan's order, then the placements and the shared changes kept land
  * (commits only); 3 the batch ships and, where copies are allowed, the gate runs in a scratch
- * worktree on the tip; 4 the other unfinished pages are taken out, inside the close, so files that
- * keep changing are left and named; 5 where the gate runs in the folder, it runs now; 6 the branch
- * is pushed and its pull request made ready, never set to merge itself; 7 D8's fast-forward; 8 one
- * write ships the batch and closes the pass, settled where nothing waits for a merge, after the
- * signed-off pages' kept refs go. A gate that fails or is aborted ends the job.
+ * worktree on the tip; 4 once Your folder is on the pass's branch, the other unfinished pages are
+ * taken out, inside the close, so files that keep changing are left and named; 5 where the gate runs
+ * in the folder, it runs now; 6 the branch is pushed and its pull request made ready, never set to
+ * merge itself; 7 D8's fast-forward, its step recorded before the move; 8 one write ships the batch
+ * and closes the pass, settled where nothing waits for a merge, after the signed-off pages' kept
+ * refs go. A gate that fails or is aborted ends the job.
  */
 export async function closeSteps(
   deps: CloseDeps,
@@ -293,7 +318,7 @@ export async function closeSteps(
       closing();
       const record = await deps.git.recordPaths({ repo, base: await tip(), paths: [file.path] });
       const title = listPassTasks(db, passId).find((t) => t.id === file.placeIn)?.title ?? '';
-      await deps.git.landPaths({
+      await landOnBranch(deps.git, {
         repo,
         branch,
         from: record.sha,
@@ -302,8 +327,9 @@ export async function closeSteps(
         opId: `pass:${passId}:place:${file.path}`,
       });
     }
-    // Every turn has stopped: a hold still open is kept, so what it changed lands or is dropped.
-    for (const hold of openHolds(db, passId)) await keepHold(deps, { claimId: hold.claimId });
+    // Every turn has stopped: a hold still open is kept, so what it changed lands or is dropped;
+    // one that cannot be kept is let go, its files left in the folder, so the close goes on.
+    for (const hold of openHolds(db, passId)) await keepOrLetGo(deps, hold.claimId);
     closing();
     await landSharedChanges(deps, {
       passId,
@@ -322,7 +348,10 @@ export async function closeSteps(
     });
     if (where === 'scratch' && !merged) {
       const ran = await deps.ship.gatePassTip({ passId, sha: await tip(), where, signal });
-      if (ran.aborted) throw new CloseStoppedError(passId);
+      if (ran.aborted) {
+        closing();
+        throw new CloseGateStoppedError();
+      }
       if (!ran.passed) {
         await failGate(deps, closing(), 'scratch', ran);
         return;
@@ -332,6 +361,9 @@ export async function closeSteps(
   }
 
   if (step() < CloseStep.TakenOut) {
+    // A take-out off the pass's branch keeps the last kept commit and writes no file: the pages it
+    // takes out would stay half done in the folder, owned by no page once the pass lands.
+    await folderBack(deps, passId, signal);
     for (const task of unfinishedPages(db, passId)) {
       closing();
       const mine = new Set(
@@ -352,7 +384,10 @@ export async function closeSteps(
     if (where === 'folder' && !merged) {
       await folderBack(deps, passId, signal);
       const ran = await deps.ship.gatePassTip({ passId, sha: await tip(), where, signal });
-      if (ran.aborted) throw new CloseStoppedError(passId);
+      if (ran.aborted) {
+        closing();
+        throw new CloseGateStoppedError();
+      }
       if (!ran.passed) {
         await failGate(deps, closing(), 'folder', ran);
         return;
@@ -391,9 +426,15 @@ export async function closeSteps(
 
   if (step() < CloseStep.FastForwarded) {
     await folderBack(deps, passId, signal, true);
+    closing();
+    // Recorded before the move: from here an Abandon is refused, so none takes over a pass whose
+    // return branch has moved. A rerun moves it again, done where it finds it done.
+    record(CloseStep.FastForwarded);
+  }
+  if (step() < CloseStep.Closed) {
+    await folderBack(deps, passId, signal, true);
     pass = closing();
     await fastForwardReturn(deps, pass);
-    record(CloseStep.FastForwarded);
   }
 
   pass = closing();
@@ -419,8 +460,9 @@ export interface PassCloses {
   /**
    * `POST /passes/:passId/close`: stops every session of the pass, builds the lists again, and
    * closes only if they are what the builder confirmed; else answers them with what changed.
-   * Refused (409) while the pass is not open or Your folder is off its branch, and for choices the
-   * lists do not allow.
+   * Refused (409) while the pass is neither open nor closing or Your folder is off its branch, and
+   * for choices the lists do not allow. A closing pass's close goes on from its recorded step, on
+   * the plan it was confirmed with, whatever the request.
    */
   close(passId: PassId, request: PassCloseRequest): Promise<PassCloseAnswerDto>;
   /** Raises the abort of the pass's close job and waits for it to stop. */
@@ -449,8 +491,22 @@ export function createPassCloses(deps: CloseDeps): PassCloses {
       deps.jobs.run(
         jobKey({ projectId: pass.projectId, worktreePath: null }, JobQueue.Cut),
         async (jobSignal) => {
+          const signal = AbortSignal.any([jobSignal, abort.signal]);
           try {
-            await closeSteps(deps, passId, AbortSignal.any([jobSignal, abort.signal]));
+            // Your folder that left the pass's branch in the middle of a step is waited for, with
+            // the folder card, and the close goes on from its recorded step. A refusal with the
+            // folder already back is taken once more, then it stops the close.
+            for (let again = false; ;) {
+              try {
+                await closeSteps(deps, passId, signal);
+                break;
+              } catch (error) {
+                if (!(error instanceof PassFolderOffBranchError)) throw error;
+                const waited = await folderBack(deps, passId, signal);
+                if (!waited && again) throw error;
+                again = !waited;
+              }
+            }
             deps.state.write((ctx) => {
               clearPassNotice(ctx, passId, CLOSE_NOTICE);
             });
@@ -490,6 +546,12 @@ export function createPassCloses(deps: CloseDeps): PassCloses {
     preview: (passId) => closePreview(deps, passId),
     async close(passId, request) {
       const pass = getPass(db, passId);
+      // A close that stopped on an error goes on from its recorded step, on the plan it was
+      // confirmed with; one still running is answered as it is.
+      if (pass.state === PassState.Closing) {
+        run(passId);
+        return { outcome: 'closing', pass };
+      }
       if (pass.state !== PassState.Open)
         throw new ConflictError(
           `Pass "${pass.name}" is ${pass.state.toLowerCase()}: only an open pass is closed`,
@@ -506,19 +568,7 @@ export function createPassCloses(deps: CloseDeps): PassCloses {
         throw new ConflictError(
           `Your folder is on ${on ?? 'a detached HEAD'}, not the pass's branch: switch back before closing`,
         );
-      checkCloseRequest(
-        await closePreview(deps, passId),
-        request,
-        new Set(
-          listPassTasks(db, passId)
-            .filter(
-              (t) =>
-                t.workstreamId !== null &&
-                getWorkstreamRow(db, t.workstreamId).state === WorkstreamState.Done,
-            )
-            .map((t) => t.id),
-        ),
-      );
+      checkCloseRequest(await closePreview(deps, passId), request, closePages(db, passId));
       // D25: the agents stop only now, and the close goes on only on the lists they leave.
       for (const task of unfinishedPages(db, passId))
         if (task.workstreamId !== null) await deps.stopLane(task.workstreamId);
@@ -555,12 +605,12 @@ export function createPassCloses(deps: CloseDeps): PassCloses {
   };
 }
 
-/** The header notice of a close that stopped on an error: it goes on at the next start, or Abandon. */
+/** The header notice of a close that stopped on an error: Close Pass or the next start goes on, or Abandon. */
 function noticeStuck(ctx: WriteContext, passId: PassId, error: unknown): void {
   setPassNotice(ctx, passId, {
     id: CLOSE_NOTICE,
     kind: PassNoticeKind.Close,
-    text: `The close stopped: ${errorText(error)}. It goes on when 10db next starts; Abandon Pass ends it now.`,
+    text: `The close stopped: ${errorText(error)}. Close Pass goes on from where it stopped, as 10db does when it next starts; Abandon Pass ends it.`,
     sendable: false,
     cardId: null,
     at: ctx.now,

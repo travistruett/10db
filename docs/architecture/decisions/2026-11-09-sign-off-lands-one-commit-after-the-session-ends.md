@@ -21,7 +21,8 @@ job queued behind others, taken up again after a wait or rerun after a restart a
    of a page still open that lands early says so on that page's thread.
 3. The page's files and the files under hazards it holds land from its kept commit as one commit
    (`Git.landPaths`): the task's title, each turn's first line as the body, a `10db-task` trailer and an
-   operation id per run, signed as the project's config asks. A page with nothing to land lands no commit, and
+   operation id of the run and the kept commit it lands (so a sign-off after the next turn of a run whose
+   landing never finished lands that turn's files, and a rerun finds its own commit), signed as the project's config asks. A page with nothing to land lands no commit, and
    its thread says "Signed off · nothing to land".
 4. The folder's own index follows for those paths; when another git held it, the thread says so (spec §18).
 5. One write resolves the item, answers the turn, deletes the wait, and takes the run to DONE by edges that

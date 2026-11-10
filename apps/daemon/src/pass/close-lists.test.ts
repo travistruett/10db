@@ -1,5 +1,5 @@
-import { PassClosePageChoice } from '@10db/contracts';
-import { getPass, openHolds } from '@10db/db';
+import { PassClosePageChoice, SharedChoiceKind, WorkstreamState } from '@10db/contracts';
+import { getPass, openHolds, transitionWorkstream } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openPassWorld, type PassWorld } from '../../test/pass-world';
 import { createPassCloses, type CloseShip } from './close';
@@ -78,6 +78,44 @@ describe('closePreview', () => {
 });
 
 describe('Close Pass, confirmed', () => {
+  it('refuses a Drop of a change a page set to Sign Off Now was built with, naming the page', async () => {
+    w = await openPassWorld();
+    const closes = createPassCloses({
+      ...w.deps,
+      stopLane: () => Promise.resolve(),
+      wrote: () => Promise.resolve(),
+      ship: noShip,
+      gateWhere: () => 'none',
+    });
+    // People's turn keeps a shared change; Settings' turn is kept after it, built with it.
+    const shared = w.startTurn(w.people);
+    const granted = await grantSharedHold(w.deps, { workstreamId: w.runOf(w.people), area: 'src' });
+    if (!granted?.ok) throw new Error('src was not granted');
+    w.write('src/button.ts', 'button\n');
+    const [hold] = openHolds(w.h.store.db, w.opened.pass.id);
+    if (!hold) throw new Error('no hold');
+    await keepHold(w.deps, { claimId: hold.claimId });
+    w.endTurn(shared);
+    const built = w.startTurn(w.settings);
+    w.write('src/settings/page.tsx', 'settings work\n');
+    w.endTurn(built);
+    await keepTurnWork(w.deps, { workstreamId: w.runOf(w.settings), turnId: built.id });
+    const shown = await closes.preview(w.opened.pass.id);
+
+    await expect(
+      closes.close(w.opened.pass.id, {
+        token: shown.token,
+        pages: [
+          { taskId: w.settings.id, choice: PassClosePageChoice.SignOff },
+          { taskId: w.people.id, choice: PassClosePageChoice.TakeOut },
+        ],
+        files: [],
+        shared: [{ seq: 1, choice: SharedChoiceKind.Drop }],
+      }),
+    ).rejects.toThrow(/Settings: UI work is set to Sign Off Now/);
+    expect(getPass(w.h.store.db, w.opened.pass.id).state).toBe('OPEN');
+  });
+
   it('shows the lists again, with what changed, when a file changed after they were shown', async () => {
     w = await openPassWorld();
     const closes = createPassCloses({
@@ -107,7 +145,7 @@ describe('Close Pass, confirmed', () => {
     expect(getPass(w.h.store.db, w.opened.pass.id).state).toBe('OPEN');
   });
 
-  it('refuses a file placed in a page that is being taken out, and a Drop of a page that signs off', async () => {
+  it('refuses a file placed in a page that is being taken out, a Drop of a page that signs off, and Sign Off Now of a failed run', async () => {
     w = await openPassWorld();
     const closes = createPassCloses({
       ...w.deps,
@@ -139,6 +177,18 @@ describe('Close Pass, confirmed', () => {
         shared: [{ seq: 1, choice: 'drop' }],
       }),
     ).rejects.toMatchObject({ name: 'ConflictError' });
+    w.h.state.write((ctx) => {
+      for (const to of [WorkstreamState.Starting, WorkstreamState.Failed])
+        transitionWorkstream(ctx, w.runOf(w.people), { to, fence: null });
+    });
+    await expect(
+      closes.close(w.opened.pass.id, {
+        token: shown.token,
+        pages: [{ taskId: w.people.id, choice: PassClosePageChoice.SignOff }],
+        files: [],
+        shared: [],
+      }),
+    ).rejects.toThrow('People: UI work cannot be signed off now: its run failed');
     expect(getPass(w.h.store.db, w.opened.pass.id).state).toBe('OPEN');
   });
 });

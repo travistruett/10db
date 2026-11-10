@@ -1,8 +1,11 @@
 import {
+  AbandonStep,
   ConflictError,
+  InboxState,
   PASS_SIGN_OFF_CHOICE,
   WorkstreamState as S,
   type TaskDto,
+  type WorkstreamId,
   type WorkstreamState,
 } from '@10db/contracts';
 import {
@@ -12,6 +15,7 @@ import {
   getInboxItem,
   getProject,
   getWorkstreamRow,
+  insertBuilderMessage,
   insertInboxItem,
   insertWorkstream,
   latestPassTurn,
@@ -19,24 +23,32 @@ import {
   listSignOffWaits,
   listTaskThread,
   openHolds,
+  setAbandonStep,
+  setClosePlan,
   transitionWorkstream,
+  updateInboxItem,
+  type WriteContext,
 } from '@10db/db';
 import { afterEach, beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { openPassWorld, type PassWorld } from '../../test/pass-world';
-import type { Git } from '../git';
+import { queueUntaken } from '../runner';
+import { GitTrustError, GitTrustFailure, type Git } from '../git';
 import {
   abandonPass,
   grantSharedHold,
   keepHold,
   keepTurnWork,
+  startAbandon,
   takeOut,
   TakeOutWithin,
 } from './index';
 import {
   cancelSignOffWait,
   finishSignOff,
+  signOffRefusal,
   signOffSteps,
   SignOffFrom,
+  startSignOff,
   type SignOffDeps,
 } from './sign-off';
 
@@ -67,8 +79,10 @@ async function turn(task: TaskDto, edit: () => void, shared = false): Promise<vo
 function ready(task: TaskDto): void {
   const ws = w.runOf(task);
   w.h.state.write((ctx) => {
-    for (const to of [S.Starting, S.Running] as const)
-      transitionWorkstream(ctx, ws, { to, fence: null });
+    // A page waiting on the builder runs again when a message starts its next turn.
+    const path =
+      getWorkstreamRow(ctx.tx, ws).state === S.WaitingHuman ? [S.Running] : [S.Starting, S.Running];
+    for (const to of path) transitionWorkstream(ctx, ws, { to, fence: null });
     const item = insertInboxItem(ctx, {
       projectId: w.h.project.id,
       kind: 'check',
@@ -177,28 +191,162 @@ describe('signOffSteps', () => {
     );
   });
 
-  it('makes no second commit when the daemon stops between the commit and the write', async () => {
+  it.each([
+    { name: 'makes no second commit', between: null, landed: ['Settings: UI work'] },
+    {
+      name: "lands the next turn's files as a second commit after a message",
+      between: { path: 'src/settings/more.tsx', content: 'more\n' },
+      landed: ['Settings: UI work', 'Settings: UI work'],
+    },
+  ])(
+    '$name when the daemon stops between the commit and the write',
+    async ({ between, landed: subjects }) => {
+      w = await openPassWorld();
+      await turn(w.settings, () => {
+        w.write('src/settings/page.tsx', 'tidied\n');
+      });
+      ready(w.settings);
+      const crashing: Git = {
+        ...w.deps.git,
+        landPaths: async (input) => {
+          await w.deps.git.landPaths(input);
+          throw new Error('the daemon stopped');
+        },
+      };
+      await expect(
+        signOff(w.settings, { ...w.deps, git: crashing, stopLane: stopped }),
+      ).rejects.toThrow('the daemon stopped');
+      expect(getWorkstreamRow(w.h.store.db, w.runOf(w.settings)).state).toBe('WAITING_HUMAN');
+      if (between !== null) {
+        await turn(w.settings, () => {
+          w.write(between.path, between.content);
+        });
+        ready(w.settings);
+      }
+
+      const again = await signOff(w.settings, { ...w.restart(), stopLane: stopped });
+
+      expect(again).toMatchObject({
+        kind: 'signed_off',
+        files: [between?.path ?? 'src/settings/page.tsx'],
+      });
+      expect(landed()).toEqual(subjects);
+      if (between !== null) expect(onBranch(between.path)).toBe('more');
+      expect(getWorkstreamRow(w.h.store.db, w.runOf(w.settings)).state).toBe('DONE');
+    },
+  );
+
+  it.each([
+    {
+      name: 'queued its next turn',
+      after: (ctx: WriteContext, ws: WorkstreamId) => queueUntaken(ctx, ws, null, null),
+      state: 'QUEUED',
+    },
+    {
+      name: 'started its next turn',
+      after: (ctx: WriteContext, ws: WorkstreamId) => {
+        transitionWorkstream(ctx, ws, { to: S.Running, fence: null });
+      },
+      state: 'RUNNING',
+    },
+    { name: 'waits for its next turn', after: () => undefined, state: 'WAITING_HUMAN' },
+  ])('leaves the page unsigned when a message as it landed $name', async ({ after, state }) => {
     w = await openPassWorld();
     await turn(w.settings, () => {
       w.write('src/settings/page.tsx', 'tidied\n');
     });
     ready(w.settings);
-    const crashing: Git = {
+    const ws = w.runOf(w.settings);
+    const messaged: Git = {
       ...w.deps.git,
       landPaths: async (input) => {
-        await w.deps.git.landPaths(input);
-        throw new Error('the daemon stopped');
+        const done = await w.deps.git.landPaths(input);
+        w.h.state.write((ctx) => {
+          insertBuilderMessage(ctx, w.settings.id, { body: 'one more thing', files: [] });
+          after(ctx, ws);
+        });
+        return done;
       },
     };
-    await expect(
-      signOff(w.settings, { ...w.deps, git: crashing, stopLane: stopped }),
-    ).rejects.toThrow('the daemon stopped');
-    expect(getWorkstreamRow(w.h.store.db, w.runOf(w.settings)).state).toBe('WAITING_HUMAN');
 
-    const again = await signOff(w.settings, { ...w.restart(), stopLane: stopped });
+    const outcome = await signOff(w.settings, { ...w.deps, git: messaged, stopLane: stopped });
 
-    expect(again).toMatchObject({ kind: 'signed_off', files: ['src/settings/page.tsx'] });
+    expect(outcome).toMatchObject({ kind: 'not_now' });
+    // The commit stays on the branch; the next sign-off lands what the turn adds.
     expect(landed()).toEqual(['Settings: UI work']);
+    expect(getWorkstreamRow(w.h.store.db, ws).state).toBe(state);
+    expect(listTaskThread(w.h.store.db, w.settings.id).at(-1)?.body).toMatch(
+      /^Not signed off: the page took a message as it landed/,
+    );
+  });
+
+  it.each([
+    { name: 'a page', from: SignOffFrom.Page, closing: false },
+    { name: "a close's Sign Off Now", from: SignOffFrom.Close, closing: true },
+  ])(
+    'of $name ends no run once an Abandon took the pass as it landed',
+    async ({ from, closing }) => {
+      w = await openPassWorld();
+      await turn(w.settings, () => {
+        w.write('src/settings/page.tsx', 'tidied\n');
+      });
+      ready(w.settings);
+      if (closing)
+        w.h.state.write((ctx) => {
+          setClosePlan(ctx, w.opened.pass.id, { token: 't', pages: [], files: [], shared: [] });
+        });
+      const abandoned: Git = {
+        ...w.deps.git,
+        landPaths: async (input) => {
+          const done = await w.deps.git.landPaths(input);
+          w.h.state.write((ctx) => {
+            setAbandonStep(ctx, w.opened.pass.id, AbandonStep.Abandoning);
+          });
+          return done;
+        },
+      };
+
+      const signing = signOffSteps(
+        { ...w.deps, git: abandoned, stopLane: stopped },
+        { taskId: w.settings.id, from },
+      );
+
+      if (closing) await expect(signing).rejects.toThrow(ConflictError);
+      else expect(await signing).toMatchObject({ kind: 'not_now' });
+      expect(getWorkstreamRow(w.h.store.db, w.runOf(w.settings)).state).toBe('WAITING_HUMAN');
+    },
+  );
+
+  it('lands from the new tip once when a hand-typed git moved the branch as it landed', async () => {
+    w = await openPassWorld();
+    await turn(w.settings, () => {
+      w.write('src/settings/page.tsx', 'tidied\n');
+    });
+    ready(w.settings);
+    let raced = false;
+    const racing: Git = {
+      ...w.deps.git,
+      landPaths: (input) => {
+        if (raced) return w.deps.git.landPaths(input);
+        raced = true;
+        // The branch moves between the landing's read of its tip and its compare-and-swap.
+        w.h.commit('docs/by-hand.md');
+        return Promise.reject(
+          new GitTrustError(w.h.repo, {
+            kind: GitTrustFailure.Ref,
+            ref: `refs/heads/${w.branch}`,
+            reason: 'raced',
+          }),
+        );
+      },
+    };
+
+    expect(await signOff(w.settings, { ...w.deps, git: racing, stopLane: stopped })).toMatchObject({
+      kind: 'signed_off',
+      files: ['src/settings/page.tsx'],
+    });
+
+    expect(landed()).toEqual(['Add docs/by-hand.md', 'Settings: UI work']);
     expect(getWorkstreamRow(w.h.store.db, w.runOf(w.settings)).state).toBe('DONE');
   });
 
@@ -375,6 +523,24 @@ describe('a waiting sign-off', () => {
     },
     { name: 'an Abandon of the pass', end: () => abandonPass(takeOutDeps(), w.opened.pass.id) },
     {
+      name: "an Abandon from its route, at the Abandon's first step",
+      end: async () => {
+        let waits = -1;
+        await startAbandon(
+          {
+            ...takeOutDeps(),
+            // Called just after step 1's write, before any page is taken out.
+            stopShip: () => {
+              waits = listSignOffWaits(w.h.store.db, w.opened.pass.id).length;
+              return Promise.resolve();
+            },
+          },
+          w.opened.pass.id,
+        );
+        expect(waits).toBe(0);
+      },
+    },
+    {
       name: 'the builder cancelling it',
       end: () => {
         cancelSignOffWait(w.deps, w.opened.pass.id, w.settings.id);
@@ -396,6 +562,70 @@ describe('a waiting sign-off', () => {
     await end();
 
     expect(listSignOffWaits(w.h.store.db, w.opened.pass.id)).toEqual([]);
+  });
+});
+
+describe('a Sign Off from the Ready card that does not land', () => {
+  afterEach(() => {
+    w.close();
+  });
+
+  /** Sign Off answered on the page's Ready card, as the card's write closes it. */
+  function answerCard(task: TaskDto) {
+    const row = getWorkstreamRow(w.h.store.db, w.runOf(task));
+    if (row.nextAction.kind !== 'pass_review') throw new Error('not Ready');
+    const id = row.nextAction.inboxId;
+    w.h.state.write((ctx) =>
+      updateInboxItem(ctx, id, {
+        state: InboxState.Resolved,
+        answer: { choice: PASS_SIGN_OFF_CHOICE },
+      }),
+    );
+    return id;
+  }
+
+  it.each([
+    {
+      name: "fails with Your folder off the pass's branch",
+      before: () => undefined,
+      act: async () => {
+        w.h.git$('switch', '-q', 'main');
+        startSignOff({ ...w.deps, stopLane: stopped }, w.settings.id);
+        await w.h.jobs.idle();
+        w.h.git$('switch', '-q', w.branch);
+      },
+      line: /^Not signed off: .*main/,
+    },
+    {
+      name: 'is cancelled while it waits',
+      before: async () => {
+        w.startTurn(w.people);
+        await grantSharedHold(w.deps, { workstreamId: w.runOf(w.people), area: 'src' });
+        w.write('src/button.ts', 'button\n');
+      },
+      act: async () => {
+        startSignOff({ ...w.deps, stopLane: stopped }, w.settings.id);
+        await w.h.jobs.idle();
+        cancelSignOffWait(w.deps, w.opened.pass.id, w.settings.id);
+      },
+      line: /^Sign-off cancelled while it waited\.$/,
+    },
+  ])('puts the Ready card back when it $name', async ({ before, act, line }) => {
+    w = await openPassWorld();
+    await before();
+    await turn(w.settings, () => {
+      w.write('src/settings/page.tsx', 'tidied\n');
+    });
+    ready(w.settings);
+    const card = answerCard(w.settings);
+
+    await act();
+
+    expect(landed()).toEqual([]);
+    expect(getInboxItem(w.h.store.db, card).state).toBe('OPEN');
+    expect(listTaskThread(w.h.store.db, w.settings.id).at(-1)?.body).toMatch(line);
+    // The builder can sign the page off again.
+    expect(signOffRefusal(w.h.store.db, w.opened.pass.id, w.settings.id)).toBeNull();
   });
 });
 
