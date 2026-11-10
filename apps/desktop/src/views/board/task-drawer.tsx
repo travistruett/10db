@@ -2,6 +2,7 @@ import {
   isTerminal,
   NEW_TASK_NO_AREAS,
   NEW_TASK_NO_CRITERIA,
+  PASS_FOLDER_WAIT_NOTICE_KEY,
   reviewRounds,
   SYSTEM_COLUMN_LABEL,
   RiskTag,
@@ -138,6 +139,8 @@ export interface TaskDrawerProps {
    * did and offers Open conversation only then; without it (a drawer outside the router), nothing.
    */
   readonly onOpenConversation?: (shapeId: ShapeId) => void;
+  /** Opens the Workbench, from a task waiting for the pass that holds Your folder. */
+  readonly onOpenWorkbench?: () => void;
   readonly onClose: () => void;
 }
 
@@ -159,6 +162,7 @@ export function TaskDrawer({
   pullRequestBase,
   areaNames,
   onOpenConversation,
+  onOpenWorkbench,
   onClose,
 }: TaskDrawerProps) {
   const patch = usePatchTask();
@@ -323,7 +327,13 @@ export function TaskDrawer({
         />
         <TaskNotices
           notices={[...taskNotices(workstream, batch), ...taskHistory(workstream, batch)]}
+          {...(onOpenWorkbench ? { onOpenWorkbench } : {})}
         />
+        {task.keptWork === true ? (
+          <Text size="sm" c="dimmed">
+            Has saved Workbench work: its next start puts it back.
+          </Text>
+        ) : null}
         {batch && task.status === TaskStatus.Done && pullRequestClosed(batch) ? (
           <ClosedPullRequest taskId={task.id} batch={batch} onClosed={onClose} />
         ) : null}
@@ -628,7 +638,13 @@ function SectionLabel({ children }: { readonly children: string }) {
  * for, a conflict its batch has with the base. The line is what the card says; the body says the rest
  * and how to fix it, with its line breaks. Nothing when there is none.
  */
-function TaskNotices({ notices }: { readonly notices: readonly Notice[] }) {
+function TaskNotices({
+  notices,
+  onOpenWorkbench,
+}: {
+  readonly notices: readonly Notice[];
+  readonly onOpenWorkbench?: () => void;
+}) {
   if (notices.length === 0) return null;
   return (
     <Stack gap="xs" data-testid="task-notice">
@@ -642,6 +658,11 @@ function TaskNotices({ notices }: { readonly notices: readonly Notice[] }) {
           <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
             {notice.body}
           </Text>
+          {notice.key === PASS_FOLDER_WAIT_NOTICE_KEY && onOpenWorkbench ? (
+            <Anchor component="button" type="button" size="sm" mt="xs" onClick={onOpenWorkbench}>
+              Open Workbench
+            </Anchor>
+          ) : null}
         </Alert>
       ))}
     </Stack>

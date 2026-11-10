@@ -467,6 +467,9 @@ function BoardColumns({
           onOpenConversation={(shapeId) => {
             void navigate({ to: '/shape/$shapeId', params: { shapeId } });
           }}
+          onOpenWorkbench={() => {
+            void navigate({ to: '/workbench' });
+          }}
           onClose={() => {
             setOpenId(null);
           }}
