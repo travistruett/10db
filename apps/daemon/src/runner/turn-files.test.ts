@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { filesTouched } from './turn-files';
+import { filesTouched, MAX_FILES_TOUCHED } from './turn-files';
 
 // Workbench spec §4.3: "3 files changed so far". A turn's touched files are those it wrote, each once,
 // by its path in the checkout.
+
+/** As many files as a turn's row carries. */
+const CAPPED = Array.from({ length: MAX_FILES_TOUCHED }, (_, n) => `src/f${String(n)}.ts`);
 
 describe('filesTouched', () => {
   it.each<{ name: string; before: string[]; written: string[]; touched: string[] }>([
@@ -30,6 +33,12 @@ describe('filesTouched', () => {
       before: ['a'],
       written: [],
       touched: ['a'],
+    },
+    {
+      name: 'stops at the cap, keeping the files first written',
+      before: CAPPED,
+      written: ['src/one-more.ts'],
+      touched: CAPPED,
     },
   ])('$name', ({ before, written, touched }) => {
     expect(filesTouched(before, written, '/repo')).toEqual(touched);

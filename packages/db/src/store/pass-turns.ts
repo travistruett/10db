@@ -289,37 +289,53 @@ export interface TurnActivityRow {
   readonly at: string;
 }
 
-/**
- * The `session.activity` rows that name the turn, from any session of its run (a handoff goes on with
- * the turn in a fresh session). The events index on entity type, entity and type, its rows in order,
- * finds them by session without a migration of its own.
- */
-function turnActivityRows(db: DbReader, turn: Pick<PassTurnDto, 'id' | 'workstreamId'>) {
-  const sessions = db
+/** The run's sessions, newest first: a turn's rows are in the latest ones it reached. */
+function sessionsOfRun(db: DbReader, workstreamId: WorkstreamId): SessionId[] {
+  return db
     .select({ id: schema.sessions.id })
     .from(schema.sessions)
-    .where(eq(schema.sessions.workstreamId, turn.workstreamId))
+    .where(eq(schema.sessions.workstreamId, workstreamId))
+    .orderBy(desc(schema.sessions.sequence))
     .all()
     .map((s) => s.id);
+}
+
+/**
+ * The `session.activity` rows of these sessions that name the turn (a handoff goes on with the turn
+ * in a fresh session). The events index on entity type, entity and type, its rows in order, finds a
+ * session's rows without a migration of its own.
+ */
+function turnActivityRows(db: DbReader, turnId: PassTurnId, sessions: readonly SessionId[]) {
   return db
     .select({ data: schema.events.data, at: schema.events.at })
     .from(schema.events)
     .where(
       and(
         eq(schema.events.entityType, 'session'),
-        inArray(schema.events.entityId, sessions),
+        inArray(schema.events.entityId, [...sessions]),
         eq(schema.events.type, EventType.SessionActivity),
-        sql`json_extract(${schema.events.data}, '$.turn.id') = ${turn.id}`,
+        sql`json_extract(${schema.events.data}, '$.turn.id') = ${turnId}`,
       ),
     );
 }
 
-/** The turn's newest activity row, or undefined before the turn reported any. */
+/**
+ * The turn's newest activity row, or undefined before the turn reported any. The run's sessions are
+ * read newest first, one at a time, so a working turn's row is found in its own session's latest rows
+ * rather than among every row of the run.
+ */
 export function latestTurnActivity(
   db: DbReader,
   turn: Pick<PassTurnDto, 'id' | 'workstreamId'>,
 ): TurnActivityRow | undefined {
-  return turnActivityRows(db, turn).orderBy(desc(schema.events.seq)).limit(1).get();
+  for (const session of sessionsOfRun(db, turn.workstreamId)) {
+    const row = turnActivityRows(db, turn.id, [session])
+      .orderBy(desc(schema.events.seq))
+      .limit(1)
+      .get();
+    if (row) return row;
+  }
+  return undefined;
 }
 
 /** The turn's activity rows, oldest first: its log. */
@@ -327,5 +343,7 @@ export function listTurnActivity(
   db: DbReader,
   turn: Pick<PassTurnDto, 'id' | 'workstreamId'>,
 ): TurnActivityRow[] {
-  return turnActivityRows(db, turn).orderBy(asc(schema.events.seq)).all();
+  return turnActivityRows(db, turn.id, sessionsOfRun(db, turn.workstreamId))
+    .orderBy(asc(schema.events.seq))
+    .all();
 }
