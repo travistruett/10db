@@ -1,4 +1,4 @@
-import { PASS_RETRY_TURN_CHOICE, TakeOutResultDto, TaskId } from '@10db/contracts';
+import { PASS_RETRY_TURN_CHOICE, PassSignOffDto, TakeOutResultDto, TaskId } from '@10db/contracts';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { useState } from 'react';
@@ -303,16 +303,91 @@ describe('PassWorkspace page actions', () => {
     expect(sent).toEqual([]);
   });
 
-  it('offers Sign Off on a Ready page only disabled, saying why, and sends nothing', async () => {
-    const sent = record();
-    await renderWorkspace((p) => p.ready.taskId);
-    const signOff = screen.getByRole('button', { name: 'Sign Off' });
-    expect(signOff.getAttribute('aria-disabled')).toBe('true');
-    fireEvent.click(signOff);
-    fireEvent.mouseEnter(signOff);
-    expect(await screen.findByText(/can't sign off a page yet/)).toBeTruthy();
-    expect(actionsSent(sent)).toEqual([]);
+  /** The sign-offs asked and withdrawn, by pass and task. */
+  function serveSignOff() {
+    const sent: { method: string; passId: string; taskId: string }[] = [];
+    const path = daemonUrl('/passes/:passId/tasks/:taskId/sign-off');
+    server.use(
+      http.post(path, ({ params }) => {
+        const taskId = TaskId.parse(params['taskId']);
+        sent.push({ method: 'POST', passId: String(params['passId']), taskId });
+        return HttpResponse.json(
+          PassSignOffDto.parse({ taskId, state: 'signing_off', waitsFor: null }),
+          { status: 202 },
+        );
+      }),
+      http.delete(path, ({ params }) => {
+        sent.push({
+          method: 'DELETE',
+          passId: String(params['passId']),
+          taskId: String(params['taskId']),
+        });
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    return sent;
+  }
+
+  it("Sign Off signs off the shown Ready page, naming that page's pass and task", async () => {
+    const sent = serveSignOff();
+    const pages = pagesByStatus();
+    const view = passViewDto({ pages: Object.values(pages) });
+    renderWithDaemon(
+      <PassWorkspace
+        view={view}
+        inbox={[]}
+        project={projectViewDto()}
+        selected={pages.ready.taskId}
+        onSelect={vi.fn()}
+      />,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign Off' }));
+    await waitFor(() => {
+      expect(sent).toEqual([{ method: 'POST', passId: view.pass.id, taskId: pages.ready.taskId }]);
+    });
   });
+
+  it.each([
+    { name: 'signing off', signOff: 'signing_off', line: 'Signing off…', cancel: false },
+    {
+      name: 'waiting for another page',
+      signOff: 'waiting',
+      line: "Signing off · waits for People's turn",
+      cancel: true,
+    },
+  ] as const)(
+    'a page $name says so, and only a waiting one offers Cancel Sign-Off',
+    async ({ signOff, line, cancel }) => {
+      const sent = serveSignOff();
+      const pages = pagesByStatus();
+      const signing = {
+        ...pages.ready,
+        signOff,
+        waitsFor:
+          signOff === 'waiting' ? { taskId: pages.asks.taskId, title: pages.asks.title } : null,
+      };
+      const view = passViewDto({ pages: [signing, pages.asks] });
+      renderWithDaemon(
+        <PassWorkspace
+          view={view}
+          inbox={[]}
+          project={projectViewDto()}
+          selected={signing.taskId}
+          onSelect={vi.fn()}
+        />,
+      );
+      const thread = await screen.findByRole('region', { name: 'Settings' });
+      expect(within(thread).getByText(line)).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Sign Off' })).toBeNull();
+      const button = within(thread).queryByRole('button', { name: 'Cancel Sign-Off' });
+      expect(button !== null).toBe(cancel);
+      if (button === null) return;
+      fireEvent.click(button);
+      await waitFor(() => {
+        expect(sent).toEqual([{ method: 'DELETE', passId: view.pass.id, taskId: signing.taskId }]);
+      });
+    },
+  );
 
   it("lists under each reply the files its turn changed, read from the page's turns", async () => {
     const pages = pagesByStatus();
