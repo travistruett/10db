@@ -27,7 +27,7 @@ import { FakeCamera } from '../../test/fake-camera';
 import { silentLogger } from '../log';
 import { createGateRunner } from '../verify';
 import { ManualClock } from '../clock';
-import { BEFORE_WAIT_MS, ELSEWHERE_NOTICE, startPictures, type Pictures } from './pictures';
+import { startPictures, type Pictures } from './pictures';
 
 // Workbench spec §10, §12, plan B5: the service end to end on a real pass in a real folder and
 // database, with a fake camera standing in for the browser, a child process 10db does not own.
@@ -298,7 +298,9 @@ describe('signing in', () => {
     expect(cam.signIns.every((u) => u === `${APP}/api/auth/dev-login/tok/`)).toBe(true);
     expect(cam.signIns).toHaveLength(3);
     const notices = (task: TaskDto) =>
-      listTaskThread(w.h.store.db, task.id).filter((m) => m.body.startsWith(ELSEWHERE_NOTICE));
+      listTaskThread(w.h.store.db, task.id).filter((m) =>
+        m.body.startsWith('Pictures of this page landed on another page of the app'),
+      );
     expect(notices(w.settings)).toHaveLength(1);
     expect(kinds(w.settings)).toEqual([]);
     expect(p.status(w.h.project.id).signIn?.problem).toMatch(/landed on another page/);
@@ -382,7 +384,7 @@ describe("a page's first launch", () => {
     expect(kinds(first)).toEqual(['before']);
   });
 
-  it(`goes on after ${String(BEFORE_WAIT_MS / 1000)} seconds without it`, async () => {
+  it('goes on after 20 seconds without it', async () => {
     await world();
     cam.hold();
     const p = start();
@@ -394,7 +396,7 @@ describe("a page's first launch", () => {
       .then(() => {
         went = true;
       });
-    clock.advance(BEFORE_WAIT_MS - 1);
+    clock.advance(19_999);
     await Promise.resolve();
     expect(went).toBe(false);
     clock.advance(1);

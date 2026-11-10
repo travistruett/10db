@@ -64,13 +64,13 @@ import { readStorageState, type StorageState } from './storage-state';
 // capture's route, outcome, milliseconds and bytes are logged; a picture is never sent anywhere.
 
 /** The longest a task's first launch waits for its before. */
-export const BEFORE_WAIT_MS = 20_000;
+const BEFORE_WAIT_MS = 20_000;
 
 /** How far back start-up looks for a finished Your-folder task whose after was missed. */
 const MISSED_AFTER_MS = 60 * 60_000;
 
 /** The start of the thread notice said once per task when a page lands elsewhere. */
-export const ELSEWHERE_NOTICE = 'Pictures of this page landed on another page of the app';
+const ELSEWHERE_NOTICE = 'Pictures of this page landed on another page of the app';
 
 export interface PicturesDeps {
   readonly state: StateStore;
