@@ -489,6 +489,20 @@ describe('a pass stacked on a closed one (D24)', () => {
     expect(edits(b.url)).toHaveLength(2);
   });
 
+  it('when the read of the stacked pull request fails, it still offers Retarget', async () => {
+    const a = await closedPass();
+    const b = await stacked(a);
+    h.gh.setState(a.url, PrState.Closed);
+    h.gh.failNext.set('prView', new GhError('unreachable', 'gh could not reach GitHub'));
+
+    await watchRound();
+
+    const card = h.only(retargetCards());
+    expect(getPassProgress(h.store.db, b.passId).notices).toEqual([
+      expect.objectContaining({ kind: PassNoticeKind.StackUnmerged, cardId: card.id }),
+    ]);
+  });
+
   it('when the stacked pull request was retargeted by hand, its card and notice go at the next look', async () => {
     const a = await closedPass();
     const b = await stacked(a);

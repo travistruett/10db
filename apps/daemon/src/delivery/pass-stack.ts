@@ -208,7 +208,10 @@ function retargetCard(above: PassDto, below: PassDto, base: string, prUrl: strin
   };
 }
 
-/** The branch the stacked pass's pull request targets on GitHub; null when it has none. */
+/**
+ * The branch the stacked pass's pull request targets on GitHub; null when it has none, or when gh
+ * could not read it, so a failed read never keeps the card from being offered.
+ */
 async function prBaseOf(
   ctx: DeliveryContext,
   above: PassDto,
@@ -217,8 +220,16 @@ async function prBaseOf(
   const batch = getBatch(ctx.state.db, above.batchId);
   const pr = getPassPullRequest(ctx.state.db, above.id);
   if (pr === null || batch.repo === null) return null;
-  const seen = await ctx.gh.prView({ repo: batch.repo, ref: pr.url }, ghCall(ctx, signal));
-  return seen?.baseRef ?? null;
+  try {
+    const seen = await ctx.gh.prView({ repo: batch.repo, ref: pr.url }, ghCall(ctx, signal));
+    return seen?.baseRef ?? null;
+  } catch (error) {
+    ctx.logger.warn(
+      { passId: above.id, err: error instanceof Error ? error.message : String(error) },
+      "stacked pass's pull request base not read",
+    );
+    return null;
+  }
 }
 
 /** Whether the builder answered the stacked pass's Retarget card with Retarget. */
