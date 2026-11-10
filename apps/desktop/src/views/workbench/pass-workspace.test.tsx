@@ -1,10 +1,10 @@
-import { TakeOutResultDto, TaskId } from '@10db/contracts';
+import { PASS_RETRY_TURN_CHOICE, TakeOutResultDto, TaskId } from '@10db/contracts';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { baseHandlers, daemonUrl, renderWithDaemon, server } from '../../test/daemon';
-import { projectViewDto } from '../../test/fixtures';
+import { inboxItemDto, projectViewDto } from '../../test/fixtures';
 import { multipartParts, useNodeMultipart } from '../../test/multipart';
 import {
   askItem,
@@ -61,7 +61,7 @@ describe('PassWorkspace queue', () => {
     const { pages } = await renderWorkspace();
     expect(queueRows().map((row) => row.textContent)).toEqual([
       'PeopleAsks a question',
-      'ReportsThe session kept crashing or could not start.',
+      'ReportsThe session kept crashing or could not start. Retry Turn sends your last message again.',
       'SettingsReady · 3 min',
       'BillingWorking · 4 min · median 5',
       `TeamPaused: usage limit, resumes ${clockTime(pages.paused.pausedUntil ?? '')}`,
@@ -328,6 +328,30 @@ describe('PassWorkspace page actions', () => {
     );
     const files = await screen.findByRole('list', { name: 'Files this turn changed' });
     expect(files.textContent).toContain('src/settings/page.tsx');
+  });
+});
+
+describe('PassWorkspace Retry Turn', () => {
+  it("answers the failed page's flag with Retry Turn", async () => {
+    const answered: { id: string; body: unknown }[] = [];
+    server.use(
+      http.post(daemonUrl('/inbox/:id/answer'), async ({ params, request }) => {
+        answered.push({ id: String(params['id']), body: await request.json() });
+        return HttpResponse.json(inboxItemDto({ state: 'RESOLVED' }));
+      }),
+    );
+    const { pages } = await renderWorkspace((p) => p.failed.taskId);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry Turn' }));
+    await waitFor(() => {
+      expect(answered).toEqual([
+        { id: pages.failed.failure?.retryItemId, body: { choice: PASS_RETRY_TURN_CHOICE } },
+      ]);
+    });
+  });
+
+  it('offers no Retry Turn on a page whose turn did not fail', async () => {
+    await renderWorkspace((p) => p.ready.taskId);
+    expect(screen.queryByRole('button', { name: 'Retry Turn' })).toBeNull();
   });
 });
 

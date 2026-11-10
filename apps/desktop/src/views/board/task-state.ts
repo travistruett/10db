@@ -158,6 +158,18 @@ export function failureLine(
   return `${happened} ${whatRetryDoes(workstream.failureKind, workstream.steps, workstream.stepIndex, step, workstream.notice ?? null, workstream.revertTold ?? false)}`;
 }
 
+/** What Retry Turn does on a failed Workbench turn: it answers the turn's flag. */
+const RETRY_TURN_LINE = 'Retry Turn sends your last message again.';
+
+/**
+ * A failed Workbench turn's line: what happened, in a run's words, and what Retry Turn does. A pass
+ * lane never fails as a run does: its failed turn waits on a flag whose one answer is Retry Turn.
+ */
+export function passTurnFailureLine(failureKind: string | null): string {
+  const happened = failureKind === null ? 'The turn failed.' : whatHappened(failureKind, null);
+  return `${happened} ${RETRY_TURN_LINE}`;
+}
+
 function building(workstream: WorkstreamDto): string {
   const total = workstream.steps.length;
   return total > 0

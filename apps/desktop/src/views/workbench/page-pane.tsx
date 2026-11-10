@@ -10,6 +10,7 @@ import { OpenPageButton } from './open-page-button';
 import { usePageActions } from './page-actions';
 import { PageStatus } from './page-status';
 import type { QueueRow } from './queue-rows';
+import { RetryTurn } from './retry-turn';
 import { Thread } from './thread';
 import { useWorkbenchKeys } from './use-workbench-keys';
 import { WorkbenchKey } from './workbench-keys';
@@ -70,6 +71,9 @@ export function PagePane({ passId, appUrl, row, openedAt, now, draft, onDraft }:
           <WorkingLine line={liveLine(page.turn, now)} />
         ) : null}
       </Box>
+      {status === PageStatus.Failed && page.failure !== null ? (
+        <RetryTurn itemId={page.failure.retryItemId} line={row.state.line} />
+      ) : null}
       <Composer
         area={page.area}
         status={status}
