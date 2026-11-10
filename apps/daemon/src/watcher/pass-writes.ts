@@ -64,8 +64,9 @@ export interface Accounted {
 
 /**
  * What the pass accounts for at each path of Your folder, by path: the newest change on the pass's
- * shared chain that sets it (spec §7.2: its turn's end kept it and let the area go, and it stays in the
- * folder until it lands; a drop is the newest when it put the path back), else what the pass's open
+ * shared chain that sets it, unless that change has landed or been dropped (spec §7.2: its turn's end
+ * kept it and let the area go, and it stays in the folder until it lands; a drop is the newest when it
+ * put the path back), else what the pass's open
  * recorded of the folder's dirt (spec §5.1). The content is the database's; only the mode is read from
  * the commit, so a ref moved since accounts for nothing new. A path still holding both is no write made
  * in the pass, whatever claim covers it.
@@ -75,13 +76,19 @@ export function accountedAt(input: {
   readonly dirtRef: string;
   readonly dirt: readonly PassDirtEntry[];
   /** The pass's shared chain, drops included. */
-  readonly shared: readonly Pick<PassSharedChangeDto, 'seq' | 'sha' | 'paths' | 'blobs'>[];
+  readonly shared: readonly Pick<
+    PassSharedChangeDto,
+    'seq' | 'sha' | 'paths' | 'blobs' | 'landedSha' | 'droppedBy'
+  >[];
 }): Map<string, Accounted> {
   const at = new Map<string, Accounted>(
     input.dirt.map((entry) => [entry.path, { at: input.dirtRef, blob: entry.blob }]),
   );
   for (const change of [...input.shared].sort((a, b) => a.seq - b.seq))
     for (const path of change.paths)
-      at.set(path, { at: change.sha, blob: change.blobs[path] ?? null });
+      // A landed change is the branch's now and accounts for nothing; neither does a dropped one, whose
+      // drop, later on the chain, says what it put back. Either ends what came before it too.
+      if (change.landedSha !== null || change.droppedBy !== null) at.delete(path);
+      else at.set(path, { at: change.sha, blob: change.blobs[path] ?? null });
   return at;
 }

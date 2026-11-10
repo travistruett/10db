@@ -80,11 +80,18 @@ describe('passWrites', () => {
 
 // Workbench spec §5.1, §7.2: the commit that holds what the pass accounts for at each path of Your folder.
 const DIRT = 'refs/10db/passes/pas_1/dirt';
-const change = (seq: number, sha: string, paths: string[]) => ({
+const change = (
+  seq: number,
+  sha: string,
+  paths: string[],
+  ended: { landedSha?: string; droppedBy?: number } = {},
+) => ({
   seq,
   sha,
   paths,
   blobs: Object.fromEntries(paths.map((path) => [path, `${sha}-blob`])),
+  landedSha: ended.landedSha ?? null,
+  droppedBy: ended.droppedBy ?? null,
 });
 
 const accountedRows: {
@@ -113,6 +120,21 @@ const accountedRows: {
       change(1, 'a1', ['src/kit/button.ts', 'src/kit/x.ts']),
     ],
     want: { 'src/kit/button.ts': 'b2', 'src/kit/x.ts': 'a1' },
+  },
+  {
+    name: 'a landed change accounts for nothing, and ends the dirt record of its paths',
+    dirt: ['src/kit/button.ts', 'README.md'],
+    shared: [change(1, 'a1', ['src/kit/button.ts'], { landedSha: 'l1' })],
+    want: { 'README.md': DIRT },
+  },
+  {
+    name: 'a dropped change accounts for nothing; its drop holds what it put back',
+    dirt: [],
+    shared: [
+      change(1, 'a1', ['src/kit/button.ts', 'src/kit/x.ts'], { droppedBy: 2 }),
+      change(2, 'd2', ['src/kit/button.ts']),
+    ],
+    want: { 'src/kit/button.ts': 'd2' },
   },
   {
     name: 'a drop that put a path back holds it',

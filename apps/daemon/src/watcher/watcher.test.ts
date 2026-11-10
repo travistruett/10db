@@ -71,7 +71,7 @@ import { passDirtRef } from '../delivery';
 import { createGit } from '../git';
 import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger, type Logger } from '../log';
-import { grantSharedHold, keepHold } from '../pass';
+import { dropShared, grantSharedHold, keepHold, landSharedChanges } from '../pass';
 import { editResult } from '../permissions';
 import { ANSWERED_CARDS_READ, stampOrReason, writeStamp } from './allowed-writes';
 import { STRAY_BULK_THRESHOLD } from './strays';
@@ -1277,11 +1277,16 @@ describe("a pass's shared change, kept as its turn ended", () => {
       .map((i) => i.body);
 
   /**
-   * Settings' turn held shared `src`, wrote `src/button.ts`, and ended Ready: its end kept the change on
+   * Settings' turn held shared `src`, wrote `src/button.ts` (dirty before the pass), and ended Ready: its end kept the change on
    * the chain and released the claim. People works meanwhile, so a write outside every claim is carded.
    */
   async function keptShared(): Promise<{ settings: WorkstreamId; sha: string }> {
-    w = await openPassWorld();
+    // The file was already dirty when the pass opened, so its dirt is recorded too.
+    w = await openPassWorld({
+      before: ({ write }) => {
+        write('src/button.ts', 'dirty\n');
+      },
+    });
     folder = fakeWatch();
     passWatcher = createWatcher({
       state: w.h.state,
@@ -1321,6 +1326,29 @@ describe("a pass's shared change, kept as its turn ended", () => {
       name: 'edited since',
       since: () => {
         w.write('src/button.ts', 'wider\n');
+      },
+      carded: true,
+    },
+    {
+      name: 'made executable since',
+      since: () => {
+        chmodSync(join(w.h.repo, 'src', 'button.ts'), 0o755);
+      },
+      carded: true,
+    },
+    {
+      name: 'landed, then written back as it was before the pass',
+      since: async () => {
+        await landSharedChanges(w.deps, { passId: w.opened.pass.id, upTo: 1 });
+        w.write('src/button.ts', 'dirty\n');
+      },
+      carded: true,
+    },
+    {
+      name: 'dropped, then written again as the change had it',
+      since: async () => {
+        await dropShared(w.deps, { passId: w.opened.pass.id, seq: 1 });
+        w.write('src/button.ts', 'button\n');
       },
       carded: true,
     },
