@@ -1080,7 +1080,7 @@ describe('a Workbench pass in Your folder', () => {
    */
   const dirtRows: {
     readonly name: string;
-    readonly since: () => void;
+    readonly since: (opened: OpenedFolder) => void;
     readonly carded: readonly string[];
   }[] = [
     { name: 'left as the open recorded it', since: () => undefined, carded: [] },
@@ -1112,6 +1112,15 @@ describe('a Workbench pass in Your folder', () => {
         touch('README.md');
       },
       carded: ['README.md'],
+    },
+    {
+      name: "the dirt commit gone, so nothing is known of the folder's entries: every dirt path",
+      since: ({ id }) => {
+        execFileSync('git', ['-C', repo.path, 'update-ref', '-d', passDirtRef(id)], {
+          env: isolatedGitEnv(),
+        });
+      },
+      carded: ['README.md', 'docs/before.md', 'docs/edited.md'],
     },
     {
       name: 'a file the folder did not hold',
@@ -1167,7 +1176,7 @@ describe('a Workbench pass in Your folder', () => {
         });
         return ws;
       });
-      since();
+      since(opened);
       expect(await watcher.stepEnd(gamma.id)).toEqual(carded);
       expect(flags().map((f) => f.body)).toEqual(
         carded.map((rel) => `${rel}\nWritten while Gamma was working`),
@@ -1178,9 +1187,10 @@ describe('a Workbench pass in Your folder', () => {
   it.each(dirtRows)(
     "in a batch while a lane works, the folder's dirt from before the pass: $name",
     async ({ since, carded }) => {
-      pass(WorkstreamState.Running, await dirtyFolderPass());
+      const opened = await dirtyFolderPass();
+      pass(WorkstreamState.Running, opened);
       watcher.sync();
-      since();
+      since(opened);
       for (const rel of DIRT_PATHS) emit(rel);
       await watcher.flush();
       expect(flags().map((f) => f.body)).toEqual(
@@ -1250,7 +1260,11 @@ describe("a pass's shared change, kept as its turn ended", () => {
       .filter((i) => i.kind === 'flag')
       .map((i) => i.body);
 
-  it('raises no stray card once its hold let the area go, at a session end or in a batch, and does for a write made since', async () => {
+  /**
+   * Settings' turn held shared `src`, wrote `src/button.ts`, and ended Ready: its end kept the change on
+   * the chain and released the claim. People works meanwhile, so a write outside every claim is carded.
+   */
+  async function keptShared(): Promise<{ settings: WorkstreamId; sha: string }> {
     w = await openPassWorld();
     folder = fakeWatch();
     passWatcher = createWatcher({
@@ -1270,29 +1284,60 @@ describe("a pass's shared change, kept as its turn ended", () => {
     w.write('src/button.ts', 'button\n');
     const [hold] = openHolds(w.h.store.db, w.opened.pass.id);
     if (!hold) throw new Error('no hold');
-    // The turn's end keeps the hold and releases its claim, then ends the turn Ready.
-    await keepHold(w.deps, { claimId: hold.claimId });
+    const kept = await keepHold(w.deps, { claimId: hold.claimId });
+    if (kept.sha === null) throw new Error('nothing was kept');
     w.endTurn(turn);
     w.ready(w.settings);
-    // People works meanwhile.
     w.h.state.write((ctx) => {
       for (const to of [WorkstreamState.Starting, WorkstreamState.Running])
         transitionWorkstream(ctx, w.runOf(w.people), { to, fence: null });
     });
+    return { settings, sha: kept.sha };
+  }
 
-    expect(await passWatcher.stepEnd(settings)).toEqual([]);
+  const sharedRows: {
+    readonly name: string;
+    readonly since: (kept: { readonly sha: string }) => void | Promise<void>;
+    readonly carded: boolean;
+  }[] = [
+    { name: 'left as the change kept it', since: () => undefined, carded: false },
+    {
+      name: 'edited since',
+      since: () => {
+        w.write('src/button.ts', 'wider\n');
+      },
+      carded: true,
+    },
+    {
+      name: "its chain commit gone, so nothing is known of the file's entry",
+      since: ({ sha }) => {
+        rmSync(join(w.h.repo, '.git', 'objects', sha.slice(0, 2), sha.slice(2)));
+      },
+      carded: true,
+    },
+  ];
+
+  it.each(sharedRows)(
+    'at the session end of a lane of the pass, a kept shared file $name',
+    async (row) => {
+      const kept = await keptShared();
+      await row.since(kept);
+      expect(await passWatcher.stepEnd(kept.settings)).toEqual(row.carded ? ['src/button.ts'] : []);
+      expect(strayBodies()).toEqual(
+        row.carded ? [expect.stringMatching(/^src\/button\.ts\nWritten while /)] : [],
+      );
+    },
+  );
+
+  it.each(sharedRows)('in a batch while a lane works, a kept shared file $name', async (row) => {
+    const kept = await keptShared();
+    await row.since(kept);
     passWatcher.sync();
-    const emitHere = (rel: string) => {
-      folder.open.get(w.h.repo)?.onChange(rel);
-    };
-    emitHere('src/button.ts');
+    folder.open.get(w.h.repo)?.onChange('src/button.ts');
     await passWatcher.flush();
-    expect(strayBodies()).toEqual([]);
-
-    w.write('src/button.ts', 'wider\n');
-    emitHere('src/button.ts');
-    await passWatcher.flush();
-    expect(strayBodies()).toEqual([expect.stringMatching(/^src\/button\.ts\nWritten while /)]);
+    expect(strayBodies()).toEqual(
+      row.carded ? [expect.stringMatching(/^src\/button\.ts\nWritten while /)] : [],
+    );
   });
 });
 
