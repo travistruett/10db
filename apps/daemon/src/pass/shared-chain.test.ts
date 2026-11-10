@@ -1,4 +1,6 @@
 import { execFileSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   activeClaims,
   getHold,
@@ -12,7 +14,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { isolatedGitEnv } from '../../test/fixtures';
 import { openPassWorld, PASS_PROJECT, type PassWorld } from '../../test/pass-world';
 import { grantSharedHold, keepHold, keepTurnWork, landSharedChanges, sharedRef } from './index';
-import { sharedNeeded } from './shared-chain';
+import { createGit, GitTrustError, GitTrustFailure } from '../git';
+import { landOnBranch, sharedNeeded } from './shared-chain';
 
 // Workbench spec §7.2: a hold keeps only what changed while it was held, as one change on the pass's
 // shared chain numbered as its grant was, and its area is released.
@@ -203,5 +206,37 @@ describe('sharedNeeded', () => {
       upTo: 0,
       openHolds: [],
     });
+  });
+});
+
+describe('landOnBranch', () => {
+  it('raises one refusal when the branch moves under both of its landings, none for the first', async () => {
+    w = await openPassWorld();
+    const refused: GitTrustError[] = [];
+    const git = createGit({ onRefused: (error) => refused.push(error) });
+    w.write('src/settings/page.tsx', 'tidied\n');
+    const record = await git.recordPaths({
+      repo: w.h.repo,
+      base: w.h.git$('rev-parse', w.branch),
+      paths: ['src/settings/page.tsx'],
+    });
+    // Another git holds the branch's ref lock, so every compare-and-swap on it fails.
+    const lock = join(w.h.repo, '.git', 'refs', 'heads', `${w.branch}.lock`);
+    writeFileSync(lock, '');
+
+    await expect(
+      landOnBranch(git, {
+        repo: w.h.repo,
+        branch: w.branch,
+        from: record.sha,
+        paths: ['src/settings/page.tsx'],
+        message: 'Settings\n',
+        opId: 'pass:test:land',
+      }),
+    ).rejects.toThrow(GitTrustError);
+
+    expect(refused.map((e) => e.detail)).toEqual([
+      { kind: GitTrustFailure.Ref, ref: `refs/heads/${w.branch}`, reason: 'raced' },
+    ]);
   });
 });

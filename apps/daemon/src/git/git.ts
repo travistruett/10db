@@ -808,7 +808,9 @@ export interface Git {
    * `indexStale` says another git held the index, which then still reads them as before (Workbench
    * spec §18). A commit on the branch carrying the opId is answered as it is, the index following the
    * branch's tip for the paths again; a tree equal to the tip's makes none and answers null. Refused
-   * with `PassFolderOffBranchError` while HEAD names another branch.
+   * with `PassFolderOffBranchError` while HEAD names another branch. A compare-and-swap that loses
+   * a race is refused; with `willRetry` (the caller lands once more from the new tip) the refusal is
+   * thrown without reaching `onRefused`, so a race the caller recovers from raises no card.
    */
   landPaths(input: {
     readonly repo: string;
@@ -817,6 +819,7 @@ export interface Git {
     readonly paths: readonly string[];
     readonly message: string;
     readonly opId: string;
+    readonly willRetry?: boolean;
   }): Promise<LandedPaths>;
   /** Sets `ref`, under `refs/10db/`, to commit `sha`, whatever it held. */
   keepRef(repo: string, ref: string, sha: string): Promise<void>;
@@ -2814,6 +2817,7 @@ export function createGit(opts: GitOptions = {}): Git {
     readonly paths: readonly string[];
     readonly message: string;
     readonly opId: string;
+    readonly willRetry?: boolean;
   }): Promise<LandedPaths> {
     const named = [...new Set(input.paths.map(checkPathName))].sort();
     return withRepoLock(realpathSync(input.repo), async () => {
@@ -2853,7 +2857,8 @@ export function createGit(opts: GitOptions = {}): Git {
         await git(c, ['update-ref', '--no-deref', '-m', `10db: ${input.opId}`, ref, sha, tip]);
       } catch (error) {
         if (!(error instanceof GitError)) throw error;
-        throw refusal(c.real, { kind: GitTrustFailure.Ref, ref, reason: 'raced' });
+        const raced = { kind: GitTrustFailure.Ref, ref, reason: 'raced' } as const;
+        throw input.willRetry === true ? new GitTrustError(c.real, raced) : refusal(c.real, raced);
       }
       return { sha, alreadyLanded: false, indexStale: await followIndex(sha) };
     });

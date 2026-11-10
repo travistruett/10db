@@ -227,20 +227,21 @@ export function sharedNeeded(
 /**
  * `Git.landPaths`, once more from the new tip when a hand-typed git moved the branch between the
  * landing's read of it and its compare-and-swap (spec §9.2, §18); the order of landings is unchanged.
+ * Only a race on the second landing raises the refusal's card.
  */
 export async function landOnBranch(
   git: Git,
   input: Parameters<Git['landPaths']>[0],
 ): Promise<LandedPaths> {
   try {
-    return await git.landPaths(input);
+    return await git.landPaths({ ...input, willRetry: true });
   } catch (error) {
     const raced =
       error instanceof GitTrustError &&
       error.detail.kind === GitTrustFailure.Ref &&
       error.detail.reason === 'raced';
     if (!raced) throw error;
-    return git.landPaths(input);
+    return git.landPaths({ ...input, willRetry: false });
   }
 }
 
