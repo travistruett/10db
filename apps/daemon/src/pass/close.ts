@@ -43,7 +43,7 @@ import {
   type WriteContext,
 } from '@10db/db';
 import { jobKey, JobQueue } from '../delivery';
-import { PassFolderOffBranchError } from '../git';
+import { GitNetworkError, GitTrustError, PassFolderOffBranchError, shellWord } from '../git';
 import { flagCard } from '../inbox';
 import {
   checkCloseRequest,
@@ -658,10 +658,27 @@ function stoppedWhile(step: number, where: CloseGateWhere): string {
 }
 
 /**
+ * Why the close stopped, in 10db's own words: a domain error's message and a typed git error's, the
+ * folder off the pass's branch with how to switch it back; null for any other error (SQLite's text, a
+ * library's), whose detail stays in the log.
+ */
+function stoppedBecause(error: unknown): string | null {
+  if (error instanceof PassFolderOffBranchError)
+    return `${error.message}; switch it back (git switch ${shellWord(error.branch)})`;
+  if (
+    error instanceof DomainError ||
+    error instanceof GitNetworkError ||
+    error instanceof GitTrustError
+  )
+    return error.message;
+  return null;
+}
+
+/**
  * The header notice of a close that stopped on an error: a plain sentence naming what it was doing,
- * the error itself only in the log, since it can be any library's or git's own text. Continue Close
- * or the next start goes on, or, before its fast-forward, Abandon ends it. From step 7 the return
- * branch may have moved, and an Abandon is refused.
+ * with why when 10db's own words say it, else pointing at the log. Continue Close or the next start
+ * goes on, or, before its fast-forward, Abandon ends it. From step 7 the return branch may have moved,
+ * and an Abandon is refused.
  */
 function noticeStuck(
   ctx: WriteContext,
@@ -674,10 +691,12 @@ function noticeStuck(
     step >= CloseStep.FastForwarded
       ? `its fast-forward may have moved ${getPass(ctx.tx, passId).returnBranch}, so it can no longer be abandoned`
       : 'Abandon Pass ends it';
+  const because = stoppedBecause(error);
+  const doing = stoppedWhile(step, where);
   const why =
-    error instanceof CloseGateStoppedError
-      ? `The close stopped: ${error.message}.`
-      : `The close stopped while ${stoppedWhile(step, where)}. 10db's log has the detail.`;
+    because === null
+      ? `The close stopped while ${doing}. 10db's log has the detail.`
+      : `The close stopped while ${doing}: ${because}.`;
   setPassNotice(ctx, passId, {
     id: CLOSE_NOTICE,
     kind: PassNoticeKind.Close,

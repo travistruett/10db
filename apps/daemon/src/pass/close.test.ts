@@ -47,6 +47,7 @@ import {
   type PassCloses,
 } from './close';
 import { closeGateOf } from './close-lists';
+import { PassFolderOffBranchError } from '../git';
 import { folderCardOpen } from './folder';
 import {
   grantSharedHold,
@@ -468,6 +469,26 @@ describe('Close Pass', () => {
       notice: /^The close stopped while pushing the pass's branch\. 10db's log has the detail\./,
     },
     {
+      name: "Your folder was off the pass's branch twice as it pushed",
+      ship: (real: CloseShip, again: () => void): Partial<CloseShip> => {
+        let refused = 0;
+        return {
+          pushPassBranch: (passId, signal) => {
+            if (refused === 2) {
+              again();
+              return real.pushPassBranch(passId, signal);
+            }
+            refused += 1;
+            return Promise.reject(
+              new PassFolderOffBranchError('/the/folder', '10db/polish', 'main'),
+            );
+          },
+        };
+      },
+      notice:
+        /^The close stopped while pushing the pass's branch: \/the\/folder is on main, not on the pass's branch 10db\/polish; switch it back \(git switch 10db\/polish\)\./,
+    },
+    {
       name: 'its gate was stopped by something other than an Abandon',
       ship: (real: CloseShip, again: () => void): Partial<CloseShip> => {
         let stopped = false;
@@ -482,7 +503,8 @@ describe('Close Pass', () => {
           },
         };
       },
-      notice: /^The close stopped: the gate was stopped before it finished\./,
+      notice:
+        /^The close stopped while running the gate in a separate copy: the gate was stopped before it finished\./,
     },
   ])('goes on with Continue Close after $name', async ({ ship, notice }) => {
     await world({ gateCommand: 'true' });
@@ -730,7 +752,10 @@ describe('Close Pass', () => {
     const stuck = getPassProgress(w.h.store.db, w.opened.pass.id).notices.find(
       (n) => n.id === 'close',
     );
-    expect(stuck?.text).toMatch(/^The close stopped while moving your folder's branch\. /);
+    // git's own refusal (the branch is gone) is not 10db's words: it stays in the log.
+    expect(stuck?.text).toMatch(
+      /^The close stopped while moving your folder's branch\. 10db's log has the detail\. /,
+    );
     expect(stuck?.text).not.toMatch(/Abandon/);
   });
 
