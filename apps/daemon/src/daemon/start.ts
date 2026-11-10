@@ -146,6 +146,7 @@ import {
   forgetEndedYields,
   withdrawStaleClaimWaits,
 } from '../mcp';
+import { answerPassCard, type PassWorkDeps } from '../pass';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
 import { chooseModel, offeredModels, PLAN_NEED } from '../routing';
 import { createScreenBroker, createScreens, renderMayRead } from '../screens';
@@ -586,6 +587,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let answerStartCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerLostMigrationsCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerWorktreeCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
+  let answerPassCards: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
 
   // A claim deadlock card's answer makes a task yield its claim, or cancels it as the Board does.
   const answerDeadlockCard = createClaimDeadlockAnswers({
@@ -627,6 +629,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       answerStartCard?.(item, answer);
       answerLostMigrationsCard?.(item, answer);
       answerWorktreeCard?.(item, answer);
+      answerPassCards?.(item, answer);
       answerDeadlockCard(item, answer);
     },
   });
@@ -895,6 +898,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   };
   answerBranchCard = createBranchCardAnswers(delivery);
   answerCiStopCard = createCiStopAnswers(delivery);
+  // A pass's cards: its folder off the pass's branch.
+  const passWork: PassWorkDeps = { state, git, inbox, jobs: delivery.jobs, logger, clock };
+  answerPassCards = (item, answer) => {
+    answerPassCard(passWork, item, answer);
+  };
   const starter = createBatchStarter(delivery);
   answerStartCard = createStartCardAnswers({ state, starter });
   answerLostMigrationsCard = createLostMigrationsAnswers(delivery);

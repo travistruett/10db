@@ -11,6 +11,7 @@ export {
   type PassWorkDeps,
 } from './kept-work';
 export { PassFolderOffBranchError } from '../git';
+export { answerPassCard } from './cards';
 export { passFolderOn } from './folder';
 export { foldHandEdits, type HandEditFold } from './hand-edits';
 export {
@@ -21,4 +22,5 @@ export {
   type TakeOutDeps,
   type TakeOutInput,
 } from './take-out';
+export { resumePassWork } from './resume';
 export { passView } from './view';

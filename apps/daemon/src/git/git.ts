@@ -462,7 +462,18 @@ export interface Git {
    * nothing in the checkout is uncommitted; otherwise it is left as it is and the answer says why.
    * A branch is checked out at its current tip; a detached place at its commit.
    */
-  switchBack(repo: string, from: string, to: CheckoutPlace): Promise<SwitchBack>;
+  switchBack(
+    repo: string,
+    from: string,
+    to: CheckoutPlace,
+    opts?: {
+      /**
+       * Keep uncommitted changes the switch does not write, as `git switch` does: only one in a file
+       * that differs between the two refuses it (`dirty`, naming those files).
+       */
+      readonly keepChanges?: boolean;
+    },
+  ): Promise<SwitchBack>;
   /**
    * Pushes `branch` to the same name at origin's recorded push URL, never forced, and records it as
    * the branch's upstream. Resolves with how long the push ran and what it printed.
@@ -1618,14 +1629,16 @@ export function createGit(opts: GitOptions = {}): Git {
     c: Pinned,
     from: string,
     to: CheckoutPlace,
+    keepChanges = false,
   ): Promise<SwitchBack> {
     const found = await currentBranch(c);
     if (found !== from) return { kind: 'moved', found };
     // What the files hold beyond HEAD, and what the checkout's own index holds beyond it: staged
     // work the files no longer show, or entries a commit made while another git held index.lock
-    // left behind. Either way the merge below would lose or keep the wrong thing, so 10db leaves it.
+    // left behind. Either way the merge below would lose or keep the wrong thing, so 10db leaves it,
+    // or, keeping changes, leaves it where the switch writes.
     const paths = [...new Set([...(await changes(c)), ...(await stagedPaths(c))])].sort();
-    if (paths.length > 0) return { kind: 'dirty', paths };
+    if (paths.length > 0 && !keepChanges) return { kind: 'dirty', paths };
     const ref = to.branch === null ? null : `refs/heads/${to.branch}`;
     const target = await revParse(c, `${ref ?? to.sha}^{commit}`);
     if (target === null) return { kind: 'gone' };
@@ -1644,6 +1657,8 @@ export function createGit(opts: GitOptions = {}): Git {
         .split('\0')
         .filter(Boolean),
     );
+    const overlapping = paths.filter((path) => written.has(path));
+    if (overlapping.length > 0) return { kind: 'dirty', paths: overlapping };
     const inTheWay = await untrackedInTheWay(c, head, target, written);
     if (inTheWay.length > 0) return { kind: 'ignored', paths: inTheWay };
     try {
@@ -3383,9 +3398,9 @@ export function createGit(opts: GitOptions = {}): Git {
         switchCheckout(await pinned(repo), name, startPoint),
       );
     },
-    async switchBack(repo, from, to) {
+    async switchBack(repo, from, to, opts) {
       return withRepoLock(realpathSync(repo), async () =>
-        switchBackCheckout(await pinned(repo), from, to),
+        switchBackCheckout(await pinned(repo), from, to, opts?.keepChanges ?? false),
       );
     },
     async push(repo, branch, net) {

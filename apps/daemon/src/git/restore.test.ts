@@ -161,3 +161,27 @@ describe('refreshIndex', () => {
     expect(indexed()).toBe(String(Math.floor(later.getTime() / 1000)));
   });
 });
+
+describe('switchBack keeping changes', () => {
+  it('switches with uncommitted changes the switch does not write, and refuses naming one it would', async () => {
+    rawGit('switch', '-q', '-c', 'other');
+    write('src/b.ts', 'one\ntwo\nthree\nfour\nfive\nsix\n');
+    rawGit('commit', '-q', '-am', 'Other');
+    const other = rawGit('rev-parse', 'HEAD');
+    rawGit('switch', '-q', 'main');
+    write('src/a.ts', 'a, uncommitted\n');
+    const toOther = () =>
+      git.switchBack(repo.path, 'main', { branch: 'other', sha: other }, { keepChanges: true });
+
+    expect(await toOther()).toEqual({ kind: 'switched' });
+    expect(rawGit('symbolic-ref', '--short', 'HEAD')).toBe('other');
+    expect(read('src/a.ts')).toBe('a, uncommitted\n');
+    expect(read('src/b.ts')).toBe('one\ntwo\nthree\nfour\nfive\nsix\n');
+
+    rawGit('switch', '-q', 'main');
+    write('src/b.ts', 'b, uncommitted\n');
+    expect(await toOther()).toEqual({ kind: 'dirty', paths: ['src/b.ts'] });
+    expect(rawGit('symbolic-ref', '--short', 'HEAD')).toBe('main');
+    expect(read('src/b.ts')).toBe('b, uncommitted\n');
+  });
+});
