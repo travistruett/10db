@@ -86,6 +86,30 @@ async function queueOrder(page: Page): Promise<string[]> {
     );
 }
 
+/**
+ * At `width`, the pass header's line reads whole, its ⋯ menu (Close Pass, Abandon) is on screen and
+ * nothing scrolls sideways; the project has no origin, so Open Pull Request says why beside it.
+ */
+async function headerFits(page: Page, width: number) {
+  await page.setViewportSize({ width, height: 900 });
+  const title = page.getByRole('heading', { level: 2, name: /· 1 signed off/ });
+  await expect(title).toBeVisible();
+  const clipped = await title.evaluate(
+    (el) => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1,
+  );
+  expect(clipped, `the header's line is cut at ${String(width)}`).toBe(false);
+  const menu = await page.getByRole('button', { name: 'More pass actions' }).boundingBox();
+  expect(menu, `the ⋯ menu is drawn at ${String(width)}`).not.toBeNull();
+  if (menu !== null)
+    expect(menu.x + menu.width, `the ⋯ menu is on screen at ${String(width)}`).toBeLessThanOrEqual(
+      width,
+    );
+  const sideways = await page.evaluate(
+    () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+  );
+  expect(sideways, `the page scrolls sideways at ${String(width)}`).toBe(false);
+}
+
 async function scan(page: Page, width: number, scheme: 'dark' | 'light', what: string) {
   await page.setViewportSize({ width, height: 900 });
   await expect(page.locator('html')).toHaveAttribute('data-mantine-color-scheme', scheme);
@@ -189,6 +213,11 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
   const seen = await recorded(page);
   expect(seen.rowLines.some((line) => line.includes('Signing off…'))).toBe(true);
   announced.push(...seen.announced);
+
+  // With a page signed off the header holds Open Pull Request too; it fits at every width.
+  await expect(page.getByRole('button', { name: 'Open Pull Request' })).toBeVisible();
+  for (const width of [1280, 800, 480, 420]) await headerFits(page, width);
+  await page.setViewportSize({ width: 1280, height: 900 });
 
   // A reload keeps the queue as it was.
   const before = await queueOrder(page);

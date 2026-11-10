@@ -46,6 +46,8 @@ export interface PassHeaderProps {
   readonly onAddPage: () => void;
   /** Open Pull Request, shown once a page is signed off; without it there is none. */
   readonly pullRequest?: ReactNode;
+  /** Why Open Pull Request is disabled, a line of its own under the header's row. */
+  readonly pullRequestReason?: ReactNode;
   /** Without it there is no Close Pass…. */
   readonly onClose?: () => void;
   readonly onRename: () => void;
@@ -71,7 +73,8 @@ function askingSince(view: PassViewDto, inbox: readonly InboxItemDto[]): string[
  * has something to say. While the pass closes its page actions wait and Abandon stays.
  */
 export function PassHeader(props: PassHeaderProps) {
-  const { project, view, inbox, now, onAddPage, pullRequest, onClose, onRename, onAbandon } = props;
+  const { project, view, inbox, now, onAddPage, pullRequest, pullRequestReason } = props;
+  const { onClose, onRename, onAbandon } = props;
   const clock = { now, medianTurnMinutes: medianTurnMinutes(view.turns) };
   const statuses = view.pages.map((page) => pageStatus(page, inbox, clock, view.pages).status);
   const open = view.pass.state === PassState.Open;
@@ -88,17 +91,25 @@ export function PassHeader(props: PassHeaderProps) {
     asking: askingSince(view, inbox),
     now,
   });
+  const signedOff = statuses.includes(PageStatus.SignedOff);
+  // The line takes the room it needs, wrapping onto a second row; the actions go under it, kept to the
+  // right, when the window is too narrow for both, so the ⋯ menu is always in reach.
   return (
     <Stack gap={4}>
-      <Group justify="space-between" wrap="nowrap" gap="sm">
-        <Title order={2} size="h5" fw={500} lineClamp={1} style={{ minWidth: 0 }}>
+      <Group justify="space-between" wrap="wrap" gap="sm" style={{ rowGap: 4 }}>
+        <Title
+          order={2}
+          size="h5"
+          fw={500}
+          style={{ flex: '1 1 16rem', minWidth: 0, overflowWrap: 'anywhere' }}
+        >
           {headerLine(project.name, view.pass.name, statuses)}
         </Title>
-        <Group gap="xs" wrap="nowrap" style={{ flex: 'none' }}>
+        <Group gap="xs" wrap="nowrap" style={{ flex: 'none', marginLeft: 'auto' }}>
           <Button variant="default" size="xs" disabled={!open} onClick={onAddPage}>
             Add Page
           </Button>
-          {statuses.includes(PageStatus.SignedOff) ? pullRequest : null}
+          {signedOff ? pullRequest : null}
           <Menu position="bottom-end" withinPortal>
             <Menu.Target>
               <ActionIcon variant="subtle" color="gray" aria-label="More pass actions">
@@ -121,6 +132,7 @@ export function PassHeader(props: PassHeaderProps) {
           </Menu>
         </Group>
       </Group>
+      {signedOff ? pullRequestReason : null}
       <CloseProgress
         state={view.pass.state}
         step={view.closeStep}

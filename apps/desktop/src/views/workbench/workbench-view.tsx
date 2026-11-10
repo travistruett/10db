@@ -36,7 +36,7 @@ import { ClosedPassLine } from './closed-pass-line';
 import { HeaderNotices } from './header-notices';
 import { PassHeader } from './pass-header';
 import { PassWorkspace } from './pass-workspace';
-import { PrButton } from './pr-button';
+import { PrButton, PrReason } from './pr-button';
 import { queueRows } from './queue-rows';
 import type { PassWorkspaceProps } from './pass-workspace-props';
 import { NoPageAreas, ProposePagesModal } from './propose-pages-modal';
@@ -166,6 +166,7 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
           setDialog('add-page');
         }}
         pullRequest={<PrButton view={live} />}
+        pullRequestReason={<PrReason view={live} />}
         onClose={() => {
           setDialog('close');
         }}
