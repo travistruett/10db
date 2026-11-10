@@ -192,6 +192,19 @@ describe('report_pages', () => {
     expect(out.refused[0]?.reason).toMatch(why);
   });
 
+  it("refuses a pass page's routes outside a turn, and keeps none", async () => {
+    await world();
+    const out = await toolsOf(w, w.runOf(w.people)).report_pages({
+      opId: 'op-pages-01',
+      routes: ['/people/42'],
+    });
+    expect(out.accepted).toEqual([]);
+    expect(out.refused[0]?.reason).toMatch(/no turn/);
+    expect(
+      listTaskPageReports(w.h.store.db, { taskId: w.people.id, workstreamId: w.runOf(w.people) }),
+    ).toEqual([]);
+  });
+
   it('refuses every route in a read-only step, and keeps none', async () => {
     await world();
     const { task, run } = ordinaryRun(WorkspaceMode.Shared);

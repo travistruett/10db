@@ -898,9 +898,11 @@ export function createToolHandlers(
             areaRoutes: pageAreaRoutes(project.areas),
             refusal: readOnly
               ? 'This step is read-only; only an implement step names pages for pictures.'
-              : inPass || task.workspaceMode === WorkspaceMode.Shared
-                ? null
-                : 'Pictures are taken only of tasks in Your folder; this task runs in a separate copy.',
+              : inPass && turnId === null
+                ? "This page has no turn open, so there is no turn's picture to name routes for: call it during a turn."
+                : inPass || task.workspaceMode === WorkspaceMode.Shared
+                  ? null
+                  : 'Pictures are taken only of tasks in Your folder; this task runs in a separate copy.',
             per: inPass ? 'turn' : 'run',
             kept,
             routes: input.routes,
