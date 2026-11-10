@@ -6,12 +6,13 @@
 ## Decision
 
 10db does not load the builder's app a second time to check the preview. Each capture of a Workbench page
-(before, after each Ready turn that changed something, after sign-off) also judges the load of the task's page
+(before, after each Ready turn that changed something or whose page is marked, after sign-off) also judges the load of the task's page
 route, its viewports and themes taken as one (`pictures/preview-marks.ts`, rule `pictures/preview-rule.ts`):
 
 - **Broken** is a document that failed (a navigation error, a timeout, a status of 500 or more, a landing off
-  the app's origin) or a dev server's error overlay, recognised per framework by its element
-  (`pictures/overlay.ts`): Next's error dialog `nextjs-portal [data-nextjs-dialog]` (its issue badge alone is
+  the app's origin) or a dev server's error overlay. A load the browser itself failed (a refused camera, the
+  shot's own deadline, a browser that would not close) says nothing about the page and is left out
+  (`Shot.cameraFailed`). An overlay is recognised per framework by its element (`pictures/overlay.ts`): Next's error dialog `nextjs-portal [data-nextjs-dialog]` (its issue badge alone is
   not broken) and Vite's `vite-error-overlay`. Any other dev server is broken only by a failed document.
 - **Blame is pass-wide.** `passes.preview` holds how the pass's last judged load went. A turn's broken load
   after a clean one opens a mark on that page (`pass_preview_marks`, one open per pass and page) and a thread
@@ -21,11 +22,13 @@ route, its viewports and themes taken as one (`pictures/preview-marks.ts`, rule 
   names no turn: the pass header says so (`preview`, not sendable) until a clean load, unless another page is
   already marked. A load that may be half written (the page works again, or another page holds a shared area)
   or that lands on another page of the app counts for nothing; before and after loads set the preview and
-  blame nobody. The marked page's clean turn mends its mark, takes back its unsent offer and logs the minutes
-  broken and the task named.
+  blame nobody. A marked page is shot after every Ready turn, changed or not, since its break may be fixed
+  elsewhere. Its clean turn mends its mark, takes back its unsent offer, withdraws the mark's open Move card
+  and logs the minutes broken and the task named.
 - **The second Move trigger.** A page whose turns break the preview twice running gets Move to a Separate
   Copy once per mark, where the project allows copies (`askMoveToCopy` with a route cause); on a `local`
-  project it stays at rank 2. Its Not Now tells the agent nothing.
+  project it stays at rank 2. Its Not Now tells the agent nothing and holds for broken previews only: a later
+  ask for a hazard still gets its card. A broken preview never rewords the page's open hazard card.
 - While the pass's preview is broken, a working page reads "Working · changing": a half-written page is
   expected.
 

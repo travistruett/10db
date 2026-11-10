@@ -159,7 +159,9 @@ The fake adapter (`sessions/fake-adapter.ts`) is the test boundary for Claude Co
   with a thread notice offered with Send to Agent (`PREVIEW_NOTICE`, never sent), the header's `preview` notice
   when no turn is named, and on two broken turns running Move to a Separate Copy once per mark where copies are
   allowed (`askMoveToCopy` takes a hazard or a route cause). A load while the page works again or another page
-  holds a shared area counts for nothing; a mend takes back the offer and logs the minutes broken and the task.
+  holds a shared area, or that the browser itself failed (`Shot.cameraFailed`), counts for nothing; a marked page
+  is shot after every Ready turn; a mend takes back the offer, withdraws the mark's Move card and logs the
+  minutes broken and the task. A Move card's Not Now holds for its own cause (hazard or preview).
   `pass.preview_broken` and `pass.preview_mended` are pass events; `passView` fills `PassPageDto.preview` and
   `PassViewDto.preview`.
 - `report_pages` (`mcp/report-pages.ts`,
@@ -167,12 +169,14 @@ The fake adapter (`sessions/fake-adapter.ts`) is the test boundary for Claude Co
   signed in, so `keptRoute` keeps only a page area's route, each parameter (`[id]`, `[...slug]`, `:id`) one
   `[A-Za-z0-9_-]{1,64}` value that is no page's literal segment at that depth, the agent's query dropped and the
   area route's own kept; at most four a turn (a pass page) or a run (a task outside a pass), refused in a
-  read-only step, a separate copy or a project with no app address. Kept routes are `task_page_reports` rows:
-  `pictureRoutes` adds the turn's to its turn picture and the run's to the after. The brief of a pass page and
+  read-only step, a separate copy, a pass page with no turn open or a project with no app address. Kept
+  routes are `task_page_reports` rows, matched again by `keptRoute` (`pictures/kept-route.ts`) when the
+  picture is taken: `pictureRoutes` adds the turn's to its turn picture, and to the after a pass page's last
+  turn's or another task's run's. The brief of a pass page and
   of a pictured Your-folder task (`PromptInput.pictures`) names the tool.
 - Pruning (`pictures/prune.ts`, `decisions/2026-11-10-turn-pictures-are-pruned-14-days-after-their-task-is-done.md`):
-  at start and every 24 h, turn pictures of a task done or cancelled 14 days ago are marked pruned and each file
-  no unpruned row names is deleted; befores and afters are kept. `TaskScreensDto.fromGoal` holds, for a task in
+  at start and every 24 h, turn pictures of a task done or cancelled 14 days ago are marked pruned, and every
+  file only pruned rows name is deleted, a failed removal included; befores and afters are kept. `TaskScreensDto.fromGoal` holds, for a task in
   a goal, the newest after (else before) each other task of the goal kept on its page route.
 - A session runs in its launch env (the project env plus its account's variables); the gate and the shipping gate get the lanes' allowlist of the project env (the login env with every billing switch stripped), inside their sandbox, and the repo's stdio MCP servers get `PATH`, `HOME` and their approved variables from it, plus the lanes' allowlist inside their sandbox. Nothing from the daemon's own `process.env` reaches a project's commands.
 - Both adapters check a session's account with `sessions/account-check.ts` before the prompt and at the first `init`; a refusal ends the session as `account_refused`, which pauses the account, and a model mismatch fails the workstream. Logs never carry an email or organization.

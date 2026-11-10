@@ -14,12 +14,18 @@ routes (`keptRoute`, `mcp/report-pages.ts`):
   when it equals a literal segment of any page area's route at the same depth (`/people/new` is that page,
   not `/people/[id]`).
 - The reported query is dropped; the matched area route's own query, if it has one, is kept exactly.
-- Every route is refused in a read-only step, for a task in a separate copy, and on a project with no app
-  address. Each refusal says why.
+- Every route is refused in a read-only step, for a task in a separate copy, for a pass page with no turn
+  open, and on a project with no app address. Each refusal says why.
+- A stored route is matched again when its picture is taken, against the page areas as they are then, so a
+  route whose page area was removed or changed is not loaded. A turn picture loads its turn's routes; a pass
+  page's after loads its last turn's, and any other task's after its run's, at most four.
 
 What remains: a GET with side effects on a parameter path of a declared page (`/people/42` doing something
-on load) is still possible. That is accepted: the page is the builder's own, declared as a page, and loaded
-the same way by its before, turn and after pictures.
+on load) is still possible. So is a value that names an undeclared sibling route: `/people/[id]` accepts
+`/people/export` when `export` is no page area's literal segment, and the app may serve its own route there.
+Both are accepted: the pattern is the builder's own page, declared as one, and loaded the same way by its
+before, turn and after pictures; a sibling the builder wants kept out is declared as its own page area, which
+makes its segment a literal no parameter takes.
 
 ## Why
 
