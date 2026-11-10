@@ -38,11 +38,13 @@ import {
   grantSharedHold,
   keepHold,
   keepTurnWork,
+  passView,
   startAbandon,
   takeOut,
   TakeOutWithin,
 } from './index';
 import {
+  askSignOff,
   cancelSignOffWait,
   finishSignOff,
   signOffRefusal,
@@ -507,6 +509,34 @@ describe('signOffSteps', () => {
     expect(listTaskThread(w.h.store.db, w.settings.id).at(-1)?.body).toBe(
       'Not signed off: the page is no longer Ready.',
     );
+  });
+});
+
+describe("the page's own Sign Off", () => {
+  afterEach(() => {
+    w.close();
+  });
+
+  it('closes the Ready card as it starts: the page reads signing off, and a second Sign Off is refused, until it lands', async () => {
+    w = await openPassWorld();
+    await turn(w.settings, () => {
+      w.write('src/settings/page.tsx', 'tidied\n');
+    });
+    ready(w.settings);
+    const deps = { ...w.deps, stopLane: stopped };
+    const signOffState = () =>
+      passView(w.h.store.db, w.opened.pass.id).pages.find((p) => p.taskId === w.settings.id)
+        ?.signOff;
+
+    expect(askSignOff(deps, w.opened.pass.id, w.settings.id)).toMatchObject({
+      state: 'signing_off',
+    });
+
+    expect(signOffState()).toBe('signing_off');
+    expect(() => askSignOff(deps, w.opened.pass.id, w.settings.id)).toThrow(ConflictError);
+    await w.h.jobs.idle();
+    expect(signOffState()).toBe('done');
+    expect(landed()).toEqual([w.settings.title]);
   });
 });
 

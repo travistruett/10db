@@ -177,6 +177,18 @@ function reopenReady(ctx: WriteContext, ws: WorkstreamId): void {
     updateInboxItem(ctx, item.id, { state: InboxState.Open, answer: null });
 }
 
+/** Closes the page's Ready card with Sign Off, as the builder's answer on the card closes it. */
+function closeReadyCard(ctx: WriteContext, ws: WorkstreamId): void {
+  const row = getWorkstreamRow(ctx.tx, ws);
+  if (row.nextAction.kind !== 'pass_review') return;
+  const item = getInboxItem(ctx.tx, row.nextAction.inboxId);
+  if (item.state === InboxState.Open)
+    updateInboxItem(ctx, item.id, {
+      state: InboxState.Resolved,
+      ...(item.kind === InboxKind.Check ? { answer: { choice: PASS_SIGN_OFF_CHOICE } } : {}),
+    });
+}
+
 /**
  * Whether a builder message waits for the page's next turn: one no turn has taken, as the runner's
  * `untakenMessages` reads them (the runner imports this module, so it is read here).
@@ -232,8 +244,14 @@ export function startSignOff(deps: SignOffDeps, taskId: TaskId): PassSignOffDto 
  * ConflictError (409) by `signOffRefusal`, else started (`startSignOff`).
  */
 export function askSignOff(deps: SignOffDeps, passId: PassId, taskId: TaskId): PassSignOffDto {
-  const refused = signOffRefusal(deps.state.db, passId, taskId);
-  if (refused !== null) throw new ConflictError(refused);
+  // The Ready card closes with the Sign Off, as Sign Off answered on the card closes it: the page
+  // reads signing off until it lands, and a second Sign Off is refused meanwhile.
+  deps.state.write((ctx) => {
+    const refused = signOffRefusal(ctx.tx, passId, taskId);
+    if (refused !== null) throw new ConflictError(refused);
+    const ws = getTask(ctx.tx, taskId).workstreamId;
+    if (ws !== null) closeReadyCard(ctx, ws);
+  });
   return startSignOff(deps, taskId);
 }
 
@@ -294,14 +312,7 @@ export function finishSignOff(
     throw new ConflictError(
       `${getTask(ctx.tx, input.taskId).title} is ${row.state.toLowerCase()}: it cannot be signed off now`,
     );
-  if (row.nextAction.kind === 'pass_review') {
-    const item = getInboxItem(ctx.tx, row.nextAction.inboxId);
-    if (item.state === InboxState.Open)
-      updateInboxItem(ctx, item.id, {
-        state: InboxState.Resolved,
-        ...(item.kind === InboxKind.Check ? { answer: { choice: PASS_SIGN_OFF_CHOICE } } : {}),
-      });
-  }
+  closeReadyCard(ctx, input.workstreamId);
   const turn = latestPassTurn(ctx.tx, input.taskId);
   if (turn?.endedAt != null) markPassTurnAnswered(ctx, turn.id);
   deleteSignOffWait(ctx, input.taskId);
