@@ -224,9 +224,10 @@ function ProjectWorkbench({ project }: { readonly project: ProjectViewDto }) {
   // builder, and only the page on screen is marked opened.
   const view = live.data;
   const named = view?.pages.some((page) => page.taskId === search.task) ?? false;
-  // The queue ranks a page by its Inbox items too, so the pin waits for the Inbox to have answered.
+  // The queue ranks a page by its Inbox items too, so the pin waits while the Inbox is first read; a
+  // failed read pins with none, rather than leave the page to follow the queue.
   const pin =
-    view == null || named || !inboxRead.isSuccess
+    view == null || named || inboxRead.isPending
       ? null
       : (queueRows(view, inbox, now)[0]?.page.taskId ?? null);
   useEffect(() => {

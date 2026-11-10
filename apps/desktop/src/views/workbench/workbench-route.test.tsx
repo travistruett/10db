@@ -245,6 +245,25 @@ describe('WorkbenchView', () => {
     ).toBe('half a thought');
   });
 
+  it('still pins the first page when the Inbox cannot be read', async () => {
+    const { ready, working } = pagesByStatus();
+    const live = passViewDto({ pass: passDto({ projectId: project.id }), pages: [working, ready] });
+    const { router } = open(
+      '/workbench',
+      { live: [live] },
+      {
+        first: [
+          http.get(daemonUrl('/inbox'), () =>
+            HttpResponse.json({ error: 'internal', message: 'locked' }, { status: 500 }),
+          ),
+        ],
+      },
+    );
+    await waitFor(() => {
+      expect(router.state.location.search).toEqual({ task: ready.taskId });
+    });
+  });
+
   it('pins the first page only once the Inbox has answered, which ranks a page that asks first', async () => {
     const { ready, asks } = pagesByStatus();
     const live = passViewDto({ pass: passDto({ projectId: project.id }), pages: [ready, asks] });
