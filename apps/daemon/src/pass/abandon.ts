@@ -5,6 +5,7 @@ import {
   type PassAbandonedDto,
   type PassDto,
   type PassId,
+  type PassSharedChangeDto,
 } from '@10db/contracts';
 import {
   abandonPassAndBatch,
@@ -24,14 +25,18 @@ import {
 import { jobKey, JobQueue } from '../delivery';
 import { flagCard, withdrawCard } from '../inbox';
 import { PASS_CARD_DETAIL, PASS_CARD_KIND, PassCardKind } from './folder';
-import { passBranch, type PassWorkDeps } from './kept-work';
+import { passBranch, readKeptRef, type PassWorkDeps } from './kept-work';
 import { keepOrLetGo } from './shared-chain';
 import { dropShared } from './shared-drop';
+import { sharedRef } from './shared-hold';
 import { takeOutSteps, TakeOutWithin, type TakeOutDeps } from './take-out';
 
 // Workbench spec §5.4 (D23): Abandon Pass is the exit that always works. Each unsigned page's files go
 // back to their state before the pass, its work kept with its task, and the pass and its batch end
 // ABANDONED, step by recorded step (`passes.abandon_step`) so a restart goes on from the next.
+
+/** Where the shared chain was when an Abandon began dropping: the drops after it are the Abandon's. */
+const abandonMarkRef = (pass: PassId): string => `refs/10db/passes/${pass}/abandon-from`;
 
 /** The fold key of the card an Abandon leaves. */
 export const passAbandonCardKey = (passId: PassId): string => `pass-abandon:${passId}`;
@@ -59,20 +64,24 @@ function takenOut(deps: TakeOutDeps, pass: PassDto) {
 }
 
 /**
- * The shared changes this Abandon dropped, read from the chain's drop rows (a drop a take-out the
- * builder asked for made is its own), and each of their files not back on disk: one an Abandon's
+ * The shared changes this Abandon dropped: the drop rows whose commits the chain did not hold when
+ * its step 4 began (`abandonMarkRef`), and each of their files not back on disk: one an Abandon's
  * drop left because it changed since it was checked. A file is compared with the last of those drops
  * that names it, since drops go newest first and the last puts it back furthest.
  */
 async function droppedShared(deps: TakeOutDeps, pass: PassDto) {
   const db = deps.state.db;
-  const byTakeOuts = new Set(listPassTakeOuts(db, pass.id).flatMap((row) => row.drops));
-  const drops = listSharedChanges(db, pass.id).filter(
-    (c) => c.dropOf !== null && !byTakeOuts.has(c.dropOf),
-  );
-  const last = new Map<string, (typeof drops)[number]>();
-  for (const drop of drops) for (const path of drop.paths) last.set(path, drop);
   const repo = getProject(db, pass.projectId).repoPath;
+  const before = await readKeptRef(deps.git, repo, abandonMarkRef(pass.id));
+  const drops: PassSharedChangeDto[] = [];
+  for (const change of listSharedChanges(db, pass.id))
+    if (
+      change.dropOf !== null &&
+      (before === null || !(await deps.git.isAncestor(repo, change.sha, before)))
+    )
+      drops.push(change);
+  const last = new Map<string, PassSharedChangeDto>();
+  for (const drop of drops) for (const path of drop.paths) last.set(path, drop);
   const left: LeftFile[] = [];
   for (const file of await deps.git.hashOnDisk(repo, [...last.keys()])) {
     const drop = last.get(file.path);
@@ -181,6 +190,12 @@ export async function abandonPassSteps(
     record(AbandonStep.SessionsStopped);
   }
   if (before(AbandonStep.SharedDropped)) {
+    // Where the chain was before this Abandon dropped anything, so its report names its own drops.
+    const repo = getProject(db, getPass(db, passId).projectId).repoPath;
+    const mark = abandonMarkRef(passId);
+    const tip = await readKeptRef(deps.git, repo, sharedRef(passId));
+    if (tip !== null && (await readKeptRef(deps.git, repo, mark)) === null)
+      await deps.git.keepRef(repo, mark, tip);
     // A hold a stopped turn left open is kept first, so what it changed is dropped too.
     for (const hold of openHolds(db, passId)) await keepOrLetGo(deps, hold.claimId);
     const unlanded = listSharedChanges(db, passId)

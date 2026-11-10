@@ -424,6 +424,26 @@ describe('abandonPass', () => {
       expect(openHolds(w.h.store.db, w.opened.pass.id)).toEqual([]);
     });
 
+    it('names a change a take-out could not drop, which it dropped itself, and the file it left', async () => {
+      w = await openPassWorld();
+      await sharedTurn(w.settings, 'settings\n');
+      // The builder edits the file after the Drop is chosen: the take-out keeps the change.
+      w.write('src/shared.ts', "settings\nand the builder's edit\n");
+      await takeOutSteps(deps(), {
+        taskId: w.settings.id,
+        within: TakeOutWithin.Alone,
+        shared: [{ seq: 1, choice: 'drop' }],
+      });
+
+      const result = await abandonPass(deps(), w.opened.pass.id);
+
+      expect(result.droppedShared).toEqual([{ seq: 1, paths: ['src/shared.ts'] }]);
+      expect(result.left).toEqual([
+        { path: 'src/shared.ts', page: `a shared change of ${w.settings.title}` },
+      ]);
+      expect(read('src/shared.ts')).toBe("settings\nand the builder's edit\n");
+    });
+
     it('leaves out a drop an earlier take-out made', async () => {
       w = await openPassWorld();
       await sharedTurn(w.settings, 'settings\n');
