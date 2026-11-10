@@ -134,6 +134,7 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     addShapeFile: track('addShapeFile'),
     taskThread: track('taskThread'),
     postTaskMessage: track('postTaskMessage'),
+    stopPage: track('stopPage'),
     taskPicture: track('taskPicture'),
     startShape: track('startShape'),
     shapeMeasures: track('shapeMeasures'),

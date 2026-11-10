@@ -1,13 +1,17 @@
 import { readFileSync, rmSync } from 'node:fs';
 import {
+  ConflictError,
   InvalidError,
   NotFoundError,
+  PassState,
+  TakeOutStep,
   TASK_MESSAGE_MAX_CHARS,
   TASK_MESSAGE_PICTURES_MAX,
   TASK_MESSAGE_PICTURES_MAX_BYTES,
   type TaskFileId,
   type TaskId,
   type TaskMessageDto,
+  type TaskMessageId,
   type TaskPictureKind,
   type TaskThreadDto,
 } from '@10db/contracts';
@@ -15,7 +19,11 @@ import {
   getTask,
   getTaskFile,
   insertBuilderMessage,
+  lastTakeOut,
+  latestPassTurn,
   listTaskThread,
+  markPassTurnAnswered,
+  passHoldingTask,
   type StoredPicture,
 } from '@10db/db';
 import type { StateStore } from '../events';
@@ -32,6 +40,16 @@ export interface PastedFile {
   readonly bytes: Uint8Array;
 }
 
+/** How a message reaches a task's page in a Workbench pass: the runner's, injected. */
+export interface PageMessages {
+  /** Hands the message to the page's session, or queues the page to start a turn with it. */
+  deliver(
+    taskId: TaskId,
+    messageId: TaskMessageId,
+    opts: { readonly redo: boolean },
+  ): Promise<void>;
+}
+
 /** The thread's routes, named as the HTTP API's services name them. */
 export interface ThreadService {
   /** A task's thread, oldest first; throws NotFoundError for an unknown task. */
@@ -39,12 +57,16 @@ export interface ThreadService {
   /**
    * Keeps the builder's message and its pictures. Throws NotFoundError for an unknown task and
    * InvalidError, naming what is refused, for a message with neither words nor a picture or for a
-   * file that is no PNG, JPEG or WebP by its bytes; nothing is kept then.
+   * file that is no PNG, JPEG or WebP by its bytes; nothing is kept then. A message to a page of a
+   * Workbench pass goes to its agent at once; it is refused (ConflictError) while the pass is not
+   * open or the page is being taken out. `redo` stops the page's running turn first, and is refused
+   * for a task in no pass.
    */
   postTaskMessage(
     taskId: TaskId,
     input: { readonly text: string; readonly pictures: readonly PastedFile[] },
-  ): TaskMessageDto;
+    opts?: { readonly redo?: boolean },
+  ): Promise<TaskMessageDto>;
   /** A pasted picture's bytes; throws NotFoundError for one that is not this task's. */
   taskPicture(
     taskId: TaskId,
@@ -59,6 +81,7 @@ export function createThreadService(deps: {
   readonly state: StateStore;
   /** The daemon's data directory; a task's pictures go under `tasks/<task id>/files/` in it. */
   readonly dataDir: string;
+  readonly pages: PageMessages;
 }): ThreadService {
   const { state } = deps;
   return {
@@ -67,8 +90,21 @@ export function createThreadService(deps: {
       return { taskId, messages: listTaskThread(state.db, taskId) };
     },
 
-    postTaskMessage(taskId, input) {
-      getTask(state.db, taskId);
+    async postTaskMessage(taskId, input, opts = {}) {
+      const task = getTask(state.db, taskId);
+      const redo = opts.redo === true;
+      // A page of a pass takes the message into its turns (Workbench spec §6.3), while the pass is
+      // open and the page is not being taken out; nothing is kept for one refused.
+      const pass = passHoldingTask(state.db, task);
+      if (pass) {
+        if (pass.state !== PassState.Open)
+          throw new ConflictError(
+            `Workbench pass "${pass.name}" is ${pass.state.toLowerCase()}; its pages take no message`,
+          );
+        const takeOut = lastTakeOut(state.db, taskId);
+        if (takeOut?.passId === pass.id && takeOut.step < TakeOutStep.Done)
+          throw new ConflictError(`${task.title} is being taken out of its pass`);
+      } else if (redo) throw new ConflictError(`${task.title} is in no Workbench pass to redo`);
       const body = input.text.trim();
       if (body === '' && input.pictures.length === 0)
         throw new InvalidError('A message needs words or a picture');
@@ -87,6 +123,7 @@ export function createThreadService(deps: {
       const pictures = input.pictures.map(checkPicture);
       const dir = taskFilesDir(deps.dataDir, taskId);
       const kept: KeptPicture[] = [];
+      let message: TaskMessageDto;
       try {
         const files: StoredPicture[] = [];
         for (const picture of pictures) {
@@ -100,13 +137,20 @@ export function createThreadService(deps: {
             storedPath: at.storedPath,
           });
         }
-        return state.write((ctx) => insertBuilderMessage(ctx, taskId, { body, files }));
+        message = state.write((ctx) => {
+          // The builder's first word after a Ready page is when the page was answered.
+          const latest = pass ? latestPassTurn(ctx.tx, taskId) : undefined;
+          if (latest && latest.readyAt !== null) markPassTurnAnswered(ctx, latest.id);
+          return insertBuilderMessage(ctx, taskId, { body, files });
+        });
       } catch (error) {
         // No row names what this call wrote; a picture kept before for the task stays.
         for (const picture of kept)
           if (picture.written) rmSync(picture.storedPath, { force: true });
         throw error;
       }
+      if (pass) await deps.pages.deliver(taskId, message.id, { redo });
+      return message;
     },
 
     taskPicture(taskId, fileId) {

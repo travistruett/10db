@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   AccountCreatedDto,
@@ -12,18 +12,24 @@ import {
   WorkstreamChangesDto,
   WorkstreamDto,
   type PassCheckDetail,
+  type PassDto,
   type ProjectInput,
 } from '@10db/contracts';
 import {
   endPassTurn,
   getInboxItem,
+  getTask,
   insertBatch,
+  insertTakeOut,
+  latestPassTurn,
   getWorkstreamRow,
   insertInboxItem,
   insertPass,
   insertPassTurn,
   insertWorkstream,
   listEvidence,
+  listInbox,
+  listPassTurns,
   listTaskThread,
   patchWorkstream,
   schema,
@@ -37,12 +43,17 @@ import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
-import { createTempRepo, isolatedGitEnv, tempDir } from './fixtures';
+import { createTempRepo, isolatedGitEnv, tempDir, waitFor } from './fixtures';
 import { startDaemonWithProfiles } from './daemon-with-profiles';
 
 // Workbench spec §5.1, §6.1: a pass opens over HTTP with each page's first message written, so its
 // first turn has one; a pass page is never approved or sent back, its Ready item answers only with
 // Sign Off, and what the builder is shown is the turn's kept commit.
+
+/** Pages whose fake agent works without ending its turn, and ends each turn Ready. */
+const WORKING = 'Settings: keeps working';
+const READY = 'Settings: ready each turn';
+const PAGE_FILE = 'src/settings/page.tsx';
 
 let data: { path: string; cleanup(): void };
 let repo: { path: string; cleanup(): void };
@@ -54,7 +65,26 @@ beforeEach(async () => {
     sandbox: null,
     dataDir: data.path,
     port: 0,
-    adapter: new FakeAdapter({}),
+    adapter: new FakeAdapter({
+      [WORKING]: [
+        [
+          { do: 'consume' },
+          { do: 'tool', toolName: 'Write', input: { file_path: PAGE_FILE, content: 'half\n' } },
+          { do: 'await_message', contains: 'never sent' },
+        ],
+      ],
+      [READY]: [
+        [
+          { do: 'consume' },
+          { do: 'tool', toolName: 'Write', input: { file_path: PAGE_FILE, content: 'one\n' } },
+          { do: 'turn_complete', text: 'Tidied the form.' },
+          { do: 'await_message', contains: 'Bigger' },
+          { do: 'consume' },
+          { do: 'turn_complete', text: 'Made it bigger.' },
+          { do: 'await_message', contains: 'never sent' },
+        ],
+      ],
+    }),
     logLevel: 'debug',
     caffeinate: () => null,
     watch: false,
@@ -406,5 +436,113 @@ describe('POST /projects/:projectId/passes', () => {
           (m) => m.author === 'builder',
         ),
       ).toEqual([]);
+  });
+});
+
+/** A pass opened over HTTP on one page whose task is `title`, its first message sent. */
+async function openedPage(title: string) {
+  const project = await projectWith(PAGES);
+  const task = await taskOn(project, title, ['settings']);
+  const opened = await api().post(`/projects/${project.id}/passes`, PassOpenedDto, {
+    name: 'Polish',
+    taskIds: [task.id],
+    firstMessage: 'Tidy the form',
+  });
+  return { project, task, pass: opened.pass };
+}
+
+async function postMessage(task: TaskDto, text: string, path = 'thread') {
+  const form = new FormData();
+  form.set('text', text);
+  const res = await fetch(`${daemon.url}/tasks/${task.id}/${path}`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${daemon.token}` },
+    body: form,
+  });
+  return res.status;
+}
+
+const runOf = (task: TaskDto) => {
+  const id = getTaskRow(task).workstreamId;
+  if (id === null) throw new Error('the task has no run');
+  return getWorkstreamRow(daemon.state.db, id);
+};
+const getTaskRow = (task: TaskDto) => getTask(daemon.state.db, task.id);
+const builderMessages = (task: TaskDto) => firstMessages(task);
+
+describe("a page's messages and Stop over HTTP", () => {
+  it.each([
+    {
+      name: 'its pass is being abandoned',
+      hold: () => {
+        // The test has one pass.
+        daemon.state.db.update(schema.passes).set({ state: 'ABANDONING' }).run();
+      },
+    },
+    {
+      name: 'it is being taken out',
+      hold: (pass: { id: PassDto['id'] }, task: TaskDto) => {
+        daemon.state.write((ctx) => {
+          insertTakeOut(ctx, { taskId: task.id, passId: pass.id, drops: [] });
+        });
+      },
+    },
+  ])('refuses a message with 409 while $name, keeping none', async ({ hold }) => {
+    const { task, pass } = await openedPage(WORKING);
+    hold(pass, task);
+    expect(await postMessage(task, 'Make it bigger')).toBe(409);
+    expect(builderMessages(task)).toEqual(['Tidy the form']);
+  });
+
+  it('stops a working page: its turn ends stopped with its work kept, and nothing is Ready', async () => {
+    const { task } = await openedPage(WORKING);
+    await waitFor(() => existsSync(join(repo.path, PAGE_FILE)));
+
+    const res = await fetch(`${daemon.url}/tasks/${task.id}/stop`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${daemon.token}` },
+    });
+
+    expect(res.status).toBe(204);
+    expect(latestPassTurn(daemon.state.db, task.id)).toMatchObject({
+      ending: 'stopped',
+      readyAt: null,
+    });
+    expect(runOf(task)).toMatchObject({ state: 'QUEUED', nextAction: { kind: 'resume' } });
+    expect(listInbox(daemon.state.db, {}).filter((i) => i.kind === 'check')).toEqual([]);
+  });
+
+  it('leaves a Ready page as it is on Stop, and a message to it starts the next turn', async () => {
+    const { task, pass } = await openedPage(READY);
+    await waitFor(() => runOf(task).nextAction.kind === 'pass_review');
+    const ready = runOf(task);
+
+    const res = await fetch(`${daemon.url}/tasks/${task.id}/stop`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${daemon.token}` },
+    });
+    expect(res.status).toBe(204);
+    expect(runOf(task)).toEqual(ready);
+
+    expect(await postMessage(task, 'Bigger please')).toBe(201);
+    await waitFor(
+      () =>
+        latestPassTurn(daemon.state.db, task.id)?.seq === 2 &&
+        runOf(task).state === 'WAITING_HUMAN',
+    );
+    // The Ready turn was answered by that message, and the next one was not yet.
+    const [first, second] = listPassTurns(daemon.state.db, pass.id);
+    expect(first?.answeredAt).not.toBeNull();
+    expect(second?.answeredAt).toBeNull();
+  });
+
+  it('refuses Stop with 409 for a task in no pass', async () => {
+    const project = await projectWith(PAGES);
+    const task = await taskOn(project, 'Settings: alone', ['settings']);
+    const res = await fetch(`${daemon.url}/tasks/${task.id}/stop`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${daemon.token}` },
+    });
+    expect(res.status).toBe(409);
   });
 });

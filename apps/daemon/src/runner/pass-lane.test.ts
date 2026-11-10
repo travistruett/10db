@@ -415,3 +415,28 @@ describe("the builder's Stop", () => {
     expect(row(id)).toEqual(before);
   });
 });
+
+describe('Stop and Redo', () => {
+  it('interrupts the running turn and goes on with the message in the same turn, never Ready between', async () => {
+    const { task, pass, id } = await openPage([
+      [
+        { do: 'consume' },
+        { do: 'tool', toolName: 'Write', input: { file_path: PAGE_FILE, content: 'half\n' } },
+        { do: 'await_message', contains: 'Instead' },
+        ...turn('other\n', 'Did it the other way.'),
+        { do: 'await_message', contains: 'never sent' },
+      ],
+    ]);
+    await waitFor(() => engine.adapter.observations.some((o) => o.kind === 'tool_allowed'));
+    const message = engine.state.write((ctx) =>
+      insertBuilderMessage(ctx, task.id, { body: 'Instead: the other way', files: [] }),
+    );
+    await engine.runner.deliverMessage(task.id, message.id, { redo: true });
+    await waitFor(isReady(id, 1));
+
+    expect(engine.adapter.interrupts).toHaveLength(1);
+    expect(listPassTurns(engine.store.db, pass.id).map((t) => [t.seq, t.ending])).toEqual([
+      [1, 'ready'],
+    ]);
+  });
+});

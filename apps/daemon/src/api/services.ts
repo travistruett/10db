@@ -329,7 +329,8 @@ export interface ApiServices {
   /**
    * Keeps the builder's message and its pasted pictures. Throws NotFoundError for an unknown task and
    * InvalidError, naming what is refused, for an empty message or a file that is no PNG, JPEG or
-   * WebP by its bytes.
+   * WebP by its bytes. A message to a page of a Workbench pass goes to its agent; `redo` stops the
+   * page's running turn first. Refused (409) while the pass is not open or the page is being taken out.
    */
   postTaskMessage(
     taskId: TaskId,
@@ -337,7 +338,13 @@ export interface ApiServices {
       readonly text: string;
       readonly pictures: readonly { readonly name: string; readonly bytes: Uint8Array }[];
     },
-  ): TaskMessageDto;
+    opts?: { readonly redo?: boolean },
+  ): Promise<TaskMessageDto>;
+  /**
+   * Stops the running turn of a page of an open Workbench pass, keeping its work and raising nothing;
+   * a page with no running turn is left as it is. Refused (409) for a task no open pass holds.
+   */
+  stopPage(taskId: TaskId): Promise<void>;
   /** A pasted picture's bytes; throws NotFoundError for one that is not this task's. */
   taskPicture(
     taskId: TaskId,

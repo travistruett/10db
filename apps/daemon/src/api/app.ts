@@ -195,7 +195,7 @@ const bodyLimiter = bodyLimit({ maxSize: MAX_BODY_BYTES });
 // A dropped file is the one body that may be larger: up to 20 MB, and a little over so the service
 // can name the limit in its refusal.
 const fileBodyLimit = bodyLimit({ maxSize: SHAPE_FILE_MAX_BYTES + 1024 });
-const TASK_THREAD_PATH = /^\/tasks\/[^/]+\/thread$/;
+const TASK_THREAD_PATH = /^\/tasks\/[^/]+\/thread(\/redo)?$/;
 // A builder's message carries its pictures in the one request, and a little over so the service can
 // name the limit.
 const messageBodyLimit = bodyLimit({ maxSize: TASK_MESSAGE_PICTURES_MAX_BYTES + 1024 * 1024 });
@@ -215,6 +215,18 @@ const TaskMessageForm = z.object({
     .transform((parts) => (parts === undefined ? [] : [parts].flat())),
 });
 type TaskMessageForm = z.infer<typeof TaskMessageForm>;
+
+/** The pictures of a message's form, read whole. */
+function pastedPictures(
+  parts: readonly File[],
+): Promise<{ readonly name: string; readonly bytes: Uint8Array }[]> {
+  return Promise.all(
+    parts.map(async (file) => ({
+      name: file.name,
+      bytes: new Uint8Array(await file.arrayBuffer()),
+    })),
+  );
+}
 
 export function createApp(deps: ApiDeps) {
   const app = new Hono()
@@ -1042,18 +1054,35 @@ export function createApp(deps: ApiDeps) {
       validator('form', (value): TaskMessageForm => TaskMessageForm.parse(value)),
       async (c) => {
         const { text, picture } = c.req.valid('form');
-        const pictures = await Promise.all(
-          picture.map(async (file) => ({
-            name: file.name,
-            bytes: new Uint8Array(await file.arrayBuffer()),
-          })),
-        );
         return c.json(
-          deps.services.postTaskMessage(TaskId.parse(c.req.param('taskId')), { text, pictures }),
+          await deps.services.postTaskMessage(TaskId.parse(c.req.param('taskId')), {
+            text,
+            pictures: await pastedPictures(picture),
+          }),
           201,
         );
       },
     )
+    // Stop and Redo on a page of a Workbench pass: its running turn stops, then the message goes in.
+    .post(
+      '/tasks/:taskId/thread/redo',
+      validator('form', (value): TaskMessageForm => TaskMessageForm.parse(value)),
+      async (c) => {
+        const { text, picture } = c.req.valid('form');
+        return c.json(
+          await deps.services.postTaskMessage(
+            TaskId.parse(c.req.param('taskId')),
+            { text, pictures: await pastedPictures(picture) },
+            { redo: true },
+          ),
+          201,
+        );
+      },
+    )
+    .post('/tasks/:taskId/stop', async (c) => {
+      await deps.services.stopPage(TaskId.parse(c.req.param('taskId')));
+      return c.body(null, 204);
+    })
     .get('/tasks/:taskId/thread/pictures/:fileId', (c) => {
       const picture = deps.services.taskPicture(
         TaskId.parse(c.req.param('taskId')),

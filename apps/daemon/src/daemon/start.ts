@@ -1435,7 +1435,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       off: opts.judgeOff === true,
     }),
     shape: createShapeServices({ shape, state, clock }),
-    thread: createThreadService({ state, dataDir: opts.dataDir }),
+    thread: createThreadService({
+      state,
+      dataDir: opts.dataDir,
+      pages: {
+        deliver: (taskId, messageId, how) => createdRunner.deliverMessage(taskId, messageId, how),
+      },
+    }),
     knowledge: createKnowledgeServices({
       state,
       searchAvailable: knowledgeIndex.failed.length === 0,

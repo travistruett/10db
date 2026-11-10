@@ -632,6 +632,8 @@ interface Control {
   messages: LaneMessages | null;
   /** The builder stopped the pass task's turn: it closes as stopped. */
   builderStop: boolean;
+  /** Set while Stop and Redo interrupts the turn: the interrupted turn's end is not the turn's. */
+  redoing: boolean;
   done: Promise<void>;
 }
 
@@ -2283,7 +2285,7 @@ export function createRunner(opts: RunnerOptions): Runner {
      * Otherwise the turn ends Ready, and the session stays open for the builder's next message.
      */
     const passTurnComplete = async (text: string | null): Promise<void> => {
-      if (messages.untaken().length > 0) return;
+      if (messages.untaken().length > 0 || ctl.redoing) return;
       try {
         await endTurnSteps(passWork, {
           workstreamId: id,
@@ -3552,6 +3554,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         unaskedHandoffs: null,
         messages: null,
         builderStop: false,
+        redoing: false,
         done: Promise.resolve(),
       };
       active.set(id, ctl);
@@ -3620,30 +3623,36 @@ export function createRunner(opts: RunnerOptions): Runner {
       const ctl = active.get(id);
       const lane = ctl?.messages ?? null;
       if (ctl && lane) {
-        if (redo && openPassTurn(db, taskId)) await lane.interrupt();
-        // What the builder changed by hand since the last turn is kept with the page, and the agent
-        // is told before it reads the message.
-        const fold = await foldHandEdits(passWork, { workstreamId: id });
-        if (ctl.messages === lane) {
-          opts.state.write((ctx) => {
-            // A Ready page's new turn resumes this session with the message if it ends untaken.
-            if (getWorkstreamRow(ctx.tx, id).nextAction.kind === 'pass_review')
-              patchWorkstream(ctx, id, ctl.fence, {
-                nextAction: {
-                  kind: 'feedback',
-                  messageId,
-                  providerSessionId: lastProviderSession(id),
-                },
+        // Stop and Redo: the interrupted turn goes on with the message, so its end is not Ready.
+        ctl.redoing = redo && openPassTurn(db, taskId) !== undefined;
+        try {
+          if (ctl.redoing) await lane.interrupt();
+          // What the builder changed by hand since the last turn is kept with the page, and the
+          // agent is told before it reads the message.
+          const fold = await foldHandEdits(passWork, { workstreamId: id });
+          if (ctl.messages === lane) {
+            opts.state.write((ctx) => {
+              // A Ready page's new turn resumes this session with the message if it ends untaken.
+              if (getWorkstreamRow(ctx.tx, id).nextAction.kind === 'pass_review')
+                patchWorkstream(ctx, id, ctl.fence, {
+                  nextAction: {
+                    kind: 'feedback',
+                    messageId,
+                    providerSessionId: lastProviderSession(id),
+                  },
+                });
+              startTurn(ctx, {
+                workstreamId: id,
+                sessionId: getWorkstreamRow(ctx.tx, id).currentSessionId,
+                messageId,
+                fence: ctl.fence,
               });
-            startTurn(ctx, {
-              workstreamId: id,
-              sessionId: getWorkstreamRow(ctx.tx, id).currentSessionId,
-              messageId,
-              fence: ctl.fence,
             });
-          });
-          lane.push(getTaskMessageRow(db, messageId), fold.agentNote);
-          return;
+            lane.push(getTaskMessageRow(db, messageId), fold.agentNote);
+            return;
+          }
+        } finally {
+          ctl.redoing = false;
         }
       }
       // A lane starting its session hands it every message no turn has taken once it is there.

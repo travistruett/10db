@@ -10,6 +10,7 @@ import {
   InvalidError,
   type McpServerStatusDto,
   ProjectInput,
+  PassState,
   ProjectLanding,
   Provider,
   providerOf,
@@ -65,6 +66,8 @@ import {
   listTasks,
   listWorkstreams,
   moveTask,
+  openPassTurn,
+  passHoldingTask,
   patchBoardColumn,
   patchFlow,
   patchModelProfile,
@@ -345,6 +348,14 @@ export function createServices(deps: {
       return { ...opened, dirt: [...opened.dirt], waiting: [...opened.waiting] };
     },
     passView: (passId) => passView(db, passId),
+    async stopPage(taskId) {
+      const task = getTask(db, taskId);
+      const pass = passHoldingTask(db, task);
+      if (pass?.state !== PassState.Open)
+        throw new ConflictError(`${task.title} is not a page of an open Workbench pass`);
+      if (task.workstreamId === null || !openPassTurn(db, taskId)) return;
+      await deps.runner.stopPassLane(task.workstreamId);
+    },
     listGoals: (projectId) => listGoalSummaries(db, projectId),
     humanTouch: (projectId) => {
       getProject(db, projectId);
