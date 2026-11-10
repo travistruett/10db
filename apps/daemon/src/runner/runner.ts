@@ -1880,6 +1880,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       const stoppedWhileWaiting = stopRequested(ctl);
       if (stoppedWhileWaiting)
         return { kind: 'stopped', reason: stoppedWhileWaiting, providerSessionId: savedResumeId };
+      if (getProject(db, row.projectId).accountId !== ctl.accountId) return { kind: 'moved' };
     }
     const answeredItem = action.kind === 'answer' ? getInboxItem(db, action.inboxId) : null;
     const resumeId = resumedSessionOf(action);

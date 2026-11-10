@@ -158,6 +158,7 @@ export async function createTestEngine(
       | 'git'
       | 'worktreeRoot'
       | 'codexLaneTempRoot'
+      | 'awaitBeforePicture'
     >
   > = {},
   setup: {

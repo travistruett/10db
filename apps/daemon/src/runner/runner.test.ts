@@ -2172,6 +2172,45 @@ describe('runner', () => {
     });
   });
 
+  describe('while a first launch waits for its before picture', () => {
+    it('starts no session until the wait ends, and then on the account the project moved to', async () => {
+      const wait = Promise.withResolvers<undefined>();
+      const asked: string[] = [];
+      engine = await createTestEngine(
+        { Alpha: [[turn], [turn]] },
+        {},
+        {
+          awaitBeforePicture: (task) => {
+            asked.push(task.id);
+            return wait.promise;
+          },
+        },
+      );
+      const { task, workstream } = engine.addTask('Alpha');
+      const first = engine.project.accountId;
+      engine.launch(workstream.id);
+      await waitFor(() => asked.length > 0);
+      expect(asked).toEqual([task.id]);
+      expect(listSessions(engine.store.db, workstream.id)).toEqual([]);
+      const other = seedAccount(engine.store, {
+        kind: 'claude_subscription',
+        label: 'Second plan',
+      });
+      engine.state.write((ctx) => {
+        patchAccount(ctx, other.id, { expectedIdentity: 'second@example.com' });
+        patchProject(ctx, engine.project.id, { accountId: other.id });
+      });
+      wait.resolve(undefined);
+      await engine.runner.idle();
+      if (engine.adapter.prompts.length === 0) {
+        engine.launch(workstream.id);
+        await engine.runner.idle();
+      }
+      expect(engine.adapter.prompts.map((p) => p.accountId)).not.toContain(first);
+      expect(engine.adapter.prompts[0]?.accountId).toBe(other.id);
+    });
+  });
+
   describe('when the hold comes on after a lane went past it', () => {
     it('starts no session after waiting for its turn to start, and gives the turn back', async () => {
       const fake = fakeHold(false);
