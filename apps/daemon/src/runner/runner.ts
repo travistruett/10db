@@ -45,10 +45,12 @@ import {
   MIGRATIONS_RENUMBERED_NOTICE_KEY,
   MIGRATIONS_UNCARRIED_NOTICE_KEY,
   PASS_RETRY_TURN_CHOICE,
+  PassState,
   PassTurnEnding,
   PassTurnId,
   Provider,
   providerOf,
+  TakeOutStep,
   type PassId,
   type TaskId,
 } from '@10db/contracts';
@@ -77,6 +79,7 @@ import {
   insertSession,
   insertSource,
   insertSystemNotice,
+  lastTakeOut,
   listAccountModels,
   listModelProfiles,
   latestHandoffForStep,
@@ -3853,13 +3856,24 @@ export function createRunner(opts: RunnerOptions): Runner {
       if (answer.choice !== PASS_RETRY_TURN_CHOICE)
         throw new InvalidError(`A failed turn is answered with ${PASS_RETRY_TURN_CHOICE}`);
       const id = target.workstreamId;
-      if (!passOfWorkstream(db, id))
-        throw new ConflictError(
-          'The task is no longer in a Workbench pass, so its turn is not retried',
-        );
       const providerSessionId = lastProviderSession(id);
       opts.state.write((ctx) => {
+        const pass = passOfWorkstream(ctx.tx, id);
+        if (!pass)
+          throw new ConflictError(
+            'The task is no longer in a Workbench pass, so its turn is not retried',
+          );
+        // A turn opened now would leave with the task, and run in its next pass unasked.
+        if (pass.state !== PassState.Open)
+          throw new ConflictError(
+            `Workbench pass "${pass.name}" is ${pass.state.toLowerCase()}; its turns are not retried`,
+          );
         const row = getWorkstreamRow(ctx.tx, id);
+        const takeOut = lastTakeOut(ctx.tx, row.taskId);
+        if (takeOut?.passId === pass.id && takeOut.step < TakeOutStep.Done)
+          throw new ConflictError(
+            'The page is being taken out of its pass, so its turn is not retried',
+          );
         if (
           row.state !== S.WaitingHuman ||
           row.nextAction.kind !== 'pass_review' ||

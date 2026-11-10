@@ -456,6 +456,43 @@ describe('a pass task turn that ends otherwise', () => {
     expect(engine.adapter.prompts[1]?.prompt).toContain('Make the form tidy');
   });
 
+  it.each<{ name: string; hold: (task: TaskDto, pass: PassDto) => void }>([
+    {
+      name: 'while the pass is abandoning',
+      hold: (_task, pass) => {
+        engine.state.write((ctx) => {
+          setAbandonStep(ctx, pass.id, AbandonStep.Abandoning);
+        });
+      },
+    },
+    {
+      name: 'while the page is being taken out',
+      hold: (task, pass) => {
+        engine.state.write((ctx) =>
+          insertTakeOut(ctx, { taskId: task.id, passId: pass.id, drops: [] }),
+        );
+      },
+    },
+  ])('refuses Retry Turn $name, starting no turn', async ({ hold }) => {
+    const { task, pass, id } = await openPage([
+      [{ do: 'billing_refused', message: 'a billing check refused the session' }],
+    ]);
+    await waitFor(() => listPassTurns(engine.store.db, pass.id)[0]?.settledAt);
+    await engine.runner.idle();
+    const failed = listInbox(engine.store.db, {}).find((i) => i.title.startsWith('Turn failed'));
+    if (!failed) throw new Error('no failed turn flag');
+    hold(task, pass);
+
+    expect(() => {
+      engine.runner.retryTurn(failed, { choice: 'retry_turn' });
+    }).toThrow(ConflictError);
+    expect(row(id)).toMatchObject({
+      state: 'WAITING_HUMAN',
+      nextAction: { kind: 'pass_review', inboxId: failed.id },
+    });
+    expect(listPassTurns(engine.store.db, pass.id).map((t) => t.seq)).toEqual([1]);
+  });
+
   it.each<{ name: string; session: FakeStep[]; attempts: number }>([
     {
       name: 'refused as it starts',
