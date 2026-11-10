@@ -55,12 +55,15 @@ import type { Logger } from '../log';
 import { untakenMessages } from '../runner';
 import { roomForLane } from './lane-room';
 import { passLaunch, PassLaunch } from './pass-launch';
+import { FREE_SESSION_WAIT_KEY, freeSessionWait, laneToYield, type WarmLane } from './warm-yield';
 
 export interface SchedulerOptions {
   readonly state: StateStore;
   readonly runner: {
     launch(id: WorkstreamId, fence: number): void;
     isRunning(id: WorkstreamId): boolean;
+    /** Closes a pass task's warm session, freeing its lane, unless a message waits for it. */
+    closeWarm(id: WorkstreamId): Promise<void>;
   };
   readonly accounts: Pick<AccountRuntime, 'blocked' | 'isPaused'> &
     Pick<AccountPreparer, 'prepare'> & {
@@ -202,6 +205,35 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
     return verdict === PassLaunch.Launch;
   }
 
+  /** A pass task's sessions open between turns, each holding a lane, with when its turn ended. */
+  function warmLanes(): WarmLane[] {
+    return listWorkstreams(db, { states: [WorkstreamState.WaitingHuman] }).flatMap((ws) => {
+      if (ws.currentSessionId === null || ws.nextAction.kind !== 'pass_review') return [];
+      if (!opts.runner.isRunning(ws.id)) return [];
+      const pass = passHoldingTask(db, getTask(db, ws.taskId));
+      if (!pass) return [];
+      return [
+        {
+          id: ws.id,
+          passId: pass.id,
+          accountId: getProject(db, ws.projectId).accountId,
+          idleSince: latestPassTurn(db, ws.taskId)?.readyAt ?? ws.updatedAt,
+        },
+      ];
+    });
+  }
+
+  /** Shows on a page that it waits for a session to free up; never over another notice. */
+  function waitForSession(id: WorkstreamId, working: number): void {
+    const notice = getWorkstreamRow(db, id).notice;
+    if (notice !== null && notice.key !== FREE_SESSION_WAIT_KEY) return;
+    const next = freeSessionWait(working);
+    if (notice?.line === next.line) return;
+    opts.state.write((ctx) => {
+      setWorkstreamNotice(ctx, id, next);
+    });
+  }
+
   /** Takes down the pass's wait once the run no longer waits for it; any other notice stays. */
   function endPassWait(id: WorkstreamId): void {
     opts.state.write((ctx) => {
@@ -227,10 +259,58 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
     const blockedThisTick = new Set<string>();
     const awaited = opts.awaitedHolders?.() ?? new Set<WorkstreamId>();
     let launched = 0;
+    // Read once a tick, when work first has no room; a session asked to close leaves it.
+    let warm: WarmLane[] | null = null;
+    /**
+     * Work that could start has no room: the warm session idle longest that makes room closes, and
+     * the work starts on the tick its lane frees. A page with none to close says it waits.
+     */
+    const makeRoom = (
+      ws: (typeof line)[number],
+      ask: { accountId: AccountId; pass: PassDto | null },
+    ): void => {
+      const full = {
+        global: global >= opts.caps.global,
+        account: (byAccount.get(ask.accountId) ?? 0) >= getAccountRow(db, ask.accountId).laneCap,
+        pass: ask.pass !== null && (byPass.get(ask.pass.id) ?? 0) >= ask.pass.pageCap,
+      };
+      warm ??= warmLanes();
+      const yielded = laneToYield(warm, {
+        accountId: ask.accountId,
+        passId: ask.pass?.id ?? null,
+        full,
+      });
+      if (yielded !== null) {
+        warm = warm.filter((w) => w.id !== yielded);
+        void opts.runner.closeWarm(yielded).catch((error: unknown) => {
+          opts.logger.warn(
+            { workstreamId: yielded, err: error instanceof Error ? error.message : String(error) },
+            'a warm session did not close',
+          );
+        });
+        return;
+      }
+      if (ask.pass === null) return;
+      const working = full.global
+        ? global
+        : full.account
+          ? (byAccount.get(ask.accountId) ?? 0)
+          : (byPass.get(ask.pass.id) ?? 0);
+      waitForSession(ws.id, working);
+    };
     const line = listWorkstreams(db, { states: [WorkstreamState.Queued] }).toSorted(queueOrder);
     for (const ws of line) {
       const overCaps = awaited.has(ws.id);
-      if (!overCaps && global >= opts.caps.global) continue;
+      if (!overCaps && global >= opts.caps.global) {
+        const pass = passHoldingTask(db, getTask(db, ws.taskId)) ?? null;
+        // A page with no turn to run asks for no room.
+        if (
+          pass === null ||
+          passPageRuns(ws, getTask(db, ws.taskId), pass, getProject(db, ws.projectId), snapshot)
+        )
+          makeRoom(ws, { accountId: getProject(db, ws.projectId).accountId, pass });
+        continue;
+      }
       // A runner that just re-queued this row is still unwinding; launch() would refuse it and
       // leave it STARTING with a lane. Its lane-freed callback ticks again once it has exited.
       if (opts.runner.isRunning(ws.id)) continue;
@@ -281,7 +361,10 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
           accountCap: account.laneCap,
         },
       );
-      if (!overCaps && !room) continue;
+      if (!overCaps && !room) {
+        makeRoom(ws, { accountId: account.id, pass: inPass });
+        continue;
+      }
       // A pass's folder was read for its branch above; its off-branch card is the pass's own.
       if (inPass === null && project.delivery === Delivery.PullRequest) {
         const checkout = batch?.worktreePath ?? project.repoPath;
@@ -335,6 +418,10 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
         return f;
       });
       if (fence === null) continue;
+      if (ws.notice?.key === FREE_SESSION_WAIT_KEY)
+        opts.state.write((ctx) => {
+          setWorkstreamNotice(ctx, ws.id, null);
+        });
       global += 1;
       if (inPass) byPass.set(inPass.id, (byPass.get(inPass.id) ?? 0) + 1);
       else byProject.set(project.id, (byProject.get(project.id) ?? 0) + 1);

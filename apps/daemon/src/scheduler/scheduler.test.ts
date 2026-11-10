@@ -24,15 +24,19 @@ import {
   getWorkstream,
   getWorkstreamRow,
   advanceTakeOut,
+  endPassTurn,
   insertBatch,
   insertBuilderMessage,
   insertPassTurn,
+  insertSession,
   insertTakeOut,
   insertTask,
   insertWorkstream,
   leavePass,
   markTaskMessagesDelivered,
   patchBatch,
+  patchWorkstream,
+  settlePassTurn,
   releaseClaims,
   runNext,
   schema,
@@ -67,6 +71,8 @@ let close: () => void;
 let state: StateStore;
 let clock: ManualClock;
 let launched: { id: WorkstreamId; fence: number }[];
+/** The warm sessions the scheduler asked the runner to close. */
+let closed: WorkstreamId[];
 let inbox: InboxService;
 let pauses: AccountPauses;
 let accounts: AccountRuntime;
@@ -113,6 +119,7 @@ beforeEach(() => {
   });
   accounts = createAccountRuntime({ state, clock, inbox, pauses, defaultPauseMs: 30 * 60_000 });
   launched = [];
+  closed = [];
   running = new Set();
   branchOf = new Map();
   refusedRepos = new Set();
@@ -146,6 +153,10 @@ function scheduler(caps = { global: 4 }, awaited: ReadonlySet<WorkstreamId> = ne
         launched.push({ id, fence });
       },
       isRunning: (id) => running.has(id),
+      closeWarm: (id) => {
+        closed.push(id);
+        return Promise.resolve();
+      },
     },
     accounts: {
       ...accounts,
@@ -815,6 +826,99 @@ describe('Workbench passes', () => {
     expect(await scheduler().tick()).toBe(1);
     expect(launched.map((l) => l.id)).toEqual([ws.id]);
     expect(activeClaims(store.db, ws.id).map((c) => c.name)).toEqual(['settings']);
+  });
+
+  /** A pass of `pageCap` holding one page whose session is warm, Ready, and one queued page. */
+  function warmAndWaiting(pageCap: number, warm = true) {
+    const project = seedProject(store, {
+      areas: [
+        { name: 'settings', globs: ['src/settings/**'], role: 'page', route: '/settings' },
+        { name: 'people', globs: ['src/people/**'], role: 'page', route: '/people' },
+      ],
+    });
+    const task = (title: string, area: string) =>
+      state.write((ctx) =>
+        insertTask(ctx, project.id, { title, acceptanceCriteria: ['x'], areas: [area] }),
+      );
+    const ready = task('Settings: UI work', 'settings');
+    const waiting = task('People: UI work', 'people');
+    const opened = state.write((ctx) => {
+      const { pass, batch } = insertPass(ctx, {
+        id: mintId('Pass'),
+        projectId: project.id,
+        name: 'Polish',
+        pageCap,
+        returnBranch: 'main',
+        startSha: 'a'.repeat(40),
+        branch: '10db/polish-abc123',
+        baseBranch: 'main',
+        repo: null,
+        taskIds: [ready.id, waiting.id],
+        dirt: [],
+      });
+      const first = { model: 'claude-sonnet-5-5', effort: 'medium' } as const;
+      const warmWs = insertWorkstream(ctx, ready.id, { batchId: batch.id, first });
+      const queued = insertWorkstream(ctx, waiting.id, { batchId: batch.id, first });
+      for (const to of ['STARTING', 'RUNNING', 'WAITING_HUMAN'] as const)
+        transitionWorkstream(ctx, warmWs.id, { to, fence: null });
+      const turn = insertPassTurn(ctx, {
+        taskId: ready.id,
+        workstreamId: warmWs.id,
+        sessionId: null,
+        messageId: null,
+      });
+      endPassTurn(ctx, turn.id, { ending: 'ready', replyBody: null });
+      settlePassTurn(ctx, turn.id);
+      const session = insertSession(ctx, {
+        workstreamId: warmWs.id,
+        provider: 'claude',
+        model: 'claude-sonnet-5-5',
+        effort: 'medium',
+        mode: 'managed',
+        mcpTokenHash: 'h',
+        briefed: false,
+        briefingBaselinePct: null,
+      });
+      patchWorkstream(ctx, warmWs.id, null, {
+        currentSessionId: warm ? session.id : null,
+        nextAction: { kind: 'pass_review', inboxId: mintId('InboxItem') },
+      });
+      insertBuilderMessage(ctx, waiting.id, { body: 'Tidy it', files: [] });
+      return { pass, batch, warm: warmWs, queued };
+    });
+    if (warm) running.add(opened.warm.id);
+    branchOf.set(project.repoPath, opened.batch.branch);
+    return opened;
+  }
+
+  it("closes the pass's longest-idle warm session for a page with no room, and launches it once freed", async () => {
+    const opened = warmAndWaiting(1);
+    expect(await scheduler().tick()).toBe(0);
+    expect(closed).toEqual([opened.warm.id]);
+    // The runner closed it: the lane is free on the next tick.
+    running.delete(opened.warm.id);
+    state.write((ctx) => {
+      patchWorkstream(ctx, opened.warm.id, null, { currentSessionId: null });
+    });
+    expect(await scheduler().tick()).toBe(1);
+    expect(launched.map((l) => l.id)).toEqual([opened.queued.id]);
+  });
+
+  it('says a page waits for a free session when no warm one can close, and drops it once it starts', async () => {
+    const opened = warmAndWaiting(1);
+    // The warm page is working again, so no session is idle.
+    running.delete(opened.warm.id);
+    expect(await scheduler({ global: 1 }).tick()).toBe(0);
+    expect(closed).toEqual([]);
+    expect(getWorkstream(store.db, opened.queued.id).notice?.line).toBe(
+      'Waiting for a free session: 1 is working',
+    );
+    // Its session ends: the lane is free, and the page starts with no notice left.
+    state.write((ctx) => {
+      patchWorkstream(ctx, opened.warm.id, null, { currentSessionId: null });
+    });
+    expect(await scheduler({ global: 1 }).tick()).toBe(1);
+    expect(getWorkstream(store.db, opened.queued.id).notice).toBeNull();
   });
 
   it('holds ordinary work in Your folder while a pass holds it, saying so, and launches it once the pass settles', async () => {
