@@ -779,6 +779,11 @@ export interface Git {
     readonly message: string;
   }): Promise<{ readonly kind: 'merged' | 'already'; readonly sha: string }>;
   /**
+   * Where `branch` is in use in a worktree of `repo` other than `repo` itself: checked out there, or
+   * being rebased or bisected there. Null when none is.
+   */
+  branchInUseElsewhere(repo: string, branch: string): Promise<string | null>;
+  /**
    * The commits `tip` has since `base` that are its own: first parents only, merges left out,
    * newest first. A merge of the base into the branch adds none, and neither do the commits it brought in.
    */
@@ -3975,6 +3980,9 @@ export function createGit(opts: GitOptions = {}): Git {
     moveBranchCas,
     moveCheckedOutBranch,
     mergeKeepingTree,
+    async branchInUseElsewhere(repo, branch) {
+      return branchInUseElsewhere(await pinned(repo), branch);
+    },
     async ownCommitsSince(repo, base, tip) {
       return (
         await git(await pinned(repo), [

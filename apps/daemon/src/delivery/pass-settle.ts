@@ -24,7 +24,7 @@ import {
   settlePass,
 } from '@10db/db';
 import type { EventBus } from '../events';
-import { comparablePath, samePath, type SwitchBack } from '../git';
+import type { SwitchBack } from '../git';
 import type { Card } from './cards';
 import {
   followStackedMerge,
@@ -137,11 +137,9 @@ function offerMove(
   );
 }
 
-/** Whether `branch` is checked out in a worktree other than the folder itself. */
+/** Whether `branch` is in use in a worktree other than the folder: checked out, rebased or bisected. */
 async function elsewhere(ctx: DeliveryContext, repo: string, branch: string): Promise<boolean> {
-  return (await ctx.git.listWorktrees(repo)).some(
-    (e) => e.branch === branch && !samePath(comparablePath(e.path), comparablePath(repo)),
-  );
+  return (await ctx.git.branchInUseElsewhere(repo, branch)) !== null;
 }
 
 function settled(ctx: DeliveryContext, pass: PassDto, how: 'realigned' | 'moved'): void {

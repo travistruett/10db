@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTempRepo, isolatedGitEnv, type TempDir } from '../../test/fixtures';
@@ -167,5 +168,22 @@ describe('mergeKeepingTree', () => {
 
     expect(await merge()).toEqual({ kind: 'already', sha: head });
     expect(rawGit('rev-parse', 'refs/heads/10db/pass-abc123')).toBe(head);
+  });
+});
+
+describe('branchInUseElsewhere', () => {
+  it('names a worktree that has the branch, and passes over the checkout itself', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'elsewhere-'));
+    try {
+      rawGit('branch', 'side', start);
+      const path = join(root, 'side');
+      rawGit('worktree', 'add', '-q', path, 'side');
+
+      expect(await git.branchInUseElsewhere(repo.path, 'side')).toBe(realpathSync(path));
+      expect(await git.branchInUseElsewhere(repo.path, '10db/pass-abc123')).toBeNull();
+      rawGit('worktree', 'remove', '--force', path);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

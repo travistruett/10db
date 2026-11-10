@@ -16,6 +16,7 @@ import {
   getBatch,
   getBatchRow,
   patchProject,
+  recordPullRequestStatus,
   patchBatch,
   getPass,
   getPassChecks,
@@ -140,6 +141,28 @@ describe('Open Pull Request', () => {
       reason: expect.stringContaining('no origin') as unknown,
     });
     expect(h.gh.calls.filter((c) => c.method === 'prCreate')).toEqual([]);
+  });
+
+  it("is not offered once the pass's pull request has merged", async () => {
+    setup({ gateCommand: null });
+    const { passId, settings } = await openedPass();
+    signOff(settings, 'src/settings/page.tsx', 'signed off\n');
+    await prs.open(passId);
+    await h.jobs.idle();
+    h.state.write((w) =>
+      recordPullRequestStatus(w, batchOf(passId), {
+        state: 'merged',
+        checks: 'none',
+        failingChecks: [],
+        checkedAt: w.now,
+        unknownReason: null,
+      }),
+    );
+
+    expect(await prs.preview(passId)).toMatchObject({
+      offered: false,
+      reason: expect.stringContaining('merged') as unknown,
+    });
   });
 
   it('pushes the branch and opens a draft, then gates the pushed commit in a scratch worktree, never the open page on disk', async () => {

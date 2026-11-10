@@ -355,6 +355,9 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
             .catch(() => null);
     if (pass.state !== PassState.Open)
       return refuse(`The pass is ${pass.state.toLowerCase()}`, ahead);
+    // Its work is in the base: the close that follows a merge (slice 7a) is what is left to do.
+    if (pr?.state === PullRequestState.Merged)
+      return refuse("The pass's pull request has merged; close the pass", ahead);
     if (tip === null || tip === pass.startSha)
       return refuse(
         'Nothing is signed off yet: the pull request holds signed-off pages only',
