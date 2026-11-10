@@ -1,4 +1,11 @@
-import { PassSignOffDto, TakeOutPreviewDto, type PassId, type TaskId } from '@10db/contracts';
+import {
+  PassSignOffDto,
+  TakeOutPreviewDto,
+  TaskMessageDto,
+  type InboxItemId,
+  type PassId,
+  type TaskId,
+} from '@10db/contracts';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import { readJson } from './client';
@@ -6,6 +13,7 @@ import { createPassCloseRoutesClient } from './pass-close-routes';
 import { passKeys } from './pass-queries';
 import { useDaemon } from './provider';
 import { queryKeys } from './queries';
+import { threadKeys } from './thread-queries';
 
 // Workbench spec §5.4, §8.3, §9.2: how a pass's pages are signed off and taken out, and how the pass
 // opens its pull request and closes. Each mutation reads the passes again once it lands, as the pass
@@ -79,6 +87,45 @@ export function useCancelSignOff() {
           param: { passId, taskId },
         }),
         z.null(),
+      ),
+    onSuccess: refetch,
+  });
+}
+
+/**
+ * Send to Agent: a sendable notice's text goes to the page the builder picked, as the builder's own
+ * message. `noticeId` is a header notice's id or a thread notice's message id.
+ */
+export function useSendToAgent() {
+  const client = usePassCloseClient();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ taskId, noticeId }: { taskId: TaskId; noticeId: string }) =>
+      readJson(
+        await client.tasks[':taskId'].thread[':messageId']['send-to-agent'].$post({
+          // A header notice's id may hold a path; the client puts params into the path as given.
+          param: { taskId, messageId: encodeURIComponent(noticeId) },
+        }),
+        TaskMessageDto,
+      ),
+    onSuccess: (_message, { taskId }) =>
+      Promise.all(
+        [passKeys.all, threadKeys.of(taskId)].map((queryKey) =>
+          queryClient.invalidateQueries({ queryKey }),
+        ),
+      ),
+  });
+}
+
+/** Answers a card a pass raised (Retarget, Move) with its one choice, through the built Inbox route. */
+export function useAnswerPassCard() {
+  const { client } = useDaemon();
+  const refetch = useRefetchPasses();
+  return useMutation({
+    mutationFn: async ({ itemId, choice }: { itemId: InboxItemId; choice: string }) =>
+      readJson(
+        await client.inbox[':id'].answer.$post({ param: { id: itemId }, json: { choice } }),
+        z.unknown(),
       ),
     onSuccess: refetch,
   });

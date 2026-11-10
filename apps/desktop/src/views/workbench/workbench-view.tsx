@@ -30,6 +30,7 @@ import { useNow } from '../../shell/relative';
 import { useSelectedProject } from '../../shell/selected-project';
 import { AbandonModal } from './abandon-modal';
 import { AddPageModal } from './add-page-modal';
+import { HeaderNotices } from './header-notices';
 import { PassHeader } from './pass-header';
 import { PassWorkspace } from './pass-workspace';
 import { queueRows } from './queue-rows';
@@ -160,6 +161,7 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
           setDialog('abandon');
         }}
       />
+      <HeaderNotices view={live} inbox={inbox} />
       {renderWorkspace({ view: live, inbox, project, selected: search.task ?? null, onSelect })}
       {dialog === 'add-page' ? (
         <AddPageModal

@@ -4,6 +4,7 @@ import {
   mintId,
   PagesProposalDto,
   PassDto,
+  PassNotice,
   PassOpenedDto,
   PASS_SIGN_OFF_CHOICE,
   PassPageDto,
@@ -192,6 +193,36 @@ export function readyItem(view: PassViewDto, page: PassPageDto): InboxItemDto {
   });
 }
 
+/** A notice in the pass's header: failing checks, sendable, unless given. */
+export function passNotice(overrides: Partial<PassNotice> = {}): PassNotice {
+  return PassNotice.parse({
+    id: 'checks',
+    kind: 'checks',
+    text: "The pull request's checks fail: test (ubuntu-24.04).",
+    sendable: true,
+    cardId: null,
+    at: minutesBeforeNow(2),
+    ...overrides,
+  });
+}
+
+/** An open card of `view`'s pass, as the Inbox holds it, with `detail` (one of `PassCardDetail`). */
+export function passCard(
+  view: PassViewDto,
+  detail: NonNullable<InboxItemDto['detail']>,
+  overrides: Partial<InboxItemDto> = {},
+): InboxItemDto {
+  return inboxItemDto({
+    projectId: view.pass.projectId,
+    kind: 'flag',
+    title: 'Workbench',
+    body: '',
+    options: [],
+    detail,
+    ...overrides,
+  });
+}
+
 /** An open question from the page's run, as the Inbox holds it. */
 export function askItem(page: PassPageDto, overrides: Partial<InboxItemDto> = {}): InboxItemDto {
   return inboxItemDto({
@@ -216,7 +247,13 @@ export function passTurnTimingDto(overrides: Partial<PassTurnTimingDto> = {}): P
 
 /** A pass with `pages`; its timings are one per page that has a turn, unless given. */
 export function passViewDto(
-  overrides: { pass?: Partial<PassDto>; pages?: PassPageDto[]; turns?: PassTurnTimingDto[] } = {},
+  overrides: {
+    pass?: Partial<PassDto>;
+    pages?: PassPageDto[];
+    turns?: PassTurnTimingDto[];
+    /** The view's other fields: its notices, pull request, close step. */
+    rest?: Partial<Omit<PassViewDto, 'pass' | 'pages' | 'turns'>>;
+  } = {},
 ): PassViewDto {
   const pages = overrides.pages ?? Object.values(pagesByStatus());
   const turns =
@@ -246,6 +283,7 @@ export function passViewDto(
     closeStep: null,
     stackedOn: null,
     notices: [],
+    ...overrides.rest,
   });
 }
 
