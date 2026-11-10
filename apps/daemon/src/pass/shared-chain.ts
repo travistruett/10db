@@ -97,16 +97,20 @@ export async function keepHold(
     also: kept?.paths ?? [],
   });
   const dirtyKept = changed.some((path) => record.some((r) => r.path === path));
-  // The paths of an earlier keep that are back as the grant found them go into the tree too, so
-  // the chain does not keep an edit the hold took back.
-  const treePaths = [...new Set([...changed, ...(kept?.paths ?? [])])].sort();
+  // An earlier keep's path that is back as the grant found it is set on the chain as it was before
+  // the hold (the record's parent, the chain's tip at the grant), never as the folder has it, which
+  // may be dirt from before the hold.
+  const takenBack = (kept?.paths ?? []).filter((path) => !changed.includes(path));
   let made: ChainCommit = { sha: null, made: false, files: [] };
-  if (treePaths.length > 0) {
+  if (changed.length + takenBack.length > 0) {
     made = await extendChain(deps, {
       repo,
       ref: sharedRef(pass.id),
       base: pass.startSha,
-      paths: treePaths,
+      paths: changed,
+      ...(takenBack.length > 0
+        ? { restore: { from: `${hold.recordSha}^`, paths: takenBack } }
+        : {}),
       message: `Shared change ${String(hold.seq)} of ${task.title}`,
       trailer: { key: HOLD_TRAILER, value: hold.claimId },
     });

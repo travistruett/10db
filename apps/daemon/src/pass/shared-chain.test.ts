@@ -88,6 +88,21 @@ describe('keepHold', () => {
     expect(h.git$('rev-parse', 'HEAD')).toBe(w.opened.pass.startSha);
   });
 
+  it("puts an early keep's file the hold took back on the chain as before the hold, not as dirt", async () => {
+    w = await openPassWorld();
+    w.write('src/shared.ts', "the builder's edit\n");
+    const hold = await grant(w.settings, 'src');
+    w.write('src/shared.ts', "the builder's edit\nand the agent's\n");
+    await keepHold(w.deps, { claimId: hold.claimId, keepOpen: true });
+    // The agent takes its edit back: the file is the builder's again.
+    w.write('src/shared.ts', "the builder's edit\n");
+
+    await keepHold(w.deps, { claimId: hold.claimId });
+
+    expect(w.h.git$('show', `${sharedRef(w.opened.pass.id)}:src/shared.ts`)).toBe('shared');
+    expect(getHold(w.h.store.db, hold.claimId)).toMatchObject({ empty: true });
+  });
+
   it('closes a hold that changed nothing as empty, with no chain commit', async () => {
     w = await openPassWorld();
     w.write('src/shared.ts', "the builder's edit\n");
