@@ -11,6 +11,7 @@ import {
 import {
   clearPassNotice,
   findOpenByFoldKey,
+  hasAnsweredByFoldKey,
   getBatch,
   getPass,
   getPassProgress,
@@ -199,6 +200,13 @@ function retargetCard(above: PassDto, below: PassDto, base: string, prUrl: strin
 /** The pass below a stacked one closed unmerged: the stacked pass's header says so and offers Retarget. */
 export function offerRetarget(ctx: DeliveryContext, below: PassDto, above: PassDto): void {
   const db = ctx.state.db;
+  // Retargeted already, or looked at again with the card open: nothing new to say.
+  const key = passRetargetKey(above.id);
+  if (
+    hasAnsweredByFoldKey(db, above.projectId, key) ||
+    findOpenByFoldKey(db, above.projectId, key) !== undefined
+  )
+    return;
   const base = getBatch(db, above.batchId).baseBranch;
   raise(
     ctx.inbox,

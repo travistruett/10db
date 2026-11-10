@@ -390,12 +390,20 @@ describe('a pass stacked on a closed one (D24)', () => {
     ]);
     expect(edits(b.url)).toEqual([]);
 
+    // As the inbox does: the answer is recorded, and the daemon acts on it.
+    h.inbox.answer(card.id, { choice: PASS_RETARGET_CHOICE });
     answerPassMoveCard(h.ctx, card, { choice: PASS_RETARGET_CHOICE });
     await h.jobs.idle();
 
     expect(edits(b.url)).toHaveLength(1);
     expect(getPassProgress(h.store.db, b.passId).notices).toEqual([]);
     expect(h.git$('rev-parse', `refs/heads/${b.branch}`)).toBe(b.tip);
+
+    // A restart looks at the closed pass again: what was answered is not asked again.
+    resumePassSettles(h.ctx);
+    await h.jobs.idle();
+    expect(h.cards().filter((c) => c.detail?.['kind'] === 'pass_retarget')).toEqual([]);
+    expect(getPassProgress(h.store.db, b.passId).notices).toEqual([]);
   });
 
   it('when the stacked pass is abandoned at its start, the closed pass offers Move again', async () => {
