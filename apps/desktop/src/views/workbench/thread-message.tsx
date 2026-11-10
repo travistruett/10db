@@ -86,6 +86,8 @@ function Notice({
         variant="default"
         size="xs"
         loading={send.isPending}
+        // Sent once is enough: the agent has it as the builder's message.
+        disabled={send.isSuccess}
         style={{ flex: 'none' }}
         onClick={() => {
           send.mutate({ taskId: message.taskId, noticeId: message.id });

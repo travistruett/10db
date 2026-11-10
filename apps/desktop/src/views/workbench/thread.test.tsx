@@ -142,5 +142,7 @@ describe('Thread', () => {
       expect(posted).toEqual([{ taskId: page.taskId, messageId: finding.id }]);
     });
     expect(await within(entry).findByText('Sent to the agent')).toBeTruthy();
+    // Sent once, it is not offered to send again.
+    expect(send).toHaveProperty('disabled', true);
   });
 });
