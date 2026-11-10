@@ -81,6 +81,11 @@ export async function startAppProxy(options: AppProxyOptions = {}): Promise<AppP
           noAnswer();
           return;
         }
+        // An answer cut off ends the browser's too, rather than leaving it waiting for the rest.
+        answer.on('error', () => res.destroy());
+        answer.on('close', () => {
+          if (!answer.complete) res.destroy();
+        });
         answer.pipe(res);
       },
     );
@@ -95,6 +100,11 @@ export async function startAppProxy(options: AppProxyOptions = {}): Promise<AppP
       res.end();
     };
     upstream.on('error', noAnswer);
+    // The browser asked for no upgrade, so a 101 is no answer it can use.
+    upstream.on('upgrade', (_answer, socket) => {
+      socket.destroy();
+      noAnswer();
+    });
     req.pipe(upstream);
   });
 

@@ -62,6 +62,39 @@ function viaProxy(proxyPort: number, target: string): Promise<{ status: number; 
   });
 }
 
+/** How a request through the proxy ends: answered in full, cut off, or still open after 5 s. */
+function settles(proxyPort: number, target: string): Promise<'ended' | 'cut' | 'hung'> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      req.destroy();
+      resolve('hung');
+    }, 5_000);
+    const done = (how: 'ended' | 'cut'): void => {
+      clearTimeout(timer);
+      resolve(how);
+    };
+    const req = request(
+      { host: '127.0.0.1', port: proxyPort, method: 'GET', path: target, agent: false },
+      (res) => {
+        res.resume();
+        res.on('end', () => {
+          done(res.complete ? 'ended' : 'cut');
+        });
+        res.on('error', () => {
+          done('cut');
+        });
+        res.on('aborted', () => {
+          done('cut');
+        });
+      },
+    );
+    req.on('error', () => {
+      done('cut');
+    });
+    req.end();
+  });
+}
+
 /** Asks the proxy for a tunnel; answers its status and, when it opened, what an HTTP request through it got. */
 function tunnel(proxyPort: number, authority: string): Promise<{ status: number; reply: string }> {
   return new Promise((resolve, reject) => {
@@ -177,6 +210,27 @@ describe('the app proxy', () => {
       expect(
         (await viaProxy(proxy.port, `http://127.0.0.1:${String(app.port)}/after`)).status,
       ).toBe(200);
+    } finally {
+      bad.server.close();
+    }
+  });
+
+  it.each([
+    [
+      'an answer cut off before its length',
+      'HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\nshort',
+      'close',
+    ],
+    [
+      'a 101 to a request that asked for no upgrade',
+      'HTTP/1.1 101 Switching Protocols\r\nUpgrade: x\r\nConnection: upgrade\r\n\r\n',
+      'hold',
+    ],
+  ] as const)('never leaves the browser waiting on %s', async (_name, answer, after) => {
+    const bad = await rawApp(answer, after);
+    try {
+      proxy.allow(bad.url);
+      expect(await settles(proxy.port, `${bad.url}/x`)).not.toBe('hung');
     } finally {
       bad.server.close();
     }
