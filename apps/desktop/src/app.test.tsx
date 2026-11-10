@@ -3,7 +3,8 @@ import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { afterEach, describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderApp, server } from './test/daemon';
-import { inboxItemDto } from './test/fixtures';
+import { inboxItemDto, projectViewDto } from './test/fixtures';
+import { pagesByStatus, passViewDto } from './test/pass-fixtures';
 
 const healthy = () =>
   http.get(daemonUrl('/health'), () =>
@@ -184,6 +185,24 @@ describe('App shell', () => {
     );
     renderApp('/factory');
     expect(await screen.findByRole('link', { name: /Inbox.*1 open card/ })).toBeTruthy();
+  });
+
+  it("counts the selected project's pass pages that wait on the builder on the Workbench link", async () => {
+    const project = projectViewDto({ name: 'ampsio' });
+    const pages = pagesByStatus();
+    const live = passViewDto({
+      pass: { projectId: project.id },
+      pages: [pages.ready, pages.failed, pages.working, { ...pages.notStarted, signOff: 'done' }],
+    });
+    // Another project's pass is not counted.
+    const elsewhere = passViewDto({ pass: { projectId: mintId('Project') }, pages: [pages.ready] });
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/passes'), () => HttpResponse.json([elsewhere, live])),
+      ...baseHandlers(),
+    );
+    renderApp('/factory');
+    expect(await screen.findByRole('link', { name: /Workbench.*2 pages waiting/ })).toBeTruthy();
   });
 
   it('draws the color scheme toggle icon at the 20px size DESIGN.md sets', async () => {

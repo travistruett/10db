@@ -1,3 +1,4 @@
+import type { ProjectId } from '@10db/contracts';
 import {
   AppShell,
   Badge,
@@ -33,6 +34,7 @@ import { DaemonStatus } from './daemon-status';
 import { KeepAwakeControl } from './keep-awake-control';
 import { ProjectSwitcher } from './project-switcher';
 import { useOpenInboxCount } from '../views/inbox/inbox-count';
+import { useWorkbenchWaitingCount } from '../views/workbench/workbench-count';
 import { FirstRun } from '../views/first-run/first-run';
 import { SettingsNav } from '../views/settings/settings-nav';
 import { firstGlobalSection, SettingsSectionKey } from '../views/settings/sections';
@@ -69,14 +71,30 @@ const SHELL_FOLD_QUERY = '(max-width: 767px)';
 /** Clears macOS's traffic lights, which sit over the header's left end. */
 const TRAFFIC_LIGHTS_WIDTH = 72;
 
-function InboxBadge({ count }: { readonly count: number }) {
+/** A count on a sidebar item, read by assistive tech as `phrase`. */
+function CountBadge({ count, phrase }: { readonly count: number; readonly phrase: string }) {
   return (
     <Badge size="sm" circle>
       {/* The name computation drops a leading space inside VisuallyHidden, so the number is hidden
           from assistive tech and the hidden text carries the whole phrase. */}
       <span aria-hidden="true">{count}</span>
-      <VisuallyHidden>{`${String(count)} open card${count === 1 ? '' : 's'}`}</VisuallyHidden>
+      <VisuallyHidden>{phrase}</VisuallyHidden>
     </Badge>
+  );
+}
+
+function InboxBadge({ count }: { readonly count: number }) {
+  return (
+    <CountBadge count={count} phrase={`${String(count)} open card${count === 1 ? '' : 's'}`} />
+  );
+}
+
+/** The pages of the project's pass that wait on the builder; nothing when none does. */
+function WorkbenchBadge({ projectId }: { readonly projectId: ProjectId }) {
+  const count = useWorkbenchWaitingCount(projectId);
+  if (count === 0) return null;
+  return (
+    <CountBadge count={count} phrase={`${String(count)} page${count === 1 ? '' : 's'} waiting`} />
   );
 }
 
@@ -91,7 +109,7 @@ function FullLayout() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const inSettings = pathname === '/settings' || pathname.startsWith('/settings/');
   const openCards = useOpenInboxCount();
-  const { projects, select } = useSelectedProject();
+  const { projects, project, select } = useSelectedProject();
   const navigate = useNavigate();
   const narrow = useMediaQuery(WORKBENCH_FOLD_QUERY);
   const small = useMediaQuery(SHELL_FOLD_QUERY);
@@ -199,6 +217,11 @@ function FullLayout() {
                       active={pathname === to || pathname.startsWith(`${to}/`)}
                       label={label}
                       leftSection={<Icon size={16} stroke={1.5} />}
+                      rightSection={
+                        to === '/workbench' && project !== null ? (
+                          <WorkbenchBadge projectId={project.id} />
+                        ) : undefined
+                      }
                     />
                   ),
                 )}
