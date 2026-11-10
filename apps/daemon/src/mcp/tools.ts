@@ -594,10 +594,22 @@ export function createToolHandlers(
           const { heldBy, inboxId, askId } = wait.state;
           if (askId !== null) {
             // The answer may come while no call waits for it: it is kept under the opId then.
-            wait.done.then(
-              (settled) => recordClaim(input.opId, settled),
-              () => undefined,
-            );
+            // A parked holder is a fact about now, never kept: a later call asks again.
+            wait.done
+              .then((settled) => {
+                if (!settled.granted && settled.parked) return;
+                recordClaim(input.opId, settled);
+              })
+              .catch((error: unknown) => {
+                deps.log.warn(
+                  {
+                    workstreamId,
+                    opId: input.opId,
+                    err: error instanceof Error ? error.message : String(error),
+                  },
+                  'a shared claim answer was not kept under its opId',
+                );
+              });
             return {
               granted: false,
               waiting: true,

@@ -10,6 +10,7 @@ import {
 } from '@10db/contracts';
 import {
   findOpenByFoldKey,
+  findToolOp,
   getHold,
   getInboxItem,
   getWorkstreamRow,
@@ -276,5 +277,23 @@ describe("the builder's question before a second task changes a shared area", ()
     expect(message).toMatchObject({ author: 'builder', body: 'Use the page one' });
     expect(delivered).toEqual([message?.id]);
     expect(listTaskThreadRows(w.h.store.db, w.people.id).at(-1)?.deliveredAt).toBeNull();
+  });
+
+  it("never keeps a parked holder's refusal under the opId", async () => {
+    w = await openPassWorld();
+    // Settings holds the area now, and the update drain has parked it.
+    w.startTurn(w.settings);
+    await grantSharedHold(w.deps, { workstreamId: w.runOf(w.settings), area: 'src' });
+    const waits = new ClaimWaits({ parked: () => true });
+    const tools = laneTools(w, w.people, waits, 30);
+    const first = await ask(tools);
+    if (first.granted || first.inboxId === null) throw new Error('no question');
+
+    w.h.inbox.answer(first.inboxId, { choice: SHARED_ASK_ALLOW_CHOICE });
+    await new Promise((r) => setImmediate(r));
+    expect(findToolOp(w.h.store.db, w.runOf(w.people), 'op-people-src')).toBeUndefined();
+
+    // The same opId asks again, since the holder is still there: nothing kept answers it.
+    expect(await ask(tools)).toMatchObject({ granted: false, waiting: true });
   });
 });
