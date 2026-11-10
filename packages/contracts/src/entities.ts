@@ -817,6 +817,11 @@ export const TaskDto = z.object({
   landingGroupId: LandingGroupId.nullable().optional(),
   /** The Workbench pass the task is in; absent or null for a task outside every pass. */
   passId: PassId.nullable().optional(),
+  /**
+   * Whether the task holds work saved from a Workbench pass it was taken out of, which its next start
+   * puts back; absent or false for none.
+   */
+  keptWork: z.boolean().optional(),
   /** The builder's own model setting for this task; null is no override, and Automatic is a setting. */
   modelSetting: ModelSetting.nullable(),
   createdAt: Timestamp,

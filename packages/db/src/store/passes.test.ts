@@ -319,7 +319,7 @@ describe('leaving a pass', () => {
     expect(lanes.byProject.get(project.id)).toBe(1);
   });
 
-  it("keeps a taken-out task's saved work and the commit it was kept on, and clears them", () => {
+  it("keeps a taken-out task's saved work and the commit it was kept on, says so on the task, and clears them", () => {
     const t = task();
     expect(getTaskKeptWork(store.db, t)).toBeNull();
     store.write((ctx) => {
@@ -329,10 +329,13 @@ describe('leaving a pass', () => {
       keptSha: 'b'.repeat(40),
       keptBaseSha: 'a'.repeat(40),
     });
+    // The Board reads it from the task: the drawer offers Discard Saved Work.
+    expect(getTask(store.db, t).keptWork).toBe(true);
     store.write((ctx) => {
       setTaskKeptWork(ctx, t, null);
     });
     expect(getTaskKeptWork(store.db, t)).toBeNull();
+    expect(getTask(store.db, t).keptWork).toBe(false);
   });
 });
 

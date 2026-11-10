@@ -11,6 +11,15 @@ import {
   SharedChoice,
   TakeOutResultDto,
 } from './passes';
+import { SessionActivityData, TurnActivityDto } from './pass-activity';
+import {
+  GoalPassPagesDto,
+  PagesProposalDto,
+  PassJoinRequest,
+  PassRename,
+  PassStartDto,
+  PassTurnWithFilesDto,
+} from './pass-view';
 import {
   BatchDto,
   BatchStartInput,
@@ -338,6 +347,14 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'take-out-result-dto': TakeOutResultDto,
   'pass-abandoned-dto': PassAbandonedDto,
   'shared-choice': SharedChoice,
+  'pass-start-dto': PassStartDto,
+  'pass-join-request': PassJoinRequest,
+  'pass-rename': PassRename,
+  'pages-proposal-dto': PagesProposalDto,
+  'goal-pass-pages-dto': GoalPassPagesDto,
+  'pass-turn-with-files-dto': PassTurnWithFilesDto,
+  'turn-activity-dto': TurnActivityDto,
+  'session-activity-data': SessionActivityData,
   ...mcpSchemas,
   ...builderMcpSchemas,
   ...shapeMcpSchemas,

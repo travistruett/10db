@@ -608,6 +608,7 @@ function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto
     goalId: row.goalId,
     landingGroupId: row.landingGroupId,
     passId: row.passId,
+    keptWork: row.keptWorkSha !== null,
     modelSetting: row.modelSetting,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
