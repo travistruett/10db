@@ -136,18 +136,23 @@ export async function followStackedMerge(
   if (batch.branch !== null && lower !== null) {
     await ctx.git.fetch(project.repoPath, batch.baseBranch, networkCall(ctx, signal));
     const base = await ctx.git.trackingTip(project.repoPath, batch.baseBranch);
-    const lowerTip = await ctx.git.branchTip(project.repoPath, lower);
-    const same =
-      base !== null &&
-      lowerTip !== null &&
-      (await ctx.git.filesChangedBetween(project.repoPath, base, lowerTip)).length === 0;
-    if (same) await takeBase(ctx, above, below, base, signal);
+    // The base holds the pass below as it merged: its tip, or, when pages were signed off after its
+    // last push (they ride this pass), the tip it pushed.
+    const lowerTips = [
+      await ctx.git.branchTip(project.repoPath, lower),
+      await ctx.git.trackingTip(project.repoPath, lower),
+    ];
+    let same = false;
+    for (const tip of lowerTips)
+      if (base !== null && tip !== null && !same)
+        same = (await ctx.git.filesChangedBetween(project.repoPath, base, tip)).length === 0;
+    if (same && base !== null) await takeBase(ctx, above, below, base, signal);
     else
       ctx.state.write((w) => {
         setPassNotice(w, above.id, {
           id: STACK_NOTICE,
           kind: PassNoticeKind.StackMerged,
-          text: `Pass "${below.name}", which this pass is built on, merged into ${batch.baseBranch} with other changes, so this pull request lists its commits beside this pass's until it merges.`,
+          text: `Pass "${below.name}", which this pass is built on, merged into ${batch.baseBranch} with other changes, so this pull request lists that pass's commits beside its own.`,
           sendable: false,
           cardId: null,
           at: w.now,

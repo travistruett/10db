@@ -20,7 +20,13 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { waitFor } from '../../test/fixtures';
 import { openPassWorld, type PassWorld } from '../../test/pass-world';
 import { PrState } from '../github';
-import { createPassPullRequests, openPass, passGateKind, type PassPullRequests } from '../delivery';
+import {
+  createPassPullRequests,
+  openPass,
+  passGateKind,
+  subscribePassSettles,
+  type PassPullRequests,
+} from '../delivery';
 import { silentLogger } from '../log';
 import { systemProcesses } from '../recovery';
 import { createGateRunner } from '../verify';
@@ -130,14 +136,20 @@ describe('a pull request that merges while its pass is open', () => {
     w.write('src/people/page.tsx', 'people, unfinished\n');
     w.endTurn(turn);
     await keepTurnWork(w.deps, { workstreamId: w.runOf(w.people), turnId: turn.id });
+    // GitHub squash-merged the pull request as pushed.
+    const squash = w.h.origin$('commit-tree', '-p', 'main', '-m', 'squash', `${pushed}^{tree}`);
+    w.h.origin$('update-ref', 'refs/heads/main', squash);
+    const settles = subscribePassSettles(w.h.bus, w.h.ctx);
 
     merged(url);
     await waitFor(() => followOnCard() !== undefined);
     await w.h.jobs.idle();
+    await waitFor(() => getPass(w.h.store.db, w.opened.pass.id).state === PassState.Settled);
+    await w.h.jobs.idle();
+    settles();
 
     const db = w.h.store.db;
     const a = w.opened.pass;
-    expect(getPass(db, a.id).state).toBe(PassState.Closed);
     expect(getBatch(db, a.batchId).state).toBe('SHIPPED');
     // No gate ran (it would have failed and reopened the pass), and nothing was pushed again.
     expect(w.h.origin$('rev-parse', w.branch)).toBe(pushed);
@@ -153,6 +165,12 @@ describe('a pull request that merges while its pass is open', () => {
     expect(getPassProgress(db, b.id).stackedOn).toBe(a.id);
     expect(b.pageCap).toBe(6);
     expect(getTask(db, w.people.id).passId).toBe(b.id);
+    // The follow-on pass took the base in by a merge that changes no file: its pull request shows
+    // the later sign-offs and its own pages, not the merged pass's commits.
+    const head = w.h.git$('rev-parse', `refs/heads/${getBatch(db, b.batchId).branch ?? ''}`);
+    expect(w.h.git$('rev-parse', `${head}^2`)).toBe(squash);
+    expect(w.h.git$('rev-parse', `${head}^{tree}`)).toBe(w.h.git$('rev-parse', `${tip}^{tree}`));
+    expect(getPassProgress(db, b.id).notices).toEqual([]);
     // The unfinished page's work is back in the folder, in the follow-on pass.
     expect(w.h.git$('show', `:src/people/page.tsx`)).toBe('people');
     expect(w.h.git$('diff', '--name-only')).toBe('src/people/page.tsx');

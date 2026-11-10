@@ -451,6 +451,26 @@ describe('a pass stacked on a closed one (D24)', () => {
     },
   );
 
+  it('when the closed pass merges as pushed, before pages signed off after its push, the stacked one takes the base in', async () => {
+    const a = await closedPass();
+    // A page signed off after A's last push: on A's branch and on main, not on origin.
+    const late = h.commit('src/settings/old.tsx', 'signed off later\n');
+    h.git$('update-ref', `refs/heads/${a.branch}`, late, a.tip);
+    const squash = squashOnOrigin(a.tip);
+    h.origin$('update-ref', 'refs/heads/main', squash);
+    h.gh.setState(a.url, PrState.Merged);
+    const b = await stacked(a);
+    expect(b.start).toBe(late);
+
+    await watchRound();
+
+    expect(getPass(h.store.db, a.passId).state).toBe(PassState.Settled);
+    const head = h.git$('rev-parse', `refs/heads/${b.branch}`);
+    expect(h.git$('rev-parse', `${head}^2`)).toBe(squash);
+    expect(h.git$('rev-parse', `${head}^{tree}`)).toBe(h.git$('rev-parse', `${b.tip}^{tree}`));
+    expect(getPassProgress(h.store.db, b.passId).notices).toEqual([]);
+  });
+
   it('when the closed pass merged before a pass stacked on it, the stacking follows the merge at once', async () => {
     const a = await closedPass();
     // Merged with drift: the base is not the pass's tip, so its Move card stays and it is unsettled.
