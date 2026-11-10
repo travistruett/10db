@@ -66,6 +66,19 @@ describe('parseLoginUrl', () => {
     { name: 'another port', output: 'http://localhost:9000/login\n', url: null },
     { name: 'a host after two slashes', output: '//evil.example/login\n', url: null },
     { name: 'words only', output: 'no session for you\n', url: null },
+    { name: 'a file path under a home', output: '/Users/me/app/manage.py\n', url: null },
+    { name: 'a file path on Linux', output: '/home/me/app/log.txt\n', url: null },
+    { name: 'a temp file', output: '/tmp/dev-login.json\n', url: null },
+    {
+      name: 'a file path after the address',
+      output: '/login/abc/\n/private/var/folders/x/log\n',
+      url: 'http://localhost:8800/login/abc/',
+    },
+    {
+      name: 'the same path as a URL on the app',
+      output: 'http://localhost:8800/Users/me/\n',
+      url: 'http://localhost:8800/Users/me/',
+    },
     { name: 'nothing', output: '', url: null },
   ])('$name', ({ output, url }) => {
     expect(parseLoginUrl(APP, output)).toBe(url);

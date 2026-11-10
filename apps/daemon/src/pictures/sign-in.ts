@@ -28,9 +28,13 @@ import { browserDir, writeStorageState, type StorageState } from './storage-stat
 /** The longest a dev login may run. */
 const DEV_LOGIN_TIMEOUT_MS = 60_000;
 
+/** The roots a file path printed by a command starts with; a route of the app never does. */
+const FILE_PATH =
+  /^\/(Users|home|tmp|private|var|opt|etc|usr|Volumes|Library|System|Applications|root|nix)(\/|$)/;
+
 /**
- * The address the dev login printed: its last line that is a route on the app or an absolute URL on
- * the app's own origin; null when it printed none.
+ * The address the dev login printed: its last line that is a route on the app (not a file path) or
+ * an absolute http(s) URL on the app's own origin; null when it printed none.
  */
 export function parseLoginUrl(appUrl: AppUrl, output: string): string | null {
   const lines = output
@@ -38,7 +42,11 @@ export function parseLoginUrl(appUrl: AppUrl, output: string): string | null {
     .map((line) => line.trim())
     .filter((line) => line !== '');
   for (const line of lines.reverse()) {
-    if (PageRoute.safeParse(line).success) return routeUrl(appUrl, line);
+    if (PageRoute.safeParse(line).success) {
+      // A path a tool printed to its own files is no page of the app.
+      if (FILE_PATH.test(line)) continue;
+      return routeUrl(appUrl, line);
+    }
     let url: URL;
     try {
       url = new URL(line);
