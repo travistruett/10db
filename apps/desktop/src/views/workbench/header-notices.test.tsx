@@ -141,6 +141,37 @@ describe('HeaderNotices', () => {
     },
   );
 
+  it('shows a long notice by its first line, and the rest, lines kept, behind Show More', async () => {
+    record();
+    const tail = 'FAIL src/form.test.ts\n  expected 2 to be 3\n    at form.test.ts:12';
+    const notice = passNotice({
+      id: 'gate',
+      kind: 'gate_failed',
+      text: `The gate on 1a2b3c4 failed.\n${tail}`,
+    });
+    renderWithDaemon(
+      <HeaderNotices view={passViewDto({ rest: { notices: [notice] } })} inbox={[]} />,
+    );
+    const shown = await screen.findByRole('listitem');
+    expect(within(shown).getByText('The gate on 1a2b3c4 failed.')).toBeTruthy();
+    expect(within(shown).queryByText(/expected 2 to be 3/)).toBeNull();
+    fireEvent.click(within(shown).getByRole('button', { name: 'Show More' }));
+    const rest = within(shown).getByText(/expected 2 to be 3/);
+    expect(rest.textContent).toBe(tail);
+    expect(rest.style.whiteSpace).toBe('pre-wrap');
+    fireEvent.click(within(shown).getByRole('button', { name: 'Show Less' }));
+    expect(within(shown).queryByText(/expected 2 to be 3/)).toBeNull();
+  });
+
+  it('offers no Show More on a notice of one line', async () => {
+    record();
+    renderWithDaemon(
+      <HeaderNotices view={passViewDto({ rest: { notices: [passNotice()] } })} inbox={[]} />,
+    );
+    const shown = await screen.findByRole('listitem');
+    expect(within(shown).queryByRole('button', { name: 'Show More' })).toBeNull();
+  });
+
   it('draws nothing while the pass has no notice', () => {
     record();
     renderWithDaemon(<HeaderNotices view={passViewDto()} inbox={[]} />);

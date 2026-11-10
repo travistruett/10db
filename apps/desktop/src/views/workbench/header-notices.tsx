@@ -11,6 +11,7 @@ import {
 } from '@10db/contracts';
 import { Button, Group, Menu, Stack, Text } from '@mantine/core';
 import { IconAlertTriangle, IconInfoCircle } from '@tabler/icons-react';
+import { useState } from 'react';
 import { useAnswerPassCard, useSendToAgent } from '../../daemon/pass-close-queries';
 
 // Workbench spec §5.3, §5.5, §8.3, D19, D24: what the pass's header says about its pull request and
@@ -51,6 +52,14 @@ interface NoticeRowProps {
   readonly canRetarget: boolean;
 }
 
+/** A notice's first line, and the lines after it (a failed gate's log tail) or null for one line. */
+function noticeLines(text: string): { readonly first: string; readonly rest: string | null } {
+  const end = text.indexOf('\n');
+  if (end === -1) return { first: text, rest: null };
+  const rest = text.slice(end + 1);
+  return { first: text.slice(0, end), rest: rest.trim() === '' ? null : rest };
+}
+
 function NoticeRow({ notice, pages, inbox, sendTo, canRetarget }: NoticeRowProps) {
   const send = useSendToAgent();
   const answer = useAnswerPassCard();
@@ -61,70 +70,102 @@ function NoticeRow({ notice, pages, inbox, sendTo, canRetarget }: NoticeRowProps
     ? pages.find((page) => page.taskId === send.variables.taskId)?.area
     : undefined;
   const failure = send.error?.message ?? answer.error?.message ?? null;
+  const { first, rest } = noticeLines(notice.text);
+  const [more, setMore] = useState(false);
   return (
-    <Group component="li" gap="xs" wrap="nowrap" align="center">
-      <Icon
-        size={16}
-        stroke={1.5}
-        color={`var(--mantine-color-${color}-filled)`}
-        style={{ flex: 'none' }}
-        aria-hidden
-      />
-      <Text size="sm" style={{ flex: 1, minWidth: 0 }}>
-        {notice.text}
-      </Text>
-      {failure === null ? null : (
-        <Text size="xs" c="red" role="alert">
-          {failure}
+    <Stack component="li" gap={4}>
+      <Group gap="xs" wrap="nowrap" align="center">
+        <Icon
+          size={16}
+          stroke={1.5}
+          color={`var(--mantine-color-${color}-filled)`}
+          style={{ flex: 'none' }}
+          aria-hidden
+        />
+        <Text size="sm" style={{ flex: 1, minWidth: 0 }}>
+          {first}
         </Text>
-      )}
-      {sentTo === undefined ? null : (
-        <Text size="xs" c="dimmed">
-          {`Sent to ${sentTo}`}
-        </Text>
-      )}
-      {card === null ? null : (
-        <Button
-          variant="default"
+        {rest === null ? null : (
+          <Button
+            variant="subtle"
+            size="xs"
+            style={{ flex: 'none' }}
+            onClick={() => {
+              setMore((shown) => !shown);
+            }}
+          >
+            {more ? 'Show Less' : 'Show More'}
+          </Button>
+        )}
+        {failure === null ? null : (
+          <Text size="xs" c="red" role="alert">
+            {failure}
+          </Text>
+        )}
+        {sentTo === undefined ? null : (
+          <Text size="xs" c="dimmed">
+            {`Sent to ${sentTo}`}
+          </Text>
+        )}
+        {card === null ? null : (
+          <Button
+            variant="default"
+            size="xs"
+            loading={answer.isPending}
+            disabled={!canRetarget}
+            onClick={() => {
+              answer.mutate({ itemId: card.item.id, choice: PASS_RETARGET_CHOICE });
+            }}
+          >
+            {`Retarget to ${card.base}`}
+          </Button>
+        )}
+        {notice.sendable && sendTo !== 'none' && pages.length > 0 ? (
+          <Menu position="bottom-end" withinPortal>
+            <Menu.Target>
+              <Button
+                variant="default"
+                size="xs"
+                loading={send.isPending}
+                disabled={sendTo !== 'offered'}
+                style={{ flex: 'none' }}
+              >
+                Send to Agent
+              </Button>
+            </Menu.Target>
+            <Menu.Dropdown>
+              <Menu.Label>Send to which page?</Menu.Label>
+              {pages.map((page) => (
+                <Menu.Item
+                  key={page.taskId}
+                  onClick={() => {
+                    send.mutate({ taskId: page.taskId, noticeId: notice.id });
+                  }}
+                >
+                  {page.area}
+                </Menu.Item>
+              ))}
+            </Menu.Dropdown>
+          </Menu>
+        ) : null}
+      </Group>
+      {more && rest !== null ? (
+        // A failed gate's log tail runs to a few kilobytes: its lines kept, scrolled within the header.
+        <Text
           size="xs"
-          loading={answer.isPending}
-          disabled={!canRetarget}
-          onClick={() => {
-            answer.mutate({ itemId: card.item.id, choice: PASS_RETARGET_CHOICE });
+          ff="monospace"
+          pl={24}
+          style={{
+            whiteSpace: 'pre-wrap',
+            overflowWrap: 'anywhere',
+            maxHeight: 240,
+            overflowY: 'auto',
           }}
         >
-          {`Retarget to ${card.base}`}
-        </Button>
-      )}
-      {notice.sendable && sendTo !== 'none' && pages.length > 0 ? (
-        <Menu position="bottom-end" withinPortal>
-          <Menu.Target>
-            <Button
-              variant="default"
-              size="xs"
-              loading={send.isPending}
-              disabled={sendTo !== 'offered'}
-              style={{ flex: 'none' }}
-            >
-              Send to Agent
-            </Button>
-          </Menu.Target>
-          <Menu.Dropdown>
-            <Menu.Label>Send to which page?</Menu.Label>
-            {pages.map((page) => (
-              <Menu.Item
-                key={page.taskId}
-                onClick={() => {
-                  send.mutate({ taskId: page.taskId, noticeId: notice.id });
-                }}
-              >
-                {page.area}
-              </Menu.Item>
-            ))}
-          </Menu.Dropdown>
-        </Menu>
+          {rest}
+        </Text>
       ) : null}
-    </Group>
+    </Stack>
   );
 }
 
