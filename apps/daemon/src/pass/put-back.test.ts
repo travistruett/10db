@@ -181,8 +181,9 @@ describe('putBackKeptWork', () => {
     await inLaterPass(() => Promise.reject(new Error('the daemon died')));
     expect(read('src/settings/long.tsx')).toBe('one\ntwo\nthree\nfour\nfive\nsix\n');
 
-    await resumePassWork({ ...w.deps, stopLane });
-    await w.h.jobs.idle();
+    const restarted = { ...w.restart(), stopLane };
+    await resumePassWork(restarted);
+    await restarted.jobs.idle();
 
     expect(read('src/settings/long.tsx')).toBe('one\ntwo, by the task\nthree\nfour\nfive\nsix\n');
     expect(getTaskKeptWork(w.h.store.db, w.settings.id)).toBeNull();

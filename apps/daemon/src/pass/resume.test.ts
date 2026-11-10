@@ -108,8 +108,9 @@ describe('resumePassWork', () => {
     ).rejects.toThrow('the daemon died');
     expect(lastTakeOut(w.h.store.db, w.settings.id)?.step).toBe(TakeOutStep.Checked);
 
-    await resumePassWork(deps(w));
-    await w.h.jobs.idle();
+    const restarted = { ...w.restart(), stopLane: (): Promise<void> => Promise.resolve() };
+    await resumePassWork(restarted);
+    await restarted.jobs.idle();
 
     expect(lastTakeOut(w.h.store.db, w.settings.id)?.step).toBe(TakeOutStep.Done);
     expect(getTask(w.h.store.db, w.settings.id).passId).toBeNull();

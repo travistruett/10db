@@ -6,7 +6,6 @@ import { join } from 'node:path';
 import { serve, upgradeWebSocket, type WebSocketServerLike } from '@hono/node-server';
 import {
   BRAINSTORM_REFUSED_ON_CHATGPT,
-  ConflictError,
   EventType,
   InvalidError,
   PROTOCOL_VERSION,
@@ -149,7 +148,7 @@ import {
   forgetEndedYields,
   withdrawStaleClaimWaits,
 } from '../mcp';
-import { answerPassCard, type PassWorkDeps } from '../pass';
+import { answerPassCard, putBackKeptWork, resumePassWork, type PassWorkDeps } from '../pass';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
 import { chooseModel, offeredModels, PLAN_NEED } from '../routing';
 import { createScreenBroker, createScreens, renderMayRead } from '../screens';
@@ -1335,6 +1334,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger,
     cleanShutdown,
   });
+  // Each open pass goes on from its rows: its folder card, a put-back and take-outs cut short.
+  await resumePassWork({ ...passWork, stopLane: (id) => createdRunner.stopPassLane(id) });
   // The previous daemon's claim waits ended with it; their cards would name holders nobody waits for.
   withdrawStaleClaimWaits(state, inbox);
   accountPauses.restore();
@@ -1409,11 +1410,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     hazardAssessor,
   );
-  // A task has saved work only once a take-out has kept it, which the pass module does and puts back.
+  // A task has saved work only once a take-out has kept it; a later pass puts it back.
   const passOpenDeps: PassOpenDeps = {
     leaseMs: opts.leaseMs ?? DEFAULTS.leaseMs,
-    putBack: () =>
-      Promise.reject(new ConflictError('This daemon has no put-back of saved work wired')),
+    putBack: (input) => putBackKeptWork(passWork, input),
   };
   const services = createServices({
     state,

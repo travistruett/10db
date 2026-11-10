@@ -1,8 +1,16 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { PassTurnDto, ProjectInput, TaskDto, WorkstreamId } from '@10db/contracts';
-import { endPassTurn, getTask, insertPassTurn } from '@10db/db';
-import { openPass, type PassOpened, type PutBackKeptWork } from '../src/delivery';
+import { createStore, endPassTurn, getTask, insertPassTurn, openDatabase } from '@10db/db';
+import {
+  createDeliveryJobs,
+  openPass,
+  type PassOpened,
+  type PutBackKeptWork,
+} from '../src/delivery';
+import { createEventBus, createStateStore } from '../src/events';
+import { createGit } from '../src/git';
+import { createInboxService } from '../src/inbox';
 import { silentLogger } from '../src/log';
 import type { PassWorkDeps } from '../src/pass';
 import { createDeliveryHarness, type DeliveryHarness } from './delivery-harness';
@@ -39,6 +47,12 @@ export interface PassWorld {
   startTurn(task: TaskDto): PassTurnDto;
   /** Ends the turn as Ready. */
   endTurn(turn: PassTurnDto): void;
+  /**
+   * What a daemon started again on the same database and folder works with: a new connection to the
+   * database file, and a new event bus, inbox, job queue and git, so nothing the last one held in
+   * memory carries over. The world's own `h` reads the same file.
+   */
+  restart(): PassWorkDeps;
   close(): void;
 }
 
@@ -73,6 +87,7 @@ export async function openPassWorld(
     { projectId: h.project.id, name: 'Polish', taskIds: [settings.id, people.id] },
     { leaseMs: 60_000, putBack: opts.putBack ?? nothingKept },
   );
+  const reopened: (() => void)[] = [];
   const runOf = (task: TaskDto): WorkstreamId => {
     const id = getTask(h.store.db, task.id).workstreamId;
     if (id === null) throw new Error(`${task.title} has no run`);
@@ -106,7 +121,23 @@ export async function openPassWorld(
     endTurn: (turn) => {
       h.state.write((c) => endPassTurn(c, turn.id, { ending: 'ready', replyBody: null }));
     },
+    restart: () => {
+      const db = openDatabase(h.store.db.$client.name);
+      reopened.push(() => {
+        db.$client.close();
+      });
+      const state = createStateStore(createStore(db), createEventBus());
+      return {
+        state,
+        git: createGit(),
+        inbox: createInboxService({ state, onParkedAnswer: () => undefined }),
+        jobs: createDeliveryJobs(silentLogger),
+        logger: silentLogger,
+        clock: h.ctx.clock,
+      };
+    },
     close: () => {
+      for (const close of reopened) close();
       h.close();
     },
   };

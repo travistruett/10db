@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   AccountCreatedDto,
@@ -19,6 +19,7 @@ import {
   endPassTurn,
   getInboxItem,
   getTask,
+  getTaskKeptWork,
   insertBatch,
   insertTakeOut,
   latestPassTurn,
@@ -35,6 +36,7 @@ import {
   patchWorkstream,
   schema,
   setPassTurnKept,
+  setTaskKeptWork,
   settlePassTurn,
   transitionBatch,
   transitionWorkstream,
@@ -64,7 +66,12 @@ let daemon: RunningDaemon;
 beforeEach(async () => {
   data = tempDir('pass api');
   repo = createTempRepo();
-  daemon = await startDaemonWithProfiles({
+  daemon = await startDaemon();
+});
+
+/** The daemon on the test's data directory: a second call is a restart on the same database. */
+function startDaemon(): Promise<RunningDaemon> {
+  return startDaemonWithProfiles({
     sandbox: null,
     dataDir: data.path,
     port: 0,
@@ -102,7 +109,7 @@ beforeEach(async () => {
     // A tick long enough that nothing starts while the test looks.
     tickMs: 3_600_000,
   });
-});
+}
 afterEach(async () => {
   await daemon.stop();
   repo.cleanup();
@@ -601,3 +608,48 @@ describe("a page's failed turn over HTTP", () => {
     expect(getInboxItem(daemon.state.db, flag.id).state).toBe('OPEN');
   });
 });
+
+describe("a pass's saved work and start-up over HTTP", () => {
+  it("puts a task's saved work back when a pass opens with it", async () => {
+    const project = await projectWith(PAGES);
+    const task = await taskOn(project, 'Settings: saved', ['settings']);
+    const base = rawGit('rev-parse', 'HEAD');
+    const saved = keptCommit(PAGE_FILE, 'saved\n');
+    rmSync(join(repo.path, PAGE_FILE));
+    rawGit('update-ref', `refs/10db/kept/${task.id}`, saved);
+    daemon.state.write((ctx) => {
+      setTaskKeptWork(ctx, task.id, { keptSha: saved, keptBaseSha: base });
+    });
+
+    await api().post(`/projects/${project.id}/passes`, PassOpenedDto, {
+      name: 'Polish',
+      taskIds: [task.id],
+    });
+
+    expect(readFileSync(join(repo.path, PAGE_FILE), 'utf8')).toBe('saved\n');
+    expect(getTaskKeptWork(daemon.state.db, task.id)).toBeNull();
+  });
+
+  it('raises one card at start-up for a folder switched away while the daemon was down, and runs no turn', async () => {
+    const { task, pass } = await openedPage(WORKING);
+    await waitFor(() => existsSync(join(repo.path, PAGE_FILE)));
+    const turns = listPassTurnsOf(pass.id);
+    await daemon.stop();
+    rawGit('switch', '-q', 'main');
+
+    daemon = await startDaemon();
+
+    const cards = listInbox(daemon.state.db, { states: ['OPEN'] }).filter(
+      (item) => item.detail?.['passId'] === pass.id,
+    );
+    expect(cards.map((c) => c.title)).toEqual([
+      'Workbench pass "Polish" is waiting for Your folder',
+    ]);
+    expect(rawGit('symbolic-ref', '--short', 'HEAD')).toBe('main');
+    expect(listPassTurnsOf(pass.id)).toEqual(turns);
+    expect(rawGit('for-each-ref', `refs/10db/passes/${pass.id}/${task.id}`)).toBe('');
+  });
+});
+
+const listPassTurnsOf = (passId: PassDto['id']) =>
+  listPassTurns(daemon.state.db, passId).map((t) => [t.seq, t.endedAt === null]);

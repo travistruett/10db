@@ -220,7 +220,8 @@ describe('takeOut', () => {
       );
       expect(lastTakeOut(w.h.store.db, w.settings.id)?.step).toBe(step);
 
-      await takeOutSteps(takeOutDeps(w), input);
+      // A daemon started again reads the step from the database file, holding nothing else.
+      await takeOutSteps({ ...takeOutDeps(w), ...w.restart() }, input);
       expectTakenOut(w);
     });
   });
