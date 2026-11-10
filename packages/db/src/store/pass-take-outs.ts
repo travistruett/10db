@@ -24,17 +24,31 @@ export interface TakeOutKey {
 const keyed = (key: TakeOutKey) =>
   and(eq(schema.passTakeOuts.taskId, key.taskId), eq(schema.passTakeOuts.passId, key.passId));
 
+/** The task's take-out from the pass, finished or not, or undefined when it has none. */
+export function findTakeOut(db: DbReader, key: TakeOutKey): PassTakeOutRow | undefined {
+  return db.select().from(schema.passTakeOuts).where(keyed(key)).get();
+}
+
 function getTakeOut(db: DbReader, key: TakeOutKey): PassTakeOutRow {
-  const row = db.select().from(schema.passTakeOuts).where(keyed(key)).get();
+  const row = findTakeOut(db, key);
   if (!row) throw new NotFoundError('take-out of task', key.taskId);
   return row;
 }
 
-/** Writes a take-out before its first step, with the shared changes chosen Drop. */
+/**
+ * Writes a take-out before its first step, with the shared changes chosen Drop. A task Add Page put
+ * back into the same pass is taken out again on a fresh row: the finished one told of a take-out
+ * whose saved work the put-back has already used. Refused while the task's take-out is unfinished,
+ * which goes on from its own row.
+ */
 export function insertTakeOut(
   ctx: WriteContext,
   input: TakeOutKey & { readonly drops: readonly number[] },
 ): PassTakeOutRow {
+  const earlier = findTakeOut(ctx.tx, input);
+  if (earlier && earlier.step < TakeOutStep.Done)
+    throw new ConflictError(`A take-out of task ${input.taskId} is already under way`);
+  if (earlier) ctx.tx.delete(schema.passTakeOuts).where(keyed(input)).run();
   const row: PassTakeOutRow = {
     taskId: input.taskId,
     passId: input.passId,
@@ -80,9 +94,18 @@ export function advanceTakeOut(
   return getTakeOut(ctx.tx, key);
 }
 
-/** Removes a take-out's row: a take-out asked for alone that stopped leaves none. */
-export function deleteTakeOut(ctx: WriteContext, key: TakeOutKey): void {
+/**
+ * Removes a take-out's row: a take-out asked for alone that stopped leaves none of its own, and the
+ * finished one it replaced, `earlier`, is written back, so a later put-back still reads how that
+ * take-out left each file.
+ */
+export function deleteTakeOut(
+  ctx: WriteContext,
+  key: TakeOutKey,
+  earlier: PassTakeOutRow | null = null,
+): void {
   ctx.tx.delete(schema.passTakeOuts).where(keyed(key)).run();
+  if (earlier !== null) ctx.tx.insert(schema.passTakeOuts).values(earlier).run();
 }
 
 /** Every take-out that has not finished its last step, oldest first: start-up goes on with each. */

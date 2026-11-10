@@ -4,6 +4,7 @@ import {
   advanceTakeOut,
   createTestStore,
   deleteTakeOut,
+  findTakeOut,
   insertPass,
   insertTakeOut,
   insertTask,
@@ -109,5 +110,31 @@ describe("a take-out's row", () => {
     });
     expect(lastTakeOut(store.db, taskId)).toBeUndefined();
     expect(listUnfinishedTakeOuts(store.db)).toEqual([]);
+  });
+
+  it('starts over for a task taken out of the same pass again, and is refused while one is unfinished', () => {
+    const key = { taskId, passId };
+    store.write((ctx) => insertTakeOut(ctx, { ...key, drops: [] }));
+    expect(() => store.write((ctx) => insertTakeOut(ctx, { ...key, drops: [] }))).toThrow(
+      /under way/,
+    );
+    store.write((ctx) =>
+      advanceTakeOut(ctx, key, { step: TakeOutStep.PutBack, left: ['src/settings/a.tsx'] }),
+    );
+    store.write((ctx) => advanceTakeOut(ctx, key, { step: TakeOutStep.Done }));
+
+    const finished = findTakeOut(store.db, key) ?? null;
+    store.write((ctx) => insertTakeOut(ctx, { ...key, drops: [3] }));
+
+    // The row tells of the latest take-out alone: what a later put-back and an Abandon read.
+    expect(listPassTakeOuts(store.db, passId)).toEqual([
+      expect.objectContaining({ ...key, step: TakeOutStep.Written, left: [], drops: [3] }),
+    ]);
+    expect(listUnfinishedTakeOuts(store.db)).toHaveLength(1);
+    // One that stops gives the finished row back.
+    store.write((ctx) => {
+      deleteTakeOut(ctx, key, finished);
+    });
+    expect(findTakeOut(store.db, key)).toEqual(finished);
   });
 });

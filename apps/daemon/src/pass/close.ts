@@ -28,6 +28,7 @@ import {
   getPass,
   getPassProgress,
   getProject,
+  getTask,
   getWorkstreamRow,
   listPassTasks,
   listPassesIn,
@@ -42,8 +43,8 @@ import {
   transitionBatch,
   type WriteContext,
 } from '@10db/db';
-import { jobKey, JobQueue } from '../delivery';
-import { PassFolderOffBranchError } from '../git';
+import { jobKey, JobQueue, PASS_GATE_NOTICE } from '../delivery';
+import { GitNetworkError, GitTrustError, PassFolderOffBranchError, shellWord } from '../git';
 import { flagCard } from '../inbox';
 import {
   checkCloseRequest,
@@ -87,6 +88,8 @@ export interface CloseShip {
     passed: boolean;
     aborted: boolean;
     logPath: string;
+    /** The end of the gate's log; empty when it did not run. */
+    tail: string;
     dirtyNamed: readonly string[];
   }>;
   pushPassBranch(passId: PassId, signal: AbortSignal): Promise<'pushed' | 'no_origin'>;
@@ -182,6 +185,12 @@ export const gateFailedKey = (passId: PassId): string => `pass-gate:${passId}`;
 /** The header notice that says why a close is stuck, cleared once it goes on. */
 const CLOSE_NOTICE = 'close';
 
+/**
+ * The header notice that the close pushed but could not make its pull request ready: the close goes
+ * on, and the notice stays for the builder to finish it on GitHub.
+ */
+const PR_READY_NOTICE = 'close-pr-ready';
+
 const errorText = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
@@ -214,9 +223,16 @@ async function failGate(
   deps: CloseDeps,
   pass: PassDto,
   where: 'scratch' | 'folder',
-  ran: { readonly logPath: string },
+  ran: { readonly logPath: string; readonly tail: string },
 ): Promise<void> {
   const tasks = await namedInLog(deps, pass, ran.logPath);
+  // The pages this close took out before a gate in the folder: those its plan set to Take Out.
+  const takenOut =
+    where === 'folder'
+      ? (getPassProgress(deps.state.db, pass.id).closePlan?.pages ?? [])
+          .filter((page) => page.choice === PassClosePageChoice.TakeOut)
+          .map((page) => getTask(deps.state.db, page.taskId).title)
+      : [];
   const detail: PassGateFailedDetail = {
     kind: 'pass_gate_failed',
     passId: pass.id,
@@ -226,10 +242,15 @@ async function failGate(
   };
   const named =
     tasks.length === 0 ? '' : ` It names files of ${tasks.map((t) => t.title).join(', ')}.`;
+  const one = takenOut.length === 1;
+  const inFolder =
+    takenOut.length === 0
+      ? 'in Your folder, so the pass is open again'
+      : `in Your folder, after ${takenOut.join(', ')} ${one ? 'was' : 'were'} taken out, so the pass is open again without ${one ? 'it' : 'them'}`;
   const place =
     where === 'scratch'
       ? 'in a scratch worktree of the tip, before any page was taken out, so the pass is open again as it was'
-      : 'in Your folder, after the pages set to Take Out were taken out, so the pass is open again without them; their work is kept with their tasks';
+      : `${inFolder}${takenOut.length === 0 ? '' : `; ${one ? 'its' : 'their'} work is kept with ${one ? 'its task' : 'their tasks'}`}`;
   deps.state.write((ctx) => {
     if (!reopenClosingPass(ctx, pass.id)) return;
     // A change chosen Drop was passed over at step 2 and its take-out has not dropped it: it lands
@@ -241,6 +262,16 @@ async function failGate(
     if (getBatch(ctx.tx, batch.id).state === BatchState.Failed)
       transitionBatch(ctx, batch.id, { to: BatchState.Open, reason: 'the pass is open again' });
     clearPassNotice(ctx, pass.id, CLOSE_NOTICE);
+    // A scratch gate's notice is its own; one in the folder is said here, once the pass is open.
+    if (where === 'folder')
+      setPassNotice(ctx, pass.id, {
+        id: PASS_GATE_NOTICE,
+        kind: PassNoticeKind.GateFailed,
+        text: `The gate failed ${inFolder}:\n${ran.tail}`,
+        sendable: true,
+        cardId: null,
+        at: ctx.now,
+      });
     flagCard(ctx, {
       projectId: pass.projectId,
       workstreamId: null,
@@ -411,8 +442,8 @@ export async function closeSteps(
         // The branch is pushed; the pull request is GitHub's to finish, and the close goes on.
         deps.state.write((ctx) => {
           setPassNotice(ctx, passId, {
-            id: CLOSE_NOTICE,
-            kind: PassNoticeKind.Close,
+            id: PR_READY_NOTICE,
+            kind: PassNoticeKind.PrNotOpened,
             text: `The pass's branch is pushed, but its pull request could not be made ready for review: ${errorText(error)}. Open or mark it on GitHub.`,
             sendable: false,
             cardId: null,
@@ -510,6 +541,11 @@ export function createPassCloses(deps: CloseDeps): PassCloses {
         jobKey({ projectId: pass.projectId, worktreePath: null }, JobQueue.Cut),
         async (jobSignal) => {
           const signal = AbortSignal.any([jobSignal, abort.signal]);
+          // The close is going on: the notice that said it stopped comes down until it stops again.
+          deps.state.write((ctx) => {
+            if (getPass(ctx.tx, passId).state === PassState.Closing)
+              clearPassNotice(ctx, passId, CLOSE_NOTICE);
+          });
           try {
             // Your folder that left the pass's branch in the middle of a step is waited for, with
             // the folder card, and the close goes on from its recorded step. A refusal with the
@@ -537,7 +573,7 @@ export function createPassCloses(deps: CloseDeps): PassCloses {
               deps.logger.warn({ passId, err: errorText(error) }, 'close did not finish');
               deps.state.write((ctx) => {
                 if (getPass(ctx.tx, passId).state !== PassState.Closing) return;
-                noticeStuck(ctx, passId, error);
+                noticeStuck(ctx, passId, error, deps.gateWhere(getPass(ctx.tx, passId)));
               });
             }
           } finally {
@@ -638,20 +674,64 @@ export function createPassCloses(deps: CloseDeps): PassCloses {
 }
 
 /**
- * The header notice of a close that stopped on an error: Continue Close or the next start goes on, or,
- * before its fast-forward, Abandon ends it. From step 7 the return branch may have moved, and an
- * Abandon is refused.
+ * What a close was doing when it stopped, in words, from the last step it recorded and where the
+ * project gates a pass.
  */
-function noticeStuck(ctx: WriteContext, passId: PassId, error: unknown): void {
+function stoppedWhile(step: number, where: CloseGateWhere): string {
+  if (step < CloseStep.Landed) return "landing the close's changes";
+  if (step < CloseStep.ScratchGated && where === 'scratch')
+    return 'running the gate in a separate copy';
+  if (step < CloseStep.TakenOut) return 'taking out pages';
+  if (step < CloseStep.FolderGated && where === 'folder') return 'running the gate in your folder';
+  if (step < CloseStep.Pushed) return "pushing the pass's branch";
+  if (step < CloseStep.Closed) return "moving your folder's branch";
+  return 'closing the pass';
+}
+
+/**
+ * Why the close stopped, in 10db's own words: a domain error's message and a typed git error's, the
+ * folder off the pass's branch with how to switch it back; null for any other error (SQLite's text, a
+ * library's), whose detail stays in the log.
+ */
+function stoppedBecause(error: unknown): string | null {
+  if (error instanceof PassFolderOffBranchError)
+    return `${error.message}; switch it back (git switch ${shellWord(error.branch)})`;
+  if (
+    error instanceof DomainError ||
+    error instanceof GitNetworkError ||
+    error instanceof GitTrustError
+  )
+    return error.message;
+  return null;
+}
+
+/**
+ * The header notice of a close that stopped on an error: a plain sentence naming what it was doing,
+ * with why when 10db's own words say it, else pointing at the log. Continue Close or the next start
+ * goes on, or, before its fast-forward, Abandon ends it. From step 7 the return branch may have moved,
+ * and an Abandon is refused.
+ */
+function noticeStuck(
+  ctx: WriteContext,
+  passId: PassId,
+  error: unknown,
+  where: CloseGateWhere,
+): void {
   const step = getPassProgress(ctx.tx, passId).closeStep ?? 0;
   const end =
     step >= CloseStep.FastForwarded
       ? `its fast-forward may have moved ${getPass(ctx.tx, passId).returnBranch}, so it can no longer be abandoned`
       : 'Abandon Pass ends it';
+  const because = stoppedBecause(error);
+  const doing = stoppedWhile(step, where);
+  const why =
+    because === null
+      ? `The close stopped while ${doing}. 10db's log has the detail.`
+      : `The close stopped while ${doing}: ${because}.`;
   setPassNotice(ctx, passId, {
     id: CLOSE_NOTICE,
     kind: PassNoticeKind.Close,
-    text: `The close stopped: ${errorText(error)}. Continue Close goes on from where it stopped, as 10db does when it next starts; ${end}.`,
+    text: `${why} Continue Close goes on from where it stopped, as 10db does when it next starts; ${end}.`,
     sendable: false,
     cardId: null,
     at: ctx.now,

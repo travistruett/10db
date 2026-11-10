@@ -1,5 +1,6 @@
 import {
   ACTIVE_STATES,
+  PassState,
   EventType,
   WORKSTREAM_FAILED_TITLE_PREFIX,
   WorkstreamFailure,
@@ -14,12 +15,14 @@ import {
   getProject,
   getTask,
   getWorkstreamRow,
+  insertSystemNotice,
   latestHandoffForStep,
   latestToolOp,
   listInbox,
   listSessions,
   listWorkstreams,
   openItemsForWorkstream,
+  openPassTurn,
   patchWorkstream,
   releaseClaims,
   transitionWorkstream,
@@ -51,6 +54,9 @@ export interface RecoveryReport {
   readonly parked: WorkstreamId[];
   readonly redelivered: InboxItemId[];
 }
+
+/** The thread's note that a page's turn goes on after 10db restarted (Workbench spec §4.3). */
+const RESUMED_AFTER_RESTART = 'Resumed after 10db restarted';
 
 /** States that keep their place: only the dead daemon's lease, session and processes are cleaned up. */
 const KEEP_STATE = new Set<string>([S.Queued, S.Held, S.PausedLimit]);
@@ -234,6 +240,13 @@ export async function recoverOnStartup(opts: {
           patch: { nextAction, recoveryAttempts: attempts, runNextAt: recoveredAt },
           reason: 'recovered after restart',
         });
+        // Workbench spec §4.3: a page's turn the restart cut short goes on, and its thread says so,
+        // once, in the write that queues it; a closing or abandoning pass takes no turn further.
+        if (
+          passOfWorkstream(ctx.tx, ws.id)?.state === PassState.Open &&
+          openPassTurn(ctx.tx, row.taskId)
+        )
+          insertSystemNotice(ctx, row.taskId, RESUMED_AFTER_RESTART);
       }
     });
     if (failed) {

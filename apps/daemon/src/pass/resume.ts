@@ -1,4 +1,4 @@
-import { PassState, type PassDto, type PassId } from '@10db/contracts';
+import { PassState, TakeOutStep, type PassDto, type PassId } from '@10db/contracts';
 import {
   findOpenPass,
   getPass,
@@ -27,13 +27,17 @@ const errorText = (error: unknown): string =>
 
 /**
  * Puts back the saved work of each task the pass holds that still records some, as when the daemon
- * stopped inside the put-back the pass's opening runs; a task being taken out of this pass is left to
- * its take-out.
+ * stopped inside the put-back the pass's opening or an Add Page runs; a task being taken out of this
+ * pass is left to its take-out, while one taken out of it earlier and added back is put back.
  */
 async function putBackAgain(deps: TakeOutDeps, passId: PassId, repo: string): Promise<void> {
   const db = deps.state.db;
   for (const task of listPassTasks(db, passId)) {
-    if (getTaskKeptWork(db, task.id) === null || lastTakeOut(db, task.id)?.passId === passId)
+    const last = lastTakeOut(db, task.id);
+    if (
+      getTaskKeptWork(db, task.id) === null ||
+      (last?.passId === passId && last.step < TakeOutStep.Done)
+    )
       continue;
     try {
       await putBackKeptWork(deps, { repo, taskId: task.id });

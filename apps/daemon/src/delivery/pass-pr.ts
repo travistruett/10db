@@ -58,6 +58,8 @@ export interface PassShipDeps {
     passed: boolean;
     aborted: boolean;
     logPath: string;
+    /** The end of the gate's log; empty when it did not run. */
+    tail: string;
     dirtyNamed: readonly string[];
   }>;
   pushPassBranch(passId: PassId, signal: AbortSignal): Promise<'pushed' | 'no_origin'>;
@@ -135,7 +137,8 @@ function signedOff(db: DbReader, passId: PassId): string[] {
   );
 }
 
-const GATE_NOTICE = 'gate';
+/** The header notice of a failed gate on the pass's tip, a close's included. */
+export const PASS_GATE_NOTICE = 'gate';
 /** The header notice that says Open Pull Request did not finish. */
 const PR_OPEN_NOTICE = 'pr-open';
 
@@ -192,6 +195,8 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
     passed: boolean;
     aborted: boolean;
     logPath: string;
+    /** The end of the gate's log; empty when it did not run. */
+    tail: string;
     dirtyNamed: readonly string[];
   }> {
     const { pass, batch, project } = placeOf(i.passId);
@@ -199,11 +204,21 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
     const beforeStart = () => Promise.resolve(deps.holdShips?.() !== true);
     if (i.where === 'folder') {
       const result = await runGate(deps, batch, project, i.signal, beforeStart);
-      if (result === null) return { passed: false, aborted: true, logPath: '', dirtyNamed: [] };
+      if (result === null)
+        return { passed: false, aborted: true, logPath: '', tail: '', dirtyNamed: [] };
       const dirty = await deps.git.changedPaths(project.repoPath);
       const passed = result.exitCode === 0;
       checked.set(pass.id, { kind: 'folder', command, passed, dirty });
-      return { passed, aborted: false, logPath: result.logPath, dirtyNamed: dirty };
+      // Only a close gates in the folder: its failure's notice is the close's to write, once the
+      // pass has reopened.
+      if (passed) deps.state.write((w) => clearPassNotice(w, pass.id, PASS_GATE_NOTICE));
+      return {
+        passed,
+        aborted: false,
+        logPath: result.logPath,
+        tail: result.tail,
+        dirtyNamed: dirty,
+      };
     }
     const ran = await gateInScratch(deps, {
       batch,
@@ -216,7 +231,7 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
     if (ran.kind === 'aborted') {
       // Held back or stopped: the body says it did not run, not that it is running.
       checked.set(pass.id, { kind: 'scratch', command, sha: i.sha, state: 'not_run' });
-      return { passed: false, aborted: true, logPath: '', dirtyNamed: [] };
+      return { passed: false, aborted: true, logPath: '', tail: '', dirtyNamed: [] };
     }
     const passed = ran.kind === 'ran' && ran.result.exitCode === 0;
     const logPath = ran.kind === 'ran' ? ran.result.logPath : (ran.logPath ?? '');
@@ -228,11 +243,11 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
     });
     deps.state.write((w) => {
       if (passed) {
-        clearPassNotice(w, pass.id, GATE_NOTICE);
+        clearPassNotice(w, pass.id, PASS_GATE_NOTICE);
         return;
       }
       setPassNotice(w, pass.id, {
-        id: GATE_NOTICE,
+        id: PASS_GATE_NOTICE,
         kind: PassNoticeKind.GateFailed,
         text:
           ran.kind === 'ran'
@@ -243,7 +258,8 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
         at: w.now,
       });
     });
-    return { passed, aborted: false, logPath, dirtyNamed: [] };
+    const tail = ran.kind === 'ran' ? ran.result.tail : '';
+    return { passed, aborted: false, logPath, tail, dirtyNamed: [] };
   }
 
   async function pushPassBranch(
