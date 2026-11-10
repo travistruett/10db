@@ -175,6 +175,24 @@ describe('the Start Pass preview', () => {
       },
     },
     {
+      name: 'a folder on a 10db branch no task names',
+      code: 'return_branch',
+      arrange: () => {
+        h.git$('switch', '-q', '-c', '10db/stray-abc123');
+      },
+    },
+    {
+      name: 'a merge in progress',
+      code: 'operation_in_progress',
+      arrange: () => {
+        h.git$('switch', '-q', '-c', 'other');
+        h.commit('src/clash.ts', 'theirs\n');
+        h.git$('switch', '-q', 'main');
+        h.commit('src/clash.ts', 'ours\n');
+        expect(() => h.git$('merge', '--no-edit', 'other')).toThrow();
+      },
+    },
+    {
       name: 'a detached HEAD',
       code: 'detached_head',
       arrange: () => {

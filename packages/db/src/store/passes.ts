@@ -287,6 +287,12 @@ export function renamePass(ctx: WriteContext, passId: PassId, name: string): Pas
     .set({ title: name, updatedAt: ctx.now })
     .where(eq(schema.batches.id, pass.batchId))
     .run();
+  ctx.emit({
+    type: EventType.BatchUpdated,
+    entityType: 'batch',
+    entityId: pass.batchId,
+    data: { title: name },
+  });
   ctx.emit({ type: EventType.PassChanged, entityType: 'pass', entityId: passId, data: { name } });
   return getPass(ctx.tx, passId);
 }

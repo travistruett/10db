@@ -63,6 +63,31 @@ describe("a page's turns", () => {
     ]);
   });
 
+  it("lists only the page's own files when the pass's branch moved between two turns", async () => {
+    w = await openPassWorld();
+    const tip = w.h.git$('rev-parse', 'HEAD');
+    const first = keptCommit(tip, { 'src/settings/page.tsx': 'tidied\n' });
+    kept(w.startTurn(w.settings), first, tip);
+    // Another page lands on the pass's branch, and a shared file changes there too.
+    w.h.commit('src/people/page.tsx', 'people, signed off\n');
+    const moved = w.h.commit('src/shared.ts', 'shared, changed\n');
+    const second = keptCommit(moved, {
+      'src/settings/page.tsx': 'tidied\n',
+      'src/settings/form.tsx': 'form\n',
+    });
+    const turn = w.startTurn(w.settings);
+    kept(turn, second, moved);
+
+    const listed = await taskTurns(
+      { db: w.h.store.db, git: w.h.git, files: createTurnFiles(w.h.git) },
+      w.settings.id,
+    );
+
+    expect(listed.find((t) => t.id === turn.id)?.files).toEqual([
+      { path: 'src/settings/form.tsx', added: 1, removed: 0 },
+    ]);
+  });
+
   it('lists a turn whose kept commit git no longer has with no files', async () => {
     w = await openPassWorld();
     const tip = w.h.git$('rev-parse', 'HEAD');

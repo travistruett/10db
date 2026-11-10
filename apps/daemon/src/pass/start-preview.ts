@@ -20,7 +20,7 @@ import {
   getWorkstreamRow,
   type DbReader,
 } from '@10db/db';
-import { lanesInProjectCheckout } from '../delivery';
+import { lanesInProjectCheckout, returnBranchProblem } from '../delivery';
 import type { Git } from '../git';
 import { classifyPath } from '../guard';
 
@@ -41,7 +41,9 @@ const PassStartRefusal = {
   PassOpen: 'pass_open',
   UnfinishedBatch: 'unfinished_batch',
   LanesInFolder: 'lanes_in_folder',
+  OperationInProgress: 'operation_in_progress',
   DetachedHead: 'detached_head',
+  ReturnBranch: 'return_branch',
 } as const;
 
 /** The first of what refuses the project a pass from its rows, in the order opening checks them. */
@@ -76,6 +78,31 @@ function rowRefusal(db: DbReader, project: ProjectDto): PassStartDto['refusal'] 
       message: `${String(lanes)} task${lanes === 1 ? ' is' : 's are'} running in Your folder; a pass opens once they stop`,
     };
   return null;
+}
+
+/**
+ * What refuses the folder a pass, in the order opening meets it: an operation git left waiting, a
+ * detached HEAD, then a branch the close could not return to (`returnBranchProblem`).
+ */
+async function folderRefusal(
+  deps: PassStartDeps,
+  project: ProjectDto,
+  branch: string | null,
+): Promise<PassStartDto['refusal']> {
+  const busy = await deps.git.operationInProgress(project.repoPath);
+  if (busy !== null)
+    return {
+      code: PassStartRefusal.OperationInProgress,
+      message: `Your folder is in the middle of ${busy.what}; finish it or stop it (${busy.end}) before opening a pass`,
+    };
+  if (branch === null)
+    return {
+      code: PassStartRefusal.DetachedHead,
+      message:
+        "Your folder's HEAD is detached; switch it to a branch (git switch <your branch>) before opening a pass, so its close has a branch to return to",
+    };
+  const stray = returnBranchProblem(deps.db, project, branch);
+  return stray === null ? null : { code: PassStartRefusal.ReturnBranch, message: stray };
 }
 
 /** The page area a changed path counts for: a file under a page is the page's (spec §7.3). */
@@ -141,18 +168,10 @@ export async function passStartPreview(
       heldBy: holderOf(deps.db, project, page.name),
     });
   const branch = await deps.git.currentBranch(project.repoPath);
-  const detached =
-    branch === null
-      ? {
-          code: PassStartRefusal.DetachedHead,
-          message:
-            "Your folder's HEAD is detached; switch it to a branch (git switch <your branch>) before opening a pass, so its close has a branch to return to",
-        }
-      : null;
   return {
     pages: listed,
     otherUncommitted: counts.get(null) ?? 0,
     lacks: await lacksOf(deps, project, branch),
-    refusal: rowRefusal(deps.db, project) ?? detached,
+    refusal: rowRefusal(deps.db, project) ?? (await folderRefusal(deps, project, branch)),
   };
 }

@@ -252,6 +252,8 @@ describe('POST /projects/:projectId/passes with pages', () => {
   it.each<{
     name: string;
     status: number;
+    /** What Start Pass's preview says first, for a refusal that is the folder's, not the request's. */
+    preview?: string;
     arrange: (project: ProjectDto) => Promise<Record<string, unknown>> | Record<string, unknown>;
   }>([
     { name: 'an area that is not a page', status: 400, arrange: () => ({ pages: ['src'] }) },
@@ -287,29 +289,35 @@ describe('POST /projects/:projectId/passes with pages', () => {
     {
       name: 'a folder on a 10db branch no task names, refused in the write',
       status: 409,
+      preview: 'return_branch',
       arrange: () => {
         rawGit('switch', '-q', '-c', '10db/stray-abc123');
         return { pages: ['settings', 'people'] };
       },
     },
-  ])('refuses $name with $status, leaving no task and no pass', async ({ arrange, status }) => {
-    const project = await projectWith(PAGES);
-    const head = rawGit('symbolic-ref', '--short', 'HEAD');
-    const extra = await arrange(project);
-    const branch = rawGit('symbolic-ref', '--short', 'HEAD');
+  ])(
+    'refuses $name with $status, leaving no task and no pass',
+    async ({ arrange, status, preview }) => {
+      const project = await projectWith(PAGES);
+      const head = rawGit('symbolic-ref', '--short', 'HEAD');
+      const extra = await arrange(project);
+      const branch = rawGit('symbolic-ref', '--short', 'HEAD');
+      const start = await api().get(`/projects/${project.id}/pass-start`, PassStartDto);
+      expect(start.refusal?.code ?? null).toBe(preview ?? null);
 
-    const res = await send('POST', `/projects/${project.id}/passes`, {
-      name: 'Polish',
-      taskIds: [],
-      ...extra,
-    });
+      const res = await send('POST', `/projects/${project.id}/passes`, {
+        name: 'Polish',
+        taskIds: [],
+        ...extra,
+      });
 
-    expect(res.status).toBe(status);
-    expect(uiTasks(project)).toEqual([]);
-    expect(daemon.state.db.select().from(schema.passes).all()).toEqual([]);
-    expect(rawGit('symbolic-ref', '--short', 'HEAD')).toBe(branch);
-    expect(head).toBe('main');
-  });
+      expect(res.status).toBe(status);
+      expect(uiTasks(project)).toEqual([]);
+      expect(daemon.state.db.select().from(schema.passes).all()).toEqual([]);
+      expect(rawGit('symbolic-ref', '--short', 'HEAD')).toBe(branch);
+      expect(head).toBe('main');
+    },
+  );
 });
 
 describe('POST /passes/:passId/pages', () => {

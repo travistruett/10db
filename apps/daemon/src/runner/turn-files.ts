@@ -4,6 +4,9 @@ import { latestTurnActivity, type DbReader } from '@10db/db';
 
 // Workbench spec §4.3: the files a pass turn has written so far, for its live line.
 
+/** The most files one activity row carries; a turn that writes more says this many. */
+export const MAX_FILES_TOUCHED = 200;
+
 /**
  * The files a turn has touched once a tool call wrote `written`: those before, then each new one, by
  * its path in the checkout when it is under it, else as it was named. Pure.
@@ -13,8 +16,9 @@ export function filesTouched(
   written: readonly string[],
   checkout: string,
 ): string[] {
-  const touched = [...before];
+  const touched = before.slice(0, MAX_FILES_TOUCHED);
   for (const path of written) {
+    if (touched.length >= MAX_FILES_TOUCHED) break;
     const inside = isAbsolute(path) ? relative(checkout, path) : path;
     const named =
       isAbsolute(path) && (inside.startsWith('..') || isAbsolute(inside)) ? path : inside;

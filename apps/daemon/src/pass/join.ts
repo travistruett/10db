@@ -11,6 +11,7 @@ import {
   type TaskId,
 } from '@10db/contracts';
 import {
+  getBatch,
   getPass,
   getProject,
   getTask,
@@ -68,9 +69,10 @@ function refuseJoin(
 /**
  * Adds a task with no brief for each of `pages`, and the open tasks named, to the open pass: in one
  * write, each joins the pass, gets its run in the pass's batch on the implement step alone, and claims
- * its pages, a page another task holds making it wait with the holder named; and, only when the builder
- * wrote one, each is sent `firstMessage`. Then, still in the job, each task with saved work has it put
- * back. A refusal rejects and joins nothing.
+ * its pages, a page another task holds making it wait with the holder named. Then, still in the job,
+ * each task with saved work has it put back, and only after that, when the builder wrote one, each is
+ * sent `firstMessage`, so no page starts on a folder half put back. Refused while Your folder is off
+ * the pass's branch. A refusal rejects and joins nothing.
  */
 export async function joinPass(
   ctx: DeliveryContext,
@@ -88,6 +90,7 @@ export async function joinPass(
     ctx.jobs.run(jobKey({ projectId: project.id, worktreePath: null }, JobQueue.Cut), async () => {
       let joined: PassJoined;
       try {
+        await refuseOffBranch();
         joined = ctx.state.write((w) => {
           refuseJoin(w.tx, getPass(w.tx, passId), project, tasks, newPages);
           const ids = [...tasks, ...writePageTasks(w, project, newPages)].map((t) => t.id);
@@ -95,9 +98,6 @@ export async function joinPass(
           const leaseExpiresAt = new Date(ctx.clock.now().getTime() + deps.leaseMs).toISOString();
           const all = ids.map((id) => getTask(w.tx, id));
           const waiting = startPassTasks(w, project, pass.batchId, all, leaseExpiresAt);
-          if (input.firstMessage !== null)
-            for (const id of ids)
-              insertBuilderMessage(w, id, { body: input.firstMessage, files: [] });
           return { joined: ids, waiting };
         });
       } catch (error) {
@@ -105,10 +105,58 @@ export async function joinPass(
         return;
       }
       for (const task of tasks) if (getTaskKeptWork(db, task.id) !== null) await putBack(task.id);
+      try {
+        sendFirstMessage(joined);
+      } catch (error) {
+        reject(error instanceof Error ? error : new Error(String(error)));
+        return;
+      }
       ctx.logger.info({ projectId: project.id, passId, joined: joined.joined }, 'pages joined');
       resolve(joined);
     });
   });
+
+  /**
+   * Writes the builder's first message to every page that joined, once the saved work is back: a
+   * message is what lets a page's lane start. The pages are in the pass already, so a write that fails
+   * is refused in words that say so, and the builder sends the message from each page.
+   */
+  function sendFirstMessage(joined: PassJoined): void {
+    const { firstMessage } = input;
+    if (firstMessage === null) return;
+    try {
+      ctx.state.write((w) => {
+        for (const id of joined.joined)
+          insertBuilderMessage(w, id, { body: firstMessage, files: [] });
+      });
+    } catch (error) {
+      const titles = joined.joined.map((id) => getTask(db, id).title).join(', ');
+      ctx.logger.warn(
+        {
+          projectId: project.id,
+          passId,
+          err: error instanceof Error ? error.message : String(error),
+        },
+        'first message of joined pages not written',
+      );
+      throw new ConflictError(
+        `${titles} joined pass "${pass.name}", but the first message was not sent (${error instanceof Error ? error.message : String(error)}); send it from each page`,
+      );
+    }
+  }
+
+  /**
+   * Refuses the join while Your folder is off the pass's branch, as the folder card says it is: a
+   * put-back there would write a page's saved work into another branch's files.
+   */
+  async function refuseOffBranch(): Promise<void> {
+    const branch = getBatch(db, pass.batchId).branch;
+    const head = await ctx.git.currentBranch(project.repoPath);
+    if (branch === null || head === branch) return;
+    throw new ConflictError(
+      `Your folder is on ${head ?? 'a detached HEAD'}, not the branch of pass "${pass.name}" (${branch}); switch it back (git switch ${branch}) to add a page`,
+    );
+  }
 
   /** Puts the task's saved work back; it is in the pass either way, so a failure is logged, not thrown. */
   async function putBack(taskId: TaskId): Promise<void> {

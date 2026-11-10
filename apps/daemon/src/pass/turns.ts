@@ -2,6 +2,7 @@ import {
   ConflictError,
   SessionActivityData,
   type PassFileChange,
+  type PassId,
   type PassTurnDto,
   type PassTurnId,
   type PassTurnWithFilesDto,
@@ -9,16 +10,19 @@ import {
   type TurnActivityDto,
 } from '@10db/contracts';
 import {
+  getBatch,
   getPassTurn,
   getProject,
   getTask,
   listTaskTurns,
+  getWorkstreamRow,
   listTurnActivity,
   markPassTurnOpened,
   type DbReader,
 } from '@10db/db';
 import type { StateStore } from '../events';
 import { GitError, type Git } from '../git';
+import { pageMatcher } from './kept-work';
 
 // Workbench spec §4.3, §11: a page's turns with the files each changed, a turn's log (Show Log), and
 // when the builder first opened a Ready page, which the pass's timing reads.
@@ -64,25 +68,45 @@ function comparedWith(turns: readonly PassTurnDto[], turn: PassTurnDto): string 
 
 /**
  * The task's turns, oldest first, each with the files its kept commit changed against the kept commit
- * before it in the same run (its pass), or the pass branch tip it was kept on. A turn that kept nothing
- * new, or whose commit git no longer has, lists none. Reads only.
+ * before it in the same run (its pass), or the pass branch tip it was kept on: only the task's page
+ * files (`pageMatcher`), since each kept commit is the branch tip of its time with the page laid over
+ * it, and another page or a shared change can land on the branch between two turns. A turn that kept
+ * nothing new, or whose commit git no longer has, lists none. Reads only.
  */
 export async function taskTurns(
   deps: PassTurnsDeps,
   taskId: TaskId,
 ): Promise<PassTurnWithFilesDto[]> {
-  const { repoPath } = getProject(deps.db, getTask(deps.db, taskId).projectId);
+  const task = getTask(deps.db, taskId);
+  const project = getProject(deps.db, task.projectId);
   const turns = listTaskTurns(deps.db, taskId);
+  const matchers = new Map<PassId, (path: string) => boolean>();
+  const pageFileOf = (passId: PassId) => {
+    const known = matchers.get(passId);
+    if (known) return known;
+    const mine = pageMatcher(deps.db, project, task, passId);
+    matchers.set(passId, mine);
+    return mine;
+  };
   const listed: PassTurnWithFilesDto[] = [];
   for (const turn of turns) {
     const from = comparedWith(turns, turn);
+    const passId = passOfRun(deps.db, turn);
     const files =
-      turn.keptSha === null || from === null || from === turn.keptSha
+      turn.keptSha === null || from === null || from === turn.keptSha || passId === null
         ? []
-        : await deps.files(repoPath, from, turn.keptSha);
+        : (await deps.files(project.repoPath, from, turn.keptSha)).filter((f) =>
+            pageFileOf(passId)(f.path),
+          );
     listed.push({ ...turn, files });
   }
   return listed;
+}
+
+/** The pass a turn's run belongs to: a pass task runs only in its pass's batch. */
+function passOfRun(db: DbReader, turn: PassTurnDto): PassId | null {
+  const { batchId } = getWorkstreamRow(db, turn.workstreamId);
+  return batchId === null ? null : (getBatch(db, batchId).passId ?? null);
 }
 
 /** The turn's log, oldest first: what the agent said and each tool it called. */
