@@ -205,40 +205,47 @@ describe('Close Pass', () => {
     expect(getTask(w.h.store.db, w.people.id).passId === null).toBe(takenOut);
   });
 
-  it('lands, at the next close, a shared change chosen Drop when the gate failed before its take-out', async () => {
-    await world({ gateCommand: 'true' });
-    // The gate fails the first time it runs and passes after.
-    const flag = join(w.h.dataDir, 'gate-ran');
-    w.h.state.write((ctx) =>
-      patchProject(ctx, w.h.project.id, {
-        gateCommand: `test -e '${flag}' || { touch '${flag}'; exit 1; }`,
-      }),
-    );
-    await twoTurns();
-    await sharedTurn(w.people, 'src/button.ts');
+  // Two closes, each with a scratch gate: longer than one test's default under a full run's load.
+  it(
+    'lands, at the next close, a shared change chosen Drop when the gate failed before its take-out',
+    {
+      timeout: 120_000,
+    },
+    async () => {
+      await world({ gateCommand: 'true' });
+      // The gate fails the first time it runs and passes after.
+      const flag = join(w.h.dataDir, 'gate-ran');
+      w.h.state.write((ctx) =>
+        patchProject(ctx, w.h.project.id, {
+          gateCommand: `test -e '${flag}' || { touch '${flag}'; exit 1; }`,
+        }),
+      );
+      await twoTurns();
+      await sharedTurn(w.people, 'src/button.ts');
 
-    await confirm(closeDeps(), [], [{ seq: 1, choice: SharedChoiceKind.Drop }]);
-    expect(passState()).toBe('OPEN');
+      await confirm(closeDeps(), [], [{ seq: 1, choice: SharedChoiceKind.Drop }]);
+      expect(passState()).toBe('OPEN');
 
-    // People is signed off at the next close, with its change kept: the change lands before it.
-    const closes = createPassCloses(closeDeps());
-    const shown = await closes.preview(w.opened.pass.id);
-    await closes.close(w.opened.pass.id, {
-      token: shown.token,
-      pages: [{ taskId: w.people.id, choice: PassClosePageChoice.SignOff }],
-      files: [],
-      shared: [],
-    });
-    await w.h.jobs.idle();
+      // People is signed off at the next close, with its change kept: the change lands before it.
+      const closes = createPassCloses(closeDeps());
+      const shown = await closes.preview(w.opened.pass.id);
+      await closes.close(w.opened.pass.id, {
+        token: shown.token,
+        pages: [{ taskId: w.people.id, choice: PassClosePageChoice.SignOff }],
+        files: [],
+        shared: [],
+      });
+      await w.h.jobs.idle();
 
-    expect(passState()).toBe('CLOSED');
-    expect(landed()).toEqual([
-      'Settings: UI work',
-      'Shared change 1 of People: UI work',
-      'People: UI work',
-    ]);
-    expect(w.h.git$('show', `${w.branch}:src/button.ts`)).toBe('People: UI work shared');
-  });
+      expect(passState()).toBe('CLOSED');
+      expect(landed()).toEqual([
+        'Settings: UI work',
+        'Shared change 1 of People: UI work',
+        'People: UI work',
+      ]);
+      expect(w.h.git$('show', `${w.branch}:src/button.ts`)).toBe('People: UI work shared');
+    },
+  );
 
   it('closes by the fast-forward alone with no origin, and settles at once', async () => {
     await world({ gateCommand: null });
