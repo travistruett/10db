@@ -162,7 +162,10 @@ describe('ClosePassModal', () => {
     ]);
     const onClose = draw(view);
     const dialog = await screen.findByRole('dialog', { name: 'Close Pass' });
-    await within(dialog).findByRole('group', { name: 'Billing' });
+    const billing = await within(dialog).findByRole('group', { name: 'Billing' });
+    // Choices made before the lists changed carry over to the lists shown again.
+    await choose(dialog, 'Settings', 'Sign Off Now');
+    fireEvent.click(within(billing).getByRole('radio', { name: 'Drop' }));
     fireEvent.click(within(dialog).getByRole('button', { name: 'Close Pass' }));
     // Said beside Close Pass, where the second click lands, and announced.
     const alert = within(dialog).getByRole('alert');
@@ -177,10 +180,18 @@ describe('ClosePassModal', () => {
     await waitFor(() => {
       expect(sent.map((s) => s.body.token)).toEqual(['lists-1', 'lists-2']);
     });
-    expect(sent[1]?.body.files).toEqual([
-      { path: 'src/app.css', placeIn: null },
-      { path: 'src/new.css', placeIn: null },
-    ]);
+    expect(sent[1]?.body).toEqual({
+      token: 'lists-2',
+      pages: [
+        { taskId: working.taskId, choice: 'take_out' },
+        { taskId: ready.taskId, choice: 'sign_off' },
+      ],
+      files: [
+        { path: 'src/app.css', placeIn: null },
+        { path: 'src/new.css', placeIn: null },
+      ],
+      shared: [{ seq: 3, choice: 'drop' }],
+    });
   });
 
   it('opened again, never shows the lists an earlier opening read', async () => {
