@@ -704,7 +704,16 @@ describe("a pass task's warm session", () => {
     );
   });
 
-  it('stays open when a message arrives as the idle close decides', async () => {
+  it.each([
+    {
+      name: 'the message is kept first: the session stays open and takes it',
+      messageFirst: true,
+    },
+    {
+      name: 'the close decides first: the session closes, and the message resumes it',
+      messageFirst: false,
+    },
+  ])('a message as the idle close decides, $name', async ({ messageFirst }) => {
     const { task, id } = await openPage([
       [
         ...turn('one\n', 'Tidied the form.'),
@@ -712,17 +721,33 @@ describe("a pass task's warm session", () => {
         ...turn('two\n', 'Made it bigger.'),
         { do: 'await_message', contains: 'never sent' },
       ],
+      [...turn('two\n', 'Made it bigger.'), { do: 'await_message', contains: 'never sent' }],
     ]);
     await waitFor(isReady(id, 1));
-    // The message is kept before it is handed over; the idle close decides in between.
-    const message = engine.state.write((ctx) =>
-      insertBuilderMessage(ctx, task.id, { body: 'Bigger please', files: [] }),
-    );
-    await engine.runner.closeWarm(id);
-    expect(engine.runner.isRunning(id)).toBe(true);
-    await engine.runner.deliverMessage(task.id, message.id, { redo: false });
+    const keep = () =>
+      engine.state.write((ctx) =>
+        insertBuilderMessage(ctx, task.id, { body: 'Bigger please', files: [] }),
+      );
+    // The close decides in one write as it is called; the message is kept before it is handed over.
+    const message = messageFirst ? keep() : null;
+    const closing = engine.runner.closeWarm(id);
+    const kept = message ?? keep();
+    await engine.runner.deliverMessage(task.id, kept.id, { redo: false });
+    await closing;
+
+    if (messageFirst) {
+      expect(engine.runner.isRunning(id)).toBe(true);
+    } else {
+      expect(engine.runner.isRunning(id)).toBe(false);
+      expect(row(id)).toMatchObject({
+        state: 'QUEUED',
+        nextAction: { kind: 'feedback', messageId: kept.id },
+      });
+      expect(readyItems().map((i) => i.state)).toEqual(['CANCELLED']);
+      engine.launch(id);
+    }
     await waitFor(isReady(id, 2));
-    expect(engine.adapter.prompts).toHaveLength(1);
+    expect(engine.adapter.prompts).toHaveLength(messageFirst ? 1 : 2);
   });
 });
 
