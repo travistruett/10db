@@ -30,6 +30,10 @@ export class FakeCamera implements PageCamera {
   get holding(): boolean {
     return this.held !== null;
   }
+  /** The browser's build was refused, saying why. */
+  refuse(problem: string): void {
+    this.browser = { state: 'refused', problem };
+  }
   fetching(): () => void {
     let done: (ok: boolean) => void = () => undefined;
     const ready = new Promise<boolean>((resolve) => {

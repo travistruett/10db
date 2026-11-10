@@ -354,6 +354,30 @@ describe('the before rule', () => {
   });
 });
 
+describe('a refused browser', () => {
+  it('tries the fetch again on the next ask after a while, and when a pass opens', async () => {
+    await world();
+    cam.refuse('the download failed');
+    start();
+    expect(prepared).toBe(1);
+    readyTurn(w.settings, 'a'.repeat(40));
+    expect(prepared).toBe(1);
+    clock.advance(10 * 60_000);
+    readyTurn(w.settings, 'b'.repeat(40));
+    expect(prepared).toBe(2);
+    w.h.state.write((ctx) => {
+      ctx.emit({
+        type: EventType.PassOpened,
+        entityType: 'pass',
+        entityId: w.opened.pass.id,
+        data: { projectId: w.h.project.id, batchId: w.opened.batch.id },
+      });
+    });
+    expect(prepared).toBe(3);
+    expect(cam.shots).toEqual([]);
+  });
+});
+
 describe('signing in', () => {
   it('signs in again once when a page lands elsewhere, and says so once per task', async () => {
     await world({ devLoginCommand: 'echo /api/auth/dev-login/tok/' });

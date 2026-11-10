@@ -67,6 +67,9 @@ import { forgetStorageState, readStorageState, type StorageState } from './stora
 /** The longest a task's first launch waits for its before. */
 const BEFORE_WAIT_MS = 20_000;
 
+/** How long a refused browser fetch rests before the next ask tries it again. */
+const FETCH_RETRY_MS = 10 * 60_000;
+
 /** How far back start-up looks for a finished Your-folder task whose after was missed. */
 const MISSED_AFTER_MS = 60 * 60_000;
 
@@ -168,7 +171,23 @@ export function startPictures(deps: PicturesDeps): Pictures {
     }
   }
 
+  /** When the browser's fetch was last asked for, by the clock. */
+  let preparedAt: number | null = null;
+
+  function prepareBrowser(): void {
+    preparedAt = deps.clock.now().getTime();
+    deps.prepareBrowser();
+  }
+
+  /** A refused fetch is tried again once it has rested, or at once when a pass opens. */
+  function retryRefusedFetch(now: boolean): void {
+    if (deps.camera.status().state !== BrowserState.Refused) return;
+    const rested = preparedAt === null || deps.clock.now().getTime() - preparedAt >= FETCH_RETRY_MS;
+    if (now || rested) prepareBrowser();
+  }
+
   function ask(request: CaptureRequest): void {
+    retryRefusedFetch(false);
     syncBrowser();
     apply({ kind: 'ask', request });
     pump();
@@ -437,7 +456,7 @@ export function startPictures(deps: PicturesDeps): Pictures {
       forgetStorageState(deps.dataDir, projectId);
     if (was === project.appUrl) return;
     if (was !== null) apply({ kind: 'app_changed', projectId });
-    if (project.appUrl !== null) deps.prepareBrowser();
+    if (project.appUrl !== null) prepareBrowser();
     pump();
   }
 
@@ -448,7 +467,12 @@ export function startPictures(deps: PicturesDeps): Pictures {
 
   /** What each event the pictures follow means for the queue. */
   const handlers: Partial<Record<EventType, (event: DaemonEvent) => void>> = {
-    [EventType.PassOpened]: onPass,
+    [EventType.PassOpened]: (event) => {
+      const projectId = ProjectId.safeParse(event.data['projectId']);
+      if (projectId.success && getProject(db, projectId.data).appUrl !== null)
+        retryRefusedFetch(true);
+      onPass(event);
+    },
     [EventType.PassChanged]: onPass,
     [EventType.PassTurnStarted]: (event) => {
       const taskId = TaskId.safeParse(event.data['taskId']);
@@ -506,7 +530,7 @@ export function startPictures(deps: PicturesDeps): Pictures {
     appUrls.set(project.id, project.appUrl);
     devLogins.set(project.id, project.devLoginCommand);
   }
-  if (projects.some((p) => p.appUrl !== null)) deps.prepareBrowser();
+  if (projects.some((p) => p.appUrl !== null)) prepareBrowser();
   syncBrowser();
   // A pass a restart finds closing or being abandoned holds its afters back, as it did before.
   for (const pass of listLivePasses(db)) {
