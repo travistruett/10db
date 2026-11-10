@@ -34,6 +34,7 @@ const COLOR: Readonly<Record<PassNoticeKind, 'red' | 'yellow'>> = {
   [PassNoticeKind.Finding]: 'yellow',
   [PassNoticeKind.StackUnmerged]: 'yellow',
   [PassNoticeKind.StackMerged]: 'yellow',
+  [PassNoticeKind.Preview]: 'yellow',
 };
 
 /** The open Retarget card a notice names, with the base it retargets to; null without one. */

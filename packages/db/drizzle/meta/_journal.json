@@ -414,6 +414,13 @@
       "when": 1794343618650,
       "tag": "0058_common_vindicator",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "6",
+      "when": 1794348362068,
+      "tag": "0059_mean_rogue",
+      "breakpoints": true
     }
   ]
 }

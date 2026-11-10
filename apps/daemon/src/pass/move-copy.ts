@@ -112,6 +112,7 @@ export function askMoveToCopy(
     taskId: input.taskId,
     workstreamId: input.workstreamId,
     hazard: input.hazard,
+    route: null,
   };
   const card = flagCard(ctx, {
     projectId: input.pass.projectId,
@@ -160,7 +161,7 @@ export async function answerMoveToCopy(
   // The detail is JSON read back from the database: a boundary, so parse it.
   const detail = PassMoveToCopyDetail.safeParse(item.detail);
   if (!detail.success || answer.choice !== PASS_MOVE_TO_COPY_CHOICE) return;
-  const { taskId, workstreamId, hazard } = detail.data;
+  const { taskId, workstreamId, hazard, route } = detail.data;
   const db = deps.state.db;
   const task = getTask(db, taskId);
   if (passHoldingTask(db, task)?.id !== detail.data.passId || task.workstreamId !== workstreamId)
@@ -171,7 +172,8 @@ export async function answerMoveToCopy(
     deps.state.write((ctx) => {
       placeTaskByRule(ctx, taskId, {
         workspaceMode: WorkspaceMode.Worktree,
-        reason: `touches ${hazard}`,
+        reason:
+          hazard === null ? `broke the preview of ${route ?? 'its page'}` : `touches ${hazard}`,
       });
     });
     deps.startInCopy(taskId);

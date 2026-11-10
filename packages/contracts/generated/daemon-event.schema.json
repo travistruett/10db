@@ -29,6 +29,8 @@
         "pass.page_signed_off",
         "pass.closed",
         "pass.settled",
+        "pass.preview_broken",
+        "pass.preview_mended",
         "workstream.created",
         "workstream.changed",
         "session.started",

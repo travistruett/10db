@@ -18,6 +18,7 @@ import { PassTurnActivity } from './pass-activity';
 import { GitObjectName } from './git-names';
 import { PassHoldDto, PassSharedChangeDto } from './pass-shared';
 import { PullRequestState, WorkstreamState } from './states';
+import { PageRoute } from './task-screens';
 import { TASK_MESSAGE_MAX_CHARS } from './task-thread';
 
 // Workbench spec docs/superpowers/specs/2026-11-09-10db-workbench-design.md §5, §11. A pass is the
@@ -230,6 +231,23 @@ export const PassSignOff = {
 } as const;
 export type PassSignOff = (typeof PassSignOff)[keyof typeof PassSignOff];
 
+/**
+ * Whether the pass's preview loaded cleanly last (spec §8.2): `clean`, `broken`, or null before any
+ * page load of the pass was judged.
+ */
+export const PassPreview = { Clean: 'clean', Broken: 'broken' } as const;
+export type PassPreview = (typeof PassPreview)[keyof typeof PassPreview];
+
+/** The preview a page broke (spec §8.2): its route, what the error overlay said, since when, and on how many turns running. */
+export const PassPagePreview = z.object({
+  route: PageRoute,
+  /** The dev server's error overlay's text; null when the document itself failed to load. */
+  overlay: z.string().nullable(),
+  since: Timestamp,
+  turns: z.int().min(1),
+});
+export type PassPagePreview = z.infer<typeof PassPagePreview>;
+
 /** One page of a pass as the Workbench's queue shows it. */
 export const PassPageDto = z.object({
   taskId: TaskId,
@@ -268,6 +286,8 @@ export const PassPageDto = z.object({
   signOff: z.enum(PassSignOff),
   /** The page whose turn a waiting sign-off waits for; null unless `signOff` is `waiting`. */
   waitsFor: z.object({ taskId: TaskId, title: z.string() }).nullable(),
+  /** The preview this page's turns broke and have not mended; null when it broke none. */
+  preview: PassPagePreview.nullable(),
 });
 export type PassPageDto = z.infer<typeof PassPageDto>;
 
@@ -326,6 +346,8 @@ export const PassNoticeKind = {
   Close: 'close',
   /** The changed-files check after a page's turn failed, or could not run (spec §8.1). */
   TurnCheck: 'turn_check',
+  /** The preview is broken and no turn of the pass is named for it (spec §8.2). */
+  Preview: 'preview',
 } as const;
 export type PassNoticeKind = (typeof PassNoticeKind)[keyof typeof PassNoticeKind];
 
@@ -389,6 +411,8 @@ export type PassChecksView = z.infer<typeof PassChecksView>;
 export const PassViewDto = z.object({
   pass: PassDto,
   pages: z.array(PassPageDto),
+  /** How the pass's preview loaded last; while it is broken, a working page reads "changing". */
+  preview: z.enum(PassPreview).nullable(),
   turns: z.array(PassTurnTimingDto),
   holds: z.array(PassHoldDto),
   sharedChanges: z.array(PassSharedChangeDto),

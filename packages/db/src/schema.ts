@@ -53,11 +53,14 @@ import type {
   PassCloseRequest,
   PassId,
   PassNotice,
+  PassPreview,
+  PassPreviewMarkId,
   PassState,
   PassTurnCheck,
   PassTurnEnding,
   PassTurnId,
   TakeOutStep,
+  TaskPageReportId,
   PatternId,
   PatternMatch,
   ModelProfileId,
@@ -1651,6 +1654,8 @@ export const passes = sqliteTable(
     /** The process group of the changed-files check running after a turn, and its start time. */
     checkPid: integer('check_pid'),
     checkPidStart: text('check_pid_start'),
+    /** How the pass's last judged page load went (spec §8.2); null before any. */
+    preview: text('preview').$type<PassPreview>(),
     openedAt: text('opened_at').notNull(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -1908,4 +1913,73 @@ export const taskScreens = sqliteTable(
     index('task_screens_task_idx').on(t.taskId, t.createdAt),
     index('task_screens_sha_idx').on(t.sha256),
   ],
+);
+
+/**
+ * A page whose turn broke the pass's preview (Workbench spec §8.2, §11): the route it loaded, what the
+ * error overlay said, the turn that broke it, how many turns running it stayed broken, the Move card it
+ * raised and the thread notice that offers it to the agent. One open mark per pass and page; a turn of
+ * the page that loads cleanly mends it.
+ */
+export const passPreviewMarks = sqliteTable(
+  'pass_preview_marks',
+  {
+    id: text('id').$type<PassPreviewMarkId>().primaryKey(),
+    passId: text('pass_id')
+      .$type<PassId>()
+      .notNull()
+      .references(() => passes.id),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .notNull()
+      .references(() => tasks.id),
+    route: text('route').notNull(),
+    turnId: text('turn_id')
+      .$type<PassTurnId>()
+      .notNull()
+      .references(() => passTurns.id),
+    /** The error overlay's text; null when the document itself failed to load. */
+    overlay: text('overlay'),
+    brokenAt: text('broken_at').notNull(),
+    turns: integer('turns').notNull().default(1),
+    mendedAt: text('mended_at'),
+    cardId: text('card_id')
+      .$type<InboxItemId>()
+      .references(() => inboxItems.id),
+    noticeId: text('notice_id')
+      .$type<TaskMessageId>()
+      .references(() => taskMessages.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex('pass_preview_marks_one_open')
+      .on(t.passId, t.taskId)
+      .where(sql`mended_at IS NULL`),
+  ],
+);
+
+/**
+ * A route an agent named with `report_pages` (Workbench spec §10), kept for the pictures of its turn
+ * (a pass page) or its run (a task outside a pass). A record, written once.
+ */
+export const taskPageReports = sqliteTable(
+  'task_page_reports',
+  {
+    id: text('id').$type<TaskPageReportId>().primaryKey(),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .notNull()
+      .references(() => tasks.id),
+    workstreamId: text('workstream_id')
+      .$type<WorkstreamId>()
+      .notNull()
+      .references(() => workstreams.id),
+    turnId: text('turn_id')
+      .$type<PassTurnId>()
+      .references(() => passTurns.id),
+    route: text('route').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index('task_page_reports_task_idx').on(t.taskId, t.workstreamId)],
 );

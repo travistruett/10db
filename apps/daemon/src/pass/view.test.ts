@@ -177,6 +177,7 @@ describe('the view of a pass', () => {
       failure: null,
       signOff: 'none',
       waitsFor: null,
+      preview: null,
     });
     expect(readyPage).toMatchObject({
       area: 'people',

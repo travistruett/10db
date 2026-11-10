@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { GitObjectName } from './git-names';
 import { PassId, TaskId } from './ids';
 import { SharedSeq } from './pass-shared';
+import { PageRoute } from './task-screens';
 
 // Workbench spec docs/superpowers/specs/2026-11-09-10db-workbench-design.md §7.2, §9.2, §5.4: the
 // `data` of the pass events the Workbench follows, beside `pass.changed`.
@@ -36,3 +37,11 @@ export type PassSettledHow = (typeof PassSettledHow)[keyof typeof PassSettledHow
 /** `pass.settled`. */
 export const PassSettledData = z.object({ passId: PassId, how: z.enum(PassSettledHow) });
 export type PassSettledData = z.infer<typeof PassSettledData>;
+
+/** `pass.preview_broken`: a page's turn loaded its route broken after a clean load (spec §8.2). */
+export const PassPreviewBrokenData = z.object({ passId: PassId, taskId: TaskId, route: PageRoute });
+export type PassPreviewBrokenData = z.infer<typeof PassPreviewBrokenData>;
+
+/** `pass.preview_mended`: the page that broke the preview loaded it cleanly. */
+export const PassPreviewMendedData = z.object({ passId: PassId, taskId: TaskId });
+export type PassPreviewMendedData = z.infer<typeof PassPreviewMendedData>;

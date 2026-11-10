@@ -53,6 +53,8 @@ const ID_SCHEMAS = {
   Pass: idSchema('pas', 'PassId'),
   PassTurn: idSchema('ptn', 'PassTurnId'),
   TaskScreen: idSchema('tsc', 'TaskScreenId'),
+  PassPreviewMark: idSchema('ppm', 'PassPreviewMarkId'),
+  TaskPageReport: idSchema('tpr', 'TaskPageReportId'),
 } as const;
 
 const ID_PREFIX = {
@@ -97,6 +99,8 @@ const ID_PREFIX = {
   Pass: 'pas',
   PassTurn: 'ptn',
   TaskScreen: 'tsc',
+  PassPreviewMark: 'ppm',
+  TaskPageReport: 'tpr',
 } as const satisfies Record<keyof typeof ID_SCHEMAS, string>;
 
 export type IdKind = keyof typeof ID_SCHEMAS;
@@ -203,5 +207,9 @@ export const PassTurnId = ID_SCHEMAS.PassTurn;
 export type PassTurnId = IdOf<'PassTurn'>;
 export const TaskScreenId = ID_SCHEMAS.TaskScreen;
 export type TaskScreenId = IdOf<'TaskScreen'>;
+export const PassPreviewMarkId = ID_SCHEMAS.PassPreviewMark;
+export type PassPreviewMarkId = IdOf<'PassPreviewMark'>;
+export const TaskPageReportId = ID_SCHEMAS.TaskPageReport;
+export type TaskPageReportId = IdOf<'TaskPageReport'>;
 export const AccountId = ID_SCHEMAS.Account;
 export type AccountId = IdOf<'Account'>;

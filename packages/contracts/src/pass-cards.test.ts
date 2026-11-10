@@ -65,13 +65,14 @@ describe("a pass card's detail", () => {
       },
     },
     {
-      name: 'Move to a Separate Copy',
+      name: 'Move to a Separate Copy for a broken preview',
       detail: {
         kind: 'pass_move_to_copy',
         passId,
         taskId,
         workstreamId: mintId('Workstream'),
-        hazard: 'migrations',
+        hazard: null,
+        route: '/settings',
       },
     },
     {
@@ -86,6 +87,33 @@ describe("a pass card's detail", () => {
     },
   ])('reads $name', ({ detail }) => {
     expect(PassCardDetail.parse(detail)).toEqual(detail);
+  });
+
+  it('reads a Move card stored before a broken preview could raise one, naming its hazard alone', () => {
+    const stored = {
+      kind: 'pass_move_to_copy',
+      passId,
+      taskId,
+      workstreamId: mintId('Workstream'),
+      hazard: 'migrations',
+    };
+    expect(PassCardDetail.parse(stored)).toEqual({ ...stored, route: null });
+  });
+
+  it.each([
+    { name: 'neither a hazard nor a route', hazard: null, route: null },
+    { name: 'both a hazard and a route', hazard: 'deps', route: '/settings' },
+    { name: 'a route off the app', hazard: null, route: '//elsewhere.test/x' },
+  ])('refuses a Move card naming $name', ({ hazard, route }) => {
+    const detail = {
+      kind: 'pass_move_to_copy',
+      passId,
+      taskId,
+      workstreamId: mintId('Workstream'),
+      hazard,
+      route,
+    };
+    expect(PassCardDetail.safeParse(detail).success).toBe(false);
   });
 
   it('refuses a kind no pass card has, and a known kind missing its pass', () => {

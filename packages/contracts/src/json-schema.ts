@@ -42,6 +42,8 @@ import {
 import {
   PassClosedData,
   PassPageSignedOffData,
+  PassPreviewBrokenData,
+  PassPreviewMendedData,
   PassSettledData,
   PassSharedChangedData,
 } from './pass-events';
@@ -402,6 +404,8 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'pass-page-signed-off-data': PassPageSignedOffData,
   'pass-closed-data': PassClosedData,
   'pass-settled-data': PassSettledData,
+  'pass-preview-broken-data': PassPreviewBrokenData,
+  'pass-preview-mended-data': PassPreviewMendedData,
   ...mcpSchemas,
   ...builderMcpSchemas,
   ...shapeMcpSchemas,

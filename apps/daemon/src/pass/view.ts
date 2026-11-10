@@ -22,6 +22,7 @@ import {
   getInboxItem,
   getPass,
   getPassChecks,
+  getPassPreview,
   getPassProgress,
   getPassPullRequest,
   getProject,
@@ -34,6 +35,7 @@ import {
   listSignOffWaits,
   listTaskThreadRows,
   openHolds,
+  openPreviewMark,
   type DbReader,
 } from '@10db/db';
 import { signingOff } from './sign-off';
@@ -136,7 +138,16 @@ function pageView(
       run,
       waits.find((w) => w.taskId === task.id),
     ),
+    preview: previewOf(db, pass, task),
   };
+}
+
+/** The preview the page's turns broke and have not mended (spec §8.2); null when none. */
+function previewOf(db: DbReader, pass: PassDto, task: TaskDto): PassPageDto['preview'] {
+  const mark = openPreviewMark(db, pass.id, task.id);
+  return mark === undefined
+    ? null
+    : { route: mark.route, overlay: mark.overlay, since: mark.brokenAt, turns: mark.turns };
 }
 
 /**
@@ -152,6 +163,7 @@ export function passView(db: DbReader, passId: PassId): PassViewDto {
   return {
     pass,
     pages: listPassTasks(db, passId).map((task) => pageView(db, pass, areas, turns, waits, task)),
+    preview: getPassPreview(db, passId),
     turns: turns.map((t) => ({
       taskId: t.taskId,
       seq: t.seq,

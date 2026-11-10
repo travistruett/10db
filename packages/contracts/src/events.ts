@@ -36,6 +36,10 @@ export const EventType = {
   PassClosed: 'pass.closed',
   /** A closed pass settled: its work is in the base, or the folder moved on (`PassSettledData`). */
   PassSettled: 'pass.settled',
+  /** A page's turn broke the pass's preview (`PassPreviewBrokenData`). */
+  PassPreviewBroken: 'pass.preview_broken',
+  /** A turn of the page that broke the preview loaded it cleanly (`PassPreviewMendedData`). */
+  PassPreviewMended: 'pass.preview_mended',
   WorkstreamCreated: 'workstream.created',
   WorkstreamChanged: 'workstream.changed',
   SessionStarted: 'session.started',

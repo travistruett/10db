@@ -99,6 +99,7 @@ export function passPageDto(overrides: Partial<PassPageDto> = {}): PassPageDto {
     failure: null,
     signOff: 'none',
     waitsFor: null,
+    preview: null,
     ...overrides,
   });
 }
@@ -275,6 +276,7 @@ export function passViewDto(
   return PassViewDto.parse({
     pass: passDto(overrides.pass),
     pages,
+    preview: null,
     turns,
     holds: [],
     sharedChanges: [],

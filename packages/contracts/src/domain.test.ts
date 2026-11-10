@@ -522,8 +522,10 @@ describe("a pass's turns and view", () => {
           failure: null,
           signOff: 'none',
           waitsFor: null,
+          preview: null,
         },
       ],
+      preview: null,
       turns: [],
       holds: [],
       sharedChanges: [],
@@ -560,6 +562,7 @@ describe("a pass's turns and view", () => {
       failure: null,
       signOff: 'waiting',
       waitsFor: { taskId: people, title: 'People' },
+      preview: null,
     };
     const view = {
       pass: {
@@ -576,6 +579,7 @@ describe("a pass's turns and view", () => {
         updatedAt: at,
       },
       pages: [page],
+      preview: null,
       turns: [],
       holds: [
         {

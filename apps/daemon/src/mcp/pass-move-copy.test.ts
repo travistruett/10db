@@ -101,6 +101,7 @@ describe('a pass lane asking for the deps hazard', () => {
       taskId: w.settings.id,
       workstreamId: w.runOf(w.settings),
       hazard: 'deps',
+      route: null,
     });
     expect(card.options.map((o) => o.label)).toEqual([
       PASS_MOVE_TO_COPY_CHOICE,

@@ -125,7 +125,7 @@ describe("a pass lane's activity and turns", () => {
     ).toBe(false);
   });
 
-  it('reads a page whose turn says what the agent is doing now', () => {
+  it('reads a page whose turn says what the agent is doing now, and the preview it broke', () => {
     const view = {
       pass: {
         id: mintId('Pass'),
@@ -167,8 +167,10 @@ describe("a pass lane's activity and turns", () => {
           failure: null,
           signOff: 'none',
           waitsFor: null,
+          preview: { route: '/settings', overlay: 'Module not found', since: AT, turns: 2 },
         },
       ],
+      preview: 'broken',
       turns: [],
       holds: [],
       sharedChanges: [],
@@ -186,9 +188,18 @@ describe("a pass lane's activity and turns", () => {
           cardId: null,
           at: AT,
         },
+        {
+          id: 'preview',
+          kind: 'preview',
+          text: 'The preview of `/people` is broken and no turn is named',
+          sendable: false,
+          cardId: null,
+          at: AT,
+        },
       ],
     };
     expect(PassViewDto.parse(view)).toEqual(view);
+    expect(PassViewDto.safeParse({ ...view, preview: 'half' }).success).toBe(false);
   });
 
   it("reads a task's turns with their files, and a turn's activity for Show Log", () => {
