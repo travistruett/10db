@@ -1,4 +1,12 @@
-import { closeSync, mkdirSync, openSync, readFileSync, rmSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import {
   PageRoute,
@@ -132,4 +140,20 @@ export async function signIn(
   }
   writeStorageState(deps.dataDir, project.id, state);
   return { ok: true, state };
+}
+
+/** At start-up: removes the dev login logs a stopped daemon left; they hold sign-in tokens. */
+export function sweepLoginLogs(dataDir: string): number {
+  const root = join(dataDir, 'browser');
+  if (!existsSync(root)) return 0;
+  let removed = 0;
+  for (const project of readdirSync(root, { withFileTypes: true })) {
+    if (!project.isDirectory()) continue;
+    for (const name of readdirSync(join(root, project.name)))
+      if (/^login-\d+\.log$/.test(name)) {
+        rmSync(join(root, project.name, name), { force: true });
+        removed += 1;
+      }
+  }
+  return removed;
 }

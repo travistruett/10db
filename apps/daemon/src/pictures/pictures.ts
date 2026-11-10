@@ -54,7 +54,7 @@ import type { PageCamera, Shot } from './camera';
 import { CAPTURE_IDLE, captureStep, type CaptureEvent, type CaptureRequest } from './capture-queue';
 import { keepScreen, sweepPictureTemps, type ScreenToKeep } from './picture-files';
 import { pictureRoutes, takesPictures, turnChangedSomething } from './picture-routes';
-import { signIn, type SignInDeps, type SignInProject } from './sign-in';
+import { signIn, sweepLoginLogs, type SignInDeps, type SignInProject } from './sign-in';
 import { readStorageState, type StorageState } from './storage-state';
 
 // Workbench spec docs/superpowers/specs/2026-11-09-10db-workbench-design.md §10, §12: the pictures of a
@@ -445,6 +445,8 @@ export function startPictures(deps: PicturesDeps): Pictures {
   // states as they stand; befores for open pages that have none; afters missed in the last hour.
   const swept = sweepPictureTemps(deps.dataDir);
   if (swept > 0) log.info({ removed: swept }, 'removed pictures a stopped write left half written');
+  const logs = sweepLoginLogs(deps.dataDir);
+  if (logs > 0) log.info({ removed: logs }, 'removed dev login logs a stopped daemon left');
   const projects = listProjects(db);
   for (const project of projects) appUrls.set(project.id, project.appUrl);
   if (projects.some((p) => p.appUrl !== null)) deps.prepareBrowser();

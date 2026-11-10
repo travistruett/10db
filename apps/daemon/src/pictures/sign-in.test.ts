@@ -6,7 +6,7 @@ import { tempDir, type TempDir } from '../../test/fixtures';
 import { silentLogger } from '../log';
 import { createGateRunner, type GateRequest, type GateRunner } from '../verify';
 import type { PageCamera } from './camera';
-import { devLoginProblem, parseLoginUrl, signIn, type SignInDeps } from './sign-in';
+import { devLoginProblem, parseLoginUrl, signIn, sweepLoginLogs, type SignInDeps } from './sign-in';
 import { readStorageState } from './storage-state';
 
 // Workbench spec §10, §13; plan B3: the dev login runs under the gate's runner with no project id, so
@@ -213,6 +213,16 @@ describe('signIn', () => {
     expect(result.ok).toBe(false);
     expect(JSON.stringify(result)).not.toContain('tok-123');
     expect(readdirSync(join(dir.path, 'browser', projectId))).toEqual([]);
+  });
+
+  it("removes a dev login's log a stopped daemon left, and keeps the state", () => {
+    const at = join(dir.path, 'browser', projectId);
+    mkdirSync(at, { recursive: true });
+    writeFileSync(join(at, 'login-1700000000000.log'), `${TOKEN_URL}\n`);
+    writeFileSync(join(at, 'state.json'), JSON.stringify(STATE));
+    expect(sweepLoginLogs(dir.path)).toBe(1);
+    expect(readdirSync(at)).toEqual(['state.json']);
+    expect(sweepLoginLogs(join(dir.path, 'none'))).toBe(0);
   });
 
   it('reads a stored state back, and no state from a file that is not one', () => {
