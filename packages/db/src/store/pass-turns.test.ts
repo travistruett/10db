@@ -172,6 +172,20 @@ describe('opening a Ready page', () => {
   });
 });
 
+describe('opening a page already answered', () => {
+  it('leaves a Ready turn the builder has written to unopened: the answer came first', () => {
+    const turn = startTurn().value;
+    store.write((ctx) => endPassTurn(ctx, turn.id, { ending: 'ready', replyBody: null }));
+    store.write((ctx) => settlePassTurn(ctx, turn.id));
+    store.write((ctx) => {
+      markPassTurnAnswered(ctx, turn.id);
+    });
+
+    expect(store.write((ctx) => markPassTurnOpened(ctx, turn.id)).value).toBe(false);
+    expect(listTaskTurns(store.db, taskId)[0]?.openedAt).toBeNull();
+  });
+});
+
 describe("a pass task's turns", () => {
   it('ends a turn and writes its reply in one write, keeps its work, and settles it: a restart between finds it', () => {
     const { value: turn, events: started } = startTurn();

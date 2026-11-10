@@ -206,7 +206,8 @@ export function markPassTurnAnswered(ctx: WriteContext, id: PassTurnId): void {
 
 /**
  * Notes when the builder first opened the turn's page once it was Ready, with a `pass.changed`; true
- * when it did. A turn not Ready yet, or opened already, is left as it is.
+ * when it did. A turn not Ready yet, opened already, or answered already (an open after the answer is
+ * no first look) is left as it is.
  */
 export function markPassTurnOpened(ctx: WriteContext, id: PassTurnId): boolean {
   getPassTurn(ctx.tx, id);
@@ -218,6 +219,7 @@ export function markPassTurnOpened(ctx: WriteContext, id: PassTurnId): boolean {
         eq(schema.passTurns.id, id),
         isNotNull(schema.passTurns.readyAt),
         isNull(schema.passTurns.openedAt),
+        isNull(schema.passTurns.answeredAt),
       ),
     )
     .run();
