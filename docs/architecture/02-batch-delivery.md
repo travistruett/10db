@@ -61,19 +61,27 @@ far, with no route that opens a pass yet:
   workstream in the batch and claims its pages (and areas with no role) through `acquireClaims`; a page another
   task holds leaves that task waiting with a notice naming the holder. Refused, with nothing written: a project
   with no page area, a task naming none, two tasks holding one area or overlapping pages, more tasks than the
-  page cap, a parked, running or finished task, a second open pass, an unfinished batch or a running lane in
-  Your folder, and a detached HEAD. A start that slips in while git works is refused by the pass's write, and
-  the branch and the dirt ref are taken back (`Git.undoPassBranch`).
-- **Never shipped by the built rules.** The ship trigger and startup's `checkOpenBatches` skip it, and Ship,
-  Ship anyway and Ship without it refuse it: only the pass's close ships it. Each rule is keyed on `pass_id`,
+  page cap, a parked, running or finished task or one a pass still holds, a second open pass, an unfinished
+  batch or a running lane in Your folder, a merge, cherry-pick, revert, rebase or `git am` in progress, a
+  detached HEAD, and a HEAD on a batch's branch or on a `10db/` branch no task names (an abandoned pass's
+  branch excepted). A start that slips in while git works, or such a HEAD, is refused by the pass's write, and
+  the branch and the dirt ref are taken back (`Git.undoPassBranch`). A nested repository is no part of the
+  dirt. A pass the daemon stopped opening before its write is taken back at start-up from its dirt commit's
+  trailers (`delivery/pass-recover.ts`) while nothing was built on it, else carded.
+- **Never shipped or abandoned by the built rules.** The ship trigger and startup's `checkOpenBatches` skip it,
+  Ship, Ship anyway, Ship without it and Abandon refuse it, and start-up's batch recovery leaves it to its
+  pass: only the pass's close ships it and only its own Abandon ends it. Each rule is keyed on `pass_id`,
   never on the batch's state, so a pass batch that a failed close left `FAILED` is treated as an open one.
-- **Its tasks are the pass's.** The scheduler never launches a pass task's workstream; the pass's own turns do.
+- **Its tasks are the pass's** while it is `OPEN`, `CLOSING` or `ABANDONING` (`passHoldsTasks`): such a task
+  gets a run only in the pass's batch, so an ordinary start refuses it; a task of a closed, settled or abandoned
+  pass is ordinary again. The scheduler never launches a held task's workstream; the pass's own turns do.
   A pass's lanes count for the pass (`LaneCounts.byPass`) and not for the project's `maxLanes`, and still for the
   account and the daemon-wide cap (`scheduler/lane-room.ts`).
 - **Your folder is the pass's (W9).** While a pass of the project is neither `SETTLED` nor `ABANDONED`
   (`passHoldingFolder`), a start sends a task set to Your folder to a separate copy with the reason "Your folder
   is in a Workbench pass", refuses one the builder placed there, and never joins or cuts a shared batch; in a
-  `local` project the scheduler leaves a folder task queued with the notice "Waits for the Workbench pass to close".
+  `local` project the scheduler leaves a folder task queued with the notice "Waits for the Workbench pass to
+  close", written over no other notice and taken down once the run no longer waits for a pass.
 
 ## Switching the checkout back
 

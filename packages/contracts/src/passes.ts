@@ -28,6 +28,16 @@ export const OPEN_PASS_STATES: readonly PassState[] = [
 ];
 
 /**
+ * Whether a pass still holds its tasks as pass tasks: while it is open, closing or abandoning. Its
+ * close signs off or takes out every task before the pass is closed, and its Abandon takes out every
+ * unsigned one, so a closed, settled or abandoned pass holds none: a task of one is ordinary work
+ * again, whatever its `pass_id` still says.
+ */
+export function passHoldsTasks(state: PassState): boolean {
+  return OPEN_PASS_STATES.includes(state);
+}
+
+/**
  * Whether a pass still holds Your folder (W9): until its work is in the base or it is abandoned, an
  * ordinary task that would run in the folder runs in a separate copy or waits.
  */

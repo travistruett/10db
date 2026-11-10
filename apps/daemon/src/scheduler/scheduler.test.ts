@@ -1,6 +1,7 @@
 import { rmSync } from 'node:fs';
 import {
   mintId,
+  REVERTED_NOTICE_KEY,
   type AccountId,
   type BatchId,
   type BatchState,
@@ -30,6 +31,7 @@ import {
   runNext,
   schema,
   seedProject,
+  setWorkstreamNotice,
   transitionBatch,
   transitionWorkstream,
   type Store,
@@ -648,13 +650,15 @@ describe('Workbench passes', () => {
 
   it('holds ordinary work in Your folder while a pass holds it, saying so, and launches it once the pass settles', async () => {
     const project = seedProject(store, { areas: PAGES });
-    openPass(project);
+    const opened = openPass(project);
     const ordinary = add(project, ['api']);
     expect(await scheduler().tick()).toBe(0);
     expect(getWorkstream(store.db, ordinary.workstream.id).notice?.line).toBe(
       'Waits for the Workbench pass to close',
     );
-    // A closed pass still holds the folder until its work is in the base. The test has one pass.
+    // A closed pass still holds the folder until its work is in the base. The test has one pass,
+    // whose close took its task out.
+    moveWorkstream(opened.workstream.id, 'CANCELLED');
     store.db.update(schema.passes).set({ state: 'CLOSED' }).run();
     expect(await scheduler().tick()).toBe(0);
     store.db.update(schema.passes).set({ state: 'SETTLED' }).run();
@@ -663,14 +667,81 @@ describe('Workbench passes', () => {
     expect(getWorkstream(store.db, ordinary.workstream.id).notice).toBeNull();
   });
 
+  it('writes its wait over no other notice, and takes it down once the run no longer waits for the pass', async () => {
+    const project = seedProject(store, { areas: PAGES });
+    const opened = openPass(project);
+    const kept = add(project, ['api']);
+    const reverted = {
+      key: REVERTED_NOTICE_KEY,
+      tone: 'info' as const,
+      line: 'Its commits are reverted on the branch',
+      body: 'b',
+    };
+    state.write((ctx) => setWorkstreamNotice(ctx, kept.workstream.id, reverted));
+    const blocker = add(project, ['api']);
+    const behind = add(project, ['api'], [blocker.task.id]);
+    expect(await scheduler().tick()).toBe(0);
+    expect(getWorkstream(store.db, kept.workstream.id).notice?.line).toBe(reverted.line);
+    expect(getWorkstream(store.db, behind.workstream.id).notice?.key).toBe('workbench-pass');
+    // The pass ends; the run still waits, for its dependency now, and says nothing of the pass.
+    moveWorkstream(opened.workstream.id, 'CANCELLED');
+    moveWorkstream(blocker.workstream.id, 'CANCELLED');
+    moveWorkstream(kept.workstream.id, 'CANCELLED');
+    store.db.update(schema.passes).set({ state: 'ABANDONED' }).run();
+    expect(await scheduler().tick()).toBe(0);
+    expect(getWorkstream(store.db, behind.workstream.id).notice).toBeNull();
+  });
+
+  it('launches the new run of a task its abandoned pass no longer holds', async () => {
+    const project = seedProject(store, { areas: PAGES });
+    const opened = openPass(project);
+    // As the pass's Abandon takes its task out: the run cancelled, its page released.
+    moveWorkstream(opened.workstream.id, 'CANCELLED');
+    state.write((ctx) => releaseClaims(ctx, opened.workstream.id));
+    store.db.update(schema.passes).set({ state: 'ABANDONED' }).run();
+    store.db.update(schema.batches).set({ state: 'ABANDONED' }).run();
+    const again = state.write((ctx) =>
+      insertWorkstream(ctx, opened.task.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      }),
+    );
+    expect(await scheduler().tick()).toBe(1);
+    expect(launched.map((l) => l.id)).toEqual([again.id]);
+  });
+
   it("leaves a pass's lanes out of its project's lane limit", async () => {
-    const project = seedProject(store, { areas: PAGES, maxLanes: 1 });
+    const project = seedProject(store, { delivery: 'pull_request', areas: PAGES, maxLanes: 1 });
     const opened = openPass(project);
     moveWorkstream(opened.workstream.id, 'STARTING');
-    store.db.update(schema.passes).set({ state: 'SETTLED' }).run();
-    const ordinary = add(project, ['api']);
-    expect(await scheduler().tick()).toBe(1);
-    expect(launched.map((l) => l.id)).toEqual([ordinary.workstream.id]);
+    // Ordinary work in a separate copy, where a pass does not hold it.
+    const dir = tempDir('worktree');
+    try {
+      const task = state.write((ctx) =>
+        insertTask(ctx, project.id, { title: 'o', acceptanceCriteria: ['x'], areas: ['api'] }),
+      );
+      const batch = state.write((ctx) => {
+        const b = insertBatch(ctx, {
+          projectId: project.id,
+          title: 'Ordinary',
+          baseBranch: 'main',
+          worktreePath: dir.path,
+        });
+        transitionBatch(ctx, b.id, { to: 'OPEN' });
+        patchBatch(ctx, b.id, { branch: '10db/ordinary-0a1b2c3d', baseSha: 'a'.repeat(40) });
+        return b;
+      });
+      branchOf.set(dir.path, '10db/ordinary-0a1b2c3d');
+      const ordinary = state.write((ctx) =>
+        insertWorkstream(ctx, task.id, {
+          first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+          batchId: batch.id,
+        }),
+      );
+      expect(await scheduler().tick()).toBe(1);
+      expect(launched.map((l) => l.id)).toEqual([ordinary.id]);
+    } finally {
+      dir.cleanup();
+    }
   });
 });
 

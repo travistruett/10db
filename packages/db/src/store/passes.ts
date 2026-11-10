@@ -5,11 +5,13 @@ import {
   OPEN_PASS_STATES,
   PassState,
   passHoldsFolder,
+  passHoldsTasks,
   type BatchDto,
   type PassDirtEntry,
   type PassDto,
   type PassId,
   type ProjectId,
+  type TaskDto,
   type TaskId,
 } from '@10db/contracts';
 import { and, asc, eq, inArray, notInArray } from 'drizzle-orm';
@@ -39,9 +41,15 @@ function toPassDto(row: PassRow): PassDto {
 }
 
 export function getPass(db: DbReader, id: PassId): PassDto {
+  const pass = findPass(db, id);
+  if (!pass) throw new NotFoundError('pass', id);
+  return pass;
+}
+
+/** The pass with this id, or undefined when no row has it. */
+export function findPass(db: DbReader, id: PassId): PassDto | undefined {
   const row = db.select().from(schema.passes).where(eq(schema.passes.id, id)).get();
-  if (!row) throw new NotFoundError('pass', id);
-  return toPassDto(row);
+  return row ? toPassDto(row) : undefined;
 }
 
 /** The project's pass that is open, closing or abandoning: at most one. */
@@ -74,6 +82,16 @@ export function passHoldingFolder(db: DbReader, projectId: ProjectId): PassDto |
   return row ? toPassDto(row) : undefined;
 }
 
+/**
+ * The pass that still holds `task` as a pass task (`passHoldsTasks`), or undefined: a task of a
+ * closed, settled or abandoned pass is ordinary work again.
+ */
+export function passHoldingTask(db: DbReader, task: Pick<TaskDto, 'passId'>): PassDto | undefined {
+  if (task.passId == null) return undefined;
+  const pass = getPass(db, task.passId);
+  return passHoldsTasks(pass.state) ? pass : undefined;
+}
+
 /** The folder's dirt recorded when the pass opened, by path. */
 export function listPassDirt(db: DbReader, passId: PassId): PassDirtEntry[] {
   return db
@@ -104,14 +122,21 @@ export interface PassInsert {
 
 /**
  * Writes an OPEN pass, its OPEN batch on the pass's branch with `base_sha` at the start, the folder's
- * dirt and each task's `pass_id`, in the caller's write. Refused while the project has a pass open,
- * closing or abandoning, or an unfinished batch in Your folder, and for a task of another project or
- * already in a pass.
+ * dirt and each task's `pass_id`, in the caller's write. Refused for a task of another project or one
+ * a pass still holds, and while the project has a pass open, closing or abandoning, or an unfinished
+ * batch in Your folder.
  */
 export function insertPass(
   ctx: WriteContext,
   input: PassInsert,
 ): { readonly pass: PassDto; readonly batch: BatchDto } {
+  for (const taskId of input.taskIds) {
+    const task = getTask(ctx.tx, taskId);
+    if (task.projectId !== input.projectId)
+      throw new ConflictError(`Task ${task.title} belongs to another project`);
+    const holding = passHoldingTask(ctx.tx, task);
+    if (holding) throw new ConflictError(`Task ${task.title} is already in pass "${holding.name}"`);
+  }
   const open = findOpenPass(ctx.tx, input.projectId);
   if (open) throw new ConflictError(`Pass "${open.name}" is still ${open.state.toLowerCase()}`);
   const unfinished = findUnfinishedBatch(ctx.tx, input.projectId);
@@ -119,12 +144,6 @@ export function insertPass(
     throw new ConflictError(
       `Batch "${unfinished.title}" in Your folder is still ${unfinished.state.toLowerCase()}`,
     );
-  for (const taskId of input.taskIds) {
-    const task = getTask(ctx.tx, taskId);
-    if (task.projectId !== input.projectId)
-      throw new ConflictError(`Task ${task.title} belongs to another project`);
-    if (task.passId != null) throw new ConflictError(`Task ${task.title} is already in a pass`);
-  }
   ctx.tx
     .insert(schema.passes)
     .values({

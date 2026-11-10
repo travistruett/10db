@@ -14,21 +14,42 @@ the checkout's repo lock (`Git.openPassBranch`) it records every path whose cont
 commit, untracked ones git does not ignore included, with the blob of that content, or null for a deleted file
 (`pass_dirt`), keeps the content in an unsigned commit on that commit at `refs/10db/passes/<pass id>/dirt`,
 makes the branch `10db/<slug>-<6 hex>` at HEAD's commit and points HEAD at it. No file and no index entry is
-written, so a dirty folder opens as it is. The pass records `return_branch` and `start_sha`; its batch is
+written, so a dirty folder opens as it is. A nested repository is left out of the dirt and its commit alike.
+The dirt commit's trailers (`10db-Pass-Branch`, `10db-Return-Branch`) name the pass's branch and the one HEAD
+named. The pass records `return_branch` and `start_sha`; its batch is
 `OPEN` from the start, `base_sha` the start, `repo` from origin's pinned push URL or null with no origin, on any
 delivery. Each task gets a `QUEUED` workstream in the batch and takes its page areas, and its areas with no
 role, through the scheduler's `acquireClaims`; a page another task holds makes that task wait with a notice
 naming the holder. The answer says how many commits HEAD has that origin's base, as last fetched, lacks.
 
 Opening is refused with nothing written for a project with no page area, a task naming none, two tasks holding
-one area or pages whose globs can share a file (`passPagesProblem`), more tasks than the page cap (4 by
-default, 6 at most), a parked, running, finished or already-passed task, a second open pass, an unfinished
-batch or a running lane in Your folder, and a detached HEAD. A batch start written while git works makes the
-pass's write fail, and the branch and the dirt ref are taken back (`Git.undoPassBranch`).
+one area or areas whose globs can share a file, an area with no role counting as a page (`passPagesProblem`),
+more tasks than the page cap (4 by default, 6 at most), a parked, running or finished task or one a pass still
+holds, a second open pass, an unfinished batch or a running lane in Your folder, a merge, cherry-pick, revert,
+rebase or `git am` in progress, a detached HEAD, and a HEAD on a branch the close could not return to: a
+batch's branch left checked out, or a branch under `10db/` no task names. An abandoned pass's branch is the one
+`10db/` branch a pass may open on (spec §5.4). A batch start written while git works, or such a HEAD, makes the
+pass's write fail, and the branch and the dirt ref are taken back (`Git.undoPassBranch`). Every refusal
+rejects `openPass`'s promise; once the pass is written it resolves, a failed count of commits ahead of the base
+answering null.
+
+**A pass the daemon stopped opening** between the git step and the write has a dirt ref and no row. Start-up
+reads each dirt ref's trailers and takes such a pass back while nothing was built on it (HEAD names the branch
+it came from again, the branch and the ref go, no file is written); otherwise one card names the branch and
+says how to go back and delete it.
 
 **The built rules leave a pass's batch alone.** The scheduler never launches a pass task's workstream. The ship
-trigger and startup's check never ship the batch, and Ship, Ship anyway and Ship without it refuse it. These are
-keyed on `pass_id`, not on the batch's state, so a pass batch a failed close leaves `FAILED` is read as open.
+trigger and startup's check never ship the batch, Ship, Ship anyway, Ship without it and the built Abandon
+refuse it, and start-up's batch recovery leaves it to its pass, so a folder the builder switched while the
+daemon was down fails no pass batch. These are keyed on `pass_id`, not on the batch's state, so a pass batch a
+failed close leaves `FAILED` is read as open.
+
+**A pass holds its tasks while it is `OPEN`, `CLOSING` or `ABANDONING`** (`passHoldsTasks`). Such a task gets a
+run only in its pass's batch (`insertWorkstream`), so an ordinary start refuses it. A close signs off or takes
+out every task before the pass is `CLOSED`, and an Abandon takes out every unsigned one, so a closed, settled or
+abandoned pass holds none: its task is ordinary work again, launched and counted as any, whatever `pass_id`
+still says. A take-out, an Abandon and a close end the membership by clearing `pass_id` (the slices that build
+them).
 
 **Lanes.** A pass's lanes are counted for the pass (`LaneCounts.byPass`), not for the project's `maxLanes`, and
 are held to its page cap; they still count against the account's limit and the daemon-wide cap
@@ -38,7 +59,9 @@ are held to its page cap; they still count against the account's limit and the d
 sends a task set to Your folder to a separate copy with the reason "Your folder is in a Workbench pass", the
 placement rule's proposal (`proposePlacement`'s `passHoldsFolder`); one the builder placed in the folder is
 refused, saying so; no shared batch is joined or cut. A `local` project has no copies, so the scheduler leaves
-its folder task queued with the notice "Waits for the Workbench pass to close" and no card.
+its folder task queued with the notice "Waits for the Workbench pass to close" and no card. That notice is
+written over no other (a parked, left-out or reverted run keeps its own) and taken down once the run no longer
+waits for a pass.
 
 Not yet built: the route that opens a pass and the turns that launch its tasks (the next slice), the close,
 watching its pull request, and a warm session yielding its lane, which needs the warm sessions that slice adds.

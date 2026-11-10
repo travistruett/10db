@@ -15,6 +15,7 @@ export {
   type FolderAt,
   type Git,
   type PassBranch,
+  type PassDirtRecord,
   type ResolvedConflict,
   type SwitchBack,
 } from './git';

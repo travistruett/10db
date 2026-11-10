@@ -1,6 +1,7 @@
 import {
   ACTIVE_STATES,
   AreaRole,
+  BRANCH_PREFIX,
   ClaimKind,
   ConflictError,
   InvalidError,
@@ -10,6 +11,7 @@ import {
   PassPageCap,
   passHeldAreas,
   passPagesProblem,
+  PassState,
   slugOf,
   TaskStatus,
   type BatchDto,
@@ -29,9 +31,12 @@ import {
   findUnfinishedBatch,
   getProject,
   getTask,
+  getPass,
   getWorkstreamRow,
   insertPass,
+  listBatches,
   listPassDirt,
+  passHoldingTask,
   setWorkstreamNotice,
   type DbReader,
 } from '@10db/db';
@@ -109,7 +114,8 @@ function refuseOpen(db: DbReader, project: ProjectDto, tasks: readonly TaskDto[]
       throw new ConflictError(`Task ${task.title} is ${task.status}`);
     if (task.boardColumnId !== null)
       throw new ConflictError(`Task ${task.title} is parked; move it to Backlog or Ready first`);
-    if (task.passId != null) throw new ConflictError(`Task ${task.title} is already in a pass`);
+    const holding = passHoldingTask(db, task);
+    if (holding) throw new ConflictError(`Task ${task.title} is already in pass "${holding.name}"`);
     const latest = task.workstreamId ? getWorkstreamRow(db, task.workstreamId) : null;
     if (latest && ACTIVE_STATES.includes(latest.state))
       throw new ConflictError(`Task ${task.title} is running; it can join a pass once it stops`);
@@ -134,14 +140,32 @@ function refuseOpen(db: DbReader, project: ProjectDto, tasks: readonly TaskDto[]
 }
 
 /**
+ * Why the branch HEAD names can't be the pass's return branch, in words, or null. A close
+ * fast-forwards that branch to the pass's tip, so it must be the builder's own: not a batch's branch
+ * left checked out (a crash before the switch back, a switch back a dirty folder held off, or a ship
+ * not yet switched back), nor a branch under 10db's prefix no task names. The one exception is an
+ * abandoned pass's branch, which holds the work it landed: a pass opened there returns to it.
+ */
+function returnBranchProblem(db: DbReader, project: ProjectDto, branch: string): string | null {
+  const batch = listBatches(db, { projectId: project.id }).find((b) => b.branch === branch);
+  if (batch?.passId != null && getPass(db, batch.passId).state === PassState.Abandoned) return null;
+  if (batch)
+    return `Your folder is on ${branch}, the branch of ${batch.passId == null ? 'batch' : 'Workbench pass'} "${batch.title}"; switch it back to your own branch (git switch <your branch>) before opening a pass`;
+  if (branch.startsWith(BRANCH_PREFIX))
+    return `Your folder is on ${branch}, a 10db branch no task names; switch it to your own branch (git switch <your branch>) before opening a pass`;
+  return null;
+}
+
+/**
  * Opens a pass on Your folder, in the project's delivery queue and under the checkout's repo lock:
  * the pass's branch at HEAD with no file written, the folder's dirt recorded with its content, the
  * pass and its batch on any delivery, and each task's pages claimed through `acquireClaims`, as the
  * scheduler claims them. A page another task holds makes that task wait with the holder named. What
  * the database already refuses is refused before anything is queued; a start that slips in while git
- * works is refused by the write, and the branch is taken back.
+ * works, or a HEAD on a branch that can't be returned to, is refused by the write, and the branch is
+ * taken back. Every refusal rejects; once the pass is written it resolves.
  */
-export function openPass(
+export async function openPass(
   ctx: DeliveryContext,
   input: PassOpenInput,
   opts: { readonly leaseMs: number },
@@ -181,6 +205,8 @@ export function openPass(
     let written: { pass: PassDto; batch: BatchDto; waiting: PassPageWait[] };
     try {
       written = ctx.state.write((w) => {
+        const stray = returnBranchProblem(w.tx, project, start.returnBranch);
+        if (stray !== null) throw new ConflictError(stray);
         const made = insertPass(w, {
           id,
           projectId: project.id,
@@ -241,10 +267,7 @@ export function openPass(
       );
       throw error;
     }
-    let aheadOfBase: number | null = null;
-    const base = await ctx.git.trackingTip(project.repoPath, project.baseBranch);
-    if (base !== null)
-      aheadOfBase = (await ctx.git.commitsSince(project.repoPath, base, start.startSha)).length;
+    const aheadOfBase = await countAhead(start.startSha);
     ctx.logger.info(
       { projectId: project.id, passId: id, branch, startSha: start.startSha, aheadOfBase },
       'pass opened',
@@ -256,5 +279,25 @@ export function openPass(
       aheadOfBase,
       waiting: written.waiting,
     };
+  }
+
+  /** The commits `startSha` has that origin's base lacks; null with none to compare, or when git can't say. */
+  async function countAhead(startSha: string): Promise<number | null> {
+    try {
+      const base = await ctx.git.trackingTip(project.repoPath, project.baseBranch);
+      if (base === null) return null;
+      return (await ctx.git.commitsSince(project.repoPath, base, startSha)).length;
+    } catch (error) {
+      // The pass is written: a count that fails says nothing, and the pass stays open.
+      ctx.logger.warn(
+        {
+          projectId: project.id,
+          passId: id,
+          err: error instanceof Error ? error.message : String(error),
+        },
+        'commits ahead of the base not counted',
+      );
+      return null;
+    }
   }
 }

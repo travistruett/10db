@@ -21,6 +21,7 @@ import {
   GitNetworkError,
   worktreeRemovalCommand,
   type CheckoutPlace,
+  type PassDirtRecord,
 } from '../git';
 import { GhError } from '../github';
 import type { GateResult } from '../verify';
@@ -1311,6 +1312,28 @@ export const branchCards = {
     body: `10db has no task for these local branches, so it can't tell whether they are yours and leaves them alone:\n${listPaths(branches)}\n\nDelete the ones you don't need with git branch -D <name>.`,
     foldKey: branchCardKey.withoutBatch,
     refresh: true,
+  }),
+};
+
+/** One per pass branch a stop left with no pass. */
+export const passCardKey = {
+  unopened: (branch: string): string => `pass-unopened:${branch}`,
+} as const;
+
+/** What 10db tells the builder about a Workbench pass's branches. */
+export const passCards = {
+  /**
+   * The daemon stopped opening a pass after it made the pass's branch and before the pass was
+   * written, and something has moved since, so start-up could not take it back.
+   */
+  unopened: (record: PassDirtRecord): Card => ({
+    title: `${record.branch} is left from a Workbench pass that did not open`,
+    body:
+      `10db stopped while opening a Workbench pass, after it made ${record.branch} at the commit ${record.returnBranch} was on and before the pass was recorded. ` +
+      `Something has changed there since, so 10db leaves it as it is. ` +
+      `If Your folder is on it, switch back with git switch ${record.returnBranch}; a commit made on ${record.branch} is only there, so merge it into ${record.returnBranch} first if you want it. ` +
+      `Then delete the branch with git branch -D ${record.branch}, and the pass's copy of your uncommitted files with git update-ref -d ${record.ref}.`,
+    foldKey: passCardKey.unopened(record.branch),
   }),
 };
 

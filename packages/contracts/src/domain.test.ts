@@ -383,6 +383,8 @@ describe('the pages of a pass', () => {
     { name: 'wide', globs: ['app/**/*.tsx'], role: 'page' as const },
     { name: 'src', globs: ['app/**'], role: 'shared' as const },
     { name: 'api', globs: ['api/**'] },
+    { name: 'api-users', globs: ['api/users/**'] },
+    { name: 'people-legacy', globs: ['app/people/legacy/**'] },
   ];
   it.each<{ name: string; tasks: { title: string; areas: string[] }[]; problem: string | null }>([
     {
@@ -421,6 +423,22 @@ describe('the pages of a pass', () => {
         { title: 'Everything', areas: ['wide'] },
       ],
       problem: 'app/people/** and app/**/*.tsx',
+    },
+    {
+      name: 'two tasks on areas with no role whose globs can share a file, both held for life',
+      tasks: [
+        { title: 'People', areas: ['people', 'api'] },
+        { title: 'Settings', areas: ['settings', 'api-users'] },
+      ],
+      problem: 'api/** and api/users/**',
+    },
+    {
+      name: "a page and another task's area with no role that can share a file",
+      tasks: [
+        { title: 'People', areas: ['people'] },
+        { title: 'Settings', areas: ['settings', 'people-legacy'] },
+      ],
+      problem: 'app/people/** and app/people/legacy/**',
     },
     {
       name: 'two tasks on one shared area: held a turn at a time, never at open',

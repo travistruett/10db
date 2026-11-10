@@ -1,11 +1,21 @@
-import { mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import {
   BranchName,
   mintId,
   WorkstreamState,
+  type BatchId,
   type ProjectInput,
   type TaskDto,
+  type WorkstreamId,
 } from '@10db/contracts';
 import {
   activeClaims,
@@ -22,8 +32,10 @@ import {
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
+import { silentLogger } from '../log';
 import { PASS_HOLDS_FOLDER_REASON } from '../placement';
-import { openPass, passBranchName, passDirtRef, type PassOpenInput } from './index';
+import { systemProcesses } from '../recovery';
+import { openPass, passBranchName, passDirtRef, recoverBatches, type PassOpenInput } from './index';
 
 // Workbench spec §5.1, §5.3 (W9), §5.5: a pass opens on Your folder, at its HEAD, with its batch,
 // its dirt record and its page claims; its batch never ships itself.
@@ -85,6 +97,41 @@ function write(path: string, content: string): void {
   mkdirSync(dirname(file), { recursive: true });
   writeFileSync(file, content);
 }
+
+/** Every ref under the branches 10db names and under `refs/10db/`, with what it points at. */
+function tenDbRefs(): string {
+  return h.git$(
+    'for-each-ref',
+    '--format=%(refname) %(objectname)',
+    'refs/heads/10db/',
+    'refs/10db/',
+  );
+}
+
+/** Commits `content` at `path` on a new branch `name` off HEAD, and comes back. */
+function sideCommit(name: string, path: string, content: string): void {
+  const back = h.git$('symbolic-ref', '--short', 'HEAD');
+  h.git$('switch', '-q', '-c', name);
+  h.commit(path, content);
+  h.git$('switch', '-q', back);
+}
+
+/** Runs git where it is meant to stop with a conflict, which exits non-zero. */
+function stopsOnConflict(...args: string[]): void {
+  expect(() => h.git$(...args)).toThrow();
+}
+
+/** Start-up's batch recovery, as the daemon runs it after a restart. */
+const recover = () =>
+  recoverBatches({
+    state: h.state,
+    git: h.git,
+    inbox: h.inbox,
+    processes: systemProcesses,
+    shipper: h.shipper,
+    starter: h.starter,
+    logger: silentLogger,
+  });
 
 describe('opening a pass', () => {
   it('opens on a dirty folder at HEAD: no file written, the dirt and its content recorded, the pages claimed', async () => {
@@ -280,27 +327,133 @@ describe('opening a pass', () => {
       },
       refusal: /detached HEAD/,
     },
+    {
+      name: 'a folder on a 10db branch no task names',
+      arrange: () => {
+        h.git$('switch', '-q', '-c', '10db/leftover-abc123');
+        return { tasks: [page('A', ['people'])] };
+      },
+      refusal: /Your folder is on 10db\/leftover-abc123, a 10db branch no task names/,
+    },
+    {
+      name: 'a merge in progress',
+      arrange: () => {
+        h.commit('src/people/a.ts', 'base\n');
+        sideCommit('other', 'src/people/a.ts', 'theirs\n');
+        h.commit('src/people/a.ts', 'ours\n');
+        stopsOnConflict('merge', '-q', 'other');
+        return { tasks: [page('A', ['people'])] };
+      },
+      refusal: /in the middle of a merge/,
+    },
+    {
+      name: 'a cherry-pick in progress',
+      arrange: () => {
+        h.commit('src/people/a.ts', 'base\n');
+        sideCommit('other', 'src/people/a.ts', 'theirs\n');
+        h.commit('src/people/a.ts', 'ours\n');
+        stopsOnConflict('cherry-pick', 'other');
+        return { tasks: [page('A', ['people'])] };
+      },
+      refusal: /in the middle of a cherry-pick/,
+    },
+    {
+      name: 'a rebase in progress',
+      arrange: () => {
+        h.commit('src/people/a.ts', 'base\n');
+        sideCommit('other', 'src/people/a.ts', 'theirs\n');
+        h.commit('src/people/a.ts', 'ours\n');
+        stopsOnConflict('rebase', '-q', 'other');
+        return { tasks: [page('A', ['people'])] };
+      },
+      refusal: /in the middle of a rebase/,
+    },
   ])(
     'refuses $name and leaves the folder and the database as they were',
     async ({ project, arrange, refusal }) => {
       harness(project);
       const { tasks, extra } = arrange();
       const head = h.git$('rev-parse', '--symbolic-full-name', 'HEAD');
-      await expect(Promise.resolve().then(() => open(tasks, extra))).rejects.toThrow(refusal);
+      const refs = tenDbRefs();
+      await expect(open(tasks, extra)).rejects.toThrow(refusal);
       await h.jobs.idle();
       expect(h.store.db.select().from(schema.passes).all()).toEqual([]);
       expect(h.git$('rev-parse', '--symbolic-full-name', 'HEAD')).toBe(head);
-      expect(h.git$('for-each-ref', '--format=%(refname)', 'refs/heads/10db/', 'refs/10db/')).toBe(
-        '',
-      );
+      expect(tenDbRefs()).toBe(refs);
     },
   );
+
+  it("refuses a folder left on a finished batch's branch, saying which", async () => {
+    harness({}, false);
+    const started = h.only(
+      h.starter.startBatch(h.project.id, {
+        title: 'Greetings',
+        taskIds: [h.addTask('Alpha', { areas: ['src'] }).id],
+      }),
+    );
+    await h.jobs.idle();
+    const batch = getBatch(h.store.db, started.id);
+    h.commit('src/alpha.ts', 'alpha\n');
+    // An edit in the folder keeps the abandoned batch's switch back from running.
+    write('src/alpha.ts', 'edited by hand\n');
+    h.shipper.abandon(batch.id);
+    await h.jobs.idle();
+    expect(h.git$('symbolic-ref', '--short', 'HEAD')).toBe(batch.branch);
+    const refs = tenDbRefs();
+    await expect(open([page('People: UI work', ['people'])])).rejects.toThrow(
+      `Your folder is on ${batch.branch ?? ''}, the branch of batch "Greetings"`,
+    );
+    await h.jobs.idle();
+    expect(h.store.db.select().from(schema.passes).all()).toEqual([]);
+    expect(h.git$('symbolic-ref', '--short', 'HEAD')).toBe(batch.branch);
+    expect(tenDbRefs()).toBe(refs);
+  });
 
   it('refuses a second pass while the first is open', async () => {
     harness();
     await open([page('People: UI work', ['people'])]);
-    expect(() => open([page('Settings: UI work', ['settings'])])).toThrow(
+    await expect(open([page('Settings: UI work', ['settings'])])).rejects.toThrow(
       /Pass "Polish pages" is still open/,
+    );
+  });
+
+  it('opens with nested repositories in the folder, leaving them out of the dirt and its commit alike', async () => {
+    harness();
+    write('src/people/page.tsx', 'edited\n');
+    // One nested repository with no commit, one with a commit: git would refuse the first and keep
+    // the second as a submodule entry.
+    h.git$('init', '-q', join(h.repo, 'empty-nested'));
+    const nested = join(h.repo, 'vendor/nested');
+    h.git$('init', '-q', nested);
+    for (const [key, value] of [
+      ['maintenance.auto', 'false'],
+      ['gc.auto', '0'],
+      ['user.name', 'Test'],
+      ['user.email', 'test@example.com'],
+    ] as const)
+      h.git$('-C', nested, 'config', key, value);
+    writeFileSync(join(nested, 'lib.ts'), 'lib\n');
+    h.git$('-C', nested, 'add', 'lib.ts');
+    h.git$('-C', nested, 'commit', '-q', '-m', 'nested');
+
+    const opened = await open([page('People: UI work', ['people'])]);
+
+    expect(opened.dirt.map((d) => d.path)).toEqual(['src/people/page.tsx']);
+    const ref = passDirtRef(opened.pass.id);
+    const tree = h.git$('diff-tree', '-r', '--name-only', '--no-commit-id', `${ref}^`, ref);
+    expect(tree).toBe('src/people/page.tsx');
+    expect(existsSync(join(h.repo, 'empty-nested/.git'))).toBe(true);
+  });
+
+  it('answers with no count of commits ahead of the base when git cannot count them, and the pass stays open', async () => {
+    harness();
+    // origin's base names an object the repository does not have, so git can count nothing from it.
+    writeFileSync(join(h.repo, '.git/refs/remotes/origin/main'), `${'1'.repeat(40)}\n`);
+    const opened = await open([page('People: UI work', ['people'])]);
+    expect(opened.aheadOfBase).toBeNull();
+    expect(getBatch(h.store.db, opened.batch.id).state).toBe('OPEN');
+    expect(h.logs.lines().some((l) => l['msg'] === 'commits ahead of the base not counted')).toBe(
+      true,
     );
   });
 
@@ -361,11 +514,95 @@ describe("a pass's batch", () => {
     expect(getWorkstream(h.store.db, ws.id).state).toBe('DONE');
   });
 
-  it('is shipped by no ship the builder asks for', async () => {
+  it.each<{ name: string; act: (batchId: BatchId, workstreamId: WorkstreamId) => unknown }>([
+    { name: 'Ship', act: (b) => h.shipper.ship(b) },
+    { name: 'Ship anyway', act: (b) => h.shipper.shipAnyway(b) },
+    { name: 'Ship without it', act: (b, w) => h.shipper.shipWithout(b, w) },
+    { name: 'Abandon', act: (b) => h.shipper.abandon(b) },
+  ])('is refused by $name: only its pass ships or abandons it', async ({ act }) => {
+    harness({}, false);
+    const task = page('People: UI work', ['people']);
+    const opened = await open([task]);
+    const ws = runOf(task);
+    if (!ws) throw new Error('the pass task has no workstream');
+    h.settle(ws.id, 'DONE');
+    expect(() => act(opened.batch.id, ws.id)).toThrow(/Workbench pass/);
+    await h.jobs.idle();
+    expect(getBatch(h.store.db, opened.batch.id).state).toBe('OPEN');
+    expect(h.git$('symbolic-ref', '--short', 'HEAD')).toBe(opened.batch.branch);
+  });
+
+  it("is left to its pass by start-up's recovery when the folder is off its branch", async () => {
     harness({}, false);
     const opened = await open([page('People: UI work', ['people'])]);
-    expect(() => h.shipper.ship(opened.batch.id)).toThrow(/Workbench pass/);
+    // The builder switched the folder while the daemon was down.
+    h.git$('switch', '-q', 'main');
+    const report = await recover();
+    expect(report.failed).toEqual([]);
     expect(getBatch(h.store.db, opened.batch.id).state).toBe('OPEN');
+    expect(h.cards()).toEqual([]);
+  });
+});
+
+describe('a pass task', () => {
+  it('starts as no ordinary work while its pass holds it', async () => {
+    harness({}, false);
+    const task = page('People: UI work', ['people']);
+    await open([task]);
+    const ws = runOf(task);
+    if (!ws) throw new Error('the pass task has no workstream');
+    h.settle(ws.id, 'CANCELLED');
+    expect(() => h.starter.startTask(task.id)).toThrow(/in the Workbench pass "Polish pages"/);
+    await h.jobs.idle();
+    expect(runOf(task)?.id).toBe(ws.id);
+  });
+});
+
+describe('a pass a crash left with no row', () => {
+  /** What `openPassBranch` leaves when the daemon dies before the pass's write. */
+  async function orphan(): Promise<{ branch: string; dirtRef: string }> {
+    const id = mintId('Pass');
+    const branch = passBranchName('Polish pages', id);
+    const dirtRef = passDirtRef(id);
+    await h.git.openPassBranch({ repo: h.repo, branch, dirtRef, message: 'the dirt' });
+    return { branch, dirtRef };
+  }
+
+  it('is taken back at start-up: HEAD names its branch again, no file written', async () => {
+    harness({}, false);
+    write('src/people/page.tsx', 'edited by hand\n');
+    const files = [...snapshot(h.repo)].filter(([path]) => !path.startsWith('.git/'));
+    const { branch } = await orphan();
+    expect(h.git$('symbolic-ref', '--short', 'HEAD')).toBe(branch);
+    await recover();
+    expect(h.git$('symbolic-ref', '--short', 'HEAD')).toBe('main');
+    expect(tenDbRefs()).toBe('');
+    expect([...snapshot(h.repo)].filter(([path]) => !path.startsWith('.git/'))).toEqual(files);
+    expect(h.cards()).toEqual([]);
+  });
+
+  it('loses its dirt record at start-up when the stop came before its branch was made', async () => {
+    harness({}, false);
+    const { branch } = await orphan();
+    // What the stop leaves when it comes between the dirt's ref and the branch.
+    h.git$('symbolic-ref', 'HEAD', 'refs/heads/main');
+    h.git$('update-ref', '-d', `refs/heads/${branch}`);
+    await recover();
+    expect(h.git$('symbolic-ref', '--short', 'HEAD')).toBe('main');
+    expect(tenDbRefs()).toBe('');
+    expect(h.cards()).toEqual([]);
+  });
+
+  it('is named on a card when work was committed on its branch, and left as it is', async () => {
+    harness({}, false);
+    const { branch, dirtRef } = await orphan();
+    const tip = h.commit('src/people/page.tsx', 'kept\n');
+    await recover();
+    expect(h.git$('symbolic-ref', '--short', 'HEAD')).toBe(branch);
+    expect(h.git$('rev-parse', branch)).toBe(tip);
+    expect(h.git$('rev-parse', '--verify', '-q', dirtRef)).not.toBe('');
+    const card = h.only(h.cards().filter((c) => c.title.includes(branch)));
+    expect(card.body).toContain('main');
   });
 });
 

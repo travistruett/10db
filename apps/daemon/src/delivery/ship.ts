@@ -1306,11 +1306,14 @@ export function createShipper(deps: ShipperDeps): Shipper {
       );
   }
 
-  /** A pass's batch ships when its pass closes, never by a ship of the batch itself. */
+  /**
+   * A pass's batch ships when its pass closes and ends with its pass's own Abandon, never by a ship
+   * or an Abandon of the batch itself.
+   */
   function refusePassBatch(batch: BatchDto): void {
     if (batch.passId != null)
       throw new ConflictError(
-        `Batch "${batch.title}" is a Workbench pass's; it ships when the pass closes`,
+        `Batch "${batch.title}" is a Workbench pass's; it ships when the pass closes and is abandoned with the pass`,
       );
   }
 
@@ -2291,6 +2294,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
     },
     abandon(batchId) {
       const batch = getBatch(db, batchId);
+      refusePassBatch(batch);
       if (batch.state !== BatchState.Open && batch.state !== BatchState.Failed)
         throw new ConflictError(
           `Batch "${batch.title}" is ${batch.state.toLowerCase()}; only an open or failed batch can be abandoned`,

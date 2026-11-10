@@ -17,12 +17,14 @@ import {
   getBatch,
   getPass,
   getTask,
+  getWorkstreamRow,
   insertBatch,
   insertPass,
   insertTask,
   insertWorkstream,
   listPassDirt,
   passHoldingFolder,
+  passHoldingTask,
   seedProject,
   transitionWorkstream,
   type PassInsert,
@@ -131,23 +133,13 @@ describe('insertPass', () => {
       refusal: /belongs to another project/,
     },
     {
-      name: 'a task already in a pass',
+      name: 'a task an open pass holds',
       arrange: () => {
         const t = task();
-        const first = store.write((ctx) => insertPass(ctx, passInput([t]))).value;
-        store.db
-          .update(schema.passes)
-          .set({ state: PassState.Abandoned })
-          .where(eq(schema.passes.id, first.pass.id))
-          .run();
-        store.db
-          .update(schema.batches)
-          .set({ state: 'ABANDONED' })
-          .where(eq(schema.batches.id, first.batch.id))
-          .run();
+        store.write((ctx) => insertPass(ctx, passInput([t])));
         return passInput([t]);
       },
-      refusal: /already in a pass/,
+      refusal: /already in pass "Polish settings"/,
     },
   ])('refuses $name and writes nothing', ({ arrange, refusal }) => {
     const input = arrange();
@@ -184,12 +176,72 @@ describe('insertPass', () => {
       .run();
     expect(findOpenPass(store.db, project.id)).toBeUndefined();
     expect(passHoldingFolder(store.db, project.id)?.id).toBe(first.pass.id);
+    // The index is partial: beside a closed pass, a second one may be open.
+    const second = mintId('Pass');
+    store.db
+      .insert(schema.passes)
+      .values({ ...getPass(store.db, first.pass.id), id: second, state: PassState.Open })
+      .run();
+    expect(findOpenPass(store.db, project.id)?.id).toBe(second);
+    store.db.delete(schema.passes).where(eq(schema.passes.id, second)).run();
     store.db
       .update(schema.passes)
       .set({ state: PassState.Settled })
       .where(eq(schema.passes.id, first.pass.id))
       .run();
     expect(passHoldingFolder(store.db, project.id)).toBeUndefined();
+  });
+});
+
+/** Moves a pass and its batch on by hand, as its close or Abandon will. */
+function endPass(passId: PassId, state: PassState): void {
+  store.db.update(schema.passes).set({ state }).where(eq(schema.passes.id, passId)).run();
+  const batchState = state === PassState.Abandoned ? 'ABANDONED' : 'SHIPPED';
+  store.db
+    .update(schema.batches)
+    .set({ state: batchState })
+    .where(eq(schema.batches.passId, passId))
+    .run();
+}
+
+describe("a pass's hold on its tasks", () => {
+  it('lets a task of an abandoned pass join another pass', () => {
+    const t = task();
+    const first = store.write((ctx) => insertPass(ctx, passInput([t]))).value;
+    endPass(first.pass.id, PassState.Abandoned);
+    const second = store.write((ctx) => insertPass(ctx, passInput([t]))).value;
+    expect(getTask(store.db, t).passId).toBe(second.pass.id);
+  });
+
+  it.each<{ state: PassState; holds: boolean }>([
+    { state: PassState.Open, holds: true },
+    { state: PassState.Closing, holds: true },
+    { state: PassState.Abandoning, holds: true },
+    { state: PassState.Closed, holds: false },
+    { state: PassState.Settled, holds: false },
+    { state: PassState.Abandoned, holds: false },
+  ])('a $state pass holds its task from an ordinary run: $holds', ({ state, holds }) => {
+    const t = task();
+    const { pass, batch } = store.write((ctx) => insertPass(ctx, passInput([t]))).value;
+    store.db.update(schema.passes).set({ state }).where(eq(schema.passes.id, pass.id)).run();
+    expect(passHoldingTask(store.db, getTask(store.db, t))?.id).toBe(holds ? pass.id : undefined);
+    const ordinary = () =>
+      store.write((ctx) =>
+        insertWorkstream(ctx, t, { first: { model: 'claude-sonnet-5-5', effort: 'medium' } }),
+      ).value;
+    if (holds) {
+      expect(ordinary).toThrow(/in the Workbench pass "Polish settings"/);
+      // Its own batch still takes a run of it.
+      const own = store.write((ctx) =>
+        insertWorkstream(ctx, t, {
+          batchId: batch.id,
+          first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        }),
+      ).value;
+      expect(getWorkstreamRow(store.db, own.id).batchId).toBe(batch.id);
+    } else {
+      expect(getWorkstreamRow(store.db, ordinary().id).batchId).toBeNull();
+    }
   });
 });
 
@@ -216,5 +268,20 @@ describe('countLanes with a pass', () => {
     expect(lanes.byAccount.get(project.accountId)).toBe(2);
     expect(lanes.byProject.get(project.id)).toBe(1);
     expect(lanes.byPass.get(pass.id)).toBe(1);
+  });
+
+  it('counts the lane of a task its abandoned pass no longer holds for its project', () => {
+    const t = task();
+    const { pass } = store.write((ctx) => insertPass(ctx, passInput([t]))).value;
+    endPass(pass.id, PassState.Abandoned);
+    store.write((ctx) => {
+      const ws = insertWorkstream(ctx, t, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      });
+      transitionWorkstream(ctx, ws.id, { to: S.Starting, fence: null });
+    });
+    const lanes = countLanes(store.db);
+    expect(lanes.byProject.get(project.id)).toBe(1);
+    expect(lanes.byPass.get(pass.id)).toBeUndefined();
   });
 });

@@ -27,6 +27,7 @@ import {
   listBatches,
   listWorkstreams,
   passHoldingFolder,
+  passHoldingTask,
   renewClaimLeases,
   renewLeases,
   setWorkstreamNotice,
@@ -146,16 +147,29 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
     }
   }
 
-  /** Shows on a task in Your folder that it waits for the pass holding the folder; written once. */
+  /**
+   * Shows on a task in Your folder that it waits for the pass holding the folder; written once, and
+   * never over another notice: a parked, left-out or reverted run's notice says what the builder
+   * must know, and the run's card says it waits.
+   */
   function waitForPass(id: WorkstreamId, pass: PassDto): void {
-    if (getWorkstreamRow(db, id).notice?.key === PASS_FOLDER_WAIT_NOTICE_KEY) return;
+    if (getWorkstreamRow(db, id).notice !== null) return;
     opts.state.write((ctx) => {
+      if (getWorkstreamRow(ctx.tx, id).notice !== null) return;
       setWorkstreamNotice(ctx, id, {
         key: PASS_FOLDER_WAIT_NOTICE_KEY,
         tone: 'info',
         line: PASS_FOLDER_WAIT_LINE,
         body: `Your folder is in the Workbench pass "${pass.name}". This task starts there once the pass has closed and its work is in the base.`,
       });
+    });
+  }
+
+  /** Takes down the pass's wait once the run no longer waits for it; any other notice stays. */
+  function endPassWait(id: WorkstreamId): void {
+    opts.state.write((ctx) => {
+      if (getWorkstreamRow(ctx.tx, id).notice?.key === PASS_FOLDER_WAIT_NOTICE_KEY)
+        setWorkstreamNotice(ctx, id, null);
     });
   }
 
@@ -184,18 +198,18 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       // leave it STARTING with a lane. Its lane-freed callback ticks again once it has exited.
       if (opts.runner.isRunning(ws.id)) continue;
       const task = getTask(db, ws.taskId);
-      // A pass task is launched by its pass's own turns, never from the queue (Workbench spec §5.5).
-      if (task.passId != null) continue;
+      // A pass task is launched by its pass's own turns, never from the queue (Workbench spec §5.5),
+      // while the pass holds it.
+      if (passHoldingTask(db, task)) continue;
       const project = getProject(db, ws.projectId);
       const batch = ws.batchId ? getBatch(db, ws.batchId) : null;
       // Nothing else runs in Your folder while a pass holds it (W9): the task waits, saying so.
-      if (batch?.worktreePath == null) {
-        const pass = passHoldingFolder(db, project.id);
-        if (pass) {
-          waitForPass(ws.id, pass);
-          continue;
-        }
+      const pass = batch?.worktreePath == null ? passHoldingFolder(db, project.id) : undefined;
+      if (pass) {
+        waitForPass(ws.id, pass);
+        continue;
       }
+      if (ws.notice?.key === PASS_FOLDER_WAIT_NOTICE_KEY) endPassWait(ws.id);
       const account = getAccountRow(db, project.accountId);
       if (account.id === signingIn) continue;
       if (opts.modelWait?.holds(account.id)) continue;
@@ -264,8 +278,6 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
           ...(areaScope ? { areaScope } : {}),
         });
         if (!claimed.ok) return null;
-        if (getWorkstreamRow(ctx.tx, ws.id).notice?.key === PASS_FOLDER_WAIT_NOTICE_KEY)
-          setWorkstreamNotice(ctx, ws.id, null);
         const f = acquireLease(ctx, ws.id, opts.instanceId, leaseUntil);
         transitionWorkstream(ctx, ws.id, {
           to: WorkstreamState.Starting,

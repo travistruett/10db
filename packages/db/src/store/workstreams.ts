@@ -10,6 +10,7 @@ import {
   mintId,
   NotFoundError,
   LEFT_OUT_NOTICE_KEY,
+  passHoldsTasks,
   PARKED_NOTICE_KEY,
   REVERT_COMMIT_LINE,
   REVERTED_NOTICE_KEY,
@@ -47,6 +48,7 @@ import {
 import * as schema from '../schema';
 import { getBoardColumn } from './board-columns';
 import { recordLaneTime } from './lane-times';
+import { passHoldingTask } from './passes';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
 import { getTask, mergedDespiteFailure } from './tasks';
@@ -219,6 +221,12 @@ export function insertWorkstream(
     )
     .get();
   if (active) throw new ConflictError(`Task ${task.title} already has an active workstream`);
+  // A pass task runs only in its pass's batch, by the pass's turns, until the pass lets it go.
+  const pass = passHoldingTask(ctx.tx, task);
+  if (pass && pass.batchId !== (opts.batchId ?? null))
+    throw new ConflictError(
+      `Task ${task.title} is in the Workbench pass "${pass.name}"; it runs there until the pass takes it out or ends`,
+    );
   const project = getProject(ctx.tx, task.projectId);
   const row: WorkstreamRow = {
     id: mintId('Workstream'),
@@ -499,27 +507,30 @@ function holdsLane(): SQL | undefined {
 }
 
 /**
- * The lanes held now: every one counts for the daemon and its project's account; a pass task's lane
- * counts for its pass and not for its project.
+ * The lanes held now: every one counts for the daemon and its project's account; the lane of a task
+ * a pass still holds (`passHoldsTasks`) counts for that pass and not for its project.
  */
 export function countLanes(db: DbReader): LaneCounts {
   const rows = db
     .select({
       projectId: schema.workstreams.projectId,
       accountId: schema.projects.accountId,
-      passId: schema.tasks.passId,
+      passId: schema.passes.id,
+      passState: schema.passes.state,
     })
     .from(schema.workstreams)
     .innerJoin(schema.projects, eq(schema.projects.id, schema.workstreams.projectId))
     .innerJoin(schema.tasks, eq(schema.tasks.id, schema.workstreams.taskId))
+    .leftJoin(schema.passes, eq(schema.passes.id, schema.tasks.passId))
     .where(holdsLane())
     .all();
   const byProject = new Map<ProjectId, number>();
   const byAccount = new Map<AccountId, number>();
   const byPass = new Map<PassId, number>();
   for (const r of rows) {
-    if (r.passId === null) byProject.set(r.projectId, (byProject.get(r.projectId) ?? 0) + 1);
-    else byPass.set(r.passId, (byPass.get(r.passId) ?? 0) + 1);
+    if (r.passId !== null && r.passState !== null && passHoldsTasks(r.passState))
+      byPass.set(r.passId, (byPass.get(r.passId) ?? 0) + 1);
+    else byProject.set(r.projectId, (byProject.get(r.projectId) ?? 0) + 1);
     byAccount.set(r.accountId, (byAccount.get(r.accountId) ?? 0) + 1);
   }
   return { global: rows.length, byProject, byAccount, byPass };

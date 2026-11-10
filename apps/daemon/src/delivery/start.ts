@@ -36,6 +36,7 @@ import {
   listWorkstreams,
   patchBatch,
   passHoldingFolder,
+  passHoldingTask,
   patchTask,
   placeTaskByRule,
   setBatchNotice,
@@ -543,6 +544,12 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     const latest = task.workstreamId ? getWorkstreamRow(db, task.workstreamId) : null;
     if (latest && ACTIVE_STATES.includes(latest.state))
       throw new ConflictError(`Task ${task.title} is already running`);
+    // Checked here too, before the cut, so a pass task never leaves a fresh branch checked out.
+    const pass = passHoldingTask(db, task);
+    if (pass)
+      throw new ConflictError(
+        `Task ${task.title} is in the Workbench pass "${pass.name}"; it runs there until the pass takes it out or ends`,
+      );
   }
 
   /** Cutting a branch (batch delivery spec §5): checks in order, then switch, then open. */
