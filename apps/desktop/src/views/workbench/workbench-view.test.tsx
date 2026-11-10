@@ -60,6 +60,8 @@ async function draw(overrides: Partial<WorkbenchScreenProps> = {}) {
       start: vi.fn(() => Promise.resolve()),
       propose: vi.fn(() => Promise.resolve(pagesProposalDto())),
       addPages: vi.fn(() => Promise.resolve()),
+      rename: vi.fn(() => Promise.resolve()),
+      abandon: vi.fn(() => Promise.resolve()),
     },
     ...overrides,
   };
@@ -93,6 +95,8 @@ describe('WorkbenchScreen', () => {
         start,
         propose: () => Promise.resolve(pagesProposalDto()),
         addPages: () => Promise.resolve(),
+        rename: () => Promise.resolve(),
+        abandon: () => Promise.resolve(),
       },
     });
     fireEvent.click(await screen.findByRole('checkbox', { name: /^settings/ }));
@@ -120,5 +124,15 @@ describe('WorkbenchScreen', () => {
     expect(screen.queryByText('Work through pages with the agents, live.')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Add Page' }));
     expect(await screen.findByRole('dialog', { name: 'Add Page' })).toBeTruthy();
+  });
+
+  it.each([
+    { item: 'Rename', dialog: 'Rename Pass' },
+    { item: 'Abandon Pass…', dialog: 'Abandon Pass' },
+  ])('opens $dialog from the pass menu', async ({ item, dialog }) => {
+    await draw({ live: passViewDto({ pages: [pagesByStatus().ready] }) });
+    fireEvent.click(await screen.findByRole('button', { name: 'More pass actions' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: item, hidden: true }));
+    expect(await screen.findByRole('dialog', { name: dialog })).toBeTruthy();
   });
 });

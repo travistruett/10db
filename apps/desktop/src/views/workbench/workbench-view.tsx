@@ -4,6 +4,7 @@ import {
   type PagesProposalDto,
   type PassJoinRequest,
   type PassOpenRequest,
+  type PassRename,
   type PassStartDto,
   type PassViewDto,
   type ProjectViewDto,
@@ -13,10 +14,12 @@ import {
 import { Group, Loader, Stack, Title } from '@mantine/core';
 import { useMutation } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
+import { AbandonModal } from './abandon-modal';
 import { AddPageModal } from './add-page-modal';
 import { PassHeader } from './pass-header';
 import type { PassWorkspaceProps } from './pass-workspace-props';
 import { NoPageAreas, ProposePagesModal } from './propose-pages-modal';
+import { RenameModal } from './rename-modal';
 import { StartPass } from './start-pass';
 import type { WorkbenchSearch } from './workbench-search';
 
@@ -28,6 +31,10 @@ export interface WorkbenchActions {
   readonly propose: () => Promise<PagesProposalDto>;
   /** Adds pages to the open pass: `POST /passes/:passId/pages`. */
   readonly addPages: (request: PassJoinRequest) => Promise<unknown>;
+  /** Renames the open pass: `PATCH /passes/:passId`. */
+  readonly rename: (body: PassRename) => Promise<unknown>;
+  /** Abandons the open pass. */
+  readonly abandon: () => Promise<unknown>;
 }
 
 export interface WorkbenchScreenProps {
@@ -53,7 +60,7 @@ export interface WorkbenchScreenProps {
 }
 
 /** Which dialog the screen holds open. */
-type Dialog = 'propose' | 'add-page' | null;
+type Dialog = 'propose' | 'add-page' | 'rename' | 'abandon' | null;
 
 /**
  * The Workbench (spec §4) for one project: why a pass needs a page area when it has none, the picker
@@ -130,8 +137,12 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
         onAddPage={() => {
           setDialog('add-page');
         }}
-        onRename={() => undefined}
-        onAbandon={() => undefined}
+        onRename={() => {
+          setDialog('rename');
+        }}
+        onAbandon={() => {
+          setDialog('abandon');
+        }}
       />
       {renderWorkspace({ view: live, inbox, project, selected: search.task ?? null, onSelect })}
       {dialog === 'add-page' ? (
@@ -143,6 +154,18 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
           now={now}
           onClose={closeDialog}
           add={actions.addPages}
+        />
+      ) : null}
+      {dialog === 'rename' ? (
+        <RenameModal pass={live.pass} onClose={closeDialog} rename={actions.rename} />
+      ) : null}
+      {dialog === 'abandon' ? (
+        <AbandonModal
+          view={live}
+          inbox={inbox}
+          now={now}
+          onClose={closeDialog}
+          abandon={actions.abandon}
         />
       ) : null}
     </Stack>
