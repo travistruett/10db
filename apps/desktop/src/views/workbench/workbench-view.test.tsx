@@ -90,9 +90,9 @@ describe('WorkbenchScreen', () => {
     expect(await screen.findByText('Settings pass closed with no pull request.')).toBeTruthy();
     expect(screen.getByRole('checkbox', { name: /^settings/ })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'More pass actions' })).toBeNull();
-    // Its notices stay in sight, and its pages take no message.
+    // Its notices stay in sight, and it holds no page to send one to.
     expect(screen.getByText(notice.text)).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Send to Agent' })).toHaveProperty('disabled', true);
+    expect(screen.queryByRole('button', { name: 'Send to Agent' })).toBeNull();
   });
 
   it('waits for the picker until what Start Pass says has loaded', async () => {
