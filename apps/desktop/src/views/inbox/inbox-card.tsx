@@ -31,6 +31,7 @@ import { CheckCard } from './check-card';
 import { isDismissable } from './inbox-rows';
 import { ReviewRejection, reviewRejection } from '../review/review-rejection';
 import { McpApprovalDetails, mcpReview } from './mcp-approval';
+import { PassCardExtras } from './pass-card-extras';
 import { SELECTED_CARD_ATTRIBUTE } from './use-inbox-keys';
 import { KIND_LABELS, optionLabel } from './permission-labels';
 import { usePrincipleOf } from './principle-card';
@@ -264,6 +265,7 @@ export function InboxCard({
             Open Accounts in Settings
           </Anchor>
         ) : null}
+        <PassCardExtras item={item} />
         <BatchCardActions item={item} onDone={onDismiss} />
         {hasOptions ? (
           <Radio.Group value={choice} onChange={onChoose} aria-label="Answer">

@@ -1010,6 +1010,76 @@ describe("a Workbench pass's shared-area question", () => {
   });
 });
 
+describe("a Workbench pass's cards", () => {
+  const passId = mintId('Pass');
+  const prUrl = 'https://github.com/acme/widgets/pull/7';
+  const mergeCommand = 'git switch main && git merge 10db/pass-settings';
+  const passFlag = (title: string, detail: NonNullable<InboxItemDto['detail']>): InboxItemDto =>
+    inboxItemDto({
+      kind: 'flag',
+      title,
+      body: 'What the pass did.',
+      options: [],
+      detail,
+      projectId: project,
+    });
+
+  it.each([
+    {
+      name: 'a branch it could not move offers the command that merges it, to copy',
+      card: passFlag('Your folder stays on 10db/pass-settings', {
+        kind: 'pass_branch_moved',
+        passId,
+        returnBranch: 'main',
+        passBranch: '10db/pass-settings',
+        reason: 'moved',
+        mergeCommand,
+      }),
+      command: mergeCommand,
+      pullRequest: null,
+    },
+    {
+      name: 'a follow-on links the pull request its later sign-offs went to',
+      card: passFlag('Workbench pass "Settings" closed when its pull request merged', {
+        kind: 'pass_follow_on',
+        passId,
+        followOnPassId: null,
+        prUrl,
+        carried: [],
+      }),
+      command: null,
+      pullRequest: prUrl,
+    },
+    {
+      name: 'a follow-on with no pull request links none',
+      card: passFlag('Workbench pass "Settings" closed when its pull request merged', {
+        kind: 'pass_follow_on',
+        passId,
+        followOnPassId: mintId('Pass'),
+        prUrl: null,
+        carried: [mintId('Task')],
+      }),
+      command: null,
+      pullRequest: null,
+    },
+  ])('$name', async ({ card, command, pullRequest }) => {
+    inbox([card]);
+    renderApp('/inbox');
+    fireEvent.click(await screen.findByText(card.title));
+    const shown = selectedCard();
+    await within(shown).findByText('What the pass did.');
+    const copy = within(shown).queryByRole('button', { name: 'Copy command' });
+    if (command === null) expect(copy).toBeNull();
+    else {
+      expect(within(shown).getByText(command)).toBeTruthy();
+      expect(copy).toBeTruthy();
+    }
+    const link = within(shown).queryByRole('link', { name: 'Pull request' });
+    if (pullRequest === null) expect(link).toBeNull();
+    else expect(link?.getAttribute('href')).toBe(pullRequest);
+  });
+});
+
 describe('the resolved view', () => {
   const closedBy10db = inboxItemDto({
     kind: 'flag',
