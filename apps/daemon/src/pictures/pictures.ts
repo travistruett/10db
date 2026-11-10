@@ -47,6 +47,7 @@ import {
   listTaskToolCalls,
   listTaskTurns,
   openPassTurn,
+  openPreviewMark,
   taskStartFacts,
 } from '@10db/db';
 import type { Clock, Timer } from '../clock';
@@ -490,7 +491,13 @@ export function startPictures(deps: PicturesDeps): Pictures {
       (t) => t.seq < turn.seq && t.ending === PassTurnEnding.Ready,
     );
     const previous = earlier[earlier.length - 1];
-    if (!turnChangedSomething(turn, previous, listSharedChanges(db, passId))) return;
+    // A page that broke the preview is shot after every Ready turn, changed or not: only a clean load of
+    // its route can mend its mark, and the break may have been fixed elsewhere.
+    if (
+      !turnChangedSomething(turn, previous, listSharedChanges(db, passId)) &&
+      openPreviewMark(db, passId, taskId) === undefined
+    )
+      return;
     const task = getTask(db, taskId);
     const project = getProject(db, task.projectId);
     if (project.appUrl === null) return;

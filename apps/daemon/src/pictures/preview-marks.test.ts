@@ -91,12 +91,19 @@ const ended = (n: number) =>
   waitFor(() => logs.lines().filter((l) => l['msg'] === 'a capture ended').length >= n);
 let captures = 2;
 
-/** A Ready turn of the page that kept a new commit, its picture loading as `outcome`. */
-async function turnLoads(task: TaskDto, outcome: ShotOutcome): Promise<PassTurnDto> {
+/**
+ * A Ready turn of the page that kept a new commit, its picture loading as `outcome`; with `changed`
+ * false, it keeps the commit its last turn kept, so it changed nothing.
+ */
+async function turnLoads(
+  task: TaskDto,
+  outcome: ShotOutcome,
+  changed = true,
+): Promise<PassTurnDto> {
   cam.outcomes = [outcome];
   const turn = w.startTurn(task);
   w.endTurn(turn);
-  sha += 1;
+  if (changed) sha += 1;
   const settled = w.h.state.write((ctx) => {
     setPassTurnKept(ctx, turn.id, {
       keptSha: sha.toString(16).padStart(40, '0'),
@@ -194,6 +201,16 @@ describe('a page that breaks the preview', () => {
       taskId: w.settings.id,
       route: '/settings',
     });
+  });
+
+  it('mends the mark on a clean turn that changed nothing, as when the break was fixed elsewhere', async () => {
+    captures = 2;
+    await world();
+    await turnLoads(w.settings, 'overlay');
+    expect(page(w.settings).preview).not.toBeNull();
+    await turnLoads(w.settings, 'clean', false);
+    expect(page(w.settings).preview).toBeNull();
+    expect(passView(w.h.store.db, w.opened.pass.id).preview).toBe('clean');
   });
 
   it('offers no copy on a project with no separate copies; the page stays marked', async () => {
