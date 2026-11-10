@@ -203,6 +203,22 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
       const dirty = await deps.git.changedPaths(project.repoPath);
       const passed = result.exitCode === 0;
       checked.set(pass.id, { kind: 'folder', command, passed, dirty });
+      // Only a close gates in the folder, after its take-outs: a failure reopens the pass without
+      // them, and the header says so with the log's tail.
+      deps.state.write((w) => {
+        if (passed) {
+          clearPassNotice(w, pass.id, GATE_NOTICE);
+          return;
+        }
+        setPassNotice(w, pass.id, {
+          id: GATE_NOTICE,
+          kind: PassNoticeKind.GateFailed,
+          text: `The gate failed in Your folder, after the pages set to Take Out were taken out, so the pass is open again without them:\n${result.tail}`,
+          sendable: true,
+          cardId: null,
+          at: w.now,
+        });
+      });
       return { passed, aborted: false, logPath: result.logPath, dirtyNamed: dirty };
     }
     const ran = await gateInScratch(deps, {

@@ -196,15 +196,17 @@ describe('Close Pass', () => {
   it.each([
     {
       name: 'in a scratch worktree, before any take-out',
-      project: { gateCommand: 'false' },
+      project: { gateCommand: "echo 'the gate says no'; false" },
       takenOut: false,
+      notice: /^The gate failed on [0-9a-f]{7}, run in a scratch worktree/,
     },
     {
       name: 'in the folder, after the take-outs',
-      project: { gateCommand: 'false', delivery: 'local' as const },
+      project: { gateCommand: "echo 'the gate says no'; false", delivery: 'local' as const },
       takenOut: true,
+      notice: /^The gate failed in Your folder, after the pages set to Take Out were taken out/,
     },
-  ])('reopens the pass when its gate fails $name', async ({ project, takenOut }) => {
+  ])('reopens the pass when its gate fails $name', async ({ project, takenOut, notice }) => {
     await world(project);
     await twoTurns();
 
@@ -220,6 +222,11 @@ describe('Close Pass', () => {
     expect(landed()).toEqual(['Settings: UI work']);
     expect(w.h.git$('symbolic-ref', '--short', 'HEAD')).toBe(w.branch);
     expect(getTask(w.h.store.db, w.people.id).passId === null).toBe(takenOut);
+    // The Workbench says so in red, the log's tail under its first line.
+    const said = getPassProgress(w.h.store.db, w.opened.pass.id).notices;
+    expect(said.map((n) => n.kind)).toEqual(['gate_failed']);
+    expect(said[0]?.text).toMatch(notice);
+    expect(said[0]?.text.split('\n').slice(1).join('\n')).toContain('the gate says no');
   });
 
   describe('after its failed gate took a page out and Add Page put it back', () => {
