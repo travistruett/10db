@@ -4,6 +4,7 @@ import {
   GoalStatus,
   InboxKind,
   InboxState,
+  mintId,
   PullRequestState,
   QuestionCategory,
   Severity,
@@ -993,6 +994,21 @@ describe('the Ungrouped group', () => {
     expect(ungroupedDigest(store.db, project.id)).toBeNull();
     const running = insertGoalFreeTask('Running');
     run(running, WorkstreamState.Running);
+    expect(ungroupedDigest(store.db, project.id)).toMatchObject({ running: 1, failed: 0 });
+  });
+
+  it('leaves out a Workbench page that is Ready, which waits on the builder and runs nothing', () => {
+    const page = insertGoalFreeTask('Settings: UI work');
+    const ws = run(page, WorkstreamState.WaitingHuman);
+    store.write((ctx) => {
+      ctx.tx
+        .update(schema.workstreams)
+        .set({ nextAction: { kind: 'pass_review', inboxId: mintId('InboxItem') } })
+        .where(eq(schema.workstreams.id, ws))
+        .run();
+    });
+    expect(ungroupedDigest(store.db, project.id)).toBeNull();
+    run(insertGoalFreeTask('Asks'), WorkstreamState.WaitingHuman);
     expect(ungroupedDigest(store.db, project.id)).toMatchObject({ running: 1, failed: 0 });
   });
 
