@@ -43,6 +43,7 @@ import {
   listTaskCodexStarts,
   listTaskToolCalls,
   listTaskTurns,
+  openPassTurn,
   taskStartFacts,
 } from '@10db/db';
 import type { Clock, Timer } from '../clock';
@@ -365,6 +366,8 @@ export function startPictures(deps: PicturesDeps): Pictures {
   }
 
   function onTurnReady(passId: PassId, taskId: TaskId, turnId: PassTurnId): void {
+    // A page already in its next turn may be half changed: its picture would show half a turn.
+    if (openPassTurn(db, taskId) !== undefined) return;
     const turn = getPassTurn(db, turnId);
     const earlier = listTaskTurns(db, taskId).filter(
       (t) => t.seq < turn.seq && t.ending === PassTurnEnding.Ready,

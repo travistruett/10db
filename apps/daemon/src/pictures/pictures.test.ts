@@ -10,6 +10,7 @@ import {
 import {
   closePass,
   getTask,
+  insertPassTurn,
   insertSession,
   listTaskScreens,
   listTaskThread,
@@ -170,6 +171,31 @@ describe('pictures of a pass', () => {
     w.startTurn(w.people);
     await ended(3);
     expect(kinds(w.people)).toEqual(['before']);
+  });
+
+  it('takes no turn picture of a page whose next turn is already open', async () => {
+    await world();
+    start();
+    await ended(2);
+    const turn = w.startTurn(w.people);
+    w.endTurn(turn);
+    w.h.state.write((ctx) => {
+      setPassTurnKept(ctx, turn.id, {
+        keptSha: 'a'.repeat(40),
+        keptBaseSha: 'b'.repeat(40),
+        sharedSeq: null,
+      });
+      settlePassTurn(ctx, turn.id);
+      insertPassTurn(ctx, {
+        taskId: w.people.id,
+        workstreamId: w.runOf(w.people),
+        sessionId: null,
+        messageId: null,
+      });
+    });
+    readyTurn(w.settings, 'c'.repeat(40));
+    await ended(3);
+    expect(cam.shots.map((s) => s.route)).toEqual(['/settings', '/people', '/settings']);
   });
 
   it("takes the after at sign-off, and holds a closing pass's after until the pass closes", async () => {
