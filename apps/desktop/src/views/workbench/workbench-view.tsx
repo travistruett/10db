@@ -1,9 +1,11 @@
 import {
   AreaRole,
+  PassState,
   passHoldsTasks,
   type InboxItemDto,
   type PagesProposalDto,
   type PassJoinRequest,
+  type PassDto,
   type PassOpenRequest,
   type PassRename,
   type PassStartDto,
@@ -84,6 +86,18 @@ export interface WorkbenchScreenProps {
 type Dialog = 'propose' | 'add-page' | 'close' | 'rename' | 'abandon' | null;
 
 /**
+ * The pass whose close finished between two reads of the live pass: it was closing or closed, and now
+ * no pass is live or it has settled. Null for anything else, an Abandon among them.
+ */
+function closeFinished(before: PassDto | null, after: PassDto | null): PassDto | null {
+  if (before === null) return null;
+  if (before.state !== PassState.Closing && before.state !== PassState.Closed) return null;
+  if (after === null || (after.id === before.id && after.state === PassState.Settled))
+    return before;
+  return null;
+}
+
+/**
  * The Workbench (spec §4) for one project: why a pass needs a page area when it has none, the picker
  * while no pass is open, else the pass's header over its workspace.
  */
@@ -91,6 +105,15 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
   const { project, live, start, tasks, inbox, search, goalPages, now } = props;
   const { onSelect, renderWorkspace, actions } = props;
   const [dialog, setDialog] = useState<Dialog>(null);
+  // The live pass last read, and the one whose close finished while it was on screen, which the picker
+  // confirms in a line until another pass opens.
+  const [lastPass, setLastPass] = useState<PassDto | null>(null);
+  const [closed, setClosed] = useState<PassDto | null>(null);
+  const current = live?.pass ?? null;
+  if (live !== undefined && (current?.id !== lastPass?.id || current?.state !== lastPass?.state)) {
+    setLastPass(current);
+    setClosed(closeFinished(lastPass, current) ?? (current === null ? closed : null));
+  }
   const closeDialog = () => {
     setDialog(null);
   };
@@ -128,6 +151,11 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
     return (
       <Stack gap="md">
         <Title order={2}>Workbench</Title>
+        {closed === null ? null : (
+          <Text size="sm" role="status">
+            {`${closed.name} closed; its work is on ${closed.returnBranch}.`}
+          </Text>
+        )}
         {live === null ? null : (
           <>
             <ClosedPassLine view={live} inbox={inbox} />
