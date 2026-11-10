@@ -34,7 +34,6 @@ import { createGateRunner, createGateSlots, limitGates } from '../verify';
 import { endTurnSteps, finishEndedTurn } from './pass-turn';
 import {
   startTurnChecks,
-  TURN_CHECK_NOTICE,
   TURN_CHECK_TIMEOUT_MS,
   withTurnChecks,
   type TurnChecks,
@@ -167,7 +166,9 @@ async function readyTurn(task: TaskDto, path: string): Promise<void> {
 
 const passId = () => w.opened.pass.id;
 const header = () =>
-  getPassProgress(w.h.store.db, passId()).notices.filter((n) => n.id === TURN_CHECK_NOTICE);
+  getPassProgress(w.h.store.db, passId()).notices.filter(
+    (n) => n.kind === PassNoticeKind.TurnCheck,
+  );
 const checkNotices = (task: TaskDto) =>
   listTaskThread(w.h.store.db, task.id).filter(
     (m) => m.author === TaskMessageAuthor.System && m.body.startsWith('Check failed'),

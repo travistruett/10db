@@ -54,7 +54,7 @@ export const TURN_CHECK_TIMEOUT_MS = 10 * 60_000;
 const LOG_TAIL_BYTES = 64 * 1024;
 
 /** The header's one notice of the pass's turn check. */
-export const TURN_CHECK_NOTICE = 'turn-check';
+const TURN_CHECK_NOTICE = 'turn-check';
 
 /** The exit code of a gate whose sandbox could not start (`verify/gate-runner.ts`). */
 const UNSTARTED_EXIT = 126;
@@ -114,7 +114,7 @@ function rootsOf(repoPath: string): string[] {
   }
 }
 
-export function createTurnChecks(deps: TurnChecksDeps): TurnChecks {
+function createTurnChecks(deps: TurnChecksDeps): TurnChecks {
   const db = deps.state.db;
   const queues = new Map<PassId, CheckQueueState>();
   const runs = new Map<
@@ -320,7 +320,7 @@ export function createTurnChecks(deps: TurnChecksDeps): TurnChecks {
  * Asks for a check when a page's turn ends Ready (in the runner or in recovery's finish), and stops
  * a pass's check once the pass is no longer open.
  */
-export function subscribeTurnChecks(bus: EventBus, db: DbReader, checks: TurnChecks): () => void {
+function subscribeTurnChecks(bus: EventBus, db: DbReader, checks: TurnChecks): () => void {
   return bus.subscribe((event) => {
     if (event.type === EventType.PassPageReady) {
       const passId = PassId.safeParse(event.entityId);
