@@ -3751,10 +3751,22 @@ export function createRunner(opts: RunnerOptions): Runner {
     async deliverMessage(taskId, messageId, { redo }) {
       const id = getTask(db, taskId).workstreamId;
       if (id === null) throw new ConflictError(`Task ${taskId} has no run to hand the message to`);
-      /** A page its pass no longer holds takes no message, whatever was kept for it. */
+      /**
+       * A page takes a message only while its pass holds it and is open and the page is not being
+       * taken out, read again after each wait: one leaving meanwhile takes none, whatever was kept
+       * for it, and the thread takes the message back.
+       */
       const stillAPage = (): void => {
-        if (!passOfWorkstream(db, id))
-          throw new ConflictError(`${getTask(db, taskId).title} is no longer in a Workbench pass`);
+        const pass = passOfWorkstream(db, id);
+        const title = getTask(db, taskId).title;
+        if (!pass) throw new ConflictError(`${title} is no longer in a Workbench pass`);
+        if (pass.state !== PassState.Open)
+          throw new ConflictError(
+            `Workbench pass "${pass.name}" is ${pass.state.toLowerCase()}; its pages take no message`,
+          );
+        const takeOut = lastTakeOut(db, taskId);
+        if (takeOut?.passId === pass.id && takeOut.step < TakeOutStep.Done)
+          throw new ConflictError(`${title} is being taken out of its pass`);
       };
       stillAPage();
       const ctl = active.get(id);
@@ -3785,6 +3797,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             await ctl.handle?.stop();
           }
           await ctl.done;
+          stillAPage();
           return;
         }
         // Stop and Redo: the interrupted turn goes on with the message. Its end is not Ready, as

@@ -91,8 +91,9 @@ async function openPage(
   sessions: FakeStep[][],
   first = 'Make the form tidy',
   beforeLaunch: () => void = () => undefined,
+  runner: Parameters<typeof createTestEngine>[2] = {},
 ): Promise<{ task: TaskDto; pass: PassDto; id: WorkstreamId }> {
-  engine = await createTestEngine({ [TITLE]: sessions }, PAGE_AREAS);
+  engine = await createTestEngine({ [TITLE]: sessions }, PAGE_AREAS, runner);
   const branch = '10db/polish-abc123';
   const startSha = git('rev-parse', 'HEAD');
   git('switch', '-q', '-c', branch);
@@ -355,6 +356,42 @@ describe("a builder message's hand-over to a warm session", () => {
     expect(engine.adapter.prompts[1]?.prompt).toContain(
       `The builder edited these files by hand since your last turn. Keep their changes:\n- ${PAGE_FILE}`,
     );
+  });
+
+  it('refuses a message whose page began leaving its pass while its hand edits were folded', async () => {
+    const real = createGit();
+    let duringFold: (() => void) | null = null;
+    const { task, pass, id } = await openPage(
+      [[...turn('one\n', 'Tidied the form.'), { do: 'await_message', contains: 'never sent' }]],
+      'Make the form tidy',
+      () => undefined,
+      {
+        git: {
+          ...real,
+          pageChanges: (...a) => {
+            duringFold?.();
+            duringFold = null;
+            return real.pageChanges(...a);
+          },
+        },
+      },
+    );
+    await waitFor(isReady(id, 1));
+    // The builder asks for the page to be taken out while the message's fold runs.
+    duringFold = () => {
+      engine.state.write((ctx) =>
+        insertTakeOut(ctx, { taskId: task.id, passId: pass.id, drops: [] }),
+      );
+    };
+    const message = engine.state.write((ctx) =>
+      insertBuilderMessage(ctx, task.id, { body: 'Bigger please', files: [] }),
+    );
+
+    await expect(
+      engine.runner.deliverMessage(task.id, message.id, { redo: false }),
+    ).rejects.toThrow(ConflictError);
+    expect(engine.adapter.sent).toEqual([]);
+    expect(openPassTurn(engine.store.db, task.id)).toBeUndefined();
   });
 
   it('hands over with the next message every one no turn took that the session was never handed', async () => {
