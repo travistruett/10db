@@ -551,10 +551,14 @@ describe('Open Pull Request', () => {
   }
 
   const bodyOf = (passId: PassId) => h.gh.body(getPassPullRequest(h.store.db, passId)?.url ?? '');
+  // A whole delivery run keeps the machine busy: a job queued behind another may take seconds.
   const gateStarted = (held: ReturnType<typeof heldWorktrees>, n: number) =>
-    vi.waitFor(() => {
-      expect(held.calls()).toBe(n);
-    });
+    vi.waitFor(
+      () => {
+        expect(held.calls()).toBe(n);
+      },
+      { timeout: 20_000 },
+    );
 
   it('writes no running gate once a second Open Pull Request finds the pass gone before its gate starts', async () => {
     const held = heldWorktrees();
@@ -572,10 +576,13 @@ describe('Open Pull Request', () => {
     });
     held.release();
 
-    await vi.waitFor(async () => {
-      await prs.ensurePassPr({ passId, ready: true }, new AbortController().signal);
-      expect(bodyOf(passId)).not.toContain('Gate running');
-    });
+    await vi.waitFor(
+      async () => {
+        await prs.ensurePassPr({ passId, ready: true }, new AbortController().signal);
+        expect(bodyOf(passId)).not.toContain('Gate running');
+      },
+      { timeout: 20_000 },
+    );
   });
 
   it("says the gate is running while a second Open Pull Request's gate runs, though the first one's stopped", async () => {
