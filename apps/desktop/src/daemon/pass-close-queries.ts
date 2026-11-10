@@ -3,12 +3,15 @@ import {
   PassClosePreviewDto,
   PassPullRequestDto,
   PassPullRequestPreviewDto,
+  PassSignOff,
   PassSignOffDto,
+  PassState,
   TakeOutPreviewDto,
   TaskMessageDto,
   type InboxItemId,
   type PassCloseRequest,
   type PassId,
+  type PassViewDto,
   type TaskId,
 } from '@10db/contracts';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -137,11 +140,18 @@ export function useAnswerPassCard() {
   });
 }
 
-/** What Open Pull Request would do, read before it is offered; under `passKeys.all`, so pass events reread it. */
-export function usePullRequestPreview(passId: PassId) {
+/**
+ * What Open Pull Request would do, read before it is offered and only while the pass is open. It
+ * reads git, so it is not under `passKeys.all`: it is read again when what it answers can change, a
+ * page signed off or the pull request made, and after an open.
+ */
+export function usePullRequestPreview(view: PassViewDto) {
   const client = usePassCloseClient();
+  const passId = view.pass.id;
+  const signedOff = view.pages.filter((page) => page.signOff === PassSignOff.Done).length;
   return useQuery({
-    queryKey: [...passKeys.all, 'pull-request', passId],
+    queryKey: [...pullRequestPreviewKey(passId), signedOff, view.pullRequest?.url ?? null],
+    enabled: view.pass.state === PassState.Open,
     queryFn: async () =>
       readJson(
         await client.passes[':passId']['pull-request'].$get({ param: { passId } }),
@@ -150,17 +160,27 @@ export function usePullRequestPreview(passId: PassId) {
   });
 }
 
+/** Every read of a pass's pull request preview. */
+function pullRequestPreviewKey(passId: PassId) {
+  return ['pass-pull-request', passId] as const;
+}
+
 /** Open Pull Request: pushes the signed-off pages and opens a draft, or updates the one open. */
 export function useOpenPullRequest() {
   const client = usePassCloseClient();
   const refetch = useRefetchPasses();
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (passId: PassId) =>
       readJson(
         await client.passes[':passId']['pull-request'].$post({ param: { passId } }),
         PassPullRequestDto,
       ),
-    onSuccess: refetch,
+    onSuccess: (_opened, passId) =>
+      Promise.all([
+        refetch(),
+        queryClient.invalidateQueries({ queryKey: pullRequestPreviewKey(passId) }),
+      ]),
   });
 }
 

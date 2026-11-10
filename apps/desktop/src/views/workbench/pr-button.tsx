@@ -94,7 +94,7 @@ function OpenPullRequestConfirm({ view, preview, onClose, onOpened }: ConfirmPro
 
 /** Open Pull Request in the pass's header, with the pull request's link once it has one. */
 export function PrButton({ view }: { readonly view: PassViewDto }) {
-  const preview = usePullRequestPreview(view.pass.id);
+  const preview = usePullRequestPreview(view);
   const [confirming, setConfirming] = useState(false);
   const [posted, setPosted] = useState<string | null>(null);
   const shown = preview.data;
@@ -111,7 +111,7 @@ export function PrButton({ view }: { readonly view: PassViewDto }) {
       <Button
         variant="default"
         size="xs"
-        loading={preview.isPending}
+        loading={preview.isLoading}
         disabled={view.pass.state !== PassState.Open || shown?.offered !== true}
         onClick={() => {
           setConfirming(true);

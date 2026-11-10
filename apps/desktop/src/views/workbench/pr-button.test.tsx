@@ -3,7 +3,8 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderWithDaemon, server } from '../../test/daemon';
-import { passViewDto } from '../../test/pass-fixtures';
+import { passKeys } from '../../daemon/pass-queries';
+import { pagesByStatus, passViewDto } from '../../test/pass-fixtures';
 import { PrButton } from './pr-button';
 
 /** Answers the pull request's preview with `preview`; records the passes asked to open one. */
@@ -84,6 +85,59 @@ describe('PrButton', () => {
       'href',
       'https://github.com/acme/ampsio/pull/7',
     );
+  });
+
+  it.each(['CLOSING', 'ABANDONING'] as const)(
+    'while the pass is %s, reads nothing and stays disabled',
+    async (state) => {
+      let reads = 0;
+      serve({});
+      server.use(
+        http.get(daemonUrl('/passes/:passId/pull-request'), () => {
+          reads += 1;
+          return HttpResponse.json({});
+        }),
+      );
+      renderWithDaemon(<PrButton view={passViewDto({ pass: { state } })} />);
+      expect(await button()).toHaveProperty('disabled', true);
+      expect(reads).toBe(0);
+    },
+  );
+
+  it('reads its preview again when a page is signed off, not on every pass event', async () => {
+    let reads = 0;
+    serve({});
+    server.use(
+      http.get(daemonUrl('/passes/:passId/pull-request'), () => {
+        reads += 1;
+        return HttpResponse.json(
+          PassPullRequestPreviewDto.parse({
+            offered: true,
+            reason: null,
+            aheadOfBase: 0,
+            base: 'main',
+            existing: null,
+            gate: 'scratch',
+          }),
+        );
+      }),
+    );
+    const { ready, working } = pagesByStatus();
+    const view = passViewDto({ pages: [{ ...ready, signOff: 'done' }, working] });
+    const { queryClient, rerender } = renderWithDaemon(<PrButton view={view} />);
+    await waitFor(() => {
+      expect(reads).toBe(1);
+    });
+    await queryClient.invalidateQueries({ queryKey: passKeys.all });
+    expect(reads).toBe(1);
+    rerender(
+      <PrButton
+        view={{ ...view, pages: [view.pages[0] ?? ready, { ...working, signOff: 'done' }] }}
+      />,
+    );
+    await waitFor(() => {
+      expect(reads).toBe(2);
+    });
   });
 
   it("links the pass's pull request once the view has one", async () => {
