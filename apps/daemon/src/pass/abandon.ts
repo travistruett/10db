@@ -17,12 +17,16 @@ import {
   leavePass,
   listPassTakeOuts,
   listPassTasks,
+  listSharedChanges,
+  openHolds,
   setAbandonStep,
 } from '@10db/db';
 import { jobKey, JobQueue } from '../delivery';
 import { flagCard, withdrawCard } from '../inbox';
 import { PASS_CARD_DETAIL, PASS_CARD_KIND, PassCardKind } from './folder';
 import { passBranch, type PassWorkDeps } from './kept-work';
+import { keepHold } from './shared-chain';
+import { dropShared } from './shared-drop';
 import { takeOutSteps, TakeOutWithin, type TakeOutDeps } from './take-out';
 
 // Workbench spec §5.4 (D23): Abandon Pass is the exit that always works. Each unsigned page's files go
@@ -51,6 +55,28 @@ function takenOut(deps: TakeOutDeps, pass: PassDto) {
       row.left.map((path): LeftFile => ({ path, page: getTask(db, row.taskId).title })),
     ),
     rows,
+  };
+}
+
+/**
+ * The shared changes the Abandon dropped, read from the chain's drop rows, and each of their files
+ * still not back on disk: an Abandon's drop leaves a file that changed since it was checked.
+ */
+async function droppedShared(deps: TakeOutDeps, pass: PassDto) {
+  const db = deps.state.db;
+  const changes = listSharedChanges(db, pass.id);
+  const drops = changes.filter((c) => c.dropOf !== null);
+  const repo = getProject(db, pass.projectId).repoPath;
+  const left: LeftFile[] = [];
+  for (const drop of drops) {
+    const onDisk = await deps.git.hashOnDisk(repo, drop.paths);
+    const page = `a shared change of ${getTask(db, drop.taskId).title}`;
+    for (const file of onDisk)
+      if (file.blob !== (drop.blobs[file.path] ?? null)) left.push({ path: file.path, page });
+  }
+  return {
+    drops: drops.map((d) => ({ seq: d.dropOf ?? d.seq, paths: [...d.paths] })),
+    left,
   };
 }
 
@@ -119,8 +145,8 @@ export function withdrawAbandonCard(deps: PassWorkDeps, pass: PassDto): void {
  * Abandons the pass (spec §5.4) for a caller already holding the project's delivery key, going on
  * from the last step it recorded: 1 the pass is ABANDONING, so no message, sign-off or close is taken;
  * 2 a ship in flight is aborted, which slice 7's sign-off and close bring; 3 every session of the pass
- * is stopped, its last work kept; 4 each shared change not landed is dropped, which slice 6's shared
- * areas bring; 5 each page still in the pass is taken out by the take-out's own steps, inside the
+ * is stopped, its last work kept; 4 each shared change not landed is dropped, newest first, its files
+ * put back as its hold found them, with no refusal but the hash before each write; 5 each page still in the pass is taken out by the take-out's own steps, inside the
  * Abandon, so files that keep changing are left and named rather than stopping it; 6 signed-off pages
  * stay as landed; 7 the pass and its batch are ABANDONED in one write; 8 where nothing landed, HEAD is
  * pointed back at the branch the pass came from, and the folder's own index is refreshed for the files
@@ -149,8 +175,17 @@ export async function abandonPassSteps(
       if (task.workstreamId !== null) await deps.stopLane(task.workstreamId);
     record(AbandonStep.SessionsStopped);
   }
-  // Step 4's place: shared changes come with slice 6's shared areas.
-  if (before(AbandonStep.SharedDropped)) record(AbandonStep.SharedDropped);
+  if (before(AbandonStep.SharedDropped)) {
+    // A hold a stopped turn left open is kept first, so what it changed is dropped too.
+    for (const hold of openHolds(db, passId)) await keepHold(deps, { claimId: hold.claimId });
+    const unlanded = listSharedChanges(db, passId)
+      .filter((c) => c.dropOf === null && c.droppedBy === null && c.landedSha === null)
+      .filter((c) => c.paths.length > 0)
+      .map((c) => c.seq)
+      .sort((a, b) => b - a);
+    for (const seq of unlanded) await dropShared(deps, { passId, seq, force: true });
+    record(AbandonStep.SharedDropped);
+  }
   if (before(AbandonStep.PagesTakenOut)) {
     for (const task of listPassTasks(db, passId)) {
       if (task.workstreamId === null)
@@ -174,7 +209,9 @@ export async function abandonPassSteps(
   const { git } = deps;
   const repo = getProject(db, pass.projectId).repoPath;
   const branch = passBranch(db, pass);
-  const done = takenOut(deps, pass);
+  const taken = takenOut(deps, pass);
+  const dropped = await droppedShared(deps, pass);
+  const done = { ...taken, left: [...dropped.left, ...taken.left] };
   const pullRequest = getBatch(db, pass.batchId).prUrl;
   if (before(AbandonStep.IndexRefreshed)) {
     // Nothing landed, so the branch it came from holds the same commit: naming it moves no file.
@@ -200,7 +237,7 @@ export async function abandonPassSteps(
     stays: [],
     left: done.left,
     folder: { branch: on ?? 'HEAD', returned: on === pass.returnBranch },
-    droppedShared: [],
+    droppedShared: dropped.drops,
     pullRequestLeftOpen: pullRequest,
   };
 }
