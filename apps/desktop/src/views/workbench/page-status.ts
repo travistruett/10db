@@ -146,12 +146,12 @@ function unsignedState(
 }
 
 /**
- * "People's turn": the page a waiting sign-off waits for, by its page when the pass holds it, else by
- * its task's title.
+ * "People's turn": the turn a waiting sign-off waits for, named by its page when the pass holds it,
+ * else by its task's title.
  */
 function waitedFor(waitsFor: NonNullable<PassPageDto['waitsFor']>, pass: readonly PassPageDto[]) {
   const page = pass.find((candidate) => candidate.taskId === waitsFor.taskId);
-  return page ? `${page.area}'s turn` : waitsFor.title;
+  return `${page?.area ?? waitsFor.title}'s turn`;
 }
 
 type SignOffState = (
@@ -172,8 +172,8 @@ const BY_SIGN_OFF: Readonly<Record<PassSignOff, SignOffState>> = {
     state(
       PageStatus.Waiting,
       page.waitsFor === null
-        ? 'Signing off · waits for another page'
-        : `Signing off · waits for ${waitedFor(page.waitsFor, pass)}`,
+        ? "Signing off: waiting for another page's turn"
+        : `Signing off: waiting for ${waitedFor(page.waitsFor, pass)}`,
     ),
   [PassSignOff.Done]: () => state(PageStatus.SignedOff, 'Signed off'),
 };

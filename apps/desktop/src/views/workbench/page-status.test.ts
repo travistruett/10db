@@ -184,7 +184,7 @@ describe('pageStatus', () => {
       },
       status: PageStatus.Waiting,
       color: 'blue',
-      line: "Signing off · waits for People's turn",
+      line: "Signing off: waiting for People's turn",
       needsYou: false,
     },
     {
@@ -197,7 +197,7 @@ describe('pageStatus', () => {
       pass: Object.values(pages),
       status: PageStatus.Waiting,
       color: 'blue',
-      line: 'Signing off · waits for People: UI work',
+      line: "Signing off: waiting for People: UI work's turn",
       needsYou: false,
     },
     {
