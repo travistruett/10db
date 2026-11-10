@@ -3,16 +3,20 @@ import { readFileSync } from 'node:fs';
 import {
   idOfUuid,
   idUuid,
+  TaskMessageAuthor,
+  TaskMessageKind,
   type TaskFileId,
   type TaskId,
   type TaskMessageId,
 } from '@10db/contracts';
 import {
   listTaskFileRows,
+  listTaskThreadRows,
   listUndeliveredTaskMessages,
   markTaskFilesInline,
   markTaskMessagesDelivered,
   markTaskMessagesPushed,
+  type DbReader,
   type TaskMessageRow,
 } from '@10db/db';
 import type { StateStore } from '../events';
@@ -26,6 +30,21 @@ import { blockPictures, threadInlineBytes } from './thread-pictures';
 // which a crash loses and a turn that is ending never reads. Its first push goes under the UUID of
 // its row's id; any later one goes under a uuid of its own, since Claude Code runs no turn for a
 // message under a uuid its transcript already holds (it acknowledges and drops it).
+
+/**
+ * The task's builder messages no turn has taken, pushed to a session or not, oldest first: while there
+ * is one, the builder is waiting for the agent.
+ */
+export function untakenMessages(reader: DbReader, taskId: TaskId): TaskMessageId[] {
+  return listTaskThreadRows(reader, taskId)
+    .filter(
+      (m) =>
+        m.author === TaskMessageAuthor.Builder &&
+        m.kind === TaskMessageKind.Message &&
+        m.deliveredAt === null,
+    )
+    .map((m) => m.id);
+}
 
 /** A builder message as a session takes it: its text, its pictures that go as blocks, its uuid. */
 export interface OutgoingMessage {
@@ -97,8 +116,11 @@ function pushedAgainAfter(
 }
 
 export interface LaneMessages {
-  /** Hands a builder message to the session, with its pictures, and marks it pushed. */
-  push(message: TaskMessageRow): void;
+  /**
+   * Hands a builder message to the session, with its pictures, and marks it pushed; `lead` goes
+   * ahead of the message's text, as a note on the builder's hand edits does.
+   */
+  push(message: TaskMessageRow, lead?: string | null): void;
   /** Marks delivered this task's messages among the uuids a turn took; answers those marked now. */
   consumed(uuids: readonly string[]): TaskMessageId[];
   /**
@@ -108,6 +130,8 @@ export interface LaneMessages {
    * message id, which the session is told names one message, and the event marks it delivered once read.
    */
   interrupt(): Promise<void>;
+  /** The builder messages this session was handed that no turn has taken, oldest first. */
+  untaken(): TaskMessageId[];
 }
 
 export interface LaneMessagesDeps {
@@ -133,11 +157,11 @@ export function createLaneMessages(deps: LaneMessagesDeps): LaneMessages {
       const id = sentUnder.get(uuid) ?? idOfUuid('TaskMessage', uuid);
       return id === null ? [] : [id];
     });
-  const push = (message: TaskMessageRow): void => {
+  const push = (message: TaskMessageRow, lead?: string | null): void => {
     const spent = threadInlineBytes(listTaskFileRows(state.db, taskId), limits);
     const out = outgoingMessage(message, spent, limits);
     sentUnder.set(out.uuid, message.id);
-    handle.send(out.text, out.images, out.uuid);
+    handle.send(lead ? `${lead}\n\n${out.text}` : out.text, out.images, out.uuid);
     state.write((ctx) => {
       markTaskMessagesPushed(ctx, [message.id]);
       markTaskFilesInline(ctx, taskId, out.blocks, false);
@@ -149,6 +173,12 @@ export function createLaneMessages(deps: LaneMessagesDeps): LaneMessages {
       const ids = messagesOf(uuids);
       if (ids.length === 0) return [];
       return state.write((ctx) => markTaskMessagesDelivered(ctx, taskId, ids));
+    },
+    untaken() {
+      const handed = new Set(sentUnder.values());
+      return listUndeliveredTaskMessages(state.db, taskId)
+        .filter((m) => handed.has(m.id))
+        .map((m) => m.id);
     },
     async interrupt() {
       const receipt = await handle.interrupt();

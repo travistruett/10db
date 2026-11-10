@@ -227,6 +227,7 @@ describe('recoverBatches', () => {
         launch: (id) => {
           launched.push(id);
         },
+        closeWarm: () => Promise.resolve(),
         isRunning: () => false,
       },
       accounts: { blocked: () => null, isPaused: () => false, prepare: () => undefined },

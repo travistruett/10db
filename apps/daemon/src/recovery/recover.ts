@@ -26,17 +26,22 @@ import {
   type DbReader,
   type WorkstreamRow,
 } from '@10db/db';
-import { batchCardFields, checkoutOf } from '../delivery';
+import { batchCardFields, checkoutOf, type DeliveryJobs } from '../delivery';
 import type { StateStore } from '../events';
 import type { Git } from '../git';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
+import type { Clock } from '../clock';
 import {
   outstandingFixEvidence,
   liveCheckCard,
   nextActionAfterCrash,
+  passOfWorkstream,
   raiseBuilderCheck,
+  untakenMessages,
+  withUndelivered,
 } from '../runner';
+import { recoverPage } from './pass-pages';
 import { failStep } from '../team';
 import type { ProcessTerminator } from './processes';
 
@@ -81,6 +86,9 @@ export async function recoverOnStartup(opts: {
   readonly logger: Logger;
   /** The previous daemon stopped cleanly, so this restart is not a failed attempt. */
   readonly cleanShutdown?: boolean;
+  /** The delivery jobs and the clock a page of a pass keeps its work beside. */
+  readonly jobs: DeliveryJobs;
+  readonly clock: Clock;
 }): Promise<RecoveryReport> {
   const db = opts.state.db;
   const report: RecoveryReport = { requeued: [], failed: [], parked: [], redelivered: [] };
@@ -116,6 +124,19 @@ export async function recoverOnStartup(opts: {
       clearLease(ctx, ws.id);
     });
     if (KEEP_STATE.has(row.state)) continue;
+    const attempts = opts.cleanShutdown ? row.recoveryAttempts : row.recoveryAttempts + 1;
+    if (
+      await recoverPage(
+        { ...opts, maxRecoveryAttempts: opts.maxRecoveryAttempts },
+        getWorkstreamRow(db, ws.id),
+        { providerSessionId, attempts },
+      )
+    ) {
+      report.parked.push(ws.id);
+      continue;
+    }
+    // A page of a pass never fails; its next session takes the message no turn took.
+    const pass = passOfWorkstream(db, ws.id);
 
     const waiting = row.state === S.WaitingHuman;
     // Work that waits for the builder's check keeps its card; it is not an agent's question to answer.
@@ -158,17 +179,19 @@ export async function recoverOnStartup(opts: {
     const head = await opts.git.head(checkout).catch(() => 'unknown');
     const dirty = await opts.git.changedPaths(checkout).catch(() => []);
     const lastOp = latestToolOp(db, ws.id);
-    const attempts = opts.cleanShutdown ? row.recoveryAttempts : row.recoveryAttempts + 1;
     // A resume that was fixing a gate failure comes back as the fix, so the failure isn't dropped.
     const failedGate = row.nextAction.kind === 'resume' ? outstandingFixEvidence(db, row) : null;
-    const nextAction: NextAction =
+    const crashAction: NextAction =
       row.state === S.Verifying || row.nextAction.kind === 'verify'
         ? { kind: 'verify' }
         : failedGate
           ? { kind: 'fix', evidenceId: failedGate }
           : nextActionAfterCrash(row.nextAction, providerSessionId, latestHandoffForStep(db, row));
+    const nextAction = pass
+      ? withUndelivered(crashAction, untakenMessages(db, row.taskId)[0] ?? null, providerSessionId)
+      : crashAction;
     // A waiting workstream has no edge to FAILED, and it never ran a session this boot.
-    const failed = !waiting && attempts > opts.maxRecoveryAttempts;
+    const failed = !waiting && !pass && attempts > opts.maxRecoveryAttempts;
     opts.state.write((ctx) => {
       if (row.state !== S.Recovering && !waiting) {
         transitionWorkstream(ctx, ws.id, {

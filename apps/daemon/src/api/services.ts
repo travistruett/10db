@@ -62,6 +62,10 @@ import type {
   ModelProfileId,
   ModelProfilePatch,
   DecisionId,
+  PassId,
+  PassOpenedDto,
+  PassOpenRequest,
+  PassViewDto,
   PersonaDto,
   PersonaId,
   PersonaInput,
@@ -239,6 +243,14 @@ export interface ApiServices {
   /** Every batch of the project, newest first: a finished task's pull request can sit in an old batch. */
   listBatches(projectId: ProjectId): BatchDto[];
   /**
+   * Opens a Workbench pass on the project's folder and writes each page's first message: the one
+   * given, else the task's description when it has one. Refused (409) on a ChatGPT account, whose
+   * sessions cannot show that a turn took a message, and for whatever the open itself refuses.
+   */
+  openPass(projectId: ProjectId, input: PassOpenRequest): Promise<PassOpenedDto>;
+  /** The pass as the Workbench reads it: its pages and every turn's timing. */
+  passView(passId: PassId): PassViewDto;
+  /**
    * The project's goals, each with its digest and count of new items since the builder last opened
    * it, and the Ungrouped group. Leaves every view mark as it was.
    */
@@ -317,7 +329,8 @@ export interface ApiServices {
   /**
    * Keeps the builder's message and its pasted pictures. Throws NotFoundError for an unknown task and
    * InvalidError, naming what is refused, for an empty message or a file that is no PNG, JPEG or
-   * WebP by its bytes.
+   * WebP by its bytes. A message to a page of a Workbench pass goes to its agent; `redo` stops the
+   * page's running turn first. Refused (409) while the pass is not open or the page is being taken out.
    */
   postTaskMessage(
     taskId: TaskId,
@@ -325,7 +338,13 @@ export interface ApiServices {
       readonly text: string;
       readonly pictures: readonly { readonly name: string; readonly bytes: Uint8Array }[];
     },
-  ): TaskMessageDto;
+    opts?: { readonly redo?: boolean },
+  ): Promise<TaskMessageDto>;
+  /**
+   * Stops the running turn of a page of an open Workbench pass, keeping its work and raising nothing;
+   * a page with no running turn is left as it is. Refused (409) for a task no open pass holds.
+   */
+  stopPage(taskId: TaskId): Promise<void>;
   /** A pasted picture's bytes; throws NotFoundError for one that is not this task's. */
   taskPicture(
     taskId: TaskId,

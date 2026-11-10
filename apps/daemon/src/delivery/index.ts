@@ -23,6 +23,7 @@ export {
   openPass,
   passBranchName,
   passDirtRef,
+  type PassOpenDeps,
   type PassOpened,
   type PassOpenInput,
   type PassPageWait,

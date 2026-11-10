@@ -1,3 +1,4 @@
+import { createDeliveryJobs } from '../delivery';
 import { execFileSync } from 'node:child_process';
 import {
   cpSync,
@@ -6079,6 +6080,8 @@ describe('without a gate command', () => {
       inbox: engine.inbox,
       git: createGit(),
       processes: systemProcesses,
+      jobs: createDeliveryJobs(silentLogger),
+      clock: engine.clock,
       maxRecoveryAttempts: 3,
       logger: silentLogger,
     });

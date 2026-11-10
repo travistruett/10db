@@ -166,6 +166,37 @@ describe('buildSessionPrompt', () => {
     );
   });
 
+  // Workbench spec §6.2: a pass lane works on one page in the builder's folder, turn by turn.
+  describe('a page of a Workbench pass', () => {
+    const pass = buildSessionPrompt({ ...base, action: { kind: 'start' }, inPass: true });
+    const ordinary = buildSessionPrompt({ ...base, action: { kind: 'start' } });
+
+    it.each([
+      ['works inside its page', 'Work inside your page'],
+      ['asks for shared code with request_claim', 'Shared code needs the request_claim tool'],
+      ['runs no gate', 'Do not run the gate'],
+      ['starts no dev server', 'do not start, stop or restart a dev server'],
+      ['stops when the change is on screen', 'Stop when the change is on screen'],
+      ['says in two lines what changed', 'say in two lines what you changed'],
+      ['acts once on a message sent again', 'the same id is the same message'],
+    ])('%s', (_name, line) => {
+      expect(pass).toContain(line);
+      expect(ordinary).not.toContain(line);
+    });
+
+    it("drops the step's rules a turn would break: committing to end, the full gate after it", () => {
+      for (const line of [
+        'Before you end your turn, commit every change',
+        '10db runs it after your turn ends',
+        'When the acceptance criteria are met and committed, end your turn.',
+        'ending your turn ends the step',
+      ]) {
+        expect(ordinary).toContain(line);
+        expect(pass).not.toContain(line);
+      }
+    });
+  });
+
   it('names the task on its own line, lists criteria and claims, and states the rules', () => {
     const prompt = buildSessionPrompt({ ...base, action: { kind: 'start' } });
     expect(prompt).toContain('Task: Add the badge\n');

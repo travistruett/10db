@@ -23,6 +23,7 @@ import { inProject } from './in-project';
 import { InboxCard } from './inbox-card';
 import { inboxRows, isDismissable, type InboxRow } from './inbox-rows';
 import { InboxShortcuts } from './inbox-shortcuts';
+import { PassReadyRow } from './pass-ready-row';
 import { defaultRecording } from './record-decision';
 import { ResolvedInbox } from './resolved-inbox';
 import { SystemCardList } from './system-card-list';
@@ -281,6 +282,17 @@ function OpenInbox({
           {rows.map((row) => {
             const open = row.key === selectedRow?.key;
             const failed = dismissFailure?.key === row.key ? dismissFailure.message : null;
+            if (row.passId !== null)
+              return (
+                <PassReadyRow
+                  key={row.key}
+                  items={row.items}
+                  selected={open}
+                  onSelect={() => {
+                    select(row);
+                  }}
+                />
+              );
             return (
               <InboxCard
                 key={row.key}

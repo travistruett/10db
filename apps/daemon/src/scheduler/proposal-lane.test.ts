@@ -125,6 +125,7 @@ describe('a lane for a task filed from a proposal', () => {
         launch: (id) => {
           launched.push(id);
         },
+        closeWarm: () => Promise.resolve(),
         isRunning: () => false,
       },
       accounts: { ...accounts, prepare: () => undefined },

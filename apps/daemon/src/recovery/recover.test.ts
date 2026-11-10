@@ -1,3 +1,5 @@
+import { ManualClock } from '../clock';
+import { createDeliveryJobs } from '../delivery';
 import { execFileSync, spawn } from 'node:child_process';
 import { realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -106,6 +108,8 @@ const recover = (extra: { cleanShutdown?: boolean } = {}) =>
     inbox,
     git: createGit(),
     processes: systemProcesses,
+    jobs: createDeliveryJobs(silentLogger),
+    clock: new ManualClock(),
     maxRecoveryAttempts: 3,
     logger: silentLogger,
     ...extra,
@@ -849,6 +853,8 @@ describe('recoverOnStartup for a project without a gate command', () => {
         inbox,
         git: watching,
         processes: systemProcesses,
+        jobs: createDeliveryJobs(silentLogger),
+        clock: new ManualClock(),
         maxRecoveryAttempts: 3,
         logger: silentLogger,
       });

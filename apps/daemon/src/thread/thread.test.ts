@@ -45,6 +45,8 @@ beforeEach(() => {
   const thread = createThreadService({
     state: createStateStore(test.store, createEventBus()),
     dataDir: data.path,
+    // These tasks are in no pass, so no message is handed to a page.
+    pages: { deliver: () => Promise.reject(new Error('no page takes a message here')) },
   });
   app = createApp({
     startedAt: new Date(),
