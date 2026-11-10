@@ -50,3 +50,4 @@ export {
   type MoveToCopyDeps,
 } from './move-copy';
 export { reopenSignedOffPage } from './reopen';
+export { subscribeMergedPasses } from './merged-open';

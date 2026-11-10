@@ -23,6 +23,7 @@ const noShip: CloseShip = {
   pushPassBranch: () => Promise.reject(new Error('no push here')),
   ensurePassPr: () => Promise.reject(new Error('no pull request here')),
   stopPassChecks: () => Promise.resolve(),
+  openFollowOnPr: () => Promise.reject(new Error('no follow-on here')),
 };
 
 describe('closePreview', () => {

@@ -16,6 +16,7 @@ import {
 } from '@10db/contracts';
 import {
   clearPassNotice,
+  forgetPassPullRequest,
   getBatch,
   getPass,
   getPassProgress,
@@ -28,7 +29,7 @@ import {
   type DbReader,
 } from '@10db/db';
 import { GhError, PrState } from '../github';
-import { ghCall, type DeliveryContext } from './context';
+import { ghCall, networkCall, type DeliveryContext } from './context';
 import { jobKey, JobQueue } from './jobs';
 import { shipCheck } from './local-check';
 import { createPassChecks } from './pass-checks';
@@ -67,6 +68,12 @@ export interface PassShipDeps {
   ): Promise<{ url: string } | null>;
   /** Raises the abort of an Open-PR gate or review still running for the pass, and waits for it to end. */
   stopPassChecks(passId: PassId): Promise<void>;
+  /**
+   * Call 6: the pass's pull request merged while it was open, and pages were signed off after its
+   * last push. Pushes the branch and opens a follow-on pull request against the base, ready for
+   * review, in the merged one's place on the batch; null with no origin or GitHub repository.
+   */
+  openFollowOnPr(passId: PassId, signal: AbortSignal): Promise<{ url: string } | null>;
 }
 
 export interface PassPullRequestDeps extends ScratchGateDeps, DeliveryContext {
@@ -319,6 +326,40 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
     return { url };
   }
 
+  async function openFollowOnPr(
+    passId: PassId,
+    signal: AbortSignal,
+  ): Promise<{ url: string } | null> {
+    const { pass, batch, project } = placeOf(passId);
+    const branch = batch.branch;
+    if (branch === null || batch.repo === null) return null;
+    const repo = project.repoPath;
+    if ((await deps.git.remoteUrl(repo, 'origin')) === null) return null;
+    // The base as GitHub merged it: when its tree is the pushed tip's, it comes into the branch by a
+    // merge that changes no file, so the follow-on pull request shows only what came after.
+    const pushed = await deps.git.trackingTip(repo, branch);
+    await deps.git.fetch(repo, batch.baseBranch, networkCall(deps, signal));
+    const base = await deps.git.trackingTip(repo, batch.baseBranch);
+    if (
+      pushed !== null &&
+      base !== null &&
+      (await deps.git.filesChangedBetween(repo, base, pushed)).length === 0
+    )
+      await deps.git.mergeKeepingTree({
+        repo,
+        branch,
+        theirs: base,
+        message: `Merge ${batch.baseBranch}, which holds the merged pull request of pass "${pass.name}", into ${branch}`,
+      });
+    await pushPassBranch(passId, signal);
+    // The merged pull request is history: the follow-on takes its place on the batch.
+    if (getPassPullRequest(db, passId)?.state === PullRequestState.Merged)
+      deps.state.write((w) => {
+        forgetPassPullRequest(w, passId);
+      });
+    return ensurePassPr({ passId, ready: true }, signal);
+  }
+
   /** Rewrites the pull request's body from the rows; one gh can't edit keeps the lines it had. */
   async function rewriteBody(passId: PassId, sha: string, signal: AbortSignal): Promise<void> {
     const { batch } = placeOf(passId);
@@ -382,9 +423,9 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
             .catch(() => null);
     if (pass.state !== PassState.Open)
       return refuse(`The pass is ${pass.state.toLowerCase()}`, ahead);
-    // Its work is in the base: the close that follows a merge (slice 7a) is what is left to do.
+    // Its work is in the base: the pass closes by itself (call 6).
     if (pr?.state === PullRequestState.Merged)
-      return refuse("The pass's pull request has merged; close the pass", ahead);
+      return refuse("The pass's pull request has merged; 10db closes the pass", ahead);
     if (tip === null || tip === pass.startSha)
       return refuse(
         'Nothing is signed off yet: the pull request holds signed-off pages only',
@@ -409,6 +450,7 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
     gatePassTip,
     pushPassBranch,
     ensurePassPr,
+    openFollowOnPr,
     async stopPassChecks(passId) {
       await checks.stop(passId);
       gating.delete(passId);

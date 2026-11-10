@@ -166,6 +166,7 @@ import {
   resumePassWork,
   startAbandon,
   startSignOff,
+  subscribeMergedPasses,
   subscribeSignOffWaits,
   takeOut,
   type AbandonDeps,
@@ -1414,12 +1415,21 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     answerPassMoveCard(delivery, item, answer);
     void answerMoveToCopy(passMoves, item, answer);
   };
-  // Close Pass, its steps under the delivery key with its gate and pull request through 7b's seam.
+  // A task has saved work only once a take-out has kept it; a later pass puts it back.
+  const passOpenDeps: PassOpenDeps = {
+    leaseMs: opts.leaseMs ?? DEFAULTS.leaseMs,
+    putBack: (input) => putBackKeptWork(passWork, input),
+  };
+  // Close Pass, its steps under the delivery key with its gate and pull request through 7b's seam;
+  // a pass whose pull request merged while it was open closes by itself, its unfinished pages
+  // carried over to a follow-on pass.
   const passCloses = createPassCloses({
     ...passTakeOuts,
     ship: passPullRequests,
     gateWhere: (pass) => closeGateOf(passGateKind(getProject(state.db, pass.projectId))),
+    openFollowOn: (input) => openPass(delivery, input, passOpenDeps),
   });
+  const unsubscribeMergedPasses = subscribeMergedPasses(bus, state.db, passCloses);
   // Abandon Pass stops what ships for the pass first: its pull request's checks and its close.
   const passAbandons: AbandonDeps = {
     ...passTakeOuts,
@@ -1511,11 +1521,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     hazardAssessor,
   );
-  // A task has saved work only once a take-out has kept it; a later pass puts it back.
-  const passOpenDeps: PassOpenDeps = {
-    leaseMs: opts.leaseMs ?? DEFAULTS.leaseMs,
-    putBack: (input) => putBackKeptWork(passWork, input),
-  };
   const services = createServices({
     state,
     clock,
@@ -1864,6 +1869,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       unsubscribeShip();
       unsubscribePassSettles();
       unsubscribeSignOffWaits();
+      unsubscribeMergedPasses();
       unsubscribeKeptWork();
       unsubscribePrWatch();
       await prWatch.stop();

@@ -16,7 +16,9 @@ import {
   type PassDto,
   type PassGateFailedDetail,
   type PassId,
+  type ProjectId,
   type TaskDto,
+  type TaskId,
 } from '@10db/contracts';
 import {
   clearPassNotice,
@@ -46,6 +48,14 @@ import { checkCloseRequest, closeChanges, closePreview, type CloseGateWhere } fr
 import { fastForwardReturn } from './fast-forward';
 import { passFolderOn } from './folder';
 import { pageMatcher, passBranch, passKeptRef } from './kept-work';
+import {
+  carryOver,
+  carryOverDue,
+  followOnPush,
+  isMergedClose,
+  mergedClosePlan,
+  mergedWhileOpen,
+} from './merged-open';
 import { keepHold, landSharedChanges } from './shared-chain';
 import { signOffSteps, SignOffFrom } from './sign-off';
 import { takeOutSteps, TakeOutWithin, type TakeOutDeps } from './take-out';
@@ -78,6 +88,7 @@ export interface CloseShip {
     signal: AbortSignal,
   ): Promise<{ url: string } | null>;
   stopPassChecks(passId: PassId): Promise<void>;
+  openFollowOnPr(passId: PassId, signal: AbortSignal): Promise<{ url: string } | null>;
 }
 
 /** What a close needs: a take-out's, the ship's seam, and where the project gates a pass. */
@@ -86,6 +97,12 @@ export type CloseDeps = TakeOutDeps & {
   readonly gateWhere: (pass: PassDto) => CloseGateWhere;
   /** How often a close whose folder is off the pass's branch looks again; `CLOSE_FOLDER_POLL_MS`. */
   readonly folderPollMs?: number;
+  /** Opens the pass a merged pass's unfinished pages carry over to, as Start Pass does. */
+  readonly openFollowOn?: (input: {
+    readonly projectId: ProjectId;
+    readonly name: string;
+    readonly taskIds: readonly TaskId[];
+  }) => Promise<{ readonly pass: PassDto }>;
 };
 
 /** How often a close waiting for Your folder to be back on the pass's branch reads it again. */
@@ -258,6 +275,8 @@ export async function closeSteps(
   const branch = passBranch(db, pass);
   const tip = (): Promise<string> => deps.git.commitAt(repo, branch);
   const where = deps.gateWhere(pass);
+  // A close for a pull request that merged while the pass was open gates and pushes nothing.
+  const merged = isMergedClose(plan);
 
   if (step() < CloseStep.Landed) {
     await folderBack(deps, passId, signal);
@@ -301,7 +320,7 @@ export async function closeSteps(
       if (batch.state === BatchState.Open)
         transitionBatch(ctx, batch.id, { to: BatchState.Shipping, reason: 'the pass is closing' });
     });
-    if (where === 'scratch') {
+    if (where === 'scratch' && !merged) {
       const ran = await deps.ship.gatePassTip({ passId, sha: await tip(), where, signal });
       if (ran.aborted) throw new CloseStoppedError(passId);
       if (!ran.passed) {
@@ -330,7 +349,7 @@ export async function closeSteps(
   }
 
   if (step() < CloseStep.FolderGated) {
-    if (where === 'folder') {
+    if (where === 'folder' && !merged) {
       await folderBack(deps, passId, signal);
       const ran = await deps.ship.gatePassTip({ passId, sha: await tip(), where, signal });
       if (ran.aborted) throw new CloseStoppedError(passId);
@@ -340,6 +359,12 @@ export async function closeSteps(
       }
     }
     record(CloseStep.FolderGated);
+  }
+
+  if (step() < CloseStep.Pushed && merged) {
+    closing();
+    await followOnPush(deps, passId, plan, signal);
+    record(CloseStep.Pushed);
   }
 
   if (step() < CloseStep.Pushed) {
@@ -400,7 +425,15 @@ export interface PassCloses {
   close(passId: PassId, request: PassCloseRequest): Promise<PassCloseAnswerDto>;
   /** Raises the abort of the pass's close job and waits for it to stop. */
   abort(passId: PassId): Promise<void>;
-  /** Start-up: each closing pass goes on from its last step. */
+  /**
+   * Call 6: closes an open pass whose pull request has merged, from a plan 10db writes, then carries
+   * its unfinished pages over to a follow-on pass. Does nothing for any other pass.
+   */
+  closeMerged(passId: PassId): void;
+  /**
+   * Start-up: each closing pass goes on from its last step, an open one whose pull request merged
+   * closes, and a merged one whose pages were not yet carried over carries them.
+   */
   resume(): void;
 }
 
@@ -421,6 +454,10 @@ export function createPassCloses(deps: CloseDeps): PassCloses {
             deps.state.write((ctx) => {
               clearPassNotice(ctx, passId, CLOSE_NOTICE);
             });
+            // Outside this job: the follow-on pass opens in the same delivery queue.
+            void carryOver(deps, passId).catch((error: unknown) => {
+              deps.logger.warn({ passId, err: errorText(error) }, 'merged pass not carried over');
+            });
           } catch (error) {
             if (!(error instanceof CloseStoppedError)) {
               deps.logger.warn({ passId, err: errorText(error) }, 'close did not finish');
@@ -439,6 +476,16 @@ export function createPassCloses(deps: CloseDeps): PassCloses {
     running.set(passId, { abort, done });
   }
 
+  function closeMerged(passId: PassId): void {
+    const wrote = deps.state.write((ctx) => {
+      if (!mergedWhileOpen(ctx.tx, passId)) return false;
+      setClosePlan(ctx, passId, mergedClosePlan(ctx.tx, passId));
+      for (const wait of listSignOffWaits(ctx.tx, passId)) deleteSignOffWait(ctx, wait.taskId);
+      return true;
+    });
+    if (wrote) run(passId);
+  }
+
   return {
     preview: (passId) => closePreview(deps, passId),
     async close(passId, request) {
@@ -447,6 +494,12 @@ export function createPassCloses(deps: CloseDeps): PassCloses {
         throw new ConflictError(
           `Pass "${pass.name}" is ${pass.state.toLowerCase()}: only an open pass is closed`,
         );
+      if (mergedWhileOpen(db, passId)) {
+        closeMerged(passId);
+        throw new ConflictError(
+          `The pull request of pass "${pass.name}" has merged: 10db closes the pass by itself, carrying its unfinished pages over`,
+        );
+      }
       const repo = getProject(db, pass.projectId).repoPath;
       const on = await deps.git.currentBranch(repo);
       if (on !== passBranch(db, pass))
@@ -485,8 +538,19 @@ export function createPassCloses(deps: CloseDeps): PassCloses {
       job.abort.abort();
       await job.done;
     },
+    closeMerged,
     resume() {
       for (const pass of listPassesIn(db, PassState.Closing)) run(pass.id);
+      for (const pass of listPassesIn(db, PassState.Open)) closeMerged(pass.id);
+      for (const state of [PassState.Closed, PassState.Settled])
+        for (const pass of listPassesIn(db, state))
+          if (carryOverDue(db, pass.id))
+            void carryOver(deps, pass.id).catch((error: unknown) => {
+              deps.logger.warn(
+                { passId: pass.id, err: errorText(error) },
+                'merged pass not carried over',
+              );
+            });
     },
   };
 }
