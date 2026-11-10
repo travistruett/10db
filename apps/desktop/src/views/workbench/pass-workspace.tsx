@@ -21,7 +21,7 @@ const CLOCK_TICK_MS = 30_000;
  * of rows across the top and the thread fills the rest. Wide: the queue on the left, the thread beside
  * it. With no page selected the thread shows the queue's first page. Each page keeps its own draft.
  */
-export function PassWorkspace({ view, inbox, selected, onSelect }: PassWorkspaceProps) {
+export function PassWorkspace({ view, inbox, project, selected, onSelect }: PassWorkspaceProps) {
   const now = useNow(CLOCK_TICK_MS);
   const layout = workbenchLayout(useViewportSize().width);
   const rows = queueRows(view, inbox, now);
@@ -44,6 +44,8 @@ export function PassWorkspace({ view, inbox, selected, onSelect }: PassWorkspace
       </Box>
       {shown === null ? null : (
         <PagePane
+          passId={view.pass.id}
+          appUrl={project.appUrl}
           row={shown}
           now={now}
           draft={drafts.get(shown.page.taskId) ?? EMPTY_DRAFT}

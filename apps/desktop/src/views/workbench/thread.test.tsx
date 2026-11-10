@@ -59,7 +59,7 @@ function serve(thread: TaskThreadDto) {
 describe('Thread', () => {
   it('shows the messages oldest first: a picture named by its file, a reply with its turn’s files, a dimmed notice', async () => {
     serve(TaskThreadDto.parse({ taskId: page.taskId, messages: [message, reply, notice] }));
-    renderWithDaemon(<Thread page={page} turns={[turn]} />);
+    renderWithDaemon(<Thread page={page} turns={[turn]} openPage={null} />);
     const thread = await screen.findByRole('list', { name: 'Thread' });
     expect([...thread.children].map((item) => item.textContent)).toEqual([
       expect.stringContaining('The padding is too tight'),
@@ -78,9 +78,12 @@ describe('Thread', () => {
 
   it('before the first message, says where the page is', async () => {
     serve(TaskThreadDto.parse({ taskId: page.taskId, messages: [] }));
-    renderWithDaemon(<Thread page={page} turns={[]} />);
+    renderWithDaemon(
+      <Thread page={page} turns={[]} openPage={<button type="button">Open Page</button>} />,
+    );
     expect(await screen.findByText('Settings is at')).toBeTruthy();
     expect(screen.getByText('/settings')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Open Page' })).toBeTruthy();
     expect(screen.queryByRole('list', { name: 'Thread' })).toBeNull();
   });
 });

@@ -1,5 +1,6 @@
 import { TaskMessageKind, type PassPageDto, type PassTurnWithFilesDto } from '@10db/contracts';
-import { Box, Code, Stack, Text } from '@mantine/core';
+import { Code, Stack, Text } from '@mantine/core';
+import type { ReactNode } from 'react';
 import { useTaskThread } from '../../daemon/thread-queries';
 import { turnOfReply } from './reply-turns';
 import { ThreadMessage } from './thread-message';
@@ -8,6 +9,8 @@ export interface ThreadProps {
   readonly page: PassPageDto;
   /** The page's turns, for the files each reply's turn changed. */
   readonly turns: readonly PassTurnWithFilesDto[];
+  /** Open Page, shown with the route before the first message. */
+  readonly openPage: ReactNode;
 }
 
 /** Before the first message the thread is not blank: it says where the page is. */
@@ -26,7 +29,7 @@ function BeforeFirstMessage({ page }: { readonly page: PassPageDto }) {
 }
 
 /** A page's thread, oldest first: the builder's messages, the agent's replies and the notices. */
-export function Thread({ page, turns }: ThreadProps) {
+export function Thread({ page, turns, openPage }: ThreadProps) {
   const thread = useTaskThread(page.taskId);
   if (thread.isError)
     return (
@@ -43,9 +46,10 @@ export function Thread({ page, turns }: ThreadProps) {
     );
   if (messages.length === 0)
     return (
-      <Box px="md" py="sm">
+      <Stack gap="xs" px="md" py="sm" align="flex-start">
         <BeforeFirstMessage page={page} />
-      </Box>
+        {openPage}
+      </Stack>
     );
   return (
     <Stack

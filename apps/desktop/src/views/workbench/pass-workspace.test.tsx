@@ -184,3 +184,29 @@ describe('PassWorkspace composer', () => {
     expect(message('Settings').value).toBe('half a thought');
   });
 });
+
+describe('PassWorkspace Open Page', () => {
+  it('opens the shown page’s route on the project’s app address, then copies its link', async () => {
+    const pages = pagesByStatus();
+    renderWithDaemon(
+      <PassWorkspace
+        view={passViewDto({ pages: Object.values(pages) })}
+        inbox={[]}
+        project={projectViewDto({ appUrl: 'http://localhost:8800' })}
+        selected={pages.working.taskId}
+        onSelect={vi.fn()}
+      />,
+    );
+    const composerOpen = async () =>
+      (await screen.findAllByRole('button', { name: /^(Open Page|Copy Link)$/ })).at(-1);
+    await composerOpen();
+    const open = vi.spyOn(window, 'open').mockReturnValue(window);
+    await act(async () => {
+      fireEvent.click((await composerOpen()) ?? document.body);
+      await Promise.resolve();
+    });
+    expect(open).toHaveBeenCalledWith('http://localhost:8800/billing', '_blank');
+    expect((await composerOpen())?.textContent).toBe('Copy Link');
+    open.mockRestore();
+  });
+});
