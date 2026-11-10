@@ -609,8 +609,9 @@ export interface Git {
    * Puts each `entries` path back as commit `from` has it, under the repo lock: written through a
    * private index (its mode and content; never through a link), or removed when `from` lacks it. Each
    * file is hashed again just before it is written: one whose blob on disk is not the one `expect`
-   * names for it (null: not there) changed since it was checked, and is left as it is. HEAD and the
-   * folder's own index are untouched.
+   * names for it (null: not there) changed since it was checked, and is left as it is, as is one
+   * where a directory now stands or beyond a link or a file. HEAD and the folder's own index are
+   * untouched.
    */
   restoreFiles(
     repo: string,
@@ -901,16 +902,38 @@ function configEnv(entries: readonly (readonly [string, string])[]): Record<stri
 /** Lexical checks first, then the guard's symlink-aware check, so `link/x` can't commit outside the repo. */
 function checkPaths(repo: string, paths: readonly string[]): string[] {
   return paths.map((p) => {
-    const clean = normalize(p);
-    const lexicallyBad =
-      p === '' || isAbsolute(p) || clean === '.' || clean === '..' || clean.startsWith(`..${sep}`);
-    if (lexicallyBad || !resolveInRepo(repo, clean).inside) {
+    const clean = checkPathName(p);
+    if (!resolveInRepo(repo, clean).inside) {
       throw new InvalidError(
         `Path ${JSON.stringify(p)} must be relative and inside the repository`,
       );
     }
     return clean;
   });
+}
+
+/** The path, normalized, when it is relative and names no place above the repository. */
+function checkPathName(p: string): string {
+  const clean = normalize(p);
+  if (p === '' || isAbsolute(p) || clean === '.' || clean === '..' || clean.startsWith(`..${sep}`))
+    throw new InvalidError(`Path ${JSON.stringify(p)} must be relative and inside the repository`);
+  return clean;
+}
+
+/**
+ * Whether a part of the folder on the way to `rel` is a link or not a directory. Git keeps no file
+ * beyond either, so the path is not there, and nothing is read or written through it. A path itself
+ * may be a link: git keeps the link, never what it points at.
+ */
+function blockedOnTheWay(real: string, rel: string): boolean {
+  let at = real;
+  for (const part of rel.split(sep).slice(0, -1)) {
+    at = join(at, part);
+    const entry = lstatSync(at, { throwIfNoEntry: false });
+    if (entry === undefined) return false;
+    if (!entry.isDirectory()) return true;
+  }
+  return false;
 }
 
 /** `message` with the op trailer, joined to a trailer block the message already ends with. */
@@ -2300,7 +2323,7 @@ export function createGit(opts: GitOptions = {}): Git {
   async function keepWork(input: KeepWorkInput): Promise<KeptCommit> {
     if (!input.ref.startsWith(KEPT_REF_PREFIX))
       throw new InvalidError(`${input.ref} is not under ${KEPT_REF_PREFIX}`);
-    const named = checkPaths(input.repo, input.paths);
+    const named = input.paths.map(checkPathName);
     return withRepoLock(realpathSync(input.repo), async () => {
       const c = await pinned(input.repo);
       const head = await currentBranch(c);
@@ -2316,9 +2339,17 @@ export function createGit(opts: GitOptions = {}): Git {
       if (held !== input.parent) throw new KeptRefMovedError(input.ref, input.parent, held);
       // HEAD names the branch, so what differs from HEAD is what differs from the tip; an ignored
       // file git doesn't track is never among it.
-      const changed = named.length === 0 ? [] : await changes(c, named);
+      // A path beyond a link or a file is not there for git: kept as gone.
+      const blocked = named.filter((path) => blockedOnTheWay(c.real, path));
+      const open = named.filter((path) => !blocked.includes(path));
+      const changed = open.length === 0 ? [] : await changes(c, open);
       const tree = await withPrivateIndex(c, tip, async (env) => {
         await stage(c, env, changed, tip);
+        if (blocked.length > 0)
+          await git(c, ['update-index', '--force-remove', '-z', '--stdin'], {
+            env,
+            input: `${blocked.join('\0')}\0`,
+          });
         return (await git(c, ['write-tree'], { env })).trim();
       });
       const parent = input.parent ?? tip;
@@ -2350,7 +2381,8 @@ export function createGit(opts: GitOptions = {}): Git {
 
   /**
    * Puts each of `paths` into a private index as the folder holds it, git's ignore rules aside: a
-   * regular file or a link is hashed, anything else, or nothing, leaves no entry.
+   * regular file or a link is hashed, anything else, or nothing, leaves no entry, as does a path
+   * beyond a link or a file.
    */
   async function indexAsOnDisk(
     c: Pinned,
@@ -2360,7 +2392,9 @@ export function createGit(opts: GitOptions = {}): Git {
     const present: string[] = [];
     const absent: string[] = [];
     for (const path of paths) {
-      const entry = lstatSync(join(c.real, path), { throwIfNoEntry: false });
+      const entry = blockedOnTheWay(c.real, path)
+        ? undefined
+        : lstatSync(join(c.real, path), { throwIfNoEntry: false });
       (entry?.isFile() === true || entry?.isSymbolicLink() === true ? present : absent).push(path);
     }
     if (present.length > 0)
@@ -2380,7 +2414,7 @@ export function createGit(opts: GitOptions = {}): Git {
     tip: string,
     pages: readonly string[],
   ): Promise<LineChange[]> {
-    const named = checkPaths(repo, pages);
+    const named = pages.map(checkPathName);
     if (named.length === 0) return [];
     const c = await pinned(repo);
     const out = await withPrivateIndex(c, tip, async (env) => {
@@ -2398,7 +2432,7 @@ export function createGit(opts: GitOptions = {}): Git {
     repo: string,
     paths: readonly string[],
   ): Promise<{ readonly path: string; readonly blob: string | null }[]> {
-    const named = [...new Set(checkPaths(repo, paths))].sort();
+    const named = [...new Set(paths.map(checkPathName))].sort();
     if (named.length === 0) return [];
     const c = await pinned(repo);
     const listed = await withPrivateIndex(c, null, async (env) => {
@@ -2454,11 +2488,7 @@ export function createGit(opts: GitOptions = {}): Git {
     entries: readonly { readonly path: string; readonly from: string }[],
     expect: readonly { readonly path: string; readonly blob: string | null }[],
   ): Promise<{ readonly written: string[]; readonly left: string[] }> {
-    const paths = checkPaths(
-      repo,
-      entries.map((entry) => entry.path),
-    );
-    const named = entries.map((entry, at) => ({ path: paths[at] ?? entry.path, from: entry.from }));
+    const named = entries.map((entry) => ({ path: checkPathName(entry.path), from: entry.from }));
     const expected = new Map(expect.map((e) => [e.path, e.blob]));
     return withRepoLock(realpathSync(repo), async () => {
       const c = await pinned(repo);
@@ -2472,7 +2502,8 @@ export function createGit(opts: GitOptions = {}): Git {
           written.push(path);
           continue;
         }
-        if (!expected.has(path) || expected.get(path) !== now) {
+        // Nothing is written beyond a link or a file: git would refuse, and a link may lead out.
+        if (!expected.has(path) || expected.get(path) !== now || blockedOnTheWay(c.real, path)) {
           left.push(path);
           continue;
         }
@@ -2516,9 +2547,10 @@ export function createGit(opts: GitOptions = {}): Git {
     readonly base: string;
     readonly theirs: string;
   }): Promise<'merged' | 'conflict'> {
-    const [path = input.path] = checkPaths(input.repo, [input.path]);
+    const path = checkPathName(input.path);
     return withRepoLock(realpathSync(input.repo), async () => {
       const c = await pinned(input.repo);
+      if (blockedOnTheWay(c.real, path)) return 'conflict';
       const base = await treeEntry(c, input.base, path);
       const theirs = await treeEntry(c, input.theirs, path);
       if (base?.oid === theirs?.oid && base?.mode === theirs?.mode) return 'merged';

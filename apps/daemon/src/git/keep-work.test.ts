@@ -1,5 +1,14 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTempRepo, isolatedGitEnv, type TempDir } from '../../test/fixtures';
@@ -191,5 +200,54 @@ describe('hashOnDisk', () => {
     // Reading writes nothing the builder's git would see.
     expect(rawGit('status', '--porcelain')).toBe(status);
     expect(readFileSync(join(repo.path, '.git/index')).equals(index)).toBe(true);
+  });
+});
+
+// Git keeps a link as a link and nothing beyond one, so only the parts on the way to a path are
+// checked: a page's link out of the folder is kept, and a path whose parent is now a file or a link
+// is not there, never a failure of the whole call.
+describe('a link or a file on the way to a page file', () => {
+  it('keeps, reads and hashes a link to outside the folder as a link', async () => {
+    const outside = mkdtempSync(join(tmpdir(), '10db-outside-'));
+    try {
+      write('src/settings/page.tsx', 'edited\n');
+      symlinkSync(outside, join(repo.path, 'src/settings/ext'));
+      const paths = ['src/settings/ext', 'src/settings/page.tsx'];
+
+      const kept = await keep(paths, null);
+      expect(rawGit('ls-tree', REF, 'src/settings/ext').split(/\s/)[0]).toBe('120000');
+      expect(kept.made).toBe(true);
+      expect((await git.hashOnDisk(repo.path, paths)).map((f) => f.blob)).toEqual([
+        rawGit('rev-parse', `${REF}:src/settings/ext`),
+        rawGit('hash-object', 'src/settings/page.tsx'),
+      ]);
+      expect((await git.pageChanges(repo.path, tip, paths)).map((f) => f.path)).toEqual(paths);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('reads a path whose parent is now a file or a link as not there, and leaves it on a restore', async () => {
+    rmSync(join(repo.path, 'src/people'), { recursive: true });
+    write('src/people', 'a file now\n');
+    rmSync(join(repo.path, 'src/settings'), { recursive: true });
+    symlinkSync('people', join(repo.path, 'src/settings'));
+    const paths = ['src/people/page.tsx', 'src/settings/page.tsx'];
+
+    expect(await git.hashOnDisk(repo.path, paths)).toEqual([
+      { path: 'src/people/page.tsx', blob: null },
+      { path: 'src/settings/page.tsx', blob: null },
+    ]);
+    const kept = await keep(paths, null);
+    expect(filesOf(kept.sha ?? 'none')).not.toContain('src/people/page.tsx');
+    expect(filesOf(REF)).not.toContain('src/settings/page.tsx');
+    expect(
+      await git.restoreFiles(
+        repo.path,
+        paths.map((path) => ({ path, from: tip })),
+        paths.map((path) => ({ path, blob: null })),
+      ),
+    ).toEqual({ written: [], left: paths });
+    expect(readFileSync(join(repo.path, 'src/people'), 'utf8')).toBe('a file now\n');
   });
 });
