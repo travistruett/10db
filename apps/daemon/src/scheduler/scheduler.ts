@@ -23,6 +23,7 @@ import {
 } from '@10db/contracts';
 import {
   acquireClaims,
+  claimConflict,
   acquireLease,
   claimRequestsForTask,
   copyHazardNames,
@@ -417,9 +418,6 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
         makeRoom(ws, { accountId: account.id, pass: inPass });
         continue;
       }
-      // Last, just before the claim: a put-back starts only for a run that would launch now, and
-      // writes the saved work only into the checkout it then launches in.
-      if (!opts.keptWork.ready(ws)) continue;
       const leaseUntil = new Date(opts.clock.now().getTime() + opts.leaseMs).toISOString();
       const areaScope = claimScopeOf(db, ws);
       // A page holds its pass's areas for its life; one that waited at the open for a page another
@@ -427,15 +425,18 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       const requests = inPass
         ? passHeldAreas(project.areas, task).map((name) => ({ kind: ClaimKind.Area, name }))
         : claimRequestsForTask(task, project);
+      const ask = {
+        projectId: project.id,
+        workstreamId: ws.id,
+        requests,
+        copyHazards: copyHazardNames(project),
+        ...(areaScope ? { areaScope } : {}),
+      };
+      // Last, just before the claim, and only with the claim free: a put-back starts only for a run
+      // that would launch now, and never writes where another lane holds the area.
+      if (claimConflict(db, ask) !== null || !opts.keptWork.ready(ws)) continue;
       const fence = opts.state.write((ctx) => {
-        const claimed = acquireClaims(ctx, {
-          projectId: project.id,
-          workstreamId: ws.id,
-          requests,
-          copyHazards: copyHazardNames(project),
-          leaseExpiresAt: leaseUntil,
-          ...(areaScope ? { areaScope } : {}),
-        });
+        const claimed = acquireClaims(ctx, { ...ask, leaseExpiresAt: leaseUntil });
         if (!claimed.ok) return null;
         const f = acquireLease(ctx, ws.id, opts.instanceId, leaseUntil);
         transitionWorkstream(ctx, ws.id, {

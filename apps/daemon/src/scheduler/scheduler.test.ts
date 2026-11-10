@@ -548,6 +548,31 @@ describe('scheduler', () => {
     expect(launched.map((l) => l.id)).toEqual([a.workstream.id]);
   });
 
+  it('asks nothing of a run whose area another run holds, so no saved work goes into a checkout that lane writes', async () => {
+    const a = queue();
+    const holder = add(a.project, ['api']);
+    state.write((ctx) => {
+      const held = acquireClaims(ctx, {
+        projectId: a.project.id,
+        workstreamId: holder.workstream.id,
+        requests: [{ kind: 'area', name: 'api' }],
+        leaseExpiresAt: new Date(clock.now().getTime() + 60_000).toISOString(),
+      });
+      if (!held.ok) throw new Error('the holder did not claim api');
+    });
+    moveWorkstream(holder.workstream.id, 'STARTING');
+    const asked: WorkstreamId[] = [];
+    const gate = {
+      ready: (run: WorkstreamDto) => {
+        asked.push(run.id);
+        return false;
+      },
+    };
+
+    expect(await scheduler(undefined, undefined, gate).tick()).toBe(0);
+    expect(asked).toEqual([]);
+  });
+
   it('serializes workstreams that claim the same area', async () => {
     const a = queue();
     const b = add(a.project, ['api']);
