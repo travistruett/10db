@@ -1,7 +1,8 @@
-import type { TaskId } from '@10db/contracts';
+import { PassState, type TaskId } from '@10db/contracts';
 import { Box, Flex } from '@mantine/core';
 import { useViewportSize } from '@mantine/hooks';
 import { useRef, useState } from 'react';
+import { useTakeOutPage } from '../../daemon/pass-queries';
 import { useNow } from '../../shell/relative';
 import { Announcer } from './announcer';
 import { EMPTY_DRAFT, type Draft } from './drafts';
@@ -9,6 +10,7 @@ import { PagePane } from './page-pane';
 import type { PassWorkspaceProps } from './pass-workspace-props';
 import { QueueList } from './queue-list';
 import { queueRows, shownRow } from './queue-rows';
+import { TakeOutModal } from './take-out-modal';
 import { useWorkbenchKeys } from './use-workbench-keys';
 import { nextWaiting, stepIndex, WorkbenchKey } from './workbench-keys';
 import { WorkbenchLayout, workbenchLayout } from './workbench-layout';
@@ -32,11 +34,18 @@ export function PassWorkspace({ view, inbox, project, selected, onSelect }: Pass
   const wide = layout === WorkbenchLayout.Wide;
   // Each page's unsent draft, kept while another page is shown.
   const [drafts, setDrafts] = useState<ReadonlyMap<TaskId, Draft>>(new Map());
+  // The page whose Take Out… confirm is open.
+  const [takingOut, setTakingOut] = useState<TaskId | null>(null);
+  const takeOut = useTakeOutPage();
+  const takingOutPage = view.pages.find((page) => page.taskId === takingOut) ?? null;
 
   // J and K move the focus along the queue's rows, and Enter on a row selects it.
   const queue = useRef<HTMLDivElement>(null);
   const move = (delta: 1 | -1): void => {
-    const buttons = [...(queue.current?.querySelectorAll('button') ?? [])];
+    // The rows' own buttons, not their menus.
+    const buttons = [
+      ...(queue.current?.querySelectorAll<HTMLButtonElement>('button:not([aria-haspopup])') ?? []),
+    ];
     const focused = buttons.findIndex((button) => button === document.activeElement);
     const from = focused >= 0 ? focused : rows.findIndex((row) => row === shown);
     const to = stepIndex(from >= 0 ? from : null, delta, buttons.length);
@@ -69,7 +78,12 @@ export function PassWorkspace({ view, inbox, project, selected, onSelect }: Pass
           overflowY: 'auto',
         }}
       >
-        <QueueList rows={rows} current={shown?.page.taskId ?? null} onSelect={onSelect} />
+        <QueueList
+          rows={rows}
+          current={shown?.page.taskId ?? null}
+          onSelect={onSelect}
+          onTakeOut={view.pass.state === PassState.Open ? setTakingOut : null}
+        />
         <Announcer rows={rows} />
       </Box>
       {shown === null ? null : (
@@ -88,6 +102,17 @@ export function PassWorkspace({ view, inbox, project, selected, onSelect }: Pass
             const taskId = shown.page.taskId;
             setDrafts((held) => new Map(held).set(taskId, draft));
           }}
+        />
+      )}
+      {takingOutPage === null ? null : (
+        <TakeOutModal
+          area={takingOutPage.area}
+          onClose={() => {
+            setTakingOut(null);
+          }}
+          takeOut={() =>
+            takeOut.mutateAsync({ passId: view.pass.id, taskId: takingOutPage.taskId })
+          }
         />
       )}
     </Flex>

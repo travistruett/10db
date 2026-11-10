@@ -173,6 +173,35 @@ describe('WorkbenchView', () => {
     expect(asked[0]?.body).toMatchObject(sent.body);
   });
 
+  it("Abandon Pass… abandons the project's open pass after its confirm", async () => {
+    const live = passViewDto({
+      pass: passDto({ projectId: project.id }),
+      pages: [pagesByStatus().ready],
+    });
+    const abandoned: string[] = [];
+    server.use(
+      http.post(daemonUrl('/passes/:passId/abandon'), ({ params }) => {
+        abandoned.push(String(params['passId']));
+        return HttpResponse.json({
+          reverted: [],
+          stays: [],
+          left: [],
+          folder: { branch: 'main', returned: true },
+          droppedShared: [],
+          pullRequestLeftOpen: null,
+        });
+      }),
+    );
+    open('/workbench', { live: [live] });
+    fireEvent.click(await screen.findByRole('button', { name: 'More pass actions' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Abandon Pass…', hidden: true }));
+    const dialog = await screen.findByRole('dialog', { name: 'Abandon Pass' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Abandon Pass' }));
+    await waitFor(() => {
+      expect(abandoned).toEqual([live.pass.id]);
+    });
+  });
+
   it('with no page area, proposes some through the daemon', async () => {
     let proposed = 0;
     const bare = projectViewDto({ areas: [{ name: 'src', globs: ['src/**'] }] });

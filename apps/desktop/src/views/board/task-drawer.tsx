@@ -68,6 +68,7 @@ import {
 } from './landing-draft';
 import { sameSetting } from '../settings/model-setting-options';
 import { ModelSettingSelect } from '../settings/model-setting-select';
+import { KeptWork } from './kept-work';
 import { LandingField } from './landing-field';
 import { placementOpen } from './placement';
 import { PlacementBadge } from './placement-badge';
@@ -329,11 +330,7 @@ export function TaskDrawer({
           notices={[...taskNotices(workstream, batch), ...taskHistory(workstream, batch)]}
           {...(onOpenWorkbench ? { onOpenWorkbench } : {})}
         />
-        {task.keptWork === true ? (
-          <Text size="sm" c="dimmed">
-            Has saved Workbench work: its next start puts it back.
-          </Text>
-        ) : null}
+        {task.keptWork === true ? <KeptWork taskId={task.id} /> : null}
         {batch && task.status === TaskStatus.Done && pullRequestClosed(batch) ? (
           <ClosedPullRequest taskId={task.id} batch={batch} onClosed={onClose} />
         ) : null}

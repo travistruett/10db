@@ -768,6 +768,26 @@ describe('TaskDrawer', () => {
       ).toBe(keptWork);
     });
 
+    it('discards saved Workbench work after a confirm, for that task only', async () => {
+      const discarded: string[] = [];
+      serve(
+        http.delete(daemonUrl('/tasks/:taskId/kept-work'), ({ params }) => {
+          discarded.push(String(params['taskId']));
+          return new HttpResponse(null, { status: 204 });
+        }),
+      );
+      const task = taskDto({ keptWork: true });
+      open({ task });
+      const d = await dialog();
+      fireEvent.click(within(d).getByRole('button', { name: 'Discard Saved Work…' }));
+      const confirm = await screen.findByRole('dialog', { name: 'Discard Saved Work' });
+      expect(within(confirm).getByText(/can't be undone/)).toBeTruthy();
+      fireEvent.click(within(confirm).getByRole('button', { name: 'Discard Saved Work' }));
+      await waitFor(() => {
+        expect(discarded).toEqual([task.id]);
+      });
+    });
+
     it("says what the task's batch stands in, with the steps to fix it", async () => {
       serve();
       const batch = batchDto({

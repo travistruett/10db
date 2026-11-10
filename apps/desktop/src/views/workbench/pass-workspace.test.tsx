@@ -1,4 +1,4 @@
-import { TaskId } from '@10db/contracts';
+import { TakeOutResultDto, TaskId } from '@10db/contracts';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { useState } from 'react';
@@ -49,8 +49,11 @@ async function renderWorkspace(selected: (pages: Pages) => TaskId | null = () =>
 
 type Pages = ReturnType<typeof pagesByStatus>;
 
+/** The queue's page rows, without each row's menu. */
 function queueRows() {
-  return within(screen.getByRole('list', { name: 'Pages in this pass' })).getAllByRole('button');
+  return within(screen.getByRole('list', { name: 'Pages in this pass' }))
+    .getAllByRole('button')
+    .filter((button) => !button.hasAttribute('aria-haspopup'));
 }
 
 describe('PassWorkspace queue', () => {
@@ -325,6 +328,70 @@ describe('PassWorkspace page actions', () => {
     );
     const files = await screen.findByRole('list', { name: 'Files this turn changed' });
     expect(files.textContent).toContain('src/settings/page.tsx');
+  });
+});
+
+describe('PassWorkspace Take Out', () => {
+  function serveTakeOut(tookOut = true) {
+    const sent: { passId: string; taskId: string; body: unknown }[] = [];
+    server.use(
+      http.post(
+        daemonUrl('/passes/:passId/tasks/:taskId/take-out'),
+        async ({ params, request }) => {
+          const taskId = TaskId.parse(params['taskId']);
+          sent.push({ passId: String(params['passId']), taskId, body: await request.json() });
+          return HttpResponse.json(
+            TakeOutResultDto.parse({
+              taskId,
+              passId: params['passId'],
+              tookOut,
+              keptSha: null,
+              stillChanging: tookOut ? [] : ['src/billing/page.tsx'],
+              left: [],
+            }),
+          );
+        },
+      ),
+    );
+    return sent;
+  }
+
+  async function takeOut(area: string) {
+    fireEvent.click(screen.getByRole('button', { name: `More actions for ${area}` }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Take Out…', hidden: true }));
+    const dialog = await screen.findByRole('dialog', { name: `Take Out ${area}` });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Take Out' }));
+    return dialog;
+  }
+
+  it("takes out the row's page after a confirm, keeping every shared change", async () => {
+    const sent = serveTakeOut();
+    const pages = pagesByStatus();
+    const view = passViewDto({ pages: Object.values(pages) });
+    renderWithDaemon(
+      <PassWorkspace
+        view={view}
+        inbox={[]}
+        project={projectViewDto()}
+        selected={pages.ready.taskId}
+        onSelect={vi.fn()}
+      />,
+    );
+    await screen.findByRole('list', { name: 'Pages in this pass' });
+    await takeOut('Billing');
+    await waitFor(() => {
+      expect(sent).toEqual([{ passId: view.pass.id, taskId: pages.working.taskId, body: {} }]);
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Take Out Billing' })).toBeNull();
+    });
+  });
+
+  it('says which files kept changing when the page could not be taken out', async () => {
+    serveTakeOut(false);
+    await renderWorkspace();
+    const dialog = await takeOut('Billing');
+    expect(await within(dialog).findByText(/src\/billing\/page\.tsx/)).toBeTruthy();
   });
 });
 
