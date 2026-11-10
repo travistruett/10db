@@ -33,12 +33,14 @@ describe('checkCloseRequest', () => {
     summary: '',
     gate: { where: 'none', consequence: null },
   };
+  // People's run failed: it can be taken out, not signed off.
   const pages: ClosePages = {
     signedOff: new Set(),
     needsUpTo: new Map([
       [settings, 2],
       [people, 3],
     ]),
+    cannotSignOff: new Map([[people, 'its run failed']]),
   };
   const signSettings: PassCloseRequest['pages'] = [
     { taskId: settings, choice: PassClosePageChoice.SignOff },
@@ -78,6 +80,24 @@ describe('checkCloseRequest', () => {
       request: {
         pages: signSettings,
         files: [{ path: 'docs/new.md', placeIn: settings }],
+        shared: [],
+      },
+      refused: null,
+    },
+    {
+      name: 'Sign Off Now of a page whose run cannot be signed off',
+      request: {
+        pages: [{ taskId: people, choice: PassClosePageChoice.SignOff }],
+        files: [],
+        shared: [],
+      },
+      refused: /People cannot be signed off now: its run failed/,
+    },
+    {
+      name: 'Take Out of a page whose run cannot be signed off',
+      request: {
+        pages: [{ taskId: people, choice: PassClosePageChoice.TakeOut }],
+        files: [],
         shared: [],
       },
       refused: null,

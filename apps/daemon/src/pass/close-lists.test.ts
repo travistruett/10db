@@ -1,5 +1,5 @@
-import { PassClosePageChoice, SharedChoiceKind } from '@10db/contracts';
-import { getPass, openHolds } from '@10db/db';
+import { PassClosePageChoice, SharedChoiceKind, WorkstreamState } from '@10db/contracts';
+import { getPass, openHolds, transitionWorkstream } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openPassWorld, type PassWorld } from '../../test/pass-world';
 import { createPassCloses, type CloseShip } from './close';
@@ -144,7 +144,7 @@ describe('Close Pass, confirmed', () => {
     expect(getPass(w.h.store.db, w.opened.pass.id).state).toBe('OPEN');
   });
 
-  it('refuses a file placed in a page that is being taken out, and a Drop of a page that signs off', async () => {
+  it('refuses a file placed in a page that is being taken out, a Drop of a page that signs off, and Sign Off Now of a failed run', async () => {
     w = await openPassWorld();
     const closes = createPassCloses({
       ...w.deps,
@@ -176,6 +176,18 @@ describe('Close Pass, confirmed', () => {
         shared: [{ seq: 1, choice: 'drop' }],
       }),
     ).rejects.toMatchObject({ name: 'ConflictError' });
+    w.h.state.write((ctx) => {
+      for (const to of [WorkstreamState.Starting, WorkstreamState.Failed])
+        transitionWorkstream(ctx, w.runOf(w.people), { to, fence: null });
+    });
+    await expect(
+      closes.close(w.opened.pass.id, {
+        token: shown.token,
+        pages: [{ taskId: w.people.id, choice: PassClosePageChoice.SignOff }],
+        files: [],
+        shared: [],
+      }),
+    ).rejects.toThrow('People: UI work cannot be signed off now: its run failed');
     expect(getPass(w.h.store.db, w.opened.pass.id).state).toBe('OPEN');
   });
 });

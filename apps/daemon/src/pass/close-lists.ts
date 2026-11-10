@@ -161,6 +161,33 @@ export interface ClosePages {
   readonly signedOff: ReadonlySet<TaskId>;
   /** The highest number of the shared chain each unfinished page needs to sign off (`sharedNeeded`). */
   readonly needsUpTo: ReadonlyMap<TaskId, number>;
+  /** Why an unfinished page cannot be signed off now: its run ended otherwise, or is the builder's. */
+  readonly cannotSignOff: ReadonlyMap<TaskId, string>;
+}
+
+/** Why a close cannot sign the page off, whatever stops its session; null when it can. */
+function signOffBlocked(db: DbReader, task: TaskDto): string | null {
+  if (task.workstreamId === null) return 'it has no run';
+  const state = getWorkstreamRow(db, task.workstreamId).state;
+  switch (state) {
+    case WorkstreamState.Failed:
+      return 'its run failed';
+    case WorkstreamState.Cancelled:
+      return 'its run was cancelled';
+    case WorkstreamState.TakenOver:
+      return 'the builder took its session over';
+    case WorkstreamState.Queued:
+    case WorkstreamState.Held:
+    case WorkstreamState.Starting:
+    case WorkstreamState.Running:
+    case WorkstreamState.HandingOff:
+    case WorkstreamState.Verifying:
+    case WorkstreamState.WaitingHuman:
+    case WorkstreamState.PausedLimit:
+    case WorkstreamState.Recovering:
+    case WorkstreamState.Done:
+      return null;
+  }
 }
 
 /** The pass's pages as `checkCloseRequest` reads them. */
@@ -174,12 +201,18 @@ export function closePages(db: DbReader, passId: PassId): ClosePages {
     needsUpTo: new Map(
       tasks.filter((t) => !done(t)).map((t) => [t.id, sharedNeeded(db, passId, t.id).upTo]),
     ),
+    cannotSignOff: new Map(
+      tasks.flatMap((t) => {
+        const why = signOffBlocked(db, t);
+        return why === null ? [] : [[t.id, why] as const];
+      }),
+    ),
   };
 }
 
 /**
  * Refuses a confirmed close whose choices the lists do not allow (409): a page that is not one of
- * the unfinished pages, a file placed that is not one no page owns or in a task that is neither
+ * the unfinished pages or is set to Sign Off Now with a run no sign-off can follow, a file placed that is not one no page owns or in a task that is neither
  * signed off nor set to Sign Off Now, a Drop of a shared change that is not of a page set to Take
  * Out, or whose Drop is refused, and a Drop of a change a page set to Sign Off Now needs, since that
  * page's sign-off lands it.
@@ -190,9 +223,15 @@ export function checkCloseRequest(
   closing: ClosePages,
 ): void {
   const pages = new Map(preview.unfinished.map((p) => [p.taskId, p]));
-  for (const page of request.pages)
+  for (const page of request.pages) {
     if (!pages.has(page.taskId))
       throw new ConflictError(`Task ${page.taskId} is not an unfinished page of the pass`);
+    const blocked = closing.cannotSignOff.get(page.taskId);
+    if (page.choice === PassClosePageChoice.SignOff && blocked !== undefined)
+      throw new ConflictError(
+        `${pages.get(page.taskId)?.title ?? page.taskId} cannot be signed off now: ${blocked}; set it to Take Out`,
+      );
+  }
   const signing = new Set([
     ...closing.signedOff,
     ...request.pages.filter((p) => p.choice === PassClosePageChoice.SignOff).map((p) => p.taskId),

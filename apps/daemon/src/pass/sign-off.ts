@@ -46,7 +46,7 @@ import { foldHandEdits } from './hand-edits';
 import { pageMatcher, passBranch, passKeptRef, readKeptRef, type PassWorkDeps } from './kept-work';
 import {
   closeHoldsOf,
-  keepHold,
+  keepOrLetGo,
   landOnBranch,
   landSharedChanges,
   sharedNeeded,
@@ -415,8 +415,9 @@ export async function signOffSteps(
     });
     return { kind: 'waiting', waitsFor: hold };
   }
-  // A close stopped every turn: a hold still open is kept now, so its change can land.
-  for (const hold of others) await keepHold(deps, { claimId: hold.claimId });
+  // A close stopped every turn: a hold still open is kept now, so its change can land, or let go
+  // when it cannot be kept.
+  for (const hold of others) await keepOrLetGo(deps, hold.claimId);
   const state = getWorkstreamRow(db, ws).state;
   if (signOffPath(state) === null)
     throw new ConflictError(`${task.title} is ${state.toLowerCase()}: it cannot be signed off now`);

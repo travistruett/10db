@@ -18,6 +18,7 @@ import {
   getWorkstreamRow,
   openHolds,
   patchProject,
+  schema,
   setClosePlan,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -27,7 +28,13 @@ import { createPassPullRequests, passGateKind, type PassPullRequests } from '../
 import { silentLogger } from '../log';
 import { systemProcesses } from '../recovery';
 import { createGateRunner } from '../verify';
-import { closeSteps, createPassCloses, gateFailedKey, type CloseDeps } from './close';
+import {
+  closeSteps,
+  createPassCloses,
+  gateFailedKey,
+  type CloseDeps,
+  type CloseShip,
+} from './close';
 import { closeGateOf } from './close-lists';
 import { folderCardOpen } from './folder';
 import { grantSharedHold, keepHold, keepTurnWork, startAbandon, type PassWorkDeps } from './index';
@@ -307,6 +314,126 @@ describe('Close Pass', () => {
     expect(folderCardOpen(w.h.store.db, w.opened.pass)).toBe(false);
     expect(w.h.git$('symbolic-ref', '--short', 'HEAD')).toBe('main');
     expect(w.h.git$('rev-parse', 'main')).toBe(tip);
+  });
+
+  it.each([
+    {
+      name: 'its push failed',
+      ship: (real: CloseShip): Partial<CloseShip> => {
+        let failed = false;
+        return {
+          pushPassBranch: (passId, signal) => {
+            if (failed) return real.pushPassBranch(passId, signal);
+            failed = true;
+            return Promise.reject(new Error('origin is offline'));
+          },
+        };
+      },
+      notice: /^The close stopped: origin is offline\./,
+    },
+    {
+      name: 'its gate was stopped by something other than an Abandon',
+      ship: (real: CloseShip): Partial<CloseShip> => {
+        let stopped = false;
+        return {
+          gatePassTip: (i) => {
+            if (stopped) return real.gatePassTip(i);
+            stopped = true;
+            return Promise.resolve({ passed: false, aborted: true, logPath: '', dirtyNamed: [] });
+          },
+        };
+      },
+      notice: /^The close stopped: the gate was stopped before it finished\./,
+    },
+  ])('goes on when Close Pass is asked again after $name', async ({ ship, notice }) => {
+    await world({ gateCommand: 'true' });
+    await twoTurns();
+    const deps = closeDeps();
+    const closes = await confirm({ ...deps, ship: { ...deps.ship, ...ship(deps.ship) } });
+    expect(passState()).toBe('CLOSING');
+    const stuck = getPassProgress(w.h.store.db, w.opened.pass.id).notices.find(
+      (n) => n.id === 'close',
+    );
+    expect(stuck?.text).toMatch(notice);
+
+    const again = await closes.close(w.opened.pass.id, {
+      token: '',
+      pages: [],
+      files: [],
+      shared: [],
+    });
+    await w.h.jobs.idle();
+
+    expect(again.outcome).toBe('closing');
+    expect(passState()).toBe('CLOSED');
+    expect(landed()).toEqual(['Settings: UI work']);
+    expect(getPassProgress(w.h.store.db, w.opened.pass.id).notices).toEqual([]);
+  });
+
+  it("waits with the folder card when Your folder leaves the pass's branch as it lands", async () => {
+    await world({ gateCommand: 'true' });
+    await twoTurns();
+    const deps = closeDeps();
+    let switched = false;
+    const closes = createPassCloses({
+      ...deps,
+      folderPollMs: 20,
+      ship: {
+        ...deps.ship,
+        stopPassChecks: async (passId) => {
+          await deps.ship.stopPassChecks(passId);
+          // The builder switches branch just after the close first found the folder on it.
+          if (!switched) w.h.git$('switch', '-q', 'main');
+          switched = true;
+        },
+      },
+    });
+    const shown = await closes.preview(w.opened.pass.id);
+    await closes.close(w.opened.pass.id, {
+      token: shown.token,
+      pages: [{ taskId: w.settings.id, choice: PassClosePageChoice.SignOff }],
+      files: [],
+      shared: [],
+    });
+
+    await waitFor(() => folderCardOpen(w.h.store.db, w.opened.pass));
+    expect(passState()).toBe('CLOSING');
+    expect(getPassProgress(w.h.store.db, w.opened.pass.id).notices).toEqual([]);
+    w.h.git$('switch', '-q', w.branch);
+    await w.h.jobs.idle();
+
+    expect(passState()).toBe('CLOSED');
+    expect(landed()).toEqual(['Settings: UI work']);
+  });
+
+  it('lets go of a hold it cannot keep, and closes', async () => {
+    await world({ gateCommand: 'true' });
+    await twoTurns();
+    w.startTurn(w.people);
+    const granted = await grantSharedHold(w.deps, { workstreamId: w.runOf(w.people), area: 'src' });
+    if (!granted?.ok) throw new Error('src was not granted');
+    w.write('src/button.ts', 'button\n');
+    const [hold] = openHolds(w.h.store.db, w.opened.pass.id);
+    if (!hold) throw new Error('no hold');
+    w.h.state.write((ctx) => {
+      setClosePlan(ctx, w.opened.pass.id, {
+        token: 't',
+        pages: [{ taskId: w.people.id, choice: PassClosePageChoice.TakeOut }],
+        files: [],
+        shared: [],
+      });
+    });
+    // People's turn held src when the close began, and the hold's record is gone since.
+    w.h.store.db
+      .update(schema.passHolds)
+      .set({ recordSha: '0'.repeat(40) })
+      .run();
+    w.h.git$('update-ref', '-d', `refs/10db/passes/${w.opened.pass.id}/holds/${hold.claimId}`);
+
+    await closeSteps(closeDeps(), w.opened.pass.id, new AbortController().signal);
+
+    expect(passState()).toBe('CLOSED');
+    expect(openHolds(w.h.store.db, w.opened.pass.id)).toEqual([]);
   });
 
   it('waits for Your folder before its take-outs, so the pages it takes out are put back', async () => {
