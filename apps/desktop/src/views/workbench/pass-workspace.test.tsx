@@ -174,6 +174,32 @@ describe('PassWorkspace working line', () => {
     expect(screen.getByRole('dialog', { name: 'Billing · Turn 1' })).toBeTruthy();
   });
 
+  it('leaves the log closed on a page shown again after another', async () => {
+    const pages = pagesByStatus();
+    const workspace = (selected: TaskId) => (
+      <PassWorkspace
+        view={passViewDto({ pages: [pages.working, pages.ready] })}
+        inbox={[]}
+        project={projectViewDto()}
+        selected={selected}
+        onSelect={() => undefined}
+      />
+    );
+    const { rerender } = renderWithDaemon(workspace(pages.working.taskId));
+    fireEvent.click(await screen.findByRole('button', { name: 'Show Log' }));
+    await screen.findByRole('dialog', { name: 'Billing · Turn 1' });
+    rerender(workspace(pages.ready.taskId));
+    await screen.findByRole('region', { name: 'Settings' });
+    // The drawer closes with a transition before it leaves the page; its title follows the page shown.
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog')).toBeNull();
+    });
+    rerender(workspace(pages.working.taskId));
+    await screen.findByRole('region', { name: 'Billing' });
+    // An opening drawer shows after its enter transition, so give it the time one takes to appear.
+    await expect(screen.findByRole('dialog', {}, { timeout: 500 })).rejects.toThrow();
+  });
+
   it('draws no working line on a page that is not working', async () => {
     await renderWorkspace((pages) => pages.ready.taskId);
     const thread = screen.getByRole('region', { name: 'Settings' });

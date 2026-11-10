@@ -48,8 +48,14 @@ export function PagePane(props: PagePaneProps) {
     marked.current = readyTurn;
     markOpened.mutate(readyTurn);
   }, [readyTurn, markOpened]);
-  // Show Log's turn: the log stays open as the turn ends, and closes once another turn is the page's.
+  // Show Log's turn: the log stays open as the turn ends, and closes once another turn is the page's
+  // or another page is shown, so coming back to the page never opens it unasked.
   const [logTurn, setLogTurn] = useState<PassTurnId | null>(null);
+  const [logPage, setLogPage] = useState(page.taskId);
+  if (logPage !== page.taskId) {
+    setLogPage(page.taskId);
+    setLogTurn(null);
+  }
   const open = useOpenPage({ passId, taskId: page.taskId, route: page.route, appUrl });
   const openPage = <OpenPageButton control={open} />;
   useWorkbenchKeys({
