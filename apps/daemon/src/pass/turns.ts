@@ -27,6 +27,7 @@ import {
 import type { StateStore } from '../events';
 import { GitError, type Git } from '../git';
 import { pageMatcher } from './kept-work';
+import { sharedKeptIn } from './turn-holds';
 
 // Workbench spec §4.3, §11: a page's turns with the files each changed, a turn's log (Show Log), and
 // when the builder first opened a Ready page, which the pass's timing reads.
@@ -68,26 +69,6 @@ function comparedWith(turns: readonly PassTurnDto[], turn: PassTurnDto): string 
     .filter((t) => t.workstreamId === turn.workstreamId && t.seq < turn.seq && t.keptSha !== null)
     .at(-1);
   return before?.keptSha ?? turn.keptBaseSha;
-}
-
-/**
- * The shared changes a turn's holds kept, by number (spec §7.2): a hold is granted to the task's run
- * while its turn is open and kept at the turn's end. A drop is not the turn's.
- */
-function sharedKeptIn(
-  turn: PassTurnDto,
-  holds: readonly PassHoldDto[],
-  changes: readonly PassSharedChangeDto[],
-): { readonly hold: PassHoldDto; readonly change: PassSharedChangeDto }[] {
-  const from = new Date(turn.startedAt).getTime();
-  const to = turn.endedAt === null ? Infinity : new Date(turn.endedAt).getTime();
-  return holds.flatMap((hold) => {
-    const at = new Date(hold.grantedAt).getTime();
-    if (hold.taskId !== turn.taskId || hold.workstreamId !== turn.workstreamId) return [];
-    if (at < from || at > to) return [];
-    const change = changes.find((c) => c.seq === hold.seq && c.dropOf === null);
-    return change === undefined ? [] : [{ hold, change }];
-  });
 }
 
 /**
