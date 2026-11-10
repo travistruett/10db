@@ -368,6 +368,36 @@ describe('abandonPass', () => {
     expect(abandonCards()).toEqual([]);
   });
 
+  it('keeps naming the files it left when a Move on its card is refused', async () => {
+    w = await openPassWorld();
+    // A page landed on the pass's branch, as a sign-off will, so the folder stays there.
+    w.h.commit('src/settings/page.tsx', 'landed\n');
+    w.write('src/people/page.tsx', 'people, by its page\n');
+    let n = 0;
+    const racing: Git = {
+      ...w.deps.git,
+      hashOnDisk: (repo, paths) => {
+        n += 1;
+        w.write('src/people/page.tsx', `written again (${String(n)})\n`);
+        return w.deps.git.hashOnDisk(repo, paths);
+      },
+    };
+    await abandonPass(deps(w.deps, racing), w.opened.pass.id);
+    const [card] = abandonCards();
+    if (!card) throw new Error('no Abandon card');
+    const left = `- src/people/page.tsx (${w.people.title})`;
+    expect(card.body).toContain(left);
+
+    // An uncommitted edit lies where the switch writes, so the Move is refused.
+    w.write('src/settings/page.tsx', 'an uncommitted edit\n');
+    answerPassCard(w.deps, card, { choice: 'Move to main' });
+    await w.h.jobs.idle();
+
+    const [again] = abandonCards();
+    expect(again?.body).toContain('10db could not move it');
+    expect(again?.body).toContain(left);
+  });
+
   it('finishes when a page keeps changing, leaving its files and naming them on the card with the page', async () => {
     w = await worked();
     let n = 0;
