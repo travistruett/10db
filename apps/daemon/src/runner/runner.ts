@@ -2352,7 +2352,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     const passTurnComplete = async (text: string | null): Promise<void> => {
       armIdleClose(id, ctl);
       try {
-        await endTurnSteps(passWork, {
+        const ended = await endTurnSteps(passWork, {
           workstreamId: id,
           ending: PassTurnEnding.Ready,
           reply: text,
@@ -2360,6 +2360,12 @@ export function createRunner(opts: RunnerOptions): Runner {
           providerSessionId: st.providerSessionId,
           reason: '',
         });
+        // A handoff asked of the turn ends with it: the next ask, for the session between turns
+        // or for a later turn, is a new one.
+        if (ended) {
+          st.handoffRequested = false;
+          st.firmSent = false;
+        }
       } catch (error) {
         if (error instanceof StaleFenceError) throw error;
         const message = error instanceof Error ? error.message : String(error);

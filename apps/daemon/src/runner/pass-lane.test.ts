@@ -706,6 +706,41 @@ describe("a pass task's handoffs", () => {
     });
   });
 
+  it('closes a Ready page asked to hand off for its account after an earlier turn was nudged', async () => {
+    const { id } = await openPage(
+      [
+        [
+          { do: 'consume' },
+          { do: 'tool', toolName: 'Write', input: { file_path: PAGE_FILE, content: 'one\n' } },
+          // The context fills: the session is nudged, then nudged firmly, and ends without a handoff.
+          { do: 'context', percentage: 80 },
+          { do: 'await_message', contains: 'filling up' },
+          { do: 'turn_complete', text: 'Nearly done.' },
+          { do: 'await_message', contains: 'almost full' },
+          { do: 'turn_complete', text: 'Tidied the form.' },
+          { do: 'await_message', contains: 'never sent' },
+        ],
+      ],
+      'Make the form tidy',
+      () => {
+        engine.state.write((ctx) => {
+          patchProject(ctx, engine.project.id, { handoffPct: 30, nudgePct: 95 });
+        });
+      },
+    );
+    await waitFor(isReady(id, 1));
+    expect(engine.adapter.sent).toHaveLength(2);
+
+    engine.runner.handOff(
+      engine.project.id,
+      engine.project.accountId,
+      'the account is near its limit',
+    );
+    await waitFor(() => !engine.runner.isRunning(id));
+    expect(engine.adapter.sent).toHaveLength(2);
+    expect(row(id)).toMatchObject({ state: 'WAITING_HUMAN', nextAction: { kind: 'pass_review' } });
+  });
+
   it('goes on with a long turn through handoffs nobody asked for while its work moves between them', async () => {
     const { pass, id } = await openPage([
       [{ do: 'consume' }, ...handOffAfter('one\n', 'op-pass-h1')],
