@@ -22,6 +22,7 @@ import {
   listSessions,
   endPassTurn,
   listTaskThread,
+  listWorkstreams,
   openPassTurn,
   patchProject,
   patchWorkstream,
@@ -78,6 +79,7 @@ const turn = (content: string, text: string): FakeStep[] => [
 async function openPage(
   sessions: FakeStep[][],
   first = 'Make the form tidy',
+  beforeLaunch: () => void = () => undefined,
 ): Promise<{ task: TaskDto; pass: PassDto; id: WorkstreamId }> {
   engine = await createTestEngine({ [TITLE]: sessions }, PAGE_AREAS);
   const branch = '10db/polish-abc123';
@@ -109,6 +111,7 @@ async function openPage(
     insertBuilderMessage(ctx, t.id, { body: first, files: [] });
     return { task: t, pass: opened.pass, ws: w };
   });
+  beforeLaunch();
   engine.launch(ws.id);
   return { task, pass, id: ws.id };
 }
@@ -379,6 +382,45 @@ describe('a pass task turn that ends otherwise', () => {
     ]);
     expect(engine.adapter.prompts[1]?.prompt).toContain('Make the form tidy');
   });
+
+  it.each<{ name: string; session: FakeStep[]; attempts: number }>([
+    {
+      name: 'refused as it starts',
+      session: [{ do: 'billing_refused', message: 'a billing check refused the session' }],
+      attempts: 0,
+    },
+    {
+      // Its Ready end cannot keep the work, which is a crash, and the page is out of attempts.
+      name: 'out of attempts as its Ready end fails',
+      session: [...turn('one\n', 'Tidied.'), { do: 'await_message', contains: 'never sent' }],
+      attempts: 3,
+    },
+  ])(
+    'parks a turn $name on its flag though its work cannot be kept, with no turn made up',
+    async ({ session, attempts }) => {
+      const { pass, id } = await openPage([session], 'Make the form tidy', () => {
+        // Your folder is off the pass's branch, so nothing of the turn can be kept now.
+        git('switch', '-q', 'main');
+        engine.state.write((ctx) => {
+          const [ws] = listWorkstreams(ctx.tx, {});
+          if (ws) patchWorkstream(ctx, ws.id, null, { recoveryAttempts: attempts });
+        });
+      });
+      await waitFor(() => !engine.runner.isRunning(id) && engine.adapter.prompts.length === 1);
+
+      expect(
+        listPassTurns(engine.store.db, pass.id).map((t) => [t.seq, t.settledAt !== null]),
+      ).toEqual([[1, true]]);
+      expect(row(id)).toMatchObject({
+        state: 'WAITING_HUMAN',
+        nextAction: { kind: 'pass_review' },
+        leaseOwner: null,
+      });
+      expect(
+        listInbox(engine.store.db, {}).filter((i) => i.title.startsWith('Turn failed')),
+      ).toHaveLength(1);
+    },
+  );
 
   it('is Ready at once with a command left running, and says on the thread when it finishes', async () => {
     const { task, id } = await openPage([

@@ -68,8 +68,9 @@ export async function recoverPage(
       if (getInboxItem(db, row.nextAction.inboxId).state === 'OPEN') return true;
       const task = getTask(db, row.taskId);
       if (!latest) return false;
-      const kept =
-        latest.ending === PassTurnEnding.Failed ? null : await keptWorkFacts(deps, task.id);
+      // A turn settled as failed says so on the run, though it may have ended another way first.
+      const failed = latest.ending === PassTurnEnding.Failed || row.failureKind !== null;
+      const kept = failed ? null : await keptWorkFacts(deps, task.id);
       deps.state.write((ctx) => {
         const item =
           kept === null
