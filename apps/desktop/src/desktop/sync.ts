@@ -1,6 +1,6 @@
 import { EventType, InboxItemId, LANE_STATES, WorkstreamState } from '@10db/contracts';
 import { useComputedColorScheme } from '@mantine/core';
-import { useQueryClient } from '@tanstack/react-query';
+import { CancelledError, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useRef } from 'react';
 import { useEventStream } from '../daemon/events';
@@ -16,6 +16,9 @@ import {
   type PassPageTarget,
 } from './notify-pass';
 import { bringWindowForward, isTauri, notifyNewCard, setWindowTheme, updateTray } from './tauri';
+
+/** How often a card's read is asked again when an event's refetch of the Inbox cancels it. */
+const INBOX_READ_ATTEMPTS = 3;
 
 /** Workstreams that hold a lane or wait on the builder: what the menu bar counts as running. */
 const BUSY_STATES: readonly WorkstreamState[] = [...LANE_STATES, WorkstreamState.WaitingHuman];
@@ -66,8 +69,19 @@ export function useDesktopSync(): void {
     [],
   );
 
+  /** The open cards; a read cancelled by the next event's refetch of the Inbox is asked again. */
+  async function openCards() {
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        return await queryClient.query(inboxQueryOptions(client));
+      } catch (error) {
+        if (!(error instanceof CancelledError) || attempt >= INBOX_READ_ATTEMPTS) throw error;
+      }
+    }
+  }
+
   async function notifyOpened(id: string): Promise<void> {
-    const items = await queryClient.query(inboxQueryOptions(client));
+    const items = await openCards();
     const opened = InboxItemId.safeParse(id);
     if (!opened.success) return;
     const item = items.find((candidate) => candidate.id === opened.data);
@@ -77,7 +91,8 @@ export function useDesktopSync(): void {
       await notifyNewCard(item);
       return;
     }
-    const passes = await queryClient.query(livePassesOptions(connection));
+    // Without the passes the notification names the item, not the page: it is never dropped for them.
+    const passes = await queryClient.query(livePassesOptions(connection)).catch(() => []);
     await notifyPassReady(
       item,
       ready,

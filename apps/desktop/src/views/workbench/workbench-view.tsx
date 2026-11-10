@@ -11,7 +11,7 @@ import {
   type TaskDto,
   type TaskId,
 } from '@10db/contracts';
-import { Group, Loader, Stack, Title } from '@mantine/core';
+import { Group, Loader, Stack, Text, Title } from '@mantine/core';
 import { useMutation } from '@tanstack/react-query';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useEffect, useState, type ReactNode } from 'react';
@@ -234,6 +234,15 @@ function ProjectWorkbench({ project }: { readonly project: ProjectViewDto }) {
     rename: (body) => renaming.mutateAsync({ passId: passId(), body }),
     abandon: () => abandoning.mutateAsync(passId()),
   };
+  // A read that failed says why; the picker needs what Start Pass says, an open pass does not.
+  const failed = live.error ?? (live.data === null && hasPages ? start.error : null);
+  if (failed !== null)
+    return (
+      <Stack gap="md">
+        <Title order={2}>Workbench</Title>
+        <Text size="sm" c="red">{`The Workbench could not be read: ${failed.message}`}</Text>
+      </Stack>
+    );
   return (
     <WorkbenchScreen
       project={project}

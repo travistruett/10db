@@ -37,9 +37,14 @@ const start = passStartDto({
 });
 
 /** The app at `path` over a daemon with `project` and these Workbench answers; the opens it was sent. */
-function open(path: string, routes: PassRoutes = {}, opts: { tasks?: unknown[] } = {}) {
+function open(
+  path: string,
+  routes: PassRoutes = {},
+  opts: { tasks?: unknown[]; first?: Parameters<typeof server.use> } = {},
+) {
   const opened: { projectId: string; body: PassOpenRequest }[] = [];
   server.use(
+    ...(opts.first ?? []),
     http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
     http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json(opts.tasks ?? [])),
     http.post(daemonUrl('/projects/:projectId/passes'), async ({ params, request }) => {
@@ -211,6 +216,27 @@ describe('WorkbenchView', () => {
     await waitFor(() => {
       expect(abandoned).toEqual([live.pass.id]);
     });
+  });
+
+  it.each([
+    { read: 'the live passes', path: '/passes' },
+    { read: 'what Start Pass says', path: '/projects/:projectId/pass-start' },
+  ])('says so when $read cannot be read, rather than loading forever', async ({ path }) => {
+    open(
+      '/workbench',
+      {},
+      {
+        first: [
+          http.get(daemonUrl(path), () =>
+            HttpResponse.json(
+              { error: 'internal', message: 'The database is locked' },
+              { status: 500 },
+            ),
+          ),
+        ],
+      },
+    );
+    expect(await screen.findByText(/The database is locked/)).toBeTruthy();
   });
 
   it('with no page area, proposes some through the daemon', async () => {

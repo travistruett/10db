@@ -175,4 +175,50 @@ describe('a ready notification', () => {
     fireEvent.focus(window);
     expect(router.state.location.search).toEqual({ task: ready.taskId });
   });
+
+  it('notifies every page that becomes ready at once, and by the item when the passes cannot be read', async () => {
+    const native = mockNative();
+    const project = projectViewDto({
+      areas: [{ name: 'settings', globs: ['src/settings/**'], role: 'page', route: '/settings' }],
+    });
+    const { ready } = pagesByStatus();
+    const people = { ...ready, taskId: mintId('Task'), title: 'People: UI work', area: 'People' };
+    const view = passViewDto({ pass: passDto({ projectId: project.id }), pages: [ready, people] });
+    const items = [readyItem(view, ready), readyItem(view, people)];
+    const sockets: { send(data: string): void }[] = [];
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/inbox'), () => HttpResponse.json(items)),
+      http.get(daemonUrl('/passes'), () =>
+        HttpResponse.json({ error: 'internal', message: 'locked' }, { status: 500 }),
+      ),
+      ...baseHandlers(),
+      eventStream.addEventListener('connection', ({ client }) => {
+        sockets.push(client);
+      }),
+    );
+    renderApp('/factory');
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+    // Both in one burst: each one's inbox read is cancelled by the other's refetch.
+    items.forEach((item, index) => {
+      sockets[0]?.send(
+        JSON.stringify(
+          daemonEvent({
+            seq: index + 1,
+            type: 'inbox.opened',
+            entityType: 'inbox',
+            entityId: item.id,
+          }),
+        ),
+      );
+    });
+    await waitFor(() => {
+      expect(native.sent.map((n) => n.title).sort()).toEqual([
+        'Ready: People: UI work',
+        'Ready: Settings: UI work',
+      ]);
+    });
+  });
 });
