@@ -20,6 +20,8 @@ import {
   Urgency,
   type McpToolInputs,
   type SessionId,
+  type TaskId,
+  type TaskMessageId,
 } from '@10db/contracts';
 import {
   activeClaims,
@@ -44,6 +46,7 @@ import {
   listEvidence,
   listToolOps,
   listStepToolOpResults,
+  openPassTurn,
   passHoldingTask,
   passPageAreas,
   replaceToolOp,
@@ -104,6 +107,8 @@ export interface McpDeps {
   readonly claimPollMs?: number;
   /** How long one request_claim call waits before answering "still waiting"; tests shorten it. */
   readonly claimWaitSliceMs?: number;
+  /** Hands a builder message to its page's session, as the thread does; absent, it waits for the next. */
+  readonly deliverMessage?: (taskId: TaskId, messageId: TaskMessageId) => Promise<void>;
   /** Brings a task's base into its branch before it gets the migrations hazard; absent, it isn't. */
   readonly migrationsBase?: MigrationsBase;
   /** Installs a lane's dependency change in its copy; absent, `install_dependencies` is refused. */
@@ -224,7 +229,10 @@ export function createToolHandlers(
     if (project.areas.find((a) => a.name === name)?.role !== AreaRole.Shared) return undefined;
     return {
       ask: () => {
-        const asked = askShared(deps, { workstreamId, sessionId, area: name, reason, signal });
+        const asked = askShared(
+          { ...deps, ...(deps.deliverMessage ? { deliver: deps.deliverMessage } : {}) },
+          { workstreamId, sessionId, area: name, reason, signal },
+        );
         if (!asked) return null;
         return {
           inboxId: asked.inboxId,
@@ -243,6 +251,7 @@ export function createToolHandlers(
         };
       },
       grant: () => grantSharedHold(deps, { workstreamId, area: name }),
+      turnOpen: () => openPassTurn(db, task.id) !== undefined,
     };
   };
 

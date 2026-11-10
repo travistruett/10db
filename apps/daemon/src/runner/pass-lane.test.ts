@@ -1,11 +1,13 @@
 import { execFileSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   ConflictError,
   InvalidError,
   mintId,
   PassCheckDetail,
+  SHARED_ASK_ALLOW_CHOICE,
+  SharedAskDetail,
   type PassDto,
   type TaskDto,
   type TaskMessageId,
@@ -42,7 +44,7 @@ import { silentLogger } from '../log';
 import { recoverOnStartup, systemProcesses } from '../recovery';
 import { untakenMessages } from './lane-messages';
 import { finishEndedTurn } from './pass-turn';
-import type { PassWorkDeps } from '../pass';
+import { closeHoldsOf, grantSharedHold, type PassWorkDeps } from '../pass';
 import { DEFAULT_RUNNER_LIMITS } from './runner';
 import { handoffArgs, isolatedGitEnv, waitFor } from '../../test/fixtures';
 import type { FakeScriptBook } from '../sessions';
@@ -608,6 +610,93 @@ describe("a pass turn's shared area", () => {
     expect(openHolds(engine.store.db, pass.id)).toEqual([]);
     expect(listSharedChanges(engine.store.db, pass.id)[0]?.paths).toEqual(['src/button.ts']);
     expect(git('show', `refs/10db/passes/${pass.id}/shared:src/button.ts`)).toBe('button');
+  });
+});
+
+describe("a pass turn's question about a shared area", () => {
+  it('is withdrawn when the turn ends, and the area is never granted to a Ready page', async () => {
+    const PEOPLE = 'People: list';
+    engine = await createTestEngine(
+      {
+        [PEOPLE]: [
+          [
+            { do: 'consume' },
+            {
+              do: 'mcp',
+              tool: 'request_claim',
+              args: { opId: 'op-people-src', kind: 'area', name: 'src', reason: 'a wider button' },
+            },
+            { do: 'turn_complete', text: 'Kept it to the page.' },
+            { do: 'await_message', contains: 'never sent' },
+          ],
+        ],
+      },
+      {
+        gateCommand: null,
+        areas: [
+          { name: 'settings', globs: ['src/settings/**'], role: 'page', route: '/settings' },
+          { name: 'people', globs: ['src/people/**'], role: 'page', route: '/people' },
+          { name: 'src', globs: ['src/**'], role: 'shared' },
+        ],
+      },
+      {},
+      { claims: { sliceMs: 200, pollMs: 20 } },
+    );
+    const branch = '10db/polish-abc123';
+    const startSha = git('rev-parse', 'HEAD');
+    git('switch', '-q', '-c', branch);
+    const { settings, people, passId } = engine.state.write((ctx) => {
+      const tasks = ['Settings: form', PEOPLE].map((title, at) =>
+        insertTask(ctx, engine.project.id, {
+          title,
+          acceptanceCriteria: ['x'],
+          areas: [at === 0 ? 'settings' : 'people'],
+        }),
+      );
+      const [s, p] = tasks;
+      if (!s || !p) throw new Error('no tasks');
+      const opened = insertPass(ctx, {
+        id: mintId('Pass'),
+        projectId: engine.project.id,
+        name: 'Polish',
+        pageCap: 4,
+        returnBranch: 'main',
+        startSha,
+        branch,
+        baseBranch: 'main',
+        repo: null,
+        taskIds: [s.id, p.id],
+        dirt: [],
+      });
+      const first = { model: 'claude-sonnet-5-5', effort: 'medium' } as const;
+      const sw = insertWorkstream(ctx, s.id, { batchId: opened.batch.id, first });
+      const pw = insertWorkstream(ctx, p.id, { batchId: opened.batch.id, first });
+      insertPassTurn(ctx, { taskId: s.id, workstreamId: sw.id, sessionId: null, messageId: null });
+      insertBuilderMessage(ctx, p.id, { body: 'Make the list wider', files: [] });
+      return { settings: sw.id, people: pw.id, passId: opened.pass.id };
+    });
+    // Settings changed the shared button in a turn of its own.
+    const granted = await grantSharedHold(passWork(), { workstreamId: settings, area: 'src' });
+    if (!granted?.ok) throw new Error('src was not granted');
+    mkdirSync(join(engine.repoPath, 'src'), { recursive: true });
+    writeFileSync(join(engine.repoPath, 'src/button.ts'), 'button\n');
+    await closeHoldsOf(passWork(), settings);
+
+    engine.launch(people);
+    await waitFor(() => isWaiting(people));
+
+    const asked = listInbox(engine.store.db, {}).find(
+      (i) => SharedAskDetail.safeParse(i.detail).success,
+    );
+    expect(asked?.state).toBe('CANCELLED');
+    if (!asked) throw new Error('no question');
+    expect(() => engine.inbox.answer(asked.id, { choice: SHARED_ASK_ALLOW_CHOICE })).toThrow(
+      ConflictError,
+    );
+    expect(openHolds(engine.store.db, passId)).toEqual([]);
+    expect(activeClaims(engine.store.db, people).map((c) => c.name)).not.toContain('src');
+    const result = engine.adapter.observations.find((o) => o.kind === 'mcp_result');
+    expect(result?.detail).toMatchObject({ tool: 'request_claim', isError: false });
   });
 });
 

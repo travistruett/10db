@@ -1,6 +1,7 @@
 import {
   InboxState,
   isParkChoice,
+  SharedAskDetail,
   QuestionCategory,
   SHARED_ASK_ALLOW_CHOICE,
   SHARED_ASK_KEEP_CHOICE,
@@ -12,8 +13,8 @@ import {
   type PassHoldDto,
   type PassSharedChangeDto,
   type SessionId,
-  type SharedAskDetail,
   type TaskId,
+  type TaskMessageId,
   type WorkstreamId,
 } from '@10db/contracts';
 import {
@@ -26,6 +27,8 @@ import {
   listSharedChanges,
   markTaskMessagesDelivered,
   markTaskMessagesPushed,
+  openItemsForWorkstream,
+  openPassTurn,
   passHoldingTask,
 } from '@10db/db';
 import type { InboxService } from '../inbox';
@@ -117,7 +120,11 @@ const keepInstruction = (area: string): string =>
  * is withdrawn, when the session stops waiting.
  */
 export function askShared(
-  deps: SharedDeps & { readonly inbox: InboxService },
+  deps: SharedDeps & {
+    readonly inbox: InboxService;
+    /** Hands a builder message to the page's session, starting a turn when none is open. */
+    readonly deliver?: (taskId: TaskId, messageId: TaskMessageId) => Promise<void>;
+  },
   input: {
     readonly workstreamId: WorkstreamId;
     readonly sessionId: SessionId;
@@ -201,7 +208,9 @@ export function askShared(
 
 /** What the builder's answer means for the call, with the thread's line for a reply or a park. */
 function answerOf(
-  deps: SharedDeps,
+  deps: SharedDeps & {
+    readonly deliver?: (taskId: TaskId, messageId: TaskMessageId) => Promise<void>;
+  },
   input: { readonly taskId: TaskId; readonly area: string },
   given: InboxAnswer,
 ): SharedAnswer {
@@ -218,17 +227,34 @@ function answerOf(
   }
   if (given.choice === SHARED_ASK_REPLY_CHOICE) {
     const words = (given.note ?? '').trim();
-    if (words !== '')
-      deps.state.write((ctx) => {
-        // The call's answer hands the words to the agent: the message is delivered with it.
-        const message = insertBuilderMessage(ctx, input.taskId, { body: words, files: [] });
-        markTaskMessagesPushed(ctx, [message.id]);
-        markTaskMessagesDelivered(ctx, input.taskId, [message.id]);
-      });
+    // While the turn is open the call's answer hands the words to the agent, so the message is
+    // delivered with it; once the turn has ended nobody reads that answer, and the message starts
+    // the page's next turn as the builder's own would.
+    const waiting = deps.state.write((ctx) => {
+      const message = insertBuilderMessage(ctx, input.taskId, { body: words, files: [] });
+      if (!openPassTurn(ctx.tx, input.taskId)) return message.id;
+      markTaskMessagesPushed(ctx, [message.id]);
+      markTaskMessagesDelivered(ctx, input.taskId, [message.id]);
+      return null;
+    });
+    if (waiting !== null) void deps.deliver?.(input.taskId, waiting).catch(() => undefined);
     return {
       allowed: false,
       instruction: `The builder replied instead of giving you shared area ${input.area}: "${words}". You did not get ${input.area}; edit nothing there, and do what the reply says.`,
     };
   }
   return { allowed: false, instruction: keepInstruction(input.area) };
+}
+
+/**
+ * Withdraws the workstream's open shared-area questions (spec §6.2 step 2): its turn has ended, and
+ * an area is held only for a turn, so an answer to one would grant nothing.
+ */
+export function withdrawSharedAsks(
+  deps: Pick<SharedDeps, 'state'> & { readonly inbox: InboxService },
+  workstreamId: WorkstreamId,
+): void {
+  for (const item of openItemsForWorkstream(deps.state.db, workstreamId))
+    if (item.state === InboxState.Open && SharedAskDetail.safeParse(item.detail).success)
+      deps.inbox.withdraw(item.id);
 }

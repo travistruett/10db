@@ -14,6 +14,7 @@ import {
   insertHold,
   listPassTasks,
   openHolds,
+  openPassTurn,
   passPageAreas,
   type AcquireResult,
   type DbReader,
@@ -110,12 +111,13 @@ export async function sharedPathsDiffering(
  * Grants a pass lane its shared area for the turn (spec §7.2): the area's shared files that differ
  * from the chain's tip are recorded with their content, then the claim and its hold, numbered on the
  * chain, are written together, and the hold's ref keeps the record. A task that took the claim first
- * is the conflict, and nothing is written: the record's commit is left unreferenced.
+ * is the conflict, and nothing is written: the record's commit is left unreferenced. Null, with
+ * nothing written, once the lane's turn has ended.
  */
 export async function grantSharedHold(
   deps: SharedDeps,
   input: { readonly workstreamId: WorkstreamId; readonly area: string },
-): Promise<AcquireResult> {
+): Promise<AcquireResult | null> {
   const db = deps.state.db;
   const place = passTaskPlace(db, getWorkstreamRow(db, input.workstreamId).taskId);
   const { pass, repo } = place;
@@ -127,8 +129,10 @@ export async function grantSharedHold(
     shared: sharedPathOf(db, pass, input.area),
   });
   const { sha, record } = await deps.git.recordPaths({ repo, base: tip, paths });
-  const outcome = deps.state.write((ctx): AcquireResult => {
+  const outcome = deps.state.write((ctx): AcquireResult | null => {
     const row = getWorkstreamRow(ctx.tx, input.workstreamId);
+    // An area is held for a turn: once the turn has ended there is none to hold it for.
+    if (!openPassTurn(ctx.tx, row.taskId)) return null;
     const areaScope = claimScopeOf(ctx.tx, row);
     const granted = acquireClaims(ctx, {
       projectId: pass.projectId,
@@ -153,7 +157,7 @@ export async function grantSharedHold(
       });
     return granted;
   });
-  if (outcome.ok) {
+  if (outcome?.ok === true) {
     const claim = outcome.claims.find((c) => c.kind === ClaimKind.Area && c.name === input.area);
     if (claim) await deps.git.keepRef(repo, holdRef(pass.id, claim.id), sha);
   }

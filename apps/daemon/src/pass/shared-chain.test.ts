@@ -38,8 +38,9 @@ const twoSharedAreas = () =>
   });
 
 async function grant(task: PassWorld['settings'], area: string) {
+  w.startTurn(task);
   const granted = await grantSharedHold(w.deps, { workstreamId: w.runOf(task), area });
-  if (!granted.ok) throw new Error(`${area} was not granted`);
+  if (!granted?.ok) throw new Error(`${area} was not granted`);
   const hold = openHolds(w.h.store.db, w.opened.pass.id).find((h) => h.area === area);
   if (!hold) throw new Error(`no hold on ${area}`);
   return hold;

@@ -1679,6 +1679,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       sessionSignal: (id) => live.get(id)?.signal,
       askedToHandOff: (id) => live.get(id)?.askedToHandOff(),
       claimWaits,
+      deliverMessage: (taskId, messageId) =>
+        createdRunner.deliverMessage(taskId, messageId, { redo: false }),
       migrationsBase,
       dependencyChanges,
       shapeTools: shape.toolsFor,

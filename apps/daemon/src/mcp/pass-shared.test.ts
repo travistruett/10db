@@ -5,6 +5,8 @@ import {
   SharedAskDetail,
   sharedAskFoldKey,
   type TaskDto,
+  type TaskId,
+  type TaskMessageId,
 } from '@10db/contracts';
 import {
   findOpenByFoldKey,
@@ -14,9 +16,11 @@ import {
   insertSession,
   listSharedChanges,
   listTaskThread,
+  listTaskThreadRows,
   openHolds,
+  openPassTurn,
 } from '@10db/db';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { openPassWorld, type PassWorld } from '../../test/pass-world';
 import { silentLogger } from '../log';
 import { closeHoldsOf, grantSharedHold, keepHold, landSharedChanges, sharedRef } from '../pass';
@@ -32,8 +36,16 @@ afterEach(() => {
 });
 
 /** The task's lane tools, as its session's MCP server builds them, sharing `waits`. */
-function laneTools(world: PassWorld, task: TaskDto, waits: ClaimWaits, sliceMs?: number) {
+function laneTools(
+  world: PassWorld,
+  task: TaskDto,
+  waits: ClaimWaits,
+  sliceMs?: number,
+  deliverMessage?: (taskId: TaskId, messageId: TaskMessageId) => Promise<void>,
+) {
   const workstreamId = world.runOf(task);
+  // The lane is in a turn, as an agent calling a tool is.
+  world.startTurn(task);
   const session = world.h.state.write((ctx) =>
     insertSession(ctx, {
       workstreamId,
@@ -56,6 +68,7 @@ function laneTools(world: PassWorld, task: TaskDto, waits: ClaimWaits, sliceMs?:
       askedToHandOff: () => undefined,
       claimPollMs: 10,
       ...(sliceMs === undefined ? {} : { claimWaitSliceMs: sliceMs }),
+      ...(deliverMessage === undefined ? {} : { deliverMessage }),
     },
     session.id,
     workstreamId,
@@ -127,11 +140,12 @@ describe('the commit tool under a shared hold', () => {
 describe("the builder's question before a second task changes a shared area", () => {
   /** Settings changes `src/button.ts` in a turn of its own, so People's ask needs the builder. */
   async function settingsChangedSrc(): Promise<void> {
+    w.startTurn(w.settings);
     const granted = await grantSharedHold(w.deps, {
       workstreamId: w.runOf(w.settings),
       area: 'src',
     });
-    if (!granted.ok) throw new Error('src was not granted');
+    if (!granted?.ok) throw new Error('src was not granted');
     w.write('src/button.ts', 'button\n');
     const [hold] = openHolds(w.h.store.db, w.opened.pass.id);
     if (!hold) throw new Error('no hold');
@@ -237,4 +251,30 @@ describe("the builder's question before a second task changes a shared area", ()
         });
     },
   );
+
+  it('hands a reply that comes after the turn ended to the next turn, not to nobody', async () => {
+    w = await openPassWorld();
+    await settingsChangedSrc();
+    const delivered: TaskMessageId[] = [];
+    const tools = laneTools(w, w.people, new ClaimWaits(), 30, (_task, id) => {
+      delivered.push(id);
+      return Promise.resolve();
+    });
+    const first = await ask(tools);
+    if (first.granted || first.inboxId === null) throw new Error('no question');
+    // The turn's end write has happened; its step 2 has not yet withdrawn the question.
+    const turn = openPassTurn(w.h.store.db, w.people.id);
+    if (!turn) throw new Error('no turn');
+    w.endTurn(turn);
+
+    w.h.inbox.answer(first.inboxId, { choice: SHARED_ASK_REPLY_CHOICE, note: 'Use the page one' });
+    await vi.waitFor(() => {
+      expect(delivered).toHaveLength(1);
+    });
+
+    const message = listTaskThread(w.h.store.db, w.people.id).at(-1);
+    expect(message).toMatchObject({ author: 'builder', body: 'Use the page one' });
+    expect(delivered).toEqual([message?.id]);
+    expect(listTaskThreadRows(w.h.store.db, w.people.id).at(-1)?.deliveredAt).toBeNull();
+  });
 });

@@ -157,7 +157,12 @@ export async function createTestEngine(
       | 'codexLaneTempRoot'
     >
   > = {},
-  setup: { readonly account?: AccountInput; readonly secret?: string } = {},
+  setup: {
+    readonly account?: AccountInput;
+    readonly secret?: string;
+    /** How long one request_claim call waits before it answers "still waiting", and how often it looks. */
+    readonly claims?: { readonly sliceMs: number; readonly pollMs: number };
+  } = {},
 ): Promise<TestEngine> {
   const repo = createTempRepo();
   const data = tempDir('engine-data');
@@ -276,6 +281,9 @@ export async function createTestEngine(
       waitObserverFor: (id) => live.get(id)?.observer,
       sessionSignal: (id) => live.get(id)?.signal,
       askedToHandOff: (id) => live.get(id)?.askedToHandOff(),
+      ...(setup.claims
+        ? { claimWaitSliceMs: setup.claims.sliceMs, claimPollMs: setup.claims.pollMs }
+        : {}),
     }),
     hostname: '127.0.0.1',
     port: 0,

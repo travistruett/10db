@@ -69,8 +69,51 @@ export interface SharedGrant {
    * on to the claim, else the refusal the call answers; it rejects when the session stops waiting.
    */
   ask(): { readonly inboxId: InboxItemId; readonly answer: Promise<ClaimResult | null> } | null;
-  /** Grants the free claim with its hold in one write; a task that took it first is the conflict. */
-  grant(): Promise<AcquireResult>;
+  /**
+   * Grants the free claim with its hold in one write; a task that took it first is the conflict, and
+   * null means the lane's turn has ended, so nothing was granted.
+   */
+  grant(): Promise<AcquireResult | null>;
+  /** Whether the lane's turn is still open: an area is held only for a turn, so a wait ends with it. */
+  turnOpen(): boolean;
+}
+
+/** What a shared wait answers once the lane's turn has ended without the area. */
+function turnEndedRefusal(a: Asking, inboxId: InboxItemId | null): ClaimResult {
+  return {
+    granted: false,
+    heldBy: null,
+    inboxId,
+    yielded: false,
+    parked: false,
+    instruction: `Your turn ended before shared ${a.kind} ${a.name} was granted, so you did not get it. If you still need it in a later turn, call request_claim with a new opId then.`,
+  };
+}
+
+/**
+ * The builder's answer to a shared question, or the turn's end: looked at every `pollMs`, so a
+ * question the turn's end withdrew ends the wait. Rejects when the session stops waiting.
+ */
+async function answerOrTurnEnd(
+  a: Asking & { readonly shared: SharedGrant },
+  asked: { readonly inboxId: InboxItemId; readonly answer: Promise<ClaimResult | null> },
+): Promise<ClaimResult | null> {
+  const answered = asked.answer.then(
+    (result) => ({ result }),
+    (error: unknown) => ({ error }),
+  );
+  for (;;) {
+    const next = await Promise.race([answered, sleep(a.pollMs, a.signal).then(() => null)]);
+    if (next !== null) {
+      if ('error' in next) throw next.error;
+      return next.result;
+    }
+    if (a.signal.aborted) throw new InvalidError('aborted');
+    if (!a.shared.turnOpen()) {
+      if (cardOpen(a, asked.inboxId)) a.inbox.withdraw(asked.inboxId);
+      return turnEndedRefusal(a, asked.inboxId);
+    }
+  }
 }
 
 /** Claims the builder made a task give up to end a claim deadlock, until its agent is told. */
@@ -523,7 +566,8 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
  * A pass lane's shared area (`Asking.shared`) asks the builder first when it needs to, and the open
  * question, named on `wait`, holds the wait until it is answered. It then looks at the claim in the
  * same synchronous way and waits on a holder as above; only a free claim goes to the grant, which
- * records the hold before it takes the claim, so it answers asynchronously.
+ * records the hold before it takes the claim, so it answers asynchronously. An area is held only for
+ * a turn: once the lane's turn has ended the wait withdraws its question and ends with nothing.
  */
 async function claimOrWait(a: Asking, wait: WaitState, waits: ClaimWaits): Promise<ClaimResult> {
   const noticeKey = waitNoticeKey(a);
@@ -540,12 +584,13 @@ async function claimOrWait(a: Asking, wait: WaitState, waits: ClaimWaits): Promi
     });
   };
   try {
-    const asked = a.shared && heldNow(a)?.ok !== true ? a.shared.ask() : null;
-    if (asked) {
+    const shared = a.shared;
+    const asked = shared && heldNow(a)?.ok !== true ? shared.ask() : null;
+    if (shared && asked) {
       wait.askId = asked.inboxId;
       let refused: ClaimResult | null;
       try {
-        refused = await asked.answer;
+        refused = await answerOrTurnEnd({ ...a, shared }, asked);
       } catch {
         throw new InvalidError(
           'This session stopped waiting for the builder’s answer and did not get the claim. End your turn.',
@@ -564,8 +609,10 @@ async function claimOrWait(a: Asking, wait: WaitState, waits: ClaimWaits): Promi
         );
       const given = waits.pendingYield(a.workstreamId);
       if (given) return yieldRefusal(given, a);
-      const outcome =
-        a.shared === undefined ? tryAcquire(a) : (heldNow(a) ?? (await a.shared.grant()));
+      // A shared area is held for a turn: a wait outlived by its turn takes nothing.
+      if (shared && !shared.turnOpen()) return turnEndedRefusal(a, null);
+      const outcome = shared === undefined ? tryAcquire(a) : (heldNow(a) ?? (await shared.grant()));
+      if (outcome === null) return turnEndedRefusal(a, null);
       if (outcome.ok) {
         withdrawDeadlock(a);
         return grantedFrom(a, outcome.claims);

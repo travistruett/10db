@@ -33,6 +33,7 @@ import {
   keptWorkFacts,
   type KeptWork,
   type PassWorkDeps,
+  withdrawSharedAsks,
 } from '../pass';
 import { liveCheckCard } from './builder-check';
 import { untakenMessages } from './lane-messages';
@@ -307,6 +308,7 @@ async function carryThrough(
   // Step 2: what the turn changed in shared areas is kept on the chain, and the areas released,
   // before its page work is kept.
   const keep = async () => {
+    withdrawSharedAsks(deps, turn.workstreamId);
     await closeHoldsOf(deps, turn.workstreamId);
     return turn.keptBaseSha === null
       ? keepTurnWork(deps, { workstreamId: turn.workstreamId, turnId: turn.id })

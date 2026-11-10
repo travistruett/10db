@@ -26,8 +26,9 @@ const read = (path: string) => readFileSync(join(w.h.repo, path), 'utf8');
 
 /** `task` holds `src` for a turn in which `edit` writes, and the turn's end keeps it. */
 async function sharedTurn(task: PassWorld['settings'], edit: () => void): Promise<number> {
+  w.startTurn(task);
   const granted = await grantSharedHold(w.deps, { workstreamId: w.runOf(task), area: 'src' });
-  if (!granted.ok) throw new Error('src was not granted');
+  if (!granted?.ok) throw new Error('src was not granted');
   const hold = openHolds(w.h.store.db, w.opened.pass.id).find((h) => h.taskId === task.id);
   if (!hold) throw new Error('no hold');
   edit();

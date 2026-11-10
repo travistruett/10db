@@ -28,9 +28,10 @@ describe('grantSharedHold', () => {
     w.write('src/settings/page.tsx', 'a page edit\n');
     w.write('src/people/page.tsx', "a neighbour's page edit\n");
 
+    w.startTurn(settings);
     const granted = await grantSharedHold(w.deps, { workstreamId: w.runOf(settings), area: 'src' });
 
-    expect(granted.ok).toBe(true);
+    expect(granted?.ok).toBe(true);
     const [hold] = openHolds(h.store.db, w.opened.pass.id);
     expect(hold).toMatchObject({ seq: 1, area: 'src', taskId: settings.id, closedAt: null });
     if (!hold) throw new Error('no hold');
@@ -59,11 +60,24 @@ describe('grantSharedHold', () => {
       }),
     );
 
+    w.startTurn(settings);
     const granted = await grantSharedHold(w.deps, { workstreamId: w.runOf(settings), area: 'src' });
 
     expect(granted).toMatchObject({ ok: false, conflict: { heldBy: w.runOf(people) } });
     expect(openHolds(h.store.db, w.opened.pass.id)).toEqual([]);
     expect(activeClaims(h.store.db, w.runOf(settings)).map((c) => c.name)).not.toContain('src');
     expect(h.git$('for-each-ref', `refs/10db/passes/${w.opened.pass.id}/holds/`)).toBe('');
+  });
+
+  it("grants nothing once the lane's turn has ended", async () => {
+    w = await openPassWorld();
+    const turn = w.startTurn(w.settings);
+    w.endTurn(turn);
+
+    expect(
+      await grantSharedHold(w.deps, { workstreamId: w.runOf(w.settings), area: 'src' }),
+    ).toBeNull();
+    expect(openHolds(w.h.store.db, w.opened.pass.id)).toEqual([]);
+    expect(activeClaims(w.h.store.db, w.runOf(w.settings)).map((c) => c.name)).not.toContain('src');
   });
 });

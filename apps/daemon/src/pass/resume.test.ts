@@ -46,6 +46,7 @@ const folderCards = (world: PassWorld) =>
 describe('resumePassWork', () => {
   it('leaves a shared hold open while the folder is off the pass branch, and keeps it once back', async () => {
     w = await openPassWorld();
+    w.startTurn(w.settings);
     await grantSharedHold(w.deps, { workstreamId: w.runOf(w.settings), area: 'src' });
     w.write('src/button.ts', 'a button\n');
     const [hold] = openHolds(w.h.store.db, w.opened.pass.id);
@@ -76,6 +77,7 @@ describe('resumePassWork', () => {
   it("keeps a shared hold the stop left open on the chain, releases it, and remakes a lost hold's ref", async () => {
     w = await openPassWorld();
     w.write('src/shared.ts', "the builder's edit\n");
+    w.startTurn(w.settings);
     await grantSharedHold(w.deps, { workstreamId: w.runOf(w.settings), area: 'src' });
     w.write('src/button.ts', 'a button\n');
     const [hold] = openHolds(w.h.store.db, w.opened.pass.id);

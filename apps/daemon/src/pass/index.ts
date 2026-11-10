@@ -23,6 +23,6 @@ export { abandonPass } from './abandon';
 export { resumePassWork } from './resume';
 export { passView } from './view';
 export { grantSharedHold, holdRef, sharedRef } from './shared-hold';
-export { askShared } from './shared-ask';
+export { askShared, withdrawSharedAsks } from './shared-ask';
 export { dropShared, sharedUnlanded } from './shared-drop';
 export { closeHoldsOf, keepCommitToolPaths, keepHold, landSharedChanges } from './shared-chain';
