@@ -17,6 +17,7 @@ import { passBranch } from './kept-work';
 import { putBackKeptWork } from './put-back';
 import { keepHold } from './shared-chain';
 import { holdRef } from './shared-hold';
+import { resumeSignOffWaits } from './sign-off';
 import { takeOut, TakeOutWithin, type TakeOutDeps } from './take-out';
 
 // Workbench spec §12: at start-up, after the runs' own recovery, each open pass goes on from its rows.
@@ -96,6 +97,8 @@ export async function resumePassWork(deps: TakeOutDeps): Promise<void> {
       );
     }
   }
+  // A sign-off that waited on a hold: it lands if the hold has closed, else it waits again.
+  resumeSignOffWaits(deps);
   // An Abandon goes on from its own recorded step, its take-outs inside it.
   for (const pass of listUnfinishedAbandons(db))
     abandonPass(deps, pass.id).catch((error: unknown) => {

@@ -751,6 +751,22 @@ export function createApp(deps: ApiDeps) {
     .post('/passes/:passId/abandon', async (c) =>
       c.json(await deps.services.abandonPass(PassId.parse(c.req.param('passId')))),
     )
+    .post('/passes/:passId/tasks/:taskId/sign-off', (c) =>
+      c.json(
+        deps.services.signOffPage(
+          PassId.parse(c.req.param('passId')),
+          TaskId.parse(c.req.param('taskId')),
+        ),
+        202,
+      ),
+    )
+    .delete('/passes/:passId/tasks/:taskId/sign-off', (c) => {
+      deps.services.cancelSignOff(
+        PassId.parse(c.req.param('passId')),
+        TaskId.parse(c.req.param('taskId')),
+      );
+      return c.body(null, 204);
+    })
     .get('/passes/:passId/pull-request', async (c) =>
       c.json(await deps.services.passPullRequest(PassId.parse(c.req.param('passId')))),
     )

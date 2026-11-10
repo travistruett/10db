@@ -157,8 +157,12 @@ import {
 import {
   abandonPass,
   answerPassCard,
+  askSignOff,
+  cancelSignOffWait,
   putBackKeptWork,
   resumePassWork,
+  startSignOff,
+  subscribeSignOffWaits,
   takeOut,
   type PassWorkDeps,
   type TakeOutDeps,
@@ -173,6 +177,7 @@ import { createShapePreparer } from './shape-session-tools';
 import {
   applyCheckAnswer,
   RunnerNotStartedError,
+  type StartSignOff,
   createLiveSessions,
   createRunner,
   DEFAULT_RUNNER_LIMITS,
@@ -605,6 +610,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let answerLostMigrationsCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerWorktreeCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerPassCards: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
+  let startPageSignOff: StartSignOff | null = null;
 
   // A claim deadlock card's answer makes a task yield its claim, or cancels it as the Board does.
   const answerDeadlockCard = createClaimDeadlockAnswers({
@@ -633,8 +639,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     onParkAnswer: parkAnswers,
     log: logger,
     onCheckAnswer: (ctx, item, answer) => {
-      if (!runner) throw new RunnerNotStartedError();
-      return applyCheckAnswer(runner, ctx, item, answer);
+      const signOffPage = startPageSignOff;
+      if (!runner || !signOffPage) throw new RunnerNotStartedError();
+      return applyCheckAnswer(runner, ctx, item, answer, signOffPage);
     },
     onFlagAnswer: (item, answer) => {
       runner?.retryTurn(item, answer);
@@ -1383,7 +1390,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     stopLane,
     wrote: (repo, paths) => watcher?.daemonWrote(repo, paths) ?? Promise.resolve(),
   };
-  // Each open pass goes on from its rows: its folder card, a put-back and take-outs cut short.
+  // A Ready page's Sign Off, from its route or its check item; one waiting for another page's hold
+  // goes on once that hold closes.
+  startPageSignOff = (taskId) => {
+    startSignOff(passTakeOuts, taskId);
+  };
+  const unsubscribeSignOffWaits = subscribeSignOffWaits(bus, passTakeOuts);
+  // Each open pass goes on from its rows: its folder card, a put-back, take-outs and sign-offs cut short.
   await resumePassWork(passTakeOuts);
   // The previous daemon's claim waits ended with it; their cards would name holders nobody waits for.
   withdrawStaleClaimWaits(state, inbox);
@@ -1515,6 +1528,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     takeOut: (input) => takeOut(passTakeOuts, input),
     abandonPass: (passId) => abandonPass(passTakeOuts, passId),
     passPullRequests,
+    signOff: (passId, taskId) => askSignOff(passTakeOuts, passId, taskId),
+    cancelSignOff: (passId, taskId) => {
+      cancelSignOffWait(passTakeOuts, passId, taskId);
+    },
     holdForPutBack: (id) => {
       holdForPutBack(delivery, id);
     },
@@ -1814,6 +1831,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       });
       unsubscribeShip();
       unsubscribePassSettles();
+      unsubscribeSignOffWaits();
       unsubscribeKeptWork();
       unsubscribePrWatch();
       await prWatch.stop();

@@ -32,3 +32,16 @@ export {
   keepHold,
   landSharedChanges,
 } from './shared-chain';
+export {
+  askSignOff,
+  cancelSignOffWait,
+  resumeSignOffWaits,
+  signOff,
+  signOffRefusal,
+  signOffSteps,
+  SignOffFrom,
+  startSignOff,
+  subscribeSignOffWaits,
+  type SignOffDeps,
+  type SignOffOutcome,
+} from './sign-off';

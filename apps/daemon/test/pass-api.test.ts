@@ -7,6 +7,7 @@ import {
   PASS_SIGN_OFF_CHOICE,
   PassAbandonedDto,
   PassOpenedDto,
+  PassSignOffDto,
   PassViewDto,
   ProjectDto,
   TakeOutPreviewDto,
@@ -20,6 +21,7 @@ import {
 } from '@10db/contracts';
 import {
   endPassTurn,
+  getBatch,
   getInboxItem,
   getTask,
   getTaskKeptWork,
@@ -249,11 +251,6 @@ describe('a Ready pass page', () => {
   it.each([
     { name: 'Approve', answer: { choice: 'approve' }, status: 400 },
     { name: 'Send Back', answer: { choice: 'send_back', note: 'Bigger' }, status: 400 },
-    {
-      name: 'Sign Off, until closing lands',
-      answer: { choice: PASS_SIGN_OFF_CHOICE },
-      status: 409,
-    },
   ])('refuses $name and leaves the page as it was', async ({ answer, status }) => {
     const page = await readyPage();
     const before = getWorkstreamRow(daemon.state.db, page.ws.id);
@@ -582,6 +579,75 @@ describe("a page's messages and Stop over HTTP", () => {
       headers: { Authorization: `Bearer ${daemon.token}` },
     });
     expect(res.status).toBe(409);
+  });
+});
+
+describe('Sign Off over HTTP', () => {
+  const signOffOf = (pass: { id: PassDto['id'] }, task: TaskDto, method = 'POST') =>
+    fetch(`${daemon.url}/passes/${pass.id}/tasks/${task.id}/sign-off`, {
+      method,
+      headers: { Authorization: `Bearer ${daemon.token}`, 'content-type': 'application/json' },
+      ...(method === 'POST' ? { body: '{}' } : {}),
+    });
+  const readyOf = async (title: string) => {
+    const page = await openedPage(title);
+    await waitFor(() => runOf(page.task).nextAction.kind === 'pass_review');
+    return page;
+  };
+  const passBranch = (pass: PassDto) => {
+    const { branch } = getBatch(daemon.state.db, pass.batchId);
+    if (branch === null) throw new Error('the pass has no branch');
+    return branch;
+  };
+
+  it("ends a warm Ready page's session and lands its files as one commit; Approve stays refused", async () => {
+    const { task, pass } = await readyOf(READY);
+    const ready = runOf(task);
+    if (ready.nextAction.kind !== 'pass_review') throw new Error('not Ready');
+    expect(ready.currentSessionId).not.toBeNull();
+    expect(
+      (await post(`/inbox/${ready.nextAction.inboxId}/answer`, { choice: 'approve' })).status,
+    ).toBe(400);
+
+    const res = await signOffOf(pass, task);
+
+    expect(res.status).toBe(202);
+    expect(PassSignOffDto.parse(await res.json())).toEqual({
+      taskId: task.id,
+      state: 'signing_off',
+      waitsFor: null,
+    });
+    await waitFor(() => runOf(task).state === 'DONE');
+    const branch = passBranch(pass);
+    expect(rawGit('log', '--format=%s', `${pass.startSha}..${branch}`)).toBe(task.title);
+    expect(rawGit('show', `${branch}:${PAGE_FILE}`)).toBe('one');
+    expect(runOf(task)).toMatchObject({ currentSessionId: null, attempt: ready.attempt });
+    expect(getInboxItem(daemon.state.db, ready.nextAction.inboxId).state).toBe('RESOLVED');
+    // Signed off is not Ready: the page waits on nothing, and a second Sign Off is refused.
+    expect((await signOffOf(pass, task)).status).toBe(409);
+  });
+
+  it("signs the page off from its check item's Sign Off", async () => {
+    const { task } = await readyOf(READY);
+    const ready = runOf(task);
+    if (ready.nextAction.kind !== 'pass_review') throw new Error('not Ready');
+
+    const res = await post(`/inbox/${ready.nextAction.inboxId}/answer`, {
+      choice: PASS_SIGN_OFF_CHOICE,
+    });
+
+    expect(res.status).toBe(200);
+    await waitFor(() => runOf(task).state === 'DONE');
+  });
+
+  it('refuses a working page, a pass not open, and a cancel with no sign-off waiting, with 409', async () => {
+    const { task, pass } = await openedPage(WORKING);
+    await waitFor(() => existsSync(join(repo.path, PAGE_FILE)));
+    expect((await signOffOf(pass, task)).status).toBe(409);
+    expect((await signOffOf(pass, task, 'DELETE')).status).toBe(409);
+    daemon.state.db.update(schema.passes).set({ state: 'ABANDONING' }).run();
+    expect((await signOffOf(pass, task)).status).toBe(409);
+    expect(runOf(task).state).toBe('RUNNING');
   });
 });
 

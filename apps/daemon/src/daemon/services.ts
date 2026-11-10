@@ -20,6 +20,7 @@ import {
   WorkstreamState,
   type SystemCheckDto,
   type PassAbandonedDto,
+  type PassSignOffDto,
   type WorkstreamDto,
   type PassId,
   type TakeOutResultDto,
@@ -170,6 +171,10 @@ export function createServices(deps: {
   readonly abandonPass: (passId: PassId) => Promise<PassAbandonedDto>;
   /** A pass's pull request: its preview, and Open Pull Request. */
   readonly passPullRequests: Pick<PassPullRequests, 'preview' | 'open'>;
+  /** Signs off a Ready page in the project's delivery queue, stopping its lane through the runner. */
+  readonly signOff: (passId: PassId, taskId: TaskId) => PassSignOffDto;
+  /** Cancels a page's waiting sign-off. */
+  readonly cancelSignOff: (passId: PassId, taskId: TaskId) => void;
   /** Holds a run of a task with saved Workbench work until the work is back in Your folder. */
   readonly holdForPutBack: (id: WorkstreamId) => void;
   readonly shipper: Shipper;
@@ -417,6 +422,10 @@ export function createServices(deps: {
           `Pass "${pass.name}" is ${pass.state.toLowerCase()}: only an open pass is abandoned`,
         );
       return deps.abandonPass(passId);
+    },
+    signOffPage: (passId, taskId) => deps.signOff(passId, taskId),
+    cancelSignOff: (passId, taskId) => {
+      deps.cancelSignOff(passId, taskId);
     },
     passPullRequest: (passId) => deps.passPullRequests.preview(passId),
     openPassPullRequest: (passId) => deps.passPullRequests.open(passId),

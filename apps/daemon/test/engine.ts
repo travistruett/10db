@@ -63,6 +63,7 @@ import {
 import { createEventBus, createStateStore, type StateStore } from '../src/events';
 import { createDeliveryJobs } from '../src/delivery';
 import { createGit } from '../src/git';
+import { startSignOff } from '../src/pass';
 import type { Judge } from '../src/judge';
 import { createInboxService, createParkAnswers, type InboxService } from '../src/inbox';
 import { silentLogger } from '../src/log';
@@ -176,6 +177,7 @@ export async function createTestEngine(
   const adapter = new FakeAdapter(book);
   const live = createLiveSessions();
   const git = createGit();
+  const jobs = createDeliveryJobs(silentLogger);
   const keychain = createMemoryKeychain();
   const rateLimited: { accountId: AccountId; resetsAt: Date | null }[] = [];
   const usageReports: { accountId: AccountId; report: UsageReport }[] = [];
@@ -200,8 +202,22 @@ export async function createTestEngine(
     },
     onParkAnswer: parkAnswers,
     onCheckAnswer: (ctx, item, answer) => {
-      if (!runner) throw new RunnerNotStartedError();
-      return applyCheckAnswer(runner, ctx, item, answer);
+      const ready = runner;
+      if (!ready) throw new RunnerNotStartedError();
+      return applyCheckAnswer(ready, ctx, item, answer, (taskId) => {
+        startSignOff(
+          {
+            state,
+            git,
+            inbox,
+            jobs,
+            logger: silentLogger,
+            clock,
+            stopLane: (id) => ready.stopPassLane(id),
+          },
+          taskId,
+        );
+      });
     },
     onFlagAnswer: (item, answer) => {
       runner?.retryTurn(item, answer);
@@ -298,7 +314,7 @@ export async function createTestEngine(
     adapter,
     inbox,
     git,
-    jobs: createDeliveryJobs(silentLogger),
+    jobs,
     gate: createGateRunner({ sandbox: null, logger: silentLogger }),
     // The engine's repository has no origin to fetch a base from: every branch is up to date.
     baseUpdates: {

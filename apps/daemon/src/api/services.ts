@@ -68,6 +68,7 @@ import type {
   PassOpenRequest,
   PassPullRequestDto,
   PassPullRequestPreviewDto,
+  PassSignOffDto,
   PassViewDto,
   TakeOutPreviewDto,
   TakeOutRequest,
@@ -275,6 +276,15 @@ export interface ApiServices {
    * neither open nor already abandoning.
    */
   abandonPass(passId: PassId): Promise<PassAbandonedDto>;
+  /**
+   * Signs off a Ready page (spec §9.2) in the background: its session ends, then the shared changes
+   * it needs and its own files land, one commit each. Answers whether it lands now or waits for
+   * another page's turn that holds a shared change it needs. Refused (409) while the pass is not
+   * open or the page is not Ready.
+   */
+  signOffPage(passId: PassId, taskId: TaskId): PassSignOffDto;
+  /** Cancels the page's sign-off that waits for another page's turn. Refused (409) when none waits. */
+  cancelSignOff(passId: PassId, taskId: TaskId): void;
   /** Whether Open Pull Request is offered for the pass (spec §8.3), why not, and what it would do. */
   passPullRequest(passId: PassId): Promise<PassPullRequestPreviewDto>;
   /**
