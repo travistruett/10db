@@ -378,6 +378,7 @@ describe("a builder message's hand-over to a warm session", () => {
       branches: createGit(),
       onWrongBranch: () => undefined,
       onWorktreeMissing: () => undefined,
+      keptWork: { ready: () => true },
     });
     expect(await scheduler.tick()).toBe(0);
     expect(folderCards()).toHaveLength(1);

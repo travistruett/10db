@@ -24,7 +24,7 @@ import {
   settlePass,
 } from '@10db/db';
 import type { EventBus } from '../events';
-import { comparablePath, samePath, type SwitchBack } from '../git';
+import type { SwitchBack } from '../git';
 import type { Card } from './cards';
 import {
   followStackedMerge,
@@ -36,6 +36,7 @@ import {
 } from './pass-stack';
 import { networkCall, raise, withdraw, type DeliveryContext } from './context';
 import { jobKey, JobQueue } from './jobs';
+import { setReviewLeft } from './review-left';
 
 // Workbench spec §5.3, §5.4, D22, call 29: a pass closed on a pull request project is CLOSED but not
 // SETTLED until its work is in the base. When its pull request merges and the base's tree is the
@@ -137,11 +138,9 @@ function offerMove(
   );
 }
 
-/** Whether `branch` is checked out in a worktree other than the folder itself. */
+/** Whether `branch` is in use in a worktree other than the folder: checked out, rebased or bisected. */
 async function elsewhere(ctx: DeliveryContext, repo: string, branch: string): Promise<boolean> {
-  return (await ctx.git.listWorktrees(repo)).some(
-    (e) => e.branch === branch && !samePath(comparablePath(e.path), comparablePath(repo)),
-  );
+  return (await ctx.git.branchInUseElsewhere(repo, branch)) !== null;
 }
 
 function settled(ctx: DeliveryContext, pass: PassDto, how: 'realigned' | 'moved'): void {
@@ -170,7 +169,7 @@ export async function settleClosedPass(
     // The stacked pass moves the branch at its own close; this pass waits, or settles once merged.
     withdraw(ctx.state, ctx.inbox, pass.projectId, [passMoveKey(pass.id)]);
     if (pr?.state === PullRequestState.Merged) await followStackedMerge(ctx, pass, above, signal);
-    else if (pr?.state === PullRequestState.Closed) offerRetarget(ctx, pass, above);
+    else if (pr?.state === PullRequestState.Closed) await offerRetarget(ctx, pass, above, signal);
     return;
   }
   if (pr?.state === PullRequestState.Closed) {
@@ -278,7 +277,8 @@ export async function movePassBranch(
   }
   const pushed = batch.branch === null ? null : await ctx.git.trackingTip(repo, batch.branch);
   const own: string[] = [];
-  for (const sha of await ctx.git.ownCommitsSince(repo, base, at))
+  // Merges included: a merge the builder made by hand is the builder's own too.
+  for (const sha of await ctx.git.commitsSince(repo, base, at))
     if (pushed === null || !(await ctx.git.isAncestor(repo, sha, pushed))) own.push(sha);
   if (own.length > 0) {
     refuse(
@@ -325,13 +325,22 @@ export function queuePassSettle(
 
 /**
  * Follows a pass's close and Abandon: a pass that closes unsettled gets its Move card at once, and
- * when a pass stacked on a closed one is abandoned, the closed one's card and realignment resume.
+ * when a pass stacked on a closed one is abandoned, the closed one's card and realignment resume. A
+ * pass that has settled or been abandoned is reviewed no more: what its reviews left unread goes.
  */
 export function subscribePassSettles(bus: EventBus, ctx: DeliveryContext): () => void {
   return bus.subscribe((event) => {
     if (event.type !== EventType.PassClosed && event.type !== EventType.PassChanged) return;
     const id = PassId.safeParse(event.entityId);
     if (!id.success) return;
+    const ended = event.data['state'];
+    if (
+      event.type === EventType.PassChanged &&
+      (ended === PassState.Settled || ended === PassState.Abandoned)
+    )
+      ctx.state.write((w) => {
+        setReviewLeft(w, id.data, null);
+      });
     const pass = findPass(ctx.state.db, id.data);
     if (event.type === EventType.PassClosed) {
       if (pass?.state === PassState.Closed)

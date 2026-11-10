@@ -99,9 +99,9 @@ import {
   createDeliveryJobs,
   createPrWatch,
   answerPassMoveCard,
+  createKeptWorkGate,
   createPassPullRequests,
   passGateKind,
-  holdForPutBack,
   createShipper,
   createWorktreeDependencies,
   createWorktreeGenerators,
@@ -1352,6 +1352,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         : {}),
     },
     connecting: () => accountService.connecting(),
+    // A run in Your folder of a local project waits for its task's saved work to go back (call 33).
+    keptWork: createKeptWorkGate(delivery),
     modelWait,
     clock,
     instanceId,
@@ -1552,9 +1554,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     signOff: (passId, taskId) => askSignOff(passTakeOuts, passId, taskId),
     cancelSignOff: (passId, taskId) => {
       cancelSignOffWait(passTakeOuts, passId, taskId);
-    },
-    holdForPutBack: (id) => {
-      holdForPutBack(delivery, id);
     },
     shipper,
     accounts: accountService,

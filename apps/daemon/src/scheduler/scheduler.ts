@@ -24,6 +24,7 @@ import {
 } from '@10db/contracts';
 import {
   acquireClaims,
+  claimConflict,
   acquireLease,
   claimRequestsForTask,
   copyHazardNames,
@@ -111,6 +112,11 @@ export interface SchedulerOptions {
   readonly connecting?: () => { readonly accountId: AccountId } | null;
   /** Accounts with no model profile yet: their queued work is left alone, not claimed and given back each tick. */
   readonly modelWait?: Pick<ModelListWait, 'holds'>;
+  /**
+   * Whether a run may launch as far as its task's saved Workbench work goes (call 33): false while
+   * its work is put back in its checkout. Asked last, of a run every other check would launch now.
+   */
+  readonly keptWork: { ready(run: WorkstreamDto): boolean };
 }
 
 export interface Scheduler {
@@ -445,15 +451,18 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       const requests = inPass
         ? passHeldAreas(project.areas, task).map((name) => ({ kind: ClaimKind.Area, name }))
         : claimRequestsForTask(task, project);
+      const ask = {
+        projectId: project.id,
+        workstreamId: ws.id,
+        requests,
+        copyHazards: copyHazardNames(project),
+        ...(areaScope ? { areaScope } : {}),
+      };
+      // Last, just before the claim, and only with the claim free: a put-back starts only for a run
+      // that would launch now, and never writes where another lane holds the area.
+      if (claimConflict(db, ask) !== null || !opts.keptWork.ready(ws)) continue;
       const fence = opts.state.write((ctx) => {
-        const claimed = acquireClaims(ctx, {
-          projectId: project.id,
-          workstreamId: ws.id,
-          requests,
-          copyHazards: copyHazardNames(project),
-          leaseExpiresAt: leaseUntil,
-          ...(areaScope ? { areaScope } : {}),
-        });
+        const claimed = acquireClaims(ctx, { ...ask, leaseExpiresAt: leaseUntil });
         if (!claimed.ok) return null;
         const f = acquireLease(ctx, ws.id, opts.instanceId, leaseUntil);
         transitionWorkstream(ctx, ws.id, {

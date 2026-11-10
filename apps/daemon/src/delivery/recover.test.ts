@@ -24,7 +24,13 @@ import { createScheduler } from '../scheduler';
 import { leftOutCards } from './cards';
 import { raise } from './context';
 import { cuttingTasksKey } from './cutting-tasks';
-import { batchBranchName, createBatchStarter, recoverBatches, type DeliveryJobs } from './index';
+import {
+  batchBranchName,
+  createBatchStarter,
+  createKeptWorkGate,
+  recoverBatches,
+  type DeliveryJobs,
+} from './index';
 
 let h: DeliveryHarness;
 afterEach(() => {
@@ -216,6 +222,7 @@ describe('recoverBatches', () => {
     );
     const launched: string[] = [];
     const scheduler = createScheduler({
+      keptWork: createKeptWorkGate(h.ctx),
       state: h.state,
       clock: new ManualClock(),
       caps: { global: 4 },

@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTempRepo, isolatedGitEnv, type TempDir } from '../../test/fixtures';
@@ -123,6 +124,16 @@ describe('moveCheckedOutBranch', () => {
     expect(readFileSync(join(repo.path, 'src/a.ts'), 'utf8')).toBe('edited\n');
   });
 
+  it('finishes a move a crash cut short between the files and the branch', async () => {
+    const base = squashedBase();
+    // What the move had written when the daemon died: the files and the index, not the branch.
+    rawGit('read-tree', '-m', '-u', tip, base);
+
+    expect(await move(base)).toEqual({ kind: 'switched' });
+    expect(rawGit('rev-parse', 'refs/heads/main')).toBe(base);
+    expect(rawGit('status', '--porcelain')).toBe('');
+  });
+
   it('refuses a branch HEAD does not name, or one that moved', async () => {
     const base = squashedBase();
     rawGit('switch', '-q', '10db/pass-abc123');
@@ -158,4 +169,59 @@ describe('mergeKeepingTree', () => {
     expect(await merge()).toEqual({ kind: 'already', sha: head });
     expect(rawGit('rev-parse', 'refs/heads/10db/pass-abc123')).toBe(head);
   });
+});
+
+describe('branchInUseElsewhere', () => {
+  /** Runs git in the other worktree; `fails` when the command is meant to stop part way. */
+  const gitIn = (path: string, args: string[], fails = false): void => {
+    const run = () =>
+      execFileSync('git', ['-C', path, ...args], { env: isolatedGitEnv(), stdio: 'pipe' });
+    if (fails) expect(run).toThrow();
+    else run();
+  };
+  const currentIn = (path: string): string =>
+    execFileSync('git', ['-C', path, 'branch', '--show-current'], { env: isolatedGitEnv() })
+      .toString()
+      .trim();
+
+  it.each([
+    { name: 'checked out there', busy: (): void => undefined, detached: false },
+    {
+      // A rebase stopped after its first pick leaves the worktree detached: only its git dir names the branch.
+      name: 'being rebased there',
+      busy: (path: string) => {
+        gitIn(path, ['rebase', '-q', '--exec', 'false', 'HEAD~2'], true);
+      },
+      detached: true,
+    },
+    {
+      // A bisect checks out a commit between its ends: only BISECT_START names the branch.
+      name: 'being bisected there',
+      busy: (path: string) => {
+        gitIn(path, ['bisect', 'start', 'side', start]);
+      },
+      detached: true,
+    },
+  ])(
+    'names a worktree that has the branch $name, and passes over the checkout itself',
+    async ({ busy, detached }) => {
+      const root = mkdtempSync(join(tmpdir(), 'elsewhere-'));
+      try {
+        // `side` is three commits past the start, so a rebase and a bisect each have a middle to stop at.
+        const one = rawGit('commit-tree', '-p', tip, '-m', 'One', `${tip}^{tree}`);
+        const two = rawGit('commit-tree', '-p', one, '-m', 'Two', `${tip}^{tree}`);
+        rawGit('branch', 'side', two);
+        const path = join(root, 'side');
+        rawGit('worktree', 'add', '-q', path, 'side');
+        busy(path);
+        expect(currentIn(path)).toBe(detached ? '' : 'side');
+
+        expect(await git.branchInUseElsewhere(repo.path, 'side')).toBe(realpathSync(path));
+        expect(await git.branchInUseElsewhere(repo.path, '10db/pass-abc123')).toBeNull();
+        rawGit('worktree', 'remove', '--force', path);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
 });

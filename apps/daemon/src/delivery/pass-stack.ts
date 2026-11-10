@@ -1,4 +1,5 @@
 import {
+  InboxState,
   PASS_RETARGET_CHOICE,
   PassNoticeKind,
   PassRetargetDetail,
@@ -11,13 +12,14 @@ import {
 import {
   clearPassNotice,
   findOpenByFoldKey,
-  findOpenPass,
+  hasAnsweredByFoldKey,
   getBatch,
   getPass,
   getPassProgress,
   getPassPullRequest,
   getProject,
-  passHoldingFolder,
+  listInbox,
+  listPassesIn,
   setPassNotice,
   setStackedOn,
   settlePass,
@@ -42,23 +44,30 @@ export const passRetargetKey = (passId: PassId): string => `pass-retarget:${pass
 /** The header notice of a stacked pass about the pass below it. */
 const STACK_NOTICE = 'stack';
 
-/** The pass stacked on this one that is still open or closing: it moves the branch itself. */
+/**
+ * The pass stacked on this one while it still holds the folder: open, closing, or closed and not
+ * yet settled (D24). It moves the branch at its own close, and its pull request is retargeted when
+ * this one merges, whichever of those it is in.
+ */
 export function stackedAbove(db: DbReader, pass: PassDto): PassDto | undefined {
-  const above = findOpenPass(db, pass.projectId);
-  if (above === undefined || above.state === PassState.Abandoning) return undefined;
-  return getPassProgress(db, above.id).stackedOn === pass.id ? above : undefined;
+  for (const state of [PassState.Open, PassState.Closing, PassState.Closed])
+    for (const above of listPassesIn(db, state))
+      if (above.id !== pass.id && getPassProgress(db, above.id).stackedOn === pass.id) return above;
+  return undefined;
 }
 
 /**
- * In the write that opens pass `passId` (D24): when the pass still holding the project's folder has
- * closed and not settled, the new pass stacks on it, and that pass's Move card waits while the new
- * one is open (`subscribePassSettles`). Answers that pass, or undefined.
+ * In the write that opens pass `passId` (D24): when a pass of the project has closed and not
+ * settled, the new pass stacks on the newest of them, whose tip is where the folder's return branch
+ * was left, and that pass's Move card waits while the new one is open (`subscribePassSettles`).
+ * Answers that pass, or undefined.
  */
 export function stackOn(w: WriteContext, passId: PassId): PassDto | undefined {
   const pass = getPass(w.tx, passId);
-  const below = passHoldingFolder(w.tx, pass.projectId);
-  if (below === undefined || below.id === passId || below.state !== PassState.Closed)
-    return undefined;
+  const below = listPassesIn(w.tx, PassState.Closed)
+    .filter((p) => p.projectId === pass.projectId && p.id !== passId)
+    .at(-1);
+  if (below === undefined) return undefined;
   setStackedOn(w, passId, below.id);
   return below;
 }
@@ -139,12 +148,31 @@ async function takeBase(
   const batch = getBatch(ctx.state.db, above.batchId);
   const branch = batch.branch;
   if (branch === null) return;
+  const before = await ctx.git.branchTip(project.repoPath, branch);
   const merged = await ctx.git.mergeKeepingTree({
     repo: project.repoPath,
     branch,
     theirs: base,
     message: `Merge ${batch.baseBranch}, which holds pass "${below.name}", into ${branch}`,
   });
+  // A stacked pass that has closed left its return branch at its tip: the branch follows the merge,
+  // whose tree is the same, so its realignment still finds it at the tip. A rerun after a crash
+  // between the two finds the branch merged already: only a merge whose second parent is the base,
+  // as 10db's is, is followed, from its first parent. Not while a pass is stacked on the closed one:
+  // that pass's close moves the return branch from its own start, which is this tip.
+  if (above.state === PassState.Closed && stackedAbove(ctx.state.db, above) === undefined) {
+    const parent = (n: 1 | 2) =>
+      ctx.git.commitAt(project.repoPath, `${merged.sha}^${String(n)}`).catch(() => null);
+    const from =
+      merged.kind === 'merged' ? before : (await parent(2)) === base ? await parent(1) : null;
+    if (from !== null)
+      await ctx.git.moveBranchCas({
+        repo: project.repoPath,
+        branch: above.returnBranch,
+        to: merged.sha,
+        expect: from,
+      });
+  }
   const pushed = await ctx.git.trackingTip(project.repoPath, branch);
   if (pushed !== null && pushed !== merged.sha)
     await pushBranch(ctx, batch, project, branch, signal);
@@ -180,10 +208,65 @@ function retargetCard(above: PassDto, below: PassDto, base: string, prUrl: strin
   };
 }
 
-/** The pass below a stacked one closed unmerged: the stacked pass's header says so and offers Retarget. */
-export function offerRetarget(ctx: DeliveryContext, below: PassDto, above: PassDto): void {
+/**
+ * The branch the stacked pass's pull request targets on GitHub; null when it has none, or when gh
+ * could not read it, so a failed read never keeps the card from being offered.
+ */
+async function prBaseOf(
+  ctx: DeliveryContext,
+  above: PassDto,
+  signal: AbortSignal,
+): Promise<string | null> {
+  const batch = getBatch(ctx.state.db, above.batchId);
+  const pr = getPassPullRequest(ctx.state.db, above.id);
+  if (pr === null || batch.repo === null) return null;
+  try {
+    const seen = await ctx.gh.prView({ repo: batch.repo, ref: pr.url }, ghCall(ctx, signal));
+    return seen?.baseRef ?? null;
+  } catch (error) {
+    ctx.logger.warn(
+      { passId: above.id, err: error instanceof Error ? error.message : String(error) },
+      "stacked pass's pull request base not read",
+    );
+    return null;
+  }
+}
+
+/** Whether the builder answered the stacked pass's Retarget card with Retarget. */
+function retargetChosen(db: DbReader, above: PassDto): boolean {
+  return listInbox(db, {
+    projectId: above.projectId,
+    states: [InboxState.Answered, InboxState.Delivering, InboxState.Resolved],
+  }).some((item) => item.answer !== null && retargetAnswered(item, item.answer) === above.id);
+}
+
+/**
+ * The pass below a stacked one closed unmerged: the stacked pass's header says so and offers
+ * Retarget. Where its pull request is based on GitHub decides, not the answer alone: one based on
+ * the base already (retargeted, by 10db or by hand) clears the card and the notice; one a Retarget
+ * answered did not move (a failed edit, a restart) is retargeted now; any other answer, or an open
+ * card, is left as it is.
+ */
+export async function offerRetarget(
+  ctx: DeliveryContext,
+  below: PassDto,
+  above: PassDto,
+  signal: AbortSignal,
+): Promise<void> {
   const db = ctx.state.db;
+  const key = passRetargetKey(above.id);
   const base = getBatch(db, above.batchId).baseBranch;
+  if ((await prBaseOf(ctx, above, signal)) === base) {
+    withdraw(ctx.state, ctx.inbox, above.projectId, [key]);
+    ctx.state.write((w) => clearPassNotice(w, above.id, STACK_NOTICE));
+    return;
+  }
+  if (findOpenByFoldKey(db, above.projectId, key) !== undefined) return;
+  if (retargetChosen(db, above)) {
+    await retargetStackedPass(ctx, above.id, signal);
+    return;
+  }
+  if (hasAnsweredByFoldKey(db, above.projectId, key)) return;
   raise(
     ctx.inbox,
     above.projectId,

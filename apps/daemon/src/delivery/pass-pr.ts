@@ -32,7 +32,9 @@ import { ghCall, type DeliveryContext } from './context';
 import { jobKey, JobQueue } from './jobs';
 import { shipCheck } from './local-check';
 import { createPassChecks } from './pass-checks';
-import { passHasReview, type PassReviewDeps } from './pass-review';
+import { passHasReview, REVIEW_CUT_NOTICE, type PassReviewDeps } from './pass-review';
+import { PASS_PR_CLOSED_NOTICE } from './pass-watch';
+import { reviewHasUnread } from './review-left';
 import { readPrTemplate } from './pr-template';
 import { passPrBody, prTitle, titlePrefix, type PassPrCheck } from './pr-text';
 import { gateInScratch, type ScratchGateDeps } from './scratch-gate';
@@ -121,26 +123,42 @@ function signedOff(db: DbReader, passId: PassId): string[] {
 }
 
 const GATE_NOTICE = 'gate';
+/** The header notice that says Open Pull Request did not finish. */
+const PR_OPEN_NOTICE = 'pr-open';
 
 const message = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
 export function createPassPullRequests(deps: PassPullRequestDeps): PassPullRequests {
   const db = deps.state.db;
-  /** How each pass's body says it was checked, as its last gate left it. */
+  /**
+   * How each pass's body says it was checked, as its last gate left it. A pass with none here has
+   * had no gate finish in this daemon's life.
+   */
   const checked = new Map<PassId, PassPrCheck>();
+  /**
+   * The pushed commit of each pass whose gate Open Pull Request is about to start, or is running:
+   * set before the draft it writes, and gone on every way out (the gate's end, a failure before it
+   * started, checks that ended without a gate, a stop). Each Open Pull Request has a mark of its
+   * own, and `run` is the abort signal of the checks it handed the gate to, so the end of an older
+   * gate of the same commit never takes a newer one's mark.
+   */
+  const gating = new Map<PassId, { readonly sha: string; run: AbortSignal | null }>();
 
   function checkOf(pass: PassDto, project: ProjectDto, sha: string): PassPrCheck {
+    const command = shipCheck(project)?.command;
+    const running = gating.get(pass.id);
+    if (running !== undefined && passGateKind(project) === PassPullRequestGate.Scratch)
+      return { kind: 'scratch', command: command ?? '', sha: running.sha, state: 'running' };
     const known = checked.get(pass.id);
     if (known) return known;
-    const command = shipCheck(project)?.command;
     switch (passGateKind(project)) {
       case PassPullRequestGate.None:
         return { kind: 'none' };
       case PassPullRequestGate.FolderAtClose:
         return { kind: 'folder_at_close', command: command ?? '' };
       case PassPullRequestGate.Scratch:
-        return { kind: 'scratch', command: command ?? '', sha, state: 'running' };
+        return { kind: 'scratch', command: command ?? '', sha, state: 'unknown' };
     }
   }
 
@@ -182,8 +200,11 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
       signal: i.signal,
       beforeStart,
     });
-    if (ran.kind === 'aborted')
+    if (ran.kind === 'aborted') {
+      // Held back or stopped: the body says it did not run, not that it is running.
+      checked.set(pass.id, { kind: 'scratch', command, sha: i.sha, state: 'not_run' });
       return { passed: false, aborted: true, logPath: '', dirtyNamed: [] };
+    }
     const passed = ran.kind === 'ran' && ran.result.exitCode === 0;
     const logPath = ran.kind === 'ran' ? ran.result.logPath : (ran.logPath ?? '');
     checked.set(pass.id, {
@@ -236,6 +257,7 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
         check: checkOf(pass, project, sha),
         ci: { repo, sha },
         template: await readPrTemplate(deps.git, project.repoPath, sha, deps.logger),
+        reviewCut: getPassProgress(db, passId).notices.some((n) => n.id === REVIEW_CUT_NOTICE),
       }),
     );
     return file;
@@ -280,6 +302,8 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
       );
       deps.state.write((w) => {
         setPassPullRequest(w, pass.id, { url, draft: !i.ready });
+        // A pull request that closed unmerged before this one is history now.
+        clearPassNotice(w, pass.id, PASS_PR_CLOSED_NOTICE);
       });
       deps.logger.info({ passId: pass.id, url, draft: !i.ready }, 'pass pull request opened');
       return { url };
@@ -295,22 +319,41 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
     return { url };
   }
 
+  /** Rewrites the pull request's body from the rows; one gh can't edit keeps the lines it had. */
+  async function rewriteBody(passId: PassId, sha: string, signal: AbortSignal): Promise<void> {
+    const { batch } = placeOf(passId);
+    const pr = getPassPullRequest(db, passId);
+    if (pr === null || batch.repo === null) return;
+    const bodyFile = await writeBody(passId, sha, batch.repo);
+    await deps.gh
+      .prEditBody({ repo: batch.repo, url: pr.url, bodyFile }, ghCall(deps, signal))
+      .catch((error: unknown) => {
+        deps.logger.warn({ passId, err: message(error) }, 'pass pull request body not updated');
+      });
+  }
+
   const checks = createPassChecks({
     ...deps,
     gate: async ({ passId, sha, signal }) => {
-      await gatePassTip({ passId, sha, where: 'scratch', signal });
-      // The body says how the gate went; a pull request gh can't edit keeps the line it had.
-      const { batch } = placeOf(passId);
-      const pr = getPassPullRequest(db, passId);
-      if (pr === null || batch.repo === null) return;
-      const bodyFile = await writeBody(passId, sha, batch.repo);
-      await deps.gh
-        .prEditBody({ repo: batch.repo, url: pr.url, bodyFile }, ghCall(deps, signal))
-        .catch((error: unknown) => {
-          deps.logger.warn({ passId, err: message(error) }, 'pass pull request body not updated');
-        });
+      try {
+        await gatePassTip({ passId, sha, where: 'scratch', signal });
+      } catch (error) {
+        // It could not run: no result of it is known, and the body says so.
+        checked.delete(passId);
+        throw error;
+      } finally {
+        if (gating.get(passId)?.run === signal) gating.delete(passId);
+        // The body says how the gate went; a shutdown or a close that stopped it writes nothing. A
+        // body that cannot be written is logged, so the gate's own error is the one that is told.
+        if (!signal.aborted)
+          await rewriteBody(passId, sha, signal).catch((error: unknown) => {
+            deps.logger.warn({ passId, err: message(error) }, 'pass pull request body not updated');
+          });
+      }
     },
     review: deps.review,
+    // The body says when the review read only part of the diff.
+    reviewed: rewriteBody,
   });
 
   async function preview(passId: PassId): Promise<PassPullRequestPreviewDto> {
@@ -339,6 +382,9 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
             .catch(() => null);
     if (pass.state !== PassState.Open)
       return refuse(`The pass is ${pass.state.toLowerCase()}`, ahead);
+    // Its work is in the base: the close that follows a merge (slice 7a) is what is left to do.
+    if (pr?.state === PullRequestState.Merged)
+      return refuse("The pass's pull request has merged; close the pass", ahead);
     if (tip === null || tip === pass.startSha)
       return refuse(
         'Nothing is signed off yet: the pull request holds signed-off pages only',
@@ -363,7 +409,10 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
     gatePassTip,
     pushPassBranch,
     ensurePassPr,
-    stopPassChecks: (passId) => checks.stop(passId),
+    async stopPassChecks(passId) {
+      await checks.stop(passId);
+      gating.delete(passId);
+    },
     preview,
     async open(passId) {
       const shown = await preview(passId);
@@ -373,37 +422,84 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
       const branch = batch.branch;
       const tip = branch === null ? null : await deps.git.branchTip(project.repoPath, branch);
       const reviewed = getPassProgress(db, passId).reviewedSha;
+      // A tip read already, with nothing a cut review left unread, is not reviewed again.
+      const unchanged = (sha: string | null): boolean =>
+        getPassProgress(db, passId).reviewedSha === sha && !reviewHasUnread(db, passId);
       const review =
         deps.review === null || !passHasReview(db, passId)
           ? 'none'
-          : reviewed !== null && reviewed === tip
+          : reviewed !== null && unchanged(tip)
             ? 'unchanged'
             : 'started';
+      const stillOpen = (): boolean => getPass(db, passId).state === PassState.Open;
+      const reviews = review !== 'none';
+      const gates = shown.gate === PassPullRequestGate.Scratch;
       deps.jobs.run(jobKey(batch, JobQueue.Ship), async (signal) => {
         if (signal.aborted || getPass(db, passId).state !== PassState.Open || branch === null)
           return;
+        // This job's mark of the commit about to be gated, and whether the checks took the gate
+        // on, whose end clears the mark.
+        let marked: { readonly sha: string; run: AbortSignal | null } | null = null;
+        let handed = false;
         try {
           if ((await pushPassBranch(passId, signal)) === 'no_origin') return;
           const sha = await deps.git.branchTip(project.repoPath, branch);
-          if (sha === null) return;
+          // An Abandon or a close that took the pass while the branch was pushed: no pull request,
+          // and no gate or review, is started for it.
+          if (sha === null || !stillOpen()) return;
+          // The gate starts once the pull request is there: its body says the gate is running.
+          if (gates) {
+            marked = { sha, run: null };
+            gating.set(passId, marked);
+          }
           await ensurePassPr({ passId, ready: false }, signal);
-          checks.start({
+          deps.state.write((w) => clearPassNotice(w, passId, PR_OPEN_NOTICE));
+          if (!stillOpen()) return;
+          const started = checks.start({
             passId,
             sha,
-            gate: shown.gate === PassPullRequestGate.Scratch,
-            review: review === 'started',
+            gate: gates,
+            // Decided on the tip pushed: a page that landed since the request makes it new.
+            review: reviews && !unchanged(sha),
             baseRef: `refs/remotes/origin/${shown.base}`,
           });
+          const mark = marked;
+          if (mark !== null) {
+            handed = true;
+            mark.run = started.signal;
+            // Checks that end without running the gate (stopped, or the pass gone meanwhile) leave
+            // no mark behind.
+            void started.done.finally(() => {
+              if (gating.get(passId) === mark) gating.delete(passId);
+            });
+          }
         } catch (error) {
           deps.logger.warn(
             { passId: pass.id, err: message(error) },
             'pass pull request not opened',
           );
-          throw error;
+          // A function, so the check after the awaits is not narrowed away by the one before them.
+          const stopped = (): boolean => signal.aborted;
+          if (stopped()) return;
+          deps.state.write((w) => {
+            setPassNotice(w, passId, {
+              id: PR_OPEN_NOTICE,
+              kind: PassNoticeKind.PrNotOpened,
+              text: `Open Pull Request did not finish: ${message(error)}`,
+              sendable: false,
+              cardId: null,
+              at: w.now,
+            });
+          });
+        } finally {
+          if (!handed && marked !== null && gating.get(passId) === marked) gating.delete(passId);
         }
       });
       return { url: shown.existing?.url ?? null, base: shown.base, gate: shown.gate, review };
     },
-    stop: () => checks.stopAll(),
+    async stop() {
+      await checks.stopAll();
+      gating.clear();
+    },
   };
 }

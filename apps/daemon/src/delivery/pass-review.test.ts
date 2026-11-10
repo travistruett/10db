@@ -110,6 +110,11 @@ function setup(answer: string): {
   };
 }
 
+/** The same deps, with the model answering `answer` from now on. */
+function setupAnswer<D extends PassReviewDeps>(deps: D, answer: string): D {
+  return { ...deps, adapter: { complete: () => Promise.resolve(answer) } };
+}
+
 async function openedPass(): Promise<{ passId: PassId; settings: TaskDto; people: TaskDto }> {
   const settings = h.addTask('Settings page', { areas: ['settings'] });
   const people = h.addTask('People page', { areas: ['people'] });
@@ -178,6 +183,123 @@ describe('reviewPassTip', () => {
     expect(asked[1]?.prompt).toContain('+people, fixed');
     expect(asked[1]?.prompt).not.toContain('+signed off');
     expect(asked[1]?.prompt).toContain('only what changed since the last review');
+    // The model names the same finding again: the page's thread holds it once.
+    expect(
+      listTaskThread(h.store.db, settings.id).filter((m) => m.body.includes('the title is wrong')),
+    ).toHaveLength(1);
+  });
+
+  /** Five files of about 100 kB each on the settings page, one commit each: a diff of about 500 kB. */
+  function longPages(): string {
+    let tip = '';
+    for (const name of ['a', 'b', 'c', 'd', 'e'])
+      tip = h.commit(
+        `src/settings/${name}.tsx`,
+        `${`${name}-long ${'x'.repeat(100)}\n`.repeat(1_000)}${name}-end\n`,
+      );
+    return tip;
+  }
+
+  it.each([
+    { name: 'the same tip', next: () => '' },
+    {
+      name: 'a small commit after it',
+      next: () => h.commit('src/people/page.tsx', 'people, signed\n'),
+    },
+  ])(
+    'reads on from where a cut review stopped, at $name, and says so until all of it is read',
+    async ({ next }) => {
+      const { deps, asked } = setup('No findings.');
+      const { passId } = await openedPass();
+      const tip = longPages();
+      const cut = () =>
+        getPassProgress(h.store.db, passId).notices.filter((n) => n.id === 'review-cut');
+
+      expect(await review(deps, passId, tip)).toBe('reviewed');
+      expect(cut()).toEqual([
+        expect.objectContaining({
+          kind: PassNoticeKind.Finding,
+          sendable: false,
+          text: expect.stringContaining('not reviewed yet') as unknown,
+        }),
+      ]);
+      expect(asked[0]?.prompt).toContain('+a-end');
+      expect(asked[0]?.prompt).not.toContain('+e-end');
+
+      const later = next() || tip;
+      expect(await review(deps, passId, later)).toBe('reviewed');
+      // The files the cut review read whole are not read again; the rest, and anything new, are.
+      expect(asked[1]?.prompt).not.toContain('+a-end');
+      expect(asked[1]?.prompt).toContain('+d-end');
+      expect(asked[1]?.prompt).toContain('+e-end');
+      if (later !== tip) expect(asked[1]?.prompt).toContain('+people, signed');
+      expect(cut()).toEqual([]);
+      expect(getPassProgress(h.store.db, passId).reviewedSha).toBe(later);
+      expect(await review(deps, passId, later)).toBe('unchanged');
+    },
+  );
+
+  it("keeps the header's findings of a cut review through the review that reads on at the same tip", async () => {
+    const { deps } = setup('1. MAJOR src/lib/util.ts:4 a helper leaks');
+    const { passId } = await openedPass();
+    const tip = longPages();
+    const header = () =>
+      getPassProgress(h.store.db, passId)
+        .notices.filter((n) => n.id.startsWith('finding:'))
+        .map((n) => [n.id, n.text]);
+    await review(deps, passId, tip);
+    const first = header();
+    expect(first).toHaveLength(1);
+
+    // The rest of the diff holds a new finding first, then the same one again.
+    await review(
+      setupAnswer(
+        deps,
+        '1. MINOR src/lib/b.ts:2 a name\n2. MAJOR src/lib/util.ts:4 a helper leaks',
+      ),
+      passId,
+      tip,
+    );
+
+    // The first part's finding stays as it was, once; the new one gets an id of its own.
+    const [kept, added, ...more] = header();
+    expect(kept).toEqual(first[0]);
+    expect(added?.[1]).toContain('a name');
+    expect(added?.[0]).not.toBe(kept?.[0]);
+    expect(more).toEqual([]);
+  });
+
+  it('reads one file longer than a review reads as far as it goes, says so, and moves on', async () => {
+    const { deps, asked } = setup('No findings.');
+    const { passId } = await openedPass();
+    const tip = h.commit('src/settings/page.tsx', `${'x'.repeat(100)}\n`.repeat(5_000));
+
+    expect(await review(deps, passId, tip)).toBe('reviewed');
+
+    expect(getPassProgress(h.store.db, passId).notices).toEqual([
+      expect.objectContaining({
+        id: 'review-cut',
+        text: expect.stringContaining(
+          'Too long to review whole, so the rest of each was not reviewed: src/settings/page.tsx.',
+        ) as unknown,
+      }),
+    ]);
+    // Nothing else is left to read at this tip: it is not asked again.
+    expect(await review(deps, passId, tip)).toBe('unchanged');
+    expect(asked).toHaveLength(1);
+  });
+
+  it("clears the header's findings of the last review when the next one reads a new tip", async () => {
+    const { deps } = setup('1. MAJOR src/lib/util.ts:4 a helper leaks');
+    const { passId } = await openedPass();
+    const tip = h.commit('src/settings/page.tsx', 'signed off\n');
+    await review(deps, passId, tip);
+    expect(getPassProgress(h.store.db, passId).notices).toHaveLength(1);
+
+    const fixed = setupAnswer(deps, 'No findings.');
+    await review(fixed, passId, h.commit('src/lib/util.ts', 'fixed\n'));
+
+    expect(getPassProgress(h.store.db, passId).notices).toEqual([]);
   });
 
   it('runs no review for a flow with no review step', async () => {

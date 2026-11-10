@@ -184,7 +184,11 @@ export type PassPrCheck =
       readonly command: string;
       /** The pushed commit the gate read, and where it is: running, passed or failed. */
       readonly sha: string;
-      readonly state: 'running' | 'passed' | 'failed';
+      /**
+       * `not_run`: it was held back or stopped before it finished. `unknown`: no gate of the pass has
+       * finished in this daemon's life (after a restart, or a gate that could not run).
+       */
+      readonly state: 'running' | 'passed' | 'failed' | 'not_run' | 'unknown';
     }
   /** The close's gate in the folder: it read the folder and its running stack, not the commit alone. */
   | {
@@ -206,6 +210,8 @@ export function passPrBody(input: {
   readonly check: PassPrCheck;
   readonly ci: { readonly repo: string; readonly sha: string };
   readonly template: string | null;
+  /** The one review read only the first part of a diff too long for it. */
+  readonly reviewCut?: boolean;
 }): string {
   const what = [
     `Workbench pass "${input.pass.name}": the pages signed off so far.`,
@@ -214,7 +220,18 @@ export function passPrBody(input: {
   ].join('\n');
   const body = fillTemplate(input.template, [
     { heading: 'What and why', text: what },
-    { heading: 'How it was checked', text: passChecked(input.check, input.ci) },
+    {
+      heading: 'How it was checked',
+      text: [
+        passChecked(input.check, input.ci),
+        ...(input.reviewCut === true
+          ? [
+              '',
+              'The review read only the first part of the diff, which was too long: the rest was not reviewed.',
+            ]
+          : []),
+      ].join('\n'),
+    },
   ]);
   return `${body}\n\n---\n\nOpened by 10db, Workbench pass ${input.pass.id}\n`;
 }
@@ -237,6 +254,12 @@ function passChecked(
       case 'scratch': {
         const where = `in a scratch worktree of the pushed commit ${check.sha.slice(0, 7)}`;
         if (check.state === 'running') return [`Gate running ${where}: \`${check.command}\`.`];
+        if (check.state === 'not_run')
+          return [`Gate not run ${where}: it was stopped before it finished. \`${check.command}\``];
+        if (check.state === 'unknown')
+          return [
+            `Gate result unknown ${where}: no gate of it has finished since 10db last started. \`${check.command}\``,
+          ];
         return check.state === 'passed'
           ? [`Gate passed ${where}: \`${check.command}\`.`]
           : [`Gate failed ${where}: \`${check.command}\`. The pass's header in 10db says so.`];
