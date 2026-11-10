@@ -15,6 +15,7 @@ import {
   getTask,
   listInbox,
   recordPullRequestStatus,
+  setClosePlan,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { waitFor } from '../../test/fixtures';
@@ -30,7 +31,7 @@ import {
 import { silentLogger } from '../log';
 import { systemProcesses } from '../recovery';
 import { createGateRunner } from '../verify';
-import { createPassCloses, type CloseDeps, type PassCloses } from './close';
+import { closeSteps, createPassCloses, type CloseDeps, type PassCloses } from './close';
 import { closeGateOf } from './close-lists';
 import { keepTurnWork, putBackKeptWork, subscribeMergedPasses } from './index';
 import { followOnPush, mergedClosePlan } from './merged-open';
@@ -200,9 +201,12 @@ describe('a pull request that merges while its pass is open', () => {
     settingsSignedOff();
     w.h.commit('src/people/page.tsx', 'people, signed off\n');
     w.h.settle(w.runOf(w.people), 'DONE');
-    const { url } = await opened();
+    const { url, pushed } = await opened();
     w.h.commit('src/settings/old.tsx', 'signed off later\n');
     const tip = w.h.git$('rev-parse', w.branch);
+    // GitHub squash-merged the pull request as pushed.
+    const squash = w.h.origin$('commit-tree', '-p', 'main', '-m', 'squash', `${pushed}^{tree}`);
+    w.h.origin$('update-ref', 'refs/heads/main', squash);
 
     merged(url);
     await waitFor(() => followOnCard() !== undefined);
@@ -212,7 +216,11 @@ describe('a pull request that merges while its pass is open', () => {
     const a = w.opened.pass;
     expect(getPass(db, a.id).state).toBe(PassState.Closed);
     expect(getBatch(db, a.batchId).state).toBe('SHIPPED');
-    expect(w.h.origin$('rev-parse', w.branch)).toBe(tip);
+    // The base came into the branch by a merge that changes no file, so the follow-on pull request
+    // shows only the later sign-offs; the branch, with it, is pushed.
+    const head = w.h.origin$('rev-parse', w.branch);
+    expect(w.h.git$('rev-parse', `${head}^1`, `${head}^2`)).toBe(`${tip}\n${squash}`);
+    expect(w.h.git$('rev-parse', `${head}^{tree}`)).toBe(w.h.git$('rev-parse', `${tip}^{tree}`));
     const creates = w.h.gh.prCreates();
     expect(creates).toHaveLength(2);
     expect(creates).toContainEqual(
@@ -298,6 +306,42 @@ describe('a pull request that merges while its pass is open', () => {
 
     expect(w.h.gh.prCreates()).toHaveLength(2);
     expect(getPassPullRequest(w.h.store.db, w.opened.pass.id)?.url).not.toBe(url);
+  });
+
+  it.each([
+    {
+      name: 'closes an open pass whose pull request merged while 10db was stopped',
+      before: () => undefined,
+    },
+    {
+      name: 'carries over the pages of a merged close a stop cut short after it closed',
+      before: async (deps: CloseDeps) => {
+        w.h.state.write((ctx) => {
+          setClosePlan(ctx, w.opened.pass.id, mergedClosePlan(ctx.tx, w.opened.pass.id));
+        });
+        await closeSteps(deps, w.opened.pass.id, new AbortController().signal);
+        expect(getPass(w.h.store.db, w.opened.pass.id).state).toBe(PassState.Closed);
+        expect(followOnCard()).toBeUndefined();
+      },
+    },
+  ])('at start-up, $name', async ({ before }) => {
+    const { deps } = await world();
+    unsubscribe();
+    settingsSignedOff();
+    const { url } = await opened();
+    merged(url);
+    await before(deps);
+
+    createPassCloses({ ...deps, ...w.restart() }).resume();
+    await waitFor(() => followOnCard() !== undefined);
+    await w.h.jobs.idle();
+
+    const db = w.h.store.db;
+    expect(getPass(db, w.opened.pass.id).state).toBe(PassState.Closed);
+    const detail = PassFollowOnDetail.parse(followOnCard()?.detail);
+    expect(detail.carried).toEqual([w.people.id]);
+    if (detail.followOnPassId === null) throw new Error('no follow-on pass');
+    expect(getTask(db, w.people.id).passId).toBe(detail.followOnPassId);
   });
 
   it('refuses a Close Pass once merged, and closes it by itself', async () => {

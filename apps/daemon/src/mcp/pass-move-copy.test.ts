@@ -8,7 +8,6 @@ import {
   type TaskDto,
 } from '@10db/contracts';
 import {
-  acquireClaims,
   activeClaims,
   getBatch,
   getInboxItem,
@@ -107,29 +106,6 @@ describe('a pass lane asking for the deps hazard', () => {
       PASS_MOVE_TO_COPY_CHOICE,
       PASS_NOT_NOW_CHOICE,
     ]);
-  });
-
-  it('is granted to a lane that holds it already, as its launch claimed it', async () => {
-    w = await openPassWorld();
-    w.h.state.write((c) =>
-      acquireClaims(c, {
-        projectId: w.h.project.id,
-        workstreamId: w.runOf(w.settings),
-        requests: [{ kind: 'hazard', name: 'deps' }],
-        leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
-      }),
-    );
-    const tools = laneTools(w, w.settings);
-
-    const answer = await tools.request_claim({
-      opId: 'op-deps-1',
-      kind: 'hazard',
-      name: 'deps',
-      reason: 'add a date library',
-    });
-
-    expect(answer.granted).toBe(true);
-    expect(w.h.cards()).toEqual([]);
   });
 
   it('is granted as today on a project with no copies, and the thread says the page will be slow', async () => {

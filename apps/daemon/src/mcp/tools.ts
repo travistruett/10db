@@ -587,16 +587,13 @@ export function createToolHandlers(
       const given = claimWaits.pendingYield(workstreamId);
       if (given) return recordClaim(input.opId, yieldRefusal(given, { kind, name: input.name }));
       // A pass page asking for migrations or deps leaves Your folder for a copy where the project
-      // allows copies: the builder is asked to move it, and the claim is refused meanwhile. One its
-      // launch claimed already is its own, as any held claim is.
+      // allows copies: the builder is asked to move it, and the claim is refused meanwhile. A page
+      // never holds one: its launch claims only its pass's areas.
       const passAsk =
         kind === ClaimKind.Hazard
           ? passHazardAsk(db, project, task, input.name)
           : ({ kind: 'none' } as const);
-      const held = activeClaims(db, workstreamId).some(
-        (c) => c.kind === kind && c.name === input.name,
-      );
-      if (passAsk.kind === 'move' && !held)
+      if (passAsk.kind === 'move')
         return deps.state.write((ctx) =>
           record(
             'request_claim',
