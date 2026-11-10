@@ -34,6 +34,14 @@ export interface PickTicks {
 /** Board columns a task can join from: not started, not running and not shipped. */
 const JOINS_FROM: ReadonlySet<BoardStatus> = new Set([BoardStatus.Backlog, BoardStatus.Ready]);
 
+/** Whether a task names a page area, which a task in a pass must. */
+export function namesAPage(
+  task: { readonly areas: readonly string[] },
+  areas: readonly AreaDef[],
+): boolean {
+  return task.areas.some((name) => areas.some((a) => a.name === name && a.role === AreaRole.Page));
+}
+
 /**
  * The open tasks that can join a pass: in Your folder, not running, not shipped, in no pass yet, and
  * naming a page area. Work a task keeps from an earlier pass comes back with it.
@@ -42,11 +50,10 @@ export function joinableTasks(
   tasks: readonly TaskDto[],
   areas: readonly AreaDef[],
 ): JoinableTask[] {
-  const isPage = (name: string) => areas.some((a) => a.name === name && a.role === AreaRole.Page);
   return tasks.flatMap((task) => {
     if (task.status !== TaskStatus.Open || !JOINS_FROM.has(task.boardStatus)) return [];
     if (task.workspaceMode !== WorkspaceMode.Shared || (task.passId ?? null) !== null) return [];
-    if (!task.areas.some(isPage)) return [];
+    if (!namesAPage(task, areas)) return [];
     return [
       {
         taskId: task.id,
@@ -158,4 +165,18 @@ export function sharedOverlaps(
 /** Every page the ticks hold: the ticked pages, then each ticked task's. */
 export function tickedPages(ticks: PickTicks): string[] {
   return [...ticks.pages, ...ticks.tasks.flatMap((task) => task.pages)];
+}
+
+/** Board columns that count as a goal's UI work finished: merged, or shipped and in review. */
+const FINISHED: ReadonlySet<BoardStatus> = new Set([BoardStatus.Done, BoardStatus.InReview]);
+
+/**
+ * Whether a goal's UI work is done or nearly so (Workbench spec §4.2, Work on This): among its tasks
+ * that name a page and are not cancelled, at most one is unfinished, and there is at least one.
+ */
+export function goalReadyForPass(tasks: readonly TaskDto[], areas: readonly AreaDef[]): boolean {
+  const ui = tasks.filter(
+    (task) => task.status !== TaskStatus.Cancelled && namesAPage(task, areas),
+  );
+  return ui.length > 0 && ui.filter((task) => !FINISHED.has(task.boardStatus)).length <= 1;
 }

@@ -134,6 +134,8 @@ describe('BatchSheet', () => {
     expect(within(sheet).getByText('make gate')).toBeTruthy();
     expect(within(sheet).getByText(/The PM review isn’t built yet/)).toBeTruthy();
     expect(within(sheet).queryByLabelText('Batch title')).toBeNull();
+    // No ticked task names a page area, so none can go to the Workbench.
+    expect(within(sheet).queryByRole('button', { name: 'Work on These' })).toBeNull();
     expect(sizes[0]).toBe(2);
 
     fireEvent.click(within(sheet).getByRole('checkbox', { name: 'Two' }));
@@ -172,6 +174,25 @@ describe('BatchSheet', () => {
       });
     },
   );
+
+  it('sends the ticked tasks to the Workbench when every one names a page area', async () => {
+    serve(
+      projectViewDto({
+        ...pr(null),
+        areas: [{ name: 'src', globs: ['src/**'], role: 'page', route: '/' }],
+      }),
+      { both: true },
+    );
+    const { router } = renderApp('/board');
+    fireEvent.click(await screen.findByRole('button', { name: 'More board actions' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: /\d+ ready/, hidden: true }));
+    const sheet = await screen.findByRole('dialog', { name: 'Start a batch' });
+    fireEvent.click(await within(sheet).findByRole('button', { name: 'Work on These' }));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/workbench');
+    });
+    expect(router.state.location.search).toEqual({ tasks: [one.id, two.id] });
+  });
 
   it('in Your folder mode, names the branch the checkout switches to before starting', async () => {
     serve(projectViewDto({ ...pr(null), baseBranch: 'develop' }), { both: true });

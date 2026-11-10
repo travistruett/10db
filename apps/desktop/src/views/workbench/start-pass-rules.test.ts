@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { taskDto } from '../../test/fixtures';
 import {
   blockedReason,
+  goalReadyForPass,
   joinableTasks,
   openRequest,
   pageCap,
@@ -194,5 +195,28 @@ describe('sharedOverlaps', () => {
       { name: 'src', globs: ['src/**'], role: 'shared' },
     ];
     expect(sharedOverlaps(['settings'], apart)).toEqual([]);
+  });
+});
+
+describe('goalReadyForPass', () => {
+  const ui = (boardStatus: TaskDto['boardStatus'], more: Partial<TaskDto> = {}) =>
+    taskDto({ areas: ['settings'], boardStatus, ...more });
+  it.each<{ name: string; tasks: TaskDto[]; ready: boolean }>([
+    { name: 'every UI task done or in review', tasks: [ui('done'), ui('in_review')], ready: true },
+    { name: 'all but one', tasks: [ui('done'), ui('in_review'), ui('in_progress')], ready: true },
+    { name: 'two still to go', tasks: [ui('done'), ui('ready'), ui('in_progress')], ready: false },
+    {
+      name: 'a task on shared code still running, which is not UI work',
+      tasks: [ui('done'), ui('in_progress', { areas: ['src'] }), ui('ready', { areas: ['src'] })],
+      ready: true,
+    },
+    {
+      name: 'a cancelled UI task, which counts for nothing',
+      tasks: [ui('done'), ui('ready'), ui('backlog', { status: 'cancelled' })],
+      ready: true,
+    },
+    { name: 'no UI task', tasks: [ui('done', { areas: ['src'] })], ready: false },
+  ])('$name: $ready', ({ tasks, ready }) => {
+    expect(goalReadyForPass(tasks, areas)).toBe(ready);
   });
 });
