@@ -4,10 +4,15 @@ import { join } from 'node:path';
 import { ConflictError, mintId, TaskMessageDto, TaskThreadDto, type TaskId } from '@10db/contracts';
 import {
   createTestStore,
+  endPassTurn,
+  getPassTurn,
   getTask,
   insertPass,
+  insertPassTurn,
   insertTask,
+  insertWorkstream,
   seedProject,
+  settlePassTurn,
   type Store,
 } from '@10db/db';
 import { defineWebSocketHelper } from 'hono/ws';
@@ -260,9 +265,9 @@ describe('a task thread over HTTP', () => {
 // Workbench spec §6.3, plan A4: a message a page refuses is not kept, whenever the refusal comes.
 describe('a message to a page of a pass', () => {
   it('keeps nothing when the page leaves its pass as the message goes in, so a retry is one message', async () => {
-    store.write((ctx) => {
+    const ready = store.write((ctx) => {
       const task = getTask(ctx.tx, taskId);
-      insertPass(ctx, {
+      const { batch } = insertPass(ctx, {
         id: mintId('Pass'),
         projectId: task.projectId,
         name: 'Polish',
@@ -275,7 +280,20 @@ describe('a message to a page of a pass', () => {
         taskIds: [taskId],
         dirt: [],
       });
-    });
+      // The page is Ready: the builder's next word answers it.
+      const run = insertWorkstream(ctx, taskId, {
+        batchId: batch.id,
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      });
+      const turn = insertPassTurn(ctx, {
+        taskId,
+        workstreamId: run.id,
+        sessionId: null,
+        messageId: null,
+      });
+      endPassTurn(ctx, turn.id, { ending: 'ready', replyBody: null });
+      return settlePassTurn(ctx, turn.id);
+    }).value;
     // A take-out finished while the message went in: the runner refuses to hand it over.
     deliver = () =>
       Promise.reject(new ConflictError('Settings page is no longer in a Workbench pass'));
@@ -286,5 +304,7 @@ describe('a message to a page of a pass', () => {
     const thread = TaskThreadDto.parse(await (await get(`/tasks/${taskId}/thread`)).json());
     expect(thread.messages).toEqual([]);
     expect(readdirSync(filesDir(taskId))).toEqual([]);
+    // Nothing answered the Ready page either.
+    expect(getPassTurn(store.db, ready.id).answeredAt).toBeNull();
   });
 });

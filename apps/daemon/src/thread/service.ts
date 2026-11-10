@@ -13,10 +13,12 @@ import {
   type TaskMessageDto,
   type TaskMessageId,
   type TaskPictureKind,
+  type PassTurnId,
   type TaskDto,
   type TaskThreadDto,
 } from '@10db/contracts';
 import {
+  clearPassTurnAnswered,
   deleteUnsentBuilderMessage,
   getTask,
   getTaskFile,
@@ -136,6 +138,8 @@ export function createThreadService(deps: {
       const dir = taskFilesDir(deps.dataDir, taskId);
       const kept: KeptPicture[] = [];
       let message: TaskMessageDto;
+      /** The Ready turn this message was the first answer to, if any. */
+      let answered: PassTurnId | null;
       try {
         const files: StoredPicture[] = [];
         for (const picture of pictures) {
@@ -149,15 +153,20 @@ export function createThreadService(deps: {
             storedPath: at.storedPath,
           });
         }
-        message = state.write((ctx) => {
+        ({ message, answered } = state.write((ctx) => {
           // Read again where the message is written, so a take-out or an Abandon that began
           // meanwhile refuses it too.
           if (pass) refusedByPass(ctx.tx, task);
           // The builder's first word after a Ready page is when the page was answered.
           const latest = pass ? latestPassTurn(ctx.tx, taskId) : undefined;
-          if (latest && latest.readyAt !== null) markPassTurnAnswered(ctx, latest.id);
-          return insertBuilderMessage(ctx, taskId, { body, files });
-        });
+          const answers =
+            latest !== undefined && latest.readyAt !== null && latest.answeredAt === null;
+          if (answers) markPassTurnAnswered(ctx, latest.id);
+          return {
+            message: insertBuilderMessage(ctx, taskId, { body, files }),
+            answered: answers ? latest.id : null,
+          };
+        }));
       } catch (error) {
         // No row names what this call wrote; a picture kept before for the task stays.
         for (const picture of kept)
@@ -172,7 +181,12 @@ export function createThreadService(deps: {
         // The page left its pass, or began leaving it, as the message went in: it keeps nothing of
         // it, as for one refused up front, so a retry is one message. One a session was handed
         // already reached the page.
-        const removed = state.write((ctx) => deleteUnsentBuilderMessage(ctx, taskId, message.id));
+        const removed = state.write((ctx) => {
+          const paths = deleteUnsentBuilderMessage(ctx, taskId, message.id);
+          // Nor did it answer the page.
+          if (paths !== null && answered !== null) clearPassTurnAnswered(ctx, answered);
+          return paths;
+        });
         if (removed === null) return message;
         for (const path of removed) rmSync(path, { force: true });
         throw error;

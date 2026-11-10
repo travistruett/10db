@@ -29,6 +29,7 @@ import {
   openPassTurn,
   seedProject,
   abandonPassAndBatch,
+  clearPassTurnAnswered,
   leavePass,
   setAbandonStep,
   setPassTurnKept,
@@ -198,6 +199,15 @@ describe("a pass task's turns", () => {
     );
     store.write((ctx) => settlePassTurn(ctx, first.id));
     later(2);
+    store.write((ctx) => {
+      markPassTurnAnswered(ctx, first.id);
+    });
+    // Taken back with the message that answered it, and answered again by the next.
+    store.write((ctx) => {
+      clearPassTurnAnswered(ctx, first.id);
+    });
+    expect(latestPassTurn(store.db, taskId)?.answeredAt).toBeNull();
+    later(1);
     store.write((ctx) => {
       markPassTurnAnswered(ctx, first.id);
     });

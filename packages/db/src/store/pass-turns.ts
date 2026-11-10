@@ -222,6 +222,16 @@ function ofCurrentRun(db: DbReader, taskId: TaskId) {
   );
 }
 
+/** Takes back a turn's first answer, as when the message that answered it is taken back. */
+export function clearPassTurnAnswered(ctx: WriteContext, id: PassTurnId): void {
+  getPassTurn(ctx.tx, id);
+  ctx.tx
+    .update(schema.passTurns)
+    .set({ answeredAt: null, updatedAt: ctx.now })
+    .where(eq(schema.passTurns.id, id))
+    .run();
+}
+
 /**
  * The task's turn that has not ended, or undefined: at most one, of any run, since a task leaving its
  * pass ends its open turn (`settleTurnsLeaving`).
