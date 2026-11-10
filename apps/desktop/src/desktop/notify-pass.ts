@@ -59,20 +59,30 @@ export function readyPageOf(item: InboxItemDto): PassCheckDetail | null {
 const ClickedNotification = z.object({ notification: z.object({ id: z.number() }) });
 
 /**
- * Registers the one listener for clicks on ready notifications; later calls keep the first. Resolves
- * once it is registered. A no-op in a browser.
+ * Registers the listener for clicks on ready notifications, for as long as the app is mounted; the
+ * returned function removes it. Sends wait for the registration. A no-op in a browser.
  */
-export function listenForPassClicks(onClick: (target: PassPageTarget) => void): Promise<void> {
-  if (!isTauri()) return Promise.resolve();
-  listening ??= onAction((performed) => {
+export function listenForPassClicks(onClick: (target: PassPageTarget) => void): () => void {
+  if (!isTauri()) return () => undefined;
+  const registered = onAction((performed) => {
     const clicked = ClickedNotification.safeParse(performed);
     if (!clicked.success) return;
     const target = shown.find((n) => n.id === clicked.data.notification.id);
     if (target === undefined) return;
-    markPassNotificationsActed(target.taskId);
+    // The click is the builder's answer to every notification on screen: the focus that follows it
+    // must not take another one, a later one, as the click.
+    shown = shown.map((n) => ({ ...n, acted: true }));
     onClick({ projectId: target.projectId, taskId: target.taskId });
-  }).then(() => undefined);
-  return listening;
+  });
+  const mine = registered.then(() => undefined);
+  listening = mine;
+  registered.catch((error: unknown) => {
+    console.warn('10db: could not listen for notification clicks', error);
+  });
+  return () => {
+    if (listening === mine) listening = null;
+    registered.then((listener) => listener.unregister()).catch(() => undefined);
+  };
 }
 
 /**

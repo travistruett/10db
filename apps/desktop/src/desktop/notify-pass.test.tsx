@@ -1,9 +1,10 @@
 import { clearMocks, mockIPC, mockWindows } from '@tauri-apps/api/mocks';
-import { screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { baseHandlers, daemonUrl, eventStream, renderApp, server } from '../test/daemon';
 import { daemonEvent, projectViewDto } from '../test/fixtures';
+import { mintId } from '@10db/contracts';
 import {
   pagesByStatus,
   passDto,
@@ -115,5 +116,63 @@ describe('a ready notification', () => {
         .getByRole('button', { name: /^Settings/ })
         .getAttribute('aria-current'),
     ).toBe('true');
+  });
+
+  it('a click on the older of two keeps its page when the window then gains focus', async () => {
+    const native = mockNative();
+    const project = projectViewDto({
+      areas: [
+        { name: 'settings', globs: ['src/settings/**'], role: 'page', route: '/settings' },
+        { name: 'people', globs: ['src/people/**'], role: 'page', route: '/people' },
+      ],
+    });
+    const { ready } = pagesByStatus();
+    const people = {
+      ...ready,
+      taskId: mintId('Task'),
+      workstreamId: mintId('Workstream'),
+      title: 'People: UI work',
+      area: 'People',
+      route: '/people',
+    };
+    const view = passViewDto({ pass: passDto({ projectId: project.id }), pages: [ready, people] });
+    const items = [readyItem(view, ready), readyItem(view, people)];
+    const sockets: { send(data: string): void }[] = [];
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/inbox'), () => HttpResponse.json(items)),
+      ...passHandlers({ live: [view] }),
+      ...baseHandlers(),
+      eventStream.addEventListener('connection', ({ client }) => {
+        sockets.push(client);
+      }),
+    );
+    const { router } = renderApp('/factory');
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+    for (const [index, item] of items.entries()) {
+      sockets[0]?.send(
+        JSON.stringify(
+          daemonEvent({
+            seq: index + 1,
+            type: 'inbox.opened',
+            entityType: 'inbox',
+            entityId: item.id,
+          }),
+        ),
+      );
+      await waitFor(() => {
+        expect(native.sent).toHaveLength(index + 1);
+      });
+    }
+    expect(native.sent.map((n) => n.title)).toEqual(['Settings is ready', 'People is ready']);
+    native.click(native.sent[0]?.options.id ?? -1);
+    await waitFor(() => {
+      expect(router.state.location.search).toEqual({ task: ready.taskId });
+    });
+    await screen.findByRole('list', { name: 'Pages in this pass' });
+    fireEvent.focus(window);
+    expect(router.state.location.search).toEqual({ task: ready.taskId });
   });
 });

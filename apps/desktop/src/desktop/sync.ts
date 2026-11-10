@@ -58,13 +58,13 @@ export function useDesktopSync(): void {
       });
     };
   });
-  useEffect(() => {
-    listenForPassClicks((target) => {
-      openPage.current(target);
-    }).catch((error: unknown) => {
-      console.warn('10db: could not listen for notification clicks', error);
-    });
-  }, []);
+  useEffect(
+    () =>
+      listenForPassClicks((target) => {
+        openPage.current(target);
+      }),
+    [],
+  );
 
   async function notifyOpened(id: string): Promise<void> {
     const items = await queryClient.query(inboxQueryOptions(client));
