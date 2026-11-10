@@ -191,54 +191,64 @@ export async function takeOutSteps(
     deps.state.write((ctx) => advanceTakeOut(ctx, key, patch));
   const { git } = deps;
 
-  if (row.step < TakeOutStep.Stopped) {
-    await deps.stopLane(workstreamId);
-    row = advance({ step: TakeOutStep.Stopped });
-  }
-
   let stillChanging: string[] = row.step >= TakeOutStep.Checked ? [...row.left] : [];
-  if (row.step < TakeOutStep.Checked) {
-    const place = passTaskPlace(db, task.id);
-    for (let tries = row.tries; ;) {
-      await foldHandEdits(deps, { workstreamId });
-      if (row.step < TakeOutStep.HandEditsFolded)
-        row = advance({ step: TakeOutStep.HandEditsFolded });
-      const kept = await keepTurnWork(deps, { workstreamId, turnId: null });
-      tries += 1;
-      row = advance({
-        step: TakeOutStep.Kept,
-        tries,
-        keptSha: kept.keptSha,
-        keptBaseSha: kept.keptBaseSha,
-      });
-      stillChanging = await changedSinceKept(deps, place, kept);
-      if (stillChanging.length === 0) {
-        row = advance({ step: TakeOutStep.Checked });
+  try {
+    if (row.step < TakeOutStep.Stopped) {
+      await deps.stopLane(workstreamId);
+      row = advance({ step: TakeOutStep.Stopped });
+    }
+    if (row.step < TakeOutStep.Checked) {
+      const place = passTaskPlace(db, task.id);
+      for (let tries = row.tries; ;) {
+        await foldHandEdits(deps, { workstreamId });
+        if (row.step < TakeOutStep.HandEditsFolded)
+          row = advance({ step: TakeOutStep.HandEditsFolded });
+        const kept = await keepTurnWork(deps, { workstreamId, turnId: null });
+        tries += 1;
+        row = advance({
+          step: TakeOutStep.Kept,
+          tries,
+          keptSha: kept.keptSha,
+          keptBaseSha: kept.keptBaseSha,
+        });
+        stillChanging = await changedSinceKept(deps, place, kept);
+        if (stillChanging.length === 0) {
+          row = advance({ step: TakeOutStep.Checked });
+          break;
+        }
+        if (tries < CHECK_TRIES) continue;
+        if (input.within === TakeOutWithin.Alone) {
+          const changing = stillChanging;
+          deps.state.write((ctx) => {
+            deleteTakeOut(ctx, key);
+            insertSystemNotice(
+              ctx,
+              task.id,
+              `The page's files kept changing while it was being taken out, so it stays in the pass:\n${listed(changing)}`,
+            );
+          });
+          return {
+            taskId: task.id,
+            passId: pass.id,
+            tookOut: false,
+            keptSha: kept.keptSha,
+            stillChanging: changing,
+            left: [],
+          };
+        }
+        row = advance({ step: TakeOutStep.Checked, left: stillChanging });
         break;
       }
-      if (tries < CHECK_TRIES) continue;
-      if (input.within === TakeOutWithin.Alone) {
-        const changing = stillChanging;
-        deps.state.write((ctx) => {
-          deleteTakeOut(ctx, key);
-          insertSystemNotice(
-            ctx,
-            task.id,
-            `The page's files kept changing while it was being taken out, so it stays in the pass:\n${listed(changing)}`,
-          );
-        });
-        return {
-          taskId: task.id,
-          passId: pass.id,
-          tookOut: false,
-          keptSha: kept.keptSha,
-          stillChanging: changing,
-          left: [],
-        };
-      }
-      row = advance({ step: TakeOutStep.Checked, left: stillChanging });
-      break;
     }
+  } catch (error) {
+    // A take-out the builder asked for alone that fails before a file is put back leaves the page
+    // in the pass as it was, taking messages again; one inside an Abandon or a close goes on from
+    // its row.
+    if (input.within === TakeOutWithin.Alone && row.step < TakeOutStep.Checked)
+      deps.state.write((ctx) => {
+        deleteTakeOut(ctx, key);
+      });
+    throw error;
   }
 
   const keptBaseSha = row.keptBaseSha;

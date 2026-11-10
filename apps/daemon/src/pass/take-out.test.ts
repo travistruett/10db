@@ -176,8 +176,23 @@ describe('takeOut', () => {
     expect(w.h.git$('rev-parse', keptRef(w.settings.id))).toBe(earlier);
   });
 
+  it('leaves no row when a take-out asked for alone fails before it puts files back, so the page goes on', async () => {
+    w = await worked();
+    // The builder moved Your folder off the pass's branch: nothing of the page can be kept.
+    w.h.git$('switch', '-q', 'main');
+    await expect(
+      takeOut(takeOutDeps(w), { taskId: w.settings.id, within: TakeOutWithin.Alone }),
+    ).rejects.toThrow(/not on the pass's branch/);
+    expect(lastTakeOut(w.h.store.db, w.settings.id)).toBeUndefined();
+    expect(getTask(w.h.store.db, w.settings.id).passId).toBe(w.opened.pass.id);
+    expect(read(w, 'src/settings/new.tsx')).toBe('added in the turn\nand by hand\n');
+  });
+
   describe('a restart after each step goes on from the step it reached', () => {
-    /** Dies at the `nth` call it is given, as the daemon dying inside that call would. */
+    /**
+     * Dies at the `nth` call it is given, as the daemon dying inside that call would: the call never
+     * returns, so nothing after it runs, not even a catch.
+     */
     type Die = <T>(nth: number, real: () => Promise<T>) => Promise<T>;
     const crashes: {
       readonly name: string;
@@ -223,16 +238,21 @@ describe('takeOut', () => {
     it.each(crashes)('$name', async ({ crash, step }) => {
       w = await worked();
       const calls = new Map<number, number>();
+      let died: () => void = () => undefined;
+      const dead = new Promise<void>((resolve) => {
+        died = resolve;
+      });
       const die: Die = (nth, real) => {
         const n = (calls.get(nth) ?? 0) + 1;
         calls.set(nth, n);
-        return n === nth ? Promise.reject(new Error('the daemon died')) : real();
+        if (n !== nth) return real();
+        died();
+        return new Promise(() => undefined);
       };
       const crashing = crash(w.h.git, die);
       const input = { taskId: w.settings.id, within: TakeOutWithin.Alone };
-      await expect(takeOutSteps(takeOutDeps(w, crashing), input)).rejects.toThrow(
-        'the daemon died',
-      );
+      void takeOutSteps(takeOutDeps(w, crashing), input);
+      await dead;
       expect(lastTakeOut(w.h.store.db, w.settings.id)?.step).toBe(step);
 
       // A daemon started again reads the step from the database file, holding nothing else.
