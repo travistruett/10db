@@ -7,6 +7,7 @@ import {
   TaskDto,
   TaskScreensDto,
   WorkstreamDto,
+  mintId,
 } from '@10db/contracts';
 import { latestEventSeq } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -46,7 +47,11 @@ beforeEach(async () => {
   cam.onShoot = () => {
     shotAtSeq.push(latestEventSeq(daemon.state.db));
   };
-  daemon = await startDaemonWithProfiles({
+  daemon = await startDaemon();
+});
+/** The daemon on the test's data dir, with the fake browser; called again for a restart. */
+function startDaemon(): Promise<RunningDaemon> {
+  return startDaemonWithProfiles({
     sandbox: null,
     dataDir: data.path,
     port: 0,
@@ -77,7 +82,8 @@ beforeEach(async () => {
     watch: false,
     pictures: { kind: 'given', camera: cam, prepare: () => undefined },
   });
-});
+}
+
 afterEach(async () => {
   await daemon.stop();
   repo.cleanup();
@@ -141,6 +147,39 @@ describe("a task's pictures over HTTP", () => {
       browser: { state: 'ready', problem: null },
       signIn: null,
     });
+  });
+});
+
+describe('pruning', () => {
+  it('prunes a turn picture of a task done 15 days ago when the daemon starts', async () => {
+    const p = await project();
+    const task = await api().post(`/projects/${p.id}/tasks`, TaskDto, {
+      title: 'People: old',
+      acceptanceCriteria: ['x'],
+      areas: ['people'],
+    });
+    const screenId = mintId('TaskScreen');
+    const db = daemon.state.db.$client;
+    db.prepare(
+      `INSERT INTO task_screens (id, task_id, kind, route, viewport, theme, sha256, size, width, height,
+        stored_path, created_at) VALUES (?, ?, 'turn', '/people', '{"width":1440,"height":900}',
+        'default', ?, 1, 1440, 900, ?, ?)`,
+    ).run(screenId, task.id, 'f'.repeat(64), `${data.path}/screens/ff/x.png`, daemon.state.now());
+    const longAgo = new Date(Date.now() - 15 * 24 * 60 * 60_000).toISOString();
+    db.prepare(`UPDATE tasks SET status = 'done', updated_at = ? WHERE id = ?`).run(
+      longAgo,
+      task.id,
+    );
+    await daemon.stop();
+    daemon = await startDaemon();
+    const row = z
+      .object({ pruned_at: z.string().nullable() })
+      .parse(
+        daemon.state.db.$client
+          .prepare('SELECT pruned_at FROM task_screens WHERE id = ?')
+          .get(screenId),
+      );
+    expect(row.pruned_at).not.toBeNull();
   });
 });
 

@@ -182,6 +182,7 @@ import {
   launchChromium,
   refusedCamera,
   startPictures,
+  startPruning,
   type PageCamera,
   type Pictures,
 } from '../pictures';
@@ -1555,6 +1556,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     clock,
     logger: logger.child({ component: 'pictures' }),
   });
+  // Turn pictures go 14 days after their task is done: swept now and once a day.
+  const picturePruning = startPruning({
+    state,
+    dataDir: opts.dataDir,
+    clock,
+    logger: logger.child({ component: 'pictures' }),
+  });
   // Tasks made for a branch that is gone from origin land in their project's default now. It asks
   // origin, so it runs beside the start (an offline start waits on no timeout) and ends with it.
   const retiredLandingsAbort = new AbortController();
@@ -1988,6 +1996,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       // A pass's gate and review on its pushed tip run outside the delivery jobs, as its turn checks do.
       // A capture in flight is dropped; its browser closes with it.
       await pictures?.stop();
+      picturePruning.stop();
       await pictureCamera.close();
       unsubscribeTurnChecks();
       await Promise.all([passPullRequests.stop(), turnChecks.stopAll()]);

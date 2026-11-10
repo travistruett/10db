@@ -3,6 +3,7 @@ import {
   mintId,
   NotFoundError,
   ScreenKind,
+  TaskStatus,
   type PassTurnId,
   type ScreenTheme,
   type ScreenViewport,
@@ -218,4 +219,61 @@ export function listTaskToolCalls(
     .orderBy(asc(schema.events.seq))
     .all()
     .flatMap((r) => (r.tool === null ? [] : [{ tool: r.tool, at: r.at }]));
+}
+
+/**
+ * The unpruned turn pictures of tasks done or cancelled, each with when its task finished (its last
+ * update, read as the moment it was done), for the pruning sweep.
+ */
+export function listFinishedTurnScreens(db: DbReader): {
+  readonly id: TaskScreenId;
+  readonly taskId: TaskId;
+  readonly kind: ScreenKind;
+  readonly sha256: string;
+  readonly doneAt: string;
+}[] {
+  return db
+    .select({
+      id: schema.taskScreens.id,
+      taskId: schema.taskScreens.taskId,
+      kind: schema.taskScreens.kind,
+      sha256: schema.taskScreens.sha256,
+      doneAt: schema.tasks.updatedAt,
+    })
+    .from(schema.taskScreens)
+    .innerJoin(schema.tasks, eq(schema.tasks.id, schema.taskScreens.taskId))
+    .where(
+      and(
+        eq(schema.taskScreens.kind, ScreenKind.Turn),
+        isNull(schema.taskScreens.prunedAt),
+        inArray(schema.tasks.status, [TaskStatus.Done, TaskStatus.Cancelled]),
+      ),
+    )
+    .orderBy(asc(schema.taskScreens.createdAt), asc(schema.taskScreens.id))
+    .all();
+}
+
+/**
+ * Marks pictures pruned: their rows stay as a record, and their files may go once no unpruned row
+ * names them. Appends `task.changed` once per task whose pictures it pruned.
+ */
+export function markScreensPruned(ctx: WriteContext, ids: readonly TaskScreenId[]): void {
+  if (ids.length === 0) return;
+  const rows = ctx.tx
+    .select({ taskId: schema.taskScreens.taskId })
+    .from(schema.taskScreens)
+    .where(and(inArray(schema.taskScreens.id, [...ids]), isNull(schema.taskScreens.prunedAt)))
+    .all();
+  ctx.tx
+    .update(schema.taskScreens)
+    .set({ prunedAt: ctx.now })
+    .where(and(inArray(schema.taskScreens.id, [...ids]), isNull(schema.taskScreens.prunedAt)))
+    .run();
+  for (const taskId of new Set(rows.map((r) => r.taskId)))
+    ctx.emit({
+      type: EventType.TaskChanged,
+      entityType: 'task',
+      entityId: taskId,
+      data: { screensPruned: rows.filter((r) => r.taskId === taskId).length },
+    });
 }
