@@ -14,6 +14,8 @@ import {
   getWorkstreamRow,
   listInbox,
   listSharedChanges,
+  openHolds,
+  schema,
   setAbandonStep,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -404,6 +406,22 @@ describe('abandonPass', () => {
         { seq: 2, paths: ['src/shared.ts'] },
         { seq: 1, paths: ['src/shared.ts'] },
       ]);
+    });
+
+    it('finishes past a hold that cannot be kept, letting it go', async () => {
+      w = await openPassWorld();
+      w.startTurn(w.settings);
+      await grantSharedHold(w.deps, { workstreamId: w.runOf(w.settings), area: 'src' });
+      w.write('src/button.ts', 'a button\n');
+      w.h.store.db
+        .update(schema.passHolds)
+        .set({ recordSha: '0'.repeat(40) })
+        .run();
+
+      await abandonPass(deps(), w.opened.pass.id);
+
+      expect(getPass(w.h.store.db, w.opened.pass.id).state).toBe(PassState.Abandoned);
+      expect(openHolds(w.h.store.db, w.opened.pass.id)).toEqual([]);
     });
 
     it('leaves out a drop an earlier take-out made', async () => {

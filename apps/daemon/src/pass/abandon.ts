@@ -25,7 +25,7 @@ import { jobKey, JobQueue } from '../delivery';
 import { flagCard, withdrawCard } from '../inbox';
 import { PASS_CARD_DETAIL, PASS_CARD_KIND, PassCardKind } from './folder';
 import { passBranch, type PassWorkDeps } from './kept-work';
-import { keepHold } from './shared-chain';
+import { keepOrLetGo } from './shared-chain';
 import { dropShared } from './shared-drop';
 import { takeOutSteps, TakeOutWithin, type TakeOutDeps } from './take-out';
 
@@ -182,7 +182,7 @@ export async function abandonPassSteps(
   }
   if (before(AbandonStep.SharedDropped)) {
     // A hold a stopped turn left open is kept first, so what it changed is dropped too.
-    for (const hold of openHolds(db, passId)) await keepHold(deps, { claimId: hold.claimId });
+    for (const hold of openHolds(db, passId)) await keepOrLetGo(deps, hold.claimId);
     const unlanded = listSharedChanges(db, passId)
       .filter((c) => c.dropOf === null && c.droppedBy === null && c.landedSha === null)
       .filter((c) => c.paths.length > 0)
