@@ -43,6 +43,8 @@ import {
   listEvidence,
   listToolOps,
   listStepToolOpResults,
+  passHoldingTask,
+  passPageAreas,
   replaceToolOp,
   patchWorkstream,
   releaseClaim,
@@ -72,6 +74,7 @@ import {
 import type { InboxService, WaitObserver } from '../inbox';
 import { principleHit, proposePrinciple } from '../knowledge';
 import type { Logger } from '../log';
+import { keepNamedPaths } from '../pass';
 import { afterMarkersResolved, commitResultAsStored, fixingFailedGate, revertOfRun } from '../team';
 import {
   CLAIM_POLL_MS,
@@ -623,8 +626,34 @@ export function createToolHandlers(
       if (done !== undefined) return McpToolOutputs.commit.parse(done);
       if (currentStep(getWorkstreamRow(db, workstreamId)).tools === ToolAccess.ReadOnly)
         throw new InvalidError('This step is read-only; only an implement step commits.');
-      const { project, workstream } = context();
+      const { project, workstream, task } = context();
       const checkout = checkoutOf(db, workstream);
+      const pass = passHoldingTask(db, task);
+      if (pass) {
+        // A pass lane's work is kept at its task's ref, never committed on the pass's branch.
+        const claimed = activeClaims(db, workstreamId).map((c) => ({ kind: c.kind, name: c.name }));
+        const inPass = { pages: passPageAreas(db, pass.id) };
+        const kept = await keepNamedPaths(deps, {
+          workstreamId,
+          paths: input.paths,
+          opId: input.opId,
+          judge: (path) => {
+            const verdict = judgeToolUse({
+              toolName: 'Write',
+              toolInput: { file_path: path },
+              repoPath: checkout,
+              areas: project.areas,
+              hazards: project.hazards,
+              claims: claimed,
+              readOnly: false,
+              inPass,
+              protectedPaths: deps.protectedPaths,
+            });
+            return verdict.decision === 'deny' ? verdict.reason : null;
+          },
+        });
+        return deps.state.write((ctx) => record('commit', input.opId, { ...kept }, ctx));
+      }
       // A batch names its branch; other work commits on the branch pinned at its first session.
       const row = getWorkstreamRow(db, workstreamId);
       const branch = row.batchId ? getBatch(db, row.batchId).branch : row.branch;

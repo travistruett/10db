@@ -3,6 +3,7 @@ import {
   AreaRole,
   ClaimKind,
   ConflictError,
+  InvalidError,
   passHeldAreas,
   type PassDto,
   type PassFileChange,
@@ -29,7 +30,7 @@ import {
 import type { Clock } from '../clock';
 import type { DeliveryJobs } from '../delivery';
 import type { StateStore } from '../events';
-import { KeptRefMovedError, PassFolderOffBranchError, type Git } from '../git';
+import { KeptRefMovedError, PassFolderOffBranchError, type Git, type KeptCommit } from '../git';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
 import { findClaimed } from '../watcher';
@@ -184,7 +185,7 @@ async function stillFromBeforePass(
 
 /** The facts of a kept commit: the files it changed since `previous`, and the page against the tip. */
 async function factsOf(
-  deps: PassWorkDeps,
+  deps: Pick<PassWorkDeps, 'state' | 'git'>,
   place: PassTaskPlace,
   kept: { readonly sha: string | null; readonly base: string; readonly made: boolean },
   previous: string,
@@ -205,19 +206,24 @@ async function factsOf(
   };
 }
 
+/** What keeping a task's page work reads and writes. */
+type KeepDeps = Pick<PassWorkDeps, 'state' | 'git'>;
+
 /**
- * Keeps the task's page work (spec §9.1) as one more kept commit at its ref, under the repo lock, by
- * compare-and-swap; another keep that moved the ref meanwhile is followed once, then the call fails.
- * Its page files are those of `pageClaims` that differ from the pass branch's tip on disk. With a turn,
- * the commit carries its trailer, so a rerun finds it, and the turn row records it and the tip.
- * Refused with `PassFolderOffBranchError` while HEAD is not the pass's branch.
+ * One more kept commit of the task's page work at its ref, named by `trailer`, with the ref's value
+ * before it. Another keep that moved the ref meanwhile is followed once, then the call fails.
  */
-export async function keepTurnWork(
-  deps: PassWorkDeps,
-  input: { readonly workstreamId: WorkstreamId; readonly turnId: PassTurnId | null },
-): Promise<KeptWork> {
+async function keepPageWork(
+  deps: KeepDeps,
+  workstreamId: WorkstreamId,
+  trailer: string,
+): Promise<{
+  readonly place: PassTaskPlace;
+  readonly kept: KeptCommit;
+  readonly parent: string | null;
+}> {
   const db = deps.state.db;
-  const place = passTaskPlace(db, getWorkstreamRow(db, input.workstreamId).taskId);
+  const place = passTaskPlace(db, getWorkstreamRow(db, workstreamId).taskId);
   const { git } = deps;
   const { repo, branch, task } = place;
   const found = await git.currentBranch(repo);
@@ -233,8 +239,7 @@ export async function keepTurnWork(
       paths: (await git.changedPaths(repo)).filter(mine),
       parent,
       message: `Kept work of ${task.title}`,
-      // A keep with no turn is its own work each time: nothing later may be taken for it.
-      trailer: { key: TURN_TRAILER, value: input.turnId ?? `none-${randomUUID()}` },
+      trailer: { key: TURN_TRAILER, value: trailer },
     });
     return { kept, parent };
   };
@@ -245,8 +250,41 @@ export async function keepTurnWork(
     if (!(error instanceof KeptRefMovedError)) throw error;
     done = await keep();
   }
-  const facts = await factsOf(deps, place, done.kept, done.parent ?? done.kept.base);
+  return { place, ...done };
+}
+
+/**
+ * Keeps the task's page work (spec §9.1) as one more kept commit at its ref, under the repo lock, by
+ * compare-and-swap; another keep that moved the ref meanwhile is followed once, then the call fails.
+ * Its page files are those of `pageClaims` that differ from the pass branch's tip on disk. With a turn,
+ * the commit carries its trailer, so a rerun finds it, and the turn row records it and the tip.
+ * Refused with `PassFolderOffBranchError` while HEAD is not the pass's branch.
+ */
+export async function keepTurnWork(
+  deps: PassWorkDeps,
+  input: { readonly workstreamId: WorkstreamId; readonly turnId: PassTurnId | null },
+): Promise<KeptWork> {
   const { turnId } = input;
+  // A keep with no turn is its own work each time: nothing later may be taken for it.
+  const { place, kept, parent } = await keepPageWork(
+    deps,
+    input.workstreamId,
+    turnId ?? `none-${randomUUID()}`,
+  );
+  // A turn's files are what changed since the task's previous turn was kept, whatever kept commits
+  // the commit tool or a fold made between.
+  const previous =
+    turnId === null
+      ? parent
+      : (listPassTurns(deps.state.db, place.pass.id)
+          .filter((t) => t.taskId === place.task.id && t.id !== turnId && t.keptBaseSha !== null)
+          .at(-1)?.keptSha ?? null);
+  const facts = await factsOf(
+    deps,
+    place,
+    { ...kept, made: kept.sha !== null && kept.sha !== previous },
+    previous ?? kept.base,
+  );
   if (turnId !== null)
     deps.state.write((ctx) =>
       setPassTurnKept(ctx, turnId, {
@@ -256,6 +294,41 @@ export async function keepTurnWork(
       }),
     );
   return facts;
+}
+
+/**
+ * The commit tool of a pass lane (spec §6.2): keeps the task's page work, the named paths with it,
+ * as `keepTurnWork` does, under the call's opId, and answers that kept commit; the pass's branch
+ * never moves. A path that is not one of the task's pages is refused (shared code waits for shared
+ * areas), then any the guard's judge refuses. A retry with the same opId answers the commit it made;
+ * nothing to keep is refused.
+ */
+export async function keepNamedPaths(
+  deps: KeepDeps,
+  input: {
+    readonly workstreamId: WorkstreamId;
+    readonly paths: readonly string[];
+    readonly opId: string;
+    /** Why the guard would refuse a write to the path, or null when it allows it. */
+    readonly judge: (path: string) => string | null;
+  },
+): Promise<{ readonly sha: string; readonly alreadyCommitted: boolean }> {
+  const db = deps.state.db;
+  const place = passTaskPlace(db, getWorkstreamRow(db, input.workstreamId).taskId);
+  const mine = pageMatcher(place.project, pageClaims(db, place.project, place.task));
+  const shared = input.paths.filter((path) => !mine(path));
+  if (shared.length > 0)
+    throw new InvalidError(
+      `${shared.join(', ')} ${shared.length === 1 ? 'is' : 'are'} not in your page: shared code needs request_claim, which lands with shared areas. Keep the change inside your page.`,
+    );
+  for (const path of input.paths) {
+    const refused = input.judge(path);
+    if (refused !== null) throw new InvalidError(refused);
+  }
+  const { kept, parent } = await keepPageWork(deps, input.workstreamId, `op-${input.opId}`);
+  if (!kept.made || kept.sha === null)
+    throw new InvalidError(`Nothing to commit in ${input.paths.join(', ')}`);
+  return { sha: kept.sha, alreadyCommitted: kept.sha === parent };
 }
 
 /**
