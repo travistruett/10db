@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
@@ -528,6 +528,100 @@ describe('Open Pull Request', () => {
       expect(h.gh.body(url)).toContain('Gate result unknown');
     },
   );
+
+  /** Scratch worktrees that wait, one at a time, until the test lets each go on or fail. */
+  function heldWorktrees() {
+    const waiting: ((error: Error | null) => void)[] = [];
+    let calls = 0;
+    return {
+      wrap: (git: Git): Git => ({
+        ...git,
+        addWorktree: async (input) => {
+          calls += 1;
+          const error = await new Promise<Error | null>((resolve) => waiting.push(resolve));
+          if (error) throw error;
+          return git.addWorktree(input);
+        },
+      }),
+      calls: () => calls,
+      release: (error: Error | null = null) => {
+        waiting.shift()?.(error);
+      },
+    };
+  }
+
+  const bodyOf = (passId: PassId) => h.gh.body(getPassPullRequest(h.store.db, passId)?.url ?? '');
+  const gateStarted = (held: ReturnType<typeof heldWorktrees>, n: number) =>
+    vi.waitFor(() => {
+      expect(held.calls()).toBe(n);
+    });
+
+  it('writes no running gate once a second Open Pull Request finds the pass gone before its gate starts', async () => {
+    const held = heldWorktrees();
+    setup({}, { wrapGit: held.wrap });
+    const { passId, settings } = await openedPass();
+    signOff(settings, 'src/settings/page.tsx', 'signed off\n');
+    await prs.open(passId);
+    await h.jobs.idle();
+    await gateStarted(held, 1);
+    // The second waits for the first gate to stop, and the pass is abandoned meanwhile.
+    await prs.open(passId);
+    await h.jobs.idle();
+    h.state.write((w) => {
+      setAbandonStep(w, passId, AbandonStep.Abandoning);
+    });
+    held.release();
+
+    await vi.waitFor(async () => {
+      await prs.ensurePassPr({ passId, ready: true }, new AbortController().signal);
+      expect(bodyOf(passId)).not.toContain('Gate running');
+    });
+  });
+
+  it("says the gate is running while a second Open Pull Request's gate runs, though the first one's stopped", async () => {
+    const held = heldWorktrees();
+    setup({}, { wrapGit: held.wrap });
+    const { passId, settings } = await openedPass();
+    signOff(settings, 'src/settings/page.tsx', 'signed off\n');
+    await prs.open(passId);
+    await h.jobs.idle();
+    await gateStarted(held, 1);
+    await prs.open(passId);
+    await h.jobs.idle();
+    // The first gate goes on to find itself stopped; the second, of the same commit, starts.
+    held.release();
+    await gateStarted(held, 2);
+
+    await prs.ensurePassPr({ passId, ready: false }, new AbortController().signal);
+
+    expect(bodyOf(passId)).toContain('Gate running');
+    held.release();
+  });
+
+  it("keeps the gate's own error when the body cannot be written after it", async () => {
+    const held = heldWorktrees();
+    setup({}, { wrapGit: held.wrap });
+    const { passId, settings } = await openedPass();
+    signOff(settings, 'src/settings/page.tsx', 'signed off\n');
+    await prs.open(passId);
+    await h.jobs.idle();
+    await gateStarted(held, 1);
+    // The body's file can no longer be written: a folder stands where it was.
+    const file = join(h.dataDir, 'delivery', `${batchOf(passId)}-pr-body.md`);
+    rmSync(file);
+    mkdirSync(file);
+
+    held.release(new Error('no room for a scratch worktree'));
+
+    await vi.waitFor(() => {
+      expect(notices(passId)).toEqual([
+        expect.objectContaining({
+          id: 'gate',
+          text: expect.stringContaining('no room for a scratch worktree') as unknown,
+        }),
+      ]);
+    });
+  });
 
   it('after a restart, writes no running gate into the body when none runs', async () => {
     setup();

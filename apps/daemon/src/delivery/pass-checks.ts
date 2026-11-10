@@ -30,6 +30,8 @@ export interface PassChecks {
   /**
    * Starts the gate and the review of pushed tip `sha` (each when asked), beside each other under one
    * abort. Checks still running for the pass are stopped first, so one tip is checked at a time.
+   * Answers this run's abort signal, which its gate is handed, and when the run ends, whether or not
+   * it ran anything.
    */
   start(input: {
     readonly passId: PassId;
@@ -38,7 +40,7 @@ export interface PassChecks {
     readonly review: boolean;
     /** The branch the pull request targets on `origin`, where the review's diff starts. */
     readonly baseRef: string | null;
-  }): void;
+  }): { readonly signal: AbortSignal; readonly done: Promise<void> };
   /** Raises the abort of the pass's running checks and waits for them to end. */
   stop(passId: PassId): Promise<void>;
   /** Stops every pass's checks, as the daemon shuts down. */
@@ -145,6 +147,7 @@ export function createPassChecks(deps: PassChecksDeps): PassChecks {
         if (running.get(input.passId)?.abort === abort) running.delete(input.passId);
       });
       running.set(input.passId, { abort, done });
+      return { signal: abort.signal, done };
     },
     stop,
     async stopAll() {

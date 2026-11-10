@@ -139,15 +139,17 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
   /**
    * The pushed commit of each pass whose gate Open Pull Request is about to start, or is running:
    * set before the draft it writes, and gone on every way out (the gate's end, a failure before it
-   * started, a pass no longer open, a stop).
+   * started, checks that ended without a gate, a stop). Each Open Pull Request has a mark of its
+   * own, and `run` is the abort signal of the checks it handed the gate to, so the end of an older
+   * gate of the same commit never takes a newer one's mark.
    */
-  const gating = new Map<PassId, string>();
+  const gating = new Map<PassId, { readonly sha: string; run: AbortSignal | null }>();
 
   function checkOf(pass: PassDto, project: ProjectDto, sha: string): PassPrCheck {
     const command = shipCheck(project)?.command;
     const running = gating.get(pass.id);
     if (running !== undefined && passGateKind(project) === PassPullRequestGate.Scratch)
-      return { kind: 'scratch', command: command ?? '', sha: running, state: 'running' };
+      return { kind: 'scratch', command: command ?? '', sha: running.sha, state: 'running' };
     const known = checked.get(pass.id);
     if (known) return known;
     switch (passGateKind(project)) {
@@ -340,9 +342,13 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
         checked.delete(passId);
         throw error;
       } finally {
-        if (gating.get(passId) === sha) gating.delete(passId);
-        // The body says how the gate went; a shutdown or a close that stopped it writes nothing.
-        if (!signal.aborted) await rewriteBody(passId, sha, signal);
+        if (gating.get(passId)?.run === signal) gating.delete(passId);
+        // The body says how the gate went; a shutdown or a close that stopped it writes nothing. A
+        // body that cannot be written is logged, so the gate's own error is the one that is told.
+        if (!signal.aborted)
+          await rewriteBody(passId, sha, signal).catch((error: unknown) => {
+            deps.logger.warn({ passId, err: message(error) }, 'pass pull request body not updated');
+          });
       }
     },
     review: deps.review,
@@ -431,9 +437,9 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
       deps.jobs.run(jobKey(batch, JobQueue.Ship), async (signal) => {
         if (signal.aborted || getPass(db, passId).state !== PassState.Open || branch === null)
           return;
-        // The commit this job marked as about to be gated, and whether the checks took the gate on,
-        // whose end clears the mark.
-        let marked: string | null = null;
+        // This job's mark of the commit about to be gated, and whether the checks took the gate
+        // on, whose end clears the mark.
+        let marked: { readonly sha: string; run: AbortSignal | null } | null = null;
         let handed = false;
         try {
           if ((await pushPassBranch(passId, signal)) === 'no_origin') return;
@@ -443,14 +449,13 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
           if (sha === null || !stillOpen()) return;
           // The gate starts once the pull request is there: its body says the gate is running.
           if (gates) {
-            gating.set(passId, sha);
-            marked = sha;
+            marked = { sha, run: null };
+            gating.set(passId, marked);
           }
           await ensurePassPr({ passId, ready: false }, signal);
           deps.state.write((w) => clearPassNotice(w, passId, PR_OPEN_NOTICE));
           if (!stillOpen()) return;
-          handed = gates;
-          checks.start({
+          const started = checks.start({
             passId,
             sha,
             gate: gates,
@@ -458,6 +463,16 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
             review: reviews && !unchanged(sha),
             baseRef: `refs/remotes/origin/${shown.base}`,
           });
+          const mark = marked;
+          if (mark !== null) {
+            handed = true;
+            mark.run = started.signal;
+            // Checks that end without running the gate (stopped, or the pass gone meanwhile) leave
+            // no mark behind.
+            void started.done.finally(() => {
+              if (gating.get(passId) === mark) gating.delete(passId);
+            });
+          }
         } catch (error) {
           deps.logger.warn(
             { passId: pass.id, err: message(error) },
