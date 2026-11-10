@@ -42,6 +42,7 @@ import {
   gateFailedKey,
   type CloseDeps,
   type CloseShip,
+  type PassCloses,
 } from './close';
 import { closeGateOf } from './close-lists';
 import { folderCardOpen } from './folder';
@@ -426,6 +427,41 @@ describe('Close Pass', () => {
     expect(again.outcome).toBe('closing');
     expect(passState()).toBe('CLOSED');
     expect(landed()).toEqual(['Settings: UI work']);
+    expect(getPassProgress(w.h.store.db, w.opened.pass.id).notices).toEqual([]);
+  });
+
+  it('goes on when Close Pass is asked again while its job is stopping on an error', async () => {
+    await world({ gateCommand: 'true' });
+    await twoTurns();
+    const deps = closeDeps();
+    let failed = false;
+    let again: Promise<unknown> = Promise.resolve();
+    const closes: PassCloses = createPassCloses({
+      ...deps,
+      ship: {
+        ...deps.ship,
+        pushPassBranch: (passId, signal) => {
+          if (failed) return deps.ship.pushPassBranch(passId, signal);
+          failed = true;
+          // The builder asks again just as the push fails, before the job has stopped.
+          again = closes.close(passId, { token: '', pages: [], files: [], shared: [] });
+          return Promise.reject(new Error('origin is offline'));
+        },
+      },
+    });
+    const shown = await closes.preview(w.opened.pass.id);
+    await closes.close(w.opened.pass.id, {
+      token: shown.token,
+      pages: [{ taskId: w.settings.id, choice: PassClosePageChoice.SignOff }],
+      files: [],
+      shared: [],
+    });
+    await w.h.jobs.idle();
+    await again;
+    await w.h.jobs.idle();
+
+    expect(await again).toMatchObject({ outcome: 'closing' });
+    expect(passState()).toBe('CLOSED');
     expect(getPassProgress(w.h.store.db, w.opened.pass.id).notices).toEqual([]);
   });
 

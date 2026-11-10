@@ -1,4 +1,5 @@
 import {
+  PassClosePageChoice,
   PassFollowOnDetail,
   PassState,
   PullRequestChecks,
@@ -47,6 +48,7 @@ afterEach(async () => {
 /** A pass whose gate would fail if it ran, with 7b's real ship over the harness's fake gh. */
 async function world(project: Partial<ProjectInput> = { gateCommand: 'false' }): Promise<{
   closes: PassCloses;
+  deps: CloseDeps;
 }> {
   w = await openPassWorld({ project });
   prs = createPassPullRequests({
@@ -71,7 +73,7 @@ async function world(project: Partial<ProjectInput> = { gateCommand: 'false' }):
   };
   const closes = createPassCloses(deps);
   unsubscribe = subscribeMergedPasses(w.h.bus, w.h.store.db, closes);
-  return { closes };
+  return { closes, deps };
 }
 
 /** Settings is signed off: its commit is on the pass's branch and its run is done. */
@@ -178,6 +180,38 @@ describe('a pull request that merges while its pass is open', () => {
       prUrl: followOn?.url,
       carried: [],
     });
+  });
+
+  it("closes by itself when the watch reads the merge while Close Pass's gate runs and fails", async () => {
+    const { deps } = await world();
+    settingsSignedOff();
+    const { url } = await opened();
+    const closes = createPassCloses({
+      ...deps,
+      ship: {
+        ...deps.ship,
+        gatePassTip: async (i) => {
+          // The pass is closing as the watch reads the merge: only the reopened pass closes by it.
+          merged(url);
+          return deps.ship.gatePassTip(i);
+        },
+      },
+    });
+    unsubscribe();
+    unsubscribe = subscribeMergedPasses(w.h.bus, w.h.store.db, closes);
+    const shown = await closes.preview(w.opened.pass.id);
+
+    await closes.close(w.opened.pass.id, {
+      token: shown.token,
+      pages: [{ taskId: w.people.id, choice: PassClosePageChoice.TakeOut }],
+      files: [],
+      shared: [],
+    });
+    await w.h.jobs.idle();
+    await w.h.jobs.idle();
+
+    expect(getPass(w.h.store.db, w.opened.pass.id).state).toBe(PassState.Closed);
+    expect(followOnCard()).toBeDefined();
   });
 
   it('refuses a Close Pass once merged, and closes it by itself', async () => {

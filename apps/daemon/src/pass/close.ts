@@ -479,10 +479,22 @@ export interface PassCloses {
 
 export function createPassCloses(deps: CloseDeps): PassCloses {
   const db = deps.state.db;
-  const running = new Map<PassId, { abort: AbortController; done: Promise<void> }>();
+  const running = new Map<
+    PassId,
+    { abort: AbortController; done: Promise<void>; again: boolean }
+  >();
 
+  /**
+   * Runs the pass's close job. Asked while it runs (a Close Pass as it stops on an error, or a
+   * merged close written after its gate reopened the pass), it runs once more after it ends, while
+   * the pass is still closing.
+   */
   function run(passId: PassId): void {
-    if (running.has(passId)) return;
+    const current = running.get(passId);
+    if (current) {
+      current.again = true;
+      return;
+    }
     const pass = getPass(db, passId);
     const abort = new AbortController();
     const done = new Promise<void>((resolve) => {
@@ -521,13 +533,15 @@ export function createPassCloses(deps: CloseDeps): PassCloses {
               });
             }
           } finally {
+            const again = running.get(passId)?.again === true;
             running.delete(passId);
             resolve();
+            if (again && getPass(db, passId).state === PassState.Closing) run(passId);
           }
         },
       );
     });
-    running.set(passId, { abort, done });
+    running.set(passId, { abort, done, again: false });
   }
 
   function closeMerged(passId: PassId): void {
