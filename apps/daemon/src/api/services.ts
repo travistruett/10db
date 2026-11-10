@@ -281,6 +281,8 @@ export interface ApiServices {
   addPassPages(passId: PassId, input: PassJoinRequest): Promise<PassViewDto>;
   /** Names the pass anew; refused (409) once it is settled or abandoned. */
   renamePass(passId: PassId, input: PassRename): PassDto;
+  /** Discard Saved Work: forgets the task's saved Workbench work and deletes its kept ref; 409 in a pass. */
+  discardKeptWork(taskId: TaskId): Promise<void>;
   /**
    * The project's goals, each with its digest and count of new items since the builder last opened
    * it, and the Ungrouped group. Leaves every view mark as it was.

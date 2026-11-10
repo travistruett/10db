@@ -768,6 +768,10 @@ export function createApp(deps: ApiDeps) {
       (c) =>
         c.json(deps.services.renamePass(PassId.parse(c.req.param('passId')), c.req.valid('json'))),
     )
+    .delete('/tasks/:taskId/kept-work', async (c) => {
+      await deps.services.discardKeptWork(TaskId.parse(c.req.param('taskId')));
+      return c.body(null, 204);
+    })
     .get('/projects/:projectId/pass-start', async (c) =>
       c.json(await deps.services.passStart(ProjectId.parse(c.req.param('projectId')))),
     )

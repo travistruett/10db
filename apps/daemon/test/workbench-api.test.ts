@@ -14,6 +14,7 @@ import {
   insertWorkstream,
   listTaskThread,
   schema,
+  setTaskKeptWork,
   transitionWorkstream,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -402,5 +403,42 @@ describe('PATCH /passes/:passId', () => {
     expect((await send('PATCH', `/passes/${opened.pass.id}`, { name: '' })).status).toBe(400);
     await api().post(`/passes/${opened.pass.id}/abandon`, PassAbandonedDto);
     expect((await send('PATCH', `/passes/${opened.pass.id}`, { name: 'Later' })).status).toBe(409);
+  });
+});
+
+/** Work kept for the task at its kept ref, as a take-out leaves it: a commit off HEAD no branch names. */
+function keepWorkFor(taskId: TaskDto['id']): string {
+  const head = rawGit('rev-parse', 'HEAD');
+  const tree = rawGit('rev-parse', 'HEAD^{tree}');
+  const sha = rawGit('commit-tree', '--no-gpg-sign', tree, '-p', head, '-m', 'kept');
+  rawGit('update-ref', `refs/10db/kept/${taskId}`, sha);
+  daemon.state.write((ctx) => {
+    setTaskKeptWork(ctx, taskId, { keptSha: sha, keptBaseSha: head });
+  });
+  return sha;
+}
+
+describe('DELETE /tasks/:taskId/kept-work', () => {
+  it("discards the task's saved work: its kept ref is gone and the task no longer has any", async () => {
+    const project = await projectWith(PAGES);
+    const task = await taskOn(project, 'Settings: tidy', ['settings']);
+    keepWorkFor(task.id);
+
+    const res = await send('DELETE', `/tasks/${task.id}/kept-work`);
+
+    expect(res.status).toBe(204);
+    expect(rawGit('for-each-ref', '--format=%(refname)', 'refs/10db/kept/')).toBe('');
+    const tasks = await api().get(`/projects/${project.id}/tasks`, z.array(TaskDto));
+    expect(tasks.find((t) => t.id === task.id)?.keptWork).toBe(false);
+  });
+
+  it('refuses with 409 while a pass holds the task, and leaves its saved work', async () => {
+    const project = await projectWith(PAGES);
+    const task = await taskOn(project, 'Settings: tidy', ['settings']);
+    await openOn(project, [task]);
+    const sha = keepWorkFor(task.id);
+
+    expect((await send('DELETE', `/tasks/${task.id}/kept-work`)).status).toBe(409);
+    expect(rawGit('rev-parse', `refs/10db/kept/${task.id}`)).toBe(sha);
   });
 });

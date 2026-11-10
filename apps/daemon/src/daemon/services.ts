@@ -22,6 +22,7 @@ import {
   type PassId,
   type PassJoinRequest,
   type TakeOutResultDto,
+  type TaskId,
   type TaskLanding,
   type WorkstreamId,
 } from '@10db/contracts';
@@ -172,6 +173,8 @@ export function createServices(deps: {
   readonly abandonPass: (passId: PassId) => Promise<PassAbandonedDto>;
   /** Adds pages to an open pass in the project's delivery queue (`joinPass` with its lease and put-back). */
   readonly joinPass: (passId: PassId, input: PassJoinRequest) => Promise<PassJoined>;
+  /** Discards a task's saved Workbench work in its project's delivery queue. */
+  readonly discardKeptWork: (taskId: TaskId) => Promise<void>;
   readonly shipper: Shipper;
   readonly accounts: AccountService;
   readonly moves: Pick<AccountMoves, 'move'>;
@@ -407,6 +410,7 @@ export function createServices(deps: {
       return passView(db, passId);
     },
     renamePass: (passId, input) => deps.state.write((ctx) => renamePass(ctx, passId, input.name)),
+    discardKeptWork: (taskId) => deps.discardKeptWork(taskId),
     async stopPage(taskId) {
       const task = getTask(db, taskId);
       const pass = passHoldingTask(db, task);

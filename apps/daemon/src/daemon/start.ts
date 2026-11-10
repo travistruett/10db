@@ -151,6 +151,7 @@ import {
 import {
   abandonPass,
   answerPassCard,
+  discardKeptWork,
   joinPass,
   putBackKeptWork,
   resumePassWork,
@@ -1473,6 +1474,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     takeOut: (input) => takeOut(passTakeOuts, input),
     abandonPass: (passId) => abandonPass(passTakeOuts, passId),
     joinPass: (passId, input) => joinPass(delivery, passId, input, passOpenDeps),
+    discardKeptWork: (taskId) => discardKeptWork(passWork, taskId),
     shipper,
     accounts: accountService,
     worktreeRoot,
