@@ -1,4 +1,10 @@
-import { mintId, PARK_TASK_OPTION, type InboxItemDto, type ProvenanceDto } from '@10db/contracts';
+import {
+  mintId,
+  PARK_TASK_OPTION,
+  PASS_SIGN_OFF_CHOICE,
+  type InboxItemDto,
+  type ProvenanceDto,
+} from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse, type RequestHandler, type WebSocketHandler } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -923,6 +929,43 @@ describe('InboxView', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
       expect(await screen.findByText('Nothing needs you right now.')).toBeTruthy();
     });
+  });
+});
+
+// Workbench spec §6.1: a pass's Ready pages are one row, which offers neither Approve nor Send Back.
+describe("a Workbench pass's Ready pages", () => {
+  const pass = mintId('Pass');
+  const ready = (title: string): InboxItemDto =>
+    inboxItemDto({
+      kind: 'check',
+      title,
+      body: '',
+      options: [{ label: PASS_SIGN_OFF_CHOICE, description: '' }],
+      projectId: project,
+      detail: {
+        passId: pass,
+        taskId: mintId('Task'),
+        workstreamId: mintId('Workstream'),
+        turnId: mintId('PassTurn'),
+        keptSha: 'a'.repeat(40),
+        keptBaseSha: 'b'.repeat(40),
+        turnFiles: [],
+        pageFiles: [],
+      },
+    });
+
+  it('show as one row naming each page, with no Approve or Send Back', async () => {
+    const { answers } = inbox([ready('Ready: Settings'), ready('Ready: People')]);
+    renderApp('/inbox');
+    expect(await screen.findByText('Workbench: 2 pages ready')).toBeTruthy();
+    expect(screen.getByRole('radio', { name: 'Open 1' })).toBeTruthy();
+    const card = selectedCard();
+    expect(within(card).getByText('Ready: Settings')).toBeTruthy();
+    expect(within(card).getByText('Ready: People')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Approve/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Send Back/ })).toBeNull();
+    key('Enter');
+    expect(answers).toEqual([]);
   });
 });
 
