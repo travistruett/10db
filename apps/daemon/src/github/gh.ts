@@ -56,6 +56,10 @@ export type PrMergeable = (typeof PrMergeable)[keyof typeof PrMergeable];
 export interface PullRequest {
   readonly url: string;
   readonly state: PrState;
+  /** Whether the pull request is a draft; null when gh gives none. */
+  readonly isDraft: boolean | null;
+  /** The branch it targets; null when gh gives none. */
+  readonly baseRef: string | null;
 }
 
 /**
@@ -83,6 +87,10 @@ export interface PullRequestStatus {
    * whose runs never started from a base that has no CI.
    */
   readonly blockedOnChecks: boolean;
+  /** Whether the pull request is a draft; null when gh gives none. */
+  readonly isDraft: boolean | null;
+  /** The branch it targets; null when gh gives none. */
+  readonly baseRef: string | null;
 }
 
 export const MergeBlocked = { Conflicts: 'conflicts', Behind: 'behind' } as const;
@@ -171,9 +179,21 @@ export interface Gh {
       readonly head: string;
       readonly title: string;
       readonly bodyFile: string;
+      /** Opens it as a draft, as a Workbench pass's pull request opens before the pass closes. */
+      readonly draft?: boolean;
     },
     call: GhCall,
   ): Promise<string>;
+  /** Marks a draft pull request ready for review. Throws a GhError with GitHub's reason when it refuses. */
+  prReady(input: { readonly repo: string; readonly url: string }, call: GhCall): Promise<void>;
+  /**
+   * Moves the pull request onto another base branch, as a stacked pass's does once the pass it was
+   * based on merges (D24). Throws a GhError with GitHub's reason when it refuses.
+   */
+  prEditBase(
+    input: { readonly repo: string; readonly url: string; readonly base: string },
+    call: GhCall,
+  ): Promise<void>;
   /**
    * Whether the open pull request waits in its base's merge queue. A push to its branch takes it out
    * of the queue, so 10db pushes nothing to one that does. Throws a GhError, never answers `false`,
@@ -328,7 +348,16 @@ export function createSystemGhExec(tools: GhTools): GhExec {
     });
 }
 
-const PrView = z.object({ url: z.url(), state: z.enum(PrState) });
+/** A field gh may leave out or print empty reads as null. */
+const nullIfAbsent = <T>(value: T | null | undefined): T | null =>
+  value === undefined || value === null || value === '' ? null : value;
+
+const PrView = z.object({
+  url: z.url(),
+  state: z.enum(PrState),
+  isDraft: z.boolean().nullish().transform(nullIfAbsent),
+  baseRefName: z.string().nullish().transform(nullIfAbsent),
+});
 /** The repository's REST answer; `gh repo view --json` has no auto-merge field in every gh. */
 const RepoSettings = z.object({ allow_auto_merge: z.boolean() });
 
@@ -435,6 +464,8 @@ const PrStatusView = z.object({
   statusCheckRollup: z.array(z.unknown().transform(rollupEntry)).nullish(),
   mergeStateStatus: z.string().nullish(),
   reviewDecision: z.string().nullish(),
+  isDraft: z.boolean().nullish().transform(nullIfAbsent),
+  baseRefName: z.string().nullish().transform(nullIfAbsent),
 });
 
 /** Review decisions that make a BLOCKED pull request wait for a person, not for a check. */
@@ -664,11 +695,12 @@ export function createGh(exec: GhExec): Gh {
       return login.data;
     },
     async prView({ repo, ref }, call) {
-      const args = ['pr', 'view', ref, '-R', repo, '--json', 'url,state'];
+      const args = ['pr', 'view', ref, '-R', repo, '--json', 'url,state,isDraft,baseRefName'];
       const out = await exec(args, call);
       if (out.exitCode !== 0 && NO_PR.test(out.stderr)) return null;
       if (out.exitCode !== 0) throw failure(args, out);
-      return parseOutput(PrView, args, out.stdout);
+      const view = parseOutput(PrView, args, out.stdout);
+      return { url: view.url, state: view.state, isDraft: view.isDraft, baseRef: view.baseRefName };
     },
     async prStatus({ repo, ref }, call) {
       const args = [
@@ -678,7 +710,7 @@ export function createGh(exec: GhExec): Gh {
         '-R',
         repo,
         '--json',
-        'url,state,statusCheckRollup,headRefOid,mergeStateStatus,mergeable,reviewDecision',
+        'url,state,statusCheckRollup,headRefOid,mergeStateStatus,mergeable,reviewDecision,isDraft,baseRefName',
       ];
       const out = await exec(args, call);
       if (out.exitCode !== 0 && (NO_PR.test(out.stderr) || PR_NOT_FOUND.test(out.stderr)))
@@ -693,6 +725,8 @@ export function createGh(exec: GhExec): Gh {
         blockedOnChecks:
           view.mergeStateStatus === 'BLOCKED' && !REVIEW_PENDING.has(view.reviewDecision ?? ''),
         mergeable: view.mergeable,
+        isDraft: view.isDraft,
+        baseRef: view.baseRefName,
         ...summariseChecks(view.statusCheckRollup ?? []),
       };
     },
@@ -731,7 +765,7 @@ export function createGh(exec: GhExec): Gh {
       const notes = parseOutput(AnnotationsView, noteArgs, await ok(noteArgs, call));
       return notes.some((note) => NOT_ACQUIRED.test(note.message ?? ''));
     },
-    async prCreate({ repo, base, head, title, bodyFile }, call) {
+    async prCreate({ repo, base, head, title, bodyFile, draft }, call) {
       const args = [
         'pr',
         'create',
@@ -745,6 +779,7 @@ export function createGh(exec: GhExec): Gh {
         title,
         '--body-file',
         bodyFile,
+        ...(draft === true ? ['--draft'] : []),
       ];
       // gh prints the new pull request's URL last; parse it, so a notice line is never recorded.
       const prUrl = prUrlIn(repo);
@@ -788,6 +823,12 @@ export function createGh(exec: GhExec): Gh {
     },
     async prMerge({ repo, url }, call) {
       await ok(['pr', 'merge', url, '-R', repo, '--squash'], call);
+    },
+    async prReady({ repo, url }, call) {
+      await ok(['pr', 'ready', url, '-R', repo], call);
+    },
+    async prEditBase({ repo, url, base }, call) {
+      await ok(['pr', 'edit', url, '-R', repo, '--base', base], call);
     },
   };
 }
