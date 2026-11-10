@@ -265,6 +265,28 @@ describe('Open Pull Request', () => {
     ).toEqual([]);
   });
 
+  it('opens no follow-on when GitHub merged the pull request as pushed, with nothing signed off since', async () => {
+    setup();
+    const { passId, settings } = await openedPass();
+    signOff(settings, 'src/settings/page.tsx', 'signed off\n');
+    const signal = new AbortController().signal;
+    await prs.pushPassBranch(passId, signal);
+    const first = await prs.ensurePassPr({ passId, ready: false }, signal);
+    if (first === null) throw new Error('no pull request');
+    const branch = getBatch(h.store.db, batchOf(passId)).branch ?? '';
+    // GitHub squash-merged it as pushed, before the watch read it.
+    const squash = h.origin$('commit-tree', '-p', 'main', '-m', 'squash', `${branch}^{tree}`);
+    h.origin$('update-ref', 'refs/heads/main', squash);
+    h.gh.setState(first.url, PrState.Merged);
+
+    await prs.pushPassBranch(passId, signal);
+    const again = await prs.ensurePassPr({ passId, ready: true }, signal);
+
+    expect(again?.url).toBe(first.url);
+    expect(h.gh.prCreates()).toHaveLength(1);
+    expect(getPassPullRequest(h.store.db, passId)?.url).toBe(first.url);
+  });
+
   it('marks a failed gate in the header and the body, and the batch stays open', async () => {
     setup({ gateCommand: 'echo broken; exit 3' });
     const { passId, settings } = await openedPass();

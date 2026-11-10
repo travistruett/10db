@@ -324,8 +324,17 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
     const url = found.url;
     // GitHub may have merged it before the watch read it: a merged pull request takes no more
     // commits, so what the branch holds since goes to a follow-on pull request.
-    if ((await deps.gh.prView({ repo, ref: url }, call))?.state === PrState.Merged)
+    if ((await deps.gh.prView({ repo, ref: url }, call))?.state === PrState.Merged) {
+      // Merged as the branch is now: nothing is left for a follow-on, and the watch marks it merged.
+      await deps.git.fetch(project.repoPath, batch.baseBranch, networkCall(deps, signal));
+      const base = await deps.git.trackingTip(project.repoPath, batch.baseBranch);
+      if (
+        base !== null &&
+        (await deps.git.filesChangedBetween(project.repoPath, base, sha)).length === 0
+      )
+        return { url };
       return followOn(pass.id, signal, true);
+    }
     await deps.gh.prEditBody({ repo, url, bodyFile }, call);
     if (i.ready && found.draft !== false) {
       await deps.gh.prReady({ repo, url }, call);
