@@ -432,11 +432,21 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
     // Its work is in the base: the pass closes by itself (call 6).
     if (pr?.state === PullRequestState.Merged)
       return refuse("The pass's pull request has merged; 10db closes the pass", ahead);
-    if (tip === null || tip === pass.startSha)
+    if (tip === null || tip === pass.startSha) {
+      // A page signed off with no change of its own lands no commit, so the branch can stay where it
+      // started with pages signed off.
+      const signedOff = listPassTasks(db, passId).some(
+        (task) =>
+          task.workstreamId !== null &&
+          getWorkstream(db, task.workstreamId).state === WorkstreamState.Done,
+      );
       return refuse(
-        'Nothing is signed off yet: the pull request holds signed-off pages only',
+        signedOff
+          ? 'The signed-off pages changed no file: the pull request holds their changes only'
+          : 'Nothing is signed off yet: the pull request holds signed-off pages only',
         ahead,
       );
+    }
     if ((await deps.git.remoteUrl(repo, 'origin')) === null)
       return refuse(`${project.name} has no origin, so the pass lands by its close alone`, ahead);
     if (batch.repo === null)

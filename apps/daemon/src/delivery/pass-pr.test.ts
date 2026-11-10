@@ -127,7 +127,7 @@ const batchOf = (passId: PassId) => getPass(h.store.db, passId).batchId;
 describe('Open Pull Request', () => {
   it('is not offered before a page is signed off, nor with no origin', async () => {
     setup();
-    const { passId, settings } = await openedPass();
+    const { passId, settings, people } = await openedPass();
 
     expect(await prs.preview(passId)).toMatchObject({
       offered: false,
@@ -137,6 +137,16 @@ describe('Open Pull Request', () => {
       gate: 'scratch',
     });
     await expect(prs.open(passId)).rejects.toMatchObject({ name: 'ConflictError' });
+
+    // A page signed off with no change of its own lands no commit: the reason says so, not that
+    // nothing is signed off.
+    const run = getTask(h.store.db, people.id).workstreamId;
+    if (run === null) throw new Error('the task has no run');
+    h.settle(run, 'DONE');
+    expect(await prs.preview(passId)).toMatchObject({
+      offered: false,
+      reason: 'The signed-off pages changed no file: the pull request holds their changes only',
+    });
 
     signOff(settings, 'src/settings/page.tsx', 'signed off\n');
     h.git$('remote', 'remove', 'origin');
