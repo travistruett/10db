@@ -16,8 +16,10 @@ waiting: true` and the agent calls again with the same opId, which gets an answe
   calls. Allow goes on to the built wait for a holder, then the grant. Keep refuses with the instruction to
   keep the change inside the page. A reply refuses with the builder's words, which are written to the thread
   as a builder message already delivered, since the tool's answer delivers them. Park the task answers as
-  Keep, never parking a page, and the thread says so. The question is not a decision. A question left when
-  the daemon stops is withdrawn at start-up, and the agent asks again.
+  Keep, never parking a page, and the thread says so. The question is not a decision. A question is withdrawn,
+  and its wait ends with nothing, once the lane's turn has ended, so an area is never granted to a page
+  between turns; a reply that comes after the turn ended is written undelivered and starts the next
+  turn. A question left when the daemon stops is withdrawn at start-up, and the agent asks again.
 - **The grant.** The claim's synchronous look stays as built, so a held claim names its holder before the
   wait is joined. A free claim is granted by recording, in an unsigned commit on the chain's tip, every
   shared file of the area that differs from that tip, with its content, then writing the claim and its hold,
