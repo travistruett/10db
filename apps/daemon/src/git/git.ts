@@ -594,6 +594,46 @@ export interface Git {
     repo: string,
     paths: readonly string[],
   ): Promise<{ readonly path: string; readonly blob: string | null }[]>;
+  /**
+   * Puts each `entries` path back as commit `from` has it, under the repo lock: written through a
+   * private index (its mode and content; never through a link), or removed when `from` lacks it. Each
+   * file is hashed again just before it is written: one whose blob on disk is not the one `expect`
+   * names for it (null: not there) changed since it was checked, and is left as it is. HEAD and the
+   * folder's own index are untouched.
+   */
+  restoreFiles(
+    repo: string,
+    entries: readonly { readonly path: string; readonly from: string }[],
+    expect: readonly { readonly path: string; readonly blob: string | null }[],
+  ): Promise<{ readonly written: string[]; readonly left: string[] }>;
+  /**
+   * Brings `path` as commit `theirs` has it into the file on disk, by a three-way merge from its
+   * version in `base` (`merge-file`, which runs no driver), under the repo lock. `merged` when the file
+   * now holds both sides, or already did; `conflict` when they don't merge cleanly, a side is not a
+   * regular file, or the file changed while it merged, and then it is left as it is.
+   */
+  mergeFileBack(input: {
+    readonly repo: string;
+    readonly path: string;
+    readonly base: string;
+    readonly theirs: string;
+  }): Promise<'merged' | 'conflict'>;
+  /**
+   * Points HEAD from branch `from` at branch `to`, writing no file, only while HEAD names `from`, both
+   * branches are at `sha` and no other worktree has `to`; true when it did.
+   */
+  pointHeadAt(input: {
+    readonly repo: string;
+    readonly from: string;
+    readonly to: string;
+    readonly sha: string;
+  }): Promise<boolean>;
+  /**
+   * Refreshes the stat data of the folder's own index after 10db wrote `paths`, so the builder's git
+   * reads an unchanged file as unchanged; staged content is not touched. False when another git held
+   * the index.
+   */
+  refreshIndex(repo: string, paths: readonly string[]): Promise<boolean>;
   /** Keeps `text` at `ref`, under `refs/10db/`, as a blob nothing else names; it is set, whatever it held. */
   keepNote(repo: string, ref: string, text: string): Promise<void>;
   /** The text `keepNote` kept at `ref`; null when the ref is gone or names no blob. */
@@ -2358,6 +2398,172 @@ export function createGit(opts: GitOptions = {}): Git {
     return named.map((path) => ({ path, blob: blobs.get(path) ?? null }));
   }
 
+  /** The blob each of `paths` holds on disk; null for one that is not a file or a link. */
+  async function blobsOnDisk(c: Pinned, paths: readonly string[]): Promise<Map<string, string>> {
+    const listed = await withPrivateIndex(c, null, async (env) => {
+      await indexAsOnDisk(c, env, paths);
+      return git(c, ['ls-files', '-s', '-z'], { env });
+    });
+    return new Map(
+      listed
+        .split('\0')
+        .filter(Boolean)
+        .map((record) => {
+          const tab = record.indexOf('\t');
+          const [, oid = ''] = record.slice(0, tab).split(' ');
+          return [record.slice(tab + 1), oid] as const;
+        }),
+    );
+  }
+
+  /** The mode and blob `path` has in commit `rev`; null when it has none there. */
+  async function treeEntry(
+    c: Pinned,
+    rev: string,
+    path: string,
+  ): Promise<{ readonly mode: string; readonly oid: string } | null> {
+    const out = await git(c, ['ls-tree', '-z', '--full-tree', rev, '--', path], {
+      env: { GIT_LITERAL_PATHSPECS: '1' },
+    });
+    const found = parseTree(out).find((entry) => entry.path === path);
+    return found ? { mode: found.mode, oid: found.oid } : null;
+  }
+
+  async function restoreFiles(
+    repo: string,
+    entries: readonly { readonly path: string; readonly from: string }[],
+    expect: readonly { readonly path: string; readonly blob: string | null }[],
+  ): Promise<{ readonly written: string[]; readonly left: string[] }> {
+    const paths = checkPaths(
+      repo,
+      entries.map((entry) => entry.path),
+    );
+    const named = entries.map((entry, at) => ({ path: paths[at] ?? entry.path, from: entry.from }));
+    const expected = new Map(expect.map((e) => [e.path, e.blob]));
+    return withRepoLock(realpathSync(repo), async () => {
+      const c = await pinned(repo);
+      const written: string[] = [];
+      const left: string[] = [];
+      for (const { path, from } of [...named].sort((a, b) => (a.path < b.path ? -1 : 1))) {
+        const now = (await blobsOnDisk(c, [path])).get(path) ?? null;
+        if (!expected.has(path) || expected.get(path) !== now) {
+          left.push(path);
+          continue;
+        }
+        const target = await treeEntry(c, from, path);
+        const file = join(c.real, path);
+        if (target === null) {
+          const entry = lstatSync(file, { throwIfNoEntry: false });
+          if (entry?.isDirectory() === true) {
+            left.push(path);
+            continue;
+          }
+          if (entry) rmSync(file, { force: true });
+          written.push(path);
+          continue;
+        }
+        try {
+          await withPrivateIndex(c, null, async (env) => {
+            await git(
+              c,
+              ['update-index', '--add', '--cacheinfo', `${target.mode},${target.oid},${path}`],
+              {
+                env,
+              },
+            );
+            // Git checks every directory on the way and writes nothing through a link.
+            await git(c, ['checkout-index', '-f', '-q', '--', path], { env });
+          });
+          written.push(path);
+        } catch (error) {
+          if (!(error instanceof GitError)) throw error;
+          left.push(path);
+        }
+      }
+      return { written, left };
+    });
+  }
+
+  async function mergeFileBack(input: {
+    readonly repo: string;
+    readonly path: string;
+    readonly base: string;
+    readonly theirs: string;
+  }): Promise<'merged' | 'conflict'> {
+    const [path = input.path] = checkPaths(input.repo, [input.path]);
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const base = await treeEntry(c, input.base, path);
+      const theirs = await treeEntry(c, input.theirs, path);
+      if (base?.oid === theirs?.oid && base?.mode === theirs?.mode) return 'merged';
+      const file = join(c.real, path);
+      const entry = lstatSync(file, { throwIfNoEntry: false });
+      const regular = (e: { readonly mode: string } | null) =>
+        e !== null && REGULAR_FILE_MODES.includes(e.mode);
+      if (entry?.isFile() !== true || !regular(base) || !regular(theirs) || !base || !theirs)
+        return 'conflict';
+      const ours = readFileSync(file);
+      const bytes = async (oid: string): Promise<Buffer> =>
+        gitCapped(c, ['cat-file', 'blob', oid], RESOLVABLE_BYTES + 1);
+      const sides = [ours, await bytes(base.oid), await bytes(theirs.oid)];
+      // A file too big to merge by line is left, and named.
+      if (sides.some((side) => side.length > RESOLVABLE_BYTES)) return 'conflict';
+      const dir = mkdtempSync(join(tmpdir(), '10db-merge-'));
+      try {
+        const [oursAt, baseAt, theirsAt] = ['ours', 'base', 'theirs'].map((name, at) => {
+          const where = join(dir, name);
+          writeFileSync(where, sides[at] ?? Buffer.alloc(0));
+          return where;
+        });
+        if (oursAt === undefined || baseAt === undefined || theirsAt === undefined)
+          return 'conflict';
+        try {
+          await git(c, ['merge-file', '-q', oursAt, baseAt, theirsAt]);
+        } catch (error) {
+          if (error instanceof GitError) return 'conflict';
+          throw error;
+        }
+        // The builder's editor is not under the lock: a file written while it merged is left.
+        if (!readFileSync(file).equals(ours)) return 'conflict';
+        writeFileSync(file, readFileSync(oursAt));
+        return 'merged';
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+  }
+
+  async function pointHeadAt(input: {
+    readonly repo: string;
+    readonly from: string;
+    readonly to: string;
+    readonly sha: string;
+  }): Promise<boolean> {
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      if ((await currentBranch(c)) !== input.from) return false;
+      for (const branch of [input.from, input.to])
+        if ((await revParse(c, `refs/heads/${branch}^{commit}`)) !== input.sha) return false;
+      if ((await branchInUseElsewhere(c, input.to)) !== null) return false;
+      // Both branches are at the same commit, so naming the other moves no file and no index entry.
+      await git(c, ['symbolic-ref', '-m', '10db: pass', 'HEAD', `refs/heads/${input.to}`]);
+      return true;
+    });
+  }
+
+  async function refreshIndex(repo: string, paths: readonly string[]): Promise<boolean> {
+    if (paths.length === 0) return true;
+    const c = await pinned(repo);
+    try {
+      await git(c, ['update-index', '-q', '--ignore-submodules', '--refresh']);
+      return true;
+    } catch (error) {
+      if (!(error instanceof GitError)) throw error;
+      // Exit 1 is a file that still differs, which a refresh leaves to `status`.
+      return error.exitCode === 1;
+    }
+  }
+
   /** One fetch of `branch` into `origin/<branch>`, from origin's pinned fetch URL. */
   async function fetchOnce(repo: string, branch: string, net: NetworkCall): Promise<NetworkRun> {
     const c = await pinned(repo);
@@ -3282,6 +3488,10 @@ export function createGit(opts: GitOptions = {}): Git {
     keepWork,
     pageChanges,
     hashOnDisk,
+    restoreFiles,
+    mergeFileBack,
+    pointHeadAt,
+    refreshIndex,
     async conflictMarkers(repo, paths, rev = 'HEAD') {
       const c = await pinned(repo);
       const found: string[] = [];
