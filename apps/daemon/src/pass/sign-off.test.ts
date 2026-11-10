@@ -250,6 +250,33 @@ describe('signOffSteps', () => {
     );
   });
 
+  it('lands nothing when a message queues the next turn as the session stops', async () => {
+    w = await openPassWorld();
+    await turn(w.settings, () => {
+      w.write('src/settings/page.tsx', 'tidied\n');
+    });
+    w.ready(w.settings);
+    const ws = w.runOf(w.settings);
+
+    const outcome = await signOff(w.settings, {
+      ...w.deps,
+      stopLane: () => {
+        w.h.state.write((ctx) => {
+          insertBuilderMessage(ctx, w.settings.id, { body: 'one more thing', files: [] });
+          queueUntaken(ctx, ws, null, null);
+        });
+        return Promise.resolve();
+      },
+    });
+
+    expect(outcome).toMatchObject({ kind: 'not_now' });
+    expect(landed()).toEqual([]);
+    expect(getWorkstreamRow(w.h.store.db, ws).state).toBe('QUEUED');
+    expect(listTaskThread(w.h.store.db, w.settings.id).at(-1)?.body).toBe(
+      'Not signed off: the page took a message as its session stopped.',
+    );
+  });
+
   it.each([
     { name: 'a page', from: SignOffFrom.Page, closing: false },
     { name: "a close's Sign Off Now", from: SignOffFrom.Close, closing: true },

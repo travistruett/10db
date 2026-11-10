@@ -415,6 +415,9 @@ export async function signOffSteps(
   // Step 0: the page's session ends, and what its turn left is kept, its own holds with it.
   await deps.stopLane(ws);
   await closeHoldsOf(deps, ws);
+  // A message that came as the session stopped starts the page's next turn: nothing lands.
+  if (input.from !== SignOffFrom.Close && (!isReady(db, ws, true) || messageWaits(db, task.id)))
+    return notNow('the page took a message as its session stopped');
   const others = othersNeeded(db, pass.id, task.id);
   if (others.length > 0 && input.from !== SignOffFrom.Close) {
     const hold = others[0];
