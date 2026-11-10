@@ -89,6 +89,21 @@ export function passHoldingFolder(db: DbReader, projectId: ProjectId): PassDto |
 }
 
 /**
+ * Every project's passes the Workbench shows, oldest first: each that still holds Your folder, so an
+ * open, closing or abandoning one, and a closed one whose work is not yet in the base.
+ */
+export function listLivePasses(db: DbReader): PassDto[] {
+  const done = Object.values(PassState).filter((s) => !passHoldsFolder(s));
+  return db
+    .select()
+    .from(schema.passes)
+    .where(notInArray(schema.passes.state, done))
+    .orderBy(asc(schema.passes.openedAt), asc(schema.passes.id))
+    .all()
+    .map(toPassDto);
+}
+
+/**
  * The pass that still holds `task` as a pass task (`passHoldsTasks`), or undefined: a task of a
  * closed, settled or abandoned pass is ordinary work again.
  */

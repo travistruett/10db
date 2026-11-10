@@ -105,7 +105,7 @@ import { adoptGoal } from '../goals';
 import { GitError, type Git } from '../git';
 import { hazardAssessmentDto, type HazardAssessor } from '../hazards';
 import { earlierMcpApproval, requestMcpApproval, type InboxService } from '../inbox';
-import { passView, TakeOutWithin, type TakeOutInput } from '../pass';
+import { livePassViews, passView, TakeOutWithin, type TakeOutInput } from '../pass';
 import type { KeepAwake } from '../keep-awake';
 import type { Runner } from '../runner';
 import type { Scheduler } from '../scheduler';
@@ -379,6 +379,7 @@ export function createServices(deps: {
         );
       return deps.abandonPass(passId);
     },
+    livePasses: () => livePassViews(db),
     async stopPage(taskId) {
       const task = getTask(db, taskId);
       const pass = passHoldingTask(db, task);

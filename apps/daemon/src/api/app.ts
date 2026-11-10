@@ -743,6 +743,12 @@ export function createApp(deps: ApiDeps) {
     .post('/passes/:passId/abandon', async (c) =>
       c.json(await deps.services.abandonPass(PassId.parse(c.req.param('passId')))),
     )
+    // The Workbench's own routes (Workbench spec §4). Only the live list of passes is served.
+    .get(
+      '/passes',
+      validator('query', (query) => z.object({ live: z.literal('true') }).parse(query)),
+      (c) => c.json(deps.services.livePasses()),
+    )
     .post('/batches/:batchId/ship', (c) =>
       c.json(deps.services.shipBatch(BatchId.parse(c.req.param('batchId')))),
     )

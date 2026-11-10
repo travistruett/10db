@@ -27,6 +27,7 @@ import {
   insertWorkstream,
   leavePass,
   listPassDirt,
+  listLivePasses,
   listPassTasks,
   listUnfinishedAbandons,
   passHoldingFolder,
@@ -252,6 +253,21 @@ describe("a pass's hold on its tasks", () => {
     } else {
       expect(getWorkstreamRow(store.db, ordinary().id).batchId).toBeNull();
     }
+  });
+});
+
+describe('the live passes', () => {
+  it.each<{ state: PassState; live: boolean }>([
+    { state: PassState.Open, live: true },
+    { state: PassState.Closing, live: true },
+    { state: PassState.Abandoning, live: true },
+    { state: PassState.Closed, live: true },
+    { state: PassState.Settled, live: false },
+    { state: PassState.Abandoned, live: false },
+  ])('lists a $state pass as live: $live', ({ state, live }) => {
+    const { pass } = store.write((ctx) => insertPass(ctx, passInput([task()]))).value;
+    store.db.update(schema.passes).set({ state }).where(eq(schema.passes.id, pass.id)).run();
+    expect(listLivePasses(store.db).map((p) => p.id)).toEqual(live ? [pass.id] : []);
   });
 });
 

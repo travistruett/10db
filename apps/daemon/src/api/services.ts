@@ -265,6 +265,8 @@ export interface ApiServices {
    * neither open nor already abandoning.
    */
   abandonPass(passId: PassId): Promise<PassAbandonedDto>;
+  /** Every live pass as the Workbench reads it: open, closing, abandoning, or closed and not settled. */
+  livePasses(): PassViewDto[];
   /**
    * The project's goals, each with its digest and count of new items since the builder last opened
    * it, and the Ungrouped group. Leaves every view mark as it was.
