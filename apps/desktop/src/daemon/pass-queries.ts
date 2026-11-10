@@ -12,6 +12,7 @@ import {
   SessionActivityData,
   TakeOutResultDto,
   TaskMessageDto,
+  TurnActivityDto,
   type DaemonEvent,
   type GoalId,
   type InboxItemId,
@@ -123,6 +124,7 @@ export function writePassActivity(queryClient: QueryClient, event: DaemonEvent):
 
 const PassViewList = z.array(PassViewDto);
 const TurnList = z.array(PassTurnWithFilesDto);
+const ActivityList = z.array(TurnActivityDto);
 
 /** `GET /passes?live=true`, for a hook or a one-off read. */
 export function livePassesOptions(client: DaemonClient) {
@@ -187,6 +189,20 @@ export function useTurns(taskId: TaskId) {
           param: { taskId },
         }),
         TurnList,
+      ),
+  });
+}
+
+/** A turn's log, oldest first: what its session did. Read only while `enabled` (the log is open). */
+export function useTurnActivity(turnId: PassTurnId, enabled: boolean) {
+  const { client } = useDaemon();
+  return useQuery({
+    enabled,
+    queryKey: passKeys.activity(turnId),
+    queryFn: async () =>
+      readJson(
+        await client['pass-turns'][':turnId'].activity.$get({ param: { turnId } }),
+        ActivityList,
       ),
   });
 }

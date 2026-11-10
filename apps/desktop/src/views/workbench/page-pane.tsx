@@ -71,7 +71,11 @@ export function PagePane(props: PagePaneProps) {
       <Box style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
         <Thread page={page} turns={turns} openPage={openPage} />
         {status === PageStatus.Working && page.turn?.endedAt === null ? (
-          <WorkingLine line={liveLine(page.turn, now)} />
+          <WorkingLine
+            line={liveLine(page.turn, now)}
+            turnId={page.turn.id}
+            logTitle={`${page.area} · Turn ${String(page.turn.seq)}`}
+          />
         ) : null}
       </Box>
       {passOpen && status === PageStatus.Failed && page.failure !== null ? (

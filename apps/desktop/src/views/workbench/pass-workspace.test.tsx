@@ -121,6 +121,28 @@ describe('PassWorkspace working line', () => {
     expect(within(thread).getByText('Working · 5 min · editing settings/page.tsx')).toBeTruthy();
   });
 
+  it("opens the working turn's log from Show Log, read from that turn's activity", async () => {
+    const asked: string[] = [];
+    server.use(
+      http.get(daemonUrl('/pass-turns/:turnId/activity'), ({ params }) => {
+        asked.push(String(params['turnId']));
+        return HttpResponse.json([
+          { at: minutesBeforeNow(3), kind: 'tool', summary: 'Read src/billing/page.tsx' },
+          { at: minutesBeforeNow(1), kind: 'tool', summary: 'Edit src/billing/page.tsx' },
+        ]);
+      }),
+    );
+    const { pages } = await renderWorkspace((p) => p.working.taskId);
+    const thread = screen.getByRole('region', { name: 'Billing' });
+    // The log is read only once it is opened.
+    expect(asked).toEqual([]);
+    fireEvent.click(within(thread).getByRole('button', { name: 'Show Log' }));
+    const log = await screen.findByRole('dialog', { name: 'Billing · Turn 1' });
+    expect(await within(log).findByText('Read src/billing/page.tsx')).toBeTruthy();
+    expect(within(log).getByText('Edit src/billing/page.tsx')).toBeTruthy();
+    expect(new Set(asked)).toEqual(new Set([pages.working.turn?.id]));
+  });
+
   it('draws no working line on a page that is not working', async () => {
     await renderWorkspace((pages) => pages.ready.taskId);
     const thread = screen.getByRole('region', { name: 'Settings' });
