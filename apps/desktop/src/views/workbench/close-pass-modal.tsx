@@ -174,6 +174,12 @@ function CloseLists({ view, preview, choices, onChoices, disabled }: ListsProps)
   );
 }
 
+/** What a confirm found changed in the lists, said before the builder confirms again; null when nothing. */
+function changedLine(changed: readonly string[]): string | null {
+  if (changed.length === 0) return null;
+  return `The lists changed since you looked: ${changed.join('; ')}. Check them and close again.`;
+}
+
 export interface ClosePassModalProps {
   readonly view: PassViewDto;
   readonly onClose: () => void;
@@ -199,7 +205,8 @@ export function ClosePassModal({ view, onClose }: ClosePassModalProps) {
       onClose={onClose}
       title="Close Pass"
       size="lg"
-      error={closing.error?.message ?? read.error?.message ?? null}
+      // What changed goes beside Close Pass, where the next click lands, and is announced there.
+      error={closing.error?.message ?? read.error?.message ?? changedLine(again?.changed ?? [])}
       actions={
         <>
           <Button variant="default" onClick={onClose}>
@@ -232,18 +239,6 @@ export function ClosePassModal({ view, onClose }: ClosePassModalProps) {
         ) : null
       ) : (
         <Stack gap="lg">
-          {again === null || again.changed.length === 0 ? null : (
-            <Stack gap={4}>
-              <Text size="sm" c="yellow">
-                These changed since you looked; check the lists and close again:
-              </Text>
-              <List size="sm" aria-label="What changed">
-                {again.changed.map((line) => (
-                  <List.Item key={line}>{line}</List.Item>
-                ))}
-              </List>
-            </Stack>
-          )}
           <CloseLists
             view={view}
             preview={preview}

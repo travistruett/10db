@@ -164,8 +164,13 @@ describe('ClosePassModal', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Close Pass' });
     await within(dialog).findByRole('group', { name: 'Billing' });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Close Pass' }));
-    const changed = await within(dialog).findByRole('list', { name: 'What changed' });
-    expect(within(changed).getByText('src/new.css is a new edit no page owns')).toBeTruthy();
+    // Said beside Close Pass, where the second click lands, and announced.
+    const alert = within(dialog).getByRole('alert');
+    expect(
+      await within(alert).findByText(
+        'The lists changed since you looked: src/new.css is a new edit no page owns. Check them and close again.',
+      ),
+    ).toBeTruthy();
     expect(select(dialog, 'src/new.css')).toBeTruthy();
     expect(onClose).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Close Pass' }));
