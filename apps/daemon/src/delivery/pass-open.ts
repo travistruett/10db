@@ -13,6 +13,7 @@ import {
   passPagesProblem,
   PassState,
   slugOf,
+  StepRole,
   TaskStatus,
   type BatchDto,
   type Notice,
@@ -21,6 +22,7 @@ import {
   type PassId,
   type ProjectDto,
   type ProjectId,
+  type StepPlanDto,
   type TaskDto,
   type TaskId,
 } from '@10db/contracts';
@@ -31,6 +33,7 @@ import {
   findUnfinishedBatch,
   getProject,
   getTask,
+  getTaskKeptWork,
   getPass,
   getWorkstreamRow,
   insertPass,
@@ -41,7 +44,7 @@ import {
   type DbReader,
 } from '@10db/db';
 import { githubRepoOf } from '../github';
-import { insertPlannedWorkstream, planForStart } from '../team';
+import { insertPlannedWorkstream, resolveStepPlan } from '../team';
 import { lanesInProjectCheckout } from './checkout';
 import type { DeliveryContext } from './context';
 import { jobKey, JobQueue } from './jobs';
@@ -55,6 +58,25 @@ export interface PassOpenInput {
   readonly taskIds: readonly TaskId[];
   /** How many pages it holds, 4 when absent, 6 at most (W11). */
   readonly pageCap?: number;
+}
+
+/** What a put-back of a task's saved work did: the files it wrote, and those it left and named. */
+export interface PutBackResult {
+  readonly applied: readonly string[];
+  readonly left: readonly string[];
+}
+
+/** Puts a task's saved work back into the folder (spec §5.4); it never imports this module. */
+export type PutBackKeptWork = (input: {
+  readonly repo: string;
+  readonly taskId: TaskId;
+}) => Promise<PutBackResult>;
+
+export interface PassOpenDeps {
+  /** How long the page claims are leased before the scheduler renews them. */
+  readonly leaseMs: number;
+  /** Called for each task with saved work, once the pass is open, inside its job. */
+  readonly putBack: PutBackKeptWork;
 }
 
 /** A task whose page another task held when the pass opened: it waits for it. */
@@ -94,6 +116,23 @@ function pageWaitNotice(area: string, holder: TaskDto): Notice {
     line: `Waiting for area ${area}: task "${holder.title}" holds it`,
     body: `This page is claimed by "${holder.title}". It joins the pass as soon as that task lets it go.`,
   };
+}
+
+/**
+ * What a task in a pass runs: the project's implement step alone (D21). A pass is reviewed once, at
+ * its pull request, so no plan, review or QA step runs per turn.
+ */
+function passPlan(db: DbReader, task: TaskDto): StepPlanDto {
+  const plan = resolveStepPlan(db, task.id);
+  const at = plan.steps.findIndex((step) => step.role === StepRole.Implement);
+  const step = plan.steps[at];
+  if (step === undefined)
+    throw new InvalidError(`The ${plan.flowName} flow of "${task.title}" has no implement step`);
+  if (plan.overBudget.includes(at))
+    throw new InvalidError(
+      `The implement step of "${task.title}" (need ${String(step.need)} ${step.score}) has no profile within the budget ceiling: ${step.reason}. Raise the ceiling, lower the need or pin a persona.`,
+    );
+  return { flowName: plan.flowName, steps: [step], overBudget: [] };
 }
 
 /** Throws what refuses these tasks a pass in the project, read from the database; writes nothing. */
@@ -159,16 +198,17 @@ function returnBranchProblem(db: DbReader, project: ProjectDto, branch: string):
 /**
  * Opens a pass on Your folder, in the project's delivery queue and under the checkout's repo lock:
  * the pass's branch at HEAD with no file written, the folder's dirt recorded with its content, the
- * pass and its batch on any delivery, and each task's pages claimed through `acquireClaims`, as the
- * scheduler claims them. A page another task holds makes that task wait with the holder named. What
- * the database already refuses is refused before anything is queued; a start that slips in while git
- * works, or a HEAD on a branch that can't be returned to, is refused by the write, and the branch is
- * taken back. Every refusal rejects; once the pass is written it resolves.
+ * pass and its batch on any delivery, each task's run on the implement step alone, and each task's
+ * pages claimed through `acquireClaims`, as the scheduler claims them. A page another task holds makes
+ * that task wait with the holder named. What the database already refuses is refused before anything
+ * is queued; a start that slips in while git works, or a HEAD on a branch that can't be returned to,
+ * is refused by the write, and the branch is taken back. Every refusal rejects; once the pass is
+ * written it resolves, after each task's saved work has been put back, still in the job.
  */
 export async function openPass(
   ctx: DeliveryContext,
   input: PassOpenInput,
-  opts: { readonly leaseMs: number },
+  deps: PassOpenDeps,
 ): Promise<PassOpened> {
   const db = ctx.state.db;
   const project = getProject(db, input.projectId);
@@ -183,11 +223,15 @@ export async function openPass(
   const dirtRef = passDirtRef(id);
   return new Promise<PassOpened>((resolve, reject) => {
     ctx.jobs.run(jobKey({ projectId: project.id, worktreePath: null }, JobQueue.Cut), async () => {
+      let opened: PassOpened;
       try {
-        resolve(await ctx.git.operation(() => open()));
+        opened = await ctx.git.operation(() => open());
       } catch (error) {
         reject(error instanceof Error ? error : new Error(String(error)));
+        return;
       }
+      for (const task of tasks) if (getTaskKeptWork(db, task.id) !== null) await putBack(task.id);
+      resolve(opened);
     });
   });
 
@@ -220,15 +264,10 @@ export async function openPass(
           taskIds: tasks.map((t) => t.id),
           dirt: start.dirt,
         });
-        const leaseExpiresAt = new Date(ctx.clock.now().getTime() + opts.leaseMs).toISOString();
+        const leaseExpiresAt = new Date(ctx.clock.now().getTime() + deps.leaseMs).toISOString();
         const waiting: PassPageWait[] = [];
         for (const task of tasks) {
-          const ws = insertPlannedWorkstream(
-            w,
-            task.id,
-            planForStart(w.tx, task.id),
-            made.batch.id,
-          );
+          const ws = insertPlannedWorkstream(w, task.id, passPlan(w.tx, task), made.batch.id);
           const claimed = acquireClaims(w, {
             projectId: project.id,
             workstreamId: ws.id,
@@ -279,6 +318,27 @@ export async function openPass(
       aheadOfBase,
       waiting: written.waiting,
     };
+  }
+
+  /** Puts the task's saved work back; the pass is open either way, so a failure is logged, not thrown. */
+  async function putBack(taskId: TaskId): Promise<void> {
+    try {
+      const done = await deps.putBack({ repo: project.repoPath, taskId });
+      ctx.logger.info(
+        { projectId: project.id, passId: id, taskId, applied: done.applied, left: done.left },
+        'saved work put back',
+      );
+    } catch (error) {
+      ctx.logger.warn(
+        {
+          projectId: project.id,
+          passId: id,
+          taskId,
+          err: error instanceof Error ? error.message : String(error),
+        },
+        'saved work not put back',
+      );
+    }
   }
 
   /** The commits `startSha` has that origin's base lacks; null with none to compare, or when git can't say. */

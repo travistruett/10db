@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "seq": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "choice": {
+      "type": "string",
+      "enum": [
+        "keep",
+        "drop"
+      ]
+    }
+  },
+  "required": [
+    "seq",
+    "choice"
+  ]
+}

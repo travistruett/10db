@@ -1,4 +1,5 @@
 import {
+  AbandonStep,
   EventType,
   mintId,
   PassState,
@@ -11,21 +12,29 @@ import { eq } from 'drizzle-orm';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as schema from '../schema';
 import {
+  abandonPassAndBatch,
   countLanes,
   createTestStore,
   findOpenPass,
   getBatch,
   getPass,
   getTask,
+  getTaskKeptWork,
   getWorkstreamRow,
   insertBatch,
   insertPass,
   insertTask,
   insertWorkstream,
+  leavePass,
   listPassDirt,
+  listPassTasks,
   passHoldingFolder,
   passHoldingTask,
+  passPageAreas,
   seedProject,
+  setAbandonStep,
+  setTaskKeptWork,
+  transitionBatch,
   transitionWorkstream,
   type PassInsert,
   type Store,
@@ -283,5 +292,125 @@ describe('countLanes with a pass', () => {
     const lanes = countLanes(store.db);
     expect(lanes.byProject.get(project.id)).toBe(1);
     expect(lanes.byPass.get(pass.id)).toBeUndefined();
+  });
+});
+
+describe('leaving a pass', () => {
+  it('ends the membership: the pass no longer holds the task, and its lane counts for the project', () => {
+    const t = task();
+    const { pass, batch } = store.write((ctx) => insertPass(ctx, passInput([t]))).value;
+    store.write((ctx) => {
+      const ws = insertWorkstream(ctx, t, {
+        batchId: batch.id,
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      });
+      transitionWorkstream(ctx, ws.id, { to: S.Starting, fence: null });
+    });
+    expect(countLanes(store.db).byPass.get(pass.id)).toBe(1);
+    const { events } = store.write((ctx) => {
+      leavePass(ctx, t);
+    });
+    expect(events.map((e) => e.type)).toContain(EventType.TaskChanged);
+    expect(getTask(store.db, t).passId ?? null).toBeNull();
+    expect(passHoldingTask(store.db, getTask(store.db, t))).toBeUndefined();
+    expect(listPassTasks(store.db, pass.id)).toEqual([]);
+    const lanes = countLanes(store.db);
+    expect(lanes.byPass.get(pass.id)).toBeUndefined();
+    expect(lanes.byProject.get(project.id)).toBe(1);
+  });
+
+  it("keeps a taken-out task's saved work and the commit it was kept on, and clears them", () => {
+    const t = task();
+    expect(getTaskKeptWork(store.db, t)).toBeNull();
+    store.write((ctx) => {
+      setTaskKeptWork(ctx, t, { keptSha: 'b'.repeat(40), keptBaseSha: 'a'.repeat(40) });
+    });
+    expect(getTaskKeptWork(store.db, t)).toEqual({
+      keptSha: 'b'.repeat(40),
+      keptBaseSha: 'a'.repeat(40),
+    });
+    store.write((ctx) => {
+      setTaskKeptWork(ctx, t, null);
+    });
+    expect(getTaskKeptWork(store.db, t)).toBeNull();
+  });
+});
+
+describe("a pass's Abandon", () => {
+  it('records its steps: the first moves the pass to ABANDONING, and a step never goes back', () => {
+    const { pass } = store.write((ctx) => insertPass(ctx, passInput([task()]))).value;
+    const { events } = store.write((ctx) => {
+      setAbandonStep(ctx, pass.id, AbandonStep.Abandoning);
+    });
+    expect(events.map((e) => e.type)).toContain(EventType.PassChanged);
+    expect(getPass(store.db, pass.id).state).toBe(PassState.Abandoning);
+    store.write((ctx) => {
+      setAbandonStep(ctx, pass.id, AbandonStep.SessionsStopped);
+    });
+    expect(() =>
+      store.write((ctx) => {
+        setAbandonStep(ctx, pass.id, AbandonStep.ShipAborted);
+      }),
+    ).toThrow(/step 3/);
+    expect(
+      store.db.select().from(schema.passes).where(eq(schema.passes.id, pass.id)).get()?.abandonStep,
+    ).toBe(AbandonStep.SessionsStopped);
+  });
+
+  it('moves the pass and its batch to ABANDONED in one write', () => {
+    const { pass, batch } = store.write((ctx) => insertPass(ctx, passInput([task()]))).value;
+    store.write((ctx) => {
+      setAbandonStep(ctx, pass.id, AbandonStep.Abandoning);
+    });
+    store.write((ctx) => {
+      setAbandonStep(ctx, pass.id, AbandonStep.PagesTakenOut);
+    });
+    store.write((ctx) => {
+      abandonPassAndBatch(ctx, pass.id);
+    });
+    expect(getPass(store.db, pass.id).state).toBe(PassState.Abandoned);
+    expect(getBatch(store.db, batch.id).state).toBe('ABANDONED');
+    expect(findOpenPass(store.db, project.id)).toBeUndefined();
+  });
+
+  it('moves neither when the batch cannot be abandoned', () => {
+    const { pass, batch } = store.write((ctx) => insertPass(ctx, passInput([task()]))).value;
+    store.write((ctx) => {
+      setAbandonStep(ctx, pass.id, AbandonStep.Abandoning);
+    });
+    store.write((ctx) => transitionBatch(ctx, batch.id, { to: 'SHIPPING' }));
+    expect(() =>
+      store.write((ctx) => {
+        abandonPassAndBatch(ctx, pass.id);
+      }),
+    ).toThrow(/from SHIPPING to ABANDONED/);
+    expect(getPass(store.db, pass.id).state).toBe(PassState.Abandoning);
+    expect(getBatch(store.db, batch.id).state).toBe('SHIPPING');
+  });
+});
+
+describe("a pass's pages", () => {
+  it("are the project's page areas and each area with no role a task of the pass holds", () => {
+    const roled = seedProject(store, {
+      name: 'roled',
+      delivery: 'local',
+      areas: [
+        { name: 'settings', globs: ['src/settings/**'], role: 'page' },
+        { name: 'people', globs: ['src/people/**'], role: 'page' },
+        { name: 'profile', globs: ['src/profile/**'] },
+        { name: 'billing', globs: ['src/billing/**'] },
+        { name: 'src', globs: ['src/**'], role: 'shared' },
+      ],
+    });
+    const add = (title: string, areas: string[]) =>
+      store.write((ctx) => insertTask(ctx, roled.id, { title, acceptanceCriteria: ['x'], areas }))
+        .value.id;
+    const inPass = add('Settings', ['settings', 'profile', 'src']);
+    const outside = add('Billing', ['people', 'billing']);
+    const id = mintId('Pass');
+    store.write((ctx) => insertPass(ctx, { ...passInput([inPass], id), projectId: roled.id }));
+    expect(passPageAreas(store.db, id)).toEqual(['people', 'profile', 'settings']);
+    expect(listPassTasks(store.db, id).map((t) => t.id)).toEqual([inPass]);
+    expect(outside).toBeDefined();
   });
 });

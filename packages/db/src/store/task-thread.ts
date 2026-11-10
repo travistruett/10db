@@ -6,6 +6,7 @@ import {
   TaskMessageKind,
   type TaskFileDto,
   type TaskFileId,
+  type PassTurnId,
   type TaskId,
   type TaskMessageDto,
   type TaskMessageId,
@@ -74,6 +75,7 @@ export function insertBuilderMessage(
     createdAt: ctx.now,
     pushedAt: null,
     deliveredAt: null,
+    turnId: null,
   };
   ctx.tx.insert(schema.taskMessages).values(message).run();
   const files = input.files.map((file): TaskFileRow => ({
@@ -233,6 +235,35 @@ export function insertSystemNotice(
     createdAt: ctx.now,
     pushedAt: null,
     deliveredAt: null,
+    turnId: null,
+  };
+  ctx.tx.insert(schema.taskMessages).values(message).run();
+  ctx.emit({
+    type: EventType.TaskMessageAdded,
+    entityType: 'task',
+    entityId: taskId,
+    data: { projectId: task.projectId, messageId: message.id },
+  });
+  return toMessageDto(message, []);
+}
+
+/** Appends the agent's reply at the end of a pass turn, naming the turn, in the caller's write. */
+export function insertAgentReply(
+  ctx: WriteContext,
+  taskId: TaskId,
+  input: { readonly body: string; readonly turnId: PassTurnId },
+): TaskMessageDto {
+  const task = getTask(ctx.tx, taskId);
+  const message: MessageRow = {
+    id: mintId('TaskMessage'),
+    taskId,
+    author: TaskMessageAuthor.Agent,
+    kind: TaskMessageKind.Reply,
+    body: input.body,
+    createdAt: ctx.now,
+    pushedAt: null,
+    deliveredAt: null,
+    turnId: input.turnId,
   };
   ctx.tx.insert(schema.taskMessages).values(message).run();
   ctx.emit({

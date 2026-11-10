@@ -246,11 +246,12 @@ describe('file edits', () => {
     ).toBe('deny');
   });
 
-  // Workbench spec §7.3: in a pass a page's file is the page's, even when a shared area or a hazard
-  // the lane holds also matches it.
+  // Workbench spec §7.1, §7.3: in a pass a page's file is the page's, even when a shared area or a
+  // hazard the lane holds also matches it. An area with no role that a task of the pass holds is a page.
+  const PAGES = { pages: ['profile', 'settings'] };
   it.each<{
     name: string;
-    inPass: boolean;
+    inPass?: { pages: readonly string[] };
     claims: Claims;
     path: string;
     decision: 'allow' | 'deny';
@@ -258,7 +259,7 @@ describe('file edits', () => {
   }>([
     {
       name: 'in a pass, a page file under a held shared area is denied, naming the page',
-      inPass: true,
+      inPass: PAGES,
       claims: [{ kind: 'area', name: 'src' }],
       path: 'src/settings/page.tsx',
       decision: 'deny',
@@ -266,7 +267,7 @@ describe('file edits', () => {
     },
     {
       name: 'in a pass, a page file under a held hazard is denied before the hazard allows it',
-      inPass: true,
+      inPass: PAGES,
       claims: [
         { kind: 'area', name: 'src' },
         { kind: 'hazard', name: 'deps' },
@@ -277,14 +278,14 @@ describe('file edits', () => {
     },
     {
       name: 'in a pass, a page file is allowed to the lane holding that page',
-      inPass: true,
+      inPass: PAGES,
       claims: [{ kind: 'area', name: 'settings' }],
       path: 'src/settings/page.tsx',
       decision: 'allow',
     },
     {
       name: 'in a pass, a hazard under a held page still needs the hazard',
-      inPass: true,
+      inPass: PAGES,
       claims: [{ kind: 'area', name: 'settings' }],
       path: 'src/settings/package.json',
       decision: 'deny',
@@ -292,14 +293,38 @@ describe('file edits', () => {
     },
     {
       name: 'in a pass, a shared file is allowed under the held shared area',
-      inPass: true,
+      inPass: PAGES,
       claims: [{ kind: 'area', name: 'src' }],
       path: 'src/lib/button.tsx',
       decision: 'allow',
     },
     {
+      name: "in a pass, another task's area with no role under a held shared area is denied, naming it",
+      inPass: PAGES,
+      claims: [{ kind: 'area', name: 'src' }],
+      path: 'src/profile/card.tsx',
+      decision: 'deny',
+      reason: 'page "profile"',
+    },
+    {
+      name: "in a pass, the lane's own area with no role is allowed",
+      inPass: PAGES,
+      claims: [
+        { kind: 'area', name: 'settings' },
+        { kind: 'area', name: 'profile' },
+      ],
+      path: 'src/profile/card.tsx',
+      decision: 'allow',
+    },
+    {
+      name: 'in a pass, an area with no role no task of the pass holds is allowed under a held shared area',
+      inPass: { pages: ['settings'] },
+      claims: [{ kind: 'area', name: 'src' }],
+      path: 'src/profile/card.tsx',
+      decision: 'allow',
+    },
+    {
       name: 'outside a pass, a page file under a held shared area is allowed as before',
-      inPass: false,
       claims: [{ kind: 'area', name: 'src' }],
       path: 'src/settings/page.tsx',
       decision: 'allow',
@@ -311,12 +336,13 @@ describe('file edits', () => {
       repoPath: repo.path,
       areas: [
         { name: 'settings', globs: ['src/settings/**'], role: 'page', route: '/settings' },
+        { name: 'profile', globs: ['src/profile/**'] },
         { name: 'src', globs: ['src/**'], role: 'shared' },
       ],
       hazards: DEFAULT_HAZARDS,
       claims,
       readOnly: false,
-      inPass,
+      ...(inPass === undefined ? {} : { inPass }),
       protectedPaths: guarded(),
     });
     expect(verdict.decision).toBe(decision);

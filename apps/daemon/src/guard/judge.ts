@@ -1,7 +1,7 @@
 import { lstatSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join, sep } from 'node:path';
-import { AreaRole, ClaimKind, type AreaDef, type Delivery, type HazardDef } from '@10db/contracts';
+import { ClaimKind, type AreaDef, type Delivery, type HazardDef } from '@10db/contracts';
 import { z } from 'zod';
 import { isOwnFile, isOwnToolResult, pathRefusal, type ProtectedPath } from './account-rules';
 import { commandForms, runCommandStarts, startsWithWords } from './command-forms';
@@ -45,10 +45,12 @@ export interface GuardInput {
   /** A read-only step: file writes and writing shell commands are refused, claims or not. */
   readonly readOnly: boolean;
   /**
-   * The lane is a Workbench pass's: a file under a page area is the page's alone, so only the lane
-   * holding that page may write it, whatever shared area or hazard it holds that also matches.
+   * The lane is a Workbench pass's, and `pages` are the areas that are pages in it: every page area
+   * and each area with no role a task of the pass holds (`passPageAreas`). A file under one is that
+   * page's alone, so only the lane holding it may write it, whatever shared area or hazard it holds
+   * that also matches.
    */
-  readonly inPass?: boolean;
+  readonly inPass?: { readonly pages: readonly string[] };
   /** The project's delivery; absent means local. In pull-request projects only the daemon pushes. */
   readonly delivery?: Delivery;
   /** Paths the file tools may not touch: the data directory and the default account's sign-in. */
@@ -130,12 +132,11 @@ function claimed(input: GuardInput, kind: ClaimKind, name: string): boolean {
   return input.claims.some((c) => c.kind === kind && c.name === name);
 }
 
-/** In a pass, the page a path belongs to that the lane does not hold, or null (spec §7.3). */
+/** In a pass, the page a path belongs to that the lane does not hold, or null (spec §7.1, §7.3). */
 function unheldPage(input: GuardInput, areas: readonly string[]): string | null {
-  if (input.inPass !== true) return null;
-  const pages = areas.filter((name) =>
-    input.areas.some((a) => a.name === name && a.role === AreaRole.Page),
-  );
+  if (input.inPass === undefined) return null;
+  const passPages = input.inPass.pages;
+  const pages = areas.filter((name) => passPages.includes(name));
   if (pages.length === 0 || pages.some((p) => claimed(input, ClaimKind.Area, p))) return null;
   return pages[0] ?? null;
 }

@@ -14,6 +14,14 @@ export const EventType = {
   TaskMessageAdded: 'task.message_added',
   /** A Workbench pass opened in Your folder; `data.batchId` names its batch. */
   PassOpened: 'pass.opened',
+  /** A pass moved on as a whole (it is abandoning or abandoned); `data` names what changed. */
+  PassChanged: 'pass.changed',
+  /** A turn of a pass task began; `data.turnId` names it. */
+  PassTurnStarted: 'pass.turn_started',
+  /** A turn of a pass task ended, ready, stopped or failed; `data.turnId` names it. */
+  PassTurnEnded: 'pass.turn_ended',
+  /** A pass task's page is Ready for the builder; `data.turnId` names the turn that made it so. */
+  PassPageReady: 'pass.page_ready',
   WorkstreamCreated: 'workstream.created',
   WorkstreamChanged: 'workstream.changed',
   SessionStarted: 'session.started',

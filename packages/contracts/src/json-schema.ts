@@ -1,6 +1,17 @@
 import { z } from 'zod';
 import { TaskFileDto, TaskMessageDto, TaskMessageInput, TaskThreadDto } from './task-thread';
 import {
+  PassAbandonedDto,
+  PassCheckDetail,
+  PassDto,
+  PassOpenedDto,
+  PassOpenRequest,
+  PassTurnDto,
+  PassViewDto,
+  SharedChoice,
+  TakeOutResultDto,
+} from './passes';
+import {
   BatchDto,
   BatchStartInput,
   BatchStartResult,
@@ -318,6 +329,15 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'task-message-dto': TaskMessageDto,
   'task-message-input': TaskMessageInput,
   'task-thread-dto': TaskThreadDto,
+  'pass-dto': PassDto,
+  'pass-view-dto': PassViewDto,
+  'pass-turn-dto': PassTurnDto,
+  'pass-check-detail': PassCheckDetail,
+  'pass-open-request': PassOpenRequest,
+  'pass-opened-dto': PassOpenedDto,
+  'take-out-result-dto': TakeOutResultDto,
+  'pass-abandoned-dto': PassAbandonedDto,
+  'shared-choice': SharedChoice,
   ...mcpSchemas,
   ...builderMcpSchemas,
   ...shapeMcpSchemas,

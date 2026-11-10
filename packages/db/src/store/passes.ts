@@ -1,11 +1,16 @@
 import {
+  AbandonStep,
+  AreaRole,
+  BatchState,
   ConflictError,
   EventType,
   NotFoundError,
   OPEN_PASS_STATES,
   PassState,
+  passHeldAreas,
   passHoldsFolder,
   passHoldsTasks,
+  TaskStatus,
   type BatchDto,
   type PassDirtEntry,
   type PassDto,
@@ -14,9 +19,10 @@ import {
   type TaskDto,
   type TaskId,
 } from '@10db/contracts';
-import { and, asc, eq, inArray, notInArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, ne, notInArray } from 'drizzle-orm';
 import * as schema from '../schema';
-import { findUnfinishedBatch, insertBatch } from './batches';
+import { findUnfinishedBatch, insertBatch, transitionBatch } from './batches';
+import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
 import { getTask } from './tasks';
 
@@ -191,4 +197,112 @@ export function insertPass(
     data: { projectId: input.projectId, batchId: batch.id },
   });
   return { pass: getPass(ctx.tx, input.id), batch };
+}
+
+/** The tasks in the pass now, oldest first: a task that left it is not one. */
+export function listPassTasks(db: DbReader, passId: PassId): TaskDto[] {
+  return db
+    .select({ id: schema.tasks.id })
+    .from(schema.tasks)
+    .where(and(eq(schema.tasks.passId, passId), ne(schema.tasks.status, TaskStatus.Cancelled)))
+    .orderBy(asc(schema.tasks.createdAt), asc(schema.tasks.id))
+    .all()
+    .map((row) => getTask(db, row.id));
+}
+
+/**
+ * Ends the task's membership of its pass (a take-out, an Abandon, a close): the pass no longer holds
+ * it, so the scheduler, `countLanes` and the guard treat it as ordinary work. A task in no pass is left
+ * as it is.
+ */
+export function leavePass(ctx: WriteContext, taskId: TaskId): void {
+  const task = getTask(ctx.tx, taskId);
+  if (task.passId == null) return;
+  ctx.tx
+    .update(schema.tasks)
+    .set({ passId: null, updatedAt: ctx.now })
+    .where(eq(schema.tasks.id, taskId))
+    .run();
+  ctx.emit({
+    type: EventType.TaskChanged,
+    entityType: 'task',
+    entityId: taskId,
+    data: { leftPassId: task.passId },
+  });
+}
+
+/**
+ * The areas that are pages in the pass (spec §7.1, §7.3): every page area of the project, and each area
+ * with no role that a task of the pass holds. A file under one belongs to the task holding it alone.
+ */
+export function passPageAreas(db: DbReader, passId: PassId): string[] {
+  const pass = getPass(db, passId);
+  const { areas } = getProject(db, pass.projectId);
+  const pages = new Set(areas.filter((a) => a.role === AreaRole.Page).map((a) => a.name));
+  for (const task of listPassTasks(db, passId))
+    for (const name of passHeldAreas(areas, task)) pages.add(name);
+  return [...pages].sort();
+}
+
+/** The last step of the pass's Abandon that finished, or null while it is not abandoning. */
+export function getAbandonStep(db: DbReader, passId: PassId): AbandonStep | null {
+  const row = db
+    .select({ step: schema.passes.abandonStep })
+    .from(schema.passes)
+    .where(eq(schema.passes.id, passId))
+    .get();
+  if (!row) throw new NotFoundError('pass', passId);
+  return row.step;
+}
+
+/**
+ * Records a finished step of the pass's Abandon (spec §5.4), so a restart goes on from the next. The
+ * first step moves an open pass to `ABANDONING`; a step is never recorded below the last one.
+ */
+export function setAbandonStep(ctx: WriteContext, passId: PassId, step: AbandonStep): void {
+  const pass = getPass(ctx.tx, passId);
+  const last = getAbandonStep(ctx.tx, passId);
+  const from: readonly PassState[] =
+    step === AbandonStep.Abandoning
+      ? [PassState.Open, PassState.Abandoning]
+      : [PassState.Abandoning];
+  if (!from.includes(pass.state))
+    throw new ConflictError(`Pass "${pass.name}" is ${pass.state.toLowerCase()}`);
+  if (last !== null && step < last)
+    throw new ConflictError(
+      `Pass "${pass.name}" has finished step ${String(last)} of its Abandon, past step ${String(step)}`,
+    );
+  ctx.tx
+    .update(schema.passes)
+    .set({ state: PassState.Abandoning, abandonStep: step, updatedAt: ctx.now })
+    .where(eq(schema.passes.id, passId))
+    .run();
+  ctx.emit({
+    type: EventType.PassChanged,
+    entityType: 'pass',
+    entityId: passId,
+    data: { projectId: pass.projectId, state: PassState.Abandoning, abandonStep: step },
+  });
+}
+
+/**
+ * Step 7 of an Abandon: the pass and its batch both become `ABANDONED` in the caller's write, or neither
+ * does. The batch moves from `OPEN` or `FAILED`, the edges that exist.
+ */
+export function abandonPassAndBatch(ctx: WriteContext, passId: PassId): void {
+  const pass = getPass(ctx.tx, passId);
+  if (pass.state !== PassState.Abandoning)
+    throw new ConflictError(`Pass "${pass.name}" is ${pass.state.toLowerCase()}, not abandoning`);
+  ctx.tx
+    .update(schema.passes)
+    .set({ state: PassState.Abandoned, abandonStep: AbandonStep.Abandoned, updatedAt: ctx.now })
+    .where(eq(schema.passes.id, passId))
+    .run();
+  transitionBatch(ctx, pass.batchId, { to: BatchState.Abandoned, reason: 'pass abandoned' });
+  ctx.emit({
+    type: EventType.PassChanged,
+    entityType: 'pass',
+    entityId: passId,
+    data: { projectId: pass.projectId, state: PassState.Abandoned },
+  });
 }

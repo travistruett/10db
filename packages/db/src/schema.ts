@@ -1,6 +1,8 @@
 import type {
   AaModelDto,
+  AbandonStep,
   AccountId,
+  AppUrl,
   AccountSettings,
   AreaDef,
   BatchFailure,
@@ -49,6 +51,10 @@ import type {
   ModelTier,
   PassId,
   PassState,
+  PassTurnCheck,
+  PassTurnEnding,
+  PassTurnId,
+  TakeOutStep,
   PatternId,
   PatternMatch,
   ModelProfileId,
@@ -255,6 +261,8 @@ export const projects = sqliteTable('projects', {
     .$type<string[]>()
     .notNull()
     .default(sql`'["migrations","deps"]'`),
+  /** Where the builder's dev server answers, a loopback origin; null when the project has not said. */
+  appUrl: text('app_url').$type<AppUrl>(),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -422,6 +430,10 @@ export const tasks = sqliteTable(
     passId: text('pass_id')
       .$type<PassId>()
       .references((): AnySQLiteColumn => passes.id),
+    /** A task taken out of a pass: its saved work, at `refs/10db/kept/<task id>`; null with none. */
+    keptWorkSha: text('kept_work_sha'),
+    /** The pass branch tip that saved work was kept on; set with `kept_work_sha`. */
+    keptBaseSha: text('kept_base_sha'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -1330,6 +1342,10 @@ export const taskMessages = sqliteTable(
     pushedAt: text('pushed_at'),
     /** When a turn took it in; a message pushed and not delivered is sent again. */
     deliveredAt: text('delivered_at'),
+    /** The pass turn the message started, or the turn whose reply it is; null outside a pass's turns. */
+    turnId: text('turn_id')
+      .$type<PassTurnId>()
+      .references((): AnySQLiteColumn => passTurns.id),
   },
   (t) => [index('task_messages_task_idx').on(t.taskId, t.id)],
 );
@@ -1594,6 +1610,8 @@ export const passes = sqliteTable(
     returnBranch: text('return_branch').notNull(),
     /** The commit HEAD was at when the pass opened; the pass's branch starts here. */
     startSha: text('start_sha').notNull(),
+    /** The last step of its Abandon that finished; null while it is not abandoning. */
+    abandonStep: integer('abandon_step').$type<AbandonStep>(),
     openedAt: text('opened_at').notNull(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -1623,4 +1641,92 @@ export const passDirt = sqliteTable(
     createdAt: createdAt(),
   },
   (t) => [primaryKey({ columns: [t.passId, t.path] })],
+);
+
+/**
+ * One turn of a pass task (Workbench spec §6.2, §11): from the builder message that started it to the
+ * end of the agent's work on it. `ended_at` and `ending` are written together, and `settled_at` once
+ * the end has been carried through, so a restart between the two finishes the turn by its `ending`.
+ */
+export const passTurns = sqliteTable(
+  'pass_turns',
+  {
+    id: text('id').$type<PassTurnId>().primaryKey(),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .notNull()
+      .references(() => tasks.id),
+    workstreamId: text('workstream_id')
+      .$type<WorkstreamId>()
+      .notNull()
+      .references(() => workstreams.id),
+    sessionId: text('session_id')
+      .$type<SessionId>()
+      .references(() => sessions.id),
+    /** The task's turn number, from 1. */
+    seq: integer('seq').notNull(),
+    messageId: text('message_id')
+      .$type<TaskMessageId>()
+      .references((): AnySQLiteColumn => taskMessages.id),
+    startedAt: text('started_at').notNull(),
+    endedAt: text('ended_at'),
+    ending: text('ending').$type<PassTurnEnding>(),
+    settledAt: text('settled_at'),
+    /** The task's kept commit after the turn; may stay null while the task never changed a page file. */
+    keptSha: text('kept_sha'),
+    /** The pass branch tip the work was compared with; null until the turn's work is kept. */
+    keptBaseSha: text('kept_base_sha'),
+    /** The highest shared-change number granted in the pass when the turn ended; null with none. */
+    sharedSeq: integer('shared_seq'),
+    check: text('check').$type<PassTurnCheck>().notNull().default('none'),
+    readyAt: text('ready_at'),
+    openedAt: text('opened_at'),
+    answeredAt: text('answered_at'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex('pass_turns_task_seq').on(t.taskId, t.seq),
+    index('pass_turns_workstream_idx').on(t.workstreamId),
+    uniqueIndex('pass_turns_one_open')
+      .on(t.taskId)
+      .where(sql`ended_at IS NULL`),
+  ],
+);
+
+/**
+ * A take-out of a task from a pass (Workbench spec §5.4), one row per task and pass: the last step that
+ * finished, so a restart goes on from the next; the kept commit it made; the files the put-back left;
+ * and the shared changes chosen Drop.
+ */
+export const passTakeOuts = sqliteTable(
+  'pass_take_outs',
+  {
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .notNull()
+      .references(() => tasks.id),
+    passId: text('pass_id')
+      .$type<PassId>()
+      .notNull()
+      .references(() => passes.id),
+    step: integer('step').$type<TakeOutStep>().notNull(),
+    /** How many times steps 1 to 3 have run: three at most. */
+    tries: integer('tries').notNull().default(0),
+    keptSha: text('kept_sha'),
+    keptBaseSha: text('kept_base_sha'),
+    /** Files the put-back did not write, because they changed after they were checked. */
+    left: text('left', { mode: 'json' })
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    /** The shared-change numbers chosen Drop. */
+    drops: text('drops', { mode: 'json' })
+      .$type<number[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [primaryKey({ columns: [t.taskId, t.passId] })],
 );

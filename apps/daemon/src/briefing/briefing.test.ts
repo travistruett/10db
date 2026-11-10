@@ -1340,6 +1340,7 @@ describe('the gate in a brief', () => {
     ['verify', { kind: 'verify' }],
     ['revise', { kind: 'revise', reviewStep: 0 }],
     ['builder review', { kind: 'builder_review', inboxId: mintId('InboxItem') }],
+    ['pass review', { kind: 'pass_review', inboxId: mintId('InboxItem') }],
   ];
   const briefs = actions.flatMap(([name, action]) =>
     [implementStep, reviewStep].flatMap((step) =>

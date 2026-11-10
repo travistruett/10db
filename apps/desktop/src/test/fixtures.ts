@@ -54,6 +54,7 @@ export function projectDto(overrides: Partial<ProjectDto> = {}): ProjectDto {
     workspaceMode: 'shared',
     worktreeSeed: ['node_modules'],
     isolate: ['migrations', 'deps'],
+    appUrl: null,
     createdAt: AT,
     updatedAt: AT,
     ...overrides,

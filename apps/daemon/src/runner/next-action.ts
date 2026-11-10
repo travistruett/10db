@@ -25,6 +25,7 @@ export function nextActionAfterCrash(
     case 'uncommitted':
     case 'merge':
     case 'builder_review':
+    case 'pass_review':
       return previous;
     case 'answer':
       return { ...previous, providerSessionId: providerSessionId ?? previous.providerSessionId };
@@ -70,6 +71,7 @@ export function nextActionOnAnotherAccount(
     case 'verify':
     case 'revise':
     case 'builder_review':
+    case 'pass_review':
       return previous;
   }
 }
@@ -80,9 +82,14 @@ export function nextActionOnAnotherAccount(
  * starts the next session, resuming the conversation the action would resume, else fresh from the
  * thread's digest. A `feedback` keeps the message it was started for, and an action that brings its
  * own builder input or verification keeps it: every session start hands the session the other
- * messages no turn took, after its prompt.
+ * messages no turn took, after its prompt. A Ready page of a pass names no conversation of its own,
+ * so it resumes `ended`, the provider session that just ended, else starts fresh.
  */
-export function withUndelivered(next: NextAction, messageId: TaskMessageId | null): NextAction {
+export function withUndelivered(
+  next: NextAction,
+  messageId: TaskMessageId | null,
+  ended?: string | null,
+): NextAction {
   if (messageId === null) return next;
   switch (next.kind) {
     case 'feedback':
@@ -92,6 +99,8 @@ export function withUndelivered(next: NextAction, messageId: TaskMessageId | nul
     case 'start':
     case 'continue_from_handoff':
       return { kind: 'feedback', messageId, providerSessionId: null };
+    case 'pass_review':
+      return { kind: 'feedback', messageId, providerSessionId: ended ?? null };
     case 'answer':
     case 'fix':
     case 'uncommitted':
@@ -131,6 +140,7 @@ export function resumedSessionOf(action: NextAction): string | null {
     case 'verify':
     case 'revise':
     case 'builder_review':
+    case 'pass_review':
       return null;
   }
 }

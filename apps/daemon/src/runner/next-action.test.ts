@@ -101,6 +101,12 @@ describe('nextActionAfterCrash with builder input', () => {
       'p1',
       { kind: 'merge', base: 'origin/main', paths: ['src/api/a.ts'] },
     ],
+    [
+      "keeps a Ready page of a pass on its item: the builder's next message starts its turn",
+      { kind: 'pass_review', inboxId },
+      'p1',
+      { kind: 'pass_review', inboxId },
+    ],
   ])('%s', (_name, previous, providerSessionId, expected) => {
     expect(nextActionAfterCrash(previous, providerSessionId, handoff)).toEqual(expected);
   });
@@ -187,13 +193,20 @@ describe('nextActionOnAnotherAccount', () => {
       evidenceId,
       { kind: 'fix', evidenceId },
     ],
+    [
+      'leaves a Ready page of a pass alone',
+      { kind: 'pass_review', inboxId },
+      handoff,
+      null,
+      { kind: 'pass_review', inboxId },
+    ],
   ])('%s', (_name, previous, latest, failedGate, expected) => {
     expect(nextActionOnAnotherAccount(previous, latest, failedGate)).toEqual(expected);
   });
 });
 
 describe('withUndelivered', () => {
-  it.each<[string, NextAction, TaskMessageId | null, NextAction]>([
+  it.each<[string, NextAction, TaskMessageId | null, NextAction, (string | null)?]>([
     [
       'leaves the action alone when every message was taken',
       { kind: 'start' },
@@ -232,8 +245,28 @@ describe('withUndelivered', () => {
     ],
     ['keeps verification', { kind: 'verify' }, messageId, { kind: 'verify' }],
     ['keeps a fix', { kind: 'fix', evidenceId }, messageId, { kind: 'fix', evidenceId }],
-  ])('%s', (_name, next, undelivered, expected) => {
-    expect(withUndelivered(next, undelivered)).toEqual(expected);
+    [
+      'leaves a Ready page of a pass on its item when every message was taken',
+      { kind: 'pass_review', inboxId },
+      null,
+      { kind: 'pass_review', inboxId },
+      'p1',
+    ],
+    [
+      "turns a Ready page whose session ended with the builder's message untaken into that message, resuming the session",
+      { kind: 'pass_review', inboxId },
+      messageId,
+      { kind: 'feedback', messageId, providerSessionId: 'p1' },
+      'p1',
+    ],
+    [
+      'turns a Ready page with an untaken message and no session to resume into that message, fresh',
+      { kind: 'pass_review', inboxId },
+      messageId,
+      { kind: 'feedback', messageId, providerSessionId: null },
+    ],
+  ])('%s', (_name, next, undelivered, expected, ended) => {
+    expect(withUndelivered(next, undelivered, ended)).toEqual(expected);
   });
 });
 

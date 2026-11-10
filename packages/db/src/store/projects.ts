@@ -82,6 +82,7 @@ export function insertProject(ctx: WriteContext, input: ProjectInput): ProjectDt
     moveBackAt: null,
     sandboxDockerOptOut: false,
     moveBackAutomatic: false,
+    appUrl: null,
     provider: Provider.Claude,
     createdAt: ctx.now,
     updatedAt: ctx.now,

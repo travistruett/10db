@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  AppUrl,
   DEFAULT_HAZARDS,
   EvidenceDto,
   FollowUpInput,
@@ -9,6 +10,9 @@ import {
   McpToolInputs,
   mintId,
   NextAction,
+  PassCheckDetail,
+  PassTurnId,
+  PassViewDto,
   passHeldAreas,
   passPagesProblem,
   ProjectInput,
@@ -331,6 +335,7 @@ describe('NextAction', () => {
     [{ kind: 'resume', providerSessionId: 'abc', reason: 'daemon restarted' }],
     [{ kind: 'uncommitted', paths: ['src/api/a.ts'] }],
     [{ kind: 'merge', base: 'origin/main', paths: ['src/api/a.ts'] }],
+    [{ kind: 'pass_review', inboxId: mintId('InboxItem') }],
   ])('accepts %j', (value) => {
     expect(NextAction.parse(value)).toEqual(value);
   });
@@ -459,6 +464,92 @@ describe('the pages of a pass', () => {
       'people',
       'api',
     ]);
+  });
+});
+
+describe("a pass's turns and view", () => {
+  it('mints a turn id that parses back and no other kind', () => {
+    const id = mintId('PassTurn');
+    expect(id).toMatch(/^ptn_/);
+    expect(PassTurnId.parse(id)).toBe(id);
+    expect(PassTurnId.safeParse(mintId('Task')).success).toBe(false);
+  });
+
+  it("reads a Ready page's check detail, with no kept commit while the task never changed a page file", () => {
+    const detail = {
+      passId: mintId('Pass'),
+      taskId: mintId('Task'),
+      workstreamId: mintId('Workstream'),
+      turnId: mintId('PassTurn'),
+      keptSha: null,
+      keptBaseSha: 'a'.repeat(40),
+      turnFiles: [],
+      pageFiles: [{ path: 'src/settings/page.tsx', added: 4, removed: 1 }],
+    };
+    expect(PassCheckDetail.parse(detail)).toEqual(detail);
+    expect(PassCheckDetail.safeParse({ ...detail, turnId: mintId('Task') }).success).toBe(false);
+  });
+
+  it('reads a view whose page has no run yet and whose sign-off is none', () => {
+    const at = '2026-11-09T12:00:00.000Z';
+    const view = {
+      pass: {
+        id: mintId('Pass'),
+        projectId: mintId('Project'),
+        name: 'Polish',
+        state: 'OPEN',
+        batchId: mintId('Batch'),
+        pageCap: 4,
+        returnBranch: 'main',
+        startSha: 'a'.repeat(40),
+        openedAt: at,
+        createdAt: at,
+        updatedAt: at,
+      },
+      pages: [
+        {
+          taskId: mintId('Task'),
+          title: 'Settings',
+          area: 'settings',
+          route: null,
+          workstreamId: null,
+          state: null,
+          nextActionKind: null,
+          spokenTo: false,
+          turn: null,
+          pausedUntil: null,
+          failure: null,
+          signOff: 'none',
+        },
+      ],
+      turns: [],
+    };
+    expect(PassViewDto.parse(view)).toEqual(view);
+    expect(
+      PassViewDto.safeParse({ ...view, pages: [{ ...view.pages[0], nextActionKind: 'nap' }] })
+        .success,
+    ).toBe(false);
+  });
+});
+
+describe("a project's app address", () => {
+  it.each([
+    ['http://localhost:8800', true],
+    ['http://localhost', true],
+    ['https://127.0.0.1:3000', true],
+    ['http://[::1]:5173', true],
+    ['http://ampsio.localhost:8800', true],
+    ['http://example.com', false],
+    ['http://localhost.example.com:8800', false],
+    ['http://10.0.0.1:8800', false],
+    ['ftp://localhost:21', false],
+    ['http://localhost:8800/people', false],
+    ['http://localhost:8800/', false],
+    ['http://me@localhost:8800', false],
+    ['http://LOCALHOST:8800', false],
+    ['localhost:8800', false],
+  ])('%s is a loopback origin: %s', (url, ok) => {
+    expect(AppUrl.safeParse(url).success).toBe(ok);
   });
 });
 

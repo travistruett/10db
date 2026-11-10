@@ -19,6 +19,7 @@ import {
 } from '@10db/contracts';
 import {
   activeClaims,
+  findFlowByName,
   getBatch,
   getTask,
   getWorkstream,
@@ -28,6 +29,7 @@ import {
   listBoardColumns,
   patchTask,
   schema,
+  setTaskKeptWork,
   transitionWorkstream,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -35,7 +37,14 @@ import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery
 import { silentLogger } from '../log';
 import { PASS_HOLDS_FOLDER_REASON } from '../placement';
 import { systemProcesses } from '../recovery';
-import { openPass, passBranchName, passDirtRef, recoverBatches, type PassOpenInput } from './index';
+import {
+  openPass,
+  passBranchName,
+  passDirtRef,
+  recoverBatches,
+  type PassOpenInput,
+  type PutBackKeptWork,
+} from './index';
 
 // Workbench spec §5.1, §5.3 (W9), §5.5: a pass opens on Your folder, at its HEAD, with its batch,
 // its dirt record and its page claims; its batch never ships itself.
@@ -53,7 +62,9 @@ afterEach(() => {
   h.close();
 });
 
-const LEASE = { leaseMs: 60_000 };
+/** A put-back that puts nothing back: the tasks these tests open have no kept work. */
+const nothingKept: PutBackKeptWork = () => Promise.resolve({ applied: [], left: [] });
+const LEASE = { leaseMs: 60_000, putBack: nothingKept };
 
 function harness(project: Partial<ProjectInput> = {}, trigger = true): DeliveryHarness {
   h = createDeliveryHarness({ ...PAGES, ...project }, { trigger });
@@ -471,6 +482,68 @@ describe('opening a pass', () => {
     expect(h.git$('rev-parse', '--abbrev-ref', 'HEAD')).toBe(
       getBatch(h.store.db, started.id).branch,
     );
+  });
+});
+
+describe("a pass task's plan and its saved work", () => {
+  it("runs only the project's implement step, and puts back each task's saved work once the pass is open", async () => {
+    harness();
+    const full = findFlowByName(h.store.db, 'full');
+    const criteria = ['one', 'two', 'three', 'four'];
+    const settings = h.addTask('Settings: UI work', {
+      areas: ['settings'],
+      acceptanceCriteria: criteria,
+    });
+    const people = page('People: UI work', ['people']);
+    h.state.write((w) => {
+      patchTask(w, settings.id, { flowId: full?.id ?? null, riskTags: ['migration'] });
+      setTaskKeptWork(w, people.id, { keptSha: 'b'.repeat(40), keptBaseSha: 'a'.repeat(40) });
+    });
+    const putBacks: { repo: string; taskId: string; head: string; inPass: boolean }[] = [];
+    const opened = await openPass(
+      h.ctx,
+      { projectId: h.project.id, name: 'Polish pages', taskIds: [settings.id, people.id] },
+      {
+        leaseMs: 60_000,
+        putBack: ({ repo, taskId }) => {
+          putBacks.push({
+            repo,
+            taskId,
+            head: h.git$('symbolic-ref', '--short', 'HEAD'),
+            inPass: getTask(h.store.db, taskId).passId != null,
+          });
+          return Promise.resolve({ applied: [], left: [] });
+        },
+      },
+    );
+
+    // No plan, plan review, review or QA step: a pass has one review, of its pull request.
+    for (const task of [settings, people])
+      expect(runOf(task)?.steps.map((step) => step.role)).toEqual(['implement']);
+    // Only the task with saved work is put back, on the pass's branch, once it is in the pass.
+    expect(putBacks).toEqual([
+      {
+        repo: h.project.repoPath,
+        taskId: people.id,
+        head: passBranchName('Polish pages', opened.pass.id),
+        inPass: true,
+      },
+    ]);
+  });
+
+  it('opens even when a put-back fails: the pass is written', async () => {
+    harness();
+    const people = page('People: UI work', ['people']);
+    h.state.write((w) => {
+      setTaskKeptWork(w, people.id, { keptSha: 'b'.repeat(40), keptBaseSha: 'a'.repeat(40) });
+    });
+    const opened = await openPass(
+      h.ctx,
+      { projectId: h.project.id, name: 'Polish pages', taskIds: [people.id] },
+      { leaseMs: 60_000, putBack: () => Promise.reject(new Error('merge-tree failed')) },
+    );
+    expect(opened.pass.state).toBe('OPEN');
+    expect(getTask(h.store.db, people.id).passId).toBe(opened.pass.id);
   });
 });
 

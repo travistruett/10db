@@ -1245,3 +1245,37 @@ export function moveTask(ctx: WriteContext, id: TaskId, move: TaskMove): TaskDto
   });
   return getTask(ctx.tx, id);
 }
+
+/** A task's saved Workbench work: its kept commit and the pass branch tip it was kept on. */
+export interface TaskKeptWork {
+  readonly keptSha: string;
+  readonly keptBaseSha: string;
+}
+
+/** The work a take-out saved for the task, or null when it has none. */
+export function getTaskKeptWork(db: DbReader, id: TaskId): TaskKeptWork | null {
+  const row = db
+    .select({ keptSha: schema.tasks.keptWorkSha, keptBaseSha: schema.tasks.keptBaseSha })
+    .from(schema.tasks)
+    .where(eq(schema.tasks.id, id))
+    .get();
+  if (!row) throw new NotFoundError('task', id);
+  return row.keptSha === null || row.keptBaseSha === null
+    ? null
+    : { keptSha: row.keptSha, keptBaseSha: row.keptBaseSha };
+}
+
+/** Records the work a take-out saved for the task, or clears it with null. */
+export function setTaskKeptWork(ctx: WriteContext, id: TaskId, kept: TaskKeptWork | null): void {
+  getTask(ctx.tx, id);
+  ctx.tx
+    .update(schema.tasks)
+    .set({
+      keptWorkSha: kept?.keptSha ?? null,
+      keptBaseSha: kept?.keptBaseSha ?? null,
+      updatedAt: ctx.now,
+    })
+    .where(eq(schema.tasks.id, id))
+    .run();
+  ctx.emit({ type: EventType.TaskChanged, entityType: 'task', entityId: id });
+}

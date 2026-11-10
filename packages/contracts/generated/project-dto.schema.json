@@ -261,6 +261,12 @@
         "type": "string"
       }
     },
+    "appUrl": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "createdAt": {
       "type": "string",
       "format": "date-time",
@@ -306,6 +312,7 @@
     "workspaceMode",
     "worktreeSeed",
     "isolate",
+    "appUrl",
     "createdAt",
     "updatedAt"
   ]

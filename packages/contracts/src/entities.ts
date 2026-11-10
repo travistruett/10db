@@ -617,6 +617,37 @@ export const ProjectInput = z
 export type ProjectInput = z.input<typeof ProjectInput>;
 export type ProjectConfig = z.output<typeof ProjectInput>;
 
+/** The loopback hosts a project's app address may name: this Mac, never another machine. */
+const LOOPBACK_HOSTS: readonly string[] = ['localhost', '127.0.0.1', '[::1]'];
+
+/**
+ * Whether `raw` is exactly an `http` or `https` origin on a loopback host (`localhost`, a name under
+ * `.localhost`, `127.0.0.1` or `[::1]`), any port: no path, no query, no credentials, written as the
+ * browser writes the origin.
+ */
+export function isLoopbackOrigin(raw: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return false;
+  }
+  return (
+    (url.protocol === 'http:' || url.protocol === 'https:') &&
+    url.origin === raw &&
+    (LOOPBACK_HOSTS.includes(url.hostname) || url.hostname.endsWith('.localhost'))
+  );
+}
+
+/** Where the builder's dev server answers (Workbench spec §10): a loopback origin only. */
+export const AppUrl = z
+  .string()
+  .refine(
+    isLoopbackOrigin,
+    'An app address is an http origin on this Mac, such as http://localhost:8800',
+  );
+export type AppUrl = z.infer<typeof AppUrl>;
+
 export const ProjectDto = z.object({
   id: ProjectId,
   name: z.string(),
@@ -670,6 +701,8 @@ export const ProjectDto = z.object({
   worktreeSeed: z.array(z.string()),
   /** Area and hazard names whose tasks are proposed a separate copy. */
   isolate: z.array(z.string()),
+  /** Where the builder's dev server answers; null when the project has not said. */
+  appUrl: AppUrl.nullable(),
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });
@@ -862,8 +895,17 @@ export const NextAction = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('revise'), reviewStep: z.int().min(0) }),
   /** The work is done and the project has no gate: the builder approves it or sends it back. */
   z.object({ kind: z.literal('builder_review'), inboxId: InboxItemId }),
+  /**
+   * A page of a Workbench pass is Ready, or its turn failed: the builder looks at it and writes again
+   * or signs it off. `inboxId` names the Ready `check` item or the failed turn's `flag`.
+   */
+  z.object({ kind: z.literal('pass_review'), inboxId: InboxItemId }),
 ]);
 export type NextAction = z.infer<typeof NextAction>;
+
+/** What kind of next action a workstream has, without its fields. */
+export const NextActionKind = z.enum(NextAction.options.map((o) => o.shape.kind.value));
+export type NextActionKind = z.infer<typeof NextActionKind>;
 
 /** The longest `Notice.line`: one line on a task's card. */
 export const NOTICE_LINE_MAX = 500;
