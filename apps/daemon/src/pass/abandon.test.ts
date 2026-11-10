@@ -7,7 +7,15 @@ import {
   WorkstreamState,
   type WorkstreamId,
 } from '@10db/contracts';
-import { getBatch, getPass, getTask, getWorkstreamRow, listInbox, setAbandonStep } from '@10db/db';
+import {
+  getBatch,
+  getPass,
+  getTask,
+  getWorkstreamRow,
+  listInbox,
+  listTaskThreadRows,
+  setAbandonStep,
+} from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openPassWorld, type PassWorld } from '../../test/pass-world';
 import { openPass } from '../delivery';
@@ -266,6 +274,61 @@ describe('abandonPass', () => {
 
       expectAbandoned(w);
       expect(getPass(w.h.store.db, w.opened.pass.id)).toMatchObject({ state: PassState.Abandoned });
+    });
+  });
+
+  describe("with Your folder off the pass's branch, it still finishes", () => {
+    const rows: {
+      readonly name: string;
+      readonly run: (world: PassWorld) => Promise<void>;
+    }[] = [
+      {
+        name: 'at once',
+        run: async (world) => {
+          await abandonPass(deps(world.deps), world.opened.pass.id);
+        },
+      },
+      {
+        name: 'after a restart cut it short',
+        run: async (world) => {
+          world.h.state.write((ctx) => {
+            setAbandonStep(ctx, world.opened.pass.id, AbandonStep.Abandoning);
+          });
+          const restarted = deps(world.restart());
+          await resumePassWork(restarted);
+          await restarted.jobs.idle();
+        },
+      },
+    ];
+    it.each(rows)('$name', async ({ run }) => {
+      w = await worked();
+      // The builder switched to the branch the pass came from, taking the pages' files along.
+      w.h.git$('switch', '-q', 'main');
+
+      await run(w);
+
+      const db = w.h.store.db;
+      expect(getPass(db, w.opened.pass.id).state).toBe(PassState.Abandoned);
+      for (const task of [w.settings, w.people]) {
+        expect(getTask(db, task.id)).toMatchObject({ passId: null, status: 'open' });
+        expect(getWorkstreamRow(db, w.runOf(task)).state).toBe(WorkstreamState.Cancelled);
+      }
+      // No file is written on a branch the pass does not own: each stays as the builder has it.
+      expect(read('src/settings/page.tsx')).toBe('edited before the pass\nand in the turn\n');
+      expect(existsSync(join(w.h.repo, 'src/settings/old.tsx'))).toBe(false);
+      expect(read('src/people/new.tsx')).toBe('added by People\n');
+      // What the turn kept stays with its task.
+      expect(w.h.git$('show', `${keptRef(w.settings.id)}:src/settings/page.tsx`)).toBe(
+        'edited before the pass\nand in the turn',
+      );
+      expect(w.h.git$('symbolic-ref', '--short', 'HEAD')).toBe('main');
+      expect(
+        listTaskThreadRows(db, w.settings.id)
+          .filter((m) => m.kind === 'notice')
+          .map((m) => m.body),
+      ).toContain(
+        "Your folder was on main, not on the pass's branch, so the page's files were left as they are.",
+      );
     });
   });
 

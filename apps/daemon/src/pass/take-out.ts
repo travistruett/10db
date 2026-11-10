@@ -36,13 +36,17 @@ import {
 } from '@10db/db';
 import { jobKey, JobQueue, passDirtRef } from '../delivery';
 import { foldHandEdits } from './hand-edits';
+import { PassFolderOffBranchError } from '../git';
 import {
   keepTurnWork,
   keptRef,
+  keptWorkFacts,
   pageMatcher,
+  passBranch,
   passKeptRef,
   passTaskPlace,
   readKeptRef,
+  type KeptWork,
   type PassTaskPlace,
   type PassWorkDeps,
 } from './kept-work';
@@ -157,7 +161,9 @@ function unfinishedTakeOut(deps: PassWorkDeps, taskId: TaskId): PassTakeOutRow |
  * those files as they are and goes on; 4 puts each page file back as the pass's branch has it where
  * something landed on it during the pass, else as it was before the pass, hashing each again just
  * before (one changed since is left and named); 5 leaves the pass for the Board, its work at its
- * kept ref.
+ * kept ref. While Your folder is off the pass's branch nothing of the page can be kept and none of
+ * its files is written: a take-out asked for alone fails, and one inside an Abandon or a close
+ * keeps the last kept commit, writes no file and goes on to step 5.
  */
 export async function takeOutSteps(
   deps: TakeOutDeps,
@@ -200,10 +206,25 @@ export async function takeOutSteps(
     if (row.step < TakeOutStep.Checked) {
       const place = passTaskPlace(db, task.id);
       for (let tries = row.tries; ;) {
-        await foldHandEdits(deps, { workstreamId });
-        if (row.step < TakeOutStep.HandEditsFolded)
-          row = advance({ step: TakeOutStep.HandEditsFolded });
-        const kept = await keepTurnWork(deps, { workstreamId, turnId: null });
+        let kept: KeptWork;
+        try {
+          await foldHandEdits(deps, { workstreamId });
+          if (row.step < TakeOutStep.HandEditsFolded)
+            row = advance({ step: TakeOutStep.HandEditsFolded });
+          kept = await keepTurnWork(deps, { workstreamId, turnId: null });
+        } catch (error) {
+          if (!(error instanceof PassFolderOffBranchError) || input.within === TakeOutWithin.Alone)
+            throw error;
+          // An Abandon or a close must finish, and nothing of the page can be kept while Your
+          // folder is off the pass's branch: the last kept commit stands, and step 4 writes nothing.
+          const last = await keptWorkFacts(deps, task.id);
+          row = advance({
+            step: TakeOutStep.Checked,
+            keptSha: last.keptSha,
+            keptBaseSha: last.keptBaseSha,
+          });
+          break;
+        }
         tries += 1;
         row = advance({
           step: TakeOutStep.Kept,
@@ -265,7 +286,10 @@ export async function takeOutSteps(
   if (row.step < TakeOutStep.PutBack) {
     const keptSha = row.keptSha;
     let left: string[] = [];
-    if (keptSha !== null) {
+    // A folder on another branch holds that branch's files: the pass's are never written into it.
+    const on = await git.currentBranch(repo);
+    const offBranch = on !== passBranch(db, pass);
+    if (!offBranch && keptSha !== null) {
       const leftAlready = new Set(row.left);
       const touched = new Set(await git.filesChangedBetween(repo, pass.startSha, keptBaseSha));
       const before = (await readKeptRef(git, repo, passDirtRef(pass.id))) ?? pass.startSha;
@@ -283,6 +307,12 @@ export async function takeOutSteps(
     }
     const changed = left;
     row = deps.state.write((ctx) => {
+      if (offBranch)
+        insertSystemNotice(
+          ctx,
+          task.id,
+          `Your folder was on ${on ?? 'a detached HEAD'}, not on the pass's branch, so the page's files were left as they are.`,
+        );
       if (changed.length > 0)
         insertSystemNotice(
           ctx,
