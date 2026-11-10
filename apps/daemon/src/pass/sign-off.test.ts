@@ -67,8 +67,10 @@ async function turn(task: TaskDto, edit: () => void, shared = false): Promise<vo
 function ready(task: TaskDto): void {
   const ws = w.runOf(task);
   w.h.state.write((ctx) => {
-    for (const to of [S.Starting, S.Running] as const)
-      transitionWorkstream(ctx, ws, { to, fence: null });
+    // A page waiting on the builder runs again when a message starts its next turn.
+    const path =
+      getWorkstreamRow(ctx.tx, ws).state === S.WaitingHuman ? [S.Running] : [S.Starting, S.Running];
+    for (const to of path) transitionWorkstream(ctx, ws, { to, fence: null });
     const item = insertInboxItem(ctx, {
       projectId: w.h.project.id,
       kind: 'check',
@@ -177,30 +179,50 @@ describe('signOffSteps', () => {
     );
   });
 
-  it('makes no second commit when the daemon stops between the commit and the write', async () => {
-    w = await openPassWorld();
-    await turn(w.settings, () => {
-      w.write('src/settings/page.tsx', 'tidied\n');
-    });
-    ready(w.settings);
-    const crashing: Git = {
-      ...w.deps.git,
-      landPaths: async (input) => {
-        await w.deps.git.landPaths(input);
-        throw new Error('the daemon stopped');
-      },
-    };
-    await expect(
-      signOff(w.settings, { ...w.deps, git: crashing, stopLane: stopped }),
-    ).rejects.toThrow('the daemon stopped');
-    expect(getWorkstreamRow(w.h.store.db, w.runOf(w.settings)).state).toBe('WAITING_HUMAN');
+  it.each([
+    { name: 'makes no second commit', between: null, landed: ['Settings: UI work'] },
+    {
+      name: "lands the next turn's files as a second commit after a message",
+      between: { path: 'src/settings/more.tsx', content: 'more\n' },
+      landed: ['Settings: UI work', 'Settings: UI work'],
+    },
+  ])(
+    '$name when the daemon stops between the commit and the write',
+    async ({ between, landed: subjects }) => {
+      w = await openPassWorld();
+      await turn(w.settings, () => {
+        w.write('src/settings/page.tsx', 'tidied\n');
+      });
+      ready(w.settings);
+      const crashing: Git = {
+        ...w.deps.git,
+        landPaths: async (input) => {
+          await w.deps.git.landPaths(input);
+          throw new Error('the daemon stopped');
+        },
+      };
+      await expect(
+        signOff(w.settings, { ...w.deps, git: crashing, stopLane: stopped }),
+      ).rejects.toThrow('the daemon stopped');
+      expect(getWorkstreamRow(w.h.store.db, w.runOf(w.settings)).state).toBe('WAITING_HUMAN');
+      if (between !== null) {
+        await turn(w.settings, () => {
+          w.write(between.path, between.content);
+        });
+        ready(w.settings);
+      }
 
-    const again = await signOff(w.settings, { ...w.restart(), stopLane: stopped });
+      const again = await signOff(w.settings, { ...w.restart(), stopLane: stopped });
 
-    expect(again).toMatchObject({ kind: 'signed_off', files: ['src/settings/page.tsx'] });
-    expect(landed()).toEqual(['Settings: UI work']);
-    expect(getWorkstreamRow(w.h.store.db, w.runOf(w.settings)).state).toBe('DONE');
-  });
+      expect(again).toMatchObject({
+        kind: 'signed_off',
+        files: [between?.path ?? 'src/settings/page.tsx'],
+      });
+      expect(landed()).toEqual(subjects);
+      if (between !== null) expect(onBranch(between.path)).toBe('more');
+      expect(getWorkstreamRow(w.h.store.db, w.runOf(w.settings)).state).toBe('DONE');
+    },
+  );
 
   it.each([
     { name: 'the first page first', order: ['settings', 'people'] as const },

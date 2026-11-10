@@ -322,7 +322,8 @@ export function finishSignOff(
  * page's turn holds makes it wait (a row, and the job ends), except in a close, whose turns have all
  * stopped, which keeps it. Then 1 folds the builder's hand edits; 2 lands the shared changes the page
  * needs, in chain order; 3 lands the page's files as one commit; 4 the folder's index follows; 5 one
- * write ends the run. Every commit has its own operation id, so a rerun makes only what is missing.
+ * write ends the run. Every commit has its own operation id (the page's, from the kept commit it
+ * lands), so a rerun makes only what is missing.
  */
 export async function signOffSteps(
   deps: SignOffDeps,
@@ -393,7 +394,9 @@ export async function signOffSteps(
       from: kept,
       paths,
       message: signOffMessage(db, pass, task.id),
-      opId: `pass:${pass.id}:sign-off:${ws}`,
+      // The kept commit counts the sign-offs: a rerun after a crash finds its own commit, while a
+      // sign-off after the next turn (a landing whose run did not end) lands that turn's files.
+      opId: `pass:${pass.id}:sign-off:${ws}:${kept}`,
     });
     landedSha = landed.sha;
     indexStale = landed.indexStale;
