@@ -161,6 +161,28 @@ describe('Add Page', () => {
     expect(builderMessages(home.id)).toEqual(['Match the settings page']);
   });
 
+  it('answers, saying the pages joined, when the first message cannot be written after the put-back', async () => {
+    w = await openPassWorld({ project: PROJECT });
+    const home = w.h.addTask('Home: tidy', { areas: ['home'] });
+    w.h.state.write((ctx) => {
+      setTaskKeptWork(ctx, home.id, { keptSha: 'b'.repeat(40), keptBaseSha: 'a'.repeat(40) });
+    });
+    const database = w.h.store.db.$client;
+
+    const joining = join({ taskIds: [home.id], firstMessage: 'Match the settings page' }, () => {
+      // The database refuses every write from here on, as a full disk would.
+      database.pragma('query_only = ON');
+      return Promise.resolve({ applied: [], left: [] });
+    });
+
+    await expect(joining).rejects.toThrow(
+      /Home: tidy joined pass "Polish", but the first message was not sent/,
+    );
+    database.pragma('query_only = OFF');
+    expect(getTask(w.h.store.db, home.id).passId).toBe(w.opened.pass.id);
+    expect(builderMessages(home.id)).toEqual([]);
+  });
+
   it("writes a joining task's saved work back into the folder on the pass's branch", async () => {
     w = await openPassWorld({ project: PROJECT });
     const home = w.h.addTask('Home: tidy', { areas: ['home'] });

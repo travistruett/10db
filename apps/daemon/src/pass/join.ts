@@ -105,17 +105,45 @@ export async function joinPass(
         return;
       }
       for (const task of tasks) if (getTaskKeptWork(db, task.id) !== null) await putBack(task.id);
-      // Only once the saved work is back: a message is what lets a page's lane start.
-      const { firstMessage } = input;
-      if (firstMessage !== null)
-        ctx.state.write((w) => {
-          for (const id of joined.joined)
-            insertBuilderMessage(w, id, { body: firstMessage, files: [] });
-        });
+      try {
+        sendFirstMessage(joined);
+      } catch (error) {
+        reject(error instanceof Error ? error : new Error(String(error)));
+        return;
+      }
       ctx.logger.info({ projectId: project.id, passId, joined: joined.joined }, 'pages joined');
       resolve(joined);
     });
   });
+
+  /**
+   * Writes the builder's first message to every page that joined, once the saved work is back: a
+   * message is what lets a page's lane start. The pages are in the pass already, so a write that fails
+   * is refused in words that say so, and the builder sends the message from each page.
+   */
+  function sendFirstMessage(joined: PassJoined): void {
+    const { firstMessage } = input;
+    if (firstMessage === null) return;
+    try {
+      ctx.state.write((w) => {
+        for (const id of joined.joined)
+          insertBuilderMessage(w, id, { body: firstMessage, files: [] });
+      });
+    } catch (error) {
+      const titles = joined.joined.map((id) => getTask(db, id).title).join(', ');
+      ctx.logger.warn(
+        {
+          projectId: project.id,
+          passId,
+          err: error instanceof Error ? error.message : String(error),
+        },
+        'first message of joined pages not written',
+      );
+      throw new ConflictError(
+        `${titles} joined pass "${pass.name}", but the first message was not sent (${error instanceof Error ? error.message : String(error)}); send it from each page`,
+      );
+    }
+  }
 
   /**
    * Refuses the join while Your folder is off the pass's branch, as the folder card says it is: a
