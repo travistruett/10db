@@ -1,4 +1,4 @@
-import type { InboxItemDto, PassViewDto } from '@10db/contracts';
+import { CloseStep, PassState, type InboxItemDto, type PassViewDto } from '@10db/contracts';
 import { Button, List, Stack, Text } from '@mantine/core';
 import { useMutation } from '@tanstack/react-query';
 import { FormModal } from '../../shell/form-modal';
@@ -37,8 +37,22 @@ function PageList({ name, says, pages }: PageListProps) {
 }
 
 /**
+ * What a close under way means for an Abandon: it stops the close, until the close has begun moving
+ * the folder's branch (D23 step 2); null while the pass is not closing.
+ */
+function closingLine(
+  view: PassViewDto,
+): { readonly line: string; readonly refused: boolean } | null {
+  if (view.pass.state !== PassState.Closing) return null;
+  return view.closeStep !== null && view.closeStep >= CloseStep.FastForwarded
+    ? { line: 'The pass is landing: it can no longer be abandoned.', refused: true }
+    : { line: 'Its close stops where it is; what has landed stays.', refused: false };
+}
+
+/**
  * Abandon Pass…'s confirm (Workbench spec §5.4): names every page that goes back to how it was before
- * the pass, its task keeping the work, and every signed-off page, which stays.
+ * the pass, its task keeping the work, and every signed-off page, which stays. From a close, it says
+ * the close stops, and refuses once the close is landing.
  */
 export function AbandonModal({ view, inbox, now, onClose, abandon }: AbandonModalProps) {
   const leaving = useMutation({ mutationFn: () => abandon(), onSuccess: onClose });
@@ -47,6 +61,7 @@ export function AbandonModal({ view, inbox, now, onClose, abandon }: AbandonModa
     pageStatus(page, inbox, clock, view.pages).status === PageStatus.SignedOff;
   const reverts = view.pages.filter((page) => !signedOff(page)).map((page) => page.area);
   const stays = view.pages.filter(signedOff).map((page) => page.area);
+  const closing = closingLine(view);
   return (
     <FormModal
       opened
@@ -62,6 +77,7 @@ export function AbandonModal({ view, inbox, now, onClose, abandon }: AbandonModa
           <Button
             color="red"
             loading={leaving.isPending}
+            disabled={closing?.refused === true}
             onClick={() => {
               leaving.mutate();
             }}
@@ -73,6 +89,11 @@ export function AbandonModal({ view, inbox, now, onClose, abandon }: AbandonModa
     >
       <Stack gap="md">
         <Text size="sm">{`Abandon ${view.pass.name}? Turns that are working stop.`}</Text>
+        {closing === null ? null : (
+          <Text size="sm" {...(closing.refused ? { c: 'red' } : {})}>
+            {closing.line}
+          </Text>
+        )}
         {reverts.length > 0 ? (
           <PageList
             name="Pages that go back"

@@ -83,6 +83,15 @@ describe('WorkbenchScreen', () => {
     expect(screen.getByRole('checkbox', { name: /^settings/ })).toBeTruthy();
   });
 
+  it('with a closed pass waiting to settle, says so in one line above the picker', async () => {
+    await draw({ live: passViewDto({ pass: { state: 'CLOSED' } }) });
+    expect(
+      await screen.findByText('Settings pass closed; it settles once its pull request merges.'),
+    ).toBeTruthy();
+    expect(screen.getByRole('checkbox', { name: /^settings/ })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'More pass actions' })).toBeNull();
+  });
+
   it('waits for the picker until what Start Pass says has loaded', async () => {
     await draw({ start: undefined });
     expect(await screen.findByRole('status', { name: 'Loading the pages' })).toBeTruthy();
