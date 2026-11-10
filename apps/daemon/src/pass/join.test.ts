@@ -1,7 +1,10 @@
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join as inRepo } from 'node:path';
 import { mintId, type ProjectInput, type TaskDto } from '@10db/contracts';
 import {
   activeClaims,
   getTask,
+  getTaskKeptWork,
   getWorkstream,
   insertWorkstream,
   listTaskThread,
@@ -13,6 +16,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { openPassWorld, PASS_PROJECT, type PassWorld } from '../../test/pass-world';
 import type { PassOpenDeps, PutBackKeptWork } from '../delivery';
 import { joinPass } from './join';
+import { putBackKeptWork } from './put-back';
 import { passView } from './view';
 
 // Workbench spec §4.3: Add Page. New tasks for page areas, and open tasks, join an open pass in its
@@ -150,4 +154,52 @@ describe('Add Page', () => {
     expect(putBacks).toEqual([{ taskId: home.id, inPass: true }]);
     expect(getTask(w.h.store.db, home.id).passId).toBe(w.opened.pass.id);
   });
+
+  it("writes a joining task's saved work back into the folder on the pass's branch", async () => {
+    w = await openPassWorld({ project: PROJECT });
+    const home = w.h.addTask('Home: tidy', { areas: ['home'] });
+    keptWorkOf(home, { 'src/home/page.tsx': 'home, tidied\n' });
+
+    await join({ taskIds: [home.id] }, (input) => putBackKeptWork(w.deps, input));
+
+    expect(readFileSync(inRepo(w.h.repo, 'src/home/page.tsx'), 'utf8')).toBe('home, tidied\n');
+    expect(getTaskKeptWork(w.h.store.db, home.id)).toBeNull();
+  });
+
+  it("refuses a join while the folder is off the pass's branch, writing nothing and joining nothing", async () => {
+    w = await openPassWorld({ project: PROJECT });
+    const home = w.h.addTask('Home: tidy', { areas: ['home'] });
+    const kept = keptWorkOf(home, { 'src/home/page.tsx': 'home, tidied\n' });
+    w.h.git$('switch', '-q', 'main');
+
+    await expect(
+      join({ pages: ['billing'], taskIds: [home.id] }, (input) => putBackKeptWork(w.deps, input)),
+    ).rejects.toThrow(/Your folder is on main, not the branch of pass "Polish"/);
+
+    expect(existsSync(inRepo(w.h.repo, 'src/home/page.tsx'))).toBe(false);
+    expect(getTaskKeptWork(w.h.store.db, home.id)?.keptSha).toBe(kept);
+    expect(getTask(w.h.store.db, home.id).passId ?? null).toBeNull();
+    expect(passView(w.h.store.db, w.opened.pass.id).pages).toHaveLength(2);
+  });
 });
+
+/** Work a take-out saved for the task: `files` over the pass's start, at its kept ref. */
+function keptWorkOf(task: TaskDto, files: Record<string, string>): string {
+  const base = w.opened.pass.startSha;
+  w.h.git$('read-tree', base);
+  for (const [path, content] of Object.entries(files)) {
+    const file = inRepo(w.h.repo, path);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, content);
+  }
+  w.h.git$('add', ...Object.keys(files));
+  const tree = w.h.git$('write-tree');
+  w.h.git$('read-tree', 'HEAD');
+  for (const path of Object.keys(files)) rmSync(inRepo(w.h.repo, path));
+  const sha = w.h.git$('commit-tree', '--no-gpg-sign', tree, '-p', base, '-m', 'kept');
+  w.h.git$('update-ref', `refs/10db/kept/${task.id}`, sha);
+  w.h.state.write((ctx) => {
+    setTaskKeptWork(ctx, task.id, { keptSha: sha, keptBaseSha: base });
+  });
+  return sha;
+}

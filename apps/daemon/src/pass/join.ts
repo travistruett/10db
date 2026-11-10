@@ -11,6 +11,7 @@ import {
   type TaskId,
 } from '@10db/contracts';
 import {
+  getBatch,
   getPass,
   getProject,
   getTask,
@@ -70,7 +71,7 @@ function refuseJoin(
  * write, each joins the pass, gets its run in the pass's batch on the implement step alone, and claims
  * its pages, a page another task holds making it wait with the holder named; and, only when the builder
  * wrote one, each is sent `firstMessage`. Then, still in the job, each task with saved work has it put
- * back. A refusal rejects and joins nothing.
+ * back. Refused while Your folder is off the pass's branch. A refusal rejects and joins nothing.
  */
 export async function joinPass(
   ctx: DeliveryContext,
@@ -88,6 +89,7 @@ export async function joinPass(
     ctx.jobs.run(jobKey({ projectId: project.id, worktreePath: null }, JobQueue.Cut), async () => {
       let joined: PassJoined;
       try {
+        await refuseOffBranch();
         joined = ctx.state.write((w) => {
           refuseJoin(w.tx, getPass(w.tx, passId), project, tasks, newPages);
           const ids = [...tasks, ...writePageTasks(w, project, newPages)].map((t) => t.id);
@@ -109,6 +111,19 @@ export async function joinPass(
       resolve(joined);
     });
   });
+
+  /**
+   * Refuses the join while Your folder is off the pass's branch, as the folder card says it is: a
+   * put-back there would write a page's saved work into another branch's files.
+   */
+  async function refuseOffBranch(): Promise<void> {
+    const branch = getBatch(db, pass.batchId).branch;
+    const head = await ctx.git.currentBranch(project.repoPath);
+    if (branch === null || head === branch) return;
+    throw new ConflictError(
+      `Your folder is on ${head ?? 'a detached HEAD'}, not the branch of pass "${pass.name}" (${branch}); switch it back (git switch ${branch}) to add a page`,
+    );
+  }
 
   /** Puts the task's saved work back; it is in the pass either way, so a failure is logged, not thrown. */
   async function putBack(taskId: TaskId): Promise<void> {
