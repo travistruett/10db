@@ -741,6 +741,19 @@ export interface Git {
    * elsewhere and refuses one in the way; one checked out anywhere else is refused.
    */
   rewindBranch(repo: string, branch: string, from: string, to: string): Promise<void>;
+  // Branch moves of a closed Workbench pass (spec §5.3, §5.4: D8, D22, D24).
+  /**
+   * Moves local branch `branch` to commit `to` by compare-and-swap, under the repo lock: `moved` when
+   * it was at `expect`, `already` when it is at `to` (a rerun), `raced` when it is anywhere else or
+   * gone, and then nothing changes. A branch checked out in any worktree moves only to a commit whose
+   * tree is its tip's, so no file and no index entry goes stale; any other such move is refused.
+   */
+  moveBranchCas(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly to: string;
+    readonly expect: string;
+  }): Promise<'moved' | 'already' | 'raced'>;
   /**
    * The commits `tip` has since `base` that are its own: first parents only, merges left out,
    * newest first. A merge of the base into the branch adds none, and neither do the commits it brought in.
@@ -3333,6 +3346,48 @@ export function createGit(opts: GitOptions = {}): Git {
     });
   }
 
+  async function moveBranchCas(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly to: string;
+    readonly expect: string;
+  }): Promise<'moved' | 'already' | 'raced'> {
+    if (!OBJECT_ID.test(input.to) || !OBJECT_ID.test(input.expect))
+      throw new InvalidError('A branch is moved between two commit ids');
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const ref = `refs/heads/${input.branch}`;
+      if (await isSymbolic(c, ref))
+        throw new InvalidError(`${ref} points at another branch, so 10db moves nothing there`);
+      const tip = await revParse(c, `${ref}^{commit}`);
+      if (tip === input.to) return 'already';
+      if (tip === null || tip !== input.expect) return 'raced';
+      const holder = await branchInUse(c, input.branch);
+      if (
+        holder !== null &&
+        (await revParse(c, `${input.to}^{tree}`)) !== (await revParse(c, `${tip}^{tree}`))
+      )
+        throw new InvalidError(
+          `Branch ${input.branch} is checked out at ${holder}, so it moves only to a commit with the same files`,
+        );
+      try {
+        await git(c, [
+          'update-ref',
+          '--no-deref',
+          '-m',
+          `10db: move to ${input.to}`,
+          ref,
+          input.to,
+          input.expect,
+        ]);
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        return 'raced';
+      }
+      return 'moved';
+    });
+  }
+
   async function rewindBranch(
     repo: string,
     branch: string,
@@ -3763,6 +3818,7 @@ export function createGit(opts: GitOptions = {}): Git {
     addWorktree,
     fastForwardBranch,
     rewindBranch,
+    moveBranchCas,
     async ownCommitsSince(repo, base, tip) {
       return (
         await git(await pinned(repo), [
