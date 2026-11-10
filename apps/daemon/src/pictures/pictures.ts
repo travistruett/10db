@@ -8,6 +8,7 @@ import {
   PassId,
   PassState,
   PassTurnEnding,
+  REPORTED_ROUTES_MAX,
   PassTurnId,
   ProjectId,
   ScreenKind,
@@ -58,6 +59,7 @@ import { beforeAllowed, wroteBefore, type TaskActivity } from './before-rule';
 import type { PageCamera, Shot } from './camera';
 import { CAPTURE_IDLE, captureStep, type CaptureEvent, type CaptureRequest } from './capture-queue';
 import { keepScreen, sweepPictureTemps, type ScreenToKeep } from './picture-files';
+import { keptRoute, pageAreaRoutes } from './kept-route';
 import { pageRoute, pictureRoutes, takesPictures, turnChangedSomething } from './picture-routes';
 import { judgePreview, routeLoad, type RouteShot } from './preview-marks';
 import { signIn, sweepLoginLogs, type SignInDeps, type SignInProject } from './sign-in';
@@ -283,7 +285,11 @@ export function startPictures(deps: PicturesDeps): Pictures {
     return [...best.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
-  /** The routes the task's agent reported for a picture of `kind`: its turn's, or its run's for an after. */
+  /**
+   * The routes the task's agent reported for a picture of `kind`: a turn picture's are its turn's, an
+   * after's its run's. Each is matched again
+   * against the project's page areas as they are now, so a route whose page area went is not loaded.
+   */
   function reportedFor(kind: ScreenKind, task: TaskDto, turnId: PassTurnId | null): string[] {
     const rows =
       kind === ScreenKind.Turn && turnId !== null
@@ -291,7 +297,9 @@ export function startPictures(deps: PicturesDeps): Pictures {
         : kind === ScreenKind.After && task.workstreamId !== null
           ? listTaskPageReports(db, { taskId: task.id, workstreamId: task.workstreamId })
           : [];
-    return rows.map((r) => r.route);
+    const areaRoutes = pageAreaRoutes(getProject(db, task.projectId).areas);
+    const kept = rows.flatMap((r) => keptRoute(areaRoutes, r.route) ?? []);
+    return [...new Set(kept)].slice(0, REPORTED_ROUTES_MAX);
   }
 
   function askAfter(task: TaskDto, passId: PassId | null): void {

@@ -26,7 +26,7 @@ import {
 import { afterEach, describe, expect, it } from 'vitest';
 import { tempDir, waitFor, type TempDir } from '../../test/fixtures';
 import { captureLogs, type LogCapture } from '../../test/log-capture';
-import { openPassWorld, type PassWorld } from '../../test/pass-world';
+import { PASS_PROJECT, openPassWorld, type PassWorld } from '../../test/pass-world';
 import { FakeCamera } from '../../test/fake-camera';
 import { silentLogger } from '../log';
 import { createGateRunner } from '../verify';
@@ -55,9 +55,15 @@ afterEach(async () => {
   dir.cleanup();
 });
 
+/** The pass world's areas, with a Settings page whose route takes a parameter. */
+const AREAS = [
+  ...(PASS_PROJECT.areas ?? []),
+  { name: 'setting', globs: ['src/setting/**'], role: 'page' as const, route: '/settings/[id]' },
+];
+
 async function world(project: { devLoginCommand?: string } = {}): Promise<void> {
   dir = tempDir('pictures');
-  w = await openPassWorld();
+  w = await openPassWorld({ project: { areas: AREAS } });
   w.h.state.write((ctx) => patchProject(ctx, w.h.project.id, { appUrl: APP, ...project }));
   cam = new FakeCamera();
   clock = new ManualClock(new Date('2026-11-10T12:00:00.000Z'));
@@ -196,31 +202,48 @@ describe('pictures of a pass', () => {
     expect(kinds(w.settings)).toEqual(['before', 'turn1']);
   });
 
-  it('also shoots the routes the agent reported in the turn', async () => {
-    await world();
-    start();
-    await ended(2);
+  /** A Ready turn of Settings that kept a new commit, its agent having reported `routes`. */
+  function reportedTurn(routes: string[], n: number): void {
     const turn = w.startTurn(w.settings);
     w.h.state.write((ctx) => {
       insertTaskPageReports(ctx, {
         taskId: w.settings.id,
         workstreamId: w.runOf(w.settings),
         turnId: turn.id,
-        routes: ['/settings/42'],
+        routes,
       });
     });
     w.endTurn(turn);
     w.h.state.write((ctx) => {
       setPassTurnKept(ctx, turn.id, {
-        keptSha: 'a'.repeat(40),
+        keptSha: String(n).repeat(40),
         keptBaseSha: 'b'.repeat(40),
         sharedSeq: null,
       });
       settlePassTurn(ctx, turn.id);
     });
+  }
+
+  it('also shoots the routes the agent reported in the turn', async () => {
+    await world();
+    start();
+    await ended(2);
+    reportedTurn(['/settings/42'], 1);
     await ended(3);
     expect(cam.shots.slice(2).map((s) => s.route)).toEqual(['/settings', '/settings/42']);
     expect(screensOf(w.settings).map((s) => `${s.kind} ${s.route}`)).toContain('turn /settings/42');
+  });
+
+  it('loads no reported route whose page area is gone by the time of the picture', async () => {
+    await world();
+    start();
+    await ended(2);
+    w.h.state.write((ctx) =>
+      patchProject(ctx, w.h.project.id, { areas: PASS_PROJECT.areas ?? [] }),
+    );
+    reportedTurn(['/settings/42'], 1);
+    await ended(3);
+    expect(cam.shots.slice(2).map((s) => s.route)).toEqual(['/settings']);
   });
 
   it("drops a turn picture that loads when the page's next turn starts", async () => {
