@@ -75,7 +75,7 @@ import {
 import type { InboxService, WaitObserver } from '../inbox';
 import { principleHit, proposePrinciple } from '../knowledge';
 import type { Logger } from '../log';
-import { grantSharedHold, keepCommitToolPaths } from '../pass';
+import { askShared, grantSharedHold, keepCommitToolPaths } from '../pass';
 import { afterMarkersResolved, commitResultAsStored, fixingFailedGate, revertOfRun } from '../team';
 import {
   CLAIM_POLL_MS,
@@ -212,13 +212,36 @@ export function createToolHandlers(
    * How a pass lane gets a shared area (Workbench spec §7.2): one turn at a time, with a hold that
    * records what the area held at the grant. Undefined for any other claim.
    */
-  const sharedGrantOf = (kind: ClaimKind, name: string): SharedGrant | undefined => {
+  const sharedGrantOf = (
+    kind: ClaimKind,
+    name: string,
+    reason: string,
+    signal: AbortSignal,
+  ): SharedGrant | undefined => {
     if (kind !== ClaimKind.Area) return undefined;
     const { project, task } = context();
     if (!passHoldingTask(db, task)) return undefined;
     if (project.areas.find((a) => a.name === name)?.role !== AreaRole.Shared) return undefined;
     return {
-      ask: () => null,
+      ask: () => {
+        const asked = askShared(deps, { workstreamId, sessionId, area: name, reason, signal });
+        if (!asked) return null;
+        return {
+          inboxId: asked.inboxId,
+          answer: asked.answer.then((given): ClaimResult | null =>
+            given.allowed
+              ? null
+              : {
+                  granted: false,
+                  heldBy: null,
+                  inboxId: asked.inboxId,
+                  instruction: given.instruction,
+                  yielded: false,
+                  parked: false,
+                },
+          ),
+        };
+      },
       grant: () => grantSharedHold(deps, { workstreamId, area: name }),
     };
   };
@@ -531,7 +554,8 @@ export function createToolHandlers(
       // Claims the builder made this task give up are told before anything else is granted.
       const given = claimWaits.pendingYield(workstreamId);
       if (given) return recordClaim(input.opId, yieldRefusal(given, { kind, name: input.name }));
-      const shared = sharedGrantOf(kind, input.name);
+      const signal = deps.sessionSignal(sessionId) ?? new AbortController().signal;
+      const shared = sharedGrantOf(kind, input.name, input.reason, signal);
       // A claim another task holds is waited for, not given up on. Every call for the claim joins the
       // one wait; a call answers "still waiting" before the session's tool timeout, and is not recorded,
       // so a retry with the same opId joins the wait again.
@@ -543,7 +567,7 @@ export function createToolHandlers(
         kind,
         name: input.name,
         reason: input.reason,
-        signal: deps.sessionSignal(sessionId) ?? new AbortController().signal,
+        signal,
         pollMs: deps.claimPollMs ?? CLAIM_POLL_MS,
         ...(shared ? { shared } : {}),
       });

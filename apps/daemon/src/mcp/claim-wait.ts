@@ -4,6 +4,7 @@ import {
   InboxState,
   InvalidError,
   isTerminal,
+  SharedAskDetail,
   WorkstreamId,
   WorkstreamState,
   type ClaimKind,
@@ -313,12 +314,16 @@ export function forgetEndedYields(bus: EventBus, waits: ClaimWaits): () => void 
 /**
  * Clears the waits a stopped daemon left showing on its tasks. Their waits ended with it, and a notice
  * that outlived its wait would name a holder nobody waits for. Also closes the wait cards an earlier
- * build raised, which a task's card shows instead now.
+ * build raised, which a task's card shows instead now, and each pass's shared-area question, whose
+ * asking call ended with the daemon: the agent asks again.
  */
 export function withdrawStaleClaimWaits(state: StateStore, inbox: InboxService): void {
   state.write((ctx) => clearWorkstreamNotices(ctx));
   for (const item of listInbox(state.db, { states: [InboxState.Open] }))
-    if (item.kind === InboxKind.Flag && (isWaitCard(item) || isDeadlockCard(item)))
+    if (
+      (item.kind === InboxKind.Flag && (isWaitCard(item) || isDeadlockCard(item))) ||
+      (item.kind === InboxKind.Question && SharedAskDetail.safeParse(item.detail).success)
+    )
       inbox.withdraw(item.id);
 }
 

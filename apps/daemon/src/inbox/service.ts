@@ -18,6 +18,7 @@ import {
   ProposalId,
   ProposalKind,
   QuestionCategory,
+  SharedAskDetail,
   Urgency,
   type CardResolution,
   type InboxItemDto,
@@ -98,6 +99,8 @@ type AskInput = AskOwner & {
   readonly foldPerLane?: boolean;
   /** Claude Code's classifier handed the call to a person: the card folds only with other escalated asks. */
   readonly escalated?: boolean;
+  /** The card folds with the open card under this key alone, whatever it says. */
+  readonly foldKey?: string;
 };
 
 /** The detail key naming the Plan conversation whose session asked a card. */
@@ -258,9 +261,16 @@ function assertKnownChoice(item: InboxItemDto, answer: InboxAnswer): void {
   }
 }
 
-/** Whether the answer to a lane's question is the choice that parks the task. */
+/**
+ * Whether the answer to a lane's question is the choice that parks the task. A pass's shared-area
+ * question never parks its page: its asking call takes the choice as Keep It to This Page.
+ */
 function parksTask(item: InboxItemDto, answer: InboxAnswer): boolean {
-  return item.kind === InboxKind.Question && isParkChoice(answer.choice);
+  return (
+    item.kind === InboxKind.Question &&
+    isParkChoice(answer.choice) &&
+    !SharedAskDetail.safeParse(item.detail).success
+  );
 }
 
 interface Waiter {
@@ -543,7 +553,7 @@ export function createInboxService(deps: {
       // Whatever the lane wrote, a question can be answered by parking the task.
       const input =
         raw.kind === 'question' ? { ...raw, options: withParkOption(raw.options) } : raw;
-      const foldKey = foldKeyFor(input);
+      const foldKey = input.foldKey ?? foldKeyFor(input);
       // A conversation's card has no target: no workstream waits on it, and its session's waiter below
       // is how the answer reaches it.
       const target: InboxTarget | null =

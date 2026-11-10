@@ -1,9 +1,25 @@
-import type { TaskDto } from '@10db/contracts';
-import { getHold, insertSession, listSharedChanges, openHolds } from '@10db/db';
+import {
+  SHARED_ASK_ALLOW_CHOICE,
+  SHARED_ASK_KEEP_CHOICE,
+  SHARED_ASK_REPLY_CHOICE,
+  SharedAskDetail,
+  sharedAskFoldKey,
+  type TaskDto,
+} from '@10db/contracts';
+import {
+  findOpenByFoldKey,
+  getHold,
+  getInboxItem,
+  getWorkstreamRow,
+  insertSession,
+  listSharedChanges,
+  listTaskThread,
+  openHolds,
+} from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openPassWorld, type PassWorld } from '../../test/pass-world';
 import { silentLogger } from '../log';
-import { closeHoldsOf, landSharedChanges, sharedRef } from '../pass';
+import { closeHoldsOf, grantSharedHold, keepHold, landSharedChanges, sharedRef } from '../pass';
 import { ClaimWaits } from './claim-wait';
 import { createToolHandlers } from './tools';
 
@@ -106,4 +122,119 @@ describe('the commit tool under a shared hold', () => {
       'Shared change 1 of Settings: UI work',
     );
   });
+});
+
+describe("the builder's question before a second task changes a shared area", () => {
+  /** Settings changes `src/button.ts` in a turn of its own, so People's ask needs the builder. */
+  async function settingsChangedSrc(): Promise<void> {
+    const granted = await grantSharedHold(w.deps, {
+      workstreamId: w.runOf(w.settings),
+      area: 'src',
+    });
+    if (!granted.ok) throw new Error('src was not granted');
+    w.write('src/button.ts', 'button\n');
+    const [hold] = openHolds(w.h.store.db, w.opened.pass.id);
+    if (!hold) throw new Error('no hold');
+    await keepHold(w.deps, { claimId: hold.claimId });
+  }
+  const ask = (tools: ReturnType<typeof laneTools>) =>
+    tools.request_claim({
+      opId: 'op-people-src',
+      kind: 'area',
+      name: 'src',
+      reason: 'a wider button',
+    });
+
+  it('waits for the answer across calls, and Allow grants the area', async () => {
+    w = await openPassWorld();
+    await settingsChangedSrc();
+    const tools = laneTools(w, w.people, new ClaimWaits(), 30);
+
+    const first = await ask(tools);
+
+    expect(first).toMatchObject({ granted: false, waiting: true, heldBy: null });
+    if (first.granted || first.inboxId === null) throw new Error('no question');
+    expect(first.instruction).toMatch(/Waiting for the builder's answer/);
+    const card = getInboxItem(w.h.store.db, first.inboxId);
+    expect(card).toMatchObject({
+      kind: 'question',
+      state: 'OPEN',
+      title: 'People: UI work wants to change shared code in src',
+    });
+    expect(
+      findOpenByFoldKey(w.h.store.db, w.h.project.id, sharedAskFoldKey(w.runOf(w.people), 'src'))
+        ?.id,
+    ).toBe(first.inboxId);
+    expect(card.body).toMatch(/^Settings: UI work changed `src\/button.ts` there /);
+    expect(card.options.map((o) => o.label)).toEqual([
+      SHARED_ASK_ALLOW_CHOICE,
+      SHARED_ASK_KEEP_CHOICE,
+      SHARED_ASK_REPLY_CHOICE,
+      'Park the task',
+    ]);
+    expect(SharedAskDetail.parse(card.detail).others).toMatchObject([
+      { taskId: w.settings.id, paths: ['src/button.ts'], holdsNow: false },
+    ]);
+
+    // The agent calls again with the same opId, and the answer comes while it waits.
+    const second = ask(tools);
+    w.h.inbox.answer(first.inboxId, { choice: SHARED_ASK_ALLOW_CHOICE });
+
+    const granted = await second;
+    expect(granted.granted).toBe(true);
+    expect(openHolds(w.h.store.db, w.opened.pass.id)).toMatchObject([
+      { taskId: w.people.id, area: 'src', seq: 2 },
+    ]);
+  });
+
+  it.each<{ name: string; choice: string; note?: string; told: RegExp; thread: string | null }>([
+    {
+      name: 'Keep It to This Page',
+      choice: SHARED_ASK_KEEP_CHOICE,
+      told: /Keep this change inside your page/,
+      thread: null,
+    },
+    {
+      name: 'a reply',
+      choice: SHARED_ASK_REPLY_CHOICE,
+      note: 'Use the page button instead',
+      told: /"Use the page button instead"/,
+      thread: 'Use the page button instead',
+    },
+    {
+      name: 'Park the task',
+      choice: 'Park the task',
+      told: /Keep this change inside your page/,
+      thread:
+        'The question about shared src was answered with Park the task, which in a pass keeps the change to this page: the page stays in the pass.',
+    },
+  ])(
+    'answers $name with no claim, kept for the next call',
+    async ({ choice, note, told, thread }) => {
+      w = await openPassWorld();
+      await settingsChangedSrc();
+      const tools = laneTools(w, w.people, new ClaimWaits(), 30);
+      const first = await ask(tools);
+      if (first.granted || first.inboxId === null) throw new Error('no question');
+
+      // The answer comes while no call waits; the next call with the same opId gets it.
+      w.h.inbox.answer(first.inboxId, { choice, ...(note === undefined ? {} : { note }) });
+      await new Promise((r) => setImmediate(r));
+      const answer = await ask(tools);
+
+      expect(answer).toMatchObject({ granted: false, waiting: false, inboxId: first.inboxId });
+      if (answer.granted) throw new Error('granted');
+      expect(answer.instruction).toMatch(told);
+      expect(openHolds(w.h.store.db, w.opened.pass.id)).toEqual([]);
+      const said = listTaskThread(w.h.store.db, w.people.id).map((m) => m.body);
+      if (thread !== null) expect(said).toContain(thread);
+      // The page stays in its pass, its run going on.
+      expect(getWorkstreamRow(w.h.store.db, w.runOf(w.people)).state).not.toBe('CANCELLED');
+      if (choice === SHARED_ASK_REPLY_CHOICE)
+        expect(listTaskThread(w.h.store.db, w.people.id).at(-1)).toMatchObject({
+          author: 'builder',
+          body: note,
+        });
+    },
+  );
 });
