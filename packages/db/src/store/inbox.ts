@@ -204,7 +204,8 @@ export function updateInboxItem(
     readonly state?: InboxState;
     readonly title?: string;
     readonly body?: string;
-    readonly answer?: InboxAnswer;
+    /** Null clears the answer, as an item opened again has none. */
+    readonly answer?: InboxAnswer | null;
     readonly targets?: readonly InboxTarget[];
     readonly options?: readonly InboxOption[];
     /** Null clears the detail. */

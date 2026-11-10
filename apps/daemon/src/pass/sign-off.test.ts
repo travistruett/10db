@@ -1,5 +1,6 @@
 import {
   ConflictError,
+  InboxState,
   PASS_SIGN_OFF_CHOICE,
   WorkstreamState as S,
   type TaskDto,
@@ -20,10 +21,11 @@ import {
   listTaskThread,
   openHolds,
   transitionWorkstream,
+  updateInboxItem,
 } from '@10db/db';
 import { afterEach, beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { openPassWorld, type PassWorld } from '../../test/pass-world';
-import type { Git } from '../git';
+import { GitTrustError, GitTrustFailure, type Git } from '../git';
 import {
   abandonPass,
   grantSharedHold,
@@ -35,8 +37,10 @@ import {
 import {
   cancelSignOffWait,
   finishSignOff,
+  signOffRefusal,
   signOffSteps,
   SignOffFrom,
+  startSignOff,
   type SignOffDeps,
 } from './sign-off';
 
@@ -223,6 +227,39 @@ describe('signOffSteps', () => {
       expect(getWorkstreamRow(w.h.store.db, w.runOf(w.settings)).state).toBe('DONE');
     },
   );
+
+  it('lands from the new tip once when a hand-typed git moved the branch as it landed', async () => {
+    w = await openPassWorld();
+    await turn(w.settings, () => {
+      w.write('src/settings/page.tsx', 'tidied\n');
+    });
+    ready(w.settings);
+    let raced = false;
+    const racing: Git = {
+      ...w.deps.git,
+      landPaths: (input) => {
+        if (raced) return w.deps.git.landPaths(input);
+        raced = true;
+        // The branch moves between the landing's read of its tip and its compare-and-swap.
+        w.h.commit('docs/by-hand.md');
+        return Promise.reject(
+          new GitTrustError(w.h.repo, {
+            kind: GitTrustFailure.Ref,
+            ref: `refs/heads/${w.branch}`,
+            reason: 'raced',
+          }),
+        );
+      },
+    };
+
+    expect(await signOff(w.settings, { ...w.deps, git: racing, stopLane: stopped })).toMatchObject({
+      kind: 'signed_off',
+      files: ['src/settings/page.tsx'],
+    });
+
+    expect(landed()).toEqual(['Add docs/by-hand.md', 'Settings: UI work']);
+    expect(getWorkstreamRow(w.h.store.db, w.runOf(w.settings)).state).toBe('DONE');
+  });
 
   it.each([
     { name: 'the first page first', order: ['settings', 'people'] as const },
@@ -418,6 +455,70 @@ describe('a waiting sign-off', () => {
     await end();
 
     expect(listSignOffWaits(w.h.store.db, w.opened.pass.id)).toEqual([]);
+  });
+});
+
+describe('a Sign Off from the Ready card that does not land', () => {
+  afterEach(() => {
+    w.close();
+  });
+
+  /** Sign Off answered on the page's Ready card, as the card's write closes it. */
+  function answerCard(task: TaskDto) {
+    const row = getWorkstreamRow(w.h.store.db, w.runOf(task));
+    if (row.nextAction.kind !== 'pass_review') throw new Error('not Ready');
+    const id = row.nextAction.inboxId;
+    w.h.state.write((ctx) =>
+      updateInboxItem(ctx, id, {
+        state: InboxState.Resolved,
+        answer: { choice: PASS_SIGN_OFF_CHOICE },
+      }),
+    );
+    return id;
+  }
+
+  it.each([
+    {
+      name: "fails with Your folder off the pass's branch",
+      before: () => undefined,
+      act: async () => {
+        w.h.git$('switch', '-q', 'main');
+        startSignOff({ ...w.deps, stopLane: stopped }, w.settings.id);
+        await w.h.jobs.idle();
+        w.h.git$('switch', '-q', w.branch);
+      },
+      line: /^Not signed off: .*main/,
+    },
+    {
+      name: 'is cancelled while it waits',
+      before: async () => {
+        w.startTurn(w.people);
+        await grantSharedHold(w.deps, { workstreamId: w.runOf(w.people), area: 'src' });
+        w.write('src/button.ts', 'button\n');
+      },
+      act: async () => {
+        startSignOff({ ...w.deps, stopLane: stopped }, w.settings.id);
+        await w.h.jobs.idle();
+        cancelSignOffWait(w.deps, w.opened.pass.id, w.settings.id);
+      },
+      line: /^Sign-off cancelled while it waited\.$/,
+    },
+  ])('puts the Ready card back when it $name', async ({ before, act, line }) => {
+    w = await openPassWorld();
+    await before();
+    await turn(w.settings, () => {
+      w.write('src/settings/page.tsx', 'tidied\n');
+    });
+    ready(w.settings);
+    const card = answerCard(w.settings);
+
+    await act();
+
+    expect(landed()).toEqual([]);
+    expect(getInboxItem(w.h.store.db, card).state).toBe('OPEN');
+    expect(listTaskThread(w.h.store.db, w.settings.id).at(-1)?.body).toMatch(line);
+    // The builder can sign the page off again.
+    expect(signOffRefusal(w.h.store.db, w.opened.pass.id, w.settings.id)).toBeNull();
   });
 });
 

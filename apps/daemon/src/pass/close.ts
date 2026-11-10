@@ -47,7 +47,7 @@ import { checkCloseRequest, closeChanges, closePreview, type CloseGateWhere } fr
 import { fastForwardReturn } from './fast-forward';
 import { passFolderOn } from './folder';
 import { pageMatcher, passBranch, passKeptRef } from './kept-work';
-import { keepHold, landSharedChanges } from './shared-chain';
+import { keepHold, landOnBranch, landSharedChanges } from './shared-chain';
 import { signOffSteps, SignOffFrom } from './sign-off';
 import { takeOutSteps, TakeOutWithin, type TakeOutDeps } from './take-out';
 import { unfinishedPages } from './unowned';
@@ -279,7 +279,7 @@ export async function closeSteps(
       closing();
       const record = await deps.git.recordPaths({ repo, base: await tip(), paths: [file.path] });
       const title = listPassTasks(db, passId).find((t) => t.id === file.placeIn)?.title ?? '';
-      await deps.git.landPaths({
+      await landOnBranch(deps.git, {
         repo,
         branch,
         from: record.sha,

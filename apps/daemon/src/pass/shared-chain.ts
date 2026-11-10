@@ -35,7 +35,14 @@ import {
 } from '@10db/db';
 import { claimScopeOf } from '../delivery';
 import type { Logger } from '../log';
-import { PassFolderOffBranchError, type ChainCommit } from '../git';
+import {
+  GitTrustError,
+  GitTrustFailure,
+  PassFolderOffBranchError,
+  type ChainCommit,
+  type Git,
+  type LandedPaths,
+} from '../git';
 import { keepNamedPaths, passBranch, passTaskPlace, type PassWorkDeps } from './kept-work';
 import {
   chainTip,
@@ -209,6 +216,26 @@ export function sharedNeeded(
   return { upTo, openHolds: openHolds(db, passId).filter((h) => h.seq <= upTo) };
 }
 
+/**
+ * `Git.landPaths`, once more from the new tip when a hand-typed git moved the branch between the
+ * landing's read of it and its compare-and-swap (spec §9.2, §18); the order of landings is unchanged.
+ */
+export async function landOnBranch(
+  git: Git,
+  input: Parameters<Git['landPaths']>[0],
+): Promise<LandedPaths> {
+  try {
+    return await git.landPaths(input);
+  } catch (error) {
+    const raced =
+      error instanceof GitTrustError &&
+      error.detail.kind === GitTrustFailure.Ref &&
+      error.detail.reason === 'raced';
+    if (!raced) throw error;
+    return git.landPaths(input);
+  }
+}
+
 /** A number of the chain a landing reached: the commit that landed its change, or null passed over. */
 export interface LandedShared {
   readonly seq: number;
@@ -252,7 +279,7 @@ export async function landSharedChanges(
       change.paths.length > 0 &&
       !(i.passOver ?? []).includes(seq)
     ) {
-      const done = await deps.git.landPaths({
+      const done = await landOnBranch(deps.git, {
         repo,
         branch,
         from: change.sha,

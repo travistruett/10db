@@ -45,6 +45,7 @@ import { pageMatcher, passBranch, passKeptRef, readKeptRef, type PassWorkDeps } 
 import {
   closeHoldsOf,
   keepHold,
+  landOnBranch,
   landSharedChanges,
   sharedNeeded,
   type LandedShared,
@@ -158,6 +159,34 @@ const errorText = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
 /**
+ * Opens the page's Ready item again when the Sign Off its answer closed did not land, so the page is
+ * Ready again and the builder can sign it off or send it a message. Only while the run still waits on
+ * that item, closed by its Sign Off.
+ */
+function reopenReady(ctx: WriteContext, ws: WorkstreamId): void {
+  const row = getWorkstreamRow(ctx.tx, ws);
+  if (row.state !== S.WaitingHuman || row.nextAction.kind !== 'pass_review') return;
+  const item = getInboxItem(ctx.tx, row.nextAction.inboxId);
+  if (
+    item.kind === InboxKind.Check &&
+    item.state === InboxState.Resolved &&
+    item.answer?.choice === PASS_SIGN_OFF_CHOICE
+  )
+    updateInboxItem(ctx, item.id, { state: InboxState.Open, answer: null });
+}
+
+/** A sign-off's job failed: the thread says why, and the page is Ready again. */
+function signOffFailed(deps: SignOffDeps, taskId: TaskId, error: unknown): void {
+  deps.logger.warn({ taskId, err: errorText(error) }, 'sign-off failed');
+  deps.state.write((ctx) => {
+    deleteSignOffWait(ctx, taskId);
+    insertSystemNotice(ctx, taskId, `Not signed off: ${errorText(error)}.`);
+    const ws = getTask(ctx.tx, taskId).workstreamId;
+    if (ws !== null) reopenReady(ctx, ws);
+  });
+}
+
+/**
  * Starts the builder's Sign Off on a Ready page as a job under the project's delivery key, and
  * answers what it will do: land now, or wait for another page's turn that holds a shared change the
  * page needs. A page already waiting answers its wait and starts nothing more. The caller has asked
@@ -175,7 +204,7 @@ export function startSignOff(deps: SignOffDeps, taskId: TaskId): PassSignOffDto 
   if (wait) return waitingFor(wait.waitsForTaskId);
   if (task.passId == null) throw new ConflictError(`${task.title} is in no pass`);
   signOff(deps, { taskId, from: SignOffFrom.Page }).catch((error: unknown) => {
-    deps.logger.warn({ taskId, err: errorText(error) }, 'sign-off failed');
+    signOffFailed(deps, taskId, error);
   });
   const holder = othersNeeded(db, task.passId, taskId)[0];
   return holder === undefined
@@ -193,7 +222,10 @@ export function askSignOff(deps: SignOffDeps, passId: PassId, taskId: TaskId): P
   return startSignOff(deps, taskId);
 }
 
-/** Cancels the page's waiting sign-off (`DELETE .../sign-off`); refused when it is not waiting. */
+/**
+ * Cancels the page's waiting sign-off (`DELETE .../sign-off`), the page Ready again; refused when it
+ * is not waiting.
+ */
 export function cancelSignOffWait(deps: PassWorkDeps, passId: PassId, taskId: TaskId): void {
   deps.state.write((ctx) => {
     const task = getTask(ctx.tx, taskId);
@@ -201,6 +233,7 @@ export function cancelSignOffWait(deps: PassWorkDeps, passId: PassId, taskId: Ta
     if (!wait || !deleteSignOffWait(ctx, taskId))
       throw new ConflictError(`${task.title} has no sign-off waiting`);
     insertSystemNotice(ctx, taskId, 'Sign-off cancelled while it waited.');
+    if (task.workstreamId !== null) reopenReady(ctx, task.workstreamId);
   });
 }
 
@@ -338,6 +371,7 @@ export async function signOffSteps(
     deps.state.write((ctx) => {
       deleteSignOffWait(ctx, task.id);
       insertSystemNotice(ctx, task.id, `Not signed off: ${reason}.`);
+      if (ws !== null) reopenReady(ctx, ws);
     });
     return { kind: 'not_now', reason };
   };
@@ -388,7 +422,7 @@ export async function signOffSteps(
     const tip = await deps.git.commitAt(repo, branch);
     const mine = pageMatcher(db, getProject(db, pass.projectId), getTask(db, task.id), pass.id);
     const paths = (await deps.git.filesChangedBetween(repo, tip, kept)).filter(mine);
-    const landed = await deps.git.landPaths({
+    const landed = await landOnBranch(deps.git, {
       repo,
       branch,
       from: kept,
@@ -450,7 +484,7 @@ export function resumeSignOffWaits(deps: SignOffDeps, passId?: PassId): void {
     const pass = getPass(db, wait.passId);
     if (pass.state !== PassState.Open) continue;
     signOff(deps, { taskId: wait.taskId, from: SignOffFrom.Wait }).catch((error: unknown) => {
-      deps.logger.warn({ taskId: wait.taskId, err: errorText(error) }, 'waiting sign-off failed');
+      signOffFailed(deps, wait.taskId, error);
     });
   }
 }
