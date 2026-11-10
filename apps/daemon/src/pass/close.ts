@@ -239,11 +239,12 @@ async function settlesAtClose(deps: CloseDeps, pass: PassDto): Promise<boolean> 
  * step its row records: 2 the pass's checks stop, every session stops again, the pages set to Sign
  * Off Now are signed off in the plan's order, then the placements and the shared changes kept land
  * (commits only); 3 the batch ships and, where copies are allowed, the gate runs in a scratch
- * worktree on the tip; 4 the other unfinished pages are taken out, inside the close, so files that
- * keep changing are left and named; 5 where the gate runs in the folder, it runs now; 6 the branch
- * is pushed and its pull request made ready, never set to merge itself; 7 D8's fast-forward; 8 one
- * write ships the batch and closes the pass, settled where nothing waits for a merge, after the
- * signed-off pages' kept refs go. A gate that fails or is aborted ends the job.
+ * worktree on the tip; 4 once Your folder is on the pass's branch, the other unfinished pages are
+ * taken out, inside the close, so files that keep changing are left and named; 5 where the gate runs
+ * in the folder, it runs now; 6 the branch is pushed and its pull request made ready, never set to
+ * merge itself; 7 D8's fast-forward; 8 one write ships the batch and closes the pass, settled where
+ * nothing waits for a merge, after the signed-off pages' kept refs go. A gate that fails or is
+ * aborted ends the job.
  */
 export async function closeSteps(
   deps: CloseDeps,
@@ -324,6 +325,9 @@ export async function closeSteps(
   }
 
   if (step() < CloseStep.TakenOut) {
+    // A take-out off the pass's branch keeps the last kept commit and writes no file: the pages it
+    // takes out would stay half done in the folder, owned by no page once the pass lands.
+    await folderBack(deps, passId, signal);
     for (const task of unfinishedPages(db, passId)) {
       closing();
       const mine = new Set(

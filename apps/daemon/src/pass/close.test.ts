@@ -309,6 +309,44 @@ describe('Close Pass', () => {
     expect(w.h.git$('rev-parse', 'main')).toBe(tip);
   });
 
+  it('waits for Your folder before its take-outs, so the pages it takes out are put back', async () => {
+    await world({ gateCommand: 'true' });
+    await twoTurns();
+    const deps = closeDeps();
+    const closes = createPassCloses({
+      ...deps,
+      folderPollMs: 20,
+      ship: {
+        ...deps.ship,
+        gatePassTip: async (i) => {
+          const ran = await deps.ship.gatePassTip(i);
+          // The builder switches branch as the gate finishes, before any page is taken out.
+          w.h.git$('switch', '-q', 'main');
+          return ran;
+        },
+      },
+    });
+    const shown = await closes.preview(w.opened.pass.id);
+    await closes.close(w.opened.pass.id, {
+      token: shown.token,
+      pages: [
+        { taskId: w.settings.id, choice: PassClosePageChoice.SignOff },
+        { taskId: w.people.id, choice: PassClosePageChoice.TakeOut },
+      ],
+      files: [],
+      shared: [],
+    });
+
+    await waitFor(() => folderCardOpen(w.h.store.db, w.opened.pass));
+    expect(getPassProgress(w.h.store.db, w.opened.pass.id).closeStep).toBe(3);
+    w.h.git$('switch', '-q', w.branch);
+    await w.h.jobs.idle();
+
+    expect(passState()).toBe('CLOSED');
+    expect(read('src/people/page.tsx')).toBe('people\n');
+    expect(getTask(w.h.store.db, w.people.id).passId).toBeNull();
+  });
+
   it(
     "is taken over by an Abandon while its gate runs: the gate's signal is raised and the pass ends ABANDONED",
     { timeout: 120_000 },
