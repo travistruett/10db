@@ -8,6 +8,7 @@ import {
 } from '@10db/contracts';
 import {
   abandonPassAndBatch,
+  deleteSignOffWait,
   findOpenByFoldKey,
   getAbandonStep,
   getBatch,
@@ -18,6 +19,7 @@ import {
   listPassTakeOuts,
   listPassTasks,
   listSharedChanges,
+  listSignOffWaits,
   openHolds,
   setAbandonStep,
   type DbReader,
@@ -176,8 +178,13 @@ export async function abandonPassSteps(
   };
   const before = (next: AbandonStep): boolean => step === null || step < next;
 
-  if (before(AbandonStep.Abandoning) || getPass(db, passId).state === PassState.Open)
+  if (before(AbandonStep.Abandoning) || getPass(db, passId).state === PassState.Open) {
     record(AbandonStep.Abandoning);
+    // No sign-off is taken from here on: one waiting for a hold ends with the pass.
+    deps.state.write((ctx) => {
+      for (const wait of listSignOffWaits(ctx.tx, passId)) deleteSignOffWait(ctx, wait.taskId);
+    });
+  }
   // Step 2's place: a pass ships only once slice 7 lands sign-off and its close.
   if (before(AbandonStep.ShipAborted)) record(AbandonStep.ShipAborted);
   if (before(AbandonStep.SessionsStopped)) {

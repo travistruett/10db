@@ -9,12 +9,14 @@ import {
   type TaskMessageId,
 } from '@10db/contracts';
 import {
+  acquireClaims,
   findOpenByFoldKey,
   findToolOp,
   getHold,
   getInboxItem,
   getWorkstreamRow,
   insertSession,
+  insertSignOffWait,
   listSharedChanges,
   listTaskThread,
   listTaskThreadRows,
@@ -295,5 +297,49 @@ describe("the builder's question before a second task changes a shared area", ()
 
     // The same opId asks again, since the holder is still there: nothing kept answers it.
     expect(await ask(tools)).toMatchObject({ granted: false, waiting: true });
+  });
+});
+
+describe('a request_claim while a sign-off waits on its turn', () => {
+  it('refuses at once a claim the signing page holds, so neither page waits on the other', async () => {
+    w = await openPassWorld();
+    // Settings' run holds the deps hazard, as its launch claimed it.
+    w.h.state.write((c) =>
+      acquireClaims(c, {
+        projectId: w.h.project.id,
+        workstreamId: w.runOf(w.settings),
+        requests: [{ kind: 'hazard', name: 'deps' }],
+        leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      }),
+    );
+    const tools = laneTools(w, w.people, new ClaimWaits(), 50);
+    const src = await tools.request_claim({
+      opId: 'op-people-src',
+      kind: 'area',
+      name: 'src',
+      reason: 'a wider button',
+    });
+    if (!src.granted) throw new Error('src was not granted');
+    // Settings needs People's change to src, so its sign-off waits for People's turn to end.
+    w.h.state.write((c) =>
+      insertSignOffWait(c, {
+        taskId: w.settings.id,
+        passId: w.opened.pass.id,
+        waitsFor: src.claimId,
+      }),
+    );
+
+    const answer = await tools.request_claim({
+      opId: 'op-people-deps',
+      kind: 'hazard',
+      name: 'deps',
+      reason: 'a lockfile change',
+    });
+
+    expect(answer).toMatchObject({
+      granted: false,
+      instruction:
+        'Settings: UI work is being signed off; do without hazard deps or ask again after your turn.',
+    });
   });
 });

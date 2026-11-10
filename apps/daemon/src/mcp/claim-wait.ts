@@ -22,9 +22,11 @@ import {
   getProject,
   getTask,
   getWorkstream,
+  getHold,
   getInboxItem,
   getWorkstreamRow,
   listInbox,
+  listSignOffWaits,
   setWorkstreamNotice,
   type AcquireResult,
   type ClaimRow,
@@ -519,6 +521,29 @@ function parkedRefusal(a: Asking, heldBy: WorkstreamId): ClaimResult {
   };
 }
 
+/**
+ * The refusal when a sign-off waits for this lane's turn to end (Workbench spec §9.2 step 0) and the
+ * claim is held by the page being signed off: neither could move, so the lane is answered at once
+ * and its turn can end. Null when no such sign-off waits.
+ */
+function signingOffRefusal(a: Asking, holder: WorkstreamId): ClaimResult | null {
+  const db = a.state.db;
+  for (const wait of listSignOffWaits(db)) {
+    if (getHold(db, wait.waitsFor).workstreamId !== a.workstreamId) continue;
+    const signing = getTask(db, wait.taskId);
+    if (signing.workstreamId !== holder) continue;
+    return {
+      granted: false,
+      heldBy: holder,
+      inboxId: null,
+      yielded: false,
+      parked: false,
+      instruction: `${signing.title} is being signed off; do without ${a.kind} ${a.name} or ask again after your turn.`,
+    };
+  }
+  return null;
+}
+
 /** Whether the task reached a terminal state: it takes no part in a deadlock any more. */
 const taskEnded =
   (db: DbReader) =>
@@ -618,6 +643,12 @@ async function claimOrWait(a: Asking, wait: WaitState, waits: ClaimWaits): Promi
         return grantedFrom(a, outcome.claims);
       }
       const holder = outcome.conflict.heldBy;
+      // A page whose sign-off waits for this turn frees nothing until the turn ends: no wait on it.
+      const signing = signingOffRefusal(a, holder);
+      if (signing) {
+        withdrawDeadlock(a);
+        return signing;
+      }
       // A holder the update drain parked frees nothing until the update has installed, and the update
       // waits for this session to end: refuse instead of waiting, and the session ends by itself.
       if (waits.holderParked(holder)) return parkedRefusal(a, holder);

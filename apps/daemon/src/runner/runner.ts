@@ -79,6 +79,7 @@ import {
   insertSession,
   insertSource,
   insertSystemNotice,
+  deleteSignOffWait,
   lastTakeOut,
   listAccountModels,
   listModelProfiles,
@@ -3789,6 +3790,11 @@ export function createRunner(opts: RunnerOptions): Runner {
           throw new ConflictError(`${title} is being taken out of its pass`);
       };
       stillAPage();
+      // A message to a page whose sign-off waits for another page's turn takes the sign-off back.
+      opts.state.write((ctx) => {
+        if (deleteSignOffWait(ctx, taskId))
+          insertSystemNotice(ctx, taskId, 'Sign-off cancelled: the page took a message.');
+      });
       const ctl = active.get(id);
       const lane = ctl?.messages ?? null;
       if (ctl && lane && ctl.stopReason === null) {

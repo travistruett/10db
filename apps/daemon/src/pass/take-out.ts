@@ -15,6 +15,7 @@ import {
 import {
   advanceTakeOut,
   clearLease,
+  deleteSignOffWait,
   deleteTakeOut,
   getPass,
   getProject,
@@ -118,8 +119,9 @@ export function leavePassForBoard(
     releaseClaims(ctx, run);
     clearLease(ctx, run);
   }
-  // No turn of the task is left for a later run of it to finish.
+  // No turn of the task is left for a later run of it to finish, nor a sign-off waiting for it.
   settleTurnsLeaving(ctx, input.taskId);
+  deleteSignOffWait(ctx, input.taskId);
   leavePass(ctx, input.taskId);
   if (task.status !== TaskStatus.Open) setTaskStatus(ctx, input.taskId, TaskStatus.Open);
   setTaskKeptWork(ctx, input.taskId, input.kept);

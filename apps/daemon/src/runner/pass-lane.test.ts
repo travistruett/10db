@@ -23,14 +23,18 @@ import {
   getTask,
   getWorkstreamRow,
   insertBuilderMessage,
+  insertHold,
   insertPass,
   insertPassTurn,
+  insertSignOffWait,
   insertTakeOut,
   insertTask,
   insertWorkstream,
   listInbox,
   listPassTurns,
   listSharedChanges,
+  listSignOffWaits,
+  latestPassTurn,
   openHolds,
   listSessions,
   endPassTurn,
@@ -444,6 +448,57 @@ describe("a builder message's hand-over to a warm session", () => {
 
 // Workbench spec §6.4: what the builder changed by hand since the page's last turn is kept with the
 // page and named to the agent, whether its next turn goes into a warm session or starts one.
+describe('a message to a page whose sign-off waits', () => {
+  it("takes the sign-off back, and the page's next turn starts", async () => {
+    const { task, pass, id } = await openPage(
+      [
+        [
+          ...turn('one\n', 'Tidied the form.'),
+          { do: 'await_message', contains: 'Bigger' },
+          ...turn('two\n', 'Made it bigger.'),
+          { do: 'await_message', contains: 'never sent' },
+        ],
+      ],
+      'Make the form tidy',
+      () => undefined,
+      {
+        gateCommand: null,
+        areas: [...PAGE_AREAS.areas, { name: 'src', globs: ['src/**'], role: 'shared' as const }],
+      },
+    );
+    await waitFor(isReady(id, 1));
+    // The page's sign-off waits for a hold of the shared area.
+    engine.state.write((ctx) => {
+      const held = acquireClaims(ctx, {
+        projectId: engine.project.id,
+        workstreamId: id,
+        requests: [{ kind: 'area', name: 'src' }],
+        leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      });
+      const claim = held.ok ? held.claims.find((c) => c.name === 'src') : undefined;
+      if (!claim) throw new Error('src was not claimed');
+      const hold = insertHold(ctx, {
+        claimId: claim.id,
+        passId: pass.id,
+        taskId: task.id,
+        workstreamId: id,
+        area: 'src',
+        recordSha: pass.startSha,
+        record: [],
+      });
+      insertSignOffWait(ctx, { taskId: task.id, passId: pass.id, waitsFor: hold.claimId });
+    });
+
+    await write(task, 'Bigger please');
+
+    expect(listSignOffWaits(engine.store.db, pass.id)).toEqual([]);
+    expect(listTaskThread(engine.store.db, task.id).map((m) => m.body)).toContain(
+      'Sign-off cancelled: the page took a message.',
+    );
+    await waitFor(() => latestPassTurn(engine.store.db, task.id)?.seq === 2);
+  });
+});
+
 describe("the builder's hand edits before a turn that starts a session", () => {
   const note = 'The builder edited these files by hand since your last turn. Keep their changes:';
   const handNotices = (task: TaskDto) =>

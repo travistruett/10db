@@ -24,8 +24,21 @@ import {
 import { afterEach, beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { openPassWorld, type PassWorld } from '../../test/pass-world';
 import type { Git } from '../git';
-import { grantSharedHold, keepHold, keepTurnWork } from './index';
-import { finishSignOff, signOffSteps, SignOffFrom, type SignOffDeps } from './sign-off';
+import {
+  abandonPass,
+  grantSharedHold,
+  keepHold,
+  keepTurnWork,
+  takeOut,
+  TakeOutWithin,
+} from './index';
+import {
+  cancelSignOffWait,
+  finishSignOff,
+  signOffSteps,
+  SignOffFrom,
+  type SignOffDeps,
+} from './sign-off';
 
 // Workbench spec §9.2, §7.2 (D17): Sign Off stops the page, lands the shared changes it needs in
 // chain order and then the page's own files as one commit, and ends its run in one write; a crash
@@ -346,6 +359,43 @@ describe('signOffSteps', () => {
     expect(listTaskThread(w.h.store.db, w.settings.id).at(-1)?.body).toBe(
       'Not signed off: the page is no longer Ready.',
     );
+  });
+});
+
+describe('a waiting sign-off', () => {
+  afterEach(() => {
+    w.close();
+  });
+  const takeOutDeps = () => ({ ...w.deps, stopLane: stopped, wrote: stopped });
+
+  it.each([
+    {
+      name: 'a take-out of the waiting page',
+      end: () => takeOut(takeOutDeps(), { taskId: w.settings.id, within: TakeOutWithin.Alone }),
+    },
+    { name: 'an Abandon of the pass', end: () => abandonPass(takeOutDeps(), w.opened.pass.id) },
+    {
+      name: 'the builder cancelling it',
+      end: () => {
+        cancelSignOffWait(w.deps, w.opened.pass.id, w.settings.id);
+        return Promise.resolve();
+      },
+    },
+  ])('ends with $name', async ({ end }) => {
+    w = await openPassWorld();
+    w.startTurn(w.people);
+    const granted = await grantSharedHold(w.deps, { workstreamId: w.runOf(w.people), area: 'src' });
+    if (!granted?.ok) throw new Error('src was not granted');
+    w.write('src/button.ts', 'button\n');
+    await turn(w.settings, () => {
+      w.write('src/settings/page.tsx', 'settings page\n');
+    });
+    ready(w.settings);
+    expect(await signOff(w.settings)).toMatchObject({ kind: 'waiting' });
+
+    await end();
+
+    expect(listSignOffWaits(w.h.store.db, w.opened.pass.id)).toEqual([]);
   });
 });
 
