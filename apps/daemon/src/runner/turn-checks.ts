@@ -95,6 +95,10 @@ function unrunText(result: GateResult): string {
   return `The changed-files check after a turn could not run${why === '' ? '' : `: ${why}`}`;
 }
 
+/** A timeout in words: seconds under a minute, else whole minutes. */
+const duration = (ms: number): string =>
+  ms < 60_000 ? `${String(ms / 1000)} s` : `${String(Math.round(ms / 60_000))} min`;
+
 /** The end of the check's log, where a failure is said; the tail it reported when it can't be read. */
 async function outputOf(result: GateResult): Promise<string> {
   try {
@@ -249,7 +253,16 @@ function createTurnChecks(deps: TurnChecksDeps): TurnChecks {
       });
       return;
     }
-    if ((result.exitCode === UNSTARTED_EXIT && !result.timedOut) || result.dockerRefused === true) {
+    // Plan §3.1: a check that timed out, could not start or had Docker refused says so and
+    // offers nothing; its turns stay unchecked.
+    if (result.timedOut) {
+      tell(
+        passId,
+        `The changed-files check after a turn timed out after ${duration(deps.timeoutMs)}`,
+      );
+      return;
+    }
+    if (result.exitCode === UNSTARTED_EXIT || result.dockerRefused === true) {
       tell(passId, unrunText(result));
       return;
     }
@@ -278,7 +291,6 @@ function createTurnChecks(deps: TurnChecksDeps): TurnChecks {
           line,
           command,
           exitCode: result.exitCode,
-          timedOut: result.timedOut,
           output,
         });
       for (const target of threads) {

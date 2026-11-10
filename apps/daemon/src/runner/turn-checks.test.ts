@@ -31,6 +31,7 @@ import { silentLogger } from '../log';
 import { closeGateOf, createPassCloses, joinPass } from '../pass';
 import { systemProcesses } from '../recovery';
 import { createGateRunner, createGateSlots, limitGates } from '../verify';
+import { SandboxProfileError, type GateSandbox } from '../sandbox';
 import { endTurnSteps, finishEndedTurn } from './pass-turn';
 import {
   startTurnChecks,
@@ -112,12 +113,16 @@ async function world(command: () => string, more: { pages?: string[] } = {}) {
 
 /** The service as start-up builds it: one gate slot, the real runner, the system's processes. */
 async function start(
-  identify: (pid: number) => Promise<string | null> = (pid) => systemProcesses.identify(pid),
+  opts: {
+    readonly identify?: (pid: number) => Promise<string | null>;
+    readonly timeoutMs?: number;
+    readonly sandbox?: GateSandbox;
+  } = {},
 ): Promise<TurnChecks> {
   started = await startTurnChecks({
     state: w.h.state,
     git: w.h.git,
-    gate: limitGates(createGateRunner({ sandbox: null, logger: silentLogger }), {
+    gate: limitGates(createGateRunner({ sandbox: opts.sandbox ?? null, logger: silentLogger }), {
       slots: createGateSlots(1),
       clock: w.h.ctx.clock,
       logger: silentLogger,
@@ -126,8 +131,8 @@ async function start(
     clock: w.h.ctx.clock,
     dataDir: w.h.dataDir,
     sessionEnv: () => ({ PATH: '/usr/bin:/bin' }),
-    identifyProcess: identify,
-    timeoutMs: TURN_CHECK_TIMEOUT_MS,
+    identifyProcess: opts.identify ?? ((pid) => systemProcesses.identify(pid)),
+    timeoutMs: opts.timeoutMs ?? TURN_CHECK_TIMEOUT_MS,
     bus: w.h.bus,
     processes: systemProcesses,
   });
@@ -235,9 +240,11 @@ describe('the check after each turn', () => {
     await world(() => checkScript('src/settings/page.tsx'));
     let psRefuses = true;
     // ps could not be asked for the check's process: the runner kills the group and rejects.
-    await start((pid) => {
-      if (psRefuses) throw new Error('ps is not there');
-      return systemProcesses.identify(pid);
+    await start({
+      identify: (pid) => {
+        if (psRefuses) throw new Error('ps is not there');
+        return systemProcesses.identify(pid);
+      },
     });
 
     await readyTurn(w.settings, 'src/settings/page.tsx');
@@ -258,9 +265,67 @@ describe('the check after each turn', () => {
     expect(header()).toMatchObject([{ sendable: true }]);
   });
 
+  it.each<{
+    name: string;
+    hold?: boolean;
+    timeoutMs?: number;
+    sandbox?: () => GateSandbox;
+    text: string;
+  }>([
+    {
+      name: 'a check that timed out',
+      hold: true,
+      timeoutMs: 300,
+      text: 'The changed-files check after a turn timed out after 0.3 s',
+    },
+    {
+      name: 'a check whose sandbox could not start (exit 126)',
+      sandbox: () => ({
+        forRun: () => Promise.reject(new SandboxProfileError('network', 'no such host list')),
+      }),
+      text: "The changed-files check after a turn could not run: 10db could not start the gate's sandbox: no such host list",
+    },
+    {
+      name: 'a check whose docker call the sandbox refused',
+      sandbox: () => ({
+        forRun: (input) =>
+          Promise.resolve({
+            file: '/bin/sh',
+            args: ['-c', input.command],
+            env: { PATH: '/usr/bin:/bin' },
+            cwd: input.project.repoPath,
+            tmpDir: input.project.repoPath,
+            commandEnv: {},
+            commandLines: 1,
+            dockerRefused: () => true,
+            dispose: () => Promise.resolve(),
+          }),
+      }),
+      text: 'The changed-files check after a turn could not run: Docker is off for this project',
+    },
+  ])(
+    'says in the header, offering nothing, that $name, and leaves the turn unchecked',
+    async ({ hold, timeoutMs, sandbox, text }) => {
+      await world(() => checkScript('src/settings/page.tsx'));
+      if (hold === true) touch('hold');
+      await start({
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
+        ...(sandbox === undefined ? {} : { sandbox: sandbox() }),
+      });
+
+      await readyTurn(w.settings, 'src/settings/page.tsx');
+      await waitFor(() => header().length === 1);
+
+      expect(header()).toMatchObject([{ kind: PassNoticeKind.TurnCheck, sendable: false, text }]);
+      expect(checks()).toEqual(['none']);
+      expect(checkNotices(w.settings)).toEqual([]);
+      touch('go');
+    },
+  );
+
   it('runs and reports a check whose process group ps could not be asked for, recording no pid', async () => {
     await world(() => checkScript('src/settings/page.tsx'));
-    await start(() => Promise.reject(new Error('ps failed')));
+    await start({ identify: () => Promise.reject(new Error('ps failed')) });
 
     await readyTurn(w.settings, 'src/settings/page.tsx');
     await waitFor(() => checks().at(-1) === 'failed');
@@ -278,12 +343,14 @@ describe('the check after each turn', () => {
       letFirstAnswer = resolve;
     });
     // ps answers the first check late, after the next one has started and been recorded.
-    const turnChecks = await start(async (pid) => {
-      if (first === 0) {
-        first = pid;
-        await firstAnswer;
-      }
-      return systemProcesses.identify(pid);
+    const turnChecks = await start({
+      identify: async (pid) => {
+        if (first === 0) {
+          first = pid;
+          await firstAnswer;
+        }
+        return systemProcesses.identify(pid);
+      },
     });
     await readyTurn(w.settings, 'src/settings/page.tsx');
     await waitFor(() => first !== 0);

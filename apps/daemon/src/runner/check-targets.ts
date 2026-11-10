@@ -118,11 +118,9 @@ export function checkOffer(input: {
   readonly line: string;
   readonly command: string;
   readonly exitCode: number;
-  readonly timedOut: boolean;
   readonly output: string;
 }): string {
-  const ended = input.timedOut ? 'timed out' : `exited ${String(input.exitCode)}`;
-  const head = `${input.line}\n\n\`${input.command}\` ${ended}.\n\n\`\`\`\n`;
+  const head = `${input.line}\n\n\`${input.command}\` exited ${String(input.exitCode)}.\n\n\`\`\`\n`;
   const foot = '```';
   // One for the newline the output may need before the fence.
   const room = TASK_MESSAGE_MAX_CHARS - head.length - foot.length - 1;

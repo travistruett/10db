@@ -141,14 +141,12 @@ describe("a failed check's words", () => {
       line: 'Check failed: names `src/settings/page.tsx`',
       command: 'make check-changed',
       exitCode: 2,
-      timedOut: false,
       output: tail,
     });
     const short = checkOffer({
       line: 'Check failed after a turn: it names no changed file',
       command: 'make check-changed',
-      exitCode: 124,
-      timedOut: true,
+      exitCode: 1,
       output: 'stuck\n',
     });
 
@@ -160,7 +158,7 @@ describe("a failed check's words", () => {
       [
         'Check failed after a turn: it names no changed file',
         '',
-        '`make check-changed` timed out.',
+        '`make check-changed` exited 1.',
         '',
         '```',
         'stuck',
