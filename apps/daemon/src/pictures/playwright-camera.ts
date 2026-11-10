@@ -3,7 +3,7 @@ import type { Browser, BrowserContext, Page, Response } from 'playwright-core';
 import { systemClock, type Clock } from '../clock';
 import type { Logger } from '../log';
 import { NO_ANSWER, NO_ANSWER_HEADER, type AppProxy } from './app-proxy';
-import type { BrowserHost } from './browser-host';
+import { BrowserStuckError, type BrowserHost } from './browser-host';
 import { ShotOutcome, type PageCamera, type Shot } from './camera';
 import { requestAllowed } from './origin-guard';
 import { DeadlineError, withDeadline } from './deadline';
@@ -148,12 +148,19 @@ async function inContext<T>(
       run.signal,
     );
   } finally {
-    await withDeadline(
+    const closed = await withDeadline(
       run.clock,
       CLOSE_TIMEOUT_MS,
       () => context.close(),
       () => undefined,
-    ).catch(() => undefined);
+    ).then(
+      () => true,
+      (error: unknown) => !(error instanceof DeadlineError),
+    );
+    // A page that would not close may still be running, and could reach the next app the proxy
+    // lets through: the host closes the browser before this use settles.
+    // eslint-disable-next-line no-unsafe-finally -- a stuck page outranks whatever the use answered
+    if (!closed) throw new BrowserStuckError('a page of the app would not close');
   }
 }
 
@@ -236,6 +243,9 @@ export function createPlaywrightCamera(
         return await shot;
       } catch (error) {
         if (error instanceof DeadlineError) return failed(`the page ${settleLine}`);
+        if (error instanceof BrowserStuckError) {
+          return failed('the page would not close, so the browser was closed');
+        }
         throw error;
       }
     },
@@ -289,6 +299,11 @@ export function createPlaywrightCamera(
       } catch (error) {
         if (error instanceof DeadlineError) {
           throw new SignInError(`the dev login's address ${settleLine}`);
+        }
+        if (error instanceof BrowserStuckError) {
+          throw new SignInError(
+            "the dev login's address would not close, so the browser was closed",
+          );
         }
         throw error;
       }
