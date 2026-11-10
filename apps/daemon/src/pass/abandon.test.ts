@@ -381,4 +381,45 @@ describe('abandonPass', () => {
     const [card] = abandonCards();
     expect(card?.body).toContain(`- src/settings/page.tsx (${w.settings.title})`);
   });
+
+  describe('the shared changes it names', () => {
+    /** `task` holds `src` for a turn that writes `src/shared.ts` as `content`. */
+    async function sharedTurn(task: PassWorld['settings'], content: string): Promise<void> {
+      w.startTurn(task);
+      await grantSharedHold(w.deps, { workstreamId: w.runOf(task), area: 'src' });
+      w.write('src/shared.ts', content);
+      await closeHoldsOf(w.deps, w.runOf(task));
+    }
+
+    it('names no file left when two changes to one file are both put back', async () => {
+      w = await openPassWorld();
+      await sharedTurn(w.settings, 'settings\n');
+      await sharedTurn(w.people, 'settings\npeople\n');
+
+      const result = await abandonPass(deps(), w.opened.pass.id);
+
+      expect(read('src/shared.ts')).toBe('shared\n');
+      expect(result.left).toEqual([]);
+      expect(result.droppedShared).toEqual([
+        { seq: 2, paths: ['src/shared.ts'] },
+        { seq: 1, paths: ['src/shared.ts'] },
+      ]);
+    });
+
+    it('leaves out a drop an earlier take-out made', async () => {
+      w = await openPassWorld();
+      await sharedTurn(w.settings, 'settings\n');
+      await takeOutSteps(deps(), {
+        taskId: w.settings.id,
+        within: TakeOutWithin.Alone,
+        shared: [{ seq: 1, choice: 'drop' }],
+      });
+      w.write('src/shared.ts', "the builder's own edit since\n");
+
+      const result = await abandonPass(deps(), w.opened.pass.id);
+
+      expect(result.droppedShared).toEqual([]);
+      expect(result.left).toEqual([]);
+    });
+  });
 });

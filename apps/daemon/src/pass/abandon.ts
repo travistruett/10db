@@ -59,20 +59,25 @@ function takenOut(deps: TakeOutDeps, pass: PassDto) {
 }
 
 /**
- * The shared changes the Abandon dropped, read from the chain's drop rows, and each of their files
- * still not back on disk: an Abandon's drop leaves a file that changed since it was checked.
+ * The shared changes this Abandon dropped, read from the chain's drop rows (a drop a take-out the
+ * builder asked for made is its own), and each of their files not back on disk: one an Abandon's
+ * drop left because it changed since it was checked. A file is compared with the last of those drops
+ * that names it, since drops go newest first and the last puts it back furthest.
  */
 async function droppedShared(deps: TakeOutDeps, pass: PassDto) {
   const db = deps.state.db;
-  const changes = listSharedChanges(db, pass.id);
-  const drops = changes.filter((c) => c.dropOf !== null);
+  const byTakeOuts = new Set(listPassTakeOuts(db, pass.id).flatMap((row) => row.drops));
+  const drops = listSharedChanges(db, pass.id).filter(
+    (c) => c.dropOf !== null && !byTakeOuts.has(c.dropOf),
+  );
+  const last = new Map<string, (typeof drops)[number]>();
+  for (const drop of drops) for (const path of drop.paths) last.set(path, drop);
   const repo = getProject(db, pass.projectId).repoPath;
   const left: LeftFile[] = [];
-  for (const drop of drops) {
-    const onDisk = await deps.git.hashOnDisk(repo, drop.paths);
-    const page = `a shared change of ${getTask(db, drop.taskId).title}`;
-    for (const file of onDisk)
-      if (file.blob !== (drop.blobs[file.path] ?? null)) left.push({ path: file.path, page });
+  for (const file of await deps.git.hashOnDisk(repo, [...last.keys()])) {
+    const drop = last.get(file.path);
+    if (drop && file.blob !== (drop.blobs[file.path] ?? null))
+      left.push({ path: file.path, page: `a shared change of ${getTask(db, drop.taskId).title}` });
   }
   return {
     drops: drops.map((d) => ({ seq: d.dropOf ?? d.seq, paths: [...d.paths] })),
