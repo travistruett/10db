@@ -7,7 +7,7 @@ import { cardAnswer, recommended } from '../inbox/card-answer';
 import { InboxCard } from '../inbox/inbox-card';
 import { defaultRecording } from '../inbox/record-decision';
 
-/** What the builder has picked and typed on the card; it starts again for another card. */
+/** What the builder has picked and typed on the card. */
 interface Draft {
   readonly choice: string | null;
   readonly note: string;
@@ -21,17 +21,13 @@ const EMPTY: Draft = { choice: null, note: '', error: null };
 /**
  * The page's open question or permission, answered on the page as the Inbox answers it (Workbench
  * spec §4.3, W5): the Inbox's own card, its options, note and recording, through
- * `POST /inbox/:id/answer`. Answered here or in the Inbox, it leaves both once the Inbox is read again.
+ * `POST /inbox/:id/answer`. Answered here, it goes at once; answered in the Inbox, once the Inbox is
+ * read again. Drawn keyed by the item's id, so a draft or a pending answer never passes to another card.
  */
 export function PageAsk({ item }: { readonly item: InboxItemDto }) {
   const answer = useAnswerInbox();
   const noteRef = useRef<HTMLTextAreaElement>(null);
-  const [draftOf, setDraftOf] = useState(item.id);
   const [draft, setDraft] = useState<Draft>(EMPTY);
-  if (draftOf !== item.id) {
-    setDraftOf(item.id);
-    setDraft(EMPTY);
-  }
   const choice = draft.choice ?? recommended(item);
   const recording = draft.record !== undefined ? draft.record : defaultRecording(item);
   const patch = (change: Partial<Draft>): void => {
@@ -57,6 +53,7 @@ export function PageAsk({ item }: { readonly item: InboxItemDto }) {
       },
     );
   };
+  if (answer.isSuccess) return null;
   return (
     <Box px="md" py="xs">
       <InboxCard

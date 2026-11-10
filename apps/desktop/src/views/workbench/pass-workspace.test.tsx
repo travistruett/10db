@@ -5,6 +5,7 @@ import {
   SHARED_ASK_KEEP_CHOICE,
   SHARED_ASK_REPLY_CHOICE,
   PassSignOffDto,
+  type InboxItemDto,
   type PassPageDto,
   TakeOutPreviewDto,
   TakeOutResultDto,
@@ -1014,6 +1015,8 @@ describe('PassWorkspace question in place', () => {
     );
     const pane = await screen.findByRole('region', { name: pages.asks.area });
     expect(within(pane).getByText(ask.title)).toBeTruthy();
+    // The Inbox's digit and Enter hints answer nothing here, so the card shows none.
+    expect(pane.querySelector('kbd')).toBeNull();
     fireEvent.click(within(pane).getByRole('radio', { name: pick }));
     if (note !== null)
       fireEvent.change(within(pane).getByLabelText('Note for the agent (optional)'), {
@@ -1023,6 +1026,69 @@ describe('PassWorkspace question in place', () => {
     await waitFor(() => {
       expect(answers).toEqual([{ id: ask.id, body }]);
     });
+    // Answered, the card goes before the Inbox is read again.
+    await waitFor(() => {
+      expect(within(pane).queryByRole('button', { name: 'Send answer' })).toBeNull();
+    });
+  });
+
+  /** The asking page shown, its run's question `ask` in the Inbox; `rerender` swaps the Inbox. */
+  function renderAsking(ask: (page: PassPageDto) => InboxItemDto, page: Partial<PassPageDto> = {}) {
+    const pages = pagesByStatus();
+    const asks = { ...pages.asks, ...page };
+    const view = passViewDto({ pages: [asks, pages.ready] });
+    const draw = (inbox: InboxItemDto[]) => (
+      <PassWorkspace
+        view={view}
+        inbox={inbox}
+        project={projectViewDto()}
+        selected={asks.taskId}
+        onSelect={vi.fn()}
+      />
+    );
+    const item = ask(asks);
+    const { rerender } = renderWithDaemon(draw([item]));
+    return {
+      item,
+      page: asks,
+      pane: () => screen.findByRole('region', { name: asks.area }),
+      rerender: (inbox: InboxItemDto[]) => {
+        rerender(draw(inbox));
+      },
+    };
+  }
+
+  it('draws no question on a page signing off, though its run still asks', async () => {
+    const { pane } = renderAsking((page) => askItem(page), { signOff: 'signing_off' });
+    expect(within(await pane()).queryByRole('button', { name: 'Send answer' })).toBeNull();
+  });
+
+  it('says when the card was already answered, and keeps it', async () => {
+    server.use(
+      http.post(daemonUrl('/inbox/:id/answer'), () =>
+        HttpResponse.json({ error: 'conflict', message: 'answered' }, { status: 409 }),
+      ),
+    );
+    const { pane } = renderAsking((page) => askItem(page));
+    const shown = await pane();
+    fireEvent.click(within(shown).getByRole('radio', { name: /Hello/ }));
+    fireEvent.click(within(shown).getByRole('button', { name: 'Send answer' }));
+    expect(await within(shown).findByText('This card was already answered.')).toBeTruthy();
+    expect(within(shown).getByRole('button', { name: 'Send answer' })).toBeTruthy();
+  });
+
+  it("starts the page's next question with nothing chosen from the last", async () => {
+    const { page, pane, rerender } = renderAsking((asking) => askItem(asking));
+    const shown = await pane();
+    fireEvent.click(within(shown).getByRole('radio', { name: /Hello/ }));
+    expect(within(shown).getByRole('radio', { name: /Hello/ }).getAttribute('aria-checked')).toBe(
+      'true',
+    );
+    rerender([askItem(page, { title: 'Which farewell?' })]);
+    expect(await within(shown).findByText('Which farewell?')).toBeTruthy();
+    expect(within(shown).getByRole('radio', { name: /Hello/ }).getAttribute('aria-checked')).toBe(
+      'false',
+    );
   });
 
   it('draws no question on a page that has none', async () => {

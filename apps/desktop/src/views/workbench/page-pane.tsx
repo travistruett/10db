@@ -100,7 +100,9 @@ export function PagePane(props: PagePaneProps) {
           }}
         />
       )}
-      {row.ask === null ? null : <PageAsk item={row.ask} />}
+      {status === PageStatus.Asks && row.ask !== null ? (
+        <PageAsk key={row.ask.id} item={row.ask} />
+      ) : null}
       {passOpen && status === PageStatus.Failed && page.failure !== null ? (
         <RetryTurn itemId={page.failure.retryItemId} line={row.state.line} />
       ) : null}
