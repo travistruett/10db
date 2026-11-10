@@ -52,6 +52,8 @@ export interface ComposerProps {
   readonly openPage: ReactNode;
   /** The input, which the workspace focuses when a page is selected. */
   readonly inputRef?: RefObject<HTMLTextAreaElement | null>;
+  /** Nothing can be sent or stopped: the pass is closing or abandoning. */
+  readonly disabled?: boolean;
 }
 
 type Busy = 'send' | 'stop' | 'signOff';
@@ -74,6 +76,7 @@ export function Composer({
   actions,
   openPage,
   inputRef,
+  disabled = false,
 }: ComposerProps) {
   const [busy, setBusy] = useState<Busy | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
@@ -84,7 +87,7 @@ export function Composer({
   const buttons = composerButtons(phase, hasContent(draft));
 
   const addPictures = (files: readonly File[]): void => {
-    if (files.length === 0) return;
+    if (files.length === 0 || disabled) return;
     const added = withPictures(draft.pictures, files);
     setRefused(added.refused);
     onDraft({ ...draft, pictures: added.pictures });
@@ -103,7 +106,7 @@ export function Composer({
     }
   };
   const send = (): void => {
-    if (buttons.send?.enabled !== true || busy === 'send') return;
+    if (disabled || buttons.send?.enabled !== true || busy === 'send') return;
     void run('send', () => actions.send(draft), true);
   };
   const stop = (): void => {
@@ -176,6 +179,7 @@ export function Composer({
           maxRows={8}
           placeholder={placeholder(area, phase, firstMessage)}
           value={draft.text}
+          disabled={disabled}
           onChange={(event) => {
             onDraft({ ...draft, text: event.currentTarget.value });
           }}
@@ -224,6 +228,7 @@ export function Composer({
             variant="subtle"
             size="lg"
             aria-label="Add Picture"
+            disabled={disabled}
             onClick={() => {
               picker.current?.click();
             }}
@@ -238,7 +243,7 @@ export function Composer({
             </Text>
           )}
           {buttons.stop === null ? null : (
-            <Button variant="default" loading={busy === 'stop'} onClick={stop}>
+            <Button variant="default" loading={busy === 'stop'} disabled={disabled} onClick={stop}>
               {buttons.stop === 'redo' ? 'Stop and Redo' : 'Stop'}
             </Button>
           )}
@@ -260,6 +265,7 @@ export function Composer({
             <Button
               variant={buttons.signOff}
               loading={busy === 'signOff'}
+              disabled={disabled}
               onClick={() => {
                 const signOff = actions.signOff;
                 if (signOff !== null) void run('signOff', signOff, false);
@@ -271,7 +277,7 @@ export function Composer({
           {buttons.send === null ? null : (
             <Button
               variant={buttons.send.variant}
-              disabled={!buttons.send.enabled}
+              disabled={disabled || !buttons.send.enabled}
               loading={busy === 'send'}
               onClick={send}
             >

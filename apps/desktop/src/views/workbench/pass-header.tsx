@@ -74,7 +74,10 @@ export function PassHeader(props: PassHeaderProps) {
   const clock = { now, medianTurnMinutes: medianTurnMinutes(view.turns) };
   const statuses = view.pages.map((page) => pageStatus(page, inbox, clock).status);
   const open = view.pass.state === PassState.Open;
-  const abandonable = open || view.pass.state === PassState.Closing;
+  // Abandon goes on from a close, and from an Abandon that stalled, which the daemon picks up where it
+  // stopped.
+  const abandonable =
+    open || view.pass.state === PassState.Closing || view.pass.state === PassState.Abandoning;
   const hint = timingLine({
     turns: view.turns,
     pages: view.pages.map((page, n) => ({

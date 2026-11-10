@@ -21,6 +21,8 @@ export interface PagePaneProps {
   /** The project's app address, which Open Page opens the page's route on. */
   readonly appUrl: string | null;
   readonly row: QueueRow;
+  /** The pass is open: while it closes or is abandoned, nothing can be sent to a page. */
+  readonly passOpen: boolean;
   /** When the builder first opened the page's latest turn; null while it never has. */
   readonly openedAt: string | null;
   /** The workspace's clock, in epoch ms. */
@@ -30,7 +32,8 @@ export interface PagePaneProps {
 }
 
 /** The shown page: its thread, the live line while a turn works, and its composer fixed at the foot. */
-export function PagePane({ passId, appUrl, row, openedAt, now, draft, onDraft }: PagePaneProps) {
+export function PagePane(props: PagePaneProps) {
+  const { passId, appUrl, row, passOpen, openedAt, now, draft, onDraft } = props;
   const { page, status } = row;
   const actions = usePageActions(page.taskId);
   const turns = useTurns(page.taskId).data ?? [];
@@ -71,7 +74,7 @@ export function PagePane({ passId, appUrl, row, openedAt, now, draft, onDraft }:
           <WorkingLine line={liveLine(page.turn, now)} />
         ) : null}
       </Box>
-      {status === PageStatus.Failed && page.failure !== null ? (
+      {passOpen && status === PageStatus.Failed && page.failure !== null ? (
         <RetryTurn itemId={page.failure.retryItemId} line={row.state.line} />
       ) : null}
       <Composer
@@ -83,6 +86,7 @@ export function PagePane({ passId, appUrl, row, openedAt, now, draft, onDraft }:
         actions={actions}
         openPage={openPage}
         inputRef={input}
+        disabled={!passOpen}
       />
     </Box>
   );

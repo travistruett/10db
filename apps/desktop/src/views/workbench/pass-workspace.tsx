@@ -122,6 +122,7 @@ export function PassWorkspace({ view, inbox, project, selected, onSelect }: Pass
           passId={view.pass.id}
           appUrl={project.appUrl}
           row={shown}
+          passOpen={view.pass.state === PassState.Open}
           openedAt={
             view.turns.find(
               (turn) => turn.taskId === shown.page.taskId && turn.seq === shown.page.turn?.seq,

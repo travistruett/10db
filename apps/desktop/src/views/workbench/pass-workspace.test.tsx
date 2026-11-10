@@ -376,6 +376,28 @@ describe('PassWorkspace window focus', () => {
   });
 });
 
+describe('PassWorkspace while the pass is not open', () => {
+  it.each(['ABANDONING', 'CLOSING'] as const)(
+    'while %s, holds every page action: no message, no Retry Turn, no row menu',
+    async (state) => {
+      const pages = pagesByStatus();
+      renderWithDaemon(
+        <PassWorkspace
+          view={passViewDto({ pass: { state }, pages: Object.values(pages) })}
+          inbox={[]}
+          project={projectViewDto()}
+          selected={pages.failed.taskId}
+          onSelect={vi.fn()}
+        />,
+      );
+      const input = await screen.findByRole('textbox', { name: 'Message to Reports' });
+      expect(input).toHaveProperty('disabled', true);
+      expect(screen.queryByRole('button', { name: 'Retry Turn' })).toBeNull();
+      expect(screen.queryByRole('button', { name: /^More actions for/ })).toBeNull();
+    },
+  );
+});
+
 describe('PassWorkspace Take Out', () => {
   function serveTakeOut(tookOut = true) {
     const sent: { passId: string; taskId: string; body: unknown }[] = [];
