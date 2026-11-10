@@ -153,9 +153,10 @@ export function useLivePass(projectId: ProjectId) {
 }
 
 /** What Start Pass and Add Page offer: the project's pages, what is changed in them, what it lacks. */
-export function usePassStart(projectId: ProjectId) {
+export function usePassStart(projectId: ProjectId, enabled: boolean) {
   const { connection } = useDaemon();
   return useQuery({
+    enabled,
     queryKey: passKeys.start(projectId),
     queryFn: async () =>
       readJson(
@@ -224,11 +225,11 @@ export function useOpenPass(projectId: ProjectId) {
 }
 
 /** Add Page: new tasks for pages, and open tasks joining the pass. */
-export function useAddPages(passId: PassId) {
+export function useAddPages() {
   const { connection } = useDaemon();
   const refetch = useRefetchAfter(['tasks']);
   return useMutation({
-    mutationFn: async (request: PassJoinRequest) =>
+    mutationFn: async ({ passId, request }: { passId: PassId; request: PassJoinRequest }) =>
       readJson(
         await createPassRoutesClient(connection).passes[':passId'].pages.$post({
           param: { passId },
@@ -240,11 +241,11 @@ export function useAddPages(passId: PassId) {
   });
 }
 
-export function useRenamePass(passId: PassId) {
+export function useRenamePass() {
   const { connection } = useDaemon();
   const refetch = useRefetchAfter();
   return useMutation({
-    mutationFn: async (body: PassRename) =>
+    mutationFn: async ({ passId, body }: { passId: PassId; body: PassRename }) =>
       readJson(
         await createPassRoutesClient(connection).passes[':passId'].$patch({
           param: { passId },
@@ -257,11 +258,11 @@ export function useRenamePass(passId: PassId) {
 }
 
 /** Abandon Pass: every unsigned page goes back, its task keeping the work. */
-export function useAbandonPass(passId: PassId) {
+export function useAbandonPass() {
   const { client } = useDaemon();
   const refetch = useRefetchAfter(['tasks'], queryKeys.inbox);
   return useMutation({
-    mutationFn: async () =>
+    mutationFn: async (passId: PassId) =>
       readJson(
         await client.passes[':passId'].abandon.$post({ param: { passId } }),
         PassAbandonedDto,
@@ -271,11 +272,11 @@ export function useAbandonPass(passId: PassId) {
 }
 
 /** Take Out: the page leaves the pass, its work kept with its task. Every shared change is kept. */
-export function useTakeOutPage(passId: PassId) {
+export function useTakeOutPage() {
   const { client } = useDaemon();
   const refetch = useRefetchAfter(['tasks'], queryKeys.inbox);
   return useMutation({
-    mutationFn: async (taskId: TaskId) =>
+    mutationFn: async ({ passId, taskId }: { passId: PassId; taskId: TaskId }) =>
       readJson(
         await client.passes[':passId'].tasks[':taskId']['take-out'].$post({
           param: { passId, taskId },

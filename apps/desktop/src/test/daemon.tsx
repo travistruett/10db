@@ -111,6 +111,8 @@ export function baseHandlers(
     http.get(daemonUrl('/tasks/:taskId/shape', base), () => HttpResponse.json({ shapeId: null })),
     http.get(daemonUrl('/workstreams', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/inbox', base), () => HttpResponse.json([])),
+    // The sidebar and the Workbench read every project's live pass; none is open.
+    http.get(daemonUrl('/passes', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/settings/self-update', base), () =>
       HttpResponse.json(
         SelfUpdateStatusDto.parse({

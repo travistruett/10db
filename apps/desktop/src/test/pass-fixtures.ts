@@ -3,6 +3,7 @@ import {
   mintId,
   PagesProposalDto,
   PassDto,
+  PassOpenedDto,
   PassPageDto,
   PassStartDto,
   PassTurnTimingDto,
@@ -19,7 +20,7 @@ import {
 } from '@10db/contracts';
 import { http, HttpResponse, type HttpHandler } from 'msw';
 import { daemonUrl } from './daemon';
-import { inboxItemDto } from './fixtures';
+import { batchDto, inboxItemDto } from './fixtures';
 
 // Workbench fixtures. Every DTO is parsed with its contract, so a contract change breaks the fixture
 // before it breaks a view, and the handlers answer the routes the daemon serves for the Workbench.
@@ -48,6 +49,18 @@ export function passDto(overrides: Partial<PassDto> = {}): PassDto {
     createdAt: PASS_OPENED_AT,
     updatedAt: PASS_OPENED_AT,
     ...overrides,
+  });
+}
+
+/** What `POST /projects/:projectId/passes` answers: the pass opened on a clean folder. */
+export function passOpenedDto(pass: Partial<PassDto> = {}): PassOpenedDto {
+  const opened = passDto(pass);
+  return PassOpenedDto.parse({
+    pass: opened,
+    batch: batchDto({ id: opened.batchId, projectId: opened.projectId, passId: opened.id }),
+    dirt: [],
+    aheadOfBase: 0,
+    waiting: [],
   });
 }
 

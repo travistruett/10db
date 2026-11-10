@@ -13,10 +13,25 @@ import {
 } from '@10db/contracts';
 import { Group, Loader, Stack, Title } from '@mantine/core';
 import { useMutation } from '@tanstack/react-query';
+import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useState, type ReactNode } from 'react';
+import {
+  useAbandonPass,
+  useAddPages,
+  useGoalPassPages,
+  useLivePass,
+  useOpenPass,
+  usePassStart,
+  useProposePageAreas,
+  useRenamePass,
+} from '../../daemon/pass-queries';
+import { useInbox, useTasks } from '../../daemon/queries';
+import { useNow } from '../../shell/relative';
+import { useSelectedProject } from '../../shell/selected-project';
 import { AbandonModal } from './abandon-modal';
 import { AddPageModal } from './add-page-modal';
 import { PassHeader } from './pass-header';
+import { PassWorkspace } from './pass-workspace';
 import type { PassWorkspaceProps } from './pass-workspace-props';
 import { NoPageAreas, ProposePagesModal } from './propose-pages-modal';
 import { RenameModal } from './rename-modal';
@@ -172,11 +187,70 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
   );
 }
 
+/** The header's minutes and the timing hint move once a minute; half that keeps them on time. */
+const CLOCK_TICK_MS = 30_000;
+
+/** Thrown for a pass action asked of a project with no pass open. */
+class NoPassOpenError extends Error {
+  override readonly name = 'NoPassOpenError';
+}
+
+/** The Workbench of one project, over the daemon. */
+function ProjectWorkbench({ project }: { readonly project: ProjectViewDto }) {
+  const search = useSearch({ from: '/workbench' });
+  const navigate = useNavigate();
+  const hasPages = project.areas.some((area) => area.role === AreaRole.Page);
+  const live = useLivePass(project.id);
+  const start = usePassStart(project.id, hasPages);
+  const tasks = useTasks(project.id).data ?? [];
+  const inbox = useInbox().data ?? [];
+  const goalPages = useGoalPassPages(search.goal ?? null).data?.pages ?? [];
+  const now = useNow(CLOCK_TICK_MS);
+  const opening = useOpenPass(project.id);
+  const proposing = useProposePageAreas(project.id);
+  const adding = useAddPages();
+  const renaming = useRenamePass();
+  const abandoning = useAbandonPass();
+  const passId = (): PassViewDto['pass']['id'] => {
+    const view = live.data;
+    if (view === null || view === undefined)
+      throw new NoPassOpenError(`${project.name} has no pass open`);
+    return view.pass.id;
+  };
+  const actions: WorkbenchActions = {
+    start: (request) => opening.mutateAsync(request),
+    propose: () => proposing.mutateAsync(),
+    addPages: (request) => adding.mutateAsync({ passId: passId(), request }),
+    rename: (body) => renaming.mutateAsync({ passId: passId(), body }),
+    abandon: () => abandoning.mutateAsync(passId()),
+  };
+  return (
+    <WorkbenchScreen
+      project={project}
+      live={live.data}
+      start={start.data}
+      tasks={tasks}
+      inbox={inbox}
+      search={search}
+      goalPages={goalPages}
+      now={now}
+      onSelect={(task) => {
+        void navigate({ to: '/workbench', search: { task } });
+      }}
+      renderWorkspace={(props) => <PassWorkspace {...props} />}
+      actions={actions}
+    />
+  );
+}
+
 /** The Workbench route (spec §4): work through pages with the agents, live in Your folder. */
 export function WorkbenchView() {
-  return (
-    <Stack gap="md">
-      <Title order={2}>Workbench</Title>
-    </Stack>
-  );
+  const { project } = useSelectedProject();
+  if (project === null)
+    return (
+      <Stack gap="md">
+        <Title order={2}>Workbench</Title>
+      </Stack>
+    );
+  return <ProjectWorkbench key={project.id} project={project} />;
 }
