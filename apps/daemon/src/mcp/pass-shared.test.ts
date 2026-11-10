@@ -1,5 +1,6 @@
 import {
   InboxAnswerRefused,
+  PARK_TASK_OPTION,
   SHARED_ASK_ALLOW_CHOICE,
   SHARED_ASK_KEEP_CHOICE,
   SHARED_ASK_REPLY_CHOICE,
@@ -23,8 +24,10 @@ import {
   listSharedChanges,
   listTaskThread,
   listTaskThreadRows,
+  listInbox,
   openHolds,
   openPassTurn,
+  updateInboxItem,
 } from '@10db/db';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { openPassWorld, type PassWorld } from '../../test/pass-world';
@@ -40,6 +43,15 @@ let w: PassWorld;
 afterEach(() => {
   w.close();
 });
+
+/** The one open question of the world's project. */
+function findOpenQuestion(world: PassWorld) {
+  const [card] = listInbox(world.h.store.db, { states: ['OPEN'] }).filter(
+    (item) => item.kind === 'question',
+  );
+  if (card === undefined) throw new Error('no question is open');
+  return card;
+}
 
 /** The task's lane tools, as its session's MCP server builds them, sharing `waits`. */
 function laneTools(
@@ -81,6 +93,27 @@ function laneTools(
     waits,
   );
 }
+
+describe("a pass page's own question", () => {
+  it('offers no Park the task: a page leaves its pass by Take Out', async () => {
+    w = await openPassWorld();
+    const tools = laneTools(w, w.people, new ClaimWaits());
+    const pending = tools.ask_human({
+      opId: 'op-people-ask',
+      category: 'design',
+      urgency: 'normal',
+      question: 'Roomy or compact?',
+      options: [
+        { label: 'Roomy', description: '' },
+        { label: 'Compact', description: '' },
+      ],
+    });
+    const card = findOpenQuestion(w);
+    expect(card.options.map((o) => o.label)).toEqual(['Roomy', 'Compact']);
+    w.h.inbox.answer(card.id, { choice: 'Roomy' });
+    expect(await pending).toMatchObject({ answer: 'Roomy' });
+  });
+});
 
 describe('request_claim for a shared area in a pass', () => {
   it('grants the first task the area with its hold', async () => {
@@ -190,7 +223,6 @@ describe("the builder's question before a second task changes a shared area", ()
       SHARED_ASK_ALLOW_CHOICE,
       SHARED_ASK_KEEP_CHOICE,
       SHARED_ASK_REPLY_CHOICE,
-      'Park the task',
     ]);
     expect(SharedAskDetail.parse(card.detail).others).toMatchObject([
       { taskId: w.settings.id, paths: ['src/button.ts'], holdsNow: false },
@@ -236,6 +268,13 @@ describe("the builder's question before a second task changes a shared area", ()
       const tools = laneTools(w, w.people, new ClaimWaits(), 30);
       const first = await ask(tools);
       if (first.granted || first.inboxId === null) throw new Error('no question');
+      const inboxId = first.inboxId;
+      // A card raised before pass questions stopped offering Park the task still takes it.
+      if (choice === PARK_TASK_OPTION.label)
+        w.h.state.write((ctx) => {
+          const card = getInboxItem(ctx.tx, inboxId);
+          updateInboxItem(ctx, inboxId, { options: [...card.options, PARK_TASK_OPTION] });
+        });
 
       // The answer comes while no call waits; the next call with the same opId gets it.
       w.h.inbox.answer(first.inboxId, { choice, ...(note === undefined ? {} : { note }) });
