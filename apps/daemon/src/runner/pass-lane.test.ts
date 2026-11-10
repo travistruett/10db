@@ -16,13 +16,14 @@ import {
   listInbox,
   listPassTurns,
   listTaskThread,
+  patchProject,
   type WorkstreamRow,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTestEngine, type TestEngine } from '../../test/engine';
 import { untakenMessages } from './lane-messages';
 import { DEFAULT_RUNNER_LIMITS } from './runner';
-import { isolatedGitEnv, waitFor } from '../../test/fixtures';
+import { handoffArgs, isolatedGitEnv, waitFor } from '../../test/fixtures';
 import type { FakeScriptBook } from '../sessions';
 
 /** One step of a fake session's script. */
@@ -494,4 +495,88 @@ describe("a pass task's warm session", () => {
     await waitFor(isReady(id, 2));
     expect(engine.adapter.prompts).toHaveLength(1);
   });
+});
+
+describe("a pass task's handoffs", () => {
+  /** An unasked handoff that names work left, written after the turn has changed the page. */
+  const handOffAfter = (content: string, op: string): FakeStep[] => [
+    { do: 'tool', toolName: 'Write', input: { file_path: PAGE_FILE, content } },
+    { do: 'mcp', tool: 'write_handoff', args: handoffArgs(op, 'Finish the form') },
+    { do: 'turn_complete', text: 'Handing off.' },
+  ];
+
+  it('closes a Ready page asked to hand off for its account, and sends it nothing', async () => {
+    const { id } = await openPage([
+      [...turn('one\n', 'Tidied the form.'), { do: 'await_message', contains: 'never sent' }],
+    ]);
+    await waitFor(isReady(id, 1));
+    engine.runner.handOff(
+      engine.project.id,
+      engine.project.accountId,
+      'the account is near its limit',
+    );
+    await waitFor(() => !engine.runner.isRunning(id));
+    expect(engine.adapter.sent).toEqual([]);
+    expect(row(id)).toMatchObject({
+      state: 'WAITING_HUMAN',
+      nextAction: { kind: 'pass_review' },
+      currentSessionId: null,
+    });
+  });
+
+  it('goes on with a long turn through handoffs nobody asked for while its work moves between them', async () => {
+    const { pass, id } = await openPage([
+      [{ do: 'consume' }, ...handOffAfter('one\n', 'op-pass-h1')],
+      handOffAfter('two\n', 'op-pass-h2'),
+      handOffAfter('three\n', 'op-pass-h3'),
+      [...turn('four\n', 'Finished the form.'), { do: 'await_message', contains: 'never sent' }],
+    ]);
+    await waitFor(isReady(id, 1));
+    expect(engine.adapter.prompts).toHaveLength(4);
+    const turns = listPassTurns(engine.store.db, pass.id);
+    expect(turns.map((t) => [t.seq, t.ending])).toEqual([[1, 'ready']]);
+    expect(git('show', `${turns[0]?.keptSha ?? ''}:${PAGE_FILE}`)).toBe('four');
+  });
+
+  it('runs twelve rounds with a low handoff line, each Ready, no message lost and nothing sent back', async () => {
+    const ROUNDS = 12;
+    /** A round's work, from its message to the handoff its context forces. */
+    const round = (n: number): FakeStep[] => [
+      { do: 'consume' },
+      { do: 'tool', toolName: 'Write', input: { file_path: PAGE_FILE, content: `${String(n)}\n` } },
+      { do: 'context', percentage: 80 },
+      { do: 'await_message', contains: 'write_handoff' },
+      { do: 'mcp', tool: 'write_handoff', args: handoffArgs(`op-round-${String(n)}`, 'Say done') },
+      { do: 'turn_complete', text: `Handing off round ${String(n)}.` },
+    ];
+    const sessions: FakeStep[][] = [round(1)];
+    for (let n = 1; n <= ROUNDS; n += 1)
+      sessions.push([
+        // The continued session's briefing sets its baseline; then it finishes the round.
+        { do: 'context', percentage: 10 },
+        { do: 'turn_complete', text: `Round ${String(n)} done.` },
+        ...(n < ROUNDS
+          ? [{ do: 'await_message' as const, contains: `Round ${String(n + 1)}` }, ...round(n + 1)]
+          : [{ do: 'await_message' as const, contains: 'never sent' }]),
+      ]);
+    const { task, pass, id } = await openPage(sessions, 'Round 1: tidy the form');
+    engine.state.write((ctx) => {
+      patchProject(ctx, engine.project.id, { handoffPct: 30, nudgePct: 95 });
+    });
+    for (let n = 1; n <= ROUNDS; n += 1) {
+      await waitFor(isReady(id, n), 20_000);
+      if (n < ROUNDS) await write(task, `Round ${String(n + 1)}: once more`);
+    }
+
+    const turns = listPassTurns(engine.store.db, pass.id);
+    expect(turns.map((t) => t.ending)).toEqual(Array.from({ length: ROUNDS }, () => 'ready'));
+    expect(
+      listTaskThread(engine.store.db, task.id)
+        .filter((m) => m.author === 'builder')
+        .every((m) => m.deliveredAt !== null),
+    ).toBe(true);
+    expect(row(id)).toMatchObject({ attempt: 0, state: 'WAITING_HUMAN' });
+    expect(engine.adapter.prompts).toHaveLength(ROUNDS + 1);
+    expect(git('show', `${turns.at(-1)?.keptSha ?? ''}:${PAGE_FILE}`)).toBe(String(ROUNDS));
+  }, 60_000);
 });

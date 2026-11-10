@@ -177,7 +177,7 @@ import {
 } from '../inbox';
 import type { Logger } from '../log';
 import { mintSessionToken } from '../mcp';
-import { foldHandEdits, type PassWorkDeps } from '../pass';
+import { foldHandEdits, keepTurnWork, type PassWorkDeps } from '../pass';
 import { allowedToolsFor, laneAutoMode, storableRule } from '../permissions';
 import { takeFoundHostsReading } from '../registries';
 import { retryStep } from '../routing';
@@ -2311,6 +2311,45 @@ export function createRunner(opts: RunnerOptions): Runner {
      * took means it is not over: the agent is about to see it, and the next completion decides.
      * Otherwise the turn ends Ready, and the session stays open for the builder's next message.
      */
+    /**
+     * A pass task's turn end with a handoff (Workbench spec §6.2): one that stands continues the same
+     * turn in a fresh session. A run of handoffs nobody asked for is keyed by the task's kept work,
+     * since a pass turn never moves the branch, so a long turn that keeps work between them goes on.
+     * One asked for and not written gets the firm nudge. True when the turn goes on.
+     */
+    const passHandoff = async (): Promise<boolean> => {
+      const turn = openPassTurn(db, task.id);
+      const recorded = handoffForSession(db, session.id);
+      const asked = st.handoffRequested || st.handoffAskedByTool;
+      if (recorded && turn && recorded.createdAt >= turn.startedAt) {
+        const stands = handoffStands({
+          asked,
+          readOnly: false,
+          resultRecorded: false,
+          leftNamed: workLeftIn(recorded).length > 0,
+          uncommitted: false,
+        });
+        if (!stands) return false;
+        if (!asked) {
+          const kept = await keepTurnWork(passWork, { workstreamId: id, turnId: null });
+          const unasked = nextUnaskedRun(ctl.unaskedHandoffs, kept.keptSha ?? kept.keptBaseSha);
+          if (unasked.atLimit) {
+            log.warn({ handoffs: unasked.run.count }, 'turn ended after handoffs nobody asked for');
+            return false;
+          }
+          ctl.unaskedHandoffs = unasked.run;
+        }
+        st.outcome = { kind: 'handoff', handoffId: recorded.id };
+        await handle.stop();
+        return true;
+      }
+      if (st.handoffRequested && !st.firmSent && turn) {
+        st.firmSent = true;
+        handle.send(NUDGES[st.handoffCause].firm);
+        return true;
+      }
+      return false;
+    };
     const passTurnComplete = async (text: string | null): Promise<void> => {
       armIdleClose(id, ctl);
       if (messages.untaken().length > 0 || ctl.redoing) return;
@@ -2340,6 +2379,15 @@ export function createRunner(opts: RunnerOptions): Runner {
     /** Asks the session to hand off, once: its context filled, or its account neared its usage limit. */
     const requestHandoff = (cause: HandoffCause, reason: string): void => {
       if (st.handoffRequested || st.outcome) return;
+      // A pass task's session between turns is closed, not nudged: a nudge would be a turn nobody
+      // wrote. Its next message starts a session where the project is then (Workbench spec §6.2).
+      if (pass && !openPassTurn(db, task.id)) {
+        if (ctl.stopReason !== null) return;
+        ctl.stopReason = 'closed';
+        log.info({ reason }, 'warm session closed for a handoff');
+        void handle.stop();
+        return;
+      }
       st.handoffRequested = true;
       st.handoffCause = cause;
       opts.state.write((ctx) => {
@@ -2545,6 +2593,7 @@ export function createRunner(opts: RunnerOptions): Runner {
             // A parked or limited session may still finish its interrupted turn before it exits.
             if (st.outcome || st.parkedFor) break;
             if (pass) {
+              if (await passHandoff()) break;
               await passTurnComplete(event.text ?? null);
               break;
             }
