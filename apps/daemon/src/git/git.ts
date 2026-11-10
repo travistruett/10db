@@ -289,6 +289,64 @@ export interface PassBranch {
   readonly dirtCommit: string;
 }
 
+/** HEAD does not name the pass's branch, so the folder's files are not the pass's to keep. */
+export class PassFolderOffBranchError extends Error {
+  override readonly name = 'PassFolderOffBranchError';
+  readonly branch: string;
+  /** The branch HEAD names instead; null when it is detached. */
+  readonly found: string | null;
+  constructor(repo: string, branch: string, found: string | null) {
+    super(`${repo} is on ${found ?? 'a detached HEAD'}, not on the pass's branch ${branch}`);
+    this.branch = branch;
+    this.found = found;
+  }
+}
+
+/** A kept ref no longer held what its writer read, so nothing was kept over the other write. */
+export class KeptRefMovedError extends Error {
+  override readonly name = 'KeptRefMovedError';
+  readonly ref: string;
+  constructor(ref: string, expected: string | null, found: string | null) {
+    super(`${ref} moved from ${expected ?? 'nothing'} to ${found ?? 'nothing'} meanwhile`);
+    this.ref = ref;
+  }
+}
+
+export interface KeepWorkInput {
+  readonly repo: string;
+  /** The pass's branch: HEAD must name it, and the work is laid on its tip. */
+  readonly branch: string;
+  /** Where the work is kept, under `refs/10db/`. */
+  readonly ref: string;
+  /** The files to keep as the folder has them: changed, added (untracked ones too) or deleted. */
+  readonly paths: readonly string[];
+  /**
+   * What `ref` holds now, or null when it does not exist: the new commit's parent (the tip, for
+   * null), and the only value the ref moves from.
+   */
+  readonly parent: string | null;
+  readonly message: string;
+  /** Names the work (`10db-turn: <turn id>`), so a rerun finds the commit it made. */
+  readonly trailer: { readonly key: string; readonly value: string };
+}
+
+/** What `keepWork` left at the ref. */
+export interface KeptCommit {
+  /** The kept commit now: made here, found by its trailer, or the parent; null when there is none. */
+  readonly sha: string | null;
+  /** The branch tip the work was laid on. */
+  readonly base: string;
+  /** True when `sha` is this work's own commit: made now, or by an earlier run with the trailer. */
+  readonly made: boolean;
+}
+
+/** One file's lines added and removed; both 0 for a binary file. */
+export interface LineChange {
+  readonly path: string;
+  readonly added: number;
+  readonly removed: number;
+}
+
 export interface MergeIntoBranchInput {
   /** The checkout that has `branch` checked out. */
   readonly repo: string;
@@ -514,6 +572,28 @@ export interface Git {
    * whose trailers or parent don't read as `openPassBranch` writes them is left out.
    */
   passDirtRecords(repo: string): Promise<PassDirtRecord[]>;
+  /**
+   * Keeps a pass task's work (spec §9.1), under the repo lock: an unsigned commit whose tree is the
+   * branch's tip with `paths` as the folder has them (ignored files never), on `parent`, at `ref` by
+   * compare-and-swap. No file, index, HEAD or branch is touched. A commit the ref already holds with
+   * the same trailer is answered as it is; a tree equal to the parent's (the tip's, with no parent)
+   * makes no commit. Refused with `PassFolderOffBranchError` while HEAD is not `branch`, and with
+   * `KeptRefMovedError` when `ref` no longer holds `parent`.
+   */
+  keepWork(input: KeepWorkInput): Promise<KeptCommit>;
+  /**
+   * Lines added and removed in each of `pages` between commit `tip` and the folder, sorted by path;
+   * a file the same in both is left out. Read through a private index: nothing is written.
+   */
+  pageChanges(repo: string, tip: string, pages: readonly string[]): Promise<LineChange[]>;
+  /**
+   * The blob each of `paths` holds in the folder now, sorted by path; null for one that is not there.
+   * Read through a private index: nothing is written.
+   */
+  hashOnDisk(
+    repo: string,
+    paths: readonly string[],
+  ): Promise<{ readonly path: string; readonly blob: string | null }[]>;
   /** Keeps `text` at `ref`, under `refs/10db/`, as a blob nothing else names; it is set, whatever it held. */
   keepNote(repo: string, ref: string, text: string): Promise<void>;
   /** The text `keepNote` kept at `ref`; null when the ref is gone or names no blob. */
@@ -1269,6 +1349,16 @@ export function createGit(opts: GitOptions = {}): Git {
   }
 
   async function findCommitByOp(c: Pinned, tip: string, opId: string): Promise<string | null> {
+    return findCommitByTrailer(c, tip, OP_TRAILER, opId);
+  }
+
+  /** The newest commit on `tip`'s first-parent line whose `key` trailer names `value`, or null. */
+  async function findCommitByTrailer(
+    c: Pinned,
+    tip: string,
+    key: string,
+    value: string,
+  ): Promise<string | null> {
     const out = await git(c, [
       'log',
       '--no-show-signature',
@@ -1277,18 +1367,18 @@ export function createGit(opts: GitOptions = {}): Git {
       '--first-parent',
       '-n',
       String(OP_SEARCH_DEPTH),
-      `--format=%H%x1f%(trailers:key=${OP_TRAILER},valueonly,separator=%x2c)%x1e`,
+      `--format=%H%x1f%(trailers:key=${key},valueonly,separator=%x2c)%x1e`,
       tip,
     ]);
     for (const record of out.split('\x1e')) {
-      const [sha, ops] = record.trim().split('\x1f');
+      const [sha, values] = record.trim().split('\x1f');
       if (
         sha &&
         OBJECT_ID.test(sha) &&
-        ops
+        values
           ?.split(',')
-          .map((o) => o.trim())
-          .includes(opId)
+          .map((v) => v.trim())
+          .includes(value)
       ) {
         return sha;
       }
@@ -2145,6 +2235,127 @@ export function createGit(opts: GitOptions = {}): Git {
       if (record.success) found.push({ ref, ...record.data });
     }
     return found;
+  }
+
+  async function keepWork(input: KeepWorkInput): Promise<KeptCommit> {
+    if (!input.ref.startsWith(KEPT_REF_PREFIX))
+      throw new InvalidError(`${input.ref} is not under ${KEPT_REF_PREFIX}`);
+    const named = checkPaths(input.repo, input.paths);
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const head = await currentBranch(c);
+      if (head !== input.branch) throw new PassFolderOffBranchError(c.real, input.branch, head);
+      const tip = await revParse(c, `refs/heads/${input.branch}^{commit}`);
+      if (tip === null) throw new InvalidError(`Branch ${input.branch} does not exist`);
+      const held = await revParse(c, `${input.ref}^{commit}`);
+      if (held !== null) {
+        const { key, value } = input.trailer;
+        const found = await findCommitByTrailer(c, held, key, value);
+        if (found !== null) return { sha: found, base: tip, made: true };
+      }
+      if (held !== input.parent) throw new KeptRefMovedError(input.ref, input.parent, held);
+      // HEAD names the branch, so what differs from HEAD is what differs from the tip; an ignored
+      // file git doesn't track is never among it.
+      const changed = named.length === 0 ? [] : await changes(c, named);
+      const tree = await withPrivateIndex(c, tip, async (env) => {
+        await stage(c, env, changed, tip);
+        return (await git(c, ['write-tree'], { env })).trim();
+      });
+      const parent = input.parent ?? tip;
+      if (tree === (await revParse(c, `${parent}^{tree}`)))
+        return { sha: input.parent, base: tip, made: false };
+      // Never pushed, so never signed.
+      const sha = (
+        await git(c, ['commit-tree', '--no-gpg-sign', tree, '-p', parent], {
+          input: `${input.message.trimEnd()}\n\n${input.trailer.key}: ${input.trailer.value}\n`,
+        })
+      ).trim();
+      try {
+        await git(c, [
+          'update-ref',
+          '--no-deref',
+          '-m',
+          '10db: kept work',
+          input.ref,
+          sha,
+          held ?? '0'.repeat(sha.length),
+        ]);
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        throw new KeptRefMovedError(input.ref, held, await revParse(c, `${input.ref}^{commit}`));
+      }
+      return { sha, base: tip, made: true };
+    });
+  }
+
+  /**
+   * Puts each of `paths` into a private index as the folder holds it, git's ignore rules aside: a
+   * regular file or a link is hashed, anything else, or nothing, leaves no entry.
+   */
+  async function indexAsOnDisk(
+    c: Pinned,
+    env: { GIT_INDEX_FILE: string; GIT_LITERAL_PATHSPECS: string },
+    paths: readonly string[],
+  ): Promise<void> {
+    const present: string[] = [];
+    const absent: string[] = [];
+    for (const path of paths) {
+      const entry = lstatSync(join(c.real, path), { throwIfNoEntry: false });
+      (entry?.isFile() === true || entry?.isSymbolicLink() === true ? present : absent).push(path);
+    }
+    if (present.length > 0)
+      await git(c, ['update-index', '--add', '-z', '--stdin'], {
+        env,
+        input: `${present.join('\0')}\0`,
+      });
+    if (absent.length > 0)
+      await git(c, ['update-index', '--force-remove', '-z', '--stdin'], {
+        env,
+        input: `${absent.join('\0')}\0`,
+      });
+  }
+
+  async function pageChanges(
+    repo: string,
+    tip: string,
+    pages: readonly string[],
+  ): Promise<LineChange[]> {
+    const named = checkPaths(repo, pages);
+    if (named.length === 0) return [];
+    const c = await pinned(repo);
+    const out = await withPrivateIndex(c, tip, async (env) => {
+      await indexAsOnDisk(c, env, named);
+      return git(c, ['diff-index', '--cached', '--numstat', '-z', '--no-renames', tip], { env });
+    });
+    const asked = new Set(named);
+    return parseNumstat(out)
+      .filter((file) => asked.has(file.path))
+      .map((file) => ({ path: file.path, added: file.added ?? 0, removed: file.removed ?? 0 }))
+      .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  }
+
+  async function hashOnDisk(
+    repo: string,
+    paths: readonly string[],
+  ): Promise<{ readonly path: string; readonly blob: string | null }[]> {
+    const named = [...new Set(checkPaths(repo, paths))].sort();
+    if (named.length === 0) return [];
+    const c = await pinned(repo);
+    const listed = await withPrivateIndex(c, null, async (env) => {
+      await indexAsOnDisk(c, env, named);
+      return git(c, ['ls-files', '-s', '-z'], { env });
+    });
+    const blobs = new Map(
+      listed
+        .split('\0')
+        .filter(Boolean)
+        .map((record) => {
+          const tab = record.indexOf('\t');
+          const [, oid = ''] = record.slice(0, tab).split(' ');
+          return [record.slice(tab + 1), oid] as const;
+        }),
+    );
+    return named.map((path) => ({ path, blob: blobs.get(path) ?? null }));
   }
 
   /** One fetch of `branch` into `origin/<branch>`, from origin's pinned fetch URL. */
@@ -3068,6 +3279,9 @@ export function createGit(opts: GitOptions = {}): Git {
     openPassBranch,
     undoPassBranch,
     passDirtRecords,
+    keepWork,
+    pageChanges,
+    hashOnDisk,
     async conflictMarkers(repo, paths, rev = 'HEAD') {
       const c = await pinned(repo);
       const found: string[] = [];

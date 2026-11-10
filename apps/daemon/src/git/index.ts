@@ -9,11 +9,16 @@ export { comparablePath, existsAsEntry } from './path-entries';
 export { withDaemonGitConfig } from './daemon-config';
 export {
   createGit,
+  KeptRefMovedError,
+  PassFolderOffBranchError,
   WorktreeNotOursError,
   type BranchMerge,
   type CheckoutPlace,
   type FolderAt,
   type Git,
+  type KeepWorkInput,
+  type KeptCommit,
+  type LineChange,
   type PassBranch,
   type PassDirtRecord,
   type ResolvedConflict,
