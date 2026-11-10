@@ -172,6 +172,15 @@ describe('opening a Ready page', () => {
   });
 });
 
+describe('the log of a turn whose run has no session', () => {
+  it('is empty, and the turn has no latest activity', () => {
+    const turn = startTurn().value;
+
+    expect(listTurnActivity(store.db, turn)).toEqual([]);
+    expect(latestTurnActivity(store.db, turn)).toBeUndefined();
+  });
+});
+
 describe('opening a page already answered', () => {
   it('leaves a Ready turn the builder has written to unopened: the answer came first', () => {
     const turn = startTurn().value;
