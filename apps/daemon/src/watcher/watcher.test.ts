@@ -1156,6 +1156,38 @@ describe('a Workbench pass in Your folder', () => {
 
   const DIRT_PATHS = ['README.md', 'docs/before.md', 'docs/edited.md', 'docs/notes.md'];
 
+  it("reads none of the folder's dirt while no lane of the pass works, at a session end or in a batch", async () => {
+    const real = createGit();
+    const hashed: string[] = [];
+    const counting = createWatcher({
+      state,
+      inbox,
+      git: {
+        ...real,
+        hashOnDisk: (root, paths) => {
+          hashed.push(...paths);
+          return real.hashOnDisk(root, paths);
+        },
+      },
+      logger: silentLogger,
+      clock,
+      watch: fake.watch,
+      batchMs: 500,
+    });
+    try {
+      const { alpha } = pass(WorkstreamState.Queued, await dirtyFolderPass());
+      // Alpha's warm session closes long after its turn, and Beta waits: no lane works.
+      expect(await counting.stepEnd(alpha.id)).toEqual([]);
+      counting.sync();
+      for (const rel of DIRT_PATHS) emit(rel);
+      await counting.flush();
+      expect(flags()).toEqual([]);
+      expect(hashed).toEqual([]);
+    } finally {
+      counting.stop();
+    }
+  });
+
   it.each(dirtRows)(
     "at a session's end with its turn open, the folder's dirt from before the pass: $name",
     async ({ since, carded }) => {

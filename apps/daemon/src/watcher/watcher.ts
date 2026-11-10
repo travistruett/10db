@@ -322,7 +322,10 @@ export function createWatcher(deps: {
     project: ProjectDto,
     root: string,
     paths: readonly string[],
+    lanes: readonly PassLane[],
   ): Promise<string[]> {
+    // With no lane working, `passWrites` cards no write outside every claim: nothing is worth a read.
+    if (!lanes.some((lane) => lane.working)) return [...paths];
     const pass = findOpenPass(db, project.id);
     if (!pass) return [...paths];
     const accounted = accountedAt({
@@ -923,7 +926,7 @@ export function createWatcher(deps: {
         : passWrites({
             project,
             lanes,
-            strays: await withoutAccounted(project, entry.root, strays),
+            strays: await withoutAccounted(project, entry.root, strays, lanes),
             foreign: reported.filter((rel) => !strays.includes(rel) && !hidden.includes(rel)),
           });
     const outside = new Set([...(inPass?.strays ?? strays), ...hidden]);
@@ -1089,7 +1092,7 @@ export function createWatcher(deps: {
           : passWrites({
               project,
               lanes,
-              strays: await withoutAccounted(project, root, strays),
+              strays: await withoutAccounted(project, root, strays, lanes),
               foreign: [],
             });
       // A write that can change what runs is flagged even inside the workstream's own claim.
