@@ -31,8 +31,24 @@ interface Shown extends ShownNotification {
   readonly projectId: ProjectId;
 }
 
+/** The largest id the native side takes (an i32). */
+const MAX_NOTIFICATION_ID = 2 ** 31 - 1;
+
+/**
+ * Where a page load's notification ids start: from the clock, so a banner shown before a reload, still
+ * on screen, does not carry an id the new load gives another page.
+ */
+export function notificationIdSeed(now: number): number {
+  return (Math.floor(now) % MAX_NOTIFICATION_ID) + 1;
+}
+
+/** The id after `id`, back to 1 past the largest. */
+export function nextNotificationId(id: number): number {
+  return (id % MAX_NOTIFICATION_ID) + 1;
+}
+
 let shown: Shown[] = [];
-let nextId = 1;
+let nextId = notificationIdSeed(Date.now());
 let listening: Promise<void> | null = null;
 
 /** The ready notifications shown lately, for the focus fallback. */
@@ -99,7 +115,7 @@ export async function notifyPassReady(
   if (document.hasFocus() || !(await canNotify())) return;
   const area = pass?.pages.find((page) => page.taskId === detail.taskId)?.area;
   const id = nextId;
-  nextId += 1;
+  nextId = nextNotificationId(id);
   shown = [
     ...shown,
     { id, projectId: item.projectId, taskId: detail.taskId, at: Date.now(), acted: false },
