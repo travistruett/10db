@@ -768,6 +768,17 @@ export interface Git {
     readonly to: string;
   }): Promise<SwitchBack>;
   /**
+   * D24: brings commit `theirs` into `branch` by one merge commit whose tree is the branch tip's own
+   * (parents the tip, then `theirs`), signed as the builder's config asks, set by compare-and-swap,
+   * under the repo lock; no file or index entry changes. `already` when the branch holds `theirs`.
+   */
+  mergeKeepingTree(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly theirs: string;
+    readonly message: string;
+  }): Promise<{ readonly kind: 'merged' | 'already'; readonly sha: string }>;
+  /**
    * The commits `tip` has since `base` that are its own: first parents only, merges left out,
    * newest first. A merge of the base into the branch adds none, and neither do the commits it brought in.
    */
@@ -3456,6 +3467,48 @@ export function createGit(opts: GitOptions = {}): Git {
     });
   }
 
+  async function mergeKeepingTree(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly theirs: string;
+    readonly message: string;
+  }): Promise<{ readonly kind: 'merged' | 'already'; readonly sha: string }> {
+    if (!OBJECT_ID.test(input.theirs)) throw new InvalidError(`${input.theirs} is not a commit id`);
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const ref = `refs/heads/${input.branch}`;
+      const tip = await revParse(c, `${ref}^{commit}`);
+      if (tip === null) throw new InvalidError(`Branch ${input.branch} is not there`);
+      if (await isAncestor(c, input.theirs, tip)) return { kind: 'already', sha: tip };
+      const sign = signing(c, await configEntries(c));
+      const sha = (
+        await git(
+          c,
+          ['commit-tree', ...sign.flags, `${tip}^{tree}`, '-p', tip, '-p', input.theirs],
+          {
+            input: `${input.message}\n`,
+            config: sign.config,
+          },
+        )
+      ).trim();
+      try {
+        await git(c, [
+          'update-ref',
+          '--no-deref',
+          '-m',
+          '10db: merge keeping its tree',
+          ref,
+          sha,
+          tip,
+        ]);
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        throw refusal(c.real, { kind: GitTrustFailure.Ref, ref, reason: 'raced' });
+      }
+      return { kind: 'merged', sha };
+    });
+  }
+
   async function rewindBranch(
     repo: string,
     branch: string,
@@ -3888,6 +3941,7 @@ export function createGit(opts: GitOptions = {}): Git {
     rewindBranch,
     moveBranchCas,
     moveCheckedOutBranch,
+    mergeKeepingTree,
     async ownCommitsSince(repo, base, tip) {
       return (
         await git(await pinned(repo), [

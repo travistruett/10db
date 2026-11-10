@@ -307,6 +307,8 @@ export const PassNoticeKind = {
   Finding: 'finding',
   /** The pass this one is stacked on closed without merging. */
   StackUnmerged: 'stack_unmerged',
+  /** The pass this one is stacked on merged with drift: its commits show beside this one's. */
+  StackMerged: 'stack_merged',
   /** The pass's pull request closed without merging while the pass was open. */
   PrClosed: 'pr_closed',
   /** The gate on the pushed tip failed. */

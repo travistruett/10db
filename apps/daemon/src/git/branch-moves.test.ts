@@ -132,3 +132,30 @@ describe('moveCheckedOutBranch', () => {
     expect(await move(base)).toEqual({ kind: 'moved', found: 'main' });
   });
 });
+
+describe('mergeKeepingTree', () => {
+  it("brings a commit into the branch by one merge commit whose tree is the branch's own, once", async () => {
+    // The base took the pass's work by a squash: same tree, other history.
+    const squash = rawGit('commit-tree', '-p', start, '-m', 'squash', `${tip}^{tree}`);
+    rawGit('update-ref', 'refs/heads/main', squash);
+    write('notes.md', 'mine\n');
+    const merge = () =>
+      git.mergeKeepingTree({
+        repo: repo.path,
+        branch: '10db/pass-abc123',
+        theirs: squash,
+        message: 'Merge main',
+      });
+
+    const made = await merge();
+    expect(made.kind).toBe('merged');
+    const head = rawGit('rev-parse', 'refs/heads/10db/pass-abc123');
+    expect(head).toBe(made.sha);
+    expect(rawGit('rev-parse', `${head}^1`, `${head}^2`)).toBe(`${tip}\n${squash}`);
+    expect(rawGit('rev-parse', `${head}^{tree}`)).toBe(rawGit('rev-parse', `${tip}^{tree}`));
+    expect(rawGit('status', '--porcelain')).toBe('?? notes.md');
+
+    expect(await merge()).toEqual({ kind: 'already', sha: head });
+    expect(rawGit('rev-parse', 'refs/heads/10db/pass-abc123')).toBe(head);
+  });
+});

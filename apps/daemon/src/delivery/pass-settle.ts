@@ -12,7 +12,6 @@ import {
 } from '@10db/contracts';
 import {
   findOpenByFoldKey,
-  findOpenPass,
   findPass,
   hasAnsweredByFoldKey,
   getBatch,
@@ -23,11 +22,18 @@ import {
   listBatches,
   listPassesIn,
   settlePass,
-  type DbReader,
 } from '@10db/db';
 import type { EventBus } from '../events';
 import { comparablePath, samePath, type SwitchBack } from '../git';
 import type { Card } from './cards';
+import {
+  followStackedMerge,
+  offerRetarget,
+  passMoveKey,
+  retargetAnswered,
+  retargetStackedPass,
+  stackedAbove,
+} from './pass-stack';
 import { networkCall, raise, withdraw, type DeliveryContext } from './context';
 import { jobKey, JobQueue } from './jobs';
 
@@ -36,16 +42,6 @@ import { jobKey, JobQueue } from './jobs';
 // pass's tip, the folder's branch moves to the base with no file changed and the pass settles. Any
 // other way ends at one card, Move <branch> to origin/<base>, which the builder may also take before
 // the merge. Nothing is forced.
-
-/** The fold key of a closed pass's one Move card. */
-export const passMoveKey = (passId: PassId): string => `pass-move:${passId}`;
-
-/** The pass stacked on this one that is still open or closing (D24): it moves the branch itself. */
-function stackedAbove(db: DbReader, pass: PassDto): PassDto | undefined {
-  const above = findOpenPass(db, pass.projectId);
-  if (above === undefined || above.state === PassState.Abandoning) return undefined;
-  return getPassProgress(db, above.id).stackedOn === pass.id ? above : undefined;
-}
 
 const SAYS: Readonly<Record<PassMoveReason, string>> = {
   [PassMoveReason.Closed]:
@@ -168,11 +164,15 @@ export async function settleClosedPass(
   const db = ctx.state.db;
   const pass = getPass(db, passId);
   if (pass.state !== PassState.Closed) return;
-  if (stackedAbove(db, pass) !== undefined) {
+  const pr = getPassPullRequest(db, passId);
+  const above = stackedAbove(db, pass);
+  if (above !== undefined) {
+    // The stacked pass moves the branch at its own close; this pass waits, or settles once merged.
     withdraw(ctx.state, ctx.inbox, pass.projectId, [passMoveKey(pass.id)]);
+    if (pr?.state === PullRequestState.Merged) await followStackedMerge(ctx, pass, above, signal);
+    else if (pr?.state === PullRequestState.Closed) offerRetarget(ctx, pass, above);
     return;
   }
-  const pr = getPassPullRequest(db, passId);
   if (pr?.state === PullRequestState.Closed) {
     offerMove(ctx, pass, PassMoveReason.ClosedUnmerged, ask);
     return;
@@ -340,13 +340,33 @@ export function subscribePassSettles(bus: EventBus, ctx: DeliveryContext): () =>
         );
       return;
     }
+    // A pass that just stacked on a closed one: that one's Move card waits while it is open.
+    const on = PassId.safeParse(event.data['stackedOn']);
+    if (pass !== undefined && on.success)
+      withdraw(ctx.state, ctx.inbox, pass.projectId, [passMoveKey(on.data)]);
     if (pass?.state !== PassState.Abandoned || event.data['state'] !== PassState.Abandoned) return;
     const below = getPassProgress(ctx.state.db, pass.id).stackedOn;
     if (below !== null)
-      queuePassSettle(ctx, below, (c, id, signal) =>
-        settleClosedPass(c, id, signal, { news: true }),
-      );
+      queuePassSettle(ctx, below, (c, id, signal) => resumeBelow(c, id, pass, signal));
   });
+}
+
+/**
+ * A pass stacked on closed pass `belowId` was abandoned: with its branch still at its start, which
+ * is the closed pass's tip, the folder is back on the return branch, and the closed pass's card and
+ * realignment resume. Otherwise the Abandon's own card says where the folder is.
+ */
+async function resumeBelow(
+  ctx: DeliveryContext,
+  belowId: PassId,
+  above: PassDto,
+  signal: AbortSignal,
+): Promise<void> {
+  const branch = getBatch(ctx.state.db, above.batchId).branch;
+  if (branch === null) return;
+  const repo = getProject(ctx.state.db, above.projectId).repoPath;
+  if ((await ctx.git.branchTip(repo, branch)) !== above.startSha) return;
+  await settleClosedPass(ctx, belowId, signal, { news: true });
 }
 
 /** At start-up: each closed pass is looked at again, its card raised once and its merge followed. */
@@ -355,7 +375,10 @@ export function resumePassSettles(ctx: DeliveryContext): void {
     queuePassSettle(ctx, pass.id, settleClosedPass);
 }
 
-/** Acts on an answer to a closed pass's Move card, in its project's delivery queue; other cards pass by. */
+/**
+ * Acts on an answer to a closed pass's Move card, or a stacked pass's Retarget card, in its project's
+ * delivery queue; other cards pass by.
+ */
 export function answerPassMoveCard(
   ctx: DeliveryContext,
   item: InboxItemDto,
@@ -363,6 +386,8 @@ export function answerPassMoveCard(
 ): void {
   // The detail is JSON read back from the database: a boundary, so parse it.
   const detail = PassMoveDetail.safeParse(item.detail);
-  if (!detail.success || answer.choice !== PASS_MOVE_CHOICE) return;
-  queuePassSettle(ctx, detail.data.passId, movePassBranch);
+  if (detail.success && answer.choice === PASS_MOVE_CHOICE)
+    queuePassSettle(ctx, detail.data.passId, movePassBranch);
+  const retargeted = retargetAnswered(item, answer);
+  if (retargeted !== null) queuePassSettle(ctx, retargeted, retargetStackedPass);
 }
