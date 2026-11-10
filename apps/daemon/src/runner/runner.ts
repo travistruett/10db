@@ -1638,9 +1638,6 @@ export function createRunner(opts: RunnerOptions): Runner {
       providerSessionId,
       reason,
     });
-    opts.state.write((ctx) => {
-      patchWorkstream(ctx, id, ctl.fence, { recoveryAttempts: 0 });
-    });
   }
 
   /** Settles the lane's ending: a pass task's own way first, else as any lane's. */

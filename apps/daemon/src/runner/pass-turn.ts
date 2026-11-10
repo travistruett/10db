@@ -168,8 +168,10 @@ function settleTurn(
           turnFiles: kept.turnFiles,
           pageFiles: kept.pageFiles,
         });
+        // A turn that got through ends the page's run of crashes.
         patchWorkstream(ctx, id, settle.fence, {
           nextAction: { kind: 'pass_review', inboxId: item.id },
+          recoveryAttempts: 0,
         });
         return;
       }
@@ -183,8 +185,10 @@ function settleTurn(
           reason: settle.reason,
         });
         // The run says why, as a failed run does, though it never fails: the page reads it.
+        // Retry Turn starts the page over, with every recovery attempt to come.
         patchWorkstream(ctx, id, settle.fence, {
           nextAction: { kind: 'pass_review', inboxId: flag.id },
+          recoveryAttempts: 0,
           currentSessionId: null,
           failureKind: WorkstreamFailure.SessionFailed,
           failureReason: settle.reason,

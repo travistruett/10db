@@ -791,13 +791,22 @@ describe('a pass page across a restart', () => {
   );
 
   it('resumes a turn cut short mid-way, without handing the message over again', async () => {
-    const { pass, id } = await openPage([working, [...turn('two\n', 'Finished it.')]]);
+    const { id } = await openPage([
+      working,
+      [...turn('two\n', 'Finished it.'), { do: 'await_message', contains: 'never sent' }],
+    ]);
     await waitFor(wrote);
     await restart();
-    expect(row(id)).toMatchObject({ state: 'QUEUED', nextAction: { kind: 'resume' } });
+    expect(row(id)).toMatchObject({
+      state: 'QUEUED',
+      nextAction: { kind: 'resume' },
+      recoveryAttempts: 1,
+    });
 
     engine.launch(id);
-    await waitFor(() => listPassTurns(engine.store.db, pass.id)[0]?.ending === 'ready');
+    await waitFor(isReady(id, 1));
+    // The turn that got through counts for the page: the next crash is its first again.
+    expect(row(id).recoveryAttempts).toBe(0);
     expect(engine.adapter.prompts[1]?.resume).not.toBeNull();
     expect(engine.adapter.prompts[1]?.prompt).not.toContain('Make the form tidy');
     expect(engine.adapter.sent).toEqual([]);
@@ -855,7 +864,12 @@ describe('a pass page across a restart', () => {
     await restart();
 
     expect(listPassTurns(engine.store.db, pass.id).map((t) => t.ending)).toEqual(['failed']);
-    expect(row(id)).toMatchObject({ state: 'WAITING_HUMAN', nextAction: { kind: 'pass_review' } });
+    // Retry Turn starts the page over, with every attempt to come.
+    expect(row(id)).toMatchObject({
+      state: 'WAITING_HUMAN',
+      nextAction: { kind: 'pass_review' },
+      recoveryAttempts: 0,
+    });
     expect(
       listInbox(engine.store.db, {}).filter((i) => i.title.startsWith('Turn failed')),
     ).toHaveLength(1);
