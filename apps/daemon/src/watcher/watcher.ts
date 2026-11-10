@@ -34,7 +34,7 @@ import {
   setAppSetting,
 } from '@10db/db';
 import type { Clock, Timer } from '../clock';
-import { checkoutOf } from '../delivery';
+import { checkoutOf, passDirtRef } from '../delivery';
 import type { EventBus, StateStore } from '../events';
 import {
   bookkeepingAt,
@@ -59,7 +59,7 @@ import {
   writeStamp,
 } from './allowed-writes';
 import { filesUnderBounded as filesUnder } from './dir-files';
-import { accountedContent, passWrites, type PassLane } from './pass-writes';
+import { accountedAt, passWrites, type PassLane } from './pass-writes';
 import {
   bulkFoldKey,
   findForeignClaimWrites,
@@ -311,8 +311,9 @@ export function createWatcher(deps: {
 
   /**
    * `paths` without each that still holds what the project's pass accounts for in Your folder `root`
-   * (`accountedContent`): the folder's dirt from before the pass is no write made in it. A sensitive path
-   * is kept, as is every path when the folder's content can't be read.
+   * (`accountedAt`): the folder's dirt from before the pass is no write made in it. An entry counts as
+   * held only when its mode and content both match, so an executable bit or a link holding the same
+   * bytes is a write. A sensitive path is kept, as is every path when git can't read either side.
    */
   async function withoutAccounted(
     project: ProjectDto,
@@ -321,14 +322,26 @@ export function createWatcher(deps: {
   ): Promise<string[]> {
     const pass = findOpenPass(db, project.id);
     if (!pass) return [...paths];
-    const expected = accountedContent({ dirt: listPassDirt(db, pass.id) });
-    const named = paths.filter((rel) => expected.has(rel) && !isSensitivePath(rel));
+    const revs = accountedAt({ dirtRef: passDirtRef(pass.id), dirt: listPassDirt(db, pass.id) });
+    const named = paths.filter((rel) => revs.has(rel) && !isSensitivePath(rel));
     if (named.length === 0) return [...paths];
-    const onDisk = await deps.git.hashOnDisk(root, named).catch((error: unknown) => {
+    const byRev = new Map<string, string[]>();
+    for (const rel of named) {
+      const rev = revs.get(rel);
+      if (rev !== undefined) byRev.set(rev, [...(byRev.get(rev) ?? []), rel]);
+    }
+    const same = new Set<string>();
+    try {
+      const onDisk = new Map((await deps.git.hashOnDisk(root, named)).map((f) => [f.path, f]));
+      for (const [rev, group] of byRev)
+        for (const kept of await deps.git.blobsAt(root, rev, group)) {
+          const disk = onDisk.get(kept.path);
+          if (disk?.blob === kept.blob && disk.mode === kept.mode) same.add(kept.path);
+        }
+    } catch (error) {
       deps.logger.warn({ root, err: String(error) }, 'could not read what the pass recorded');
-      return [];
-    });
-    const same = new Set(onDisk.filter((f) => expected.get(f.path) === f.blob).map((f) => f.path));
+      return [...paths];
+    }
     return paths.filter((rel) => !same.has(rel));
   }
 

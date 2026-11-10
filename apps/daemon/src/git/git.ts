@@ -385,6 +385,15 @@ export interface PathBlob {
   readonly blob: string | null;
 }
 
+/**
+ * A path as a commit or the folder holds it, with the mode git gives it (`100644`, `100755`, `120000`
+ * for a link): a link or an executable bit holding the same bytes is another entry. Null where it is
+ * not there.
+ */
+export interface PathEntry extends PathBlob {
+  readonly mode: string | null;
+}
+
 /** What `recordPaths` made: the unsigned commit on `base`, and what each path held in the folder. */
 export interface PathRecord {
   readonly sha: string;
@@ -715,13 +724,10 @@ export interface Git {
    */
   pageChanges(repo: string, tip: string, pages: readonly string[]): Promise<LineChange[]>;
   /**
-   * The blob each of `paths` holds in the folder now, sorted by path; null for one that is not there.
-   * Read through a private index: nothing is written.
+   * The blob and mode each of `paths` holds in the folder now, sorted by path; null for one that is
+   * not there. Read through a private index: nothing is written.
    */
-  hashOnDisk(
-    repo: string,
-    paths: readonly string[],
-  ): Promise<{ readonly path: string; readonly blob: string | null }[]>;
+  hashOnDisk(repo: string, paths: readonly string[]): Promise<PathEntry[]>;
   /**
    * Puts each `entries` path back as commit `from` has it, under the repo lock: written through a
    * private index (its mode and content; never through a link), or removed when `from` lacks it. Each
@@ -836,8 +842,8 @@ export interface Git {
   }): Promise<LandedPaths>;
   /** Sets `ref`, under `refs/10db/`, to commit `sha`, whatever it held. */
   keepRef(repo: string, ref: string, sha: string): Promise<void>;
-  /** The blob each of `paths` holds in commit `rev`, sorted by path; null for one it lacks there. */
-  blobsAt(repo: string, rev: string, paths: readonly string[]): Promise<PathBlob[]>;
+  /** The blob and mode each of `paths` holds in commit `rev`, sorted by path; null for one it lacks there. */
+  blobsAt(repo: string, rev: string, paths: readonly string[]): Promise<PathEntry[]>;
   /** True when commit `ancestor` is in the history of `tip`, `tip` itself included. */
   isAncestor(repo: string, ancestor: string, tip: string): Promise<boolean>;
   /** Whether the object store of `repo` holds commit `sha`. */
@@ -2664,10 +2670,7 @@ export function createGit(opts: GitOptions = {}): Git {
       .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   }
 
-  async function hashOnDisk(
-    repo: string,
-    paths: readonly string[],
-  ): Promise<{ readonly path: string; readonly blob: string | null }[]> {
+  async function hashOnDisk(repo: string, paths: readonly string[]): Promise<PathEntry[]> {
     const named = [...new Set(paths.map(checkPathName))].sort();
     if (named.length === 0) return [];
     const c = await pinned(repo);
@@ -2675,17 +2678,21 @@ export function createGit(opts: GitOptions = {}): Git {
       await indexAsOnDisk(c, env, named);
       return git(c, ['ls-files', '-s', '-z'], { env });
     });
-    const blobs = new Map(
+    const entries = new Map(
       listed
         .split('\0')
         .filter(Boolean)
         .map((record) => {
           const tab = record.indexOf('\t');
-          const [, oid = ''] = record.slice(0, tab).split(' ');
-          return [record.slice(tab + 1), oid] as const;
+          const [mode = '', oid = ''] = record.slice(0, tab).split(' ');
+          return [record.slice(tab + 1), { mode, oid }] as const;
         }),
     );
-    return named.map((path) => ({ path, blob: blobs.get(path) ?? null }));
+    return named.map((path) => ({
+      path,
+      blob: entries.get(path)?.oid ?? null,
+      mode: entries.get(path)?.mode ?? null,
+    }));
   }
 
   /** What each of `paths` holds in a private index, by path; null for one it has no entry for. */
@@ -4378,9 +4385,13 @@ export function createGit(opts: GitOptions = {}): Git {
           await git(c, ['ls-tree', '-r', '-z', '--full-tree', rev, '--', ...named], {
             env: { GIT_LITERAL_PATHSPECS: '1' },
           }),
-        ).map((entry) => [entry.path, entry.oid]),
+        ).map((entry) => [entry.path, entry]),
       );
-      return named.map((path) => ({ path, blob: found.get(path) ?? null }));
+      return named.map((path) => ({
+        path,
+        blob: found.get(path)?.oid ?? null,
+        mode: found.get(path)?.mode ?? null,
+      }));
     },
     async isAncestor(repo, ancestor, tip) {
       return isAncestor(await pinned(repo), ancestor, tip);

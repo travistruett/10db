@@ -49,12 +49,14 @@ export function passWrites(input: {
 }
 
 /**
- * What each path of Your folder holds while the pass accounts for it, by path (null: not there): what
- * the pass's open recorded of the folder's dirt (spec §5.1). A path that still holds it is no write
- * made in the pass, whatever claim covers it.
+ * The commit that holds what each path of Your folder holds while the pass accounts for it, by path:
+ * the pass's dirt commit for a path its open recorded (spec §5.1). A path still holding that commit's
+ * entry, mode and content alike, is no write made in the pass, whatever claim covers it.
  */
-export function accountedContent(input: {
-  readonly dirt: readonly PassDirtEntry[];
-}): Map<string, string | null> {
-  return new Map(input.dirt.map((entry) => [entry.path, entry.blob]));
+export function accountedAt(input: {
+  /** The pass's dirt commit, whose tree holds the folder's dirt as the open found it. */
+  readonly dirtRef: string;
+  readonly dirt: readonly Pick<PassDirtEntry, 'path'>[];
+}): Map<string, string> {
+  return new Map(input.dirt.map((entry) => [entry.path, input.dirtRef]));
 }

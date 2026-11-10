@@ -65,6 +65,7 @@ import {
 } from '../../test/fixtures';
 import { ManualClock, systemClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
+import { passDirtRef } from '../delivery';
 import { createGit } from '../git';
 import { createInboxService, type InboxService } from '../inbox';
 import { silentLogger, type Logger } from '../log';
@@ -914,17 +915,35 @@ describe('watcher', () => {
 
 // Workbench spec §6.4: while a pass holds its tasks, the builder's writes in Your folder raise no card.
 describe('a Workbench pass in Your folder', () => {
+  /** What a pass's open made of Your folder: its id, and the dirt it recorded at the pass's dirt ref. */
+  interface OpenedFolder {
+    readonly id: PassId;
+    readonly dirt: readonly { path: string; blob: string | null }[];
+  }
+
+  /** Opens a pass's branch in Your folder as `openPass` does, recording its dirt. */
+  async function openFolder(): Promise<OpenedFolder> {
+    const id = mintId('Pass');
+    const { dirt } = await createGit().openPassBranch({
+      repo: repo.path,
+      branch: '10db/polish-abc123',
+      dirtRef: passDirtRef(id),
+      message: 'the dirt',
+    });
+    return { id, dirt };
+  }
+
   /**
    * A pass on Alpha (`api`, Ready) and Beta (`ui`), each claiming its page as a pass does at open, with
-   * the folder's dirt its open recorded.
+   * the folder's dirt its open recorded when `opened` is given.
    */
   function pass(
     beta: WorkstreamState,
-    dirt: readonly { path: string; blob: string | null }[] = [],
+    opened?: OpenedFolder,
   ): { alpha: WorkstreamDto; beta: WorkstreamDto; id: PassId } {
     const a = seedWorkstream(base, { project, title: 'Alpha', areas: ['api'] });
     const b = seedWorkstream(base, { project, title: 'Beta', areas: ['ui'] });
-    const id = mintId('Pass');
+    const id = opened?.id ?? mintId('Pass');
     state.write((ctx) => {
       insertPass(ctx, {
         id,
@@ -941,7 +960,7 @@ describe('a Workbench pass in Your folder', () => {
         baseBranch: 'main',
         repo: null,
         taskIds: [a.task.id, b.task.id],
-        dirt,
+        dirt: opened?.dirt ?? [],
       });
       for (const seeded of [a, b])
         acquireClaims(ctx, {
@@ -1052,88 +1071,120 @@ describe('a Workbench pass in Your folder', () => {
     expect(flags().map((f) => f.body)).toEqual(['docs/notes.md\nWritten while Gamma was working']);
   });
 
-  /** The blob git would make of `text`. */
-  const blobOf = (text: string): string =>
-    execFileSync('git', ['-C', repo.path, 'hash-object', '--stdin'], {
-      input: text,
-      env: isolatedGitEnv(),
-    })
-      .toString()
-      .trim();
-
   /**
-   * Your folder before the pass: `docs/before.md` new, `docs/edited.md` new and edited again since,
-   * README.md deleted. What the pass's open recorded of each, as it was then.
+   * Your folder before the pass: `docs/before.md` and `docs/edited.md` new, README.md deleted. Each row
+   * says what happens to it after the pass opened, and which paths a lane of the pass is then carded for.
    */
-  function earlierDirt(): { path: string; blob: string | null }[] {
+  const dirtRows: {
+    readonly name: string;
+    readonly since: () => void;
+    readonly carded: readonly string[];
+  }[] = [
+    { name: 'left as the open recorded it', since: () => undefined, carded: [] },
+    {
+      name: 'a file edited since',
+      since: () => {
+        writeFileSync(join(repo.path, 'docs', 'edited.md'), 'later');
+      },
+      carded: ['docs/edited.md'],
+    },
+    {
+      name: 'a file made executable since',
+      since: () => {
+        chmodSync(join(repo.path, 'docs', 'before.md'), 0o755);
+      },
+      carded: ['docs/before.md'],
+    },
+    {
+      name: 'a file swapped for a link whose target is its bytes',
+      since: () => {
+        rmSync(join(repo.path, 'docs', 'before.md'));
+        symlinkSync('x', join(repo.path, 'docs', 'before.md'));
+      },
+      carded: ['docs/before.md'],
+    },
+    {
+      name: 'a deleted file written again',
+      since: () => {
+        touch('README.md');
+      },
+      carded: ['README.md'],
+    },
+    {
+      name: 'a file the folder did not hold',
+      since: () => {
+        touch('docs/notes.md');
+      },
+      carded: ['docs/notes.md'],
+    },
+  ];
+
+  async function dirtyFolderPass(): Promise<OpenedFolder> {
     touch('docs/before.md');
-    writeFileSync(join(repo.path, 'docs', 'edited.md'), 'later');
+    writeFileSync(join(repo.path, 'docs', 'edited.md'), 'earlier');
     rmSync(join(repo.path, 'README.md'));
-    return [
-      { path: 'README.md', blob: null },
-      { path: 'docs/before.md', blob: blobOf('x') },
-      { path: 'docs/edited.md', blob: blobOf('earlier') },
-    ];
+    return openFolder();
   }
 
-  it("at a session's end, cards no file that still holds what the pass's open recorded of it, and does one changed since", async () => {
-    const dirt = earlierDirt();
-    const gamma = state.write((ctx) => {
-      const task = insertTask(ctx, project.id, {
-        title: 'Gamma',
-        acceptanceCriteria: ['ok'],
-        areas: ['api'],
-      });
-      const { batch } = insertPass(ctx, {
-        id: mintId('Pass'),
-        projectId: project.id,
-        name: 'Polish',
-        pageCap: 4,
-        returnBranch: 'main',
-        startSha: 'a'.repeat(40),
-        branch: '10db/polish-abc123',
-        baseBranch: 'main',
-        repo: null,
-        taskIds: [task.id],
-        dirt,
-      });
-      const ws = insertWorkstream(ctx, task.id, {
-        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
-        batchId: batch.id,
-      });
-      // Its session crashed mid-turn: queued to resume, the turn still open.
-      insertPassTurn(ctx, {
-        taskId: task.id,
-        workstreamId: ws.id,
-        sessionId: null,
-        messageId: null,
-      });
-      return ws;
-    });
-    touch('docs/notes.md');
-    expect(await watcher.stepEnd(gamma.id)).toEqual(['docs/edited.md', 'docs/notes.md']);
-    expect(flags().map((f) => f.body)).toEqual(
-      expect.arrayContaining([
-        'docs/edited.md\nWritten while Gamma was working',
-        'docs/notes.md\nWritten while Gamma was working',
-      ]),
-    );
-    expect(flags()).toHaveLength(2);
-  });
+  const DIRT_PATHS = ['README.md', 'docs/before.md', 'docs/edited.md', 'docs/notes.md'];
 
-  it("while a lane works, cards no write that leaves a file as the pass's open recorded it", async () => {
-    pass(WorkstreamState.Running, earlierDirt());
-    watcher.sync();
-    for (const rel of ['README.md', 'docs/before.md', 'docs/edited.md']) emit(rel);
-    await write('docs/notes.md');
-    expect(flags().map((f) => f.body)).toEqual(
-      expect.arrayContaining([
-        'docs/edited.md\nWritten while Beta was working',
-        'docs/notes.md\nWritten while Beta was working',
-      ]),
-    );
-    expect(flags()).toHaveLength(2);
-  });
+  it.each(dirtRows)(
+    "at a session's end with its turn open, the folder's dirt from before the pass: $name",
+    async ({ since, carded }) => {
+      const opened = await dirtyFolderPass();
+      const gamma = state.write((ctx) => {
+        const task = insertTask(ctx, project.id, {
+          title: 'Gamma',
+          acceptanceCriteria: ['ok'],
+          areas: ['api'],
+        });
+        const { batch } = insertPass(ctx, {
+          id: opened.id,
+          projectId: project.id,
+          name: 'Polish',
+          pageCap: 4,
+          returnBranch: 'main',
+          startSha: 'a'.repeat(40),
+          branch: '10db/polish-abc123',
+          baseBranch: 'main',
+          repo: null,
+          taskIds: [task.id],
+          dirt: opened.dirt,
+        });
+        const ws = insertWorkstream(ctx, task.id, {
+          first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+          batchId: batch.id,
+        });
+        // Its session crashed mid-turn: queued to resume, the turn still open.
+        insertPassTurn(ctx, {
+          taskId: task.id,
+          workstreamId: ws.id,
+          sessionId: null,
+          messageId: null,
+        });
+        return ws;
+      });
+      since();
+      expect(await watcher.stepEnd(gamma.id)).toEqual(carded);
+      expect(flags().map((f) => f.body)).toEqual(
+        carded.map((rel) => `${rel}\nWritten while Gamma was working`),
+      );
+    },
+  );
+
+  it.each(dirtRows)(
+    "in a batch while a lane works, the folder's dirt from before the pass: $name",
+    async ({ since, carded }) => {
+      pass(WorkstreamState.Running, await dirtyFolderPass());
+      watcher.sync();
+      since();
+      for (const rel of DIRT_PATHS) emit(rel);
+      await watcher.flush();
+      expect(flags().map((f) => f.body)).toEqual(
+        carded.map((rel) => `${rel}\nWritten while Beta was working`),
+      );
+    },
+  );
 
   it('cards a write outside every claim that arrives just after a lane of the pass ended its turn', async () => {
     state.write((ctx) => {
