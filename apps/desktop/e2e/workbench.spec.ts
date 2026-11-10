@@ -1,5 +1,6 @@
 import { createServer } from 'node:net';
 import { expect, test, type Locator, type Page } from '@playwright/test';
+import { z } from 'zod';
 import { claudeIsInstalled } from './claude-is-installed';
 import { daemonUrl } from './daemon-url';
 import { expectAccessible } from './expect-accessible';
@@ -15,6 +16,8 @@ const AREAS = [
   { name: 'people', globs: ['src/people/**'], role: 'page', route: '/people' },
   { name: 'repo', globs: ['**'], catchAll: true, role: 'shared' },
 ] as const;
+
+const Live = z.array(z.looseObject({ pass: z.looseObject({ projectId: z.string() }) }));
 
 /** A real 1×1 PNG, as a screenshot pasted into the composer would be. */
 const PICTURE = Buffer.from(
@@ -199,4 +202,20 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
   expect(
     said.filter((line) => !/^(settings|people) (is ready|asks a question)$/.test(line)),
   ).toEqual([]);
+
+  // Abandon ends the pass: its confirm names the page that goes back and the one that stays. Later
+  // specs read Factory across projects, so nothing of this pass is left running.
+  await page.getByRole('button', { name: 'More pass actions' }).click();
+  await page.getByRole('menuitem', { name: 'Abandon Pass…' }).click();
+  const abandon = page.getByRole('dialog', { name: 'Abandon Pass' });
+  await expect(abandon.getByRole('list', { name: 'Pages that go back' })).toHaveText('people');
+  await expect(abandon.getByRole('list', { name: 'Pages that stay' })).toHaveText('settings');
+  await abandon.getByRole('button', { name: 'Abandon Pass' }).click();
+  await expect(page.getByRole('button', { name: /^Start Pass/ })).toBeVisible();
+  await expect
+    .poll(async () => {
+      const live = await request.get(`${daemonUrl}/passes?live=true`, { headers: auth });
+      return Live.parse(await live.json()).filter((view) => view.pass.projectId === projectId);
+    })
+    .toEqual([]);
 });
