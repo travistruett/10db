@@ -31,7 +31,8 @@ export type GhMethod =
   | 'prAutoMerge'
   | 'prMerge'
   | 'prReady'
-  | 'prEditBase';
+  | 'prEditBase'
+  | 'prEditBody';
 export interface PrCreateCall {
   readonly repo: string;
   readonly base: string;
@@ -231,6 +232,16 @@ export class FakeGh implements Gh {
   }): Promise<void> {
     return this.call('prEditBase', input, () => {
       this.found(input.url).baseRef = input.base;
+    });
+  }
+
+  prEditBody(input: {
+    readonly repo: string;
+    readonly url: string;
+    readonly bodyFile: string;
+  }): Promise<void> {
+    return this.call('prEditBody', input, () => {
+      this.found(input.url).body = readFileSync(input.bodyFile, 'utf8');
     });
   }
 

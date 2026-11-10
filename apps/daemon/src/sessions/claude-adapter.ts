@@ -1057,7 +1057,7 @@ async function probeAccount(
   }
 }
 
-/** How long a one-shot question may take before it is given up on. */
+/** How long a one-shot question may take before it is given up on, unless it says otherwise. */
 const COMPLETION_MS = 120_000;
 
 /**
@@ -1079,6 +1079,7 @@ async function complete(
       cwd: ask.cwd,
       env: { ...ask.env, ...AUTOUPDATE_OFF },
       model: ask.model,
+      ...(ask.effort === undefined ? {} : { effort: ask.effort }),
       pathToClaudeCodeExecutable: opts.claudePath,
       settingSources: [],
       strictMcpConfig: true,
@@ -1095,7 +1096,7 @@ async function complete(
   const timeout = new Promise<never>((_, reject) => {
     timer = clock.setTimeout(() => {
       reject(new CompletionError('The model did not answer in time.'));
-    }, COMPLETION_MS);
+    }, ask.timeoutMs ?? COMPLETION_MS);
   });
   // A caller that gives up ends the question now, not when the model would have answered.
   let withdrawn: () => void = () => undefined;

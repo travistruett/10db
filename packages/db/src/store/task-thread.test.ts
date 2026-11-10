@@ -20,6 +20,8 @@ import {
   markTaskFilesInline,
   markTaskMessagesDelivered,
   markTaskMessagesPushed,
+  offeredText,
+  offerToAgent,
   seedProject,
   type Store,
 } from './index';
@@ -219,5 +221,23 @@ describe('a task thread', () => {
       }),
     ]);
     expect(notice.events.map((e) => e.type)).toEqual([EventType.TaskMessageAdded]);
+  });
+
+  it('reads a notice offered with Send to Agent as sendable, with the text it sends', () => {
+    const plain = store.write((ctx) => insertSystemNotice(ctx, taskId, 'Signed off')).value;
+    const finding = store.write((ctx) => {
+      const made = insertSystemNotice(ctx, taskId, 'Review: the label is cut off');
+      offerToAgent(ctx, made.id, 'Fix the cut-off label in src/settings/page.tsx');
+      return made;
+    }).value;
+
+    expect(listTaskThread(store.db, taskId).map((m) => [m.id, m.sendable])).toEqual([
+      [plain.id, false],
+      [finding.id, true],
+    ]);
+    expect(offeredText(store.db, finding.id)).toBe(
+      'Fix the cut-off label in src/settings/page.tsx',
+    );
+    expect(offeredText(store.db, plain.id)).toBeNull();
   });
 });

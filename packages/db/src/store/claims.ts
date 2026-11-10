@@ -87,32 +87,64 @@ function activeHolder(
     .get();
 }
 
+/**
+ * The workstream holding the claim `request` names, as `acquireClaims` looks for it in the same
+ * scope, or null while it is free. Reads only: a caller whose grant needs more than one write learns
+ * here, without granting, whether the claim is free.
+ */
+export function claimHolder(
+  db: DbReader,
+  input: {
+    readonly projectId: ProjectId;
+    readonly request: ClaimRequest;
+    readonly areaScope?: BatchId;
+    readonly copyHazards?: ReadonlySet<string>;
+  },
+): WorkstreamId | null {
+  return activeHolder(db, scopeOf(input.request, input), input.request)?.workstreamId ?? null;
+}
+
+/** What a workstream asks to claim, and where. */
+export interface ClaimAsk {
+  readonly projectId: ProjectId;
+  readonly workstreamId: WorkstreamId;
+  readonly requests: readonly ClaimRequest[];
+  /** The batch whose copy these are; absent, areas and per-copy hazards are scoped to the project. */
+  readonly areaScope?: BatchId;
+  /** The hazards (`copyHazardNames`) exclusive per copy; any other hazard is exclusive across the project. */
+  readonly copyHazards?: ReadonlySet<string>;
+}
+
+const uniqueRequests = (requests: readonly ClaimRequest[]): ClaimRequest[] => [
+  ...new Map(requests.map((r) => [`${r.kind}:${r.name}`, r])).values(),
+];
+
+/**
+ * The first requested claim another workstream holds, or null when `acquireClaims` would grant them
+ * all now. Reads only, for a caller that must know before it acts on the workstream's checkout.
+ */
+export function claimConflict(
+  db: DbReader,
+  input: ClaimAsk,
+): Extract<AcquireResult, { ok: false }>['conflict'] | null {
+  for (const request of uniqueRequests(input.requests)) {
+    const holder = activeHolder(db, scopeOf(request, input), request);
+    if (holder && holder.workstreamId !== input.workstreamId)
+      return { kind: request.kind, name: request.name, heldBy: holder.workstreamId };
+  }
+  return null;
+}
+
 /** Grants every requested claim or none. Active claims never overlap (spec §8.1). */
 export function acquireClaims(
   ctx: WriteContext,
-  input: {
-    readonly projectId: ProjectId;
-    readonly workstreamId: WorkstreamId;
-    readonly requests: readonly ClaimRequest[];
-    readonly leaseExpiresAt: string;
-    /** The batch whose copy these are; absent, areas and per-copy hazards are scoped to the project. */
-    readonly areaScope?: BatchId;
-    /** The hazards (`copyHazardNames`) exclusive per copy; any other hazard is exclusive across the project. */
-    readonly copyHazards?: ReadonlySet<string>;
-  },
+  input: ClaimAsk & { readonly leaseExpiresAt: string },
 ): AcquireResult {
-  const toInsert: ClaimRequest[] = [];
-  const unique = new Map(input.requests.map((r) => [`${r.kind}:${r.name}`, r]));
-  for (const request of unique.values()) {
-    const holder = activeHolder(ctx.tx, scopeOf(request, input), request);
-    if (holder && holder.workstreamId !== input.workstreamId) {
-      return {
-        ok: false,
-        conflict: { kind: request.kind, name: request.name, heldBy: holder.workstreamId },
-      };
-    }
-    if (!holder) toInsert.push(request);
-  }
+  const conflict = claimConflict(ctx.tx, input);
+  if (conflict !== null) return { ok: false, conflict };
+  const toInsert = uniqueRequests(input.requests).filter(
+    (request) => !activeHolder(ctx.tx, scopeOf(request, input), request),
+  );
   for (const request of toInsert) {
     const id = mintId('Claim');
     ctx.tx

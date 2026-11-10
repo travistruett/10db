@@ -37,7 +37,6 @@ import {
   patchBatch,
   passHoldingFolder,
   passHoldingTask,
-  refuseStartWithKeptWork,
   patchTask,
   placeTaskByRule,
   setBatchNotice,
@@ -551,7 +550,6 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       throw new ConflictError(
         `Task ${task.title} is in the Workbench pass "${pass.name}"; it runs there until the pass takes it out or ends`,
       );
-    refuseStartWithKeptWork(db, task);
   }
 
   /** Cutting a branch (batch delivery spec §5): checks in order, then switch, then open. */

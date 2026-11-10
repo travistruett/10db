@@ -83,6 +83,7 @@ import {
   StartTaskInput,
   SystemCheckDto,
   TakeOutRequest,
+  PassCloseRequest,
   TaskFileId,
   TaskId,
   TaskInput,
@@ -731,6 +732,14 @@ export function createApp(deps: ApiDeps) {
     .get('/passes/:passId', (c) =>
       c.json(deps.services.passView(PassId.parse(c.req.param('passId')))),
     )
+    .get('/passes/:passId/tasks/:taskId/take-out', async (c) =>
+      c.json(
+        await deps.services.takeOutPreview(
+          PassId.parse(c.req.param('passId')),
+          TaskId.parse(c.req.param('taskId')),
+        ),
+      ),
+    )
     .post(
       '/passes/:passId/tasks/:taskId/take-out',
       validator('json', (value): TakeOutRequest => TakeOutRequest.parse(value)),
@@ -799,6 +808,48 @@ export function createApp(deps: ApiDeps) {
     })
     .get('/projects/:projectId/pass-start', async (c) =>
       c.json(await deps.services.passStart(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .get('/passes/:passId/close', async (c) =>
+      c.json(await deps.services.passClosePreview(PassId.parse(c.req.param('passId')))),
+    )
+    .post(
+      '/passes/:passId/close',
+      validator('json', (value): PassCloseRequest => PassCloseRequest.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.closePass(PassId.parse(c.req.param('passId')), c.req.valid('json')),
+        ),
+    )
+    .post('/passes/:passId/tasks/:taskId/sign-off', (c) =>
+      c.json(
+        deps.services.signOffPage(
+          PassId.parse(c.req.param('passId')),
+          TaskId.parse(c.req.param('taskId')),
+        ),
+        202,
+      ),
+    )
+    .delete('/passes/:passId/tasks/:taskId/sign-off', (c) => {
+      deps.services.cancelSignOff(
+        PassId.parse(c.req.param('passId')),
+        TaskId.parse(c.req.param('taskId')),
+      );
+      return c.body(null, 204);
+    })
+    .get('/passes/:passId/pull-request', async (c) =>
+      c.json(await deps.services.passPullRequest(PassId.parse(c.req.param('passId')))),
+    )
+    .post('/passes/:passId/pull-request', async (c) =>
+      c.json(await deps.services.openPassPullRequest(PassId.parse(c.req.param('passId'))), 202),
+    )
+    .post('/tasks/:taskId/thread/:messageId/send-to-agent', async (c) =>
+      c.json(
+        await deps.services.sendToAgent(
+          TaskId.parse(c.req.param('taskId')),
+          z.string().min(1).max(200).parse(c.req.param('messageId')),
+        ),
+        201,
+      ),
     )
     .post('/batches/:batchId/ship', (c) =>
       c.json(deps.services.shipBatch(BatchId.parse(c.req.param('batchId')))),

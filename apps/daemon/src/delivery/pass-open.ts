@@ -53,6 +53,7 @@ import { insertPlannedWorkstream, resolveStepPlan } from '../team';
 import { lanesInProjectCheckout } from './checkout';
 import type { DeliveryContext } from './context';
 import { jobKey, JobQueue } from './jobs';
+import { stackOn } from './pass-stack';
 
 // Workbench spec §5.1: opening a pass. No route reaches this yet; the route that opens a pass ships
 // with the pass's turns, so no pass can be opened whose tasks could not run.
@@ -131,7 +132,7 @@ function pageWaitNotice(area: string, holder: TaskDto): Notice {
  * What a task in a pass runs: the project's implement step alone (D21). A pass is reviewed once, at
  * its pull request, so no plan, review or QA step runs per turn.
  */
-function passPlan(db: DbReader, task: TaskDto): StepPlanDto {
+export function passPlan(db: DbReader, task: TaskDto): StepPlanDto {
   const plan = resolveStepPlan(db, task.id);
   const at = plan.steps.findIndex((step) => step.role === StepRole.Implement);
   const step = plan.steps[at];
@@ -274,6 +275,7 @@ export async function openPass(
           taskIds: pageTasks.map((t) => t.id),
           dirt: start.dirt,
         });
+        stackOn(w, id);
         const leaseExpiresAt = new Date(ctx.clock.now().getTime() + deps.leaseMs).toISOString();
         const waiting = startPassTasks(w, project, made.batch.id, pageTasks, leaseExpiresAt);
         return { ...made, waiting };

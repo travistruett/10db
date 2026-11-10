@@ -344,21 +344,29 @@ export function getAbandonStep(db: DbReader, passId: PassId): AbandonStep | null
 
 /**
  * Records a finished step of the pass's Abandon (spec §5.4), so a restart goes on from the next. The
- * first step moves an open pass to `ABANDONING`; a step is never recorded below the last one. The last,
- * the folder's index refreshed, follows step 7's `abandonPassAndBatch` and leaves the pass `ABANDONED`.
+ * first step moves an open pass to `ABANDONING`, and a closing one too until its close is about to
+ * move the return branch (D23: step 7 is recorded before the move, and from then on the pass is
+ * landing); a step is never recorded below the last one.
+ * The last, the folder's index refreshed, follows step 7's `abandonPassAndBatch` and leaves the pass
+ * `ABANDONED`.
  */
 export function setAbandonStep(ctx: WriteContext, passId: PassId, step: AbandonStep): void {
   const pass = getPass(ctx.tx, passId);
   const last = getAbandonStep(ctx.tx, passId);
   const from: readonly PassState[] =
     step === AbandonStep.Abandoning
-      ? [PassState.Open, PassState.Abandoning]
+      ? [PassState.Open, PassState.Closing, PassState.Abandoning]
       : step === AbandonStep.IndexRefreshed
         ? [PassState.Abandoned]
         : [PassState.Abandoning];
   const state = step === AbandonStep.IndexRefreshed ? PassState.Abandoned : PassState.Abandoning;
   if (!from.includes(pass.state))
     throw new ConflictError(`Pass "${pass.name}" is ${pass.state.toLowerCase()}`);
+  const closed = getPassProgress(ctx.tx, passId).closeStep;
+  if (pass.state === PassState.Closing && closed !== null && closed >= CloseStep.FastForwarded)
+    throw new ConflictError(
+      `Pass "${pass.name}" is landing: its close is moving the branch Your folder came from`,
+    );
   if (last !== null && step < last)
     throw new ConflictError(
       `Pass "${pass.name}" has finished step ${String(last)} of its Abandon, past step ${String(step)}`,
@@ -635,6 +643,42 @@ export function setPassPullRequest(
     .where(eq(schema.batches.id, pass.batchId))
     .run();
   emitPass(ctx, pass, { prUrl: pr.url, draft: pr.draft });
+}
+
+/**
+ * Forgets the pass's pull request and what was read of it (spec §5.5): one closed unmerged while the
+ * pass is open, so the next Open Pull Request opens another.
+ */
+export function forgetPassPullRequest(ctx: WriteContext, passId: PassId): void {
+  const pass = getPass(ctx.tx, passId);
+  ctx.tx
+    .update(schema.batches)
+    .set({
+      prUrl: null,
+      prDraft: null,
+      prState: null,
+      prChecks: null,
+      prFailingChecks: null,
+      prCheckedAt: null,
+      prUnknownReason: null,
+      prRequired: null,
+      prMergeBlocked: null,
+      updatedAt: ctx.now,
+    })
+    .where(eq(schema.batches.id, pass.batchId))
+    .run();
+  emitPass(ctx, pass, { prUrl: null });
+}
+
+/** Every pass in `state`, oldest first. */
+export function listPassesIn(db: DbReader, state: PassState): PassDto[] {
+  return db
+    .select()
+    .from(schema.passes)
+    .where(eq(schema.passes.state, state))
+    .orderBy(asc(schema.passes.createdAt))
+    .all()
+    .map(toPassDto);
 }
 
 /** The pass's pull request as last made or read, or null before it has one. */

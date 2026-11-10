@@ -13,7 +13,10 @@ import {
   getTask,
   getWorkstreamRow,
   listInbox,
+  listSharedChanges,
   listTaskThreadRows,
+  openHolds,
+  schema,
   setAbandonStep,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -23,6 +26,9 @@ import type { Git } from '../git';
 import {
   abandonPass,
   answerPassCard,
+  closeHoldsOf,
+  dropShared,
+  grantSharedHold,
   keepTurnWork,
   keptRef,
   passFolderOn,
@@ -55,18 +61,24 @@ const abandonCards = () =>
   );
 
 /**
- * A pass on a folder whose Settings page was edited before it opened; Settings' turn edits the page
- * and deletes a file, and People's adds one.
+ * A pass on a folder whose Settings page and shared file were edited before it opened; Settings'
+ * turn edits the page, deletes a file and, holding the shared area, edits the shared file further
+ * and adds a button, and People's adds a page file.
  */
 async function worked(): Promise<PassWorld> {
   const world = await openPassWorld({
     before: ({ write }) => {
       write('src/settings/page.tsx', 'edited before the pass\n');
+      write('src/shared.ts', 'shared, edited before the pass\n');
     },
   });
   const turn = world.startTurn(world.settings);
+  await grantSharedHold(world.deps, { workstreamId: world.runOf(world.settings), area: 'src' });
   world.write('src/settings/page.tsx', 'edited before the pass\nand in the turn\n');
   unlinkSync(join(world.h.repo, 'src/settings/old.tsx'));
+  world.write('src/shared.ts', 'shared, edited before the pass\nand in the turn\n');
+  world.write('src/button.ts', 'a shared button\n');
+  await closeHoldsOf(world.deps, world.runOf(world.settings));
   await keepTurnWork(world.deps, { workstreamId: world.runOf(world.settings), turnId: turn.id });
   world.endTurn(turn);
   world.write('src/people/new.tsx', 'added by People\n');
@@ -83,6 +95,13 @@ function expectAbandoned(world: PassWorld): void {
   expect(read('src/settings/page.tsx')).toBe('edited before the pass\n');
   expect(read('src/settings/old.tsx')).toBe('old\n');
   expect(existsSync(join(world.h.repo, 'src/people/new.tsx'))).toBe(false);
+  // The shared change is dropped: its files are as its hold found them, the earlier edit included.
+  expect(read('src/shared.ts')).toBe('shared, edited before the pass\n');
+  expect(existsSync(join(world.h.repo, 'src/button.ts'))).toBe(false);
+  expect(listSharedChanges(db, pass.id).map((c) => [c.seq, c.droppedBy, c.dropOf])).toEqual([
+    [1, 2, null],
+    [2, null, 1],
+  ]);
   // Each page's work is kept with its task, which is back on the Board.
   expect(world.h.git$('show', `${keptRef(world.settings.id)}:src/settings/page.tsx`)).toBe(
     'edited before the pass\nand in the turn',
@@ -120,7 +139,7 @@ describe('abandonPass', () => {
       stays: [],
       left: [],
       folder: { branch: 'main', returned: true },
-      droppedShared: [],
+      droppedShared: [{ seq: 1, paths: ['src/button.ts', 'src/shared.ts'] }],
       pullRequestLeftOpen: null,
     });
     expect(stopped).toEqual(expect.arrayContaining([w.runOf(w.settings), w.runOf(w.people)]));
@@ -180,6 +199,42 @@ describe('abandonPass', () => {
         },
       },
       {
+        name: 'while it dropped a shared change',
+        step: AbandonStep.SessionsStopped,
+        kill: async (world) => {
+          const git = world.deps.git;
+          await expect(
+            abandonPassSteps(
+              deps(world.deps, {
+                ...git,
+                restoreFiles: dying(1, (...a: Parameters<Git['restoreFiles']>) =>
+                  git.restoreFiles(...a),
+                ),
+              }),
+              world.opened.pass.id,
+            ),
+          ).rejects.toThrow('the daemon died');
+        },
+      },
+      {
+        name: "between a shared drop's files and its row",
+        step: AbandonStep.SessionsStopped,
+        kill: async (world) => {
+          const git = world.deps.git;
+          await expect(
+            abandonPassSteps(
+              deps(world.deps, {
+                ...git,
+                chainCommit: dying(1, (...a: Parameters<Git['chainCommit']>) =>
+                  git.chainCommit(...a),
+                ),
+              }),
+              world.opened.pass.id,
+            ),
+          ).rejects.toThrow('the daemon died');
+        },
+      },
+      {
         name: "during the first page's take-out",
         step: AbandonStep.SharedDropped,
         kill: async (world) => {
@@ -206,7 +261,8 @@ describe('abandonPass', () => {
             abandonPassSteps(
               deps(world.deps, {
                 ...git,
-                restoreFiles: dying(2, (...a: Parameters<Git['restoreFiles']>) =>
+                // The first call puts the shared change back, the second the first page.
+                restoreFiles: dying(3, (...a: Parameters<Git['restoreFiles']>) =>
                   git.restoreFiles(...a),
                 ),
               }),
@@ -224,11 +280,14 @@ describe('abandonPass', () => {
             AbandonStep.Abandoning,
             AbandonStep.ShipAborted,
             AbandonStep.SessionsStopped,
-            AbandonStep.SharedDropped,
           ])
             world.h.state.write((ctx) => {
               setAbandonStep(ctx, id, step);
             });
+          await dropShared(world.deps, { passId: id, seq: 1, force: true });
+          world.h.state.write((ctx) => {
+            setAbandonStep(ctx, id, AbandonStep.SharedDropped);
+          });
           for (const task of [world.settings, world.people])
             await takeOutSteps(deps(world.deps), {
               taskId: task.id,
@@ -282,10 +341,19 @@ describe('abandonPass', () => {
   describe("with Your folder off the pass's branch, it still finishes", () => {
     const rows: {
       readonly name: string;
+      /** A turn of Settings is open with a shared hold it has not kept. */
+      readonly hold?: boolean;
       readonly run: (world: PassWorld) => Promise<void>;
     }[] = [
       {
         name: 'at once',
+        run: async (world) => {
+          await abandonPass(deps(world.deps), world.opened.pass.id);
+        },
+      },
+      {
+        name: 'with a shared hold its stopped turn left open',
+        hold: true,
         run: async (world) => {
           await abandonPass(deps(world.deps), world.opened.pass.id);
         },
@@ -302,8 +370,12 @@ describe('abandonPass', () => {
         },
       },
     ];
-    it.each(rows)('$name', async ({ run }) => {
+    it.each(rows)('$name', async ({ run, hold }) => {
       w = await worked();
+      if (hold === true) {
+        w.startTurn(w.settings);
+        await grantSharedHold(w.deps, { workstreamId: w.runOf(w.settings), area: 'src' });
+      }
       // The builder switched to the branch the pass came from, taking the pages' files along; the
       // pass's folder card says so.
       w.h.git$('switch', '-q', 'main');
@@ -419,5 +491,82 @@ describe('abandonPass', () => {
     expect(getTask(w.h.store.db, w.settings.id).passId).toBeNull();
     const [card] = abandonCards();
     expect(card?.body).toContain(`- src/settings/page.tsx (${w.settings.title})`);
+  });
+
+  describe('the shared changes it names', () => {
+    /** `task` holds `src` for a turn that writes `src/shared.ts` as `content`. */
+    async function sharedTurn(task: PassWorld['settings'], content: string): Promise<void> {
+      w.startTurn(task);
+      await grantSharedHold(w.deps, { workstreamId: w.runOf(task), area: 'src' });
+      w.write('src/shared.ts', content);
+      await closeHoldsOf(w.deps, w.runOf(task));
+    }
+
+    it('names no file left when two changes to one file are both put back', async () => {
+      w = await openPassWorld();
+      await sharedTurn(w.settings, 'settings\n');
+      await sharedTurn(w.people, 'settings\npeople\n');
+
+      const result = await abandonPass(deps(), w.opened.pass.id);
+
+      expect(read('src/shared.ts')).toBe('shared\n');
+      expect(result.left).toEqual([]);
+      expect(result.droppedShared).toEqual([
+        { seq: 2, paths: ['src/shared.ts'] },
+        { seq: 1, paths: ['src/shared.ts'] },
+      ]);
+    });
+
+    it('finishes past a hold that cannot be kept, letting it go', async () => {
+      w = await openPassWorld();
+      w.startTurn(w.settings);
+      await grantSharedHold(w.deps, { workstreamId: w.runOf(w.settings), area: 'src' });
+      w.write('src/button.ts', 'a button\n');
+      w.h.store.db
+        .update(schema.passHolds)
+        .set({ recordSha: '0'.repeat(40) })
+        .run();
+
+      await abandonPass(deps(), w.opened.pass.id);
+
+      expect(getPass(w.h.store.db, w.opened.pass.id).state).toBe(PassState.Abandoned);
+      expect(openHolds(w.h.store.db, w.opened.pass.id)).toEqual([]);
+    });
+
+    it('names a change a take-out could not drop, which it dropped itself, and the file it left', async () => {
+      w = await openPassWorld();
+      await sharedTurn(w.settings, 'settings\n');
+      // The builder edits the file after the Drop is chosen: the take-out keeps the change.
+      w.write('src/shared.ts', "settings\nand the builder's edit\n");
+      await takeOutSteps(deps(), {
+        taskId: w.settings.id,
+        within: TakeOutWithin.Alone,
+        shared: [{ seq: 1, choice: 'drop' }],
+      });
+
+      const result = await abandonPass(deps(), w.opened.pass.id);
+
+      expect(result.droppedShared).toEqual([{ seq: 1, paths: ['src/shared.ts'] }]);
+      expect(result.left).toEqual([
+        { path: 'src/shared.ts', page: `a shared change of ${w.settings.title}` },
+      ]);
+      expect(read('src/shared.ts')).toBe("settings\nand the builder's edit\n");
+    });
+
+    it('leaves out a drop an earlier take-out made', async () => {
+      w = await openPassWorld();
+      await sharedTurn(w.settings, 'settings\n');
+      await takeOutSteps(deps(), {
+        taskId: w.settings.id,
+        within: TakeOutWithin.Alone,
+        shared: [{ seq: 1, choice: 'drop' }],
+      });
+      w.write('src/shared.ts', "the builder's own edit since\n");
+
+      const result = await abandonPass(deps(), w.opened.pass.id);
+
+      expect(result.droppedShared).toEqual([]);
+      expect(result.left).toEqual([]);
+    });
   });
 });

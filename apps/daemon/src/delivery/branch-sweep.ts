@@ -3,10 +3,11 @@ import {
   BRANCH_PREFIX,
   BatchState,
   Delivery,
+  PassState,
   PullRequestState,
   type BatchId,
 } from '@10db/contracts';
-import { hasAnsweredByFoldKey, listBatches, listProjects } from '@10db/db';
+import { getPass, hasAnsweredByFoldKey, listBatches, listProjects } from '@10db/db';
 import { PrState } from '../github';
 import { removeBranch, settleBranch } from './branch-cleanup';
 import { branchCardKey, branchCards, detailOf } from './cards';
@@ -32,7 +33,12 @@ export async function removeMergedBranches(
       projectId: project.id,
       states: [BatchState.Shipped],
     }).filter(
-      (b) => b.pr?.state === PullRequestState.Merged && b.branch?.startsWith(BRANCH_PREFIX),
+      (b) =>
+        b.pr?.state === PullRequestState.Merged &&
+        b.branch?.startsWith(BRANCH_PREFIX) &&
+        // A closed pass's branch and its tracking ref are what its Move and realignment read
+        // (Workbench spec §5.3): they stay until the pass has settled.
+        (b.passId == null || getPass(ctx.state.db, b.passId).state === PassState.Settled),
     );
     if (merged.length === 0) continue;
     try {

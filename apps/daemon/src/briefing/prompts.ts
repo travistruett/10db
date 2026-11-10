@@ -683,3 +683,38 @@ export function compactionReinjection(
     ...(answered ? renderAnsweredCards(answered.role, answered.answeredCards) : []),
   ].join('\n');
 }
+
+/**
+ * The one review of a Workbench pass's pull request (spec §8.3, D21): the diff as text, read once
+ * with no tool. Its findings come back as numbered notes, the format `parseFindings` reads, so each
+ * can be matched to the page whose file it names.
+ */
+export function passReviewPrompt(input: {
+  readonly passName: string;
+  /** The pages signed off, by title. */
+  readonly pages: readonly string[];
+  readonly diff: string;
+  /** True when the diff was longer than 10db sends and was cut. */
+  readonly truncated: boolean;
+  /** True when the diff starts after the tip an earlier review read: only what changed since. */
+  readonly sinceLastReview: boolean;
+}): string {
+  return [
+    `You are reviewing the pull request of a Workbench pass, "${input.passName}": pages the builder worked through with agents and signed off by eye.`,
+    `Pages: ${input.pages.length > 0 ? input.pages.join('; ') : '(none named)'}.`,
+    input.sinceLastReview
+      ? 'This diff is only what changed since the last review of this pull request.'
+      : 'This diff is the whole pull request.',
+    ...(input.truncated
+      ? [
+          'The diff was too long and is cut: review what is here, and say that the rest was not read.',
+        ]
+      : []),
+    '',
+    'List each real problem as a numbered note, one per line: `1. <SEVERITY> <path>:<line> <what is wrong and why>`, SEVERITY one of BLOCKING, MAJOR, MINOR. Name the file exactly as the diff does. Write nothing but the notes; with no problem, answer `No findings.`',
+    '',
+    '```diff',
+    input.diff,
+    '```',
+  ].join('\n');
+}

@@ -98,6 +98,10 @@ import {
   createBatchStarter,
   createDeliveryJobs,
   createPrWatch,
+  answerPassMoveCard,
+  createKeptWorkGate,
+  createPassPullRequests,
+  passGateKind,
   createShipper,
   createWorktreeDependencies,
   createWorktreeGenerators,
@@ -110,6 +114,9 @@ import {
   recoverBatches,
   removeMergedBranches,
   resolvePnpm,
+  resumePassSettles,
+  subscribeKeptWorkLanding,
+  subscribePassSettles,
   subscribePrWatch,
   subscribeShipTrigger,
   type DeliveryContext,
@@ -149,13 +156,23 @@ import {
   withdrawStaleClaimWaits,
 } from '../mcp';
 import {
-  abandonPass,
+  answerMoveToCopy,
   answerPassCard,
+  askSignOff,
+  cancelSignOffWait,
+  closeGateOf,
+  createPassCloses,
   discardKeptWork,
   joinPass,
   putBackKeptWork,
   resumePassWork,
+  startAbandon,
+  startSignOff,
+  subscribeMergedPasses,
+  subscribeSignOffWaits,
   takeOut,
+  type AbandonDeps,
+  type MoveToCopyDeps,
   type PassWorkDeps,
   type TakeOutDeps,
 } from '../pass';
@@ -169,6 +186,7 @@ import { createShapePreparer } from './shape-session-tools';
 import {
   applyCheckAnswer,
   RunnerNotStartedError,
+  type StartSignOff,
   createLiveSessions,
   createRunner,
   DEFAULT_RUNNER_LIMITS,
@@ -600,6 +618,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let answerLostMigrationsCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerWorktreeCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerPassCards: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
+  let startPageSignOff: StartSignOff | null = null;
 
   // A claim deadlock card's answer makes a task yield its claim, or cancels it as the Board does.
   const answerDeadlockCard = createClaimDeadlockAnswers({
@@ -628,8 +647,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     onParkAnswer: parkAnswers,
     log: logger,
     onCheckAnswer: (ctx, item, answer) => {
-      if (!runner) throw new RunnerNotStartedError();
-      return applyCheckAnswer(runner, ctx, item, answer);
+      const signOffPage = startPageSignOff;
+      if (!runner || !signOffPage) throw new RunnerNotStartedError();
+      return applyCheckAnswer(runner, ctx, item, answer, signOffPage);
     },
     onFlagAnswer: (item, answer) => {
       runner?.retryTurn(item, answer);
@@ -903,6 +923,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     onWorkQueued: () => {
       scheduler?.requestTick();
     },
+    // An ordinary start of a taken-out task puts its saved work back in the checkout it runs in.
+    putBack: (input) =>
+      putBackKeptWork({ state, git, inbox, jobs: deliveryJobs, logger, clock }, input),
     worktreeRoot,
     // Not behind the gate slots: waiting out a long gate would hold the cut. Each cut downloads the
     // worktree's whole tree (the run's store is empty), so several cuts at once are several downloads.
@@ -911,11 +934,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   };
   answerBranchCard = createBranchCardAnswers(delivery);
   answerCiStopCard = createCiStopAnswers(delivery);
-  // A pass's cards: its folder off the pass's branch.
+  // A pass's work in Your folder, and its cards (set below, once its take-outs are built).
   const passWork: PassWorkDeps = { state, git, inbox, jobs: delivery.jobs, logger, clock };
-  answerPassCards = (item, answer) => {
-    answerPassCard(passWork, item, answer);
-  };
   const starter = createBatchStarter(delivery);
   answerStartCard = createStartCardAnswers({ state, starter });
   answerLostMigrationsCard = createLostMigrationsAnswers(delivery);
@@ -936,6 +956,28 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     identifyProcess: (pid) => processes.identify(pid),
     isRunning: (id) => runner?.isRunning(id) ?? false,
     load: loadGuard,
+  });
+  // A pass's pull request: its push and draft in the delivery key, its gate and one review outside it.
+  const passPullRequests = createPassPullRequests({
+    ...delivery,
+    gate: shipGate,
+    holdShips: () => updateDrain.draining,
+    clock,
+    dataDir: opts.dataDir,
+    sessionEnv: () => launcher.projectEnv(),
+    identifyProcess: (pid) => processes.identify(pid),
+    review: {
+      adapter,
+      launch: (accountId, model) => {
+        const session = launcher.session(
+          getAccountRow(state.db, accountId),
+          model,
+          listAccountModels(state.db, accountId),
+        );
+        return { model: session.model, env: session.env, expect: session.expect };
+      },
+      scratchRoot: tmpdir(),
+    },
   });
   answerWorktreeCard = createWorktreeCardAnswers(delivery, {
     starter,
@@ -1310,6 +1352,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         : {}),
     },
     connecting: () => accountService.connecting(),
+    // A run in Your folder of a local project waits for its task's saved work to go back (call 33).
+    keptWork: createKeptWorkGate(delivery),
     modelWait,
     clock,
     instanceId,
@@ -1352,8 +1396,53 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     stopLane,
     wrote: (repo, paths) => watcher?.daemonWrote(repo, paths) ?? Promise.resolve(),
   };
-  // Each open pass goes on from its rows: its folder card, a put-back and take-outs cut short.
+  // A Ready page's Sign Off, from its route or its check item; one waiting for another page's hold
+  // goes on once that hold closes.
+  startPageSignOff = (taskId) => {
+    startSignOff(passTakeOuts, taskId);
+  };
+  const unsubscribeSignOffWaits = subscribeSignOffWaits(bus, passTakeOuts);
+  // A pass page that asked for migrations or deps: Move to a Separate Copy takes it out and starts
+  // it in a copy, as the Board's Start does.
+  const passMoves: MoveToCopyDeps = {
+    ...passTakeOuts,
+    startInCopy: (taskId) => {
+      starter.startTask(taskId);
+      createdScheduler.requestTick();
+    },
+  };
+  answerPassCards = (item, answer) => {
+    answerPassCard(passWork, item, answer);
+    answerPassMoveCard(delivery, item, answer);
+    void answerMoveToCopy(passMoves, item, answer);
+  };
+  // A task has saved work only once a take-out has kept it; a later pass puts it back.
+  const passOpenDeps: PassOpenDeps = {
+    leaseMs: opts.leaseMs ?? DEFAULTS.leaseMs,
+    putBack: (input) => putBackKeptWork(passWork, input),
+  };
+  // Close Pass, its steps under the delivery key with its gate and pull request through 7b's seam;
+  // a pass whose pull request merged while it was open closes by itself, its unfinished pages
+  // carried over to a follow-on pass.
+  const passCloses = createPassCloses({
+    ...passTakeOuts,
+    ship: passPullRequests,
+    gateWhere: (pass) => closeGateOf(passGateKind(getProject(state.db, pass.projectId))),
+    openFollowOn: (input) => openPass(delivery, input, passOpenDeps),
+  });
+  const unsubscribeMergedPasses = subscribeMergedPasses(bus, state.db, passCloses);
+  // Abandon Pass stops what ships for the pass first: its pull request's checks and its close.
+  const passAbandons: AbandonDeps = {
+    ...passTakeOuts,
+    stopShip: async (passId) => {
+      await passPullRequests.stopPassChecks(passId);
+      await passCloses.abort(passId);
+    },
+  };
+  // Each open pass goes on from its rows: its folder card, a put-back, take-outs and sign-offs cut short.
   await resumePassWork(passTakeOuts);
+  // A close a restart cut short goes on from its last step.
+  passCloses.resume();
   // The previous daemon's claim waits ended with it; their cards would name holders nobody waits for.
   withdrawStaleClaimWaits(state, inbox);
   accountPauses.restore();
@@ -1378,6 +1467,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
   );
   const unsubscribeShip = subscribeShipTrigger(bus, state.db, shipper);
+  // A pass that closes unsettled gets its Move card, and each closed pass is looked at again; a
+  // started task's saved work goes once its work lands.
+  const unsubscribePassSettles = subscribePassSettles(bus, delivery);
+  const unsubscribeKeptWork = subscribeKeptWorkLanding(bus, delivery);
+  resumePassSettles(delivery);
   // Outside the delivery job queues: a slow or offline gh never holds a cut or a ship.
   const prWatch = createPrWatch({
     ctx: delivery,
@@ -1428,11 +1522,6 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     hazardAssessor,
   );
-  // A task has saved work only once a take-out has kept it; a later pass puts it back.
-  const passOpenDeps: PassOpenDeps = {
-    leaseMs: opts.leaseMs ?? DEFAULTS.leaseMs,
-    putBack: (input) => putBackKeptWork(passWork, input),
-  };
   const services = createServices({
     state,
     clock,
@@ -1477,9 +1566,15 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     starter,
     openPass: (input) => openPass(delivery, input, passOpenDeps),
     takeOut: (input) => takeOut(passTakeOuts, input),
-    abandonPass: (passId) => abandonPass(passTakeOuts, passId),
+    abandonPass: (passId) => startAbandon(passAbandons, passId),
     joinPass: (passId, input) => joinPass(delivery, passId, input, passOpenDeps),
     discardKeptWork: (taskId) => discardKeptWork(passWork, taskId),
+    passPullRequests,
+    closes: passCloses,
+    signOff: (passId, taskId) => askSignOff(passTakeOuts, passId, taskId),
+    cancelSignOff: (passId, taskId) => {
+      cancelSignOffWait(passTakeOuts, passId, taskId);
+    },
     shipper,
     accounts: accountService,
     worktreeRoot,
@@ -1687,6 +1782,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       sessionSignal: (id) => live.get(id)?.signal,
       askedToHandOff: (id) => live.get(id)?.askedToHandOff(),
       claimWaits,
+      deliverMessage: (taskId, messageId) =>
+        createdRunner.deliverMessage(taskId, messageId, { redo: false }),
       migrationsBase,
       dependencyChanges,
       shapeTools: shape.toolsFor,
@@ -1773,6 +1870,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         logger.warn({ err: error }, 'could not stop the sign-in');
       });
       unsubscribeShip();
+      unsubscribePassSettles();
+      unsubscribeSignOffWaits();
+      unsubscribeMergedPasses();
+      unsubscribeKeptWork();
       unsubscribePrWatch();
       await prWatch.stop();
       retiredLandingsAbort.abort();
@@ -1781,6 +1882,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       await systemTempSwept;
       backupsAbort.abort();
       await rootsKeptOutOfBackups;
+      // A pass's gate and review on its pushed tip run outside the delivery jobs.
+      await passPullRequests.stop();
       // A gate that waits must not start because shutdown freed the slot of the one it killed.
       gateSlots.close();
       // Aborts a shipping gate and any git or gh child; the batch stays SHIPPING for recovery.

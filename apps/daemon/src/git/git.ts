@@ -127,6 +127,49 @@ export interface DiffSince {
   }[];
 }
 
+/** Which files a diff covers: only these, or every file but these. */
+interface DiffPaths {
+  readonly only?: readonly string[];
+  readonly except?: readonly string[];
+}
+
+/** Whether a file of the whole change is one `paths` keeps. */
+function keptBy(paths: DiffPaths): (path: string) => boolean {
+  const only = paths.only === undefined ? null : new Set(paths.only);
+  const except = new Set(paths.except ?? []);
+  return (path) => (only === null || only.has(path)) && !except.has(path);
+}
+
+/** How many files, and how many bytes of their names, one `diff-tree` command names at most. */
+const PATHS_PER_COMMAND = 200;
+const PATH_BYTES_PER_COMMAND = 32 * 1024;
+
+/**
+ * `paths` in turns small enough for one command line, in the order given; each name is a literal
+ * pathspec, so a name with `*` or `:` is never read as a pattern.
+ */
+function pathspecTurns(paths: readonly string[]): string[][] {
+  const turns: string[][] = [];
+  let turn: string[] = [];
+  let bytes = 0;
+  for (const path of paths) {
+    const spec = `:(literal)${path}`;
+    const size = Buffer.byteLength(spec) + 1;
+    if (
+      turn.length > 0 &&
+      (turn.length >= PATHS_PER_COMMAND || bytes + size > PATH_BYTES_PER_COMMAND)
+    ) {
+      turns.push(turn);
+      turn = [];
+      bytes = 0;
+    }
+    turn.push(spec);
+    bytes += size;
+  }
+  if (turn.length > 0) turns.push(turn);
+  return turns;
+}
+
 /** What `fileAt` found at a path of a commit. */
 export type FileAt =
   | { readonly kind: 'file'; readonly text: string }
@@ -334,6 +377,57 @@ export interface KeepWorkInput {
   readonly message: string;
   /** Names the work (`10db-turn: <turn id>`), so a rerun finds the commit it made. */
   readonly trailer: { readonly key: string; readonly value: string };
+}
+
+/** A path as a commit or the folder holds it: the blob of its content, or null where it is not there. */
+export interface PathBlob {
+  readonly path: string;
+  readonly blob: string | null;
+}
+
+/** What `recordPaths` made: the unsigned commit on `base`, and what each path held in the folder. */
+export interface PathRecord {
+  readonly sha: string;
+  /** Each path recorded, sorted, as the commit holds it. */
+  readonly record: readonly PathBlob[];
+}
+
+/** What `landPaths` landed. */
+export interface LandedPaths {
+  /** The commit on the branch that holds the paths; null when the tip held them already. */
+  readonly sha: string | null;
+  /** A commit carrying the operation id was on the branch already: a rerun's own. */
+  readonly alreadyLanded: boolean;
+  /** Another git held the folder's index, so it still reads the landed paths as they were. */
+  readonly indexStale: boolean;
+}
+
+export interface ChainCommitInput {
+  readonly repo: string;
+  /** The chain's ref, under `refs/10db/`. */
+  readonly ref: string;
+  /** What `ref` holds now, or null when it does not exist: the only value it moves from. */
+  readonly expect: string | null;
+  /** The commit the first change is laid on while `ref` does not exist: the pass's start. */
+  readonly base: string;
+  /** The paths the change sets: as the folder has them, or, with `from`, as that commit has them. */
+  readonly paths: readonly string[];
+  readonly from?: string;
+  /** More paths the change sets, as commit `from` has them (gone where it lacks them). */
+  readonly restore?: { readonly from: string; readonly paths: readonly string[] };
+  readonly message: string;
+  /** Names the change (`10db-hold: <claim id>`), so a rerun finds the commit it made. */
+  readonly trailer: { readonly key: string; readonly value: string };
+}
+
+/** What `chainCommit` left on the chain. */
+export interface ChainCommit {
+  /** The change's commit: made now, or one the chain already holds; null when the paths changed nothing. */
+  readonly sha: string | null;
+  /** True when `sha` was made by this call. */
+  readonly made: boolean;
+  /** Each of `paths`, sorted, as the change's tree holds it. */
+  readonly files: readonly PathBlob[];
 }
 
 /** Work still kept at a ref that a move must not write over (`moveKeptRef`). */
@@ -701,6 +795,46 @@ export interface Git {
   keptRefs(repo: string, prefix: string): Promise<string[]>;
   /** Deletes `ref`, under `refs/10db/`, whatever it names; one already gone is no error. */
   deleteKeptRef(repo: string, ref: string): Promise<void>;
+  /**
+   * A pass's shared hold (spec §7.2): an unsigned commit on `base` whose tree is `base`'s with each of
+   * `paths` as the folder has it (git's ignore rules aside; gone where nothing is there), under the
+   * repo lock, naming no ref. No file, index, HEAD or branch is touched.
+   */
+  recordPaths(input: {
+    readonly repo: string;
+    readonly base: string;
+    readonly paths: readonly string[];
+  }): Promise<PathRecord>;
+  /**
+   * One change of a pass's shared chain (spec §7.2), under the repo lock: an unsigned commit whose tree
+   * is the chain tip's (`expect`, else `base`) with `paths` set (and `restore`'s), on that tip, at `ref` by
+   * compare-and-swap. A tree equal to the tip's makes no commit: it answers the newest commit on the
+   * chain carrying the same trailer, a rerun's own, else null. Refused with `KeptRefMovedError` when
+   * `ref` no longer holds `expect`. No file, index, HEAD or branch is touched.
+   */
+  chainCommit(input: ChainCommitInput): Promise<ChainCommit>;
+  /**
+   * Lands paths on a branch the folder has checked out, under the repo lock: a signed commit on its
+   * tip whose tree is the tip's with each of `paths` as commit `from` has it (gone where it lacks
+   * it), named by `opId`, by compare-and-swap, while HEAD names the branch. No file is written; the
+   * folder's own index follows for those paths, so the builder's git reads them as committed;
+   * `indexStale` says another git held the index, which then still reads them as before (Workbench
+   * spec §18). A commit on the branch carrying the opId is answered as it is, the index following the
+   * branch's tip for the paths again; a tree equal to the tip's makes none and answers null. Refused
+   * with `PassFolderOffBranchError` while HEAD names another branch.
+   */
+  landPaths(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly from: string;
+    readonly paths: readonly string[];
+    readonly message: string;
+    readonly opId: string;
+  }): Promise<LandedPaths>;
+  /** Sets `ref`, under `refs/10db/`, to commit `sha`, whatever it held. */
+  keepRef(repo: string, ref: string, sha: string): Promise<void>;
+  /** The blob each of `paths` holds in commit `rev`, sorted by path; null for one it lacks there. */
+  blobsAt(repo: string, rev: string, paths: readonly string[]): Promise<PathBlob[]>;
   /** True when commit `ancestor` is in the history of `tip`, `tip` itself included. */
   isAncestor(repo: string, ancestor: string, tip: string): Promise<boolean>;
   /** Whether the object store of `repo` holds commit `sha`. */
@@ -754,6 +888,48 @@ export interface Git {
    * elsewhere and refuses one in the way; one checked out anywhere else is refused.
    */
   rewindBranch(repo: string, branch: string, from: string, to: string): Promise<void>;
+  // Branch moves of a closed Workbench pass (spec §5.3, §5.4: D8, D22, D24).
+  /**
+   * Moves local branch `branch` to commit `to` by compare-and-swap, under the repo lock: `moved` when
+   * it was at `expect`, `already` when it is at `to` (a rerun), `raced` when it is anywhere else or
+   * gone, and then nothing changes. A branch checked out in any worktree moves only to a commit whose
+   * tree is its tip's, so no file and no index entry goes stale; any other such move is refused.
+   */
+  moveBranchCas(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly to: string;
+    readonly expect: string;
+  }): Promise<'moved' | 'already' | 'raced'>;
+  /**
+   * D22's Move: moves `branch`, which HEAD names at `from`, to commit `to`, its files following
+   * through `read-tree -m -u` as the built switch writes them, under the repo lock. Uncommitted changes
+   * the move does not write stay; one where it writes (`dirty`), or a file git does not track in the
+   * way (`ignored`), refuses it and nothing changes, as does a HEAD on another branch or a branch no
+   * longer at `from` (`moved`).
+   */
+  moveCheckedOutBranch(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly from: string;
+    readonly to: string;
+  }): Promise<SwitchBack>;
+  /**
+   * D24: brings commit `theirs` into `branch` by one merge commit whose tree is the branch tip's own
+   * (parents the tip, then `theirs`), signed as the builder's config asks, set by compare-and-swap,
+   * under the repo lock; no file or index entry changes. `already` when the branch holds `theirs`.
+   */
+  mergeKeepingTree(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly theirs: string;
+    readonly message: string;
+  }): Promise<{ readonly kind: 'merged' | 'already'; readonly sha: string }>;
+  /**
+   * Where `branch` is in use in a worktree of `repo` other than `repo` itself: checked out there, or
+   * being rebased or bisected there. Null when none is.
+   */
+  branchInUseElsewhere(repo: string, branch: string): Promise<string | null>;
   /**
    * The commits `tip` has since `base` that are its own: first parents only, merges left out,
    * newest first. A merge of the base into the branch adds none, and neither do the commits it brought in.
@@ -808,9 +984,16 @@ export interface Git {
   /**
    * The unified diff from `base` to `head`, read with no external diff program and no textconv
    * filter, cut to at most `maxBytes` of UTF-8 on a character boundary, plus the per-file counts
-   * of the whole change. Renames are shown as a delete and an add.
+   * of the whole change. Renames are shown as a delete and an add. With `paths`, only the files it
+   * names, or every file but those, each path matched as spelled.
    */
-  diffSince(repo: string, base: string, head: string, maxBytes: number): Promise<DiffSince>;
+  diffSince(
+    repo: string,
+    base: string,
+    head: string,
+    maxBytes: number,
+    paths?: DiffPaths,
+  ): Promise<DiffSince>;
   /**
    * The commit `rev` names now, as a full object id. A caller that reads many folders and files of one
    * `rev` resolves it once and reads each from the id, so the reads cannot span a branch that moves.
@@ -2502,6 +2685,199 @@ export function createGit(opts: GitOptions = {}): Git {
     return named.map((path) => ({ path, blob: blobs.get(path) ?? null }));
   }
 
+  /** What each of `paths` holds in a private index, by path; null for one it has no entry for. */
+  async function indexBlobs(
+    c: Pinned,
+    env: { GIT_INDEX_FILE: string; GIT_LITERAL_PATHSPECS: string },
+    paths: readonly string[],
+  ): Promise<PathBlob[]> {
+    if (paths.length === 0) return [];
+    const listed = await git(c, ['ls-files', '-s', '-z', '--', ...paths], { env });
+    const blobs = new Map(
+      listed
+        .split('\0')
+        .filter(Boolean)
+        .map((record) => {
+          const tab = record.indexOf('\t');
+          const [, oid = ''] = record.slice(0, tab).split(' ');
+          return [record.slice(tab + 1), oid] as const;
+        }),
+    );
+    return paths.map((path) => ({ path, blob: blobs.get(path) ?? null }));
+  }
+
+  /** The tree of commit `base` with each of `paths` as the folder has it, and what each then holds. */
+  async function treeWithDisk(
+    c: Pinned,
+    base: string,
+    paths: readonly string[],
+  ): Promise<{ readonly tree: string; readonly files: PathBlob[] }> {
+    return withPrivateIndex(c, base, async (env) => {
+      await indexAsOnDisk(c, env, paths);
+      return {
+        tree: (await git(c, ['write-tree'], { env })).trim(),
+        files: await indexBlobs(c, env, paths),
+      };
+    });
+  }
+
+  /** Sets each of `paths` in a private index as commit `from` has it, or removes it where it lacks it. */
+  async function takeInto(
+    c: Pinned,
+    env: { GIT_INDEX_FILE: string; GIT_LITERAL_PATHSPECS: string },
+    from: string,
+    paths: readonly string[],
+  ): Promise<void> {
+    for (const path of paths) {
+      const entry = await treeEntry(c, from, path);
+      await git(
+        c,
+        entry === null
+          ? ['update-index', '--force-remove', '--', path]
+          : ['update-index', '--add', '--cacheinfo', `${entry.mode},${entry.oid},${path}`],
+        { env },
+      );
+    }
+  }
+
+  async function recordPaths(input: {
+    readonly repo: string;
+    readonly base: string;
+    readonly paths: readonly string[];
+  }): Promise<PathRecord> {
+    const named = [...new Set(input.paths.map(checkPathName))].sort();
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const base = await revParse(c, `${input.base}^{commit}`);
+      if (base === null) throw new InvalidError(`${input.base} names no commit`);
+      const { tree, files } = await treeWithDisk(c, base, named);
+      // Never pushed, so never signed.
+      const sha = (
+        await git(c, ['commit-tree', '--no-gpg-sign', tree, '-p', base], {
+          input: '10db: shared hold record\n',
+        })
+      ).trim();
+      return { sha, record: files };
+    });
+  }
+
+  async function chainCommit(input: ChainCommitInput): Promise<ChainCommit> {
+    if (!input.ref.startsWith(KEPT_REF_PREFIX))
+      throw new InvalidError(`${input.ref} is not under ${KEPT_REF_PREFIX}`);
+    const named = [...new Set(input.paths.map(checkPathName))].sort();
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const held = await revParse(c, `${input.ref}^{commit}`);
+      if (held !== input.expect) throw new KeptRefMovedError(input.ref, input.expect, held);
+      const tip = held ?? (await revParse(c, `${input.base}^{commit}`));
+      if (tip === null) throw new InvalidError(`${input.base} names no commit`);
+      const from = input.from;
+      const restore = input.restore;
+      const { tree, files } =
+        restore !== undefined
+          ? await withPrivateIndex(c, tip, async (env) => {
+              if (from === undefined) await indexAsOnDisk(c, env, named);
+              else await takeInto(c, env, from, named);
+              const restored = [...new Set(restore.paths.map(checkPathName))].sort();
+              await takeInto(c, env, restore.from, restored);
+              return {
+                tree: (await git(c, ['write-tree'], { env })).trim(),
+                files: await indexBlobs(c, env, [...new Set([...named, ...restored])].sort()),
+              };
+            })
+          : from === undefined
+            ? await treeWithDisk(c, tip, named)
+            : {
+                tree: await treeTaking(c, tip, from, named),
+                files: await Promise.all(
+                  named.map(async (path) => ({
+                    path,
+                    blob: (await treeEntry(c, from, path))?.oid ?? null,
+                  })),
+                ),
+              };
+      const { key, value } = input.trailer;
+      if (tree === (await revParse(c, `${tip}^{tree}`))) {
+        // Nothing to add: the chain holds this change already when a commit of its own is on it.
+        const own = held === null ? null : await findCommitByTrailer(c, held, key, value);
+        return { sha: own, made: false, files };
+      }
+      // Never pushed, so never signed.
+      const sha = (
+        await git(c, ['commit-tree', '--no-gpg-sign', tree, '-p', tip], {
+          input: `${input.message.trimEnd()}\n\n${key}: ${value}\n`,
+        })
+      ).trim();
+      try {
+        await git(c, [
+          'update-ref',
+          '--no-deref',
+          '-m',
+          '10db: shared change',
+          input.ref,
+          sha,
+          held ?? '0'.repeat(sha.length),
+        ]);
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        throw new KeptRefMovedError(input.ref, held, await revParse(c, `${input.ref}^{commit}`));
+      }
+      return { sha, made: true, files };
+    });
+  }
+
+  async function landPaths(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly from: string;
+    readonly paths: readonly string[];
+    readonly message: string;
+    readonly opId: string;
+  }): Promise<LandedPaths> {
+    const named = [...new Set(input.paths.map(checkPathName))].sort();
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const ref = `refs/heads/${input.branch}`;
+      if (await isSymbolic(c, ref))
+        throw refusal(c.real, { kind: GitTrustFailure.Ref, ref, reason: 'symbolic' });
+      const head = await currentBranch(c);
+      if (head !== input.branch) throw new PassFolderOffBranchError(c.real, input.branch, head);
+      const tip = await revParse(c, `${ref}^{commit}`);
+      if (tip === null) throw new InvalidError(`Branch ${input.branch} does not exist`);
+      // Another git holding index.lock leaves the index stale, which the caller says.
+      const followIndex = (sha: string): Promise<boolean> =>
+        git(c, ['reset', '-q', sha, '--', ...named], {
+          env: { GIT_LITERAL_PATHSPECS: '1' },
+        }).then(
+          () => false,
+          () => true,
+        );
+      const existing = await findCommitByOp(c, tip, input.opId);
+      // A rerun's index follows the branch too: the run it repeats may have stopped before it did.
+      if (existing)
+        return { sha: existing, alreadyLanded: true, indexStale: await followIndex(tip) };
+      const from = await revParse(c, `${input.from}^{commit}`);
+      if (from === null) throw new InvalidError(`${input.from} names no commit`);
+      const tree = await treeTaking(c, tip, from, named);
+      if (tree === (await revParse(c, `${tip}^{tree}`)))
+        return { sha: null, alreadyLanded: false, indexStale: false };
+      const sign = signing(c, await configEntries(c));
+      const sha = (
+        await git(c, ['commit-tree', ...sign.flags, tree, '-p', tip], {
+          input: withOpTrailer(input.message, input.opId),
+          config: sign.config,
+        })
+      ).trim();
+      try {
+        await git(c, ['update-ref', '--no-deref', '-m', `10db: ${input.opId}`, ref, sha, tip]);
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        throw refusal(c.real, { kind: GitTrustFailure.Ref, ref, reason: 'raced' });
+      }
+      return { sha, alreadyLanded: false, indexStale: await followIndex(sha) };
+    });
+  }
+
   /** The blob each of `paths` holds on disk; null for one that is not a file or a link. */
   async function blobsOnDisk(c: Pinned, paths: readonly string[]): Promise<Map<string, string>> {
     const listed = await withPrivateIndex(c, null, async (env) => {
@@ -3352,6 +3728,178 @@ export function createGit(opts: GitOptions = {}): Git {
     });
   }
 
+  async function moveBranchCas(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly to: string;
+    readonly expect: string;
+  }): Promise<'moved' | 'already' | 'raced'> {
+    if (!OBJECT_ID.test(input.to) || !OBJECT_ID.test(input.expect))
+      throw new InvalidError('A branch is moved between two commit ids');
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const ref = `refs/heads/${input.branch}`;
+      if (await isSymbolic(c, ref))
+        throw new InvalidError(`${ref} points at another branch, so 10db moves nothing there`);
+      const tip = await revParse(c, `${ref}^{commit}`);
+      if (tip === input.to) return 'already';
+      if (tip === null || tip !== input.expect) return 'raced';
+      const holder = await branchInUse(c, input.branch);
+      if (
+        holder !== null &&
+        (await revParse(c, `${input.to}^{tree}`)) !== (await revParse(c, `${tip}^{tree}`))
+      )
+        throw new InvalidError(
+          `Branch ${input.branch} is checked out at ${holder}, so it moves only to a commit with the same files`,
+        );
+      try {
+        await git(c, [
+          'update-ref',
+          '--no-deref',
+          '-m',
+          `10db: move to ${input.to}`,
+          ref,
+          input.to,
+          input.expect,
+        ]);
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        return 'raced';
+      }
+      return 'moved';
+    });
+  }
+
+  /** The last step of `moveCheckedOutBranch`: the branch moves by compare-and-swap. */
+  async function moveRefOnly(
+    c: Pinned,
+    ref: string,
+    from: string,
+    target: string,
+    found: string | null,
+  ): Promise<SwitchBack> {
+    try {
+      await git(c, [
+        'update-ref',
+        '--no-deref',
+        '-m',
+        `10db: move to ${target}`,
+        ref,
+        target,
+        from,
+      ]);
+    } catch (error) {
+      if (!(error instanceof GitError)) throw error;
+      return { kind: 'moved', found };
+    }
+    return { kind: 'switched' };
+  }
+
+  async function moveCheckedOutBranch(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly from: string;
+    readonly to: string;
+  }): Promise<SwitchBack> {
+    if (!OBJECT_ID.test(input.from) || !OBJECT_ID.test(input.to))
+      throw new InvalidError('A branch is moved between two commit ids');
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const ref = `refs/heads/${input.branch}`;
+      const found = await currentBranch(c);
+      if (found !== input.branch) return { kind: 'moved', found };
+      if ((await revParse(c, `${ref}^{commit}`)) !== input.from) return { kind: 'moved', found };
+      const target = await revParse(c, `${input.to}^{commit}`);
+      if (target === null) return { kind: 'gone' };
+      await git(c, ['update-index', '-q', '--ignore-submodules', '--refresh']).catch(
+        () => undefined,
+      );
+      // A move a crash cut short after its files and index and before the branch: the index holds
+      // the target's tree, so only the branch is left to move.
+      const indexTree = await git(c, ['write-tree']).then(
+        (out) => out.trim(),
+        () => null,
+      );
+      if (indexTree !== null && indexTree === (await revParse(c, `${target}^{tree}`)))
+        return moveRefOnly(c, ref, input.from, target, found);
+      const paths = [...new Set([...(await changes(c)), ...(await stagedPaths(c))])];
+      const written = new Set(
+        (await git(c, ['diff-tree', '-r', '--name-only', '--no-renames', '-z', input.from, target]))
+          .split('\0')
+          .filter(Boolean),
+      );
+      const overlapping = paths.filter((path) => written.has(path)).sort();
+      if (overlapping.length > 0) return { kind: 'dirty', paths: overlapping };
+      const inTheWay = await untrackedInTheWay(c, input.from, target, written);
+      if (inTheWay.length > 0) return { kind: 'ignored', paths: inTheWay };
+      try {
+        await git(c, ['read-tree', '-m', '-u', input.from, target]);
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        throw new InvalidError(`10db could not move ${input.branch}'s files: ${error.message}`);
+      }
+      try {
+        await git(c, [
+          'update-ref',
+          '--no-deref',
+          '-m',
+          `10db: move to ${target}`,
+          ref,
+          target,
+          input.from,
+        ]);
+      } catch (error) {
+        // The branch moved meanwhile: its files go back to what it held.
+        await git(c, ['read-tree', '-m', '-u', target, input.from]).catch(() => undefined);
+        if (!(error instanceof GitError)) throw error;
+        return { kind: 'moved', found };
+      }
+      return { kind: 'switched' };
+    });
+  }
+
+  async function mergeKeepingTree(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly theirs: string;
+    readonly message: string;
+  }): Promise<{ readonly kind: 'merged' | 'already'; readonly sha: string }> {
+    if (!OBJECT_ID.test(input.theirs)) throw new InvalidError(`${input.theirs} is not a commit id`);
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const ref = `refs/heads/${input.branch}`;
+      const tip = await revParse(c, `${ref}^{commit}`);
+      if (tip === null) throw new InvalidError(`Branch ${input.branch} is not there`);
+      if (await isAncestor(c, input.theirs, tip)) return { kind: 'already', sha: tip };
+      const sign = signing(c, await configEntries(c));
+      const sha = (
+        await git(
+          c,
+          ['commit-tree', ...sign.flags, `${tip}^{tree}`, '-p', tip, '-p', input.theirs],
+          {
+            input: `${input.message}\n`,
+            config: sign.config,
+          },
+        )
+      ).trim();
+      try {
+        await git(c, [
+          'update-ref',
+          '--no-deref',
+          '-m',
+          '10db: merge keeping its tree',
+          ref,
+          sha,
+          tip,
+        ]);
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        throw refusal(c.real, { kind: GitTrustFailure.Ref, ref, reason: 'raced' });
+      }
+      return { kind: 'merged', sha };
+    });
+  }
+
   async function rewindBranch(
     repo: string,
     branch: string,
@@ -3706,7 +4254,7 @@ export function createGit(opts: GitOptions = {}): Git {
       const at = out.trim();
       return at === '' ? null : new Date(at).toISOString();
     },
-    async diffSince(repo, base, head, maxBytes) {
+    async diffSince(repo, base, head, maxBytes, paths) {
       const c = await pinned(repo);
       const numstat = await git(
         c,
@@ -3715,14 +4263,36 @@ export function createGit(opts: GitOptions = {}): Git {
           config: DIFF_CONFIG,
         },
       );
+      const patch = (specs: readonly string[], cap: number) =>
+        gitCapped(
+          c,
+          ['diff-tree', ...DIFF_FLAGS, '-p', '--unified=3', base, head, '--', ...specs],
+          cap,
+          {
+            config: DIFF_CONFIG,
+          },
+        );
       // A few bytes past the cap are read so a character split by the cap is seen whole.
-      const text = await gitCapped(
-        c,
-        ['diff-tree', ...DIFF_FLAGS, '-p', '--unified=3', base, head, '--'],
-        maxBytes + UTF8_MAX_BYTES,
-        { config: DIFF_CONFIG },
-      );
-      return { ...cutDiff(text, maxBytes), files: parseNumstat(numstat) };
+      const cap = maxBytes + UTF8_MAX_BYTES;
+      if (paths === undefined)
+        return { ...cutDiff(await patch([], cap), maxBytes), files: parseNumstat(numstat) };
+      // The files are picked from the whole change's counts, never named on one command line: the
+      // kept ones are read in turns, in the counts' order, which is the order the text lists them in.
+      const files = parseNumstat(numstat).filter((file) => keptBy(paths)(file.path));
+      const read: Buffer[] = [];
+      let size = 0;
+      let left = false;
+      for (const turn of pathspecTurns(files.map((file) => file.path))) {
+        if (size >= cap) {
+          left = true;
+          break;
+        }
+        const text = await patch(turn, cap - size);
+        read.push(text);
+        size += text.length;
+      }
+      const cut = cutDiff(Buffer.concat(read), maxBytes);
+      return { diff: cut.diff, truncated: cut.truncated || left, files };
     },
     async filtersIn(repo, rev) {
       return filters(await pinned(repo), rev);
@@ -3781,6 +4351,30 @@ export function createGit(opts: GitOptions = {}): Git {
       if ((await revParse(c, ref)) === null) return;
       await git(c, ['update-ref', '--no-deref', '-d', ref]);
     },
+    recordPaths,
+    chainCommit,
+    landPaths,
+    async keepRef(repo, ref, sha) {
+      if (!ref.startsWith(KEPT_REF_PREFIX))
+        throw new InvalidError(`${ref} is not under ${KEPT_REF_PREFIX}`);
+      const c = await pinned(repo);
+      const commit = await revParse(c, `${sha}^{commit}`);
+      if (commit === null) throw new InvalidError(`${sha} names no commit`);
+      await git(c, ['update-ref', '--no-deref', '-m', '10db: kept ref', ref, commit]);
+    },
+    async blobsAt(repo, rev, paths) {
+      const named = [...new Set(paths.map(checkPathName))].sort();
+      if (named.length === 0) return [];
+      const c = await pinned(repo);
+      const found = new Map(
+        parseTree(
+          await git(c, ['ls-tree', '-r', '-z', '--full-tree', rev, '--', ...named], {
+            env: { GIT_LITERAL_PATHSPECS: '1' },
+          }),
+        ).map((entry) => [entry.path, entry.oid]),
+      );
+      return named.map((path) => ({ path, blob: found.get(path) ?? null }));
+    },
     async isAncestor(repo, ancestor, tip) {
       return isAncestor(await pinned(repo), ancestor, tip);
     },
@@ -3800,6 +4394,12 @@ export function createGit(opts: GitOptions = {}): Git {
     addWorktree,
     fastForwardBranch,
     rewindBranch,
+    moveBranchCas,
+    moveCheckedOutBranch,
+    mergeKeepingTree,
+    async branchInUseElsewhere(repo, branch) {
+      return branchInUseElsewhere(await pinned(repo), branch);
+    },
     async ownCommitsSince(repo, base, tip) {
       return (
         await git(await pinned(repo), [

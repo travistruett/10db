@@ -55,6 +55,11 @@ export const TaskMessageDto = z.object({
   /** When a turn took it in; a message pushed and not delivered is sent again. */
   deliveredAt: Timestamp.nullable(),
   files: z.array(TaskFileDto),
+  /**
+   * A notice offered with Send to Agent (D19): a review finding or a failed check, whose text the
+   * builder may send as a message of their own. Never sent by itself.
+   */
+  sendable: z.boolean(),
 });
 export type TaskMessageDto = z.infer<typeof TaskMessageDto>;
 

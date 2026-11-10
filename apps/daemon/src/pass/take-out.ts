@@ -15,6 +15,7 @@ import {
 import {
   advanceTakeOut,
   clearLease,
+  deleteSignOffWait,
   deleteTakeOut,
   getPass,
   getProject,
@@ -25,6 +26,7 @@ import {
   insertTakeOut,
   lastTakeOut,
   leavePass,
+  openHolds,
   passHoldingTask,
   releaseClaims,
   setTaskKeptWork,
@@ -37,6 +39,8 @@ import {
 } from '@10db/db';
 import { jobKey, JobQueue, passDirtRef } from '../delivery';
 import { foldHandEdits } from './hand-edits';
+import { keepOrLetGo } from './shared-chain';
+import { dropShared } from './shared-drop';
 import { PassFolderOffBranchError } from '../git';
 import {
   keepTurnWork,
@@ -115,8 +119,9 @@ export function leavePassForBoard(
     releaseClaims(ctx, run);
     clearLease(ctx, run);
   }
-  // No turn of the task is left for a later run of it to finish.
+  // No turn of the task is left for a later run of it to finish, nor a sign-off waiting for it.
   settleTurnsLeaving(ctx, input.taskId);
+  deleteSignOffWait(ctx, input.taskId);
   leavePass(ctx, input.taskId);
   if (task.status !== TaskStatus.Open) setTaskStatus(ctx, input.taskId, TaskStatus.Open);
   setTaskKeptWork(ctx, input.taskId, input.kept);
@@ -169,10 +174,12 @@ function unfinishedTakeOut(deps: PassWorkDeps, taskId: TaskId): PassTakeOutRow |
  * (the task stays in the pass, the thread names the files), one inside an Abandon or a close leaves
  * those files as they are and goes on; 4 puts each page file back as the pass's branch has it where
  * something landed on it during the pass, else as it was before the pass, hashing each again just
- * before (one changed since is left and named); 5 leaves the pass for the Board, its work at its
- * kept ref. While Your folder is off the pass's branch nothing of the page can be kept and none of
- * its files is written: a take-out asked for alone fails, and one inside an Abandon or a close
- * keeps the last kept commit, writes no file and goes on to step 5.
+ * before (one changed since is left and named), then drops each shared change chosen Drop, newest
+ * first (inside an Abandon or a close without its refusals, never without the hash before each
+ * write; a refused one stays on the chain and the thread says why); 5 leaves the pass for the Board,
+ * its work at its kept ref. While Your folder is off the pass's branch nothing of the page can be
+ * kept and none of its files is written: a take-out asked for alone fails, and one inside an Abandon
+ * or a close keeps the last kept commit, writes no file and goes on to step 5.
  */
 export async function takeOutSteps(
   deps: TakeOutDeps,
@@ -317,6 +324,25 @@ export async function takeOutSteps(
       await deps.wrote(repo, restored.written);
       await git.refreshIndex(repo, restored.written);
     }
+    // Every hold the stop left open is kept first: a Drop chosen for it has its change, and none
+    // stays open once the page has left, with its claim released. A folder off the pass's branch
+    // holds another branch's files: the holds stay open for its return, as nothing of the page is
+    // kept or written then.
+    if (!offBranch)
+      for (const hold of openHolds(db, pass.id))
+        if (hold.taskId === task.id) await keepOrLetGo(deps, hold.claimId);
+    // The shared changes chosen Drop, newest first, so each later one is back before an earlier.
+    const kept: string[] = [];
+    for (const seq of offBranch ? [] : [...row.drops].sort((a, b) => b - a)) {
+      const dropped = await dropShared(deps, {
+        passId: pass.id,
+        seq,
+        force: input.within !== TakeOutWithin.Alone,
+      });
+      if (dropped.refused !== null)
+        kept.push(`Shared change ${String(seq)} is kept on the chain: ${dropped.refused}.`);
+      left = [...left, ...dropped.left];
+    }
     const changed = left;
     row = deps.state.write((ctx) => {
       if (offBranch)
@@ -331,6 +357,7 @@ export async function takeOutSteps(
           task.id,
           `Left as they are, because they changed after they were checked:\n${listed(changed)}`,
         );
+      for (const line of kept) insertSystemNotice(ctx, task.id, line);
       return advanceTakeOut(ctx, key, {
         step: TakeOutStep.PutBack,
         left: [...row.left, ...changed],

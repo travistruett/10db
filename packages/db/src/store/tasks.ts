@@ -1294,17 +1294,6 @@ export function getTaskKeptWork(db: DbReader, id: TaskId): TaskKeptWork | null {
     : { keptSha: row.keptSha, keptBaseSha: row.keptBaseSha };
 }
 
-/**
- * Refuses an ordinary start of a task with saved Workbench work, which the start would lose: a pass
- * that takes the task puts the work back.
- */
-export function refuseStartWithKeptWork(db: DbReader, task: Pick<TaskDto, 'id' | 'title'>): void {
-  if (getTaskKeptWork(db, task.id) !== null)
-    throw new ConflictError(
-      `Task ${task.title} has saved Workbench work; open a Workbench pass on it to put the work back (starting it from the Board comes with closing a pass)`,
-    );
-}
-
 /** Records the work a take-out saved for the task, or clears it with null. */
 export function setTaskKeptWork(ctx: WriteContext, id: TaskId, kept: TaskKeptWork | null): void {
   getTask(ctx.tx, id);

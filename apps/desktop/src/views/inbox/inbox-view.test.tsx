@@ -2,6 +2,9 @@ import {
   mintId,
   PARK_TASK_OPTION,
   PASS_SIGN_OFF_CHOICE,
+  SHARED_ASK_ALLOW_CHOICE,
+  SHARED_ASK_KEEP_CHOICE,
+  SHARED_ASK_REPLY_CHOICE,
   type InboxItemDto,
   type ProvenanceDto,
 } from '@10db/contracts';
@@ -966,6 +969,44 @@ describe("a Workbench pass's Ready pages", () => {
     expect(screen.queryByRole('button', { name: /Send Back/ })).toBeNull();
     key('Enter');
     expect(answers).toEqual([]);
+  });
+});
+
+describe("a Workbench pass's shared-area question", () => {
+  it('offers Allow, Keep It to This Page and a reply, and sends the reply with its note', async () => {
+    const asked = inboxItemDto({
+      kind: 'question',
+      category: 'other',
+      title: 'People wants to change shared code in src',
+      body: 'Settings changed `src/button.ts` there 12 minutes ago.',
+      options: [
+        { label: SHARED_ASK_ALLOW_CHOICE, description: 'This change is for every page' },
+        { label: SHARED_ASK_KEEP_CHOICE, description: 'The agent keeps it inside its page' },
+        { label: SHARED_ASK_REPLY_CHOICE, description: 'Your note goes to the agent instead' },
+        PARK_TASK_OPTION,
+      ],
+      projectId: project,
+    });
+    const { answers } = inbox([asked]);
+    renderApp('/inbox');
+    expect(await screen.findByText('People wants to change shared code in src')).toBeTruthy();
+    for (const label of [SHARED_ASK_ALLOW_CHOICE, SHARED_ASK_KEEP_CHOICE, SHARED_ASK_REPLY_CHOICE])
+      expect(screen.getByRole('radio', { name: new RegExp(label) })).toBeTruthy();
+
+    key('3');
+    key('n');
+    const note = screen.getByLabelText('Note for the agent (optional)');
+    fireEvent.change(note, { target: { value: 'Use the page button' } });
+    fireEvent.keyDown(note, { key: 'Enter', metaKey: true });
+
+    await waitFor(() => {
+      expect(answers).toEqual([
+        {
+          id: asked.id,
+          body: { choice: SHARED_ASK_REPLY_CHOICE, note: 'Use the page button', record: null },
+        },
+      ]);
+    });
   });
 });
 

@@ -6,8 +6,9 @@ import {
   passHeldAreas,
   PASS_FOLDER_WAIT_LINE,
   PASS_FOLDER_WAIT_NOTICE_KEY,
-  queueOrder,
+  PASS_PR_WAIT_LINE,
   PassState,
+  queueOrder,
   PassTurnEnding,
   TakeOutStep,
   WorkstreamState,
@@ -23,6 +24,7 @@ import {
 } from '@10db/contracts';
 import {
   acquireClaims,
+  claimConflict,
   acquireLease,
   claimRequestsForTask,
   copyHazardNames,
@@ -110,6 +112,11 @@ export interface SchedulerOptions {
   readonly connecting?: () => { readonly accountId: AccountId } | null;
   /** Accounts with no model profile yet: their queued work is left alone, not claimed and given back each tick. */
   readonly modelWait?: Pick<ModelListWait, 'holds'>;
+  /**
+   * Whether a run may launch as far as its task's saved Workbench work goes (call 33): false while
+   * its work is put back in its checkout. Asked last, of a run every other check would launch now.
+   */
+  readonly keptWork: { ready(run: WorkstreamDto): boolean };
 }
 
 export interface Scheduler {
@@ -168,18 +175,22 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
   }
 
   /**
-   * Shows on a task in Your folder that it waits for the pass holding the folder; written once, and
-   * never over another notice: a parked, left-out or reverted run's notice says what the builder
-   * must know, and the run's card says it waits.
+   * Shows on a task in Your folder that it waits for the pass holding the folder: for its close, or
+   * once closed for its pull request to merge (D22). Written when what it says changes, and never
+   * over another notice: a parked, left-out or reverted run's notice says what the builder must know,
+   * and the run's card says it waits.
    */
   function waitForPass(id: WorkstreamId, pass: PassDto): void {
-    if (getWorkstreamRow(db, id).notice !== null) return;
+    const line = pass.state === PassState.Closed ? PASS_PR_WAIT_LINE : PASS_FOLDER_WAIT_LINE;
+    const stale = (notice: WorkstreamDto['notice']): boolean =>
+      notice === null || (notice.key === PASS_FOLDER_WAIT_NOTICE_KEY && notice.line !== line);
+    if (!stale(getWorkstreamRow(db, id).notice)) return;
     opts.state.write((ctx) => {
-      if (getWorkstreamRow(ctx.tx, id).notice !== null) return;
+      if (!stale(getWorkstreamRow(ctx.tx, id).notice)) return;
       setWorkstreamNotice(ctx, id, {
         key: PASS_FOLDER_WAIT_NOTICE_KEY,
         tone: 'info',
-        line: PASS_FOLDER_WAIT_LINE,
+        line,
         body: `Your folder is in the Workbench pass "${pass.name}". This task starts there once the pass has closed and its work is in the base.`,
       });
     });
@@ -440,15 +451,18 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       const requests = inPass
         ? passHeldAreas(project.areas, task).map((name) => ({ kind: ClaimKind.Area, name }))
         : claimRequestsForTask(task, project);
+      const ask = {
+        projectId: project.id,
+        workstreamId: ws.id,
+        requests,
+        copyHazards: copyHazardNames(project),
+        ...(areaScope ? { areaScope } : {}),
+      };
+      // Last, just before the claim, and only with the claim free: a put-back starts only for a run
+      // that would launch now, and never writes where another lane holds the area.
+      if (claimConflict(db, ask) !== null || !opts.keptWork.ready(ws)) continue;
       const fence = opts.state.write((ctx) => {
-        const claimed = acquireClaims(ctx, {
-          projectId: project.id,
-          workstreamId: ws.id,
-          requests,
-          copyHazards: copyHazardNames(project),
-          leaseExpiresAt: leaseUntil,
-          ...(areaScope ? { areaScope } : {}),
-        });
+        const claimed = acquireClaims(ctx, { ...ask, leaseExpiresAt: leaseUntil });
         if (!claimed.ok) return null;
         const f = acquireLease(ctx, ws.id, opts.instanceId, leaseUntil);
         transitionWorkstream(ctx, ws.id, {

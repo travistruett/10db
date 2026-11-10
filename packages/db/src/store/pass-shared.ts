@@ -12,7 +12,7 @@ import {
 } from '@10db/contracts';
 import { and, asc, eq, isNull, max } from 'drizzle-orm';
 import * as schema from '../schema';
-import { getPass } from './passes';
+import { getPass, getPassProgress } from './passes';
 import type { DbReader, WriteContext } from './store';
 
 // Workbench spec §7.2, §11, §12: a pass task's holds on shared areas and the pass's shared chain. A
@@ -151,6 +151,17 @@ export function closeHold(
     .run();
   emitPass(ctx, hold.passId, { holdSeq: hold.seq, closed: 1 });
   return getHold(ctx.tx, claimId);
+}
+
+/** Every hold of the pass, open and closed, by number. */
+export function listHolds(db: DbReader, passId: PassId): PassHoldDto[] {
+  return db
+    .select()
+    .from(schema.passHolds)
+    .where(eq(schema.passHolds.passId, passId))
+    .orderBy(asc(schema.passHolds.seq))
+    .all()
+    .map(toHoldDto);
 }
 
 /** The pass's holds whose turn has not kept them, by number. */
@@ -328,6 +339,27 @@ export function insertDrop(
   const drop = getSharedChange(ctx.tx, input.passId, seq);
   emitShared(ctx, drop);
   return drop;
+}
+
+/**
+ * Moves the pass's landed mark back to just before its first change still to land: not landed, not
+ * dropped, not a drop, and holding a file. A close passes over a change chosen Drop before its page's
+ * take-out drops it; when its gate fails first, the change stays on the chain and must land with the
+ * next sign-off or close. A mark already there is left.
+ */
+export function rewindSharedLanded(ctx: WriteContext, passId: PassId): void {
+  const first = listSharedChanges(ctx.tx, passId).find(
+    (c) => c.landedSha === null && c.dropOf === null && c.droppedBy === null && c.paths.length > 0,
+  );
+  if (first === undefined) return;
+  const landed = getPassProgress(ctx.tx, passId).sharedLanded;
+  if (first.seq > landed) return;
+  ctx.tx
+    .update(schema.passes)
+    .set({ sharedLanded: first.seq - 1, updatedAt: ctx.now })
+    .where(eq(schema.passes.id, passId))
+    .run();
+  emitPass(ctx, passId, { sharedLanded: first.seq - 1 });
 }
 
 /**

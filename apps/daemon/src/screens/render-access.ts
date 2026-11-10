@@ -71,6 +71,12 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
     "A page's turns list the files each changed, read from its kept commits with git.",
   '/projects/:projectId/pass-start':
     "Start Pass's preview reads Your folder with git: its changed files, its branch and the base.",
+  '/passes/:passId/tasks/:taskId/take-out':
+    "A take-out's shared changes are read by running git in Your folder, and no screen draws them.",
+  '/passes/:passId/close':
+    "A pass's close lists are read by running git in Your folder, and only the Workbench draws them.",
+  '/passes/:passId/pull-request':
+    "Reading a pass's pull request asks gh whether it is signed in, and only the Workbench draws it.",
   '/shape-measures': 'No screen draws a measure.',
   '/accounts': 'No screen draws an account.',
   '/accounts/pauses': 'No screen draws an account.',

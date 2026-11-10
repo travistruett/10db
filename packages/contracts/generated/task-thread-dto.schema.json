@@ -125,6 +125,9 @@
                 "createdAt"
               ]
             }
+          },
+          "sendable": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -136,7 +139,8 @@
           "createdAt",
           "pushedAt",
           "deliveredAt",
-          "files"
+          "files",
+          "sendable"
         ]
       }
     }

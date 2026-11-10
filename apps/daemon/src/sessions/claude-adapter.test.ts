@@ -2720,6 +2720,29 @@ describe('complete', () => {
     expect(record.options?.abortController?.signal.aborted).toBe(true);
   });
 
+  it('passes the effort it is given, and waits the time it is given before giving up', async () => {
+    const clock = new ManualClock();
+    const { adapter, record } = adapterFor_({ messages: [], then: 'stall' }, clock);
+    const asked = adapter.complete({ ...ASK, effort: 'high', timeoutMs: 600_000 });
+    let settled = false;
+    const failure = expect(
+      asked.finally(() => {
+        settled = true;
+      }),
+    ).rejects.toThrow(CompletionError);
+    await vi.waitFor(() => {
+      expect(record.inputs).toHaveLength(1);
+    });
+    expect(record.options).toMatchObject({ effort: 'high' });
+    clock.advance(120_000);
+    // Long enough for a timeout's rejection to reach the caller, had one fired.
+    for (let flush = 0; flush < 20; flush += 1) await Promise.resolve();
+    expect(settled).toBe(false);
+    clock.advance(480_000);
+    await failure;
+    expect(record.options?.abortController?.signal.aborted).toBe(true);
+  });
+
   it('stops Claude Code when the caller gives up, without waiting for the answer', async () => {
     const { adapter, record } = adapterFor_({ messages: [], then: 'stall' });
     const caller = new AbortController();

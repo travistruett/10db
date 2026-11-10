@@ -341,6 +341,10 @@ export interface CompletionSpec {
   readonly account: AccountExpectation;
   /** Aborting it ends the question at once: Claude Code is stopped and the call rejects. */
   readonly signal?: AbortSignal;
+  /** How long the answer may take before it is given up on; 2 minutes unless given. */
+  readonly timeoutMs?: number;
+  /** How hard the model thinks, as a step's effort; the model's own default unless given. */
+  readonly effort?: Effort;
 }
 
 /** The model gave no answer: it was refused, it failed, or it did not answer in time. */

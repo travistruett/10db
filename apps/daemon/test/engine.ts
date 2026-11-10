@@ -60,9 +60,10 @@ import {
   secretFingerprint,
   type Keychain,
 } from '../src/environment';
-import { createEventBus, createStateStore, type StateStore } from '../src/events';
+import { createEventBus, createStateStore, type EventBus, type StateStore } from '../src/events';
 import { createDeliveryJobs } from '../src/delivery';
 import { createGit } from '../src/git';
+import { startSignOff } from '../src/pass';
 import type { Judge } from '../src/judge';
 import { createInboxService, createParkAnswers, type InboxService } from '../src/inbox';
 import { silentLogger } from '../src/log';
@@ -87,6 +88,8 @@ import { createMemoryKeychain, createTempRepo, tempDir } from './fixtures';
 export interface TestEngine {
   readonly store: Store;
   readonly state: StateStore;
+  /** Every event the engine's writes push, as the daemon's listeners get them. */
+  readonly bus: EventBus;
   readonly inbox: InboxService;
   readonly runner: Runner;
   readonly adapter: FakeAdapter;
@@ -157,20 +160,27 @@ export async function createTestEngine(
       | 'codexLaneTempRoot'
     >
   > = {},
-  setup: { readonly account?: AccountInput; readonly secret?: string } = {},
+  setup: {
+    readonly account?: AccountInput;
+    readonly secret?: string;
+    /** How long one request_claim call waits before it answers "still waiting", and how often it looks. */
+    readonly claims?: { readonly sliceMs: number; readonly pollMs: number };
+  } = {},
 ): Promise<TestEngine> {
   const repo = createTempRepo();
   const data = tempDir('engine-data');
   // The store stamps sessions with the test clock, so the monthly cap reads the clock's month.
   const clock = new ManualClock();
   const { store, close } = createTestStore(() => clock.now());
-  const state = createStateStore(store, createEventBus());
+  const bus = createEventBus();
+  const state = createStateStore(store, bus);
   seedTeam(state, readDefaultPersonas());
   seedProfiles(state);
   measureForTests(state);
   const adapter = new FakeAdapter(book);
   const live = createLiveSessions();
   const git = createGit();
+  const jobs = createDeliveryJobs(silentLogger);
   const keychain = createMemoryKeychain();
   const rateLimited: { accountId: AccountId; resetsAt: Date | null }[] = [];
   const usageReports: { accountId: AccountId; report: UsageReport }[] = [];
@@ -195,8 +205,22 @@ export async function createTestEngine(
     },
     onParkAnswer: parkAnswers,
     onCheckAnswer: (ctx, item, answer) => {
-      if (!runner) throw new RunnerNotStartedError();
-      return applyCheckAnswer(runner, ctx, item, answer);
+      const ready = runner;
+      if (!ready) throw new RunnerNotStartedError();
+      return applyCheckAnswer(ready, ctx, item, answer, (taskId) => {
+        startSignOff(
+          {
+            state,
+            git,
+            inbox,
+            jobs,
+            logger: silentLogger,
+            clock,
+            stopLane: (id) => ready.stopPassLane(id),
+          },
+          taskId,
+        );
+      });
     },
     onFlagAnswer: (item, answer) => {
       runner?.retryTurn(item, answer);
@@ -276,6 +300,12 @@ export async function createTestEngine(
       waitObserverFor: (id) => live.get(id)?.observer,
       sessionSignal: (id) => live.get(id)?.signal,
       askedToHandOff: (id) => live.get(id)?.askedToHandOff(),
+      // As the daemon does: a builder message the MCP side writes goes to the page's session.
+      deliverMessage: (taskId, messageId) =>
+        created.deliverMessage(taskId, messageId, { redo: false }),
+      ...(setup.claims
+        ? { claimWaitSliceMs: setup.claims.sliceMs, claimPollMs: setup.claims.pollMs }
+        : {}),
     }),
     hostname: '127.0.0.1',
     port: 0,
@@ -290,7 +320,7 @@ export async function createTestEngine(
     adapter,
     inbox,
     git,
-    jobs: createDeliveryJobs(silentLogger),
+    jobs,
     gate: createGateRunner({ sandbox: null, logger: silentLogger }),
     // The engine's repository has no origin to fetch a base from: every branch is up to date.
     baseUpdates: {
@@ -354,6 +384,7 @@ export async function createTestEngine(
   const engine: TestEngine = {
     store,
     state,
+    bus,
     inbox,
     runner: created,
     adapter,

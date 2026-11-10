@@ -11,6 +11,7 @@ import {
   type McpServerStatusDto,
   ProjectInput,
   PassState,
+  SharedChoiceKind,
   ProjectLanding,
   Provider,
   providerOf,
@@ -19,10 +20,13 @@ import {
   WorkstreamState,
   type SystemCheckDto,
   type PassAbandonedDto,
+  type PassSignOffDto,
   type PassId,
   type PassJoinRequest,
   type TakeOutResultDto,
   type TaskId,
+  TaskMessageId,
+  TaskMessageKind,
   type TaskLanding,
   type WorkstreamId,
 } from '@10db/contracts';
@@ -39,6 +43,7 @@ import {
   getSmallProposalLimit,
   setSmallProposalLimit,
   getPass,
+  getPassProgress,
   getTask,
   getTeam,
   getWorkstream,
@@ -70,6 +75,7 @@ import {
   listProjectViews,
   listRoutingRules,
   listTasks,
+  listTaskThread,
   listWorkstreams,
   moveTask,
   listPassTasks,
@@ -87,6 +93,7 @@ import {
   setRoutingRules,
   setTeam,
   undoHazardAddition,
+  offeredText,
 } from '@10db/db';
 import { MoveCause, type AccountMoves, type AccountService } from '../accounts';
 import type { Clock } from '../clock';
@@ -100,6 +107,7 @@ import {
   type BatchStarter,
   type PassOpened,
   type PassOpenInput,
+  type PassPullRequests,
   type Shipper,
 } from '../delivery';
 import { markGhRequired, withAgentStatus, type AgentTools } from '../environment';
@@ -116,9 +124,11 @@ import {
   openTurn,
   passStartPreview,
   passView,
+  sharedUnlanded,
   TakeOutWithin,
   taskTurns,
   turnLog,
+  type PassCloses,
   type PassJoined,
   type TakeOutInput,
 } from '../pass';
@@ -180,6 +190,14 @@ export function createServices(deps: {
   readonly joinPass: (passId: PassId, input: PassJoinRequest) => Promise<PassJoined>;
   /** Discards a task's saved Workbench work in its project's delivery queue. */
   readonly discardKeptWork: (taskId: TaskId) => Promise<void>;
+  /** A pass's pull request: its preview, and Open Pull Request. */
+  readonly passPullRequests: Pick<PassPullRequests, 'preview' | 'open'>;
+  /** A pass's close: its lists and its confirm, which queues the close in the delivery queue. */
+  readonly closes: Pick<PassCloses, 'preview' | 'close'>;
+  /** Signs off a Ready page in the project's delivery queue, stopping its lane through the runner. */
+  readonly signOff: (passId: PassId, taskId: TaskId) => PassSignOffDto;
+  /** Cancels a page's waiting sign-off. */
+  readonly cancelSignOff: (passId: PassId, taskId: TaskId) => void;
   readonly shipper: Shipper;
   readonly accounts: AccountService;
   readonly moves: Pick<AccountMoves, 'move'>;
@@ -382,7 +400,7 @@ export function createServices(deps: {
       return { ...opened, dirt: [...opened.dirt], waiting: [...opened.waiting] };
     },
     passView: (passId) => passView(db, passId),
-    takeOutPage(passId, taskId, input) {
+    async takeOutPage(passId, taskId, input) {
       const pass = getPass(db, passId);
       const task = getTask(db, taskId);
       if (pass.state !== PassState.Open)
@@ -391,17 +409,41 @@ export function createServices(deps: {
         );
       if (passHoldingTask(db, task)?.id !== passId)
         throw new ConflictError(`${task.title} is not a page of pass "${pass.name}"`);
-      return deps.takeOut({
-        taskId,
-        within: TakeOutWithin.Alone,
-        ...(input.shared === undefined ? {} : { shared: input.shared }),
-      });
+      // A Drop is taken only for a change of the page the preview offers it for.
+      const offered = new Map(
+        (await sharedUnlanded(deps, { passId, taskId })).map((c) => [c.seq, c.dropRefusal]),
+      );
+      for (const choice of input.shared) {
+        if (choice.choice !== SharedChoiceKind.Drop) continue;
+        if (!offered.has(choice.seq))
+          throw new ConflictError(
+            `Shared change ${String(choice.seq)} is not one of ${task.title}'s that has not landed`,
+          );
+        const refused = offered.get(choice.seq);
+        if (refused)
+          throw new ConflictError(
+            `Shared change ${String(choice.seq)} cannot be dropped: ${refused}`,
+          );
+      }
+      return deps.takeOut({ taskId, within: TakeOutWithin.Alone, shared: input.shared });
+    },
+    async takeOutPreview(passId, taskId) {
+      const pass = getPass(db, passId);
+      const task = getTask(db, taskId);
+      if (passHoldingTask(db, task)?.id !== passId)
+        throw new ConflictError(`${task.title} is not a page of pass "${pass.name}"`);
+      return { shared: await sharedUnlanded(deps, { passId, taskId }) };
     },
     abandonPass(passId) {
       const pass = getPass(db, passId);
-      if (pass.state !== PassState.Open && pass.state !== PassState.Abandoning)
+      const states: readonly PassState[] = [
+        PassState.Open,
+        PassState.Closing,
+        PassState.Abandoning,
+      ];
+      if (!states.includes(pass.state))
         throw new ConflictError(
-          `Pass "${pass.name}" is ${pass.state.toLowerCase()}: only an open pass is abandoned`,
+          `Pass "${pass.name}" is ${pass.state.toLowerCase()}: only an open or closing pass is abandoned`,
         );
       return deps.abandonPass(passId);
     },
@@ -430,6 +472,34 @@ export function createServices(deps: {
         getProject(db, projectId),
         signal,
       ),
+    passClosePreview: (passId) => deps.closes.preview(passId),
+    closePass: (passId, input) => deps.closes.close(passId, input),
+    signOffPage: (passId, taskId) => deps.signOff(passId, taskId),
+    cancelSignOff: (passId, taskId) => {
+      deps.cancelSignOff(passId, taskId);
+    },
+    passPullRequest: (passId) => deps.passPullRequests.preview(passId),
+    openPassPullRequest: (passId) => deps.passPullRequests.open(passId),
+    async sendToAgent(taskId, noticeId) {
+      const task = getTask(db, taskId);
+      const message = TaskMessageId.safeParse(noticeId);
+      const onThread =
+        message.success &&
+        listTaskThread(db, taskId).some(
+          (m) => m.id === message.data && m.kind === TaskMessageKind.Notice,
+        )
+          ? offeredText(db, message.data)
+          : null;
+      const pass = passHoldingTask(db, task);
+      const inHeader =
+        pass === undefined
+          ? null
+          : (getPassProgress(db, pass.id).notices.find((n) => n.id === noticeId && n.sendable)
+              ?.text ?? null);
+      const text = onThread ?? inHeader;
+      if (text === null) throw new ConflictError('That notice offers nothing to send to the agent');
+      return deps.thread.postTaskMessage(taskId, { text, pictures: [] });
+    },
     async stopPage(taskId) {
       const task = getTask(db, taskId);
       const pass = passHoldingTask(db, task);
