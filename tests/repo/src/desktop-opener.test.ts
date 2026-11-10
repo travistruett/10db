@@ -55,4 +55,16 @@ describe("the desktop app's window", () => {
       ]),
     );
   });
+
+  it("narrows to the Workbench's narrow layout, about 420 px beside the builder's browser", () => {
+    const config = z
+      .object({
+        app: z.object({
+          windows: z.array(z.object({ label: z.string(), minWidth: z.number() })),
+        }),
+      })
+      .parse(JSON.parse(readRepoFile('apps/desktop/src-tauri/tauri.conf.json')));
+    const main = config.app.windows.find((window) => window.label === 'main');
+    expect(main?.minWidth).toBe(420);
+  });
 });
