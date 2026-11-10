@@ -35,16 +35,18 @@ export function proxyAllows(
   const app = parse(appUrl);
   if (app === null) return false;
   if (request.method.toUpperCase() === 'CONNECT') {
-    // Authority form, `host:port`: the port is always there.
-    if (!/:\d+$/.test(request.target)) return false;
+    // Authority form, `host:port`: the port is always there. It is read as written, since a URL
+    // drops a scheme's default port (80) and would read none.
+    const port = /:(\d+)$/.exec(request.target)?.[1];
+    if (port === undefined) return false;
     const url = parse(`http://${request.target}`);
     return (
       url !== null &&
       url.username === '' &&
       url.password === '' &&
       url.pathname === '/' &&
-      url.port !== '' &&
-      sameHostAndPort(app, url)
+      url.hostname === app.hostname &&
+      Number(port) === Number(portOf(app))
     );
   }
   if (!/^https?:\/\//i.test(request.target)) return false;

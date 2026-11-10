@@ -1,10 +1,13 @@
 import { routeUrl, ScreenTheme, type AppUrl } from '@10db/contracts';
-import type { Browser, BrowserContext, Page } from 'playwright-core';
+import type { Browser, BrowserContext, Page, Response } from 'playwright-core';
+import { systemClock, type Clock } from '../clock';
 import type { Logger } from '../log';
-import type { AppProxy } from './app-proxy';
-import type { BrowserHost } from './browser-host';
+import { NO_ANSWER, NO_ANSWER_HEADER, type AppProxy } from './app-proxy';
+import { BrowserStuckError, type BrowserHost } from './browser-host';
 import { ShotOutcome, type PageCamera, type Shot } from './camera';
 import { requestAllowed } from './origin-guard';
+import { DeadlineError, withDeadline } from './deadline';
+import { addressForLog, loadFailure } from './load-failure';
 import { capOverlayText, OVERLAY_SELECTORS } from './overlay';
 import { shotOutcome, type PageLoad } from './shot-outcome';
 import { StorageState } from './storage-state';
@@ -13,16 +16,16 @@ import { StorageState } from './storage-state';
 const LOAD_TIMEOUT_MS = 30_000;
 /** How long a loaded page gets to go quiet, and its fonts to load, before it is shot anyway. */
 const SETTLE_TIMEOUT_MS = 5_000;
+/** How long one shot or sign-in may take in all, whatever the page does. */
+export const SHOT_DEADLINE_MS = 90_000;
+/** How long closing a context may take before it is left to the browser. */
+const CLOSE_TIMEOUT_MS = 10_000;
 /** How long reading an overlay's text may take. */
 const OVERLAY_READ_MS = 1_000;
 
 /** A sign-in that gave no state: the message says why, for the status line. */
 export class SignInError extends Error {
   override readonly name = 'SignInError';
-}
-
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 /**
@@ -36,7 +39,7 @@ async function guard(context: BrowserContext, appUrl: AppUrl, logger: Logger): P
       await route.continue();
       return;
     }
-    logger.info({ url }, 'the pictures browser refused a request off the app');
+    logger.info({ url: addressForLog(url) }, 'the pictures browser refused a request off the app');
     await route.abort('blockedbyclient');
   });
   await context.routeWebSocket(
@@ -47,10 +50,21 @@ async function guard(context: BrowserContext, appUrl: AppUrl, logger: Logger): P
         socket.connectToServer();
         return;
       }
-      logger.info({ url }, 'the pictures browser refused a WebSocket off the app');
+      logger.info(
+        { url: addressForLog(url) },
+        'the pictures browser refused a WebSocket off the app',
+      );
       void socket.close({ code: 1008, reason: 'off the app' });
     },
   );
+}
+
+/** Why a load or a sign-in failed when the proxy, not the app, answered. */
+const APP_DID_NOT_ANSWER = 'the app did not answer';
+
+/** Whether the answer is the proxy's own 502: the app refused the connection, reset it or garbled it. */
+function unanswered(response: Response | null): boolean {
+  return response?.headers()[NO_ANSWER_HEADER] === NO_ANSWER;
 }
 
 /** The text of the first dev-server overlay up on the page, capped; null when none is. */
@@ -72,9 +86,12 @@ async function load(page: Page, url: string): Promise<PageLoad> {
   let status: number | null;
   try {
     const response = await page.goto(url, { waitUntil: 'load', timeout: LOAD_TIMEOUT_MS });
+    if (unanswered(response)) {
+      return { error: APP_DID_NOT_ANSWER, landedUrl: null, status: null, overlayText: null };
+    }
     status = response?.status() ?? null;
   } catch (error) {
-    return { error: message(error), landedUrl: null, status: null, overlayText: null };
+    return { error: loadFailure(error), landedUrl: null, status: null, overlayText: null };
   }
   await page.waitForLoadState('networkidle', { timeout: SETTLE_TIMEOUT_MS }).catch(() => undefined);
   await page
@@ -86,22 +103,30 @@ async function load(page: Page, url: string): Promise<PageLoad> {
   return { error: null, landedUrl: page.url(), status, overlayText: await overlayOn(page) };
 }
 
+/** What one shot or sign-in runs with. */
+interface ContextRun {
+  readonly browser: Browser;
+  readonly proxy: AppProxy;
+  readonly appUrl: AppUrl;
+  readonly signal: AbortSignal;
+  readonly logger: Logger;
+  readonly clock: Clock;
+  readonly deadlineMs: number;
+}
+
 /**
- * Runs `fn` in a fresh context with the proxy letting `appUrl` through, closing the context when it
- * ends or `signal` aborts. Every context refuses downloads, blocks service workers and records nothing.
+ * Runs `fn` in a fresh context with the proxy letting the app through, and settles within the run's
+ * deadline whatever the page does: past it, or when `signal` aborts, the context is closed. Every
+ * context refuses downloads, blocks service workers and records nothing.
  */
 async function inContext<T>(
-  browser: Browser,
-  proxy: AppProxy,
-  appUrl: AppUrl,
-  signal: AbortSignal,
-  logger: Logger,
+  run: ContextRun,
   options: Parameters<Browser['newContext']>[0],
   fn: (context: BrowserContext) => Promise<T>,
 ): Promise<T> {
-  signal.throwIfAborted();
-  proxy.allow(appUrl);
-  const context = await browser.newContext({
+  run.signal.throwIfAborted();
+  run.proxy.allow(run.appUrl);
+  const context = await run.browser.newContext({
     ...options,
     acceptDownloads: false,
     serviceWorkers: 'block',
@@ -109,21 +134,61 @@ async function inContext<T>(
   const stop = (): void => {
     void context.close().catch(() => undefined);
   };
-  signal.addEventListener('abort', stop, { once: true });
   try {
-    await guard(context, appUrl, logger);
-    const result = await fn(context);
-    signal.throwIfAborted();
-    return result;
+    // The signal is watched by the race itself: once a context closes under it, a pending Playwright
+    // call may never settle. An abort while the context was being made is seen here too.
+    return await withDeadline(
+      run.clock,
+      run.deadlineMs,
+      async () => {
+        await guard(context, run.appUrl, run.logger);
+        return fn(context);
+      },
+      stop,
+      run.signal,
+    );
   } finally {
-    signal.removeEventListener('abort', stop);
-    await context.close().catch(() => undefined);
+    const closed = await withDeadline(
+      run.clock,
+      CLOSE_TIMEOUT_MS,
+      () => context.close(),
+      () => undefined,
+    ).then(
+      () => true,
+      (error: unknown) => !(error instanceof DeadlineError),
+    );
+    // A page that would not close may still be running, and could reach the next app the proxy
+    // lets through: the host closes the browser before this use settles.
+    // eslint-disable-next-line no-unsafe-finally -- a stuck page outranks whatever the use answered
+    if (!closed) throw new BrowserStuckError('a page of the app would not close');
   }
 }
 
+export interface PlaywrightCameraOptions {
+  readonly clock?: Clock;
+  /** How long one shot or sign-in may take, from its fresh context to its answer. */
+  readonly deadlineMs?: number;
+}
+
 /** The camera on the daemon's pinned Chromium. One shot or sign-in runs at a time (`BrowserHost.use`). */
-export function createPlaywrightCamera(host: BrowserHost<Browser>, logger: Logger): PageCamera {
+export function createPlaywrightCamera(
+  host: BrowserHost<Browser>,
+  logger: Logger,
+  options: PlaywrightCameraOptions = {},
+): PageCamera {
   const log = logger.child({ module: 'pictures' });
+  const clock = options.clock ?? systemClock;
+  const deadlineMs = options.deadlineMs ?? SHOT_DEADLINE_MS;
+  const settleLine = `did not settle within ${String(Math.round(deadlineMs / 1000))} s`;
+  const runOf = (browser: Browser, proxy: AppProxy, appUrl: AppUrl, signal: AbortSignal) => ({
+    browser,
+    proxy,
+    appUrl,
+    signal,
+    logger: log,
+    clock,
+    deadlineMs,
+  });
   return {
     async shoot({ appUrl, route, viewport, theme, storageState, signal }) {
       const failed = (reason: string, landedUrl: string | null = null): Shot => ({
@@ -137,13 +202,11 @@ export function createPlaywrightCamera(host: BrowserHost<Browser>, logger: Logge
       });
       const url = routeUrl(appUrl, route);
       if (url === null) return failed(`${route} is not a route on ${appUrl}`);
-      return host.use((browser, proxy) =>
+      // Aborted already: never wait for the browser, nor launch it.
+      signal.throwIfAborted();
+      const shot = host.use((browser, proxy) =>
         inContext(
-          browser,
-          proxy,
-          appUrl,
-          signal,
-          log,
+          runOf(browser, proxy, appUrl, signal),
           {
             viewport: { width: viewport.width, height: viewport.height },
             deviceScaleFactor: 1,
@@ -176,6 +239,15 @@ export function createPlaywrightCamera(host: BrowserHost<Browser>, logger: Logge
           },
         ),
       );
+      try {
+        return await shot;
+      } catch (error) {
+        if (error instanceof DeadlineError) return failed(`the page ${settleLine}`);
+        if (error instanceof BrowserStuckError) {
+          return failed('the page would not close, so the browser was closed');
+        }
+        throw error;
+      }
     },
 
     async signIn({ appUrl, url, signal }) {
@@ -188,13 +260,23 @@ export function createPlaywrightCamera(host: BrowserHost<Browser>, logger: Logge
       if (target.origin !== appUrl) {
         throw new SignInError(`the dev login's address is not on ${appUrl}`);
       }
-      return host.use((browser, proxy) =>
-        inContext(browser, proxy, appUrl, signal, log, {}, async (context) => {
+      signal.throwIfAborted();
+      const signedIn = host.use((browser, proxy) =>
+        inContext(runOf(browser, proxy, appUrl, signal), {}, async (context) => {
           const page = await context.newPage();
+          let response: Response | null;
           try {
-            await page.goto(target.href, { waitUntil: 'load', timeout: LOAD_TIMEOUT_MS });
+            response = await page.goto(target.href, {
+              waitUntil: 'load',
+              timeout: LOAD_TIMEOUT_MS,
+            });
           } catch (error) {
-            throw new SignInError(`the dev login's address did not load: ${message(error)}`);
+            throw new SignInError(`the dev login's address did not load: ${loadFailure(error)}`);
+          }
+          if (unanswered(response)) throw new SignInError(APP_DID_NOT_ANSWER);
+          const status = response?.status() ?? null;
+          if (status !== null && status >= 500) {
+            throw new SignInError(`the dev login's address answered ${String(status)}`);
           }
           await page
             .waitForLoadState('networkidle', { timeout: SETTLE_TIMEOUT_MS })
@@ -212,6 +294,19 @@ export function createPlaywrightCamera(host: BrowserHost<Browser>, logger: Logge
           return StorageState.parse(await context.storageState());
         }),
       );
+      try {
+        return await signedIn;
+      } catch (error) {
+        if (error instanceof DeadlineError) {
+          throw new SignInError(`the dev login's address ${settleLine}`);
+        }
+        if (error instanceof BrowserStuckError) {
+          throw new SignInError(
+            "the dev login's address would not close, so the browser was closed",
+          );
+        }
+        throw error;
+      }
     },
 
     status: () => host.status(),

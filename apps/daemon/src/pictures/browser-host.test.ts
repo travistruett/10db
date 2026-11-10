@@ -12,7 +12,9 @@ import {
   type LedgerSweep,
 } from '../sandbox';
 import {
+  BROWSER_CLOSE_MS,
   BROWSER_IDLE_MS,
+  BrowserStuckError,
   createBrowserHost,
   launchOptions,
   NO_LEDGER_PROBLEM,
@@ -91,6 +93,8 @@ describe('the browser host', () => {
   let launched: BrowserLaunch[];
   let standIns: StandIn[];
   let host: BrowserHost<StandIn> | null;
+  /** Whether a stand-in's close never ends, as a wedged browser's may not. */
+  let closeHangs: boolean;
 
   const launch = (options: BrowserLaunch): Promise<StandIn> =>
     new Promise((resolve, reject) => {
@@ -112,6 +116,10 @@ describe('the browser host', () => {
           pid,
           isConnected: () => child.exitCode === null && child.signalCode === null,
           close: async () => {
+            if (closeHangs) {
+              await new Promise<void>(() => undefined);
+              return;
+            }
             if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
             await exited;
           },
@@ -167,8 +175,10 @@ describe('the browser host', () => {
     launched = [];
     standIns = [];
     host = null;
+    closeHangs = false;
   });
   afterEach(async () => {
+    closeHangs = false;
     await host?.close();
     sweep.stop();
     for (const s of standIns) await s.close();
@@ -292,5 +302,66 @@ describe('the browser host', () => {
     expect(most).toBe(1);
     expect(launched).toHaveLength(1);
     expect(existsSync(join(dataDir, 'browser', 'artifacts'))).toBe(true);
+  });
+
+  it('closes a stuck browser before the use settles, stopping it when it will not close', async () => {
+    const h = makeHost();
+    closeHangs = true;
+    let pid = 0;
+    let proxyPort = 0;
+    const used = h.use((browser, proxy) => {
+      pid = browser.pid;
+      proxyPort = proxy.port;
+      proxy.allow('http://127.0.0.1:9');
+      return Promise.reject(new BrowserStuckError('a page would not close'));
+    });
+    let settled = false;
+    void used.catch(() => {
+      settled = true;
+    });
+    // The browser's own close never ends: the host gives it its time on the clock, then stops it.
+    await waitForAsync(() => Promise.resolve(clock.pendingTimers() > 0 ? true : undefined), 5_000);
+    expect(settled).toBe(false);
+    clock.advance(BROWSER_CLOSE_MS);
+    await expect(used).rejects.toBeInstanceOf(BrowserStuckError);
+    expect(alive(pid)).toBe(false);
+    // Nothing passes the proxy any more: it is closed with the browser.
+    await expect(fetch(`http://127.0.0.1:${String(proxyPort)}/`)).rejects.toThrow();
+    // The next use launches a fresh browser.
+    closeHangs = false;
+    const next = await h.use((browser) => Promise.resolve(browser.pid));
+    expect(next).not.toBe(pid);
+    expect(launched).toHaveLength(2);
+  });
+
+  it('closes at once while a use waits for the download, and that use is refused', async () => {
+    host = createBrowserHost({
+      dataDir,
+      ledgers: { sweep, root: ledgerRoot },
+      processes: { table: systemProcessTable },
+      clock,
+      logger: silentLogger,
+      launch,
+      ensure: () => new Promise<string>(() => undefined),
+      env: {},
+    });
+    const used = host.use(() => Promise.resolve('shot'));
+    const refused = expect(used).rejects.toThrow(/shut down/);
+    const waiting = host;
+    await waitForAsync(
+      () => Promise.resolve(waiting.status().state === 'fetching' ? true : undefined),
+      5_000,
+    );
+    const closing = waiting.close().then(() => 'closed' as const);
+    let timer: NodeJS.Timeout | undefined;
+    const hung = new Promise<'hung'>((resolve) => {
+      timer = setTimeout(() => {
+        resolve('hung');
+      }, 3_000);
+    });
+    expect(await Promise.race([closing, hung])).toBe('closed');
+    clearTimeout(timer);
+    await refused;
+    expect(launched).toEqual([]);
   });
 });
