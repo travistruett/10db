@@ -118,7 +118,11 @@ function rootsOf(repoPath: string): string[] {
   }
 }
 
-function createTurnChecks(deps: TurnChecksDeps): TurnChecks {
+function createTurnChecks(
+  deps: TurnChecksDeps,
+  /** Resolves once start-up lets checks run; until then the queue records asks and runs none. */
+  begun: Promise<void>,
+): TurnChecks {
   const db = deps.state.db;
   const queues = new Map<PassId, CheckQueueState>();
   const runs = new Map<
@@ -189,6 +193,12 @@ function createTurnChecks(deps: TurnChecksDeps): TurnChecks {
   }
 
   async function check(passId: PassId, turns: readonly TurnAsk[], signal: AbortSignal) {
+    await Promise.race([
+      begun,
+      new Promise((resolve) => {
+        signal.addEventListener('abort', resolve, { once: true });
+      }),
+    ]);
     const project = checkedProject(passId);
     const command = project?.changedCheckCommand ?? null;
     // A function, so the checks after the awaits are not narrowed away by the one before them.
@@ -397,12 +407,18 @@ export interface CheckTerminator {
 
 /**
  * At start-up, before recovery settles any turn: stops every turn check a stopped daemon left
- * running and clears its pid, then follows Ready turns. Recovery's own Ready turns are checked, and
- * a new check never runs beside a left one or takes its pid's place.
+ * running and clears its pid, then follows Ready turns. Recovery's own Ready turns are asked for, and
+ * a new check never runs beside a left one or takes its pid's place. No check runs until `begin`,
+ * which start-up calls once the batches' recovery has stopped the gates the last daemon left, so a
+ * check never runs beside an orphaned ship or pass gate either.
  */
 export async function startTurnChecks(
   deps: TurnChecksDeps & { readonly bus: EventBus; readonly processes: CheckTerminator },
-): Promise<{ readonly checks: TurnChecks; readonly unsubscribe: () => void }> {
+): Promise<{
+  readonly checks: TurnChecks;
+  readonly unsubscribe: () => void;
+  readonly begin: () => void;
+}> {
   for (const left of listPassCheckPids(deps.state.db)) {
     await deps.processes.terminate({ pid: left.pid, startedAt: left.start, group: true });
     deps.state.write((w) => {
@@ -410,6 +426,14 @@ export async function startTurnChecks(
     });
     deps.logger.info({ passId: left.passId }, 'stopped a turn check a stopped daemon left running');
   }
-  const checks = createTurnChecks(deps);
-  return { checks, unsubscribe: subscribeTurnChecks(deps.bus, deps.state.db, checks) };
+  let begin = (): void => undefined;
+  const begun = new Promise<void>((resolve) => {
+    begin = resolve;
+  });
+  const checks = createTurnChecks(deps, begun);
+  return {
+    checks,
+    unsubscribe: subscribeTurnChecks(deps.bus, deps.state.db, checks),
+    begin,
+  };
 }

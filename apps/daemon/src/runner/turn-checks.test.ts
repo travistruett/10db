@@ -46,7 +46,7 @@ import {
 
 let w: PassWorld;
 let dir: TempDir;
-let started: { checks: TurnChecks; unsubscribe: () => void } | null = null;
+let started: Awaited<ReturnType<typeof startTurnChecks>> | null = null;
 let prs: PassPullRequests | null = null;
 afterEach(async () => {
   started?.unsubscribe();
@@ -117,6 +117,8 @@ async function start(
     readonly identify?: (pid: number) => Promise<string | null>;
     readonly timeoutMs?: number;
     readonly sandbox?: GateSandbox;
+    /** False leaves the checks held, as start-up does until its recovery has run. */
+    readonly begin?: boolean;
   } = {},
 ): Promise<TurnChecks> {
   started = await startTurnChecks({
@@ -136,6 +138,7 @@ async function start(
     bus: w.h.bus,
     processes: systemProcesses,
   });
+  if (opts.begin !== false) started.begin();
   return started.checks;
 }
 
@@ -234,6 +237,22 @@ describe('the check after each turn', () => {
     expect(header()).toEqual([]);
     expect(checkNotices(w.settings).map((m) => m.sendable)).toEqual([false, false]);
     expect(lines('runs')).toHaveLength(3);
+  });
+
+  it('holds a Ready asked during start-up until start-up has stopped what the last daemon left', async () => {
+    await world(() =>
+      checkScript('src/settings/page.tsx', '$([ -f "$D/begun" ] && echo after || echo before)'),
+    );
+    await start({ begin: false });
+
+    await readyTurn(w.settings, 'src/settings/page.tsx');
+    // A check that ran now would say "before"; a held one has not run.
+    await waitFor(() => lines('runs').length > 0, 1_000).catch(() => undefined);
+    touch('begun');
+    started?.begin();
+    await waitFor(() => checks().at(-1) === 'failed');
+
+    expect(lines('runs')).toEqual(['after']);
   });
 
   it('says in the header that a run that threw could not run, offering nothing, and the next Ready runs', async () => {
