@@ -1,6 +1,7 @@
 import {
   ConflictError,
   PassTurnEnding,
+  WorkstreamFailure,
   WorkstreamState as S,
   type NextAction,
   type PassDto,
@@ -80,6 +81,12 @@ export function startTurn(
     messageId: input.messageId,
   });
   withdrawPageItems(ctx, input.workstreamId);
+  // A new turn is past any failed one: the page shows no failure while it runs.
+  if (row.failureKind !== null || row.failureReason !== null)
+    patchWorkstream(ctx, input.workstreamId, input.fence, {
+      failureKind: null,
+      failureReason: null,
+    });
   if (row.state === S.WaitingHuman)
     transitionWorkstream(ctx, input.workstreamId, {
       to: S.Running,
@@ -145,9 +152,12 @@ function settleTurn(
           turnId: turn.id,
           reason: settle.reason,
         });
+        // The run says why, as a failed run does, though it never fails: the page reads it.
         patchWorkstream(ctx, id, settle.fence, {
           nextAction: { kind: 'pass_review', inboxId: flag.id },
           currentSessionId: null,
+          failureKind: WorkstreamFailure.SessionFailed,
+          failureReason: settle.reason,
         });
         clearLease(ctx, id);
         return;

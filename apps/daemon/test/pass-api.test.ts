@@ -22,6 +22,7 @@ import {
   insertBatch,
   insertTakeOut,
   latestPassTurn,
+  leavePass,
   getWorkstreamRow,
   insertInboxItem,
   insertPass,
@@ -53,6 +54,8 @@ import { startDaemonWithProfiles } from './daemon-with-profiles';
 /** Pages whose fake agent works without ending its turn, and ends each turn Ready. */
 const WORKING = 'Settings: keeps working';
 const READY = 'Settings: ready each turn';
+/** A page whose first session is refused, and whose second ends its turn Ready. */
+const REFUSED = 'Settings: refused once';
 const PAGE_FILE = 'src/settings/page.tsx';
 
 let data: { path: string; cleanup(): void };
@@ -70,6 +73,14 @@ beforeEach(async () => {
         [
           { do: 'consume' },
           { do: 'tool', toolName: 'Write', input: { file_path: PAGE_FILE, content: 'half\n' } },
+          { do: 'await_message', contains: 'never sent' },
+        ],
+      ],
+      [REFUSED]: [
+        [{ do: 'billing_refused', message: 'a billing check refused the session' }],
+        [
+          { do: 'consume' },
+          { do: 'turn_complete', text: 'Tidied the form.' },
           { do: 'await_message', contains: 'never sent' },
         ],
       ],
@@ -544,5 +555,49 @@ describe("a page's messages and Stop over HTTP", () => {
       headers: { Authorization: `Bearer ${daemon.token}` },
     });
     expect(res.status).toBe(409);
+  });
+});
+
+describe("a page's failed turn over HTTP", () => {
+  async function failedPage() {
+    const page = await openedPage(REFUSED);
+    await waitFor(() => latestPassTurn(daemon.state.db, page.task.id)?.ending === 'failed');
+    await waitFor(() => runOf(page.task).nextAction.kind === 'pass_review');
+    const flag = listInbox(daemon.state.db, {}).find((i) => i.title.startsWith('Turn failed'));
+    if (!flag) throw new Error('no failed turn flag');
+    return { ...page, flag };
+  }
+
+  it('shows why on the page, and Retry Turn queues the failed message and withdraws the flag', async () => {
+    const { task, pass, flag } = await failedPage();
+    const view = await api().get(`/passes/${pass.id}`, PassViewDto);
+    expect(view.pages[0]?.failure).toEqual({ failureKind: 'session_failed', retryItemId: flag.id });
+
+    const res = await post(`/inbox/${flag.id}/answer`, { choice: 'retry_turn' });
+
+    expect(res.status).toBe(200);
+    expect(getInboxItem(daemon.state.db, flag.id).state).not.toBe('OPEN');
+    const [first] = listTaskThread(daemon.state.db, task.id).filter((m) => m.author === 'builder');
+    // The scheduler takes it from here; the page runs its second session.
+    await waitFor(() => latestPassTurn(daemon.state.db, task.id)?.ending === 'ready');
+    expect(
+      listPassTurns(daemon.state.db, pass.id).map((t) => [t.seq, t.ending, t.messageId]),
+    ).toEqual([
+      [1, 'failed', first?.id],
+      [2, 'ready', first?.id],
+    ]);
+    expect(runOf(task).failureKind).toBeNull();
+  });
+
+  it('refuses Retry Turn with 409 once the pass no longer holds the task', async () => {
+    const { task, flag } = await failedPage();
+    daemon.state.write((ctx) => {
+      leavePass(ctx, task.id);
+    });
+
+    const res = await post(`/inbox/${flag.id}/answer`, { choice: 'retry_turn' });
+
+    expect(res.status).toBe(409);
+    expect(getInboxItem(daemon.state.db, flag.id).state).toBe('OPEN');
   });
 });

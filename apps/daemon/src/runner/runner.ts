@@ -3742,6 +3742,11 @@ export function createRunner(opts: RunnerOptions): Runner {
       const target = item.targets[0];
       if (!turnId.success || !target) return;
       const id = target.workstreamId;
+      if (!passOfWorkstream(db, id))
+        throw new ConflictError(
+          'The task is no longer in a Workbench pass, so its turn is not retried',
+        );
+      const providerSessionId = lastProviderSession(id);
       opts.state.write((ctx) => {
         const row = getWorkstreamRow(ctx.tx, id);
         if (
@@ -3757,14 +3762,20 @@ export function createRunner(opts: RunnerOptions): Runner {
           sessionId: null,
           messageId: failed.messageId,
         });
+        // The message goes to the session the turn failed in when it can be resumed, else to a
+        // fresh one that starts from the thread's digest.
         transitionWorkstream(ctx, id, {
           to: S.Queued,
           fence: null,
           patch: {
             nextAction:
               failed.messageId === null
-                ? { kind: 'start' }
-                : { kind: 'feedback', messageId: failed.messageId, providerSessionId: null },
+                ? providerSessionId === null
+                  ? { kind: 'start' }
+                  : { kind: 'resume', providerSessionId, reason: 'the builder retried the turn' }
+                : { kind: 'feedback', messageId: failed.messageId, providerSessionId },
+            failureKind: null,
+            failureReason: null,
           },
           reason: 'the builder retried the turn',
         });
