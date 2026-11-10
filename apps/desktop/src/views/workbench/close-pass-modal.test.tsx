@@ -183,6 +183,22 @@ describe('ClosePassModal', () => {
     ]);
   });
 
+  it('opened again, never shows the lists an earlier opening read', async () => {
+    const { asked } = serve(preview(), []);
+    const { rerender } = renderWithDaemon(<ClosePassModal view={view} onClose={vi.fn()} />);
+    let dialog = await screen.findByRole('dialog', { name: 'Close Pass' });
+    await within(dialog).findByRole('group', { name: 'Billing' });
+    rerender(<></>);
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Close Pass' })).toBeNull();
+    });
+    rerender(<ClosePassModal view={view} onClose={vi.fn()} />);
+    dialog = await screen.findByRole('dialog', { name: 'Close Pass' });
+    expect(within(dialog).queryByRole('group', { name: 'Billing' })).toBeNull();
+    expect(await within(dialog).findByRole('group', { name: 'Billing' })).toBeTruthy();
+    expect(asked).toEqual([view.pass.id, view.pass.id]);
+  });
+
   it('with nothing loose, is the summary and its footer', async () => {
     serve(
       preview({

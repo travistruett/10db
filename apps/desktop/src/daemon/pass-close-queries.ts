@@ -51,10 +51,11 @@ export function useTakeOutPreview({ passId, taskId }: PassPage) {
   const client = usePassCloseClient();
   return useQuery({
     // Not under `passKeys.all`: the take-out it leads to refetches the passes, and a page gone from the
-    // pass has nothing to preview. Each Take Out… reads it afresh, and the daemon refuses a Drop no
-    // longer offered.
+    // pass has nothing to preview. Kept nowhere once the confirm closes, so each Take Out… reads it
+    // afresh and never offers a Drop from an earlier read.
     queryKey: ['take-out-preview', passId, taskId],
     staleTime: 0,
+    gcTime: 0,
     queryFn: async () =>
       readJson(
         await client.passes[':passId'].tasks[':taskId']['take-out'].$get({
@@ -171,7 +172,9 @@ export function useClosePreview(passId: PassId) {
   const client = usePassCloseClient();
   return useQuery({
     queryKey: ['close-preview', passId],
+    // Kept nowhere once the modal closes: each Close Pass… shows the lists as they are now.
     staleTime: 0,
+    gcTime: 0,
     queryFn: async () =>
       readJson(
         await client.passes[':passId'].close.$get({ param: { passId } }),

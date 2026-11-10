@@ -681,6 +681,57 @@ describe('PassWorkspace Take Out', () => {
     expect(screen.queryByRole('dialog', { name: 'Take Out Billing' })).toBeNull();
   });
 
+  it('reads the shared changes afresh on each Take Out…, and again after a refused take-out', async () => {
+    const button = (refusal: string | null) => [
+      { seq: 1, paths: ['src/shared/button.tsx'], dropRefusal: refusal, laterPages: [] },
+    ];
+    // The first read offers Drop; every later read refuses it, as the daemon then does.
+    let reads = 0;
+    let refuse = false;
+    server.use(
+      http.get(daemonUrl('/passes/:passId/tasks/:taskId/take-out'), () => {
+        reads += 1;
+        return HttpResponse.json(
+          TakeOutPreviewDto.parse({ shared: button(reads === 1 ? null : 'People changed it') }),
+        );
+      }),
+      http.post(daemonUrl('/passes/:passId/tasks/:taskId/take-out'), () =>
+        refuse
+          ? HttpResponse.json(
+              { error: 'conflict', message: 'Drop is no longer offered for change 1' },
+              { status: 409 },
+            )
+          : HttpResponse.json({}),
+      ),
+    );
+    await renderWorkspace();
+    const drop = (dialog: HTMLElement) =>
+      within(within(dialog).getByRole('group', { name: 'src/shared/button.tsx' })).getByRole(
+        'radio',
+        { name: 'Drop' },
+      );
+    let dialog = await openTakeOut('Billing');
+    await within(dialog).findByRole('group', { name: 'src/shared/button.tsx' });
+    expect(drop(dialog)).toHaveProperty('disabled', false);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Take Out Billing' })).toBeNull();
+    });
+    // Opened again, it never shows the first read while it reads again.
+    dialog = await openTakeOut('Billing');
+    expect(within(dialog).queryByRole('group', { name: 'src/shared/button.tsx' })).toBeNull();
+    await within(dialog).findByRole('group', { name: 'src/shared/button.tsx' });
+    expect(drop(dialog)).toHaveProperty('disabled', true);
+    // A refused take-out reads the changes again, so what it offers next is what the daemon takes.
+    refuse = true;
+    const before = reads;
+    await confirmTakeOut(dialog);
+    expect(await within(dialog).findByText('Drop is no longer offered for change 1')).toBeTruthy();
+    await waitFor(() => {
+      expect(reads).toBe(before + 1);
+    });
+  });
+
   it('says which files kept changing when the page could not be taken out', async () => {
     serveTakeOut(false);
     await renderWorkspace();

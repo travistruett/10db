@@ -58,7 +58,9 @@ export function TakeOutModal({ passId, taskId, area, onClose }: TakeOutModalProp
                   if (result.tookOut) onClose();
                 })
                 .catch(() => {
-                  // The failure is said from `taking.error`.
+                  // The failure is said from `taking.error`; what the daemon offers is read again,
+                  // since a refused Drop means the changes moved under the confirm.
+                  void preview.refetch();
                 });
             }}
           >
