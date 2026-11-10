@@ -59,7 +59,7 @@ function serve(thread: TaskThreadDto) {
 describe('Thread', () => {
   it('shows the messages oldest first: a picture named by its file, a reply with its turn’s files, a dimmed notice', async () => {
     serve(TaskThreadDto.parse({ taskId: page.taskId, messages: [message, reply, notice] }));
-    renderWithDaemon(<Thread page={page} turns={[turn]} openPage={null} canSend />);
+    renderWithDaemon(<Thread page={page} turns={[turn]} canSend />);
     const thread = await screen.findByRole('list', { name: 'Thread' });
     expect([...thread.children].map((item) => item.textContent)).toEqual([
       expect.stringContaining('The padding is too tight'),
@@ -84,7 +84,7 @@ describe('Thread', () => {
       createdAt: minutesBeforeNow(1),
     });
     serve(TaskThreadDto.parse({ taskId: page.taskId, messages: [reply, shared] }));
-    renderWithDaemon(<Thread page={page} turns={[]} openPage={null} canSend />);
+    renderWithDaemon(<Thread page={page} turns={[]} canSend />);
     const path = await screen.findByText('src/ui/button.ts');
     expect(path.tagName).toBe('CODE');
     expect(path.parentElement?.textContent).toBe(
@@ -94,13 +94,24 @@ describe('Thread', () => {
 
   it('before the first message, says where the page is', async () => {
     serve(TaskThreadDto.parse({ taskId: page.taskId, messages: [] }));
-    renderWithDaemon(
-      <Thread page={page} turns={[]} openPage={<button type="button">Open Page</button>} canSend />,
-    );
+    renderWithDaemon(<Thread page={page} turns={[]} canSend />);
     expect(await screen.findByText('Settings is at')).toBeTruthy();
     expect(screen.getByText('/settings')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Open Page' })).toBeTruthy();
     expect(screen.queryByRole('list', { name: 'Thread' })).toBeNull();
+  });
+
+  it('keeps saying where the page is above a notice, until the builder sends a message', async () => {
+    serve(TaskThreadDto.parse({ taskId: page.taskId, messages: [notice] }));
+    renderWithDaemon(<Thread page={page} turns={[]} canSend />);
+    expect(await screen.findByText(notice.body)).toBeTruthy();
+    expect(screen.getByText('Settings is at')).toBeTruthy();
+  });
+
+  it('says no more where the page is once the builder has written', async () => {
+    serve(TaskThreadDto.parse({ taskId: page.taskId, messages: [notice, message] }));
+    renderWithDaemon(<Thread page={page} turns={[]} canSend />);
+    expect(await screen.findByText('The padding is too tight')).toBeTruthy();
+    expect(screen.queryByText('Settings is at')).toBeNull();
   });
 
   it.each([
@@ -143,7 +154,7 @@ describe('Thread', () => {
       }),
     );
     serve(TaskThreadDto.parse({ taskId: page.taskId, messages: [reply, finding] }));
-    renderWithDaemon(<Thread page={page} turns={[]} openPage={null} canSend={canSend} />);
+    renderWithDaemon(<Thread page={page} turns={[]} canSend={canSend} />);
     const entry = (await screen.findByText(finding.body)).closest('li');
     if (entry === null) throw new Error('the notice is not an entry of the thread');
     const send = within(entry).queryByRole('button', { name: 'Send to Agent' });

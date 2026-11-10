@@ -98,6 +98,8 @@ describe('PassWorkspace queue', () => {
     expect(current.map((row) => row.textContent)).toEqual(['BillingWorking · 4 min · median 5']);
     const thread = screen.getByRole('region', { name: 'Billing' });
     expect(await within(thread).findByText('Billing is at')).toBeTruthy();
+    // Open Page is the composer's; the intro above the first message names the route only.
+    expect(within(thread).getAllByRole('button', { name: 'Open Page' })).toHaveLength(1);
   });
 
   it('names a page that waits on the builder heavier, and dims the rest', async () => {
