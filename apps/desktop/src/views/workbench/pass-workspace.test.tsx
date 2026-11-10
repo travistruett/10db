@@ -557,6 +557,51 @@ describe('PassWorkspace window focus', () => {
     fireEvent.focus(window);
     expect(onSelect).not.toHaveBeenCalled();
   });
+
+  /** The workspace with the selection kept in state, starting on `first`. */
+  function drawSelecting(first: (pages: Pages) => TaskId) {
+    const pages = pagesByStatus();
+    function Selecting() {
+      const [selected, setSelected] = useState<TaskId>(first(pages));
+      return (
+        <PassWorkspace
+          view={passViewDto({ pages: Object.values(pages) })}
+          inbox={[askItem(pages.asks)]}
+          project={projectViewDto()}
+          selected={selected}
+          onSelect={setSelected}
+        />
+      );
+    }
+    renderWithDaemon(<Selecting />);
+    return pages;
+  }
+
+  it.each<{ name: string; first: (pages: Pages) => TaskId; shown: string }>([
+    {
+      name: 'on the page it selects, though a row of the queue had the cursor',
+      first: (p) => p.working.taskId,
+      shown: 'People',
+    },
+    {
+      name: 'on the page shown when nothing moves',
+      first: (p) => p.ready.taskId,
+      shown: 'Settings',
+    },
+  ])(
+    'puts the cursor in the composer as the window gains focus: $name',
+    async ({ first, shown }) => {
+      drawSelecting(first);
+      await screen.findByRole('list', { name: 'Pages in this pass' });
+      // The builder had moved through the queue with J before leaving for the browser.
+      queueRows()[0]?.focus();
+      fireEvent.focus(window);
+      const input = await screen.findByRole('textbox', { name: `Message to ${shown}` });
+      await waitFor(() => {
+        expect(document.activeElement).toBe(input);
+      });
+    },
+  );
 });
 
 describe('PassWorkspace while the pass is not open', () => {

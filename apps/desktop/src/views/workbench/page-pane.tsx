@@ -31,13 +31,15 @@ export interface PagePaneProps {
   readonly openedAt: string | null;
   /** The workspace's clock, in epoch ms. */
   readonly now: number;
+  /** Counts the window gaining focus: each time, the composer takes the cursor. */
+  readonly composerFocus: number;
   readonly draft: Draft;
   readonly onDraft: (draft: Draft) => void;
 }
 
 /** The shown page: its thread, the live line while a turn works, and its composer fixed at the foot. */
 export function PagePane(props: PagePaneProps) {
-  const { passId, appUrl, row, passOpen, openedAt, now, draft, onDraft } = props;
+  const { passId, appUrl, row, passOpen, openedAt, now, composerFocus, draft, onDraft } = props;
   const { page, status } = row;
   const actions = usePageActions(passId, page.taskId);
   const turns = useTurns(page.taskId).data ?? [];
@@ -71,12 +73,16 @@ export function PagePane(props: PagePaneProps) {
   // and K keep working.
   const input = useRef<HTMLTextAreaElement>(null);
   const shownBefore = useRef(page.taskId);
+  const focusAsked = useRef(composerFocus);
   useEffect(() => {
-    if (shownBefore.current === page.taskId) return;
+    // The window gaining focus, a notification's click among its ways, asks for the composer outright.
+    const asked = focusAsked.current !== composerFocus;
+    focusAsked.current = composerFocus;
+    const moved = shownBefore.current !== page.taskId;
     shownBefore.current = page.taskId;
-    if (document.activeElement?.closest(`[${QUEUE_ATTRIBUTE}]`)) return;
-    input.current?.focus();
-  }, [page.taskId]);
+    if (asked || (moved && !document.activeElement?.closest(`[${QUEUE_ATTRIBUTE}]`)))
+      input.current?.focus();
+  }, [page.taskId, composerFocus]);
   return (
     <Box
       component="section"
