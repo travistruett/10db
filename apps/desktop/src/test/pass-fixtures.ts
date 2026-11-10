@@ -96,6 +96,7 @@ export function passPageDto(overrides: Partial<PassPageDto> = {}): PassPageDto {
     pausedUntil: null,
     failure: null,
     signOff: 'none',
+    waitsFor: null,
     ...overrides,
   });
 }
@@ -233,7 +234,19 @@ export function passViewDto(
           ]
         : [],
     );
-  return PassViewDto.parse({ pass: passDto(overrides.pass), pages, turns });
+  return PassViewDto.parse({
+    pass: passDto(overrides.pass),
+    pages,
+    turns,
+    holds: [],
+    sharedChanges: [],
+    signOffWaits: [],
+    pullRequest: null,
+    checks: { gate: { state: 'not_run', logPath: null }, review: { reviewedSha: null } },
+    closeStep: null,
+    stackedOn: null,
+    notices: [],
+  });
 }
 
 export function passStartDto(overrides: Partial<PassStartDto> = {}): PassStartDto {

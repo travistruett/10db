@@ -447,7 +447,9 @@ describe('PassWorkspace Take Out', () => {
     await screen.findByRole('list', { name: 'Pages in this pass' });
     await takeOut('Billing');
     await waitFor(() => {
-      expect(sent).toEqual([{ passId: view.pass.id, taskId: pages.working.taskId, body: {} }]);
+      expect(sent).toEqual([
+        { passId: view.pass.id, taskId: pages.working.taskId, body: { shared: [] } },
+      ]);
     });
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: 'Take Out Billing' })).toBeNull();

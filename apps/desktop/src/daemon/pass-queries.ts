@@ -32,9 +32,7 @@ import {
   type QueryKey,
 } from '@tanstack/react-query';
 import { z } from 'zod';
-import { readJson } from './client';
-import type { DaemonConnection } from './connection';
-import { createPassRoutesClient } from './pass-routes';
+import { readJson, type DaemonClient } from './client';
 import { useDaemon } from './provider';
 import { queryKeys } from './queries';
 import { threadKeys, type TaskMessageSend } from './thread-queries';
@@ -127,35 +125,32 @@ const PassViewList = z.array(PassViewDto);
 const TurnList = z.array(PassTurnWithFilesDto);
 
 /** `GET /passes?live=true`, for a hook or a one-off read. */
-export function livePassesOptions(connection: DaemonConnection) {
+export function livePassesOptions(client: DaemonClient) {
   return queryOptions({
     queryKey: passKeys.live,
     queryFn: async () =>
-      readJson(
-        await createPassRoutesClient(connection).passes.$get({ query: { live: 'true' } }),
-        PassViewList,
-      ),
+      readJson(await client.passes.$get({ query: { live: 'true' } }), PassViewList),
   });
 }
 
 /** The project's pass the Workbench shows (`livePassOf`): null with none, undefined until read. */
 export function useLivePass(projectId: ProjectId) {
-  const { connection } = useDaemon();
+  const { client } = useDaemon();
   return useQuery({
-    ...livePassesOptions(connection),
+    ...livePassesOptions(client),
     select: (passes) => livePassOf(passes, projectId),
   });
 }
 
 /** What Start Pass and Add Page offer: the project's pages, what is changed in them, what it lacks. */
 export function usePassStart(projectId: ProjectId, enabled: boolean) {
-  const { connection } = useDaemon();
+  const { client } = useDaemon();
   return useQuery({
     enabled,
     queryKey: passKeys.start(projectId),
     queryFn: async () =>
       readJson(
-        await createPassRoutesClient(connection).projects[':projectId']['pass-start'].$get({
+        await client.projects[':projectId']['pass-start'].$get({
           param: { projectId },
         }),
         PassStartDto,
@@ -165,14 +160,14 @@ export function usePassStart(projectId: ProjectId, enabled: boolean) {
 
 /** The pages a goal's tasks committed in, which Work on This starts the picker with; none without a goal. */
 export function useGoalPassPages(goalId: GoalId | null) {
-  const { connection } = useDaemon();
+  const { client } = useDaemon();
   return useQuery({
     queryKey: goalId === null ? ['passes', 'goal-pages', 'none'] : passKeys.goalPages(goalId),
     queryFn: async () =>
       goalId === null
         ? GoalPassPagesDto.parse({ pages: [], fromTasks: [] })
         : readJson(
-            await createPassRoutesClient(connection).goals[':goalId']['pass-pages'].$get({
+            await client.goals[':goalId']['pass-pages'].$get({
               param: { goalId },
             }),
             GoalPassPagesDto,
@@ -183,12 +178,12 @@ export function useGoalPassPages(goalId: GoalId | null) {
 
 /** A page's turns with the files each changed, oldest first. */
 export function useTurns(taskId: TaskId) {
-  const { connection } = useDaemon();
+  const { client } = useDaemon();
   return useQuery({
     queryKey: passKeys.turns(taskId),
     queryFn: async () =>
       readJson(
-        await createPassRoutesClient(connection).tasks[':taskId'].turns.$get({
+        await client.tasks[':taskId'].turns.$get({
           param: { taskId },
         }),
         TurnList,
@@ -221,12 +216,12 @@ export function useOpenPass(projectId: ProjectId) {
 
 /** Add Page: new tasks for pages, and open tasks joining the pass. */
 export function useAddPages() {
-  const { connection } = useDaemon();
+  const { client } = useDaemon();
   const refetch = useRefetchAfter(['tasks']);
   return useMutation({
     mutationFn: async ({ passId, request }: { passId: PassId; request: PassJoinRequest }) =>
       readJson(
-        await createPassRoutesClient(connection).passes[':passId'].pages.$post({
+        await client.passes[':passId'].pages.$post({
           param: { passId },
           json: request,
         }),
@@ -237,12 +232,12 @@ export function useAddPages() {
 }
 
 export function useRenamePass() {
-  const { connection } = useDaemon();
+  const { client } = useDaemon();
   const refetch = useRefetchAfter();
   return useMutation({
     mutationFn: async ({ passId, body }: { passId: PassId; body: PassRename }) =>
       readJson(
-        await createPassRoutesClient(connection).passes[':passId'].$patch({
+        await client.passes[':passId'].$patch({
           param: { passId },
           json: body,
         }),
@@ -275,7 +270,7 @@ export function useTakeOutPage() {
       readJson(
         await client.passes[':passId'].tasks[':taskId']['take-out'].$post({
           param: { passId, taskId },
-          json: {},
+          json: { shared: [] },
         }),
         TakeOutResultDto,
       ),
@@ -285,13 +280,11 @@ export function useTakeOutPage() {
 
 /** Propose Page Areas: the pages 10db finds in the project, for the builder to keep or leave out. */
 export function useProposePageAreas(projectId: ProjectId) {
-  const { connection } = useDaemon();
+  const { client } = useDaemon();
   return useMutation({
     mutationFn: async () =>
       readJson(
-        await createPassRoutesClient(connection).projects[':projectId']['propose-page-areas'].$post(
-          { param: { projectId } },
-        ),
+        await client.projects[':projectId']['propose-page-areas'].$post({ param: { projectId } }),
         PagesProposalDto,
       ),
   });
@@ -344,13 +337,13 @@ export function useRetryTurn() {
 
 /** Marks a Ready turn opened: the builder has looked at it, which the timing hint reads. */
 export function useMarkOpened(taskId: TaskId) {
-  const { connection } = useDaemon();
+  const { client } = useDaemon();
   const refetch = useRefetchAfter();
   return useMutation({
     // What it answers is not read: the pass view, read again, carries the mark.
     mutationFn: async (turnId: PassTurnId) =>
       readJson(
-        await createPassRoutesClient(connection).tasks[':taskId'].turns[':turnId'].opened.$post({
+        await client.tasks[':taskId'].turns[':turnId'].opened.$post({
           param: { taskId, turnId },
         }),
         z.unknown(),
@@ -361,12 +354,12 @@ export function useMarkOpened(taskId: TaskId) {
 
 /** Discard Saved Work: drops the work a task kept from a pass, which its next start would put back. */
 export function useDiscardKeptWork(taskId: TaskId) {
-  const { connection } = useDaemon();
+  const { client } = useDaemon();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async () =>
       readJson(
-        await createPassRoutesClient(connection).tasks[':taskId']['kept-work'].$delete({
+        await client.tasks[':taskId']['kept-work'].$delete({
           param: { taskId },
         }),
         z.null(),

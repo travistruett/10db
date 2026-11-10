@@ -28,7 +28,7 @@ const BUSY_STATES: readonly WorkstreamState[] = [...LANE_STATES, WorkstreamState
  * Mounted once by AppLayout.
  */
 export function useDesktopSync(): void {
-  const { client, connection } = useDaemon();
+  const { client } = useDaemon();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const { select } = useSelectedProject();
@@ -92,7 +92,7 @@ export function useDesktopSync(): void {
       return;
     }
     // Without the passes the notification names the item, not the page: it is never dropped for them.
-    const passes = await queryClient.query(livePassesOptions(connection)).catch(() => []);
+    const passes = await queryClient.query(livePassesOptions(client)).catch(() => []);
     await notifyPassReady(
       item,
       ready,
