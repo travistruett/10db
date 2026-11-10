@@ -24,3 +24,11 @@ export { abandonPass } from './abandon';
 export { resumePassWork } from './resume';
 export { passView } from './view';
 export { grantSharedHold, holdRef, sharedRef } from './shared-hold';
+export {
+  closeHoldsOf,
+  keepHold,
+  landSharedChanges,
+  sharedNeeded,
+  type KeptHold,
+  type LandedShared,
+} from './shared-chain';

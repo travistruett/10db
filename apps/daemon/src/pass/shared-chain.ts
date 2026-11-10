@@ -1,0 +1,220 @@
+import {
+  ConflictError,
+  type ClaimId,
+  type PassHoldDto,
+  type PassId,
+  type TaskId,
+  type WorkstreamId,
+} from '@10db/contracts';
+import {
+  closeHold,
+  getHold,
+  getPass,
+  getPassProgress,
+  getProject,
+  getTask,
+  getWorkstreamRow,
+  holdRecord,
+  insertSystemNotice,
+  listPassTasks,
+  listPassTurns,
+  listSharedChanges,
+  markLanded,
+  openHolds,
+  releaseClaim,
+  upsertSharedChange,
+  type DbReader,
+} from '@10db/db';
+import { KeptRefMovedError, type ChainCommit } from '../git';
+import { passBranch, readKeptRef, type PassWorkDeps } from './kept-work';
+import { sharedPathOf, sharedPathsDiffering, sharedRef, type SharedDeps } from './shared-hold';
+
+// Workbench spec §7.2: what a hold changed in its shared area is kept as one change on the pass's
+// shared chain, numbered as the hold was, and released; a sign-off later lands the chain's prefix it
+// needs, in number order.
+
+/** The trailer that names the hold a chain commit keeps, so a rerun finds it. */
+const HOLD_TRAILER = '10db-hold';
+
+/** What keeping a hold left on the chain. */
+export interface KeptHold {
+  readonly seq: number;
+  /** The change's chain commit; null when the hold changed nothing. */
+  readonly sha: string | null;
+  /** True when this keep made a new chain commit. */
+  readonly made: boolean;
+  /** The shared files the hold changed, sorted. */
+  readonly paths: readonly string[];
+}
+
+const quoted = (paths: readonly string[]): string => paths.map((p) => `\`${p}\``).join(', ');
+
+/**
+ * Keeps what a hold changed (spec §7.2): a shared file of its area whose content on disk differs
+ * from the record taken at the grant (which holds the chain's tip for every file it did not record)
+ * is in the change, whole, even when it was dirty at the grant. The change is one commit on the
+ * shared chain by compare-and-swap, followed once when another keep moved it; then one write upserts
+ * the change's row and, unless `keepOpen` (the commit tool's early keep), closes the hold, releases
+ * its claim and posts a line on every other thread of the pass. A hold that changed nothing makes no
+ * commit and closes as empty. A closed hold is answered as it was kept.
+ */
+export async function keepHold(
+  deps: SharedDeps,
+  input: { readonly claimId: ClaimId; readonly keepOpen?: boolean },
+): Promise<KeptHold> {
+  const db = deps.state.db;
+  const hold = getHold(db, input.claimId);
+  const kept = listSharedChanges(db, hold.passId).find((c) => c.seq === hold.seq);
+  if (hold.closedAt !== null)
+    return { seq: hold.seq, sha: kept?.sha ?? null, made: false, paths: kept?.paths ?? [] };
+  const pass = getPass(db, hold.passId);
+  const task = getTask(db, hold.taskId);
+  const repo = getProject(db, pass.projectId).repoPath;
+  const record = holdRecord(db, hold.claimId);
+  const changed = await sharedPathsDiffering(deps, {
+    repo,
+    against: hold.recordSha,
+    shared: sharedPathOf(db, pass, hold.area),
+    also: kept?.paths ?? [],
+  });
+  const dirtyKept = changed.some((path) => record.some((r) => r.path === path));
+  // The paths of an earlier keep that are back as the grant found them go into the tree too, so
+  // the chain does not keep an edit the hold took back.
+  const treePaths = [...new Set([...changed, ...(kept?.paths ?? [])])].sort();
+  let made: ChainCommit = { sha: null, made: false, files: [] };
+  if (treePaths.length > 0) {
+    const commit = async () =>
+      deps.git.chainCommit({
+        repo,
+        ref: sharedRef(pass.id),
+        expect: await readKeptRef(deps.git, repo, sharedRef(pass.id)),
+        base: pass.startSha,
+        paths: treePaths,
+        message: `Shared change ${String(hold.seq)} of ${task.title}`,
+        trailer: { key: HOLD_TRAILER, value: hold.claimId },
+      });
+    try {
+      made = await commit();
+    } catch (error) {
+      if (!(error instanceof KeptRefMovedError)) throw error;
+      made = await commit();
+    }
+  }
+  const files = made.files.filter((f) => changed.includes(f.path));
+  const sha = made.sha;
+  const empty = sha === null || files.length === 0;
+  deps.state.write((ctx) => {
+    if (sha !== null && (kept !== undefined || files.length > 0))
+      upsertSharedChange(ctx, { passId: pass.id, seq: hold.seq, sha, files, dirtyKept });
+    if (input.keepOpen === true) return;
+    closeHold(ctx, hold.claimId, { empty });
+    releaseClaim(ctx, hold.claimId);
+    if (empty) return;
+    const line = `${task.title} changed shared ${quoted(files.map((f) => f.path))}${
+      dirtyKept ? '; it includes edits that were already in your folder' : ''
+    }.`;
+    for (const other of listPassTasks(ctx.tx, pass.id))
+      if (other.id !== task.id) insertSystemNotice(ctx, other.id, line);
+  });
+  return {
+    seq: hold.seq,
+    sha: empty ? null : sha,
+    made: made.made,
+    paths: files.map((f) => f.path),
+  };
+}
+
+/** The open holds of a workstream, by number. */
+function openHoldsOf(db: DbReader, ws: WorkstreamId): PassHoldDto[] {
+  const task = getTask(db, getWorkstreamRow(db, ws).taskId);
+  const passId = task.passId;
+  if (passId == null) return [];
+  return openHolds(db, passId).filter((h) => h.workstreamId === ws);
+}
+
+/**
+ * Keeps, then releases, every open hold of the workstream (spec §6.2 step 2): what its turn changed
+ * in each shared area is on the chain before the area is free again.
+ */
+export async function closeHoldsOf(deps: PassWorkDeps, ws: WorkstreamId): Promise<void> {
+  for (const hold of openHoldsOf(deps.state.db, ws))
+    await keepHold(deps, { claimId: hold.claimId });
+}
+
+/**
+ * What a page needs of the shared chain to sign off (spec §7.2): every number up to the highest
+ * granted when one of its turns was kept, or its own last change, and the holds among them still
+ * open, whose turns the sign-off waits for.
+ */
+export function sharedNeeded(
+  db: DbReader,
+  passId: PassId,
+  taskId: TaskId,
+): { upTo: number; openHolds: PassHoldDto[] } {
+  const granted = listPassTurns(db, passId)
+    .filter((t) => t.taskId === taskId && t.sharedSeq !== null)
+    .map((t) => t.sharedSeq ?? 0);
+  const own = listSharedChanges(db, passId)
+    .filter((c) => c.taskId === taskId && c.dropOf === null && c.droppedBy === null)
+    .map((c) => c.seq);
+  const upTo = Math.max(0, ...granted, ...own);
+  return { upTo, openHolds: openHolds(db, passId).filter((h) => h.seq <= upTo) };
+}
+
+/** A number of the chain a landing reached: the commit that landed its change, or null passed over. */
+export interface LandedShared {
+  readonly seq: number;
+  readonly landedSha: string | null;
+}
+
+/**
+ * Lands the pass's shared chain up to `upTo` on its branch (spec §7.2, §9.2), from the number landed
+ * so far, in number order: each change as one signed commit on the branch's tip with its paths as
+ * its chain commit holds them, so the branch's shared files are always a state the folder was in;
+ * an empty hold, a dropped change and a drop are passed over. Each number is recorded as it lands,
+ * and a rerun finds a commit it made by its operation id. Refused at a hold still open, and while
+ * the folder is off the pass's branch.
+ */
+export async function landSharedChanges(
+  deps: PassWorkDeps,
+  i: { readonly passId: PassId; readonly upTo: number },
+): Promise<LandedShared[]> {
+  const db = deps.state.db;
+  const pass = getPass(db, i.passId);
+  const repo = getProject(db, pass.projectId).repoPath;
+  const branch = passBranch(db, pass);
+  const changes = new Map(listSharedChanges(db, pass.id).map((c) => [c.seq, c]));
+  const open = new Set(openHolds(db, pass.id).map((h) => h.seq));
+  const landed: LandedShared[] = [];
+  for (let seq = getPassProgress(db, pass.id).sharedLanded + 1; seq <= i.upTo; seq += 1) {
+    if (open.has(seq))
+      throw new ConflictError(
+        `Shared change ${String(seq)} is still being made; its turn has not ended`,
+      );
+    const change = changes.get(seq);
+    let sha: string | null = change?.landedSha ?? null;
+    if (
+      change !== undefined &&
+      sha === null &&
+      change.dropOf === null &&
+      change.droppedBy === null &&
+      change.paths.length > 0
+    ) {
+      const done = await deps.git.landPaths({
+        repo,
+        branch,
+        from: change.sha,
+        paths: change.paths,
+        message: `Shared change ${String(seq)} of ${getTask(db, change.taskId).title}`,
+        opId: `shared-${pass.id}-${String(seq)}`,
+      });
+      sha = done.sha;
+    }
+    const at = sha;
+    deps.state.write((ctx) => {
+      markLanded(ctx, { passId: pass.id, seq, landedSha: at });
+    });
+    landed.push({ seq, landedSha: at });
+  }
+  return landed;
+}

@@ -745,6 +745,22 @@ export interface Git {
    * `ref` no longer holds `expect`. No file, index, HEAD or branch is touched.
    */
   chainCommit(input: ChainCommitInput): Promise<ChainCommit>;
+  /**
+   * Lands paths on a branch the folder has checked out, under the repo lock: a signed commit on its
+   * tip whose tree is the tip's with each of `paths` as commit `from` has it (gone where it lacks
+   * it), named by `opId`, by compare-and-swap, while HEAD names the branch. No file is written; the
+   * folder's own index follows for those paths, so the builder's git reads them as committed. A
+   * commit on the branch carrying the opId is answered as it is; a tree equal to the tip's makes none
+   * and answers null. Refused with `PassFolderOffBranchError` while HEAD names another branch.
+   */
+  landPaths(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly from: string;
+    readonly paths: readonly string[];
+    readonly message: string;
+    readonly opId: string;
+  }): Promise<{ readonly sha: string | null; readonly alreadyLanded: boolean }>;
   /** Sets `ref`, under `refs/10db/`, to commit `sha`, whatever it held. */
   keepRef(repo: string, ref: string, sha: string): Promise<void>;
   /** The blob each of `paths` holds in commit `rev`, sorted by path; null for one it lacks there. */
@@ -2654,6 +2670,51 @@ export function createGit(opts: GitOptions = {}): Git {
     });
   }
 
+  async function landPaths(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly from: string;
+    readonly paths: readonly string[];
+    readonly message: string;
+    readonly opId: string;
+  }): Promise<{ readonly sha: string | null; readonly alreadyLanded: boolean }> {
+    const named = [...new Set(input.paths.map(checkPathName))].sort();
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const ref = `refs/heads/${input.branch}`;
+      if (await isSymbolic(c, ref))
+        throw refusal(c.real, { kind: GitTrustFailure.Ref, ref, reason: 'symbolic' });
+      const head = await currentBranch(c);
+      if (head !== input.branch) throw new PassFolderOffBranchError(c.real, input.branch, head);
+      const tip = await revParse(c, `${ref}^{commit}`);
+      if (tip === null) throw new InvalidError(`Branch ${input.branch} does not exist`);
+      const existing = await findCommitByOp(c, tip, input.opId);
+      if (existing) return { sha: existing, alreadyLanded: true };
+      const from = await revParse(c, `${input.from}^{commit}`);
+      if (from === null) throw new InvalidError(`${input.from} names no commit`);
+      const tree = await treeTaking(c, tip, from, named);
+      if (tree === (await revParse(c, `${tip}^{tree}`))) return { sha: null, alreadyLanded: false };
+      const sign = signing(c, await configEntries(c));
+      const sha = (
+        await git(c, ['commit-tree', ...sign.flags, tree, '-p', tip], {
+          input: withOpTrailer(input.message, input.opId),
+          config: sign.config,
+        })
+      ).trim();
+      try {
+        await git(c, ['update-ref', '--no-deref', '-m', `10db: ${input.opId}`, ref, sha, tip]);
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        throw refusal(c.real, { kind: GitTrustFailure.Ref, ref, reason: 'raced' });
+      }
+      // Another git holding index.lock just leaves the index stale.
+      await git(c, ['reset', '-q', sha, '--', ...named], {
+        env: { GIT_LITERAL_PATHSPECS: '1' },
+      }).catch(() => undefined);
+      return { sha, alreadyLanded: false };
+    });
+  }
+
   /** The blob each of `paths` holds on disk; null for one that is not a file or a link. */
   async function blobsOnDisk(c: Pinned, paths: readonly string[]): Promise<Map<string, string>> {
     const listed = await withPrivateIndex(c, null, async (env) => {
@@ -3917,6 +3978,7 @@ export function createGit(opts: GitOptions = {}): Git {
     },
     recordPaths,
     chainCommit,
+    landPaths,
     async keepRef(repo, ref, sha) {
       if (!ref.startsWith(KEPT_REF_PREFIX))
         throw new InvalidError(`${ref} is not under ${KEPT_REF_PREFIX}`);
