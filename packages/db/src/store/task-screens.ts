@@ -13,7 +13,7 @@ import {
   type TaskScreenDto,
   type TaskScreenId,
 } from '@10db/contracts';
-import { and, asc, count, desc, eq, inArray, isNull, lte, sql } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, lte, sql } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { DbReader, WriteContext } from './store';
 import { getTask } from './tasks';
@@ -310,4 +310,14 @@ export function listGoalRouteScreens(db: DbReader, goalId: GoalId, route: string
     .orderBy(asc(schema.taskScreens.createdAt), asc(schema.taskScreens.id))
     .all()
     .map((r) => toDto(r.row, r.turnSeq));
+}
+
+/** Every hash a pruned picture names, once each: the files a sweep may still have to remove. */
+export function listPrunedHashes(db: DbReader): string[] {
+  return db
+    .selectDistinct({ sha256: schema.taskScreens.sha256 })
+    .from(schema.taskScreens)
+    .where(isNotNull(schema.taskScreens.prunedAt))
+    .all()
+    .map((r) => r.sha256);
 }

@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { mintId, ScreenKind, ScreenTheme, type TaskId, type TaskScreenDto } from '@10db/contracts';
 import {
   createTestStore,
@@ -133,5 +133,19 @@ describe('the pruning sweep', () => {
     clock.advance(DAY);
     expect(listTaskScreens(store.db, recent)).toEqual([]);
     expect(existsSync(fileOf(shared))).toBe(false);
+  });
+
+  it('deletes on a later sweep a file whose removal failed after its rows were pruned', () => {
+    world();
+    const old = task('Old');
+    const turn = keep(old, ScreenKind.Turn, 5);
+    done(old);
+    clock.advance(15 * DAY);
+    stop = startPruning({ state, dataDir: dir.path, clock, logger: silentLogger }).stop;
+    expect(existsSync(fileOf(turn))).toBe(false);
+    // As if the removal had failed: the file is still there, and only a pruned row names it.
+    writeFileSync(fileOf(turn), pngOfSize(400, 400, 5));
+    clock.advance(DAY);
+    expect(existsSync(fileOf(turn))).toBe(false);
   });
 });

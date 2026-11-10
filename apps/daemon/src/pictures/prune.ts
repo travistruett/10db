@@ -1,5 +1,5 @@
 import { ScreenKind, type TaskId, type TaskScreenId } from '@10db/contracts';
-import { listFinishedTurnScreens, markScreensPruned } from '@10db/db';
+import { listFinishedTurnScreens, listPrunedHashes, markScreensPruned } from '@10db/db';
 import type { Clock, Timer } from '../clock';
 import type { StateStore } from '../events';
 import type { Logger } from '../log';
@@ -40,19 +40,23 @@ export interface PruningDeps {
   readonly logger: Logger;
 }
 
-/** One sweep: marks the prunable turn pictures pruned and deletes the files nothing names any more. */
+/**
+ * One sweep: marks the prunable turn pictures pruned, then deletes every file only pruned rows name,
+ * so a file whose removal failed on an earlier sweep goes on a later one.
+ */
 function sweep(deps: PruningDeps): void {
   const rows = listFinishedTurnScreens(deps.state.db);
   const doneAt = new Map(rows.map((r) => [r.taskId, r.doneAt]));
-  const pruned = new Set(prunableTurnScreens(rows, doneAt, deps.clock.now().getTime()));
-  if (pruned.size === 0) return;
-  deps.state.write((ctx) => {
-    markScreensPruned(ctx, [...pruned]);
-  });
+  const pruned = prunableTurnScreens(rows, doneAt, deps.clock.now().getTime());
+  if (pruned.length > 0)
+    deps.state.write((ctx) => {
+      markScreensPruned(ctx, pruned);
+    });
   let removed = 0;
-  for (const sha of new Set(rows.filter((r) => pruned.has(r.id)).map((r) => r.sha256)))
+  for (const sha of listPrunedHashes(deps.state.db))
     if (removeUnnamed(deps.state.db, deps.dataDir, sha)) removed += 1;
-  deps.logger.info({ pruned: pruned.size, filesRemoved: removed }, 'pruned turn pictures');
+  if (pruned.length > 0 || removed > 0)
+    deps.logger.info({ pruned: pruned.length, filesRemoved: removed }, 'pruned turn pictures');
 }
 
 /** Sweeps at once, then every `PRUNE_EVERY_MS`, until stopped; a failed sweep is logged and tried again. */
