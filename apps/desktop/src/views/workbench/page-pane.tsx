@@ -7,6 +7,7 @@ import type { Draft } from './drafts';
 import { liveLine } from './live-line';
 import { useOpenPage } from './open-page';
 import { OpenPageButton } from './open-page-button';
+import { PageAsk } from './page-ask';
 import { usePageActions } from './page-actions';
 import { PageStatus } from './page-status';
 import type { QueueRow } from './queue-rows';
@@ -99,6 +100,7 @@ export function PagePane(props: PagePaneProps) {
           }}
         />
       )}
+      {row.ask === null ? null : <PageAsk item={row.ask} />}
       {passOpen && status === PageStatus.Failed && page.failure !== null ? (
         <RetryTurn itemId={page.failure.retryItemId} line={row.state.line} />
       ) : null}

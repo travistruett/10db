@@ -82,8 +82,8 @@ const WORKING_STATES: ReadonlySet<WorkstreamState> = new Set([
   WorkstreamState.Recovering,
 ]);
 
-/** An open question or permission ask from the page's run, if any. */
-function askOf(page: PassPageDto, items: readonly InboxItemDto[]): InboxItemDto | undefined {
+/** An open question or permission ask from the page's run, if any: the Workbench answers it in place. */
+export function askOf(page: PassPageDto, items: readonly InboxItemDto[]): InboxItemDto | undefined {
   if (page.workstreamId === null) return undefined;
   const run = page.workstreamId;
   return items.find(

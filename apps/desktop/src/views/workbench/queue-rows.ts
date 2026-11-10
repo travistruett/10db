@@ -1,5 +1,5 @@
 import type { InboxItemDto, PassPageDto, PassViewDto, TaskId } from '@10db/contracts';
-import { pageStatus, type PageState } from './page-status';
+import { askOf, pageStatus, type PageState } from './page-status';
 import { isDimmed, queueOrder } from './queue-order';
 import { medianTurnMinutes } from './timing';
 
@@ -12,6 +12,8 @@ export interface QueueRow {
   readonly readyAt: string | null;
   /** Nothing on the row waits on the builder: its text is dimmed. */
   readonly dimmed: boolean;
+  /** The open question or permission from the page's run, which the page answers in place. */
+  readonly ask: InboxItemDto | null;
 }
 
 /** The pass's pages in queue order at `now`, each with its state from the page and the open Inbox. */
@@ -30,6 +32,7 @@ export function queueRows(
         status: state.status,
         readyAt: page.turn?.readyAt ?? null,
         dimmed: isDimmed(state.status),
+        ask: askOf(page, inbox) ?? null,
       };
     }),
   );

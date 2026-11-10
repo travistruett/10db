@@ -62,6 +62,8 @@ export interface InboxCardProps {
   readonly onSubmit: () => void;
   /** Dismisses the row's flags; only offered for a flag with no options. */
   readonly onDismiss: () => void;
+  /** Whether the Inbox's keys answer the card, so each option shows its digit and Send its Enter. */
+  readonly shortcuts?: boolean;
 }
 
 /** Card text is untrusted (agent and tool output): it is only ever rendered as text. */
@@ -121,6 +123,7 @@ export function InboxCard({
   onNoteFocus,
   onSubmit,
   onDismiss,
+  shortcuts = true,
 }: InboxCardProps) {
   const review = mcpReview(item);
   const rejection = reviewRejection(item);
@@ -274,7 +277,7 @@ export function InboxCard({
                 <Radio.Card key={option.label} value={option.label} p="sm">
                   <Group wrap="nowrap" align="flex-start">
                     <Radio.Indicator />
-                    {index < 4 ? <Kbd size="xs">{index + 1}</Kbd> : null}
+                    {shortcuts && index < 4 ? <Kbd size="xs">{index + 1}</Kbd> : null}
                     <div>
                       <Group gap="xs">
                         <Text size="sm" fw={500}>
@@ -324,9 +327,11 @@ export function InboxCard({
             loading={pending}
             onClick={onSubmit}
             rightSection={
-              <Kbd size="xs" aria-hidden>
-                ↵
-              </Kbd>
+              shortcuts ? (
+                <Kbd size="xs" aria-hidden>
+                  ↵
+                </Kbd>
+              ) : null
             }
           >
             {hasOptions ? 'Send answer' : count > 1 ? 'Dismiss All' : 'Dismiss'}

@@ -1,5 +1,9 @@
 import {
+  PARK_TASK_OPTION,
   PASS_RETRY_TURN_CHOICE,
+  SHARED_ASK_ALLOW_CHOICE,
+  SHARED_ASK_KEEP_CHOICE,
+  SHARED_ASK_REPLY_CHOICE,
   PassSignOffDto,
   type PassPageDto,
   TakeOutPreviewDto,
@@ -948,5 +952,82 @@ describe('PassWorkspace announcer', () => {
     );
     expect(region.textContent).toBe('Billing is ready');
     expect(screen.getAllByRole('status')).toHaveLength(1);
+  });
+});
+
+describe('PassWorkspace question in place', () => {
+  it.each([
+    {
+      name: "slice 6's shared-code question, answered with a reply and its note",
+      item: (page: PassPageDto) =>
+        askItem(page, {
+          kind: 'question',
+          category: 'other',
+          title: 'People wants to change shared code in src',
+          body: 'Settings changed `src/button.ts` there 12 minutes ago.',
+          options: [
+            { label: SHARED_ASK_ALLOW_CHOICE, description: 'This change is for every page' },
+            { label: SHARED_ASK_KEEP_CHOICE, description: 'The agent keeps it inside its page' },
+            { label: SHARED_ASK_REPLY_CHOICE, description: 'Your note goes to the agent instead' },
+            PARK_TASK_OPTION,
+          ],
+        }),
+      pick: new RegExp(SHARED_ASK_REPLY_CHOICE),
+      note: 'Use the page button',
+      body: { choice: SHARED_ASK_REPLY_CHOICE, note: 'Use the page button', record: null },
+    },
+    {
+      name: 'a permission, answered with its choice',
+      item: (page: PassPageDto) =>
+        askItem(page, {
+          kind: 'permission',
+          category: 'environment',
+          title: 'Allow Bash?',
+          body: 'pnpm test',
+          options: [
+            { label: 'allow_once', description: 'Allow this call once' },
+            { label: 'deny', description: 'Deny; your note is passed to the agent' },
+          ],
+        }),
+      pick: /Allow once/,
+      note: null,
+      body: { choice: 'allow_once' },
+    },
+  ])('answers $name on the page, through the Inbox', async ({ item, pick, note, body }) => {
+    const pages = pagesByStatus();
+    const ask = item(pages.asks);
+    const answers: { id: string; body: unknown }[] = [];
+    server.use(
+      http.post(daemonUrl('/inbox/:id/answer'), async ({ params, request }) => {
+        answers.push({ id: String(params['id']), body: await request.json() });
+        return HttpResponse.json({ ...ask, state: 'ANSWERED' });
+      }),
+    );
+    renderWithDaemon(
+      <PassWorkspace
+        view={passViewDto({ pages: Object.values(pages) })}
+        inbox={[ask]}
+        project={projectViewDto()}
+        selected={pages.asks.taskId}
+        onSelect={vi.fn()}
+      />,
+    );
+    const pane = await screen.findByRole('region', { name: pages.asks.area });
+    expect(within(pane).getByText(ask.title)).toBeTruthy();
+    fireEvent.click(within(pane).getByRole('radio', { name: pick }));
+    if (note !== null)
+      fireEvent.change(within(pane).getByLabelText('Note for the agent (optional)'), {
+        target: { value: note },
+      });
+    fireEvent.click(within(pane).getByRole('button', { name: 'Send answer' }));
+    await waitFor(() => {
+      expect(answers).toEqual([{ id: ask.id, body }]);
+    });
+  });
+
+  it('draws no question on a page that has none', async () => {
+    const { pages } = await renderWorkspace((p) => p.ready.taskId);
+    const pane = screen.getByRole('region', { name: pages.ready.area });
+    expect(within(pane).queryByRole('button', { name: 'Send answer' })).toBeNull();
   });
 });

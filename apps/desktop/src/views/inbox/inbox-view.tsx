@@ -1,11 +1,4 @@
-import {
-  InboxKind,
-  isParkChoice,
-  type DecisionRecording,
-  type InboxAnswer,
-  type InboxItemDto,
-  type ProjectId,
-} from '@10db/contracts';
+import { InboxKind, type DecisionRecording, type ProjectId } from '@10db/contracts';
 import { Alert, Group, SegmentedControl, Stack, Text, Title } from '@mantine/core';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearch } from '@tanstack/react-router';
@@ -20,6 +13,7 @@ import {
 } from '../../daemon/queries';
 import { ProjectFilter } from '../../shell/project-filter';
 import { inProject } from './in-project';
+import { cardAnswer, recommended } from './card-answer';
 import { InboxCard } from './inbox-card';
 import { inboxRows, isDismissable, type InboxRow } from './inbox-rows';
 import { InboxShortcuts } from './inbox-shortcuts';
@@ -32,11 +26,6 @@ import { useInboxKeys } from './use-inbox-keys';
 
 /** Flag cards have no options; the daemon accepts any choice and closes them. */
 export const DISMISS_CHOICE = 'dismissed';
-
-/** A recommendation preselects only when it names one of the options. */
-function recommended(item: InboxItemDto): string | null {
-  return item.options.some((o) => o.label === item.recommendation) ? item.recommendation : null;
-}
 
 /** What the builder has typed or picked on one row's card. */
 interface Draft {
@@ -218,15 +207,7 @@ function OpenInbox({
       patch(key, { error: 'Choose an option first (1–5).' });
       return;
     }
-    const trimmed = note.trim();
-    const base: InboxAnswer =
-      trimmed === '' ? { choice: picked } : { choice: picked, note: trimmed };
-    // A question card always says how it is recorded, so the daemon never guesses from the category.
-    // Parking the task is 10db's control over the run, not an answer: nothing is recorded, so nothing is sent.
-    const body: InboxAnswer =
-      selected.kind === InboxKind.Question && !isParkChoice(picked)
-        ? { ...base, record: recording }
-        : base;
+    const body = cardAnswer(selected, picked, note, recording);
     answer.mutate(
       { id, answer: body },
       {
