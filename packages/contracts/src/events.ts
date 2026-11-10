@@ -14,7 +14,11 @@ export const EventType = {
   TaskMessageAdded: 'task.message_added',
   /** A Workbench pass opened in Your folder; `data.batchId` names its batch. */
   PassOpened: 'pass.opened',
-  /** A pass moved on as a whole (it is abandoning or abandoned); `data` names what changed. */
+  /**
+   * A pass moved on as a whole (closing, a close step, closed, settled, abandoning, abandoned) or a row
+   * of its close changed (a sign-off wait, its stack, its pull request, a header notice); `data` names
+   * what changed.
+   */
   PassChanged: 'pass.changed',
   /** A turn of a pass task began; `data.turnId` names it. */
   PassTurnStarted: 'pass.turn_started',
@@ -22,6 +26,14 @@ export const EventType = {
   PassTurnEnded: 'pass.turn_ended',
   /** A pass task's page is Ready for the builder; `data.turnId` names the turn that made it so. */
   PassPageReady: 'pass.page_ready',
+  /** A shared change of a pass was kept, replaced or dropped (`PassSharedChangedData`). */
+  PassSharedChanged: 'pass.shared_changed',
+  /** A pass task's page was signed off and landed (`PassPageSignedOffData`). */
+  PassPageSignedOff: 'pass.page_signed_off',
+  /** A pass closed (`PassClosedData`). */
+  PassClosed: 'pass.closed',
+  /** A closed pass settled: its work is in the base, or the folder moved on (`PassSettledData`). */
+  PassSettled: 'pass.settled',
   WorkstreamCreated: 'workstream.created',
   WorkstreamChanged: 'workstream.changed',
   SessionStarted: 'session.started',

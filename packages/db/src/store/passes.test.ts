@@ -1,5 +1,6 @@
 import {
   AbandonStep,
+  CloseStep,
   EventType,
   mintId,
   PassState,
@@ -13,6 +14,20 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as schema from '../schema';
 import {
   abandonPassAndBatch,
+  clearPassNotice,
+  closePass,
+  getPassChecks,
+  getPassProgress,
+  getPassPullRequest,
+  patchBatch,
+  reopenClosingPass,
+  setClosePlan,
+  setCloseStep,
+  setPassNotice,
+  setPassPullRequest,
+  setReviewedSha,
+  setStackedOn,
+  settlePass,
   countLanes,
   createTestStore,
   findOpenPass,
@@ -102,6 +117,8 @@ describe('insertPass', () => {
       baseSha: 'a'.repeat(40),
       repo: null,
       worktreePath: null,
+      // A pass's pull request never merges by itself.
+      autoMerge: false,
     });
     expect(listPassDirt(store.db, pass.id)).toEqual([
       { path: 'src/old.ts', blob: null },
@@ -533,5 +550,156 @@ describe("a pass's pages", () => {
     expect(passPageAreas(store.db, id)).toEqual(['people', 'profile', 'settings']);
     expect(listPassTasks(store.db, id).map((t) => t.id)).toEqual([inPass]);
     expect(outside).toBeDefined();
+  });
+});
+
+describe("a pass's close", () => {
+  const plan = (taskId: TaskId) => ({
+    token: 't1',
+    pages: [{ taskId, choice: 'take_out' as const }],
+    files: [{ path: 'README.md', placeIn: null }],
+    shared: [{ seq: 1, choice: 'keep' as const }],
+  });
+
+  it('confirms the plan, records each step while closing, and writes nothing once the pass is abandoning', () => {
+    const t = task();
+    const { pass } = store.write((ctx) => insertPass(ctx, passInput([t]))).value;
+    const confirmed = store.write((ctx) => {
+      setClosePlan(ctx, pass.id, plan(t));
+    });
+    expect(confirmed.events.map((e) => e.type)).toEqual([EventType.PassChanged]);
+    expect(getPass(store.db, pass.id).state).toBe(PassState.Closing);
+    expect(getPassProgress(store.db, pass.id)).toMatchObject({
+      closeStep: CloseStep.Confirmed,
+      closePlan: plan(t),
+    });
+    expect(() =>
+      store.write((ctx) => {
+        setClosePlan(ctx, pass.id, plan(t));
+      }),
+    ).toThrow(/closing/);
+    expect(store.write((ctx) => setCloseStep(ctx, pass.id, CloseStep.Landed)).value).toBe(true);
+    expect(() => store.write((ctx) => setCloseStep(ctx, pass.id, CloseStep.Confirmed))).toThrow(
+      /step 2/,
+    );
+    // An Abandon took the pass over: the close's next write finds no closing pass and stops.
+    store.db
+      .update(schema.passes)
+      .set({ state: PassState.Abandoning })
+      .where(eq(schema.passes.id, pass.id))
+      .run();
+    const late = store.write((ctx) => setCloseStep(ctx, pass.id, CloseStep.ScratchGated));
+    expect(late.value).toBe(false);
+    expect(late.events).toEqual([]);
+    expect(getPassProgress(store.db, pass.id).closeStep).toBe(CloseStep.Landed);
+    expect(store.write((ctx) => closePass(ctx, pass.id, { settled: false })).value).toBe(false);
+    expect(store.write((ctx) => reopenClosingPass(ctx, pass.id)).value).toBe(false);
+    expect(getPass(store.db, pass.id).state).toBe(PassState.Abandoning);
+  });
+
+  it('closes, then settles; a local close settles at once; a failed gate reopens it', () => {
+    const { pass } = store.write((ctx) => insertPass(ctx, passInput([task()]))).value;
+    store.write((ctx) => {
+      setClosePlan(ctx, pass.id, plan(task()));
+    });
+    expect(store.write((ctx) => reopenClosingPass(ctx, pass.id)).value).toBe(true);
+    expect(getPass(store.db, pass.id).state).toBe(PassState.Open);
+    expect(getPassProgress(store.db, pass.id).closeStep).toBeNull();
+
+    store.write((ctx) => {
+      setClosePlan(ctx, pass.id, plan(task()));
+    });
+    const closed = store.write((ctx) => closePass(ctx, pass.id, { settled: false }));
+    expect(closed.value).toBe(true);
+    expect(closed.events.map((e) => [e.type, e.data])).toContainEqual([
+      EventType.PassClosed,
+      { passId: pass.id, settled: false },
+    ]);
+    expect(getPass(store.db, pass.id).state).toBe(PassState.Closed);
+    expect(getPassProgress(store.db, pass.id)).toMatchObject({
+      closeStep: CloseStep.Closed,
+      closedAt: '2026-11-09T12:00:00.000Z',
+      settledAt: null,
+    });
+    const settled = store.write((ctx) => settlePass(ctx, pass.id, 'realigned'));
+    expect(settled.value).toBe(true);
+    expect(settled.events.map((e) => [e.type, e.data])).toContainEqual([
+      EventType.PassSettled,
+      { passId: pass.id, how: 'realigned' },
+    ]);
+    expect(getPass(store.db, pass.id).state).toBe(PassState.Settled);
+    expect(store.write((ctx) => settlePass(ctx, pass.id, 'moved')).value).toBe(false);
+    // The close's own write ships the batch; this test moves it by hand.
+    endPass(pass.id, PassState.Settled);
+
+    const local = store.write((ctx) => insertPass(ctx, passInput([task()]))).value.pass;
+    store.write((ctx) => {
+      setClosePlan(ctx, local.id, plan(task()));
+    });
+    const at = store.write((ctx) => closePass(ctx, local.id, { settled: true }));
+    expect(at.events.map((e) => e.type)).toEqual(
+      expect.arrayContaining([EventType.PassClosed, EventType.PassSettled]),
+    );
+    expect(getPass(store.db, local.id).state).toBe(PassState.Settled);
+    expect(getPassProgress(store.db, local.id).settledAt).toBe('2026-11-09T12:00:00.000Z');
+  });
+
+  it("keeps its stack, its review, its header's notices and its pull request", () => {
+    const first = store.write((ctx) => insertPass(ctx, passInput([task()]))).value.pass;
+    endPass(first.id, PassState.Closed);
+    const { pass, batch } = store.write((ctx) => insertPass(ctx, passInput([task()]))).value;
+    expect(getPassPullRequest(store.db, pass.id)).toBeNull();
+    expect(getPassChecks(store.db, pass.id)).toEqual({
+      gate: { state: 'not_run', logPath: null },
+      review: { reviewedSha: null },
+    });
+    const notice = {
+      id: 'checks',
+      kind: 'checks' as const,
+      text: 'build fails',
+      sendable: true,
+      cardId: null,
+      at: '2026-11-09T12:00:00.000Z',
+    };
+    const writes = [
+      store.write((ctx) => {
+        setStackedOn(ctx, pass.id, first.id);
+      }),
+      store.write((ctx) => {
+        setReviewedSha(ctx, pass.id, 'c'.repeat(40));
+      }),
+      store.write((ctx) => {
+        setPassNotice(ctx, pass.id, notice);
+      }),
+      store.write((ctx) => {
+        setPassNotice(ctx, pass.id, { ...notice, text: 'build and lint fail' });
+      }),
+      store.write((ctx) => {
+        setPassPullRequest(ctx, pass.id, { url: 'https://github.com/o/r/pull/3', draft: true });
+      }),
+    ];
+    for (const w of writes) expect(w.events.map((e) => e.type)).toContain(EventType.PassChanged);
+    expect(getPassProgress(store.db, pass.id)).toMatchObject({
+      stackedOn: first.id,
+      reviewedSha: 'c'.repeat(40),
+      notices: [{ ...notice, text: 'build and lint fail' }],
+    });
+    expect(getPassPullRequest(store.db, pass.id)).toEqual({
+      url: 'https://github.com/o/r/pull/3',
+      draft: true,
+      state: null,
+      failingChecks: [],
+    });
+    expect(getBatch(store.db, batch.id).prUrl).toBe('https://github.com/o/r/pull/3');
+    store.write((ctx) =>
+      patchBatch(ctx, batch.id, { gateExitCode: 1, gateLogPath: '/tmp/gate.log' }),
+    );
+    expect(getPassChecks(store.db, pass.id).gate).toEqual({
+      state: 'failed',
+      logPath: '/tmp/gate.log',
+    });
+    expect(store.write((ctx) => clearPassNotice(ctx, pass.id, 'checks')).value).toBe(true);
+    expect(store.write((ctx) => clearPassNotice(ctx, pass.id, 'checks')).value).toBe(false);
+    expect(getPassProgress(store.db, pass.id).notices).toEqual([]);
   });
 });

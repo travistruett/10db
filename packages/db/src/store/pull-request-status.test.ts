@@ -1,13 +1,15 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { BatchState, type BatchId, type ProjectId } from '@10db/contracts';
+import { BatchState, mintId, type BatchId, type ProjectId } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { migrateDatabase, openDatabase } from '../database';
 import {
   createStore,
   getBatch,
   insertBatch,
+  insertPass,
+  insertTask,
   listWatchedPullRequests,
   patchBatch,
   recordPullRequestStatus,
@@ -186,5 +188,71 @@ describe('listWatchedPullRequests', () => {
     ).value.id;
     store.write((ctx) => patchBatch(ctx, id, { prUrl: 'https://github.com/o/r/pull/9' }));
     expect(listWatchedPullRequests(store.db)).toEqual([]);
+  });
+
+  /** A pass's batch, in its own project, moved to `state`, with a pull request or none. */
+  function passBatch(state: BatchState, prUrl: string | null, read?: 'open' | 'merged'): BatchId {
+    const project = seedProject(store, {
+      delivery: 'pull_request',
+      areas: [{ name: 'settings', globs: ['src/settings/**'], role: 'page' }],
+    });
+    const taskId = store.write((ctx) =>
+      insertTask(ctx, project.id, {
+        title: 'Settings',
+        acceptanceCriteria: ['x'],
+        areas: ['settings'],
+      }),
+    ).value.id;
+    const { batch } = store.write((ctx) =>
+      insertPass(ctx, {
+        id: mintId('Pass'),
+        projectId: project.id,
+        name: 'Polish',
+        pageCap: 4,
+        returnBranch: 'main',
+        startSha: 'a'.repeat(40),
+        branch: '10db/polish-abc123',
+        baseBranch: 'main',
+        repo: 'o/r',
+        taskIds: [taskId],
+        dirt: [],
+      }),
+    ).value;
+    if (prUrl !== null) store.write((ctx) => patchBatch(ctx, batch.id, { prUrl }));
+    if (read) store.write((ctx) => recordPullRequestStatus(ctx, batch.id, status({ state: read })));
+    const path: Partial<Record<BatchState, BatchState[]>> = {
+      FAILED: ['SHIPPING', 'FAILED'],
+      ABANDONED: ['ABANDONED'],
+    };
+    for (const to of path[state] ?? [])
+      store.write((ctx) => transitionBatch(ctx, batch.id, { to }));
+    return batch.id;
+  }
+
+  it.each<{ name: string; arrange: () => BatchId; watched: boolean }>([
+    {
+      name: 'open with a pull request',
+      arrange: () => passBatch('OPEN', 'https://github.com/o/r/pull/1'),
+      watched: true,
+    },
+    {
+      name: 'failed with a pull request',
+      arrange: () => passBatch('FAILED', 'https://github.com/o/r/pull/2', 'open'),
+      watched: true,
+    },
+    { name: 'open with none yet', arrange: () => passBatch('OPEN', null), watched: false },
+    {
+      name: 'open with its pull request merged',
+      arrange: () => passBatch('OPEN', 'https://github.com/o/r/pull/3', 'merged'),
+      watched: false,
+    },
+    {
+      name: 'abandoned with a pull request left open',
+      arrange: () => passBatch('ABANDONED', 'https://github.com/o/r/pull/4'),
+      watched: false,
+    },
+  ])("follows a pass's batch $name: $watched", ({ arrange, watched }) => {
+    const id = arrange();
+    expect(listWatchedPullRequests(store.db).some((b) => b.id === id)).toBe(watched);
   });
 });

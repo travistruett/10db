@@ -3,6 +3,7 @@
   "type": "object",
   "properties": {
     "shared": {
+      "default": [],
       "type": "array",
       "items": {
         "type": "object",

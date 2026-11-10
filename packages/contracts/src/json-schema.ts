@@ -9,7 +9,6 @@ import {
   PassTurnDto,
   PassViewDto,
   SharedChoice,
-  TakeOutRequest,
   TakeOutResultDto,
 } from './passes';
 import { SessionActivityData, TurnActivityDto } from './pass-activity';
@@ -21,6 +20,24 @@ import {
   PassStartDto,
   PassTurnWithFilesDto,
 } from './pass-view';
+import { PassCardDetail } from './pass-cards';
+import {
+  PassCloseAnswerDto,
+  PassClosePreviewDto,
+  PassCloseRequest,
+  PassPullRequestDto,
+  PassPullRequestPreviewDto,
+  PassSignOffDto,
+  TakeOutPreviewDto,
+  TakeOutRequest,
+} from './pass-close';
+import {
+  PassClosedData,
+  PassPageSignedOffData,
+  PassSettledData,
+  PassSharedChangedData,
+} from './pass-events';
+import { PassHoldDto, PassSharedChangeDto } from './pass-shared';
 import {
   BatchDto,
   BatchStartInput,
@@ -345,7 +362,6 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'pass-check-detail': PassCheckDetail,
   'pass-open-request': PassOpenRequest,
   'pass-opened-dto': PassOpenedDto,
-  'take-out-request': TakeOutRequest,
   'take-out-result-dto': TakeOutResultDto,
   'pass-abandoned-dto': PassAbandonedDto,
   'shared-choice': SharedChoice,
@@ -357,6 +373,21 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'pass-turn-with-files-dto': PassTurnWithFilesDto,
   'turn-activity-dto': TurnActivityDto,
   'session-activity-data': SessionActivityData,
+  'pass-hold-dto': PassHoldDto,
+  'pass-shared-change-dto': PassSharedChangeDto,
+  'pass-card-detail': PassCardDetail,
+  'pass-sign-off-dto': PassSignOffDto,
+  'pass-pull-request-preview-dto': PassPullRequestPreviewDto,
+  'pass-pull-request-dto': PassPullRequestDto,
+  'take-out-preview-dto': TakeOutPreviewDto,
+  'take-out-request': TakeOutRequest,
+  'pass-close-preview-dto': PassClosePreviewDto,
+  'pass-close-request': PassCloseRequest,
+  'pass-close-answer-dto': PassCloseAnswerDto,
+  'pass-shared-changed-data': PassSharedChangedData,
+  'pass-page-signed-off-data': PassPageSignedOffData,
+  'pass-closed-data': PassClosedData,
+  'pass-settled-data': PassSettledData,
   ...mcpSchemas,
   ...builderMcpSchemas,
   ...shapeMcpSchemas,
