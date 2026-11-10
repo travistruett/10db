@@ -1,6 +1,7 @@
 import type { PassId, TaskId } from '@10db/contracts';
 import { Button, Group, Text } from '@mantine/core';
 import { useCancelSignOff } from '../../daemon/pass-close-queries';
+import { CodeSpans } from '../../shell/code-spans';
 
 export interface SignOffLineProps {
   readonly passId: PassId;
@@ -21,7 +22,7 @@ export function SignOffLine({ passId, taskId, line, waiting }: SignOffLineProps)
   return (
     <Group gap="sm" px="md" py="xs" wrap="nowrap" align="center">
       <Text size="sm" c={cancel.error ? 'red' : 'dimmed'} style={{ flex: 1, minWidth: 0 }}>
-        {cancel.error?.message ?? line}
+        <CodeSpans text={cancel.error?.message ?? line} />
       </Text>
       {waiting ? (
         <Button

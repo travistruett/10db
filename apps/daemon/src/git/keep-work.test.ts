@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -189,8 +190,9 @@ describe('pageChanges', () => {
 });
 
 describe('hashOnDisk', () => {
-  it("names each file's blob as the folder holds it, null for one that is not there", async () => {
+  it("names each file's blob and mode as the folder holds it, null for one that is not there", async () => {
     write('src/settings/page.tsx', 'edited\n');
+    chmodSync(join(repo.path, 'src/people/page.tsx'), 0o755);
     write('src/settings/new.tsx', 'untracked\n');
     unlinkSync(join(repo.path, 'src/settings/old.tsx'));
     const status = rawGit('status', '--porcelain');
@@ -204,10 +206,22 @@ describe('hashOnDisk', () => {
         'src/people/page.tsx',
       ]),
     ).toEqual([
-      { path: 'src/people/page.tsx', blob: rawGit('hash-object', 'src/people/page.tsx') },
-      { path: 'src/settings/new.tsx', blob: rawGit('hash-object', 'src/settings/new.tsx') },
-      { path: 'src/settings/old.tsx', blob: null },
-      { path: 'src/settings/page.tsx', blob: rawGit('hash-object', 'src/settings/page.tsx') },
+      {
+        path: 'src/people/page.tsx',
+        blob: rawGit('hash-object', 'src/people/page.tsx'),
+        mode: '100755',
+      },
+      {
+        path: 'src/settings/new.tsx',
+        blob: rawGit('hash-object', 'src/settings/new.tsx'),
+        mode: '100644',
+      },
+      { path: 'src/settings/old.tsx', blob: null, mode: null },
+      {
+        path: 'src/settings/page.tsx',
+        blob: rawGit('hash-object', 'src/settings/page.tsx'),
+        mode: '100644',
+      },
     ]);
     // Reading writes nothing the builder's git would see.
     expect(rawGit('status', '--porcelain')).toBe(status);
@@ -229,9 +243,9 @@ describe('a link or a file on the way to a page file', () => {
       const kept = await keep(paths, null);
       expect(rawGit('ls-tree', REF, 'src/settings/ext').split(/\s/)[0]).toBe('120000');
       expect(kept.made).toBe(true);
-      expect((await git.hashOnDisk(repo.path, paths)).map((f) => f.blob)).toEqual([
-        rawGit('rev-parse', `${REF}:src/settings/ext`),
-        rawGit('hash-object', 'src/settings/page.tsx'),
+      expect((await git.hashOnDisk(repo.path, paths)).map((f) => [f.blob, f.mode])).toEqual([
+        [rawGit('rev-parse', `${REF}:src/settings/ext`), '120000'],
+        [rawGit('hash-object', 'src/settings/page.tsx'), '100644'],
       ]);
       expect((await git.pageChanges(repo.path, tip, paths)).map((f) => f.path)).toEqual(paths);
     } finally {
@@ -247,8 +261,8 @@ describe('a link or a file on the way to a page file', () => {
     const paths = ['src/people/page.tsx', 'src/settings/page.tsx'];
 
     expect(await git.hashOnDisk(repo.path, paths)).toEqual([
-      { path: 'src/people/page.tsx', blob: null },
-      { path: 'src/settings/page.tsx', blob: null },
+      { path: 'src/people/page.tsx', blob: null, mode: null },
+      { path: 'src/settings/page.tsx', blob: null, mode: null },
     ]);
     const kept = await keep(paths, null);
     expect(filesOf(kept.sha ?? 'none')).not.toContain('src/people/page.tsx');

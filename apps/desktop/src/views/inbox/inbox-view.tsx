@@ -17,7 +17,7 @@ import { cardAnswer, recommended } from './card-answer';
 import { InboxCard } from './inbox-card';
 import { inboxRows, isDismissable, type InboxRow } from './inbox-rows';
 import { InboxShortcuts } from './inbox-shortcuts';
-import { PassReadyRow } from './pass-ready-row';
+import { PassReadyRow, useOpenPassWorkbench } from './pass-ready-row';
 import { defaultRecording } from './record-decision';
 import { ResolvedInbox } from './resolved-inbox';
 import { SystemCardList } from './system-card-list';
@@ -118,6 +118,7 @@ function OpenInbox({
   const inbox = useInbox();
   const answer = useAnswerInbox();
   const queryClient = useQueryClient();
+  const openWorkbench = useOpenPassWorkbench();
   const rows = inboxRows(inProject(inbox.data ?? [], project));
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
@@ -194,6 +195,11 @@ function OpenInbox({
   };
 
   const submit = (): void => {
+    // A pass's Ready pages open the Workbench (spec §4.1, §4.6); each is signed off by its own button.
+    if (selectedRow?.passId != null && selected) {
+      openWorkbench(selected.projectId);
+      return;
+    }
     // A check card is answered by its own buttons, never by a key.
     if (!selectedRow || !selected || selected.kind === InboxKind.Check || answer.isPending) return;
     if (isDismissable(selected)) {

@@ -92,23 +92,47 @@ function OpenPullRequestConfirm({ view, preview, onClose, onOpened }: ConfirmPro
   );
 }
 
+/** Why Open Pull Request is not offered, read from its preview; null while it is or is not read yet. */
+function usePullRequestRefusal(view: PassViewDto) {
+  const preview = usePullRequestPreview(view);
+  const shown = preview.data;
+  return {
+    preview,
+    why: preview.error?.message ?? (shown?.offered === false ? shown.reason : null),
+  };
+}
+
+/** The element that says why Open Pull Request is disabled, which the button names as its description. */
+function reasonId(view: PassViewDto): string {
+  return `pull-request-reason-${view.pass.id}`;
+}
+
+/**
+ * Why Open Pull Request is disabled, as a dimmed line of its own under the header's row: beside the
+ * button it would crowd the pass's line out of a narrow window.
+ */
+export function PrReason({ view }: { readonly view: PassViewDto }) {
+  const { why } = usePullRequestRefusal(view);
+  if (why === null) return null;
+  return (
+    <Text id={reasonId(view)} size="xs" c="dimmed">
+      {why}
+    </Text>
+  );
+}
+
 /** Open Pull Request in the pass's header, with the pull request's link once it has one. */
 export function PrButton({ view }: { readonly view: PassViewDto }) {
-  const preview = usePullRequestPreview(view);
+  const { preview, why } = usePullRequestRefusal(view);
   const [confirming, setConfirming] = useState(false);
   const [posted, setPosted] = useState<string | null>(null);
   const shown = preview.data;
   const url = view.pullRequest?.url ?? posted ?? shown?.existing?.url ?? null;
-  const why = preview.error?.message ?? (shown?.offered === false ? shown.reason : null);
   return (
     <Group gap="xs" wrap="nowrap">
       {url === null ? null : <PullRequestLink url={url} />}
-      {why === null ? null : (
-        <Text size="xs" c="dimmed" lineClamp={2}>
-          {why}
-        </Text>
-      )}
       <Button
+        {...(why === null ? {} : { 'aria-describedby': reasonId(view) })}
         variant="default"
         size="xs"
         loading={preview.isLoading}

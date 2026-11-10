@@ -55,6 +55,15 @@ describe('pageStatus', () => {
       needsYou: false,
     },
     {
+      name: 'a working page while the turns that ended took under a minute: no median yet',
+      page: pages.working,
+      median: 0,
+      status: PageStatus.Working,
+      color: 'blue',
+      line: 'Working · 4 min',
+      needsYou: false,
+    },
+    {
       name: 'a page spoken to whose session is still starting',
       page: passPageDto({ spokenTo: true, state: 'STARTING' }),
       status: PageStatus.Working,

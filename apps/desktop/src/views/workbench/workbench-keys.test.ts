@@ -15,6 +15,7 @@ const press = (key: string, mods: Partial<Omit<KeyPress, 'key'>> = {}): KeyPress
   ctrlKey: false,
   altKey: false,
   shiftKey: false,
+  isComposing: false,
   ...mods,
 });
 
@@ -74,6 +75,25 @@ describe('workbenchKey', () => {
     { name: '⌘J is not J', press: press('j', { metaKey: true }), key: null },
     { name: '⌘⇧L is not ⌘L', press: press('L', { metaKey: true, shiftKey: true }), key: null },
     { name: 'another letter', press: press('x'), key: null },
+    {
+      name: 'Escape leaves the message for the queue',
+      press: press('Escape'),
+      where: { editing: true },
+      key: WorkbenchKey.LeaveField,
+    },
+    { name: 'Escape off a field does nothing', press: press('Escape'), key: null },
+    {
+      name: 'Escape that ends an IME composition stays in the field',
+      press: press('Escape', { isComposing: true }),
+      where: { editing: true },
+      key: null,
+    },
+    {
+      name: 'Escape in a dialog is the dialog’s',
+      press: press('Escape'),
+      where: { editing: true, dialog: true },
+      key: null,
+    },
   ])('$name', ({ press: p, where, key }) => {
     expect(workbenchKey(p, { ...on, ...where })).toBe(key);
   });

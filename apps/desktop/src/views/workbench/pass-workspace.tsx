@@ -40,8 +40,10 @@ export function PassWorkspace({ view, inbox, project, selected, onSelect }: Pass
   const takingOutPage = view.pages.find((page) => page.taskId === takingOut) ?? null;
 
   // As the window gains focus, the page a ready notification just named, or the one that has waited
-  // longest when the shown page waits on nothing; never away from a draft.
+  // longest when the shown page waits on nothing; never away from a draft. The composer of the page
+  // then shown takes the cursor either way (spec §4.3), unless a dialog is open over the view.
   const onFocus = useRef<() => void>(() => undefined);
+  const [composerFocus, setComposerFocus] = useState(0);
   useEffect(() => {
     onFocus.current = () => {
       const target = focusTarget({
@@ -53,9 +55,12 @@ export function PassWorkspace({ view, inbox, project, selected, onSelect }: Pass
           [...drafts].filter(([, draft]) => hasContent(draft)).map(([taskId]) => taskId),
         ),
       });
-      if (target === null) return;
-      markPassNotificationsActed(target);
-      if (target !== shown?.page.taskId) onSelect(target);
+      if (target !== null) {
+        markPassNotificationsActed(target);
+        if (target !== shown?.page.taskId) onSelect(target);
+      }
+      if (document.querySelector('[role="dialog"]') === null)
+        setComposerFocus((asked) => asked + 1);
     };
   });
   useEffect(() => {
@@ -86,6 +91,12 @@ export function PassWorkspace({ view, inbox, project, selected, onSelect }: Pass
     },
     [WorkbenchKey.Previous]: () => {
       move(-1);
+    },
+    // Escape in a field goes back to the shown page's row, where J and K go on.
+    [WorkbenchKey.LeaveField]: () => {
+      const current = queue.current?.querySelector<HTMLButtonElement>('button[aria-current]');
+      const first = queue.current?.querySelector<HTMLButtonElement>('button:not([aria-haspopup])');
+      (current ?? first)?.focus();
     },
     [WorkbenchKey.NextWaiting]: () => {
       const next = nextWaiting(
@@ -127,6 +138,7 @@ export function PassWorkspace({ view, inbox, project, selected, onSelect }: Pass
             )?.openedAt ?? null
           }
           now={now}
+          composerFocus={composerFocus}
           draft={drafts.get(shown.page.taskId) ?? EMPTY_DRAFT}
           onDraft={(draft) => {
             const taskId = shown.page.taskId;

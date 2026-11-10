@@ -279,6 +279,28 @@ describe("a pass's hold on its tasks", () => {
   });
 });
 
+describe("a pass page's Board column", () => {
+  it.each<{ state: PassState; column: string }>([
+    { state: PassState.Open, column: 'in_progress' },
+    { state: PassState.Closing, column: 'in_progress' },
+    { state: PassState.Closed, column: 'blocked' },
+  ])('a page waiting on the builder in a $state pass is $column', ({ state, column }) => {
+    const t = task();
+    const { pass, batch } = store.write((ctx) => insertPass(ctx, passInput([t]))).value;
+    store.write((ctx) => {
+      const ws = insertWorkstream(ctx, t, {
+        batchId: batch.id,
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+      });
+      transitionWorkstream(ctx, ws.id, { to: S.Starting, fence: null });
+      transitionWorkstream(ctx, ws.id, { to: S.Running, fence: null });
+      transitionWorkstream(ctx, ws.id, { to: S.WaitingHuman, fence: null });
+    });
+    store.db.update(schema.passes).set({ state }).where(eq(schema.passes.id, pass.id)).run();
+    expect(getTask(store.db, t).boardStatus).toBe(column);
+  });
+});
+
 describe('the live passes', () => {
   it.each<{ state: PassState; live: boolean }>([
     { state: PassState.Open, live: true },

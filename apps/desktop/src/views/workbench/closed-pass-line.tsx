@@ -9,6 +9,7 @@ import {
 } from '@10db/contracts';
 import { Button, Group, Stack, Text } from '@mantine/core';
 import { useAnswerPassCard } from '../../daemon/pass-close-queries';
+import { CodeSpans } from '../../shell/code-spans';
 import { PullRequestLink } from '../board/pull-request-link';
 
 /** The pass's open Move card (D22), with what it moves; null while none is open. */
@@ -71,7 +72,9 @@ export function ClosedPassLine({ view, inbox }: ClosedPassLineProps) {
   return (
     <Stack gap={4}>
       <Group gap="sm" wrap="wrap">
-        <Text size="sm">{closedPassWords(view, card?.detail ?? null)}</Text>
+        <Text size="sm">
+          <CodeSpans text={closedPassWords(view, card?.detail ?? null)} />
+        </Text>
         {url === null ? null : <PullRequestLink url={url} />}
         {card === null ? null : (
           <Button

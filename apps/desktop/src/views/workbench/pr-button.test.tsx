@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderWithDaemon, server } from '../../test/daemon';
 import { passKeys } from '../../daemon/pass-queries';
 import { pagesByStatus, passViewDto } from '../../test/pass-fixtures';
-import { PrButton } from './pr-button';
+import { PrButton, PrReason } from './pr-button';
 
 /** Answers the pull request's preview with `preview`; records the passes asked to open one. */
 function serve(preview: Partial<PassPullRequestPreviewDto>, url: string | null = null) {
@@ -39,17 +39,27 @@ function serve(preview: Partial<PassPullRequestPreviewDto>, url: string | null =
 const button = () => screen.findByRole('button', { name: 'Open Pull Request' });
 
 describe('PrButton', () => {
-  it('is disabled with its reason beside it when the daemon does not offer it', async () => {
+  it('is disabled with its reason under it, which describes it, when the daemon does not offer it', async () => {
     const opened = serve({
       offered: false,
       reason: 'ampsio has no origin, so the pass lands by its close alone',
     });
-    renderWithDaemon(<PrButton view={passViewDto()} />);
+    const view = passViewDto();
+    renderWithDaemon(
+      <>
+        <PrButton view={view} />
+        <PrReason view={view} />
+      </>,
+    );
     expect(
       await screen.findByText('ampsio has no origin, so the pass lands by its close alone'),
     ).toBeTruthy();
     const open = await button();
     expect(open).toHaveProperty('disabled', true);
+    const described = document.getElementById(open.getAttribute('aria-describedby') ?? '');
+    expect(described?.textContent).toBe(
+      'ampsio has no origin, so the pass lands by its close alone',
+    );
     fireEvent.click(open);
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(opened).toEqual([]);

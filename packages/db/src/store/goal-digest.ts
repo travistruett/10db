@@ -97,13 +97,17 @@ function gatherFacts(db: DbReader, tasks: TaskRow[]): Facts {
   return { tasks, workstreams: rows.map((r) => r.workstream), latest, taskOfWorkstream };
 }
 
-/** A run that has started and is not over: not terminal, not waiting in the queue, not set aside. */
+/**
+ * A run that has started and is not over: not terminal, not waiting in the queue, not set aside, and
+ * not a Workbench page that is Ready, which waits on the builder with nothing running.
+ */
 function isRunning(run: Run | undefined): boolean {
   const state = run?.workstream.state;
   return (
     state !== undefined &&
     state !== WorkstreamState.Held &&
     state !== WorkstreamState.Queued &&
+    run?.workstream.nextAction.kind !== 'pass_review' &&
     ACTIVE_STATES.includes(state)
   );
 }

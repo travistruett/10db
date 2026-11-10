@@ -43,13 +43,15 @@ export interface BatchPanelProps {
   readonly workstreams: readonly WorkstreamDto[];
   /** The project's gate command, named beside a failed gate's exit code. */
   readonly gateCommand: string | null;
+  /** Opens the Workbench, from a Workbench pass's batch. */
+  readonly onOpenWorkbench?: (() => void) | undefined;
 }
 
 /**
  * Where a task's work ships: its branch, why a ship failed and what the builder can do about it. The
  * pull request link is on the drawer's status line, beside the CI link, and is not repeated here.
  */
-export function BatchPanel({ batch, workstreams, gateCommand }: BatchPanelProps) {
+export function BatchPanel({ batch, workstreams, gateCommand, onOpenWorkbench }: BatchPanelProps) {
   const ship = useShipBatch();
   const abandon = useAbandonBatch();
   const [fixOpen, fix] = useDisclosure(false);
@@ -82,6 +84,22 @@ export function BatchPanel({ batch, workstreams, gateCommand }: BatchPanelProps)
     abandon.mutate(batch.id);
   };
   const exit = batch.gateExitCode;
+
+  // A pass's batch ships when its pass closes and is abandoned with it; the Workbench acts on it.
+  if (batch.passId != null)
+    return (
+      <Stack gap="xs" aria-label="Delivery" role="group" align="flex-start">
+        {batch.branch ? <Code>{batch.branch}</Code> : null}
+        <Text size="xs" c="dimmed">
+          It ships when the Workbench pass closes, and is abandoned with it.
+        </Text>
+        {onOpenWorkbench ? (
+          <Button size="xs" variant="default" onClick={onOpenWorkbench}>
+            Open Workbench
+          </Button>
+        ) : null}
+      </Stack>
+    );
 
   return (
     <Stack gap="xs" aria-label="Delivery" role="group">

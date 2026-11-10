@@ -25,6 +25,8 @@ import {
   getWorkstreamRow,
   listInbox,
   latestPassTurn,
+  listPassDirt,
+  listSharedChanges,
   listPassTasks,
   listPermissionRules,
   listProjects,
@@ -33,7 +35,7 @@ import {
   setAppSetting,
 } from '@10db/db';
 import type { Clock, Timer } from '../clock';
-import { checkoutOf } from '../delivery';
+import { checkoutOf, passDirtRef } from '../delivery';
 import type { EventBus, StateStore } from '../events';
 import {
   bookkeepingAt,
@@ -58,7 +60,7 @@ import {
   writeStamp,
 } from './allowed-writes';
 import { filesUnderBounded as filesUnder } from './dir-files';
-import { passWrites, type PassLane } from './pass-writes';
+import { accountedAt, passWrites, type PassLane } from './pass-writes';
 import {
   bulkFoldKey,
   findForeignClaimWrites,
@@ -306,6 +308,53 @@ export function createWatcher(deps: {
         },
       ];
     });
+  }
+
+  /**
+   * `paths` without each that still holds what the project's pass accounts for in Your folder `root`
+   * (`accountedAt`): the folder's dirt from before the pass, and a shared change its turn kept and whose
+   * hold let the area go, are no write made in it. The content must be the one the database recorded,
+   * and the mode the one its commit holds. An entry counts as
+   * held only when its mode and content both match, so an executable bit or a link holding the same
+   * bytes is a write. A sensitive path is kept, as is every path when git can't read either side.
+   */
+  async function withoutAccounted(
+    project: ProjectDto,
+    root: string,
+    paths: readonly string[],
+    lanes: readonly PassLane[],
+  ): Promise<string[]> {
+    // With no lane working, `passWrites` cards no write outside every claim: nothing is worth a read.
+    if (!lanes.some((lane) => lane.working)) return [...paths];
+    const pass = findOpenPass(db, project.id);
+    if (!pass) return [...paths];
+    const accounted = accountedAt({
+      dirtRef: passDirtRef(pass.id),
+      dirt: listPassDirt(db, pass.id),
+      shared: listSharedChanges(db, pass.id),
+    });
+    const named = paths.filter((rel) => accounted.has(rel) && !isSensitivePath(rel));
+    if (named.length === 0) return [...paths];
+    const byCommit = new Map<string, string[]>();
+    for (const rel of named) {
+      const at = accounted.get(rel)?.at;
+      if (at !== undefined) byCommit.set(at, [...(byCommit.get(at) ?? []), rel]);
+    }
+    const same = new Set<string>();
+    try {
+      const onDisk = new Map((await deps.git.hashOnDisk(root, named)).map((f) => [f.path, f]));
+      for (const [at, group] of byCommit)
+        for (const kept of await deps.git.blobsAt(root, at, group)) {
+          const disk = onDisk.get(kept.path);
+          const want = accounted.get(kept.path);
+          if (disk === undefined || want === undefined) continue;
+          if (disk.blob === want.blob && disk.mode === kept.mode) same.add(kept.path);
+        }
+    } catch (error) {
+      deps.logger.warn({ root, err: String(error) }, 'could not read what the pass recorded');
+      return [...paths];
+    }
+    return paths.filter((rel) => !same.has(rel));
   }
 
   /**
@@ -877,7 +926,7 @@ export function createWatcher(deps: {
         : passWrites({
             project,
             lanes,
-            strays,
+            strays: await withoutAccounted(project, entry.root, strays, lanes),
             foreign: reported.filter((rel) => !strays.includes(rel) && !hidden.includes(rel)),
           });
     const outside = new Set([...(inPass?.strays ?? strays), ...hidden]);
@@ -1037,7 +1086,15 @@ export function createWatcher(deps: {
       );
       // The ending lane's own write outside every claim is carded: its shell may have made it.
       const lanes = passLanes(project, batchId, workstreamId);
-      const inPass = lanes === null ? null : passWrites({ project, lanes, strays, foreign: [] });
+      const inPass =
+        lanes === null
+          ? null
+          : passWrites({
+              project,
+              lanes,
+              strays: await withoutAccounted(project, root, strays, lanes),
+              foreign: [],
+            });
       // A write that can change what runs is flagged even inside the workstream's own claim.
       const written = [
         ...new Set([...(inPass?.strays ?? strays), ...changed.filter(isSensitivePath)]),

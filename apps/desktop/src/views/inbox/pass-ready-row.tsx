@@ -1,7 +1,19 @@
-import { PassCheckDetail, type InboxItemDto } from '@10db/contracts';
-import { Badge, Button, Group, List, Paper, Stack, Text, UnstyledButton } from '@mantine/core';
+import { PassCheckDetail, type InboxItemDto, type ProjectId, type TaskId } from '@10db/contracts';
+import {
+  Anchor,
+  Badge,
+  Button,
+  Group,
+  List,
+  Paper,
+  Stack,
+  Text,
+  UnstyledButton,
+} from '@mantine/core';
+import { useNavigate } from '@tanstack/react-router';
 import { useSignOff } from '../../daemon/pass-close-queries';
 import { ProjectLabel } from '../../shell/project-label';
+import { useSelectedProject } from '../../shell/selected-project';
 import { SELECTED_CARD_ATTRIBUTE } from './use-inbox-keys';
 
 export interface PassReadyRowProps {
@@ -16,17 +28,48 @@ export function passReadyTitle(count: number): string {
   return `Workbench: ${String(count)} ${count === 1 ? 'page' : 'pages'} ready`;
 }
 
-/** One Ready page of the row: its title, and Sign Off for the page its item names. */
-function ReadyPage({ item }: { readonly item: InboxItemDto }) {
+/** Opens the Workbench in the pass's project, at one of its pages when given. */
+type OpenWorkbench = (taskId?: TaskId) => void;
+
+/**
+ * Opens the Workbench in a pass's project, at one of its pages when given. The Workbench shows the
+ * selected project's pass, so the pass's project is selected first.
+ */
+export function useOpenPassWorkbench(): (projectId: ProjectId, taskId?: TaskId) => void {
+  const navigate = useNavigate();
+  const { select } = useSelectedProject();
+  return (projectId, taskId) => {
+    select(projectId);
+    void navigate({ to: '/workbench', search: taskId === undefined ? {} : { task: taskId } });
+  };
+}
+
+/** One Ready page of the row: its title, which opens it in the Workbench, and Sign Off for it. */
+function ReadyPage({
+  item,
+  onOpen,
+}: {
+  readonly item: InboxItemDto;
+  readonly onOpen: OpenWorkbench;
+}) {
   const signOff = useSignOff();
   const detail = PassCheckDetail.safeParse(item.detail);
   return (
     <List.Item>
       <Group gap="sm" wrap="nowrap">
         {/* Item titles are written by the daemon from task titles: text only. */}
-        <Text size="sm" style={{ flex: 1, minWidth: 0 }}>
+        <Anchor
+          component="button"
+          type="button"
+          size="sm"
+          ta="left"
+          style={{ flex: 1, minWidth: 0 }}
+          onClick={() => {
+            onOpen(detail.success ? detail.data.taskId : undefined);
+          }}
+        >
           {item.title}
-        </Text>
+        </Anchor>
         {signOff.error ? (
           <Text size="xs" c="red">
             {signOff.error.message}
@@ -50,11 +93,16 @@ function ReadyPage({ item }: { readonly item: InboxItemDto }) {
 }
 
 /**
- * A Workbench pass's Ready pages as one row (spec §6.1): it names each page, each with Sign Off. A
- * page is never approved or sent back; the builder looks at it and writes again, or signs it off.
+ * A Workbench pass's Ready pages as one row (spec §4.1, §6.1): it opens the Workbench, and names each
+ * page, which opens it there, each with Sign Off. A page is never approved or sent back; the builder
+ * looks at it and writes again, or signs it off.
  */
 export function PassReadyRow({ items, selected, onSelect }: PassReadyRowProps) {
   const [first] = items;
+  const openWorkbench = useOpenPassWorkbench();
+  const open: OpenWorkbench = (taskId) => {
+    openWorkbench(first.projectId, taskId);
+  };
   const header = (
     <Group gap="sm" wrap="nowrap">
       {/* Every card waits on the builder: yellow, never the red of a failure. */}
@@ -86,9 +134,20 @@ export function PassReadyRow({ items, selected, onSelect }: PassReadyRowProps) {
         {header}
         <List size="sm" spacing={4}>
           {items.map((item) => (
-            <ReadyPage key={item.id} item={item} />
+            <ReadyPage key={item.id} item={item} onOpen={open} />
           ))}
         </List>
+        <Group>
+          <Button
+            variant="default"
+            size="xs"
+            onClick={() => {
+              open();
+            }}
+          >
+            Open Workbench
+          </Button>
+        </Group>
       </Stack>
     </Paper>
   );

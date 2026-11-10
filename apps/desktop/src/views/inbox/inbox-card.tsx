@@ -24,6 +24,7 @@ import {
 } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
 import type { KeyboardEvent, RefObject } from 'react';
+import { CodeSpans } from '../../shell/code-spans';
 import { ProjectLabel } from '../../shell/project-label';
 import { ExternalLink } from '../board/pull-request-link';
 import { BatchCardActions } from './batch-card-actions';
@@ -78,7 +79,7 @@ export function CardBody({ item }: { readonly item: InboxItemDto }) {
   }
   return (
     <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
-      {item.body}
+      <CodeSpans text={item.body} />
     </Text>
   );
 }

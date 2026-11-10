@@ -57,6 +57,36 @@ export function NoPageAreas({ onPropose }: NoPageAreasProps) {
   );
 }
 
+/** Why the proposer has no page to offer, and where page areas are added by hand. */
+function NothingProposed({ leftOut }: { readonly leftOut: boolean }) {
+  return (
+    <Stack gap="xs">
+      <Text size="sm">
+        {leftOut
+          ? 'No page areas to propose: each screen the proposer looked at is listed below with why it was left out.'
+          : 'No page areas to propose: the proposer found no screen with files and a route of its own to name.'}
+      </Text>
+      <Text size="sm">
+        Add page areas by hand in{' '}
+        <Anchor
+          size="sm"
+          renderRoot={(props) => (
+            <Link
+              {...props}
+              to="/settings/$section"
+              params={{ section: SettingsSectionKey.Areas }}
+            />
+          )}
+        >
+          Settings › Areas and hazards
+        </Anchor>
+        : each one names a screen, the files under it and the route that shows it, with the role
+        Page.
+      </Text>
+    </Stack>
+  );
+}
+
 /** A proposed page as the builder edits it before saving. */
 interface PageDraft {
   /** The name it was proposed under, which labels its row while the name is edited. */
@@ -160,6 +190,9 @@ export function ProposePagesModal({ project, opened, onClose, propose }: Propose
         </Group>
       ) : (
         <Stack gap="lg">
+          {proposal.isSuccess && proposal.data.pages.length === 0 ? (
+            <NothingProposed leftOut={proposal.data.skipped.length > 0} />
+          ) : null}
           {drafts.map((draft) => (
             <Stack key={draft.proposed} gap="xs" role="group" aria-label={draft.proposed}>
               <Checkbox

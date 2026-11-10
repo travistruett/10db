@@ -2,7 +2,9 @@ import {
   ConflictError,
   SessionActivityData,
   type PassFileChange,
+  type PassHoldDto,
   type PassId,
+  type PassSharedChangeDto,
   type PassTurnDto,
   type PassTurnId,
   type PassTurnWithFilesDto,
@@ -14,6 +16,8 @@ import {
   getPassTurn,
   getProject,
   getTask,
+  listHolds,
+  listSharedChanges,
   listTaskTurns,
   getWorkstreamRow,
   listTurnActivity,
@@ -23,6 +27,7 @@ import {
 import type { StateStore } from '../events';
 import { GitError, type Git } from '../git';
 import { pageMatcher } from './kept-work';
+import { sharedKeptIn } from './turn-holds';
 
 // Workbench spec §4.3, §11: a page's turns with the files each changed, a turn's log (Show Log), and
 // when the builder first opened a Ready page, which the pass's timing reads.
@@ -70,8 +75,10 @@ function comparedWith(turns: readonly PassTurnDto[], turn: PassTurnDto): string 
  * The task's turns, oldest first, each with the files its kept commit changed against the kept commit
  * before it in the same run (its pass), or the pass branch tip it was kept on: only the task's page
  * files (`pageMatcher`), since each kept commit is the branch tip of its time with the page laid over
- * it, and another page or a shared change can land on the branch between two turns. A turn that kept
- * nothing new, or whose commit git no longer has, lists none. Reads only.
+ * it, and another page or a shared change can land on the branch between two turns. After them come the
+ * shared files the turn's own holds kept, each against the shared chain as its hold found it (the hold
+ * record's parent). A turn that kept nothing new, or whose commit git no longer has, lists none. Reads
+ * only.
  */
 export async function taskTurns(
   deps: PassTurnsDeps,
@@ -88,6 +95,18 @@ export async function taskTurns(
     matchers.set(passId, mine);
     return mine;
   };
+  const holds = new Map<PassId, PassHoldDto[]>();
+  const holdsOf = (passId: PassId): PassHoldDto[] => {
+    const known = holds.get(passId) ?? listHolds(deps.db, passId);
+    holds.set(passId, known);
+    return known;
+  };
+  const changes = new Map<PassId, PassSharedChangeDto[]>();
+  const changesOf = (passId: PassId): PassSharedChangeDto[] => {
+    const known = changes.get(passId) ?? listSharedChanges(deps.db, passId);
+    changes.set(passId, known);
+    return known;
+  };
   const listed: PassTurnWithFilesDto[] = [];
   for (const turn of turns) {
     const from = comparedWith(turns, turn);
@@ -98,7 +117,16 @@ export async function taskTurns(
         : (await deps.files(project.repoPath, from, turn.keptSha)).filter((f) =>
             pageFileOf(passId)(f.path),
           );
-    listed.push({ ...turn, files });
+    const shared: PassFileChange[] = [];
+    if (passId !== null)
+      for (const { hold, change } of sharedKeptIn(turn, holdsOf(passId), changesOf(passId)))
+        for (const f of await deps.files(project.repoPath, `${hold.recordSha}^`, change.sha))
+          if (
+            change.paths.includes(f.path) &&
+            ![...files, ...shared].some((g) => g.path === f.path)
+          )
+            shared.push(f);
+    listed.push({ ...turn, files: [...files, ...shared] });
   }
   return listed;
 }

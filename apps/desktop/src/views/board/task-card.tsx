@@ -82,6 +82,7 @@ export function cardSummary(
     task.areas.length > 0 ? `Areas: ${task.areas.join(', ')}.` : null,
     criteria > 0 ? `${String(criteria)} ${criteria === 1 ? 'criterion' : 'criteria'}.` : null,
     placement ? `Runs in ${placement}.` : null,
+    batch?.passId != null ? 'A page of a Workbench pass.' : null,
     sharedWith > 1
       ? `Shares its branch with ${String(sharedWith - 1)} other ${sharedWith === 2 ? 'task' : 'tasks'}.`
       : null,
@@ -134,6 +135,14 @@ function indicatorsOf(
           label: shortGoalTitle(goalTitle),
           color: 'gray',
           tooltip: goalTitle,
+        }
+      : null,
+    batch?.passId != null
+      ? {
+          kind: 'workbench',
+          label: 'Workbench',
+          color: 'gray',
+          tooltip: 'A page of a Workbench pass, worked on in the Workbench',
         }
       : null,
     sharedWith > 1

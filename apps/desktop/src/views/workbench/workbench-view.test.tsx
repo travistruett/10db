@@ -1,5 +1,6 @@
 import type { AreaDef, PassViewDto, TaskId } from '@10db/contracts';
 import { fireEvent, screen } from '@testing-library/react';
+import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { baseHandlers, renderWithDaemonAndRouter, server } from '../../test/daemon';
 import { projectViewDto } from '../../test/fixtures';
@@ -39,8 +40,8 @@ function Workspace({ view, selected, onSelect }: PassWorkspaceProps) {
   );
 }
 
-async function draw(overrides: Partial<WorkbenchScreenProps> = {}) {
-  server.use(...baseHandlers());
+/** The screen's props, with a spy for each daemon call and for the selection. */
+function screenProps(overrides: Partial<WorkbenchScreenProps> = {}) {
   const onSelect = vi.fn<(taskId: TaskId) => void>();
   const props: WorkbenchScreenProps = {
     project: withPages,
@@ -66,8 +67,14 @@ async function draw(overrides: Partial<WorkbenchScreenProps> = {}) {
     },
     ...overrides,
   };
-  await renderWithDaemonAndRouter(<WorkbenchScreen {...props} />);
   return { onSelect, props };
+}
+
+async function draw(overrides: Partial<WorkbenchScreenProps> = {}) {
+  server.use(...baseHandlers());
+  const drawn = screenProps(overrides);
+  await renderWithDaemonAndRouter(<WorkbenchScreen {...drawn.props} />);
+  return drawn;
 }
 
 describe('WorkbenchScreen', () => {
@@ -146,5 +153,37 @@ describe('WorkbenchScreen', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'More pass actions' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: item, hidden: true }));
     expect(await screen.findByRole('dialog', { name: dialog })).toBeTruthy();
+  });
+
+  it.each<{ name: string; before: 'CLOSING' | 'ABANDONING' | 'OPEN'; said: boolean }>([
+    { name: 'a close that finished says so above the picker', before: 'CLOSING', said: true },
+    { name: 'an Abandon that finished says nothing of a close', before: 'ABANDONING', said: false },
+    { name: 'a pass gone while open says nothing of a close', before: 'OPEN', said: false },
+  ])('$name', async ({ before, said }) => {
+    const view = passViewDto({
+      pass: { state: before, name: 'Settings pass', returnBranch: 'main' },
+    });
+    server.use(...baseHandlers());
+    function Settling(props: WorkbenchScreenProps) {
+      const [live, setLive] = useState<PassViewDto | null>(view);
+      return (
+        <>
+          <button
+            type="button"
+            onClick={() => {
+              setLive(null);
+            }}
+          >
+            Settle
+          </button>
+          <WorkbenchScreen {...props} live={live} />
+        </>
+      );
+    }
+    await renderWithDaemonAndRouter(<Settling {...screenProps().props} />);
+    await screen.findByRole('button', { name: 'More pass actions' });
+    fireEvent.click(screen.getByRole('button', { name: 'Settle' }));
+    expect(await screen.findByRole('button', { name: /^Start Pass/ })).toBeTruthy();
+    expect(screen.queryByText('Settings pass closed; its work is on main.') !== null).toBe(said);
   });
 });
