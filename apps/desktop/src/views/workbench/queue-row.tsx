@@ -1,4 +1,5 @@
 import { Group, Text, UnstyledButton } from '@mantine/core';
+import type { ReactNode } from 'react';
 import { StatusDot } from '../factory/status-dot';
 import type { QueueRow as Row } from './queue-rows';
 
@@ -6,6 +7,8 @@ export interface QueueRowProps {
   readonly row: Row;
   readonly current: boolean;
   readonly onSelect: () => void;
+  /** The row's menu, drawn beside its button; null when the row has none. */
+  readonly menu: ReactNode;
 }
 
 /**
@@ -13,35 +16,40 @@ export interface QueueRowProps {
  * name, heavier when it waits on the builder, and one short state line. No border; a hairline under
  * the row; the selected row on the control fill; a row that needs nothing in dimmed text.
  */
-export function QueueRow({ row, current, onSelect }: QueueRowProps) {
+export function QueueRow({ row, current, onSelect, menu }: QueueRowProps) {
   return (
-    <UnstyledButton
-      w="100%"
-      px="sm"
-      py={6}
-      aria-current={current ? 'true' : undefined}
-      {...(row.dimmed ? { c: 'dimmed' } : {})}
-      onClick={onSelect}
+    <Group
+      gap={0}
+      wrap="nowrap"
       style={{
-        display: 'block',
         borderBottom: '1px solid var(--mantine-color-default-border)',
         background: current ? 'var(--mantine-color-default)' : undefined,
       }}
     >
-      <Group gap="sm" wrap="nowrap" align="baseline">
-        <StatusDot color={row.state.color} />
-        <Text
-          component="span"
-          size="sm"
-          fw={row.state.needsYou ? 500 : 400}
-          style={{ flex: 'none' }}
-        >
-          {row.page.area}
-        </Text>
-        <Text component="span" size="sm" truncate="end">
-          {row.state.line}
-        </Text>
-      </Group>
-    </UnstyledButton>
+      <UnstyledButton
+        px="sm"
+        py={6}
+        aria-current={current ? 'true' : undefined}
+        {...(row.dimmed ? { c: 'dimmed' } : {})}
+        onClick={onSelect}
+        style={{ display: 'block', flex: 1, minWidth: 0 }}
+      >
+        <Group gap="sm" wrap="nowrap" align="baseline">
+          <StatusDot color={row.state.color} />
+          <Text
+            component="span"
+            size="sm"
+            fw={row.state.needsYou ? 500 : 400}
+            style={{ flex: 'none' }}
+          >
+            {row.page.area}
+          </Text>
+          <Text component="span" size="sm" truncate="end">
+            {row.state.line}
+          </Text>
+        </Group>
+      </UnstyledButton>
+      {menu}
+    </Group>
   );
 }

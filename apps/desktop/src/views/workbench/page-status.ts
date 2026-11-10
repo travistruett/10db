@@ -7,7 +7,7 @@ import {
   type PassPageDto,
 } from '@10db/contracts';
 import type { MantineColor } from '@mantine/core';
-import { failureLine } from '../board/task-state';
+import { passTurnFailureLine } from '../board/task-state';
 
 // Workbench spec §4.3: a page's state in the queue, as one dot, one short line and whether it waits on
 // the builder. The colors are DESIGN.md's: yellow waits on the builder, blue works, orange is paused,
@@ -128,11 +128,7 @@ function unsignedState(
       PageStatus.Asks,
       ask.kind === InboxKind.Permission ? 'Asks for permission' : 'Asks a question',
     );
-  if (page.failure)
-    return state(
-      PageStatus.Failed,
-      failureLine({ steps: [], stepIndex: 0, failureKind: page.failure.failureKind }, false),
-    );
+  if (page.failure) return state(PageStatus.Failed, passTurnFailureLine(page.failure.failureKind));
   if (page.state === WorkstreamState.PausedLimit)
     return state(
       PageStatus.Paused,

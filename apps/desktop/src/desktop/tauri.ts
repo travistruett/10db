@@ -112,9 +112,22 @@ export async function setWindowTheme(scheme: 'light' | 'dark'): Promise<void> {
   await getCurrentWindow().setTheme(scheme);
 }
 
+/**
+ * Brings 10db's window forward: shown if hidden to the menu bar, unminimized, then focused. A no-op in
+ * a browser.
+ */
+export async function bringWindowForward(): Promise<void> {
+  if (!isTauri()) return;
+  const window = getCurrentWindow();
+  await window.show();
+  await window.unminimize();
+  await window.setFocus();
+}
+
 let permission: Promise<boolean> | null = null;
 
-function canNotify(): Promise<boolean> {
+/** Whether 10db may show notifications, asking macOS once. */
+export function canNotify(): Promise<boolean> {
   permission ??= (async () =>
     (await isPermissionGranted()) || (await requestPermission()) === 'granted')();
   return permission;

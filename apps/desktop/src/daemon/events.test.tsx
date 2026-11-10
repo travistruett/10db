@@ -346,9 +346,12 @@ describe('useEventStream', () => {
   it("refetches a pass on every pass event, and a task's thread and turns when a message joins it", () => {
     // The stream's first open refetches everything, so the table is what can go wrong.
     expect(INVALIDATIONS['pass']).toEqual(expect.arrayContaining([passKeys.all]));
+    // A message joining a page starts its turn, and a run pausing or resuming changes its page: the
+    // queue reads both from the live passes.
     expect(EVENT_INVALIDATIONS['task.message_added']).toEqual(
-      expect.arrayContaining([threadKeys.all, passKeys.turnsAll]),
+      expect.arrayContaining([threadKeys.all, passKeys.turnsAll, passKeys.live]),
     );
+    expect(INVALIDATIONS['workstream']).toEqual(expect.arrayContaining([passKeys.live]));
     // A tool call is written into the pass, never refetched: one arrives per call.
     for (const key of [
       ...(INVALIDATIONS['session'] ?? []),

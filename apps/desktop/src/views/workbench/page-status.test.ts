@@ -120,11 +120,11 @@ describe('pageStatus', () => {
       needsYou: false,
     },
     {
-      name: 'a failed turn, in failureLine’s words, never yellow',
+      name: 'a failed turn, in failureLine’s words with what Retry Turn does, never yellow',
       page: pages.failed,
       status: PageStatus.Failed,
       color: 'red',
-      line: 'The session kept crashing or could not start.',
+      line: 'The session kept crashing or could not start. Retry Turn sends your last message again.',
       needsYou: true,
     },
     {
@@ -132,7 +132,7 @@ describe('pageStatus', () => {
       page: { ...pages.failed, failure: { failureKind: null, retryItemId: mintId('InboxItem') } },
       status: PageStatus.Failed,
       color: 'red',
-      line: 'The run failed.',
+      line: 'The turn failed. Retry Turn sends your last message again.',
       needsYou: true,
     },
     {

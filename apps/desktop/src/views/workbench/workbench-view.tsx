@@ -11,12 +11,28 @@ import {
   type TaskDto,
   type TaskId,
 } from '@10db/contracts';
-import { Group, Loader, Stack, Title } from '@mantine/core';
+import { Group, Loader, Stack, Text, Title } from '@mantine/core';
 import { useMutation } from '@tanstack/react-query';
-import { useState, type ReactNode } from 'react';
+import { useNavigate, useSearch } from '@tanstack/react-router';
+import { useEffect, useState, type ReactNode } from 'react';
+import {
+  useAbandonPass,
+  useAddPages,
+  useGoalPassPages,
+  useLivePass,
+  useOpenPass,
+  usePassStart,
+  useProposePageAreas,
+  useRenamePass,
+} from '../../daemon/pass-queries';
+import { useInbox, useTasks } from '../../daemon/queries';
+import { useNow } from '../../shell/relative';
+import { useSelectedProject } from '../../shell/selected-project';
 import { AbandonModal } from './abandon-modal';
 import { AddPageModal } from './add-page-modal';
 import { PassHeader } from './pass-header';
+import { PassWorkspace } from './pass-workspace';
+import { queueRows } from './queue-rows';
 import type { PassWorkspaceProps } from './pass-workspace-props';
 import { NoPageAreas, ProposePagesModal } from './propose-pages-modal';
 import { RenameModal } from './rename-modal';
@@ -172,11 +188,98 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
   );
 }
 
+/** The header's minutes and the timing hint move once a minute; half that keeps them on time. */
+const CLOCK_TICK_MS = 30_000;
+
+/** Thrown for a pass action asked of a project with no pass open. */
+class NoPassOpenError extends Error {
+  override readonly name = 'NoPassOpenError';
+}
+
+/** The Workbench of one project, over the daemon. */
+function ProjectWorkbench({ project }: { readonly project: ProjectViewDto }) {
+  const search = useSearch({ from: '/workbench' });
+  const navigate = useNavigate();
+  const hasPages = project.areas.some((area) => area.role === AreaRole.Page);
+  const live = useLivePass(project.id);
+  const start = usePassStart(project.id, hasPages);
+  const tasks = useTasks(project.id).data ?? [];
+  const inboxRead = useInbox();
+  const inbox = inboxRead.data ?? [];
+  const goalPages = useGoalPassPages(search.goal ?? null).data?.pages ?? [];
+  const now = useNow(CLOCK_TICK_MS);
+  const opening = useOpenPass(project.id);
+  const proposing = useProposePageAreas(project.id);
+  const adding = useAddPages();
+  const renaming = useRenamePass();
+  const abandoning = useAbandonPass();
+  const passId = (): PassViewDto['pass']['id'] => {
+    const view = live.data;
+    if (view === null || view === undefined)
+      throw new NoPassOpenError(`${project.name} has no pass open`);
+    return view.pass.id;
+  };
+  // With no page of the pass in the address, the queue's first page is shown; it goes into the address
+  // in place, so a queue that reorders on live data never swaps the page (and its composer) under the
+  // builder, and only the page on screen is marked opened.
+  const view = live.data;
+  const named = view?.pages.some((page) => page.taskId === search.task) ?? false;
+  // The queue ranks a page by its Inbox items too, so the pin waits while the Inbox is first read; a
+  // failed read pins with none, rather than leave the page to follow the queue.
+  const pin =
+    view == null || named || inboxRead.isPending
+      ? null
+      : (queueRows(view, inbox, now)[0]?.page.taskId ?? null);
+  useEffect(() => {
+    if (pin !== null) void navigate({ to: '/workbench', search: { task: pin }, replace: true });
+  }, [pin, navigate]);
+  const actions: WorkbenchActions = {
+    start: (request) => opening.mutateAsync(request),
+    propose: () => proposing.mutateAsync(),
+    addPages: (request) => adding.mutateAsync({ passId: passId(), request }),
+    rename: (body) => renaming.mutateAsync({ passId: passId(), body }),
+    abandon: () => abandoning.mutateAsync(passId()),
+  };
+  // A read that failed with nothing read before says why; a refetch that fails keeps what was read, so
+  // a daemon blip never takes the pass, and its drafts, off the screen. The picker needs what Start Pass
+  // says, an open pass does not.
+  const failed =
+    (live.data === undefined ? live.error : null) ??
+    (live.data === null && hasPages && start.data === undefined ? start.error : null);
+  if (failed !== null)
+    return (
+      <Stack gap="md">
+        <Title order={2}>Workbench</Title>
+        <Text size="sm" c="red">{`The Workbench could not be read: ${failed.message}`}</Text>
+      </Stack>
+    );
+  return (
+    <WorkbenchScreen
+      project={project}
+      live={live.data}
+      start={start.data}
+      tasks={tasks}
+      inbox={inbox}
+      search={search}
+      goalPages={goalPages}
+      now={now}
+      onSelect={(task) => {
+        void navigate({ to: '/workbench', search: { task } });
+      }}
+      renderWorkspace={(props) => <PassWorkspace {...props} />}
+      actions={actions}
+    />
+  );
+}
+
 /** The Workbench route (spec §4): work through pages with the agents, live in Your folder. */
 export function WorkbenchView() {
-  return (
-    <Stack gap="md">
-      <Title order={2}>Workbench</Title>
-    </Stack>
-  );
+  const { project } = useSelectedProject();
+  if (project === null)
+    return (
+      <Stack gap="md">
+        <Title order={2}>Workbench</Title>
+      </Stack>
+    );
+  return <ProjectWorkbench key={project.id} project={project} />;
 }

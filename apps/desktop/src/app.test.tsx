@@ -196,7 +196,11 @@ describe('App shell', () => {
   it.each([
     { width: 480, path: '/workbench', folded: true },
     { width: 1280, path: '/workbench', folded: false },
-    { width: 480, path: '/board', folded: false },
+    // Under the shell's sm breakpoint every view folds, or the sidebar would cover it.
+    { width: 480, path: '/board', folded: true },
+    { width: 480, path: '/inbox', folded: true },
+    { width: 800, path: '/board', folded: false },
+    { width: 800, path: '/workbench', folded: true },
   ])('at $width px on $path the sidebar folds: $folded', async ({ width, path, folded }) => {
     windowWidth(width);
     server.use(...baseHandlers());

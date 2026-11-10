@@ -55,8 +55,9 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   network_hosts: [NETWORK_HOSTS_KEY],
   // A batch's state shows on the board's strip and in its list; cancelling an abandoned batch's work moves tasks.
   batch: [queryKeys.projects, ['batches'], ...WORK, CANDIDATES],
-  // Lanes changing can switch keep-awake on or off.
-  workstream: [...WORK, queryKeys.keepAwake, CANDIDATES, humanTouchKeys.all],
+  // Lanes changing can switch keep-awake on or off. A pass page's state is its run's, paused or resumed
+  // by a usage limit with no pass event.
+  workstream: [...WORK, queryKeys.keepAwake, CANDIDATES, humanTouchKeys.all, passKeys.live],
   // A session's span says which tasks ran that day.
   session: [...WORK, humanTouchKeys.all],
   claim: [...WORK, CANDIDATES],
@@ -85,8 +86,9 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
 export const EVENT_INVALIDATIONS: Readonly<Partial<Record<EventType, readonly QueryKey[]>>> = {
   // A session's tokens and dollars are recorded when it ends, not on its per-tool-call events.
   'session.ended': [accountKeys.usage],
-  // A builder message, an agent's reply or a notice joined a task's thread; a reply ends a turn.
-  'task.message_added': [threadKeys.all, passKeys.turnsAll],
+  // A builder message, an agent's reply or a notice joined a task's thread; a reply ends a turn, and a
+  // message to a page makes it working before its turn starts.
+  'task.message_added': [threadKeys.all, passKeys.turnsAll, passKeys.live],
 };
 
 export function eventStreamUrl(conn: DaemonConnection, after: number): string {

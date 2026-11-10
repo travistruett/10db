@@ -1,10 +1,10 @@
-import { TaskId } from '@10db/contracts';
+import { PASS_RETRY_TURN_CHOICE, TakeOutResultDto, TaskId } from '@10db/contracts';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { baseHandlers, daemonUrl, renderWithDaemon, server } from '../../test/daemon';
-import { projectViewDto } from '../../test/fixtures';
+import { inboxItemDto, projectViewDto } from '../../test/fixtures';
 import { multipartParts, useNodeMultipart } from '../../test/multipart';
 import {
   askItem,
@@ -13,6 +13,8 @@ import {
   PASS_NOW,
   passHandlers,
   pagesByStatus,
+  passTurnTimingDto,
+  passTurnWithFilesDto,
   passViewDto,
   taskMessageDto,
 } from '../../test/pass-fixtures';
@@ -47,8 +49,11 @@ async function renderWorkspace(selected: (pages: Pages) => TaskId | null = () =>
 
 type Pages = ReturnType<typeof pagesByStatus>;
 
+/** The queue's page rows, without each row's menu. */
 function queueRows() {
-  return within(screen.getByRole('list', { name: 'Pages in this pass' })).getAllByRole('button');
+  return within(screen.getByRole('list', { name: 'Pages in this pass' }))
+    .getAllByRole('button')
+    .filter((button) => !button.hasAttribute('aria-haspopup'));
 }
 
 describe('PassWorkspace queue', () => {
@@ -56,7 +61,7 @@ describe('PassWorkspace queue', () => {
     const { pages } = await renderWorkspace();
     expect(queueRows().map((row) => row.textContent)).toEqual([
       'PeopleAsks a question',
-      'ReportsThe session kept crashing or could not start.',
+      'ReportsThe session kept crashing or could not start. Retry Turn sends your last message again.',
       'SettingsReady · 3 min',
       'BillingWorking · 4 min · median 5',
       `TeamPaused: usage limit, resumes ${clockTime(pages.paused.pausedUntil ?? '')}`,
@@ -184,6 +189,276 @@ describe('PassWorkspace composer', () => {
     expect(message('Billing').value).toBe('');
     fireEvent.click(screen.getByRole('button', { name: /^Settings/ }));
     expect(message('Settings').value).toBe('half a thought');
+  });
+});
+
+describe('PassWorkspace page actions', () => {
+  /** What the daemon was sent, by route and task. */
+  function record() {
+    const sent: { route: string; taskId: string; text?: string | undefined }[] = [];
+    server.use(
+      http.post(daemonUrl('/tasks/:taskId/stop'), ({ params }) => {
+        sent.push({ route: 'stop', taskId: String(params['taskId']) });
+        return new HttpResponse(null, { status: 204 });
+      }),
+      http.post(daemonUrl('/tasks/:taskId/thread/redo'), async ({ params, request }) => {
+        const taskId = TaskId.parse(params['taskId']);
+        sent.push({
+          route: 'redo',
+          taskId,
+          text: multipartParts(await request.text()).text['text'],
+        });
+        return HttpResponse.json(taskMessageDto(taskId), { status: 201 });
+      }),
+      http.post(daemonUrl('/tasks/:taskId/turns/:turnId/opened'), ({ params }) => {
+        sent.push({
+          route: `opened ${String(params['turnId'])}`,
+          taskId: String(params['taskId']),
+        });
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    return sent;
+  }
+
+  /** What was sent besides opened marks, which an earlier test's Ready page may still be sending. */
+  const actionsSent = (sent: ReturnType<typeof record>) =>
+    sent.filter((s) => !s.route.startsWith('opened'));
+
+  it('an empty composer stops the working page plainly, sending nothing', async () => {
+    const sent = record();
+    const { pages } = await renderWorkspace((p) => p.working.taskId);
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+    await waitFor(() => {
+      expect(actionsSent(sent)).toEqual([{ route: 'stop', taskId: pages.working.taskId }]);
+    });
+  });
+
+  it('Stop and Redo sends the typed words to the working page as its next turn', async () => {
+    await useNodeMultipart();
+    const sent = record();
+    const { pages } = await renderWorkspace((p) => p.working.taskId);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message to Billing' }), {
+      target: { value: 'not that, the header' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Stop and Redo' }));
+    await waitFor(() => {
+      expect(actionsSent(sent)).toEqual([
+        { route: 'redo', taskId: pages.working.taskId, text: 'not that, the header' },
+      ]);
+    });
+  });
+
+  it('marks a Ready page’s turn opened once it is shown, and never one already opened', async () => {
+    const sent = record();
+    const { pages } = await renderWorkspace((p) => p.ready.taskId);
+    const turnId = pages.ready.turn?.id ?? '';
+    await waitFor(() => {
+      expect(sent).toEqual([{ route: `opened ${turnId}`, taskId: pages.ready.taskId }]);
+    });
+    sent.length = 0;
+    const ready = pages.ready;
+    renderWithDaemon(
+      <PassWorkspace
+        view={passViewDto({
+          pages: [ready],
+          turns: [
+            passTurnTimingDto({
+              taskId: ready.taskId,
+              seq: ready.turn?.seq ?? 1,
+              readyAt: ready.turn?.readyAt ?? null,
+              openedAt: minutesBeforeNow(1),
+            }),
+          ],
+        })}
+        inbox={[]}
+        project={projectViewDto()}
+        selected={ready.taskId}
+        onSelect={vi.fn()}
+      />,
+    );
+    await screen.findAllByRole('textbox', { name: 'Message to Settings' });
+    expect(sent).toEqual([]);
+  });
+
+  it('offers Sign Off on a Ready page only disabled, saying why, and sends nothing', async () => {
+    const sent = record();
+    await renderWorkspace((p) => p.ready.taskId);
+    const signOff = screen.getByRole('button', { name: 'Sign Off' });
+    expect(signOff.getAttribute('aria-disabled')).toBe('true');
+    fireEvent.click(signOff);
+    fireEvent.mouseEnter(signOff);
+    expect(await screen.findByText(/can't sign off a page yet/)).toBeTruthy();
+    expect(actionsSent(sent)).toEqual([]);
+  });
+
+  it("lists under each reply the files its turn changed, read from the page's turns", async () => {
+    const pages = pagesByStatus();
+    const ready = pages.ready;
+    server.use(
+      ...passHandlers({
+        threads: {
+          [ready.taskId]: {
+            taskId: ready.taskId,
+            messages: [
+              taskMessageDto(ready.taskId, {
+                author: 'agent',
+                kind: 'reply',
+                body: 'Tightened the padding',
+                createdAt: minutesBeforeNow(3),
+              }),
+            ],
+          },
+        },
+        turns: {
+          [ready.taskId]: [
+            passTurnWithFilesDto({
+              taskId: ready.taskId,
+              startedAt: minutesBeforeNow(12),
+              files: [{ path: 'src/settings/page.tsx', added: 4, removed: 1 }],
+            }),
+          ],
+        },
+      }),
+    );
+    renderWithDaemon(
+      <PassWorkspace
+        view={passViewDto({ pages: [ready] })}
+        inbox={[]}
+        project={projectViewDto()}
+        selected={ready.taskId}
+        onSelect={vi.fn()}
+      />,
+    );
+    const files = await screen.findByRole('list', { name: 'Files this turn changed' });
+    expect(files.textContent).toContain('src/settings/page.tsx');
+  });
+});
+
+describe('PassWorkspace Retry Turn', () => {
+  it("answers the failed page's flag with Retry Turn", async () => {
+    const answered: { id: string; body: unknown }[] = [];
+    server.use(
+      http.post(daemonUrl('/inbox/:id/answer'), async ({ params, request }) => {
+        answered.push({ id: String(params['id']), body: await request.json() });
+        return HttpResponse.json(inboxItemDto({ state: 'RESOLVED' }));
+      }),
+    );
+    const { pages } = await renderWorkspace((p) => p.failed.taskId);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry Turn' }));
+    await waitFor(() => {
+      expect(answered).toEqual([
+        { id: pages.failed.failure?.retryItemId, body: { choice: PASS_RETRY_TURN_CHOICE } },
+      ]);
+    });
+  });
+
+  it('offers no Retry Turn on a page whose turn did not fail', async () => {
+    await renderWorkspace((p) => p.ready.taskId);
+    expect(screen.queryByRole('button', { name: 'Retry Turn' })).toBeNull();
+  });
+});
+
+describe('PassWorkspace window focus', () => {
+  it('selects the page that has waited longest when the window gains focus on a page that waits on nothing', async () => {
+    const { pages, onSelect } = await renderWorkspace((p) => p.working.taskId);
+    fireEvent.focus(window);
+    expect(onSelect).toHaveBeenCalledWith(pages.asks.taskId);
+  });
+
+  it('never moves away from a page with a draft', async () => {
+    const { onSelect } = await renderWorkspace((p) => p.working.taskId);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message to Billing' }), {
+      target: { value: 'half a thought' },
+    });
+    fireEvent.focus(window);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+});
+
+describe('PassWorkspace while the pass is not open', () => {
+  it.each(['ABANDONING', 'CLOSING'] as const)(
+    'while %s, holds every page action: no message, no Retry Turn, no row menu',
+    async (state) => {
+      const pages = pagesByStatus();
+      renderWithDaemon(
+        <PassWorkspace
+          view={passViewDto({ pass: { state }, pages: Object.values(pages) })}
+          inbox={[]}
+          project={projectViewDto()}
+          selected={pages.failed.taskId}
+          onSelect={vi.fn()}
+        />,
+      );
+      const input = await screen.findByRole('textbox', { name: 'Message to Reports' });
+      expect(input).toHaveProperty('disabled', true);
+      expect(screen.queryByRole('button', { name: 'Retry Turn' })).toBeNull();
+      expect(screen.queryByRole('button', { name: /^More actions for/ })).toBeNull();
+    },
+  );
+});
+
+describe('PassWorkspace Take Out', () => {
+  function serveTakeOut(tookOut = true) {
+    const sent: { passId: string; taskId: string; body: unknown }[] = [];
+    server.use(
+      http.post(
+        daemonUrl('/passes/:passId/tasks/:taskId/take-out'),
+        async ({ params, request }) => {
+          const taskId = TaskId.parse(params['taskId']);
+          sent.push({ passId: String(params['passId']), taskId, body: await request.json() });
+          return HttpResponse.json(
+            TakeOutResultDto.parse({
+              taskId,
+              passId: params['passId'],
+              tookOut,
+              keptSha: null,
+              stillChanging: tookOut ? [] : ['src/billing/page.tsx'],
+              left: [],
+            }),
+          );
+        },
+      ),
+    );
+    return sent;
+  }
+
+  async function takeOut(area: string) {
+    fireEvent.click(screen.getByRole('button', { name: `More actions for ${area}` }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Take Out…', hidden: true }));
+    const dialog = await screen.findByRole('dialog', { name: `Take Out ${area}` });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Take Out' }));
+    return dialog;
+  }
+
+  it("takes out the row's page after a confirm, keeping every shared change", async () => {
+    const sent = serveTakeOut();
+    const pages = pagesByStatus();
+    const view = passViewDto({ pages: Object.values(pages) });
+    renderWithDaemon(
+      <PassWorkspace
+        view={view}
+        inbox={[]}
+        project={projectViewDto()}
+        selected={pages.ready.taskId}
+        onSelect={vi.fn()}
+      />,
+    );
+    await screen.findByRole('list', { name: 'Pages in this pass' });
+    await takeOut('Billing');
+    await waitFor(() => {
+      expect(sent).toEqual([{ passId: view.pass.id, taskId: pages.working.taskId, body: {} }]);
+    });
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Take Out Billing' })).toBeNull();
+    });
+  });
+
+  it('says which files kept changing when the page could not be taken out', async () => {
+    serveTakeOut(false);
+    await renderWorkspace();
+    const dialog = await takeOut('Billing');
+    expect(await within(dialog).findByText(/src\/billing\/page\.tsx/)).toBeTruthy();
   });
 });
 

@@ -1,8 +1,11 @@
+import type { TurnActivityDto } from '@10db/contracts';
 import {
   GoalPassPagesDto,
   mintId,
   PagesProposalDto,
   PassDto,
+  PassOpenedDto,
+  PASS_SIGN_OFF_CHOICE,
   PassPageDto,
   PassStartDto,
   PassTurnTimingDto,
@@ -12,14 +15,13 @@ import {
   TaskId,
   TaskMessageDto,
   TaskThreadDto,
-  TurnActivityDto,
   type InboxItemDto,
   type PassTurnActivity,
   type WorkstreamId,
 } from '@10db/contracts';
 import { http, HttpResponse, type HttpHandler } from 'msw';
 import { daemonUrl } from './daemon';
-import { inboxItemDto } from './fixtures';
+import { batchDto, inboxItemDto } from './fixtures';
 
 // Workbench fixtures. Every DTO is parsed with its contract, so a contract change breaks the fixture
 // before it breaks a view, and the handlers answer the routes the daemon serves for the Workbench.
@@ -48,6 +50,18 @@ export function passDto(overrides: Partial<PassDto> = {}): PassDto {
     createdAt: PASS_OPENED_AT,
     updatedAt: PASS_OPENED_AT,
     ...overrides,
+  });
+}
+
+/** What `POST /projects/:projectId/passes` answers: the pass opened on a clean folder. */
+export function passOpenedDto(pass: Partial<PassDto> = {}): PassOpenedDto {
+  const opened = passDto(pass);
+  return PassOpenedDto.parse({
+    pass: opened,
+    batch: batchDto({ id: opened.batchId, projectId: opened.projectId, passId: opened.id }),
+    dirt: [],
+    aheadOfBase: 0,
+    waiting: [],
   });
 }
 
@@ -154,6 +168,27 @@ export function pagesByStatus() {
     pausedUntil: '2026-11-09T15:40:00.000Z',
   });
   return { notStarted, working, ready, asks, failed, paused };
+}
+
+/** The `check` item of a page of `view` that became Ready, as the Inbox holds it. */
+export function readyItem(view: PassViewDto, page: PassPageDto): InboxItemDto {
+  return inboxItemDto({
+    projectId: view.pass.projectId,
+    kind: 'check',
+    title: `Ready: ${page.title}`,
+    body: '',
+    options: [{ label: PASS_SIGN_OFF_CHOICE, description: '' }],
+    detail: {
+      passId: view.pass.id,
+      taskId: page.taskId,
+      workstreamId: page.workstreamId ?? mintId('Workstream'),
+      turnId: page.turn?.id ?? mintId('PassTurn'),
+      keptSha: 'b'.repeat(40),
+      keptBaseSha: 'a'.repeat(40),
+      turnFiles: [],
+      pageFiles: [],
+    },
+  });
 }
 
 /** An open question from the page's run, as the Inbox holds it. */
@@ -277,15 +312,6 @@ export function passTurnWithFilesDto(
   });
 }
 
-export function turnActivityDto(overrides: Partial<TurnActivityDto> = {}): TurnActivityDto {
-  return TurnActivityDto.parse({
-    at: minutesBeforeNow(2),
-    kind: 'tool_use',
-    summary: 'Edit src/settings/page.tsx',
-    ...overrides,
-  });
-}
-
 /** The data of a `session.activity` event from a pass lane's turn. */
 export function passActivityData(
   workstreamId: WorkstreamId,
@@ -383,6 +409,11 @@ export function passHandlers(routes: PassRoutes = {}): HttpHandler[] {
     ),
     http.get(daemonUrl('/tasks/:taskId/turns'), ({ params }) =>
       HttpResponse.json(routes.turns?.[String(params['taskId'])] ?? []),
+    ),
+    // Showing a Ready page marks its turn opened.
+    http.post(
+      daemonUrl('/tasks/:taskId/turns/:turnId/opened'),
+      () => new HttpResponse(null, { status: 204 }),
     ),
     http.get(daemonUrl('/pass-turns/:turnId/activity'), ({ params }) =>
       HttpResponse.json(routes.activity?.[String(params['turnId'])] ?? []),

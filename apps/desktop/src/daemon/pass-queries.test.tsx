@@ -1,7 +1,10 @@
-import { mintId, type PassState } from '@10db/contracts';
+import { mintId, type PassState, type ProjectId } from '@10db/contracts';
+import { screen } from '@testing-library/react';
+import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
+import { baseHandlers, daemonUrl, renderWithDaemon, server } from '../test/daemon';
 import { passViewDto } from '../test/pass-fixtures';
-import { livePassOf } from './pass-queries';
+import { livePassOf, useLivePass } from './pass-queries';
 
 describe('livePassOf', () => {
   const project = mintId('Project');
@@ -41,5 +44,31 @@ describe('livePassOf', () => {
     },
   ])('$name', ({ passes, shown }) => {
     expect(livePassOf(passes, project)?.pass.name ?? null).toBe(shown);
+  });
+});
+
+function LivePassName({ projectId }: { readonly projectId: ProjectId }) {
+  const live = useLivePass(projectId);
+  if (live.data === undefined) return null;
+  return <span>{live.data?.pass.name ?? 'No pass'}</span>;
+}
+
+describe('useLivePass', () => {
+  it("asks for every project's live passes and shows the project's own", async () => {
+    const project = mintId('Project');
+    const asked: string[] = [];
+    server.use(
+      http.get(daemonUrl('/passes'), ({ request }) => {
+        asked.push(new URL(request.url).search);
+        return HttpResponse.json([
+          passViewDto({ pass: { name: 'Theirs', projectId: mintId('Project') }, pages: [] }),
+          passViewDto({ pass: { name: 'Mine', projectId: project }, pages: [] }),
+        ]);
+      }),
+      ...baseHandlers(),
+    );
+    renderWithDaemon(<LivePassName projectId={project} />);
+    expect(await screen.findByText('Mine')).toBeTruthy();
+    expect(asked).toEqual(['?live=true']);
   });
 });

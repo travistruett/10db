@@ -110,4 +110,14 @@ describe('PassHeader', () => {
     fireEvent.click(abandon);
     expect(props.onAbandon).toHaveBeenCalledTimes(1);
   });
+
+  it('while abandoning, keeps Abandon in reach, so a stalled Abandon can be asked again', async () => {
+    const { ready } = pagesByStatus();
+    const props = draw(passViewDto({ pass: { state: 'ABANDONING' }, pages: [ready] }));
+    fireEvent.click(menu());
+    const abandon = await screen.findByRole('menuitem', { name: 'Abandon Pass…', hidden: true });
+    expect(abandon.hasAttribute('disabled')).toBe(false);
+    fireEvent.click(abandon);
+    expect(props.onAbandon).toHaveBeenCalledTimes(1);
+  });
 });
