@@ -3412,6 +3412,31 @@ export function createGit(opts: GitOptions = {}): Git {
     });
   }
 
+  /** The last step of `moveCheckedOutBranch`: the branch moves by compare-and-swap. */
+  async function moveRefOnly(
+    c: Pinned,
+    ref: string,
+    from: string,
+    target: string,
+    found: string | null,
+  ): Promise<SwitchBack> {
+    try {
+      await git(c, [
+        'update-ref',
+        '--no-deref',
+        '-m',
+        `10db: move to ${target}`,
+        ref,
+        target,
+        from,
+      ]);
+    } catch (error) {
+      if (!(error instanceof GitError)) throw error;
+      return { kind: 'moved', found };
+    }
+    return { kind: 'switched' };
+  }
+
   async function moveCheckedOutBranch(input: {
     readonly repo: string;
     readonly branch: string;
@@ -3431,6 +3456,14 @@ export function createGit(opts: GitOptions = {}): Git {
       await git(c, ['update-index', '-q', '--ignore-submodules', '--refresh']).catch(
         () => undefined,
       );
+      // A move a crash cut short after its files and index and before the branch: the index holds
+      // the target's tree, so only the branch is left to move.
+      const indexTree = await git(c, ['write-tree']).then(
+        (out) => out.trim(),
+        () => null,
+      );
+      if (indexTree !== null && indexTree === (await revParse(c, `${target}^{tree}`)))
+        return moveRefOnly(c, ref, input.from, target, found);
       const paths = [...new Set([...(await changes(c)), ...(await stagedPaths(c))])];
       const written = new Set(
         (await git(c, ['diff-tree', '-r', '--name-only', '--no-renames', '-z', input.from, target]))

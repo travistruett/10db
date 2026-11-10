@@ -123,6 +123,16 @@ describe('moveCheckedOutBranch', () => {
     expect(readFileSync(join(repo.path, 'src/a.ts'), 'utf8')).toBe('edited\n');
   });
 
+  it('finishes a move a crash cut short between the files and the branch', async () => {
+    const base = squashedBase();
+    // What the move had written when the daemon died: the files and the index, not the branch.
+    rawGit('read-tree', '-m', '-u', tip, base);
+
+    expect(await move(base)).toEqual({ kind: 'switched' });
+    expect(rawGit('rev-parse', 'refs/heads/main')).toBe(base);
+    expect(rawGit('status', '--porcelain')).toBe('');
+  });
+
   it('refuses a branch HEAD does not name, or one that moved', async () => {
     const base = squashedBase();
     rawGit('switch', '-q', '10db/pass-abc123');

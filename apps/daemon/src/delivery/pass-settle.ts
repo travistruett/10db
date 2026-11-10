@@ -278,7 +278,8 @@ export async function movePassBranch(
   }
   const pushed = batch.branch === null ? null : await ctx.git.trackingTip(repo, batch.branch);
   const own: string[] = [];
-  for (const sha of await ctx.git.ownCommitsSince(repo, base, at))
+  // Merges included: a merge the builder made by hand is the builder's own too.
+  for (const sha of await ctx.git.commitsSince(repo, base, at))
     if (pushed === null || !(await ctx.git.isAncestor(repo, sha, pushed))) own.push(sha);
   if (own.length > 0) {
     refuse(

@@ -178,6 +178,16 @@ describe('a closed pass', () => {
       },
       says: 'holds 1 commit of your own',
     },
+    {
+      name: 'a merge the builder made by hand on the branch',
+      arrange: () => {
+        h.git$('switch', '-q', '-c', 'side');
+        h.commit('notes.md', 'mine\n');
+        h.git$('switch', '-q', 'main');
+        h.git$('merge', '-q', '--no-ff', '-m', 'Merge side', 'side');
+      },
+      says: 'holds 1 commit of your own',
+    },
   ])('refuses Move, saying so on the card, for $name', async ({ arrange, says }) => {
     const { passId } = await closedPass();
     arrange();
