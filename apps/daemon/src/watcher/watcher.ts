@@ -92,6 +92,8 @@ interface ExcusedWrite {
 }
 /** The most excused writes kept; the oldest go first. */
 const MAX_EXCUSED_WRITES = 500;
+/** The most of 10db's own writes kept; the oldest go first. */
+const MAX_DAEMON_WRITES = 500;
 const WATCHED_STATES = [...LANE_STATES, WorkstreamState.WaitingHuman];
 /**
  * Whose claims excuse a write at a step's end: every unfinished workstream but one a human took over. A lane
@@ -137,6 +139,11 @@ export interface Watcher {
   stepEnd(workstreamId: WorkstreamId): Promise<string[]>;
   /** Processes pending changes now instead of at the next batch. */
   flush(): Promise<void>;
+  /**
+   * Notes the files 10db itself just wrote in the checkout `root` (a take-out putting a page back), as
+   * they are now: a batch or a step end that finds one unchanged since raises no card for it.
+   */
+  daemonWrote(root: string, paths: readonly string[]): Promise<void>;
   stop(): void;
 }
 
@@ -416,6 +423,9 @@ export function createWatcher(deps: {
   // Kept in the database too, so a restarted daemon still excuses the write a card allowed before it: the
   // cards answered before it started count as used, which alone would card that write again at the step end.
   const excusedWrites = loadExcusedWrites();
+  /** Files 10db itself wrote, by checkout and path, with their stamp (`writeStamp`) just after. */
+  const daemonWrites = new Map<string, string>();
+  const daemonKey = (root: string, path: string): string => `${root}\0${path}`;
 
   function loadExcusedWrites(): Map<string, ExcusedWrite> {
     const stored = getAppSetting(db, EXCUSED_WRITES_SETTING);
@@ -444,6 +454,23 @@ export function createWatcher(deps: {
         ]),
       );
     });
+  }
+
+  /**
+   * `paths` without the files 10db itself wrote in `root` that nobody has written since; one written
+   * since is forgotten, so it is judged as any write.
+   */
+  async function withoutDaemonWrites(root: string, paths: readonly string[]): Promise<string[]> {
+    if (daemonWrites.size === 0) return [...paths];
+    const kept: string[] = [];
+    for (const rel of paths) {
+      const key = daemonKey(root, rel);
+      const stamp = daemonWrites.get(key);
+      if (stamp !== undefined && (await writeStamp(root, rel)) === stamp) continue;
+      daemonWrites.delete(key);
+      kept.push(rel);
+    }
+    return kept;
   }
 
   /** What names a lane's excused write to `path` in `root`. */
@@ -808,7 +835,10 @@ export function createWatcher(deps: {
     }
     // Before git's filter, which drops a file restored as it was: an excused deletion ends when it comes back.
     forgetRestored(entry.root, allPaths);
-    const paths = withoutBookkeeping(projectId, entry.root, allPaths);
+    const paths = await withoutDaemonWrites(
+      entry.root,
+      withoutBookkeeping(projectId, entry.root, allPaths),
+    );
     if (paths.length === 0) return;
     // Only what git still sees as changed now. This drops ignored files and directories. It also drops files
     // already committed through 10db's claim-checked commit, whose claims may have been released since the write.
@@ -994,7 +1024,10 @@ export function createWatcher(deps: {
       const batchId = worktreeBatchOf(ws);
       // A file restored since its excused deletion is no longer in git's changes, so check every one here.
       forgetRestored(root);
-      const changed = withoutBookkeeping(ws.projectId, root, await deps.git.changedPaths(root));
+      const changed = await withoutDaemonWrites(
+        root,
+        withoutBookkeeping(ws.projectId, root, await deps.git.changedPaths(root)),
+      );
       const { strays, candidates } = straysIn(
         project,
         batchId,
@@ -1046,6 +1079,21 @@ export function createWatcher(deps: {
     },
 
     flush,
+
+    async daemonWrote(root, paths) {
+      for (const rel of paths) {
+        const stamp = await writeStamp(root, rel);
+        const key = daemonKey(root, rel);
+        daemonWrites.delete(key);
+        if (stamp === null) continue;
+        daemonWrites.set(key, stamp);
+        while (daemonWrites.size > MAX_DAEMON_WRITES) {
+          const oldest = daemonWrites.keys().next();
+          if (oldest.done) break;
+          daemonWrites.delete(oldest.value);
+        }
+      }
+    },
 
     stop() {
       stopped = true;

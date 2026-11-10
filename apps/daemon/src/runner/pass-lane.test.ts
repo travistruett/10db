@@ -1128,7 +1128,11 @@ describe('a take-out or Abandon across a restart', () => {
       maxRecoveryAttempts: 3,
       cleanShutdown: false,
     });
-    await resumePassWork({ ...work, stopLane: (id) => engine.runner.stopPassLane(id) });
+    await resumePassWork({
+      ...work,
+      stopLane: (id) => engine.runner.stopPassLane(id),
+      wrote: () => Promise.resolve(),
+    });
     await work.jobs.idle();
   }
 

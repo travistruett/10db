@@ -63,8 +63,14 @@ export type TakeOutWithin = (typeof TakeOutWithin)[keyof typeof TakeOutWithin];
 /** Ends a pass lane's session, if any, keeping its last work; the runner's, injected. */
 export type StopPassLane = (id: WorkstreamId) => Promise<void>;
 
-/** What a take-out needs: the pass's work in the folder, and the runner's stop. */
-export type TakeOutDeps = PassWorkDeps & { readonly stopLane: StopPassLane };
+/** Tells Your folder's watcher which files 10db just wrote there, so they raise no card. */
+export type DaemonWrote = (repo: string, paths: readonly string[]) => Promise<void>;
+
+/** What a take-out needs: the pass's work in the folder, the runner's stop, the watcher's ear. */
+export type TakeOutDeps = PassWorkDeps & {
+  readonly stopLane: StopPassLane;
+  readonly wrote: DaemonWrote;
+};
 
 export interface TakeOutInput {
   readonly taskId: TaskId;
@@ -306,6 +312,9 @@ export async function takeOutSteps(
         expect,
       );
       ({ left } = restored);
+      // The page's files go back as they were before the pass, outside every claim once step 5
+      // releases the page: they are 10db's writes, not a lane's.
+      await deps.wrote(repo, restored.written);
       await git.refreshIndex(repo, restored.written);
     }
     const changed = left;

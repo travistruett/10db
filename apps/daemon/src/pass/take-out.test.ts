@@ -2,6 +2,7 @@ import { existsSync, readFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   AbandonStep,
+  InboxState,
   isTerminal,
   mintId,
   TakeOutStep,
@@ -20,6 +21,7 @@ import {
   insertTask,
   insertWorkstream,
   lastTakeOut,
+  listInbox,
   listTaskThreadRows,
   seedProject,
   setAbandonStep,
@@ -30,6 +32,8 @@ import {
 import { afterEach, describe, expect, it } from 'vitest';
 import { openPassWorld, type PassWorld } from '../../test/pass-world';
 import type { Git } from '../git';
+import { silentLogger } from '../log';
+import { createWatcher } from '../watcher';
 import { keptRef, keepTurnWork, passKeptRef, takeOut, takeOutSteps, TakeOutWithin } from './index';
 import { leavePassForBoard } from './take-out';
 
@@ -50,6 +54,7 @@ const takeOutDeps = (world: PassWorld, git: Git = world.h.git) => ({
     stopped.push(id);
     return Promise.resolve();
   },
+  wrote: (): Promise<void> => Promise.resolve(),
 });
 
 const read = (world: PassWorld, rel: string) => readFileSync(join(world.h.repo, rel), 'utf8');
@@ -144,6 +149,56 @@ describe('takeOut', () => {
     await takeOutSteps(takeOutDeps(w), { taskId: w.settings.id, within: TakeOutWithin.Alone });
     expect(read(w, 'src/settings/page.tsx')).toBe('landed on the pass branch\n');
     expect(getTaskKeptWork(w.h.store.db, w.settings.id)?.keptBaseSha).toBe(landed);
+  });
+
+  it("raises no card for the files its own put-back wrote, while another page's lane works", async () => {
+    w = await worked();
+    const db = w.h.store.db;
+    // People's lane is working, so a write outside every claim is carded as its shell's.
+    w.h.state.write((ctx) => {
+      for (const to of [WorkstreamState.Starting, WorkstreamState.Running])
+        transitionWorkstream(ctx, w.runOf(w.people), { to, fence: null });
+    });
+    const heard = new Map<string, (rel: string) => void>();
+    const watcher = createWatcher({
+      state: w.h.state,
+      inbox: w.h.inbox,
+      git: w.h.git,
+      logger: silentLogger,
+      clock: w.h.ctx.clock,
+      watch: (root, onChange) => {
+        heard.set(root, onChange);
+        return { close: () => undefined };
+      },
+    });
+    const strays = () =>
+      listInbox(db, { states: [InboxState.Open] }).filter((i) =>
+        i.title.includes('outside every claim'),
+      );
+    const change = async (rel: string) => {
+      for (const onChange of heard.values()) onChange(rel);
+      await watcher.flush();
+    };
+    try {
+      watcher.sync();
+      await takeOutSteps(
+        { ...takeOutDeps(w), wrote: (repo, paths) => watcher.daemonWrote(repo, paths) },
+        { taskId: w.settings.id, within: TakeOutWithin.Alone },
+      );
+      // The file went back to its earlier uncommitted content, outside every claim now.
+      expect(read(w, 'src/settings/page.tsx')).toBe('edited before the pass\n');
+      await change('src/settings/page.tsx');
+      expect(strays()).toEqual([]);
+
+      // A write to it after the put-back is someone's.
+      w.write('src/settings/page.tsx', 'written after the take-out\n');
+      await change('src/settings/page.tsx');
+      expect(strays().map((c) => c.body)).toEqual([
+        expect.stringContaining('src/settings/page.tsx'),
+      ]);
+    } finally {
+      watcher.stop();
+    }
   });
 
   it('refuses a take-out asked for alone once the pass is no longer open, writing no row', async () => {

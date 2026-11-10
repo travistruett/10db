@@ -47,6 +47,7 @@ const deps = (base: PassWorkDeps = w.deps, git: Git = base.git) => ({
   ...base,
   git,
   stopLane: (): Promise<void> => Promise.resolve(),
+  wrote: (): Promise<void> => Promise.resolve(),
 });
 const abandonCards = () =>
   listInbox(w.h.store.db, { states: [InboxState.Open] }).filter(
