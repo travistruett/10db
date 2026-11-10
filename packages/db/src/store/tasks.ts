@@ -62,7 +62,10 @@ export interface BoardStatusInput {
     /** Why 10db stopped fixing its failing required checks; null or absent while it has not. */
     readonly ciStopped?: CiStopped | null;
   } | null;
-  /** The task is a page of a pass that still holds it: the Workbench has it, whatever its run says. */
+  /**
+   * The task is a page of a pass that still holds it: In progress, as the Workbench works on it,
+   * unless its run is paused by a usage limit or held.
+   */
   readonly inPass?: boolean;
 }
 
@@ -99,8 +102,15 @@ export function deriveBoardStatus({
     case TaskStatus.Open:
       // A run marked failed but shipped anyway is judged by its pull request like a finished one.
       if (workstreamState === WorkstreamState.Failed && shipped) return shipped;
-      // A page waiting on the builder, failed or not yet spoken to is worked on in the Workbench.
-      if (inPass) return BoardStatus.InProgress;
+      // A page a pass holds is In progress, as the Workbench works on it: whether it waits on the
+      // builder (Ready or asking), failed its turn, has not been spoken to, or has no live run while
+      // the pass still holds it. A usage-limit pause and a hold stay Blocked, as for any run.
+      if (
+        inPass &&
+        workstreamState !== WorkstreamState.PausedLimit &&
+        workstreamState !== WorkstreamState.Held
+      )
+        return BoardStatus.InProgress;
       break;
   }
   if (

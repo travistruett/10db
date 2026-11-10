@@ -6,8 +6,8 @@
 
 While a pass holds a task (`passHoldsTasks`), every other view treats it as the Workbench's:
 
-- The Board puts it In progress whatever its run says (`deriveBoardStatus`'s `inPass`), so a Ready page,
-  a question or a failed turn never sits in Blocked. Its card says Workbench, not Shared branch; one that
+- The Board puts it In progress (`deriveBoardStatus`'s `inPass`), so a Ready page, a question or a failed
+  turn never sits in Blocked; a run paused by a usage limit or held stays Blocked, as any run does. Its card says Workbench, not Shared branch; one that
   waits on the builder says "Waiting on you in the Workbench"; its drawer names the pass's branch with
   Open Workbench and offers no batch action.
 - A question its run asks, its own or the shared-code question, carries no Park the task.
