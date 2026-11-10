@@ -1,9 +1,20 @@
-import { PassClosePageChoice } from '@10db/contracts';
+import {
+  mintId,
+  PassClosePageChoice,
+  SharedChoiceKind,
+  type PassClosePreviewDto,
+  type PassCloseRequest,
+} from '@10db/contracts';
 import { getPass, openHolds } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openPassWorld, type PassWorld } from '../../test/pass-world';
 import { createPassCloses, type CloseShip } from './close';
-import { closePreview, type CloseListDeps } from './close-lists';
+import {
+  checkCloseRequest,
+  closePreview,
+  type CloseListDeps,
+  type ClosePages,
+} from './close-lists';
 import { grantSharedHold, keepHold, keepTurnWork } from './index';
 
 // Workbench spec §5.4 (D25), W10, §18: Close Pass… lists the unfinished pages, the files no page
@@ -77,6 +88,44 @@ describe('closePreview', () => {
 });
 
 describe('Close Pass, confirmed', () => {
+  it('refuses a Drop of a change a page set to Sign Off Now was built with, naming the page', async () => {
+    w = await openPassWorld();
+    const closes = createPassCloses({
+      ...w.deps,
+      stopLane: () => Promise.resolve(),
+      wrote: () => Promise.resolve(),
+      ship: noShip,
+      gateWhere: () => 'none',
+    });
+    // People's turn keeps a shared change; Settings' turn is kept after it, built with it.
+    const shared = w.startTurn(w.people);
+    const granted = await grantSharedHold(w.deps, { workstreamId: w.runOf(w.people), area: 'src' });
+    if (!granted?.ok) throw new Error('src was not granted');
+    w.write('src/button.ts', 'button\n');
+    const [hold] = openHolds(w.h.store.db, w.opened.pass.id);
+    if (!hold) throw new Error('no hold');
+    await keepHold(w.deps, { claimId: hold.claimId });
+    w.endTurn(shared);
+    const built = w.startTurn(w.settings);
+    w.write('src/settings/page.tsx', 'settings work\n');
+    w.endTurn(built);
+    await keepTurnWork(w.deps, { workstreamId: w.runOf(w.settings), turnId: built.id });
+    const shown = await closes.preview(w.opened.pass.id);
+
+    await expect(
+      closes.close(w.opened.pass.id, {
+        token: shown.token,
+        pages: [
+          { taskId: w.settings.id, choice: PassClosePageChoice.SignOff },
+          { taskId: w.people.id, choice: PassClosePageChoice.TakeOut },
+        ],
+        files: [],
+        shared: [{ seq: 1, choice: SharedChoiceKind.Drop }],
+      }),
+    ).rejects.toThrow(/Settings: UI work is set to Sign Off Now/);
+    expect(getPass(w.h.store.db, w.opened.pass.id).state).toBe('OPEN');
+  });
+
   it('shows the lists again, with what changed, when a file changed after they were shown', async () => {
     w = await openPassWorld();
     const closes = createPassCloses({
@@ -139,5 +188,67 @@ describe('Close Pass, confirmed', () => {
       }),
     ).rejects.toMatchObject({ name: 'ConflictError' });
     expect(getPass(w.h.store.db, w.opened.pass.id).state).toBe('OPEN');
+  });
+});
+
+describe('checkCloseRequest', () => {
+  const settings = mintId('Task');
+  const people = mintId('Task');
+  const preview: PassClosePreviewDto = {
+    token: 't',
+    unfinished: [
+      { taskId: settings, title: 'Settings', working: false, sharedUnlanded: [] },
+      {
+        taskId: people,
+        title: 'People',
+        working: false,
+        sharedUnlanded: [
+          { seq: 1, paths: ['src/button.ts'], dropRefusal: null, laterPages: [] },
+          { seq: 3, paths: ['src/card.ts'], dropRefusal: null, laterPages: [] },
+        ],
+      },
+    ],
+    unowned: [{ path: 'docs/new.md', added: 1, removed: 0, fromBeforePass: false }],
+    foreignCommits: [],
+    summary: '',
+    gate: { where: 'none', consequence: null },
+  };
+  const pages: ClosePages = {
+    signedOff: new Set(),
+    needsUpTo: new Map([
+      [settings, 2],
+      [people, 3],
+    ]),
+  };
+  const signSettings: PassCloseRequest['pages'] = [
+    { taskId: settings, choice: PassClosePageChoice.SignOff },
+    { taskId: people, choice: PassClosePageChoice.TakeOut },
+  ];
+
+  it.each([
+    {
+      name: 'a Drop of a change a page set to Sign Off Now was built with',
+      request: {
+        pages: signSettings,
+        files: [],
+        shared: [{ seq: 1, choice: SharedChoiceKind.Drop }],
+      },
+      refused: /Settings is set to Sign Off Now/,
+    },
+    {
+      name: 'a Drop of a change past what a page set to Sign Off Now needs',
+      request: {
+        pages: signSettings,
+        files: [],
+        shared: [{ seq: 3, choice: SharedChoiceKind.Drop }],
+      },
+      refused: null,
+    },
+  ])('$name', ({ request, refused }) => {
+    const check = () => {
+      checkCloseRequest(preview, { token: 't', ...request }, pages);
+    };
+    if (refused === null) expect(check).not.toThrow();
+    else expect(check).toThrow(refused);
   });
 });

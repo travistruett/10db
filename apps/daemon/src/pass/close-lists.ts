@@ -11,6 +11,8 @@ import {
   type PassCloseRequest,
   type PassDto,
   type PassId,
+  type TaskDto,
+  type TaskId,
 } from '@10db/contracts';
 import {
   getPass,
@@ -19,8 +21,10 @@ import {
   listPassTasks,
   listSharedChanges,
   openPassTurn,
+  type DbReader,
 } from '@10db/db';
 import type { PassWorkDeps } from './kept-work';
+import { sharedNeeded } from './shared-chain';
 import { sharedUnlanded } from './shared-drop';
 import { foreignCommits, unfinishedPages, unownedFiles } from './unowned';
 
@@ -151,22 +155,45 @@ export function closeChanges(request: PassCloseRequest, now: PassClosePreviewDto
   return lines.length > 0 ? lines : ['The lists changed since they were shown'];
 }
 
+/** What a confirmed close is checked against beside its lists, read from the pass's rows. */
+export interface ClosePages {
+  /** The pages signed off already. */
+  readonly signedOff: ReadonlySet<TaskId>;
+  /** The highest number of the shared chain each unfinished page needs to sign off (`sharedNeeded`). */
+  readonly needsUpTo: ReadonlyMap<TaskId, number>;
+}
+
+/** The pass's pages as `checkCloseRequest` reads them. */
+export function closePages(db: DbReader, passId: PassId): ClosePages {
+  const tasks = listPassTasks(db, passId);
+  const done = (task: TaskDto): boolean =>
+    task.workstreamId !== null &&
+    getWorkstreamRow(db, task.workstreamId).state === WorkstreamState.Done;
+  return {
+    signedOff: new Set(tasks.filter(done).map((t) => t.id)),
+    needsUpTo: new Map(
+      tasks.filter((t) => !done(t)).map((t) => [t.id, sharedNeeded(db, passId, t.id).upTo]),
+    ),
+  };
+}
+
 /**
  * Refuses a confirmed close whose choices the lists do not allow (409): a page that is not one of
  * the unfinished pages, a file placed in a task that is neither signed off nor set to Sign Off Now,
- * and a Drop of a shared change that is not of a page set to Take Out, or whose Drop is refused.
+ * a Drop of a shared change that is not of a page set to Take Out, or whose Drop is refused, and a
+ * Drop of a change a page set to Sign Off Now needs, since that page's sign-off lands it.
  */
 export function checkCloseRequest(
   preview: PassClosePreviewDto,
   request: PassCloseRequest,
-  signedOff: ReadonlySet<string>,
+  closing: ClosePages,
 ): void {
   const pages = new Map(preview.unfinished.map((p) => [p.taskId, p]));
   for (const page of request.pages)
     if (!pages.has(page.taskId))
       throw new ConflictError(`Task ${page.taskId} is not an unfinished page of the pass`);
   const signing = new Set([
-    ...signedOff,
+    ...closing.signedOff,
     ...request.pages.filter((p) => p.choice === PassClosePageChoice.SignOff).map((p) => p.taskId),
   ]);
   for (const file of request.files)
@@ -196,5 +223,14 @@ export function checkCloseRequest(
     const refused = offered.get(choice.seq);
     if (refused)
       throw new ConflictError(`Shared change ${String(choice.seq)} cannot be dropped: ${refused}`);
+    const needing = request.pages.find(
+      (p) =>
+        p.choice === PassClosePageChoice.SignOff &&
+        choice.seq <= (closing.needsUpTo.get(p.taskId) ?? 0),
+    );
+    if (needing)
+      throw new ConflictError(
+        `Shared change ${String(choice.seq)} cannot be dropped: ${pages.get(needing.taskId)?.title ?? needing.taskId} is set to Sign Off Now and was built with it`,
+      );
   }
 }

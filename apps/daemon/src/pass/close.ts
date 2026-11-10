@@ -43,7 +43,13 @@ import {
 } from '@10db/db';
 import { jobKey, JobQueue } from '../delivery';
 import { flagCard } from '../inbox';
-import { checkCloseRequest, closeChanges, closePreview, type CloseGateWhere } from './close-lists';
+import {
+  checkCloseRequest,
+  closeChanges,
+  closePages,
+  closePreview,
+  type CloseGateWhere,
+} from './close-lists';
 import { fastForwardReturn } from './fast-forward';
 import { passFolderOn } from './folder';
 import { pageMatcher, passBranch, passKeptRef } from './kept-work';
@@ -458,19 +464,7 @@ export function createPassCloses(deps: CloseDeps): PassCloses {
         throw new ConflictError(
           `Your folder is on ${on ?? 'a detached HEAD'}, not the pass's branch: switch back before closing`,
         );
-      checkCloseRequest(
-        await closePreview(deps, passId),
-        request,
-        new Set(
-          listPassTasks(db, passId)
-            .filter(
-              (t) =>
-                t.workstreamId !== null &&
-                getWorkstreamRow(db, t.workstreamId).state === WorkstreamState.Done,
-            )
-            .map((t) => t.id),
-        ),
-      );
+      checkCloseRequest(await closePreview(deps, passId), request, closePages(db, passId));
       // D25: the agents stop only now, and the close goes on only on the lists they leave.
       for (const task of unfinishedPages(db, passId))
         if (task.workstreamId !== null) await deps.stopLane(task.workstreamId);
