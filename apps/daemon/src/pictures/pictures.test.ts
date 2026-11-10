@@ -1,3 +1,5 @@
+import { existsSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   APP_URL_IS_DAEMON,
   EventType,
@@ -369,10 +371,40 @@ describe('signing in', () => {
     expect(kinds(w.settings)).toEqual([]);
     expect(p.status(w.h.project.id).signIn?.problem).toMatch(/landed on another page/);
 
-    cam.outcomes = ['elsewhere', 'elsewhere'];
+    // The route redirects by design: the next capture of the task signs in no more for it.
+    cam.outcomes = ['elsewhere'];
     readyTurn(w.settings, 'a'.repeat(40));
     await ended(3);
     expect(notices(w.settings)).toHaveLength(1);
+    expect(cam.signIns).toHaveLength(3);
+  });
+
+  it('says a page lands elsewhere without speaking of signing in, for an app with no dev login', async () => {
+    await world();
+    cam.outcomes = ['elsewhere', 'elsewhere'];
+    start();
+    await ended(2);
+    const said = listTaskThread(w.h.store.db, w.settings.id).map((m) => m.body);
+    expect(said).toHaveLength(1);
+    expect(said[0]).toMatch(/^Pictures of this page landed on another page of the app/);
+    expect(said[0]).not.toMatch(/signing in again/);
+    expect(cam.signIns).toEqual([]);
+  });
+
+  it('keeps the last sign-in as it was when a dev login is stopped', async () => {
+    await world({ devLoginCommand: 'sleep 5; echo /login' });
+    const p = start();
+    const loginDir = join(dir.path, 'browser', w.h.project.id);
+    // The dev login runs: its log is there.
+    await waitFor(
+      () => existsSync(loginDir) && readdirSync(loginDir).some((f) => f.endsWith('.log')),
+    );
+    w.h.state.write((ctx) =>
+      patchProject(ctx, w.h.project.id, { appUrl: 'http://localhost:5173' }),
+    );
+    await ended(1);
+    expect(p.status(w.h.project.id).signIn).toBeNull();
+    expect(cam.signIns).toEqual([]);
   });
 
   it('takes no picture when the dev login fails, says why, and runs it again next time', async () => {

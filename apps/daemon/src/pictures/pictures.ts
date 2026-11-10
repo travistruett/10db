@@ -127,6 +127,8 @@ export function startPictures(deps: PicturesDeps): Pictures {
   /** A task's first launch waiting on its before. */
   const beforeWaiters = new Map<TaskId, (() => void)[]>();
   const signIns = new Map<ProjectId, { problem: string | null; at: string }>();
+  /** A task's routes that landed elsewhere even after a fresh sign-in: no sign-in again for them. */
+  const redirectingRoutes = new Set<string>();
   const appUrls = new Map<ProjectId, AppUrl | null>();
   const passStates = new Map<PassId, PassState>();
 
@@ -249,6 +251,8 @@ export function startPictures(deps: PicturesDeps): Pictures {
     signal: AbortSignal,
   ): Promise<StorageState | null> {
     const result = await signIn({ ...deps.signIn, camera: deps.camera }, project, signal);
+    // A login stopped with its capture says nothing of the project's sign-in.
+    if (signal.aborted) return null;
     signIns.set(project.id, {
       problem: result.ok ? null : result.problem,
       at: deps.clock.now().toISOString(),
@@ -263,7 +267,7 @@ export function startPictures(deps: PicturesDeps): Pictures {
   }
 
   /** Says once on the task's thread that its page lands elsewhere, however many turns it does. */
-  function noticeElsewhere(taskId: TaskId, route: string): void {
+  function noticeElsewhere(taskId: TaskId, route: string, signedIn: boolean): void {
     const said = listTaskThread(db, taskId).some(
       (m) => m.author === TaskMessageAuthor.System && m.body.startsWith(ELSEWHERE_NOTICE),
     );
@@ -272,7 +276,9 @@ export function startPictures(deps: PicturesDeps): Pictures {
       insertSystemNotice(
         ctx,
         taskId,
-        `${ELSEWHERE_NOTICE} instead of ${route}, even after signing in again, so no picture of it was kept. Check the dev login command in Settings › General.`,
+        signedIn
+          ? `${ELSEWHERE_NOTICE} instead of ${route}, even after signing in again, so no picture of it was kept. Check the dev login command in Settings › General.`
+          : `${ELSEWHERE_NOTICE} instead of ${route}, so no picture of it was kept. If the page needs a sign-in, set a dev login command in Settings › General.`,
       );
     });
   }
@@ -328,7 +334,13 @@ export function startPictures(deps: PicturesDeps): Pictures {
           : Promise.reject(new Error("The app address changed or names 10db's own port"));
       const startedAt = deps.clock.now().getTime();
       let shot = await shoot(storageState);
-      if (shot.outcome === 'elsewhere' && project.devLoginCommand !== null && !signedInAgain) {
+      const redirects = `${task.id} ${target.route}`;
+      if (
+        shot.outcome === 'elsewhere' &&
+        project.devLoginCommand !== null &&
+        !signedInAgain &&
+        !redirectingRoutes.has(redirects)
+      ) {
         signedInAgain = true;
         if (shootableAddress(project.id, port) !== appUrl) return 0;
         storageState = await runSignIn(project, signal);
@@ -348,12 +360,15 @@ export function startPictures(deps: PicturesDeps): Pictures {
         'took a picture',
       );
       if (shot.outcome === 'elsewhere') {
-        if (signedInAgain)
+        if (signedInAgain) {
+          // Still elsewhere after a fresh sign-in: the route redirects by design for this task.
+          redirectingRoutes.add(redirects);
           signIns.set(project.id, {
             problem: `${target.route} landed on another page of the app after signing in`,
             at: deps.clock.now().toISOString(),
           });
-        noticeElsewhere(task.id, target.route);
+        }
+        noticeElsewhere(task.id, target.route, project.devLoginCommand !== null);
         continue;
       }
       if (shot.png === null || shot.outcome === 'failed') continue;
