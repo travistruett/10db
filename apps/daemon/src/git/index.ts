@@ -19,7 +19,6 @@ export {
   type Git,
   type KeptCommit,
   type PassDirtRecord,
-  type PathBlob,
   type ResolvedConflict,
   type SwitchBack,
 } from './git';

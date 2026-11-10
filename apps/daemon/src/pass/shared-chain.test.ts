@@ -1,9 +1,17 @@
 import { execFileSync } from 'node:child_process';
-import { activeClaims, getHold, listSharedChanges, listTaskThread, openHolds } from '@10db/db';
+import {
+  activeClaims,
+  getHold,
+  getPassTurn,
+  listSharedChanges,
+  listTaskThread,
+  openHolds,
+} from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { isolatedGitEnv } from '../../test/fixtures';
 import { openPassWorld, PASS_PROJECT, type PassWorld } from '../../test/pass-world';
-import { grantSharedHold, keepHold, landSharedChanges, sharedRef } from './index';
+import { grantSharedHold, keepHold, keepTurnWork, landSharedChanges, sharedRef } from './index';
+import { sharedNeeded } from './shared-chain';
 
 // Workbench spec §7.2: a hold keeps only what changed while it was held, as one change on the pass's
 // shared chain numbered as its grant was, and its area is released.
@@ -133,5 +141,28 @@ describe('keepHold', () => {
     // Landing again lands nothing twice.
     expect(await landSharedChanges(w.deps, { passId: w.opened.pass.id, upTo: 2 })).toEqual([]);
     expect(w.h.git$('rev-parse', w.branch)).toBe(tip);
+  });
+});
+
+describe('sharedNeeded', () => {
+  it("needs every change granted when the page's turn was kept, a hold still open included", async () => {
+    w = await twoSharedAreas();
+    const mine = await grant(w.settings, 'src');
+    w.write('src/button.ts', 'button\n');
+    await keepHold(w.deps, { claimId: mine.claimId });
+    // People's agent is still writing a shared file this page was built and looked at with.
+    const theirs = await grant(w.people, 'styles');
+    const turn = w.startTurn(w.settings);
+    w.write('src/settings/page.tsx', 'uses the button\n');
+    await keepTurnWork(w.deps, { workstreamId: w.runOf(w.settings), turnId: turn.id });
+
+    expect(getPassTurn(w.h.store.db, turn.id).sharedSeq).toBe(2);
+    const needed = sharedNeeded(w.h.store.db, w.opened.pass.id, w.settings.id);
+    expect(needed.upTo).toBe(2);
+    expect(needed.openHolds.map((h) => h.claimId)).toEqual([theirs.claimId]);
+    expect(sharedNeeded(w.h.store.db, w.opened.pass.id, w.people.id)).toEqual({
+      upTo: 0,
+      openHolds: [],
+    });
   });
 });

@@ -1,7 +1,6 @@
 // Workbench spec §5, §6, §9: a pass's own work in Your folder, and what the Workbench reads of it.
 
 export {
-  keepNamedPaths,
   keepTurnWork,
   keptRef,
   keptWorkFacts,
@@ -24,14 +23,6 @@ export { abandonPass } from './abandon';
 export { resumePassWork } from './resume';
 export { passView } from './view';
 export { grantSharedHold, holdRef, sharedRef } from './shared-hold';
-export { askShared, sharedAskNeeded, type SharedAnswer } from './shared-ask';
-export { dropShared, sharedUnlanded, type DropDone } from './shared-drop';
-export {
-  closeHoldsOf,
-  keepCommitToolPaths,
-  keepHold,
-  landSharedChanges,
-  sharedNeeded,
-  type KeptHold,
-  type LandedShared,
-} from './shared-chain';
+export { askShared } from './shared-ask';
+export { dropShared, sharedUnlanded } from './shared-drop';
+export { closeHoldsOf, keepCommitToolPaths, keepHold, landSharedChanges } from './shared-chain';
