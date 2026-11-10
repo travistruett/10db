@@ -13,11 +13,13 @@ export {
   PassFolderOffBranchError,
   WorktreeNotOursError,
   type BranchMerge,
+  type ChainCommit,
   type CheckoutPlace,
   type FolderAt,
   type Git,
   type KeptCommit,
   type PassDirtRecord,
+  type PathBlob,
   type ResolvedConflict,
   type SwitchBack,
 } from './git';
