@@ -146,26 +146,48 @@ function unsignedState(
 }
 
 /**
+ * "People's turn": the page a waiting sign-off waits for, by its page when the pass holds it, else by
+ * its task's title.
+ */
+function waitedFor(waitsFor: NonNullable<PassPageDto['waitsFor']>, pass: readonly PassPageDto[]) {
+  const page = pass.find((candidate) => candidate.taskId === waitsFor.taskId);
+  return page ? `${page.area}'s turn` : waitsFor.title;
+}
+
+type SignOffState = (
+  page: PassPageDto,
+  items: readonly InboxItemDto[],
+  clock: PageStatusClock,
+  pass: readonly PassPageDto[],
+) => PageState;
+
+/**
  * How each sign-off state reads. A page not signed off reads what its run, its turn and the Inbox say;
  * a sign-off state added to the contract must say how it reads here.
  */
-const BY_SIGN_OFF: Readonly<
-  Record<
-    PassSignOff,
-    (page: PassPageDto, items: readonly InboxItemDto[], clock: PageStatusClock) => PageState
-  >
-> = {
+const BY_SIGN_OFF: Readonly<Record<PassSignOff, SignOffState>> = {
   [PassSignOff.None]: unsignedState,
+  [PassSignOff.SigningOff]: () => state(PageStatus.SigningOff, 'Signing off…'),
+  [PassSignOff.Waiting]: (page, _items, _clock, pass) =>
+    state(
+      PageStatus.Waiting,
+      page.waitsFor === null
+        ? 'Signing off · waits for another page'
+        : `Signing off · waits for ${waitedFor(page.waitsFor, pass)}`,
+    ),
+  [PassSignOff.Done]: () => state(PageStatus.SignedOff, 'Signed off'),
 };
 
 /**
- * One page's state in the queue, from the page and the open Inbox items of the pass's project: an ask
- * is an item that targets the page's run.
+ * One page's state in the queue, from the page, the open Inbox items of the pass's project and the
+ * pass's pages: an ask is an item that targets the page's run, and a waiting sign-off names the page
+ * it waits for.
  */
 export function pageStatus(
   page: PassPageDto,
   items: readonly InboxItemDto[],
   clock: PageStatusClock,
+  pass: readonly PassPageDto[],
 ): PageState {
-  return BY_SIGN_OFF[page.signOff](page, items, clock);
+  return BY_SIGN_OFF[page.signOff](page, items, clock, pass);
 }

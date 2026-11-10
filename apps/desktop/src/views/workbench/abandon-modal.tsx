@@ -44,7 +44,7 @@ export function AbandonModal({ view, inbox, now, onClose, abandon }: AbandonModa
   const leaving = useMutation({ mutationFn: () => abandon(), onSuccess: onClose });
   const clock = { now, medianTurnMinutes: medianTurnMinutes(view.turns) };
   const signedOff = (page: PassViewDto['pages'][number]) =>
-    pageStatus(page, inbox, clock).status === PageStatus.SignedOff;
+    pageStatus(page, inbox, clock, view.pages).status === PageStatus.SignedOff;
   const reverts = view.pages.filter((page) => !signedOff(page)).map((page) => page.area);
   const stays = view.pages.filter(signedOff).map((page) => page.area);
   return (

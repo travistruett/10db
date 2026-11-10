@@ -72,7 +72,7 @@ export function PassHeader(props: PassHeaderProps) {
   const { project, view, inbox, now, onAddPage, onOpenPullRequest, onClose, onRename, onAbandon } =
     props;
   const clock = { now, medianTurnMinutes: medianTurnMinutes(view.turns) };
-  const statuses = view.pages.map((page) => pageStatus(page, inbox, clock).status);
+  const statuses = view.pages.map((page) => pageStatus(page, inbox, clock, view.pages).status);
   const open = view.pass.state === PassState.Open;
   // Abandon goes on from a close, and from an Abandon that stalled, which the daemon picks up where it
   // stopped.

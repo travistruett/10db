@@ -13,6 +13,8 @@ import { clockTime, pageStatus, PageStatus } from './page-status';
 
 const pages = pagesByStatus();
 const now = Date.parse(PASS_NOW);
+const people = passPageDto({ title: 'People: UI work', area: 'People', route: '/people' });
+const inPass = [...Object.values(pages), people];
 
 describe('pageStatus', () => {
   it.each<{
@@ -20,6 +22,7 @@ describe('pageStatus', () => {
     page: PassPageDto;
     items?: InboxItemDto[];
     median?: number | null;
+    pass?: PassPageDto[];
     status: PageStatus;
     color: string;
     line: string;
@@ -164,8 +167,50 @@ describe('pageStatus', () => {
       line: 'Stopped',
       needsYou: false,
     },
-  ])('$name', ({ page, items = [], median = 6, status, color, line, needsYou }) => {
-    expect(pageStatus(page, items, { now, medianTurnMinutes: median })).toEqual({
+    {
+      name: 'a page whose sign-off is landing',
+      page: { ...pages.ready, signOff: 'signing_off' },
+      status: PageStatus.SigningOff,
+      color: 'blue',
+      line: 'Signing off…',
+      needsYou: false,
+    },
+    {
+      name: "a sign-off waiting for another page's turn, named by that page",
+      page: {
+        ...pages.ready,
+        signOff: 'waiting',
+        waitsFor: { taskId: people.taskId, title: people.title },
+      },
+      status: PageStatus.Waiting,
+      color: 'blue',
+      line: "Signing off · waits for People's turn",
+      needsYou: false,
+    },
+    {
+      name: 'a sign-off waiting for a task the pass does not hold, named by its title',
+      page: {
+        ...pages.ready,
+        signOff: 'waiting',
+        waitsFor: { taskId: people.taskId, title: people.title },
+      },
+      pass: Object.values(pages),
+      status: PageStatus.Waiting,
+      color: 'blue',
+      line: 'Signing off · waits for People: UI work',
+      needsYou: false,
+    },
+    {
+      name: 'a signed-off page, even with a question still open from its run',
+      page: { ...pages.asks, signOff: 'done' },
+      items: [askItem(pages.asks)],
+      status: PageStatus.SignedOff,
+      color: 'green',
+      line: 'Signed off',
+      needsYou: false,
+    },
+  ])('$name', ({ page, items = [], median = 6, pass = inPass, status, color, line, needsYou }) => {
+    expect(pageStatus(page, items, { now, medianTurnMinutes: median }, pass)).toEqual({
       status,
       color,
       line,
