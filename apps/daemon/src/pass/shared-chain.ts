@@ -221,7 +221,8 @@ export interface LandedShared {
  * its chain commit holds them, so the branch's shared files are always a state the folder was in;
  * an empty hold, a dropped change and a drop are passed over, as is each of `passOver`: a close's
  * change chosen Drop, which its page's take-out drops after (no later change touches its paths, so
- * the branch is still a state the folder will be in). Each number is recorded as it lands, and a
+ * the branch is still a state the folder will be in; a gate that fails before the take-out moves the
+ * landed mark back, `rewindSharedLanded`, so the change lands later). Each number is recorded as it lands, and a
  * rerun finds a commit it made by its operation id. Refused at a hold still open, and while the
  * folder is off the pass's branch.
  */

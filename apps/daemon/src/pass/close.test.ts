@@ -1,6 +1,12 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { PassClosePageChoice, type PassCloseRequest, type ProjectInput } from '@10db/contracts';
+import {
+  PassClosePageChoice,
+  SharedChoiceKind,
+  type PassCloseRequest,
+  type ProjectInput,
+  type TaskDto,
+} from '@10db/contracts';
 import {
   findOpenByFoldKey,
   getBatch,
@@ -10,6 +16,8 @@ import {
   getProject,
   getTask,
   getWorkstreamRow,
+  openHolds,
+  patchProject,
   setClosePlan,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -22,7 +30,7 @@ import { createGateRunner } from '../verify';
 import { closeSteps, createPassCloses, gateFailedKey, type CloseDeps } from './close';
 import { closeGateOf } from './close-lists';
 import { folderCardOpen } from './folder';
-import { keepTurnWork, startAbandon, type PassWorkDeps } from './index';
+import { grantSharedHold, keepHold, keepTurnWork, startAbandon, type PassWorkDeps } from './index';
 
 // Workbench spec §5.4, §5.5, §12: Close Pass signs off the pages set to it, lands what is kept, gates,
 // takes the other pages out, pushes, fast-forwards the folder's branch and closes, step by recorded
@@ -80,8 +88,24 @@ async function twoTurns(): Promise<void> {
   }
 }
 
+/** `task` takes a turn holding `src`, in which `path` is written, kept as a turn's end keeps it. */
+async function sharedTurn(task: TaskDto, path: string): Promise<void> {
+  const turn = w.startTurn(task);
+  const granted = await grantSharedHold(w.deps, { workstreamId: w.runOf(task), area: 'src' });
+  if (!granted?.ok) throw new Error('src was not granted');
+  w.write(path, `${task.title} shared\n`);
+  for (const hold of openHolds(w.h.store.db, w.opened.pass.id))
+    await keepHold(w.deps, { claimId: hold.claimId });
+  w.endTurn(turn);
+  await keepTurnWork(w.deps, { workstreamId: w.runOf(task), turnId: turn.id });
+}
+
 /** Close Pass confirmed on the lists as shown: Settings signed off, People taken out. */
-async function confirm(deps: CloseDeps, files: PassCloseRequest['files'] = []) {
+async function confirm(
+  deps: CloseDeps,
+  files: PassCloseRequest['files'] = [],
+  shared: PassCloseRequest['shared'] = [],
+) {
   const closes = createPassCloses(deps);
   const shown = await closes.preview(w.opened.pass.id);
   const answer = await closes.close(w.opened.pass.id, {
@@ -91,7 +115,7 @@ async function confirm(deps: CloseDeps, files: PassCloseRequest['files'] = []) {
       { taskId: w.people.id, choice: PassClosePageChoice.TakeOut },
     ],
     files,
-    shared: [],
+    shared,
   });
   expect(answer.outcome).toBe('closing');
   await w.h.jobs.idle();
@@ -169,6 +193,41 @@ describe('Close Pass', () => {
     expect(landed()).toEqual(['Settings: UI work']);
     expect(w.h.git$('symbolic-ref', '--short', 'HEAD')).toBe(w.branch);
     expect(getTask(w.h.store.db, w.people.id).passId === null).toBe(takenOut);
+  });
+
+  it('lands, at the next close, a shared change chosen Drop when the gate failed before its take-out', async () => {
+    await world({ gateCommand: 'true' });
+    // The gate fails the first time it runs and passes after.
+    const flag = join(w.h.dataDir, 'gate-ran');
+    w.h.state.write((ctx) =>
+      patchProject(ctx, w.h.project.id, {
+        gateCommand: `test -e '${flag}' || { touch '${flag}'; exit 1; }`,
+      }),
+    );
+    await twoTurns();
+    await sharedTurn(w.people, 'src/button.ts');
+
+    await confirm(closeDeps(), [], [{ seq: 1, choice: SharedChoiceKind.Drop }]);
+    expect(passState()).toBe('OPEN');
+
+    // People is signed off at the next close, with its change kept: the change lands before it.
+    const closes = createPassCloses(closeDeps());
+    const shown = await closes.preview(w.opened.pass.id);
+    await closes.close(w.opened.pass.id, {
+      token: shown.token,
+      pages: [{ taskId: w.people.id, choice: PassClosePageChoice.SignOff }],
+      files: [],
+      shared: [],
+    });
+    await w.h.jobs.idle();
+
+    expect(passState()).toBe('CLOSED');
+    expect(landed()).toEqual([
+      'Settings: UI work',
+      'Shared change 1 of People: UI work',
+      'People: UI work',
+    ]);
+    expect(w.h.git$('show', `${w.branch}:src/button.ts`)).toBe('People: UI work shared');
   });
 
   it('closes by the fast-forward alone with no origin, and settles at once', async () => {

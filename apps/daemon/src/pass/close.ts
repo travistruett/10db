@@ -34,6 +34,7 @@ import {
   maxGrantedSeq,
   openHolds,
   reopenClosingPass,
+  rewindSharedLanded,
   setClosePlan,
   setCloseStep,
   setPassNotice,
@@ -169,8 +170,9 @@ async function namedInLog(
 
 /**
  * A close's gate failed (spec §5.4, call 17): in one write the batch goes `SHIPPING → FAILED → OPEN`
- * and the pass back to `OPEN` with no close step, and a card names the pages the failure names. It
- * offers no Retry: the next Close Pass runs the gate again. Nothing below the gate has happened.
+ * and the pass back to `OPEN` with no close step, its landed mark before any shared change still to
+ * land, and a card names the pages the failure names. It offers no Retry: the next Close Pass runs
+ * the gate again. Nothing below the gate has happened.
  */
 async function failGate(
   deps: CloseDeps,
@@ -194,6 +196,9 @@ async function failGate(
       : 'in Your folder, after the pages set to Take Out were taken out, so the pass is open again without them; their work is kept with their tasks';
   deps.state.write((ctx) => {
     if (!reopenClosingPass(ctx, pass.id)) return;
+    // A change chosen Drop was passed over at step 2 and its take-out has not dropped it: it lands
+    // with the next sign-off or close that needs it.
+    rewindSharedLanded(ctx, pass.id);
     const batch = getBatch(ctx.tx, pass.batchId);
     if (batch.state === BatchState.Shipping)
       transitionBatch(ctx, batch.id, { to: BatchState.Failed, reason: 'the close gate failed' });
