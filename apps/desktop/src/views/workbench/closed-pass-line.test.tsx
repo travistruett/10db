@@ -1,10 +1,10 @@
-import { PASS_MOVE_CHOICE } from '@10db/contracts';
+import { PASS_MOVE_CHOICE, type PassMoveDetail, type PassViewDto } from '@10db/contracts';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderWithDaemon, server } from '../../test/daemon';
 import { passCard, passViewDto } from '../../test/pass-fixtures';
-import { ClosedPassLine } from './closed-pass-line';
+import { ClosedPassLine, closedPassWords } from './closed-pass-line';
 
 const PR = 'https://github.com/acme/ampsio/pull/7';
 const closed = passViewDto({
@@ -67,5 +67,82 @@ describe('ClosedPassLine', () => {
     expect(
       await screen.findByText('src/app.css is uncommitted where the move would write'),
     ).toBeTruthy();
+  });
+});
+
+describe('closedPassWords', () => {
+  const pr = (state: 'open' | 'merged' | 'closed' | null): PassViewDto['pullRequest'] => ({
+    url: PR,
+    draft: false,
+    state,
+    failingChecks: [],
+  });
+  const move = (reason: PassMoveDetail['reason']): PassMoveDetail => ({
+    kind: 'pass_move',
+    passId: closed.pass.id,
+    returnBranch: 'main',
+    base: 'main',
+    reason,
+    prUrl: PR,
+  });
+  it.each<{
+    name: string;
+    pullRequest: PassViewDto['pullRequest'];
+    card: PassMoveDetail | null;
+    words: string;
+  }>([
+    {
+      name: 'its pull request open',
+      pullRequest: pr('open'),
+      card: null,
+      words: 'Settings pass closed; it settles once its pull request merges.',
+    },
+    {
+      name: 'its pull request not read yet',
+      pullRequest: pr(null),
+      card: move('closed'),
+      words: 'Settings pass closed; it settles once its pull request merges.',
+    },
+    {
+      name: 'no pull request',
+      pullRequest: null,
+      card: null,
+      words: 'Settings pass closed with no pull request.',
+    },
+    {
+      name: 'closed unmerged, by its card',
+      pullRequest: pr('open'),
+      card: move('closed_unmerged'),
+      words: 'Settings pass closed; its pull request closed without merging.',
+    },
+    {
+      name: 'closed unmerged, read before a card',
+      pullRequest: pr('closed'),
+      card: null,
+      words: 'Settings pass closed; its pull request closed without merging.',
+    },
+    {
+      name: 'merged after other work reached the base',
+      pullRequest: pr('merged'),
+      card: move('drift'),
+      words:
+        'Settings pass closed; its pull request merged, but other work reached main first, so the folder waits to move.',
+    },
+    {
+      name: 'a CI fix pushed to it',
+      pullRequest: pr('open'),
+      card: move('ci_fix'),
+      words:
+        'Settings pass closed; a fix was pushed to its pull request, so the folder waits to move.',
+    },
+    {
+      name: 'merged, realigning by itself',
+      pullRequest: pr('merged'),
+      card: null,
+      words:
+        'Settings pass closed; its pull request merged, and the folder moves to the base next.',
+    },
+  ])('$name', ({ pullRequest, card, words }) => {
+    expect(closedPassWords({ ...closed, pullRequest }, card)).toBe(words);
   });
 });

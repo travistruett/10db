@@ -1,6 +1,7 @@
 import {
   InboxKind,
   InboxState,
+  PassSignOff,
   PassState,
   type InboxItemDto,
   type PassViewDto,
@@ -120,7 +121,15 @@ export function PassHeader(props: PassHeaderProps) {
           </Menu>
         </Group>
       </Group>
-      <CloseProgress state={view.pass.state} step={view.closeStep} />
+      <CloseProgress
+        state={view.pass.state}
+        step={view.closeStep}
+        facts={{
+          delivery: project.delivery,
+          gated: project.gateCommand !== null,
+          takingOut: view.pages.some((page) => page.signOff !== PassSignOff.Done),
+        }}
+      />
       {hint === null ? null : (
         <Text size="xs" c="dimmed">
           {hint}

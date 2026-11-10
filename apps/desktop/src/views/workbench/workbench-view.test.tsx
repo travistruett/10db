@@ -87,9 +87,7 @@ describe('WorkbenchScreen', () => {
   it('with a closed pass waiting to settle, says so in one line above the picker', async () => {
     const notice = passNotice();
     await draw({ live: passViewDto({ pass: { state: 'CLOSED' }, rest: { notices: [notice] } }) });
-    expect(
-      await screen.findByText('Settings pass closed; it settles once its pull request merges.'),
-    ).toBeTruthy();
+    expect(await screen.findByText('Settings pass closed with no pull request.')).toBeTruthy();
     expect(screen.getByRole('checkbox', { name: /^settings/ })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'More pass actions' })).toBeNull();
     // Its notices stay in sight, and its pages take no message.
