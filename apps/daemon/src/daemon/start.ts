@@ -98,6 +98,7 @@ import {
   createBatchStarter,
   createDeliveryJobs,
   createPrWatch,
+  answerPassMoveCard,
   createPassPullRequests,
   createShipper,
   createWorktreeDependencies,
@@ -111,6 +112,8 @@ import {
   recoverBatches,
   removeMergedBranches,
   resolvePnpm,
+  resumePassSettles,
+  subscribePassSettles,
   subscribePrWatch,
   subscribeShipTrigger,
   type DeliveryContext,
@@ -915,6 +918,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const passWork: PassWorkDeps = { state, git, inbox, jobs: delivery.jobs, logger, clock };
   answerPassCards = (item, answer) => {
     answerPassCard(passWork, item, answer);
+    answerPassMoveCard(delivery, item, answer);
   };
   const starter = createBatchStarter(delivery);
   answerStartCard = createStartCardAnswers({ state, starter });
@@ -1395,6 +1399,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
   );
   const unsubscribeShip = subscribeShipTrigger(bus, state.db, shipper);
+  // A pass that closes unsettled gets its Move card, and each closed pass is looked at again.
+  const unsubscribePassSettles = subscribePassSettles(bus, delivery);
+  resumePassSettles(delivery);
   // Outside the delivery job queues: a slow or offline gh never holds a cut or a ship.
   const prWatch = createPrWatch({
     ctx: delivery,
@@ -1789,6 +1796,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         logger.warn({ err: error }, 'could not stop the sign-in');
       });
       unsubscribeShip();
+      unsubscribePassSettles();
       unsubscribePrWatch();
       await prWatch.stop();
       retiredLandingsAbort.abort();

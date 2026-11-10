@@ -29,6 +29,7 @@ export {
   type PutBackKeptWork,
 } from './pass-open';
 export { createPassPullRequests, type PassPullRequests, type PassShipDeps } from './pass-pr';
+export { answerPassMoveCard, resumePassSettles, subscribePassSettles } from './pass-settle';
 export { createFailedRestarts } from './restart';
 export { stepCheck } from './local-check';
 export { fileFlakyTests, flakeNote, rerunFlaky, type FlakyTest } from './flaky-tests';

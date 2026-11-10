@@ -755,6 +755,19 @@ export interface Git {
     readonly expect: string;
   }): Promise<'moved' | 'already' | 'raced'>;
   /**
+   * D22's Move: moves `branch`, which HEAD names at `from`, to commit `to`, its files following
+   * through `read-tree -m -u` as the built switch writes them, under the repo lock. Uncommitted changes
+   * the move does not write stay; one where it writes (`dirty`), or a file git does not track in the
+   * way (`ignored`), refuses it and nothing changes, as does a HEAD on another branch or a branch no
+   * longer at `from` (`moved`).
+   */
+  moveCheckedOutBranch(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly from: string;
+    readonly to: string;
+  }): Promise<SwitchBack>;
+  /**
    * The commits `tip` has since `base` that are its own: first parents only, merges left out,
    * newest first. A merge of the base into the branch adds none, and neither do the commits it brought in.
    */
@@ -3388,6 +3401,61 @@ export function createGit(opts: GitOptions = {}): Git {
     });
   }
 
+  async function moveCheckedOutBranch(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly from: string;
+    readonly to: string;
+  }): Promise<SwitchBack> {
+    if (!OBJECT_ID.test(input.from) || !OBJECT_ID.test(input.to))
+      throw new InvalidError('A branch is moved between two commit ids');
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const ref = `refs/heads/${input.branch}`;
+      const found = await currentBranch(c);
+      if (found !== input.branch) return { kind: 'moved', found };
+      if ((await revParse(c, `${ref}^{commit}`)) !== input.from) return { kind: 'moved', found };
+      const target = await revParse(c, `${input.to}^{commit}`);
+      if (target === null) return { kind: 'gone' };
+      await git(c, ['update-index', '-q', '--ignore-submodules', '--refresh']).catch(
+        () => undefined,
+      );
+      const paths = [...new Set([...(await changes(c)), ...(await stagedPaths(c))])];
+      const written = new Set(
+        (await git(c, ['diff-tree', '-r', '--name-only', '--no-renames', '-z', input.from, target]))
+          .split('\0')
+          .filter(Boolean),
+      );
+      const overlapping = paths.filter((path) => written.has(path)).sort();
+      if (overlapping.length > 0) return { kind: 'dirty', paths: overlapping };
+      const inTheWay = await untrackedInTheWay(c, input.from, target, written);
+      if (inTheWay.length > 0) return { kind: 'ignored', paths: inTheWay };
+      try {
+        await git(c, ['read-tree', '-m', '-u', input.from, target]);
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        throw new InvalidError(`10db could not move ${input.branch}'s files: ${error.message}`);
+      }
+      try {
+        await git(c, [
+          'update-ref',
+          '--no-deref',
+          '-m',
+          `10db: move to ${target}`,
+          ref,
+          target,
+          input.from,
+        ]);
+      } catch (error) {
+        // The branch moved meanwhile: its files go back to what it held.
+        await git(c, ['read-tree', '-m', '-u', target, input.from]).catch(() => undefined);
+        if (!(error instanceof GitError)) throw error;
+        return { kind: 'moved', found };
+      }
+      return { kind: 'switched' };
+    });
+  }
+
   async function rewindBranch(
     repo: string,
     branch: string,
@@ -3819,6 +3887,7 @@ export function createGit(opts: GitOptions = {}): Git {
     fastForwardBranch,
     rewindBranch,
     moveBranchCas,
+    moveCheckedOutBranch,
     async ownCommitsSince(repo, base, tip) {
       return (
         await git(await pinned(repo), [

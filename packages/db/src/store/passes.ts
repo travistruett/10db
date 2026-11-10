@@ -585,6 +585,17 @@ export function forgetPassPullRequest(ctx: WriteContext, passId: PassId): void {
   emitPass(ctx, pass, { prUrl: null });
 }
 
+/** Every pass in `state`, oldest first. */
+export function listPassesIn(db: DbReader, state: PassState): PassDto[] {
+  return db
+    .select()
+    .from(schema.passes)
+    .where(eq(schema.passes.state, state))
+    .orderBy(asc(schema.passes.createdAt))
+    .all()
+    .map(toPassDto);
+}
+
 /** The pass's pull request as last made or read, or null before it has one. */
 export function getPassPullRequest(db: DbReader, passId: PassId): PassPullRequestView | null {
   const row = getBatchRow(db, getPass(db, passId).batchId);

@@ -86,3 +86,49 @@ describe('moveBranchCas', () => {
     expect(rawGit('rev-parse', 'refs/heads/main')).toBe(start);
   });
 });
+
+describe('moveCheckedOutBranch', () => {
+  /** The base as a squash merge left it: the pass's change fixed by CI, and another pull request's file. */
+  function squashedBase(): string {
+    rawGit('switch', '-q', 'main');
+    rawGit('merge', '-q', '--ff-only', tip);
+    write('src/b.ts', 'another pull request\n');
+    write('src/a.ts', 'signed off, then fixed by CI\n');
+    rawGit('add', 'src/a.ts', 'src/b.ts');
+    const tree = rawGit('write-tree');
+    rawGit('reset', '-q', '--hard');
+    return rawGit('commit-tree', '-p', start, '-m', 'squash', tree);
+  }
+  const move = (to: string) =>
+    git.moveCheckedOutBranch({ repo: repo.path, branch: 'main', from: tip, to });
+
+  it("moves the branch HEAD names and its files to the commit, keeping changes the move doesn't write", async () => {
+    const base = squashedBase();
+    write('notes.md', 'mine\n');
+
+    expect(await move(base)).toEqual({ kind: 'switched' });
+    expect(rawGit('symbolic-ref', 'HEAD')).toBe('refs/heads/main');
+    expect(rawGit('rev-parse', 'refs/heads/main')).toBe(base);
+    expect(readFileSync(join(repo.path, 'src/b.ts'), 'utf8')).toBe('another pull request\n');
+    expect(readFileSync(join(repo.path, 'notes.md'), 'utf8')).toBe('mine\n');
+    expect(rawGit('status', '--porcelain')).toBe('?? notes.md');
+  });
+
+  it('refuses, naming them, when uncommitted changes lie where the move writes', async () => {
+    const base = squashedBase();
+    write('src/a.ts', 'edited\n');
+
+    expect(await move(base)).toEqual({ kind: 'dirty', paths: ['src/a.ts'] });
+    expect(rawGit('rev-parse', 'refs/heads/main')).toBe(tip);
+    expect(readFileSync(join(repo.path, 'src/a.ts'), 'utf8')).toBe('edited\n');
+  });
+
+  it('refuses a branch HEAD does not name, or one that moved', async () => {
+    const base = squashedBase();
+    rawGit('switch', '-q', '10db/pass-abc123');
+    expect(await move(base)).toEqual({ kind: 'moved', found: '10db/pass-abc123' });
+    rawGit('switch', '-q', 'main');
+    rawGit('commit', '-q', '--allow-empty', '-m', 'own');
+    expect(await move(base)).toEqual({ kind: 'moved', found: 'main' });
+  });
+});

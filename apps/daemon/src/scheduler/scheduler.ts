@@ -6,6 +6,8 @@ import {
   passHeldAreas,
   PASS_FOLDER_WAIT_LINE,
   PASS_FOLDER_WAIT_NOTICE_KEY,
+  PASS_PR_WAIT_LINE,
+  PassState,
   queueOrder,
   PassTurnEnding,
   TakeOutStep,
@@ -163,18 +165,22 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
   }
 
   /**
-   * Shows on a task in Your folder that it waits for the pass holding the folder; written once, and
-   * never over another notice: a parked, left-out or reverted run's notice says what the builder
-   * must know, and the run's card says it waits.
+   * Shows on a task in Your folder that it waits for the pass holding the folder: for its close, or
+   * once closed for its pull request to merge (D22). Written when what it says changes, and never
+   * over another notice: a parked, left-out or reverted run's notice says what the builder must know,
+   * and the run's card says it waits.
    */
   function waitForPass(id: WorkstreamId, pass: PassDto): void {
-    if (getWorkstreamRow(db, id).notice !== null) return;
+    const line = pass.state === PassState.Closed ? PASS_PR_WAIT_LINE : PASS_FOLDER_WAIT_LINE;
+    const stale = (notice: WorkstreamDto['notice']): boolean =>
+      notice === null || (notice.key === PASS_FOLDER_WAIT_NOTICE_KEY && notice.line !== line);
+    if (!stale(getWorkstreamRow(db, id).notice)) return;
     opts.state.write((ctx) => {
-      if (getWorkstreamRow(ctx.tx, id).notice !== null) return;
+      if (!stale(getWorkstreamRow(ctx.tx, id).notice)) return;
       setWorkstreamNotice(ctx, id, {
         key: PASS_FOLDER_WAIT_NOTICE_KEY,
         tone: 'info',
-        line: PASS_FOLDER_WAIT_LINE,
+        line,
         body: `Your folder is in the Workbench pass "${pass.name}". This task starts there once the pass has closed and its work is in the base.`,
       });
     });

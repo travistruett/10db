@@ -36,6 +36,7 @@ import {
 } from '../github';
 import { prCardKey, prCards, detailOf } from './cards';
 import { startCiFix } from './ci-fix';
+import { queuePassSettle, settleClosedPass } from './pass-settle';
 import { recordPassPullRequest, watchedAsPass } from './pass-watch';
 import { clearCiStop, endFixesOfEndedPullRequests, type FixEnds } from './ci-stop';
 import { ghCall, raiseIn, rewriteIn, withdrawIn, type DeliveryContext } from './context';
@@ -1100,6 +1101,14 @@ export function createPrWatch(input: {
           withdrawIn(write, root.projectId, [key]);
         }
       });
+      // A closed pass settles, or its Move card says why not, after each read: news once it merged
+      // or closed, which is read only once.
+      const passEnded =
+        read !== null && read.state !== PrState.Open && root.pr?.state !== STATE_OF[read.state];
+      if (root.passId != null && read !== null)
+        queuePassSettle(ctx, root.passId, (c, id, s) =>
+          settleClosedPass(c, id, s, { news: passEnded }),
+        );
       if (
         landing !== undefined &&
         read?.state === PrState.Open &&
