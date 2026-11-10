@@ -330,6 +330,16 @@ export interface KeepWorkInput {
   readonly trailer: { readonly key: string; readonly value: string };
 }
 
+/** Work still kept at a ref that a move must not write over (`moveKeptRef`). */
+export interface KeptRefEarlier {
+  /** The commit the ref holds. */
+  readonly sha: string;
+  /** The commit it was made on. */
+  readonly base: string;
+  /** The commit the moved work was made on. */
+  readonly workBase: string;
+}
+
 /** What `keepWork` left at the ref. */
 export interface KeptCommit {
   /** The kept commit now: made here, found by its trailer, or the parent; null when there is none. */
@@ -621,8 +631,27 @@ export interface Git {
   /**
    * Moves the commit kept at `from` to `to`, both under `refs/10db/`: `to` is set to it, then `from`
    * goes. Resolves with the commit, or with what `to` holds when `from` is gone (a rerun), or null.
+   * With `earlier`, work still kept at `to` that is not in the folder: while `to` holds it, `to` gets
+   * a new commit on both, so neither is lost, whose tree is `from`'s with each file `earlier` changed
+   * since its base as `earlier` has it, where `from` left that file as `workBase` has it.
    */
-  moveKeptRef(repo: string, from: string, to: string): Promise<string | null>;
+  moveKeptRef(
+    repo: string,
+    from: string,
+    to: string,
+    earlier?: KeptRefEarlier,
+  ): Promise<string | null>;
+  /**
+   * Narrows the work kept at `ref` (commit `kept.sha`, made on `kept.base`) to `paths`, under the repo
+   * lock: a new commit on it whose tree is `kept.base`'s with only those files as it has them, set at
+   * `ref` by compare-and-swap. A rerun finds the commit it made. Resolves with it.
+   */
+  narrowKeptRef(
+    repo: string,
+    ref: string,
+    kept: { readonly sha: string; readonly base: string },
+    paths: readonly string[],
+  ): Promise<string>;
   /**
    * Brings `path` as commit `theirs` has it into the file on disk, by a three-way merge from its
    * version in `base` (`merge-file`, which runs no driver), under the repo lock. `merged` when the file
@@ -2593,7 +2622,41 @@ export function createGit(opts: GitOptions = {}): Git {
     });
   }
 
-  async function moveKeptRef(repo: string, from: string, to: string): Promise<string | null> {
+  /** The tree of commit `base` with each of `paths` as commit `from` has it, or gone where it lacks it. */
+  async function treeTaking(
+    c: Pinned,
+    base: string,
+    from: string,
+    paths: readonly string[],
+  ): Promise<string> {
+    return withPrivateIndex(c, base, async (env) => {
+      for (const path of paths) {
+        const entry = await treeEntry(c, from, path);
+        await git(
+          c,
+          entry === null
+            ? ['update-index', '--force-remove', '--', path]
+            : ['update-index', '--add', '--cacheinfo', `${entry.mode},${entry.oid},${path}`],
+          { env },
+        );
+      }
+      return (await git(c, ['write-tree'], { env })).trim();
+    });
+  }
+
+  /** The paths whose entries differ between commits `from` and `to`. */
+  async function pathsBetween(c: Pinned, from: string, to: string): Promise<string[]> {
+    return (await git(c, ['diff-tree', '-r', '-z', '--name-only', '--no-renames', from, to]))
+      .split('\0')
+      .filter(Boolean);
+  }
+
+  async function moveKeptRef(
+    repo: string,
+    from: string,
+    to: string,
+    earlier?: KeptRefEarlier,
+  ): Promise<string | null> {
     for (const ref of [from, to])
       if (!ref.startsWith(KEPT_REF_PREFIX))
         throw new InvalidError(`${ref} is not under ${KEPT_REF_PREFIX}`);
@@ -2601,8 +2664,78 @@ export function createGit(opts: GitOptions = {}): Git {
       const c = await pinned(repo);
       const sha = await revParse(c, `${from}^{commit}`);
       if (sha === null) return revParse(c, `${to}^{commit}`);
-      await git(c, ['update-ref', '--no-deref', '-m', '10db: kept work moved', to, sha]);
+      const held = await revParse(c, `${to}^{commit}`);
+      let moved = sha;
+      if (held === earlier?.sha && held !== sha) {
+        const keep: string[] = [];
+        for (const path of await pathsBetween(c, earlier.base, earlier.sha)) {
+          const ours = await treeEntry(c, sha, path);
+          const was = await treeEntry(c, earlier.workBase, path);
+          if (ours?.oid === was?.oid && ours?.mode === was?.mode) keep.push(path);
+        }
+        const tree = await treeTaking(c, sha, earlier.sha, keep);
+        // Never pushed, so never signed.
+        moved = (
+          await git(c, ['commit-tree', '--no-gpg-sign', tree, '-p', sha, '-p', held], {
+            input: 'Kept work, on the work kept before it\n',
+          })
+        ).trim();
+        await git(c, ['update-ref', '--no-deref', '-m', '10db: kept work moved', to, moved, held]);
+      } else if (
+        held !== null &&
+        held !== sha &&
+        (await git(c, ['rev-list', '--parents', '-n', '1', held])).trim().split(' ').includes(sha)
+      ) {
+        // A rerun after the new commit was set: only `from` is left to go.
+        moved = held;
+      } else {
+        await git(c, ['update-ref', '--no-deref', '-m', '10db: kept work moved', to, sha]);
+      }
       await git(c, ['update-ref', '--no-deref', '-d', from, sha]);
+      return moved;
+    });
+  }
+
+  async function narrowKeptRef(
+    repo: string,
+    ref: string,
+    kept: { readonly sha: string; readonly base: string },
+    paths: readonly string[],
+  ): Promise<string> {
+    if (!ref.startsWith(KEPT_REF_PREFIX))
+      throw new InvalidError(`${ref} is not under ${KEPT_REF_PREFIX}`);
+    const named = paths.map(checkPathName);
+    return withRepoLock(realpathSync(repo), async () => {
+      const c = await pinned(repo);
+      const tree = await treeTaking(c, kept.base, kept.sha, named);
+      const held = await revParse(c, `${ref}^{commit}`);
+      if (
+        held !== null &&
+        held !== kept.sha &&
+        (await revParse(c, `${held}^{tree}`)) === tree &&
+        (await revParse(c, `${held}^1`)) === kept.sha
+      )
+        return held;
+      // Never pushed, so never signed.
+      const sha = (
+        await git(c, ['commit-tree', '--no-gpg-sign', tree, '-p', kept.sha], {
+          input: 'Kept work not yet back in the folder\n',
+        })
+      ).trim();
+      try {
+        await git(c, [
+          'update-ref',
+          '--no-deref',
+          '-m',
+          '10db: kept work narrowed',
+          ref,
+          sha,
+          kept.sha,
+        ]);
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        throw new KeptRefMovedError(ref, kept.sha, await revParse(c, `${ref}^{commit}`));
+      }
       return sha;
     });
   }
@@ -3569,6 +3702,7 @@ export function createGit(opts: GitOptions = {}): Git {
     hashOnDisk,
     restoreFiles,
     moveKeptRef,
+    narrowKeptRef,
     mergeFileBack,
     pointHeadAt,
     refreshIndex,

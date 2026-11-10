@@ -11,12 +11,13 @@ import {
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openPassWorld, type PassWorld } from '../../test/pass-world';
-import { openPass } from '../delivery';
+import { openPass, type PutBackKeptWork } from '../delivery';
 import {
   foldHandEdits,
   keepTurnWork,
   keptRef,
   putBackKeptWork,
+  resumePassWork,
   takeOutSteps,
   TakeOutWithin,
 } from './index';
@@ -55,6 +56,29 @@ async function takenOut(): Promise<void> {
 }
 
 const putBack = () => putBackKeptWork(w.deps, { repo: w.h.repo, taskId: w.settings.id });
+
+const runOfSettings = () => {
+  const run = getTask(w.h.store.db, w.settings.id).workstreamId;
+  if (run === null) throw new Error('Settings has no run');
+  return run;
+};
+
+/** The first pass is abandoned and the folder goes home; a later pass takes Settings with `put`. */
+async function inLaterPass(put: PutBackKeptWork): Promise<void> {
+  await takeOutSteps({ ...w.deps, stopLane }, { taskId: w.people.id, within: TakeOutWithin.Alone });
+  w.h.state.write((ctx) => {
+    setAbandonStep(ctx, w.opened.pass.id, AbandonStep.Abandoning);
+    abandonPassAndBatch(ctx, w.opened.pass.id);
+  });
+  // The folder goes home with what landed on the pass's branch, as a close's fast-forward leaves it.
+  w.h.git$('branch', '-f', 'main', 'HEAD');
+  w.h.git$('switch', '-q', 'main');
+  await openPass(
+    w.h.ctx,
+    { projectId: w.h.project.id, name: 'Again', taskIds: [w.settings.id] },
+    { leaseMs: 60_000, putBack: put },
+  );
+}
 
 describe('putBackKeptWork', () => {
   it('gives each file still as the take-out left it the kept version', async () => {
@@ -110,34 +134,57 @@ describe('putBackKeptWork', () => {
 
   it('runs when a later pass takes the task', async () => {
     await takenOut();
-    await takeOutSteps(
-      { ...w.deps, stopLane },
-      { taskId: w.people.id, within: TakeOutWithin.Alone },
-    );
-    w.h.state.write((ctx) => {
-      setAbandonStep(ctx, w.opened.pass.id, AbandonStep.Abandoning);
-      abandonPassAndBatch(ctx, w.opened.pass.id);
-    });
-    // The folder goes home with what landed on the pass's branch, as a close's fast-forward leaves it.
-    w.h.git$('branch', '-f', 'main', 'HEAD');
-    w.h.git$('switch', '-q', 'main');
-
-    await openPass(
-      w.h.ctx,
-      { projectId: w.h.project.id, name: 'Again', taskIds: [w.settings.id] },
-      {
-        leaseMs: 60_000,
-        putBack: (input) => putBackKeptWork(w.deps, input),
-      },
-    );
+    await inLaterPass((input) => putBackKeptWork(w.deps, input));
     expect(read('src/settings/long.tsx')).toBe('one\ntwo, by the task\nthree\nfour\nfive\nsix\n');
     expect(getTaskKeptWork(w.h.store.db, w.settings.id)).toBeNull();
     // What went back is the task's own work, kept with it in the new pass: never a hand edit.
-    const run = getTask(w.h.store.db, w.settings.id).workstreamId;
-    if (run === null) throw new Error('Settings has no run in the new pass');
-    expect(await foldHandEdits(w.deps, { workstreamId: run })).toMatchObject({
+    expect(await foldHandEdits(w.deps, { workstreamId: runOfSettings() })).toMatchObject({
       byHand: [],
       whileWorking: null,
     });
+  });
+
+  it('keeps what did not go back saved with the task, and a second take-out keeps it on its own', async () => {
+    await takenOut();
+    const first = getTaskKeptWork(w.h.store.db, w.settings.id);
+    w.write('src/settings/new.tsx', 'the builder made this file too\n');
+    await inLaterPass((input) => putBackKeptWork(w.deps, input));
+
+    // Only the file that did not merge is still saved, on the commit the work was kept on.
+    const saved = getTaskKeptWork(w.h.store.db, w.settings.id);
+    expect(saved?.keptBaseSha).toBe(first?.keptBaseSha);
+    const narrowed = saved?.keptSha ?? 'none';
+    expect(w.h.git$('rev-parse', keptRef(w.settings.id))).toBe(narrowed);
+    expect(w.h.git$('diff', '--name-only', first?.keptBaseSha ?? 'none', narrowed)).toBe(
+      'src/settings/new.tsx',
+    );
+    expect(w.h.git$('show', `${narrowed}:src/settings/new.tsx`)).toBe('added by the task');
+
+    // The page works in the new pass and is taken out again: the saved file is not written over.
+    w.write('src/settings/long.tsx', 'one\ntwo, by the task\nthree, again\nfour\nfive\nsix\n');
+    await takeOutSteps(
+      { ...w.deps, stopLane },
+      { taskId: w.settings.id, within: TakeOutWithin.Alone },
+    );
+    const second = getTaskKeptWork(w.h.store.db, w.settings.id);
+    const ref = keptRef(w.settings.id);
+    expect(second?.keptSha).toBe(w.h.git$('rev-parse', ref));
+    expect(w.h.git$('rev-parse', `${ref}^2`)).toBe(narrowed);
+    expect(w.h.git$('show', `${ref}:src/settings/long.tsx`)).toBe(
+      'one\ntwo, by the task\nthree, again\nfour\nfive\nsix',
+    );
+    expect(w.h.git$('show', `${ref}^2:src/settings/new.tsx`)).toBe('added by the task');
+  });
+
+  it('runs again at start-up for a task whose put-back the daemon stopped in', async () => {
+    await takenOut();
+    await inLaterPass(() => Promise.reject(new Error('the daemon died')));
+    expect(read('src/settings/long.tsx')).toBe('one\ntwo\nthree\nfour\nfive\nsix\n');
+
+    await resumePassWork({ ...w.deps, stopLane });
+    await w.h.jobs.idle();
+
+    expect(read('src/settings/long.tsx')).toBe('one\ntwo, by the task\nthree\nfour\nfive\nsix\n');
+    expect(getTaskKeptWork(w.h.store.db, w.settings.id)).toBeNull();
   });
 });

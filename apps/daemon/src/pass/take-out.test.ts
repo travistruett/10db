@@ -21,6 +21,7 @@ import {
   lastTakeOut,
   listTaskThreadRows,
   seedProject,
+  setTaskKeptWork,
   transitionWorkstream,
   type Store,
 } from '@10db/db';
@@ -141,6 +142,23 @@ describe('takeOut', () => {
     await takeOutSteps(takeOutDeps(w), { taskId: w.settings.id, within: TakeOutWithin.Alone });
     expect(read(w, 'src/settings/page.tsx')).toBe('landed on the pass branch\n');
     expect(getTaskKeptWork(w.h.store.db, w.settings.id)?.keptBaseSha).toBe(landed);
+  });
+
+  it('leaves saved work from an earlier take-out as it is when the page made none since', async () => {
+    stopped = [];
+    w = await openPassWorld();
+    const start = w.opened.pass.startSha;
+    const earlier = w.h.git$('commit-tree', '-p', start, '-m', 'Earlier', `${start}^{tree}`);
+    w.h.git$('update-ref', keptRef(w.settings.id), earlier);
+    const saved = { keptSha: earlier, keptBaseSha: start };
+    w.h.state.write((ctx) => {
+      setTaskKeptWork(ctx, w.settings.id, saved);
+    });
+
+    await takeOutSteps(takeOutDeps(w), { taskId: w.settings.id, within: TakeOutWithin.Alone });
+
+    expect(getTaskKeptWork(w.h.store.db, w.settings.id)).toEqual(saved);
+    expect(w.h.git$('rev-parse', keptRef(w.settings.id))).toBe(earlier);
   });
 
   describe('a restart after each step goes on from the step it reached', () => {

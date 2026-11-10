@@ -7,7 +7,7 @@ import {
   setTaskKeptWork,
 } from '@10db/db';
 import { passDirtRef } from '../delivery';
-import { keepPutBackWork, readKeptRef, type PassWorkDeps } from './kept-work';
+import { keepPutBackWork, keptRef, readKeptRef, type PassWorkDeps } from './kept-work';
 
 // Workbench spec §5.4: a taken-out task's kept work goes back into the folder when a later pass takes
 // it, file by file, so nothing the builder did to a file since is written over.
@@ -19,8 +19,11 @@ const count = (n: number): string => `${String(n)} file${n === 1 ? '' : 's'}`;
  * task's last take-out left it (the former pass's branch version where that pass had landed on it,
  * else the file as it was before that pass) takes the kept version; any other is merged three ways
  * from the commit the work was kept on; one that does not merge is left as it is and named on the
- * thread. A file the take-out itself left, because it kept changing, is not touched. The work is in
- * the folder afterwards, so the task no longer records it as saved; its ref stays until it lands.
+ * thread. A file the take-out itself left, because it kept changing, is not touched. What went back
+ * is kept at once as the task's work in its pass. The task records as saved only what did not go
+ * back: none, or a commit on the kept one holding only those files, so a later take-out or a rerun
+ * never writes over it; its ref stays until the work lands. A rerun after a restart takes a file
+ * already holding the kept version as put back, and writes nothing on the thread when nothing changed.
  */
 export async function putBackKeptWork(
   deps: PassWorkDeps,
@@ -76,8 +79,24 @@ export async function putBackKeptWork(
   }
   await git.refreshIndex(repo, applied);
   await keepPutBackWork(deps, taskId, applied);
+  const still =
+    left.length === 0
+      ? null
+      : {
+          keptSha:
+            left.length === files.length
+              ? kept.keptSha
+              : await git.narrowKeptRef(
+                  repo,
+                  keptRef(taskId),
+                  { sha: kept.keptSha, base: kept.keptBaseSha },
+                  left,
+                ),
+          keptBaseSha: kept.keptBaseSha,
+        };
+  if (applied.length === 0 && still?.keptSha === kept.keptSha) return { applied, left };
   deps.state.write((ctx) => {
-    setTaskKeptWork(ctx, taskId, null);
+    setTaskKeptWork(ctx, taskId, still);
     insertSystemNotice(
       ctx,
       taskId,

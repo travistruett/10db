@@ -18,6 +18,7 @@ import {
   getPass,
   getProject,
   getTask,
+  getTaskKeptWork,
   getWorkstreamRow,
   insertSystemNotice,
   insertTakeOut,
@@ -281,12 +282,25 @@ export async function takeOutSteps(
 
   if (row.step < TakeOutStep.Done) {
     deps.inbox.cancelForWorkstream(workstreamId);
-    const keptSha = row.keptSha;
-    if (keptSha !== null)
-      await git.moveKeptRef(repo, passKeptRef(pass.id, task.id), keptRef(task.id));
-    const kept = keptSha === null ? null : { keptSha, keptBaseSha };
+    // Work saved from an earlier take-out that is still not in the folder is never written over:
+    // with no new work it stays as it is, else the new kept commit is made on it too.
+    const earlier = getTaskKeptWork(db, task.id);
+    const moved =
+      row.keptSha === null
+        ? null
+        : await git.moveKeptRef(
+            repo,
+            passKeptRef(pass.id, task.id),
+            keptRef(task.id),
+            earlier === null
+              ? undefined
+              : { sha: earlier.keptSha, base: earlier.keptBaseSha, workBase: keptBaseSha },
+          );
+    const kept = moved === null ? earlier : { keptSha: moved, keptBaseSha };
+    const held =
+      kept === null ? [] : await git.filesChangedBetween(repo, kept.keptBaseSha, kept.keptSha);
     deps.state.write((ctx) => {
-      leavePassForBoard(ctx, { taskId: task.id, passId: pass.id, kept, files: files.length });
+      leavePassForBoard(ctx, { taskId: task.id, passId: pass.id, kept, files: held.length });
     });
     row = { ...row, step: TakeOutStep.Done };
   }

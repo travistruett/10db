@@ -1,6 +1,15 @@
-import { PassState } from '@10db/contracts';
-import { findOpenPass, getPass, listProjects, listUnfinishedTakeOuts } from '@10db/db';
+import { PassState, type PassId } from '@10db/contracts';
+import {
+  findOpenPass,
+  getPass,
+  getTaskKeptWork,
+  lastTakeOut,
+  listPassTasks,
+  listProjects,
+  listUnfinishedTakeOuts,
+} from '@10db/db';
 import { passFolderOn } from './folder';
+import { putBackKeptWork } from './put-back';
 import { takeOut, TakeOutWithin, type TakeOutDeps } from './take-out';
 
 // Workbench spec §12: at start-up, after the runs' own recovery, each open pass goes on from its rows.
@@ -9,8 +18,29 @@ const errorText = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
 /**
+ * Puts back the saved work of each task the pass holds that still records some, as when the daemon
+ * stopped inside the put-back the pass's opening runs; a task being taken out of this pass is left to
+ * its take-out.
+ */
+async function putBackAgain(deps: TakeOutDeps, passId: PassId, repo: string): Promise<void> {
+  const db = deps.state.db;
+  for (const task of listPassTasks(db, passId)) {
+    if (getTaskKeptWork(db, task.id) === null || lastTakeOut(db, task.id)?.passId === passId)
+      continue;
+    try {
+      await putBackKeptWork(deps, { repo, taskId: task.id });
+    } catch (error) {
+      deps.logger.warn(
+        { passId, taskId: task.id, err: errorText(error) },
+        'saved work not put back',
+      );
+    }
+  }
+}
+
+/**
  * Start-up, after `recoverOnStartup`: each open pass whose folder is off its branch gets its one card
- * (never a repoint), and each take-out the builder asked for that a stop cut short goes on as a job.
+ * (never a repoint), one on it puts back saved work a restart cut short, and each take-out the builder asked for that a stop cut short goes on as a job.
  * The take-outs of an Abandon or a close go on with it. Nothing here waits for those jobs.
  */
 export async function resumePassWork(deps: TakeOutDeps): Promise<void> {
@@ -19,7 +49,7 @@ export async function resumePassWork(deps: TakeOutDeps): Promise<void> {
     const pass = findOpenPass(db, project.id);
     if (pass?.state !== PassState.Open) continue;
     try {
-      await passFolderOn(deps, pass.id);
+      if (await passFolderOn(deps, pass.id)) await putBackAgain(deps, pass.id, project.repoPath);
     } catch (error) {
       deps.logger.warn(
         { projectId: project.id, passId: pass.id, err: errorText(error) },
