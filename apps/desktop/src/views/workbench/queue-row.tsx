@@ -44,7 +44,8 @@ export function QueueRow({ row, current, onSelect, menu }: QueueRowProps) {
           >
             {row.page.area}
           </Text>
-          <Text component="span" size="sm" truncate="end">
+          {/* The line wraps rather than cut: "Working · 4 min · median 6" outgrows the wide queue. */}
+          <Text component="span" size="sm" style={{ minWidth: 0 }}>
             {row.state.line}
           </Text>
         </Group>
