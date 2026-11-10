@@ -13,6 +13,7 @@ import {
 } from '@10db/db';
 import { abandonPass } from './abandon';
 import { passFolderOn } from './folder';
+import { passBranch } from './kept-work';
 import { putBackKeptWork } from './put-back';
 import { keepHold } from './shared-chain';
 import { holdRef } from './shared-hold';
@@ -46,8 +47,9 @@ async function putBackAgain(deps: TakeOutDeps, passId: PassId, repo: string): Pr
 
 /**
  * The pass's shared holds after a stop (spec §12): each hold's record is at its ref again, remade
- * from its row where the stop lost it, and each hold a turn left open is kept on the chain and
- * released, so no area is held with no turn running and the resumed turn asks for it again.
+ * from its row where the stop lost it, and, while the folder is on the pass's branch, each hold a
+ * turn left open is kept on the chain and released, so no area is held with no turn running and the
+ * resumed turn asks for it again.
  */
 async function settleHolds(deps: TakeOutDeps, pass: PassDto, repo: string): Promise<void> {
   const prefix = `refs/10db/passes/${pass.id}/holds/`;
@@ -57,6 +59,9 @@ async function settleHolds(deps: TakeOutDeps, pass: PassDto, repo: string): Prom
     if (!refs.has(ref) && (await deps.git.hasCommit(repo, hold.recordSha)))
       await deps.git.keepRef(repo, ref, hold.recordSha);
   }
+  // While the folder is off the pass's branch its files are not the hold's: the hold stays open,
+  // and the next turn's end or start-up on the branch keeps it.
+  if ((await deps.git.currentBranch(repo)) !== passBranch(deps.state.db, pass)) return;
   for (const hold of openHolds(deps.state.db, pass.id))
     await keepHold(deps, { claimId: hold.claimId });
 }

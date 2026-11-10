@@ -20,7 +20,14 @@ import {
 } from '@10db/db';
 import { claimScopeOf } from '../delivery';
 import { classifyPath } from '../guard';
-import { pageMatcher, passTaskPlace, readKeptRef, type PassWorkDeps } from './kept-work';
+import { PassFolderOffBranchError } from '../git';
+import {
+  pageMatcher,
+  passBranch,
+  passTaskPlace,
+  readKeptRef,
+  type PassWorkDeps,
+} from './kept-work';
 
 // Workbench spec §7.2, §7.3: a pass task's shared area is held one turn at a time. At the grant the
 // daemon records every path of the area that differs from the shared chain's tip, with its content,
@@ -35,6 +42,16 @@ export const holdRef = (pass: PassId, claim: ClaimId): string =>
 
 /** What the shared chain and its holds read and write. */
 export type SharedDeps = Pick<PassWorkDeps, 'state' | 'git'>;
+
+/**
+ * Refuses with `PassFolderOffBranchError` while HEAD does not name the pass's branch: the folder's
+ * files are then another branch's, and nothing of them is a hold's record or a shared change.
+ */
+export async function onPassBranch(deps: SharedDeps, pass: PassDto, repo: string): Promise<void> {
+  const branch = passBranch(deps.state.db, pass);
+  const found = await deps.git.currentBranch(repo);
+  if (found !== branch) throw new PassFolderOffBranchError(repo, branch, found);
+}
 
 /** The chain's tip: its newest commit, else the pass's start. */
 export async function chainTip(deps: SharedDeps, repo: string, pass: PassDto): Promise<string> {
@@ -102,6 +119,7 @@ export async function grantSharedHold(
   const db = deps.state.db;
   const place = passTaskPlace(db, getWorkstreamRow(db, input.workstreamId).taskId);
   const { pass, repo } = place;
+  await onPassBranch(deps, pass, repo);
   const tip = await chainTip(deps, repo, pass);
   const paths = await sharedPathsDiffering(deps, {
     repo,

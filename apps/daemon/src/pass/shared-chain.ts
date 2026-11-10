@@ -28,7 +28,13 @@ import {
 } from '@10db/db';
 import { KeptRefMovedError, type ChainCommit } from '../git';
 import { keepNamedPaths, passBranch, readKeptRef, type PassWorkDeps } from './kept-work';
-import { sharedPathOf, sharedPathsDiffering, sharedRef, type SharedDeps } from './shared-hold';
+import {
+  onPassBranch,
+  sharedPathOf,
+  sharedPathsDiffering,
+  sharedRef,
+  type SharedDeps,
+} from './shared-hold';
 
 // Workbench spec §7.2: what a hold changed in its shared area is kept as one change on the pass's
 // shared chain, numbered as the hold was, and released; a sign-off later lands the chain's prefix it
@@ -71,6 +77,7 @@ export async function keepHold(
   const pass = getPass(db, hold.passId);
   const task = getTask(db, hold.taskId);
   const repo = getProject(db, pass.projectId).repoPath;
+  await onPassBranch(deps, pass, repo);
   const record = holdRecord(db, hold.claimId);
   const changed = await sharedPathsDiffering(deps, {
     repo,

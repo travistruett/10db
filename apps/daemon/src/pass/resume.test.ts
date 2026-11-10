@@ -13,10 +13,12 @@ import {
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openPassWorld, type PassWorld } from '../../test/pass-world';
+import { PassFolderOffBranchError } from '../git';
 import {
   answerPassCard,
   grantSharedHold,
   holdRef,
+  keepHold,
   keepTurnWork,
   resumePassWork,
   takeOutSteps,
@@ -42,6 +44,35 @@ const folderCards = (world: PassWorld) =>
   );
 
 describe('resumePassWork', () => {
+  it('leaves a shared hold open while the folder is off the pass branch, and keeps it once back', async () => {
+    w = await openPassWorld();
+    await grantSharedHold(w.deps, { workstreamId: w.runOf(w.settings), area: 'src' });
+    w.write('src/button.ts', 'a button\n');
+    const [hold] = openHolds(w.h.store.db, w.opened.pass.id);
+    if (!hold) throw new Error('no hold');
+    // The builder switched the folder away while the daemon was down.
+    w.h.git$('switch', '-q', 'main');
+
+    await expect(keepHold(w.deps, { claimId: hold.claimId })).rejects.toThrow(
+      PassFolderOffBranchError,
+    );
+    await expect(
+      grantSharedHold(w.deps, { workstreamId: w.runOf(w.people), area: 'src' }),
+    ).rejects.toThrow(PassFolderOffBranchError);
+    const restarted = deps({ ...w, deps: w.restart() });
+    await resumePassWork(restarted);
+    await restarted.jobs.idle();
+    expect(openHolds(w.h.store.db, w.opened.pass.id).map((h) => h.claimId)).toEqual([hold.claimId]);
+    expect(listSharedChanges(w.h.store.db, w.opened.pass.id)).toEqual([]);
+
+    w.h.git$('switch', '-q', w.branch);
+    const again = deps({ ...w, deps: w.restart() });
+    await resumePassWork(again);
+    await again.jobs.idle();
+    expect(openHolds(w.h.store.db, w.opened.pass.id)).toEqual([]);
+    expect(listSharedChanges(w.h.store.db, w.opened.pass.id)[0]?.paths).toEqual(['src/button.ts']);
+  });
+
   it("keeps a shared hold the stop left open on the chain, releases it, and remakes a lost hold's ref", async () => {
     w = await openPassWorld();
     w.write('src/shared.ts', "the builder's edit\n");

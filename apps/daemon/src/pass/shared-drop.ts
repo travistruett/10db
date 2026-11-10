@@ -16,7 +16,7 @@ import {
 } from '@10db/db';
 import { KeptRefMovedError } from '../git';
 import { readKeptRef } from './kept-work';
-import { sharedRef, type SharedDeps } from './shared-hold';
+import { onPassBranch, sharedRef, type SharedDeps } from './shared-hold';
 
 // Workbench spec §7.2 (D17): a page taken out may drop a shared change of its own that has not
 // landed. Its files go back to what they were when its hold was granted, and a drop is appended to
@@ -113,6 +113,7 @@ export async function dropShared(
     ...patch,
   });
   if (change.droppedBy !== null) return done({ dropSeq: change.droppedBy });
+  await onPassBranch(deps, pass, repo);
   if (change.dropOf !== null || change.landedSha !== null || change.paths.length === 0)
     return done({ refused: `Shared change ${String(change.seq)} is not on the chain to drop` });
   if (input.force !== true) {
