@@ -4,6 +4,7 @@ import { http, HttpResponse } from 'msw';
 import { afterEach, describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderApp, server } from './test/daemon';
 import { inboxItemDto, projectViewDto } from './test/fixtures';
+import { passKeys } from './daemon/pass-queries';
 import { pagesByStatus, passViewDto } from './test/pass-fixtures';
 
 const healthy = () =>
@@ -203,6 +204,25 @@ describe('App shell', () => {
     );
     renderApp('/factory');
     expect(await screen.findByRole('link', { name: /Workbench.*2 pages waiting/ })).toBeTruthy();
+  });
+
+  it('counts nothing on the Workbench link for a closed pass still to settle', async () => {
+    const project = projectViewDto({ name: 'ampsio' });
+    const pages = pagesByStatus();
+    const closed = passViewDto({
+      pass: { projectId: project.id, state: 'CLOSED' },
+      pages: [pages.ready, pages.failed],
+    });
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/passes'), () => HttpResponse.json([closed])),
+      ...baseHandlers(),
+    );
+    const { queryClient } = renderApp('/factory');
+    await waitFor(() => {
+      expect(queryClient.getQueryState(passKeys.live)?.status).toBe('success');
+    });
+    expect(screen.getByRole('link', { name: /Workbench/ }).textContent).toBe('Workbench');
   });
 
   it('draws the color scheme toggle icon at the 20px size DESIGN.md sets', async () => {
