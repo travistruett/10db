@@ -1,0 +1,292 @@
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import {
+  PassGateState,
+  PassNoticeKind,
+  type PassId,
+  type ProjectInput,
+  type TaskDto,
+} from '@10db/contracts';
+import {
+  getBatch,
+  getBatchRow,
+  patchBatch,
+  getPass,
+  getPassChecks,
+  getPassProgress,
+  getPassPullRequest,
+  getTask,
+} from '@10db/db';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
+import { silentLogger } from '../log';
+import { systemProcesses } from '../recovery';
+import { createGateRunner } from '../verify';
+import { SANDBOXED, waitFor } from '../../test/fixtures';
+import { alive, orphanGateGroup } from '../../test/orphan-gate';
+import { openPass, recoverBatches, type PutBackKeptWork } from './index';
+import { createPassPullRequests, type PassPullRequests } from './pass-pr';
+import { scratchBranchName } from './scratch-gate';
+import { worktreeLockReason } from './worktree-cut';
+import { madeWorktreeRoot, worktreePathFor } from './worktree-path';
+
+// Workbench spec §5.5, §8.3, W6, W8: Open Pull Request pushes the pass's branch and opens a draft on
+// any delivery; the gate then reads the pushed commit in a scratch worktree, never the folder.
+
+const PAGES: Partial<ProjectInput> = {
+  areas: [
+    { name: 'settings', globs: ['src/settings/**'], role: 'page', route: '/settings' },
+    { name: 'people', globs: ['src/people/**'], role: 'page', route: '/people' },
+  ],
+};
+
+/** Passes only where the people page is as committed: never in the folder, where it is open. */
+const GATE = 'test "$(cat src/people/page.tsx)" = people';
+
+const nothingKept: PutBackKeptWork = () => Promise.resolve({ applied: [], left: [] });
+
+let h: DeliveryHarness;
+let prs: PassPullRequests;
+afterEach(async () => {
+  await prs.stop();
+  h.close();
+});
+
+function setup(project: Partial<ProjectInput> = {}, opts: { holdShips?: () => boolean } = {}) {
+  h = createDeliveryHarness({ ...PAGES, gateCommand: GATE, ...project });
+  prs = createPassPullRequests({
+    ...h.ctx,
+    gate: createGateRunner({ sandbox: null, logger: silentLogger }),
+    dataDir: h.dataDir,
+    sessionEnv: () => ({ PATH: '/usr/bin:/bin' }),
+    identifyProcess: (pid) => systemProcesses.identify(pid),
+    review: null,
+    ...(opts.holdShips ? { holdShips: opts.holdShips } : {}),
+  });
+  h.commit('src/settings/page.tsx', 'settings\n');
+  h.commit('src/people/page.tsx', 'people\n');
+  h.git$('push', '-q', 'origin', 'main');
+}
+
+function write(path: string, content: string): void {
+  const file = join(h.repo, path);
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(file, content);
+}
+
+async function openedPass(): Promise<{ passId: PassId; settings: TaskDto; people: TaskDto }> {
+  const settings = h.addTask('Settings page', { areas: ['settings'] });
+  const people = h.addTask('People page', { areas: ['people'] });
+  const opened = await openPass(
+    h.ctx,
+    { projectId: h.project.id, name: 'Polish pages', taskIds: [settings.id, people.id] },
+    { leaseMs: 60_000, putBack: nothingKept },
+  );
+  return { passId: opened.pass.id, settings, people };
+}
+
+/** Signs a page off as its sign-off will: one commit on the pass's branch, its run done. */
+function signOff(task: TaskDto, path: string, content: string): string {
+  const sha = h.commit(path, content);
+  const run = getTask(h.store.db, task.id).workstreamId;
+  if (run === null) throw new Error('the task has no run');
+  h.settle(run, 'DONE');
+  return sha;
+}
+
+const gateState = (passId: PassId) => getPassChecks(h.store.db, passId).gate.state;
+const batchOf = (passId: PassId) => getPass(h.store.db, passId).batchId;
+
+describe('Open Pull Request', () => {
+  it('is not offered before a page is signed off, nor with no origin', async () => {
+    setup();
+    const { passId, settings } = await openedPass();
+
+    expect(await prs.preview(passId)).toMatchObject({
+      offered: false,
+      reason: expect.stringContaining('Nothing is signed off') as unknown,
+      base: 'main',
+      existing: null,
+      gate: 'scratch',
+    });
+    await expect(prs.open(passId)).rejects.toMatchObject({ name: 'ConflictError' });
+
+    signOff(settings, 'src/settings/page.tsx', 'signed off\n');
+    h.git$('remote', 'remove', 'origin');
+    expect(await prs.preview(passId)).toMatchObject({
+      offered: false,
+      reason: expect.stringContaining('no origin') as unknown,
+    });
+    expect(h.gh.calls.filter((c) => c.method === 'prCreate')).toEqual([]);
+  });
+
+  it('pushes the branch and opens a draft, then gates the pushed commit in a scratch worktree, never the open page on disk', async () => {
+    setup();
+    const { passId, settings } = await openedPass();
+    const tip = signOff(settings, 'src/settings/page.tsx', 'signed off\n');
+    // The people page is still open: its file on disk is not what the branch holds.
+    write('src/people/page.tsx', 'half done\n');
+
+    const preview = await prs.preview(passId);
+    expect(preview).toMatchObject({ offered: true, reason: null, base: 'main', aheadOfBase: 0 });
+    const answer = await prs.open(passId);
+    expect(answer).toEqual({ url: null, base: 'main', gate: 'scratch', review: 'none' });
+    await h.jobs.idle();
+
+    const branch = getBatch(h.store.db, batchOf(passId)).branch ?? '';
+    expect(h.origin$('rev-parse', `refs/heads/${branch}`)).toBe(tip);
+    expect(h.gh.prCreates()).toEqual([
+      {
+        repo: 'acme/widgets',
+        base: 'main',
+        head: branch,
+        title: 'feat(app): polish pages',
+        draft: true,
+      },
+    ]);
+    await vi.waitFor(() => {
+      expect(gateState(passId)).toBe(PassGateState.Passed);
+    });
+    const pr = getPassPullRequest(h.store.db, passId);
+    expect(pr).toMatchObject({ draft: true });
+    await vi.waitFor(() => {
+      expect(h.gh.body(pr?.url ?? '')).toContain('Gate passed in a scratch worktree');
+    });
+    expect(h.gh.body(pr?.url ?? '')).toContain('- Settings page');
+    expect(h.gh.body(pr?.url ?? '')).not.toContain('People page');
+    // The scratch worktree and its branch are gone; the folder is as the builder left it.
+    expect(h.git$('worktree', 'list')).not.toContain('gate-');
+    expect(h.git$('branch', '--list', scratchBranchName(passId))).toBe('');
+    expect(h.git$('rev-parse', '--abbrev-ref', 'HEAD')).toBe(branch);
+    expect(h.git$('status', '--porcelain')).toBe('M src/people/page.tsx');
+  });
+
+  it('pushes to the pull request it already has, rewriting its body rather than opening another', async () => {
+    setup();
+    const { passId, settings, people } = await openedPass();
+    signOff(settings, 'src/settings/page.tsx', 'signed off\n');
+    await prs.open(passId);
+    await h.jobs.idle();
+    await vi.waitFor(() => {
+      expect(gateState(passId)).toBe(PassGateState.Passed);
+    });
+    const url = getPassPullRequest(h.store.db, passId)?.url ?? '';
+
+    const tip = signOff(people, 'src/people/page.tsx', 'people\n// signed\n');
+    expect(await prs.open(passId)).toMatchObject({ url });
+    await h.jobs.idle();
+
+    const branch = getBatch(h.store.db, batchOf(passId)).branch ?? '';
+    expect(h.origin$('rev-parse', `refs/heads/${branch}`)).toBe(tip);
+    expect(h.gh.prCreates()).toHaveLength(1);
+    expect(h.gh.body(url)).toContain('- People page');
+  });
+
+  it('marks a failed gate in the header and the body, and the batch stays open', async () => {
+    setup({ gateCommand: 'echo broken; exit 3' });
+    const { passId, settings } = await openedPass();
+    signOff(settings, 'src/settings/page.tsx', 'signed off\n');
+
+    await prs.open(passId);
+    await h.jobs.idle();
+
+    await vi.waitFor(() => {
+      expect(gateState(passId)).toBe(PassGateState.Failed);
+    });
+    const url = getPassPullRequest(h.store.db, passId)?.url ?? '';
+    await vi.waitFor(() => {
+      expect(h.gh.body(url)).toContain('Gate failed in a scratch worktree');
+    });
+    expect(getPassProgress(h.store.db, passId).notices).toEqual([
+      expect.objectContaining({ id: 'gate', kind: PassNoticeKind.GateFailed, sendable: true }),
+    ]);
+    expect(getBatch(h.store.db, batchOf(passId)).state).toBe('OPEN');
+  });
+
+  it('opens a draft on a local project too, its gate not run until the close', async () => {
+    setup({ delivery: 'local' });
+    const { passId, settings } = await openedPass();
+    signOff(settings, 'src/settings/page.tsx', 'signed off\n');
+
+    expect(await prs.open(passId)).toMatchObject({ gate: 'folder_at_close' });
+    await h.jobs.idle();
+
+    const url = getPassPullRequest(h.store.db, passId)?.url ?? '';
+    expect(h.gh.prCreates()).toEqual([expect.objectContaining({ draft: true, base: 'main' })]);
+    expect(h.gh.body(url)).toContain('Gate not run: pages are still open in the folder');
+    expect(getBatchRow(h.store.db, batchOf(passId)).gateExitCode).toBeNull();
+  });
+
+  it('starts no gate while an update drains the factory', async () => {
+    setup({}, { holdShips: () => true });
+    const { passId, settings } = await openedPass();
+    signOff(settings, 'src/settings/page.tsx', 'signed off\n');
+
+    await prs.open(passId);
+    await h.jobs.idle();
+
+    await vi.waitFor(() => {
+      expect(h.logs.lines()).toContainEqual(
+        expect.objectContaining({ msg: 'gate finished', aborted: true }),
+      );
+    });
+    expect(h.gh.prCreates()).toHaveLength(1);
+    expect(gateState(passId)).toBe(PassGateState.NotRun);
+    await vi.waitFor(() => {
+      expect(h.git$('worktree', 'list')).not.toContain('gate-');
+    });
+  });
+});
+
+describe('a restart during an Open Pull Request gate', () => {
+  // Identifies the process with `ps`, which is setuid: no sandbox can run it.
+  it.skipIf(SANDBOXED)(
+    "reaps the gate the pass's open batch recorded and removes the scratch worktree and branch it left",
+    async () => {
+      setup();
+      const { passId, settings } = await openedPass();
+      const tip = signOff(settings, 'src/settings/page.tsx', 'signed off\n');
+      const batchId = batchOf(passId);
+      // What a daemon killed mid-gate leaves: the worktree on its branch, and the gate's group.
+      const branch = scratchBranchName(passId);
+      await h.git.addWorktree({
+        repo: h.repo,
+        path: worktreePathFor(madeWorktreeRoot(h.worktreeRoot), h.project, branch),
+        branch,
+        startPoint: tip,
+        lockReason: worktreeLockReason(batchId),
+      });
+      const gate = await orphanGateGroup();
+      try {
+        h.state.write((w) =>
+          patchBatch(w, batchId, { gatePid: gate.pid, gatePidStart: gate.startedAt }),
+        );
+
+        await recoverBatches({
+          state: h.state,
+          git: h.git,
+          inbox: h.inbox,
+          processes: systemProcesses,
+          shipper: h.shipper,
+          starter: h.starter,
+          logger: silentLogger,
+          worktrees: { ctx: h.ctx, root: h.worktreeRoot },
+        });
+
+        await gate.exited;
+        await waitFor(() => !alive(gate.grandchildPid));
+        expect(getBatchRow(h.store.db, batchId)).toMatchObject({
+          state: 'OPEN',
+          gatePid: null,
+          gatePidStart: null,
+        });
+        expect(h.git$('worktree', 'list')).not.toContain('gate-');
+        expect(h.git$('branch', '--list', branch)).toBe('');
+        expect(h.cards().filter((c) => c.title.includes('branch'))).toEqual([]);
+      } finally {
+        if (alive(gate.grandchildPid)) process.kill(gate.grandchildPid, 'SIGKILL');
+        gate.cleanup();
+      }
+    },
+  );
+});

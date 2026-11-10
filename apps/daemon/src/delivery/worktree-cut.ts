@@ -25,6 +25,7 @@ import { forTasks, startCards, worktreeCards, type Card } from './cards';
 import { stopCiFixing } from './ci-stop';
 import { ghCall, networkCall, raise, showNotice, type DeliveryContext } from './context';
 import { unmergedDependencies } from './deps';
+import { putBackForStart } from './kept-work-start';
 import { noticeUnbuilt, recordInstall } from './installed-lockfile';
 import { landingWarnings, missingLandingBranch, type SameStart } from './landing';
 import { seedNotices } from './notices';
@@ -301,6 +302,8 @@ export async function cutWorktree(
     // that started over has told the builder already, recordInstall above.
     if (!seed && installed.kind === 'installed' && !installed.startedOver)
       noticeUnbuilt(ctx, batchId, path, 'seed_skipped');
+    // Saved Workbench work goes back in the copy before the batch opens, so no lane starts without it.
+    await putBackForStart(ctx, plans.keys(), path);
     ctx.state.write((w) => {
       patchBatch(w, batchId, { branch, baseSha, repo });
       transitionBatch(w, batchId, { to: BatchState.Open, reason: 'worktree cut' });

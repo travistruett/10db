@@ -818,6 +818,43 @@ export interface Git {
    * elsewhere and refuses one in the way; one checked out anywhere else is refused.
    */
   rewindBranch(repo: string, branch: string, from: string, to: string): Promise<void>;
+  // Branch moves of a closed Workbench pass (spec §5.3, §5.4: D8, D22, D24).
+  /**
+   * Moves local branch `branch` to commit `to` by compare-and-swap, under the repo lock: `moved` when
+   * it was at `expect`, `already` when it is at `to` (a rerun), `raced` when it is anywhere else or
+   * gone, and then nothing changes. A branch checked out in any worktree moves only to a commit whose
+   * tree is its tip's, so no file and no index entry goes stale; any other such move is refused.
+   */
+  moveBranchCas(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly to: string;
+    readonly expect: string;
+  }): Promise<'moved' | 'already' | 'raced'>;
+  /**
+   * D22's Move: moves `branch`, which HEAD names at `from`, to commit `to`, its files following
+   * through `read-tree -m -u` as the built switch writes them, under the repo lock. Uncommitted changes
+   * the move does not write stay; one where it writes (`dirty`), or a file git does not track in the
+   * way (`ignored`), refuses it and nothing changes, as does a HEAD on another branch or a branch no
+   * longer at `from` (`moved`).
+   */
+  moveCheckedOutBranch(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly from: string;
+    readonly to: string;
+  }): Promise<SwitchBack>;
+  /**
+   * D24: brings commit `theirs` into `branch` by one merge commit whose tree is the branch tip's own
+   * (parents the tip, then `theirs`), signed as the builder's config asks, set by compare-and-swap,
+   * under the repo lock; no file or index entry changes. `already` when the branch holds `theirs`.
+   */
+  mergeKeepingTree(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly theirs: string;
+    readonly message: string;
+  }): Promise<{ readonly kind: 'merged' | 'already'; readonly sha: string }>;
   /**
    * The commits `tip` has since `base` that are its own: first parents only, merges left out,
    * newest first. A merge of the base into the branch adds none, and neither do the commits it brought in.
@@ -3565,6 +3602,145 @@ export function createGit(opts: GitOptions = {}): Git {
     });
   }
 
+  async function moveBranchCas(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly to: string;
+    readonly expect: string;
+  }): Promise<'moved' | 'already' | 'raced'> {
+    if (!OBJECT_ID.test(input.to) || !OBJECT_ID.test(input.expect))
+      throw new InvalidError('A branch is moved between two commit ids');
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const ref = `refs/heads/${input.branch}`;
+      if (await isSymbolic(c, ref))
+        throw new InvalidError(`${ref} points at another branch, so 10db moves nothing there`);
+      const tip = await revParse(c, `${ref}^{commit}`);
+      if (tip === input.to) return 'already';
+      if (tip === null || tip !== input.expect) return 'raced';
+      const holder = await branchInUse(c, input.branch);
+      if (
+        holder !== null &&
+        (await revParse(c, `${input.to}^{tree}`)) !== (await revParse(c, `${tip}^{tree}`))
+      )
+        throw new InvalidError(
+          `Branch ${input.branch} is checked out at ${holder}, so it moves only to a commit with the same files`,
+        );
+      try {
+        await git(c, [
+          'update-ref',
+          '--no-deref',
+          '-m',
+          `10db: move to ${input.to}`,
+          ref,
+          input.to,
+          input.expect,
+        ]);
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        return 'raced';
+      }
+      return 'moved';
+    });
+  }
+
+  async function moveCheckedOutBranch(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly from: string;
+    readonly to: string;
+  }): Promise<SwitchBack> {
+    if (!OBJECT_ID.test(input.from) || !OBJECT_ID.test(input.to))
+      throw new InvalidError('A branch is moved between two commit ids');
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const ref = `refs/heads/${input.branch}`;
+      const found = await currentBranch(c);
+      if (found !== input.branch) return { kind: 'moved', found };
+      if ((await revParse(c, `${ref}^{commit}`)) !== input.from) return { kind: 'moved', found };
+      const target = await revParse(c, `${input.to}^{commit}`);
+      if (target === null) return { kind: 'gone' };
+      await git(c, ['update-index', '-q', '--ignore-submodules', '--refresh']).catch(
+        () => undefined,
+      );
+      const paths = [...new Set([...(await changes(c)), ...(await stagedPaths(c))])];
+      const written = new Set(
+        (await git(c, ['diff-tree', '-r', '--name-only', '--no-renames', '-z', input.from, target]))
+          .split('\0')
+          .filter(Boolean),
+      );
+      const overlapping = paths.filter((path) => written.has(path)).sort();
+      if (overlapping.length > 0) return { kind: 'dirty', paths: overlapping };
+      const inTheWay = await untrackedInTheWay(c, input.from, target, written);
+      if (inTheWay.length > 0) return { kind: 'ignored', paths: inTheWay };
+      try {
+        await git(c, ['read-tree', '-m', '-u', input.from, target]);
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        throw new InvalidError(`10db could not move ${input.branch}'s files: ${error.message}`);
+      }
+      try {
+        await git(c, [
+          'update-ref',
+          '--no-deref',
+          '-m',
+          `10db: move to ${target}`,
+          ref,
+          target,
+          input.from,
+        ]);
+      } catch (error) {
+        // The branch moved meanwhile: its files go back to what it held.
+        await git(c, ['read-tree', '-m', '-u', target, input.from]).catch(() => undefined);
+        if (!(error instanceof GitError)) throw error;
+        return { kind: 'moved', found };
+      }
+      return { kind: 'switched' };
+    });
+  }
+
+  async function mergeKeepingTree(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly theirs: string;
+    readonly message: string;
+  }): Promise<{ readonly kind: 'merged' | 'already'; readonly sha: string }> {
+    if (!OBJECT_ID.test(input.theirs)) throw new InvalidError(`${input.theirs} is not a commit id`);
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const ref = `refs/heads/${input.branch}`;
+      const tip = await revParse(c, `${ref}^{commit}`);
+      if (tip === null) throw new InvalidError(`Branch ${input.branch} is not there`);
+      if (await isAncestor(c, input.theirs, tip)) return { kind: 'already', sha: tip };
+      const sign = signing(c, await configEntries(c));
+      const sha = (
+        await git(
+          c,
+          ['commit-tree', ...sign.flags, `${tip}^{tree}`, '-p', tip, '-p', input.theirs],
+          {
+            input: `${input.message}\n`,
+            config: sign.config,
+          },
+        )
+      ).trim();
+      try {
+        await git(c, [
+          'update-ref',
+          '--no-deref',
+          '-m',
+          '10db: merge keeping its tree',
+          ref,
+          sha,
+          tip,
+        ]);
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        throw refusal(c.real, { kind: GitTrustFailure.Ref, ref, reason: 'raced' });
+      }
+      return { kind: 'merged', sha };
+    });
+  }
+
   async function rewindBranch(
     repo: string,
     branch: string,
@@ -4019,6 +4195,9 @@ export function createGit(opts: GitOptions = {}): Git {
     addWorktree,
     fastForwardBranch,
     rewindBranch,
+    moveBranchCas,
+    moveCheckedOutBranch,
+    mergeKeepingTree,
     async ownCommitsSince(repo, base, tip) {
       return (
         await git(await pinned(repo), [

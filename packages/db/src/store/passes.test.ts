@@ -16,6 +16,8 @@ import {
   abandonPassAndBatch,
   clearPassNotice,
   closePass,
+  forgetPassPullRequest,
+  recordPullRequestStatus,
   getPassChecks,
   getPassProgress,
   getPassPullRequest,
@@ -599,5 +601,22 @@ describe("a pass's close", () => {
     expect(store.write((ctx) => clearPassNotice(ctx, pass.id, 'checks')).value).toBe(true);
     expect(store.write((ctx) => clearPassNotice(ctx, pass.id, 'checks')).value).toBe(false);
     expect(getPassProgress(store.db, pass.id).notices).toEqual([]);
+
+    // A pull request closed unmerged while the pass is open is forgotten with what was read of it.
+    store.write((ctx) =>
+      recordPullRequestStatus(ctx, batch.id, {
+        state: 'closed',
+        checks: 'none',
+        failingChecks: [],
+        checkedAt: '2026-11-09T12:00:00.000Z',
+        unknownReason: null,
+      }),
+    );
+    const forgot = store.write((ctx) => {
+      forgetPassPullRequest(ctx, pass.id);
+    });
+    expect(forgot.events.map((e) => e.type)).toContain(EventType.PassChanged);
+    expect(getPassPullRequest(store.db, pass.id)).toBeNull();
+    expect(getBatch(store.db, batch.id)).toMatchObject({ prUrl: null, pr: null });
   });
 });

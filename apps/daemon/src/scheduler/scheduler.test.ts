@@ -990,6 +990,10 @@ describe('Workbench passes', () => {
     moveWorkstream(opened.workstream.id, 'CANCELLED');
     store.db.update(schema.passes).set({ state: 'CLOSED' }).run();
     expect(await scheduler().tick()).toBe(0);
+    // Closed, the wait is for the pass's pull request now (D22).
+    expect(getWorkstream(store.db, ordinary.workstream.id).notice?.line).toBe(
+      "Waits for the Workbench pass's pull request to merge",
+    );
     store.db.update(schema.passes).set({ state: 'SETTLED' }).run();
     expect(await scheduler().tick()).toBe(1);
     expect(launched.map((l) => l.id)).toEqual([ordinary.workstream.id]);

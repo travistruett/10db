@@ -751,6 +751,21 @@ export function createApp(deps: ApiDeps) {
     .post('/passes/:passId/abandon', async (c) =>
       c.json(await deps.services.abandonPass(PassId.parse(c.req.param('passId')))),
     )
+    .get('/passes/:passId/pull-request', async (c) =>
+      c.json(await deps.services.passPullRequest(PassId.parse(c.req.param('passId')))),
+    )
+    .post('/passes/:passId/pull-request', async (c) =>
+      c.json(await deps.services.openPassPullRequest(PassId.parse(c.req.param('passId'))), 202),
+    )
+    .post('/tasks/:taskId/thread/:messageId/send-to-agent', async (c) =>
+      c.json(
+        await deps.services.sendToAgent(
+          TaskId.parse(c.req.param('taskId')),
+          z.string().min(1).max(200).parse(c.req.param('messageId')),
+        ),
+        201,
+      ),
+    )
     .post('/batches/:batchId/ship', (c) =>
       c.json(deps.services.shipBatch(BatchId.parse(c.req.param('batchId')))),
     )

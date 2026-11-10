@@ -224,7 +224,7 @@ describe('createGh', () => {
     ]);
   });
 
-  it('creates a draft PR when asked, and makes a PR ready or moves its base, each value its own argument', async () => {
+  it('creates a draft PR when asked, and makes a PR ready, moves its base or rewrites its body, each value its own argument', async () => {
     const { exec, seen } = scripted({
       'pr create': { exitCode: 0, stdout: 'https://github.com/acme/widgets/pull/8\n' },
       'pr ready': { exitCode: 0 },
@@ -244,6 +244,7 @@ describe('createGh', () => {
     );
     await gh.prReady({ repo: 'acme/widgets', url }, CALL);
     await gh.prEditBase({ repo: 'acme/widgets', url, base: 'main' }, CALL);
+    await gh.prEditBody({ repo: 'acme/widgets', url, bodyFile: '/b2' }, CALL);
     expect(seen).toEqual([
       [
         'pr',
@@ -262,6 +263,7 @@ describe('createGh', () => {
       ],
       ['pr', 'ready', url, '-R', 'acme/widgets'],
       ['pr', 'edit', url, '-R', 'acme/widgets', '--base', 'main'],
+      ['pr', 'edit', url, '-R', 'acme/widgets', '--body-file', '/b2'],
     ]);
   });
 

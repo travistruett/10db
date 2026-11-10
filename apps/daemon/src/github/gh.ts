@@ -195,6 +195,14 @@ export interface Gh {
     call: GhCall,
   ): Promise<void>;
   /**
+   * Rewrites the pull request's body from a file, as a Workbench pass's does once its gate has run.
+   * Throws a GhError with GitHub's reason when it refuses.
+   */
+  prEditBody(
+    input: { readonly repo: string; readonly url: string; readonly bodyFile: string },
+    call: GhCall,
+  ): Promise<void>;
+  /**
    * Whether the open pull request waits in its base's merge queue. A push to its branch takes it out
    * of the queue, so 10db pushes nothing to one that does. Throws a GhError, never answers `false`,
    * for any failure of the call itself or an answer without the field, so an unread queue is never
@@ -829,6 +837,9 @@ export function createGh(exec: GhExec): Gh {
     },
     async prEditBase({ repo, url, base }, call) {
       await ok(['pr', 'edit', url, '-R', repo, '--base', base], call);
+    },
+    async prEditBody({ repo, url, bodyFile }, call) {
+      await ok(['pr', 'edit', url, '-R', repo, '--body-file', bodyFile], call);
     },
   };
 }

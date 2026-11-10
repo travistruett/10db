@@ -763,6 +763,7 @@
               "checks",
               "finding",
               "stack_unmerged",
+              "stack_merged",
               "pr_closed",
               "gate_failed"
             ]

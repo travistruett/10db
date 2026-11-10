@@ -66,6 +66,8 @@ import type {
   PassOpenedDto,
   PassAbandonedDto,
   PassOpenRequest,
+  PassPullRequestDto,
+  PassPullRequestPreviewDto,
   PassViewDto,
   TakeOutPreviewDto,
   TakeOutRequest,
@@ -273,6 +275,20 @@ export interface ApiServices {
    * neither open nor already abandoning.
    */
   abandonPass(passId: PassId): Promise<PassAbandonedDto>;
+  /** Whether Open Pull Request is offered for the pass (spec §8.3), why not, and what it would do. */
+  passPullRequest(passId: PassId): Promise<PassPullRequestPreviewDto>;
+  /**
+   * Pushes the pass's branch and opens its draft pull request in the background, then gates and
+   * reviews what it pushed. Refused (409) when it is not offered: nothing signed off, no origin or gh,
+   * or the pass not open.
+   */
+  openPassPullRequest(passId: PassId): Promise<PassPullRequestDto>;
+  /**
+   * Send to Agent (D19): sends the text a notice offers as the builder's message to the task: a notice
+   * on its thread, or one in the header of the pass holding it, by id. Refused (409) for a notice that
+   * offers nothing to send, and as a message to the task is.
+   */
+  sendToAgent(taskId: TaskId, noticeId: string): Promise<TaskMessageDto>;
   /**
    * The project's goals, each with its digest and count of new items since the builder last opened
    * it, and the Ungrouped group. Leaves every view mark as it was.

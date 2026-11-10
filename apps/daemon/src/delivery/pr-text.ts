@@ -173,3 +173,87 @@ function howChecked(
     ciLine,
   ].join('\n');
 }
+
+/** How a Workbench pass's pull request was checked, as its body says (spec §8.3). */
+export type PassPrCheck =
+  | { readonly kind: 'none' }
+  /** A project whose gate runs only in the folder: it runs at close, not on the pushed commit alone. */
+  | { readonly kind: 'folder_at_close'; readonly command: string }
+  | {
+      readonly kind: 'scratch';
+      readonly command: string;
+      /** The pushed commit the gate read, and where it is: running, passed or failed. */
+      readonly sha: string;
+      readonly state: 'running' | 'passed' | 'failed';
+    }
+  /** The close's gate in the folder: it read the folder and its running stack, not the commit alone. */
+  | {
+      readonly kind: 'folder';
+      readonly command: string;
+      readonly passed: boolean;
+      /** Files that differed from the tip when it ran: edits the builder left out. */
+      readonly dirty: readonly string[];
+    };
+
+/**
+ * A Workbench pass's pull request body (spec §5.4, §8.3): each signed-off page on one line, then how
+ * the pass was checked and on what. Its sections are the repo's template's when it has one.
+ */
+export function passPrBody(input: {
+  readonly pass: { readonly id: string; readonly name: string };
+  /** The titles of the pages signed off, in the order they joined the pass. */
+  readonly pages: readonly string[];
+  readonly check: PassPrCheck;
+  readonly ci: { readonly repo: string; readonly sha: string };
+  readonly template: string | null;
+}): string {
+  const what = [
+    `Workbench pass "${input.pass.name}": the pages signed off so far.`,
+    '',
+    ...(input.pages.length > 0 ? input.pages.map((title) => `- ${title}`) : ['- (none yet)']),
+  ].join('\n');
+  const body = fillTemplate(input.template, [
+    { heading: 'What and why', text: what },
+    { heading: 'How it was checked', text: passChecked(input.check, input.ci) },
+  ]);
+  return `${body}\n\n---\n\nOpened by 10db, Workbench pass ${input.pass.id}\n`;
+}
+
+function passChecked(
+  check: PassPrCheck,
+  ci: { readonly repo: string; readonly sha: string },
+): string {
+  const ciLine = `CI run for the pushed head: [${ci.sha.slice(0, 7)}](https://github.com/${ci.repo}/commit/${ci.sha}/checks)`;
+  const lines = ((): string[] => {
+    switch (check.kind) {
+      case 'none':
+        return ['No gate command: each page was signed off by the builder in 10db.'];
+      case 'folder_at_close':
+        return [
+          'Gate not run: pages are still open in the folder.',
+          '',
+          `It runs once, at close, in the folder: \`${check.command}\` tests the folder and its running stack, not the pushed commit alone.`,
+        ];
+      case 'scratch': {
+        const where = `in a scratch worktree of the pushed commit ${check.sha.slice(0, 7)}`;
+        if (check.state === 'running') return [`Gate running ${where}: \`${check.command}\`.`];
+        return check.state === 'passed'
+          ? [`Gate passed ${where}: \`${check.command}\`.`]
+          : [`Gate failed ${where}: \`${check.command}\`. The pass's header in 10db says so.`];
+      }
+      case 'folder':
+        return [
+          `Gate ${check.passed ? 'passed' : 'failed'} in the folder at close: \`${check.command}\` tested the folder and its running stack, not the pushed commit alone.`,
+          ...(check.dirty.length > 0
+            ? [
+                '',
+                'Files that differed from the pushed commit when it ran (left out of the pass):',
+                '',
+                ...check.dirty.map((path) => `- ${path}`),
+              ]
+            : []),
+        ];
+    }
+  })();
+  return [...lines, '', ciLine].join('\n');
+}

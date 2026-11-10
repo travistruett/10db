@@ -37,7 +37,6 @@ import {
   patchBatch,
   passHoldingFolder,
   passHoldingTask,
-  refuseStartWithKeptWork,
   patchTask,
   placeTaskByRule,
   setBatchNotice,
@@ -60,6 +59,7 @@ import { unfinishedDependencies, unmergedDependencies, type BlockedTask } from '
 import { groupByDependency } from './grouping';
 import { jobKey, JobQueue } from './jobs';
 import { landingHold, planLandings, shippedLandingNotice } from './landing-join';
+import { putBackForStart } from './kept-work-start';
 import { keptRevertOf } from './left-out-settle';
 import { batchPlacement, placementWords, refuseCrossPlacementDependency } from './placement';
 import { resolveStartCards } from './stale-cards';
@@ -551,7 +551,6 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
       throw new ConflictError(
         `Task ${task.title} is in the Workbench pass "${pass.name}"; it runs there until the pass takes it out or ends`,
       );
-    refuseStartWithKeptWork(db, task);
   }
 
   /** Cutting a branch (batch delivery spec §5): checks in order, then switch, then open. */
@@ -667,6 +666,8 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         `origin/${batch.baseBranch}`,
       );
       const baseSha = await ctx.git.head(project.repoPath);
+      // Saved Workbench work goes back before the batch opens, so no lane starts without it.
+      await putBackForStart(ctx, plans.keys(), project.repoPath);
       ctx.state.write((w) => {
         patchBatch(w, batchId, {
           branch,
@@ -738,6 +739,8 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
         refuse(startCards.joinInterrupted(batch));
         return;
       }
+      // Saved Workbench work goes back before the joined runs are written, so none starts without it.
+      await putBackForStart(ctx, plans.keys(), batchCheckout(db, batch));
       if (reopening) {
         const opened = await reopenWhenWhole(ctx, batchId, 'a fix task joined', signal, (w) => {
           for (const [taskId, plan] of plans) insertJoinedWorkstream(w, taskId, plan, batchId);

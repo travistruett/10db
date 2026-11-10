@@ -20,8 +20,12 @@ import {
   WorkstreamState,
   type SystemCheckDto,
   type PassAbandonedDto,
+  type WorkstreamDto,
   type PassId,
   type TakeOutResultDto,
+  type TaskId,
+  TaskMessageId,
+  TaskMessageKind,
   type TaskLanding,
   type WorkstreamId,
 } from '@10db/contracts';
@@ -38,6 +42,7 @@ import {
   getSmallProposalLimit,
   setSmallProposalLimit,
   getPass,
+  getPassProgress,
   getTask,
   getTeam,
   getWorkstream,
@@ -69,6 +74,7 @@ import {
   listProjectViews,
   listRoutingRules,
   listTasks,
+  listTaskThread,
   listWorkstreams,
   moveTask,
   openPassTurn,
@@ -97,6 +103,8 @@ import {
   type BatchStarter,
   type PassOpened,
   type PassOpenInput,
+  offeredText,
+  type PassPullRequests,
   type Shipper,
 } from '../delivery';
 import { markGhRequired, withAgentStatus, type AgentTools } from '../environment';
@@ -160,6 +168,10 @@ export function createServices(deps: {
   readonly takeOut: (input: TakeOutInput) => Promise<TakeOutResultDto>;
   /** Abandons a pass in the project's delivery queue, stopping its lanes through the runner. */
   readonly abandonPass: (passId: PassId) => Promise<PassAbandonedDto>;
+  /** A pass's pull request: its preview, and Open Pull Request. */
+  readonly passPullRequests: Pick<PassPullRequests, 'preview' | 'open'>;
+  /** Holds a run of a task with saved Workbench work until the work is back in Your folder. */
+  readonly holdForPutBack: (id: WorkstreamId) => void;
   readonly shipper: Shipper;
   readonly accounts: AccountService;
   readonly moves: Pick<AccountMoves, 'move'>;
@@ -180,6 +192,13 @@ export function createServices(deps: {
 }): ApiServices & TaskRemovalServices & TaskLookupServices {
   const db = deps.state.db;
   const restarts = createFailedRestarts(deps);
+
+  /** A start in a local project runs in Your folder; a taken-out task's saved work goes back first. */
+  function startLocally(taskId: TaskId): WorkstreamDto {
+    const run = startTaskWithPlan(deps.state, taskId);
+    deps.holdForPutBack(run.id);
+    return getWorkstream(db, run.id);
+  }
   const catalogueStatus = (): CatalogueStatusDto => ({
     ...deps.catalogue.status(),
     ...(deps.catalogueOn ? {} : { lastAttempt: CatalogueAttempt.Off }),
@@ -309,7 +328,7 @@ export function createServices(deps: {
       const started: TaskStarted =
         project.delivery === Delivery.PullRequest
           ? { kind: 'batch', batch: deps.starter.startTask(taskId) }
-          : { kind: 'workstream', workstream: startTaskWithPlan(deps.state, taskId) };
+          : { kind: 'workstream', workstream: startLocally(taskId) };
       // The batch it left no longer waits on the attempt it started over from.
       if (left) deps.shipper.checkBatch(left);
       // The failed run is left behind by the new one; its card's Retry would be refused.
@@ -398,6 +417,28 @@ export function createServices(deps: {
           `Pass "${pass.name}" is ${pass.state.toLowerCase()}: only an open pass is abandoned`,
         );
       return deps.abandonPass(passId);
+    },
+    passPullRequest: (passId) => deps.passPullRequests.preview(passId),
+    openPassPullRequest: (passId) => deps.passPullRequests.open(passId),
+    async sendToAgent(taskId, noticeId) {
+      const task = getTask(db, taskId);
+      const message = TaskMessageId.safeParse(noticeId);
+      const onThread =
+        message.success &&
+        listTaskThread(db, taskId).some(
+          (m) => m.id === message.data && m.kind === TaskMessageKind.Notice,
+        )
+          ? offeredText(db, message.data)
+          : null;
+      const pass = passHoldingTask(db, task);
+      const inHeader =
+        pass === undefined
+          ? null
+          : (getPassProgress(db, pass.id).notices.find((n) => n.id === noticeId && n.sendable)
+              ?.text ?? null);
+      const text = onThread ?? inHeader;
+      if (text === null) throw new ConflictError('That notice offers nothing to send to the agent');
+      return deps.thread.postTaskMessage(taskId, { text, pictures: [] });
     },
     async stopPage(taskId) {
       const task = getTask(db, taskId);

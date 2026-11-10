@@ -98,6 +98,9 @@ import {
   createBatchStarter,
   createDeliveryJobs,
   createPrWatch,
+  answerPassMoveCard,
+  createPassPullRequests,
+  holdForPutBack,
   createShipper,
   createWorktreeDependencies,
   createWorktreeGenerators,
@@ -110,6 +113,9 @@ import {
   recoverBatches,
   removeMergedBranches,
   resolvePnpm,
+  resumePassSettles,
+  subscribeKeptWorkLanding,
+  subscribePassSettles,
   subscribePrWatch,
   subscribeShipTrigger,
   type DeliveryContext,
@@ -902,6 +908,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     onWorkQueued: () => {
       scheduler?.requestTick();
     },
+    // An ordinary start of a taken-out task puts its saved work back in the checkout it runs in.
+    putBack: (input) =>
+      putBackKeptWork({ state, git, inbox, jobs: deliveryJobs, logger, clock }, input),
     worktreeRoot,
     // Not behind the gate slots: waiting out a long gate would hold the cut. Each cut downloads the
     // worktree's whole tree (the run's store is empty), so several cuts at once are several downloads.
@@ -914,6 +923,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const passWork: PassWorkDeps = { state, git, inbox, jobs: delivery.jobs, logger, clock };
   answerPassCards = (item, answer) => {
     answerPassCard(passWork, item, answer);
+    answerPassMoveCard(delivery, item, answer);
   };
   const starter = createBatchStarter(delivery);
   answerStartCard = createStartCardAnswers({ state, starter });
@@ -935,6 +945,28 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     identifyProcess: (pid) => processes.identify(pid),
     isRunning: (id) => runner?.isRunning(id) ?? false,
     load: loadGuard,
+  });
+  // A pass's pull request: its push and draft in the delivery key, its gate and one review outside it.
+  const passPullRequests = createPassPullRequests({
+    ...delivery,
+    gate: shipGate,
+    holdShips: () => updateDrain.draining,
+    clock,
+    dataDir: opts.dataDir,
+    sessionEnv: () => launcher.projectEnv(),
+    identifyProcess: (pid) => processes.identify(pid),
+    review: {
+      adapter,
+      launch: (accountId, model) => {
+        const session = launcher.session(
+          getAccountRow(state.db, accountId),
+          model,
+          listAccountModels(state.db, accountId),
+        );
+        return { model: session.model, env: session.env, expect: session.expect };
+      },
+      scratchRoot: tmpdir(),
+    },
   });
   answerWorktreeCard = createWorktreeCardAnswers(delivery, {
     starter,
@@ -1372,6 +1404,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
   );
   const unsubscribeShip = subscribeShipTrigger(bus, state.db, shipper);
+  // A pass that closes unsettled gets its Move card, and each closed pass is looked at again; a
+  // started task's saved work goes once its work lands.
+  const unsubscribePassSettles = subscribePassSettles(bus, delivery);
+  const unsubscribeKeptWork = subscribeKeptWorkLanding(bus, delivery);
+  resumePassSettles(delivery);
   // Outside the delivery job queues: a slow or offline gh never holds a cut or a ship.
   const prWatch = createPrWatch({
     ctx: delivery,
@@ -1472,6 +1509,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     openPass: (input) => openPass(delivery, input, passOpenDeps),
     takeOut: (input) => takeOut(passTakeOuts, input),
     abandonPass: (passId) => abandonPass(passTakeOuts, passId),
+    passPullRequests,
+    holdForPutBack: (id) => {
+      holdForPutBack(delivery, id);
+    },
     shipper,
     accounts: accountService,
     worktreeRoot,
@@ -1767,6 +1808,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
         logger.warn({ err: error }, 'could not stop the sign-in');
       });
       unsubscribeShip();
+      unsubscribePassSettles();
+      unsubscribeKeptWork();
       unsubscribePrWatch();
       await prWatch.stop();
       retiredLandingsAbort.abort();
@@ -1775,6 +1818,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       await systemTempSwept;
       backupsAbort.abort();
       await rootsKeptOutOfBackups;
+      // A pass's gate and review on its pushed tip run outside the delivery jobs.
+      await passPullRequests.stop();
       // A gate that waits must not start because shutdown freed the slot of the one it killed.
       gateSlots.close();
       // Aborts a shipping gate and any git or gh child; the batch stays SHIPPING for recovery.

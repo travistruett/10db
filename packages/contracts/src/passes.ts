@@ -70,6 +70,8 @@ export const PassPageCap = z.int().min(1).max(PASS_PAGE_CAP_MAX);
 /** The line an ordinary task in Your folder shows while a pass holds the folder. */
 export const PASS_FOLDER_WAIT_NOTICE_KEY = 'workbench-pass';
 export const PASS_FOLDER_WAIT_LINE = 'Waits for the Workbench pass to close';
+/** The same line once the pass has closed and waits for its pull request to merge (D22). */
+export const PASS_PR_WAIT_LINE = "Waits for the Workbench pass's pull request to merge";
 
 export const PassDto = z.object({
   id: PassId,
@@ -305,6 +307,8 @@ export const PassNoticeKind = {
   Finding: 'finding',
   /** The pass this one is stacked on closed without merging. */
   StackUnmerged: 'stack_unmerged',
+  /** The pass this one is stacked on merged with drift: its commits show beside this one's. */
+  StackMerged: 'stack_merged',
   /** The pass's pull request closed without merging while the pass was open. */
   PrClosed: 'pr_closed',
   /** The gate on the pushed tip failed. */
