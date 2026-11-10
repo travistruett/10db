@@ -1,8 +1,15 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { mintId, TaskMessageDto, TaskThreadDto, type TaskId } from '@10db/contracts';
-import { createTestStore, insertTask, seedProject, type Store } from '@10db/db';
+import { ConflictError, mintId, TaskMessageDto, TaskThreadDto, type TaskId } from '@10db/contracts';
+import {
+  createTestStore,
+  getTask,
+  insertPass,
+  insertTask,
+  seedProject,
+  type Store,
+} from '@10db/db';
 import { defineWebSocketHelper } from 'hono/ws';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
@@ -29,6 +36,8 @@ let taskId: TaskId;
 let otherTaskId: TaskId;
 /** What the API answered 500 for; a test that expects one takes it out. */
 let unexpected: unknown[];
+/** How a message reaches a page of a pass, as the runner hands it. */
+let deliver: Parameters<typeof createThreadService>[0]['pages']['deliver'];
 beforeEach(() => {
   unexpected = [];
   const test = createTestStore();
@@ -42,11 +51,12 @@ beforeEach(() => {
     ).value.id;
   taskId = task('Settings page');
   otherTaskId = task('Board page');
+  // These tasks are in no pass, so no message is handed to a page unless a test puts one in one.
+  deliver = () => Promise.reject(new Error('no page takes a message here'));
   const thread = createThreadService({
     state: createStateStore(test.store, createEventBus()),
     dataDir: data.path,
-    // These tasks are in no pass, so no message is handed to a page.
-    pages: { deliver: () => Promise.reject(new Error('no page takes a message here')) },
+    pages: { deliver: (...a) => deliver(...a) },
   });
   app = createApp({
     startedAt: new Date(),
@@ -244,5 +254,37 @@ describe('a task thread over HTTP', () => {
     expect((await get(`/tasks/${otherTaskId}/thread/pictures/${fileId}`)).status).toBe(404);
     expect((await get(`/tasks/${taskId}/thread/pictures/${mintId('TaskFile')}`)).status).toBe(404);
     expect((await get(`/tasks/${mintId('Task')}/thread`)).status).toBe(404);
+  });
+});
+
+// Workbench spec §6.3, plan A4: a message a page refuses is not kept, whenever the refusal comes.
+describe('a message to a page of a pass', () => {
+  it('keeps nothing when the page leaves its pass as the message goes in, so a retry is one message', async () => {
+    store.write((ctx) => {
+      const task = getTask(ctx.tx, taskId);
+      insertPass(ctx, {
+        id: mintId('Pass'),
+        projectId: task.projectId,
+        name: 'Polish',
+        pageCap: 4,
+        returnBranch: 'main',
+        startSha: 'a'.repeat(40),
+        branch: '10db/polish-abc123',
+        baseBranch: 'main',
+        repo: null,
+        taskIds: [taskId],
+        dirt: [],
+      });
+    });
+    // A take-out finished while the message went in: the runner refuses to hand it over.
+    deliver = () =>
+      Promise.reject(new ConflictError('Settings page is no longer in a Workbench pass'));
+
+    const res = await post(taskId, 'Make it bigger', [{ name: 'shot.png', bytes: PNG }]);
+
+    expect(res.status).toBe(409);
+    const thread = TaskThreadDto.parse(await (await get(`/tasks/${taskId}/thread`)).json());
+    expect(thread.messages).toEqual([]);
+    expect(readdirSync(filesDir(taskId))).toEqual([]);
   });
 });

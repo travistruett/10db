@@ -13,9 +13,11 @@ import {
   type TaskMessageDto,
   type TaskMessageId,
   type TaskPictureKind,
+  type TaskDto,
   type TaskThreadDto,
 } from '@10db/contracts';
 import {
+  deleteUnsentBuilderMessage,
   getTask,
   getTaskFile,
   insertBuilderMessage,
@@ -24,6 +26,7 @@ import {
   listTaskThread,
   markPassTurnAnswered,
   passHoldingTask,
+  type DbReader,
   type StoredPicture,
 } from '@10db/db';
 import type { StateStore } from '../events';
@@ -74,6 +77,22 @@ export interface ThreadService {
   ): { readonly bytes: Uint8Array<ArrayBuffer>; readonly mediaType: TaskPictureKind };
 }
 
+/**
+ * Refuses (ConflictError) a message to a page of a pass while the pass is not open or the page is
+ * being taken out of it.
+ */
+function refusedByPass(db: DbReader, task: TaskDto): void {
+  const pass = passHoldingTask(db, getTask(db, task.id));
+  if (!pass) throw new ConflictError(`${task.title} is no longer in a Workbench pass`);
+  if (pass.state !== PassState.Open)
+    throw new ConflictError(
+      `Workbench pass "${pass.name}" is ${pass.state.toLowerCase()}; its pages take no message`,
+    );
+  const takeOut = lastTakeOut(db, task.id);
+  if (takeOut?.passId === pass.id && takeOut.step < TakeOutStep.Done)
+    throw new ConflictError(`${task.title} is being taken out of its pass`);
+}
+
 const isMissingFile = (error: unknown) =>
   error instanceof Error && 'code' in error && error.code === 'ENOENT';
 
@@ -96,15 +115,8 @@ export function createThreadService(deps: {
       // A page of a pass takes the message into its turns (Workbench spec §6.3), while the pass is
       // open and the page is not being taken out; nothing is kept for one refused.
       const pass = passHoldingTask(state.db, task);
-      if (pass) {
-        if (pass.state !== PassState.Open)
-          throw new ConflictError(
-            `Workbench pass "${pass.name}" is ${pass.state.toLowerCase()}; its pages take no message`,
-          );
-        const takeOut = lastTakeOut(state.db, taskId);
-        if (takeOut?.passId === pass.id && takeOut.step < TakeOutStep.Done)
-          throw new ConflictError(`${task.title} is being taken out of its pass`);
-      } else if (redo) throw new ConflictError(`${task.title} is in no Workbench pass to redo`);
+      if (pass) refusedByPass(state.db, task);
+      else if (redo) throw new ConflictError(`${task.title} is in no Workbench pass to redo`);
       const body = input.text.trim();
       if (body === '' && input.pictures.length === 0)
         throw new InvalidError('A message needs words or a picture');
@@ -138,6 +150,9 @@ export function createThreadService(deps: {
           });
         }
         message = state.write((ctx) => {
+          // Read again where the message is written, so a take-out or an Abandon that began
+          // meanwhile refuses it too.
+          if (pass) refusedByPass(ctx.tx, task);
           // The builder's first word after a Ready page is when the page was answered.
           const latest = pass ? latestPassTurn(ctx.tx, taskId) : undefined;
           if (latest && latest.readyAt !== null) markPassTurnAnswered(ctx, latest.id);
@@ -149,7 +164,19 @@ export function createThreadService(deps: {
           if (picture.written) rmSync(picture.storedPath, { force: true });
         throw error;
       }
-      if (pass) await deps.pages.deliver(taskId, message.id, { redo });
+      if (!pass) return message;
+      try {
+        await deps.pages.deliver(taskId, message.id, { redo });
+      } catch (error) {
+        if (!(error instanceof ConflictError)) throw error;
+        // The page left its pass, or began leaving it, as the message went in: it keeps nothing of
+        // it, as for one refused up front, so a retry is one message. One a session was handed
+        // already reached the page.
+        const removed = state.write((ctx) => deleteUnsentBuilderMessage(ctx, taskId, message.id));
+        if (removed === null) return message;
+        for (const path of removed) rmSync(path, { force: true });
+        throw error;
+      }
       return message;
     },
 
