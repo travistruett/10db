@@ -17,6 +17,10 @@ describe('daemonOptionsFromEnv', () => {
     ).toBeNull();
   });
 
+  it("takes pictures with the pinned browser, which a daemon whose sandbox's roots are refused never launches", () => {
+    expect(daemonOptionsFromEnv(loadEnv({})).pictures).toEqual({ kind: 'pinned' });
+  });
+
   it.each([
     ['TENDB_LANE_SANDBOX', 'off'],
     ['TENDB_LANE_SANDBOX_LOOPBACK', 'on'],
@@ -66,6 +70,7 @@ describe('daemonOptionsFromEnv', () => {
       uiToken: token,
       devUiOrigin: 'http://localhost:51234',
       catalogueSync: true,
+      pictures: { kind: 'pinned' },
     });
   });
 

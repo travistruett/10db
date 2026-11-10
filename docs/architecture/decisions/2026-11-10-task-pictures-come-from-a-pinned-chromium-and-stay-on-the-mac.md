@@ -61,6 +61,32 @@ src/pictures/browser.live.test.ts` fetches the pin into the live tests' own fold
   profile holds no app cookie after a signed-in shot; both overlays are recognised; and no browser process is
   left once it closes. CI never runs it; a bump of the pin or of `playwright-core` must pass it first.
 
+- **The dev login runs as a gate, never turns Docker on, and its log is a credential.** The builder's dev
+  login command (Settings › General) runs through the gate runner, outside the gate slots as a worktree's
+  install does, under the gate sandbox, with no project id, so it gets the project's Docker switch as it stands
+  and never turns it on; a refused `docker` says to turn on Allow Docker. It runs for at most 60 seconds. Its
+  output holds a sign-in token, and the system temp dir is readable to lanes, so its log is
+  `<data dir>/browser/<project id>/login-<ms>.log`, made 0600 before the command writes it and deleted once read
+  whatever happened; the address is never logged or shown. The last line that is a route or a URL on the app's
+  own origin is opened by the camera's sign-in, and the storage state it leads to is kept in
+  `<data dir>/browser/<project id>/state.json` (0600), outside every path a lane or gate reads (the data dir is a
+  protected read, which the seatbelt test shows). A capture signs in when no state is kept, and once again when
+  a page lands elsewhere on the app; a page still elsewhere is said once on the task's thread.
+- **The before rule.** A before shows the page before the task's first edit: it is asked only while the task
+  has no pass turn (a pass page) or no session (any other task) and no kept work, and a finished one is dropped
+  when a session of the task reported a Write, Edit, MultiEdit, NotebookEdit or any Bash call at or before the
+  shot's end. A task's first launch waits for its before at most 20 seconds, before its session exists; past
+  that the launch goes on and the rule keeps or drops the shot. While the browser downloads, befores wait for
+  it and turn and after pictures are dropped.
+- **Pictures are files by their hash, at 1x.** Each is the viewport's PNG at device scale 1 in each viewport and
+  theme of the project's matrix (at most 4 a route), kept at `<data dir>/screens/<2 hex>/<sha256>.png` (0600),
+  written under a temporary name and renamed before its row; a turn picture with the same hash as the last one
+  of its route, viewport and theme is not kept. One capture runs at a time; one a turn, a take-out, a close,
+  an Abandon or a changed app address overtakes writes nothing.
+- **Nothing leaves the Mac.** Pictures are shown in the Workbench's thread and the task drawer, read by id with
+  the UI's token; a screen's render token is refused them. They are not uploaded to a pull request and not sent
+  to a model: they can show the builder's own data.
+
 ## Why
 
 A picture of the builder's app is taken with the builder's dev session, and the daemon's own API listens on
@@ -81,5 +107,10 @@ another loopback port of the same Mac. A page, or a redirect of one, that reache
   test shows the headless shell runs sandboxed on macOS.
 - **A browser with no ledger** could outlive a daemon that dies, with the dev session in memory and nothing
   that would stop it; the lane ledger is what stops what a dead daemon left.
+- **The dev login outside the gate slots** cannot wait behind a 20-minute gate while a launch waits for its
+  before; it changes nothing in the folder a gate reads. **Without Docker turned on**, a dev login that needs it
+  says so rather than 10db turning on the socket for a command typed in Settings.
+- **A before kept only if nothing wrote first** takes a shot that is slow (a cold dev server) rather than
+  holding a lane longer; a write before it finished is the only thing that makes it wrong.
 - **Cost.** Web fonts and CDNs never load, so pictures show fallback fonts; 105 MB on first use; about 14 MB
   of `playwright-core` in the app.

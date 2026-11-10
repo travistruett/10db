@@ -176,7 +176,15 @@ import {
   type PassWorkDeps,
   type TakeOutDeps,
 } from '../pass';
-import { refusedCamera, startPictures, type PageCamera, type Pictures } from '../pictures';
+import {
+  createBrowserHost,
+  createPlaywrightCamera,
+  launchChromium,
+  refusedCamera,
+  startPictures,
+  type PageCamera,
+  type Pictures,
+} from '../pictures';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
 import { chooseModel, offeredModels, PLAN_NEED } from '../routing';
 import { createScreenBroker, createScreens, renderMayRead } from '../screens';
@@ -299,10 +307,13 @@ export interface DaemonOptions {
   readonly sqliteBinding?: string;
   readonly clock?: Clock;
   /**
-   * The browser for pictures of the builder's app (Workbench spec §10): its camera, and how its pinned
-   * build is fetched. Tests pass a fake camera.
+   * The browser for pictures of the builder's app (Workbench spec §10): the pinned Chromium (the entry
+   * point), or a camera given with how its build is fetched (tests pass a fake one). Absent, the daemon
+   * takes no pictures and fetches nothing, so an in-process test never downloads a browser.
    */
-  readonly pictures?: { readonly camera: PageCamera; readonly prepare: () => void };
+  readonly pictures?:
+    | { readonly kind: 'pinned' }
+    | { readonly kind: 'given'; readonly camera: PageCamera; readonly prepare: () => void };
   /** Lane caps across all projects; each account has its own `laneCap`. */
   readonly caps?: { readonly global: number };
   /** Recovery attempts, fix attempts, the gate timeout and the gate slots; merged over the runner defaults. */
@@ -1497,13 +1508,37 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   beginTurnChecks();
   // Pictures of the builder's app (Workbench spec §10): after recovery, so a page recovery made Ready
   // is not shot half settled. The dev login runs through the unslotted gate runner, as an install does.
+  // The pinned browser is launched only with a ledger to hold its processes: with the sandbox's roots
+  // refused, its host refuses and fetches nothing.
+  const browserHost =
+    opts.pictures?.kind === 'pinned'
+      ? createBrowserHost({
+          dataDir: opts.dataDir,
+          ledgers:
+            ledgerSweep && sandboxRoots ? { sweep: ledgerSweep, root: sandboxRoots.files } : null,
+          processes: laneProcesses,
+          clock,
+          logger: logger.child({ component: 'pictures' }),
+          launch: launchChromium,
+        })
+      : null;
   const pictureCamera =
-    opts.pictures?.camera ?? refusedCamera('This build of 10db has no browser for pictures');
+    opts.pictures?.kind === 'given'
+      ? opts.pictures.camera
+      : browserHost
+        ? createPlaywrightCamera(browserHost, logger.child({ component: 'pictures' }))
+        : refusedCamera('This daemon takes no pictures');
+  const prepareBrowser =
+    opts.pictures?.kind === 'given'
+      ? opts.pictures.prepare
+      : () => {
+          void browserHost?.prepare();
+        };
   pictures = startPictures({
     state,
     bus,
     camera: pictureCamera,
-    prepareBrowser: opts.pictures?.prepare ?? (() => undefined),
+    prepareBrowser,
     git,
     signIn: {
       gate: gateRunner,

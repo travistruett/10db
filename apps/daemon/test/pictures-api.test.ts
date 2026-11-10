@@ -74,7 +74,7 @@ beforeEach(async () => {
     logLevel: 'warn',
     caffeinate: () => null,
     watch: false,
-    pictures: { camera: cam, prepare: () => undefined },
+    pictures: { kind: 'given', camera: cam, prepare: () => undefined },
   });
 });
 afterEach(async () => {

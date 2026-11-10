@@ -56,7 +56,7 @@ serves agents over MCP, and runs Claude Code sessions and, for a `codex_signin` 
 modules import only that (ESLint enforces it). Dependencies point one way:
 
 `clock`, `log`, `events`, `judge`, `guard`, `permissions`, `sandbox`, `git`, `github`, `verify`, `routing`, `picker`, `folders`, `placement`, `knowledge` → `sessions`, `inbox`, `briefing`, `team` →
-`delivery`, `accounts` → `pass` → `mcp` → `screens` → `thread`, `shape` → `runner` → `watcher`, `scheduler`, `recovery`, `backups`, `benchmarks`, `self-update` → `daemon` (composition root) → `main.ts`.
+`delivery`, `accounts` → `pass` → `pictures` → `mcp` → `screens` → `thread`, `shape` → `runner` → `watcher`, `scheduler`, `recovery`, `backups`, `benchmarks`, `self-update` → `daemon` (composition root) → `main.ts`.
 `api` depends only on `@10db/contracts` and its own `ApiServices` interface; the composition root
 implements it and hands it to `createApp` in `ApiDeps`.
 
@@ -120,6 +120,37 @@ The fake adapter (`sessions/fake-adapter.ts`) is the test boundary for Claude Co
   only, because it never sees a redirect's next hop. `shotOutcome` and `OVERLAY_SELECTORS` are pure.
   `src/pictures/browser.live.test.ts` runs the real headless shell behind `TENDB_LIVE_BROWSER=1`, never in CI;
   a bump of `BROWSER_PIN` or `playwright-core` passes it first.
+- `pictures/`'s service (Workbench spec §10-§13): `startPictures` (`pictures.ts`) starts after recovery and drives
+  one capture queue (`capture-queue.ts`, a pure step over §3.2 of the plan: one load at a time; a newer turn
+  picture replaces the waiting one; the page's next turn, a take-out, a pass entering CLOSING or ABANDONING and a
+  changed app address abort a load, and nothing of an aborted load is written; a closing or abandoning pass's
+  afters wait until it leaves that state; while the browser downloads only befores wait). It follows the bus:
+  `pass.opened` and `pass.changed` (befores for open pages with none; the pass's state), `pass.turn_started` and a
+  turn that ended not Ready (abort), `pass.page_ready` (a turn picture when `turnChangedSomething`: a new kept
+  commit, or a shared change of the task's own held in the turn), `pass.page_signed_off` (the after),
+  `task.changed` with `leftPassId` (a take-out), `workstream.changed` to DONE (the after of a Your-folder task
+  naming a routed page) and `project.changed` (an app address set starts `BrowserHost.prepare`; a changed one
+  aborts). Start-up removes half-written picture files, asks befores for open pages with none and afters for
+  Your-folder tasks done in the last hour with none. Which tasks and routes: `picture-routes.ts` (a pass page,
+  or a Your-folder task naming a page area whose route loads, no `[`/`:` segment; every route × the project's
+  matrix). The before rule (`before-rule.ts`): a before is asked only while the task has no pass turn (a pass
+  page) or no session (any other task) and no kept work, and dropped when a session of the task reported a
+  Write, Edit, MultiEdit, NotebookEdit or any Bash call at or before the shot's end. A task's first launch
+  waits for its before at most `BEFORE_WAIT_MS` (20 s) through `RunnerOptions.awaitBeforePicture`, before its
+  session exists; a stop ends the wait. Files (`picture-files.ts`): `<data dir>/screens/<2 hex>/<sha256>.png`,
+  0600 (directories 0700), written under a temporary name and renamed before the row; a turn picture the store
+  does not keep (the same hash as the last) leaves no file. The dev login (`sign-in.ts`) runs the project's
+  command through the unslotted gate runner under the gate sandbox with no project id, so it never turns Docker
+  on, for at most 60 s; its log holds a token, so it is `<data dir>/browser/<project id>/login-<ms>.log`, made
+  0600 before the command writes it and deleted once read; the address is never logged. The storage state is
+  `<data dir>/browser/<project id>/state.json` (0600, temp and rename), read back through zod
+  (`storage-state.ts`). A capture signs in when no state is kept, and once again when a page lands elsewhere; a
+  page still elsewhere says so once on the task's thread (`ELSEWHERE_NOTICE`) and on the status line. Each
+  capture logs its route, outcome, milliseconds and bytes. `GET /tasks/:taskId/screens`, `GET
+/screens/:screenId` (a PNG, private and immutable; 404 once pruned) and `GET /projects/:projectId/pictures`
+  are refused to screens. `DaemonOptions.pictures` is `{ kind: 'pinned' }` from the entry point; tests give a
+  camera (`test/fake-camera.ts`); absent, the daemon takes no pictures and fetches nothing. No picture is
+  uploaded or sent to a model.
 - A session runs in its launch env (the project env plus its account's variables); the gate and the shipping gate get the lanes' allowlist of the project env (the login env with every billing switch stripped), inside their sandbox, and the repo's stdio MCP servers get `PATH`, `HOME` and their approved variables from it, plus the lanes' allowlist inside their sandbox. Nothing from the daemon's own `process.env` reaches a project's commands.
 - Both adapters check a session's account with `sessions/account-check.ts` before the prompt and at the first `init`; a refusal ends the session as `account_refused`, which pauses the account, and a model mismatch fails the workstream. Logs never carry an email or organization.
 - The variables that point git at a repository (`GIT_REPO_ENV_VARS` in `git/`: `GIT_DIR` and the
