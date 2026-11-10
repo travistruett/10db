@@ -6,6 +6,7 @@ import {
   PassCheckDetail,
   type PassDto,
   type TaskDto,
+  type TaskMessageId,
   type WorkstreamId,
 } from '@10db/contracts';
 import {
@@ -703,9 +704,13 @@ describe("a pass task's handoffs", () => {
 });
 
 describe('a pass page across a restart', () => {
-  /** The daemon stops and starts again: its sessions end, and recovery runs over the rows. */
-  async function restart(): Promise<void> {
+  /**
+   * The daemon stops and starts again: its sessions end, and recovery runs over the rows.
+   * `whileDown` writes what the daemon kept before it died and never acted on.
+   */
+  async function restart(whileDown: () => void = () => undefined): Promise<void> {
     await engine.runner.stopAll('shutdown');
+    whileDown();
     await recoverOnStartup({
       state: engine.state,
       inbox: engine.inbox,
@@ -733,6 +738,57 @@ describe('a pass page across a restart', () => {
     });
     expect(readyItems().map((i) => i.state)).toEqual(['OPEN']);
   });
+
+  it.each<{
+    name: string;
+    first: FakeStep[];
+    before: (id: WorkstreamId) => boolean;
+    down: (task: TaskDto) => void;
+  }>([
+    {
+      name: 'Ready',
+      first: [...turn('one\n', 'Tidied.'), { do: 'await_message', contains: 'never sent' }],
+      before: (id) => isReady(id, 1)(),
+      down: () => undefined,
+    },
+    {
+      name: 'whose turn ended before its work was kept',
+      first: working,
+      before: () => wrote(),
+      down: (task) => {
+        engine.state.write((ctx) => {
+          const open = openPassTurn(ctx.tx, task.id);
+          if (!open) throw new Error('no open turn');
+          endPassTurn(ctx, open.id, { ending: 'ready', replyBody: 'Tidied.' });
+        });
+      },
+    },
+  ])(
+    'queues a page $name with a message no turn took, its item withdrawn',
+    async ({ first, before, down }) => {
+      const { task, id } = await openPage([
+        first,
+        [...turn('two\n', 'Made it bigger.'), { do: 'await_message', contains: 'never sent' }],
+      ]);
+      await waitFor(() => before(id));
+      let message: TaskMessageId | null = null;
+      await restart(() => {
+        down(task);
+        // The message was kept; the daemon died before it was handed over.
+        message = engine.state.write(
+          (ctx) => insertBuilderMessage(ctx, task.id, { body: 'Bigger please', files: [] }).id,
+        );
+      });
+
+      expect(row(id)).toMatchObject({
+        state: 'QUEUED',
+        nextAction: { kind: 'feedback', messageId: message },
+      });
+      expect(readyItems().filter((i) => i.state === 'OPEN')).toEqual([]);
+      engine.launch(id);
+      await waitFor(() => isWaiting(id) && untakenMessages(engine.store.db, task.id).length === 0);
+    },
+  );
 
   it('resumes a turn cut short mid-way, without handing the message over again', async () => {
     const { pass, id } = await openPage([working, [...turn('two\n', 'Finished it.')]]);

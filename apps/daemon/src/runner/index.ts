@@ -12,5 +12,5 @@ export {
 } from './runner';
 export { liveCheckCard, raiseBuilderCheck } from './builder-check';
 export { untakenMessages } from './lane-messages';
-export { endTurnSteps, finishEndedTurn, passOfWorkstream } from './pass-turn';
+export { endTurnSteps, finishEndedTurn, passOfWorkstream, queueUntaken } from './pass-turn';
 export { raisePassCheck, raiseTurnFailed } from './pass-check';

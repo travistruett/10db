@@ -239,8 +239,8 @@ import {
   endTurnSteps,
   finishEndedTurn,
   passOfWorkstream,
+  queueUntaken,
   startTurn,
-  withdrawPageItems,
 } from './pass-turn';
 import {
   keepingFeedback,
@@ -1544,17 +1544,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     providerSessionId: string | null,
   ): void {
     opts.state.write((ctx) => {
-      const row = getWorkstreamRow(ctx.tx, id);
-      const untaken = untakenMessages(ctx.tx, row.taskId)[0];
-      if (untaken !== undefined) {
-        withdrawPageItems(ctx, id);
-        transitionWorkstream(ctx, id, {
-          to: S.Queued,
-          fence: ctl.fence,
-          patch: { nextAction: { kind: 'feedback', messageId: untaken, providerSessionId } },
-          reason: 'a message waits for the next turn',
-        });
-      }
+      queueUntaken(ctx, id, ctl.fence, providerSessionId);
       clearLease(ctx, id);
     });
   }
@@ -3476,12 +3466,14 @@ export function createRunner(opts: RunnerOptions): Runner {
         // finished first, and nothing is resumed (Workbench spec §12).
         const latest = latestPassTurn(db, getWorkstreamRow(db, id).taskId);
         if (latest && latest.endedAt !== null && latest.settledAt === null) {
+          const providerSessionId = lastProviderSession(id);
           await finishEndedTurn(passWork, latest, {
             fence: ctl.fence,
-            providerSessionId: lastProviderSession(id),
+            providerSessionId,
             reason: 'The turn ended while 10db was stopping, and its session is gone',
           });
           opts.state.write((ctx) => {
+            queueUntaken(ctx, id, ctl.fence, providerSessionId);
             clearLease(ctx, id);
           });
           return;
@@ -3739,19 +3731,8 @@ export function createRunner(opts: RunnerOptions): Runner {
       }
       // A lane starting its session hands it every message no turn has taken once it is there.
       if (active.has(id)) return;
-      opts.state.write((ctx) => {
-        const row = getWorkstreamRow(ctx.tx, id);
-        if (row.state !== S.WaitingHuman || row.nextAction.kind !== 'pass_review') return;
-        withdrawPageItems(ctx, id);
-        transitionWorkstream(ctx, id, {
-          to: S.Queued,
-          fence: null,
-          patch: {
-            nextAction: { kind: 'feedback', messageId, providerSessionId: lastProviderSession(id) },
-          },
-          reason: 'the builder wrote to the page',
-        });
-      });
+      // A page with no session starts its next turn from the oldest message no turn took.
+      opts.state.write((ctx) => queueUntaken(ctx, id, null, lastProviderSession(id)));
       opts.onLaneFreed();
     },
     async closeWarm(id) {

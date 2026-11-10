@@ -58,6 +58,31 @@ export function withdrawPageItems(ctx: WriteContext, id: WorkstreamId): void {
 }
 
 /**
+ * A page waiting for the builder, with no session to hand it to, that has a builder message no turn
+ * took: it goes back to the queue to start a turn with the oldest, resuming `providerSessionId`, and
+ * its item is withdrawn. Nothing else would launch it. True when it was queued.
+ */
+export function queueUntaken(
+  ctx: WriteContext,
+  id: WorkstreamId,
+  fence: number | null,
+  providerSessionId: string | null,
+): boolean {
+  const row = getWorkstreamRow(ctx.tx, id);
+  if (row.state !== S.WaitingHuman || row.nextAction.kind !== 'pass_review') return false;
+  const messageId = untakenMessages(ctx.tx, row.taskId)[0];
+  if (messageId === undefined) return false;
+  withdrawPageItems(ctx, id);
+  transitionWorkstream(ctx, id, {
+    to: S.Queued,
+    fence,
+    patch: { nextAction: { kind: 'feedback', messageId, providerSessionId } },
+    reason: 'a message waits for the next turn',
+  });
+  return true;
+}
+
+/**
  * A builder message goes into the page's session (spec §6.2, §6.3): it starts a turn unless one is
  * open, in which case it folds into that turn. A started turn moves a Ready page back to running and
  * withdraws its Ready item, in the caller's write.
