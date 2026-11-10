@@ -56,9 +56,15 @@ const PROJECT_NAV = [
 
 /**
  * The Workbench sits beside the builder's browser, often 420 to 520 px wide (Workbench spec §4.3): under
- * 900 px its sidebar folds away behind a header button. Every other view keeps the shell's own breakpoint.
+ * 900 px its sidebar folds away behind a header button.
  */
 const WORKBENCH_FOLD_QUERY = '(max-width: 899px)';
+
+/**
+ * Under the shell's `sm` breakpoint (48em) the sidebar would cover the whole window, so every view folds
+ * it behind the header button; the window narrows to 420 px.
+ */
+const SHELL_FOLD_QUERY = '(max-width: 767px)';
 
 /** Clears macOS's traffic lights, which sit over the header's left end. */
 const TRAFFIC_LIGHTS_WIDTH = 72;
@@ -88,7 +94,8 @@ function FullLayout() {
   const { projects, select } = useSelectedProject();
   const navigate = useNavigate();
   const narrow = useMediaQuery(WORKBENCH_FOLD_QUERY);
-  const folded = narrow && pathname === '/workbench';
+  const small = useMediaQuery(SHELL_FOLD_QUERY);
+  const folded = small || (narrow && pathname === '/workbench');
   // Where the builder opened the folded sidebar; leaving that view folds it again.
   const [openedOn, setOpenedOn] = useState<string | null>(null);
   const navHidden = folded && openedOn !== pathname;
