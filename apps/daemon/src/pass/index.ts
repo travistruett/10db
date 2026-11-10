@@ -35,22 +35,9 @@ export {
 export {
   askSignOff,
   cancelSignOffWait,
-  resumeSignOffWaits,
-  signOff,
   signOffRefusal,
-  signOffSteps,
-  SignOffFrom,
   startSignOff,
   subscribeSignOffWaits,
-  type SignOffDeps,
-  type SignOffOutcome,
 } from './sign-off';
-export { closeGateOf, closePreview, type CloseGateWhere } from './close-lists';
-export {
-  closeSteps,
-  createPassCloses,
-  type CloseDeps,
-  type CloseShip,
-  type PassCloses,
-} from './close';
-export { fastForwardReturn } from './fast-forward';
+export { closeGateOf } from './close-lists';
+export { createPassCloses, type PassCloses } from './close';
