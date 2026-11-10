@@ -66,6 +66,7 @@ import type {
   PassOpenedDto,
   PassAbandonedDto,
   PassOpenRequest,
+  PassStartDto,
   PassViewDto,
   TakeOutRequest,
   TakeOutResultDto,
@@ -267,6 +268,8 @@ export interface ApiServices {
   abandonPass(passId: PassId): Promise<PassAbandonedDto>;
   /** Every live pass as the Workbench reads it: open, closing, abandoning, or closed and not settled. */
   livePasses(): PassViewDto[];
+  /** What Start Pass shows before a pass opens on the project; reads the folder with git. */
+  passStart(projectId: ProjectId): Promise<PassStartDto>;
   /**
    * The project's goals, each with its digest and count of new items since the builder last opened
    * it, and the Ungrouped group. Leaves every view mark as it was.

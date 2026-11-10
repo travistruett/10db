@@ -105,7 +105,13 @@ import { adoptGoal } from '../goals';
 import { GitError, type Git } from '../git';
 import { hazardAssessmentDto, type HazardAssessor } from '../hazards';
 import { earlierMcpApproval, requestMcpApproval, type InboxService } from '../inbox';
-import { livePassViews, passView, TakeOutWithin, type TakeOutInput } from '../pass';
+import {
+  livePassViews,
+  passStartPreview,
+  passView,
+  TakeOutWithin,
+  type TakeOutInput,
+} from '../pass';
 import type { KeepAwake } from '../keep-awake';
 import type { Runner } from '../runner';
 import type { Scheduler } from '../scheduler';
@@ -126,6 +132,7 @@ import type { JudgeApiServices } from './judge-services';
 import type { KnowledgeApiServices } from './knowledge-services';
 import { createModelSettingsServices } from './model-settings-services';
 import type { ShapeApiServices } from './shape-services';
+import { gateCallsDocker } from './docker-need';
 import { checkoutConflictsWithRoot } from './worktree-root';
 
 /** The HTTP layer's view of the daemon: reads go to the database, writes go through the state store. */
@@ -380,6 +387,11 @@ export function createServices(deps: {
       return deps.abandonPass(passId);
     },
     livePasses: () => livePassViews(db),
+    passStart: (projectId) =>
+      passStartPreview(
+        { db, git: deps.git, gateCallsDocker: (project) => gateCallsDocker(deps.git, project) },
+        projectId,
+      ),
     async stopPage(taskId) {
       const task = getTask(db, taskId);
       const pass = passHoldingTask(db, task);

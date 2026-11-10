@@ -181,6 +181,18 @@ export function releaseClaim(ctx: WriteContext, claimId: ClaimRow['id']): boolea
   return true;
 }
 
+/**
+ * The workstream holding the area in the project's own checkout, where a pass's pages are claimed, or
+ * undefined while none does. A claim in a separate copy is that copy's and is not this one.
+ */
+export function folderAreaHolder(
+  db: DbReader,
+  projectId: ProjectId,
+  area: string,
+): WorkstreamId | undefined {
+  return activeHolder(db, projectId, { kind: ClaimKind.Area, name: area })?.workstreamId;
+}
+
 export function activeClaims(db: DbReader, workstreamId: WorkstreamId): ClaimRow[] {
   return db
     .select()

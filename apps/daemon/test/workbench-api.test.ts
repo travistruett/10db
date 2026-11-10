@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import {
   PassAbandonedDto,
   PassOpenedDto,
+  PassStartDto,
   PassViewDto,
   ProjectDto,
   TaskDto,
@@ -117,5 +118,25 @@ describe('GET /passes?live=true', () => {
 
   it('refuses a list of passes that is not the live one', async () => {
     expect((await send('GET', '/passes')).status).toBe(400);
+  });
+});
+
+describe('GET /projects/:projectId/pass-start', () => {
+  it('says what Start Pass shows: the pages, and that the gate needs Docker, which is off', async () => {
+    const project = await api().post('/projects', ProjectDto, {
+      name: 'demo',
+      repoPath: repo.path,
+      gateCommand: 'docker compose run --rm test',
+      areas: PAGES,
+    });
+
+    const start = await api().get(`/projects/${project.id}/pass-start`, PassStartDto);
+
+    expect(start.pages.map((p) => [p.area, p.route])).toEqual([
+      ['settings', '/settings'],
+      ['people', '/people'],
+    ]);
+    expect(start.lacks.map((l) => l.kind)).toContain('docker_off');
+    expect(start.refusal).toBeNull();
   });
 });

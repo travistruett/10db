@@ -749,6 +749,9 @@ export function createApp(deps: ApiDeps) {
       validator('query', (query) => z.object({ live: z.literal('true') }).parse(query)),
       (c) => c.json(deps.services.livePasses()),
     )
+    .get('/projects/:projectId/pass-start', async (c) =>
+      c.json(await deps.services.passStart(ProjectId.parse(c.req.param('projectId')))),
+    )
     .post('/batches/:batchId/ship', (c) =>
       c.json(deps.services.shipBatch(BatchId.parse(c.req.param('batchId')))),
     )

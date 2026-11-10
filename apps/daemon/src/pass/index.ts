@@ -23,4 +23,5 @@ export { putBackKeptWork } from './put-back';
 export { abandonPass } from './abandon';
 export { resumePassWork } from './resume';
 export { livePassViews } from './live';
+export { passStartPreview } from './start-preview';
 export { passView } from './view';
