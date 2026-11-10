@@ -730,6 +730,17 @@ function describeEnding(
   return `${how}${context}.`;
 }
 
+/**
+ * A pass task's session that would start bare while a turn is open: it cannot resume the turn's
+ * conversation, so it starts fresh from the thread's digest and the message the turn began with,
+ * as Retry Turn does (Workbench spec §6.3).
+ */
+function turnMessageFirst(reader: DbReader, taskId: TaskId, action: NextAction): NextAction {
+  if (action.kind !== 'start') return action;
+  const messageId = openPassTurn(reader, taskId)?.messageId ?? null;
+  return messageId === null ? action : { kind: 'feedback', messageId, providerSessionId: null };
+}
+
 /** A review that ends without a verdict is rerun once by itself; a second such ending fails the task. */
 const NO_VERDICT_ENDINGS_ALLOWED = 2;
 
@@ -1753,7 +1764,11 @@ export function createRunner(opts: RunnerOptions): Runner {
     const fresh = actionOnAnotherAccount(id, ctl, row);
     // A pass task's session starts from the oldest message no turn has taken, whatever it was queued for.
     const action = pass
-      ? withUndelivered(fresh ?? row.nextAction, untakenMessages(db, task.id)[0] ?? null)
+      ? turnMessageFirst(
+          db,
+          task.id,
+          withUndelivered(fresh ?? row.nextAction, untakenMessages(db, task.id)[0] ?? null),
+        )
       : (fresh ?? row.nextAction);
     const step = currentStep(row);
     const persona = step.personaId ? getPersona(db, step.personaId) : null;

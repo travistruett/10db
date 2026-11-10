@@ -803,6 +803,29 @@ describe('a pass page across a restart', () => {
     expect(engine.adapter.sent).toEqual([]);
   });
 
+  it("starts a fresh session for a turn whose session cannot be resumed from that turn's message", async () => {
+    const { pass, id } = await openPage([
+      working,
+      // The resumed session dies at once, so the next one cannot resume it.
+      [{ do: 'crash', message: 'the resumed session died' }],
+      [...turn('two\n', 'Finished it.'), { do: 'await_message', contains: 'never sent' }],
+    ]);
+    await waitFor(wrote);
+    await restart();
+    engine.launch(id);
+    await waitFor(() => engine.adapter.prompts.length === 2 && !engine.runner.isRunning(id));
+    expect(row(id)).toMatchObject({ state: 'QUEUED', nextAction: { kind: 'start' } });
+
+    engine.launch(id);
+    await waitFor(isReady(id, 1));
+    // The fresh session is given the message its turn began with, not a bare start.
+    expect(engine.adapter.prompts[2]?.resume).toBeNull();
+    expect(engine.adapter.prompts[2]?.prompt).toContain('Make the form tidy');
+    expect(listPassTurns(engine.store.db, pass.id).map((t) => [t.seq, t.ending])).toEqual([
+      [1, 'ready'],
+    ]);
+  });
+
   it('finishes a turn that ended before its work was kept, by its ending, resuming nothing', async () => {
     const { task, pass, id } = await openPage([working]);
     await waitFor(wrote);
