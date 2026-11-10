@@ -10,7 +10,7 @@ import {
 } from '@10db/contracts';
 import { Button, Group, Menu, Stack, Text } from '@mantine/core';
 import { IconAlertTriangle, IconInfoCircle } from '@tabler/icons-react';
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { useAnswerPassCard, useSendToAgent } from '../../daemon/pass-close-queries';
 
 // Workbench spec §5.3, §5.5, §8.3, D19, D24: what the pass's header says about its pull request and
@@ -71,6 +71,7 @@ function NoticeRow({ notice, pages, inbox, canSend, canRetarget }: NoticeRowProp
   const failure = send.error?.message ?? answer.error?.message ?? null;
   const { first, rest } = noticeLines(notice.text);
   const [more, setMore] = useState(false);
+  const restId = useId();
   return (
     <Stack component="li" gap={4}>
       <Group gap="xs" wrap="nowrap" align="center">
@@ -89,6 +90,8 @@ function NoticeRow({ notice, pages, inbox, canSend, canRetarget }: NoticeRowProp
             variant="subtle"
             size="xs"
             style={{ flex: 'none' }}
+            aria-expanded={more}
+            aria-controls={restId}
             onClick={() => {
               setMore((shown) => !shown);
             }}
@@ -122,7 +125,14 @@ function NoticeRow({ notice, pages, inbox, canSend, canRetarget }: NoticeRowProp
         {notice.sendable && canSend && pages.length > 0 ? (
           <Menu position="bottom-end" withinPortal>
             <Menu.Target>
-              <Button variant="default" size="xs" loading={send.isPending} style={{ flex: 'none' }}>
+              <Button
+                variant="default"
+                size="xs"
+                loading={send.isPending}
+                // Sent once is enough: that page's agent has it as the builder's message.
+                disabled={send.isSuccess}
+                style={{ flex: 'none' }}
+              >
                 Send to Agent
               </Button>
             </Menu.Target>
@@ -145,6 +155,7 @@ function NoticeRow({ notice, pages, inbox, canSend, canRetarget }: NoticeRowProp
       {more && rest !== null ? (
         // A failed gate's log tail runs to a few kilobytes: its lines kept, scrolled within the header.
         <Text
+          id={restId}
           size="xs"
           ff="monospace"
           pl={24}

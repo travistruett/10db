@@ -50,6 +50,11 @@ describe('HeaderNotices', () => {
       expect(sent).toEqual([{ route: 'send', id: notice.id, of: working.taskId }]);
     });
     expect(await within(shown).findByText('Sent to Billing')).toBeTruthy();
+    // Sent once, it is not offered to send again.
+    expect(within(shown).getByRole('button', { name: 'Send to Agent' })).toHaveProperty(
+      'disabled',
+      true,
+    );
   });
 
   it("announces the daemon's refusal of a Send to Agent", async () => {
@@ -156,8 +161,12 @@ describe('HeaderNotices', () => {
     const shown = await screen.findByRole('listitem');
     expect(within(shown).getByText('The gate on 1a2b3c4 failed.')).toBeTruthy();
     expect(within(shown).queryByText(/expected 2 to be 3/)).toBeNull();
-    fireEvent.click(within(shown).getByRole('button', { name: 'Show More' }));
+    const toggle = within(shown).getByRole('button', { name: 'Show More' });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
     const rest = within(shown).getByText(/expected 2 to be 3/);
+    expect(toggle.getAttribute('aria-controls')).toBe(rest.id);
     expect(rest.textContent).toBe(tail);
     expect(rest.style.whiteSpace).toBe('pre-wrap');
     fireEvent.click(within(shown).getByRole('button', { name: 'Show Less' }));
