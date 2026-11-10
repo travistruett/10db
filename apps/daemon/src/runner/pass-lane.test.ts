@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import {
   AbandonStep,
   ConflictError,
@@ -356,6 +356,49 @@ describe("a builder message's hand-over to a warm session", () => {
       'Bigger please',
     ]);
     expect(untakenMessages(engine.store.db, task.id)).toEqual([]);
+  });
+});
+
+// Workbench spec §6.4: what the builder changed by hand since the page's last turn is kept with the
+// page and named to the agent, whether its next turn goes into a warm session or starts one.
+describe("the builder's hand edits before a turn that starts a session", () => {
+  const note = 'The builder edited these files by hand since your last turn. Keep their changes:';
+  const handNotices = (task: TaskDto) =>
+    listTaskThread(engine.store.db, task.id).filter(
+      (m) => m.author === 'system' && m.body.startsWith('You edited 1 file by hand'),
+    );
+
+  it('folds an edit made after the warm session closed into the page, and leads the message with it', async () => {
+    const { task, id } = await openPage([
+      [...turn('one\n', 'Tidied the form.'), { do: 'await_message', contains: 'never sent' }],
+      [...turn('two\n', 'Made it bigger.'), { do: 'await_message', contains: 'never sent' }],
+    ]);
+    await waitFor(isReady(id, 1));
+    engine.clock.advance(DEFAULT_RUNNER_LIMITS.warmIdleMs);
+    await waitFor(() => !engine.runner.isRunning(id));
+    writeFileSync(join(engine.repoPath, PAGE_FILE), 'one, and by hand\n');
+
+    await write(task, 'Bigger please');
+    engine.launch(id);
+    await waitFor(isReady(id, 2));
+
+    expect(engine.adapter.prompts[1]?.prompt).toContain(`${note}\n- ${PAGE_FILE} +1 −1`);
+    expect(handNotices(task)).toHaveLength(1);
+  });
+
+  it('folds an edit made before the first turn into the page, and leads its message with it', async () => {
+    const { task, id } = await openPage(
+      [[...turn('one\n', 'Tidied the form.'), { do: 'await_message', contains: 'never sent' }]],
+      'Make the form tidy',
+      () => {
+        mkdirSync(join(engine.repoPath, dirname(PAGE_FILE)), { recursive: true });
+        writeFileSync(join(engine.repoPath, PAGE_FILE), 'edited before the first turn\n');
+      },
+    );
+    await waitFor(isReady(id, 1));
+
+    expect(engine.adapter.prompts[0]?.prompt).toContain(`${note}\n- ${PAGE_FILE}`);
+    expect(handNotices(task)).toHaveLength(1);
   });
 });
 

@@ -819,6 +819,24 @@ export function createRunner(opts: RunnerOptions): Runner {
     ctl.idleTimer = null;
   }
 
+  /**
+   * Keeps what the builder changed by hand since the page's last turn with the page (Workbench spec
+   * §6.4), before a turn opens, and answers what the agent's next message starts with. An edit that
+   * cannot be kept now (Your folder off the pass's branch) is kept with the turn's work instead, and
+   * the message goes without its note.
+   */
+  async function foldForTurn(id: WorkstreamId): Promise<string | null> {
+    try {
+      return (await foldHandEdits(passWork, { workstreamId: id })).agentNote;
+    } catch (error) {
+      opts.logger.warn(
+        { workstreamId: id, err: error instanceof Error ? error.message : String(error) },
+        "the builder's hand edits were not folded; the message goes without its note",
+      );
+      return null;
+    }
+  }
+
   /** The provider session the workstream's last session ran, or null when none started. */
   function lastProviderSession(id: WorkstreamId): string | null {
     return (
@@ -1865,6 +1883,9 @@ export function createRunner(opts: RunnerOptions): Runner {
         message: `The builder's message in this task's thread needs a Claude session, and the project's account "${account.label}" runs Codex, which cannot show that a turn took the message. Move the project to a Claude account and retry.`,
         providerSessionId: savedResumeId,
       };
+    // A turn this session opens folds the builder's hand edits first, as a message into a warm
+    // session does; a turn already open folds nothing, since an edit then is kept with the turn.
+    const handNote = pass && !openPassTurn(db, task.id) ? await foldForTurn(id) : null;
     const fed =
       feedback === null
         ? null
@@ -1941,7 +1962,14 @@ export function createRunner(opts: RunnerOptions): Runner {
         action.kind === 'resume'
           ? { reason: action.reason, lastOp: latestToolOp(db, id)?.opId ?? null }
           : null,
-      ...(fed === null ? {} : { feedback: { message: fed.text, digest } }),
+      ...(fed === null
+        ? {}
+        : {
+            feedback: {
+              message: handNote === null ? fed.text : `${handNote}\n\n${fed.text}`,
+              digest,
+            },
+          }),
     });
     const { token, hash } = mintSessionToken();
     const notReady = unready(account);
@@ -2308,7 +2336,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     // writes is handed to it at once.
     for (const message of untaken) messages.push(message);
     if (pass) {
-      messages.pushUntaken();
+      messages.pushUntaken(fed === null ? handNote : null);
       ctl.messages = messages;
     }
     /**
@@ -3724,18 +3752,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         // Stop and Redo: the interrupted turn goes on with the message. Its end is not Ready, as
         // no turn's is while the message waits untaken.
         if (redo && openPassTurn(db, taskId)) await lane.interrupt();
-        // What the builder changed by hand since the last turn is kept with the page, and the
-        // agent is told before it reads the message. An edit that cannot be kept now (Your folder
-        // off the pass's branch) is kept with the turn's work instead, and the message goes on.
-        let note: string | null = null;
-        try {
-          note = (await foldHandEdits(passWork, { workstreamId: id })).agentNote;
-        } catch (error) {
-          opts.logger.warn(
-            { workstreamId: id, err: error instanceof Error ? error.message : String(error) },
-            "the builder's hand edits were not folded; the message goes without its note",
-          );
-        }
+        const note = await foldForTurn(id);
         stillAPage();
         // A stop that landed meanwhile (the builder's, a take-out's, an idle close) ends this
         // session: the message stays untaken for the next one.
