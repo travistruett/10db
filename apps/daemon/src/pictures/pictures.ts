@@ -454,7 +454,11 @@ export function startPictures(deps: PicturesDeps): Pictures {
   for (const project of projects) appUrls.set(project.id, project.appUrl);
   if (projects.some((p) => p.appUrl !== null)) deps.prepareBrowser();
   syncBrowser();
-  for (const pass of listLivePasses(db)) passStates.set(pass.id, pass.state);
+  // A pass a restart finds closing or being abandoned holds its afters back, as it did before.
+  for (const pass of listLivePasses(db)) {
+    passStates.set(pass.id, pass.state);
+    if (HOLDING.includes(pass.state)) apply({ kind: 'pass_holding', passId: pass.id });
+  }
   for (const pass of listLivePasses(db))
     if (pass.state === PassState.Open)
       for (const task of listPassTasks(db, pass.id)) askBefore(task, pass.id);

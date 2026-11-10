@@ -132,6 +132,36 @@ function toolCall(task: TaskDto, tool: string): void {
   });
 }
 
+/** The page's sign-off landed, as the sign-off's write says it. */
+function signedOff(task: TaskDto): void {
+  w.h.state.write((ctx) => {
+    ctx.emit({
+      type: EventType.PassPageSignedOff,
+      entityType: 'pass',
+      entityId: w.opened.pass.id,
+      data: {
+        passId: w.opened.pass.id,
+        taskId: task.id,
+        landedSha: null,
+        files: [],
+        sharedLanded: [],
+      },
+    });
+  });
+}
+
+/** The pass enters CLOSING with the page signed off now. */
+function closing(task: TaskDto): void {
+  w.h.state.write((ctx) => {
+    setClosePlan(ctx, w.opened.pass.id, {
+      token: 't',
+      pages: [{ taskId: task.id, choice: PassClosePageChoice.SignOff }],
+      files: [],
+      shared: [],
+    });
+  });
+}
+
 describe('pictures of a pass', () => {
   it('takes befores of the open pages, then a picture per Ready turn that changed something', async () => {
     await world();
@@ -202,40 +232,30 @@ describe('pictures of a pass', () => {
     await world();
     start();
     await ended(2);
-    const signedOff = (task: TaskDto): void => {
-      w.h.state.write((ctx) => {
-        ctx.emit({
-          type: EventType.PassPageSignedOff,
-          entityType: 'pass',
-          entityId: w.opened.pass.id,
-          data: {
-            passId: w.opened.pass.id,
-            taskId: task.id,
-            landedSha: null,
-            files: [],
-            sharedLanded: [],
-          },
-        });
-      });
-    };
     cam.version = 3;
     signedOff(w.settings);
     await ended(3);
     expect(kinds(w.settings)).toEqual(['before', 'after']);
 
-    w.h.state.write((ctx) => {
-      setClosePlan(ctx, w.opened.pass.id, {
-        token: 't',
-        pages: [{ taskId: w.people.id, choice: PassClosePageChoice.SignOff }],
-        files: [],
-        shared: [],
-      });
-    });
+    closing(w.people);
     signedOff(w.people);
-    expect(kinds(w.people)).toEqual(['before']);
+    expect(cam.shots).toHaveLength(3);
     w.h.state.write((ctx) => closePass(ctx, w.opened.pass.id, { settled: false }));
     await ended(4);
+    expect(cam.shots).toHaveLength(4);
     expect(kinds(w.people)).toEqual(['before', 'after']);
+  });
+
+  it('holds an after back after a restart in the middle of a close, until the pass closes', async () => {
+    await world();
+    closing(w.people);
+    start();
+    signedOff(w.people);
+    expect(cam.shots).toHaveLength(0);
+    w.h.state.write((ctx) => closePass(ctx, w.opened.pass.id, { settled: false }));
+    await ended(1);
+    expect(cam.shots.map((s) => s.route)).toEqual(['/people']);
+    expect(kinds(w.people)).toEqual(['after']);
   });
 });
 
