@@ -235,10 +235,18 @@ export async function reviewPassTip(
   }));
   const targets = findingTargets(findings, pages, project.areas);
   deps.state.write((w) => {
-    // The header's findings were the last review's: this one reads a newer tip.
-    for (const notice of getPassProgress(w.tx, input.passId).notices)
-      if (notice.id.startsWith(FINDING_NOTICE)) clearPassNotice(w, input.passId, notice.id);
-    targets.forEach((target, n) => {
+    const prefix = `${FINDING_NOTICE}${input.sha.slice(0, 12)}:`;
+    // A review of a newer tip replaces the header's findings; one that reads on at the same tip
+    // adds to them, each finding once, numbered past those it keeps.
+    const header = getPassProgress(w.tx, input.passId).notices.filter((notice) =>
+      notice.id.startsWith(FINDING_NOTICE),
+    );
+    if (last !== input.sha)
+      for (const notice of header) clearPassNotice(w, input.passId, notice.id);
+    const kept = last === input.sha ? header : [];
+    const shown = new Set(kept.map((notice) => notice.text));
+    let next = Math.max(0, ...kept.map((notice) => Number(notice.id.slice(prefix.length)) || 0));
+    targets.forEach((target) => {
       const line = noticeLine(target.finding);
       if (target.taskId !== null) {
         // A finding the page's thread holds already, from a review that read the same lines, once.
@@ -250,8 +258,11 @@ export async function reviewPassTip(
         offerToAgent(w, notice.id, line);
         return;
       }
+      if (shown.has(line)) return;
+      shown.add(line);
+      next += 1;
       setPassNotice(w, input.passId, {
-        id: `${FINDING_NOTICE}${input.sha.slice(0, 12)}:${String(n + 1)}`,
+        id: `${prefix}${String(next)}`,
         kind: PassNoticeKind.Finding,
         text: line,
         sendable: true,

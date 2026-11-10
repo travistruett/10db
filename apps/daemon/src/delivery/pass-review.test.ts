@@ -239,6 +239,36 @@ describe('reviewPassTip', () => {
     },
   );
 
+  it("keeps the header's findings of a cut review through the review that reads on at the same tip", async () => {
+    const { deps } = setup('1. MAJOR src/lib/util.ts:4 a helper leaks');
+    const { passId } = await openedPass();
+    const tip = longPages();
+    const header = () =>
+      getPassProgress(h.store.db, passId)
+        .notices.filter((n) => n.id.startsWith('finding:'))
+        .map((n) => [n.id, n.text]);
+    await review(deps, passId, tip);
+    const first = header();
+    expect(first).toHaveLength(1);
+
+    // The rest of the diff holds a new finding first, then the same one again.
+    await review(
+      setupAnswer(
+        deps,
+        '1. MINOR src/lib/b.ts:2 a name\n2. MAJOR src/lib/util.ts:4 a helper leaks',
+      ),
+      passId,
+      tip,
+    );
+
+    // The first part's finding stays as it was, once; the new one gets an id of its own.
+    const [kept, added, ...more] = header();
+    expect(kept).toEqual(first[0]);
+    expect(added?.[1]).toContain('a name');
+    expect(added?.[0]).not.toBe(kept?.[0]);
+    expect(more).toEqual([]);
+  });
+
   it('reads one file longer than a review reads as far as it goes, says so, and moves on', async () => {
     const { deps, asked } = setup('No findings.');
     const { passId } = await openedPass();
