@@ -10,6 +10,7 @@ import {
   type TaskMessageId,
 } from '@10db/contracts';
 import {
+  getTaskMessageRow,
   listTaskFileRows,
   listTaskThreadRows,
   listUndeliveredTaskMessages,
@@ -121,6 +122,11 @@ export interface LaneMessages {
    * ahead of the message's text, as a note on the builder's hand edits does.
    */
   push(message: TaskMessageRow, lead?: string | null): void;
+  /**
+   * Hands the session, oldest first, every builder message of the task no turn has taken that it
+   * was not handed yet; `lead` goes ahead of the first.
+   */
+  pushUntaken(lead?: string | null): void;
   /** Marks delivered this task's messages among the uuids a turn took; answers those marked now. */
   consumed(uuids: readonly string[]): TaskMessageId[];
   /**
@@ -169,6 +175,15 @@ export function createLaneMessages(deps: LaneMessagesDeps): LaneMessages {
   };
   return {
     push,
+    pushUntaken(lead) {
+      const handed = new Set(sentUnder.values());
+      let first = true;
+      for (const id of untakenMessages(state.db, taskId)) {
+        if (handed.has(id)) continue;
+        push(getTaskMessageRow(state.db, id), first ? lead : null);
+        first = false;
+      }
+    },
     consumed(uuids) {
       const ids = messagesOf(uuids);
       if (ids.length === 0) return [];

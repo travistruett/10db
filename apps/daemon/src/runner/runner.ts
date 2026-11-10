@@ -2300,8 +2300,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     // writes is handed to it at once.
     for (const message of untaken) messages.push(message);
     if (pass) {
-      for (const messageId of untakenMessages(db, task.id))
-        if (messageId !== feedback?.id) messages.push(getTaskMessageRow(db, messageId));
+      messages.pushUntaken();
       ctl.messages = messages;
     }
     /**
@@ -3704,8 +3703,17 @@ export function createRunner(opts: RunnerOptions): Runner {
         // no turn's is while the message waits untaken.
         if (redo && openPassTurn(db, taskId)) await lane.interrupt();
         // What the builder changed by hand since the last turn is kept with the page, and the
-        // agent is told before it reads the message.
-        const fold = await foldHandEdits(passWork, { workstreamId: id });
+        // agent is told before it reads the message. An edit that cannot be kept now (Your folder
+        // off the pass's branch) is kept with the turn's work instead, and the message goes on.
+        let note: string | null = null;
+        try {
+          note = (await foldHandEdits(passWork, { workstreamId: id })).agentNote;
+        } catch (error) {
+          opts.logger.warn(
+            { workstreamId: id, err: error instanceof Error ? error.message : String(error) },
+            "the builder's hand edits were not folded; the message goes without its note",
+          );
+        }
         if (ctl.messages === lane) {
           opts.state.write((ctx) => {
             // A Ready page's new turn resumes this session with the message if it ends untaken.
@@ -3724,7 +3732,8 @@ export function createRunner(opts: RunnerOptions): Runner {
               fence: ctl.fence,
             });
           });
-          lane.push(getTaskMessageRow(db, messageId), fold.agentNote);
+          // Every message no turn took goes with it, so none is left behind for the lane to wait on.
+          lane.pushUntaken(note);
           return;
         }
       }

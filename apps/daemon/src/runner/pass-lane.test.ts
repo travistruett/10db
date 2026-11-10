@@ -1,4 +1,6 @@
 import { execFileSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   mintId,
   PassCheckDetail,
@@ -295,6 +297,52 @@ describe('a pass task turn by turn', () => {
         .filter((m) => m.author === 'builder')
         .every((m) => m.deliveredAt !== null),
     ).toBe(true);
+  });
+});
+
+describe("a builder message's hand-over to a warm session", () => {
+  const twoTurns = (): FakeStep[][] => [
+    [
+      ...turn('one\n', 'Tidied the form.'),
+      { do: 'await_message', contains: 'Bigger' },
+      { do: 'await_signal', name: 'go on' },
+      ...turn('two\n', 'Made it bigger.'),
+      { do: 'await_message', contains: 'never sent' },
+    ],
+  ];
+
+  it('hands the message over without the hand-edit note when the hand edits cannot be kept', async () => {
+    const { task, id } = await openPage(twoTurns());
+    await waitFor(isReady(id, 1));
+    // The builder edits the page by hand and switches Your folder away, so the edit cannot be kept.
+    writeFileSync(join(engine.repoPath, PAGE_FILE), 'one by hand\n');
+    git('switch', '-q', 'main');
+
+    await write(task, 'Bigger please');
+
+    expect(engine.adapter.sent.map((m) => m.text).some((t) => t.includes('Bigger please'))).toBe(
+      true,
+    );
+    git('switch', '-q', '10db/polish-abc123');
+    engine.adapter.signal('go on');
+    await waitFor(isReady(id, 2));
+  });
+
+  it('hands over with the next message every one no turn took that the session was never handed', async () => {
+    const { task, id } = await openPage(twoTurns());
+    await waitFor(isReady(id, 1));
+    // A message kept whose hand-over never happened.
+    engine.state.write((ctx) => insertBuilderMessage(ctx, task.id, { body: 'Left', files: [] }));
+
+    await write(task, 'Bigger please');
+    engine.adapter.signal('go on');
+    await waitFor(isReady(id, 2));
+
+    expect(engine.adapter.sent.map((m) => m.text.split('\n')[1])).toEqual([
+      'Left',
+      'Bigger please',
+    ]);
+    expect(untakenMessages(engine.store.db, task.id)).toEqual([]);
   });
 });
 
