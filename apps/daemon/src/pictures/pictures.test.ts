@@ -311,6 +311,22 @@ describe('the before rule', () => {
     expect(kinds(first)).toEqual([]);
   });
 
+  it('asks no before of a page that wrote already, and so never holds a launch for one', async () => {
+    await world();
+    toolCall(w.settings, 'Write');
+    const p = start();
+    await ended(1);
+    expect(cam.shots.map((s) => s.route)).toEqual(['/people']);
+    let went = false;
+    await p
+      .awaitBefore(getTask(w.h.store.db, w.settings.id), new AbortController().signal)
+      .then(() => {
+        went = true;
+      });
+    expect(went).toBe(true);
+    expect(cam.shots).toHaveLength(1);
+  });
+
   it('keeps a before when the page only read before it was taken', async () => {
     await world();
     cam.hold();

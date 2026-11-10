@@ -231,6 +231,9 @@ export function startPictures(deps: PicturesDeps): Pictures {
     if (pictureRoutes(project, task).length === 0) return;
     if (hasTaskScreen(db, task.id, ScreenKind.Before)) return;
     if (!beforeAllowed({ inPass: passId !== null, ...taskStartFacts(db, task.id) })) return;
+    // A before taken now would be dropped at its end: the task has written already.
+    const now = deps.state.now();
+    if (wroteBefore(activityOf(task.id, now), now)) return;
     ask({ kind: ScreenKind.Before, projectId: project.id, passId, taskId: task.id, turnId: null });
   }
 
