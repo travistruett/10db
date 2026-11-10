@@ -109,17 +109,23 @@ export function withActivity(
   };
 }
 
-/** Writes a pass lane's `session.activity` into every cached pass that holds its page. */
+/**
+ * Writes a pass lane's `session.activity` into every cached pass that holds its page, and marks its
+ * turn's log stale.
+ */
 export function writePassActivity(queryClient: QueryClient, event: DaemonEvent): void {
   const parsed = SessionActivityData.safeParse(event.data);
   if (!parsed.success || parsed.data.turn === null) return;
   const data = parsed.data;
+  const turnId = parsed.data.turn.id;
   queryClient.setQueriesData<PassViewDto[]>({ queryKey: passKeys.live, exact: true }, (old) =>
     old?.map((view) => withActivity(view, data, event.at)),
   );
   queryClient.setQueriesData<PassViewDto>({ queryKey: passKeys.views }, (old) =>
     old ? withActivity(old, data, event.at) : old,
   );
+  // The turn's log grows by this row: only an open log reads it again.
+  void queryClient.invalidateQueries({ queryKey: passKeys.activity(turnId) });
 }
 
 const PassViewList = z.array(PassViewDto);

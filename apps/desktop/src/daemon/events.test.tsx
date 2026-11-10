@@ -14,7 +14,7 @@ import { daemonEvent } from '../test/fixtures';
 import { passActivityData, passViewDto, pagesByStatus } from '../test/pass-fixtures';
 import { useAccounts, useAccountUsage } from './account-queries';
 import { EVENT_INVALIDATIONS, eventStreamUrl, INVALIDATIONS, useEventStream } from './events';
-import { passKeys } from './pass-queries';
+import { passKeys, useTurnActivity } from './pass-queries';
 import { threadKeys } from './thread-queries';
 import { useBatches, useProjects } from './queries';
 
@@ -435,6 +435,67 @@ describe('useEventStream', () => {
     expect(
       queryClient.getQueryData<typeof view>(passKeys.view(view.pass.id))?.pages[0]?.turn?.activity,
     ).toEqual(activity);
+  });
+
+  it("reads an open turn log again on that turn's activity, and no other turn's", async () => {
+    const turnId = mintId('PassTurn');
+    const asked: string[] = [];
+    const sockets: { send(data: string): void }[] = [];
+    server.use(
+      ...baseHandlers(),
+      http.get(daemonUrl('/pass-turns/:turnId/activity'), ({ params }) => {
+        asked.push(String(params['turnId']));
+        return HttpResponse.json([]);
+      }),
+      eventStream.addEventListener('connection', ({ client }) => {
+        sockets.push(client);
+      }),
+    );
+    const seen: number[] = [];
+    function OpenLog() {
+      useTurnActivity(turnId, true);
+      return null;
+    }
+    const { queryClient } = renderWithDaemon(
+      <>
+        <Stream
+          onEvent={(event) => {
+            seen.push(event.seq);
+          }}
+        />
+        <OpenLog />
+      </>,
+    );
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+    // The stream reads everything again as it opens; count from once that has settled.
+    await waitFor(() => {
+      expect(asked.length > 0 && queryClient.isFetching() === 0).toBe(true);
+    });
+    const before = asked.length;
+    const run = mintId('Workstream');
+    for (const [seq, turn] of [
+      [1, mintId('PassTurn')],
+      [2, turnId],
+    ] as const)
+      sockets[0]?.send(
+        JSON.stringify(
+          daemonEvent({
+            seq,
+            type: 'session.activity',
+            entityType: 'session',
+            data: passActivityData(run, turn),
+          }),
+        ),
+      );
+    await waitFor(() => {
+      expect(seen).toEqual([1, 2]);
+    });
+    await waitFor(() => {
+      expect(asked).toHaveLength(before + 1);
+    });
+    expect(new Set(asked)).toEqual(new Set([turnId]));
   });
 
   it('builds ws and wss stream URLs', () => {

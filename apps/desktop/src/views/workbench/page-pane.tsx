@@ -1,6 +1,6 @@
-import type { PassId } from '@10db/contracts';
+import type { PassId, PassTurnId } from '@10db/contracts';
 import { Box, Title } from '@mantine/core';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMarkOpened, useTurns } from '../../daemon/pass-queries';
 import { Composer } from './composer';
 import type { Draft } from './drafts';
@@ -12,6 +12,7 @@ import { PageStatus } from './page-status';
 import type { QueueRow } from './queue-rows';
 import { RetryTurn } from './retry-turn';
 import { Thread } from './thread';
+import { TurnLogDrawer } from './turn-log-drawer';
 import { useWorkbenchKeys } from './use-workbench-keys';
 import { WorkbenchKey } from './workbench-keys';
 import { WorkingLine } from './working-line';
@@ -47,6 +48,8 @@ export function PagePane(props: PagePaneProps) {
     marked.current = readyTurn;
     markOpened.mutate(readyTurn);
   }, [readyTurn, markOpened]);
+  // Show Log's turn: the log stays open as the turn ends, and closes once another turn is the page's.
+  const [logTurn, setLogTurn] = useState<PassTurnId | null>(null);
   const open = useOpenPage({ passId, taskId: page.taskId, route: page.route, appUrl });
   const openPage = <OpenPageButton control={open} />;
   useWorkbenchKeys({
@@ -73,11 +76,22 @@ export function PagePane(props: PagePaneProps) {
         {status === PageStatus.Working && page.turn?.endedAt === null ? (
           <WorkingLine
             line={liveLine(page.turn, now)}
-            turnId={page.turn.id}
-            logTitle={`${page.area} · Turn ${String(page.turn.seq)}`}
+            onShowLog={() => {
+              setLogTurn(page.turn?.id ?? null);
+            }}
           />
         ) : null}
       </Box>
+      {page.turn === null ? null : (
+        <TurnLogDrawer
+          turnId={page.turn.id}
+          title={`${page.area} · Turn ${String(page.turn.seq)}`}
+          opened={logTurn === page.turn.id}
+          onClose={() => {
+            setLogTurn(null);
+          }}
+        />
+      )}
       {passOpen && status === PageStatus.Failed && page.failure !== null ? (
         <RetryTurn itemId={page.failure.retryItemId} line={row.state.line} />
       ) : null}

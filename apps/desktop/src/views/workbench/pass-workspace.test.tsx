@@ -143,6 +143,33 @@ describe('PassWorkspace working line', () => {
     expect(new Set(asked)).toEqual(new Set([pages.working.turn?.id]));
   });
 
+  it('keeps the log open when its turn ends Ready', async () => {
+    const pages = pagesByStatus();
+    const turn = pages.working.turn;
+    if (turn === null) throw new Error('the working page has a turn');
+    const workspace = (working: typeof pages.working) => (
+      <PassWorkspace
+        view={passViewDto({ pages: [working] })}
+        inbox={[]}
+        project={projectViewDto()}
+        selected={working.taskId}
+        onSelect={() => undefined}
+      />
+    );
+    const { rerender } = renderWithDaemon(workspace(pages.working));
+    fireEvent.click(await screen.findByRole('button', { name: 'Show Log' }));
+    await screen.findByRole('dialog', { name: 'Billing · Turn 1' });
+    rerender(
+      workspace({
+        ...pages.working,
+        state: 'WAITING_HUMAN',
+        turn: { ...turn, endedAt: PASS_NOW, readyAt: PASS_NOW },
+      }),
+    );
+    expect(await screen.findByText('Ready')).toBeTruthy();
+    expect(screen.getByRole('dialog', { name: 'Billing · Turn 1' })).toBeTruthy();
+  });
+
   it('draws no working line on a page that is not working', async () => {
     await renderWorkspace((pages) => pages.ready.taskId);
     const thread = screen.getByRole('region', { name: 'Settings' });
