@@ -16,7 +16,7 @@ import { ManualClock } from '../clock';
 import { createEventBus, createStateStore, type StateStore } from '../events';
 import { silentLogger } from '../log';
 import { keepScreen } from './picture-files';
-import { prunableTurnScreens, PRUNE_EVERY_MS, startPruning, TURN_PICTURES_KEPT_MS } from './prune';
+import { prunableTurnScreens, startPruning } from './prune';
 
 // Workbench spec §10 "When", §11: turn pictures are kept 14 days after their task is done or
 // cancelled; befores and afters are kept for good, and a file is deleted only once no unpruned row
@@ -53,10 +53,6 @@ describe('prunableTurnScreens', () => {
     expect(prunableTurnScreens([screen, row(ScreenKind.Turn, taskB)], doneAt, NOW)).toEqual(
       pruned ? [screen.id] : [],
     );
-  });
-
-  it('keeps the bound in one place', () => {
-    expect(TURN_PICTURES_KEPT_MS).toBe(14 * DAY);
   });
 });
 
@@ -134,7 +130,7 @@ describe('the pruning sweep', () => {
     expect(listTaskScreens(store.db, recent).map((s) => s.id)).toEqual([recentTurn.id]);
 
     // A day later the next sweep reaches the recent task, and the shared file goes with it.
-    clock.advance(PRUNE_EVERY_MS);
+    clock.advance(DAY);
     expect(listTaskScreens(store.db, recent)).toEqual([]);
     expect(existsSync(fileOf(shared))).toBe(false);
   });

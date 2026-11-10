@@ -11,10 +11,10 @@ import { removeUnnamed } from './picture-files';
 // and its file is deleted once no unpruned row names its hash.
 
 /** How long a turn picture is kept after its task is done or cancelled. */
-export const TURN_PICTURES_KEPT_MS = 14 * 24 * 60 * 60_000;
+const TURN_PICTURES_KEPT_MS = 14 * 24 * 60 * 60_000;
 
 /** How often the sweep runs after the one at start-up. */
-export const PRUNE_EVERY_MS = 24 * 60 * 60_000;
+const PRUNE_EVERY_MS = 24 * 60 * 60_000;
 
 /** The turn pictures among `rows` whose task was done (by `doneAt`) at least 14 days before `now`. */
 export function prunableTurnScreens(

@@ -29,7 +29,7 @@ import { silentLogger } from '../log';
 import { grantSharedHold, passView } from '../pass';
 import { createGateRunner } from '../verify';
 import type { ShotOutcome } from './camera';
-import { PREVIEW_NOTICE, startPictures, type Pictures } from './index';
+import { startPictures, type Pictures } from './index';
 
 // Workbench spec §8.2, §8.4, plan P3 (S3's shape): a page's turn that loads its route broken after a
 // clean load marks that page, offered to its agent and never sent; two turns running offer a separate
@@ -123,7 +123,7 @@ const page = (task: TaskDto) => {
   return found;
 };
 const previewNotices = (task: TaskDto) =>
-  listTaskThread(w.h.store.db, task.id).filter((m) => m.body.startsWith(PREVIEW_NOTICE));
+  listTaskThread(w.h.store.db, task.id).filter((m) => m.body.startsWith('The preview of `'));
 const headerNotice = () =>
   getPassProgress(w.h.store.db, w.opened.pass.id).notices.filter(
     (n) => n.kind === PassNoticeKind.Preview,

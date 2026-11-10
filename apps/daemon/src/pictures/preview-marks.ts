@@ -46,7 +46,7 @@ import { previewStep } from './preview-rule';
 // turn mends the mark. A break no turn is named for is a header notice until a clean load.
 
 /** The start of the thread notice on the page whose turn broke the preview. */
-export const PREVIEW_NOTICE = 'The preview of';
+const PREVIEW_NOTICE = 'The preview of';
 
 /** The id of the header's one notice that the preview is broken with no turn named. */
 const UNNAMED_NOTICE_ID = 'preview';
