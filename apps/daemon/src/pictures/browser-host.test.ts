@@ -333,4 +333,35 @@ describe('the browser host', () => {
     expect(next).not.toBe(pid);
     expect(launched).toHaveLength(2);
   });
+
+  it('closes at once while a use waits for the download, and that use is refused', async () => {
+    host = createBrowserHost({
+      dataDir,
+      ledgers: { sweep, root: ledgerRoot },
+      processes: { table: systemProcessTable },
+      clock,
+      logger: silentLogger,
+      launch,
+      ensure: () => new Promise<string>(() => undefined),
+      env: {},
+    });
+    const used = host.use(() => Promise.resolve('shot'));
+    const refused = expect(used).rejects.toThrow(/shut down/);
+    const waiting = host;
+    await waitForAsync(
+      () => Promise.resolve(waiting.status().state === 'fetching' ? true : undefined),
+      5_000,
+    );
+    const closing = waiting.close().then(() => 'closed' as const);
+    let timer: NodeJS.Timeout | undefined;
+    const hung = new Promise<'hung'>((resolve) => {
+      timer = setTimeout(() => {
+        resolve('hung');
+      }, 3_000);
+    });
+    expect(await Promise.race([closing, hung])).toBe('closed');
+    clearTimeout(timer);
+    await refused;
+    expect(launched).toEqual([]);
+  });
 });

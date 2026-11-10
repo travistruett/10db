@@ -161,6 +161,8 @@ export function createBrowserHost<B extends ClosableBrowser>(
   let running: Running<B> | null = null;
   let idle: Timer | null = null;
   let closed = false;
+  /** Aborted by `close`, so a use waiting for the download lets the shutdown through. */
+  const closing = new AbortController();
   /** Read through a call: `close` may run while a use awaits. */
   const isClosed = (): boolean => closed;
   /** Every use and every shut-down runs after the one before it. */
@@ -224,7 +226,20 @@ export function createBrowserHost<B extends ClosableBrowser>(
       if (running.browser.isConnected()) return running;
       await shut();
     }
-    if (!(await prepare())) {
+    const ready = await new Promise<boolean | 'closing'>((resolve) => {
+      const shutting = (): void => {
+        resolve('closing');
+      };
+      closing.signal.addEventListener('abort', shutting, { once: true });
+      void prepare().then((value) => {
+        closing.signal.removeEventListener('abort', shutting);
+        resolve(value);
+      });
+    });
+    if (ready === 'closing' || closing.signal.aborted) {
+      throw new BrowserHostError('the browser for pictures is shut down');
+    }
+    if (!ready) {
       throw new BrowserHostError(
         prepared.kind === 'refused' ? prepared.problem : 'the browser for pictures is not ready',
       );
@@ -321,6 +336,7 @@ export function createBrowserHost<B extends ClosableBrowser>(
     },
     async close() {
       closed = true;
+      closing.abort();
       idle?.cancel();
       idle = null;
       await enqueue(shut);
