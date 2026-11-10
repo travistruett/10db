@@ -15,6 +15,7 @@ const press = (key: string, mods: Partial<Omit<KeyPress, 'key'>> = {}): KeyPress
   ctrlKey: false,
   altKey: false,
   shiftKey: false,
+  isComposing: false,
   ...mods,
 });
 
@@ -81,6 +82,12 @@ describe('workbenchKey', () => {
       key: WorkbenchKey.LeaveField,
     },
     { name: 'Escape off a field does nothing', press: press('Escape'), key: null },
+    {
+      name: 'Escape that ends an IME composition stays in the field',
+      press: press('Escape', { isComposing: true }),
+      where: { editing: true },
+      key: null,
+    },
     {
       name: 'Escape in a dialog is the dialog’s',
       press: press('Escape'),

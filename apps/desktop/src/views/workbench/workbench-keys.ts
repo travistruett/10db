@@ -25,6 +25,8 @@ export interface KeyPress {
   readonly ctrlKey: boolean;
   readonly altKey: boolean;
   readonly shiftKey: boolean;
+  /** The key is part of an IME composition, which the field keeps. */
+  readonly isComposing: boolean;
 }
 
 export interface KeyPlace {
@@ -44,7 +46,7 @@ const LETTERS: Readonly<Record<string, WorkbenchKey>> = {
 
 /** What a key press does in the Workbench, or null when it is left to where it landed. */
 export function workbenchKey(press: KeyPress, place: KeyPlace): WorkbenchKey | null {
-  if (place.ignored || place.dialog) return null;
+  if (place.ignored || place.dialog || press.isComposing) return null;
   const command = press.metaKey || press.ctrlKey;
   // ⌘L types nothing, so it copies from the composer too.
   if (command && !press.shiftKey && !press.altKey && press.key.toLowerCase() === 'l')
