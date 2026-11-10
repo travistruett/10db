@@ -36,6 +36,7 @@ import {
 } from './pass-stack';
 import { networkCall, raise, withdraw, type DeliveryContext } from './context';
 import { jobKey, JobQueue } from './jobs';
+import { setReviewLeft } from './review-left';
 
 // Workbench spec §5.3, §5.4, D22, call 29: a pass closed on a pull request project is CLOSED but not
 // SETTLED until its work is in the base. When its pull request merges and the base's tree is the
@@ -324,13 +325,22 @@ export function queuePassSettle(
 
 /**
  * Follows a pass's close and Abandon: a pass that closes unsettled gets its Move card at once, and
- * when a pass stacked on a closed one is abandoned, the closed one's card and realignment resume.
+ * when a pass stacked on a closed one is abandoned, the closed one's card and realignment resume. A
+ * pass that has settled or been abandoned is reviewed no more: what its reviews left unread goes.
  */
 export function subscribePassSettles(bus: EventBus, ctx: DeliveryContext): () => void {
   return bus.subscribe((event) => {
     if (event.type !== EventType.PassClosed && event.type !== EventType.PassChanged) return;
     const id = PassId.safeParse(event.entityId);
     if (!id.success) return;
+    const ended = event.data['state'];
+    if (
+      event.type === EventType.PassChanged &&
+      (ended === PassState.Settled || ended === PassState.Abandoned)
+    )
+      ctx.state.write((w) => {
+        setReviewLeft(w, id.data, null);
+      });
     const pass = findPass(ctx.state.db, id.data);
     if (event.type === EventType.PassClosed) {
       if (pass?.state === PassState.Closed)

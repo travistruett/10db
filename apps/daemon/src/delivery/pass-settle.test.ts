@@ -41,6 +41,7 @@ import {
 import { passPrBase } from './pass-pr';
 import { settleClosedPass } from './pass-settle';
 import { passMoveKey } from './pass-stack';
+import { reviewLeft, setReviewLeft } from './review-left';
 
 // Workbench spec §5.3, §5.4, D22, call 29: a closed pass on a pull request project settles when its
 // pull request merges with the base's tree its tip, and otherwise offers one card, Move <branch> to
@@ -257,6 +258,50 @@ describe('a closed pass', () => {
     expect(h.git$('rev-parse', `refs/remotes/origin/${c.branch}`)).toBe(c.tip);
     await answerMove(h.only(moveCards(c.passId)));
     expect(getPass(h.store.db, c.passId).state).toBe(PassState.Settled);
+  });
+
+  it.each([
+    {
+      name: 'settles',
+      pass: async () => (await closedPass()).passId,
+      end: async (passId: PassId) => {
+        await answerMove(h.only(moveCards(passId)));
+      },
+      state: PassState.Settled,
+    },
+    {
+      name: 'is abandoned',
+      // A pass opened on the closed one, and abandoned while open.
+      pass: async () => {
+        await closedPass();
+        const task = h.addTask('People page', { areas: ['people'] });
+        const opened = await openPass(
+          h.ctx,
+          { projectId: h.project.id, name: 'More pages', taskIds: [task.id] },
+          { leaseMs: 60_000, putBack: nothingKept },
+        );
+        await h.jobs.idle();
+        return opened.pass.id;
+      },
+      end: (passId: PassId) => {
+        h.state.write((ctx) => {
+          setAbandonStep(ctx, passId, AbandonStep.Abandoning);
+          abandonPassAndBatch(ctx, passId);
+        });
+        return h.jobs.idle();
+      },
+      state: PassState.Abandoned,
+    },
+  ])('forgets what its reviews left unread once it $name', async ({ pass, end, state }) => {
+    const passId = await pass();
+    h.state.write((ctx) => {
+      setReviewLeft(ctx, passId, { from: 'a'.repeat(40), files: ['src/a.ts'], partial: [] });
+    });
+
+    await end(passId);
+
+    expect(getPass(h.store.db, passId).state).toBe(state);
+    expect(reviewLeft(h.store.db, passId)).toBeNull();
   });
 
   it('after a restart, raises no second card, keeps the folder held, and realigns when the merge is read', async () => {
