@@ -22,5 +22,6 @@ export {
   type TakeOutDeps,
   type TakeOutInput,
 } from './take-out';
+export { putBackKeptWork } from './put-back';
 export { resumePassWork } from './resume';
 export { passView } from './view';

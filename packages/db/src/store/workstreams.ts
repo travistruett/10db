@@ -51,7 +51,7 @@ import { recordLaneTime } from './lane-times';
 import { passHoldingTask } from './passes';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
-import { getTask, mergedDespiteFailure } from './tasks';
+import { getTask, mergedDespiteFailure, refuseStartWithKeptWork } from './tasks';
 
 export class StaleFenceError extends Error {
   override readonly name = 'StaleFenceError';
@@ -227,6 +227,7 @@ export function insertWorkstream(
     throw new ConflictError(
       `Task ${task.title} is in the Workbench pass "${pass.name}"; it runs there until the pass takes it out or ends`,
     );
+  if (!pass) refuseStartWithKeptWork(ctx.tx, task);
   const project = getProject(ctx.tx, task.projectId);
   const row: WorkstreamRow = {
     id: mintId('Workstream'),
