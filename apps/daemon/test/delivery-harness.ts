@@ -72,7 +72,8 @@ import {
   tempDir,
 } from './fixtures';
 
-type Settled = 'DONE' | 'FAILED' | 'CANCELLED' | 'WAITING_HUMAN' | 'RUNNING' | 'TAKEN_OVER';
+/** A state a test moves a workstream to, along the shortest run of allowed transitions. */
+type Settled = WorkstreamState;
 
 /** A `pnpm` on its own PATH directory, recording calls and failing on request. */
 function fakePnpm(root: string): FakePnpm {

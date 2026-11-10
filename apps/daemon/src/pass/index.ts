@@ -13,4 +13,12 @@ export {
 export { PassFolderOffBranchError } from '../git';
 export { passFolderOn } from './folder';
 export { foldHandEdits, type HandEditFold } from './hand-edits';
+export {
+  takeOut,
+  takeOutSteps,
+  TakeOutWithin,
+  type StopPassLane,
+  type TakeOutDeps,
+  type TakeOutInput,
+} from './take-out';
 export { passView } from './view';

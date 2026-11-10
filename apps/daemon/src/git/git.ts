@@ -607,6 +607,11 @@ export interface Git {
     expect: readonly { readonly path: string; readonly blob: string | null }[],
   ): Promise<{ readonly written: string[]; readonly left: string[] }>;
   /**
+   * Moves the commit kept at `from` to `to`, both under `refs/10db/`: `to` is set to it, then `from`
+   * goes. Resolves with the commit, or with what `to` holds when `from` is gone (a rerun), or null.
+   */
+  moveKeptRef(repo: string, from: string, to: string): Promise<string | null>;
+  /**
    * Brings `path` as commit `theirs` has it into the file on disk, by a three-way merge from its
    * version in `base` (`merge-file`, which runs no driver), under the repo lock. `merged` when the file
    * now holds both sides, or already did; `conflict` when they don't merge cleanly, a side is not a
@@ -2446,11 +2451,16 @@ export function createGit(opts: GitOptions = {}): Git {
       const left: string[] = [];
       for (const { path, from } of [...named].sort((a, b) => (a.path < b.path ? -1 : 1))) {
         const now = (await blobsOnDisk(c, [path])).get(path) ?? null;
+        const target = await treeEntry(c, from, path);
+        // Already as asked: a rerun after a restart writes nothing twice.
+        if (now === (target?.oid ?? null)) {
+          written.push(path);
+          continue;
+        }
         if (!expected.has(path) || expected.get(path) !== now) {
           left.push(path);
           continue;
         }
-        const target = await treeEntry(c, from, path);
         const file = join(c.real, path);
         if (target === null) {
           const entry = lstatSync(file, { throwIfNoEntry: false });
@@ -2530,6 +2540,20 @@ export function createGit(opts: GitOptions = {}): Git {
       } finally {
         rmSync(dir, { recursive: true, force: true });
       }
+    });
+  }
+
+  async function moveKeptRef(repo: string, from: string, to: string): Promise<string | null> {
+    for (const ref of [from, to])
+      if (!ref.startsWith(KEPT_REF_PREFIX))
+        throw new InvalidError(`${ref} is not under ${KEPT_REF_PREFIX}`);
+    return withRepoLock(realpathSync(repo), async () => {
+      const c = await pinned(repo);
+      const sha = await revParse(c, `${from}^{commit}`);
+      if (sha === null) return revParse(c, `${to}^{commit}`);
+      await git(c, ['update-ref', '--no-deref', '-m', '10db: kept work moved', to, sha]);
+      await git(c, ['update-ref', '--no-deref', '-d', from, sha]);
+      return sha;
     });
   }
 
@@ -3489,6 +3513,7 @@ export function createGit(opts: GitOptions = {}): Git {
     pageChanges,
     hashOnDisk,
     restoreFiles,
+    moveKeptRef,
     mergeFileBack,
     pointHeadAt,
     refreshIndex,

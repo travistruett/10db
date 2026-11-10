@@ -1,0 +1,321 @@
+import {
+  ConflictError,
+  isTerminal,
+  SharedChoiceKind,
+  TakeOutStep,
+  TaskStatus,
+  WorkstreamState,
+  type PassId,
+  type SharedChoice,
+  type TakeOutResultDto,
+  type TaskId,
+  type WorkstreamId,
+} from '@10db/contracts';
+import {
+  advanceTakeOut,
+  clearLease,
+  deleteTakeOut,
+  getPass,
+  getProject,
+  getTask,
+  getWorkstreamRow,
+  insertSystemNotice,
+  insertTakeOut,
+  lastTakeOut,
+  leavePass,
+  passHoldingTask,
+  releaseClaims,
+  setTaskKeptWork,
+  setTaskStatus,
+  transitionWorkstream,
+  type PassTakeOutRow,
+  type TaskKeptWork,
+  type WriteContext,
+} from '@10db/db';
+import { jobKey, JobQueue, passDirtRef } from '../delivery';
+import { foldHandEdits } from './hand-edits';
+import {
+  keepTurnWork,
+  keptRef,
+  pageClaims,
+  pageMatcher,
+  passKeptRef,
+  passTaskPlace,
+  readKeptRef,
+  type PassTaskPlace,
+  type PassWorkDeps,
+} from './kept-work';
+
+// Workbench spec §5.4: taking a task out of its pass, step by recorded step, so a restart goes on from
+// the step its `pass_take_outs` row reached. Its work is kept with the task, its page's files go back
+// to what they were without it, and it returns to the Board.
+
+/** What a take-out is part of: the builder's ask alone, or an Abandon or a close, which must finish. */
+export const TakeOutWithin = { Alone: 'alone', Abandon: 'abandon', Close: 'close' } as const;
+export type TakeOutWithin = (typeof TakeOutWithin)[keyof typeof TakeOutWithin];
+
+/** Ends a pass lane's session, if any, keeping its last work; the runner's, injected. */
+export type StopPassLane = (id: WorkstreamId) => Promise<void>;
+
+/** What a take-out needs: the pass's work in the folder, and the runner's stop. */
+export type TakeOutDeps = PassWorkDeps & { readonly stopLane: StopPassLane };
+
+export interface TakeOutInput {
+  readonly taskId: TaskId;
+  readonly within: TakeOutWithin;
+  /** What becomes of each shared change of the page that has not landed; Keep by default. */
+  readonly shared?: readonly SharedChoice[];
+}
+
+/** How many times steps 1 to 3 run before the files that keep changing decide. */
+const CHECK_TRIES = 3;
+
+const count = (n: number): string => `${String(n)} file${n === 1 ? '' : 's'}`;
+const listed = (paths: readonly string[]): string => paths.map((p) => `- ${p}`).join('\n');
+
+/**
+ * Step 5 of a take-out, in the caller's write: the task's run is cancelled from whatever state it is
+ * in (a queued one would start an ordinary session in the folder the moment the pass let go of it),
+ * its claims released, the task leaves the pass for the Board, open, with its kept work recorded, and
+ * the thread says so.
+ */
+export function leavePassForBoard(
+  ctx: WriteContext,
+  input: {
+    readonly taskId: TaskId;
+    readonly passId: PassId;
+    readonly kept: TaskKeptWork | null;
+    /** How many files the kept work holds. */
+    readonly files: number;
+  },
+): void {
+  const task = getTask(ctx.tx, input.taskId);
+  const pass = getPass(ctx.tx, input.passId);
+  const run = task.workstreamId;
+  if (run !== null) {
+    if (!isTerminal(getWorkstreamRow(ctx.tx, run).state))
+      transitionWorkstream(ctx, run, {
+        to: WorkstreamState.Cancelled,
+        fence: null,
+        patch: { currentSessionId: null },
+        reason: `taken out of pass "${pass.name}"`,
+      });
+    releaseClaims(ctx, run);
+    clearLease(ctx, run);
+  }
+  leavePass(ctx, input.taskId);
+  if (task.status !== TaskStatus.Open) setTaskStatus(ctx, input.taskId, TaskStatus.Open);
+  setTaskKeptWork(ctx, input.taskId, input.kept);
+  advanceTakeOut(ctx, { taskId: input.taskId, passId: input.passId }, { step: TakeOutStep.Done });
+  insertSystemNotice(
+    ctx,
+    input.taskId,
+    input.kept === null
+      ? `Taken out of the pass "${pass.name}"; it had no work to keep.`
+      : `Taken out of the pass "${pass.name}": its work is kept with the task (${count(input.files)}).`,
+  );
+}
+
+/** The page files whose content on disk is not what `kept` holds: something wrote after the keep. */
+async function changedSinceKept(
+  deps: PassWorkDeps,
+  place: PassTaskPlace,
+  kept: {
+    readonly keptSha: string | null;
+    readonly keptBaseSha: string;
+    readonly pageFiles: readonly { path: string }[];
+  },
+): Promise<string[]> {
+  const { git } = deps;
+  const mine = pageMatcher(place.project, pageClaims(deps.state.db, place.project, place.task));
+  const paths = [
+    ...new Set([
+      ...kept.pageFiles.map((f) => f.path),
+      ...(await git.changedPaths(place.repo)).filter(mine),
+    ]),
+  ].sort();
+  const commit = kept.keptSha ?? kept.keptBaseSha;
+  const changed: string[] = [];
+  for (const { path, blob } of await git.hashOnDisk(place.repo, paths))
+    if ((await git.blobAt(place.repo, commit, path)) !== blob) changed.push(path);
+  return changed;
+}
+
+/** The task's take-out that has not finished, from a run a restart cut short, or undefined. */
+function unfinishedTakeOut(deps: PassWorkDeps, taskId: TaskId): PassTakeOutRow | undefined {
+  const row = lastTakeOut(deps.state.db, taskId);
+  return row && row.step < TakeOutStep.Done ? row : undefined;
+}
+
+/**
+ * The take-out's steps (spec §5.4), for a caller already holding the project's delivery key: a close
+ * or an Abandon. Goes on from the step the task's unfinished take-out reached, else writes one.
+ * 0 stops the lane; 1 folds hand edits; 2 makes a last kept commit; 3 checks the page's files on disk
+ * hash as it holds them, running 1 to 3 again up to three times: a take-out asked for alone then stops
+ * (the task stays in the pass, the thread names the files), one inside an Abandon or a close leaves
+ * those files as they are and goes on; 4 puts each page file back as the pass's branch has it where
+ * something landed on it during the pass, else as it was before the pass, hashing each again just
+ * before (one changed since is left and named); 5 leaves the pass for the Board, its work at its
+ * kept ref.
+ */
+export async function takeOutSteps(
+  deps: TakeOutDeps,
+  input: TakeOutInput,
+): Promise<TakeOutResultDto> {
+  const db = deps.state.db;
+  const task = getTask(db, input.taskId);
+  const workstreamId = task.workstreamId;
+  if (workstreamId === null) throw new ConflictError(`${task.title} has no run to take out`);
+  let row =
+    unfinishedTakeOut(deps, task.id) ??
+    deps.state.write((ctx) => {
+      const pass = passHoldingTask(ctx.tx, getTask(ctx.tx, task.id));
+      if (!pass) throw new ConflictError(`${task.title} is in no open pass`);
+      return insertTakeOut(ctx, {
+        taskId: task.id,
+        passId: pass.id,
+        drops: (input.shared ?? [])
+          .filter((c) => c.choice === SharedChoiceKind.Drop)
+          .map((c) => c.seq),
+      });
+    });
+  const key = { taskId: task.id, passId: row.passId };
+  const pass = getPass(db, row.passId);
+  const advance = (patch: Parameters<typeof advanceTakeOut>[2]): PassTakeOutRow =>
+    deps.state.write((ctx) => advanceTakeOut(ctx, key, patch));
+  const { git } = deps;
+
+  if (row.step < TakeOutStep.Stopped) {
+    await deps.stopLane(workstreamId);
+    row = advance({ step: TakeOutStep.Stopped });
+  }
+
+  let stillChanging: string[] = row.step >= TakeOutStep.Checked ? [...row.left] : [];
+  if (row.step < TakeOutStep.Checked) {
+    const place = passTaskPlace(db, task.id);
+    for (let tries = row.tries; ;) {
+      await foldHandEdits(deps, { workstreamId });
+      if (row.step < TakeOutStep.HandEditsFolded)
+        row = advance({ step: TakeOutStep.HandEditsFolded });
+      const kept = await keepTurnWork(deps, { workstreamId, turnId: null });
+      tries += 1;
+      row = advance({
+        step: TakeOutStep.Kept,
+        tries,
+        keptSha: kept.keptSha,
+        keptBaseSha: kept.keptBaseSha,
+      });
+      stillChanging = await changedSinceKept(deps, place, kept);
+      if (stillChanging.length === 0) {
+        row = advance({ step: TakeOutStep.Checked });
+        break;
+      }
+      if (tries < CHECK_TRIES) continue;
+      if (input.within === TakeOutWithin.Alone) {
+        const changing = stillChanging;
+        deps.state.write((ctx) => {
+          deleteTakeOut(ctx, key);
+          insertSystemNotice(
+            ctx,
+            task.id,
+            `The page's files kept changing while it was being taken out, so it stays in the pass:\n${listed(changing)}`,
+          );
+        });
+        return {
+          taskId: task.id,
+          passId: pass.id,
+          tookOut: false,
+          keptSha: kept.keptSha,
+          stillChanging: changing,
+          left: [],
+        };
+      }
+      row = advance({ step: TakeOutStep.Checked, left: stillChanging });
+      break;
+    }
+  }
+
+  const keptBaseSha = row.keptBaseSha;
+  if (keptBaseSha === null) throw new ConflictError(`The take-out of ${task.title} kept nothing`);
+  const project = getProject(db, pass.projectId);
+  const repo = project.repoPath;
+  const files =
+    row.keptSha === null
+      ? []
+      : (await git.filesChangedBetween(repo, keptBaseSha, row.keptSha)).filter(
+          pageMatcher(project, pageClaims(db, project, getTask(db, task.id))),
+        );
+
+  if (row.step < TakeOutStep.PutBack) {
+    const keptSha = row.keptSha;
+    let left: string[] = [];
+    if (keptSha !== null) {
+      const leftAlready = new Set(row.left);
+      const touched = new Set(await git.filesChangedBetween(repo, pass.startSha, keptBaseSha));
+      const before = (await readKeptRef(git, repo, passDirtRef(pass.id))) ?? pass.startSha;
+      const putBack = files.filter((path) => !leftAlready.has(path));
+      const expect = await Promise.all(
+        putBack.map(async (path) => ({ path, blob: await git.blobAt(repo, keptSha, path) })),
+      );
+      ({ left } = await git.restoreFiles(
+        repo,
+        putBack.map((path) => ({ path, from: touched.has(path) ? keptBaseSha : before })),
+        expect,
+      ));
+    }
+    const changed = left;
+    row = deps.state.write((ctx) => {
+      if (changed.length > 0)
+        insertSystemNotice(
+          ctx,
+          task.id,
+          `Left as they are, because they changed after they were checked:\n${listed(changed)}`,
+        );
+      return advanceTakeOut(ctx, key, {
+        step: TakeOutStep.PutBack,
+        left: [...row.left, ...changed],
+      });
+    });
+  }
+
+  if (row.step < TakeOutStep.Done) {
+    deps.inbox.cancelForWorkstream(workstreamId);
+    const keptSha = row.keptSha;
+    if (keptSha !== null)
+      await git.moveKeptRef(repo, passKeptRef(pass.id, task.id), keptRef(task.id));
+    const kept = keptSha === null ? null : { keptSha, keptBaseSha };
+    deps.state.write((ctx) => {
+      leavePassForBoard(ctx, { taskId: task.id, passId: pass.id, kept, files: files.length });
+    });
+    row = { ...row, step: TakeOutStep.Done };
+  }
+  return {
+    taskId: task.id,
+    passId: pass.id,
+    tookOut: true,
+    keptSha: row.keptSha,
+    stillChanging,
+    left: [...row.left],
+  };
+}
+
+/**
+ * Takes a task out of its pass as a job under the project's delivery key, as a pass opens, so it never
+ * interleaves with an opening, another take-out or an Abandon. The shared changes chosen Drop are
+ * recorded on the take-out's row, so a restart follows them.
+ */
+export function takeOut(deps: TakeOutDeps, input: TakeOutInput): Promise<TakeOutResultDto> {
+  const task = getTask(deps.state.db, input.taskId);
+  return new Promise<TakeOutResultDto>((resolve, reject) => {
+    deps.jobs.run(
+      jobKey({ projectId: task.projectId, worktreePath: null }, JobQueue.Cut),
+      async () => {
+        try {
+          resolve(await takeOutSteps(deps, input));
+        } catch (error) {
+          reject(error instanceof Error ? error : new Error(String(error)));
+        }
+      },
+    );
+  });
+}

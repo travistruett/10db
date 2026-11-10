@@ -83,6 +83,15 @@ describe('restoreFiles', () => {
     expect(rawGit('rev-parse', 'HEAD')).toBe(start);
     expect(rawGit('diff', '--cached', '--name-only')).toBe('');
   });
+
+  it('writes nothing twice: a file already as asked is done, whatever it was expected to hold', async () => {
+    const done = await git.restoreFiles(
+      repo.path,
+      [{ path: 'src/a.ts', from: start }],
+      [{ path: 'src/a.ts', blob: 'f'.repeat(40) }],
+    );
+    expect(done).toEqual({ written: ['src/a.ts'], left: [] });
+  });
 });
 
 describe('mergeFileBack', () => {
