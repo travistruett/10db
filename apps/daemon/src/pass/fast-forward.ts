@@ -2,6 +2,7 @@ import type { PassBranchMovedDetail, PassDto, PassId } from '@10db/contracts';
 import { findOpenByFoldKey, getProject } from '@10db/db';
 import { flagCard, withdrawCard } from '../inbox';
 import { passBranch, type PassWorkDeps } from './kept-work';
+import { branchMergeCommand } from './paste-command';
 
 // Workbench spec §5.4 (D8): at close the branch the folder came from fast-forwards to the pass's tip
 // and the folder returns to it, so the signed-off work stays on screen. Each step checks first
@@ -35,7 +36,7 @@ function raiseBranchMoved(
     returnBranch: pass.returnBranch,
     passBranch: branch,
     reason,
-    mergeCommand: `git switch ${pass.returnBranch} && git merge ${branch}`,
+    mergeCommand: branchMergeCommand(pass.returnBranch, branch),
   };
   const why =
     reason === 'in_use_elsewhere'
