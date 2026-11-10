@@ -520,15 +520,119 @@ describe("a pass's turns and view", () => {
           pausedUntil: null,
           failure: null,
           signOff: 'none',
+          waitsFor: null,
         },
       ],
       turns: [],
+      holds: [],
+      sharedChanges: [],
+      signOffWaits: [],
+      pullRequest: null,
+      checks: { gate: { state: 'not_run', logPath: null }, review: { reviewedSha: null } },
+      closeStep: null,
+      stackedOn: null,
+      notices: [],
     };
     expect(PassViewDto.parse(view)).toEqual(view);
     expect(
       PassViewDto.safeParse({ ...view, pages: [{ ...view.pages[0], nextActionKind: 'nap' }] })
         .success,
     ).toBe(false);
+  });
+
+  it("reads a closing pass's view: a page waiting on another's hold, the chain, its pull request and notices", () => {
+    const at = '2026-11-09T12:00:00.000Z';
+    const passId = mintId('Pass');
+    const people = mintId('Task');
+    const claimId = mintId('Claim');
+    const page = {
+      taskId: mintId('Task'),
+      title: 'Settings',
+      area: 'settings',
+      route: '/settings',
+      workstreamId: null,
+      state: null,
+      nextActionKind: null,
+      spokenTo: true,
+      turn: null,
+      pausedUntil: null,
+      failure: null,
+      signOff: 'waiting',
+      waitsFor: { taskId: people, title: 'People' },
+    };
+    const view = {
+      pass: {
+        id: passId,
+        projectId: mintId('Project'),
+        name: 'Polish',
+        state: 'CLOSING',
+        batchId: mintId('Batch'),
+        pageCap: 4,
+        returnBranch: 'main',
+        startSha: 'a'.repeat(40),
+        openedAt: at,
+        createdAt: at,
+        updatedAt: at,
+      },
+      pages: [page],
+      turns: [],
+      holds: [
+        {
+          claimId,
+          passId,
+          taskId: people,
+          workstreamId: mintId('Workstream'),
+          area: 'src',
+          seq: 2,
+          recordSha: 'b'.repeat(40),
+          grantedAt: at,
+          closedAt: null,
+          empty: false,
+        },
+      ],
+      sharedChanges: [
+        {
+          passId,
+          seq: 1,
+          taskId: page.taskId,
+          sha: 'c'.repeat(40),
+          paths: ['src/Button.tsx', 'src/old.ts'],
+          blobs: { 'src/Button.tsx': 'd'.repeat(40), 'src/old.ts': null },
+          dirtyKept: true,
+          landedSha: null,
+          droppedBy: null,
+          dropOf: null,
+          createdAt: at,
+          updatedAt: at,
+        },
+      ],
+      signOffWaits: [
+        { taskId: page.taskId, passId, waitsFor: claimId, waitsForTaskId: people, askedAt: at },
+      ],
+      pullRequest: {
+        url: 'https://github.com/acme/widgets/pull/8',
+        draft: true,
+        state: 'open',
+        failingChecks: [{ name: 'build', url: null }],
+      },
+      checks: {
+        gate: { state: 'failed', logPath: '/tmp/gate.log' },
+        review: { reviewedSha: 'e'.repeat(40) },
+      },
+      closeStep: 3,
+      stackedOn: mintId('Pass'),
+      notices: [
+        { id: 'checks', kind: 'checks', text: 'build fails', sendable: true, cardId: null, at },
+      ],
+    };
+    expect(PassViewDto.parse(view)).toEqual(view);
+    expect(PassViewDto.safeParse({ ...view, closeStep: 9 }).success).toBe(false);
+    expect(
+      PassViewDto.safeParse({ ...view, pages: [{ ...page, signOff: 'signed' }] }).success,
+    ).toBe(false);
+    expect(PassViewDto.safeParse({ ...view, holds: [{ ...view.holds[0], seq: 0 }] }).success).toBe(
+      false,
+    );
   });
 });
 

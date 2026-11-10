@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "token": {
+      "type": "string",
+      "minLength": 1
+    },
+    "pages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "pattern": "^tsk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "choice": {
+            "type": "string",
+            "enum": [
+              "take_out",
+              "sign_off"
+            ]
+          }
+        },
+        "required": [
+          "taskId",
+          "choice"
+        ]
+      }
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "placeIn": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^tsk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "path",
+          "placeIn"
+        ]
+      }
+    },
+    "shared": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "choice": {
+            "type": "string",
+            "enum": [
+              "keep",
+              "drop"
+            ]
+          }
+        },
+        "required": [
+          "seq",
+          "choice"
+        ]
+      }
+    }
+  },
+  "required": [
+    "token",
+    "pages",
+    "files",
+    "shared"
+  ]
+}

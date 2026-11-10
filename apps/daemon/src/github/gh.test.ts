@@ -127,7 +127,26 @@ describe('createGh', () => {
         exitCode: 0,
         stdout: '{"state":"OPEN","url":"https://github.com/acme/widgets/pull/7"}',
       },
-      expected: { state: 'OPEN', url: 'https://github.com/acme/widgets/pull/7' },
+      expected: {
+        state: 'OPEN',
+        url: 'https://github.com/acme/widgets/pull/7',
+        isDraft: null,
+        baseRef: null,
+      },
+    },
+    {
+      name: 'a draft PR on another pass branch',
+      answer: {
+        exitCode: 0,
+        stdout:
+          '{"state":"OPEN","url":"https://github.com/acme/widgets/pull/7","isDraft":true,"baseRefName":"10db/polish-a"}',
+      },
+      expected: {
+        state: 'OPEN',
+        url: 'https://github.com/acme/widgets/pull/7',
+        isDraft: true,
+        baseRef: '10db/polish-a',
+      },
     },
     {
       name: 'a merged PR',
@@ -135,7 +154,12 @@ describe('createGh', () => {
         exitCode: 0,
         stdout: '{"state":"MERGED","url":"https://github.com/acme/widgets/pull/7"}',
       },
-      expected: { state: 'MERGED', url: 'https://github.com/acme/widgets/pull/7' },
+      expected: {
+        state: 'MERGED',
+        url: 'https://github.com/acme/widgets/pull/7',
+        isDraft: null,
+        baseRef: null,
+      },
     },
     {
       name: 'no PR for the branch',
@@ -160,7 +184,7 @@ describe('createGh', () => {
       '-R',
       'acme/widgets',
       '--json',
-      'url,state',
+      'url,state,isDraft,baseRefName',
     ]);
   });
 
@@ -198,6 +222,62 @@ describe('createGh', () => {
       '--body-file',
       '/tmp/body.md',
     ]);
+  });
+
+  it('creates a draft PR when asked, and makes a PR ready or moves its base, each value its own argument', async () => {
+    const { exec, seen } = scripted({
+      'pr create': { exitCode: 0, stdout: 'https://github.com/acme/widgets/pull/8\n' },
+      'pr ready': { exitCode: 0 },
+      'pr edit': { exitCode: 0 },
+    });
+    const gh = createGh(exec);
+    const url = await gh.prCreate(
+      {
+        repo: 'acme/widgets',
+        base: '10db/polish-a',
+        head: '10db/polish-b',
+        title: 't',
+        bodyFile: '/b',
+        draft: true,
+      },
+      CALL,
+    );
+    await gh.prReady({ repo: 'acme/widgets', url }, CALL);
+    await gh.prEditBase({ repo: 'acme/widgets', url, base: 'main' }, CALL);
+    expect(seen).toEqual([
+      [
+        'pr',
+        'create',
+        '-R',
+        'acme/widgets',
+        '--base',
+        '10db/polish-a',
+        '--head',
+        '10db/polish-b',
+        '--title',
+        't',
+        '--body-file',
+        '/b',
+        '--draft',
+      ],
+      ['pr', 'ready', url, '-R', 'acme/widgets'],
+      ['pr', 'edit', url, '-R', 'acme/widgets', '--base', 'main'],
+    ]);
+  });
+
+  it('refuses a ready or a base edit GitHub refused, with its reason', async () => {
+    const { exec } = scripted({
+      'pr ready': { exitCode: 1, stderr: 'GraphQL: Pull request is closed' },
+      'pr edit': { exitCode: 1, stderr: 'HTTP 422: base branch does not exist' },
+    });
+    const gh = createGh(exec);
+    const pr = { repo: 'acme/widgets', url: 'https://github.com/acme/widgets/pull/8' };
+    const ready = gh.prReady(pr, CALL);
+    await expect(ready).rejects.toMatchObject({ name: 'GhError', kind: 'failed' });
+    await expect(ready).rejects.toThrow(/Pull request is closed/);
+    const edit = gh.prEditBase({ ...pr, base: 'gone' }, CALL);
+    await expect(edit).rejects.toMatchObject({ name: 'GhError', kind: 'failed' });
+    await expect(edit).rejects.toThrow(/base branch does not exist/);
   });
 
   it.each([

@@ -1,0 +1,314 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "shared_ask"
+        },
+        "passId": {
+          "type": "string",
+          "pattern": "^pas_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "taskId": {
+          "type": "string",
+          "pattern": "^tsk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "workstreamId": {
+          "type": "string",
+          "pattern": "^ws_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "area": {
+          "type": "string",
+          "minLength": 1
+        },
+        "others": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "taskId": {
+                "type": "string",
+                "pattern": "^tsk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              "title": {
+                "type": "string"
+              },
+              "paths": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "at": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "date-time",
+                    "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "holdsNow": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "taskId",
+              "title",
+              "paths",
+              "at",
+              "holdsNow"
+            ]
+          }
+        }
+      },
+      "required": [
+        "kind",
+        "passId",
+        "taskId",
+        "workstreamId",
+        "area",
+        "others"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "pass_branch_moved"
+        },
+        "passId": {
+          "type": "string",
+          "pattern": "^pas_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "returnBranch": {
+          "type": "string"
+        },
+        "passBranch": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "in_use_elsewhere",
+            "moved"
+          ]
+        },
+        "mergeCommand": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "passId",
+        "returnBranch",
+        "passBranch",
+        "reason",
+        "mergeCommand"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "pass_move"
+        },
+        "passId": {
+          "type": "string",
+          "pattern": "^pas_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "returnBranch": {
+          "type": "string"
+        },
+        "base": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "closed",
+            "drift",
+            "ci_fix",
+            "closed_unmerged"
+          ]
+        },
+        "prUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "passId",
+        "returnBranch",
+        "base",
+        "reason",
+        "prUrl"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "pass_retarget"
+        },
+        "passId": {
+          "type": "string",
+          "pattern": "^pas_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "stackedOn": {
+          "type": "string",
+          "pattern": "^pas_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "base": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "passId",
+        "stackedOn",
+        "base"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "pass_gate_failed"
+        },
+        "passId": {
+          "type": "string",
+          "pattern": "^pas_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "where": {
+          "type": "string",
+          "enum": [
+            "scratch",
+            "folder"
+          ]
+        },
+        "logPath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tasks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "taskId": {
+                "type": "string",
+                "pattern": "^tsk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              "title": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "taskId",
+              "title"
+            ]
+          }
+        }
+      },
+      "required": [
+        "kind",
+        "passId",
+        "where",
+        "logPath",
+        "tasks"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "pass_move_to_copy"
+        },
+        "passId": {
+          "type": "string",
+          "pattern": "^pas_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "taskId": {
+          "type": "string",
+          "pattern": "^tsk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "workstreamId": {
+          "type": "string",
+          "pattern": "^ws_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "hazard": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "kind",
+        "passId",
+        "taskId",
+        "workstreamId",
+        "hazard"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "const": "pass_follow_on"
+        },
+        "passId": {
+          "type": "string",
+          "pattern": "^pas_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "followOnPassId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^pas_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "prUrl": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "carried": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^tsk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          }
+        }
+      },
+      "required": [
+        "kind",
+        "passId",
+        "followOnPassId",
+        "prUrl",
+        "carried"
+      ]
+    }
+  ]
+}

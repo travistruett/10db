@@ -329,6 +329,7 @@ export function insertBatch(
     baseSha: input.pass?.baseSha ?? null,
     repo: input.pass?.repo ?? null,
     prUrl: null,
+    prDraft: null,
     gateExitCode: null,
     gateLogPath: null,
     gatePid: null,
@@ -468,8 +469,10 @@ export function recordPullRequestStatus(
 }
 
 /**
- * The shipped batches whose pull request the watcher still follows, oldest first: one with a
- * pull request url whose state was never read, or reads open or unknown. Merged and closed are final.
+ * The batches whose pull request the watcher still follows, oldest first: one with a pull request url
+ * whose state was never read, or reads open or unknown. Merged and closed are final. A shipped batch is
+ * followed, and a Workbench pass's batch while it is open or failed too (spec §5.5): its pull request
+ * is opened before the pass closes.
  */
 export function listWatchedPullRequests(db: DbReader): BatchDto[] {
   return db
@@ -477,7 +480,13 @@ export function listWatchedPullRequests(db: DbReader): BatchDto[] {
     .from(schema.batches)
     .where(
       and(
-        eq(schema.batches.state, BatchState.Shipped),
+        or(
+          eq(schema.batches.state, BatchState.Shipped),
+          and(
+            isNotNull(schema.batches.passId),
+            inArray(schema.batches.state, [BatchState.Open, BatchState.Failed]),
+          ),
+        ),
         isNotNull(schema.batches.prUrl),
         or(
           isNull(schema.batches.prState),

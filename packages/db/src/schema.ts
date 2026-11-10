@@ -49,7 +49,10 @@ import type {
   ModelSetting,
   ModelStatus,
   ModelTier,
+  CloseStep,
+  PassCloseRequest,
   PassId,
+  PassNotice,
   PassState,
   PassTurnCheck,
   PassTurnEnding,
@@ -291,6 +294,8 @@ export const batches = sqliteTable(
     /** The GitHub `owner/name` from `gh repo view`, recorded at cut. */
     repo: text('repo'),
     prUrl: text('pr_url'),
+    /** Whether the pull request is a draft, as made or last read; null until then. A pass's opens as one. */
+    prDraft: integer('pr_draft', { mode: 'boolean' }),
     gateExitCode: integer('gate_exit_code'),
     gateLogPath: text('gate_log_path'),
     /** The shipping gate's process-group leader and its OS start time, so recovery can kill an orphaned gate. */
@@ -1612,6 +1617,25 @@ export const passes = sqliteTable(
     startSha: text('start_sha').notNull(),
     /** The last step of its Abandon that finished; null while it is not abandoning. */
     abandonStep: integer('abandon_step').$type<AbandonStep>(),
+    /** The highest shared-change number the pass's branch has landed, or passed over; 0 for none. */
+    sharedLanded: integer('shared_landed').notNull().default(0),
+    /** The last step of its close that finished; null while it is not closing. */
+    closeStep: integer('close_step').$type<CloseStep>(),
+    /** The lists the builder confirmed at Close Pass, so a restart runs the same close. */
+    closePlan: text('close_plan', { mode: 'json' }).$type<PassCloseRequest>(),
+    /** The closed, unsettled pass this one was opened on (D24); null for none. */
+    stackedOn: text('stacked_on')
+      .$type<PassId>()
+      .references((): AnySQLiteColumn => passes.id),
+    closedAt: text('closed_at'),
+    settledAt: text('settled_at'),
+    /** The tip the pass's one review last read (D21). */
+    reviewedSha: text('reviewed_sha'),
+    /** What the pass's header shows: failing checks, findings, a stack that did not merge. */
+    notices: text('notices', { mode: 'json' })
+      .$type<PassNotice[]>()
+      .notNull()
+      .default(sql`'[]'`),
     openedAt: text('opened_at').notNull(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -1730,3 +1754,108 @@ export const passTakeOuts = sqliteTable(
   },
   (t) => [primaryKey({ columns: [t.taskId, t.passId] })],
 );
+
+/**
+ * A pass task's hold on a shared area for one turn (Workbench spec §7.2, §11), one per shared grant:
+ * its number on the pass's chain, given in the grant's own write, and the commit at
+ * `refs/10db/passes/<pass id>/holds/<claim id>` that holds the content of the record. `closed_at` is
+ * written when the turn's end keeps it, with `empty` when it changed nothing.
+ */
+export const passHolds = sqliteTable(
+  'pass_holds',
+  {
+    claimId: text('claim_id')
+      .$type<ClaimId>()
+      .primaryKey()
+      .references(() => claims.id),
+    passId: text('pass_id')
+      .$type<PassId>()
+      .notNull()
+      .references(() => passes.id),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .notNull()
+      .references(() => tasks.id),
+    workstreamId: text('workstream_id')
+      .$type<WorkstreamId>()
+      .notNull()
+      .references(() => workstreams.id),
+    area: text('area').notNull(),
+    seq: integer('seq').notNull(),
+    recordSha: text('record_sha').notNull(),
+    grantedAt: text('granted_at').notNull(),
+    closedAt: text('closed_at'),
+    empty: integer('empty', { mode: 'boolean' }).notNull().default(false),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex('pass_holds_pass_seq').on(t.passId, t.seq)],
+);
+
+/**
+ * A hold's record, taken at its grant: each path of the area that differed from the chain's tip, with
+ * the hash of its content on disk, or null for a deleted file. A record, written once.
+ */
+export const passHoldPaths = sqliteTable(
+  'pass_hold_paths',
+  {
+    claimId: text('claim_id')
+      .$type<ClaimId>()
+      .notNull()
+      .references(() => passHolds.claimId),
+    path: text('path').notNull(),
+    blob: text('blob'),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.claimId, t.path] })],
+);
+
+/**
+ * One commit of a pass's shared chain (Workbench spec §7.2, §11), numbered as its hold: the paths it
+ * sets and their content, replaced while the hold is open. A drop is a row of its own (`drop_of`), and
+ * the change it puts back names it (`dropped_by`).
+ */
+export const passSharedChanges = sqliteTable(
+  'pass_shared_changes',
+  {
+    passId: text('pass_id')
+      .$type<PassId>()
+      .notNull()
+      .references(() => passes.id),
+    seq: integer('seq').notNull(),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .notNull()
+      .references(() => tasks.id),
+    sha: text('sha').notNull(),
+    paths: text('paths', { mode: 'json' }).$type<string[]>().notNull(),
+    blobs: text('blobs', { mode: 'json' }).$type<Record<string, string | null>>().notNull(),
+    dirtyKept: integer('dirty_kept', { mode: 'boolean' }).notNull().default(false),
+    landedSha: text('landed_sha'),
+    droppedBy: integer('dropped_by'),
+    dropOf: integer('drop_of'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [primaryKey({ columns: [t.passId, t.seq] })],
+);
+
+/**
+ * A sign-off that waits for another page's hold to close (Workbench spec §9.2 step 0), one per task,
+ * so a restart finds it and lands at once, or waits again.
+ */
+export const passSignOffs = sqliteTable('pass_sign_offs', {
+  taskId: text('task_id')
+    .$type<TaskId>()
+    .primaryKey()
+    .references(() => tasks.id),
+  passId: text('pass_id')
+    .$type<PassId>()
+    .notNull()
+    .references(() => passes.id),
+  waitsFor: text('waits_for')
+    .$type<ClaimId>()
+    .notNull()
+    .references(() => passHolds.claimId),
+  askedAt: text('asked_at').notNull(),
+});

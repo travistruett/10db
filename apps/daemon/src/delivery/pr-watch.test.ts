@@ -1278,6 +1278,8 @@ describe('gh unavailable', () => {
       rerunFailed: (input) => h.gh.rerunFailed(input),
       jobHadNoRunner: (input) => h.gh.jobHadNoRunner(input),
       prInMergeQueue: (input) => h.gh.prInMergeQueue(input),
+      prReady: (input) => h.gh.prReady(input),
+      prEditBase: (input) => h.gh.prEditBase(input),
       prStatus: () => Promise.reject(new GhError('failed', 'HTTP 502')),
     };
     const w = watcher({ ...h.ctx, gh: offline });
@@ -1377,6 +1379,8 @@ describe('restart and stop', () => {
       rerunFailed: (input) => h.gh.rerunFailed(input),
       jobHadNoRunner: (input) => h.gh.jobHadNoRunner(input),
       prInMergeQueue: (input) => h.gh.prInMergeQueue(input),
+      prReady: (input) => h.gh.prReady(input),
+      prEditBase: (input) => h.gh.prEditBase(input),
       prStatus: (_input, call) =>
         new Promise((_resolve, reject) => {
           entered = true;

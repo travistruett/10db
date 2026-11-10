@@ -1033,7 +1033,12 @@ export function createShipper(deps: ShipperDeps): Shipper {
           await afterEnd(batchId, worktreePath);
           return;
         }
-        fixPr = { url: status.url, state: status.state };
+        fixPr = {
+          url: status.url,
+          state: status.state,
+          isDraft: status.isDraft,
+          baseRef: status.baseRef,
+        };
       }
       // 1. Nothing beyond the base: nothing to push. (A fix batch's own commits were counted above.)
       if (

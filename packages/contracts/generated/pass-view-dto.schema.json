@@ -258,7 +258,33 @@
           "signOff": {
             "type": "string",
             "enum": [
-              "none"
+              "none",
+              "signing_off",
+              "waiting",
+              "done"
+            ]
+          },
+          "waitsFor": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "taskId": {
+                    "type": "string",
+                    "pattern": "^tsk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                  },
+                  "title": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "taskId",
+                  "title"
+                ]
+              },
+              {
+                "type": "null"
+              }
             ]
           }
         },
@@ -274,7 +300,8 @@
           "turn",
           "pausedUntil",
           "failure",
-          "signOff"
+          "signOff",
+          "waitsFor"
         ]
       }
     },
@@ -356,11 +383,436 @@
           "answeredAt"
         ]
       }
+    },
+    "holds": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "claimId": {
+            "type": "string",
+            "pattern": "^clm_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "passId": {
+            "type": "string",
+            "pattern": "^pas_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "taskId": {
+            "type": "string",
+            "pattern": "^tsk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "workstreamId": {
+            "type": "string",
+            "pattern": "^ws_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "area": {
+            "type": "string",
+            "minLength": 1
+          },
+          "seq": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "recordSha": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"
+          },
+          "grantedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "closedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "empty": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "claimId",
+          "passId",
+          "taskId",
+          "workstreamId",
+          "area",
+          "seq",
+          "recordSha",
+          "grantedAt",
+          "closedAt",
+          "empty"
+        ]
+      }
+    },
+    "sharedChanges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "passId": {
+            "type": "string",
+            "pattern": "^pas_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "seq": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "taskId": {
+            "type": "string",
+            "pattern": "^tsk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "sha": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "blobs": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "dirtyKept": {
+            "type": "boolean"
+          },
+          "landedSha": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "droppedBy": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "dropOf": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          }
+        },
+        "required": [
+          "passId",
+          "seq",
+          "taskId",
+          "sha",
+          "paths",
+          "blobs",
+          "dirtyKept",
+          "landedSha",
+          "droppedBy",
+          "dropOf",
+          "createdAt",
+          "updatedAt"
+        ]
+      }
+    },
+    "signOffWaits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "taskId": {
+            "type": "string",
+            "pattern": "^tsk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "passId": {
+            "type": "string",
+            "pattern": "^pas_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "waitsFor": {
+            "type": "string",
+            "pattern": "^clm_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "waitsForTaskId": {
+            "type": "string",
+            "pattern": "^tsk_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "askedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          }
+        },
+        "required": [
+          "taskId",
+          "passId",
+          "waitsFor",
+          "waitsForTaskId",
+          "askedAt"
+        ]
+      }
+    },
+    "pullRequest": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string"
+            },
+            "draft": {
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "state": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "open",
+                    "merged",
+                    "closed",
+                    "unknown"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "failingChecks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "name",
+                  "url"
+                ]
+              }
+            }
+          },
+          "required": [
+            "url",
+            "draft",
+            "state",
+            "failingChecks"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "checks": {
+      "type": "object",
+      "properties": {
+        "gate": {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string",
+              "enum": [
+                "not_run",
+                "running",
+                "passed",
+                "failed"
+              ]
+            },
+            "logPath": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "state",
+            "logPath"
+          ]
+        },
+        "review": {
+          "type": "object",
+          "properties": {
+            "reviewedSha": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{40}([0-9a-f]{24})?$"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "reviewedSha"
+          ]
+        }
+      },
+      "required": [
+        "gate",
+        "review"
+      ]
+    },
+    "closeStep": {
+      "anyOf": [
+        {
+          "type": "number",
+          "enum": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "stackedOn": {
+      "anyOf": [
+        {
+          "type": "string",
+          "pattern": "^pas_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "notices": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "checks",
+              "finding",
+              "stack_unmerged",
+              "pr_closed",
+              "gate_failed"
+            ]
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sendable": {
+            "type": "boolean"
+          },
+          "cardId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^inb_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z))$"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "text",
+          "sendable",
+          "cardId",
+          "at"
+        ]
+      }
     }
   },
   "required": [
     "pass",
     "pages",
-    "turns"
+    "turns",
+    "holds",
+    "sharedChanges",
+    "signOffWaits",
+    "pullRequest",
+    "checks",
+    "closeStep",
+    "stackedOn",
+    "notices"
   ]
 }

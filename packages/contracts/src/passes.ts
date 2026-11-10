@@ -1,8 +1,9 @@
 import { z } from 'zod';
-import { BatchDto } from './batches';
+import { BatchDto, FailingCheckDto } from './batches';
 import { NextActionKind, Title } from './entities';
 import {
   BatchId,
+  ClaimId,
   InboxItemId,
   PassId,
   PassTurnId,
@@ -12,7 +13,9 @@ import {
   TaskMessageId,
   WorkstreamId,
 } from './ids';
-import { WorkstreamState } from './states';
+import { GitObjectName } from './git-names';
+import { PassHoldDto, PassSharedChangeDto } from './pass-shared';
+import { PullRequestState, WorkstreamState } from './states';
 import { TASK_MESSAGE_MAX_CHARS } from './task-thread';
 
 // Workbench spec docs/superpowers/specs/2026-11-09-10db-workbench-design.md §5, §11. A pass is the
@@ -211,8 +214,16 @@ export const AbandonStep = {
 } as const;
 export type AbandonStep = (typeof AbandonStep)[keyof typeof AbandonStep];
 
-/** Where a page is in its sign-off; the slice that lands sign-off adds its states. */
-export const PassSignOff = { None: 'none' } as const;
+/**
+ * Where a page is in its sign-off (spec §9.2): not asked, landing now, waiting for another page's hold
+ * to close, or signed off and landed.
+ */
+export const PassSignOff = {
+  None: 'none',
+  SigningOff: 'signing_off',
+  Waiting: 'waiting',
+  Done: 'done',
+} as const;
 export type PassSignOff = (typeof PassSignOff)[keyof typeof PassSignOff];
 
 /** One page of a pass as the Workbench's queue shows it. */
@@ -251,6 +262,8 @@ export const PassPageDto = z.object({
     })
     .nullable(),
   signOff: z.enum(PassSignOff),
+  /** The page whose turn a waiting sign-off waits for; null unless `signOff` is `waiting`. */
+  waitsFor: z.object({ taskId: TaskId, title: z.string() }).nullable(),
 });
 export type PassPageDto = z.infer<typeof PassPageDto>;
 
@@ -266,11 +279,108 @@ export const PassTurnTimingDto = z.object({
 });
 export type PassTurnTimingDto = z.infer<typeof PassTurnTimingDto>;
 
-/** `GET /passes/:passId`: the pass, a row per page it holds, and every turn of the pass. */
+/**
+ * The last step of a pass's close that finished (spec §5.4), as `passes.close_step` records it, so a
+ * restart goes on from the next: 1 the builder confirmed the lists; 2 the sign-offs, placements and
+ * kept shared changes landed; 3 the gate in a scratch worktree; 4 the take-outs; 5 the gate in the
+ * folder; 6 the push and the pull request made ready; 7 D8's fast-forward; 8 the pass closed.
+ */
+export const CloseStep = {
+  Confirmed: 1,
+  Landed: 2,
+  ScratchGated: 3,
+  TakenOut: 4,
+  FolderGated: 5,
+  Pushed: 6,
+  FastForwarded: 7,
+  Closed: 8,
+} as const;
+export type CloseStep = (typeof CloseStep)[keyof typeof CloseStep];
+
+/** What a notice in the pass's header is about (spec §5.5, §8.3, D19, D21, D24). */
+export const PassNoticeKind = {
+  /** The pull request's checks fail. */
+  Checks: 'checks',
+  /** A review finding that names no page's files. */
+  Finding: 'finding',
+  /** The pass this one is stacked on closed without merging. */
+  StackUnmerged: 'stack_unmerged',
+  /** The pass's pull request closed without merging while the pass was open. */
+  PrClosed: 'pr_closed',
+  /** The gate on the pushed tip failed. */
+  GateFailed: 'gate_failed',
+} as const;
+export type PassNoticeKind = (typeof PassNoticeKind)[keyof typeof PassNoticeKind];
+
+/**
+ * A notice in the pass's header. `sendable` offers Send to Agent, which sends `text` to the page the
+ * builder picks; `cardId` names the Inbox card that acts on it, such as Retarget.
+ */
+export const PassNotice = z.object({
+  /** A later notice with the same id replaces it. */
+  id: z.string().min(1).max(200),
+  kind: z.enum(PassNoticeKind),
+  text: z.string().min(1),
+  sendable: z.boolean(),
+  cardId: InboxItemId.nullable(),
+  at: Timestamp,
+});
+export type PassNotice = z.infer<typeof PassNotice>;
+
+/** A sign-off that waits for another page's hold to close (spec §9.2 step 0). */
+export const PassSignOffWaitDto = z.object({
+  taskId: TaskId,
+  passId: PassId,
+  /** The hold it waits for, and the task holding it. */
+  waitsFor: ClaimId,
+  waitsForTaskId: TaskId,
+  askedAt: Timestamp,
+});
+export type PassSignOffWaitDto = z.infer<typeof PassSignOffWaitDto>;
+
+/** The pass's pull request as the daemon last made or read it. `draft` and `state` are null until read. */
+export const PassPullRequestView = z.object({
+  url: z.string(),
+  draft: z.boolean().nullable(),
+  state: z.enum(PullRequestState).nullable(),
+  failingChecks: z.array(FailingCheckDto),
+});
+export type PassPullRequestView = z.infer<typeof PassPullRequestView>;
+
+/** Where the pass's gate on its pushed tip is. */
+export const PassGateState = {
+  NotRun: 'not_run',
+  Running: 'running',
+  Passed: 'passed',
+  Failed: 'failed',
+} as const;
+export type PassGateState = (typeof PassGateState)[keyof typeof PassGateState];
+
+/** The checks of what the pass's pull request holds (spec §8.3, D21): its gate and its one review. */
+export const PassChecksView = z.object({
+  gate: z.object({ state: z.enum(PassGateState), logPath: z.string().nullable() }),
+  /** The tip the review last read; a review of an unchanged tip is not run again. */
+  review: z.object({ reviewedSha: GitObjectName.nullable() }),
+});
+export type PassChecksView = z.infer<typeof PassChecksView>;
+
+/**
+ * `GET /passes/:passId`: the pass, a row per page it holds, every turn of the pass, and what its close
+ * reads: its open shared holds, its shared chain, its waiting sign-offs, its pull request and checks,
+ * the close's last step, the pass it is stacked on and its header's notices.
+ */
 export const PassViewDto = z.object({
   pass: PassDto,
   pages: z.array(PassPageDto),
   turns: z.array(PassTurnTimingDto),
+  holds: z.array(PassHoldDto),
+  sharedChanges: z.array(PassSharedChangeDto),
+  signOffWaits: z.array(PassSignOffWaitDto),
+  pullRequest: PassPullRequestView.nullable(),
+  checks: PassChecksView,
+  closeStep: z.enum(CloseStep).nullable(),
+  stackedOn: PassId.nullable(),
+  notices: z.array(PassNotice),
 });
 export type PassViewDto = z.infer<typeof PassViewDto>;
 
@@ -299,10 +409,6 @@ export const PassOpenedDto = z.object({
   waiting: z.array(PassPageWaitDto),
 });
 export type PassOpenedDto = z.infer<typeof PassOpenedDto>;
-
-/** `POST /passes/:passId/tasks/:taskId/take-out`: what becomes of each shared change not landed; Keep by default. */
-export const TakeOutRequest = z.object({ shared: z.array(SharedChoice).optional() });
-export type TakeOutRequest = z.infer<typeof TakeOutRequest>;
 
 /** What a take-out did (spec §5.4). */
 export const TakeOutResultDto = z.object({
