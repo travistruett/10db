@@ -18,8 +18,9 @@ so. A restart goes on from `close_step`.
 D8 (`pass/fast-forward.ts`), each step checked first: a return branch checked out, rebased or bisected in
 another worktree stops it; the return branch moves from the pass's start to its tip by compare-and-swap
 (`moveBranchCas`); HEAD is pointed at it, writing no file; the folder's index is refreshed for the paths the pass
-landed. A return branch that moved since the pass opened, or HEAD on the return branch away from the tip (the
-builder's own switch), is never forced: the folder stays where it is and one card gives the command that merges
+landed. A return branch that moved since the pass opened, a pass's branch whose tip no longer descends from the pass's
+start (rewritten by hand, so the move would not be a fast-forward), or HEAD on the return branch away from the
+tip (the builder's own switch), is never forced: the folder stays where it is and one card gives the command that merges
 the pass's branch.
 
 ## Why

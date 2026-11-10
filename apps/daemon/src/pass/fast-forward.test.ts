@@ -68,6 +68,26 @@ describe('fastForwardReturn', () => {
     });
   });
 
+  it("forces nothing when the pass's branch no longer holds where the pass started", async () => {
+    const tip = await landedPass();
+    // A hand-typed rewrite of the pass's branch drops the commit the pass started on.
+    const rewritten = w.h.git$(
+      'commit-tree',
+      '-p',
+      `${w.opened.pass.startSha}~1`,
+      '-m',
+      'by hand',
+      `${tip}^{tree}`,
+    );
+    w.h.git$('update-ref', `refs/heads/${w.branch}`, rewritten);
+
+    expect(await fastForwardReturn(w.deps, w.opened.pass)).toEqual({ kind: 'moved' });
+
+    expect(w.h.git$('rev-parse', 'main')).toBe(w.opened.pass.startSha);
+    expect(head()).toBe(w.branch);
+    expect(card()?.body).toMatch(/no longer holds the commit the pass started on/);
+  });
+
   it('forces nothing when the builder switched the folder back to the return branch by hand', async () => {
     const tip = await landedPass();
     w.h.git$('switch', '-q', 'main');

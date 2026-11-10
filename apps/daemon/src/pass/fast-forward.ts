@@ -15,7 +15,10 @@ export type FastForward =
   | { readonly kind: 'returned' }
   /** The return branch is checked out, rebased or bisected elsewhere: nothing moved. */
   | { readonly kind: 'in_use'; readonly where: string }
-  /** The return branch is no longer where the pass started, or HEAD moved: nothing was forced. */
+  /**
+   * The return branch is no longer where the pass started, the pass's branch no longer holds that
+   * start, or HEAD moved: nothing was forced.
+   */
   | { readonly kind: 'moved' };
 
 function raiseBranchMoved(
@@ -23,6 +26,7 @@ function raiseBranchMoved(
   pass: PassDto,
   reason: PassBranchMovedDetail['reason'],
   where: string | null,
+  rewritten = false,
 ): void {
   const branch = passBranch(deps.state.db, pass);
   const detail: PassBranchMovedDetail = {
@@ -36,7 +40,9 @@ function raiseBranchMoved(
   const why =
     reason === 'in_use_elsewhere'
       ? `${pass.returnBranch} is in use in ${where ?? 'another worktree'}, and moving a branch another worktree sits on would leave its files behind.`
-      : `${pass.returnBranch} moved since the pass opened, so 10db did not move it.`;
+      : rewritten
+        ? `${branch} no longer holds the commit the pass started on, so moving ${pass.returnBranch} to it would drop commits; 10db did not move it.`
+        : `${pass.returnBranch} moved since the pass opened, so 10db did not move it.`;
   deps.state.write((ctx) =>
     flagCard(ctx, {
       projectId: pass.projectId,
@@ -63,7 +69,8 @@ export function withdrawBranchMoved(deps: PassWorkDeps, pass: PassDto): void {
  * worktree stops it, with one card; 2 the return branch moves from the pass's start to its tip by
  * compare-and-swap (done when it is there), and one that moved meanwhile stops it, with one card
  * and the command that merges; 3 HEAD is pointed at the return branch, writing no file (done when it
- * names it); 4 the folder's own index is refreshed for the paths the pass landed. A stacked pass
+ * names it); 4 the folder's own index is refreshed for the paths the pass landed. A tip that no longer
+ * descends from the pass's start stops it at 2 too, with the card. A stacked pass
  * starts where the pass below it ended, so its close moves the return branch on from that tip.
  */
 export async function fastForwardReturn(deps: PassWorkDeps, pass: PassDto): Promise<FastForward> {
@@ -83,6 +90,11 @@ export async function fastForwardReturn(deps: PassWorkDeps, pass: PassDto): Prom
     if (where !== null) {
       raiseBranchMoved(deps, pass, 'in_use_elsewhere', where);
       return { kind: 'in_use', where };
+    }
+    // Only a fast-forward: a pass's branch rewritten by hand past its start is never moved onto.
+    if (!(await git.isAncestor(repo, pass.startSha, tip))) {
+      raiseBranchMoved(deps, pass, 'moved', null, true);
+      return { kind: 'moved' };
     }
     if (
       (await git.moveBranchCas({
