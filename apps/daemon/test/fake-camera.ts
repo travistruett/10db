@@ -15,6 +15,8 @@ export class FakeCamera implements PageCamera {
   version = 1;
   /** Outcomes to answer, in order, before answering clean. */
   outcomes: ShotOutcome[] = [];
+  /** What an `overlay` answer says the dev server's error overlay shows. */
+  overlayText = 'Failed to compile';
   private browser: BrowserStatus = { state: 'ready', problem: null };
   private held: { release: () => void } | null = null;
   private holdNext = false;
@@ -57,7 +59,7 @@ export class FakeCamera implements PageCamera {
     }
     const outcome = this.outcomes.shift() ?? 'clean';
     const png =
-      outcome === 'clean'
+      outcome === 'clean' || outcome === 'overlay'
         ? pngOfSize(input.viewport.width, input.viewport.height, this.version)
         : null;
     return {
@@ -66,7 +68,7 @@ export class FakeCamera implements PageCamera {
       width: input.viewport.width,
       height: input.viewport.height,
       landedUrl: `${input.appUrl}${input.route}`,
-      overlayText: null,
+      overlayText: outcome === 'overlay' ? this.overlayText : null,
       reason: outcome === 'failed' ? 'HTTP 500' : null,
     };
   }

@@ -31,7 +31,8 @@ import { takeOut, TakeOutWithin, type TakeOutDeps } from './take-out';
 // copy, never in Your folder, where the project allows copies. The ask is refused and the builder
 // gets one card per task, Move to a Separate Copy, which takes the task out of the pass and starts it
 // in a copy, where the start puts its kept work back. With no copies the hazard is granted as today,
-// and the thread says the page will be slow.
+// and the thread says the page will be slow. A task that broke the preview on two turns running
+// (§8.2) is offered the same card where copies are allowed; its Not Now tells the agent nothing.
 
 /** The hazards a pass task leaves Your folder for. */
 const COPY_HAZARDS: readonly string[] = ['migrations', 'deps'];
@@ -87,6 +88,30 @@ function notNowAnswered(db: DbReader, pass: PassDto, taskId: TaskId): InboxItemD
   });
 }
 
+/** Why a pass task is offered a separate copy: a hazard it asked for, or a preview it broke twice running. */
+export type MoveToCopyCause = { readonly hazard: string } | { readonly route: string };
+
+/** The card's body and the thread's line for a cause. */
+function moveWords(
+  cause: MoveToCopyCause,
+  task: Pick<TaskDto, 'title'>,
+  pass: Pick<PassDto, 'name'>,
+): { readonly body: string; readonly line: string; readonly notNow: string } {
+  const move =
+    'Move takes the page out of the pass with its work kept and starts the task in a separate copy, its work put back there.';
+  return 'hazard' in cause
+    ? {
+        body: `"${task.title}" asked for the ${cause.hazard} hazard, which runs in a separate copy, not in Your folder while Workbench pass "${pass.name}" is open. ${move} Not Now leaves it in the pass without the hazard.`,
+        line: `The agent asked for the ${cause.hazard} hazard, which runs in a separate copy: "Move to a Separate Copy" waits in the Inbox.`,
+        notNow: 'Leaves the page in the pass without the hazard',
+      }
+    : {
+        body: `"${task.title}" broke the preview of \`${cause.route}\` on two turns running in Workbench pass "${pass.name}". ${move} Not Now leaves it in the pass as it is.`,
+        line: `The preview of \`${cause.route}\` broke on two turns running: "Move to a Separate Copy" waits in the Inbox.`,
+        notNow: 'Leaves the page in the pass as it is',
+      };
+}
+
 /**
  * Raises, or refreshes, the task's one Move to a Separate Copy card, in the caller's write; a new
  * card puts one line on the page's thread. Once the builder answered Not Now in this pass, no card
@@ -98,7 +123,7 @@ export function askMoveToCopy(
     readonly pass: PassDto;
     readonly taskId: TaskId;
     readonly workstreamId: WorkstreamId;
-    readonly hazard: string;
+    readonly cause: MoveToCopyCause;
   },
 ): { readonly inboxId: InboxItemId; readonly notNow: boolean } {
   const answered = notNowAnswered(ctx.tx, input.pass, input.taskId);
@@ -111,14 +136,15 @@ export function askMoveToCopy(
     passId: input.pass.id,
     taskId: input.taskId,
     workstreamId: input.workstreamId,
-    hazard: input.hazard,
-    route: null,
+    hazard: 'hazard' in input.cause ? input.cause.hazard : null,
+    route: 'route' in input.cause ? input.cause.route : null,
   };
+  const words = moveWords(input.cause, task, input.pass);
   const card = flagCard(ctx, {
     projectId: input.pass.projectId,
     workstreamId: input.workstreamId,
     title: `Move "${task.title}" to a separate copy?`,
-    body: `"${task.title}" asked for the ${input.hazard} hazard, which runs in a separate copy, not in Your folder while Workbench pass "${input.pass.name}" is open. Move takes the page out of the pass with its work kept and starts the task in a separate copy, its work put back there. Not Now leaves it in the pass without the hazard.`,
+    body: words.body,
     foldKey: key,
     refresh: true,
     detail,
@@ -127,15 +153,10 @@ export function askMoveToCopy(
         label: PASS_MOVE_TO_COPY_CHOICE,
         description: 'Takes the page out of the pass and starts it in a separate copy',
       },
-      { label: PASS_NOT_NOW_CHOICE, description: 'Leaves the page in the pass without the hazard' },
+      { label: PASS_NOT_NOW_CHOICE, description: words.notNow },
     ],
   });
-  if (raised)
-    insertSystemNotice(
-      ctx,
-      input.taskId,
-      `The agent asked for the ${input.hazard} hazard, which runs in a separate copy: "Move to a Separate Copy" waits in the Inbox.`,
-    );
+  if (raised) insertSystemNotice(ctx, input.taskId, words.line);
   return { inboxId: card.id, notNow: false };
 }
 

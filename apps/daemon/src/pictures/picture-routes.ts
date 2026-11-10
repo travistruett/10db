@@ -49,6 +49,20 @@ export function pictureRoutes(
   );
 }
 
+/**
+ * The route whose loads judge the preview for the task (spec §8.2): its first page area's, when that
+ * route loads; null otherwise.
+ */
+export function pageRoute(
+  project: Pick<RoutedProject, 'areas'>,
+  task: Pick<TaskDto, 'areas'>,
+): string | null {
+  const page = task.areas
+    .map((name) => project.areas.find((a) => a.name === name))
+    .find((a) => a?.role === AreaRole.Page);
+  return page?.route !== undefined && loads(page.route) ? page.route : null;
+}
+
 /** Whether pictures are taken of the task: a page of a pass, or a Your-folder task naming a routed page. */
 export function takesPictures(
   project: RoutedProject,

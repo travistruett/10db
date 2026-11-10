@@ -52,7 +52,8 @@ import { beforeAllowed, wroteBefore } from './before-rule';
 import type { PageCamera, Shot } from './camera';
 import { CAPTURE_IDLE, captureStep, type CaptureEvent, type CaptureRequest } from './capture-queue';
 import { keepScreen, sweepPictureTemps, type ScreenToKeep } from './picture-files';
-import { pictureRoutes, takesPictures, turnChangedSomething } from './picture-routes';
+import { pageRoute, pictureRoutes, takesPictures, turnChangedSomething } from './picture-routes';
+import { judgePreview, routeLoad, type RouteLoad } from './preview-marks';
 import { signIn, type SignInDeps, type SignInProject } from './sign-in';
 import { readStorageState, type StorageState } from './storage-state';
 
@@ -286,6 +287,8 @@ export function startPictures(deps: PicturesDeps): Pictures {
     }
     let signedInAgain = false;
     const shots: Omit<ScreenToKeep, 'keptSha'>[] = [];
+    const judged = pageRoute(project, task);
+    const loads: Omit<RouteLoad, 'route'>[] = [];
     for (const target of targets) {
       const shoot = (state: StorageState | null): Promise<Shot> =>
         deps.camera.shoot({ appUrl, ...target, storageState: state, signal });
@@ -309,6 +312,8 @@ export function startPictures(deps: PicturesDeps): Pictures {
         },
         'took a picture',
       );
+      if (target.route === judged)
+        loads.push({ outcome: shot.outcome, overlayText: shot.overlayText, reason: shot.reason });
       if (shot.outcome === 'elsewhere') {
         if (signedInAgain)
           signIns.set(project.id, {
@@ -329,8 +334,6 @@ export function startPictures(deps: PicturesDeps): Pictures {
         png: shot.png,
       });
     }
-    if (stopped() || shots.length === 0) return 0;
-    const keptSha = await keptShaOf(request, project);
     if (stopped()) return 0;
     const end = deps.state.now();
     if (
@@ -340,6 +343,21 @@ export function startPictures(deps: PicturesDeps): Pictures {
       log.info({ taskId: task.id }, 'dropped a before picture: the task wrote before it was taken');
       return 0;
     }
+    const load = judged === null ? null : routeLoad(judged, loads);
+    if (request.passId !== null && load !== null)
+      judgePreview(
+        { state: deps.state, logger: log },
+        {
+          passId: request.passId,
+          taskId: task.id,
+          kind: request.kind,
+          turnId: request.turnId,
+          load,
+        },
+      );
+    if (shots.length === 0) return 0;
+    const keptSha = await keptShaOf(request, project);
+    if (stopped()) return 0;
     return shots.filter(
       (screen) => keepScreen(deps.state, deps.dataDir, { ...screen, keptSha }) !== null,
     ).length;

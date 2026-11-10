@@ -599,7 +599,7 @@ export function createToolHandlers(
             pass: passAsk.pass,
             taskId: task.id,
             workstreamId,
-            hazard: input.name,
+            cause: { hazard: input.name },
           });
           return record(
             'request_claim',
