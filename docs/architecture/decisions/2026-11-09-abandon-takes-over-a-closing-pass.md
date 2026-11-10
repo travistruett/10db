@@ -17,7 +17,7 @@ pages that are not signed off; signed-off pages stay as landed and are named in 
 From step 7 the close is the only way out. While Your folder is off the pass's branch (and not on the return
 branch at the pass's tip), the close waits with the folder card, holding the project's delivery key, and an
 Abandon is refused: switching Your folder back is what lets it finish. A close that stops on an error from step 7
-says so in its header notice, which offers Close Pass and no Abandon.
+says so in its header notice, which offers Continue Close and no Abandon.
 
 ## Why
 

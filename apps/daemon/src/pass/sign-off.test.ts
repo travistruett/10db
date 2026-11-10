@@ -566,6 +566,31 @@ describe('a waiting sign-off', () => {
   });
 });
 
+describe('a second Sign Off on a waiting page', () => {
+  afterEach(() => {
+    w.close();
+  });
+
+  it('answers the wait it already has', async () => {
+    w = await openPassWorld();
+    w.startTurn(w.people);
+    await grantSharedHold(w.deps, { workstreamId: w.runOf(w.people), area: 'src' });
+    w.write('src/button.ts', 'button\n');
+    await turn(w.settings, () => {
+      w.write('src/settings/page.tsx', 'settings page\n');
+    });
+    w.ready(w.settings);
+    const deps = { ...w.deps, stopLane: stopped };
+    askSignOff(deps, w.opened.pass.id, w.settings.id);
+    await w.h.jobs.idle();
+
+    expect(askSignOff(deps, w.opened.pass.id, w.settings.id)).toMatchObject({
+      state: 'waiting',
+      waitsFor: { taskId: w.people.id },
+    });
+  });
+});
+
 describe('a Sign Off from the Ready card that does not land', () => {
   afterEach(() => {
     w.close();
