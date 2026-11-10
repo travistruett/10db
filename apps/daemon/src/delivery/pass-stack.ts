@@ -156,14 +156,23 @@ async function takeBase(
     message: `Merge ${batch.baseBranch}, which holds pass "${below.name}", into ${branch}`,
   });
   // A stacked pass that has closed left its return branch at its tip: the branch follows the merge,
-  // whose tree is the same, so its realignment still finds it at the tip.
-  if (above.state === PassState.Closed && before !== null && merged.kind === 'merged')
-    await ctx.git.moveBranchCas({
-      repo: project.repoPath,
-      branch: above.returnBranch,
-      to: merged.sha,
-      expect: before,
-    });
+  // whose tree is the same, so its realignment still finds it at the tip. A rerun after a crash
+  // between the two finds the branch merged already, and the return branch at the merge's first
+  // parent. Not while a pass is stacked on the closed one: that pass's close moves the return
+  // branch from its own start, which is this tip.
+  if (above.state === PassState.Closed && stackedAbove(ctx.state.db, above) === undefined) {
+    const from =
+      merged.kind === 'merged'
+        ? before
+        : await ctx.git.commitAt(project.repoPath, `${merged.sha}^1`).catch(() => null);
+    if (from !== null)
+      await ctx.git.moveBranchCas({
+        repo: project.repoPath,
+        branch: above.returnBranch,
+        to: merged.sha,
+        expect: from,
+      });
+  }
   const pushed = await ctx.git.trackingTip(project.repoPath, branch);
   if (pushed !== null && pushed !== merged.sha)
     await pushBranch(ctx, batch, project, branch, signal);
