@@ -189,7 +189,11 @@ function refuseOpen(
  * not yet switched back), nor a branch under 10db's prefix no task names. The one exception is an
  * abandoned pass's branch, which holds the work it landed: a pass opened there returns to it.
  */
-function returnBranchProblem(db: DbReader, project: ProjectDto, branch: string): string | null {
+export function returnBranchProblem(
+  db: DbReader,
+  project: ProjectDto,
+  branch: string,
+): string | null {
   const batch = listBatches(db, { projectId: project.id }).find((b) => b.branch === branch);
   if (batch?.passId != null && getPass(db, batch.passId).state === PassState.Abandoned) return null;
   if (batch)

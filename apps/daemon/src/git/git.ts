@@ -274,6 +274,12 @@ const OPERATIONS_IN_PROGRESS = [
   },
 ] as const;
 
+/** An operation git left waiting for the builder: what it is, and how to finish or stop it. */
+export interface OperationInProgress {
+  readonly what: string;
+  readonly end: string;
+}
+
 /** Where `openPassBranch` found the folder, and what in it differed from that commit. */
 export interface PassBranch {
   /** The branch HEAD named. */
@@ -521,6 +527,8 @@ export interface Git {
    * pathspec), as an ISO time in UTC; null with no glob, no commit or none that touched one.
    */
   lastChangedAt(repo: string, globs: readonly string[]): Promise<string | null>;
+  /** The merge, cherry-pick, revert, rebase or `git am` waiting in the worktree, or null. */
+  operationInProgress(repo: string): Promise<OperationInProgress | null>;
   /** Filters the tree at `rev`, or the checkout's own attributes, ask for; empty when none. */
   filtersIn(repo: string, rev: string): Promise<{ path: string; filter: string }[]>;
   /**
@@ -2200,15 +2208,21 @@ export function createGit(opts: GitOptions = {}): Git {
     return found.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   }
 
+  /** The operation git left waiting in the worktree, or null when none is. */
+  function operationIn(c: Pinned): OperationInProgress | null {
+    const busy = OPERATIONS_IN_PROGRESS.find(({ entry }) =>
+      existsAsEntry(join(c.dirs.gitDir, entry)),
+    );
+    return busy === undefined ? null : { what: busy.what, end: busy.end };
+  }
+
   async function openPassBranch(input: PassBranchInput): Promise<PassBranch> {
     if (!input.dirtRef.startsWith(KEPT_REF_PREFIX))
       throw new InvalidError(`${input.dirtRef} is not under ${KEPT_REF_PREFIX}`);
     return withRepoLock(realpathSync(input.repo), async () => {
       const c = await pinned(input.repo);
       // Checked first: a rebase leaves HEAD detached, and saying so would hide why.
-      const busy = OPERATIONS_IN_PROGRESS.find(({ entry }) =>
-        existsAsEntry(join(c.dirs.gitDir, entry)),
-      );
+      const busy = operationIn(c);
       if (busy)
         throw new InvalidError(
           `${c.real} is in the middle of ${busy.what}; finish it or stop it (${busy.end}) before opening a pass`,
@@ -3673,6 +3687,9 @@ export function createGit(opts: GitOptions = {}): Git {
       )
         .split('\n')
         .filter(Boolean);
+    },
+    async operationInProgress(repo) {
+      return operationIn(await pinned(repo));
     },
     async lastChangedAt(repo, globs) {
       if (globs.length === 0) return null;
