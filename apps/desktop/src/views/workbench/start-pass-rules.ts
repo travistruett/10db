@@ -78,26 +78,32 @@ function sharedGlobs(
 }
 
 /**
- * Why a row cannot be ticked beside what is, or null when it can: the pass is full, a ticked row
- * already holds one of its pages, or a ticked page can share a file with one of them (named with both
- * globs). Pass a ticked row the other ticks, so it is never blocked by itself.
+ * Why a row cannot be ticked beside what is, or null when it can: the pass is full, a ticked row or
+ * the open pass (`inPass`, its pages) already holds one of its pages, or one of those can share a file
+ * with one of them (named with both globs). Pass a ticked row the other ticks, so it is never blocked
+ * by itself.
  */
 export function blockedReason(
   row: { readonly pages: readonly string[] },
   ticks: PickTicks,
   areas: readonly AreaDef[],
+  inPass: readonly string[] = [],
 ): string | null {
-  if (ticks.pages.length + ticks.tasks.length >= PASS_PAGE_CAP_MAX)
+  if (inPass.length + ticks.pages.length + ticks.tasks.length >= PASS_PAGE_CAP_MAX)
     return `A pass holds at most ${String(PASS_PAGE_CAP_MAX)} pages`;
   const area = (name: string) => areas.find((a) => a.name === name);
-  const holders = [
-    ...ticks.pages.map((page) => ({ name: page, pages: [page], isTask: false })),
-    ...ticks.tasks.map((task) => ({ name: task.title, pages: task.pages, isTask: true })),
-  ];
+  const holders: { readonly pages: readonly string[]; readonly holds: (page: string) => string }[] =
+    [
+      ...inPass.map((page) => ({ pages: [page], holds: () => `${page} is in the pass` })),
+      ...ticks.pages.map((page) => ({ pages: [page], holds: () => `${page} is ticked` })),
+      ...ticks.tasks.map((task) => ({
+        pages: task.pages,
+        holds: (page: string) => `${task.title} works on ${page}`,
+      })),
+    ];
   for (const holder of holders) {
     for (const page of row.pages) {
-      if (holder.pages.includes(page))
-        return holder.isTask ? `${holder.name} works on ${page}` : `${page} is ticked`;
+      if (holder.pages.includes(page)) return holder.holds(page);
       for (const held of holder.pages) {
         const globs = sharedGlobs(area(held), area(page));
         if (globs)

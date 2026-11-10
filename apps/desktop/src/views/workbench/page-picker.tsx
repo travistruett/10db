@@ -12,6 +12,8 @@ export interface PagePickerProps {
   readonly onTicks: (ticks: PickTicks) => void;
   /** Now, in epoch milliseconds: when each page's files last changed is said from here. */
   readonly now: number;
+  /** The pages an open pass holds already, for Add Page: not offered, and nothing may share their files. */
+  readonly inPass?: readonly string[];
 }
 
 /** "/settings · changed 1d ago", with what holds the page when something does. */
@@ -93,11 +95,14 @@ function Section({ title, children }: { readonly title: string; readonly childre
  * open Board tasks that could join. A row that would hold a file a ticked row holds is disabled and
  * says why.
  */
-export function PagePicker({ pages, tasks, areas, ticks, onTicks, now }: PagePickerProps) {
+export function PagePicker(props: PagePickerProps) {
+  const { pages, tasks, areas, ticks, onTicks, now, inPass = [] } = props;
   const [filter, setFilter] = useState('');
   const wanted = filter.trim().toLowerCase();
   const shownPages = pages.filter(
-    (page) => ticks.pages.includes(page.area) || matches(wanted, page.area, page.route),
+    (page) =>
+      !inPass.includes(page.area) &&
+      (ticks.pages.includes(page.area) || matches(wanted, page.area, page.route)),
   );
   const ticked = (taskId: TaskId) => ticks.tasks.some((task) => task.taskId === taskId);
   const shownTasks = tasks.filter(
@@ -123,7 +128,7 @@ export function PagePicker({ pages, tasks, areas, ticks, onTicks, now }: PagePic
               line={pageLine(page, now)}
               note={page.heldBy === null ? null : `Waits for ${page.heldBy.title}`}
               checked={checked}
-              blocked={blockedReason({ pages: [page.area] }, ticks, areas)}
+              blocked={blockedReason({ pages: [page.area] }, ticks, areas, inPass)}
               onChange={(on) => {
                 const others = othersOf(ticks, { page: page.area });
                 onTicks(on ? { ...others, pages: [...others.pages, page.area] } : others);
@@ -146,7 +151,7 @@ export function PagePicker({ pages, tasks, areas, ticks, onTicks, now }: PagePic
               line={task.pages.join(', ')}
               note={null}
               checked={ticked(task.taskId)}
-              blocked={blockedReason(task, ticks, areas)}
+              blocked={blockedReason(task, ticks, areas, inPass)}
               onChange={(on) => {
                 const others = othersOf(ticks, { taskId: task.taskId });
                 onTicks(on ? { ...others, tasks: [...others.tasks, task] } : others);

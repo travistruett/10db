@@ -2,6 +2,7 @@ import {
   AreaRole,
   type InboxItemDto,
   type PagesProposalDto,
+  type PassJoinRequest,
   type PassOpenRequest,
   type PassStartDto,
   type PassViewDto,
@@ -12,6 +13,7 @@ import {
 import { Group, Loader, Stack, Title } from '@mantine/core';
 import { useMutation } from '@tanstack/react-query';
 import { useState, type ReactNode } from 'react';
+import { AddPageModal } from './add-page-modal';
 import { PassHeader } from './pass-header';
 import type { PassWorkspaceProps } from './pass-workspace-props';
 import { NoPageAreas, ProposePagesModal } from './propose-pages-modal';
@@ -24,6 +26,8 @@ export interface WorkbenchActions {
   readonly start: (request: PassOpenRequest) => Promise<unknown>;
   /** Proposes page areas: `POST /projects/:projectId/propose-page-areas`. */
   readonly propose: () => Promise<PagesProposalDto>;
+  /** Adds pages to the open pass: `POST /passes/:passId/pages`. */
+  readonly addPages: (request: PassJoinRequest) => Promise<unknown>;
 }
 
 export interface WorkbenchScreenProps {
@@ -49,7 +53,7 @@ export interface WorkbenchScreenProps {
 }
 
 /** Which dialog the screen holds open. */
-type Dialog = 'propose' | null;
+type Dialog = 'propose' | 'add-page' | null;
 
 /**
  * The Workbench (spec §4) for one project: why a pass needs a page area when it has none, the picker
@@ -59,6 +63,9 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
   const { project, live, start, tasks, inbox, search, goalPages, now } = props;
   const { onSelect, renderWorkspace, actions } = props;
   const [dialog, setDialog] = useState<Dialog>(null);
+  const closeDialog = () => {
+    setDialog(null);
+  };
   const opening = useMutation({
     mutationFn: (request: PassOpenRequest) => actions.start(request),
   });
@@ -81,9 +88,7 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
           <ProposePagesModal
             project={project}
             opened
-            onClose={() => {
-              setDialog(null);
-            }}
+            onClose={closeDialog}
             propose={actions.propose}
           />
         ) : null}
@@ -122,11 +127,24 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
         view={live}
         inbox={inbox}
         now={now}
-        onAddPage={() => undefined}
+        onAddPage={() => {
+          setDialog('add-page');
+        }}
         onRename={() => undefined}
         onAbandon={() => undefined}
       />
       {renderWorkspace({ view: live, inbox, project, selected: search.task ?? null, onSelect })}
+      {dialog === 'add-page' ? (
+        <AddPageModal
+          project={project}
+          view={live}
+          start={start}
+          tasks={tasks}
+          now={now}
+          onClose={closeDialog}
+          add={actions.addPages}
+        />
+      ) : null}
     </Stack>
   );
 }

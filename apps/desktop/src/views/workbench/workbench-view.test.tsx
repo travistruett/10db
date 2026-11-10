@@ -59,6 +59,7 @@ async function draw(overrides: Partial<WorkbenchScreenProps> = {}) {
     actions: {
       start: vi.fn(() => Promise.resolve()),
       propose: vi.fn(() => Promise.resolve(pagesProposalDto())),
+      addPages: vi.fn(() => Promise.resolve()),
     },
     ...overrides,
   };
@@ -87,7 +88,13 @@ describe('WorkbenchScreen', () => {
 
   it('sends Start Pass and says its refusal beside the button', async () => {
     const start = vi.fn(() => Promise.reject(new Error('A lane is running in the folder')));
-    await draw({ actions: { start, propose: () => Promise.resolve(pagesProposalDto()) } });
+    await draw({
+      actions: {
+        start,
+        propose: () => Promise.resolve(pagesProposalDto()),
+        addPages: () => Promise.resolve(),
+      },
+    });
     fireEvent.click(await screen.findByRole('checkbox', { name: /^settings/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Start Pass (1)' }));
     expect(await screen.findByText('A lane is running in the folder')).toBeTruthy();
@@ -111,5 +118,7 @@ describe('WorkbenchScreen', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Select first' }));
     expect(onSelect).toHaveBeenCalledWith(ready.taskId);
     expect(screen.queryByText('Work through pages with the agents, live.')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Add Page' }));
+    expect(await screen.findByRole('dialog', { name: 'Add Page' })).toBeTruthy();
   });
 });

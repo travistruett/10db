@@ -121,6 +121,37 @@ describe('blockedReason', () => {
     expect(blockedReason(row, ticks, areas)).toBe(reason);
   });
 
+  it.each<{ name: string; row: { pages: string[] }; inPass: string[]; reason: string | null }>([
+    {
+      name: 'a page beside the pass',
+      row: { pages: ['people'] },
+      inPass: ['settings'],
+      reason: null,
+    },
+    {
+      name: 'a page the pass holds',
+      row: { pages: ['settings'] },
+      inPass: ['settings'],
+      reason: 'settings is in the pass',
+    },
+    {
+      name: 'a page that can share a file with one the pass holds',
+      row: { pages: ['forms'] },
+      inPass: ['settings'],
+      reason:
+        'settings can share a file with it: src/settings/** and src/**/form.tsx both match one',
+    },
+    {
+      name: 'any page once the pass and the ticks fill it',
+      row: { pages: ['people'] },
+      inPass: ['a', 'b', 'c', 'd', 'e'],
+      reason: `A pass holds at most ${String(PASS_PAGE_CAP_MAX)} pages`,
+    },
+  ])('beside an open pass, $name', ({ row, inPass, reason }) => {
+    const ticks: PickTicks = { pages: inPass.length === 5 ? ['f'] : [], tasks: [] };
+    expect(blockedReason(row, ticks, areas, inPass)).toBe(reason);
+  });
+
   it('refuses another row once the pass is full', () => {
     const full: PickTicks = {
       pages: Array.from({ length: PASS_PAGE_CAP_MAX }, (_, n) => `Page ${String(n)}`),
