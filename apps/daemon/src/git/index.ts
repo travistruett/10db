@@ -14,6 +14,7 @@ export {
   WorktreeNotOursError,
   type BranchMerge,
   type ChainCommit,
+  type ChainCommitInput,
   type CheckoutPlace,
   type FolderAt,
   type Git,

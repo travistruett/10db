@@ -15,9 +15,9 @@ import {
   openHolds,
   type DbReader,
 } from '@10db/db';
-import { KeptRefMovedError } from '../git';
 import { readKeptRef } from './kept-work';
 import {
+  extendChain,
   onPassBranch,
   sharedPathOf,
   sharedPathsDiffering,
@@ -139,24 +139,15 @@ export async function dropShared(
   );
   await deps.git.refreshIndex(repo, written);
   const ref = sharedRef(pass.id);
-  const commit = async () =>
-    deps.git.chainCommit({
-      repo,
-      ref,
-      expect: await readKeptRef(deps.git, repo, ref),
-      base: pass.startSha,
-      paths: change.paths,
-      from: back,
-      message: `Drop of shared change ${String(change.seq)} of ${getTask(db, change.taskId).title}`,
-      trailer: { key: DROP_TRAILER, value: String(change.seq) },
-    });
-  let made: Awaited<ReturnType<typeof commit>>;
-  try {
-    made = await commit();
-  } catch (error) {
-    if (!(error instanceof KeptRefMovedError)) throw error;
-    made = await commit();
-  }
+  const made = await extendChain(deps, {
+    repo,
+    ref,
+    base: pass.startSha,
+    paths: change.paths,
+    from: back,
+    message: `Drop of shared change ${String(change.seq)} of ${getTask(db, change.taskId).title}`,
+    trailer: { key: DROP_TRAILER, value: String(change.seq) },
+  });
   // A tree the chain holds already, with no drop commit of its own, is the chain's tip.
   const sha = made.sha ?? (await readKeptRef(deps.git, repo, ref)) ?? pass.startSha;
   const drop = deps.state.write((ctx) =>

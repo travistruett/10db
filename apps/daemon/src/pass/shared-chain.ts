@@ -34,16 +34,11 @@ import {
   type DbReader,
 } from '@10db/db';
 import { claimScopeOf } from '../delivery';
-import { KeptRefMovedError, type ChainCommit } from '../git';
-import {
-  keepNamedPaths,
-  passBranch,
-  passTaskPlace,
-  readKeptRef,
-  type PassWorkDeps,
-} from './kept-work';
+import type { ChainCommit } from '../git';
+import { keepNamedPaths, passBranch, passTaskPlace, type PassWorkDeps } from './kept-work';
 import {
   chainTip,
+  extendChain,
   holdRef,
   onPassBranch,
   sharedPathOf,
@@ -107,22 +102,14 @@ export async function keepHold(
   const treePaths = [...new Set([...changed, ...(kept?.paths ?? [])])].sort();
   let made: ChainCommit = { sha: null, made: false, files: [] };
   if (treePaths.length > 0) {
-    const commit = async () =>
-      deps.git.chainCommit({
-        repo,
-        ref: sharedRef(pass.id),
-        expect: await readKeptRef(deps.git, repo, sharedRef(pass.id)),
-        base: pass.startSha,
-        paths: treePaths,
-        message: `Shared change ${String(hold.seq)} of ${task.title}`,
-        trailer: { key: HOLD_TRAILER, value: hold.claimId },
-      });
-    try {
-      made = await commit();
-    } catch (error) {
-      if (!(error instanceof KeptRefMovedError)) throw error;
-      made = await commit();
-    }
+    made = await extendChain(deps, {
+      repo,
+      ref: sharedRef(pass.id),
+      base: pass.startSha,
+      paths: treePaths,
+      message: `Shared change ${String(hold.seq)} of ${task.title}`,
+      trailer: { key: HOLD_TRAILER, value: hold.claimId },
+    });
   }
   const files = made.files.filter((f) => changed.includes(f.path));
   const sha = made.sha;

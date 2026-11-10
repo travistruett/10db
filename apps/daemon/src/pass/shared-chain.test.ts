@@ -26,13 +26,14 @@ const hash = (text: string) =>
     .toString()
     .trim();
 
-/** A pass with a second shared area, `styles`. */
+/** A pass with two more shared areas, `styles` and `assets`. */
 const twoSharedAreas = () =>
   openPassWorld({
     project: {
       areas: [
         ...(PASS_PROJECT.areas ?? []),
         { name: 'styles', globs: ['styles/**'], role: 'shared' },
+        { name: 'assets', globs: ['assets/**'], role: 'shared' },
       ],
     },
   });
@@ -102,23 +103,26 @@ describe('keepHold', () => {
     expect(w.h.git$('for-each-ref', sharedRef(w.opened.pass.id))).toBe('');
   });
 
-  it('keeps both of two turn ends racing for the chain', async () => {
+  it('keeps every one of three turn ends racing for the chain', async () => {
     w = await twoSharedAreas();
     const src = await grant(w.settings, 'src');
     const styles = await grant(w.people, 'styles');
+    const assets = await grant(w.settings, 'assets');
     w.write('src/button.ts', 'button\n');
     w.write('styles/app.css', 'app\n');
+    w.write('assets/logo.svg', 'logo\n');
 
-    const [one, two] = await Promise.all([
-      keepHold(w.deps, { claimId: src.claimId }),
-      keepHold(w.deps, { claimId: styles.claimId }),
-    ]);
+    const kept = await Promise.all(
+      [src, styles, assets].map((hold) => keepHold(w.deps, { claimId: hold.claimId })),
+    );
 
     const ref = sharedRef(w.opened.pass.id);
     const line = w.h.git$('rev-list', `${w.opened.pass.startSha}..${ref}`).split('\n');
-    expect(line.sort()).toEqual([one.sha, two.sha].sort());
+    expect(line.sort()).toEqual(kept.map((k) => k.sha).sort());
     expect(w.h.git$('show', `${ref}:src/button.ts`)).toBe('button');
     expect(w.h.git$('show', `${ref}:styles/app.css`)).toBe('app');
+    expect(w.h.git$('show', `${ref}:assets/logo.svg`)).toBe('logo');
+    expect(openHolds(w.h.store.db, w.opened.pass.id)).toEqual([]);
   });
 
   it('lands changes in number order when two areas end opposite to their grants', async () => {
