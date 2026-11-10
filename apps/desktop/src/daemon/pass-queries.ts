@@ -126,7 +126,8 @@ export function writePassActivity(queryClient: QueryClient, event: DaemonEvent):
 const PassViewList = z.array(PassViewDto);
 const TurnList = z.array(PassTurnWithFilesDto);
 
-function livePassesOptions(connection: DaemonConnection) {
+/** `GET /passes?live=true`, for a hook or a one-off read. */
+export function livePassesOptions(connection: DaemonConnection) {
   return queryOptions({
     queryKey: passKeys.live,
     queryFn: async () =>

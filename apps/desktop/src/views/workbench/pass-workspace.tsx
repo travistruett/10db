@@ -1,11 +1,13 @@
 import { PassState, type TaskId } from '@10db/contracts';
 import { Box, Flex } from '@mantine/core';
 import { useViewportSize } from '@mantine/hooks';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTakeOutPage } from '../../daemon/pass-queries';
+import { markPassNotificationsActed, shownPassNotifications } from '../../desktop/notify-pass';
 import { useNow } from '../../shell/relative';
 import { Announcer } from './announcer';
-import { EMPTY_DRAFT, type Draft } from './drafts';
+import { EMPTY_DRAFT, hasContent, type Draft } from './drafts';
+import { focusTarget } from './focus-target';
 import { PagePane } from './page-pane';
 import type { PassWorkspaceProps } from './pass-workspace-props';
 import { QueueList } from './queue-list';
@@ -38,6 +40,35 @@ export function PassWorkspace({ view, inbox, project, selected, onSelect }: Pass
   const [takingOut, setTakingOut] = useState<TaskId | null>(null);
   const takeOut = useTakeOutPage();
   const takingOutPage = view.pages.find((page) => page.taskId === takingOut) ?? null;
+
+  // As the window gains focus, the page a ready notification just named, or the one that has waited
+  // longest when the shown page waits on nothing; never away from a draft.
+  const onFocus = useRef<() => void>(() => undefined);
+  useEffect(() => {
+    onFocus.current = () => {
+      const target = focusTarget({
+        now: Date.now(),
+        notified: shownPassNotifications(),
+        rows: rows.map((row) => ({ taskId: row.page.taskId, status: row.status })),
+        selected: shown?.page.taskId ?? null,
+        drafts: new Set(
+          [...drafts].filter(([, draft]) => hasContent(draft)).map(([taskId]) => taskId),
+        ),
+      });
+      if (target === null) return;
+      markPassNotificationsActed(target);
+      if (target !== shown?.page.taskId) onSelect(target);
+    };
+  });
+  useEffect(() => {
+    const focused = () => {
+      onFocus.current();
+    };
+    window.addEventListener('focus', focused);
+    return () => {
+      window.removeEventListener('focus', focused);
+    };
+  }, []);
 
   // J and K move the focus along the queue's rows, and Enter on a row selects it.
   const queue = useRef<HTMLDivElement>(null);

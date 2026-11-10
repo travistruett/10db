@@ -355,6 +355,23 @@ describe('PassWorkspace Retry Turn', () => {
   });
 });
 
+describe('PassWorkspace window focus', () => {
+  it('selects the page that has waited longest when the window gains focus on a page that waits on nothing', async () => {
+    const { pages, onSelect } = await renderWorkspace((p) => p.working.taskId);
+    fireEvent.focus(window);
+    expect(onSelect).toHaveBeenCalledWith(pages.asks.taskId);
+  });
+
+  it('never moves away from a page with a draft', async () => {
+    const { onSelect } = await renderWorkspace((p) => p.working.taskId);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Message to Billing' }), {
+      target: { value: 'half a thought' },
+    });
+    fireEvent.focus(window);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+});
+
 describe('PassWorkspace Take Out', () => {
   function serveTakeOut(tookOut = true) {
     const sent: { passId: string; taskId: string; body: unknown }[] = [];

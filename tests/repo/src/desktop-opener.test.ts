@@ -41,3 +41,18 @@ describe("the desktop app's opener", () => {
     );
   });
 });
+
+describe("the desktop app's window", () => {
+  it('may be shown, unminimized and focused, which a click on a ready notification does', () => {
+    const capability = Capability.parse(
+      JSON.parse(readRepoFile('apps/desktop/src-tauri/capabilities/default.json')),
+    );
+    expect(capability.permissions).toEqual(
+      expect.arrayContaining([
+        'core:window:allow-show',
+        'core:window:allow-unminimize',
+        'core:window:allow-set-focus',
+      ]),
+    );
+  });
+});

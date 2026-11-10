@@ -1,12 +1,21 @@
 import { EventType, InboxItemId, LANE_STATES, WorkstreamState } from '@10db/contracts';
 import { useComputedColorScheme } from '@mantine/core';
 import { useQueryClient } from '@tanstack/react-query';
-import { useEffect } from 'react';
+import { useNavigate } from '@tanstack/react-router';
+import { useEffect, useRef } from 'react';
 import { useEventStream } from '../daemon/events';
+import { livePassesOptions } from '../daemon/pass-queries';
 import { useDaemon } from '../daemon/provider';
 import { inboxQueryOptions, useKeepAwake, useWorkstreams } from '../daemon/queries';
+import { useSelectedProject } from '../shell/selected-project';
 import { useOpenInboxCount } from '../views/inbox/inbox-count';
-import { isTauri, notifyNewCard, setWindowTheme, updateTray } from './tauri';
+import {
+  listenForPassClicks,
+  notifyPassReady,
+  readyPageOf,
+  type PassPageTarget,
+} from './notify-pass';
+import { bringWindowForward, isTauri, notifyNewCard, setWindowTheme, updateTray } from './tauri';
 
 /** Workstreams that hold a lane or wait on the builder: what the menu bar counts as running. */
 const BUSY_STATES: readonly WorkstreamState[] = [...LANE_STATES, WorkstreamState.WaitingHuman];
@@ -16,8 +25,10 @@ const BUSY_STATES: readonly WorkstreamState[] = [...LANE_STATES, WorkstreamState
  * Mounted once by AppLayout.
  */
 export function useDesktopSync(): void {
-  const { client } = useDaemon();
+  const { client, connection } = useDaemon();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const { select } = useSelectedProject();
   const lanes =
     useWorkstreams({ active: true }).data?.filter((w) => BUSY_STATES.includes(w.state)).length ?? 0;
   const inbox = useOpenInboxCount();
@@ -35,12 +46,43 @@ export function useDesktopSync(): void {
     });
   }, [scheme]);
 
+  // A click on a ready notification selects its project and page and brings the window forward. The
+  // listener is registered once, at mount: a notification sent before it would never report a click.
+  const openPage = useRef<(target: PassPageTarget) => void>(() => undefined);
+  useEffect(() => {
+    openPage.current = (target) => {
+      select(target.projectId);
+      void navigate({ to: '/workbench', search: { task: target.taskId } });
+      bringWindowForward().catch((error: unknown) => {
+        console.warn('10db: could not bring the window forward', error);
+      });
+    };
+  });
+  useEffect(() => {
+    listenForPassClicks((target) => {
+      openPage.current(target);
+    }).catch((error: unknown) => {
+      console.warn('10db: could not listen for notification clicks', error);
+    });
+  }, []);
+
   async function notifyOpened(id: string): Promise<void> {
     const items = await queryClient.query(inboxQueryOptions(client));
     const opened = InboxItemId.safeParse(id);
     if (!opened.success) return;
     const item = items.find((candidate) => candidate.id === opened.data);
-    if (item) await notifyNewCard(item);
+    if (!item) return;
+    const ready = readyPageOf(item);
+    if (ready === null) {
+      await notifyNewCard(item);
+      return;
+    }
+    const passes = await queryClient.query(livePassesOptions(connection));
+    await notifyPassReady(
+      item,
+      ready,
+      passes.find((view) => view.pass.id === ready.passId),
+    );
   }
 
   useEventStream((event) => {

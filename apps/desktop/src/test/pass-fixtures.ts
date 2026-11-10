@@ -4,6 +4,7 @@ import {
   PagesProposalDto,
   PassDto,
   PassOpenedDto,
+  PASS_SIGN_OFF_CHOICE,
   PassPageDto,
   PassStartDto,
   PassTurnTimingDto,
@@ -167,6 +168,27 @@ export function pagesByStatus() {
     pausedUntil: '2026-11-09T15:40:00.000Z',
   });
   return { notStarted, working, ready, asks, failed, paused };
+}
+
+/** The `check` item of a page of `view` that became Ready, as the Inbox holds it. */
+export function readyItem(view: PassViewDto, page: PassPageDto): InboxItemDto {
+  return inboxItemDto({
+    projectId: view.pass.projectId,
+    kind: 'check',
+    title: `Ready: ${page.title}`,
+    body: '',
+    options: [{ label: PASS_SIGN_OFF_CHOICE, description: '' }],
+    detail: {
+      passId: view.pass.id,
+      taskId: page.taskId,
+      workstreamId: page.workstreamId ?? mintId('Workstream'),
+      turnId: page.turn?.id ?? mintId('PassTurn'),
+      keptSha: 'b'.repeat(40),
+      keptBaseSha: 'a'.repeat(40),
+      turnFiles: [],
+      pageFiles: [],
+    },
+  });
 }
 
 /** An open question from the page's run, as the Inbox holds it. */
