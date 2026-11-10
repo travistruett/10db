@@ -336,7 +336,7 @@ export interface KeptCommit {
   readonly sha: string | null;
   /** The branch tip the work was laid on. */
   readonly base: string;
-  /** True when this call made `sha`. */
+  /** True when `sha` is this work's own commit: made now, or by an earlier run with the trailer. */
   readonly made: boolean;
 }
 
@@ -2251,7 +2251,7 @@ export function createGit(opts: GitOptions = {}): Git {
       if (held !== null) {
         const { key, value } = input.trailer;
         const found = await findCommitByTrailer(c, held, key, value);
-        if (found !== null) return { sha: found, base: tip, made: false };
+        if (found !== null) return { sha: found, base: tip, made: true };
       }
       if (held !== input.parent) throw new KeptRefMovedError(input.ref, input.parent, held);
       // HEAD names the branch, so what differs from HEAD is what differs from the tip; an ignored

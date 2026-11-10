@@ -124,7 +124,7 @@ describe('keepWork', () => {
     expect(await keep(['src/settings/page.tsx'], null)).toEqual({
       sha: first.sha,
       base: tip,
-      made: false,
+      made: true,
     });
     expect(rawGit('rev-parse', REF)).toBe(first.sha);
   });
