@@ -341,10 +341,19 @@ describe('abandonPass', () => {
   describe("with Your folder off the pass's branch, it still finishes", () => {
     const rows: {
       readonly name: string;
+      /** A turn of Settings is open with a shared hold it has not kept. */
+      readonly hold?: boolean;
       readonly run: (world: PassWorld) => Promise<void>;
     }[] = [
       {
         name: 'at once',
+        run: async (world) => {
+          await abandonPass(deps(world.deps), world.opened.pass.id);
+        },
+      },
+      {
+        name: 'with a shared hold its stopped turn left open',
+        hold: true,
         run: async (world) => {
           await abandonPass(deps(world.deps), world.opened.pass.id);
         },
@@ -361,8 +370,12 @@ describe('abandonPass', () => {
         },
       },
     ];
-    it.each(rows)('$name', async ({ run }) => {
+    it.each(rows)('$name', async ({ run, hold }) => {
       w = await worked();
+      if (hold === true) {
+        w.startTurn(w.settings);
+        await grantSharedHold(w.deps, { workstreamId: w.runOf(w.settings), area: 'src' });
+      }
       // The builder switched to the branch the pass came from, taking the pages' files along; the
       // pass's folder card says so.
       w.h.git$('switch', '-q', 'main');

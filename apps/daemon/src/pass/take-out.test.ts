@@ -34,7 +34,15 @@ import { openPassWorld, type PassWorld } from '../../test/pass-world';
 import type { Git } from '../git';
 import { silentLogger } from '../log';
 import { createWatcher } from '../watcher';
-import { keptRef, keepTurnWork, passKeptRef, takeOut, takeOutSteps, TakeOutWithin } from './index';
+import {
+  grantSharedHold,
+  keptRef,
+  keepTurnWork,
+  passKeptRef,
+  takeOut,
+  takeOutSteps,
+  TakeOutWithin,
+} from './index';
 import { leavePassForBoard } from './take-out';
 
 // Workbench spec §5.4: taking a task out of its pass keeps its work at a ref of its own, puts its
@@ -242,6 +250,24 @@ describe('takeOut', () => {
     expect(getTask(w.h.store.db, w.settings.id).passId).toBe(w.opened.pass.id);
     expect(read(w, 'src/settings/new.tsx')).toBe('added in the turn\nand by hand\n');
   });
+
+  it.each([TakeOutWithin.Close, TakeOutWithin.Abandon])(
+    "inside %s, finishes with Your folder off the pass's branch and a shared hold left open",
+    async (within) => {
+      w = await worked();
+      w.startTurn(w.settings);
+      await grantSharedHold(w.deps, { workstreamId: w.runOf(w.settings), area: 'src' });
+      w.write('src/button.ts', 'a shared button\n');
+      w.h.git$('switch', '-q', 'main');
+
+      const out = await takeOutSteps(takeOutDeps(w), { taskId: w.settings.id, within });
+
+      expect(out.tookOut).toBe(true);
+      expect(getTask(w.h.store.db, w.settings.id).passId ?? null).toBeNull();
+      // Nothing is written on a branch the pass does not own.
+      expect(read(w, 'src/button.ts')).toBe('a shared button\n');
+    },
+  );
 
   describe('a restart after each step goes on from the step it reached', () => {
     /**
