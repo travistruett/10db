@@ -11,12 +11,12 @@ import {
 import {
   clearPassNotice,
   findOpenByFoldKey,
-  findOpenPass,
   getBatch,
   getPass,
   getPassProgress,
   getPassPullRequest,
   getProject,
+  listPassesIn,
   passHoldingFolder,
   setPassNotice,
   setStackedOn,
@@ -42,11 +42,16 @@ export const passRetargetKey = (passId: PassId): string => `pass-retarget:${pass
 /** The header notice of a stacked pass about the pass below it. */
 const STACK_NOTICE = 'stack';
 
-/** The pass stacked on this one that is still open or closing: it moves the branch itself. */
+/**
+ * The pass stacked on this one while it still holds the folder: open, closing, or closed and not
+ * yet settled (D24). It moves the branch at its own close, and its pull request is retargeted when
+ * this one merges, whichever of those it is in.
+ */
 export function stackedAbove(db: DbReader, pass: PassDto): PassDto | undefined {
-  const above = findOpenPass(db, pass.projectId);
-  if (above === undefined || above.state === PassState.Abandoning) return undefined;
-  return getPassProgress(db, above.id).stackedOn === pass.id ? above : undefined;
+  for (const state of [PassState.Open, PassState.Closing, PassState.Closed])
+    for (const above of listPassesIn(db, state))
+      if (above.id !== pass.id && getPassProgress(db, above.id).stackedOn === pass.id) return above;
+  return undefined;
 }
 
 /**
@@ -139,12 +144,22 @@ async function takeBase(
   const batch = getBatch(ctx.state.db, above.batchId);
   const branch = batch.branch;
   if (branch === null) return;
+  const before = await ctx.git.branchTip(project.repoPath, branch);
   const merged = await ctx.git.mergeKeepingTree({
     repo: project.repoPath,
     branch,
     theirs: base,
     message: `Merge ${batch.baseBranch}, which holds pass "${below.name}", into ${branch}`,
   });
+  // A stacked pass that has closed left its return branch at its tip: the branch follows the merge,
+  // whose tree is the same, so its realignment still finds it at the tip.
+  if (above.state === PassState.Closed && before !== null && merged.kind === 'merged')
+    await ctx.git.moveBranchCas({
+      repo: project.repoPath,
+      branch: above.returnBranch,
+      to: merged.sha,
+      expect: before,
+    });
   const pushed = await ctx.git.trackingTip(project.repoPath, branch);
   if (pushed !== null && pushed !== merged.sha)
     await pushBranch(ctx, batch, project, branch, signal);
