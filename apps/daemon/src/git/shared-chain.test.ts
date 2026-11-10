@@ -154,10 +154,10 @@ describe('chainCommit', () => {
 });
 
 describe('blobsAt and keepRef', () => {
-  it("reads several paths' blobs in one commit, and keeps a commit at a ref", async () => {
+  it("reads several paths' blobs and modes in one commit, and keeps a commit at a ref", async () => {
     expect(await git.blobsAt(repo.path, start, ['src/shared.ts', 'src/gone.ts'])).toEqual([
-      { path: 'src/gone.ts', blob: null },
-      { path: 'src/shared.ts', blob: hash('shared\n') },
+      { path: 'src/gone.ts', blob: null, mode: null },
+      { path: 'src/shared.ts', blob: hash('shared\n'), mode: '100644' },
     ]);
     const ref = 'refs/10db/passes/pas_1/holds/clm_1';
     await git.keepRef(repo.path, ref, start);
