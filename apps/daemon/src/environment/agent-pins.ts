@@ -19,21 +19,27 @@ export const CLAUDE_CODE_SHA512 =
 export const AgentTool = { Claude: 'claude', Codex: 'codex' } as const;
 export type AgentTool = (typeof AgentTool)[keyof typeof AgentTool];
 
-export interface AgentPin {
-  readonly tool: AgentTool;
-  /** What the builder reads: "Claude Code", "Codex". */
+/** One release 10db fetches, checks against a recorded checksum and runs from its own read-only copy. */
+export interface PinnedRelease {
+  /** The copy's folder name starts with it: `<tool>-<version>-<platform>`. */
+  readonly tool: string;
+  /** What the builder reads: "Claude Code", "Codex", "Chromium for pictures". */
   readonly label: string;
   readonly version: string;
-  /** The tarball's checksum as npm records it: `sha512-` and the base64 digest. */
+  /** The download's checksum as npm records it: `sha512-` and the base64 digest. */
   readonly sha512: string;
   readonly tarballUrl: string;
-  /** The registry document of the newest release, read to tell the builder a newer one is out. */
-  readonly latestUrl: string;
-  /** How much of the tarball is kept: the member to extract and the leading path parts it drops. */
+  /** How much of the download is kept: the member to extract and the leading path parts it drops. */
   readonly member: string;
   readonly strip: number;
   /** The executable inside what is kept. */
   readonly executable: string;
+}
+
+export interface AgentPin extends PinnedRelease {
+  readonly tool: AgentTool;
+  /** The registry document of the newest release, read to tell the builder a newer one is out. */
+  readonly latestUrl: string;
 }
 
 /** The only platform a 10db release runs on (Apple Silicon); npm names its builds `darwin-arm64`. */
