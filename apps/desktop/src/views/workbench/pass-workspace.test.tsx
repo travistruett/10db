@@ -194,10 +194,25 @@ describe('PassWorkspace working line', () => {
     await waitFor(() => {
       expect(screen.queryByRole('dialog')).toBeNull();
     });
+    // A drawer that opens mounts over its transition's timers: with them faked and run out, one that
+    // opened on coming back would be on the page by the assertion.
+    vi.useRealTimers();
+    vi.useFakeTimers({
+      toFake: [
+        'Date',
+        'setTimeout',
+        'clearTimeout',
+        'requestAnimationFrame',
+        'cancelAnimationFrame',
+      ],
+      now: Date.parse(PASS_NOW),
+    });
     rerender(workspace(pages.working.taskId));
-    await screen.findByRole('region', { name: 'Billing' });
-    // An opening drawer shows after its enter transition, so give it the time one takes to appear.
-    await expect(screen.findByRole('dialog', {}, { timeout: 500 })).rejects.toThrow();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(screen.getByRole('region', { name: 'Billing' })).toBeTruthy();
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
   it('draws no working line on a page that is not working', async () => {
