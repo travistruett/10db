@@ -2,6 +2,7 @@ import {
   AbandonStep,
   AreaRole,
   BatchState,
+  CloseStep,
   ConflictError,
   EventType,
   NotFoundError,
@@ -11,17 +12,24 @@ import {
   passHoldsFolder,
   passHoldsTasks,
   TaskStatus,
+  PassGateState,
   type BatchDto,
+  type PassChecksView,
+  type PassCloseRequest,
   type PassDirtEntry,
   type PassDto,
   type PassId,
+  type PassNotice,
+  type PassPullRequestView,
+  type PassSettledHow,
   type ProjectId,
   type TaskDto,
   type TaskId,
 } from '@10db/contracts';
 import { and, asc, eq, inArray, ne, notInArray } from 'drizzle-orm';
+import type { Json } from '../json';
 import * as schema from '../schema';
-import { findUnfinishedBatch, insertBatch, transitionBatch } from './batches';
+import { findUnfinishedBatch, getBatchRow, insertBatch, transitionBatch } from './batches';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
 import { getTask } from './tasks';
@@ -170,6 +178,8 @@ export function insertPass(
     projectId: input.projectId,
     title: input.name,
     baseBranch: input.baseBranch,
+    // A pass's pull request is a review record: it never merges by itself.
+    autoMerge: false,
     pass: { id: input.id, branch: input.branch, baseSha: input.startSha, repo: input.repo },
   });
   ctx.tx
@@ -305,4 +315,250 @@ export function abandonPassAndBatch(ctx: WriteContext, passId: PassId): void {
     entityId: passId,
     data: { projectId: pass.projectId, state: PassState.Abandoned },
   });
+}
+
+// Workbench spec §5.3, §5.4, §8.3, §11, D21, D22, D24: what a pass's close, its pull request and its
+// header keep on its row. Every write appends `pass.changed`; a close's writes each hold only while the
+// pass is still closing, and answer whether they wrote, so an Abandon that took the pass over stops
+// the close at its next write.
+
+/** What a pass's row holds for its close, beside `PassDto`. */
+export interface PassProgress {
+  /** The highest shared-change number the branch has landed or passed over; 0 for none. */
+  readonly sharedLanded: number;
+  readonly closeStep: CloseStep | null;
+  readonly closePlan: PassCloseRequest | null;
+  readonly stackedOn: PassId | null;
+  readonly closedAt: string | null;
+  readonly settledAt: string | null;
+  readonly reviewedSha: string | null;
+  readonly notices: readonly PassNotice[];
+}
+
+export function getPassProgress(db: DbReader, passId: PassId): PassProgress {
+  const row = db
+    .select({
+      sharedLanded: schema.passes.sharedLanded,
+      closeStep: schema.passes.closeStep,
+      closePlan: schema.passes.closePlan,
+      stackedOn: schema.passes.stackedOn,
+      closedAt: schema.passes.closedAt,
+      settledAt: schema.passes.settledAt,
+      reviewedSha: schema.passes.reviewedSha,
+      notices: schema.passes.notices,
+    })
+    .from(schema.passes)
+    .where(eq(schema.passes.id, passId))
+    .get();
+  if (!row) throw new NotFoundError('pass', passId);
+  return row;
+}
+
+function emitPass(ctx: WriteContext, pass: PassDto, data: Record<string, Json>): void {
+  ctx.emit({
+    type: EventType.PassChanged,
+    entityType: 'pass',
+    entityId: pass.id,
+    data: { projectId: pass.projectId, ...data },
+  });
+}
+
+/** Updates the pass only while it is closing; answers whether it did. */
+function whileClosing(
+  ctx: WriteContext,
+  passId: PassId,
+  set: Partial<typeof schema.passes.$inferInsert>,
+): boolean {
+  const written = ctx.tx
+    .update(schema.passes)
+    .set({ ...set, updatedAt: ctx.now })
+    .where(and(eq(schema.passes.id, passId), eq(schema.passes.state, PassState.Closing)))
+    .run();
+  return written.changes > 0;
+}
+
+/**
+ * Close Pass, confirmed (spec §5.4, D25): the open pass becomes `CLOSING` with the lists the builder
+ * confirmed as its plan, step 1 done. Refused for a pass that is not open.
+ */
+export function setClosePlan(ctx: WriteContext, passId: PassId, plan: PassCloseRequest): void {
+  const pass = getPass(ctx.tx, passId);
+  if (pass.state !== PassState.Open)
+    throw new ConflictError(`Pass "${pass.name}" is ${pass.state.toLowerCase()}, not open`);
+  ctx.tx
+    .update(schema.passes)
+    .set({
+      state: PassState.Closing,
+      closeStep: CloseStep.Confirmed,
+      closePlan: plan,
+      updatedAt: ctx.now,
+    })
+    .where(eq(schema.passes.id, passId))
+    .run();
+  emitPass(ctx, pass, { state: PassState.Closing, closeStep: CloseStep.Confirmed });
+}
+
+/**
+ * Records a finished step of the close while the pass is closing, and answers whether it did. A step
+ * is never recorded below the last one.
+ */
+export function setCloseStep(ctx: WriteContext, passId: PassId, step: CloseStep): boolean {
+  const pass = getPass(ctx.tx, passId);
+  const last = getPassProgress(ctx.tx, passId).closeStep;
+  if (pass.state === PassState.Closing && last !== null && step < last)
+    throw new ConflictError(
+      `Pass "${pass.name}" has finished step ${String(last)} of its close, past step ${String(step)}`,
+    );
+  if (!whileClosing(ctx, passId, { closeStep: step })) return false;
+  emitPass(ctx, pass, { closeStep: step });
+  return true;
+}
+
+/**
+ * A close's gate failed (spec §5.4): the closing pass is open again, with no close step, and answers
+ * whether it was closing.
+ */
+export function reopenClosingPass(ctx: WriteContext, passId: PassId): boolean {
+  const pass = getPass(ctx.tx, passId);
+  if (!whileClosing(ctx, passId, { state: PassState.Open, closeStep: null })) return false;
+  emitPass(ctx, pass, { state: PassState.Open });
+  return true;
+}
+
+/**
+ * The close's last step: the closing pass is `CLOSED`, or `SETTLED` at once when nothing is left to
+ * wait for (a `local` project, or no `origin` or `gh`). Answers whether the pass was closing.
+ */
+export function closePass(
+  ctx: WriteContext,
+  passId: PassId,
+  input: { readonly settled: boolean },
+): boolean {
+  const pass = getPass(ctx.tx, passId);
+  const state = input.settled ? PassState.Settled : PassState.Closed;
+  const wrote = whileClosing(ctx, passId, {
+    state,
+    closeStep: CloseStep.Closed,
+    closedAt: ctx.now,
+    ...(input.settled ? { settledAt: ctx.now } : {}),
+  });
+  if (!wrote) return false;
+  emitPass(ctx, pass, { state, closeStep: CloseStep.Closed });
+  ctx.emit({
+    type: EventType.PassClosed,
+    entityType: 'pass',
+    entityId: passId,
+    data: { passId, settled: input.settled },
+  });
+  if (input.settled)
+    ctx.emit({
+      type: EventType.PassSettled,
+      entityType: 'pass',
+      entityId: passId,
+      data: { passId, how: 'local' },
+    });
+  return true;
+}
+
+/** A closed pass settles (D22): realigned with the base, or moved by the builder. Answers whether it was closed. */
+export function settlePass(ctx: WriteContext, passId: PassId, how: PassSettledHow): boolean {
+  const pass = getPass(ctx.tx, passId);
+  const written = ctx.tx
+    .update(schema.passes)
+    .set({ state: PassState.Settled, settledAt: ctx.now, updatedAt: ctx.now })
+    .where(and(eq(schema.passes.id, passId), eq(schema.passes.state, PassState.Closed)))
+    .run();
+  if (written.changes === 0) return false;
+  emitPass(ctx, pass, { state: PassState.Settled });
+  ctx.emit({
+    type: EventType.PassSettled,
+    entityType: 'pass',
+    entityId: passId,
+    data: { passId, how },
+  });
+  return true;
+}
+
+function setPassFields(
+  ctx: WriteContext,
+  passId: PassId,
+  set: Partial<typeof schema.passes.$inferInsert>,
+  data: Record<string, Json>,
+): void {
+  const pass = getPass(ctx.tx, passId);
+  ctx.tx
+    .update(schema.passes)
+    .set({ ...set, updatedAt: ctx.now })
+    .where(eq(schema.passes.id, passId))
+    .run();
+  emitPass(ctx, pass, data);
+}
+
+/** The closed, unsettled pass this one was opened on (D24), or null once it no longer stacks. */
+export function setStackedOn(ctx: WriteContext, passId: PassId, on: PassId | null): void {
+  setPassFields(ctx, passId, { stackedOn: on }, { stackedOn: on });
+}
+
+/** The tip the pass's one review read (D21), so an unchanged tip is not reviewed again. */
+export function setReviewedSha(ctx: WriteContext, passId: PassId, sha: string): void {
+  setPassFields(ctx, passId, { reviewedSha: sha }, { reviewedSha: sha });
+}
+
+/** Adds a notice to the pass's header, replacing the one with the same id. */
+export function setPassNotice(ctx: WriteContext, passId: PassId, notice: PassNotice): void {
+  const others = getPassProgress(ctx.tx, passId).notices.filter((n) => n.id !== notice.id);
+  setPassFields(ctx, passId, { notices: [...others, notice] }, { notice: notice.id });
+}
+
+/** Removes the header's notice with this id; answers whether there was one. */
+export function clearPassNotice(ctx: WriteContext, passId: PassId, id: string): boolean {
+  const notices = getPassProgress(ctx.tx, passId).notices;
+  const rest = notices.filter((n) => n.id !== id);
+  if (rest.length === notices.length) return false;
+  setPassFields(ctx, passId, { notices: rest }, { noticeCleared: id });
+  return true;
+}
+
+/** Records the pass's pull request on its batch: its url, and whether it is a draft, as made or read. */
+export function setPassPullRequest(
+  ctx: WriteContext,
+  passId: PassId,
+  pr: { readonly url: string; readonly draft: boolean },
+): void {
+  const pass = getPass(ctx.tx, passId);
+  ctx.tx
+    .update(schema.batches)
+    .set({ prUrl: pr.url, prDraft: pr.draft, updatedAt: ctx.now })
+    .where(eq(schema.batches.id, pass.batchId))
+    .run();
+  emitPass(ctx, pass, { prUrl: pr.url, draft: pr.draft });
+}
+
+/** The pass's pull request as last made or read, or null before it has one. */
+export function getPassPullRequest(db: DbReader, passId: PassId): PassPullRequestView | null {
+  const row = getBatchRow(db, getPass(db, passId).batchId);
+  if (row.prUrl === null) return null;
+  return {
+    url: row.prUrl,
+    draft: row.prDraft,
+    state: row.prState,
+    failingChecks: row.prFailingChecks ?? [],
+  };
+}
+
+/** The gate on the pass's tip, as its batch row holds it, and the tip its review last read. */
+export function getPassChecks(db: DbReader, passId: PassId): PassChecksView {
+  const row = getBatchRow(db, getPass(db, passId).batchId);
+  const state =
+    row.gatePid !== null
+      ? PassGateState.Running
+      : row.gateExitCode === null
+        ? PassGateState.NotRun
+        : row.gateExitCode === 0
+          ? PassGateState.Passed
+          : PassGateState.Failed;
+  return {
+    gate: { state, logPath: row.gateLogPath },
+    review: { reviewedSha: getPassProgress(db, passId).reviewedSha },
+  };
 }

@@ -10,6 +10,7 @@ import {
   type PassDto,
   type PassId,
   type PassPageDto,
+  type PassSignOffWaitDto,
   type PassTurnDto,
   type PassViewDto,
   type TaskDto,
@@ -18,11 +19,18 @@ import {
 import {
   getInboxItem,
   getPass,
+  getPassChecks,
+  getPassProgress,
+  getPassPullRequest,
   getProject,
+  getTask,
   getWorkstream,
   listPassTasks,
   listPassTurns,
+  listSharedChanges,
+  listSignOffWaits,
   listTaskThreadRows,
+  openHolds,
   type DbReader,
 } from '@10db/db';
 
@@ -43,11 +51,32 @@ function failureOf(db: DbReader, run: WorkstreamDto | null): PassPageDto['failur
   return { failureKind: run.failureKind, retryItemId: item.id };
 }
 
+/**
+ * Where the page is in its sign-off, as its rows say: waiting on another page's hold, or done once its
+ * run is. A sign-off landing now is a job's, not a row's, so the view never reads it as such.
+ */
+function signOffOf(
+  db: DbReader,
+  run: WorkstreamDto | null,
+  wait: PassSignOffWaitDto | undefined,
+): Pick<PassPageDto, 'signOff' | 'waitsFor'> {
+  if (wait !== undefined)
+    return {
+      signOff: PassSignOff.Waiting,
+      waitsFor: { taskId: wait.waitsForTaskId, title: getTask(db, wait.waitsForTaskId).title },
+    };
+  return {
+    signOff: run?.state === WorkstreamState.Done ? PassSignOff.Done : PassSignOff.None,
+    waitsFor: null,
+  };
+}
+
 function pageView(
   db: DbReader,
   pass: PassDto,
   areas: readonly AreaDef[],
   turns: readonly PassTurnDto[],
+  waits: readonly PassSignOffWaitDto[],
   task: TaskDto,
 ): PassPageDto {
   const area = pageOf(areas, task);
@@ -78,21 +107,27 @@ function pageView(
           },
     pausedUntil: run?.state === WorkstreamState.PausedLimit ? run.pausedUntil : null,
     failure: failureOf(db, run),
-    signOff: PassSignOff.None,
+    ...signOffOf(
+      db,
+      run,
+      waits.find((w) => w.taskId === task.id),
+    ),
   };
 }
 
 /**
- * The pass, a page for each task in it now with its latest turn in this pass, and the timing of every
- * turn of the pass, a task taken out of it included. Reads only.
+ * The pass, a page for each task in it now with its latest turn in this pass, the timing of every turn
+ * of the pass, a task taken out of it included, and what its close reads. Reads only.
  */
 export function passView(db: DbReader, passId: PassId): PassViewDto {
   const pass = getPass(db, passId);
   const { areas } = getProject(db, pass.projectId);
   const turns = listPassTurns(db, passId);
+  const waits = listSignOffWaits(db, passId);
+  const progress = getPassProgress(db, passId);
   return {
     pass,
-    pages: listPassTasks(db, passId).map((task) => pageView(db, pass, areas, turns, task)),
+    pages: listPassTasks(db, passId).map((task) => pageView(db, pass, areas, turns, waits, task)),
     turns: turns.map((t) => ({
       taskId: t.taskId,
       seq: t.seq,
@@ -102,5 +137,13 @@ export function passView(db: DbReader, passId: PassId): PassViewDto {
       openedAt: t.openedAt,
       answeredAt: t.answeredAt,
     })),
+    holds: openHolds(db, passId),
+    sharedChanges: listSharedChanges(db, passId),
+    signOffWaits: waits,
+    pullRequest: getPassPullRequest(db, passId),
+    checks: getPassChecks(db, passId),
+    closeStep: progress.closeStep,
+    stackedOn: progress.stackedOn,
+    notices: [...progress.notices],
   };
 }

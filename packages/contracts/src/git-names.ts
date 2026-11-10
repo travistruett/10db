@@ -66,3 +66,6 @@ function capSlug(slug: string): string {
   const boundary = slug.slice(0, MAX_SLUG + 1).lastIndexOf('-');
   return boundary > 0 ? slug.slice(0, boundary) : slug.slice(0, MAX_SLUG);
 }
+
+/** A git object name: a commit, tree or blob, by SHA-1 or SHA-256. */
+export const GitObjectName = z.string().regex(/^[0-9a-f]{40}([0-9a-f]{24})?$/);

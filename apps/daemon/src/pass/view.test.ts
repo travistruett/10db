@@ -12,7 +12,14 @@ import {
   type WorkstreamId,
 } from '@10db/contracts';
 import {
+  acquireClaims,
   createTestStore,
+  insertHold,
+  insertSignOffWait,
+  setClosePlan,
+  setPassNotice,
+  setPassPullRequest,
+  upsertSharedChange,
   endPassTurn,
   insertBuilderMessage,
   insertInboxItem,
@@ -47,6 +54,7 @@ beforeEach(() => {
       { name: 'people', globs: ['src/people/**'], role: 'page', route: '/people' },
       { name: 'billing', globs: ['src/billing/**'], role: 'page' },
       { name: 'home', globs: ['src/home/**'], role: 'page', route: '/' },
+      { name: 'shared-ui', globs: ['src/ui/**'], role: 'shared' },
     ],
   });
 });
@@ -168,6 +176,7 @@ describe('the view of a pass', () => {
       pausedUntil: null,
       failure: null,
       signOff: 'none',
+      waitsFor: null,
     });
     expect(readyPage).toMatchObject({
       area: 'people',
@@ -204,5 +213,82 @@ describe('the view of a pass', () => {
         answeredAt: null,
       })),
     );
+  });
+});
+
+describe("the view of a pass's close", () => {
+  it('names the page a sign-off waits for, marks a signed-off page done, and reads the chain, pull request, step and notices', () => {
+    const settings = task('Settings: UI work', 'settings');
+    const people = task('People: UI work', 'people');
+    const home = task('Home: UI work', 'home');
+    const { pass, runs } = openPass([settings, people, home]);
+    const [, peopleRun, homeRun] = runs;
+    if (!peopleRun || !homeRun) throw new Error('a run is missing');
+    const hold = store.write((ctx) => {
+      const granted = acquireClaims(ctx, {
+        projectId: project.id,
+        workstreamId: peopleRun,
+        requests: [{ kind: 'area', name: 'shared-ui' }],
+        leaseExpiresAt: '2026-11-09T13:00:00.000Z',
+      });
+      const claim = granted.ok ? granted.claims[0] : undefined;
+      if (claim === undefined) throw new Error('claim not granted');
+      const made = insertHold(ctx, {
+        claimId: claim.id,
+        passId: pass.id,
+        taskId: people,
+        workstreamId: peopleRun,
+        area: 'shared-ui',
+        recordSha: 'b'.repeat(40),
+        record: [],
+      });
+      upsertSharedChange(ctx, {
+        passId: pass.id,
+        seq: made.seq,
+        sha: 'c'.repeat(40),
+        files: [{ path: 'src/ui/Button.tsx', blob: 'd'.repeat(40) }],
+        dirtyKept: false,
+      });
+      insertSignOffWait(ctx, { taskId: settings, passId: pass.id, waitsFor: claim.id });
+      for (const to of [S.Starting, S.Running, S.Verifying, S.Done])
+        transitionWorkstream(ctx, homeRun, { to, fence: null });
+      setPassPullRequest(ctx, pass.id, { url: 'https://github.com/o/r/pull/3', draft: true });
+      setPassNotice(ctx, pass.id, {
+        id: 'checks',
+        kind: 'checks',
+        text: 'build fails',
+        sendable: true,
+        cardId: null,
+        at: clock.toISOString(),
+      });
+      setClosePlan(ctx, pass.id, { token: 't', pages: [], files: [], shared: [] });
+      return made;
+    }).value;
+
+    const view = PassViewDto.parse(passView(store.db, pass.id));
+
+    expect(view.pages.map((p) => [p.taskId, p.signOff, p.waitsFor])).toEqual([
+      [settings, 'waiting', { taskId: people, title: 'People: UI work' }],
+      [people, 'none', null],
+      [home, 'done', null],
+    ]);
+    expect(view.holds).toEqual([hold]);
+    expect(view.sharedChanges).toMatchObject([
+      { seq: hold.seq, taskId: people, paths: ['src/ui/Button.tsx'], landedSha: null },
+    ]);
+    expect(view.signOffWaits).toMatchObject([{ taskId: settings, waitsForTaskId: people }]);
+    expect(view.pullRequest).toEqual({
+      url: 'https://github.com/o/r/pull/3',
+      draft: true,
+      state: null,
+      failingChecks: [],
+    });
+    expect(view.checks).toEqual({
+      gate: { state: 'not_run', logPath: null },
+      review: { reviewedSha: null },
+    });
+    expect(view.closeStep).toBe(1);
+    expect(view.stackedOn).toBeNull();
+    expect(view.notices.map((n) => n.text)).toEqual(['build fails']);
   });
 });
