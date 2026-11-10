@@ -11,6 +11,7 @@ import {
   closePass,
   getTask,
   insertSession,
+  insertTaskPageReports,
   listTaskScreens,
   listTaskThread,
   patchProject,
@@ -158,6 +159,33 @@ describe('pictures of a pass', () => {
     await ended(4);
     expect(cam.shots).toHaveLength(4);
     expect(kinds(w.settings)).toEqual(['before', 'turn1']);
+  });
+
+  it('also shoots the routes the agent reported in the turn', async () => {
+    await world();
+    start();
+    await ended(2);
+    const turn = w.startTurn(w.settings);
+    w.h.state.write((ctx) => {
+      insertTaskPageReports(ctx, {
+        taskId: w.settings.id,
+        workstreamId: w.runOf(w.settings),
+        turnId: turn.id,
+        routes: ['/settings/42'],
+      });
+    });
+    w.endTurn(turn);
+    w.h.state.write((ctx) => {
+      setPassTurnKept(ctx, turn.id, {
+        keptSha: 'a'.repeat(40),
+        keptBaseSha: 'b'.repeat(40),
+        sharedSeq: null,
+      });
+      settlePassTurn(ctx, turn.id);
+    });
+    await ended(3);
+    expect(cam.shots.slice(2).map((s) => s.route)).toEqual(['/settings', '/settings/42']);
+    expect(screensOf(w.settings).map((s) => `${s.kind} ${s.route}`)).toContain('turn /settings/42');
   });
 
   it("drops a turn picture that loads when the page's next turn starts", async () => {

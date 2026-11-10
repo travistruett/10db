@@ -369,6 +369,15 @@ describe('MCP tool inputs', () => {
     expect(FollowUpInput.shape.description.description).toMatch(/what you saw/i);
   });
 
+  it('takes one to four routes on report_pages, each judged by the tool', () => {
+    const call = (routes: string[]) =>
+      McpToolInputs.report_pages.safeParse({ opId: 'op-00000001', routes }).success;
+    expect(call([])).toBe(false);
+    expect(call(['/a', '/b', '/c', '/d'])).toBe(true);
+    expect(call(['/a', '/b', '/c', '/d', '/e'])).toBe(false);
+    expect(call(['http://elsewhere.test/'])).toBe(true);
+  });
+
   it('requires a next action in the handoff', () => {
     const handoff = {
       objective: { task: 't', acceptanceCriteria: ['a'], nonGoals: [] },

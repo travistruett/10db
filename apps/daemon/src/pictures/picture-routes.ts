@@ -26,23 +26,27 @@ type RoutedProject = Pick<ProjectDto, 'appUrl' | 'screens'> & {
 };
 
 /** A route the browser can load as it stands: a path with no parameter segment (`[id]`, `:id`). */
-const loads = (route: string): boolean =>
+export const pageRouteLoads = (route: string): boolean =>
   PageRoute.safeParse(route).success &&
   !route
     .split('?')[0]
     ?.split('/')
     .some((segment) => segment.includes('[') || segment.startsWith(':'));
 
-/** The routes of the page areas the task names that load, each in every viewport and theme. */
+/**
+ * The routes of the page areas the task names that load, then the routes its agent reported for these
+ * pictures (`report_pages`), each once, in every viewport and theme.
+ */
 export function pictureRoutes(
   project: RoutedProject,
   task: Pick<TaskDto, 'areas'>,
+  reported: readonly string[] = [],
 ): PictureTarget[] {
   if (project.appUrl === null) return [];
   const routes = project.areas
     .filter((a) => a.role === AreaRole.Page && task.areas.includes(a.name))
-    .flatMap((a) => (a.route !== undefined && loads(a.route) ? [a.route] : []));
-  return [...new Set(routes)].flatMap((route) =>
+    .flatMap((a) => (a.route !== undefined && pageRouteLoads(a.route) ? [a.route] : []));
+  return [...new Set([...routes, ...reported.filter(pageRouteLoads)])].flatMap((route) =>
     project.screens.viewports.flatMap((viewport) =>
       project.screens.themes.map((theme) => ({ route, viewport, theme })),
     ),
@@ -60,16 +64,22 @@ export function pageRoute(
   const page = task.areas
     .map((name) => project.areas.find((a) => a.name === name))
     .find((a) => a?.role === AreaRole.Page);
-  return page?.route !== undefined && loads(page.route) ? page.route : null;
+  return page?.route !== undefined && pageRouteLoads(page.route) ? page.route : null;
 }
 
-/** Whether pictures are taken of the task: a page of a pass, or a Your-folder task naming a routed page. */
+/**
+ * Whether pictures are taken of the task: a page of a pass, or a Your-folder task naming a routed page
+ * or reporting a route.
+ */
 export function takesPictures(
   project: RoutedProject,
   task: Pick<TaskDto, 'areas' | 'passId' | 'workspaceMode'>,
+  reported: readonly string[] = [],
 ): boolean {
   if (task.passId != null) return true;
-  return task.workspaceMode === WorkspaceMode.Shared && pictureRoutes(project, task).length > 0;
+  return (
+    task.workspaceMode === WorkspaceMode.Shared && pictureRoutes(project, task, reported).length > 0
+  );
 }
 
 /**

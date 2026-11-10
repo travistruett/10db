@@ -265,6 +265,7 @@ import {
   resumedSessionOf,
   withUndelivered,
 } from './next-action';
+import { takesPictures } from '../pictures';
 import { threadInlineBytes } from './thread-pictures';
 
 /**
@@ -2096,6 +2097,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     const prompt = buildSessionPrompt({
       provider,
       inPass: pass !== null,
+      pictures: project.appUrl !== null && takesPictures(project, task),
       sandboxed: Boolean(opts.laneSandbox),
       denials: denialsToTell(),
       answeredCards: answeredCardsForTask(db, row.taskId),

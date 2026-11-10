@@ -5,3 +5,4 @@ export { createBrowserHost } from './browser-host';
 export { launchChromium } from './playwright';
 export { createPlaywrightCamera } from './playwright-camera';
 export { PREVIEW_NOTICE } from './preview-marks';
+export { pageRouteLoads, takesPictures } from './picture-routes';

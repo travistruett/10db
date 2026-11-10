@@ -76,6 +76,11 @@ export interface PromptInput {
    */
   readonly inPass?: boolean;
   /**
+   * 10db takes pictures of the task's pages for the builder (Workbench spec §10): a pass page, or a
+   * task in Your folder naming a routed page, on a project with an app address.
+   */
+  readonly pictures?: boolean;
+  /**
    * For a `feedback` action: the builder's message as the session reads it, and the thread's digest a
    * session with no conversation to resume starts from (null for one that resumes it).
    */
@@ -312,6 +317,10 @@ const PASS_RULES = [
   "The builder's messages each carry an id, and 10db may send one again: the same id is the same message, so act on it once.",
   HAND_OFF_RULE,
 ];
+
+/** Told to a session whose pages 10db pictures for the builder (Workbench spec §10 "Which pages"). */
+const PICTURES_RULE =
+  "10db takes pictures of your task's pages for the builder, by their routes. When a page you changed has no route of its own here (a route with a parameter, or a change only in shared code), name it with report_pages, such as /people/42: at most four routes a turn.";
 
 function readOnlyRules(role: StepRole): string[] {
   return [
@@ -640,9 +649,10 @@ export function buildSessionPrompt(input: PromptInput): string {
       withSandboxRules(
         input.step.tools === ToolAccess.ReadOnly
           ? readOnlyRules(input.step.role)
-          : input.inPass === true
-            ? PASS_RULES
-            : RULES,
+          : [
+              ...(input.inPass === true ? PASS_RULES : RULES),
+              ...(input.pictures === true ? [PICTURES_RULE] : []),
+            ],
         input.sandboxed === true,
         input.provider,
       ),

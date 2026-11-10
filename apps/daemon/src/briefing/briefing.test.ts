@@ -197,6 +197,19 @@ describe('buildSessionPrompt', () => {
     });
   });
 
+  it('names report_pages to a pass page and a pictured task in Your folder, and to no other', () => {
+    const tool = 'report_pages';
+    const pictured = (inPass: boolean) =>
+      buildSessionPrompt({ ...base, action: { kind: 'start' }, inPass, pictures: true });
+    expect(pictured(true)).toContain(tool);
+    expect(pictured(false)).toContain(tool);
+    expect(pictured(false)).toContain('a route with a parameter, or a change only in shared code');
+    expect(buildSessionPrompt({ ...base, action: { kind: 'start' }, inPass: true })).not.toContain(
+      tool,
+    );
+    expect(buildSessionPrompt({ ...base, action: { kind: 'start' } })).not.toContain(tool);
+  });
+
   it('names the task on its own line, lists criteria and claims, and states the rules', () => {
     const prompt = buildSessionPrompt({ ...base, action: { kind: 'start' } });
     expect(prompt).toContain('Task: Add the badge\n');

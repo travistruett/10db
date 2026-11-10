@@ -18,6 +18,7 @@ import {
   StepRole,
   ToolAccess,
   Urgency,
+  WorkspaceMode,
   type McpToolInputs,
   type SessionId,
   type TaskId,
@@ -43,8 +44,10 @@ import {
   insertProposal,
   insertSource,
   insertSystemNotice,
+  insertTaskPageReports,
   insertToolOp,
   listEvidence,
+  listTaskPageReports,
   listToolOps,
   listStepToolOpResults,
   openPassTurn,
@@ -98,6 +101,7 @@ import {
   type ClaimResult,
   type SharedGrant,
 } from './claim-wait';
+import { judgeReportedRoutes } from './report-pages';
 import type { ShapeToolsFor } from './shape-tools';
 
 export interface McpDeps {
@@ -175,6 +179,8 @@ export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   commit:
     'Commit the named paths (and only those) under the repository lock. Returns the commit SHA. Retry with the same opId if unsure it completed.',
   record_evidence: 'Attach verification output: a command you ran, its exit code and a summary.',
+  report_pages:
+    "Name the app's routes this turn's pictures should load, beside the page areas your task names: a route with a parameter (/people/42), or the pages a change only in shared code shows. Each is a path on the project's app address; at most four a turn (a task outside a Workbench pass: a run). 10db only takes pictures for the builder; nothing is sent back to you.",
   write_handoff:
     'Write the six-part handoff when 10db asks you to hand off, or when you must stop with work left: name that work under progress.notDone. 10db adds the git facts. End your turn after calling it. Never call it to finish a step: ending your turn finishes the step, and a handoff that names nothing left ends it too.',
   complete_step:
@@ -867,6 +873,40 @@ export function createToolHandlers(
             commitShas: [],
           });
           return record('record_evidence', input.opId, { evidenceId: evidence.id }, ctx);
+        }),
+      );
+    },
+
+    report_pages: (input) => {
+      const done = prior(input.opId, McpToolName.ReportPages);
+      if (done !== undefined) return Promise.resolve(McpToolOutputs.report_pages.parse(done));
+      return Promise.resolve(
+        deps.state.write((ctx) => {
+          const { project, task } = context();
+          const inPass = passHoldingTask(ctx.tx, task) !== undefined;
+          const turnId = inPass ? (openPassTurn(ctx.tx, task.id)?.id ?? null) : null;
+          const kept = (
+            turnId !== null
+              ? listTaskPageReports(ctx.tx, { taskId: task.id, turnId })
+              : listTaskPageReports(ctx.tx, { taskId: task.id, workstreamId })
+          ).map((r) => r.route);
+          const judged = judgeReportedRoutes({
+            appUrl: project.appUrl,
+            refusal:
+              inPass || task.workspaceMode === WorkspaceMode.Shared
+                ? null
+                : 'Pictures are taken only of tasks in Your folder; this task runs in a separate copy.',
+            per: inPass ? 'turn' : 'run',
+            kept,
+            routes: input.routes,
+          });
+          insertTaskPageReports(ctx, {
+            taskId: task.id,
+            workstreamId,
+            turnId,
+            routes: judged.accepted.filter((route) => !kept.includes(route)),
+          });
+          return record('report_pages', input.opId, judged, ctx);
         }),
       );
     },

@@ -40,6 +40,7 @@ import {
   listTasks,
   listTaskScreens,
   listTaskThread,
+  listTaskPageReports,
   listTaskToolCalls,
   listTaskTurns,
   taskStartFacts,
@@ -215,10 +216,22 @@ export function startPictures(deps: PicturesDeps): Pictures {
     ask({ kind: ScreenKind.Before, projectId: project.id, passId, taskId: task.id, turnId: null });
   }
 
+  /** The routes the task's agent reported for a picture of `kind`: its turn's, or its run's for an after. */
+  function reportedFor(kind: ScreenKind, task: TaskDto, turnId: PassTurnId | null): string[] {
+    const rows =
+      kind === ScreenKind.Turn && turnId !== null
+        ? listTaskPageReports(db, { taskId: task.id, turnId })
+        : kind === ScreenKind.After && task.workstreamId !== null
+          ? listTaskPageReports(db, { taskId: task.id, workstreamId: task.workstreamId })
+          : [];
+    return rows.map((r) => r.route);
+  }
+
   function askAfter(task: TaskDto, passId: PassId | null): void {
     const project = getProject(db, task.projectId);
-    if (project.appUrl === null || !takesPictures(project, task)) return;
-    if (pictureRoutes(project, task).length === 0) return;
+    const reported = reportedFor(ScreenKind.After, task, null);
+    if (project.appUrl === null || !takesPictures(project, task, reported)) return;
+    if (pictureRoutes(project, task, reported).length === 0) return;
     ask({ kind: ScreenKind.After, projectId: project.id, passId, taskId: task.id, turnId: null });
   }
 
@@ -278,7 +291,7 @@ export function startPictures(deps: PicturesDeps): Pictures {
       !beforeAllowed({ inPass, ...taskStartFacts(db, task.id) })
     )
       return 0;
-    const targets = pictureRoutes(project, task);
+    const targets = pictureRoutes(project, task, reportedFor(request.kind, task, request.turnId));
     if (targets.length === 0) return 0;
     let storageState = readStorageState(deps.dataDir, project.id);
     if (storageState === null && project.devLoginCommand !== null) {

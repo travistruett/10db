@@ -32,6 +32,12 @@ const OpId = z
   .regex(/^[A-Za-z0-9._:-]{8,100}$/)
   .describe('A unique ID for this call. Reuse it only when retrying the same call.');
 
+/**
+ * How many routes a page's turn, or an ordinary task's run, may name for its pictures with
+ * `report_pages` (Workbench spec §10).
+ */
+export const REPORTED_ROUTES_MAX = 4;
+
 export const McpToolName = {
   GetContext: 'get_context',
   FindKnowledge: 'find_knowledge',
@@ -46,6 +52,7 @@ export const McpToolName = {
   RecordEvidence: 'record_evidence',
   WriteHandoff: 'write_handoff',
   CompleteStep: 'complete_step',
+  ReportPages: 'report_pages',
 } as const;
 export type McpToolName = (typeof McpToolName)[keyof typeof McpToolName];
 
@@ -227,6 +234,16 @@ export const McpToolInputs = {
         'Review, plan review and QA steps only: real problems that should not reject the work (on a later round, ones that are new and not caused by the fix). 10db files each as a task in the Icebox column and names it in your result.',
       ),
   }),
+  report_pages: z.object({
+    opId: OpId,
+    routes: z
+      .array(z.string().min(1).max(512))
+      .min(1)
+      .max(REPORTED_ROUTES_MAX)
+      .describe(
+        "Paths on the app, such as /people/42 or /people?tab=all: each loaded for this turn's pictures.",
+      ),
+  }),
 } as const satisfies Record<McpToolName, z.ZodType>;
 
 export const McpToolOutputs = {
@@ -284,5 +301,10 @@ export const McpToolOutputs = {
     instruction: z.string(),
     /** The tasks filed from `followUps`; absent in a result recorded before there were any. */
     followUps: z.array(z.object({ taskId: TaskId, title: z.string() })).default([]),
+  }),
+  report_pages: z.object({
+    /** The routes kept for this turn's (or this run's) pictures. */
+    accepted: z.array(z.string()),
+    refused: z.array(z.object({ route: z.string(), reason: z.string() })),
   }),
 } as const satisfies Record<McpToolName, z.ZodType>;

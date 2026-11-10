@@ -42,6 +42,17 @@ describe('pictureRoutes', () => {
     ]);
   });
 
+  it('adds the routes the agent reported, once each, after the page areas', () => {
+    expect(
+      pictureRoutes(
+        { ...project, screens: { ...project.screens, viewports: [{ width: 1440, height: 900 }] } },
+        { areas: ['people'] },
+        ['/people/42', '/people', '/people/42'],
+      ).map((t) => t.route),
+    ).toEqual(['/people', '/people/42']);
+    expect(pictureRoutes({ ...project, appUrl: null }, { areas: [] }, ['/people/42'])).toEqual([]);
+  });
+
   it('shoots nothing for a project with no app address, or a task with no page route', () => {
     expect(pictureRoutes({ ...project, appUrl: null }, { areas: ['people'] })).toEqual([]);
     expect(pictureRoutes(project, { areas: ['ui', 'person'] })).toEqual([]);
@@ -66,12 +77,18 @@ describe('takesPictures', () => {
       takes: false,
     },
     {
+      name: 'a Your-folder task naming shared code only that reported a route',
+      task: { areas: ['ui'], passId: null, workspaceMode: 'shared' as const },
+      reported: ['/people/42'],
+      takes: true,
+    },
+    {
       name: 'a task in a separate copy',
       task: { areas: ['people'], passId: null, workspaceMode: 'worktree' as const },
       takes: false,
     },
-  ])('$name', ({ task, takes }) => {
-    expect(takesPictures(project, task)).toBe(takes);
+  ])('$name', ({ task, reported = [], takes }) => {
+    expect(takesPictures(project, task, reported)).toBe(takes);
   });
 });
 
