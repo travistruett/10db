@@ -149,6 +149,24 @@ describe('a take-out that drops a shared change', () => {
     expect(getTask(w.h.store.db, w.settings.id).passId).toBeNull();
   });
 
+  it('keeps every hold the page still had open before it leaves, kept on the chain', async () => {
+    w = await openPassWorld();
+    w.startTurn(w.settings);
+    await grantSharedHold(w.deps, { workstreamId: w.runOf(w.settings), area: 'src' });
+    w.write('src/button.ts', 'a button\n');
+
+    await takeOut(
+      { ...w.deps, stopLane: () => Promise.resolve() },
+      { taskId: w.settings.id, within: TakeOutWithin.Alone },
+    );
+
+    expect(openHolds(w.h.store.db, w.opened.pass.id)).toEqual([]);
+    expect(listSharedChanges(w.h.store.db, w.opened.pass.id)).toMatchObject([
+      { seq: 1, paths: ['src/button.ts'], droppedBy: null },
+    ]);
+    expect(read('src/button.ts')).toBe('a button\n');
+  });
+
   it('keeps a change whose file changed since it was chosen, and says why', async () => {
     w = await openPassWorld();
     const seq = await sharedTurn(w.settings, () => {
