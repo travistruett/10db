@@ -20,6 +20,7 @@ import {
   hasTaskScreen,
   insertBuilderMessage,
   insertSession,
+  listTaskCodexStarts,
   listTaskToolCalls,
   taskStartFacts,
   insertPass,
@@ -310,6 +311,26 @@ describe('what the before rule reads', () => {
       { tool: 'Read', at: read },
       { tool: 'Write', at: write },
     ]);
+  });
+
+  it("lists when the task's Codex sessions started, and none of its Claude sessions", () => {
+    const start = (provider: 'claude' | 'codex') => {
+      later();
+      store.write((ctx) =>
+        insertSession(ctx, {
+          workstreamId: runId,
+          provider,
+          model: 'm',
+          effort: 'low',
+          mode: 'managed',
+          mcpTokenHash: mintId('Session'),
+        }),
+      );
+      return clock.toISOString();
+    };
+    start('claude');
+    const codex = start('codex');
+    expect(listTaskCodexStarts(store.db, taskId)).toEqual([codex]);
   });
 
   it('says whether the task has a picture of a kind', () => {

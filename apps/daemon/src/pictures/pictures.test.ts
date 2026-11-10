@@ -230,6 +230,39 @@ describe('the before rule', () => {
     expect(cam.shots.filter((s) => s.route === cam.shots[0]?.route)).toHaveLength(1);
   });
 
+  it('drops a before when a Codex session of the task started before it was taken', async () => {
+    await world();
+    cam.hold();
+    start();
+    await waitFor(() => cam.holding);
+    const first = cam.shots[0]?.route === '/settings' ? w.settings : w.people;
+    w.h.state.write((ctx) =>
+      insertSession(ctx, {
+        workstreamId: w.runOf(first),
+        provider: 'codex',
+        model: 'm',
+        effort: 'low',
+        mode: 'managed',
+        mcpTokenHash: mintId('Session'),
+      }),
+    );
+    cam.release();
+    await ended(2);
+    expect(kinds(first)).toEqual([]);
+  });
+
+  it('drops a before when a Codex patch was reported before it was taken', async () => {
+    await world();
+    cam.hold();
+    start();
+    await waitFor(() => cam.holding);
+    const first = cam.shots[0]?.route === '/settings' ? w.settings : w.people;
+    toolCall(first, 'apply_patch');
+    cam.release();
+    await ended(2);
+    expect(kinds(first)).toEqual([]);
+  });
+
   it('keeps a before when the page only read before it was taken', async () => {
     await world();
     cam.hold();

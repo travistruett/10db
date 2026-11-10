@@ -1,5 +1,6 @@
 import {
   EventType,
+  Provider,
   mintId,
   NotFoundError,
   ScreenKind,
@@ -218,4 +219,16 @@ export function listTaskToolCalls(
     .orderBy(asc(schema.events.seq))
     .all()
     .flatMap((r) => (r.tool === null ? [] : [{ tool: r.tool, at: r.at }]));
+}
+
+/** When each of the task's Codex sessions started, on every run, oldest first. */
+export function listTaskCodexStarts(db: DbReader, taskId: TaskId): string[] {
+  return db
+    .select({ startedAt: schema.sessions.startedAt })
+    .from(schema.sessions)
+    .innerJoin(schema.workstreams, eq(schema.workstreams.id, schema.sessions.workstreamId))
+    .where(and(eq(schema.workstreams.taskId, taskId), eq(schema.sessions.provider, Provider.Codex)))
+    .orderBy(asc(schema.sessions.startedAt))
+    .all()
+    .map((s) => s.startedAt);
 }

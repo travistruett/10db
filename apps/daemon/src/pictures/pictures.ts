@@ -40,6 +40,7 @@ import {
   listTasks,
   listTaskScreens,
   listTaskThread,
+  listTaskCodexStarts,
   listTaskToolCalls,
   listTaskTurns,
   taskStartFacts,
@@ -48,7 +49,7 @@ import type { Clock, Timer } from '../clock';
 import type { EventBus, StateStore } from '../events';
 import type { Git } from '../git';
 import type { Logger } from '../log';
-import { beforeAllowed, wroteBefore } from './before-rule';
+import { beforeAllowed, wroteBefore, type TaskActivity } from './before-rule';
 import type { PageCamera, Shot } from './camera';
 import { CAPTURE_IDLE, captureStep, type CaptureEvent, type CaptureRequest } from './capture-queue';
 import { keepScreen, sweepPictureTemps, type ScreenToKeep } from './picture-files';
@@ -204,6 +205,12 @@ export function startPictures(deps: PicturesDeps): Pictures {
     return port !== null && isDaemonAddress(appUrl, port);
   }
 
+  /** What the task's sessions did up to `until`, as the before rule reads it. */
+  const activityOf = (taskId: TaskId, until: string): TaskActivity => ({
+    calls: listTaskToolCalls(db, taskId, until),
+    codexStarts: listTaskCodexStarts(db, taskId),
+  });
+
   /** Asks a before for the task when it takes pictures, has none, and has started nothing. */
   function askBefore(task: TaskDto, passId: PassId | null): void {
     const project = getProject(db, task.projectId);
@@ -333,10 +340,7 @@ export function startPictures(deps: PicturesDeps): Pictures {
     const keptSha = await keptShaOf(request, project);
     if (stopped()) return 0;
     const end = deps.state.now();
-    if (
-      request.kind === ScreenKind.Before &&
-      wroteBefore(listTaskToolCalls(db, task.id, end), end)
-    ) {
+    if (request.kind === ScreenKind.Before && wroteBefore(activityOf(task.id, end), end)) {
       log.info({ taskId: task.id }, 'dropped a before picture: the task wrote before it was taken');
       return 0;
     }
