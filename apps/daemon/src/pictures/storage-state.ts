@@ -73,8 +73,3 @@ export function writeStorageState(
     throw error;
   }
 }
-
-/** Forgets the project's sign-in, as when its app address changes. */
-export function forgetStorageState(dataDir: string, projectId: ProjectId): void {
-  rmSync(statePath(dataDir, projectId), { force: true });
-}
