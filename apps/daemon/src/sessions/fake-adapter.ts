@@ -278,6 +278,8 @@ export class FakeAdapter implements SessionAdapter {
    * take seconds to close after it is asked to.
    */
   shapeStopGate: Promise<void> | null = null;
+  /** The same for a lane session: its stop waits for it before the session ends. */
+  laneStopGate: Promise<void> | null = null;
 
   startShape(spec: ShapeSessionSpec): ShapeSessionHandle {
     const refusal = checkAccount(spec.account, expectedSeen(spec.account));
@@ -672,6 +674,7 @@ export class FakeAdapter implements SessionAdapter {
     })();
 
     const interrupts = this.interrupts;
+    const stopGate = (): Promise<void> | null => this.laneStopGate;
     const receiptFor = (untakenNow: readonly string[]): InterruptReceipt =>
       this.interruptReceipt(untakenNow);
     return {
@@ -692,6 +695,8 @@ export class FakeAdapter implements SessionAdapter {
         return Promise.resolve(receipt);
       },
       async stop() {
+        const gate = stopGate();
+        if (gate !== null) await gate;
         abort.abort();
         end('stopped', null);
         await done;

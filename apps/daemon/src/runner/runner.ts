@@ -3705,6 +3705,12 @@ export function createRunner(opts: RunnerOptions): Runner {
     async deliverMessage(taskId, messageId, { redo }) {
       const id = getTask(db, taskId).workstreamId;
       if (id === null) throw new ConflictError(`Task ${taskId} has no run to hand the message to`);
+      /** A page its pass no longer holds takes no message, whatever was kept for it. */
+      const stillAPage = (): void => {
+        if (!passOfWorkstream(db, id))
+          throw new ConflictError(`${getTask(db, taskId).title} is no longer in a Workbench pass`);
+      };
+      stillAPage();
       const ctl = active.get(id);
       const lane = ctl?.messages ?? null;
       if (ctl && lane && ctl.stopReason === null) {
@@ -3724,7 +3730,10 @@ export function createRunner(opts: RunnerOptions): Runner {
             "the builder's hand edits were not folded; the message goes without its note",
           );
         }
-        if (ctl.messages === lane) {
+        stillAPage();
+        // A stop that landed meanwhile (the builder's, a take-out's, an idle close) ends this
+        // session: the message stays untaken for the next one.
+        if (ctl.messages === lane && stopRequested(ctl) === null) {
           opts.state.write((ctx) => {
             // A Ready page's new turn resumes this session with the message if it ends untaken.
             if (getWorkstreamRow(ctx.tx, id).nextAction.kind === 'pass_review')

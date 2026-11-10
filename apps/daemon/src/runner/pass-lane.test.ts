@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  ConflictError,
   mintId,
   PassCheckDetail,
   type PassDto,
@@ -22,6 +23,7 @@ import {
   listSessions,
   endPassTurn,
   listTaskThread,
+  leavePass,
   listWorkstreams,
   openPassTurn,
   patchProject,
@@ -597,6 +599,51 @@ describe("the builder's Stop", () => {
     const before = row(id);
     await engine.runner.stopPassLane(id);
     expect(row(id)).toEqual(before);
+  });
+});
+
+describe('a message that meets a stop', () => {
+  it('goes to no session that is stopping, and waits in the thread for the next', async () => {
+    const { task, pass, id } = await openPage([working]);
+    await waitFor(wrote);
+    let release: () => void = () => undefined;
+    engine.adapter.laneStopGate = new Promise((resolve) => {
+      release = resolve;
+    });
+    const message = engine.state.write((ctx) =>
+      insertBuilderMessage(ctx, task.id, { body: 'Bigger please', files: [] }),
+    );
+    // The builder stops the page while the message is on its way in.
+    const delivering = engine.runner.deliverMessage(task.id, message.id, { redo: false });
+    const stopping = engine.runner.stopPassLane(id);
+    await delivering;
+    release();
+    await stopping;
+
+    expect(engine.adapter.sent.some((m) => m.text.includes('Bigger please'))).toBe(false);
+    expect(untakenMessages(engine.store.db, task.id)).toEqual([message.id]);
+    expect(listPassTurns(engine.store.db, pass.id).map((t) => [t.seq, t.ending])).toEqual([
+      [1, 'stopped'],
+    ]);
+    expect(row(id).state).toBe('QUEUED');
+  });
+
+  it('is refused once the pass no longer holds the page', async () => {
+    const { task, id } = await openPage([
+      [...turn('one\n', 'Tidied.'), { do: 'await_message', contains: 'never sent' }],
+    ]);
+    await waitFor(isReady(id, 1));
+    engine.state.write((ctx) => {
+      leavePass(ctx, task.id);
+    });
+    const message = engine.state.write((ctx) =>
+      insertBuilderMessage(ctx, task.id, { body: 'Bigger please', files: [] }),
+    );
+
+    await expect(
+      engine.runner.deliverMessage(task.id, message.id, { redo: false }),
+    ).rejects.toThrow(ConflictError);
+    expect(engine.adapter.sent).toEqual([]);
   });
 });
 
