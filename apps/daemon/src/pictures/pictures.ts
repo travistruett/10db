@@ -456,7 +456,13 @@ export function startPictures(deps: PicturesDeps): Pictures {
       forgetStorageState(deps.dataDir, projectId);
     if (was === project.appUrl) return;
     if (was !== null) apply({ kind: 'app_changed', projectId });
-    if (project.appUrl !== null) prepareBrowser();
+    if (project.appUrl !== null) {
+      prepareBrowser();
+      // The open pages' befores are taken at the new address, under the before rule.
+      for (const pass of listLivePasses(db))
+        if (pass.projectId === projectId && pass.state === PassState.Open)
+          for (const task of listPassTasks(db, pass.id)) askBefore(task, pass.id);
+    }
     pump();
   }
 

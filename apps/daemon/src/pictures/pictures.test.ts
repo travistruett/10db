@@ -499,7 +499,7 @@ describe("the daemon's own address", () => {
 });
 
 describe('what stops a capture', () => {
-  it('aborts a shot when the app address changes, and writes nothing', async () => {
+  it("aborts a shot on a changed app address, and takes the open pages' befores there", async () => {
     await world();
     cam.hold();
     start();
@@ -507,8 +507,13 @@ describe('what stops a capture', () => {
     w.h.state.write((ctx) =>
       patchProject(ctx, w.h.project.id, { appUrl: 'http://localhost:5173' }),
     );
-    await ended(1);
-    expect([...screensOf(w.settings), ...screensOf(w.people)]).toEqual([]);
+    await ended(3);
+    expect(kinds(w.settings)).toEqual(['before']);
+    expect(kinds(w.people)).toEqual(['before']);
+    expect(cam.shots.slice(1).map((s) => s.appUrl)).toEqual([
+      'http://localhost:5173',
+      'http://localhost:5173',
+    ]);
   });
 
   it('leaves no row for a capture in flight when the daemon stops', async () => {
