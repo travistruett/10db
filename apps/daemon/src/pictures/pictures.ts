@@ -44,6 +44,7 @@ import {
   listTaskThread,
   listGoalRouteScreens,
   listTaskCodexStarts,
+  latestPassTurn,
   listTaskPageReports,
   listTaskToolCalls,
   listTaskTurns,
@@ -286,17 +287,27 @@ export function startPictures(deps: PicturesDeps): Pictures {
   }
 
   /**
-   * The routes the task's agent reported for a picture of `kind`: a turn picture's are its turn's, an
-   * after's its run's. Each is matched again
+   * The routes the task's agent reported for a picture of `kind`: a turn picture's are its turn's; a
+   * pass page's after takes its last turn's, any other task's after its run's. Each is matched again
    * against the project's page areas as they are now, so a route whose page area went is not loaded.
    */
-  function reportedFor(kind: ScreenKind, task: TaskDto, turnId: PassTurnId | null): string[] {
+  function reportedFor(
+    kind: ScreenKind,
+    task: TaskDto,
+    turnId: PassTurnId | null,
+    inPass: boolean,
+  ): string[] {
+    const lastTurn = inPass ? latestPassTurn(db, task.id) : undefined;
     const rows =
       kind === ScreenKind.Turn && turnId !== null
         ? listTaskPageReports(db, { taskId: task.id, turnId })
-        : kind === ScreenKind.After && task.workstreamId !== null
-          ? listTaskPageReports(db, { taskId: task.id, workstreamId: task.workstreamId })
-          : [];
+        : kind !== ScreenKind.After
+          ? []
+          : lastTurn !== undefined
+            ? listTaskPageReports(db, { taskId: task.id, turnId: lastTurn.id })
+            : !inPass && task.workstreamId !== null
+              ? listTaskPageReports(db, { taskId: task.id, workstreamId: task.workstreamId })
+              : [];
     const areaRoutes = pageAreaRoutes(getProject(db, task.projectId).areas);
     const kept = rows.flatMap((r) => keptRoute(areaRoutes, r.route) ?? []);
     return [...new Set(kept)].slice(0, REPORTED_ROUTES_MAX);
@@ -304,7 +315,7 @@ export function startPictures(deps: PicturesDeps): Pictures {
 
   function askAfter(task: TaskDto, passId: PassId | null): void {
     const project = getProject(db, task.projectId);
-    const reported = reportedFor(ScreenKind.After, task, null);
+    const reported = reportedFor(ScreenKind.After, task, null, passId !== null);
     if (project.appUrl === null || !takesPictures(project, task, reported)) return;
     if (pictureRoutes(project, task, reported).length === 0) return;
     ask({ kind: ScreenKind.After, projectId: project.id, passId, taskId: task.id, turnId: null });
@@ -381,7 +392,11 @@ export function startPictures(deps: PicturesDeps): Pictures {
       !beforeAllowed({ inPass, ...taskStartFacts(db, task.id) })
     )
       return 0;
-    const targets = pictureRoutes(project, task, reportedFor(request.kind, task, request.turnId));
+    const targets = pictureRoutes(
+      project,
+      task,
+      reportedFor(request.kind, task, request.turnId, request.passId !== null),
+    );
     if (targets.length === 0) return 0;
     let storageState = readStorageState(deps.dataDir, project.id);
     if (storageState === null && project.devLoginCommand !== null) {

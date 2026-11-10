@@ -246,6 +246,19 @@ describe('pictures of a pass', () => {
     expect(cam.shots.slice(2).map((s) => s.route)).toEqual(['/settings']);
   });
 
+  it("loads only the last turn's reported routes in the after", async () => {
+    await world();
+    start();
+    await ended(2);
+    reportedTurn(['/settings/1'], 1);
+    await ended(3);
+    reportedTurn(['/settings/2'], 2);
+    await ended(4);
+    signedOff(w.settings);
+    await ended(5);
+    expect(cam.shots.slice(-2).map((s) => s.route)).toEqual(['/settings', '/settings/2']);
+  });
+
   it("drops a turn picture that loads when the page's next turn starts", async () => {
     await world();
     start();
