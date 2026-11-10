@@ -110,6 +110,7 @@ import { GitError, type Git } from '../git';
 import { hazardAssessmentDto, type HazardAssessor } from '../hazards';
 import { earlierMcpApproval, requestMcpApproval, type InboxService } from '../inbox';
 import {
+  goalPassPages,
   livePassViews,
   passStartPreview,
   passView,
@@ -411,6 +412,7 @@ export function createServices(deps: {
     },
     renamePass: (passId, input) => deps.state.write((ctx) => renamePass(ctx, passId, input.name)),
     discardKeptWork: (taskId) => deps.discardKeptWork(taskId),
+    goalPassPages: (goalId) => goalPassPages({ db, git: deps.git }, goalId),
     proposePageAreas: (projectId, signal) =>
       proposePageAreas(
         { git: deps.git, namer: deps.areaNamer, protectedRoots: deps.protectedRoots },

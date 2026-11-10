@@ -62,6 +62,7 @@ import type {
   ModelProfileId,
   ModelProfilePatch,
   DecisionId,
+  GoalPassPagesDto,
   PagesProposalDto,
   PassDto,
   PassId,
@@ -286,6 +287,8 @@ export interface ApiServices {
   discardKeptWork(taskId: TaskId): Promise<void>;
   /** Propose Page Areas: the page areas the area proposer finds that the project can add, and why not the rest. */
   proposePageAreas(projectId: ProjectId, signal?: AbortSignal): Promise<PagesProposalDto>;
+  /** The page areas the goal's tasks committed in, read from git, for Work on This. */
+  goalPassPages(goalId: GoalId): Promise<GoalPassPagesDto>;
   /**
    * The project's goals, each with its digest and count of new items since the builder last opened
    * it, and the Ungrouped group. Leaves every view mark as it was.

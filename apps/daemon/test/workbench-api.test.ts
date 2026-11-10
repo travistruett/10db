@@ -2,6 +2,8 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import {
+  GoalPassPagesDto,
+  mintId,
   PagesProposalDto,
   PassAbandonedDto,
   PassDto,
@@ -483,5 +485,18 @@ describe('POST /projects/:projectId/propose-page-areas', () => {
       [['app/people/**'], 'page', '/people'],
     ]);
     expect(proposal.skipped.map((s) => s.name)).toEqual(['settings']);
+  });
+});
+
+describe('GET /goals/:goalId/pass-pages', () => {
+  it("answers the pages a goal's tasks committed in, and 404 for a goal there is none of", async () => {
+    const project = await projectWith(PAGES);
+    const goal = goalOf(project);
+
+    expect(await api().get(`/goals/${goal.id}/pass-pages`, GoalPassPagesDto)).toEqual({
+      pages: [],
+      fromTasks: [],
+    });
+    expect((await send('GET', `/goals/${mintId('Goal')}/pass-pages`)).status).toBe(404);
   });
 });

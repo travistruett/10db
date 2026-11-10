@@ -780,6 +780,9 @@ export function createApp(deps: ApiDeps) {
         ),
       ),
     )
+    .get('/goals/:goalId/pass-pages', async (c) =>
+      c.json(await deps.services.goalPassPages(GoalId.parse(c.req.param('goalId')))),
+    )
     .get('/projects/:projectId/pass-start', async (c) =>
       c.json(await deps.services.passStart(ProjectId.parse(c.req.param('projectId')))),
     )

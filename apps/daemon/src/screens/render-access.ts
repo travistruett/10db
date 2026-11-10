@@ -66,6 +66,7 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/projects/:projectId/routing-rules': 'No screen draws a setting.',
   '/projects/:projectId/candidates': 'No screen draws what Run next would pick.',
   '/passes/:passId': 'Only the Workbench draws a pass, and it is not a screen.',
+  '/goals/:goalId/pass-pages': "A goal's pass pages are read from its tasks' commits with git.",
   '/projects/:projectId/pass-start':
     "Start Pass's preview reads Your folder with git: its changed files, its branch and the base.",
   '/shape-measures': 'No screen draws a measure.',
