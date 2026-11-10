@@ -23,6 +23,8 @@ export interface OpenPageControl {
   readonly refusal: string | null;
   /** Opens the page, or copies its link once it has been opened. */
   readonly act: () => Promise<void>;
+  /** Copies the page's link (⌘L), opened or not. */
+  readonly copy: () => Promise<void>;
 }
 
 const storageKey = (passId: PassId): string => `tendb.workbench.opened.${passId}`;
@@ -46,8 +48,13 @@ function rememberOpened(passId: PassId, taskId: TaskId): void {
   }
 }
 
+interface Address {
+  readonly appUrl: string;
+  readonly route: string;
+}
+
 /** The app address and the route to open, or why there are none. */
-function addressOf(target: OpenPageTarget): { readonly appUrl: string; readonly route: string } {
+function addressOf(target: OpenPageTarget): Address {
   if (target.appUrl === null) throw new Error('No app address is set for this project.');
   if (target.route === null) throw new Error('This page names no route.');
   return { appUrl: target.appUrl, route: target.route };
@@ -61,20 +68,27 @@ export function useOpenPage(target: OpenPageTarget): OpenPageControl {
   );
   const key = `${target.passId}/${target.taskId}`;
   const opened = openedHere.has(key) || readOpened(target.passId).includes(target.taskId);
-  const act = async (): Promise<void> => {
+  const attempt = async (step: (address: Address) => Promise<void>): Promise<void> => {
     try {
-      const { appUrl, route } = addressOf(target);
-      if (opened) {
-        await navigator.clipboard.writeText(appPageUrl(appUrl, route));
-      } else {
-        await openAppPage(appUrl, route);
-        rememberOpened(target.passId, target.taskId);
-        setOpenedHere((held) => new Set(held).add(key));
-      }
+      await step(addressOf(target));
       setRefused(null);
     } catch (error) {
       setRefused({ key, reason: error instanceof Error ? error.message : String(error) });
     }
   };
-  return { opened, refusal: refused?.key === key ? refused.reason : null, act };
+  const copy = ({ appUrl, route }: Address) =>
+    navigator.clipboard.writeText(appPageUrl(appUrl, route));
+  const act = () =>
+    attempt(async (address) => {
+      if (opened) return copy(address);
+      await openAppPage(address.appUrl, address.route);
+      rememberOpened(target.passId, target.taskId);
+      setOpenedHere((held) => new Set(held).add(key));
+    });
+  return {
+    opened,
+    refusal: refused?.key === key ? refused.reason : null,
+    act,
+    copy: () => attempt(copy),
+  };
 }

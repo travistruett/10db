@@ -210,3 +210,73 @@ describe('PassWorkspace Open Page', () => {
     open.mockRestore();
   });
 });
+
+describe('PassWorkspace keys', () => {
+  it('J and K move along the queue’s rows, and a J typed into a message stays text', async () => {
+    const { onSelect } = await renderWorkspace();
+    const rows = queueRows();
+    rows[0]?.focus();
+    fireEvent.keyDown(rows[0] ?? document.body, { key: 'j' });
+    expect(document.activeElement).toBe(rows[1]);
+    fireEvent.keyDown(rows[1] ?? document.body, { key: 'j' });
+    fireEvent.keyDown(rows[2] ?? document.body, { key: 'k' });
+    expect(document.activeElement).toBe(rows[1]);
+    const input = screen.getByRole('textbox', { name: 'Message to People' });
+    input.focus();
+    fireEvent.keyDown(input, { key: 'j' });
+    fireEvent.keyDown(input, { key: 'n' });
+    expect(document.activeElement).toBe(input);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('N selects the next page that waits on the builder', async () => {
+    const { pages, onSelect } = await renderWorkspace();
+    fireEvent.keyDown(document.body, { key: 'n' });
+    // The asks page is shown first; the failed page waits after it.
+    expect(onSelect).toHaveBeenCalledWith(pages.failed.taskId);
+  });
+
+  it('puts the cursor in the composer of the page selected', async () => {
+    const pages = pagesByStatus();
+    function Selecting() {
+      const [selected, setSelected] = useState<TaskId>(pages.ready.taskId);
+      return (
+        <PassWorkspace
+          view={passViewDto({ pages: Object.values(pages) })}
+          inbox={[]}
+          project={projectViewDto()}
+          selected={selected}
+          onSelect={setSelected}
+        />
+      );
+    }
+    renderWithDaemon(<Selecting />);
+    await screen.findByRole('textbox', { name: 'Message to Settings' });
+    fireEvent.click(screen.getByRole('button', { name: /^Billing/ }));
+    expect(document.activeElement).toBe(
+      screen.getByRole('textbox', { name: 'Message to Billing' }),
+    );
+  });
+
+  it('⌘L copies the shown page’s link, from the composer too', async () => {
+    const writeText = vi.fn<(text: string) => Promise<void>>(() => Promise.resolve());
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    const pages = pagesByStatus();
+    renderWithDaemon(
+      <PassWorkspace
+        view={passViewDto({ pages: Object.values(pages) })}
+        inbox={[]}
+        project={projectViewDto({ appUrl: 'http://localhost:8800' })}
+        selected={pages.ready.taskId}
+        onSelect={vi.fn()}
+      />,
+    );
+    const input = await screen.findByRole('textbox', { name: 'Message to Settings' });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'l', metaKey: true });
+      await Promise.resolve();
+    });
+    expect(writeText).toHaveBeenCalledWith('http://localhost:8800/settings');
+    Reflect.deleteProperty(navigator, 'clipboard');
+  });
+});

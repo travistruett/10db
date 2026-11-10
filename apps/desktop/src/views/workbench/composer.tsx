@@ -1,6 +1,13 @@
 import { ActionIcon, Box, Button, CloseButton, Group, Stack, Text, Textarea } from '@mantine/core';
 import { IconPhotoPlus } from '@tabler/icons-react';
-import { useRef, useState, type ClipboardEvent, type DragEvent, type ReactNode } from 'react';
+import {
+  useRef,
+  useState,
+  type ClipboardEvent,
+  type DragEvent,
+  type ReactNode,
+  type RefObject,
+} from 'react';
 import { isSendKey } from '../shape/use-shape-keys';
 import { ComposerPhase, composerButtons, composerPhase } from './composer-buttons';
 import { EMPTY_DRAFT, hasContent, type Draft } from './drafts';
@@ -29,6 +36,8 @@ export interface ComposerProps {
   readonly actions: PageActions;
   /** Open Page, always on the left. */
   readonly openPage: ReactNode;
+  /** The input, which the workspace focuses when a page is selected. */
+  readonly inputRef?: RefObject<HTMLTextAreaElement | null>;
 }
 
 type Busy = 'send' | 'stop' | 'signOff';
@@ -50,6 +59,7 @@ export function Composer({
   onDraft,
   actions,
   openPage,
+  inputRef,
 }: ComposerProps) {
   const [busy, setBusy] = useState<Busy | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
@@ -145,6 +155,7 @@ export function Composer({
         }}
       >
         <Textarea
+          ref={inputRef}
           aria-label={`Message to ${area}`}
           autosize
           minRows={1}

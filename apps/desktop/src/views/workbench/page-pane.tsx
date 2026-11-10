@@ -1,5 +1,6 @@
 import type { PassId } from '@10db/contracts';
 import { Box, Title } from '@mantine/core';
+import { useEffect, useRef } from 'react';
 import { Composer } from './composer';
 import type { Draft } from './drafts';
 import { liveLine } from './live-line';
@@ -9,6 +10,8 @@ import { usePageActions } from './page-actions';
 import { PageStatus } from './page-status';
 import type { QueueRow } from './queue-rows';
 import { Thread } from './thread';
+import { useWorkbenchKeys } from './use-workbench-keys';
+import { WorkbenchKey } from './workbench-keys';
 import { WorkingLine } from './working-line';
 
 export interface PagePaneProps {
@@ -28,6 +31,16 @@ export function PagePane({ passId, appUrl, row, now, draft, onDraft }: PagePaneP
   const actions = usePageActions(page.taskId);
   const open = useOpenPage({ passId, taskId: page.taskId, route: page.route, appUrl });
   const openPage = <OpenPageButton control={open} />;
+  useWorkbenchKeys({
+    [WorkbenchKey.CopyLink]: () => {
+      void open.copy();
+    },
+  });
+  // The cursor goes to the composer of each page shown, so the builder can paste and type at once.
+  const input = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    input.current?.focus();
+  }, [page.taskId]);
   return (
     <Box
       component="section"
@@ -51,6 +64,7 @@ export function PagePane({ passId, appUrl, row, now, draft, onDraft }: PagePaneP
         onDraft={onDraft}
         actions={actions}
         openPage={openPage}
+        inputRef={input}
       />
     </Box>
   );
