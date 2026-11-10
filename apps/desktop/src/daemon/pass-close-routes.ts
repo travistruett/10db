@@ -1,3 +1,4 @@
+import type { PassCloseRequest } from '@10db/contracts';
 import type { Hono } from 'hono';
 import type { BlankEnv, ToSchema } from 'hono/types';
 import { hc } from 'hono/client';
@@ -25,7 +26,9 @@ type PassCloseRouteSchema = Route<'post', '/passes/:passId/tasks/:taskId/sign-of
   Route<'get', '/passes/:passId/tasks/:taskId/take-out'> &
   Route<'post', '/tasks/:taskId/thread/:messageId/send-to-agent'> &
   Route<'get', '/passes/:passId/pull-request'> &
-  Route<'post', '/passes/:passId/pull-request'>;
+  Route<'post', '/passes/:passId/pull-request'> &
+  Route<'get', '/passes/:passId/close'> &
+  Route<'post', '/passes/:passId/close', { json: PassCloseRequest }>;
 
 /** The typed client for these routes, sending what `DaemonClient` sends. */
 export function createPassCloseRoutesClient(conn: DaemonConnection) {

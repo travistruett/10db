@@ -120,7 +120,7 @@ export function PassHeader(props: PassHeaderProps) {
           </Menu>
         </Group>
       </Group>
-      <CloseProgress state={view.pass.state} />
+      <CloseProgress state={view.pass.state} step={view.closeStep} />
       {hint === null ? null : (
         <Text size="xs" c="dimmed">
           {hint}

@@ -1,10 +1,13 @@
 import {
+  PassCloseAnswerDto,
+  PassClosePreviewDto,
   PassPullRequestDto,
   PassPullRequestPreviewDto,
   PassSignOffDto,
   TakeOutPreviewDto,
   TaskMessageDto,
   type InboxItemId,
+  type PassCloseRequest,
   type PassId,
   type TaskId,
 } from '@10db/contracts';
@@ -155,6 +158,37 @@ export function useOpenPullRequest() {
       readJson(
         await client.passes[':passId']['pull-request'].$post({ param: { passId } }),
         PassPullRequestDto,
+      ),
+    onSuccess: refetch,
+  });
+}
+
+/**
+ * What Close Pass… shows: the lists a close settles, read once per opening. It stops nothing (D25).
+ * Not under `passKeys.all`: the close it leads to refetches the passes, and a closing pass has no lists.
+ */
+export function useClosePreview(passId: PassId) {
+  const client = usePassCloseClient();
+  return useQuery({
+    queryKey: ['close-preview', passId],
+    staleTime: 0,
+    queryFn: async () =>
+      readJson(
+        await client.passes[':passId'].close.$get({ param: { passId } }),
+        PassClosePreviewDto,
+      ),
+  });
+}
+
+/** Close Pass: closes on the lists confirmed, or answers them again with what changed. */
+export function useClosePass() {
+  const client = usePassCloseClient();
+  const refetch = useRefetchPasses();
+  return useMutation({
+    mutationFn: async ({ passId, request }: { passId: PassId; request: PassCloseRequest }) =>
+      readJson(
+        await client.passes[':passId'].close.$post({ param: { passId }, json: request }),
+        PassCloseAnswerDto,
       ),
     onSuccess: refetch,
   });

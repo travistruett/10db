@@ -105,8 +105,10 @@ describe('PassHeader', () => {
 
   it('while closing, says so, holds the page actions and keeps Abandon in reach', async () => {
     const { ready } = pagesByStatus();
-    const props = draw(passViewDto({ pass: { state: 'CLOSING' }, pages: [ready] }));
-    expect(within(screen.getByRole('status')).getByText('Closing the pass…')).toBeTruthy();
+    const props = draw(
+      passViewDto({ pass: { state: 'CLOSING' }, pages: [ready], rest: { closeStep: 5 } }),
+    );
+    expect(within(screen.getByRole('status')).getByText('Pushing…')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Add Page' })).toHaveProperty('disabled', true);
     fireEvent.click(menu());
     const close = await screen.findByRole('menuitem', { name: 'Close Pass…', hidden: true });

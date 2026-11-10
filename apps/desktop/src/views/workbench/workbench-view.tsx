@@ -30,6 +30,7 @@ import { useNow } from '../../shell/relative';
 import { useSelectedProject } from '../../shell/selected-project';
 import { AbandonModal } from './abandon-modal';
 import { AddPageModal } from './add-page-modal';
+import { ClosePassModal } from './close-pass-modal';
 import { HeaderNotices } from './header-notices';
 import { PassHeader } from './pass-header';
 import { PassWorkspace } from './pass-workspace';
@@ -78,7 +79,7 @@ export interface WorkbenchScreenProps {
 }
 
 /** Which dialog the screen holds open. */
-type Dialog = 'propose' | 'add-page' | 'rename' | 'abandon' | null;
+type Dialog = 'propose' | 'add-page' | 'close' | 'rename' | 'abandon' | null;
 
 /**
  * The Workbench (spec §4) for one project: why a pass needs a page area when it has none, the picker
@@ -156,6 +157,9 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
           setDialog('add-page');
         }}
         pullRequest={<PrButton view={live} />}
+        onClose={() => {
+          setDialog('close');
+        }}
         onRename={() => {
           setDialog('rename');
         }}
@@ -176,6 +180,7 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
           add={actions.addPages}
         />
       ) : null}
+      {dialog === 'close' ? <ClosePassModal view={live} onClose={closeDialog} /> : null}
       {dialog === 'rename' ? (
         <RenameModal pass={live.pass} onClose={closeDialog} rename={actions.rename} />
       ) : null}
