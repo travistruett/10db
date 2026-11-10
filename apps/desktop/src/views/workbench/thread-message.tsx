@@ -4,7 +4,8 @@ import {
   type TaskFileDto,
   type TaskMessageDto,
 } from '@10db/contracts';
-import { Paper, Stack, Text } from '@mantine/core';
+import { Button, Group, Paper, Stack, Text } from '@mantine/core';
+import { useSendToAgent } from '../../daemon/pass-close-queries';
 import { useTaskPicture } from '../../daemon/thread-queries';
 import { TurnFiles } from './turn-files';
 
@@ -48,14 +49,64 @@ function Body({ text }: { readonly text: string }) {
   );
 }
 
+/**
+ * A notice, dimmed. One the daemon offers with Send to Agent (D19: a review finding or a failed
+ * check) has the button, which sends its text to this page as the builder's own message; nothing
+ * sends it by itself.
+ */
+function Notice({
+  message,
+  canSend,
+}: {
+  readonly message: TaskMessageDto;
+  readonly canSend: boolean;
+}) {
+  const send = useSendToAgent();
+  const text = (
+    <Text size="xs" c="dimmed" style={{ whiteSpace: 'pre-wrap', flex: 1, minWidth: 0 }}>
+      {message.body}
+    </Text>
+  );
+  if (!message.sendable) return <Group px="sm">{text}</Group>;
+  return (
+    <Group px="sm" gap="xs" wrap="nowrap" align="center">
+      {text}
+      {send.error ? (
+        <Text size="xs" c="red" role="alert">
+          {send.error.message}
+        </Text>
+      ) : null}
+      {send.isSuccess ? (
+        <Text size="xs" c="dimmed">
+          Sent to the agent
+        </Text>
+      ) : null}
+      <Button
+        variant="default"
+        size="xs"
+        loading={send.isPending}
+        disabled={!canSend}
+        style={{ flex: 'none' }}
+        onClick={() => {
+          send.mutate({ taskId: message.taskId, noticeId: message.id });
+        }}
+      >
+        Send to Agent
+      </Button>
+    </Group>
+  );
+}
+
 export interface ThreadMessageProps {
   readonly message: TaskMessageDto;
   /** For a reply, the turn it ends, whose changed files it shows. */
   readonly turn: PassTurnWithFilesDto | null;
+  /** The page takes a message: its pass is open. */
+  readonly canSend: boolean;
 }
 
 /** One entry of a page's thread: the builder's message with its pictures, a reply, or a notice. */
-export function ThreadMessage({ message, turn }: ThreadMessageProps) {
+export function ThreadMessage({ message, turn, canSend }: ThreadMessageProps) {
   switch (message.kind) {
     case TaskMessageKind.Message:
       return (
@@ -76,10 +127,6 @@ export function ThreadMessage({ message, turn }: ThreadMessageProps) {
         </Stack>
       );
     case TaskMessageKind.Notice:
-      return (
-        <Text size="xs" c="dimmed" px="sm" style={{ whiteSpace: 'pre-wrap' }}>
-          {message.body}
-        </Text>
-      );
+      return <Notice message={message} canSend={canSend} />;
   }
 }

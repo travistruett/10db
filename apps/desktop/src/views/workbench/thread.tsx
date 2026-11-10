@@ -11,6 +11,8 @@ export interface ThreadProps {
   readonly turns: readonly PassTurnWithFilesDto[];
   /** Open Page, shown with the route before the first message. */
   readonly openPage: ReactNode;
+  /** The page takes a message: its pass is open, so a notice may be sent to its agent. */
+  readonly canSend: boolean;
 }
 
 /** Before the first message the thread is not blank: it says where the page is. */
@@ -29,7 +31,7 @@ function BeforeFirstMessage({ page }: { readonly page: PassPageDto }) {
 }
 
 /** A page's thread, oldest first: the builder's messages, the agent's replies and the notices. */
-export function Thread({ page, turns, openPage }: ThreadProps) {
+export function Thread({ page, turns, openPage, canSend }: ThreadProps) {
   const thread = useTaskThread(page.taskId);
   if (thread.isError)
     return (
@@ -66,6 +68,7 @@ export function Thread({ page, turns, openPage }: ThreadProps) {
           <ThreadMessage
             message={message}
             turn={message.kind === TaskMessageKind.Reply ? turnOfReply(message, turns) : null}
+            canSend={canSend}
           />
         </li>
       ))}
