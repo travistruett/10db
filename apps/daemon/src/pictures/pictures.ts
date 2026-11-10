@@ -77,8 +77,11 @@ export interface PicturesDeps {
   readonly state: StateStore;
   readonly bus: EventBus;
   readonly camera: PageCamera;
-  /** The port the daemon's API listens on, which no app address may name; null until it listens. */
-  readonly daemonPort: () => number | null;
+  /**
+   * The port the daemon's API listens on, which no app address may name; settles once it listens.
+   * No picture is taken before then.
+   */
+  readonly daemonPort: Promise<number>;
   /** Starts fetching the pinned browser when it is not there yet; returns at once. */
   readonly prepareBrowser: () => void;
   readonly git: Pick<Git, 'head'>;
@@ -200,10 +203,19 @@ export function startPictures(deps: PicturesDeps): Pictures {
       });
   }
 
+  /** The daemon's API port once it listens; null before. */
+  let listenPort: number | null = null;
+  void deps.daemonPort.then((port) => {
+    listenPort = port;
+  });
+
   /** An app address on the daemon's own port: a page there would reach 10db's API, so none is shot. */
-  function onDaemon(appUrl: AppUrl): boolean {
-    const port = deps.daemonPort();
-    return port !== null && isDaemonAddress(appUrl, port);
+  const onDaemon = (appUrl: AppUrl, port: number): boolean => isDaemonAddress(appUrl, port);
+
+  /** The project's app address as it stands, unless it names the daemon's own port. */
+  function shootableAddress(projectId: ProjectId, port: number): AppUrl | null {
+    const { appUrl } = getProject(db, projectId);
+    return appUrl === null || onDaemon(appUrl, port) ? null : appUrl;
   }
 
   /** What the task's sessions did up to `until`, as the before rule reads it. */
@@ -277,8 +289,19 @@ export function startPictures(deps: PicturesDeps): Pictures {
     const stopped = (): boolean => signal.aborted;
     const project = getProject(db, request.projectId);
     const task = getTask(db, request.taskId);
-    const appUrl = project.appUrl;
-    if (appUrl === null || onDaemon(appUrl)) return 0;
+    // A shutdown before the API listens ends the wait.
+    const port = await Promise.race([
+      deps.daemonPort,
+      new Promise<null>((resolve) => {
+        signal.addEventListener('abort', () => {
+          resolve(null);
+        });
+        if (signal.aborted) resolve(null);
+      }),
+    ]);
+    if (port === null || stopped()) return 0;
+    const appUrl = shootableAddress(project.id, port);
+    if (appUrl === null) return 0;
     const inPass = request.passId !== null;
     if (
       request.kind === ScreenKind.Before &&
@@ -289,6 +312,7 @@ export function startPictures(deps: PicturesDeps): Pictures {
     if (targets.length === 0) return 0;
     let storageState = readStorageState(deps.dataDir, project.id);
     if (storageState === null && project.devLoginCommand !== null) {
+      if (shootableAddress(project.id, port) !== appUrl) return 0;
       storageState = await runSignIn(project, signal);
       if (storageState === null) return 0;
     }
@@ -296,11 +320,14 @@ export function startPictures(deps: PicturesDeps): Pictures {
     const shots: Omit<ScreenToKeep, 'keptSha'>[] = [];
     for (const target of targets) {
       const shoot = (state: StorageState | null): Promise<Shot> =>
-        deps.camera.shoot({ appUrl, ...target, storageState: state, signal });
+        shootableAddress(project.id, port) === appUrl
+          ? deps.camera.shoot({ appUrl, ...target, storageState: state, signal })
+          : Promise.reject(new Error("The app address changed or names 10db's own port"));
       const startedAt = deps.clock.now().getTime();
       let shot = await shoot(storageState);
       if (shot.outcome === 'elsewhere' && project.devLoginCommand !== null && !signedInAgain) {
         signedInAgain = true;
+        if (shootableAddress(project.id, port) !== appUrl) return 0;
         storageState = await runSignIn(project, signal);
         if (storageState === null) return 0;
         shot = await shoot(storageState);
@@ -496,7 +523,7 @@ export function startPictures(deps: PicturesDeps): Pictures {
     },
     status(projectId) {
       const { appUrl } = getProject(db, projectId);
-      if (appUrl !== null && onDaemon(appUrl))
+      if (appUrl !== null && listenPort !== null && onDaemon(appUrl, listenPort))
         return {
           browser: { state: BrowserState.Refused, problem: APP_URL_IS_DAEMON },
           signIn: signIns.get(projectId) ?? null,

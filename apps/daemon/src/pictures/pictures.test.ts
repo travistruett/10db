@@ -42,7 +42,8 @@ let logs: LogCapture;
 let pictures: Pictures | null = null;
 let prepared = 0;
 let clock: ManualClock;
-let daemonPort: number | null = null;
+/** The daemon's API port as the service learns it; tests resolve it at once unless they hold it. */
+let listening: PromiseWithResolvers<number>;
 
 afterEach(async () => {
   await pictures?.stop();
@@ -57,7 +58,8 @@ async function world(project: { devLoginCommand?: string } = {}): Promise<void> 
   w.h.state.write((ctx) => patchProject(ctx, w.h.project.id, { appUrl: APP, ...project }));
   cam = new FakeCamera();
   clock = new ManualClock(new Date('2026-11-10T12:00:00.000Z'));
-  daemonPort = null;
+  listening = Promise.withResolvers<number>();
+  listening.resolve(4317);
   logs = captureLogs();
   prepared = 0;
 }
@@ -67,7 +69,7 @@ function start(): Pictures {
     state: w.h.state,
     bus: w.h.bus,
     camera: cam,
-    daemonPort: () => daemonPort,
+    daemonPort: listening.promise,
     prepareBrowser: () => {
       prepared += 1;
     },
@@ -375,7 +377,8 @@ describe('signing in', () => {
 describe("the daemon's own address", () => {
   it("takes no picture of an app address on the daemon's own port, and says why", async () => {
     await world();
-    daemonPort = 8800;
+    listening = Promise.withResolvers<number>();
+    listening.resolve(8800);
     const p = start();
     await ended(2);
     expect(cam.shots).toEqual([]);
@@ -383,6 +386,26 @@ describe("the daemon's own address", () => {
       state: 'refused',
       problem: APP_URL_IS_DAEMON,
     });
+  });
+
+  it('stops at once when the daemon stops before it listens', async () => {
+    await world();
+    listening = Promise.withResolvers<number>();
+    const p = start();
+    await p.stop();
+    pictures = null;
+    expect(cam.shots).toEqual([]);
+  });
+
+  it('takes no picture until the daemon listens, and then takes them', async () => {
+    await world();
+    listening = Promise.withResolvers<number>();
+    start();
+    await Promise.resolve();
+    expect(cam.shots).toEqual([]);
+    listening.resolve(4317);
+    await ended(2);
+    expect(cam.shots).toHaveLength(2);
   });
 });
 
