@@ -1,6 +1,14 @@
 import { execFileSync } from 'node:child_process';
 import { ClaimKind } from '@10db/contracts';
-import { acquireClaims, activeClaims, holdRecord, openHolds } from '@10db/db';
+import {
+  acquireClaims,
+  activeClaims,
+  getHold,
+  holdRecord,
+  listSharedChanges,
+  openHolds,
+  releaseClaim,
+} from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { isolatedGitEnv } from '../../test/fixtures';
 import { openPassWorld, type PassWorld } from '../../test/pass-world';
@@ -79,5 +87,30 @@ describe('grantSharedHold', () => {
     ).toBeNull();
     expect(openHolds(w.h.store.db, w.opened.pass.id)).toEqual([]);
     expect(activeClaims(w.h.store.db, w.runOf(w.settings)).map((c) => c.name)).not.toContain('src');
+  });
+
+  it("keeps a hold whose claim was taken from its lane before the area's next grant", async () => {
+    w = await openPassWorld();
+    const { h, settings, people } = w;
+    w.startTurn(settings);
+    await grantSharedHold(w.deps, { workstreamId: w.runOf(settings), area: 'src' });
+    const [first] = openHolds(h.store.db, w.opened.pass.id);
+    if (!first) throw new Error('no hold');
+    w.write('src/button.ts', "settings' half-written button\n");
+    // A deadlock's yield releases the claim and leaves the hold.
+    h.state.write((c) => releaseClaim(c, first.claimId));
+
+    w.startTurn(people);
+    const granted = await grantSharedHold(w.deps, { workstreamId: w.runOf(people), area: 'src' });
+
+    expect(granted?.ok).toBe(true);
+    expect(getHold(h.store.db, first.claimId).closedAt).not.toBeNull();
+    expect(listSharedChanges(h.store.db, w.opened.pass.id)).toMatchObject([
+      { seq: 1, taskId: settings.id, paths: ['src/button.ts'] },
+    ]);
+    const [second] = openHolds(h.store.db, w.opened.pass.id);
+    expect(second).toMatchObject({ seq: 2, taskId: people.id });
+    if (!second) throw new Error('no second hold');
+    expect(holdRecord(h.store.db, second.claimId)).toEqual([]);
   });
 });

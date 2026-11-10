@@ -22,7 +22,13 @@ export { putBackKeptWork } from './put-back';
 export { abandonPass } from './abandon';
 export { resumePassWork } from './resume';
 export { passView } from './view';
-export { grantSharedHold, holdRef, sharedRef } from './shared-hold';
+export { holdRef, sharedRef } from './shared-hold';
 export { askShared, withdrawSharedAsks } from './shared-ask';
 export { dropShared, sharedUnlanded } from './shared-drop';
-export { closeHoldsOf, keepCommitToolPaths, keepHold, landSharedChanges } from './shared-chain';
+export {
+  closeHoldsOf,
+  grantSharedHold,
+  keepCommitToolPaths,
+  keepHold,
+  landSharedChanges,
+} from './shared-chain';

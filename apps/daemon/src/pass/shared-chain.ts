@@ -1,4 +1,5 @@
 import {
+  ClaimKind,
   ConflictError,
   InvalidError,
   type ClaimId,
@@ -8,7 +9,10 @@ import {
   type WorkstreamId,
 } from '@10db/contracts';
 import {
+  acquireClaims,
+  activeClaims,
   closeHold,
+  copyHazardNames,
   getHold,
   getPass,
   getPassProgress,
@@ -16,19 +20,31 @@ import {
   getTask,
   getWorkstreamRow,
   holdRecord,
+  insertHold,
   insertSystemNotice,
   listPassTasks,
   listPassTurns,
   listSharedChanges,
   markLanded,
   openHolds,
+  openPassTurn,
   releaseClaim,
   upsertSharedChange,
+  type AcquireResult,
   type DbReader,
 } from '@10db/db';
+import { claimScopeOf } from '../delivery';
 import { KeptRefMovedError, type ChainCommit } from '../git';
-import { keepNamedPaths, passBranch, readKeptRef, type PassWorkDeps } from './kept-work';
 import {
+  keepNamedPaths,
+  passBranch,
+  passTaskPlace,
+  readKeptRef,
+  type PassWorkDeps,
+} from './kept-work';
+import {
+  chainTip,
+  holdRef,
   onPassBranch,
   sharedPathOf,
   sharedPathsDiffering,
@@ -277,4 +293,70 @@ export async function keepCommitToolPaths(
   const [first] = shared;
   if (!first) throw new InvalidError('Name at least one path to commit');
   return first;
+}
+
+/**
+ * Grants a pass lane its shared area for the turn (spec §7.2): the area's shared files that differ
+ * from the chain's tip are recorded with their content, then the claim and its hold, numbered on the
+ * chain, are written together, and the hold's ref keeps the record. A task that took the claim first
+ * is the conflict, and nothing is written: the record's commit is left unreferenced. Null, with
+ * nothing written, once the lane's turn has ended. An open hold on the area whose claim its lane
+ * no longer holds is kept first.
+ */
+export async function grantSharedHold(
+  deps: SharedDeps,
+  input: { readonly workstreamId: WorkstreamId; readonly area: string },
+): Promise<AcquireResult | null> {
+  const db = deps.state.db;
+  const place = passTaskPlace(db, getWorkstreamRow(db, input.workstreamId).taskId);
+  const { pass, repo } = place;
+  await onPassBranch(deps, pass, repo);
+  // A hold whose claim was taken from its lane (a deadlock's yield, a take-out after a failed keep)
+  // is kept first: otherwise its lane's edits would be in the next hold's record, or be its change.
+  for (const stale of openHolds(db, pass.id))
+    if (
+      stale.area === input.area &&
+      !activeClaims(db, stale.workstreamId).some((c) => c.id === stale.claimId)
+    )
+      await keepHold(deps, { claimId: stale.claimId });
+  const tip = await chainTip(deps, repo, pass);
+  const paths = await sharedPathsDiffering(deps, {
+    repo,
+    against: tip,
+    shared: sharedPathOf(db, pass, input.area),
+  });
+  const { sha, record } = await deps.git.recordPaths({ repo, base: tip, paths });
+  const outcome = deps.state.write((ctx): AcquireResult | null => {
+    const row = getWorkstreamRow(ctx.tx, input.workstreamId);
+    // An area is held for a turn: once the turn has ended there is none to hold it for.
+    if (!openPassTurn(ctx.tx, row.taskId)) return null;
+    const areaScope = claimScopeOf(ctx.tx, row);
+    const granted = acquireClaims(ctx, {
+      projectId: pass.projectId,
+      workstreamId: input.workstreamId,
+      requests: [{ kind: ClaimKind.Area, name: input.area }],
+      leaseExpiresAt: row.leaseExpiresAt ?? ctx.now,
+      copyHazards: copyHazardNames(getProject(ctx.tx, pass.projectId)),
+      ...(areaScope ? { areaScope } : {}),
+    });
+    if (!granted.ok) return granted;
+    const claim = granted.claims.find((c) => c.kind === ClaimKind.Area && c.name === input.area);
+    // A claim the lane held already has its hold.
+    if (claim && !openHolds(ctx.tx, pass.id).some((h) => h.claimId === claim.id))
+      insertHold(ctx, {
+        claimId: claim.id,
+        passId: pass.id,
+        taskId: getTask(ctx.tx, row.taskId).id,
+        workstreamId: input.workstreamId,
+        area: input.area,
+        recordSha: sha,
+        record,
+      });
+    return granted;
+  });
+  if (outcome?.ok === true) {
+    const claim = outcome.claims.find((c) => c.kind === ClaimKind.Area && c.name === input.area);
+    if (claim) await deps.git.keepRef(repo, holdRef(pass.id, claim.id), sha);
+  }
+  return outcome;
 }
