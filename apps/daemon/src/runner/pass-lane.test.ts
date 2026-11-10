@@ -15,12 +15,19 @@ import {
   insertWorkstream,
   listInbox,
   listPassTurns,
+  endPassTurn,
   listTaskThread,
+  openPassTurn,
   patchProject,
+  patchWorkstream,
   type WorkstreamRow,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTestEngine, type TestEngine } from '../../test/engine';
+import { createDeliveryJobs } from '../delivery';
+import { createGit } from '../git';
+import { silentLogger } from '../log';
+import { recoverOnStartup, systemProcesses } from '../recovery';
 import { untakenMessages } from './lane-messages';
 import { DEFAULT_RUNNER_LIMITS } from './runner';
 import { handoffArgs, isolatedGitEnv, waitFor } from '../../test/fixtures';
@@ -579,4 +586,91 @@ describe("a pass task's handoffs", () => {
     expect(engine.adapter.prompts).toHaveLength(ROUNDS + 1);
     expect(git('show', `${turns.at(-1)?.keptSha ?? ''}:${PAGE_FILE}`)).toBe(String(ROUNDS));
   }, 60_000);
+});
+
+describe('a pass page across a restart', () => {
+  /** The daemon stops and starts again: its sessions end, and recovery runs over the rows. */
+  async function restart(): Promise<void> {
+    await engine.runner.stopAll('shutdown');
+    await recoverOnStartup({
+      state: engine.state,
+      inbox: engine.inbox,
+      git: createGit(),
+      processes: systemProcesses,
+      jobs: createDeliveryJobs(silentLogger),
+      clock: engine.clock,
+      maxRecoveryAttempts: 3,
+      logger: silentLogger,
+      cleanShutdown: false,
+    });
+  }
+  const working: FakeStep[] = [
+    { do: 'consume' },
+    { do: 'tool', toolName: 'Write', input: { file_path: PAGE_FILE, content: 'one\n' } },
+    { do: 'await_message', contains: 'never sent' },
+  ];
+  const wrote = () => engine.adapter.observations.some((o) => o.kind === 'tool_allowed');
+
+  it('keeps a Ready page waiting on its Ready item', async () => {
+    const { id } = await openPage([
+      [...turn('one\n', 'Tidied.'), { do: 'await_message', contains: 'never sent' }],
+    ]);
+    await waitFor(isReady(id, 1));
+    const [item] = readyItems();
+    await restart();
+    expect(row(id)).toMatchObject({
+      state: 'WAITING_HUMAN',
+      nextAction: { kind: 'pass_review', inboxId: item?.id },
+      currentSessionId: null,
+    });
+    expect(readyItems().map((i) => i.state)).toEqual(['OPEN']);
+  });
+
+  it('resumes a turn cut short mid-way, without handing the message over again', async () => {
+    const { pass, id } = await openPage([working, [...turn('two\n', 'Finished it.')]]);
+    await waitFor(wrote);
+    await restart();
+    expect(row(id)).toMatchObject({ state: 'QUEUED', nextAction: { kind: 'resume' } });
+
+    engine.launch(id);
+    await waitFor(() => listPassTurns(engine.store.db, pass.id)[0]?.ending === 'ready');
+    expect(engine.adapter.prompts[1]?.resume).not.toBeNull();
+    expect(engine.adapter.prompts[1]?.prompt).not.toContain('Make the form tidy');
+    expect(engine.adapter.sent).toEqual([]);
+  });
+
+  it('finishes a turn that ended before its work was kept, by its ending, resuming nothing', async () => {
+    const { task, pass, id } = await openPage([working]);
+    await waitFor(wrote);
+    await engine.runner.stopAll('shutdown');
+    // The daemon stopped between the turn's end and keeping its work.
+    engine.state.write((ctx) => {
+      const open = openPassTurn(ctx.tx, task.id);
+      if (!open) throw new Error('no open turn');
+      endPassTurn(ctx, open.id, { ending: 'ready', replyBody: 'Tidied.' });
+    });
+    await restart();
+
+    const [finished] = listPassTurns(engine.store.db, pass.id);
+    expect(finished?.settledAt).not.toBeNull();
+    expect(git('show', `${finished?.keptSha ?? ''}:${PAGE_FILE}`)).toBe('one');
+    expect(row(id)).toMatchObject({ state: 'WAITING_HUMAN', nextAction: { kind: 'pass_review' } });
+    expect(readyItems().map((i) => i.state)).toEqual(['OPEN']);
+    expect(engine.adapter.prompts).toHaveLength(1);
+  });
+
+  it('parks a page past the recovery limit on a failed turn, never failing it', async () => {
+    const { pass, id } = await openPage([working]);
+    await waitFor(wrote);
+    engine.state.write((ctx) => {
+      patchWorkstream(ctx, id, null, { recoveryAttempts: 3 });
+    });
+    await restart();
+
+    expect(listPassTurns(engine.store.db, pass.id).map((t) => t.ending)).toEqual(['failed']);
+    expect(row(id)).toMatchObject({ state: 'WAITING_HUMAN', nextAction: { kind: 'pass_review' } });
+    expect(
+      listInbox(engine.store.db, {}).filter((i) => i.title.startsWith('Turn failed')),
+    ).toHaveLength(1);
+  });
 });

@@ -1320,6 +1320,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     state,
     inbox,
     git,
+    jobs: deliveryJobs,
+    clock,
     processes,
     maxRecoveryAttempts: limits.maxRecoveryAttempts,
     logger,

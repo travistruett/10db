@@ -1,3 +1,4 @@
+import { createDeliveryJobs } from '../delivery';
 import { rmSync } from 'node:fs';
 import {
   mintId,
@@ -325,6 +326,8 @@ describe('scheduler', () => {
           inbox,
           git: createGit(),
           processes: systemProcesses,
+          jobs: createDeliveryJobs(silentLogger),
+          clock: clock,
           maxRecoveryAttempts: 3,
           logger: silentLogger,
           cleanShutdown: true,
@@ -645,6 +648,8 @@ describe('Workbench passes', () => {
       inbox,
       git: createGit(),
       processes: systemProcesses,
+      jobs: createDeliveryJobs(silentLogger),
+      clock: clock,
       maxRecoveryAttempts: 3,
       logger: silentLogger,
       cleanShutdown: false,
@@ -717,6 +722,8 @@ describe('Workbench passes', () => {
         inbox,
         git: createGit(),
         processes: systemProcesses,
+        jobs: createDeliveryJobs(silentLogger),
+        clock: clock,
         maxRecoveryAttempts: 3,
         logger: silentLogger,
         cleanShutdown: false,
