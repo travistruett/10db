@@ -25,6 +25,7 @@ import {
   answerPassCard,
   keepTurnWork,
   keptRef,
+  passFolderOn,
   resumePassWork,
   takeOutSteps,
   TakeOutWithin,
@@ -302,8 +303,10 @@ describe('abandonPass', () => {
     ];
     it.each(rows)('$name', async ({ run }) => {
       w = await worked();
-      // The builder switched to the branch the pass came from, taking the pages' files along.
+      // The builder switched to the branch the pass came from, taking the pages' files along; the
+      // pass's folder card says so.
       w.h.git$('switch', '-q', 'main');
+      await passFolderOn(w.deps, w.opened.pass.id);
 
       await run(w);
 
@@ -322,6 +325,12 @@ describe('abandonPass', () => {
         'edited before the pass\nand in the turn',
       );
       expect(w.h.git$('symbolic-ref', '--short', 'HEAD')).toBe('main');
+      // An abandoned pass waits for no folder.
+      expect(
+        listInbox(db, { states: [InboxState.Open] }).filter(
+          (item) => item.detail?.['passCard'] === 'folder',
+        ),
+      ).toEqual([]);
       expect(
         listTaskThreadRows(db, w.settings.id)
           .filter((m) => m.kind === 'notice')

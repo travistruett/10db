@@ -49,6 +49,7 @@ import {
   PassTurnId,
   Provider,
   providerOf,
+  type PassId,
   type TaskId,
 } from '@10db/contracts';
 import {
@@ -178,7 +179,7 @@ import {
 } from '../inbox';
 import type { Logger } from '../log';
 import { mintSessionToken } from '../mcp';
-import { foldHandEdits, keepTurnWork, type PassWorkDeps } from '../pass';
+import { foldHandEdits, keepTurnWork, passFolderOn, type PassWorkDeps } from '../pass';
 import { allowedToolsFor, laneAutoMode, storableRule } from '../permissions';
 import { takeFoundHostsReading } from '../registries';
 import { retryStep } from '../routing';
@@ -3749,6 +3750,32 @@ export function createRunner(opts: RunnerOptions): Runner {
       const lane = ctl?.messages ?? null;
       if (ctl && lane && ctl.stopReason === null) {
         disarmIdleClose(ctl);
+        // A turn starts only while Your folder is on the pass's branch: off it, the page's warm
+        // session closes and the message waits untaken, queued with the pass's folder card, so the
+        // page goes on by itself once the folder is back (Workbench spec §5.1, §12).
+        const pass = passOfWorkstream(db, id);
+        // A folder that cannot be read is left to the turn's own keep, which refuses off the branch.
+        const folderOn = (passId: PassId): Promise<boolean> =>
+          passFolderOn(passWork, passId).catch((error: unknown) => {
+            opts.logger.warn(
+              { workstreamId: id, err: error instanceof Error ? error.message : String(error) },
+              "Your folder's branch could not be read; the message goes on",
+            );
+            return true;
+          });
+        if (pass && !openPassTurn(db, taskId) && !(await folderOn(pass.id))) {
+          // A stop that landed while the branch was read closes the session already.
+          if (stopRequested(ctl) === null) {
+            ctl.stopReason = 'closed';
+            opts.logger.info(
+              { workstreamId: id },
+              'warm session closed: Your folder is off the pass',
+            );
+            await ctl.handle?.stop();
+          }
+          await ctl.done;
+          return;
+        }
         // Stop and Redo: the interrupted turn goes on with the message. Its end is not Ready, as
         // no turn's is while the message waits untaken.
         if (redo && openPassTurn(db, taskId)) await lane.interrupt();

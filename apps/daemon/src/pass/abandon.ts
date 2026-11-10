@@ -21,7 +21,7 @@ import {
 } from '@10db/db';
 import { jobKey, JobQueue } from '../delivery';
 import { flagCard, withdrawCard } from '../inbox';
-import { PASS_CARD_DETAIL, PASS_CARD_KIND, PassCardKind } from './folder';
+import { PASS_CARD_DETAIL, PASS_CARD_KIND, PassCardKind, withdrawFolderCard } from './folder';
 import { passBranch, type PassWorkDeps } from './kept-work';
 import { takeOutSteps, TakeOutWithin, type TakeOutDeps } from './take-out';
 
@@ -171,6 +171,8 @@ export async function abandonPassSteps(
   }
 
   const pass = getPass(db, passId);
+  // An abandoned pass waits for no folder: its card about one is over.
+  withdrawFolderCard(deps, pass);
   const { git } = deps;
   const repo = getProject(db, pass.projectId).repoPath;
   const branch = passBranch(db, pass);

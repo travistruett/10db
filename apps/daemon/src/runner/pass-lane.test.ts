@@ -324,21 +324,35 @@ describe("a builder message's hand-over to a warm session", () => {
     ],
   ];
 
-  it('hands the message over without the hand-edit note when the hand edits cannot be kept', async () => {
-    const { task, id } = await openPage(twoTurns());
+  it("holds a message to a warm session while Your folder is off the pass's branch, and the page goes on once it is back", async () => {
+    const { task, id } = await openPage([
+      [...turn('one\n', 'Tidied the form.'), { do: 'await_message', contains: 'never sent' }],
+      [...turn('two\n', 'Made it bigger.'), { do: 'await_message', contains: 'never sent' }],
+    ]);
     await waitFor(isReady(id, 1));
-    // The builder edits the page by hand and switches Your folder away, so the edit cannot be kept.
+    // The builder edits the page by hand and switches Your folder away.
     writeFileSync(join(engine.repoPath, PAGE_FILE), 'one by hand\n');
     git('switch', '-q', 'main');
 
     await write(task, 'Bigger please');
 
-    expect(engine.adapter.sent.map((m) => m.text).some((t) => t.includes('Bigger please'))).toBe(
-      true,
-    );
+    // No turn runs on a branch the pass does not own: the session closed, the message waits.
+    expect(engine.runner.isRunning(id)).toBe(false);
+    expect(engine.adapter.sent).toEqual([]);
+    expect(row(id)).toMatchObject({ state: 'QUEUED', nextAction: { kind: 'feedback' } });
+    expect(
+      listInbox(engine.store.db, { states: ['OPEN'] }).filter(
+        (i) => i.detail?.['passCard'] === 'folder',
+      ),
+    ).toHaveLength(1);
+
     git('switch', '-q', '10db/polish-abc123');
-    engine.adapter.signal('go on');
+    engine.launch(id);
     await waitFor(isReady(id, 2));
+    expect(engine.adapter.prompts[1]?.prompt).toContain('Bigger please');
+    expect(engine.adapter.prompts[1]?.prompt).toContain(
+      `The builder edited these files by hand since your last turn. Keep their changes:\n- ${PAGE_FILE}`,
+    );
   });
 
   it('hands over with the next message every one no turn took that the session was never handed', async () => {

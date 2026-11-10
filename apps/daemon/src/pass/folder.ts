@@ -1,5 +1,5 @@
 import type { PassDto, PassId } from '@10db/contracts';
-import { findOpenByFoldKey, getPass, getProject } from '@10db/db';
+import { findOpenByFoldKey, getPass, getProject, type DbReader } from '@10db/db';
 import { flagCard, withdrawCard } from '../inbox';
 import { passBranch, type PassWorkDeps } from './kept-work';
 
@@ -25,7 +25,7 @@ export const switchBackLabel = (branch: string): string => `Switch to ${branch}`
  * the card says so and is raised again.
  */
 export function raiseFolderCard(
-  deps: PassWorkDeps,
+  deps: Pick<PassWorkDeps, 'state'>,
   pass: PassDto,
   found: string | null,
   why?: string,
@@ -54,12 +54,34 @@ export function raiseFolderCard(
   );
 }
 
+/** Whether the pass's folder card is open. */
+export function folderCardOpen(db: DbReader, pass: PassDto): boolean {
+  return findOpenByFoldKey(db, pass.projectId, passFolderCardKey(pass.id)) !== undefined;
+}
+
 /** Withdraws the pass's folder card, if one is open. */
-export function withdrawFolderCard(deps: PassWorkDeps, pass: PassDto): void {
+export function withdrawFolderCard(deps: Pick<PassWorkDeps, 'state'>, pass: PassDto): void {
   deps.state.write((ctx) => {
     const card = findOpenByFoldKey(ctx.tx, pass.projectId, passFolderCardKey(pass.id));
     if (card) withdrawCard(ctx, card.id);
   });
+}
+
+/**
+ * The pass's folder card by a read of Your folder's branch already made, `found` being the branch
+ * HEAD names: raised when it is not the pass's branch, writing nothing while the card is open, and
+ * withdrawn once it is. True when the folder is on the pass's branch.
+ */
+export function folderSeenOn(
+  deps: Pick<PassWorkDeps, 'state'>,
+  pass: PassDto,
+  found: string | null,
+): boolean {
+  const on = found === passBranch(deps.state.db, pass);
+  const open = folderCardOpen(deps.state.db, pass);
+  if (on && open) withdrawFolderCard(deps, pass);
+  else if (!on && !open) raiseFolderCard(deps, pass, found);
+  return on;
 }
 
 /**
@@ -69,13 +91,6 @@ export function withdrawFolderCard(deps: PassWorkDeps, pass: PassDto): void {
 export async function passFolderOn(deps: PassWorkDeps, passId: PassId): Promise<boolean> {
   const db = deps.state.db;
   const pass = getPass(db, passId);
-  const branch = passBranch(db, pass);
   const { repoPath } = getProject(db, pass.projectId);
-  const found = await deps.git.currentBranch(repoPath);
-  if (found === branch) {
-    withdrawFolderCard(deps, pass);
-    return true;
-  }
-  raiseFolderCard(deps, pass, found);
-  return false;
+  return folderSeenOn(deps, pass, await deps.git.currentBranch(repoPath));
 }
