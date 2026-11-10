@@ -2,7 +2,7 @@ import { createServer, request, type Server } from 'node:http';
 import { createServer as createNetServer, type Server as NetServer } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { waitForAsync } from '../../test/fixtures';
-import { startAppProxy, type AppProxy } from './app-proxy';
+import { NO_ANSWER, NO_ANSWER_HEADER, startAppProxy, type AppProxy } from './app-proxy';
 
 /** A loopback server that answers every request with its own name and counts what reached it. */
 async function countingServer(
@@ -43,7 +43,10 @@ async function rawApp(
 }
 
 /** Sends `GET <target>` to the proxy in absolute form, as Chromium does. */
-function viaProxy(proxyPort: number, target: string): Promise<{ status: number; body: string }> {
+function viaProxy(
+  proxyPort: number,
+  target: string,
+): Promise<{ status: number; body: string; noAnswer: boolean }> {
   return new Promise((resolve, reject) => {
     const req = request(
       { host: '127.0.0.1', port: proxyPort, method: 'GET', path: target, agent: false },
@@ -54,7 +57,11 @@ function viaProxy(proxyPort: number, target: string): Promise<{ status: number; 
           body += chunk;
         });
         res.on('end', () => {
-          resolve({ status: res.statusCode ?? 0, body });
+          resolve({
+            status: res.statusCode ?? 0,
+            body,
+            noAnswer: res.headers[NO_ANSWER_HEADER] === NO_ANSWER,
+          });
         });
       },
     );
@@ -199,7 +206,7 @@ describe('the app proxy', () => {
 
   it('forwards a request on the app’s origin', async () => {
     const got = await viaProxy(proxy.port, `http://127.0.0.1:${String(app.port)}/people?tab=all`);
-    expect(got).toEqual({ status: 200, body: 'app /people?tab=all' });
+    expect(got).toEqual({ status: 200, body: 'app /people?tab=all', noAnswer: false });
     expect(app.hits).toEqual(['GET /people?tab=all']);
   });
 
@@ -307,6 +314,28 @@ describe('the app proxy', () => {
     } finally {
       stream.server.closeAllConnections();
       stream.server.close();
+    }
+  });
+
+  it('marks the 502 it makes when the app never answered, and only that one', async () => {
+    const closed = await rawApp('');
+    const gone = closed.url;
+    await new Promise<void>((resolve) => {
+      closed.server.close(() => {
+        resolve();
+      });
+    });
+    proxy.allow(gone);
+    expect(await viaProxy(proxy.port, `${gone}/x`)).toMatchObject({ status: 502, noAnswer: true });
+    const own = await rawApp('HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n');
+    try {
+      proxy.allow(own.url);
+      expect(await viaProxy(proxy.port, `${own.url}/x`)).toMatchObject({
+        status: 502,
+        noAnswer: false,
+      });
+    } finally {
+      own.server.close();
     }
   });
 });

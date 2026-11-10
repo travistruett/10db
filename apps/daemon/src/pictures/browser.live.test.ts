@@ -462,6 +462,29 @@ describe.skipIf(!live)('the pinned browser, live', () => {
     expect(renderers.filter((p) => !p.args.includes('--seatbelt-client='))).toEqual([]);
   }, 60_000);
 
+  it('says the app did not answer, for a shot and for a sign-in', async () => {
+    const closed = createServer();
+    const port = await listen(closed, '127.0.0.1', 0);
+    await new Promise<void>((resolve) => {
+      closed.close(() => {
+        resolve();
+      });
+    });
+    const gone = `http://127.0.0.1:${String(port)}`;
+    const shot = await camera.shoot({
+      appUrl: gone,
+      route: '/clean',
+      viewport: VIEWPORT,
+      theme: 'default',
+      storageState: null,
+      signal: new AbortController().signal,
+    });
+    expect(shot).toMatchObject({ outcome: ShotOutcome.Failed, reason: 'the app did not answer' });
+    await expect(
+      camera.signIn({ appUrl: gone, url: '/login', signal: new AbortController().signal }),
+    ).rejects.toThrow('the app did not answer');
+  }, 60_000);
+
   it('names a failed sign-in without its token, in the error and in the log', async () => {
     const marker = 'MARKER-IN-QUERY';
     const failure = await camera

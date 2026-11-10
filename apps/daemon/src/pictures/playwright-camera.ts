@@ -1,7 +1,7 @@
 import { routeUrl, ScreenTheme, type AppUrl } from '@10db/contracts';
-import type { Browser, BrowserContext, Page } from 'playwright-core';
+import type { Browser, BrowserContext, Page, Response } from 'playwright-core';
 import type { Logger } from '../log';
-import type { AppProxy } from './app-proxy';
+import { NO_ANSWER, NO_ANSWER_HEADER, type AppProxy } from './app-proxy';
 import type { BrowserHost } from './browser-host';
 import { ShotOutcome, type PageCamera, type Shot } from './camera';
 import { requestAllowed } from './origin-guard';
@@ -53,6 +53,14 @@ async function guard(context: BrowserContext, appUrl: AppUrl, logger: Logger): P
   );
 }
 
+/** Why a load or a sign-in failed when the proxy, not the app, answered. */
+const APP_DID_NOT_ANSWER = 'the app did not answer';
+
+/** Whether the answer is the proxy's own 502: the app refused the connection, reset it or garbled it. */
+function unanswered(response: Response | null): boolean {
+  return response?.headers()[NO_ANSWER_HEADER] === NO_ANSWER;
+}
+
 /** The text of the first dev-server overlay up on the page, capped; null when none is. */
 async function overlayOn(page: Page): Promise<string | null> {
   for (const overlay of OVERLAY_SELECTORS) {
@@ -72,6 +80,9 @@ async function load(page: Page, url: string): Promise<PageLoad> {
   let status: number | null;
   try {
     const response = await page.goto(url, { waitUntil: 'load', timeout: LOAD_TIMEOUT_MS });
+    if (unanswered(response)) {
+      return { error: APP_DID_NOT_ANSWER, landedUrl: null, status: null, overlayText: null };
+    }
     status = response?.status() ?? null;
   } catch (error) {
     return { error: loadFailure(error), landedUrl: null, status: null, overlayText: null };
@@ -191,10 +202,19 @@ export function createPlaywrightCamera(host: BrowserHost<Browser>, logger: Logge
       return host.use((browser, proxy) =>
         inContext(browser, proxy, appUrl, signal, log, {}, async (context) => {
           const page = await context.newPage();
+          let response: Response | null;
           try {
-            await page.goto(target.href, { waitUntil: 'load', timeout: LOAD_TIMEOUT_MS });
+            response = await page.goto(target.href, {
+              waitUntil: 'load',
+              timeout: LOAD_TIMEOUT_MS,
+            });
           } catch (error) {
             throw new SignInError(`the dev login's address did not load: ${loadFailure(error)}`);
+          }
+          if (unanswered(response)) throw new SignInError(APP_DID_NOT_ANSWER);
+          const status = response?.status() ?? null;
+          if (status !== null && status >= 500) {
+            throw new SignInError(`the dev login's address answered ${String(status)}`);
           }
           await page
             .waitForLoadState('networkidle', { timeout: SETTLE_TIMEOUT_MS })

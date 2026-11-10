@@ -30,6 +30,13 @@ export interface AppProxyOptions {
   readonly onTunnel?: (target: string) => void;
 }
 
+/**
+ * The header on a 502 the proxy made because the app never answered (refused, reset, or an answer no
+ * response can carry), so the camera tells that apart from a 502 of the app's own.
+ */
+export const NO_ANSWER_HEADER = 'x-10db-pictures-proxy';
+export const NO_ANSWER = 'no-answer';
+
 const HOP_BY_HOP = ['proxy-connection', 'proxy-authorization', 'connection', 'keep-alive'];
 
 /** A URL's hostname as a socket takes it: an IPv6 literal without its brackets. */
@@ -100,7 +107,7 @@ export async function startAppProxy(options: AppProxyOptions = {}): Promise<AppP
     const noAnswer = (): void => {
       if (!res.headersSent) {
         try {
-          res.writeHead(502, { 'content-length': '0' });
+          res.writeHead(502, { 'content-length': '0', [NO_ANSWER_HEADER]: NO_ANSWER });
         } catch {
           // Headers already on their way: ending is all that is left.
         }
