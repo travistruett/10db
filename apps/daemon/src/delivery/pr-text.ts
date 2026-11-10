@@ -206,6 +206,8 @@ export function passPrBody(input: {
   readonly check: PassPrCheck;
   readonly ci: { readonly repo: string; readonly sha: string };
   readonly template: string | null;
+  /** The one review read only the first part of a diff too long for it. */
+  readonly reviewCut?: boolean;
 }): string {
   const what = [
     `Workbench pass "${input.pass.name}": the pages signed off so far.`,
@@ -214,7 +216,18 @@ export function passPrBody(input: {
   ].join('\n');
   const body = fillTemplate(input.template, [
     { heading: 'What and why', text: what },
-    { heading: 'How it was checked', text: passChecked(input.check, input.ci) },
+    {
+      heading: 'How it was checked',
+      text: [
+        passChecked(input.check, input.ci),
+        ...(input.reviewCut === true
+          ? [
+              '',
+              'The review read only the first part of the diff, which was too long: the rest was not reviewed.',
+            ]
+          : []),
+      ].join('\n'),
+    },
   ]);
   return `${body}\n\n---\n\nOpened by 10db, Workbench pass ${input.pass.id}\n`;
 }

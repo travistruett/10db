@@ -32,7 +32,7 @@ import { ghCall, type DeliveryContext } from './context';
 import { jobKey, JobQueue } from './jobs';
 import { shipCheck } from './local-check';
 import { createPassChecks } from './pass-checks';
-import { passHasReview, type PassReviewDeps } from './pass-review';
+import { passHasReview, REVIEW_CUT_NOTICE, type PassReviewDeps } from './pass-review';
 import { readPrTemplate } from './pr-template';
 import { passPrBody, prTitle, titlePrefix, type PassPrCheck } from './pr-text';
 import { gateInScratch, type ScratchGateDeps } from './scratch-gate';
@@ -238,6 +238,7 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
         check: checkOf(pass, project, sha),
         ci: { repo, sha },
         template: await readPrTemplate(deps.git, project.repoPath, sha, deps.logger),
+        reviewCut: getPassProgress(db, passId).notices.some((n) => n.id === REVIEW_CUT_NOTICE),
       }),
     );
     return file;
@@ -297,22 +298,29 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
     return { url };
   }
 
+  /** Rewrites the pull request's body from the rows; one gh can't edit keeps the lines it had. */
+  async function rewriteBody(passId: PassId, sha: string, signal: AbortSignal): Promise<void> {
+    const { batch } = placeOf(passId);
+    const pr = getPassPullRequest(db, passId);
+    if (pr === null || batch.repo === null) return;
+    const bodyFile = await writeBody(passId, sha, batch.repo);
+    await deps.gh
+      .prEditBody({ repo: batch.repo, url: pr.url, bodyFile }, ghCall(deps, signal))
+      .catch((error: unknown) => {
+        deps.logger.warn({ passId, err: message(error) }, 'pass pull request body not updated');
+      });
+  }
+
   const checks = createPassChecks({
     ...deps,
     gate: async ({ passId, sha, signal }) => {
       await gatePassTip({ passId, sha, where: 'scratch', signal });
-      // The body says how the gate went; a pull request gh can't edit keeps the line it had.
-      const { batch } = placeOf(passId);
-      const pr = getPassPullRequest(db, passId);
-      if (pr === null || batch.repo === null) return;
-      const bodyFile = await writeBody(passId, sha, batch.repo);
-      await deps.gh
-        .prEditBody({ repo: batch.repo, url: pr.url, bodyFile }, ghCall(deps, signal))
-        .catch((error: unknown) => {
-          deps.logger.warn({ passId, err: message(error) }, 'pass pull request body not updated');
-        });
+      // The body says how the gate went.
+      await rewriteBody(passId, sha, signal);
     },
     review: deps.review,
+    // The body says when the review read only part of the diff.
+    reviewed: rewriteBody,
   });
 
   async function preview(passId: PassId): Promise<PassPullRequestPreviewDto> {

@@ -321,6 +321,7 @@ describe('Open Pull Request', () => {
         return Promise.resolve();
       },
       review: null,
+      reviewed: () => Promise.resolve(),
     });
 
     checks.start({ passId, sha: 'a'.repeat(40), gate: true, review: false, baseRef: null });

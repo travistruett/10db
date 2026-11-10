@@ -180,6 +180,23 @@ describe('reviewPassTip', () => {
     expect(asked[1]?.prompt).toContain('only what changed since the last review');
   });
 
+  it('says in the header that a diff too long to read whole was cut', async () => {
+    const { deps } = setup('No findings.');
+    const { passId } = await openedPass();
+    const tip = h.commit('src/settings/page.tsx', `${'x'.repeat(100)}\n`.repeat(5_000));
+
+    expect(await review(deps, passId, tip)).toBe('reviewed');
+
+    expect(getPassProgress(h.store.db, passId).notices).toEqual([
+      expect.objectContaining({
+        id: 'review-cut',
+        kind: PassNoticeKind.Finding,
+        sendable: false,
+        text: expect.stringContaining('was not reviewed') as unknown,
+      }),
+    ]);
+  });
+
   it('runs no review for a flow with no review step', async () => {
     const { deps, asked } = setup('No findings.');
     const quick = findFlowByName(h.store.db, 'quick');

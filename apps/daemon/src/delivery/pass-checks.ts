@@ -22,6 +22,8 @@ export interface PassChecksDeps extends Pick<
   readonly gate: GateTip | null;
   /** The one review's model; absent, no review runs. */
   readonly review: PassReviewDeps | null;
+  /** Runs once a review has read tip `sha`, as the pull request's body says what it read. */
+  reviewed(passId: PassId, sha: string, signal: AbortSignal): Promise<void>;
 }
 
 export interface PassChecks {
@@ -99,8 +101,9 @@ export function createPassChecks(deps: PassChecksDeps): PassChecks {
             { ...deps, ...review },
             { passId: input.passId, sha: input.sha, baseRef: input.baseRef, signal },
           ).then(
-            () => {
+            async (did) => {
               deps.state.write((w) => clearPassNotice(w, input.passId, REVIEW_NOTICE));
+              if (did === 'reviewed') await deps.reviewed(input.passId, input.sha, signal);
             },
             (error: unknown) => {
               deps.logger.warn(

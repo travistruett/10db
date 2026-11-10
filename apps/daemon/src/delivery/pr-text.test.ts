@@ -486,5 +486,18 @@ describe('passPrBody', () => {
     expect(text).toContain('- Settings page\n- People page');
     expect(text).toContain(`https://github.com/acme/widgets/commit/${SHA}/checks`);
     expect(text).toContain('Opened by 10db, Workbench pass pas_1');
+    expect(text).not.toContain('The review read');
+  });
+
+  it('says when the review read only part of the diff', () => {
+    const text = passPrBody({
+      pass: { id: 'pas_1', name: 'Polish pages' },
+      pages: ['Settings page'],
+      check: { kind: 'none' },
+      ci: { repo: 'acme/widgets', sha: SHA },
+      template: null,
+      reviewCut: true,
+    });
+    expect(text).toContain('The review read only the first part of the diff');
   });
 });

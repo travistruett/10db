@@ -16,6 +16,7 @@ import {
   type WorkstreamStep,
 } from '@10db/contracts';
 import {
+  clearPassNotice,
   getPass,
   getPassProgress,
   getProject,
@@ -41,6 +42,9 @@ export const PASS_REVIEW_TIMEOUT_MS = 10 * 60_000;
 
 /** How much of the diff the review reads; a longer one is cut and the review says so. */
 const PASS_REVIEW_DIFF_BYTES = 400_000;
+
+/** The header notice that says the last review read only part of its diff. */
+export const REVIEW_CUT_NOTICE = 'review-cut';
 
 /** One question to the model, as the adapter takes it. */
 type CompletionAsk = Parameters<SessionAdapter['complete']>[0];
@@ -184,6 +188,17 @@ export async function reviewPassTip(
         at: w.now,
       });
     });
+    // The tip counts as read, so the cut part is not asked again; the header and the body say so.
+    if (diff.truncated)
+      setPassNotice(w, input.passId, {
+        id: REVIEW_CUT_NOTICE,
+        kind: PassNoticeKind.Finding,
+        text: `The diff to ${input.sha.slice(0, 7)} was longer than the review reads (${String(PASS_REVIEW_DIFF_BYTES / 1000)} kB): the rest of it was not reviewed.`,
+        sendable: false,
+        cardId: null,
+        at: w.now,
+      });
+    else clearPassNotice(w, input.passId, REVIEW_CUT_NOTICE);
     setReviewedSha(w, input.passId, input.sha);
   });
   deps.logger.info(
