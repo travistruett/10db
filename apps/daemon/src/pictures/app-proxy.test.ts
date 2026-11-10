@@ -1,6 +1,7 @@
 import { createServer, request, type Server } from 'node:http';
 import { createServer as createNetServer, type Server as NetServer } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { waitForAsync } from '../../test/fixtures';
 import { startAppProxy, type AppProxy } from './app-proxy';
 
 /** A loopback server that answers every request with its own name and counts what reached it. */
@@ -58,6 +59,47 @@ function viaProxy(proxyPort: number, target: string): Promise<{ status: number; 
       },
     );
     req.on('error', reject);
+    req.end();
+  });
+}
+
+/** An app that streams events and never ends its answer; `closed` counts the streams it saw end. */
+async function streamingApp(): Promise<{ server: Server; url: string; closed: () => number }> {
+  let closed = 0;
+  const server = createServer((_req, res) => {
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    res.write('data: first\n\n');
+    res.on('close', () => {
+      closed += 1;
+    });
+  });
+  await new Promise<void>((resolve) => {
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const address = server.address();
+  if (address === null || typeof address === 'string') throw new Error('no port');
+  return { server, url: `http://127.0.0.1:${String(address.port)}`, closed: () => closed };
+}
+
+/** Opens `target` through the proxy and resolves once the first bytes arrive, with a way to drop it. */
+function firstBytes(proxyPort: number, target: string): Promise<{ drop(): void }> {
+  return new Promise((resolve, reject) => {
+    const req = request(
+      { host: '127.0.0.1', port: proxyPort, method: 'GET', path: target, agent: false },
+      (res) => {
+        res.once('data', () => {
+          resolve({
+            drop: () => {
+              req.destroy();
+            },
+          });
+        });
+        res.on('error', () => undefined);
+      },
+    );
+    req.on('error', (error) => {
+      reject(error);
+    });
     req.end();
   });
 }
@@ -233,6 +275,32 @@ describe('the app proxy', () => {
       expect(await settles(proxy.port, `${bad.url}/x`)).not.toBe('hung');
     } finally {
       bad.server.close();
+    }
+  });
+
+  it('stops the app’s stream when the browser drops it', async () => {
+    const stream = await streamingApp();
+    try {
+      proxy.allow(stream.url);
+      const open = await firstBytes(proxy.port, `${stream.url}/events`);
+      open.drop();
+      await waitForAsync(() => Promise.resolve(stream.closed() === 1 ? true : undefined), 5_000);
+    } finally {
+      stream.server.closeAllConnections();
+      stream.server.close();
+    }
+  });
+
+  it('stops the app’s streams when it closes', async () => {
+    const stream = await streamingApp();
+    try {
+      proxy.allow(stream.url);
+      await firstBytes(proxy.port, `${stream.url}/events`);
+      await proxy.close();
+      await waitForAsync(() => Promise.resolve(stream.closed() === 1 ? true : undefined), 5_000);
+    } finally {
+      stream.server.closeAllConnections();
+      stream.server.close();
     }
   });
 });

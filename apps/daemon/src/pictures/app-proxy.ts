@@ -1,4 +1,9 @@
-import { createServer, request as httpRequest, type OutgoingHttpHeaders } from 'node:http';
+import {
+  createServer,
+  request as httpRequest,
+  type ClientRequest,
+  type OutgoingHttpHeaders,
+} from 'node:http';
 import { connect, type Socket } from 'node:net';
 import type { Duplex } from 'node:stream';
 import { proxyAllows } from './origin-guard';
@@ -39,6 +44,8 @@ function refuse(socket: Duplex): void {
 export async function startAppProxy(options: AppProxyOptions = {}): Promise<AppProxy> {
   let allowed: string | null = null;
   const tunnels = new Set<Duplex>();
+  /** Requests forwarded to the app whose answer the browser may still be reading. */
+  const forwards = new Set<ClientRequest>();
   const refused = (method: string, target: string): void => {
     options.onRefused?.(`${method} ${target}`);
   };
@@ -99,6 +106,12 @@ export async function startAppProxy(options: AppProxyOptions = {}): Promise<AppP
       }
       res.end();
     };
+    // The browser gone, or the answer done: the request to the app is too, a stream's included.
+    forwards.add(upstream);
+    res.on('close', () => {
+      forwards.delete(upstream);
+      upstream.destroy();
+    });
     upstream.on('error', noAnswer);
     // The browser asked for no upgrade, so a 101 is no answer it can use.
     upstream.on('upgrade', (_answer, socket) => {
@@ -166,6 +179,8 @@ export async function startAppProxy(options: AppProxyOptions = {}): Promise<AppP
         allowed = null;
         for (const socket of tunnels) socket.destroy();
         tunnels.clear();
+        for (const forward of forwards) forward.destroy();
+        forwards.clear();
         server.closeAllConnections();
         server.close(() => {
           resolve();
