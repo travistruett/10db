@@ -2,7 +2,9 @@ import {
   ConflictError,
   SessionActivityData,
   type PassFileChange,
+  type PassHoldDto,
   type PassId,
+  type PassSharedChangeDto,
   type PassTurnDto,
   type PassTurnId,
   type PassTurnWithFilesDto,
@@ -14,6 +16,8 @@ import {
   getPassTurn,
   getProject,
   getTask,
+  listHolds,
+  listSharedChanges,
   listTaskTurns,
   getWorkstreamRow,
   listTurnActivity,
@@ -67,11 +71,33 @@ function comparedWith(turns: readonly PassTurnDto[], turn: PassTurnDto): string 
 }
 
 /**
+ * The shared changes a turn's holds kept, by number (spec §7.2): a hold is granted to the task's run
+ * while its turn is open and kept at the turn's end. A drop is not the turn's.
+ */
+function sharedKeptIn(
+  turn: PassTurnDto,
+  holds: readonly PassHoldDto[],
+  changes: readonly PassSharedChangeDto[],
+): { readonly hold: PassHoldDto; readonly change: PassSharedChangeDto }[] {
+  const from = new Date(turn.startedAt).getTime();
+  const to = turn.endedAt === null ? Infinity : new Date(turn.endedAt).getTime();
+  return holds.flatMap((hold) => {
+    const at = new Date(hold.grantedAt).getTime();
+    if (hold.taskId !== turn.taskId || hold.workstreamId !== turn.workstreamId) return [];
+    if (at < from || at > to) return [];
+    const change = changes.find((c) => c.seq === hold.seq && c.dropOf === null);
+    return change === undefined ? [] : [{ hold, change }];
+  });
+}
+
+/**
  * The task's turns, oldest first, each with the files its kept commit changed against the kept commit
  * before it in the same run (its pass), or the pass branch tip it was kept on: only the task's page
  * files (`pageMatcher`), since each kept commit is the branch tip of its time with the page laid over
- * it, and another page or a shared change can land on the branch between two turns. A turn that kept
- * nothing new, or whose commit git no longer has, lists none. Reads only.
+ * it, and another page or a shared change can land on the branch between two turns. After them come the
+ * shared files the turn's own holds kept, each against the shared chain as its hold found it (the hold
+ * record's parent). A turn that kept nothing new, or whose commit git no longer has, lists none. Reads
+ * only.
  */
 export async function taskTurns(
   deps: PassTurnsDeps,
@@ -88,6 +114,18 @@ export async function taskTurns(
     matchers.set(passId, mine);
     return mine;
   };
+  const holds = new Map<PassId, PassHoldDto[]>();
+  const holdsOf = (passId: PassId): PassHoldDto[] => {
+    const known = holds.get(passId) ?? listHolds(deps.db, passId);
+    holds.set(passId, known);
+    return known;
+  };
+  const changes = new Map<PassId, PassSharedChangeDto[]>();
+  const changesOf = (passId: PassId): PassSharedChangeDto[] => {
+    const known = changes.get(passId) ?? listSharedChanges(deps.db, passId);
+    changes.set(passId, known);
+    return known;
+  };
   const listed: PassTurnWithFilesDto[] = [];
   for (const turn of turns) {
     const from = comparedWith(turns, turn);
@@ -98,7 +136,16 @@ export async function taskTurns(
         : (await deps.files(project.repoPath, from, turn.keptSha)).filter((f) =>
             pageFileOf(passId)(f.path),
           );
-    listed.push({ ...turn, files });
+    const shared: PassFileChange[] = [];
+    if (passId !== null)
+      for (const { hold, change } of sharedKeptIn(turn, holdsOf(passId), changesOf(passId)))
+        for (const f of await deps.files(project.repoPath, `${hold.recordSha}^`, change.sha))
+          if (
+            change.paths.includes(f.path) &&
+            ![...files, ...shared].some((g) => g.path === f.path)
+          )
+            shared.push(f);
+    listed.push({ ...turn, files: [...files, ...shared] });
   }
   return listed;
 }
