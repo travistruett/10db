@@ -258,6 +258,17 @@ describe('the check after each turn', () => {
     expect(header()).toMatchObject([{ sendable: true }]);
   });
 
+  it('runs and reports a check whose process group ps could not be asked for, recording no pid', async () => {
+    await world(() => checkScript('src/settings/page.tsx'));
+    await start(() => Promise.reject(new Error('ps failed')));
+
+    await readyTurn(w.settings, 'src/settings/page.tsx');
+    await waitFor(() => checks().at(-1) === 'failed');
+
+    expect(listPassCheckPids(w.h.store.db)).toEqual([]);
+    expect(header()).toMatchObject([{ sendable: true }]);
+  });
+
   it('stops a check a stopped daemon left running before recovery settles a Ready turn, which is checked once', async () => {
     const orphan = await orphanGateGroup();
     try {

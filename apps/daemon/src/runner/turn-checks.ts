@@ -210,17 +210,24 @@ function createTurnChecks(deps: TurnChecksDeps): TurnChecks {
         checkouts: allCheckouts(db),
         signal,
         onSpawn: (pid) => {
-          recording = deps.identifyProcess(pid).then((start) => {
-            if (start !== null)
-              deps.state.write((w) => {
-                setPassCheckPid(w, passId, { pid, start });
-              });
-          });
+          // Caught as it is made: a pid that can't be read or written is only logged, and the
+          // check runs on unrecorded.
+          recording = deps
+            .identifyProcess(pid)
+            .then((start) => {
+              if (start !== null)
+                deps.state.write((w) => {
+                  setPassCheckPid(w, passId, { pid, start });
+                });
+            })
+            .catch((error: unknown) => {
+              deps.logger.warn({ passId, err: message(error) }, 'turn check pid not recorded');
+            });
         },
       });
     } finally {
       // The pid is cleared only once its recording has landed, so a late one never outlives it.
-      await recording.catch(() => undefined);
+      await recording;
       deps.state.write((w) => {
         setPassCheckPid(w, passId, null);
       });
