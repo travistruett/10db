@@ -1,7 +1,7 @@
 import { mintId, PROTOCOL_VERSION } from '@10db/contracts';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderApp, server } from './test/daemon';
 import { inboxItemDto } from './test/fixtures';
 
@@ -13,6 +13,37 @@ const healthy = () =>
       startedAt: '2026-10-13T12:00:00.000Z',
     }),
   );
+
+/** The setup's matchMedia, which each width test puts back. */
+const setupMatchMedia = window.matchMedia.bind(window);
+
+/** A window `width` px wide: min- and max-width queries in px answer as a browser of that width would. */
+function windowWidth(width: number): void {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: (query: string): Omit<MediaQueryList, 'addListener' | 'removeListener'> => {
+      const bound = /\((min|max)-width:\s*([\d.]+)px\)/.exec(query);
+      const px = Number(bound?.[2]);
+      return {
+        matches:
+          bound === null
+            ? setupMatchMedia(query).matches
+            : bound[1] === 'min'
+              ? width >= px
+              : width <= px,
+        media: query,
+        onchange: null,
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+        dispatchEvent: () => false,
+      };
+    },
+  });
+}
+
+afterEach(() => {
+  Object.defineProperty(window, 'matchMedia', { writable: true, value: setupMatchMedia });
+});
 
 describe('App shell', () => {
   it('orders the sidebar global views first, then the project and its views, then app-wide Settings', async () => {
@@ -31,6 +62,7 @@ describe('App shell', () => {
       'switcher',
       'Board',
       'Plan',
+      'Workbench',
       'Knowledge',
       'Project Settings',
       'Settings',
@@ -159,5 +191,37 @@ describe('App shell', () => {
     renderApp();
     const toggle = await screen.findByRole('button', { name: /^Switch to (dark|light) mode$/ });
     expect(toggle.querySelector('svg')?.getAttribute('width')).toBe('20');
+  });
+
+  it.each([
+    { width: 480, path: '/workbench', folded: true },
+    { width: 1280, path: '/workbench', folded: false },
+    { width: 480, path: '/board', folded: false },
+  ])('at $width px on $path the sidebar folds: $folded', async ({ width, path, folded }) => {
+    windowWidth(width);
+    server.use(...baseHandlers());
+    renderApp(path);
+    const nav = await screen.findByRole('navigation', { hidden: true });
+    await waitFor(() => {
+      expect(nav.hasAttribute('inert')).toBe(folded);
+    });
+    const burger = screen.queryByRole('button', { name: 'Show navigation' });
+    expect(burger !== null).toBe(folded);
+    if (burger === null) return;
+    fireEvent.click(burger);
+    await waitFor(() => {
+      expect(nav.hasAttribute('inert')).toBe(false);
+    });
+    expect(screen.getByRole('button', { name: 'Hide navigation' })).toBeTruthy();
+  });
+
+  it('opens the Workbench from the sidebar, between Plan and Knowledge', async () => {
+    server.use(...baseHandlers());
+    const { router } = renderApp('/factory');
+    fireEvent.click(await screen.findByRole('link', { name: 'Workbench' }));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/workbench');
+    });
+    expect(await screen.findByRole('heading', { name: 'Workbench' })).toBeTruthy();
   });
 });
