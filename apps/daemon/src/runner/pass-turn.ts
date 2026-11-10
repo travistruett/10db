@@ -1,0 +1,226 @@
+import {
+  ConflictError,
+  PassTurnEnding,
+  WorkstreamState as S,
+  type NextAction,
+  type PassDto,
+  type PassTurnDto,
+  type SessionId,
+  type TaskMessageId,
+  type WorkstreamId,
+} from '@10db/contracts';
+import {
+  clearLease,
+  endPassTurn,
+  getTask,
+  getWorkstreamRow,
+  insertPassTurn,
+  openPassTurn,
+  passHoldingTask,
+  patchWorkstream,
+  settlePassTurn,
+  transitionWorkstream,
+  type DbReader,
+  type WriteContext,
+} from '@10db/db';
+import { withdrawCard } from '../inbox';
+import { keepTurnWork, keptWorkFacts, type KeptWork, type PassWorkDeps } from '../pass';
+import { liveCheckCard } from './builder-check';
+import { untakenMessages } from './lane-messages';
+import { raisePassCheck, raiseTurnFailed } from './pass-check';
+
+// Workbench spec §6.2: a pass task's turn. It starts with a builder message going into its session
+// and ends in one order, however it ends: the end and the agent's reply in one write, the page's
+// work kept, then the turn settled in one more write, so a restart between finishes it by its ending.
+
+/** The pass that holds the workstream's task, or undefined for ordinary work. */
+export function passOfWorkstream(db: DbReader, id: WorkstreamId): PassDto | undefined {
+  return passHoldingTask(db, getTask(db, getWorkstreamRow(db, id).taskId));
+}
+
+/** Moves the workstream to WAITING_HUMAN from wherever a turn of it can end. */
+function toWaitingHuman(ctx: WriteContext, id: WorkstreamId, fence: number | null): void {
+  const { state } = getWorkstreamRow(ctx.tx, id);
+  if (state === S.WaitingHuman) return;
+  if (state === S.Starting) transitionWorkstream(ctx, id, { to: S.Running, fence });
+  else if (state !== S.Running && state !== S.HandingOff)
+    throw new ConflictError(`Workstream ${id} is ${state}; its turn cannot end there`);
+  transitionWorkstream(ctx, id, { to: S.WaitingHuman, fence, reason: 'the turn ended' });
+}
+
+/** Closes the item the page waits on and its live Ready item, if any. */
+export function withdrawPageItems(ctx: WriteContext, id: WorkstreamId): void {
+  const row = getWorkstreamRow(ctx.tx, id);
+  if (row.nextAction.kind === 'pass_review') withdrawCard(ctx, row.nextAction.inboxId);
+  const live = liveCheckCard(ctx.tx, id);
+  if (live) withdrawCard(ctx, live.id);
+}
+
+/**
+ * A builder message goes into the page's session (spec §6.2, §6.3): it starts a turn unless one is
+ * open, in which case it folds into that turn. A started turn moves a Ready page back to running and
+ * withdraws its Ready item, in the caller's write.
+ */
+export function startTurn(
+  ctx: WriteContext,
+  input: {
+    readonly workstreamId: WorkstreamId;
+    readonly sessionId: SessionId | null;
+    readonly messageId: TaskMessageId | null;
+    readonly fence: number | null;
+  },
+): PassTurnDto {
+  const row = getWorkstreamRow(ctx.tx, input.workstreamId);
+  const open = openPassTurn(ctx.tx, row.taskId);
+  if (open) return open;
+  const turn = insertPassTurn(ctx, {
+    taskId: row.taskId,
+    workstreamId: input.workstreamId,
+    sessionId: input.sessionId,
+    messageId: input.messageId,
+  });
+  withdrawPageItems(ctx, input.workstreamId);
+  if (row.state === S.WaitingHuman)
+    transitionWorkstream(ctx, input.workstreamId, {
+      to: S.Running,
+      fence: input.fence,
+      reason: 'the builder wrote to the page',
+    });
+  return turn;
+}
+
+/** How a turn's end is carried through once its work is kept. */
+export interface TurnSettle {
+  /** The runner's fence on the workstream; null where no runner holds it (recovery). */
+  readonly fence: number | null;
+  /** The provider session a stopped page resumes with its next message; null starts fresh. */
+  readonly providerSessionId: string | null;
+  /** Why a failed turn could not go on, in the builder's words. */
+  readonly reason: string;
+}
+
+/**
+ * The last write of a turn's end: the turn settled, and the page moved by how it ended. Ready waits
+ * for the builder on a new Ready item with its session still open; a failed turn waits on its flag;
+ * a stopped turn goes back to the queue resuming its session, which launches nothing until the
+ * builder writes again.
+ */
+function settleTurn(
+  deps: PassWorkDeps,
+  turn: PassTurnDto,
+  kept: KeptWork,
+  settle: TurnSettle,
+): void {
+  const id = turn.workstreamId;
+  deps.state.write((ctx) => {
+    settlePassTurn(ctx, turn.id);
+    const row = getWorkstreamRow(ctx.tx, id);
+    const task = getTask(ctx.tx, row.taskId);
+    const pass = passHoldingTask(ctx.tx, task);
+    if (!pass) throw new ConflictError(`${task.title} is in no open pass`);
+    switch (turn.ending) {
+      case PassTurnEnding.Ready: {
+        toWaitingHuman(ctx, id, settle.fence);
+        const item = raisePassCheck(ctx, {
+          pass,
+          task,
+          workstreamId: id,
+          turnId: turn.id,
+          keptSha: kept.keptSha,
+          keptBaseSha: kept.keptBaseSha,
+          turnFiles: kept.turnFiles,
+          pageFiles: kept.pageFiles,
+        });
+        patchWorkstream(ctx, id, settle.fence, {
+          nextAction: { kind: 'pass_review', inboxId: item.id },
+        });
+        return;
+      }
+      case PassTurnEnding.Failed: {
+        toWaitingHuman(ctx, id, settle.fence);
+        const flag = raiseTurnFailed(ctx, {
+          pass,
+          task,
+          workstreamId: id,
+          turnId: turn.id,
+          reason: settle.reason,
+        });
+        patchWorkstream(ctx, id, settle.fence, {
+          nextAction: { kind: 'pass_review', inboxId: flag.id },
+          currentSessionId: null,
+        });
+        clearLease(ctx, id);
+        return;
+      }
+      case PassTurnEnding.Stopped: {
+        withdrawPageItems(ctx, id);
+        toWaitingHuman(ctx, id, settle.fence);
+        const next: NextAction =
+          settle.providerSessionId === null
+            ? { kind: 'start' }
+            : { kind: 'resume', providerSessionId: settle.providerSessionId, reason: 'stopped' };
+        transitionWorkstream(ctx, id, {
+          to: S.Queued,
+          fence: settle.fence,
+          patch: { nextAction: next, currentSessionId: null },
+          reason: 'the builder stopped the turn',
+        });
+        clearLease(ctx, id);
+        return;
+      }
+      case null:
+        throw new ConflictError(`Turn ${String(turn.seq)} of this task has not ended`);
+    }
+  });
+}
+
+/**
+ * Ends the page's turn (spec §6.2) in its order, for every ending: the end and the agent's reply in
+ * one write; the page's work kept; then the turn settled. A failed page with no turn open gets one
+ * for the message it was given, so Retry Turn has a message to send again. Does nothing when no
+ * turn is open and it did not fail.
+ */
+export async function endTurnSteps(
+  deps: PassWorkDeps,
+  input: TurnSettle & {
+    readonly workstreamId: WorkstreamId;
+    readonly ending: PassTurnEnding;
+    readonly reply: string | null;
+  },
+): Promise<void> {
+  const db = deps.state.db;
+  const { taskId } = getWorkstreamRow(db, input.workstreamId);
+  const ended = deps.state.write((ctx) => {
+    const open =
+      openPassTurn(ctx.tx, taskId) ??
+      (input.ending === PassTurnEnding.Failed
+        ? insertPassTurn(ctx, {
+            taskId,
+            workstreamId: input.workstreamId,
+            sessionId: null,
+            messageId: untakenMessages(ctx.tx, taskId)[0] ?? null,
+          })
+        : undefined);
+    if (!open) return undefined;
+    // A shared change the turn made is kept, and its areas released, before this write.
+    return endPassTurn(ctx, open.id, { ending: input.ending, replyBody: input.reply });
+  });
+  if (!ended) return;
+  await finishEndedTurn(deps, ended, input);
+}
+
+/**
+ * Carries an ended turn through: keeps its work unless it was kept already, then settles it by its
+ * ending. A restart between the end and the settle finishes the turn here, never resuming it.
+ */
+export async function finishEndedTurn(
+  deps: PassWorkDeps,
+  turn: PassTurnDto,
+  settle: TurnSettle,
+): Promise<void> {
+  const kept =
+    turn.keptBaseSha === null
+      ? await keepTurnWork(deps, { workstreamId: turn.workstreamId, turnId: turn.id })
+      : await keptWorkFacts(deps, turn.taskId);
+  settleTurn(deps, turn, kept, settle);
+}

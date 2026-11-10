@@ -7,7 +7,7 @@ import { PassState } from '@10db/contracts';
 /** Why a queued page of a pass launches now, or what holds it. */
 export const PassLaunch = {
   Launch: 'launch',
-  /** Nothing to act on: no builder message waits and no turn is open. */
+  /** Nothing to act on: no builder message waits and the latest turn is carried through. */
   Idle: 'idle',
   /** The pass is closing or abandoning; its pages start no turn. */
   PassNotOpen: 'pass_not_open',
@@ -25,8 +25,8 @@ export interface PassLaunchFacts {
   readonly takingOut: boolean;
   /** A builder message of the task that no turn has taken, pushed or not. */
   readonly untaken: boolean;
-  /** The task's latest turn has not ended. */
-  readonly turnOpen: boolean;
+  /** The task's latest turn is not carried through: still open, or ended and not settled. */
+  readonly turnUnsettled: boolean;
   /** Whether Your folder names the pass's branch; null when this tick did not read it. */
   readonly folderOn: boolean | null;
 }
@@ -34,7 +34,7 @@ export interface PassLaunchFacts {
 export function passLaunch(facts: PassLaunchFacts): PassLaunch {
   if (facts.passState !== PassState.Open) return PassLaunch.PassNotOpen;
   if (facts.takingOut) return PassLaunch.TakingOut;
-  if (!facts.untaken && !facts.turnOpen) return PassLaunch.Idle;
+  if (!facts.untaken && !facts.turnUnsettled) return PassLaunch.Idle;
   if (facts.folderOn !== true) return PassLaunch.FolderOff;
   return PassLaunch.Launch;
 }

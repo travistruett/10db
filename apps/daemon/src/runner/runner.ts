@@ -42,8 +42,10 @@ import {
   type WorkstreamStep,
   MIGRATIONS_RENUMBERED_NOTICE_KEY,
   MIGRATIONS_UNCARRIED_NOTICE_KEY,
+  PassTurnEnding,
   Provider,
   providerOf,
+  type TaskId,
 } from '@10db/contracts';
 import {
   activeClaims,
@@ -71,6 +73,7 @@ import {
   listAccountModels,
   listModelProfiles,
   latestHandoffForStep,
+  latestPassTurn,
   latestToolOp,
   listPermissionRules,
   listSessions,
@@ -83,6 +86,8 @@ import {
   answeredCardsForTask,
   deniedPermissionsForWorkstream,
   openItemsForWorkstream,
+  openPassTurn,
+  passPageAreas,
   patchWorkstream,
   recordJudgeOutcome,
   recordProfileOutcome,
@@ -141,6 +146,7 @@ import {
   uncarriedSaid,
   type BaseUpdate,
   type BaseUpdates,
+  type DeliveryJobs,
   type FlakyTest,
   type MigrationsBase,
 } from '../delivery';
@@ -166,6 +172,7 @@ import {
 } from '../inbox';
 import type { Logger } from '../log';
 import { mintSessionToken } from '../mcp';
+import { foldHandEdits, type PassWorkDeps } from '../pass';
 import { allowedToolsFor, laneAutoMode, storableRule } from '../permissions';
 import { takeFoundHostsReading } from '../registries';
 import { retryStep } from '../routing';
@@ -216,7 +223,19 @@ import {
   reviewSizeRule,
   reviewSizeState,
 } from './review-size';
-import { createLaneMessages, outgoingMessage } from './lane-messages';
+import {
+  createLaneMessages,
+  outgoingMessage,
+  untakenMessages,
+  type LaneMessages,
+} from './lane-messages';
+import {
+  endTurnSteps,
+  finishEndedTurn,
+  passOfWorkstream,
+  startTurn,
+  withdrawPageItems,
+} from './pass-turn';
 import {
   keepingFeedback,
   nextActionAfterCrash,
@@ -266,6 +285,8 @@ export interface RunnerOptions {
   /** Told when a step finds no model profile for its account, so the scheduler leaves that account's work alone. */
   readonly modelWait?: Pick<ModelListWait, 'hold'>;
   readonly git: Git;
+  /** The daemon's delivery jobs, which a pass task's kept work is written beside. */
+  readonly jobs: DeliveryJobs;
   readonly gate: GateRunner;
   /** Brings a batch's base as origin has it now into its branch before each of its gates. */
   readonly baseUpdates: BaseUpdates;
@@ -360,6 +381,16 @@ export interface Runner {
    * check. The result runs once that write has committed.
    */
   sendBack(ctx: WriteContext, id: WorkstreamId, note: string): AfterCommit;
+  /**
+   * Hands the builder's message to a page of a pass (Workbench spec §6.3). A live session gets it at
+   * once, after the builder's hand edits are kept and named ahead of it, starting a turn unless one
+   * is open; with no session the page is queued to start one with it. The message's row is written.
+   */
+  deliverMessage(
+    taskId: TaskId,
+    messageId: TaskMessageId,
+    opts: { readonly redo: boolean },
+  ): Promise<void>;
 }
 
 type Outcome =
@@ -438,6 +469,11 @@ type Outcome =
   | {
       readonly kind: 'stopped';
       readonly reason: StopReason;
+      readonly providerSessionId: string | null;
+    }
+  | {
+      /** A pass task's session ended between its turns: the page waits for the builder as it was. */
+      readonly kind: 'closed';
       readonly providerSessionId: string | null;
     };
 
@@ -570,6 +606,8 @@ interface Control {
    * clears it; a move, which starts no session, and a refused model leave it, so the run only grows.
    */
   unaskedHandoffs: UnaskedRun | null;
+  /** Set while a pass task's session runs: the builder messages it was handed. */
+  messages: LaneMessages | null;
   done: Promise<void>;
 }
 
@@ -703,6 +741,24 @@ export function createRunner(opts: RunnerOptions): Runner {
   const identify = (pid: number | null): Promise<string | null> =>
     pid === null || !opts.identifyProcess ? Promise.resolve(null) : opts.identifyProcess(pid);
 
+  /** What a pass task's turns keep their work and raise their items with. */
+  const passWork: PassWorkDeps = {
+    state: opts.state,
+    git: opts.git,
+    inbox: opts.inbox,
+    jobs: opts.jobs,
+    logger: opts.logger,
+    clock: opts.clock,
+  };
+
+  /** The provider session the workstream's last session ran, or null when none started. */
+  function lastProviderSession(id: WorkstreamId): string | null {
+    return (
+      [...listSessions(db, id)].reverse().find((s) => s.providerSessionId !== null)
+        ?.providerSessionId ?? null
+    );
+  }
+
   function freshAction(reader: DbReader, id: WorkstreamId): NextAction {
     const latest = latestHandoffForStep(reader, getWorkstreamRow(reader, id));
     return latest ? { kind: 'continue_from_handoff', handoffId: latest.id } : { kind: 'start' };
@@ -715,6 +771,8 @@ export function createRunner(opts: RunnerOptions): Runner {
    */
   function untakenMessage(reader: DbReader, id: WorkstreamId): TaskMessageId | null {
     const row = getWorkstreamRow(reader, id);
+    // A pass task's message waits for a turn whether or not a session was ever handed it.
+    if (passOfWorkstream(reader, id)) return untakenMessages(reader, row.taskId)[0] ?? null;
     if (currentStep(row).role !== StepRole.Implement) return null;
     return listUndeliveredTaskMessages(reader, row.taskId)[0]?.id ?? null;
   }
@@ -1375,6 +1433,14 @@ export function createRunner(opts: RunnerOptions): Runner {
       case 'parked':
         park(id, ctl.fence, outcome.inboxId, outcome.providerSessionId);
         return;
+      case 'closed':
+        // Only a pass task's session closes; one that is no longer a page's is retried as after a crash.
+        settle(id, ctl, {
+          kind: 'crashed',
+          message: 'the session closed',
+          providerSessionId: outcome.providerSessionId,
+        });
+        return;
       case 'refused':
       case 'background_hung':
         // A retry would hang the same way, and the work it left is for the builder to see.
@@ -1414,6 +1480,53 @@ export function createRunner(opts: RunnerOptions): Runner {
         });
       }
     }
+  }
+
+  /**
+   * A pass task's session ended between turns (Workbench spec §6.3): a message no turn took queues the
+   * page to start a turn with it, resuming the session that ended, and withdraws its item; otherwise
+   * the page waits for the builder as it was, its lane freed.
+   */
+  function closeBetweenTurns(
+    id: WorkstreamId,
+    ctl: Control,
+    providerSessionId: string | null,
+  ): void {
+    opts.state.write((ctx) => {
+      const row = getWorkstreamRow(ctx.tx, id);
+      const untaken = untakenMessages(ctx.tx, row.taskId)[0];
+      if (untaken !== undefined) {
+        withdrawPageItems(ctx, id);
+        transitionWorkstream(ctx, id, {
+          to: S.Queued,
+          fence: ctl.fence,
+          patch: { nextAction: { kind: 'feedback', messageId: untaken, providerSessionId } },
+          reason: 'a message waits for the next turn',
+        });
+      }
+      clearLease(ctx, id);
+    });
+  }
+
+  /**
+   * Settles how a pass task's session ended, where that differs from any other lane's; false leaves
+   * it to `settle`. A page between turns, Ready or on its failed turn's flag, keeps waiting for the
+   * builder whatever ended its session, but a cancel.
+   */
+  function settlePage(id: WorkstreamId, ctl: Control, outcome: Terminal): boolean {
+    if (!passOfWorkstream(db, id)) return false;
+    const row = getWorkstreamRow(db, id);
+    if (outcome.kind === 'stopped' && outcome.reason === 'cancelled') return false;
+    if (row.state === S.WaitingHuman && row.nextAction.kind === 'pass_review') {
+      closeBetweenTurns(id, ctl, outcome.providerSessionId);
+      return true;
+    }
+    return false;
+  }
+
+  /** Settles the lane's ending: a pass task's own way first, else as any lane's. */
+  function settleLane(id: WorkstreamId, ctl: Control, outcome: Terminal): void {
+    if (!settlePage(id, ctl, outcome)) settle(id, ctl, outcome);
   }
 
   /**
@@ -1525,8 +1638,13 @@ export function createRunner(opts: RunnerOptions): Runner {
     const project = getProject(db, row.projectId);
     const checkout = checkoutOf(db, row);
     const task = getTask(db, row.taskId);
+    // A page of a pass (Workbench spec §6.2): its session runs turn after turn, each from a builder message.
+    const pass = passOfWorkstream(db, id) ?? null;
     const fresh = actionOnAnotherAccount(id, ctl, row);
-    const action = fresh ?? row.nextAction;
+    // A pass task's session starts from the oldest message no turn has taken, whatever it was queued for.
+    const action = pass
+      ? withUndelivered(fresh ?? row.nextAction, untakenMessages(db, task.id)[0] ?? null)
+      : (fresh ?? row.nextAction);
     const step = currentStep(row);
     const persona = step.personaId ? getPersona(db, step.personaId) : null;
     const priorResults = row.steps.flatMap((s, i) =>
@@ -1605,8 +1723,9 @@ export function createRunner(opts: RunnerOptions): Runner {
     const feedback = action.kind === 'feedback' ? getTaskMessageRow(db, action.messageId) : null;
     // The builder writes to the task's implementer: only an implement step's sessions are handed what
     // an earlier session was handed and no turn took (§12).
+    // A pass task's are read once its session is there to take them (below).
     const untaken =
-      step.role === StepRole.Implement
+      step.role === StepRole.Implement && !pass
         ? listUndeliveredTaskMessages(db, task.id).filter((m) => m.id !== feedback?.id)
         : [];
     // Codex stamps no client uuid on a turn, so nothing would show it took a message, and a message
@@ -1648,6 +1767,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           });
     const prompt = buildSessionPrompt({
       provider,
+      inPass: pass !== null,
       sandboxed: Boolean(opts.laneSandbox),
       denials: denialsToTell(),
       answeredCards: answeredCardsForTask(db, row.taskId),
@@ -1836,8 +1956,16 @@ export function createRunner(opts: RunnerOptions): Runner {
         patchWorkstream(ctx, id, ctl.fence, {
           currentSessionId: s.id,
           baseHead,
-          ...(fresh ? { nextAction: fresh } : {}),
+          ...(action !== row.nextAction ? { nextAction: action } : {}),
         });
+        // The message the session starts from starts the page's turn, unless one is open.
+        if (pass)
+          startTurn(ctx, {
+            workstreamId: id,
+            sessionId: s.id,
+            messageId: feedback?.id ?? null,
+            fence: ctl.fence,
+          });
         // A fresh session holds no picture an earlier one was sent.
         if (resumeId === null) markTaskFilesInline(ctx, task.id, [], true);
         // Every session's prompt carries the pack (spec §9); a resumed conversation gets it again.
@@ -2002,6 +2130,8 @@ export function createRunner(opts: RunnerOptions): Runner {
             readOnly,
             delivery: project.delivery,
             protectedPaths: opts.protectedPaths,
+            // Every page of the pass is a page here: another task's is never written.
+            ...(pass ? { inPass: { pages: passPageAreas(db, pass.id) } } : {}),
             ownSession: {
               configDir,
               providerSessionId: st.providerSessionId ?? resumeId,
@@ -2045,8 +2175,43 @@ export function createRunner(opts: RunnerOptions): Runner {
         markTaskMessagesPushed(ctx, [feedback.id]);
         markTaskFilesInline(ctx, task.id, fed.blocks, false);
       });
-    // A message an earlier session was handed and no turn took goes to this one too (§12).
+    // A message an earlier session was handed and no turn took goes to this one too (§12). A pass
+    // task's session takes every message no turn has taken, read now: from here on one the builder
+    // writes is handed to it at once.
     for (const message of untaken) messages.push(message);
+    if (pass) {
+      for (const messageId of untakenMessages(db, task.id))
+        if (messageId !== feedback?.id) messages.push(getTaskMessageRow(db, messageId));
+      ctl.messages = messages;
+    }
+    /**
+     * A pass task's turn ended (Workbench spec §6.2). A message the session was handed and no turn
+     * took means it is not over: the agent is about to see it, and the next completion decides.
+     * Otherwise the turn ends Ready, and the session stays open for the builder's next message.
+     */
+    const passTurnComplete = async (text: string | null): Promise<void> => {
+      if (messages.untaken().length > 0) return;
+      try {
+        await endTurnSteps(passWork, {
+          workstreamId: id,
+          ending: PassTurnEnding.Ready,
+          reply: text,
+          fence: ctl.fence,
+          providerSessionId: st.providerSessionId,
+          reason: '',
+        });
+      } catch (error) {
+        if (error instanceof StaleFenceError) throw error;
+        const message = error instanceof Error ? error.message : String(error);
+        log.warn({ err: message }, "the turn's work could not be kept");
+        st.outcome = {
+          kind: 'crashed',
+          message: `The turn's work could not be kept: ${message}`,
+          providerSessionId: st.providerSessionId,
+        };
+        await handle.stop();
+      }
+    };
     /** Whether the thread has been told this fresh session began. */
     let noticed = false;
     /** Asks the session to hand off, once: its context filled, or its account neared its usage limit. */
@@ -2238,6 +2403,10 @@ export function createRunner(opts: RunnerOptions): Runner {
             });
             // A parked or limited session may still finish its interrupted turn before it exits.
             if (st.outcome || st.parkedFor) break;
+            if (pass) {
+              await passTurnComplete(event.text ?? null);
+              break;
+            }
             const recorded = handoffForSession(db, session.id);
             const resultRecorded = () =>
               currentStep(getWorkstreamRow(db, id)).result?.sessionId === session.id;
@@ -2403,6 +2572,19 @@ export function createRunner(opts: RunnerOptions): Runner {
                   };
                   break;
               }
+              // A pass task's session that ends between turns has closed; one that ends mid-turn
+              // is resumed, whatever ended it.
+              if (pass && (st.outcome.kind === 'step_done' || st.outcome.kind === 'crashed'))
+                st.outcome = openPassTurn(db, task.id)
+                  ? {
+                      kind: 'crashed',
+                      message:
+                        st.outcome.kind === 'crashed'
+                          ? st.outcome.message
+                          : 'the session ended in the middle of a turn',
+                      providerSessionId: st.providerSessionId,
+                    }
+                  : { kind: 'closed', providerSessionId: st.providerSessionId };
             }
             break;
           }
@@ -2425,6 +2607,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       ctl.handle = null;
       ctl.requestHandoff = null;
       ctl.endWaits = null;
+      ctl.messages = null;
       // Every exit ends the session row and frees the workstream's session slot, so a parked answer
       // is delivered, the lane is freed and the session's MCP token stops working.
       outcome = finishSession(id, ctl, session.id, st);
@@ -3100,14 +3283,33 @@ export function createRunner(opts: RunnerOptions): Runner {
 
   async function run(id: WorkstreamId, ctl: Control): Promise<void> {
     try {
-      await baseFirst(id, ctl);
-      await migrationsBaseFirst(id, ctl);
+      const pass = passOfWorkstream(db, id);
+      if (pass) {
+        // A turn that ended and was not carried through (its work not kept, a restart between) is
+        // finished first, and nothing is resumed (Workbench spec §12).
+        const latest = latestPassTurn(db, getWorkstreamRow(db, id).taskId);
+        if (latest && latest.endedAt !== null && latest.settledAt === null) {
+          await finishEndedTurn(passWork, latest, {
+            fence: ctl.fence,
+            providerSessionId: lastProviderSession(id),
+            reason: 'The turn ended while 10db was stopping, and its session is gone',
+          });
+          opts.state.write((ctx) => {
+            clearLease(ctx, id);
+          });
+          return;
+        }
+      } else {
+        // A pass's branch takes no base and runs no migrations step: its work lands at its close.
+        await baseFirst(id, ctl);
+        await migrationsBaseFirst(id, ctl);
+      }
       for (;;) {
         const row = getWorkstreamRow(db, id);
         const verifying = row.nextAction.kind === 'verify' || row.state === S.Verifying;
         // A pause only stops sessions; verification doesn't use the provider, so it carries on.
         if (ctl.stopReason && !(ctl.stopReason === 'paused' && verifying)) {
-          settle(id, ctl, { kind: 'stopped', reason: ctl.stopReason, providerSessionId: null });
+          settleLane(id, ctl, { kind: 'stopped', reason: ctl.stopReason, providerSessionId: null });
           return;
         }
         if (verifying) {
@@ -3189,7 +3391,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           );
           continue;
         }
-        settle(id, ctl, outcome);
+        settleLane(id, ctl, outcome);
         return;
       }
     } catch (error) {
@@ -3203,7 +3405,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         'runner failed',
       );
       try {
-        settle(id, ctl, {
+        settleLane(id, ctl, {
           kind: 'crashed',
           message: error instanceof Error ? error.message : String(error),
           providerSessionId: null,
@@ -3233,6 +3435,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         parked: false,
         endWaits: null,
         unaskedHandoffs: null,
+        messages: null,
         done: Promise.resolve(),
       };
       active.set(id, ctl);
@@ -3293,6 +3496,46 @@ export function createRunner(opts: RunnerOptions): Runner {
           reason: 'answer arrived',
         }),
       );
+      opts.onLaneFreed();
+    },
+    async deliverMessage(taskId, messageId, { redo }) {
+      const id = getTask(db, taskId).workstreamId;
+      if (id === null) throw new ConflictError(`Task ${taskId} has no run to hand the message to`);
+      const ctl = active.get(id);
+      const lane = ctl?.messages ?? null;
+      if (ctl && lane) {
+        if (redo && openPassTurn(db, taskId)) await lane.interrupt();
+        // What the builder changed by hand since the last turn is kept with the page, and the agent
+        // is told before it reads the message.
+        const fold = await foldHandEdits(passWork, { workstreamId: id });
+        if (ctl.messages === lane) {
+          opts.state.write((ctx) => {
+            startTurn(ctx, {
+              workstreamId: id,
+              sessionId: getWorkstreamRow(ctx.tx, id).currentSessionId,
+              messageId,
+              fence: ctl.fence,
+            });
+          });
+          lane.push(getTaskMessageRow(db, messageId), fold.agentNote);
+          return;
+        }
+      }
+      // A lane starting its session hands it every message no turn has taken once it is there.
+      if (active.has(id)) return;
+      opts.state.write((ctx) => {
+        const row = getWorkstreamRow(ctx.tx, id);
+        if (row.state !== S.WaitingHuman || row.nextAction.kind !== 'pass_review') return;
+        withdrawPageItems(ctx, id);
+        transitionWorkstream(ctx, id, {
+          to: S.Queued,
+          fence: null,
+          patch: {
+            nextAction: { kind: 'feedback', messageId, providerSessionId: lastProviderSession(id) },
+          },
+          reason: 'the builder wrote to the page',
+        });
+      });
       opts.onLaneFreed();
     },
     approveCheck(ctx, id) {

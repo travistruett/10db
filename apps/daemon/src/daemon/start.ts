@@ -1240,6 +1240,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     adapter,
     inbox,
     git,
+    jobs: deliveryJobs,
     gate,
     baseUpdates,
     migrationsBase,

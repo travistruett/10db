@@ -33,7 +33,7 @@ import {
   lastTakeOut,
   listBatches,
   listWorkstreams,
-  openPassTurn,
+  latestPassTurn,
   passHoldingFolder,
   passHoldingTask,
   renewClaimLeases,
@@ -192,7 +192,7 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       passState: pass.state,
       takingOut: takeOut?.passId === pass.id && takeOut.step < TakeOutStep.Done,
       untaken: untakenMessages(db, task.id).length > 0,
-      turnOpen: openPassTurn(db, task.id) !== undefined,
+      turnUnsettled: latestPassTurn(db, task.id)?.settledAt === null,
       folderOn: read
         ? snapshot.branches.get(project.repoPath) === getBatch(db, pass.batchId).branch
         : null,

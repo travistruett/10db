@@ -61,6 +61,7 @@ import {
   type Keychain,
 } from '../src/environment';
 import { createEventBus, createStateStore, type StateStore } from '../src/events';
+import { createDeliveryJobs } from '../src/delivery';
 import { createGit } from '../src/git';
 import type { Judge } from '../src/judge';
 import { createInboxService, createParkAnswers, type InboxService } from '../src/inbox';
@@ -288,6 +289,7 @@ export async function createTestEngine(
     adapter,
     inbox,
     git,
+    jobs: createDeliveryJobs(silentLogger),
     gate: createGateRunner({ sandbox: null, logger: silentLogger }),
     // The engine's repository has no origin to fetch a base from: every branch is up to date.
     baseUpdates: {

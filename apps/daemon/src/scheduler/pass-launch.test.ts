@@ -8,7 +8,7 @@ const quiet: PassLaunchFacts = {
   passState: 'OPEN',
   takingOut: false,
   untaken: false,
-  turnOpen: false,
+  turnUnsettled: false,
   folderOn: true,
 };
 
@@ -22,12 +22,12 @@ describe('passLaunch', () => {
     },
     {
       name: 'a message pushed to a session that ended before a turn took it',
-      facts: { untaken: true, turnOpen: true },
+      facts: { untaken: true, turnUnsettled: true },
       verdict: PassLaunch.Launch,
     },
     {
-      name: 'a turn a crash cut short, its message taken (twice over: still the open turn)',
-      facts: { turnOpen: true },
+      name: 'a turn not carried through: cut short by a crash, or ended before a restart',
+      facts: { turnUnsettled: true },
       verdict: PassLaunch.Launch,
     },
     {
@@ -52,7 +52,7 @@ describe('passLaunch', () => {
     },
     {
       name: 'an open turn while the folder is on another branch',
-      facts: { turnOpen: true, folderOn: false },
+      facts: { turnUnsettled: true, folderOn: false },
       verdict: PassLaunch.FolderOff,
     },
     {
