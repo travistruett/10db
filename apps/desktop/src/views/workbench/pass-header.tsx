@@ -1,6 +1,7 @@
 import {
   InboxKind,
   InboxState,
+  PassSignOff,
   PassState,
   type InboxItemDto,
   type PassViewDto,
@@ -8,6 +9,7 @@ import {
 } from '@10db/contracts';
 import { ActionIcon, Button, Group, Menu, Stack, Text, Title } from '@mantine/core';
 import { IconDots } from '@tabler/icons-react';
+import type { ReactNode } from 'react';
 import { CloseProgress } from './close-progress';
 import { PageStatus, pageStatus } from './page-status';
 import { medianTurnMinutes, timingLine } from './timing';
@@ -42,8 +44,8 @@ export interface PassHeaderProps {
   /** Now, in epoch milliseconds. */
   readonly now: number;
   readonly onAddPage: () => void;
-  /** Offered once a page is signed off; without it there is no Open Pull Request. */
-  readonly onOpenPullRequest?: () => void;
+  /** Open Pull Request, shown once a page is signed off; without it there is none. */
+  readonly pullRequest?: ReactNode;
   /** Without it there is no Close Pass…. */
   readonly onClose?: () => void;
   readonly onRename: () => void;
@@ -69,8 +71,7 @@ function askingSince(view: PassViewDto, inbox: readonly InboxItemDto[]): string[
  * has something to say. While the pass closes its page actions wait and Abandon stays.
  */
 export function PassHeader(props: PassHeaderProps) {
-  const { project, view, inbox, now, onAddPage, onOpenPullRequest, onClose, onRename, onAbandon } =
-    props;
+  const { project, view, inbox, now, onAddPage, pullRequest, onClose, onRename, onAbandon } = props;
   const clock = { now, medianTurnMinutes: medianTurnMinutes(view.turns) };
   const statuses = view.pages.map((page) => pageStatus(page, inbox, clock, view.pages).status);
   const open = view.pass.state === PassState.Open;
@@ -97,11 +98,7 @@ export function PassHeader(props: PassHeaderProps) {
           <Button variant="default" size="xs" disabled={!open} onClick={onAddPage}>
             Add Page
           </Button>
-          {onOpenPullRequest && statuses.includes(PageStatus.SignedOff) ? (
-            <Button variant="default" size="xs" disabled={!open} onClick={onOpenPullRequest}>
-              Open Pull Request
-            </Button>
-          ) : null}
+          {statuses.includes(PageStatus.SignedOff) ? pullRequest : null}
           <Menu position="bottom-end" withinPortal>
             <Menu.Target>
               <ActionIcon variant="subtle" color="gray" aria-label="More pass actions">
@@ -124,7 +121,15 @@ export function PassHeader(props: PassHeaderProps) {
           </Menu>
         </Group>
       </Group>
-      <CloseProgress state={view.pass.state} />
+      <CloseProgress
+        state={view.pass.state}
+        step={view.closeStep}
+        facts={{
+          delivery: project.delivery,
+          gated: project.gateCommand !== null,
+          takingOut: view.pages.some((page) => page.signOff !== PassSignOff.Done),
+        }}
+      />
       {hint === null ? null : (
         <Text size="xs" c="dimmed">
           {hint}

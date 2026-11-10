@@ -1,4 +1,11 @@
-import { PASS_RETRY_TURN_CHOICE, TakeOutResultDto, TaskId } from '@10db/contracts';
+import {
+  PASS_RETRY_TURN_CHOICE,
+  PassSignOffDto,
+  type PassPageDto,
+  TakeOutPreviewDto,
+  TakeOutResultDto,
+  TaskId,
+} from '@10db/contracts';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { useState } from 'react';
@@ -375,16 +382,91 @@ describe('PassWorkspace page actions', () => {
     expect(sent).toEqual([]);
   });
 
-  it('offers Sign Off on a Ready page only disabled, saying why, and sends nothing', async () => {
-    const sent = record();
-    await renderWorkspace((p) => p.ready.taskId);
-    const signOff = screen.getByRole('button', { name: 'Sign Off' });
-    expect(signOff.getAttribute('aria-disabled')).toBe('true');
-    fireEvent.click(signOff);
-    fireEvent.mouseEnter(signOff);
-    expect(await screen.findByText(/can't sign off a page yet/)).toBeTruthy();
-    expect(actionsSent(sent)).toEqual([]);
+  /** The sign-offs asked and withdrawn, by pass and task. */
+  function serveSignOff() {
+    const sent: { method: string; passId: string; taskId: string }[] = [];
+    const path = daemonUrl('/passes/:passId/tasks/:taskId/sign-off');
+    server.use(
+      http.post(path, ({ params }) => {
+        const taskId = TaskId.parse(params['taskId']);
+        sent.push({ method: 'POST', passId: String(params['passId']), taskId });
+        return HttpResponse.json(
+          PassSignOffDto.parse({ taskId, state: 'signing_off', waitsFor: null }),
+          { status: 202 },
+        );
+      }),
+      http.delete(path, ({ params }) => {
+        sent.push({
+          method: 'DELETE',
+          passId: String(params['passId']),
+          taskId: String(params['taskId']),
+        });
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    return sent;
+  }
+
+  it("Sign Off signs off the shown Ready page, naming that page's pass and task", async () => {
+    const sent = serveSignOff();
+    const pages = pagesByStatus();
+    const view = passViewDto({ pages: Object.values(pages) });
+    renderWithDaemon(
+      <PassWorkspace
+        view={view}
+        inbox={[]}
+        project={projectViewDto()}
+        selected={pages.ready.taskId}
+        onSelect={vi.fn()}
+      />,
+    );
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign Off' }));
+    await waitFor(() => {
+      expect(sent).toEqual([{ method: 'POST', passId: view.pass.id, taskId: pages.ready.taskId }]);
+    });
   });
+
+  it.each([
+    { name: 'signing off', signOff: 'signing_off', line: 'Signing off…', cancel: false },
+    {
+      name: 'waiting for another page',
+      signOff: 'waiting',
+      line: "Signing off · waits for People's turn",
+      cancel: true,
+    },
+  ] as const)(
+    'a page $name says so, and only a waiting one offers Cancel Sign-Off',
+    async ({ signOff, line, cancel }) => {
+      const sent = serveSignOff();
+      const pages = pagesByStatus();
+      const signing = {
+        ...pages.ready,
+        signOff,
+        waitsFor:
+          signOff === 'waiting' ? { taskId: pages.asks.taskId, title: pages.asks.title } : null,
+      };
+      const view = passViewDto({ pages: [signing, pages.asks] });
+      renderWithDaemon(
+        <PassWorkspace
+          view={view}
+          inbox={[]}
+          project={projectViewDto()}
+          selected={signing.taskId}
+          onSelect={vi.fn()}
+        />,
+      );
+      const thread = await screen.findByRole('region', { name: 'Settings' });
+      expect(within(thread).getByText(line)).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Sign Off' })).toBeNull();
+      const button = within(thread).queryByRole('button', { name: 'Cancel Sign-Off' });
+      expect(button !== null).toBe(cancel);
+      if (button === null) return;
+      fireEvent.click(button);
+      await waitFor(() => {
+        expect(sent).toEqual([{ method: 'DELETE', passId: view.pass.id, taskId: signing.taskId }]);
+      });
+    },
+  );
 
   it("lists under each reply the files its turn changed, read from the page's turns", async () => {
     const pages = pagesByStatus();
@@ -493,9 +575,15 @@ describe('PassWorkspace while the pass is not open', () => {
 });
 
 describe('PassWorkspace Take Out', () => {
-  function serveTakeOut(tookOut = true) {
+  /** Answers the take-out preview with `shared` and records each take-out sent. */
+  function serveTakeOut(tookOut = true, shared: TakeOutPreviewDto['shared'] = []) {
     const sent: { passId: string; taskId: string; body: unknown }[] = [];
+    const previewed: { passId: string; taskId: string }[] = [];
     server.use(
+      http.get(daemonUrl('/passes/:passId/tasks/:taskId/take-out'), ({ params }) => {
+        previewed.push({ passId: String(params['passId']), taskId: String(params['taskId']) });
+        return HttpResponse.json(TakeOutPreviewDto.parse({ shared }));
+      }),
       http.post(
         daemonUrl('/passes/:passId/tasks/:taskId/take-out'),
         async ({ params, request }) => {
@@ -514,19 +602,32 @@ describe('PassWorkspace Take Out', () => {
         },
       ),
     );
-    return sent;
+    return { sent, previewed };
+  }
+
+  async function openTakeOut(area: string) {
+    fireEvent.click(screen.getByRole('button', { name: `More actions for ${area}` }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Take Out…', hidden: true }));
+    return screen.findByRole('dialog', { name: `Take Out ${area}` });
+  }
+
+  /** Take Out, once the preview it waits for has answered. */
+  async function confirmTakeOut(dialog: HTMLElement) {
+    const button = within(dialog).getByRole('button', { name: 'Take Out' });
+    await waitFor(() => {
+      expect(button).toHaveProperty('disabled', false);
+    });
+    fireEvent.click(button);
   }
 
   async function takeOut(area: string) {
-    fireEvent.click(screen.getByRole('button', { name: `More actions for ${area}` }));
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Take Out…', hidden: true }));
-    const dialog = await screen.findByRole('dialog', { name: `Take Out ${area}` });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Take Out' }));
+    const dialog = await openTakeOut(area);
+    await confirmTakeOut(dialog);
     return dialog;
   }
 
   it("takes out the row's page after a confirm, keeping every shared change", async () => {
-    const sent = serveTakeOut();
+    const { sent } = serveTakeOut();
     const pages = pagesByStatus();
     const view = passViewDto({ pages: Object.values(pages) });
     renderWithDaemon(
@@ -547,6 +648,159 @@ describe('PassWorkspace Take Out', () => {
     });
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: 'Take Out Billing' })).toBeNull();
+    });
+  });
+
+  it("offers Keep or Drop for each of the page's unlanded shared changes, and sends the choices", async () => {
+    const { sent, previewed } = serveTakeOut(true, [
+      { seq: 1, paths: ['src/shared/button.tsx'], dropRefusal: null, laterPages: ['People'] },
+      {
+        seq: 2,
+        paths: ['src/shared/theme.ts'],
+        dropRefusal: 'the file changed on disk since',
+        laterPages: [],
+      },
+    ]);
+    const pages = pagesByStatus();
+    const view = passViewDto({ pages: Object.values(pages) });
+    renderWithDaemon(
+      <PassWorkspace
+        view={view}
+        inbox={[]}
+        project={projectViewDto()}
+        selected={pages.ready.taskId}
+        onSelect={vi.fn()}
+      />,
+    );
+    await screen.findByRole('list', { name: 'Pages in this pass' });
+    const dialog = await openTakeOut('Billing');
+    const change = (path: string) => within(dialog).findByRole('group', { name: path });
+    const button = await change('src/shared/button.tsx');
+    // The pages a Drop would also take back are named before the choice.
+    expect(within(button).getByText('People changed these files later.')).toBeTruthy();
+    fireEvent.click(within(button).getByRole('radio', { name: 'Drop' }));
+    const theme = await change('src/shared/theme.ts');
+    expect(within(theme).getByRole('radio', { name: 'Drop' })).toHaveProperty('disabled', true);
+    expect(within(theme).getByText('Only Keep: the file changed on disk since')).toBeTruthy();
+    await confirmTakeOut(dialog);
+    await waitFor(() => {
+      expect(sent).toEqual([
+        {
+          passId: view.pass.id,
+          taskId: pages.working.taskId,
+          body: {
+            shared: [
+              { seq: 1, choice: 'drop' },
+              { seq: 2, choice: 'keep' },
+            ],
+          },
+        },
+      ]);
+    });
+    expect(previewed).toEqual([{ passId: view.pass.id, taskId: pages.working.taskId }]);
+  });
+
+  it('never reopens the confirm when the page left the pass before its take-out answered', async () => {
+    const { sent } = serveTakeOut();
+    let answer: () => void = () => undefined;
+    const answered = new Promise<void>((resolve) => {
+      answer = resolve;
+    });
+    // The take-out answers only once the test lets it, after the pass has dropped the page.
+    server.use(
+      http.post(daemonUrl('/passes/:passId/tasks/:taskId/take-out'), async ({ params }) => {
+        sent.push({ passId: String(params['passId']), taskId: String(params['taskId']), body: {} });
+        await answered;
+        return HttpResponse.json(
+          TakeOutResultDto.parse({
+            taskId: params['taskId'],
+            passId: params['passId'],
+            tookOut: true,
+            keptSha: null,
+            stillChanging: [],
+            left: [],
+          }),
+        );
+      }),
+    );
+    const pages = pagesByStatus();
+    const draw = (shown: PassPageDto[]) => (
+      <PassWorkspace
+        view={passViewDto({ pages: shown })}
+        inbox={[]}
+        project={projectViewDto()}
+        selected={pages.ready.taskId}
+        onSelect={vi.fn()}
+      />
+    );
+    const { rerender, queryClient } = renderWithDaemon(draw(Object.values(pages)));
+    await screen.findByRole('list', { name: 'Pages in this pass' });
+    await takeOut('Billing');
+    await waitFor(() => {
+      expect(sent).toHaveLength(1);
+    });
+    rerender(draw([pages.ready]));
+    answer();
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'More actions for Billing' })).toBeNull();
+    });
+    // Once the take-out's answer has settled, the task joins the pass again.
+    await waitFor(() => {
+      expect(queryClient.isMutating()).toBe(0);
+    });
+    rerender(draw([pages.ready, pages.working]));
+    await screen.findByRole('button', { name: 'More actions for Billing' });
+    expect(screen.queryByRole('dialog', { name: 'Take Out Billing' })).toBeNull();
+  });
+
+  it('reads the shared changes afresh on each Take Out…, and again after a refused take-out', async () => {
+    const button = (refusal: string | null) => [
+      { seq: 1, paths: ['src/shared/button.tsx'], dropRefusal: refusal, laterPages: [] },
+    ];
+    // The first read offers Drop; every later read refuses it, as the daemon then does.
+    let reads = 0;
+    let refuse = false;
+    server.use(
+      http.get(daemonUrl('/passes/:passId/tasks/:taskId/take-out'), () => {
+        reads += 1;
+        return HttpResponse.json(
+          TakeOutPreviewDto.parse({ shared: button(reads === 1 ? null : 'People changed it') }),
+        );
+      }),
+      http.post(daemonUrl('/passes/:passId/tasks/:taskId/take-out'), () =>
+        refuse
+          ? HttpResponse.json(
+              { error: 'conflict', message: 'Drop is no longer offered for change 1' },
+              { status: 409 },
+            )
+          : HttpResponse.json({}),
+      ),
+    );
+    await renderWorkspace();
+    const drop = (dialog: HTMLElement) =>
+      within(within(dialog).getByRole('group', { name: 'src/shared/button.tsx' })).getByRole(
+        'radio',
+        { name: 'Drop' },
+      );
+    let dialog = await openTakeOut('Billing');
+    await within(dialog).findByRole('group', { name: 'src/shared/button.tsx' });
+    expect(drop(dialog)).toHaveProperty('disabled', false);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: 'Take Out Billing' })).toBeNull();
+    });
+    // Opened again, it never shows the first read while it reads again.
+    dialog = await openTakeOut('Billing');
+    expect(within(dialog).queryByRole('group', { name: 'src/shared/button.tsx' })).toBeNull();
+    await within(dialog).findByRole('group', { name: 'src/shared/button.tsx' });
+    expect(drop(dialog)).toHaveProperty('disabled', true);
+    // A refused take-out reads the changes again, so what it offers next is what the daemon takes.
+    refuse = true;
+    const before = reads;
+    await confirmTakeOut(dialog);
+    expect(await within(dialog).findByText('Drop is no longer offered for change 1')).toBeTruthy();
+    await waitFor(() => {
+      expect(reads).toBe(before + 1);
     });
   });
 

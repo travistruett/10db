@@ -1,5 +1,6 @@
 import {
   AreaRole,
+  passHoldsTasks,
   type InboxItemDto,
   type PagesProposalDto,
   type PassJoinRequest,
@@ -30,8 +31,12 @@ import { useNow } from '../../shell/relative';
 import { useSelectedProject } from '../../shell/selected-project';
 import { AbandonModal } from './abandon-modal';
 import { AddPageModal } from './add-page-modal';
+import { ClosePassModal } from './close-pass-modal';
+import { ClosedPassLine } from './closed-pass-line';
+import { HeaderNotices } from './header-notices';
 import { PassHeader } from './pass-header';
 import { PassWorkspace } from './pass-workspace';
+import { PrButton } from './pr-button';
 import { queueRows } from './queue-rows';
 import type { PassWorkspaceProps } from './pass-workspace-props';
 import { NoPageAreas, ProposePagesModal } from './propose-pages-modal';
@@ -76,7 +81,7 @@ export interface WorkbenchScreenProps {
 }
 
 /** Which dialog the screen holds open. */
-type Dialog = 'propose' | 'add-page' | 'rename' | 'abandon' | null;
+type Dialog = 'propose' | 'add-page' | 'close' | 'rename' | 'abandon' | null;
 
 /**
  * The Workbench (spec §4) for one project: why a pass needs a page area when it has none, the picker
@@ -118,10 +123,17 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
       </Stack>
     );
   if (live === undefined) return loading;
-  if (live === null)
+  // A pass that has closed and not settled is one line above the picker: the next pass may stack on it.
+  if (live === null || !passHoldsTasks(live.pass.state))
     return (
       <Stack gap="md">
         <Title order={2}>Workbench</Title>
+        {live === null ? null : (
+          <>
+            <ClosedPassLine view={live} inbox={inbox} />
+            <HeaderNotices view={live} inbox={inbox} />
+          </>
+        )}
         {start === undefined ? (
           loading
         ) : (
@@ -153,6 +165,10 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
         onAddPage={() => {
           setDialog('add-page');
         }}
+        pullRequest={<PrButton view={live} />}
+        onClose={() => {
+          setDialog('close');
+        }}
         onRename={() => {
           setDialog('rename');
         }}
@@ -160,6 +176,7 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
           setDialog('abandon');
         }}
       />
+      <HeaderNotices view={live} inbox={inbox} />
       {renderWorkspace({ view: live, inbox, project, selected: search.task ?? null, onSelect })}
       {dialog === 'add-page' ? (
         <AddPageModal
@@ -172,6 +189,7 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
           add={actions.addPages}
         />
       ) : null}
+      {dialog === 'close' ? <ClosePassModal view={live} onClose={closeDialog} /> : null}
       {dialog === 'rename' ? (
         <RenameModal pass={live.pass} onClose={closeDialog} rename={actions.rename} />
       ) : null}
@@ -227,7 +245,7 @@ function ProjectWorkbench({ project }: { readonly project: ProjectViewDto }) {
   // The queue ranks a page by its Inbox items too, so the pin waits while the Inbox is first read; a
   // failed read pins with none, rather than leave the page to follow the queue.
   const pin =
-    view == null || named || inboxRead.isPending
+    view == null || !passHoldsTasks(view.pass.state) || named || inboxRead.isPending
       ? null
       : (queueRows(view, inbox, now)[0]?.page.taskId ?? null);
   useEffect(() => {
@@ -245,7 +263,12 @@ function ProjectWorkbench({ project }: { readonly project: ProjectViewDto }) {
   // says, an open pass does not.
   const failed =
     (live.data === undefined ? live.error : null) ??
-    (live.data === null && hasPages && start.data === undefined ? start.error : null);
+    (live.data !== undefined &&
+    (live.data === null || !passHoldsTasks(live.data.pass.state)) &&
+    hasPages &&
+    start.data === undefined
+      ? start.error
+      : null);
   if (failed !== null)
     return (
       <Stack gap="md">

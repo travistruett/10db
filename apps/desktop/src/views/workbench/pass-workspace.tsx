@@ -2,7 +2,6 @@ import { PassState, type TaskId } from '@10db/contracts';
 import { Box, Flex } from '@mantine/core';
 import { useViewportSize } from '@mantine/hooks';
 import { useEffect, useRef, useState } from 'react';
-import { useTakeOutPage } from '../../daemon/pass-queries';
 import { markPassNotificationsActed, shownPassNotifications } from '../../desktop/notify-pass';
 import { useNow } from '../../shell/relative';
 import { Announcer } from './announcer';
@@ -38,7 +37,6 @@ export function PassWorkspace({ view, inbox, project, selected, onSelect }: Pass
   const [drafts, setDrafts] = useState<ReadonlyMap<TaskId, Draft>>(new Map());
   // The page whose Take Out… confirm is open.
   const [takingOut, setTakingOut] = useState<TaskId | null>(null);
-  const takeOut = useTakeOutPage();
   const takingOutPage = view.pages.find((page) => page.taskId === takingOut) ?? null;
 
   // As the window gains focus, the page a ready notification just named, or the one that has waited
@@ -138,13 +136,12 @@ export function PassWorkspace({ view, inbox, project, selected, onSelect }: Pass
       )}
       {takingOutPage === null ? null : (
         <TakeOutModal
+          passId={view.pass.id}
+          taskId={takingOutPage.taskId}
           area={takingOutPage.area}
           onClose={() => {
             setTakingOut(null);
           }}
-          takeOut={() =>
-            takeOut.mutateAsync({ passId: view.pass.id, taskId: takingOutPage.taskId })
-          }
         />
       )}
     </Flex>

@@ -11,6 +11,7 @@ import { usePageActions } from './page-actions';
 import { PageStatus } from './page-status';
 import type { QueueRow } from './queue-rows';
 import { RetryTurn } from './retry-turn';
+import { SignOffLine } from './sign-off-line';
 import { Thread } from './thread';
 import { TurnLogDrawer } from './turn-log-drawer';
 import { useWorkbenchKeys } from './use-workbench-keys';
@@ -36,7 +37,7 @@ export interface PagePaneProps {
 export function PagePane(props: PagePaneProps) {
   const { passId, appUrl, row, passOpen, openedAt, now, draft, onDraft } = props;
   const { page, status } = row;
-  const actions = usePageActions(page.taskId);
+  const actions = usePageActions(passId, page.taskId);
   const turns = useTurns(page.taskId).data ?? [];
   // A Ready page shown is a page the builder has looked at: its turn is marked opened, once.
   const markOpened = useMarkOpened(page.taskId);
@@ -100,6 +101,14 @@ export function PagePane(props: PagePaneProps) {
       )}
       {passOpen && status === PageStatus.Failed && page.failure !== null ? (
         <RetryTurn itemId={page.failure.retryItemId} line={row.state.line} />
+      ) : null}
+      {status === PageStatus.SigningOff || status === PageStatus.Waiting ? (
+        <SignOffLine
+          passId={passId}
+          taskId={page.taskId}
+          line={row.state.line}
+          waiting={passOpen && status === PageStatus.Waiting}
+        />
       ) : null}
       <Composer
         area={page.area}

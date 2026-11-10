@@ -1,5 +1,6 @@
-import type { InboxItemDto } from '@10db/contracts';
-import { Badge, Group, List, Paper, Stack, Text, UnstyledButton } from '@mantine/core';
+import { PassCheckDetail, type InboxItemDto } from '@10db/contracts';
+import { Badge, Button, Group, List, Paper, Stack, Text, UnstyledButton } from '@mantine/core';
+import { useSignOff } from '../../daemon/pass-close-queries';
 import { ProjectLabel } from '../../shell/project-label';
 import { SELECTED_CARD_ATTRIBUTE } from './use-inbox-keys';
 
@@ -15,9 +16,42 @@ export function passReadyTitle(count: number): string {
   return `Workbench: ${String(count)} ${count === 1 ? 'page' : 'pages'} ready`;
 }
 
+/** One Ready page of the row: its title, and Sign Off for the page its item names. */
+function ReadyPage({ item }: { readonly item: InboxItemDto }) {
+  const signOff = useSignOff();
+  const detail = PassCheckDetail.safeParse(item.detail);
+  return (
+    <List.Item>
+      <Group gap="sm" wrap="nowrap">
+        {/* Item titles are written by the daemon from task titles: text only. */}
+        <Text size="sm" style={{ flex: 1, minWidth: 0 }}>
+          {item.title}
+        </Text>
+        {signOff.error ? (
+          <Text size="xs" c="red">
+            {signOff.error.message}
+          </Text>
+        ) : null}
+        {detail.success ? (
+          <Button
+            variant="default"
+            size="xs"
+            loading={signOff.isPending}
+            onClick={() => {
+              signOff.mutate({ passId: detail.data.passId, taskId: detail.data.taskId });
+            }}
+          >
+            Sign Off
+          </Button>
+        ) : null}
+      </Group>
+    </List.Item>
+  );
+}
+
 /**
- * A Workbench pass's Ready pages as one row (spec §6.1): it names each page and is answered by
- * nothing here. A page is never approved or sent back; the builder looks at it and writes again.
+ * A Workbench pass's Ready pages as one row (spec §6.1): it names each page, each with Sign Off. A
+ * page is never approved or sent back; the builder looks at it and writes again, or signs it off.
  */
 export function PassReadyRow({ items, selected, onSelect }: PassReadyRowProps) {
   const [first] = items;
@@ -50,10 +84,9 @@ export function PassReadyRow({ items, selected, onSelect }: PassReadyRowProps) {
     <Paper withBorder p="md" shadow="xs" {...{ [SELECTED_CARD_ATTRIBUTE]: true }}>
       <Stack gap="sm">
         {header}
-        {/* Item titles are written by the daemon from task titles: text only. */}
         <List size="sm" spacing={4}>
           {items.map((item) => (
-            <List.Item key={item.id}>{item.title}</List.Item>
+            <ReadyPage key={item.id} item={item} />
           ))}
         </List>
       </Stack>

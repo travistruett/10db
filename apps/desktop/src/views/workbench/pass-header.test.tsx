@@ -47,7 +47,7 @@ function draw(view: PassViewDto, overrides: Partial<PassHeaderProps> = {}) {
     inbox: [],
     now,
     onAddPage: vi.fn(),
-    onOpenPullRequest: vi.fn(),
+    pullRequest: <button type="button">Open Pull Request</button>,
     onClose: vi.fn(),
     onRename: vi.fn(),
     onAbandon: vi.fn(),
@@ -79,6 +79,12 @@ describe('PassHeader', () => {
     expect(props.onAbandon).toHaveBeenCalledTimes(1);
   });
 
+  it('shows Open Pull Request once a page is signed off', () => {
+    const { ready, working } = pagesByStatus();
+    draw(passViewDto({ pages: [ready, { ...working, signOff: 'done' }] }));
+    expect(screen.getByRole('button', { name: 'Open Pull Request' })).toBeTruthy();
+  });
+
   it.each([
     { name: 'two pages ready for long', minutes: 15, hint: true },
     { name: 'two pages ready a moment ago', minutes: 3, hint: false },
@@ -99,8 +105,13 @@ describe('PassHeader', () => {
 
   it('while closing, says so, holds the page actions and keeps Abandon in reach', async () => {
     const { ready } = pagesByStatus();
-    const props = draw(passViewDto({ pass: { state: 'CLOSING' }, pages: [ready] }));
-    expect(within(screen.getByRole('status')).getByText('Closing the pass…')).toBeTruthy();
+    const props = draw(
+      passViewDto({ pass: { state: 'CLOSING' }, pages: [ready], rest: { closeStep: 4 } }),
+    );
+    // The project delivers locally with a gate, so the gate runs in its folder next.
+    expect(
+      within(screen.getByRole('status')).getByText('Running the gate in your folder…'),
+    ).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Add Page' })).toHaveProperty('disabled', true);
     fireEvent.click(menu());
     const close = await screen.findByRole('menuitem', { name: 'Close Pass…', hidden: true });

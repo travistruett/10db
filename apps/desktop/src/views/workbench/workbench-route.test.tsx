@@ -1,5 +1,6 @@
 import {
   mintId,
+  PassClosePreviewDto,
   PassJoinRequest,
   PassOpenRequest,
   PassRename,
@@ -217,6 +218,41 @@ describe('WorkbenchView', () => {
     await waitFor(() => {
       expect(abandoned).toEqual([live.pass.id]);
     });
+  });
+
+  it("Close Pass… reads the open pass's close lists and stops nothing", async () => {
+    const live = passViewDto({
+      pass: passDto({ projectId: project.id }),
+      pages: [pagesByStatus().ready],
+    });
+    const asked: string[] = [];
+    const posted: string[] = [];
+    server.use(
+      http.get(daemonUrl('/passes/:passId/close'), ({ params }) => {
+        asked.push(String(params['passId']));
+        return HttpResponse.json(
+          PassClosePreviewDto.parse({
+            token: 'lists-1',
+            unfinished: [],
+            unowned: [],
+            foreignCommits: [],
+            summary: 'Lands 1 page on main.',
+            gate: { where: 'none', consequence: null },
+          }),
+        );
+      }),
+      http.post(daemonUrl('/passes/:passId/close'), ({ params }) => {
+        posted.push(String(params['passId']));
+        return HttpResponse.json({ outcome: 'closing', pass: live.pass });
+      }),
+    );
+    open('/workbench', { live: [live] });
+    fireEvent.click(await screen.findByRole('button', { name: 'More pass actions' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Close Pass…', hidden: true }));
+    const dialog = await screen.findByRole('dialog', { name: 'Close Pass' });
+    expect(await within(dialog).findByText('Lands 1 page on main.')).toBeTruthy();
+    expect(asked).toEqual([live.pass.id]);
+    expect(posted).toEqual([]);
   });
 
   it("keeps the open pass and a page's draft when a refetch of the live passes fails", async () => {
