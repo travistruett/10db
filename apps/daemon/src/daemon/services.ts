@@ -110,11 +110,15 @@ import { GitError, type Git } from '../git';
 import { hazardAssessmentDto, type HazardAssessor } from '../hazards';
 import { earlierMcpApproval, requestMcpApproval, type InboxService } from '../inbox';
 import {
+  createTurnFiles,
   goalPassPages,
   livePassViews,
+  openTurn,
   passStartPreview,
   passView,
   TakeOutWithin,
+  taskTurns,
+  turnLog,
   type PassJoined,
   type TakeOutInput,
 } from '../pass';
@@ -200,6 +204,8 @@ export function createServices(deps: {
     ...deps.catalogue.status(),
     ...(deps.catalogueOn ? {} : { lastAttempt: CatalogueAttempt.Off }),
   });
+  // A turn's files are read once per pair of kept commits, which never change.
+  const turnFiles = createTurnFiles(deps.git);
   // The tool check and gh's login are probed on the first request and on a recheck, never otherwise.
   let lastCheck: Promise<SystemCheckDto> | null = null;
 
@@ -413,6 +419,11 @@ export function createServices(deps: {
     renamePass: (passId, input) => deps.state.write((ctx) => renamePass(ctx, passId, input.name)),
     discardKeptWork: (taskId) => deps.discardKeptWork(taskId),
     goalPassPages: (goalId) => goalPassPages({ db, git: deps.git }, goalId),
+    taskTurns: (taskId) => taskTurns({ db, git: deps.git, files: turnFiles }, taskId),
+    turnActivity: (turnId) => turnLog(db, turnId),
+    openedTurn: (taskId, turnId) => {
+      openTurn(deps.state, taskId, turnId);
+    },
     proposePageAreas: (projectId, signal) =>
       proposePageAreas(
         { git: deps.git, namer: deps.areaNamer, protectedRoots: deps.protectedRoots },

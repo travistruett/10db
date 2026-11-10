@@ -72,6 +72,9 @@ import type {
   PassOpenRequest,
   PassRename,
   PassStartDto,
+  PassTurnId,
+  PassTurnWithFilesDto,
+  TurnActivityDto,
   PassViewDto,
   TakeOutRequest,
   TakeOutResultDto,
@@ -289,6 +292,12 @@ export interface ApiServices {
   proposePageAreas(projectId: ProjectId, signal?: AbortSignal): Promise<PagesProposalDto>;
   /** The page areas the goal's tasks committed in, read from git, for Work on This. */
   goalPassPages(goalId: GoalId): Promise<GoalPassPagesDto>;
+  /** The task's turns, each with the files it changed against the turn before; reads git. */
+  taskTurns(taskId: TaskId): Promise<PassTurnWithFilesDto[]>;
+  /** A turn's log, oldest first (Show Log). */
+  turnActivity(turnId: PassTurnId): TurnActivityDto[];
+  /** Notes the builder opened the Ready page of this turn, the first time only; 409 for another task's turn. */
+  openedTurn(taskId: TaskId, turnId: PassTurnId): void;
   /**
    * The project's goals, each with its digest and count of new items since the builder last opened
    * it, and the Ungrouped group. Leaves every view mark as it was.

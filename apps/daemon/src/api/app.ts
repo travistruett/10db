@@ -62,6 +62,7 @@ import {
   PassJoinRequest,
   PassOpenRequest,
   PassRename,
+  PassTurnId,
   SmallProposalLimitDto,
   ScreenImageInput,
   ScreenRefusalInput,
@@ -783,6 +784,19 @@ export function createApp(deps: ApiDeps) {
     .get('/goals/:goalId/pass-pages', async (c) =>
       c.json(await deps.services.goalPassPages(GoalId.parse(c.req.param('goalId')))),
     )
+    .get('/tasks/:taskId/turns', async (c) =>
+      c.json(await deps.services.taskTurns(TaskId.parse(c.req.param('taskId')))),
+    )
+    .get('/pass-turns/:turnId/activity', (c) =>
+      c.json(deps.services.turnActivity(PassTurnId.parse(c.req.param('turnId')))),
+    )
+    .post('/tasks/:taskId/turns/:turnId/opened', (c) => {
+      deps.services.openedTurn(
+        TaskId.parse(c.req.param('taskId')),
+        PassTurnId.parse(c.req.param('turnId')),
+      );
+      return c.body(null, 204);
+    })
     .get('/projects/:projectId/pass-start', async (c) =>
       c.json(await deps.services.passStart(ProjectId.parse(c.req.param('projectId')))),
     )

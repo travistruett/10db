@@ -9,17 +9,24 @@ import {
   PassDto,
   PassOpenedDto,
   PassStartDto,
+  PassTurnWithFilesDto,
   PassViewDto,
   ProjectDto,
   TaskDto,
+  TurnActivityDto,
   type ProjectInput,
 } from '@10db/contracts';
 import {
+  endPassTurn,
+  getTask,
   insertGoal,
+  insertPassTurn,
+  insertSession,
   insertWorkstream,
   listTaskThread,
   schema,
   setTaskKeptWork,
+  settlePassTurn,
   transitionWorkstream,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -498,5 +505,71 @@ describe('GET /goals/:goalId/pass-pages', () => {
       fromTasks: [],
     });
     expect((await send('GET', `/goals/${mintId('Goal')}/pass-pages`)).status).toBe(404);
+  });
+});
+
+/** A page of an open pass whose first turn ended Ready, with one activity row from its session. */
+async function readyTurn() {
+  const project = await projectWith(PAGES);
+  const settings = await taskOn(project, 'Settings: tidy', ['settings']);
+  const people = await taskOn(project, 'People: tidy', ['people']);
+  const opened = await openOn(project, [settings, people]);
+  const turn = daemon.state.write((ctx) => {
+    const workstreamId = getTask(ctx.tx, settings.id).workstreamId;
+    if (workstreamId === null) throw new Error('the page has a run');
+    const session = insertSession(ctx, {
+      workstreamId,
+      provider: 'claude',
+      model: 'claude-sonnet-5-5',
+      effort: 'medium',
+      mode: 'managed',
+      mcpTokenHash: 'workbench-api',
+    });
+    const started = insertPassTurn(ctx, {
+      taskId: settings.id,
+      workstreamId,
+      sessionId: session.id,
+      messageId: null,
+    });
+    ctx.emit({
+      type: 'session.activity',
+      entityType: 'session',
+      entityId: session.id,
+      data: {
+        workstreamId,
+        kind: 'tool',
+        summary: 'Edit src/settings/page.tsx',
+        tool: { name: 'Edit', target: 'src/settings/page.tsx' },
+        turn: { id: started.id, filesTouched: ['src/settings/page.tsx'] },
+      },
+    });
+    endPassTurn(ctx, started.id, { ending: 'ready', replyBody: 'Tidied it.' });
+    return settlePassTurn(ctx, started.id);
+  });
+  return { settings, people, pass: opened.pass, turn };
+}
+
+describe("a page's turns over HTTP", () => {
+  it("lists the task's turns with their files, and the turn's log", async () => {
+    const { settings, turn } = await readyTurn();
+
+    const turns = await api().get(`/tasks/${settings.id}/turns`, z.array(PassTurnWithFilesDto));
+    const log = await api().get(`/pass-turns/${turn.id}/activity`, z.array(TurnActivityDto));
+
+    expect(turns.map((t) => [t.id, t.seq, t.files])).toEqual([[turn.id, 1, []]]);
+    expect(log.map((l) => [l.kind, l.summary])).toEqual([['tool', 'Edit src/settings/page.tsx']]);
+  });
+
+  it("notes the Ready page opened once, and refuses another task's turn", async () => {
+    const { settings, people, pass, turn } = await readyTurn();
+
+    const first = await send('POST', `/tasks/${settings.id}/turns/${turn.id}/opened`);
+    const openedAt = (await api().get(`/passes/${pass.id}`, PassViewDto)).turns[0]?.openedAt;
+    const again = await send('POST', `/tasks/${settings.id}/turns/${turn.id}/opened`);
+
+    expect([first.status, again.status]).toEqual([204, 204]);
+    expect(openedAt).not.toBeNull();
+    expect((await api().get(`/passes/${pass.id}`, PassViewDto)).turns[0]?.openedAt).toBe(openedAt);
+    expect((await send('POST', `/tasks/${people.id}/turns/${turn.id}/opened`)).status).toBe(409);
   });
 });

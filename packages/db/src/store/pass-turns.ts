@@ -204,6 +204,39 @@ export function markPassTurnAnswered(ctx: WriteContext, id: PassTurnId): void {
     .run();
 }
 
+/**
+ * Notes when the builder first opened the turn's page once it was Ready, with a `pass.changed`; true
+ * when it did. A turn not Ready yet, or opened already, is left as it is.
+ */
+export function markPassTurnOpened(ctx: WriteContext, id: PassTurnId): boolean {
+  getPassTurn(ctx.tx, id);
+  const marked = ctx.tx
+    .update(schema.passTurns)
+    .set({ openedAt: ctx.now, updatedAt: ctx.now })
+    .where(
+      and(
+        eq(schema.passTurns.id, id),
+        isNotNull(schema.passTurns.readyAt),
+        isNull(schema.passTurns.openedAt),
+      ),
+    )
+    .run();
+  if (marked.changes === 0) return false;
+  emitTurn(ctx, EventType.PassChanged, getPassTurn(ctx.tx, id));
+  return true;
+}
+
+/** The task's turns, every pass's, oldest first. */
+export function listTaskTurns(db: DbReader, taskId: TaskId): PassTurnDto[] {
+  return db
+    .select()
+    .from(schema.passTurns)
+    .where(eq(schema.passTurns.taskId, taskId))
+    .orderBy(asc(schema.passTurns.seq))
+    .all()
+    .map(toPassTurnDto);
+}
+
 /** The task's turn that has not ended, or undefined: at most one. */
 export function openPassTurn(db: DbReader, taskId: TaskId): PassTurnDto | undefined {
   const row = db
@@ -250,23 +283,24 @@ export function listPassTurns(db: DbReader, passId: PassId): PassTurnDto[] {
     .map((r) => toPassTurnDto(r.turn));
 }
 
+/** A turn's `session.activity` rows: the data its runner wrote and when. */
+export interface TurnActivityRow {
+  readonly data: Record<string, Json>;
+  readonly at: string;
+}
+
 /**
- * The newest `session.activity` row that names the turn, from any session of its run (a handoff
- * goes on with the turn in a fresh session), with when it was written; undefined before the turn
- * reported any. The events index on entity type, entity and type, with its rows in order, finds a
- * session's newest first.
+ * The `session.activity` rows that name the turn, from any session of its run (a handoff goes on with
+ * the turn in a fresh session). The events index on entity type, entity and type, its rows in order,
+ * finds them by session without a migration of its own.
  */
-export function latestTurnActivity(
-  db: DbReader,
-  turn: Pick<PassTurnDto, 'id' | 'workstreamId'>,
-): { readonly data: Record<string, Json>; readonly at: string } | undefined {
+function turnActivityRows(db: DbReader, turn: Pick<PassTurnDto, 'id' | 'workstreamId'>) {
   const sessions = db
     .select({ id: schema.sessions.id })
     .from(schema.sessions)
     .where(eq(schema.sessions.workstreamId, turn.workstreamId))
     .all()
     .map((s) => s.id);
-  if (sessions.length === 0) return undefined;
   return db
     .select({ data: schema.events.data, at: schema.events.at })
     .from(schema.events)
@@ -277,8 +311,21 @@ export function latestTurnActivity(
         eq(schema.events.type, EventType.SessionActivity),
         sql`json_extract(${schema.events.data}, '$.turn.id') = ${turn.id}`,
       ),
-    )
-    .orderBy(desc(schema.events.seq))
-    .limit(1)
-    .get();
+    );
+}
+
+/** The turn's newest activity row, or undefined before the turn reported any. */
+export function latestTurnActivity(
+  db: DbReader,
+  turn: Pick<PassTurnDto, 'id' | 'workstreamId'>,
+): TurnActivityRow | undefined {
+  return turnActivityRows(db, turn).orderBy(desc(schema.events.seq)).limit(1).get();
+}
+
+/** The turn's activity rows, oldest first: its log. */
+export function listTurnActivity(
+  db: DbReader,
+  turn: Pick<PassTurnDto, 'id' | 'workstreamId'>,
+): TurnActivityRow[] {
+  return turnActivityRows(db, turn).orderBy(asc(schema.events.seq)).all();
 }

@@ -22,6 +22,9 @@ import {
   insertWorkstream,
   latestPassTurn,
   latestTurnActivity,
+  listTaskTurns,
+  listTurnActivity,
+  markPassTurnOpened,
   listPassTurns,
   listTaskThreadRows,
   listTurnsEndedUnsettled,
@@ -140,8 +143,32 @@ describe("a turn's latest activity", () => {
     activity(null, 'not a turn');
 
     expect(latestTurnActivity(store.db, first)?.data['summary']).toBe('one');
+    expect(listTurnActivity(store.db, second).map((a) => a.data['summary'])).toEqual([
+      'two',
+      'three',
+    ]);
     const latest = latestTurnActivity(store.db, second);
     expect([latest?.data['summary'], latest?.at]).toEqual(['three', clock.toISOString()]);
+  });
+});
+
+describe('opening a Ready page', () => {
+  it("notes when the builder first opened the turn's page once it is Ready, and only the first time", () => {
+    const turn = startTurn().value;
+    expect(store.write((ctx) => markPassTurnOpened(ctx, turn.id)).value).toBe(false);
+    store.write((ctx) => endPassTurn(ctx, turn.id, { ending: 'ready', replyBody: null }));
+    store.write((ctx) => settlePassTurn(ctx, turn.id));
+    later(2);
+    const opened = clock.toISOString();
+
+    const { value, events } = store.write((ctx) => markPassTurnOpened(ctx, turn.id));
+    later(1);
+    const again = store.write((ctx) => markPassTurnOpened(ctx, turn.id));
+
+    expect([value, again.value]).toEqual([true, false]);
+    expect(events.map((e) => e.type)).toEqual([EventType.PassChanged]);
+    expect(again.events).toEqual([]);
+    expect(listTaskTurns(store.db, taskId).map((t) => [t.seq, t.openedAt])).toEqual([[1, opened]]);
   });
 });
 
