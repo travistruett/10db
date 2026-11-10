@@ -7,6 +7,8 @@ import {
   type GoalListDto,
   type GoalSummaryDto,
   type HumanTouchDayDto,
+  type PassViewDto,
+  type ProjectViewDto,
   type TaskDto,
   type WorkstreamDto,
 } from '@10db/contracts';
@@ -31,6 +33,7 @@ import {
   passHandlers,
   passViewDto,
 } from '../../test/pass-fixtures';
+import { passKeys } from '../../daemon/pass-queries';
 import { failureLine } from '../board/task-state';
 
 function serve(...overrides: (RequestHandler | WebSocketHandler)[]): void {
@@ -1676,7 +1679,8 @@ describe('FactoryView ways into the Workbench', () => {
     ).toBeTruthy();
   });
 
-  it('offers Work on This on a goal whose UI work is nearly done, opening the Workbench on the goal', async () => {
+  /** A goal whose one UI task is done, whose commits name a page; `live` is what GET /passes answers. */
+  function goalReadyForAPass(live: (project: ProjectViewDto) => PassViewDto[] = () => []) {
     const project = projectViewDto({
       areas: [{ name: 'settings', globs: ['src/settings/**'], role: 'page', route: '/settings' }],
     });
@@ -1699,9 +1703,13 @@ describe('FactoryView ways into the Workbench', () => {
         asked.push(String(params['goalId']));
         return HttpResponse.json(goalPassPagesDto({ pages: ['settings'], fromTasks: [done.id] }));
       }),
-      ...passHandlers(),
+      ...passHandlers({ live: live(project) }),
     );
-    const { router } = renderApp('/factory');
+    return { linked, asked, ...renderApp('/factory') };
+  }
+
+  it('offers Work on This on a goal whose UI work is nearly done, opening the Workbench on the goal', async () => {
+    const { router, linked, asked } = goalReadyForAPass();
     fireEvent.click(await screen.findByRole('button', { name: /^Settings polish/ }));
     const region = await screen.findByRole('region', { name: 'Settings polish' });
     fireEvent.click(await within(region).findByRole('link', { name: 'Work on This' }));
@@ -1711,6 +1719,20 @@ describe('FactoryView ways into the Workbench', () => {
     expect(router.state.location.search).toEqual({ goal: linked.goal.id });
     // The Workbench reads the goal's pages again as it opens; only this goal's are asked for.
     expect(new Set(asked)).toEqual(new Set([linked.goal.id]));
+  });
+
+  it("offers no Work on This while the project's pass holds pages, and reads no goal pages", async () => {
+    const { queryClient, asked } = goalReadyForAPass((project) => [
+      passViewDto({ pass: { projectId: project.id }, pages: [pagesByStatus().working] }),
+    ]);
+    fireEvent.click(await screen.findByRole('button', { name: /^Settings polish/ }));
+    const region = await screen.findByRole('region', { name: 'Settings polish' });
+    await within(region).findByRole('button', { name: 'Start Ready Tasks…' });
+    await waitFor(() => {
+      expect(queryClient.getQueryState(passKeys.live)?.status).toBe('success');
+    });
+    expect(within(region).queryByRole('link', { name: 'Work on This' })).toBeNull();
+    expect(asked).toEqual([]);
   });
 });
 

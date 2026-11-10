@@ -1,8 +1,14 @@
-import type { GoalSummaryDto, ProjectViewDto, WorkstreamDto, WorkstreamId } from '@10db/contracts';
+import {
+  passHoldsTasks,
+  type GoalSummaryDto,
+  type ProjectViewDto,
+  type WorkstreamDto,
+  type WorkstreamId,
+} from '@10db/contracts';
 import { Button, Divider, Group, Stack, Text } from '@mantine/core';
 import { useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
-import { useGoalPassPages } from '../../daemon/pass-queries';
+import { useGoalPassPages, useLivePass } from '../../daemon/pass-queries';
 import { useBatches, useTasks, useWorkstreams } from '../../daemon/queries';
 import { OpenConversation } from '../shape/open-conversation';
 import { useRemoveDraftGoalAction } from '../shape/remove-draft-goal';
@@ -62,8 +68,11 @@ export function GoalDetail({ project, summary, opened }: GoalDetailProps) {
     gateCommand: project.gateCommand,
   });
   const ready = rows.filter((r) => r.bucket === 'ready').length;
-  // The pages a goal's commits touched are a git read, asked for only once Work on This could show.
-  const passReady = goalReadyForPass(goalTasks, project.areas);
+  // Work on This opens a pass, so it waits while the project's pass holds pages; the pages a goal's
+  // commits touched are a git read, asked for only once it could show.
+  const live = useLivePass(project.id);
+  const passHolding = live.data != null && passHoldsTasks(live.data.pass.state);
+  const passReady = live.isSuccess && !passHolding && goalReadyForPass(goalTasks, project.areas);
   const passPages = useGoalPassPages(passReady ? goal.id : null);
   const loadError = tasks.isError
     ? tasks.error.message
