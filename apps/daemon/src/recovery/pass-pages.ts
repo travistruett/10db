@@ -12,6 +12,7 @@ import {
   endTurnSteps,
   finishEndedTurn,
   passOfWorkstream,
+  queueUntaken,
   raisePassCheck,
   raiseTurnFailed,
 } from '../runner';
@@ -54,16 +55,22 @@ export async function recoverPage(
         providerSessionId: input.providerSessionId,
         reason: row.failureReason ?? UNRECORDED_FAILURE,
       });
+      // A message the builder wrote meanwhile starts the next turn.
+      deps.state.write((ctx) => queueUntaken(ctx, row.id, null, input.providerSessionId));
       log.info({ turnId: latest.id, ending: latest.ending }, 'pass turn finished after restart');
       return true;
     }
-    // A page waiting for the builder keeps the item it waits on, or has it raised again.
+    // A page waiting for the builder keeps the item it waits on, or has it raised again, unless
+    // the builder has written to it: then the message starts its next turn.
     if (row.state === S.WaitingHuman && row.nextAction.kind === 'pass_review') {
+      if (deps.state.write((ctx) => queueUntaken(ctx, row.id, null, input.providerSessionId)))
+        return true;
       if (getInboxItem(db, row.nextAction.inboxId).state === 'OPEN') return true;
       const task = getTask(db, row.taskId);
       if (!latest) return false;
-      const kept =
-        latest.ending === PassTurnEnding.Failed ? null : await keptWorkFacts(deps, task.id);
+      // A turn settled as failed says so on the run, though it may have ended another way first.
+      const failed = latest.ending === PassTurnEnding.Failed || row.failureKind !== null;
+      const kept = failed ? null : await keptWorkFacts(deps, task.id);
       deps.state.write((ctx) => {
         const item =
           kept === null

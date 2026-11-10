@@ -97,6 +97,8 @@ export const FakeStep = z.discriminatedUnion('do', [
   z.object({ do: z.literal('tool'), toolName: z.string(), input: z.record(z.string(), Json) }),
   z.object({ do: z.literal('mcp'), tool: z.string(), args: z.record(z.string(), Json) }),
   z.object({ do: z.literal('await_message'), contains: z.string() }),
+  /** Waits until the test calls `signal` with this name, so a test can place the next step exactly. */
+  z.object({ do: z.literal('await_signal'), name: z.string() }),
   /**
    * A turn takes in every message the session holds that it has not taken yet, the prompt's first:
    * their client uuids come as `consumed`, as an assistant message stamps `user_message_uuids`.
@@ -136,6 +138,9 @@ export const FakeStep = z.discriminatedUnion('do', [
   z.object({ do: z.literal('end'), reason: z.enum(['completed', 'rate_limited']).optional() }),
 ]);
 export type FakeStep = z.infer<typeof FakeStep>;
+
+/** The steps that do a turn's work: one of them running means a turn is. */
+const TURN_STEPS: ReadonlySet<FakeStep['do']> = new Set(['consume', 'tool', 'mcp', 'activity']);
 
 /** Task title → one step list per session, indexed by the session's sequence within its workstream. */
 export const FakeScriptBook = z.record(z.string(), z.array(z.array(FakeStep)));
@@ -212,9 +217,20 @@ export class FakeAdapter implements SessionAdapter {
     Promise.reject(new CompletionError('The fake adapter has no model to ask.'));
 
   private readonly book: FakeScriptBook;
+  /** The names `signal` was called with, and the sessions waiting for one. */
+  private readonly signalled = new Set<string>();
+  private signalWaiters: (() => void)[] = [];
 
   constructor(book: FakeScriptBook) {
     this.book = book;
+  }
+
+  /** Lets every session waiting at `await_signal` for `name` go on, and any that reaches it later. */
+  signal(name: string): void {
+    this.signalled.add(name);
+    const waiters = this.signalWaiters;
+    this.signalWaiters = [];
+    for (const wake of waiters) wake();
   }
 
   complete(ask: CompletionSpec): Promise<string> {
@@ -262,6 +278,8 @@ export class FakeAdapter implements SessionAdapter {
    * take seconds to close after it is asked to.
    */
   shapeStopGate: Promise<void> | null = null;
+  /** The same for a lane session: its stop waits for it before the session ends. */
+  laneStopGate: Promise<void> | null = null;
 
   startShape(spec: ShapeSessionSpec): ShapeSessionHandle {
     const refusal = checkAccount(spec.account, expectedSeen(spec.account));
@@ -332,6 +350,23 @@ export class FakeAdapter implements SessionAdapter {
     const untaken: string[] = [];
     /** What the running turn has taken, which its result lists again. */
     let takenThisTurn: string[] = [];
+    /** A turn is running: a step of it ran and its result has not come. */
+    let inTurn = false;
+    /** The running turn's result, as Claude Code reports it: what it took, then its completion. */
+    const completeTurn = (result: 'success' | 'max_turns' | 'error' | undefined, text?: string) => {
+      if (takenThisTurn.length > 0) channel.push({ type: 'consumed', uuids: takenThisTurn });
+      takenThisTurn = [];
+      inTurn = false;
+      channel.push({
+        type: 'turn_complete',
+        ...(result ? { result } : {}),
+        ...(text ? { text } : {}),
+        inputTokens: 1000,
+        outputTokens: 200,
+        cachedTokens: 0,
+        costUsd: 0.01,
+      });
+    };
     /** Takes in a message unless its uuid is one the conversation already holds. */
     const receive = (uuid: string | undefined): void => {
       if (uuid === undefined || transcript.has(uuid)) return;
@@ -441,6 +476,7 @@ export class FakeAdapter implements SessionAdapter {
     };
 
     const runStep = async (step: FakeStep, index: number): Promise<'continue' | 'halt'> => {
+      if (TURN_STEPS.has(step.do)) inTurn = true;
       switch (step.do) {
         case 'context':
           channel.push({
@@ -505,6 +541,20 @@ export class FakeAdapter implements SessionAdapter {
           });
           return 'continue';
         }
+        case 'await_signal': {
+          while (!this.signalled.has(step.name)) {
+            const woke = await Promise.race([
+              new Promise<'signal'>((r) => {
+                this.signalWaiters.push(() => {
+                  r('signal');
+                });
+              }),
+              untilStopped,
+            ]);
+            if (woke === 'stopped') return 'halt';
+          }
+          return 'continue';
+        }
         case 'await_message': {
           for (;;) {
             if (messages.some((m) => m.includes(step.contains))) return 'continue';
@@ -527,17 +577,7 @@ export class FakeAdapter implements SessionAdapter {
         }
         case 'turn_complete':
           // The turn's result lists every message the turn took, as Claude Code's does.
-          if (takenThisTurn.length > 0) channel.push({ type: 'consumed', uuids: takenThisTurn });
-          takenThisTurn = [];
-          channel.push({
-            type: 'turn_complete',
-            ...(step.result ? { result: step.result } : {}),
-            ...(step.text ? { text: step.text } : {}),
-            inputTokens: 1000,
-            outputTokens: 200,
-            cachedTokens: 0,
-            costUsd: 0.01,
-          });
+          completeTurn(step.result, step.text);
           return 'continue';
         case 'rate_limit':
           channel.push({
@@ -634,6 +674,7 @@ export class FakeAdapter implements SessionAdapter {
     })();
 
     const interrupts = this.interrupts;
+    const stopGate = (): Promise<void> | null => this.laneStopGate;
     const receiptFor = (untakenNow: readonly string[]): InterruptReceipt =>
       this.interruptReceipt(untakenNow);
     return {
@@ -646,12 +687,16 @@ export class FakeAdapter implements SessionAdapter {
         messageWaiter = null;
       },
       interrupt() {
-        // What no turn has taken yet stays queued and runs next, as far as the receipt says.
+        // What no turn has taken yet stays queued and runs next, as far as the receipt says. The
+        // running turn ends with an error result, as Claude Code's interrupted turn does.
         const receipt = receiptFor(untaken);
+        if (inTurn) completeTurn('error');
         interrupts.push({ sessionId: spec.sessionId, receipt });
         return Promise.resolve(receipt);
       },
       async stop() {
+        const gate = stopGate();
+        if (gate !== null) await gate;
         abort.abort();
         end('stopped', null);
         await done;

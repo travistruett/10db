@@ -9,6 +9,7 @@ import {
   type SessionId,
   type TaskMessageId,
   type WorkstreamId,
+  type WorkstreamState,
 } from '@10db/contracts';
 import {
   clearLease,
@@ -16,6 +17,7 @@ import {
   getTask,
   getWorkstreamRow,
   insertPassTurn,
+  latestPassTurn,
   openPassTurn,
   passHoldingTask,
   patchWorkstream,
@@ -39,6 +41,9 @@ export function passOfWorkstream(db: DbReader, id: WorkstreamId): PassDto | unde
   return passHoldingTask(db, getTask(db, getWorkstreamRow(db, id).taskId));
 }
 
+/** The states of a lane that has been granted and has not parked: its turn may not be open yet. */
+const LAUNCHED: ReadonlySet<WorkstreamState> = new Set([S.Starting, S.Running, S.HandingOff]);
+
 /** Moves the workstream to WAITING_HUMAN from wherever a turn of it can end. */
 function toWaitingHuman(ctx: WriteContext, id: WorkstreamId, fence: number | null): void {
   const { state } = getWorkstreamRow(ctx.tx, id);
@@ -55,6 +60,31 @@ export function withdrawPageItems(ctx: WriteContext, id: WorkstreamId): void {
   if (row.nextAction.kind === 'pass_review') withdrawCard(ctx, row.nextAction.inboxId);
   const live = liveCheckCard(ctx.tx, id);
   if (live) withdrawCard(ctx, live.id);
+}
+
+/**
+ * A page waiting for the builder, with no session to hand it to, that has a builder message no turn
+ * took: it goes back to the queue to start a turn with the oldest, resuming `providerSessionId`, and
+ * its item is withdrawn. Nothing else would launch it. True when it was queued.
+ */
+export function queueUntaken(
+  ctx: WriteContext,
+  id: WorkstreamId,
+  fence: number | null,
+  providerSessionId: string | null,
+): boolean {
+  const row = getWorkstreamRow(ctx.tx, id);
+  if (row.state !== S.WaitingHuman || row.nextAction.kind !== 'pass_review') return false;
+  const messageId = untakenMessages(ctx.tx, row.taskId)[0];
+  if (messageId === undefined) return false;
+  withdrawPageItems(ctx, id);
+  transitionWorkstream(ctx, id, {
+    to: S.Queued,
+    fence,
+    patch: { nextAction: { kind: 'feedback', messageId, providerSessionId } },
+    reason: 'a message waits for the next turn',
+  });
+  return true;
 }
 
 /**
@@ -110,12 +140,14 @@ export interface TurnSettle {
  * The last write of a turn's end: the turn settled, and the page moved by how it ended. Ready waits
  * for the builder on a new Ready item with its session still open; a failed turn waits on its flag;
  * a stopped turn goes back to the queue resuming its session, which launches nothing until the
- * builder writes again.
+ * builder writes again. `kept` is null for an ending that raises no Ready and whose work could not
+ * be kept now: it stays on disk, and the next keep takes it.
  */
 function settleTurn(
   deps: PassWorkDeps,
   turn: PassTurnDto,
-  kept: KeptWork,
+  ending: PassTurnEnding,
+  kept: KeptWork | null,
   settle: TurnSettle,
 ): void {
   const id = turn.workstreamId;
@@ -125,8 +157,14 @@ function settleTurn(
     const task = getTask(ctx.tx, row.taskId);
     const pass = passHoldingTask(ctx.tx, task);
     if (!pass) throw new ConflictError(`${task.title} is in no open pass`);
-    switch (turn.ending) {
+    switch (ending) {
       case PassTurnEnding.Ready: {
+        if (kept === null) throw new ConflictError(`Turn ${String(turn.seq)} has no kept work`);
+        // A message that came as this turn ended has opened the next one: the page works on, and
+        // that turn's end raises its Ready.
+        if (openPassTurn(ctx.tx, row.taskId)) return;
+        // A page never has two open Ready items.
+        withdrawPageItems(ctx, id);
         toWaitingHuman(ctx, id, settle.fence);
         const item = raisePassCheck(ctx, {
           pass,
@@ -138,8 +176,10 @@ function settleTurn(
           turnFiles: kept.turnFiles,
           pageFiles: kept.pageFiles,
         });
+        // A turn that got through ends the page's run of crashes.
         patchWorkstream(ctx, id, settle.fence, {
           nextAction: { kind: 'pass_review', inboxId: item.id },
+          recoveryAttempts: 0,
         });
         return;
       }
@@ -153,8 +193,10 @@ function settleTurn(
           reason: settle.reason,
         });
         // The run says why, as a failed run does, though it never fails: the page reads it.
+        // Retry Turn starts the page over, with every recovery attempt to come.
         patchWorkstream(ctx, id, settle.fence, {
           nextAction: { kind: 'pass_review', inboxId: flag.id },
+          recoveryAttempts: 0,
           currentSessionId: null,
           failureKind: WorkstreamFailure.SessionFailed,
           failureReason: settle.reason,
@@ -183,17 +225,18 @@ function settleTurn(
         clearLease(ctx, id);
         return;
       }
-      case null:
-        throw new ConflictError(`Turn ${String(turn.seq)} of this task has not ended`);
     }
   });
 }
 
 /**
  * Ends the page's turn (spec §6.2) in its order, for every ending: the end and the agent's reply in
- * one write; the page's work kept; then the turn settled. A failed page with no turn open gets one
- * for the message it was given, so Retry Turn has a message to send again. Does nothing when no
- * turn is open and it did not fail.
+ * one write; the page's work kept; then the turn settled. A turn is not over, and nothing is done,
+ * while a builder message no turn has taken is kept (step 1): it is on its way into the session,
+ * whether or not it has been handed over yet. A failed page settles the turn that ended and was not
+ * settled, if one did, rather than ending another; with none, a failed lane or one stopped before
+ * its turn opened gets one for the message it was given, so Retry Turn has a message to send again
+ * and the launch rule sees the stop. True when a turn was carried through.
  */
 export async function endTurnSteps(
   deps: PassWorkDeps,
@@ -202,26 +245,33 @@ export async function endTurnSteps(
     readonly ending: PassTurnEnding;
     readonly reply: string | null;
   },
-): Promise<void> {
+): Promise<boolean> {
   const db = deps.state.db;
   const { taskId } = getWorkstreamRow(db, input.workstreamId);
   const ended = deps.state.write((ctx) => {
-    const open =
-      openPassTurn(ctx.tx, taskId) ??
-      (input.ending === PassTurnEnding.Failed
-        ? insertPassTurn(ctx, {
-            taskId,
-            workstreamId: input.workstreamId,
-            sessionId: null,
-            messageId: untakenMessages(ctx.tx, taskId)[0] ?? null,
-          })
-        : undefined);
-    if (!open) return undefined;
+    if (input.ending === PassTurnEnding.Ready && untakenMessages(ctx.tx, taskId).length > 0)
+      return undefined;
+    const open = openPassTurn(ctx.tx, taskId);
     // A shared change the turn made is kept, and its areas released, before this write.
-    return endPassTurn(ctx, open.id, { ending: input.ending, replyBody: input.reply });
+    if (open) return endPassTurn(ctx, open.id, { ending: input.ending, replyBody: input.reply });
+    if (input.ending === PassTurnEnding.Ready) return undefined;
+    if (input.ending === PassTurnEnding.Failed) {
+      const latest = latestPassTurn(ctx.tx, taskId);
+      if (latest && latest.endedAt !== null && latest.settledAt === null) return latest;
+    } else if (!LAUNCHED.has(getWorkstreamRow(ctx.tx, input.workstreamId).state)) return undefined;
+    // The lane was started for a message and stopped or failed before its turn opened: the turn is
+    // opened for it here so how it ended is on the rows the launch rule and Retry Turn read.
+    const turn = insertPassTurn(ctx, {
+      taskId,
+      workstreamId: input.workstreamId,
+      sessionId: null,
+      messageId: untakenMessages(ctx.tx, taskId)[0] ?? null,
+    });
+    return endPassTurn(ctx, turn.id, { ending: input.ending, replyBody: input.reply });
   });
-  if (!ended) return;
-  await finishEndedTurn(deps, ended, input);
+  if (!ended) return false;
+  await carryThrough(deps, ended, input.ending, input);
+  return true;
 }
 
 /**
@@ -233,9 +283,41 @@ export async function finishEndedTurn(
   turn: PassTurnDto,
   settle: TurnSettle,
 ): Promise<void> {
-  const kept =
+  if (turn.ending === null)
+    throw new ConflictError(`Turn ${String(turn.seq)} of this task has not ended`);
+  await carryThrough(deps, turn, turn.ending, settle);
+}
+
+/**
+ * Keeps the turn's work and settles it as `ending`. A Ready needs its kept work for the item it
+ * raises; any other ending settles though its work cannot be kept now, so the page is never left
+ * working with no runner.
+ */
+async function carryThrough(
+  deps: PassWorkDeps,
+  turn: PassTurnDto,
+  ending: PassTurnEnding,
+  settle: TurnSettle,
+): Promise<void> {
+  const keep = () =>
     turn.keptBaseSha === null
-      ? await keepTurnWork(deps, { workstreamId: turn.workstreamId, turnId: turn.id })
-      : await keptWorkFacts(deps, turn.taskId);
-  settleTurn(deps, turn, kept, settle);
+      ? keepTurnWork(deps, { workstreamId: turn.workstreamId, turnId: turn.id })
+      : keptWorkFacts(deps, turn.taskId);
+  let kept: KeptWork | null;
+  if (ending === PassTurnEnding.Ready) kept = await keep();
+  else
+    try {
+      kept = await keep();
+    } catch (error) {
+      deps.logger.warn(
+        {
+          workstreamId: turn.workstreamId,
+          turnId: turn.id,
+          err: error instanceof Error ? error.message : String(error),
+        },
+        "the turn's work was not kept; it is settled, and the next keep takes it",
+      );
+      kept = null;
+    }
+  settleTurn(deps, turn, ending, kept, settle);
 }

@@ -8,6 +8,8 @@ const quiet: PassLaunchFacts = {
   passState: 'OPEN',
   takingOut: false,
   untaken: false,
+  stopped: false,
+  writtenSinceStop: false,
   turnUnsettled: false,
   folderOn: true,
 };
@@ -28,6 +30,21 @@ describe('passLaunch', () => {
     {
       name: 'a turn not carried through: cut short by a crash, or ended before a restart',
       facts: { turnUnsettled: true },
+      verdict: PassLaunch.Launch,
+    },
+    {
+      name: 'a page the builder stopped, its message from before the stop untaken',
+      facts: { untaken: true, stopped: true },
+      verdict: PassLaunch.Idle,
+    },
+    {
+      name: 'a page the builder stopped, then wrote to',
+      facts: { untaken: true, stopped: true, writtenSinceStop: true },
+      verdict: PassLaunch.Launch,
+    },
+    {
+      name: 'a stopped turn not carried through before a restart',
+      facts: { untaken: true, stopped: true, turnUnsettled: true },
       verdict: PassLaunch.Launch,
     },
     {

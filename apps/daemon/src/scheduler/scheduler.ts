@@ -7,6 +7,7 @@ import {
   PASS_FOLDER_WAIT_LINE,
   PASS_FOLDER_WAIT_NOTICE_KEY,
   queueOrder,
+  PassTurnEnding,
   TakeOutStep,
   WorkstreamState,
   type BatchDto,
@@ -29,6 +30,7 @@ import {
   getAccountRow,
   getProject,
   getTask,
+  getTaskMessageRow,
   getWorkstreamRow,
   lastTakeOut,
   listBatches,
@@ -191,11 +193,18 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
   ): boolean {
     const takeOut = lastTakeOut(db, task.id);
     const read = snapshot.branches.has(project.repoPath);
+    const latest = latestPassTurn(db, task.id);
+    const untaken = untakenMessages(db, task.id);
+    const stoppedAt = latest?.ending === PassTurnEnding.Stopped ? latest.endedAt : null;
     const verdict = passLaunch({
       passState: pass.state,
       takingOut: takeOut?.passId === pass.id && takeOut.step < TakeOutStep.Done,
-      untaken: untakenMessages(db, task.id).length > 0,
-      turnUnsettled: latestPassTurn(db, task.id)?.settledAt === null,
+      untaken: untaken.length > 0,
+      stopped: stoppedAt !== null,
+      writtenSinceStop:
+        stoppedAt !== null &&
+        untaken.some((messageId) => getTaskMessageRow(db, messageId).createdAt > stoppedAt),
+      turnUnsettled: latest?.settledAt === null,
       folderOn: read
         ? snapshot.branches.get(project.repoPath) === getBatch(db, pass.batchId).branch
         : null,
@@ -301,16 +310,15 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
     const line = listWorkstreams(db, { states: [WorkstreamState.Queued] }).toSorted(queueOrder);
     for (const ws of line) {
       const overCaps = awaited.has(ws.id);
-      if (!overCaps && global >= opts.caps.global) {
-        const pass = passHoldingTask(db, getTask(db, ws.taskId)) ?? null;
-        // A page with no turn to run asks for no room.
-        if (
-          pass === null ||
-          passPageRuns(ws, getTask(db, ws.taskId), pass, getProject(db, ws.projectId), snapshot)
-        )
-          makeRoom(ws, { accountId: getProject(db, ws.projectId).accountId, pass });
+      // At the daemon-wide cap ordinary work waits, unless a warm pass session could close for it;
+      // a page goes on to say it waits. The room check below decides either.
+      if (
+        !overCaps &&
+        global >= opts.caps.global &&
+        (warm ??= warmLanes()).length === 0 &&
+        !passHoldingTask(db, getTask(db, ws.taskId))
+      )
         continue;
-      }
       // A runner that just re-queued this row is still unwinding; launch() would refuse it and
       // leave it STARTING with a lane. Its lane-freed callback ticks again once it has exited.
       if (opts.runner.isRunning(ws.id)) continue;
@@ -361,9 +369,12 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
           accountCap: account.laneCap,
         },
       );
+      let needsRoom = false;
       if (!overCaps && !room) {
-        makeRoom(ws, { accountId: account.id, pass: inPass });
-        continue;
+        // A project's own limit is never freed by a warm session, which it does not count.
+        if (inPass === null && (byProject.get(project.id) ?? 0) >= project.maxLanes) continue;
+        // A warm session closes only for work that could start once it has: after every check.
+        needsRoom = true;
       }
       // A pass's folder was read for its branch above; its off-branch card is the pass's own.
       if (inPass === null && project.delivery === Delivery.PullRequest) {
@@ -391,6 +402,10 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
       if (!dependenciesDone(db, ws.taskId)) continue;
       // A parked task never launches, whatever its queue holds.
       if (task.boardColumnId !== null) continue;
+      if (needsRoom) {
+        makeRoom(ws, { accountId: account.id, pass: inPass });
+        continue;
+      }
       const leaseUntil = new Date(opts.clock.now().getTime() + opts.leaseMs).toISOString();
       const areaScope = claimScopeOf(db, ws);
       // A page holds its pass's areas for its life; one that waited at the open for a page another

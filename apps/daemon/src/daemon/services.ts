@@ -384,8 +384,13 @@ export function createServices(deps: {
       const pass = passHoldingTask(db, task);
       if (pass?.state !== PassState.Open)
         throw new ConflictError(`${task.title} is not a page of an open Workbench pass`);
-      if (task.workstreamId === null || !openPassTurn(db, taskId)) return;
-      await deps.runner.stopPassLane(task.workstreamId);
+      if (task.workstreamId === null) return;
+      // A turn running, or a lane starting one: a page waiting for the builder is left as it is.
+      const working =
+        openPassTurn(db, taskId) !== undefined ||
+        (deps.runner.isRunning(task.workstreamId) &&
+          getWorkstream(db, task.workstreamId).state !== WorkstreamState.WaitingHuman);
+      if (working) await deps.runner.stopPassLane(task.workstreamId);
     },
     listGoals: (projectId) => listGoalSummaries(db, projectId),
     humanTouch: (projectId) => {

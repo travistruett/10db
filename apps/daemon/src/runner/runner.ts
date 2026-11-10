@@ -41,6 +41,7 @@ import {
   type TaskMessageId,
   type WorkstreamId,
   type WorkstreamStep,
+  InvalidError,
   MIGRATIONS_RENUMBERED_NOTICE_KEY,
   MIGRATIONS_UNCARRIED_NOTICE_KEY,
   PASS_RETRY_TURN_CHOICE,
@@ -239,8 +240,8 @@ import {
   endTurnSteps,
   finishEndedTurn,
   passOfWorkstream,
+  queueUntaken,
   startTurn,
-  withdrawPageItems,
 } from './pass-turn';
 import {
   keepingFeedback,
@@ -643,8 +644,6 @@ interface Control {
   messages: LaneMessages | null;
   /** The builder stopped the pass task's turn: it closes as stopped. */
   builderStop: boolean;
-  /** Set while Stop and Redo interrupts the turn: the interrupted turn's end is not the turn's. */
-  redoing: boolean;
   /** Closes a pass task's session once it has been idle since its last turn ended. */
   idleTimer: Timer | null;
   done: Promise<void>;
@@ -732,6 +731,17 @@ function describeEnding(
   return `${how}${context}.`;
 }
 
+/**
+ * A pass task's session that would start bare while a turn is open: it cannot resume the turn's
+ * conversation, so it starts fresh from the thread's digest and the message the turn began with,
+ * as Retry Turn does (Workbench spec §6.3).
+ */
+function turnMessageFirst(reader: DbReader, taskId: TaskId, action: NextAction): NextAction {
+  if (action.kind !== 'start') return action;
+  const messageId = openPassTurn(reader, taskId)?.messageId ?? null;
+  return messageId === null ? action : { kind: 'feedback', messageId, providerSessionId: null };
+}
+
 /** A review that ends without a verdict is rerun once by itself; a second such ending fails the task. */
 const NO_VERDICT_ENDINGS_ALLOWED = 2;
 
@@ -795,7 +805,12 @@ export function createRunner(opts: RunnerOptions): Runner {
     ctl.idleTimer?.cancel();
     ctl.idleTimer = opts.clock.setTimeout(() => {
       ctl.idleTimer = null;
-      void runner.closeWarm(id);
+      runner.closeWarm(id).catch((error: unknown) => {
+        opts.logger.warn(
+          { workstreamId: id, err: error instanceof Error ? error.message : String(error) },
+          'a warm session did not close when idle',
+        );
+      });
     }, opts.limits.warmIdleMs);
   }
 
@@ -1546,17 +1561,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     providerSessionId: string | null,
   ): void {
     opts.state.write((ctx) => {
-      const row = getWorkstreamRow(ctx.tx, id);
-      const untaken = untakenMessages(ctx.tx, row.taskId)[0];
-      if (untaken !== undefined) {
-        withdrawPageItems(ctx, id);
-        transitionWorkstream(ctx, id, {
-          to: S.Queued,
-          fence: ctl.fence,
-          patch: { nextAction: { kind: 'feedback', messageId: untaken, providerSessionId } },
-          reason: 'a message waits for the next turn',
-        });
-      }
+      queueUntaken(ctx, id, ctl.fence, providerSessionId);
       clearLease(ctx, id);
     });
   }
@@ -1638,9 +1643,6 @@ export function createRunner(opts: RunnerOptions): Runner {
       fence: ctl.fence,
       providerSessionId,
       reason,
-    });
-    opts.state.write((ctx) => {
-      patchWorkstream(ctx, id, ctl.fence, { recoveryAttempts: 0 });
     });
   }
 
@@ -1765,7 +1767,11 @@ export function createRunner(opts: RunnerOptions): Runner {
     const fresh = actionOnAnotherAccount(id, ctl, row);
     // A pass task's session starts from the oldest message no turn has taken, whatever it was queued for.
     const action = pass
-      ? withUndelivered(fresh ?? row.nextAction, untakenMessages(db, task.id)[0] ?? null)
+      ? turnMessageFirst(
+          db,
+          task.id,
+          withUndelivered(fresh ?? row.nextAction, untakenMessages(db, task.id)[0] ?? null),
+        )
       : (fresh ?? row.nextAction);
     const step = currentStep(row);
     const persona = step.personaId ? getPersona(db, step.personaId) : null;
@@ -2302,15 +2308,9 @@ export function createRunner(opts: RunnerOptions): Runner {
     // writes is handed to it at once.
     for (const message of untaken) messages.push(message);
     if (pass) {
-      for (const messageId of untakenMessages(db, task.id))
-        if (messageId !== feedback?.id) messages.push(getTaskMessageRow(db, messageId));
+      messages.pushUntaken();
       ctl.messages = messages;
     }
-    /**
-     * A pass task's turn ended (Workbench spec §6.2). A message the session was handed and no turn
-     * took means it is not over: the agent is about to see it, and the next completion decides.
-     * Otherwise the turn ends Ready, and the session stays open for the builder's next message.
-     */
     /**
      * A pass task's turn end with a handoff (Workbench spec §6.2): one that stands continues the same
      * turn in a fresh session. A run of handoffs nobody asked for is keyed by the task's kept work,
@@ -2350,11 +2350,15 @@ export function createRunner(opts: RunnerOptions): Runner {
       }
       return false;
     };
+    /**
+     * A pass task's turn ended (Workbench spec §6.2). A builder message no turn took means it is
+     * not over: the agent is about to see it, and the next completion decides. Otherwise the turn
+     * ends Ready, and the session stays open for the builder's next message.
+     */
     const passTurnComplete = async (text: string | null): Promise<void> => {
       armIdleClose(id, ctl);
-      if (messages.untaken().length > 0 || ctl.redoing) return;
       try {
-        await endTurnSteps(passWork, {
+        const ended = await endTurnSteps(passWork, {
           workstreamId: id,
           ending: PassTurnEnding.Ready,
           reply: text,
@@ -2362,6 +2366,12 @@ export function createRunner(opts: RunnerOptions): Runner {
           providerSessionId: st.providerSessionId,
           reason: '',
         });
+        // A handoff asked of the turn ends with it: the next ask, for the session between turns
+        // or for a later turn, is a new one.
+        if (ended) {
+          st.handoffRequested = false;
+          st.firmSent = false;
+        }
       } catch (error) {
         if (error instanceof StaleFenceError) throw error;
         const message = error instanceof Error ? error.message : String(error);
@@ -3480,12 +3490,14 @@ export function createRunner(opts: RunnerOptions): Runner {
         // finished first, and nothing is resumed (Workbench spec §12).
         const latest = latestPassTurn(db, getWorkstreamRow(db, id).taskId);
         if (latest && latest.endedAt !== null && latest.settledAt === null) {
+          const providerSessionId = lastProviderSession(id);
           await finishEndedTurn(passWork, latest, {
             fence: ctl.fence,
-            providerSessionId: lastProviderSession(id),
+            providerSessionId,
             reason: 'The turn ended while 10db was stopping, and its session is gone',
           });
           opts.state.write((ctx) => {
+            queueUntaken(ctx, id, ctl.fence, providerSessionId);
             clearLease(ctx, id);
           });
           return;
@@ -3633,7 +3645,6 @@ export function createRunner(opts: RunnerOptions): Runner {
         unaskedHandoffs: null,
         messages: null,
         builderStop: false,
-        redoing: false,
         idleTimer: null,
         done: Promise.resolve(),
       };
@@ -3700,57 +3711,61 @@ export function createRunner(opts: RunnerOptions): Runner {
     async deliverMessage(taskId, messageId, { redo }) {
       const id = getTask(db, taskId).workstreamId;
       if (id === null) throw new ConflictError(`Task ${taskId} has no run to hand the message to`);
+      /** A page its pass no longer holds takes no message, whatever was kept for it. */
+      const stillAPage = (): void => {
+        if (!passOfWorkstream(db, id))
+          throw new ConflictError(`${getTask(db, taskId).title} is no longer in a Workbench pass`);
+      };
+      stillAPage();
       const ctl = active.get(id);
       const lane = ctl?.messages ?? null;
       if (ctl && lane && ctl.stopReason === null) {
         disarmIdleClose(ctl);
-        // Stop and Redo: the interrupted turn goes on with the message, so its end is not Ready.
-        ctl.redoing = redo && openPassTurn(db, taskId) !== undefined;
+        // Stop and Redo: the interrupted turn goes on with the message. Its end is not Ready, as
+        // no turn's is while the message waits untaken.
+        if (redo && openPassTurn(db, taskId)) await lane.interrupt();
+        // What the builder changed by hand since the last turn is kept with the page, and the
+        // agent is told before it reads the message. An edit that cannot be kept now (Your folder
+        // off the pass's branch) is kept with the turn's work instead, and the message goes on.
+        let note: string | null = null;
         try {
-          if (ctl.redoing) await lane.interrupt();
-          // What the builder changed by hand since the last turn is kept with the page, and the
-          // agent is told before it reads the message.
-          const fold = await foldHandEdits(passWork, { workstreamId: id });
-          if (ctl.messages === lane) {
-            opts.state.write((ctx) => {
-              // A Ready page's new turn resumes this session with the message if it ends untaken.
-              if (getWorkstreamRow(ctx.tx, id).nextAction.kind === 'pass_review')
-                patchWorkstream(ctx, id, ctl.fence, {
-                  nextAction: {
-                    kind: 'feedback',
-                    messageId,
-                    providerSessionId: lastProviderSession(id),
-                  },
-                });
-              startTurn(ctx, {
-                workstreamId: id,
-                sessionId: getWorkstreamRow(ctx.tx, id).currentSessionId,
-                messageId,
-                fence: ctl.fence,
+          note = (await foldHandEdits(passWork, { workstreamId: id })).agentNote;
+        } catch (error) {
+          opts.logger.warn(
+            { workstreamId: id, err: error instanceof Error ? error.message : String(error) },
+            "the builder's hand edits were not folded; the message goes without its note",
+          );
+        }
+        stillAPage();
+        // A stop that landed meanwhile (the builder's, a take-out's, an idle close) ends this
+        // session: the message stays untaken for the next one.
+        if (ctl.messages === lane && stopRequested(ctl) === null) {
+          opts.state.write((ctx) => {
+            // A Ready page's new turn resumes this session with the message if it ends untaken.
+            if (getWorkstreamRow(ctx.tx, id).nextAction.kind === 'pass_review')
+              patchWorkstream(ctx, id, ctl.fence, {
+                nextAction: {
+                  kind: 'feedback',
+                  messageId,
+                  providerSessionId: lastProviderSession(id),
+                },
               });
+            startTurn(ctx, {
+              workstreamId: id,
+              sessionId: getWorkstreamRow(ctx.tx, id).currentSessionId,
+              messageId,
+              fence: ctl.fence,
             });
-            lane.push(getTaskMessageRow(db, messageId), fold.agentNote);
-            return;
-          }
-        } finally {
-          ctl.redoing = false;
+          });
+          // Every message no turn took goes with it, so none is left behind for the lane to wait on.
+          lane.pushUntaken(note);
+          return;
         }
       }
       // A lane starting its session hands it every message no turn has taken once it is there.
       if (active.has(id)) return;
-      opts.state.write((ctx) => {
-        const row = getWorkstreamRow(ctx.tx, id);
-        if (row.state !== S.WaitingHuman || row.nextAction.kind !== 'pass_review') return;
-        withdrawPageItems(ctx, id);
-        transitionWorkstream(ctx, id, {
-          to: S.Queued,
-          fence: null,
-          patch: {
-            nextAction: { kind: 'feedback', messageId, providerSessionId: lastProviderSession(id) },
-          },
-          reason: 'the builder wrote to the page',
-        });
-      });
+      // A page with no session starts its next turn from the oldest message no turn took.
+      opts.state.write((ctx) => queueUntaken(ctx, id, null, lastProviderSession(id)));
       opts.onLaneFreed();
     },
     async closeWarm(id) {
@@ -3786,10 +3801,13 @@ export function createRunner(opts: RunnerOptions): Runner {
       await ctl.done;
     },
     retryTurn(item, answer) {
-      if (answer.choice !== PASS_RETRY_TURN_CHOICE) return;
       const turnId = PassTurnId.safeParse(item.detail?.[PASS_TURN_DETAIL]);
       const target = item.targets[0];
+      // Another flag is another handler's.
       if (!turnId.success || !target) return;
+      // A failed turn's flag is answered by Retry Turn alone; any other answer leaves it open.
+      if (answer.choice !== PASS_RETRY_TURN_CHOICE)
+        throw new InvalidError(`A failed turn is answered with ${PASS_RETRY_TURN_CHOICE}`);
       const id = target.workstreamId;
       if (!passOfWorkstream(db, id))
         throw new ConflictError(
