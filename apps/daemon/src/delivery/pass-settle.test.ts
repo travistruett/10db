@@ -451,6 +451,23 @@ describe('a pass stacked on a closed one (D24)', () => {
     },
   );
 
+  it('when the closed pass merged before a pass stacked on it, the stacking follows the merge at once', async () => {
+    const a = await closedPass();
+    // Merged with drift: the base is not the pass's tip, so its Move card stays and it is unsettled.
+    h.gh.setState(a.url, PrState.Merged);
+    await watchRound();
+    expect(getPass(h.store.db, a.passId).state).toBe(PassState.Closed);
+
+    const b = await stacked(a);
+    await h.jobs.idle();
+
+    expect(getPass(h.store.db, a.passId).state).toBe(PassState.Settled);
+    expect(moveCards(a.passId)).toEqual([]);
+    expect(getPassProgress(h.store.db, b.passId).notices.map((n) => n.kind)).toEqual([
+      PassNoticeKind.StackMerged,
+    ]);
+  });
+
   it("when the stacked branch holds the base by a merge that is not 10db's, the return branch is not moved", async () => {
     const a = await closedPass();
     const b = await stacked(a);

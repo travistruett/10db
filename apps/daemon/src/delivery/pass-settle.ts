@@ -349,10 +349,16 @@ export function subscribePassSettles(bus: EventBus, ctx: DeliveryContext): () =>
         );
       return;
     }
-    // A pass that just stacked on a closed one: that one's Move card waits while it is open.
+    // A pass that just stacked on a closed one: that one's Move card waits while it is open, and
+    // a merge of its pull request read before the stacking is followed now.
     const on = PassId.safeParse(event.data['stackedOn']);
-    if (pass !== undefined && on.success)
+    if (pass !== undefined && on.success) {
       withdraw(ctx.state, ctx.inbox, pass.projectId, [passMoveKey(on.data)]);
+      if (getPassPullRequest(ctx.state.db, on.data)?.state === PullRequestState.Merged)
+        queuePassSettle(ctx, on.data, (c, id, signal) =>
+          settleClosedPass(c, id, signal, { news: true }),
+        );
+    }
     if (pass?.state !== PassState.Abandoned || event.data['state'] !== PassState.Abandoned) return;
     const below = getPassProgress(ctx.state.db, pass.id).stackedOn;
     if (below !== null)
