@@ -160,7 +160,7 @@ export const TOOL_DESCRIPTIONS: Record<McpToolName, string> = {
   find_knowledge:
     'Search the current decisions and confirmed principles that apply to this project, each labelled with its scope and area. Set kind to decision or principle to search one shelf; limit applies to each shelf. Returns an explicit empty result when nothing matches.',
   ask_human:
-    'Ask the builder a structured question and wait for the answer. Use for decisions outside routine engineering. 10db adds a "Park the task" choice to every card; if the builder picks it, your run stops (you get no answer) and the task is parked, so never ask the same question again to get around it.',
+    'Ask the builder a structured question and wait for the answer. Use for decisions outside routine engineering. 10db adds a "Park the task" choice to your card, except when your task is a page of a Workbench pass; if the builder picks it, your run stops (you get no answer) and the task is parked, so never ask the same question again to get around it.',
   record_decision:
     'Record a routine engineering decision you made within your authority, with its rationale.',
   propose:
