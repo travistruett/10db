@@ -1,5 +1,5 @@
-import { TaskThreadDto, type TaskFileId, type TaskId } from '@10db/contracts';
-import { useQuery } from '@tanstack/react-query';
+import { TaskMessageDto, TaskThreadDto, type TaskFileId, type TaskId } from '@10db/contracts';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { readJson } from './client';
 import { dataUrlOf } from './data-url';
 import { useDaemon } from './provider';
@@ -40,5 +40,28 @@ export function useTaskPicture(taskId: TaskId, fileId: TaskFileId) {
     },
     staleTime: Infinity,
     gcTime: 5 * 60_000,
+  });
+}
+
+/** What the builder sends a task: words, pictures, or both. */
+export interface TaskMessageSend {
+  readonly text: string;
+  readonly pictures: readonly File[];
+}
+
+/** Sends the builder's message and its pictures to the task's thread, as one multipart request. */
+export function usePostTaskMessage(taskId: TaskId) {
+  const { client } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ text, pictures }: TaskMessageSend) =>
+      readJson(
+        await client.tasks[':taskId'].thread.$post({
+          param: { taskId },
+          form: { text, picture: [...pictures] },
+        }),
+        TaskMessageDto,
+      ),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: threadKeys.of(taskId) }),
   });
 }

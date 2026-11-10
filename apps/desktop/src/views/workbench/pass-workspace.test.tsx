@@ -1,14 +1,18 @@
-import type { TaskId } from '@10db/contracts';
-import { act, fireEvent, screen, within } from '@testing-library/react';
+import { TaskId } from '@10db/contracts';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { http, HttpResponse } from 'msw';
+import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { baseHandlers, renderWithDaemon, server } from '../../test/daemon';
+import { baseHandlers, daemonUrl, renderWithDaemon, server } from '../../test/daemon';
 import { projectViewDto } from '../../test/fixtures';
+import { multipartParts, useNodeMultipart } from '../../test/multipart';
 import {
   askItem,
   PASS_NOW,
   passHandlers,
   pagesByStatus,
   passViewDto,
+  taskMessageDto,
 } from '../../test/pass-fixtures';
 import { clockTime } from './page-status';
 import { PassWorkspace } from './pass-workspace';
@@ -20,6 +24,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 async function renderWorkspace(selected: (pages: Pages) => TaskId | null = () => null) {
@@ -113,5 +118,69 @@ describe('PassWorkspace working line', () => {
     await renderWorkspace((pages) => pages.ready.taskId);
     const thread = screen.getByRole('region', { name: 'Settings' });
     expect(within(thread).queryByText(/^Working/)).toBeNull();
+  });
+});
+
+describe('PassWorkspace composer', () => {
+  it('sends the shown page’s draft, words and picture, to that page’s thread', async () => {
+    const NodeFile = await useNodeMultipart();
+    let posted: { taskId: string; text: string | undefined; pictures: readonly string[] } | null =
+      null;
+    server.use(
+      http.post(daemonUrl('/tasks/:taskId/thread'), async ({ params, request }) => {
+        const parts = multipartParts(await request.text());
+        posted = {
+          taskId: String(params['taskId']),
+          text: parts.text['text'],
+          pictures: parts.files['picture'] ?? [],
+        };
+        return HttpResponse.json(
+          taskMessageDto(TaskId.parse(params['taskId']), { body: 'padding too tight' }),
+          { status: 201 },
+        );
+      }),
+    );
+    const { pages } = await renderWorkspace((p) => p.ready.taskId);
+    const input = screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Message to Settings' });
+    fireEvent.change(input, { target: { value: 'padding too tight' } });
+    const shot = new NodeFile([new Uint8Array([1])], 'tight.png', { type: 'image/png' });
+    fireEvent.paste(input, { clipboardData: { files: [shot], getData: () => '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => {
+      expect(posted).toEqual({
+        taskId: pages.ready.taskId,
+        text: 'padding too tight',
+        pictures: ['tight.png'],
+      });
+    });
+    await waitFor(() => {
+      expect(input.value).toBe('');
+    });
+  });
+
+  it('keeps each page’s draft while another page is shown', async () => {
+    const pages = pagesByStatus();
+    const view = passViewDto({ pages: Object.values(pages) });
+    function Selecting() {
+      const [selected, setSelected] = useState<TaskId>(pages.ready.taskId);
+      return (
+        <PassWorkspace
+          view={view}
+          inbox={[]}
+          project={projectViewDto()}
+          selected={selected}
+          onSelect={setSelected}
+        />
+      );
+    }
+    renderWithDaemon(<Selecting />);
+    const message = (page: string) =>
+      screen.getByRole<HTMLTextAreaElement>('textbox', { name: `Message to ${page}` });
+    await screen.findByRole('textbox', { name: 'Message to Settings' });
+    fireEvent.change(message('Settings'), { target: { value: 'half a thought' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Billing/ }));
+    expect(message('Billing').value).toBe('');
+    fireEvent.click(screen.getByRole('button', { name: /^Settings/ }));
+    expect(message('Settings').value).toBe('half a thought');
   });
 });
