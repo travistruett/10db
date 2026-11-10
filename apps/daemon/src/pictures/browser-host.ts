@@ -237,6 +237,9 @@ export function createBrowserHost<B extends ClosableBrowser>(
         onRefused: (target) => {
           logger.info({ target }, 'the pictures proxy refused a request off the app');
         },
+        onTunnel: (target) => {
+          logger.debug({ target }, 'the pictures proxy opened a tunnel to the app');
+        },
       });
       browser = await deps.launch(
         launchOptions(exe, proxy.port, artifactsDir, browserEnv(deps.env ?? process.env)),

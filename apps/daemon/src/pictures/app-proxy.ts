@@ -20,6 +20,8 @@ export interface AppProxy {
 export interface AppProxyOptions {
   /** Told each request it refused, as `<method> <target>`. */
   readonly onRefused?: (target: string) => void;
+  /** Told each tunnel it opened to the app, as `host:port`. */
+  readonly onTunnel?: (target: string) => void;
 }
 
 const HOP_BY_HOP = ['proxy-connection', 'proxy-authorization', 'connection', 'keep-alive'];
@@ -84,6 +86,7 @@ export async function startAppProxy(options: AppProxyOptions = {}): Promise<AppP
     }
     const url = new URL(`http://${target}`);
     const upstream: Socket = connect(Number(url.port), socketHost(url.hostname), () => {
+      options.onTunnel?.(target);
       client.write('HTTP/1.1 200 Connection Established\r\n\r\n');
       if (head.length > 0) upstream.write(head);
       upstream.pipe(client);

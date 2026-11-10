@@ -78,14 +78,19 @@ describe('the app proxy', () => {
   let other: Awaited<ReturnType<typeof countingServer>>;
   let proxy: AppProxy;
   let refused: string[];
+  let tunnels: string[];
 
   beforeEach(async () => {
     app = await countingServer('app');
     other = await countingServer('daemon');
     refused = [];
+    tunnels = [];
     proxy = await startAppProxy({
       onRefused: (target) => {
         refused.push(target);
+      },
+      onTunnel: (target) => {
+        tunnels.push(target);
       },
     });
     proxy.allow(`http://127.0.0.1:${String(app.port)}`);
@@ -119,6 +124,7 @@ describe('the app proxy', () => {
     const opened = await tunnel(proxy.port, `127.0.0.1:${String(app.port)}`);
     expect(opened.status).toBe(200);
     expect(opened.reply).toContain('app /tunnelled');
+    expect(tunnels).toEqual([`127.0.0.1:${String(app.port)}`]);
     const shut = await tunnel(proxy.port, `127.0.0.1:${String(other.port)}`);
     expect(shut.status).toBe(403);
     expect(other.hits).toEqual([]);
