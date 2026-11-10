@@ -134,7 +134,7 @@ describe('the turn check queue of one pass', () => {
 
   it('never runs two checks at once and runs every Ready turn, however many end together', () => {
     let state: CheckQueueState = CHECK_IDLE;
-    const started: TurnAsk[][] = [];
+    const started: (readonly TurnAsk[])[] = [];
     const apply = (event: CheckQueueEvent): void => {
       const next = step(state, event);
       state = next.state;
