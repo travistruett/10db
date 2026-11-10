@@ -11,8 +11,10 @@ import { HAZARD_ASSESSMENT_KEY } from './hazard-queries';
 import { modelKeys } from './model-queries';
 import { modelSettingKeys } from './model-settings-queries';
 import { NETWORK_HOSTS_KEY } from './network-host-queries';
+import { passKeys, writePassActivity } from './pass-queries';
 import { queryKeys } from './queries';
 import { shapeKeys } from './shape-queries';
+import { threadKeys } from './thread-queries';
 
 export const STREAM_RETRY_BASE_MS = 500;
 export const STREAM_RETRY_MAX_MS = 10_000;
@@ -46,6 +48,9 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   proposal: KNOWLEDGE,
   // A conversation's transcript, proposals, round and turn all change under this one event.
   shape: [shapeKeys.all],
+  // A pass opening, a turn starting or ending, a page Ready or signed off, a close step: each changes
+  // the pass and its pages' turns.
+  pass: [passKeys.all],
   board_column: [['board-columns'], CANDIDATES],
   network_hosts: [NETWORK_HOSTS_KEY],
   // A batch's state shows on the board's strip and in its list; cancelling an abandoned batch's work moves tasks.
@@ -80,6 +85,8 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
 export const EVENT_INVALIDATIONS: Readonly<Partial<Record<EventType, readonly QueryKey[]>>> = {
   // A session's tokens and dollars are recorded when it ends, not on its per-tool-call events.
   'session.ended': [accountKeys.usage],
+  // A builder message, an agent's reply or a notice joined a task's thread; a reply ends a turn.
+  'task.message_added': [threadKeys.all, passKeys.turnsAll],
 };
 
 export function eventStreamUrl(conn: DaemonConnection, after: number): string {
@@ -136,6 +143,8 @@ export function useEventStream(onEvent?: (event: DaemonEvent) => void): void {
         if (ended.success)
           queryClient.setQueryData(accountLoginKey(ended.data.accountId), ended.data);
       }
+      // One arrives per tool call: a pass lane's is written into its page, never refetched.
+      if (event.type === EventType.SessionActivity) writePassActivity(queryClient, event);
       listener.current?.(event);
     }
 

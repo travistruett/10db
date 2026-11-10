@@ -11,8 +11,11 @@ import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, eventStream, renderWithDaemon, server } from '../test/daemon';
 import { accountUsageDto, DEFAULT_ACCOUNT } from '../test/account-fixtures';
 import { daemonEvent } from '../test/fixtures';
+import { passActivityData, passViewDto, pagesByStatus } from '../test/pass-fixtures';
 import { useAccounts, useAccountUsage } from './account-queries';
-import { eventStreamUrl, INVALIDATIONS, useEventStream } from './events';
+import { EVENT_INVALIDATIONS, eventStreamUrl, INVALIDATIONS, useEventStream } from './events';
+import { passKeys } from './pass-queries';
+import { threadKeys } from './thread-queries';
 import { useBatches, useProjects } from './queries';
 
 function Stream({ onEvent }: { readonly onEvent?: (event: DaemonEvent) => void }) {
@@ -338,6 +341,97 @@ describe('useEventStream', () => {
     for (const entity of ['role_setting', 'pattern']) {
       expect(INVALIDATIONS[entity]).toEqual(expect.arrayContaining([['model-settings']]));
     }
+  });
+
+  it("refetches a pass on every pass event, and a task's thread and turns when a message joins it", () => {
+    // The stream's first open refetches everything, so the table is what can go wrong.
+    expect(INVALIDATIONS['pass']).toEqual(expect.arrayContaining([passKeys.all]));
+    expect(EVENT_INVALIDATIONS['task.message_added']).toEqual(
+      expect.arrayContaining([threadKeys.all, passKeys.turnsAll]),
+    );
+    // A tool call is written into the pass, never refetched: one arrives per call.
+    for (const key of [
+      ...(INVALIDATIONS['session'] ?? []),
+      ...(EVENT_INVALIDATIONS['session.activity'] ?? []),
+    ])
+      expect(key[0]).not.toBe(passKeys.all[0]);
+  });
+
+  it("writes a pass lane's tool call into its page's turn, and leaves other lanes' pages alone", async () => {
+    const { working, ready } = pagesByStatus();
+    const view = passViewDto({ pages: [working, ready] });
+    const sockets: { send(data: string): void }[] = [];
+    server.use(
+      ...baseHandlers(),
+      eventStream.addEventListener('connection', ({ client }) => {
+        sockets.push(client);
+      }),
+    );
+    const seen: number[] = [];
+    const { queryClient } = renderWithDaemon(
+      <Stream
+        onEvent={(event) => {
+          seen.push(event.seq);
+        }}
+      />,
+    );
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+    queryClient.setQueryData(passKeys.live, [view]);
+    queryClient.setQueryData(passKeys.view(view.pass.id), view);
+    const workingRun = working.workstreamId ?? mintId('Workstream');
+    const turnId = working.turn?.id ?? mintId('PassTurn');
+    const at = '2026-11-09T12:29:30.000Z';
+    // A lane outside the pass, then one with no turn: neither touches the pass.
+    sockets[0]?.send(
+      JSON.stringify(
+        daemonEvent({
+          seq: 1,
+          type: 'session.activity',
+          entityType: 'session',
+          data: passActivityData(mintId('Workstream'), mintId('PassTurn')),
+          at,
+        }),
+      ),
+    );
+    sockets[0]?.send(
+      JSON.stringify(
+        daemonEvent({
+          seq: 2,
+          type: 'session.activity',
+          entityType: 'session',
+          data: { ...passActivityData(workingRun, turnId), turn: null },
+          at,
+        }),
+      ),
+    );
+    sockets[0]?.send(
+      JSON.stringify(
+        daemonEvent({
+          seq: 3,
+          type: 'session.activity',
+          entityType: 'session',
+          data: passActivityData(workingRun, turnId),
+          at,
+        }),
+      ),
+    );
+    await waitFor(() => {
+      expect(seen).toEqual([1, 2, 3]);
+    });
+    const activity = {
+      tool: 'Edit',
+      target: 'src/settings/form.tsx',
+      filesTouched: ['src/settings/page.tsx', 'src/settings/form.tsx'],
+      at,
+    };
+    const live = queryClient.getQueryData<(typeof view)[]>(passKeys.live);
+    expect(live?.[0]?.pages[0]?.turn?.activity).toEqual(activity);
+    expect(live?.[0]?.pages[1]).toEqual(ready);
+    expect(
+      queryClient.getQueryData<typeof view>(passKeys.view(view.pass.id))?.pages[0]?.turn?.activity,
+    ).toEqual(activity);
   });
 
   it('builds ws and wss stream URLs', () => {
