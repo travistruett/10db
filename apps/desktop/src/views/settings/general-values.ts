@@ -1,6 +1,7 @@
 import {
   allowedCommandProblem,
   AllowedCommands,
+  AppUrl,
   BranchName,
   Delivery,
   NAME_LANDING_BRANCH,
@@ -77,6 +78,8 @@ export interface GeneralValues {
   readonly worktreeSeed: readonly string[];
   /** Area and hazard names whose new tasks are proposed a separate copy; blanks are dropped on save. */
   readonly isolate: readonly string[];
+  /** Where the dev server answers; '' means none. */
+  readonly appUrl: string;
 }
 
 export type GeneralErrors = Partial<Record<keyof GeneralValues, string>>;
@@ -107,6 +110,7 @@ export function generalValues(project: ProjectDto): GeneralValues {
     workspaceMode: project.workspaceMode,
     worktreeSeed: project.worktreeSeed,
     isolate: project.isolate,
+    appUrl: project.appUrl ?? '',
   };
 }
 
@@ -167,6 +171,10 @@ export function checkGeneral(project: ProjectDto, values: GeneralValues): Genera
   const seed = checkedSeed.names;
   const checkedIsolate = checkIsolateNames(values.isolate);
   if (checkedIsolate.error !== null) errors.isolate = checkedIsolate.error;
+  const appUrlText = values.appUrl.trim();
+  const appUrl = appUrlText === '' ? null : AppUrl.safeParse(appUrlText);
+  if (appUrl !== null && !appUrl.success)
+    errors.appUrl = appUrl.error.issues[0]?.message ?? 'Enter an address on this Mac';
   if (Object.keys(errors).length > 0) return { ok: false, errors };
 
   const patch: { -readonly [K in keyof ProjectPatch]: ProjectPatch[K] } = {};
@@ -206,6 +214,8 @@ export function checkGeneral(project: ProjectDto, values: GeneralValues): Genera
   if (values.workspaceMode !== project.workspaceMode) patch.workspaceMode = values.workspaceMode;
   if (!sameCommands(seed, project.worktreeSeed)) patch.worktreeSeed = seed;
   if (!sameCommands(checkedIsolate.names, project.isolate)) patch.isolate = checkedIsolate.names;
+  const address = appUrl?.success ? appUrl.data : null;
+  if (address !== project.appUrl) patch.appUrl = address;
   return { ok: true, patch: Object.keys(patch).length > 0 ? patch : null };
 }
 
