@@ -391,6 +391,23 @@ describe('signing in', () => {
     expect(cam.signIns).toEqual([]);
   });
 
+  it('forgets the kept sign-in when the dev login command or the app address changes', async () => {
+    await world({ devLoginCommand: 'echo /login' });
+    start();
+    await ended(2);
+    const state = join(dir.path, 'browser', w.h.project.id, 'state.json');
+    expect(existsSync(state)).toBe(true);
+    w.h.state.write((ctx) => patchProject(ctx, w.h.project.id, { devLoginCommand: 'echo /other' }));
+    expect(existsSync(state)).toBe(false);
+    readyTurn(w.settings, 'a'.repeat(40));
+    await ended(3);
+    expect(existsSync(state)).toBe(true);
+    w.h.state.write((ctx) =>
+      patchProject(ctx, w.h.project.id, { appUrl: 'http://localhost:5173' }),
+    );
+    expect(existsSync(state)).toBe(false);
+  });
+
   it('keeps the last sign-in as it was when a dev login is stopped', async () => {
     await world({ devLoginCommand: 'sleep 5; echo /login' });
     const p = start();

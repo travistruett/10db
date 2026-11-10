@@ -56,7 +56,7 @@ import { CAPTURE_IDLE, captureStep, type CaptureEvent, type CaptureRequest } fro
 import { keepScreen, sweepPictureTemps, type ScreenToKeep } from './picture-files';
 import { pictureRoutes, takesPictures, turnChangedSomething } from './picture-routes';
 import { signIn, sweepLoginLogs, type SignInDeps, type SignInProject } from './sign-in';
-import { readStorageState, type StorageState } from './storage-state';
+import { forgetStorageState, readStorageState, type StorageState } from './storage-state';
 
 // Workbench spec docs/superpowers/specs/2026-11-09-10db-workbench-design.md §10, §12: the pictures of a
 // task's pages, taken by the daemon's browser through one queue. A pass page gets a before when the pass
@@ -130,6 +130,7 @@ export function startPictures(deps: PicturesDeps): Pictures {
   /** A task's routes that landed elsewhere even after a fresh sign-in: no sign-in again for them. */
   const redirectingRoutes = new Set<string>();
   const appUrls = new Map<ProjectId, AppUrl | null>();
+  const devLogins = new Map<ProjectId, string | null>();
   const passStates = new Map<PassId, PassState>();
 
   function apply(event: CaptureEvent): void {
@@ -428,7 +429,12 @@ export function startPictures(deps: PicturesDeps): Pictures {
   function onProjectChanged(projectId: ProjectId): void {
     const project = getProject(db, projectId);
     const was = appUrls.get(projectId) ?? null;
+    const loginWas = devLogins.get(projectId) ?? null;
     appUrls.set(projectId, project.appUrl);
+    devLogins.set(projectId, project.devLoginCommand);
+    // A sign-in kept for another address or another dev login is not this one's.
+    if (was !== project.appUrl || loginWas !== project.devLoginCommand)
+      forgetStorageState(deps.dataDir, projectId);
     if (was === project.appUrl) return;
     if (was !== null) apply({ kind: 'app_changed', projectId });
     if (project.appUrl !== null) deps.prepareBrowser();
@@ -496,7 +502,10 @@ export function startPictures(deps: PicturesDeps): Pictures {
   const logs = sweepLoginLogs(deps.dataDir);
   if (logs > 0) log.info({ removed: logs }, 'removed dev login logs a stopped daemon left');
   const projects = listProjects(db);
-  for (const project of projects) appUrls.set(project.id, project.appUrl);
+  for (const project of projects) {
+    appUrls.set(project.id, project.appUrl);
+    devLogins.set(project.id, project.devLoginCommand);
+  }
   if (projects.some((p) => p.appUrl !== null)) deps.prepareBrowser();
   syncBrowser();
   // A pass a restart finds closing or being abandoned holds its afters back, as it did before.
