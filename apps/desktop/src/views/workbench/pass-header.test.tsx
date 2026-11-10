@@ -31,6 +31,11 @@ describe('headerLine', () => {
       line: 'ampsio · Settings pass · 2 signed off · 1 ready · 1 asking · 1 failed · 2 working',
     },
     {
+      name: 'a page that broke the preview, counted after the failures',
+      statuses: [PageStatus.PreviewBroken, PageStatus.Ready],
+      line: 'ampsio · Settings pass · 1 ready · 1 preview broken',
+    },
+    {
       name: 'signing off, counted with it',
       statuses: [PageStatus.SigningOff, PageStatus.Waiting],
       line: 'ampsio · Settings pass · 2 signing off',

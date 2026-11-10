@@ -28,6 +28,7 @@ export interface ComposerButtons {
 
 const PHASE: Readonly<Record<PageStatus, ComposerPhase>> = {
   [PageStatus.Ready]: ComposerPhase.Ready,
+  [PageStatus.PreviewBroken]: ComposerPhase.Ready,
   [PageStatus.Working]: ComposerPhase.Working,
   [PageStatus.Paused]: ComposerPhase.Working,
   [PageStatus.SigningOff]: ComposerPhase.Signing,

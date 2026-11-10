@@ -46,7 +46,9 @@ export function PagePane(props: PagePaneProps) {
   // A Ready page shown is a page the builder has looked at: its turn is marked opened, once.
   const markOpened = useMarkOpened(page.taskId);
   const readyTurn =
-    status === PageStatus.Ready && openedAt === null ? (page.turn?.id ?? null) : null;
+    (status === PageStatus.Ready || status === PageStatus.PreviewBroken) && openedAt === null
+      ? (page.turn?.id ?? null)
+      : null;
   const marked = useRef<string | null>(null);
   useEffect(() => {
     if (readyTurn === null || marked.current === readyTurn) return;

@@ -1,10 +1,10 @@
 import { PageStatus } from './page-status';
 
-// Workbench spec §4.3: the queue's order. Rank 1, an agent stalled (a question, a permission, a failed
-// turn); rank 3, Ready pages, the longest waiting first; rank 4, dimmed, the pages that need nothing.
-// Rank 2, a page that broke the preview, comes with the preview check.
+// Workbench spec §4.3, §8.2: the queue's order. Rank 1, an agent stalled (a question, a permission, a
+// failed turn); rank 2, a Ready page whose turn broke the preview; rank 3, Ready pages, the longest
+// waiting first; rank 4, dimmed, the pages that need nothing.
 
-export type QueueRank = 1 | 3 | 4;
+export type QueueRank = 1 | 2 | 3 | 4;
 
 /** A page as the queue sorts it. */
 export interface QueueEntry {
@@ -20,6 +20,7 @@ export interface QueueEntry {
 const PLACE: Readonly<Record<PageStatus, { readonly rank: QueueRank; readonly within: number }>> = {
   [PageStatus.Asks]: { rank: 1, within: 0 },
   [PageStatus.Failed]: { rank: 1, within: 0 },
+  [PageStatus.PreviewBroken]: { rank: 2, within: 0 },
   [PageStatus.Ready]: { rank: 3, within: 0 },
   [PageStatus.SigningOff]: { rank: 4, within: 0 },
   [PageStatus.Waiting]: { rank: 4, within: 0 },

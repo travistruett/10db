@@ -2,6 +2,7 @@ import { Group, Text, UnstyledButton } from '@mantine/core';
 import type { ReactNode } from 'react';
 import { StatusDot } from '../factory/status-dot';
 import type { QueueRow as Row } from './queue-rows';
+import { CodeSpans } from '../../shell/code-spans';
 
 export interface QueueRowProps {
   readonly row: Row;
@@ -51,7 +52,7 @@ export function QueueRow({ row, current, onSelect, menu }: QueueRowProps) {
           </Text>
           {/* The line wraps rather than cut: "Working · 4 min · median 6" outgrows the wide queue. */}
           <Text component="span" size="sm" style={{ minWidth: 0 }}>
-            {row.state.line}
+            <CodeSpans text={row.state.line} />
           </Text>
         </Group>
       </UnstyledButton>

@@ -1,4 +1,4 @@
-import { mintId, type InboxItemDto, type PassPageDto } from '@10db/contracts';
+import { mintId, type InboxItemDto, type PassPageDto, type PassPreview } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { inboxItemDto } from '../../test/fixtures';
 import {
@@ -23,6 +23,7 @@ describe('pageStatus', () => {
     items?: InboxItemDto[];
     median?: number | null;
     pass?: PassPageDto[];
+    preview?: PassPreview | null;
     status: PageStatus;
     color: string;
     line: string;
@@ -210,6 +211,52 @@ describe('pageStatus', () => {
       needsYou: false,
     },
     {
+      name: 'a Ready page whose turn broke the preview, at rank 2',
+      page: {
+        ...pages.ready,
+        preview: { route: '/settings', overlay: 'x', since: PASS_NOW, turns: 1 },
+      },
+      preview: 'broken',
+      status: PageStatus.PreviewBroken,
+      color: 'red',
+      line: 'Preview broken: `/settings`',
+      needsYou: true,
+    },
+    {
+      name: 'a page that broke the preview and asks a question: the question first',
+      page: {
+        ...pages.asks,
+        preview: { route: '/settings', overlay: null, since: PASS_NOW, turns: 1 },
+      },
+      items: [askItem(pages.asks)],
+      preview: 'broken',
+      status: PageStatus.Asks,
+      color: 'yellow',
+      line: 'Asks a question',
+      needsYou: true,
+    },
+    {
+      name: 'a working page while the preview is broken: changing, as a half-written page is expected',
+      page: pages.working,
+      preview: 'broken',
+      status: PageStatus.Working,
+      color: 'blue',
+      line: 'Working · changing · 4 min · median 6',
+      needsYou: false,
+    },
+    {
+      name: 'a working page with its own mark reads changing, not Preview broken',
+      page: {
+        ...pages.working,
+        preview: { route: '/billing', overlay: null, since: PASS_NOW, turns: 1 },
+      },
+      preview: 'broken',
+      status: PageStatus.Working,
+      color: 'blue',
+      line: 'Working · changing · 4 min · median 6',
+      needsYou: false,
+    },
+    {
       name: 'a signed-off page, even with a question still open from its run',
       page: { ...pages.asks, signOff: 'done' },
       items: [askItem(pages.asks)],
@@ -218,12 +265,27 @@ describe('pageStatus', () => {
       line: 'Signed off',
       needsYou: false,
     },
-  ])('$name', ({ page, items = [], median = 6, pass = inPass, status, color, line, needsYou }) => {
-    expect(pageStatus(page, items, { now, medianTurnMinutes: median }, pass)).toEqual({
+  ])(
+    '$name',
+    ({
+      page,
+      items = [],
+      median = 6,
+      pass = inPass,
+      preview = 'clean',
       status,
       color,
       line,
       needsYou,
-    });
-  });
+    }) => {
+      expect(
+        pageStatus(page, items, { now, medianTurnMinutes: median }, { pages: pass, preview }),
+      ).toEqual({
+        status,
+        color,
+        line,
+        needsYou,
+      });
+    },
+  );
 });

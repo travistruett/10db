@@ -10,6 +10,7 @@ import {
   TakeOutPreviewDto,
   TakeOutResultDto,
   TaskId,
+  mintId,
 } from '@10db/contracts';
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
@@ -26,6 +27,7 @@ import {
   passHandlers,
   pagesByStatus,
   passTurnTimingDto,
+  passPageDto,
   passTurnWithFilesDto,
   passViewDto,
   taskMessageDto,
@@ -79,6 +81,46 @@ describe('PassWorkspace queue', () => {
       `TeamPaused: usage limit, resumes ${clockTime(pages.paused.pausedUntil ?? '')}`,
       'HomeNot started',
     ]);
+  });
+
+  it('puts a Ready page that broke the preview at rank 2, its route as code, and says changing beside it', async () => {
+    const pages = pagesByStatus();
+    const broke = passPageDto({
+      ...pages.ready,
+      taskId: mintId('Task'),
+      title: 'Profile: UI work',
+      area: 'Profile',
+      route: '/profile',
+      preview: { route: '/profile', overlay: 'Failed to compile', since: PASS_NOW, turns: 1 },
+    });
+    renderWithDaemon(
+      <PassWorkspace
+        view={passViewDto({
+          pages: [...Object.values(pages), broke],
+          rest: { preview: 'broken' },
+        })}
+        inbox={[askItem(pages.asks)]}
+        project={projectViewDto()}
+        selected={null}
+        onSelect={vi.fn()}
+      />,
+    );
+    await screen.findByRole('list', { name: 'Pages in this pass' });
+    expect(
+      queueRows()
+        .map((row) => row.textContent)
+        .slice(0, 4),
+    ).toEqual([
+      'PeopleAsks a question',
+      'ReportsThe session kept crashing or could not start. Retry Turn sends your last message again.',
+      'ProfilePreview broken: /profile',
+      'SettingsReady · 3 min',
+    ]);
+    const row = screen.getByRole('button', { name: /^Profile/ });
+    expect(within(row).getByText('/profile').tagName).toBe('CODE');
+    expect(screen.getByRole('button', { name: /^Billing/ }).textContent).toMatch(
+      /^BillingWorking · changing · 4 min/,
+    );
   });
 
   it('marks the selected page current and selects another on a click', async () => {

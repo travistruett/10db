@@ -17,6 +17,7 @@ describe('queueRank', () => {
   it.each<{ status: PageStatus; rank: number; dimmed: boolean }>([
     { status: S.Asks, rank: 1, dimmed: false },
     { status: S.Failed, rank: 1, dimmed: false },
+    { status: S.PreviewBroken, rank: 2, dimmed: false },
     { status: S.Ready, rank: 3, dimmed: false },
     { status: S.SigningOff, rank: 4, dimmed: true },
     { status: S.Waiting, rank: 4, dimmed: true },
@@ -36,6 +37,17 @@ describe('queueOrder', () => {
       name: 'a stalled agent above a Ready page, whatever the page order',
       entries: [entry('Settings', S.Ready, 3), entry('People', S.Asks), entry('Billing', S.Failed)],
       order: ['People', 'Billing', 'Settings'],
+      waiting: 3,
+    },
+    {
+      name: 'a page that broke the preview after a stalled agent and before every Ready page',
+      entries: [
+        entry('Settings', S.Ready, 30),
+        entry('People', S.PreviewBroken, 1),
+        entry('Billing', S.Failed),
+        entry('Home', S.Working),
+      ],
+      order: ['Billing', 'People', 'Settings', 'Home'],
       waiting: 3,
     },
     {

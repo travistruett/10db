@@ -23,7 +23,7 @@ export function passLineText(name: string, waiting: number): string {
 export function PassLine({ view, inbox, now, onOpen }: PassLineProps) {
   const clock = { now, medianTurnMinutes: medianTurnMinutes(view.turns) };
   const entries = view.pages.map((page) => ({
-    status: pageStatus(page, inbox, clock, view.pages).status,
+    status: pageStatus(page, inbox, clock, view).status,
     readyAt: page.turn?.readyAt ?? null,
   }));
   return (

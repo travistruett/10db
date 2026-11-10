@@ -25,7 +25,7 @@ export function queueRows(
   const clock = { now, medianTurnMinutes: medianTurnMinutes(view.turns) };
   return queueOrder(
     view.pages.map((page) => {
-      const state = pageStatus(page, inbox, clock, view.pages);
+      const state = pageStatus(page, inbox, clock, view);
       return {
         page,
         state,

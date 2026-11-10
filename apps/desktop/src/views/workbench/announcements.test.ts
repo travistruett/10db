@@ -35,6 +35,12 @@ describe('announcements', () => {
       said: ['Billing failed'],
     },
     {
+      name: 'a page whose turn broke the preview',
+      before: [page('c', 'Billing', S.Working)],
+      now: [page('c', 'Billing', S.PreviewBroken)],
+      said: ['Billing broke the preview'],
+    },
+    {
       name: 'two at once, in queue order',
       before: [page('a', 'Settings', S.Working), page('c', 'Billing', S.Working)],
       now: [page('c', 'Billing', S.Failed), page('a', 'Settings', S.Ready)],

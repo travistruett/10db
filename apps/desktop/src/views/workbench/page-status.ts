@@ -1,17 +1,19 @@
 import {
   InboxKind,
   InboxState,
+  PassPreview,
   PassSignOff,
   WorkstreamState,
   type InboxItemDto,
   type PassPageDto,
+  type PassViewDto,
 } from '@10db/contracts';
 import type { MantineColor } from '@mantine/core';
 import { passTurnFailureLine } from '../board/task-state';
 
 // Workbench spec §4.3: a page's state in the queue, as one dot, one short line and whether it waits on
 // the builder. The colors are DESIGN.md's: yellow waits on the builder, blue works, orange is paused,
-// red failed, green signed off, gray not started.
+// red failed or broke the preview, green signed off, gray not started.
 
 /** Where a page is, as the queue orders and draws it. */
 export const PageStatus = {
@@ -19,6 +21,8 @@ export const PageStatus = {
   Asks: 'asks',
   /** The turn could not go on; Retry Turn sends the last message again. */
   Failed: 'failed',
+  /** Ready, but its turn broke the preview (spec §8.2): Send to Agent offers the break. */
+  PreviewBroken: 'preview_broken',
   Ready: 'ready',
   SigningOff: 'signing_off',
   /** Signing off, waiting for another page's turn to release shared code. */
@@ -45,6 +49,7 @@ export const PAGE_LOOK: Readonly<
 > = {
   [PageStatus.Asks]: { color: 'yellow', needsYou: true },
   [PageStatus.Failed]: { color: 'red', needsYou: true },
+  [PageStatus.PreviewBroken]: { color: 'red', needsYou: true },
   [PageStatus.Ready]: { color: 'yellow', needsYou: true },
   [PageStatus.SigningOff]: { color: 'blue', needsYou: false },
   [PageStatus.Waiting]: { color: 'blue', needsYou: false },
@@ -105,12 +110,18 @@ function working(page: PassPageDto): boolean {
   return page.turn.endedAt === null || page.nextActionKind === 'feedback';
 }
 
-function workingLine(page: PassPageDto, clock: PageStatusClock): string {
+/** What the queue reads of the pass beside the page: its pages, and how its preview loaded last. */
+export type PassAround = Pick<PassViewDto, 'pages' | 'preview'>;
+
+function workingLine(page: PassPageDto, clock: PageStatusClock, pass: PassAround): string {
   const turn = page.turn;
   // A message is on its way into a session that has not started its turn yet.
   if (turn === null || (turn.endedAt !== null && page.nextActionKind === 'feedback'))
     return 'Starting';
-  const elapsed = `Working · ${String(minutesSince(turn.startedAt, clock.now))} min`;
+  // While the preview is broken, a page mid-turn may be half written: that is expected (spec §8.2).
+  const changing =
+    pass.preview === PassPreview.Broken || page.preview !== null ? ' · changing' : '';
+  const elapsed = `Working${changing} · ${String(minutesSince(turn.startedAt, clock.now))} min`;
   // Turns that ended in under a minute measure nothing yet: "median 0" says no more than nothing.
   const median = clock.medianTurnMinutes;
   return median === null || median < 1 ? elapsed : `${elapsed} · median ${String(median)}`;
@@ -121,6 +132,7 @@ function unsignedState(
   page: PassPageDto,
   items: readonly InboxItemDto[],
   clock: PageStatusClock,
+  pass: PassAround,
 ): PageState {
   const ask = askOf(page, items);
   if (ask)
@@ -138,10 +150,12 @@ function unsignedState(
     );
   const readyAt = page.turn?.readyAt ?? null;
   if (page.state === WorkstreamState.WaitingHuman && readyAt !== null) {
+    if (page.preview !== null)
+      return state(PageStatus.PreviewBroken, `Preview broken: \`${page.preview.route}\``);
     const waited = minutesSince(readyAt, clock.now);
     return state(PageStatus.Ready, waited === 0 ? 'Ready' : `Ready · ${String(waited)} min`);
   }
-  if (working(page)) return state(PageStatus.Working, workingLine(page, clock));
+  if (working(page)) return state(PageStatus.Working, workingLine(page, clock, pass));
   return state(PageStatus.NotStarted, page.turn === null ? 'Not started' : 'Stopped');
 }
 
@@ -149,8 +163,8 @@ function unsignedState(
  * "People's turn": the turn a waiting sign-off waits for, named by its page when the pass holds it,
  * else by its task's title.
  */
-function waitedFor(waitsFor: NonNullable<PassPageDto['waitsFor']>, pass: readonly PassPageDto[]) {
-  const page = pass.find((candidate) => candidate.taskId === waitsFor.taskId);
+function waitedFor(waitsFor: NonNullable<PassPageDto['waitsFor']>, pass: PassAround) {
+  const page = pass.pages.find((candidate) => candidate.taskId === waitsFor.taskId);
   return `${page?.area ?? waitsFor.title}'s turn`;
 }
 
@@ -158,7 +172,7 @@ type SignOffState = (
   page: PassPageDto,
   items: readonly InboxItemDto[],
   clock: PageStatusClock,
-  pass: readonly PassPageDto[],
+  pass: PassAround,
 ) => PageState;
 
 /**
@@ -180,14 +194,14 @@ const BY_SIGN_OFF: Readonly<Record<PassSignOff, SignOffState>> = {
 
 /**
  * One page's state in the queue, from the page, the open Inbox items of the pass's project and the
- * pass's pages: an ask is an item that targets the page's run, and a waiting sign-off names the page
- * it waits for.
+ * pass around it: an ask is an item that targets the page's run, a waiting sign-off names the page
+ * it waits for, and a broken preview makes a working page's line say it is changing.
  */
 export function pageStatus(
   page: PassPageDto,
   items: readonly InboxItemDto[],
   clock: PageStatusClock,
-  pass: readonly PassPageDto[],
+  pass: PassAround,
 ): PageState {
   return BY_SIGN_OFF[page.signOff](page, items, clock, pass);
 }
