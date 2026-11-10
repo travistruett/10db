@@ -2,9 +2,11 @@ import {
   EventsHead,
   KeepAwakeStatus,
   LanePermissionsDto,
+  PicturesStatusDto,
   PROTOCOL_VERSION,
   SelfUpdateStatusDto,
   SystemCheckDto,
+  TaskScreensDto,
 } from '@10db/contracts';
 import { MantineProvider } from '@mantine/core';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -109,6 +111,18 @@ export function baseHandlers(
     // A goal's and a task's drawer ask which conversation made them (Shape spec §12); none did.
     http.get(daemonUrl('/goals/:goalId/shape', base), () => HttpResponse.json({ shapeId: null })),
     http.get(daemonUrl('/tasks/:taskId/shape', base), () => HttpResponse.json({ shapeId: null })),
+    // A task's thread and drawer show its pictures of the app; none taken.
+    http.get(daemonUrl('/tasks/:taskId/screens', base), ({ params }) =>
+      HttpResponse.json(
+        TaskScreensDto.parse({ taskId: params['taskId'], screens: [], fromGoal: [] }),
+      ),
+    ),
+    // Settings › General says how the browser for pictures stands; off until a project needs it.
+    http.get(daemonUrl('/projects/:projectId/pictures', base), () =>
+      HttpResponse.json(
+        PicturesStatusDto.parse({ browser: { state: 'off', problem: null }, signIn: null }),
+      ),
+    ),
     http.get(daemonUrl('/workstreams', base), () => HttpResponse.json([])),
     http.get(daemonUrl('/inbox', base), () => HttpResponse.json([])),
     // The sidebar and the Workbench read every project's live pass; none is open.

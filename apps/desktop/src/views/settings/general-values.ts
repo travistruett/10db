@@ -9,8 +9,10 @@ import {
   PrTitlePrefix,
   ProjectLanding,
   ProjectPatch,
+  ScreensMatrix,
   WorkspaceMode,
   type FlowId,
+  type ScreenTheme,
   type ProjectDto,
 } from '@10db/contracts';
 
@@ -80,6 +82,21 @@ export interface GeneralValues {
   readonly isolate: readonly string[];
   /** Where the dev server answers; '' means none. */
   readonly appUrl: string;
+  /** Prints the address that signs the browser for pictures in; '' means none. */
+  readonly devLoginCommand: string;
+  /** The viewports, an emptied number being '', and the themes each page's pictures are taken in. */
+  readonly screens: ScreensValues;
+}
+
+/** A viewport as the form holds it; an emptied number field is ''. */
+export interface ViewportValues {
+  readonly width: number | '';
+  readonly height: number | '';
+}
+
+export interface ScreensValues {
+  readonly viewports: readonly ViewportValues[];
+  readonly themes: readonly ScreenTheme[];
 }
 
 export type GeneralErrors = Partial<Record<keyof GeneralValues, string>>;
@@ -111,7 +128,30 @@ export function generalValues(project: ProjectDto): GeneralValues {
     worktreeSeed: project.worktreeSeed,
     isolate: project.isolate,
     appUrl: project.appUrl ?? '',
+    devLoginCommand: project.devLoginCommand ?? '',
+    screens: project.screens,
   };
+}
+
+/** The matrix the form holds, or the first rule it breaks, in the contract's words where it has them. */
+function checkScreens(values: ScreensValues): { matrix: ScreensMatrix } | { error: string } {
+  if (values.viewports.some((v) => v.width === '' || v.height === ''))
+    return { error: "Enter each viewport's width and height" };
+  if (values.themes.length === 0) return { error: 'Choose at least one theme' };
+  const parsed = ScreensMatrix.safeParse(values);
+  if (parsed.success) return { matrix: parsed.data };
+  const issue = parsed.error.issues[0];
+  // A size out of range is a number's message; the matrix's own rules carry words of their own.
+  return {
+    error:
+      issue?.path.includes('width') === true || issue?.path.includes('height') === true
+        ? 'A viewport is 320 to 3840 wide and 320 to 2400 high'
+        : (issue?.message ?? 'Check the screenshot matrix'),
+  };
+}
+
+function sameMatrix(a: ScreensMatrix, b: ScreensMatrix): boolean {
+  return JSON.stringify(a) === JSON.stringify(b);
 }
 
 /**
@@ -175,6 +215,8 @@ export function checkGeneral(project: ProjectDto, values: GeneralValues): Genera
   const appUrl = appUrlText === '' ? null : AppUrl.safeParse(appUrlText);
   if (appUrl !== null && !appUrl.success)
     errors.appUrl = appUrl.error.issues[0]?.message ?? 'Enter an address on this Mac';
+  const screens = checkScreens(values.screens);
+  if ('error' in screens) errors.screens = screens.error;
   if (Object.keys(errors).length > 0) return { ok: false, errors };
 
   const patch: { -readonly [K in keyof ProjectPatch]: ProjectPatch[K] } = {};
@@ -216,6 +258,11 @@ export function checkGeneral(project: ProjectDto, values: GeneralValues): Genera
   if (!sameCommands(checkedIsolate.names, project.isolate)) patch.isolate = checkedIsolate.names;
   const address = appUrl?.success ? appUrl.data : null;
   if (address !== project.appUrl) patch.appUrl = address;
+  const devLogin = values.devLoginCommand.trim();
+  const devLoginCommand = devLogin === '' ? null : devLogin;
+  if (devLoginCommand !== project.devLoginCommand) patch.devLoginCommand = devLoginCommand;
+  if ('matrix' in screens && !sameMatrix(screens.matrix, project.screens))
+    patch.screens = screens.matrix;
   return { ok: true, patch: Object.keys(patch).length > 0 ? patch : null };
 }
 

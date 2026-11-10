@@ -24,6 +24,8 @@ import {
   type GeneralValues,
 } from './general-values';
 import { FlowSelect } from '../board/flow-select';
+import { PicturesStatus } from './pictures-status';
+import { ScreensMatrixField } from './screens-matrix-field';
 import { SettingRow, SettingsCard } from './setting-row';
 
 /** Keeps the fields the builder changed and moves the rest to the project's current values. */
@@ -73,6 +75,14 @@ function reseed(current: GeneralValues, seed: GeneralValues, next: GeneralValues
       : current.worktreeSeed,
     isolate: sameList(current.isolate, seed.isolate) ? next.isolate : current.isolate,
     appUrl: current.appUrl === seed.appUrl ? next.appUrl : current.appUrl,
+    devLoginCommand:
+      current.devLoginCommand === seed.devLoginCommand
+        ? next.devLoginCommand
+        : current.devLoginCommand,
+    screens:
+      JSON.stringify(current.screens) === JSON.stringify(seed.screens)
+        ? next.screens
+        : current.screens,
   };
 }
 
@@ -230,6 +240,38 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
             }}
           />
         </SettingRow>
+      </SettingsCard>
+
+      <SettingsCard title="Pictures of pages">
+        <SettingRow
+          label="Dev login command"
+          description="Optional. Prints an address on the app that signs a browser in, for pictures of pages that need a sign-in. It runs under the gate's sandbox."
+        >
+          <Textarea
+            aria-label="Dev login command"
+            autosize
+            minRows={1}
+            styles={MONO_INPUT}
+            value={values.devLoginCommand}
+            error={errors.devLoginCommand}
+            onChange={(e) => {
+              set({ devLoginCommand: e.currentTarget.value });
+            }}
+          />
+        </SettingRow>
+        <SettingRow
+          label="Screenshot matrix"
+          description="Each page is pictured in each viewport and theme: at most 4 pictures a route."
+        >
+          <ScreensMatrixField
+            value={values.screens}
+            error={errors.screens}
+            onChange={(screens) => {
+              set({ screens });
+            }}
+          />
+        </SettingRow>
+        <PicturesStatus projectId={project.id} />
       </SettingsCard>
 
       <SettingsCard title="When work is finished">

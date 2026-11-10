@@ -50,6 +50,65 @@ describe('checkGeneral', () => {
       },
     },
     {
+      name: 'a dev login command, trimmed',
+      change: { devLoginCommand: '  uv run manage.py dev_login \n' },
+      expected: { ok: true, patch: { devLoginCommand: 'uv run manage.py dev_login' } },
+    },
+    {
+      name: 'a second viewport and the dark theme',
+      change: {
+        screens: {
+          viewports: [
+            { width: 1440, height: 900 },
+            { width: 390, height: 844 },
+          ],
+          themes: ['default', 'dark'],
+        },
+      },
+      expected: {
+        ok: true,
+        patch: {
+          screens: {
+            viewports: [
+              { width: 1440, height: 900 },
+              { width: 390, height: 844 },
+            ],
+            themes: ['default', 'dark'],
+          },
+        },
+      },
+    },
+    {
+      name: 'a viewport with no height',
+      change: { screens: { viewports: [{ width: 1440, height: '' }], themes: ['default'] } },
+      expected: { ok: false, errors: { screens: "Enter each viewport's width and height" } },
+    },
+    {
+      name: 'more pictures than a route may take',
+      change: {
+        screens: {
+          viewports: [
+            { width: 1440, height: 900 },
+            { width: 768, height: 1024 },
+            { width: 390, height: 844 },
+          ],
+          themes: ['light', 'dark'],
+        },
+      },
+      expected: {
+        ok: false,
+        errors: {
+          screens:
+            'The screenshot matrix takes at most 4 pictures a route: fewer viewports or themes',
+        },
+      },
+    },
+    {
+      name: 'no theme',
+      change: { screens: { viewports: [{ width: 1440, height: 900 }], themes: [] } },
+      expected: { ok: false, errors: { screens: 'Choose at least one theme' } },
+    },
+    {
       name: 'holding pull requests for review',
       change: { landing: 'hold' },
       expected: { ok: true, patch: { landing: 'hold' } },
@@ -226,6 +285,15 @@ describe('checkGeneral', () => {
     expect(checkGeneral(served, { ...generalValues(served), appUrl: ' ' })).toEqual({
       ok: true,
       patch: { appUrl: null },
+    });
+  });
+
+  it('forgets the dev login command when the field is emptied', () => {
+    const signing = projectDto({ devLoginCommand: 'uv run manage.py dev_login' });
+    expect(generalValues(signing).devLoginCommand).toBe('uv run manage.py dev_login');
+    expect(checkGeneral(signing, { ...generalValues(signing), devLoginCommand: ' ' })).toEqual({
+      ok: true,
+      patch: { devLoginCommand: null },
     });
   });
 

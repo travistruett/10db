@@ -80,6 +80,41 @@ const rows: readonly Row[] = [
     sent: { appUrl: 'http://localhost:5173' },
   },
   {
+    name: 'Dev login command',
+    label: 'Dev login command',
+    line: "Optional. Prints an address on the app that signs a browser in, for pictures of pages that need a sign-in. It runs under the gate's sandbox.",
+    change: () => type('Dev login command', 'uv run manage.py dev_login'),
+    sent: { devLoginCommand: 'uv run manage.py dev_login' },
+  },
+  {
+    name: 'Screenshot matrix: a second viewport',
+    label: 'Screenshot matrix',
+    line: 'Each page is pictured in each viewport and theme: at most 4 pictures a route.',
+    change: () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Add viewport' }));
+      type('Viewport 2 width', '390');
+      type('Viewport 2 height', '844');
+    },
+    sent: {
+      screens: {
+        viewports: [
+          { width: 1440, height: 900 },
+          { width: 390, height: 844 },
+        ],
+        themes: ['default'],
+      },
+    },
+  },
+  {
+    name: 'Screenshot matrix: the dark theme too',
+    label: 'Screenshot matrix',
+    line: null,
+    change: () => fireEvent.click(screen.getByRole('checkbox', { name: 'Dark' })),
+    sent: {
+      screens: { viewports: [{ width: 1440, height: 900 }], themes: ['default', 'dark'] },
+    },
+  },
+  {
     name: 'Check after each step',
     label: 'Check after each step',
     line: 'Optional. Runs after each step instead of the gate command; the gate command still runs before the push.',
@@ -355,6 +390,51 @@ describe('ProjectGeneralForm', () => {
       ),
     ).toBeTruthy();
     expect(patched).toEqual([]);
+  });
+
+  it('says why a matrix of more than four pictures is refused, and sends nothing', async () => {
+    const patched = serve(
+      projectDto({
+        screens: {
+          viewports: [
+            { width: 1440, height: 900 },
+            { width: 390, height: 844 },
+          ],
+          themes: ['light', 'dark'],
+        },
+      }),
+    );
+    renderApp('/settings/general');
+    await open();
+    fireEvent.click(screen.getByRole('button', { name: 'Add viewport' }));
+    type('Viewport 3 width', '768');
+    type('Viewport 3 height', '1024');
+    save();
+    expect(
+      await screen.findByText(
+        'The screenshot matrix takes at most 4 pictures a route: fewer viewports or themes',
+      ),
+    ).toBeTruthy();
+    expect(patched).toEqual([]);
+  });
+
+  it("says how the browser for pictures and the project's sign-in stand", async () => {
+    serve(projectDto());
+    server.use(
+      http.get(daemonUrl('/projects/:projectId/pictures'), () =>
+        HttpResponse.json({
+          browser: { state: 'fetching', problem: null },
+          signIn: {
+            problem: 'The dev login command failed (exit 2)',
+            at: '2026-11-10T12:00:00.000Z',
+          },
+        }),
+      ),
+    );
+    renderApp('/settings/general');
+    await open();
+    expect(await screen.findByText('Browser for pictures: downloading')).toBeTruthy();
+    expect(screen.getByText('Last sign-in: The dev login command failed (exit 2)')).toBeTruthy();
   });
 
   it('clears the gate and shows what an empty one means', async () => {
