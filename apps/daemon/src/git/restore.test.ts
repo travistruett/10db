@@ -84,6 +84,22 @@ describe('restoreFiles', () => {
     expect(rawGit('diff', '--cached', '--name-only')).toBe('');
   });
 
+  it('leaves a path that is now a directory, ignored files and all, rather than writing over it', async () => {
+    // The kept commit deleted src/a.ts; the builder has since made a directory there.
+    write('.gitignore', '.env\n');
+    unlinkSync(join(repo.path, 'src/a.ts'));
+    write('src/a.ts/.env', 'SECRET=1\n');
+
+    const done = await git.restoreFiles(
+      repo.path,
+      [{ path: 'src/a.ts', from: start }],
+      [{ path: 'src/a.ts', blob: null }],
+    );
+
+    expect(done).toEqual({ written: [], left: ['src/a.ts'] });
+    expect(read('src/a.ts/.env')).toBe('SECRET=1\n');
+  });
+
   it('writes nothing twice: a file already as asked is done, whatever it was expected to hold', async () => {
     const done = await git.restoreFiles(
       repo.path,

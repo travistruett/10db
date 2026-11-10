@@ -2477,12 +2477,13 @@ export function createGit(opts: GitOptions = {}): Git {
           continue;
         }
         const file = join(c.real, path);
+        const entry = lstatSync(file, { throwIfNoEntry: false });
+        // A directory in the way may hold files git ignores: writing the path would remove them all.
+        if (entry?.isDirectory() === true) {
+          left.push(path);
+          continue;
+        }
         if (target === null) {
-          const entry = lstatSync(file, { throwIfNoEntry: false });
-          if (entry?.isDirectory() === true) {
-            left.push(path);
-            continue;
-          }
           if (entry) rmSync(file, { force: true });
           written.push(path);
           continue;
