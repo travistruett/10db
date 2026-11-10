@@ -14,9 +14,4 @@ export { liveCheckCard, raiseBuilderCheck } from './builder-check';
 export { untakenMessages } from './lane-messages';
 export { endTurnSteps, finishEndedTurn, passOfWorkstream, queueUntaken } from './pass-turn';
 export { raisePassCheck, raiseTurnFailed } from './pass-check';
-export {
-  startTurnChecks,
-  TURN_CHECK_TIMEOUT_MS,
-  withTurnChecks,
-  type TurnChecks,
-} from './turn-checks';
+export { startTurnChecks, TURN_CHECK_TIMEOUT_MS, withTurnChecks } from './turn-checks';
