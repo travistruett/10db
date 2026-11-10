@@ -272,6 +272,11 @@ export interface RunnerLimits {
   readonly backgroundMs: number;
   /** Gates running at once across the whole daemon. */
   readonly gateSlots: number;
+  /**
+   * How long a pass task's session waits after a turn ends with nothing more from the agent before
+   * it closes and frees its lane; the next message resumes it (Workbench spec §6.3, W14).
+   */
+  readonly warmIdleMs: number;
 }
 
 export const DEFAULT_RUNNER_LIMITS: RunnerLimits = {
@@ -281,6 +286,7 @@ export const DEFAULT_RUNNER_LIMITS: RunnerLimits = {
   backgroundMs: 15 * 60_000,
   // One at a time: a gate runs a whole test suite, and several at once overload the machine.
   gateSlots: 1,
+  warmIdleMs: 10 * 60_000,
 };
 
 export interface RunnerOptions {
@@ -403,6 +409,11 @@ export interface Runner {
    * one's message, in a fresh session. A flag that is not the page's failed turn is left alone.
    */
   retryTurn(item: InboxItemDto, answer: InboxAnswer): void;
+  /**
+   * Closes a pass task's warm session, freeing its lane, if the page is still Ready and no message
+   * waits for a turn: decided in one write, so a message that arrives first keeps it open.
+   */
+  closeWarm(id: WorkstreamId): Promise<void>;
   /**
    * Ends a pass lane's session, if any (Workbench spec §5.4, §6.3): a working turn is stopped as a
    * stop does and closes as `stopped`, its work kept, with no Ready item and no notification; the
@@ -634,6 +645,8 @@ interface Control {
   builderStop: boolean;
   /** Set while Stop and Redo interrupts the turn: the interrupted turn's end is not the turn's. */
   redoing: boolean;
+  /** Closes a pass task's session once it has been idle since its last turn ended. */
+  idleTimer: Timer | null;
   done: Promise<void>;
 }
 
@@ -776,6 +789,20 @@ export function createRunner(opts: RunnerOptions): Runner {
     logger: opts.logger,
     clock: opts.clock,
   };
+
+  /** Closes the pass task's session once it has been idle `warmIdleMs` since a turn ended. */
+  function armIdleClose(id: WorkstreamId, ctl: Control): void {
+    ctl.idleTimer?.cancel();
+    ctl.idleTimer = opts.clock.setTimeout(() => {
+      ctl.idleTimer = null;
+      void runner.closeWarm(id);
+    }, opts.limits.warmIdleMs);
+  }
+
+  function disarmIdleClose(ctl: Control): void {
+    ctl.idleTimer?.cancel();
+    ctl.idleTimer = null;
+  }
 
   /** The provider session the workstream's last session ran, or null when none started. */
   function lastProviderSession(id: WorkstreamId): string | null {
@@ -2285,6 +2312,7 @@ export function createRunner(opts: RunnerOptions): Runner {
      * Otherwise the turn ends Ready, and the session stays open for the builder's next message.
      */
     const passTurnComplete = async (text: string | null): Promise<void> => {
+      armIdleClose(id, ctl);
       if (messages.untaken().length > 0 || ctl.redoing) return;
       try {
         await endTurnSteps(passWork, {
@@ -2391,6 +2419,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           case 'activity':
             // The session is working again (Claude Code woke it, or an answer did): it is not idle.
             stopWaitingOnBackground();
+            disarmIdleClose(ctl);
             opts.state.write((ctx) => {
               patchWorkstream(ctx, id, ctl.fence, { lastActivityAt: ctx.now });
               ctx.emit({
@@ -2720,6 +2749,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       ctl.requestHandoff = null;
       ctl.endWaits = null;
       ctl.messages = null;
+      disarmIdleClose(ctl);
       // Every exit ends the session row and frees the workstream's session slot, so a parked answer
       // is delivered, the lane is freed and the session's MCP token stops working.
       outcome = finishSession(id, ctl, session.id, st);
@@ -3555,6 +3585,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         messages: null,
         builderStop: false,
         redoing: false,
+        idleTimer: null,
         done: Promise.resolve(),
       };
       active.set(id, ctl);
@@ -3622,7 +3653,8 @@ export function createRunner(opts: RunnerOptions): Runner {
       if (id === null) throw new ConflictError(`Task ${taskId} has no run to hand the message to`);
       const ctl = active.get(id);
       const lane = ctl?.messages ?? null;
-      if (ctl && lane) {
+      if (ctl && lane && ctl.stopReason === null) {
+        disarmIdleClose(ctl);
         // Stop and Redo: the interrupted turn goes on with the message, so its end is not Ready.
         ctl.redoing = redo && openPassTurn(db, taskId) !== undefined;
         try {
@@ -3671,6 +3703,24 @@ export function createRunner(opts: RunnerOptions): Runner {
         });
       });
       opts.onLaneFreed();
+    },
+    async closeWarm(id) {
+      const ctl = active.get(id);
+      if (!ctl?.handle || ctl.stopReason !== null) return;
+      const closes = opts.state.write((ctx) => {
+        const row = getWorkstreamRow(ctx.tx, id);
+        const still =
+          row.state === S.WaitingHuman &&
+          row.nextAction.kind === 'pass_review' &&
+          untakenMessages(ctx.tx, row.taskId).length === 0 &&
+          !openPassTurn(ctx.tx, row.taskId);
+        if (still) ctl.stopReason = 'closed';
+        return still;
+      });
+      if (!closes) return;
+      opts.logger.info({ workstreamId: id }, 'warm session closed');
+      await ctl.handle.stop();
+      await ctl.done;
     },
     async stopPassLane(id) {
       const ctl = active.get(id);

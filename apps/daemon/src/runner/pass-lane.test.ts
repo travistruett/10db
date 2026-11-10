@@ -21,6 +21,7 @@ import {
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTestEngine, type TestEngine } from '../../test/engine';
 import { untakenMessages } from './lane-messages';
+import { DEFAULT_RUNNER_LIMITS } from './runner';
 import { isolatedGitEnv, waitFor } from '../../test/fixtures';
 import type { FakeScriptBook } from '../sessions';
 
@@ -438,5 +439,59 @@ describe('Stop and Redo', () => {
     expect(listPassTurns(engine.store.db, pass.id).map((t) => [t.seq, t.ending])).toEqual([
       [1, 'ready'],
     ]);
+  });
+});
+
+describe("a pass task's warm session", () => {
+  const warm = (): FakeStep[][] => [
+    [...turn('one\n', 'Tidied the form.'), { do: 'await_message', contains: 'Bigger' }],
+    [...turn('two\n', 'Made it bigger.'), { do: 'await_message', contains: 'never sent' }],
+  ];
+
+  it('closes once idle after a Ready turn, freeing its lane, and the next message resumes it', async () => {
+    const { task, id } = await openPage(warm());
+    await waitFor(isReady(id, 1));
+    expect(engine.runner.isRunning(id)).toBe(true);
+
+    engine.clock.advance(DEFAULT_RUNNER_LIMITS.warmIdleMs);
+    await waitFor(() => !engine.runner.isRunning(id));
+
+    expect(row(id)).toMatchObject({
+      state: 'WAITING_HUMAN',
+      nextAction: { kind: 'pass_review' },
+      currentSessionId: null,
+      leaseOwner: null,
+    });
+    expect(readyItems().map((i) => i.state)).toEqual(['OPEN']);
+
+    await write(task, 'Bigger please');
+    expect(row(id)).toMatchObject({ state: 'QUEUED', nextAction: { kind: 'feedback' } });
+    engine.launch(id);
+    await waitFor(isReady(id, 2));
+    // The second session resumes the conversation the first one had.
+    expect(engine.adapter.prompts[1]?.resume).toBe(
+      `fake-${engine.adapter.prompts[0]?.sessionId ?? ''}`,
+    );
+  });
+
+  it('stays open when a message arrives as the idle close decides', async () => {
+    const { task, id } = await openPage([
+      [
+        ...turn('one\n', 'Tidied the form.'),
+        { do: 'await_message', contains: 'Bigger' },
+        ...turn('two\n', 'Made it bigger.'),
+        { do: 'await_message', contains: 'never sent' },
+      ],
+    ]);
+    await waitFor(isReady(id, 1));
+    // The message is kept before it is handed over; the idle close decides in between.
+    const message = engine.state.write((ctx) =>
+      insertBuilderMessage(ctx, task.id, { body: 'Bigger please', files: [] }),
+    );
+    await engine.runner.closeWarm(id);
+    expect(engine.runner.isRunning(id)).toBe(true);
+    await engine.runner.deliverMessage(task.id, message.id, { redo: false });
+    await waitFor(isReady(id, 2));
+    expect(engine.adapter.prompts).toHaveLength(1);
   });
 });
