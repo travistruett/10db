@@ -165,9 +165,18 @@ describe("a pass lane's activity and turns", () => {
           pausedUntil: null,
           failure: null,
           signOff: 'none',
+          waitsFor: null,
         },
       ],
       turns: [],
+      holds: [],
+      sharedChanges: [],
+      signOffWaits: [],
+      pullRequest: null,
+      checks: { gate: { state: 'not_run', logPath: null }, review: { reviewedSha: null } },
+      closeStep: null,
+      stackedOn: null,
+      notices: [],
     };
     expect(PassViewDto.parse(view)).toEqual(view);
   });
