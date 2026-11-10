@@ -232,12 +232,14 @@ type KeepDeps = Pick<PassWorkDeps, 'state' | 'git'>;
 
 /**
  * One more kept commit of the task's page work at its ref, named by `trailer`, with the ref's value
- * before it. Another keep that moved the ref meanwhile is followed once, then the call fails.
+ * before it; with `only`, of those of its page files alone. Another keep that moved the ref meanwhile
+ * is followed once, then the call fails.
  */
 async function keepPageWork(
   deps: KeepDeps,
   workstreamId: WorkstreamId,
   trailer: string,
+  only?: readonly string[],
 ): Promise<{
   readonly place: PassTaskPlace;
   readonly kept: KeptCommit;
@@ -257,7 +259,9 @@ async function keepPageWork(
       repo,
       branch,
       ref,
-      paths: (await git.changedPaths(repo)).filter(mine),
+      paths: (await git.changedPaths(repo)).filter(
+        (path) => mine(path) && (only === undefined || only.includes(path)),
+      ),
       parent,
       message: `Kept work of ${task.title}`,
       trailer: { key: TURN_TRAILER, value: trailer },
@@ -315,6 +319,21 @@ export async function keepTurnWork(
       }),
     );
   return facts;
+}
+
+/**
+ * Keeps the files a put-back wrote into the folder as the task's work in the pass that now holds it,
+ * so the builder's next message does not take them for hand edits. Nothing for a task no pass holds.
+ */
+export async function keepPutBackWork(
+  deps: KeepDeps,
+  taskId: TaskId,
+  paths: readonly string[],
+): Promise<void> {
+  const db = deps.state.db;
+  const task = getTask(db, taskId);
+  if (paths.length === 0 || task.workstreamId === null || !passHoldingTask(db, task)) return;
+  await keepPageWork(deps, task.workstreamId, `put-back-${randomUUID()}`, paths);
 }
 
 /**

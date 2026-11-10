@@ -1,11 +1,24 @@
 import { existsSync, readFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { AbandonStep } from '@10db/contracts';
-import { abandonPassAndBatch, getTaskKeptWork, listTaskThreadRows, setAbandonStep } from '@10db/db';
+import {
+  abandonPassAndBatch,
+  getTask,
+  getTaskKeptWork,
+  listTaskThreadRows,
+  setAbandonStep,
+} from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openPassWorld, type PassWorld } from '../../test/pass-world';
 import { openPass } from '../delivery';
-import { keepTurnWork, keptRef, putBackKeptWork, takeOutSteps, TakeOutWithin } from './index';
+import {
+  foldHandEdits,
+  keepTurnWork,
+  keptRef,
+  putBackKeptWork,
+  takeOutSteps,
+  TakeOutWithin,
+} from './index';
 
 // Workbench spec §5.4: a later pass that takes a taken-out task puts its kept work back file by file:
 // a file still as the take-out left it takes the kept version, any other merges three ways, and one
@@ -102,5 +115,12 @@ describe('putBackKeptWork', () => {
     );
     expect(read('src/settings/long.tsx')).toBe('one\ntwo, by the task\nthree\nfour\nfive\nsix\n');
     expect(getTaskKeptWork(w.h.store.db, w.settings.id)).toBeNull();
+    // What went back is the task's own work, kept with it in the new pass: never a hand edit.
+    const run = getTask(w.h.store.db, w.settings.id).workstreamId;
+    if (run === null) throw new Error('Settings has no run in the new pass');
+    expect(await foldHandEdits(w.deps, { workstreamId: run })).toMatchObject({
+      byHand: [],
+      whileWorking: null,
+    });
   });
 });

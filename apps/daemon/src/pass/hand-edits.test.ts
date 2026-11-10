@@ -108,6 +108,24 @@ describe('foldHandEdits', () => {
     ]);
   });
 
+  it("names a file deleted while another page's agent was working by its folder's time", async () => {
+    w = await openPassWorld();
+    await afterFirstTurn(w);
+    const working = w.startTurn(w.people);
+    unlinkSync(join(w.h.repo, 'src/settings/old.tsx'));
+    const started = new Date(getPassTurn(w.h.store.db, working.id).startedAt);
+    touch(w, 'src/settings', new Date(started.getTime() + 500));
+    w.endTurn(working);
+
+    const fold = await foldHandEdits(w.deps, { workstreamId: w.runOf(w.settings) });
+
+    expect(fold.byHand).toEqual([]);
+    expect(fold.whileWorking).toEqual({
+      lanes: ['People: UI work'],
+      files: [{ path: 'src/settings/old.tsx', added: 0, removed: 1 }],
+    });
+  });
+
   it('marks a page file the folder held before the pass as such', async () => {
     w = await openPassWorld({
       before: ({ write }) => {

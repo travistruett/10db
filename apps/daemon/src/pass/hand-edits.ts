@@ -1,5 +1,5 @@
 import { lstatSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { TaskId, WorkstreamId } from '@10db/contracts';
 import {
   getTask,
@@ -53,6 +53,18 @@ const lines = (files: readonly FileChange[], before: ReadonlySet<string>): strin
     .join('\n');
 
 const count = (n: number): string => `${String(n)} file${n === 1 ? '' : 's'}`;
+
+/**
+ * When a page file was last written: its own time, or for one deleted, the time of the nearest
+ * directory still holding its place, which a removal sets. Undefined when neither can be read.
+ */
+function lastWritten(repo: string, path: string): number | undefined {
+  for (let at = path; at !== '.' && at !== ''; at = dirname(at)) {
+    const entry = lstatSync(join(repo, at), { throwIfNoEntry: false });
+    if (entry) return entry.mtimeMs;
+  }
+  return lstatSync(repo, { throwIfNoEntry: false })?.mtimeMs;
+}
 
 /** The thread's notice for a fold. */
 function noticeOf(fold: HandEditFold, before: ReadonlySet<string>): string {
@@ -130,7 +142,7 @@ export async function foldHandEdits(
   const whileWorking: FileChange[] = [];
   const lanes = new Set<TaskId>();
   for (const file of changed) {
-    const mtime = lstatSync(join(place.repo, file.path), { throwIfNoEntry: false })?.mtimeMs;
+    const mtime = lastWritten(place.repo, file.path);
     const during =
       mtime === undefined ? [] : windows.filter((w) => w.from <= mtime && mtime <= w.to);
     if (during.length === 0) byHand.push(file);

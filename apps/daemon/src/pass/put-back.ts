@@ -7,7 +7,7 @@ import {
   setTaskKeptWork,
 } from '@10db/db';
 import { passDirtRef } from '../delivery';
-import { readKeptRef, type PassWorkDeps } from './kept-work';
+import { keepPutBackWork, readKeptRef, type PassWorkDeps } from './kept-work';
 
 // Workbench spec §5.4: a taken-out task's kept work goes back into the folder when a later pass takes
 // it, file by file, so nothing the builder did to a file since is written over.
@@ -69,6 +69,7 @@ export async function putBackKeptWork(
     });
     (merged === 'merged' ? applied : left).push(path);
   }
+  await keepPutBackWork(deps, taskId, applied);
   deps.state.write((ctx) => {
     setTaskKeptWork(ctx, taskId, null);
     insertSystemNotice(
