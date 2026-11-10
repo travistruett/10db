@@ -50,14 +50,16 @@ export function TakeOutModal({ passId, taskId, area, onClose }: TakeOutModalProp
             loading={taking.isPending}
             disabled={preview.data === undefined}
             onClick={() => {
-              taking.mutate(
-                { passId, taskId, shared: sharedChoicesOf(shared, chosen) },
-                {
-                  onSuccess: (result) => {
-                    if (result.tookOut) onClose();
-                  },
-                },
-              );
+              // Closed from the promise, not from mutate's own onSuccess, which is dropped once the
+              // page leaves the pass and this modal unmounts before the answer.
+              taking
+                .mutateAsync({ passId, taskId, shared: sharedChoicesOf(shared, chosen) })
+                .then((result) => {
+                  if (result.tookOut) onClose();
+                })
+                .catch(() => {
+                  // The failure is said from `taking.error`.
+                });
             }}
           >
             Take Out

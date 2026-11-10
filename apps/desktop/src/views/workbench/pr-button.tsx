@@ -59,12 +59,17 @@ function OpenPullRequestConfirm({ view, preview, onClose, onOpened }: ConfirmPro
           <Button
             loading={opening.isPending}
             onClick={() => {
-              opening.mutate(view.pass.id, {
-                onSuccess: (opened) => {
+              // From the promise, not mutate's own onSuccess, which is dropped if a preview read
+              // after the open stops offering it and this confirm unmounts first.
+              opening
+                .mutateAsync(view.pass.id)
+                .then((opened) => {
                   onOpened(opened.url);
                   onClose();
-                },
-              });
+                })
+                .catch(() => {
+                  // The failure is said from `opening.error`.
+                });
             }}
           >
             Open Pull Request

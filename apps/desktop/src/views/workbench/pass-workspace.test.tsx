@@ -1,6 +1,7 @@
 import {
   PASS_RETRY_TURN_CHOICE,
   PassSignOffDto,
+  type PassPageDto,
   TakeOutPreviewDto,
   TakeOutResultDto,
   TaskId,
@@ -625,6 +626,59 @@ describe('PassWorkspace Take Out', () => {
       ]);
     });
     expect(previewed).toEqual([{ passId: view.pass.id, taskId: pages.working.taskId }]);
+  });
+
+  it('never reopens the confirm when the page left the pass before its take-out answered', async () => {
+    const { sent } = serveTakeOut();
+    let answer: () => void = () => undefined;
+    const answered = new Promise<void>((resolve) => {
+      answer = resolve;
+    });
+    // The take-out answers only once the test lets it, after the pass has dropped the page.
+    server.use(
+      http.post(daemonUrl('/passes/:passId/tasks/:taskId/take-out'), async ({ params }) => {
+        sent.push({ passId: String(params['passId']), taskId: String(params['taskId']), body: {} });
+        await answered;
+        return HttpResponse.json(
+          TakeOutResultDto.parse({
+            taskId: params['taskId'],
+            passId: params['passId'],
+            tookOut: true,
+            keptSha: null,
+            stillChanging: [],
+            left: [],
+          }),
+        );
+      }),
+    );
+    const pages = pagesByStatus();
+    const draw = (shown: PassPageDto[]) => (
+      <PassWorkspace
+        view={passViewDto({ pages: shown })}
+        inbox={[]}
+        project={projectViewDto()}
+        selected={pages.ready.taskId}
+        onSelect={vi.fn()}
+      />
+    );
+    const { rerender, queryClient } = renderWithDaemon(draw(Object.values(pages)));
+    await screen.findByRole('list', { name: 'Pages in this pass' });
+    await takeOut('Billing');
+    await waitFor(() => {
+      expect(sent).toHaveLength(1);
+    });
+    rerender(draw([pages.ready]));
+    answer();
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'More actions for Billing' })).toBeNull();
+    });
+    // Once the take-out's answer has settled, the task joins the pass again.
+    await waitFor(() => {
+      expect(queryClient.isMutating()).toBe(0);
+    });
+    rerender(draw([pages.ready, pages.working]));
+    await screen.findByRole('button', { name: 'More actions for Billing' });
+    expect(screen.queryByRole('dialog', { name: 'Take Out Billing' })).toBeNull();
   });
 
   it('says which files kept changing when the page could not be taken out', async () => {
