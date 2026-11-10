@@ -577,7 +577,21 @@ describe("a pass turn's shared area", () => {
     ...end,
   ];
 
-  it.each<{ name: string; end: FakeStep[]; settled: (id: WorkstreamId) => boolean }>([
+  it.each<{
+    name: string;
+    end: FakeStep[];
+    settled: (id: WorkstreamId) => boolean;
+    act?: (id: WorkstreamId) => Promise<void>;
+  }>([
+    {
+      name: 'at a stop',
+      end: [{ do: 'await_message', contains: 'never sent' }],
+      act: async (id) => {
+        await waitFor(wrote);
+        await engine.runner.stopPassLane(id);
+      },
+      settled: (id) => row(id).state === 'QUEUED' && !engine.runner.isRunning(id),
+    },
     {
       name: 'at Ready',
       end: [
@@ -596,13 +610,14 @@ describe("a pass turn's shared area", () => {
       end: [{ do: 'rate_limit', status: 'rejected', resetsInSeconds: 600 }],
       settled: (id) => row(id).state === 'PAUSED_LIMIT' && !engine.runner.isRunning(id),
     },
-  ])('is kept on the chain and released $name', async ({ end, settled }) => {
+  ])('is kept on the chain and released $name', async ({ end, settled, act }) => {
     const { pass, id } = await openPage(
       [sharedTurn(end)],
       'Make the form tidy',
       () => undefined,
       WITH_SHARED,
     );
+    await act?.(id);
     await waitFor(() => settled(id));
     await waitFor(() => listSharedChanges(engine.store.db, pass.id).length === 1);
 
