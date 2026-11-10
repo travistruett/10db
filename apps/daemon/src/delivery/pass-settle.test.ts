@@ -289,6 +289,36 @@ describe('a pass stacked on a closed one (D24)', () => {
     return { passId: opened.pass.id, start: opened.pass.startSha, branch, tip, url };
   }
 
+  /** B closes as 7a's close leaves it: main fast-forwarded from A's tip to B's, the folder on main. */
+  async function closeStacked(a: Closed, b: Awaited<ReturnType<typeof stacked>>): Promise<void> {
+    const batchOf = getPass(h.store.db, b.passId).batchId;
+    h.git$('update-ref', 'refs/heads/main', b.tip, a.tip);
+    h.git$('symbolic-ref', 'HEAD', 'refs/heads/main');
+    h.state.write((ctx) => {
+      setClosePlan(ctx, b.passId, { token: 't', pages: [], files: [], shared: [] });
+      transitionBatch(ctx, batchOf, { to: 'SHIPPING' });
+      transitionBatch(ctx, batchOf, { to: 'SHIPPED' });
+      closePass(ctx, b.passId, { settled: false });
+    });
+    await h.jobs.idle();
+  }
+
+  it('stacks a third pass on the newest closed one, whose tip it opens at', async () => {
+    const a = await closedPass();
+    const b = await stacked(a);
+    await closeStacked(a, b);
+    const task = h.addTask('Home page', { areas: ['settings'] });
+
+    const c = await openPass(
+      h.ctx,
+      { projectId: h.project.id, name: 'Home', taskIds: [task.id] },
+      { leaseMs: 60_000, putBack: nothingKept },
+    );
+
+    expect(c.pass.startSha).toBe(b.tip);
+    expect(getPassProgress(h.store.db, c.pass.id).stackedOn).toBe(b.passId);
+  });
+
   const edits = (url: string) =>
     h.gh.calls.filter(
       (c) => c.method === 'prEditBase' && (c.args as { readonly url: string }).url === url,
@@ -331,17 +361,7 @@ describe('a pass stacked on a closed one (D24)', () => {
   it('when the closed pass merges after the stacked one has closed too: it still retargets it, takes the base in and keeps the folder on the tip', async () => {
     const a = await closedPass();
     const b = await stacked(a);
-    // B closes as 7a's close leaves it: main fast-forwarded from A's tip to B's, the folder on main.
-    const batchOf = getPass(h.store.db, b.passId).batchId;
-    h.git$('update-ref', 'refs/heads/main', b.tip, a.tip);
-    h.git$('symbolic-ref', 'HEAD', 'refs/heads/main');
-    h.state.write((ctx) => {
-      setClosePlan(ctx, b.passId, { token: 't', pages: [], files: [], shared: [] });
-      transitionBatch(ctx, batchOf, { to: 'SHIPPING' });
-      transitionBatch(ctx, batchOf, { to: 'SHIPPED' });
-      closePass(ctx, b.passId, { settled: false });
-    });
-    await h.jobs.idle();
+    await closeStacked(a, b);
     const squash = squashOnOrigin(a.tip);
     h.origin$('update-ref', 'refs/heads/main', squash);
     h.gh.setState(a.url, PrState.Merged);

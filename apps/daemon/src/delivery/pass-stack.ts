@@ -17,7 +17,6 @@ import {
   getPassPullRequest,
   getProject,
   listPassesIn,
-  passHoldingFolder,
   setPassNotice,
   setStackedOn,
   settlePass,
@@ -55,15 +54,17 @@ export function stackedAbove(db: DbReader, pass: PassDto): PassDto | undefined {
 }
 
 /**
- * In the write that opens pass `passId` (D24): when the pass still holding the project's folder has
- * closed and not settled, the new pass stacks on it, and that pass's Move card waits while the new
- * one is open (`subscribePassSettles`). Answers that pass, or undefined.
+ * In the write that opens pass `passId` (D24): when a pass of the project has closed and not
+ * settled, the new pass stacks on the newest of them, whose tip is where the folder's return branch
+ * was left, and that pass's Move card waits while the new one is open (`subscribePassSettles`).
+ * Answers that pass, or undefined.
  */
 export function stackOn(w: WriteContext, passId: PassId): PassDto | undefined {
   const pass = getPass(w.tx, passId);
-  const below = passHoldingFolder(w.tx, pass.projectId);
-  if (below === undefined || below.id === passId || below.state !== PassState.Closed)
-    return undefined;
+  const below = listPassesIn(w.tx, PassState.Closed)
+    .filter((p) => p.projectId === pass.projectId && p.id !== passId)
+    .at(-1);
+  if (below === undefined) return undefined;
   setStackedOn(w, passId, below.id);
   return below;
 }
