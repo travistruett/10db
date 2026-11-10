@@ -560,6 +560,31 @@ export function setPassPullRequest(
   emitPass(ctx, pass, { prUrl: pr.url, draft: pr.draft });
 }
 
+/**
+ * Forgets the pass's pull request and what was read of it (spec §5.5): one closed unmerged while the
+ * pass is open, so the next Open Pull Request opens another.
+ */
+export function forgetPassPullRequest(ctx: WriteContext, passId: PassId): void {
+  const pass = getPass(ctx.tx, passId);
+  ctx.tx
+    .update(schema.batches)
+    .set({
+      prUrl: null,
+      prDraft: null,
+      prState: null,
+      prChecks: null,
+      prFailingChecks: null,
+      prCheckedAt: null,
+      prUnknownReason: null,
+      prRequired: null,
+      prMergeBlocked: null,
+      updatedAt: ctx.now,
+    })
+    .where(eq(schema.batches.id, pass.batchId))
+    .run();
+  emitPass(ctx, pass, { prUrl: null });
+}
+
 /** The pass's pull request as last made or read, or null before it has one. */
 export function getPassPullRequest(db: DbReader, passId: PassId): PassPullRequestView | null {
   const row = getBatchRow(db, getPass(db, passId).batchId);

@@ -36,6 +36,7 @@ import {
 } from '../github';
 import { prCardKey, prCards, detailOf } from './cards';
 import { startCiFix } from './ci-fix';
+import { recordPassPullRequest, watchedAsPass } from './pass-watch';
 import { clearCiStop, endFixesOfEndedPullRequests, type FixEnds } from './ci-stop';
 import { ghCall, raiseIn, rewriteIn, withdrawIn, type DeliveryContext } from './context';
 import {
@@ -1043,6 +1044,15 @@ export function createPrWatch(input: {
         continue;
       }
       answered = true;
+      // A pass's pull request, while the pass holds its tasks or in a local project, is read for
+      // merged and closed only: nothing below runs for it.
+      const passId = watchedAsPass(ctx.state.db, root);
+      if (passId !== null) {
+        ctx.state.write((write) => {
+          recordPassPullRequest(write, root, passId, answer(root, read));
+        });
+        continue;
+      }
       // The checks GitHub requires of an open pull request's base. A read that fails leaves what the
       // root holds: the status read above is still true.
       let required: RequiredChecks | null = null;
