@@ -1,10 +1,27 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AbandonStep, InboxState, TakeOutStep } from '@10db/contracts';
-import { abandonPassAndBatch, getTask, lastTakeOut, listInbox, setAbandonStep } from '@10db/db';
+import {
+  abandonPassAndBatch,
+  activeClaims,
+  getTask,
+  lastTakeOut,
+  listInbox,
+  listSharedChanges,
+  openHolds,
+  setAbandonStep,
+} from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openPassWorld, type PassWorld } from '../../test/pass-world';
-import { answerPassCard, keepTurnWork, resumePassWork, takeOutSteps, TakeOutWithin } from './index';
+import {
+  answerPassCard,
+  grantSharedHold,
+  holdRef,
+  keepTurnWork,
+  resumePassWork,
+  takeOutSteps,
+  TakeOutWithin,
+} from './index';
 
 // Workbench spec §12: at start-up a pass goes on from its rows. A folder switched away from the pass's
 // branch while the daemon was down is one card, never a repoint; an unfinished take-out goes on.
@@ -25,6 +42,29 @@ const folderCards = (world: PassWorld) =>
   );
 
 describe('resumePassWork', () => {
+  it("keeps a shared hold the stop left open on the chain, releases it, and remakes a lost hold's ref", async () => {
+    w = await openPassWorld();
+    w.write('src/shared.ts', "the builder's edit\n");
+    await grantSharedHold(w.deps, { workstreamId: w.runOf(w.settings), area: 'src' });
+    w.write('src/button.ts', 'a button\n');
+    const [hold] = openHolds(w.h.store.db, w.opened.pass.id);
+    if (!hold) throw new Error('no hold');
+    const ref = holdRef(w.opened.pass.id, hold.claimId);
+    // The daemon died with the hold open, and the hold's ref was lost with it.
+    w.h.git$('update-ref', '-d', ref);
+
+    const restarted = deps({ ...w, deps: w.restart() });
+    await resumePassWork(restarted);
+
+    expect(openHolds(w.h.store.db, w.opened.pass.id)).toEqual([]);
+    expect(activeClaims(w.h.store.db, w.runOf(w.settings)).map((c) => c.name)).not.toContain('src');
+    expect(listSharedChanges(w.h.store.db, w.opened.pass.id)).toMatchObject([
+      { seq: hold.seq, paths: ['src/button.ts'] },
+    ]);
+    expect(w.h.git$('rev-parse', ref)).toBe(hold.recordSha);
+    await restarted.jobs.idle();
+  });
+
   it('raises one card for a folder switched away while the daemon was down; its answer switches back', async () => {
     w = await openPassWorld();
     w.write('src/settings/page.tsx', 'edited, not committed\n');
