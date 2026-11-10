@@ -227,12 +227,12 @@ describe('the check after each turn', () => {
     expect(attempts()).toEqual(before);
     expect(listPassCheckPids(w.h.store.db)).toEqual([]);
 
-    // A check that passes clears the header and leaves the threads' offers.
+    // A check that passes clears the header and takes back every offer.
     touch('pass');
     await readyTurn(w.people, 'src/people/page.tsx');
     await waitFor(() => checks().at(-1) === 'passed');
     expect(header()).toEqual([]);
-    expect(checkNotices(w.settings).map((m) => m.sendable)).toEqual([false, true]);
+    expect(checkNotices(w.settings).map((m) => m.sendable)).toEqual([false, false]);
     expect(lines('runs')).toHaveLength(3);
   });
 
@@ -263,6 +263,22 @@ describe('the check after each turn', () => {
     await readyTurn(w.people, 'src/people/page.tsx');
     await waitFor(() => checks().at(-1) === 'failed');
     expect(header()).toMatchObject([{ sendable: true }]);
+  });
+
+  it("takes back an older failure's offers on every page, not only the pages the newer one names", async () => {
+    await world(() => checkScript('$(cat "$D/names")'));
+    await start();
+    writeFileSync(join(dir.path, 'names'), 'src/settings/page.tsx');
+    await readyTurn(w.settings, 'src/settings/page.tsx');
+    await waitFor(() => checks().at(-1) === 'failed');
+    expect(checkNotices(w.settings).map((m) => m.sendable)).toEqual([true]);
+
+    writeFileSync(join(dir.path, 'names'), 'src/people/page.tsx');
+    await readyTurn(w.people, 'src/people/page.tsx');
+    await waitFor(() => checks().filter((c) => c === 'failed').length === 2);
+
+    expect(checkNotices(w.settings).map((m) => m.sendable)).toEqual([false]);
+    expect(checkNotices(w.people).map((m) => m.sendable)).toEqual([true]);
   });
 
   it.each<{

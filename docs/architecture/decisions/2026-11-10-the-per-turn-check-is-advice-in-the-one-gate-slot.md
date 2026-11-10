@@ -17,11 +17,12 @@ pre-check or the gate in its place (W16). A project with none runs nothing per t
   that ends while one waits joins it. "The tasks whose turns ran the check" are every task whose turn ended
   since the last run started.
 - Its result is advice: no page is held back from Ready, no `attempt` moves, no turn starts. A pass writes
-  `passed` on the run's turns and clears the header's `turn-check` notice; a failure writes `failed`, puts a
-  sendable `turn_check` header notice and a sendable thread notice on each page the output names by a whole
-  changed path (`runner/check-targets.ts`), else on the run's tasks still held, not signed off and not
-  working again; a newer failure withdraws the task's older check offers. A check that could not start (exit
-  126, Docker refused) or that threw is a header notice offering nothing, and its turns stay `none`.
+  `passed` on the run's turns, clears the header's `turn-check` notice and takes back every unsent check
+  offer on the pass's pages; a failure takes back those offers too, then writes `failed`, puts a sendable
+  `turn_check` header notice and a sendable thread notice on each page the output names by a whole changed
+  path (`runner/check-targets.ts`), else on the run's tasks still held, not signed off and not working
+  again. Only what the latest check said can be sent. A check that timed out, could not start (exit 126),
+  had Docker refused, or threw is a header notice offering nothing, and its turns stay `none`.
 - Its process group is `passes.check_pid`/`check_pid_start` (migration 0057), named by the load monitor.
   Start-up stops a recorded one and clears it before recovery runs (`startTurnChecks`), so a check recovery's
   Ready asks for never runs beside a left one or takes its pid's place. A waiting check dies with the daemon.

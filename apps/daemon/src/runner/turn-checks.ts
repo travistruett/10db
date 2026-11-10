@@ -250,6 +250,7 @@ function createTurnChecks(deps: TurnChecksDeps): TurnChecks {
       whileOpen(passId, (w) => {
         markTurnsChecked(w, turnIds, PassTurnCheck.Passed);
         clearPassNotice(w, passId, TURN_CHECK_NOTICE);
+        takeBackOffers(w, passId);
       });
       return;
     }
@@ -293,8 +294,8 @@ function createTurnChecks(deps: TurnChecksDeps): TurnChecks {
           exitCode: result.exitCode,
           output,
         });
+      takeBackOffers(w, passId);
       for (const target of threads) {
-        withdrawOlderOffers(w, target.taskId);
         const line = checkNoticeLine(target.paths);
         const notice = insertSystemNotice(w, target.taskId, line);
         offerToAgent(w, notice.id, offer(line));
@@ -311,15 +312,19 @@ function createTurnChecks(deps: TurnChecksDeps): TurnChecks {
     });
   }
 
-  /** A newer failure replaces the task's older check offers: only the latest is sent. */
-  function withdrawOlderOffers(w: WriteContext, taskId: TaskId): void {
-    for (const said of listTaskThread(w.tx, taskId))
-      if (
-        said.author === TaskMessageAuthor.System &&
-        said.sendable &&
-        said.body.startsWith(CHECK_FAILED)
-      )
-        takeOffer(w, said.id);
+  /**
+   * Plan call 7: a newer result takes back every unsent check offer on the pass's pages, so only
+   * what the latest check said can be sent.
+   */
+  function takeBackOffers(w: WriteContext, passId: PassId): void {
+    for (const task of listPassTasks(w.tx, passId))
+      for (const said of listTaskThread(w.tx, task.id))
+        if (
+          said.author === TaskMessageAuthor.System &&
+          said.sendable &&
+          said.body.startsWith(CHECK_FAILED)
+        )
+          takeOffer(w, said.id);
   }
 
   async function stop(passId: PassId): Promise<void> {
