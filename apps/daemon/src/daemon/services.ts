@@ -177,7 +177,7 @@ export function createServices(deps: {
   /** A pass's pull request: its preview, and Open Pull Request. */
   readonly passPullRequests: Pick<PassPullRequests, 'preview' | 'open'>;
   /** A pass's close: its lists and its confirm, which queues the close in the delivery queue. */
-  readonly closes: Pick<PassCloses, 'preview' | 'close'>;
+  readonly closes: Pick<PassCloses, 'preview' | 'close' | 'continueClose'>;
   /** Signs off a Ready page in the project's delivery queue, stopping its lane through the runner. */
   readonly signOff: (passId: PassId, taskId: TaskId) => PassSignOffDto;
   /** Cancels a page's waiting sign-off. */
@@ -428,6 +428,7 @@ export function createServices(deps: {
     },
     passClosePreview: (passId) => deps.closes.preview(passId),
     closePass: (passId, input) => deps.closes.close(passId, input),
+    continueClose: (passId) => deps.closes.continueClose(passId),
     signOffPage: (passId, taskId) => deps.signOff(passId, taskId),
     cancelSignOff: (passId, taskId) => {
       deps.cancelSignOff(passId, taskId);

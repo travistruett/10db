@@ -66,6 +66,7 @@ import type {
   PassOpenedDto,
   PassAbandonedDto,
   PassCloseAnswerDto,
+  PassCloseContinueDto,
   PassClosePreviewDto,
   PassCloseRequest,
   PassOpenRequest,
@@ -301,6 +302,11 @@ export interface ApiServices {
    * lists do not allow.
    */
   closePass(passId: PassId, input: PassCloseRequest): Promise<PassCloseAnswerDto>;
+  /**
+   * Continue Close: the close of a closing pass whose job stopped goes on from its recorded step.
+   * Refused (409) for a pass that is not closing.
+   */
+  continueClose(passId: PassId): PassCloseContinueDto;
   /** Whether Open Pull Request is offered for the pass (spec §8.3), why not, and what it would do. */
   passPullRequest(passId: PassId): Promise<PassPullRequestPreviewDto>;
   /**

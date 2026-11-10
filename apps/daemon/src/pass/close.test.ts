@@ -407,7 +407,7 @@ describe('Close Pass', () => {
       },
       notice: /^The close stopped: the gate was stopped before it finished\./,
     },
-  ])('goes on when Close Pass is asked again after $name', async ({ ship, notice }) => {
+  ])('goes on with Continue Close after $name', async ({ ship, notice }) => {
     await world({ gateCommand: 'true' });
     await twoTurns();
     const deps = closeDeps();
@@ -417,19 +417,17 @@ describe('Close Pass', () => {
       (n) => n.id === 'close',
     );
     expect(stuck?.text).toMatch(notice);
+    expect(stuck?.text).toMatch(/Continue Close goes on from where it stopped/);
 
-    const again = await closes.close(w.opened.pass.id, {
-      token: '',
-      pages: [],
-      files: [],
-      shared: [],
-    });
+    const again = closes.continueClose(w.opened.pass.id);
     await w.h.jobs.idle();
 
     expect(again.outcome).toBe('closing');
     expect(passState()).toBe('CLOSED');
     expect(landed()).toEqual(['Settings: UI work']);
     expect(getPassProgress(w.h.store.db, w.opened.pass.id).notices).toEqual([]);
+    // Only a closing pass is continued.
+    expect(() => closes.continueClose(w.opened.pass.id)).toThrow(ConflictError);
   });
 
   it('goes on when Close Pass is asked again while its job is stopping on an error', async () => {

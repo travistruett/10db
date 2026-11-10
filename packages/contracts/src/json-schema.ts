@@ -14,6 +14,7 @@ import {
 import { PassCardDetail } from './pass-cards';
 import {
   PassCloseAnswerDto,
+  PassCloseContinueDto,
   PassClosePreviewDto,
   PassCloseRequest,
   PassPullRequestDto,
@@ -367,6 +368,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'pass-close-preview-dto': PassClosePreviewDto,
   'pass-close-request': PassCloseRequest,
   'pass-close-answer-dto': PassCloseAnswerDto,
+  'pass-close-continue-dto': PassCloseContinueDto,
   'pass-shared-changed-data': PassSharedChangedData,
   'pass-page-signed-off-data': PassPageSignedOffData,
   'pass-closed-data': PassClosedData,

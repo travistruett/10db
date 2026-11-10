@@ -11,6 +11,7 @@ import {
   SharedChoiceKind,
   WorkstreamState,
   type PassCloseAnswerDto,
+  type PassCloseContinueDto,
   type PassClosePreviewDto,
   type PassCloseRequest,
   type PassDto,
@@ -464,6 +465,12 @@ export interface PassCloses {
    * the plan it was confirmed with, whatever the request.
    */
   close(passId: PassId, request: PassCloseRequest): Promise<PassCloseAnswerDto>;
+  /**
+   * `POST /passes/:passId/close/continue`: the close of a closing pass goes on from its recorded step,
+   * on the plan it was confirmed with (a job still running runs once more after it ends). Refused
+   * (409) for a pass that is not closing.
+   */
+  continueClose(passId: PassId): PassCloseContinueDto;
   /** Raises the abort of the pass's close job and waits for it to stop. */
   abort(passId: PassId): Promise<void>;
   /**
@@ -598,6 +605,15 @@ export function createPassCloses(deps: CloseDeps): PassCloses {
       run(passId);
       return { outcome: 'closing', pass: getPass(db, passId) };
     },
+    continueClose(passId) {
+      const pass = getPass(db, passId);
+      if (pass.state !== PassState.Closing)
+        throw new ConflictError(
+          `Pass "${pass.name}" is ${pass.state.toLowerCase()}: only a closing pass's close goes on`,
+        );
+      run(passId);
+      return { outcome: 'closing', pass };
+    },
     async abort(passId) {
       const job = running.get(passId);
       if (!job) return;
@@ -622,7 +638,7 @@ export function createPassCloses(deps: CloseDeps): PassCloses {
 }
 
 /**
- * The header notice of a close that stopped on an error: Close Pass or the next start goes on, or,
+ * The header notice of a close that stopped on an error: Continue Close or the next start goes on, or,
  * before its fast-forward, Abandon ends it. From step 7 the return branch may have moved, and an
  * Abandon is refused.
  */
@@ -635,7 +651,7 @@ function noticeStuck(ctx: WriteContext, passId: PassId, error: unknown): void {
   setPassNotice(ctx, passId, {
     id: CLOSE_NOTICE,
     kind: PassNoticeKind.Close,
-    text: `The close stopped: ${errorText(error)}. Close Pass goes on from where it stopped, as 10db does when it next starts; ${end}.`,
+    text: `The close stopped: ${errorText(error)}. Continue Close goes on from where it stopped, as 10db does when it next starts; ${end}.`,
     sendable: false,
     cardId: null,
     at: ctx.now,
