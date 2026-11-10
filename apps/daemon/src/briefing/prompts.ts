@@ -71,6 +71,11 @@ export interface PromptInput {
   /** What the batch's notice says of migrations a merge of its base lost, while any are missing. */
   readonly uncarried?: string | null;
   /**
+   * The session works on one page of a Workbench pass: a turn ends at the change on screen, and the
+   * builder writes again, so the step's rules for ending, committing and the gate do not apply.
+   */
+  readonly inPass?: boolean;
+  /**
    * For a `feedback` action: the builder's message as the session reads it, and the thread's digest a
    * session with no conversation to resume starts from (null for one that resumes it).
    */
@@ -286,6 +291,25 @@ const RULES = [
   // In the brief as well as the persona: a builder's edited persona is never overwritten.
   'A task is about one pull request, design and docs included. When a design or docs change would grow past about 300 lines, stop at a coherent point so what you have stands on its own, and file each remaining section with mcp__10db__file_follow_up (one call each, a new opId): 10db parks it in the Icebox column and names this task in its description.',
   'When the acceptance criteria are met and committed, end your turn.',
+  HAND_OFF_RULE,
+];
+
+/**
+ * A pass lane's rules (Workbench spec §6.2). Its turns run in the builder's own folder while the
+ * builder's dev server shows each change: 10db keeps the page's work when a turn ends, and the
+ * builder answers each turn with another message, so nothing here ends a step.
+ */
+const PASS_RULES = [
+  'Work inside your page: edit only files inside your claims. Shared code needs the request_claim tool first. When another task holds the claim, the call waits until it frees; if it answers waiting: true, call it again with the same opId. Do not edit those files without it.',
+  "Never run git commit, add, checkout, reset, stash or push, and never switch the folder's branch: 10db keeps your page's work when your turn ends.",
+  'To add or change a dependency, edit the package.json with an exact version (no ^, ~ or range), then call install_dependencies: 10db resolves it, writes pnpm-lock.yaml and installs. Never run pnpm add or pnpm install yourself.',
+  'When a decision is not yours to make, ask with ask_human (or your question tool). Record routine engineering decisions with record_decision.',
+  PLAIN_COMMANDS,
+  'Run each command in the foreground and wait for its result: a command moved to the background will not wake you. One still running when you end your turn goes on until the session ends.',
+  EDIT_RULE,
+  "Do not run the gate, and do not start, stop or restart a dev server: the builder's own dev server shows each change as you write it. Run a check of your own only for what you changed.",
+  'Stop when the change is on screen: end your turn and say in two lines what you changed. The builder looks at the page and writes to you again.',
+  "The builder's messages each carry an id, and 10db may send one again: the same id is the same message, so act on it once.",
   HAND_OFF_RULE,
 ];
 
@@ -614,7 +638,11 @@ export function buildSessionPrompt(input: PromptInput): string {
     'Rules:',
     bullets(
       withSandboxRules(
-        input.step.tools === ToolAccess.ReadOnly ? readOnlyRules(input.step.role) : RULES,
+        input.step.tools === ToolAccess.ReadOnly
+          ? readOnlyRules(input.step.role)
+          : input.inPass === true
+            ? PASS_RULES
+            : RULES,
         input.sandboxed === true,
         input.provider,
       ),
