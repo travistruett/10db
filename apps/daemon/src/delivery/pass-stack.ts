@@ -10,6 +10,7 @@ import {
   type InboxItemDto,
   type PassDto,
   type PassId,
+  type ProjectId,
 } from '@10db/contracts';
 import {
   clearPassNotice,
@@ -67,29 +68,55 @@ function unmergedPr(db: DbReader, passId: PassId): boolean {
 }
 
 /**
- * The pass a new one stacks on. On a pull request project (D24), the newest pass that has closed
- * and not settled, whose tip is where the folder's return branch was left. On a `local` project
- * every pass settles at its close and the new one continues on the same branch (spec §5.3): it
- * stacks on the newest settled pass while that one's record pull request is unmerged, only so its
+ * The pass a new one in the project stacks on. On a pull request project (D24), the newest pass that
+ * has closed and not settled, whose tip is where the folder's return branch was left. On a `local`
+ * project every pass settles at its close and the new one continues on the same branch (spec §5.3):
+ * it stacks on the newest settled pass while that one's record pull request is unmerged, only so its
  * own record pull request takes that pass's branch as its base.
  */
-function passBelow(db: DbReader, pass: PassDto): PassDto | undefined {
+function passBelow(db: DbReader, projectId: ProjectId, opening?: PassId): PassDto | undefined {
   const others = (state: PassState) =>
-    listPassesIn(db, state).filter((p) => p.projectId === pass.projectId && p.id !== pass.id);
-  if (getProject(db, pass.projectId).delivery === Delivery.PullRequest)
+    listPassesIn(db, state).filter((p) => p.projectId === projectId && p.id !== opening);
+  if (getProject(db, projectId).delivery === Delivery.PullRequest)
     return others(PassState.Closed).at(-1);
   const newest = others(PassState.Settled).at(-1);
   return newest !== undefined && unmergedPr(db, newest.id) ? newest : undefined;
 }
 
 /**
- * In the write that opens pass `passId`: the pass it stacks on (`passBelow`), recorded as
- * `stacked_on`; that pass's Move card waits while the new one is open (`subscribePassSettles`).
- * Answers that pass, or undefined.
+ * Read before the write that opens a pass at `startSha`: the pass it will stack on (`passBelow`), or
+ * null. On a `local` project only one whose branch's tip `startSha` holds: a folder whose branch was
+ * moved off that pass carries none of its work, and its record pull request is no base for this one.
  */
-export function stackOn(w: WriteContext, passId: PassId): PassDto | undefined {
-  const below = passBelow(w.tx, getPass(w.tx, passId));
-  if (below === undefined) return undefined;
+export async function stackTarget(
+  ctx: Pick<DeliveryContext, 'state' | 'git'>,
+  projectId: ProjectId,
+  startSha: string,
+): Promise<PassId | null> {
+  const db = ctx.state.db;
+  const below = passBelow(db, projectId);
+  if (below === undefined) return null;
+  const project = getProject(db, projectId);
+  if (project.delivery === Delivery.PullRequest) return below.id;
+  const branch = getBatch(db, below.batchId).branch;
+  const tip = branch === null ? null : await ctx.git.branchTip(project.repoPath, branch);
+  return tip !== null && (await ctx.git.isAncestor(project.repoPath, tip, startSha))
+    ? below.id
+    : null;
+}
+
+/**
+ * In the write that opens pass `passId`: the pass it stacks on, `target` from `stackTarget` while it
+ * is still the one `passBelow` names, recorded as `stacked_on`; that pass's Move card waits while the
+ * new one is open (`subscribePassSettles`). Answers that pass, or undefined.
+ */
+export function stackOn(
+  w: WriteContext,
+  passId: PassId,
+  target: PassId | null,
+): PassDto | undefined {
+  const below = passBelow(w.tx, getPass(w.tx, passId).projectId, passId);
+  if (below?.id !== target) return undefined;
   setStackedOn(w, passId, below.id);
   return below;
 }
@@ -210,7 +237,7 @@ async function takeBase(
 }
 
 /** The pass stacked on `below` on a `local` project: any but an abandoned one, newest first. */
-function localStackedAbove(db: DbReader, below: PassDto): PassDto | undefined {
+export function localStackedAbove(db: DbReader, below: PassDto): PassDto | undefined {
   for (const state of [PassState.Open, PassState.Closing, PassState.Closed, PassState.Settled])
     for (const above of listPassesIn(db, state).reverse())
       if (above.id !== below.id && getPassProgress(db, above.id).stackedOn === below.id)

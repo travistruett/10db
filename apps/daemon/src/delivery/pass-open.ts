@@ -48,7 +48,7 @@ import { insertPlannedWorkstream, resolveStepPlan } from '../team';
 import { lanesInProjectCheckout } from './checkout';
 import type { DeliveryContext } from './context';
 import { jobKey, JobQueue } from './jobs';
-import { stackOn } from './pass-stack';
+import { stackOn, stackTarget } from './pass-stack';
 
 // Workbench spec §5.1: opening a pass. No route reaches this yet; the route that opens a pass ships
 // with the pass's turns, so no pass can be opened whose tasks could not run.
@@ -247,6 +247,8 @@ export async function openPass(
       dirtRef,
       message: `10db: the folder's dirt when pass ${id} opened`,
     });
+    // A read git cannot answer stacks the pass on nothing, rather than leave its branch unwritten.
+    const below = await stackTarget(ctx, project.id, start.startSha).catch(() => null);
     let written: { pass: PassDto; batch: BatchDto; waiting: PassPageWait[] };
     try {
       written = ctx.state.write((w) => {
@@ -265,7 +267,7 @@ export async function openPass(
           taskIds: tasks.map((t) => t.id),
           dirt: start.dirt,
         });
-        stackOn(w, id);
+        stackOn(w, id, below);
         const leaseExpiresAt = new Date(ctx.clock.now().getTime() + deps.leaseMs).toISOString();
         const waiting: PassPageWait[] = [];
         for (const task of tasks) {

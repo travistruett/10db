@@ -648,7 +648,7 @@ describe('a pass on a local project (spec §5.3)', () => {
    * Pass A on a local project, its record pull request open, closed and settled at once as 7a's close
    * leaves it; then pass B opened at the folder's HEAD, its pull request opened.
    */
-  async function twoLocalPasses() {
+  async function twoLocalPasses(beforeB: (start: string) => void = () => undefined) {
     h = createDeliveryHarness({ ...PAGES, delivery: 'local' });
     unsubscribe = subscribePassSettles(h.bus, h.ctx);
     h.commit('src/settings/page.tsx', 'settings\n');
@@ -675,6 +675,7 @@ describe('a pass on a local project (spec §5.3)', () => {
       closePass(ctx, a.pass.id, { settled: true });
     });
     await h.jobs.idle();
+    beforeB(a.pass.startSha);
     const second = h.addTask('People page', { areas: ['people'] });
     const b = await openPass(
       h.ctx,
@@ -716,5 +717,59 @@ describe('a pass on a local project (spec §5.3)', () => {
           (c.args as { readonly base: string }).base === 'main',
       ),
     ).toHaveLength(1);
+  });
+
+  it('retargets the later pull request at start-up when the retarget after the merge did not go through', async () => {
+    const { a, b } = await twoLocalPasses();
+    h.gh.setState(a.url, PrState.Merged);
+    h.gh.failNext.set('prEditBase', new GhError('failed', 'HTTP 502: Bad Gateway'));
+    const baseOnGitHub = async () =>
+      (await h.gh.prView({ repo: 'acme/widgets', ref: b.url }))?.baseRef;
+    await watchRound();
+    await watchRound();
+    expect(await baseOnGitHub()).toBe(a.branch);
+
+    resumePassSettles(h.ctx);
+    await h.jobs.idle();
+
+    expect(await baseOnGitHub()).toBe('main');
+  });
+
+  it("does not stack a later pass on the settled one when the folder's branch no longer holds its tip", async () => {
+    const { a, b } = await twoLocalPasses((start) => {
+      // The builder put main back before the first pass.
+      h.git$('reset', '-q', '--hard', start);
+    });
+
+    expect(b.startSha).not.toBe(a.tip);
+    expect(getPassProgress(h.store.db, b.id).stackedOn).toBeNull();
+    expect(passPrBase(h.store.db, getPass(h.store.db, b.id))).toBe('main');
+  });
+
+  it('queues a settle for the settled pass whose record it reads, none for the open one', async () => {
+    const { b } = await twoLocalPasses();
+    const queued: string[] = [];
+    w = createPrWatch({
+      ctx: {
+        ...h.ctx,
+        jobs: {
+          ...h.ctx.jobs,
+          run: (key, job) => {
+            queued.push(key);
+            h.ctx.jobs.run(key, job);
+          },
+        },
+      },
+      clock: new ManualClock(),
+      intervalMs: 120_000,
+    });
+    w.start();
+    await w.idle();
+    await h.jobs.idle();
+
+    expect(getPass(h.store.db, b.id).state).toBe(PassState.Open);
+    // One read each of the settled pass's record and the open pass's pull request: only the first
+    // can have a pass stacked on it to follow.
+    expect(queued).toHaveLength(1);
   });
 });
