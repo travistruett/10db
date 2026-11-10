@@ -1,8 +1,11 @@
-import type { GoalId, ProjectId, ProjectViewDto } from '@10db/contracts';
+import { passHoldsTasks, type GoalId, type ProjectId, type ProjectViewDto } from '@10db/contracts';
 import { Alert, Box, Button, Group, Loader, Stack, Text, Title } from '@mantine/core';
 import { Link, useNavigate, useSearch } from '@tanstack/react-router';
 import { useId } from 'react';
 import { useGoals } from '../../daemon/goal-queries';
+import { useLivePass } from '../../daemon/pass-queries';
+import { useInbox } from '../../daemon/queries';
+import { useNow } from '../../shell/relative';
 import { ProjectFilter } from '../../shell/project-filter';
 import { ProjectTile } from '../../shell/project-tile';
 import { useSelectedProject } from '../../shell/selected-project';
@@ -10,6 +13,7 @@ import { BenchmarkSyncNote } from './benchmark-sync-note';
 import { GoalList } from './goal-list';
 import { HumanTouchPanel } from './human-touch-panel';
 import { UpdateDrainNote } from './update-drain-note';
+import { PassLine } from '../workbench/pass-line';
 
 /**
  * Factory: every project's goals, each opening to its digest, sessions and pull requests (goals spec §8),
@@ -67,6 +71,28 @@ export function FactoryView() {
 }
 
 /**
+ * The project's pass while it holds pages (Workbench spec §4.1): its name and how many pages wait on
+ * the builder, opening the Workbench. The group selects the project before the click lands.
+ */
+function ProjectPassLine({ projectId }: { readonly projectId: ProjectId }) {
+  const live = useLivePass(projectId).data;
+  const inbox = useInbox().data ?? [];
+  const now = useNow();
+  const navigate = useNavigate();
+  if (live == null || !passHoldsTasks(live.pass.state)) return null;
+  return (
+    <PassLine
+      view={live}
+      inbox={inbox}
+      now={now}
+      onOpen={() => {
+        void navigate({ to: '/workbench' });
+      }}
+    />
+  );
+}
+
+/**
  * One project's goals under its name. Acting on anything in it makes that project the selected one
  * first, so a link into the Board or Plan opens in the project the goal belongs to.
  */
@@ -102,6 +128,7 @@ function ProjectGoals({
             Plan Work…
           </Button>
         </Group>
+        <ProjectPassLine projectId={project.id} />
         {goals.isError ? (
           <Alert color="red" title="Couldn't load the goals">
             {goals.error.message}

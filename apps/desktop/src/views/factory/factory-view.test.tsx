@@ -25,6 +25,12 @@ import {
   goalSummaryDto,
   ungroupedDto,
 } from '../../test/goal-fixtures';
+import {
+  goalPassPagesDto,
+  pagesByStatus,
+  passHandlers,
+  passViewDto,
+} from '../../test/pass-fixtures';
 import { failureLine } from '../board/task-state';
 
 function serve(...overrides: (RequestHandler | WebSocketHandler)[]): void {
@@ -1639,6 +1645,72 @@ describe('FactoryView human-touch panel', () => {
     renderApp('/factory');
 
     expect(await screen.findByText("Couldn't load how often a person was needed")).toBeTruthy();
+  });
+});
+
+describe('FactoryView ways into the Workbench', () => {
+  it("names a project's live pass and what waits in it, and opens the Workbench in that project", async () => {
+    const alpha = projectViewDto({ name: 'alpha' });
+    const beta = projectViewDto({ name: 'beta' });
+    const { ready, failed, working } = pagesByStatus();
+    const live = passViewDto({ pass: { projectId: beta.id }, pages: [ready, failed, working] });
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([alpha, beta])),
+      http.get(daemonUrl('/passes'), () => HttpResponse.json([live])),
+      goals(goalListDto()),
+    );
+    const { router } = renderApp('/factory');
+    const betaGroup = await screen.findByRole('group', { name: 'beta' });
+    const line = await within(betaGroup).findByRole('button', {
+      name: 'Settings pass · 2 waiting',
+    });
+    // A project with no pass has no line.
+    const alphaGroup = screen.getByRole('group', { name: 'alpha' });
+    expect(within(alphaGroup).queryByRole('button', { name: /pass/ })).toBeNull();
+    fireEvent.click(line);
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/workbench');
+    });
+    expect(
+      await screen.findByRole('button', { name: 'Project: beta. Switch project' }),
+    ).toBeTruthy();
+  });
+
+  it('offers Work on This on a goal whose UI work is nearly done, opening the Workbench on the goal', async () => {
+    const project = projectViewDto({
+      areas: [{ name: 'settings', globs: ['src/settings/**'], role: 'page', route: '/settings' }],
+    });
+    const summary = goal('Settings polish', 'running');
+    const done = taskDto({
+      projectId: project.id,
+      goalId: summary.goal.id,
+      areas: ['settings'],
+      boardStatus: 'done',
+      status: 'done',
+    });
+    const linked = { ...summary, goal: { ...summary.goal, taskIds: [done.id] } };
+    const asked: string[] = [];
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      goals(goalListDto(linked)),
+      tasksOf(done),
+      digests([], linked.digest),
+      http.get(daemonUrl('/goals/:goalId/pass-pages'), ({ params }) => {
+        asked.push(String(params['goalId']));
+        return HttpResponse.json(goalPassPagesDto({ pages: ['settings'], fromTasks: [done.id] }));
+      }),
+      ...passHandlers(),
+    );
+    const { router } = renderApp('/factory');
+    fireEvent.click(await screen.findByRole('button', { name: /^Settings polish/ }));
+    const region = await screen.findByRole('region', { name: 'Settings polish' });
+    fireEvent.click(await within(region).findByRole('link', { name: 'Work on This' }));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/workbench');
+    });
+    expect(router.state.location.search).toEqual({ goal: linked.goal.id });
+    // The Workbench reads the goal's pages again as it opens; only this goal's are asked for.
+    expect(new Set(asked)).toEqual(new Set([linked.goal.id]));
   });
 });
 

@@ -2,10 +2,13 @@ import type { GoalSummaryDto, ProjectViewDto, WorkstreamDto, WorkstreamId } from
 import { Button, Divider, Group, Stack, Text } from '@mantine/core';
 import { useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
+import { useGoalPassPages } from '../../daemon/pass-queries';
 import { useBatches, useTasks, useWorkstreams } from '../../daemon/queries';
 import { OpenConversation } from '../shape/open-conversation';
 import { useRemoveDraftGoalAction } from '../shape/remove-draft-goal';
 import { BatchSheet } from '../board/batch/batch-sheet';
+import { goalReadyForPass } from '../workbench/start-pass-rules';
+import { WorkOnThis } from '../workbench/work-on-this';
 import {
   AboutGoal,
   GoalBar,
@@ -59,6 +62,9 @@ export function GoalDetail({ project, summary, opened }: GoalDetailProps) {
     gateCommand: project.gateCommand,
   });
   const ready = rows.filter((r) => r.bucket === 'ready').length;
+  // The pages a goal's commits touched are a git read, asked for only once Work on This could show.
+  const passReady = goalReadyForPass(goalTasks, project.areas);
+  const passPages = useGoalPassPages(passReady ? goal.id : null);
   const loadError = tasks.isError
     ? tasks.error.message
     : (sessions.error ?? (batches.isError ? batches.error.message : null));
@@ -67,16 +73,24 @@ export function GoalDetail({ project, summary, opened }: GoalDetailProps) {
     <Stack gap="md">
       <Group justify="space-between" wrap="nowrap" align="center">
         <GoalBar digest={digest} rows={rows} />
-        <Button
-          variant="default"
-          size="xs"
-          disabled={ready === 0}
-          onClick={() => {
-            setStarting(true);
-          }}
-        >
-          Start Ready Tasks…
-        </Button>
+        <Group gap="xs" wrap="nowrap">
+          <WorkOnThis
+            goalId={goal.id}
+            passPages={passReady ? passPages.data : undefined}
+            tasks={goalTasks}
+            areas={project.areas}
+          />
+          <Button
+            variant="default"
+            size="xs"
+            disabled={ready === 0}
+            onClick={() => {
+              setStarting(true);
+            }}
+          >
+            Start Ready Tasks…
+          </Button>
+        </Group>
       </Group>
       <NeedsYou digest={digest} rows={rows} />
       <GoalTasks
