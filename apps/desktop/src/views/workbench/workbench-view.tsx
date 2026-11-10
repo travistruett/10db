@@ -14,7 +14,7 @@ import {
 import { Group, Loader, Stack, Title } from '@mantine/core';
 import { useMutation } from '@tanstack/react-query';
 import { useNavigate, useSearch } from '@tanstack/react-router';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import {
   useAbandonPass,
   useAddPages,
@@ -32,6 +32,7 @@ import { AbandonModal } from './abandon-modal';
 import { AddPageModal } from './add-page-modal';
 import { PassHeader } from './pass-header';
 import { PassWorkspace } from './pass-workspace';
+import { queueRows } from './queue-rows';
 import type { PassWorkspaceProps } from './pass-workspace-props';
 import { NoPageAreas, ProposePagesModal } from './propose-pages-modal';
 import { RenameModal } from './rename-modal';
@@ -217,6 +218,15 @@ function ProjectWorkbench({ project }: { readonly project: ProjectViewDto }) {
       throw new NoPassOpenError(`${project.name} has no pass open`);
     return view.pass.id;
   };
+  // With no page of the pass in the address, the queue's first page is shown; it goes into the address
+  // in place, so a queue that reorders on live data never swaps the page (and its composer) under the
+  // builder, and only the page on screen is marked opened.
+  const view = live.data;
+  const named = view?.pages.some((page) => page.taskId === search.task) ?? false;
+  const pin = view == null || named ? null : (queueRows(view, inbox, now)[0]?.page.taskId ?? null);
+  useEffect(() => {
+    if (pin !== null) void navigate({ to: '/workbench', search: { task: pin }, replace: true });
+  }, [pin, navigate]);
   const actions: WorkbenchActions = {
     start: (request) => opening.mutateAsync(request),
     propose: () => proposing.mutateAsync(),

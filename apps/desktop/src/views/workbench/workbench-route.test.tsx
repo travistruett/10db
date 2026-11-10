@@ -112,6 +112,17 @@ describe('WorkbenchView', () => {
     });
   });
 
+  it('pins the page it shows into the address, so a reordered queue never swaps the page under a draft', async () => {
+    const { ready, working } = pagesByStatus();
+    const live = passViewDto({ pass: passDto({ projectId: project.id }), pages: [working, ready] });
+    const { router } = open('/workbench', { live: [live] });
+    await waitFor(() => {
+      expect(router.state.location.search).toEqual({ task: ready.taskId });
+    });
+    // Pinned in place: Back leaves the Workbench rather than unpinning.
+    expect(router.history.length).toBe(1);
+  });
+
   it.each([
     {
       action: 'Add Page',

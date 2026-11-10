@@ -221,12 +221,16 @@ describe('PassWorkspace page actions', () => {
     return sent;
   }
 
+  /** What was sent besides opened marks, which an earlier test's Ready page may still be sending. */
+  const actionsSent = (sent: ReturnType<typeof record>) =>
+    sent.filter((s) => !s.route.startsWith('opened'));
+
   it('an empty composer stops the working page plainly, sending nothing', async () => {
     const sent = record();
     const { pages } = await renderWorkspace((p) => p.working.taskId);
     fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
     await waitFor(() => {
-      expect(sent).toEqual([{ route: 'stop', taskId: pages.working.taskId }]);
+      expect(actionsSent(sent)).toEqual([{ route: 'stop', taskId: pages.working.taskId }]);
     });
   });
 
@@ -239,7 +243,7 @@ describe('PassWorkspace page actions', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: 'Stop and Redo' }));
     await waitFor(() => {
-      expect(sent).toEqual([
+      expect(actionsSent(sent)).toEqual([
         { route: 'redo', taskId: pages.working.taskId, text: 'not that, the header' },
       ]);
     });
@@ -285,7 +289,7 @@ describe('PassWorkspace page actions', () => {
     fireEvent.click(signOff);
     fireEvent.mouseEnter(signOff);
     expect(await screen.findByText(/can't sign off a page yet/)).toBeTruthy();
-    expect(sent.filter((s) => !s.route.startsWith('opened'))).toEqual([]);
+    expect(actionsSent(sent)).toEqual([]);
   });
 
   it("lists under each reply the files its turn changed, read from the page's turns", async () => {
