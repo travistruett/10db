@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { getTask, listSharedChanges, listTaskThread, openHolds } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openPassWorld, type PassWorld } from '../../test/pass-world';
+import { PassFolderOffBranchError } from '../git';
 import {
   dropShared,
   grantSharedHold,
@@ -95,6 +96,20 @@ describe('dropShared', () => {
       refused: 'People: UI work changed `src/shared.ts` after it',
     });
     expect(read('src/shared.ts')).toBe('settings\npeople\n');
+  });
+
+  it('refuses a folder off the pass branch, writing nothing', async () => {
+    w = await openPassWorld();
+    const seq = await sharedTurn(w.settings, () => {
+      w.write('src/button.ts', 'a button\n');
+    });
+    w.h.git$('switch', '-q', 'main');
+
+    await expect(
+      dropShared(w.deps, { passId: w.opened.pass.id, seq, force: true }),
+    ).rejects.toThrow(PassFolderOffBranchError);
+    expect(read('src/button.ts')).toBe('a button\n');
+    expect(listSharedChanges(w.h.store.db, w.opened.pass.id)).toHaveLength(1);
   });
 
   it("is refused while another page's turn holds the area", async () => {
