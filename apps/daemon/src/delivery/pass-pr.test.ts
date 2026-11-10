@@ -475,6 +475,60 @@ describe('Open Pull Request', () => {
     expect(h.gh.body(url)).not.toContain('Gate running');
   });
 
+  it.each([
+    {
+      name: 'the pull request could not be opened',
+      arrange: () => {
+        h.gh.failNext.set('prCreate', new GhError('failed', 'HTTP 502: Bad Gateway'));
+      },
+    },
+    {
+      name: 'the pass was abandoned while its pull request opened',
+      arrange: (passId: PassId) => {
+        const create = h.gh.prCreate.bind(h.gh);
+        h.gh.prCreate = async (input) => {
+          const url = await create(input);
+          h.state.write((w) => {
+            setAbandonStep(w, passId, AbandonStep.Abandoning);
+          });
+          return url;
+        };
+      },
+    },
+    {
+      name: 'the gate could not run',
+      wrapGit: (git: Git): Git => ({
+        ...git,
+        addWorktree: () => Promise.reject(new Error('no room for a scratch worktree')),
+      }),
+      arrange: () => undefined,
+      // The gate is left to fail on its own, not stopped first.
+      until: (passId: PassId) => notices(passId).some((n) => n.id === 'gate'),
+    },
+  ])(
+    'writes no running gate into the body once Open Pull Request stops because $name',
+    async ({ arrange, wrapGit, until }) => {
+      setup({}, wrapGit ? { wrapGit } : {});
+      const { passId, settings } = await openedPass();
+      signOff(settings, 'src/settings/page.tsx', 'signed off\n');
+      arrange(passId);
+
+      await prs.open(passId);
+      await h.jobs.idle();
+      if (until)
+        await vi.waitFor(() => {
+          expect(until(passId)).toBe(true);
+        });
+      await prs.stopPassChecks(passId);
+      // The close writes the body again, marking the pull request ready.
+      await prs.ensurePassPr({ passId, ready: true }, new AbortController().signal);
+
+      const url = getPassPullRequest(h.store.db, passId)?.url ?? '';
+      expect(h.gh.body(url)).not.toContain('Gate running');
+      expect(h.gh.body(url)).toContain('Gate result unknown');
+    },
+  );
+
   it('after a restart, writes no running gate into the body when none runs', async () => {
     setup();
     const { passId, settings } = await openedPass();

@@ -131,15 +131,24 @@ const message = (error: unknown): string =>
 export function createPassPullRequests(deps: PassPullRequestDeps): PassPullRequests {
   const db = deps.state.db;
   /**
-   * How each pass's body says it was checked, as its last gate left it, or as the gate Open Pull
-   * Request is about to start. A pass with none here had no gate in this daemon's life.
+   * How each pass's body says it was checked, as its last gate left it. A pass with none here has
+   * had no gate finish in this daemon's life.
    */
   const checked = new Map<PassId, PassPrCheck>();
+  /**
+   * The pushed commit of each pass whose gate Open Pull Request is about to start, or is running:
+   * set before the draft it writes, and gone on every way out (the gate's end, a failure before it
+   * started, a pass no longer open, a stop).
+   */
+  const gating = new Map<PassId, string>();
 
   function checkOf(pass: PassDto, project: ProjectDto, sha: string): PassPrCheck {
+    const command = shipCheck(project)?.command;
+    const running = gating.get(pass.id);
+    if (running !== undefined && passGateKind(project) === PassPullRequestGate.Scratch)
+      return { kind: 'scratch', command: command ?? '', sha: running, state: 'running' };
     const known = checked.get(pass.id);
     if (known) return known;
-    const command = shipCheck(project)?.command;
     switch (passGateKind(project)) {
       case PassPullRequestGate.None:
         return { kind: 'none' };
@@ -323,9 +332,17 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
   const checks = createPassChecks({
     ...deps,
     gate: async ({ passId, sha, signal }) => {
-      await gatePassTip({ passId, sha, where: 'scratch', signal });
-      // The body says how the gate went; a shutdown or a close that stopped it writes nothing.
-      if (!signal.aborted) await rewriteBody(passId, sha, signal);
+      try {
+        await gatePassTip({ passId, sha, where: 'scratch', signal });
+      } catch (error) {
+        // It could not run: no result of it is known, and the body says so.
+        checked.delete(passId);
+        throw error;
+      } finally {
+        if (gating.get(passId) === sha) gating.delete(passId);
+        // The body says how the gate went; a shutdown or a close that stopped it writes nothing.
+        if (!signal.aborted) await rewriteBody(passId, sha, signal);
+      }
     },
     review: deps.review,
     // The body says when the review read only part of the diff.
@@ -385,7 +402,10 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
     gatePassTip,
     pushPassBranch,
     ensurePassPr,
-    stopPassChecks: (passId) => checks.stop(passId),
+    async stopPassChecks(passId) {
+      await checks.stop(passId);
+      gating.delete(passId);
+    },
     preview,
     async open(passId) {
       const shown = await preview(passId);
@@ -407,6 +427,10 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
       deps.jobs.run(jobKey(batch, JobQueue.Ship), async (signal) => {
         if (signal.aborted || getPass(db, passId).state !== PassState.Open || branch === null)
           return;
+        // The commit this job marked as about to be gated, and whether the checks took the gate on,
+        // whose end clears the mark.
+        let marked: string | null = null;
+        let handed = false;
         try {
           if ((await pushPassBranch(passId, signal)) === 'no_origin') return;
           const sha = await deps.git.branchTip(project.repoPath, branch);
@@ -414,16 +438,14 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
           // and no gate or review, is started for it.
           if (sha === null || !stillOpen()) return;
           // The gate starts once the pull request is there: its body says the gate is running.
-          if (gates)
-            checked.set(passId, {
-              kind: 'scratch',
-              command: shipCheck(project)?.command ?? '',
-              sha,
-              state: 'running',
-            });
+          if (gates) {
+            gating.set(passId, sha);
+            marked = sha;
+          }
           await ensurePassPr({ passId, ready: false }, signal);
           deps.state.write((w) => clearPassNotice(w, passId, PR_OPEN_NOTICE));
           if (!stillOpen()) return;
+          handed = gates;
           checks.start({
             passId,
             sha,
@@ -450,10 +472,15 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
               at: w.now,
             });
           });
+        } finally {
+          if (!handed && marked !== null && gating.get(passId) === marked) gating.delete(passId);
         }
       });
       return { url: shown.existing?.url ?? null, base: shown.base, gate: shown.gate, review };
     },
-    stop: () => checks.stopAll(),
+    async stop() {
+      await checks.stopAll();
+      gating.clear();
+    },
   };
 }
