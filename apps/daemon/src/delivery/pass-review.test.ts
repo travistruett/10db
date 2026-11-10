@@ -185,8 +185,8 @@ describe('reviewPassTip', () => {
     expect(asked[1]?.prompt).toContain('only what changed since the last review');
   });
 
-  it('says in the header that a diff too long to read whole was cut', async () => {
-    const { deps } = setup('No findings.');
+  it('says in the header that a diff too long to read whole was cut, until a review reads all of it', async () => {
+    const { deps, asked } = setup('No findings.');
     const { passId } = await openedPass();
     const tip = h.commit('src/settings/page.tsx', `${'x'.repeat(100)}\n`.repeat(5_000));
 
@@ -200,6 +200,22 @@ describe('reviewPassTip', () => {
         text: expect.stringContaining('was not reviewed') as unknown,
       }),
     ]);
+    const cut = () =>
+      getPassProgress(h.store.db, passId).notices.filter((n) => n.id === 'review-cut');
+
+    // A small commit after the cut: its own diff is short, but the cut tail was never read, so the
+    // cut tip is not counted as read and the next review starts where the cut one did.
+    const small = h.commit('src/people/page.tsx', 'people, signed\n');
+    expect(await review(deps, passId, small)).toBe('reviewed');
+    expect(asked[1]?.prompt).not.toContain('only what changed since the last review');
+    expect(cut()).toHaveLength(1);
+    expect(getPassProgress(h.store.db, passId).reviewedSha).toBeNull();
+
+    // The long file goes back to a short one: the whole diff fits, so all of it is read.
+    const short = h.commit('src/settings/page.tsx', 'signed off\n');
+    expect(await review(deps, passId, short)).toBe('reviewed');
+    expect(cut()).toEqual([]);
+    expect(getPassProgress(h.store.db, passId).reviewedSha).toBe(short);
   });
 
   it("clears the header's findings of the last review when the next one reads a new tip", async () => {

@@ -129,8 +129,8 @@ function noticeLine(finding: Finding): string {
  * The one review of the pass's tip `sha` (D21), unless it read that tip already: the diff from the tip
  * the last review read, else from where the tip leaves `base`, through the project's review step's
  * model and effort. Each finding is a notice offered to the page whose file it names, else in the
- * pass's header, and the tip is recorded as read. Answers what it did; a failure to ask the model is
- * thrown, and records nothing, so the next Open Pull Request asks again.
+ * pass's header, and the tip is recorded as read unless the diff was cut. Answers what it did; a
+ * failure to ask the model is thrown, and records nothing, so the next Open Pull Request asks again.
  */
 export async function reviewPassTip(
   deps: Pick<DeliveryContext, 'state' | 'git' | 'logger' | 'clock'> & PassReviewDeps,
@@ -194,8 +194,9 @@ export async function reviewPassTip(
         at: w.now,
       });
     });
-    // The tip counts as read, so the cut part is not asked again; the header and the body say so.
-    if (diff.truncated)
+    // A cut diff leaves its tail unread: the tip is not counted as read, so the next review starts
+    // where this one did, and the header and the body say so until a review reads all of it.
+    if (diff.truncated) {
       setPassNotice(w, input.passId, {
         id: REVIEW_CUT_NOTICE,
         kind: PassNoticeKind.Finding,
@@ -204,7 +205,9 @@ export async function reviewPassTip(
         cardId: null,
         at: w.now,
       });
-    else clearPassNotice(w, input.passId, REVIEW_CUT_NOTICE);
+      return;
+    }
+    clearPassNotice(w, input.passId, REVIEW_CUT_NOTICE);
     setReviewedSha(w, input.passId, input.sha);
   });
   deps.logger.info(
