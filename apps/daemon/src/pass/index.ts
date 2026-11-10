@@ -25,6 +25,7 @@ export { resumePassWork } from './resume';
 export { passView } from './view';
 export { grantSharedHold, holdRef, sharedRef } from './shared-hold';
 export { askShared, sharedAskNeeded, type SharedAnswer } from './shared-ask';
+export { dropShared, sharedUnlanded, type DropDone } from './shared-drop';
 export {
   closeHoldsOf,
   keepCommitToolPaths,

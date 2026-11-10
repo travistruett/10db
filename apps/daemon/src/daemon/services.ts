@@ -11,6 +11,7 @@ import {
   type McpServerStatusDto,
   ProjectInput,
   PassState,
+  SharedChoiceKind,
   ProjectLanding,
   Provider,
   providerOf,
@@ -105,7 +106,7 @@ import { adoptGoal } from '../goals';
 import { GitError, type Git } from '../git';
 import { hazardAssessmentDto, type HazardAssessor } from '../hazards';
 import { earlierMcpApproval, requestMcpApproval, type InboxService } from '../inbox';
-import { passView, TakeOutWithin, type TakeOutInput } from '../pass';
+import { passView, sharedUnlanded, TakeOutWithin, type TakeOutInput } from '../pass';
 import type { KeepAwake } from '../keep-awake';
 import type { Runner } from '../runner';
 import type { Scheduler } from '../scheduler';
@@ -356,7 +357,7 @@ export function createServices(deps: {
       return { ...opened, dirt: [...opened.dirt], waiting: [...opened.waiting] };
     },
     passView: (passId) => passView(db, passId),
-    takeOutPage(passId, taskId, input) {
+    async takeOutPage(passId, taskId, input) {
       const pass = getPass(db, passId);
       const task = getTask(db, taskId);
       if (pass.state !== PassState.Open)
@@ -365,11 +366,30 @@ export function createServices(deps: {
         );
       if (passHoldingTask(db, task)?.id !== passId)
         throw new ConflictError(`${task.title} is not a page of pass "${pass.name}"`);
-      return deps.takeOut({
-        taskId,
-        within: TakeOutWithin.Alone,
-        ...(input.shared === undefined ? {} : { shared: input.shared }),
-      });
+      // A Drop is taken only for a change of the page the preview offers it for.
+      const offered = new Map(
+        (await sharedUnlanded(deps, { passId, taskId })).map((c) => [c.seq, c.dropRefusal]),
+      );
+      for (const choice of input.shared) {
+        if (choice.choice !== SharedChoiceKind.Drop) continue;
+        if (!offered.has(choice.seq))
+          throw new ConflictError(
+            `Shared change ${String(choice.seq)} is not one of ${task.title}'s that has not landed`,
+          );
+        const refused = offered.get(choice.seq);
+        if (refused)
+          throw new ConflictError(
+            `Shared change ${String(choice.seq)} cannot be dropped: ${refused}`,
+          );
+      }
+      return deps.takeOut({ taskId, within: TakeOutWithin.Alone, shared: input.shared });
+    },
+    async takeOutPreview(passId, taskId) {
+      const pass = getPass(db, passId);
+      const task = getTask(db, taskId);
+      if (passHoldingTask(db, task)?.id !== passId)
+        throw new ConflictError(`${task.title} is not a page of pass "${pass.name}"`);
+      return { shared: await sharedUnlanded(deps, { passId, taskId }) };
     },
     abandonPass(passId) {
       const pass = getPass(db, passId);

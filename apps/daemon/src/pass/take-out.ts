@@ -36,6 +36,7 @@ import {
 } from '@10db/db';
 import { jobKey, JobQueue, passDirtRef } from '../delivery';
 import { foldHandEdits } from './hand-edits';
+import { dropShared } from './shared-drop';
 import {
   keepTurnWork,
   keptRef,
@@ -156,8 +157,10 @@ function unfinishedTakeOut(deps: PassWorkDeps, taskId: TaskId): PassTakeOutRow |
  * (the task stays in the pass, the thread names the files), one inside an Abandon or a close leaves
  * those files as they are and goes on; 4 puts each page file back as the pass's branch has it where
  * something landed on it during the pass, else as it was before the pass, hashing each again just
- * before (one changed since is left and named); 5 leaves the pass for the Board, its work at its
- * kept ref.
+ * before (one changed since is left and named), then drops each shared change chosen Drop, newest
+ * first (inside an Abandon or a close without its refusals, never without the hash before each
+ * write; a refused one stays on the chain and the thread says why); 5 leaves the pass for the Board,
+ * its work at its kept ref.
  */
 export async function takeOutSteps(
   deps: TakeOutDeps,
@@ -271,6 +274,18 @@ export async function takeOutSteps(
       ({ left } = restored);
       await git.refreshIndex(repo, restored.written);
     }
+    // The shared changes chosen Drop, newest first, so each later one is back before an earlier.
+    const kept: string[] = [];
+    for (const seq of [...row.drops].sort((a, b) => b - a)) {
+      const dropped = await dropShared(deps, {
+        passId: pass.id,
+        seq,
+        force: input.within !== TakeOutWithin.Alone,
+      });
+      if (dropped.refused !== null)
+        kept.push(`Shared change ${String(seq)} is kept on the chain: ${dropped.refused}.`);
+      left = [...left, ...dropped.left];
+    }
     const changed = left;
     row = deps.state.write((ctx) => {
       if (changed.length > 0)
@@ -279,6 +294,7 @@ export async function takeOutSteps(
           task.id,
           `Left as they are, because they changed after they were checked:\n${listed(changed)}`,
         );
+      for (const line of kept) insertSystemNotice(ctx, task.id, line);
       return advanceTakeOut(ctx, key, {
         step: TakeOutStep.PutBack,
         left: [...row.left, ...changed],

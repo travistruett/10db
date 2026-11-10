@@ -9,6 +9,7 @@ import {
   PassOpenedDto,
   PassViewDto,
   ProjectDto,
+  TakeOutPreviewDto,
   TakeOutResultDto,
   TaskDto,
   WorkstreamChangesDto,
@@ -24,6 +25,7 @@ import {
   getTaskKeptWork,
   insertBatch,
   insertTakeOut,
+  lastTakeOut,
   latestPassTurn,
   leavePass,
   getWorkstreamRow,
@@ -675,6 +677,24 @@ describe('POST /passes/:passId/tasks/:taskId/take-out', () => {
     expect(listInbox(daemon.state.db, {}).filter((i) => i.kind === 'check')).toEqual([]);
     expect(getTaskRow(task).passId).toBeNull();
     expect(runOf(task).state).toBe('CANCELLED');
+  });
+
+  it('previews the shared changes it would ask about, and refuses a Drop the preview does not offer', async () => {
+    const { task, pass } = await openedPage(WORKING);
+    await waitFor(() => existsSync(join(repo.path, PAGE_FILE)));
+    const preview = await fetch(`${daemon.url}/passes/${pass.id}/tasks/${task.id}/take-out`, {
+      headers: { Authorization: `Bearer ${daemon.token}` },
+    });
+    expect(preview.status).toBe(200);
+    expect(TakeOutPreviewDto.parse(await preview.json())).toEqual({ shared: [] });
+
+    const res = await post(`/passes/${pass.id}/tasks/${task.id}/take-out`, {
+      shared: [{ seq: 1, choice: 'drop' }],
+    });
+    expect(res.status).toBe(409);
+    // Refused before anything ran: no take-out began, and the page works on.
+    expect(lastTakeOut(daemon.state.db, task.id)).toBeUndefined();
+    expect(getTaskRow(task).passId).toBe(pass.id);
   });
 
   it('refuses with 409 while the pass is not open, or for a task it does not hold', async () => {

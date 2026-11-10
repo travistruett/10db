@@ -67,6 +67,7 @@ import type {
   PassAbandonedDto,
   PassOpenRequest,
   PassViewDto,
+  TakeOutPreviewDto,
   TakeOutRequest,
   TakeOutResultDto,
   PersonaDto,
@@ -255,10 +256,17 @@ export interface ApiServices {
   passView(passId: PassId): PassViewDto;
   /**
    * Takes a page out of its pass (spec §5.4): its agent stopped, its work kept with the task, its files
-   * put back as they were without it, and the task back on the Board. Refused (409) while the pass is
-   * not open or does not hold the task; answers `tookOut: false` when the page's files kept changing.
+   * put back as they were without it, and the task back on the Board, its shared changes chosen Drop
+   * put back too. Refused (409) while the pass is not open or does not hold the task, and for a Drop
+   * of a change that is not the page's to drop or that the preview would not offer; answers
+   * `tookOut: false` when the page's files kept changing.
    */
   takeOutPage(passId: PassId, taskId: TaskId, input: TakeOutRequest): Promise<TakeOutResultDto>;
+  /**
+   * What taking the page out would ask (spec §7.2): each of its shared changes that has not landed,
+   * with why Drop is not offered for it, if it is not, and the pages that changed its files later.
+   */
+  takeOutPreview(passId: PassId, taskId: TaskId): Promise<TakeOutPreviewDto>;
   /**
    * Abandons the pass (spec §5.4, D23): every unsigned page taken out and put back, the pass and its
    * batch `ABANDONED`, and the folder returned when nothing landed. Refused (409) once the pass is

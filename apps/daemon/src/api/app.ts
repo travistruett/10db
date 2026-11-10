@@ -728,6 +728,14 @@ export function createApp(deps: ApiDeps) {
     .get('/passes/:passId', (c) =>
       c.json(deps.services.passView(PassId.parse(c.req.param('passId')))),
     )
+    .get('/passes/:passId/tasks/:taskId/take-out', async (c) =>
+      c.json(
+        await deps.services.takeOutPreview(
+          PassId.parse(c.req.param('passId')),
+          TaskId.parse(c.req.param('taskId')),
+        ),
+      ),
+    )
     .post(
       '/passes/:passId/tasks/:taskId/take-out',
       validator('json', (value): TakeOutRequest => TakeOutRequest.parse(value)),
