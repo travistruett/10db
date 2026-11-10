@@ -19,6 +19,7 @@
         "task.created",
         "task.changed",
         "task.message_added",
+        "task.screen_added",
         "pass.opened",
         "pass.changed",
         "pass.turn_started",

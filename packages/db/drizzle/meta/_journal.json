@@ -407,6 +407,13 @@
       "when": 1794341199934,
       "tag": "0057_little_gauntlet",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "6",
+      "when": 1794343618650,
+      "tag": "0058_common_vindicator",
+      "breakpoints": true
     }
   ]
 }

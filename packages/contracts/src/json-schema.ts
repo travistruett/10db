@@ -1,4 +1,11 @@
 import { z } from 'zod';
+import {
+  PicturesStatusDto,
+  ScreensMatrix,
+  TaskScreenAddedData,
+  TaskScreenDto,
+  TaskScreensDto,
+} from './task-screens';
 import { TaskFileDto, TaskMessageDto, TaskMessageInput, TaskThreadDto } from './task-thread';
 import {
   PassAbandonedDto,
@@ -357,6 +364,11 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'task-message-dto': TaskMessageDto,
   'task-message-input': TaskMessageInput,
   'task-thread-dto': TaskThreadDto,
+  'task-screen-dto': TaskScreenDto,
+  'task-screens-dto': TaskScreensDto,
+  'task-screen-added-data': TaskScreenAddedData,
+  'screens-matrix': ScreensMatrix,
+  'pictures-status-dto': PicturesStatusDto,
   'pass-dto': PassDto,
   'pass-view-dto': PassViewDto,
   'pass-turn-dto': PassTurnDto,

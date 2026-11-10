@@ -4,6 +4,7 @@ import { AllowedCommands } from './allowed-commands';
 import { ModelSetting } from './catalogue';
 import { BranchName, PrTitlePrefix } from './git-names';
 import { AreaRole, AreaRoute, areaRolesProblem } from './page-areas';
+import { ScreensMatrix } from './task-screens';
 import {
   AccountId,
   BatchId,
@@ -648,6 +649,12 @@ export const AppUrl = z
   );
 export type AppUrl = z.infer<typeof AppUrl>;
 
+/** The dev login command as the builder types it; a blank one is no command. */
+const DevLoginCommand = z
+  .string()
+  .max(2000)
+  .transform((c) => (c.trim() === '' ? null : c));
+
 export const ProjectDto = z.object({
   id: ProjectId,
   name: z.string(),
@@ -703,6 +710,10 @@ export const ProjectDto = z.object({
   isolate: z.array(z.string()),
   /** Where the builder's dev server answers; null when the project has not said. */
   appUrl: AppUrl.nullable(),
+  /** Prints a URL or path on the app's address that signs a browser in; null when the app needs none. */
+  devLoginCommand: z.string().nullable(),
+  /** The viewports and themes each page's pictures are taken in. */
+  screens: ScreensMatrix,
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });
@@ -747,6 +758,9 @@ export const ProjectPatch = z
     isolate: Isolate,
     /** Where Open Page goes; null forgets it. */
     appUrl: AppUrl.nullable(),
+    /** Run under the gate's sandbox before pictures; blank or null forgets it. */
+    devLoginCommand: DevLoginCommand.nullable(),
+    screens: ScreensMatrix,
   })
   .partial()
   .refine((p) => Object.keys(p).length > 0, { message: 'Change at least one field' })

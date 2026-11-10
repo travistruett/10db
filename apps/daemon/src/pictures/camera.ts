@@ -1,0 +1,66 @@
+import type { AppUrl, ScreenTheme, ScreenViewport } from '@10db/contracts';
+import type { StorageState } from './storage-state';
+
+// Workbench spec docs/superpowers/specs/2026-11-09-10db-workbench-design.md §10, §13: the seam between
+// what takes pictures and the browser. A `PageCamera` is the only thing that touches Playwright; the
+// queue, the sign-in and the service above it are built against this interface.
+
+/** The browser's readiness; `fetching` carries a promise that settles once the pinned build is ready or refused. */
+export type BrowserStatus =
+  | { readonly state: 'off' | 'ready'; readonly problem: null }
+  | { readonly state: 'fetching'; readonly problem: null; readonly ready: Promise<boolean> }
+  | { readonly state: 'refused'; readonly problem: string };
+
+/**
+ * How a load went: the page as asked (`clean`), the page under a dev server's error overlay
+ * (`overlay`), no page (`failed`, a landing off the app's origin included), or another page of the app
+ * (`elsewhere`, such as a sign-in page).
+ */
+export const ShotOutcome = {
+  Clean: 'clean',
+  Overlay: 'overlay',
+  Failed: 'failed',
+  Elsewhere: 'elsewhere',
+} as const;
+export type ShotOutcome = (typeof ShotOutcome)[keyof typeof ShotOutcome];
+
+export interface Shot {
+  readonly outcome: ShotOutcome;
+  /** The viewport's PNG; for `clean` and `overlay` only. */
+  readonly png: Uint8Array | null;
+  readonly width: number;
+  readonly height: number;
+  /** The page's URL after redirects, origin included. */
+  readonly landedUrl: string | null;
+  /** At most 4 KB of the overlay's text. */
+  readonly overlayText: string | null;
+  /** For `failed`: the navigation error or the status. */
+  readonly reason: string | null;
+}
+
+export interface ShootInput {
+  readonly appUrl: AppUrl;
+  readonly route: string;
+  readonly viewport: ScreenViewport;
+  readonly theme: ScreenTheme;
+  readonly storageState: StorageState | null;
+  readonly signal: AbortSignal;
+}
+
+export interface SignInInput {
+  readonly appUrl: AppUrl;
+  readonly url: string;
+  readonly signal: AbortSignal;
+}
+
+export interface PageCamera {
+  shoot(input: ShootInput): Promise<Shot>;
+  /**
+   * Opens `url` (same origin as `appUrl`) in a fresh context, under the same guard as a shot, and
+   * answers its storage state; throws when it lands off the app's origin.
+   */
+  signIn(input: SignInInput): Promise<StorageState>;
+  /** The browser's readiness, for Settings: fetching, ready, refused (with why), off. */
+  status(): BrowserStatus;
+  close(): Promise<void>;
+}

@@ -267,6 +267,58 @@
         "null"
       ]
     },
+    "devLoginCommand": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "screens": {
+      "type": "object",
+      "properties": {
+        "viewports": {
+          "minItems": 1,
+          "maxItems": 3,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "width": {
+                "type": "integer",
+                "minimum": 320,
+                "maximum": 3840
+              },
+              "height": {
+                "type": "integer",
+                "minimum": 320,
+                "maximum": 2400
+              }
+            },
+            "required": [
+              "width",
+              "height"
+            ]
+          }
+        },
+        "themes": {
+          "minItems": 1,
+          "maxItems": 3,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "default",
+              "light",
+              "dark"
+            ]
+          }
+        }
+      },
+      "required": [
+        "viewports",
+        "themes"
+      ]
+    },
     "createdAt": {
       "type": "string",
       "format": "date-time",
@@ -313,6 +365,8 @@
     "worktreeSeed",
     "isolate",
     "appUrl",
+    "devLoginCommand",
+    "screens",
     "createdAt",
     "updatedAt"
   ]

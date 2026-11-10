@@ -90,6 +90,11 @@ import type {
   SupportedAccountKind,
   TaskId,
   TaskFileId,
+  TaskScreenId,
+  ScreenKind,
+  ScreenTheme,
+  ScreenViewport,
+  ScreensMatrix,
   TaskLanding,
   TaskMessageAuthor,
   TaskMessageId,
@@ -266,6 +271,13 @@ export const projects = sqliteTable('projects', {
     .default(sql`'["migrations","deps"]'`),
   /** Where the builder's dev server answers, a loopback origin; null when the project has not said. */
   appUrl: text('app_url').$type<AppUrl>(),
+  /** Prints the address that signs the browser for pictures in; null when the app needs no sign-in. */
+  devLoginCommand: text('dev_login_command'),
+  /** The viewports and themes a page's pictures are taken in. */
+  screens: text('screens', { mode: 'json' })
+    .$type<ScreensMatrix>()
+    .notNull()
+    .default(sql`'{"viewports":[{"width":1440,"height":900}],"themes":["default"]}'`),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -1862,3 +1874,38 @@ export const passSignOffs = sqliteTable('pass_sign_offs', {
     .references(() => passHolds.claimId),
   askedAt: text('asked_at').notNull(),
 });
+
+/**
+ * A picture of the builder's app taken for a task (Workbench spec §10, §11): its file lies under the data
+ * directory by its hash, and a file no unpruned row names is deleted. A pruned row keeps its record.
+ */
+export const taskScreens = sqliteTable(
+  'task_screens',
+  {
+    id: text('id').$type<TaskScreenId>().primaryKey(),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .notNull()
+      .references(() => tasks.id),
+    turnId: text('turn_id')
+      .$type<PassTurnId>()
+      .references(() => passTurns.id),
+    kind: text('kind').$type<ScreenKind>().notNull(),
+    route: text('route').notNull(),
+    viewport: text('viewport', { mode: 'json' }).$type<ScreenViewport>().notNull(),
+    theme: text('theme').$type<ScreenTheme>().notNull(),
+    sha256: text('sha256').notNull(),
+    size: integer('size').notNull(),
+    width: integer('width').notNull(),
+    height: integer('height').notNull(),
+    storedPath: text('stored_path').notNull(),
+    /** The pass turn's kept commit, or the folder's HEAD, the picture was taken at. */
+    keptSha: text('kept_sha'),
+    createdAt: createdAt(),
+    prunedAt: text('pruned_at'),
+  },
+  (t) => [
+    index('task_screens_task_idx').on(t.taskId, t.createdAt),
+    index('task_screens_sha_idx').on(t.sha256),
+  ],
+);

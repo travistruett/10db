@@ -40,6 +40,7 @@ export * from './shape-state';
 export * from './shapes';
 export * from './store';
 export * from './team';
+export * from './task-screens';
 export * from './task-thread';
 export * from './tasks';
 export * from './tool-ops';

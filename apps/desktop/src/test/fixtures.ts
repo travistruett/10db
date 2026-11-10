@@ -55,6 +55,8 @@ export function projectDto(overrides: Partial<ProjectDto> = {}): ProjectDto {
     worktreeSeed: ['node_modules'],
     isolate: ['migrations', 'deps'],
     appUrl: null,
+    devLoginCommand: null,
+    screens: { viewports: [{ width: 1440, height: 900 }], themes: ['default'] },
     createdAt: AT,
     updatedAt: AT,
     ...overrides,
