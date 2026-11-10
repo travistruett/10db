@@ -67,7 +67,8 @@ function Notice({
       {message.body}
     </Text>
   );
-  if (!message.sendable) return <Group px="sm">{text}</Group>;
+  // A page takes a message only while its pass is open, so Send to Agent is offered only then.
+  if (!message.sendable || !canSend) return <Group px="sm">{text}</Group>;
   return (
     <Group px="sm" gap="xs" wrap="nowrap" align="center">
       {text}
@@ -85,7 +86,6 @@ function Notice({
         variant="default"
         size="xs"
         loading={send.isPending}
-        disabled={!canSend}
         style={{ flex: 'none' }}
         onClick={() => {
           send.mutate({ taskId: message.taskId, noticeId: message.id });

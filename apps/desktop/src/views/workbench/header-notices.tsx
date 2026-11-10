@@ -4,7 +4,6 @@ import {
   PassNoticeKind,
   PassState,
   PassRetargetDetail,
-  passHoldsTasks,
   type InboxItemDto,
   type PassNotice,
   type PassViewDto,
@@ -46,8 +45,8 @@ interface NoticeRowProps {
   readonly notice: PassNotice;
   readonly pages: PassViewDto['pages'];
   readonly inbox: readonly InboxItemDto[];
-  /** Send to Agent is offered while the pass holds pages, and a page takes a message only while it is open. */
-  readonly sendTo: 'offered' | 'waiting' | 'none';
+  /** A page takes a message only while the pass is open, so Send to Agent is offered only then. */
+  readonly canSend: boolean;
   /** A Retarget card is answered while the pass is open or closed, never mid-close or mid-abandon. */
   readonly canRetarget: boolean;
 }
@@ -60,7 +59,7 @@ function noticeLines(text: string): { readonly first: string; readonly rest: str
   return { first: text.slice(0, end), rest: rest.trim() === '' ? null : rest };
 }
 
-function NoticeRow({ notice, pages, inbox, sendTo, canRetarget }: NoticeRowProps) {
+function NoticeRow({ notice, pages, inbox, canSend, canRetarget }: NoticeRowProps) {
   const send = useSendToAgent();
   const answer = useAnswerPassCard();
   const card = retargetCard(notice, inbox);
@@ -120,16 +119,10 @@ function NoticeRow({ notice, pages, inbox, sendTo, canRetarget }: NoticeRowProps
             {`Retarget to ${card.base}`}
           </Button>
         )}
-        {notice.sendable && sendTo !== 'none' && pages.length > 0 ? (
+        {notice.sendable && canSend && pages.length > 0 ? (
           <Menu position="bottom-end" withinPortal>
             <Menu.Target>
-              <Button
-                variant="default"
-                size="xs"
-                loading={send.isPending}
-                disabled={sendTo !== 'offered'}
-                style={{ flex: 'none' }}
-              >
+              <Button variant="default" size="xs" loading={send.isPending} style={{ flex: 'none' }}>
                 Send to Agent
               </Button>
             </Menu.Target>
@@ -194,7 +187,7 @@ export function HeaderNotices({ view, inbox }: HeaderNoticesProps) {
           notice={notice}
           pages={view.pages}
           inbox={inbox}
-          sendTo={state === PassState.Open ? 'offered' : passHoldsTasks(state) ? 'waiting' : 'none'}
+          canSend={state === PassState.Open}
           canRetarget={state === PassState.Open || state === PassState.Closed}
         />
       ))}

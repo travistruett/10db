@@ -111,8 +111,9 @@ describe('HeaderNotices', () => {
 
   it.each([
     { state: 'OPEN', send: 'enabled', retarget: true },
-    { state: 'CLOSING', send: 'disabled', retarget: false },
-    { state: 'ABANDONING', send: 'disabled', retarget: false },
+    // No page takes a message while the pass ends, so nothing offers to send one.
+    { state: 'CLOSING', send: 'hidden', retarget: false },
+    { state: 'ABANDONING', send: 'hidden', retarget: false },
     // A closed pass's Retarget card is still the daemon's to take; it holds no page to send to.
     { state: 'CLOSED', send: 'hidden', retarget: true },
   ] as const)(
@@ -137,7 +138,7 @@ describe('HeaderNotices', () => {
       );
       const sendButton = screen.queryByRole('button', { name: 'Send to Agent' });
       if (send === 'hidden') expect(sendButton).toBeNull();
-      else expect(sendButton).toHaveProperty('disabled', send === 'disabled');
+      else expect(sendButton).toHaveProperty('disabled', false);
     },
   );
 

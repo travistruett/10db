@@ -95,10 +95,10 @@ describe('Thread', () => {
       button: 'enabled',
     },
     {
-      name: 'offers a sendable notice disabled while the pass is not open',
+      name: 'offers nothing on a sendable notice while the pass is not open',
       sendable: true,
       canSend: false,
-      button: 'disabled',
+      button: 'none',
     },
     {
       name: 'offers nothing on a notice that is not sendable',
@@ -137,8 +137,6 @@ describe('Thread', () => {
     );
     if (button === 'none') return;
     if (send === null) throw new Error('the notice offers no Send to Agent');
-    expect(send).toHaveProperty('disabled', button === 'disabled');
-    if (button === 'disabled') return;
     fireEvent.click(send);
     await waitFor(() => {
       expect(posted).toEqual([{ taskId: page.taskId, messageId: finding.id }]);
