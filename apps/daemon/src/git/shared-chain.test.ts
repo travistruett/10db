@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTempRepo, isolatedGitEnv, type TempDir } from '../../test/fixtures';
-import { createGit, KeptRefMovedError } from './index';
+import { createGit, KeptRefMovedError, PassFolderOffBranchError } from './index';
 
 // Workbench spec §7.2: a shared hold's record is an unsigned commit of the folder's content, and the
 // pass's shared chain moves by compare-and-swap, one unsigned commit per change, never an empty one.
@@ -162,5 +162,83 @@ describe('blobsAt and keepRef', () => {
     const ref = 'refs/10db/passes/pas_1/holds/clm_1';
     await git.keepRef(repo.path, ref, start);
     expect(rawGit('rev-parse', ref)).toBe(start);
+  });
+});
+
+describe('landPaths', () => {
+  const OP = 'pass:pas_1:sign-off:wst_1';
+  /** A commit off the branch holding `files`, as a page's kept commit is. */
+  async function keptWith(files: Record<string, string | null>): Promise<string> {
+    for (const [path, text] of Object.entries(files))
+      if (text === null) unlinkSync(join(repo.path, path));
+      else write(path, text);
+    const { sha } = await git.recordPaths({
+      repo: repo.path,
+      base: start,
+      paths: Object.keys(files),
+    });
+    return sha;
+  }
+  const land = (from: string, paths: readonly string[], opId = OP) =>
+    git.landPaths({
+      repo: repo.path,
+      branch: '10db/polish',
+      from,
+      paths,
+      message: 'Settings: tidy the form\n\n10db-task: tsk_1',
+      opId,
+    });
+
+  it('lands the named paths alone as one commit on the tip, a deleted one gone, and the index follows', async () => {
+    const kept = await keptWith({ 'src/shared.ts': 'tidied\n', 'src/button.ts': null });
+    write('src/notes.ts', 'never named\n');
+
+    const landed = await land(kept, ['src/shared.ts', 'src/button.ts']);
+
+    expect(landed).toMatchObject({ alreadyLanded: false, indexStale: false });
+    expect(rawGit('rev-parse', '10db/polish')).toBe(landed.sha);
+    expect(rawGit('rev-parse', `${landed.sha ?? ''}^`)).toBe(start);
+    expect(rawGit('show', '10db/polish:src/shared.ts')).toBe('tidied');
+    expect(rawGit('ls-tree', '--name-only', '-r', '10db/polish', 'src')).toBe('src/shared.ts');
+    expect(
+      rawGit('log', '-1', '--format=%s%n%(trailers:key=10db-task,valueonly)', '10db/polish'),
+    ).toBe('Settings: tidy the form\ntsk_1');
+    // The folder's own git reads the landed paths as committed; the unnamed file is still its own.
+    expect(rawGit('status', '--porcelain')).toBe('?? src/notes.ts');
+  });
+
+  it('answers the commit a rerun already made by its operation id, and lands nothing twice', async () => {
+    const kept = await keptWith({ 'src/shared.ts': 'tidied\n' });
+    const first = await land(kept, ['src/shared.ts']);
+
+    // The daemon stopped after the commit and before its row: the rerun names no path left to land.
+    const again = await land(kept, []);
+
+    expect(again).toMatchObject({ sha: first.sha, alreadyLanded: true });
+    expect(rawGit('rev-list', '--count', `${start}..10db/polish`)).toBe('1');
+  });
+
+  it('makes no commit for paths the tip already holds as named', async () => {
+    const landed = await land(start, ['src/shared.ts']);
+    expect(landed).toMatchObject({ sha: null, alreadyLanded: false });
+    expect(rawGit('rev-parse', '10db/polish')).toBe(start);
+  });
+
+  it('refuses while the folder is off the branch, and moves nothing', async () => {
+    const kept = await keptWith({ 'src/shared.ts': 'tidied\n' });
+    rawGit('switch', '-q', 'main');
+    await expect(land(kept, ['src/shared.ts'])).rejects.toThrow(PassFolderOffBranchError);
+    expect(rawGit('rev-parse', '10db/polish')).toBe(start);
+  });
+
+  it("says the folder's index is stale when another git holds it, after landing the commit", async () => {
+    const kept = await keptWith({ 'src/shared.ts': 'tidied\n' });
+    writeFileSync(join(repo.path, '.git/index.lock'), '');
+
+    const landed = await land(kept, ['src/shared.ts']);
+
+    unlinkSync(join(repo.path, '.git/index.lock'));
+    expect(landed.indexStale).toBe(true);
+    expect(rawGit('show', '10db/polish:src/shared.ts')).toBe('tidied');
   });
 });

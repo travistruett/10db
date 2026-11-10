@@ -15,6 +15,7 @@ export {
   type BranchMerge,
   type ChainCommit,
   type ChainCommitInput,
+  type LandedPaths,
   type CheckoutPlace,
   type FolderAt,
   type Git,
