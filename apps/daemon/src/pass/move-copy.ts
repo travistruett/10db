@@ -15,6 +15,7 @@ import {
   type WorkstreamId,
 } from '@10db/contracts';
 import {
+  findOpenByFoldKey,
   getTask,
   insertSystemNotice,
   listInbox,
@@ -87,7 +88,8 @@ function notNowAnswered(db: DbReader, pass: PassDto, taskId: TaskId): InboxItemD
 }
 
 /**
- * Raises, or refreshes, the task's one Move to a Separate Copy card, in the caller's write. Once the builder answered Not Now in this pass, no card
+ * Raises, or refreshes, the task's one Move to a Separate Copy card, in the caller's write; a new
+ * card puts one line on the page's thread. Once the builder answered Not Now in this pass, no card
  * is raised again: the answered one is named, with `notNow`.
  */
 export function askMoveToCopy(
@@ -103,6 +105,7 @@ export function askMoveToCopy(
   if (answered !== undefined) return { inboxId: answered.id, notNow: true };
   const task = getTask(ctx.tx, input.taskId);
   const key = moveToCopyKey(input.taskId);
+  const raised = findOpenByFoldKey(ctx.tx, input.pass.projectId, key) === undefined;
   const detail: PassMoveToCopyDetail = {
     kind: 'pass_move_to_copy',
     passId: input.pass.id,
@@ -126,6 +129,12 @@ export function askMoveToCopy(
       { label: PASS_NOT_NOW_CHOICE, description: 'Leaves the page in the pass without the hazard' },
     ],
   });
+  if (raised)
+    insertSystemNotice(
+      ctx,
+      input.taskId,
+      `The agent asked for the ${input.hazard} hazard, which runs in a separate copy: "Move to a Separate Copy" waits in the Inbox.`,
+    );
   return { inboxId: card.id, notNow: false };
 }
 

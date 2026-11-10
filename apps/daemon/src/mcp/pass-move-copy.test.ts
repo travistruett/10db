@@ -106,6 +106,14 @@ describe('a pass lane asking for the deps hazard', () => {
       PASS_MOVE_TO_COPY_CHOICE,
       PASS_NOT_NOW_CHOICE,
     ]);
+    // The page's thread says so once, for the card, not once per ask.
+    expect(
+      listTaskThread(w.h.store.db, w.settings.id)
+        .map((m) => m.body)
+        .filter((body) => body.includes('Move to a Separate Copy')),
+    ).toEqual([
+      'The agent asked for the deps hazard, which runs in a separate copy: "Move to a Separate Copy" waits in the Inbox.',
+    ]);
   });
 
   it('is granted as today on a project with no copies, and the thread says the page will be slow', async () => {
