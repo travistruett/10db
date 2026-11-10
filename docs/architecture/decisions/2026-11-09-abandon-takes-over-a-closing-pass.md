@@ -14,6 +14,11 @@ aborted and waited for, still outside the key, since the close holds it; the clo
 write. Step 2 moves a `SHIPPING` batch to `FAILED`, so step 7 can make it `ABANDONED`. Step 5 takes out only the
 pages that are not signed off; signed-off pages stay as landed and are named in the answer's `stays`.
 
+From step 7 the close is the only way out. While Your folder is off the pass's branch (and not on the return
+branch at the pass's tip), the close waits with the folder card, holding the project's delivery key, and an
+Abandon is refused: switching Your folder back is what lets it finish. A close that stops on an error from step 7
+says so in its header notice, which offers Close Pass and no Abandon.
+
 ## Why
 
 Spec §5.4: an Abandon is the exit that always works, also while a close is stuck in a long gate. Once the return

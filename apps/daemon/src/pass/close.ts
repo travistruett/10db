@@ -620,12 +620,21 @@ export function createPassCloses(deps: CloseDeps): PassCloses {
   };
 }
 
-/** The header notice of a close that stopped on an error: Close Pass or the next start goes on, or Abandon. */
+/**
+ * The header notice of a close that stopped on an error: Close Pass or the next start goes on, or,
+ * before its fast-forward, Abandon ends it. From step 7 the return branch may have moved, and an
+ * Abandon is refused.
+ */
 function noticeStuck(ctx: WriteContext, passId: PassId, error: unknown): void {
+  const step = getPassProgress(ctx.tx, passId).closeStep ?? 0;
+  const end =
+    step >= CloseStep.FastForwarded
+      ? `its fast-forward may have moved ${getPass(ctx.tx, passId).returnBranch}, so it can no longer be abandoned`
+      : 'Abandon Pass ends it';
   setPassNotice(ctx, passId, {
     id: CLOSE_NOTICE,
     kind: PassNoticeKind.Close,
-    text: `The close stopped: ${errorText(error)}. Close Pass goes on from where it stopped, as 10db does when it next starts; Abandon Pass ends it.`,
+    text: `The close stopped: ${errorText(error)}. Close Pass goes on from where it stopped, as 10db does when it next starts; ${end}.`,
     sendable: false,
     cardId: null,
     at: ctx.now,

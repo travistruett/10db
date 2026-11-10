@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   AbandonStep,
+  CloseStep,
   ConflictError,
   InboxState,
   PASS_SIGN_OFF_CHOICE,
@@ -27,6 +28,7 @@ import {
   schema,
   setAbandonStep,
   setClosePlan,
+  setCloseStep,
   updateInboxItem,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -620,6 +622,29 @@ describe('Close Pass', () => {
 
     expect(passState()).toBe('OPEN');
     expect(getPassProgress(w.h.store.db, w.opened.pass.id).closePlan).toBeNull();
+  });
+
+  it('offers no Abandon in its stuck notice once its fast-forward may have moved the return branch', async () => {
+    await world({ gateCommand: null });
+    await twoTurns();
+    w.h.git$('remote', 'remove', 'origin');
+    w.h.state.write((ctx) => {
+      setClosePlan(ctx, w.opened.pass.id, { token: 't', pages: [], files: [], shared: [] });
+      setCloseStep(ctx, w.opened.pass.id, CloseStep.FastForwarded);
+    });
+    // The builder went back to the return branch and deleted the pass's branch.
+    w.h.git$('switch', '-q', 'main');
+    w.h.git$('branch', '-D', w.branch);
+
+    createPassCloses(closeDeps()).resume();
+    await w.h.jobs.idle();
+
+    expect(passState()).toBe('CLOSING');
+    const stuck = getPassProgress(w.h.store.db, w.opened.pass.id).notices.find(
+      (n) => n.id === 'close',
+    );
+    expect(stuck?.text).toMatch(/^The close stopped: /);
+    expect(stuck?.text).not.toMatch(/Abandon/);
   });
 
   it('refuses an Abandon once its fast-forward may have moved the return branch', async () => {
