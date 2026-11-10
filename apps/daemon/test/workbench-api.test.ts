@@ -1,5 +1,8 @@
 import { execFileSync } from 'node:child_process';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import {
+  PagesProposalDto,
   PassAbandonedDto,
   PassDto,
   PassOpenedDto,
@@ -440,5 +443,45 @@ describe('DELETE /tasks/:taskId/kept-work', () => {
 
     expect((await send('DELETE', `/tasks/${task.id}/kept-work`)).status).toBe(409);
     expect(rawGit('rev-parse', `refs/10db/kept/${task.id}`)).toBe(sha);
+  });
+});
+
+/** Commits each file, with its path as its content, in the test's repository. */
+function commitFiles(paths: readonly string[]): void {
+  for (const path of paths) {
+    const file = join(repo.path, path);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, `${path}\n`);
+  }
+  rawGit('add', ...paths);
+  rawGit('commit', '-q', '--no-gpg-sign', '-m', 'An app');
+}
+
+describe('POST /projects/:projectId/propose-page-areas', () => {
+  it('proposes the screens the project has no page for, and says why it left out the one it has', async () => {
+    commitFiles([
+      'package.json',
+      'app/layout.tsx',
+      'app/(marketing)/page.tsx',
+      'app/settings/page.tsx',
+      'app/people/page.tsx',
+      'app/billing/page.tsx',
+    ]);
+    const project = await projectWith([
+      { name: 'settings', globs: ['app/settings/**'], role: 'page', route: '/settings' },
+      { name: 'repo', globs: ['**'], catchAll: true },
+    ]);
+
+    const proposal = await api().post(
+      `/projects/${project.id}/propose-page-areas`,
+      PagesProposalDto,
+    );
+
+    expect(proposal.pages.map((p) => [p.globs, p.role, p.route ?? null])).toEqual([
+      [['app/(marketing)/**'], 'page', null],
+      [['app/billing/**'], 'page', '/billing'],
+      [['app/people/**'], 'page', '/people'],
+    ]);
+    expect(proposal.skipped.map((s) => s.name)).toEqual(['settings']);
   });
 });

@@ -104,7 +104,7 @@ import {
 } from '../delivery';
 import { markGhRequired, withAgentStatus, type AgentTools } from '../environment';
 import type { EventBus, StateStore } from '../events';
-import { inspectFolder, proposeAreas, type AreaNamer } from '../folders';
+import { inspectFolder, proposeAreas, proposePageAreas, type AreaNamer } from '../folders';
 import { adoptGoal } from '../goals';
 import { GitError, type Git } from '../git';
 import { hazardAssessmentDto, type HazardAssessor } from '../hazards';
@@ -411,6 +411,12 @@ export function createServices(deps: {
     },
     renamePass: (passId, input) => deps.state.write((ctx) => renamePass(ctx, passId, input.name)),
     discardKeptWork: (taskId) => deps.discardKeptWork(taskId),
+    proposePageAreas: (projectId, signal) =>
+      proposePageAreas(
+        { git: deps.git, namer: deps.areaNamer, protectedRoots: deps.protectedRoots },
+        getProject(db, projectId),
+        signal,
+      ),
     async stopPage(taskId) {
       const task = getTask(db, taskId);
       const pass = passHoldingTask(db, task);
