@@ -35,6 +35,7 @@ import {
   type ToolDecision,
 } from './types';
 import { createFakeShapeSession, refusedShapeSession, type FakeShapeBehaviour } from './fake-shape';
+import { claudeToolTarget } from './tool-target';
 
 const Json: z.ZodType = z.json();
 
@@ -491,7 +492,12 @@ export class FakeAdapter implements SessionAdapter {
           return 'continue';
         case 'tool': {
           const input = step.input;
-          channel.push({ type: 'activity', kind: 'tool', summary: step.toolName });
+          channel.push({
+            type: 'activity',
+            kind: 'tool',
+            summary: step.toolName,
+            tool: claudeToolTarget(step.toolName, input),
+          });
           const verdict = guardVerdict(step.toolName, input);
           if (verdict.decision === 'deny') {
             observe(index, 'denied_by_guard', { reason: verdict.reason });

@@ -820,7 +820,12 @@ describe('createClaudeAdapter', () => {
     const events = await collect(adapter.start(spec()).events);
     expect(events[0]).toEqual({ type: 'started', providerSessionId: PROVIDER_SESSION, pid: null });
     expect(events).toContainEqual({ type: 'activity', kind: 'text', summary: 'Looking.' });
-    expect(events).toContainEqual({ type: 'activity', kind: 'tool', summary: 'Read a.ts' });
+    expect(events).toContainEqual({
+      type: 'activity',
+      kind: 'tool',
+      summary: 'Read a.ts',
+      tool: { name: 'Read', target: 'a.ts', written: [] },
+    });
     expect(events).toContainEqual({
       type: 'turn_complete',
       inputTokens: 100,

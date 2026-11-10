@@ -5,6 +5,7 @@ import {
   ConflictError,
   currentStep,
   EventType,
+  type SessionActivityData,
   findingNotes,
   FIX_ATTEMPT_LIMIT,
   InboxKind,
@@ -243,6 +244,7 @@ import {
   queueUntaken,
   startTurn,
 } from './pass-turn';
+import { filesTouched, turnFilesSoFar } from './turn-files';
 import {
   keepingFeedback,
   nextActionAfterCrash,
@@ -2474,20 +2476,41 @@ export function createRunner(opts: RunnerOptions): Runner {
             handle.send(readOnly ? BACKGROUND_DONE_NUDGE_READ_ONLY : BACKGROUND_DONE_NUDGE);
             break;
           }
-          case 'activity':
+          case 'activity': {
             // The session is working again (Claude Code woke it, or an answer did): it is not idle.
             stopWaitingOnBackground();
             disarmIdleClose(ctl);
+            const tool = event.kind === 'tool' ? event.tool : null;
             opts.state.write((ctx) => {
               patchWorkstream(ctx, id, ctl.fence, { lastActivityAt: ctx.now });
+              // A page's working turn carries the files it has written so far (Workbench spec §4.3).
+              const turn = pass ? openPassTurn(ctx.tx, task.id) : undefined;
+              const data: SessionActivityData = {
+                workstreamId: id,
+                kind: event.kind,
+                summary: event.summary.slice(0, 500),
+                tool: tool === null ? null : { name: tool.name, target: tool.target },
+                turn:
+                  turn === undefined
+                    ? null
+                    : {
+                        id: turn.id,
+                        filesTouched: filesTouched(
+                          turnFilesSoFar(ctx.tx, turn),
+                          tool?.written ?? [],
+                          checkout,
+                        ),
+                      },
+              };
               ctx.emit({
                 type: EventType.SessionActivity,
                 entityType: 'session',
                 entityId: session.id,
-                data: { workstreamId: id, kind: event.kind, summary: event.summary.slice(0, 500) },
+                data,
               });
             });
             break;
+          }
           case 'context': {
             st.contextPct = event.percentage;
             if (st.awaitingBriefingBaseline) {

@@ -59,7 +59,10 @@ import {
   SHAPE_FILE_MAX_BYTES,
   OneWayPathsDto,
   PassId,
+  PassJoinRequest,
   PassOpenRequest,
+  PassRename,
+  PassTurnId,
   SmallProposalLimitDto,
   ScreenImageInput,
   ScreenRefusalInput,
@@ -742,6 +745,60 @@ export function createApp(deps: ApiDeps) {
     )
     .post('/passes/:passId/abandon', async (c) =>
       c.json(await deps.services.abandonPass(PassId.parse(c.req.param('passId')))),
+    )
+    // The Workbench's own routes (Workbench spec §4). Only the live list of passes is served.
+    .get(
+      '/passes',
+      validator('query', (query) => z.object({ live: z.literal('true') }).parse(query)),
+      (c) => c.json(deps.services.livePasses()),
+    )
+    .post(
+      '/passes/:passId/pages',
+      validator('json', (value): PassJoinRequest => PassJoinRequest.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.addPassPages(
+            PassId.parse(c.req.param('passId')),
+            c.req.valid('json'),
+          ),
+        ),
+    )
+    .patch(
+      '/passes/:passId',
+      validator('json', (value): PassRename => PassRename.parse(value)),
+      (c) =>
+        c.json(deps.services.renamePass(PassId.parse(c.req.param('passId')), c.req.valid('json'))),
+    )
+    .delete('/tasks/:taskId/kept-work', async (c) => {
+      await deps.services.discardKeptWork(TaskId.parse(c.req.param('taskId')));
+      return c.body(null, 204);
+    })
+    .post('/projects/:projectId/propose-page-areas', async (c) =>
+      c.json(
+        await deps.services.proposePageAreas(
+          ProjectId.parse(c.req.param('projectId')),
+          c.req.raw.signal,
+        ),
+      ),
+    )
+    .get('/goals/:goalId/pass-pages', async (c) =>
+      c.json(await deps.services.goalPassPages(GoalId.parse(c.req.param('goalId')))),
+    )
+    .get('/tasks/:taskId/turns', async (c) =>
+      c.json(await deps.services.taskTurns(TaskId.parse(c.req.param('taskId')))),
+    )
+    .get('/pass-turns/:turnId/activity', (c) =>
+      c.json(deps.services.turnActivity(PassTurnId.parse(c.req.param('turnId')))),
+    )
+    .post('/tasks/:taskId/turns/:turnId/opened', (c) => {
+      deps.services.openedTurn(
+        TaskId.parse(c.req.param('taskId')),
+        PassTurnId.parse(c.req.param('turnId')),
+      );
+      return c.body(null, 204);
+    })
+    .get('/projects/:projectId/pass-start', async (c) =>
+      c.json(await deps.services.passStart(ProjectId.parse(c.req.param('projectId')))),
     )
     .post('/batches/:batchId/ship', (c) =>
       c.json(deps.services.shipBatch(BatchId.parse(c.req.param('batchId')))),

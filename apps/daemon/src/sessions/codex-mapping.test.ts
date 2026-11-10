@@ -50,17 +50,38 @@ describe('mapCodexNotification', () => {
     [
       'a command',
       itemCompleted({ type: 'commandExecution', command: 'ls' }),
-      [{ type: 'activity', kind: 'tool', summary: 'ls' }],
+      [
+        {
+          type: 'activity',
+          kind: 'tool',
+          summary: 'ls',
+          tool: { name: 'command', target: 'ls', written: [] },
+        },
+      ],
     ],
     [
       'a patch',
       itemCompleted({ type: 'fileChange', changes: [{ path: '/c/a.ts' }, { path: '/c/b.ts' }] }),
-      [{ type: 'activity', kind: 'tool', summary: '/c/a.ts' }],
+      [
+        {
+          type: 'activity',
+          kind: 'tool',
+          summary: '/c/a.ts',
+          tool: { name: 'apply_patch', target: '/c/a.ts', written: ['/c/a.ts', '/c/b.ts'] },
+        },
+      ],
     ],
     [
       'an MCP call',
       itemCompleted({ type: 'mcpToolCall', server: '10db', tool: 'commit' }),
-      [{ type: 'activity', kind: 'tool', summary: '10db.commit' }],
+      [
+        {
+          type: 'activity',
+          kind: 'tool',
+          summary: '10db.commit',
+          tool: { name: '10db.commit', target: null, written: [] },
+        },
+      ],
     ],
     [
       'a message',

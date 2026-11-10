@@ -151,6 +151,8 @@ import {
 import {
   abandonPass,
   answerPassCard,
+  discardKeptWork,
+  joinPass,
   putBackKeptWork,
   resumePassWork,
   takeOut,
@@ -216,6 +218,7 @@ import { createGateRunner, createGateSlots, limitGates } from '../verify';
 import { CLIENT_APP } from '../version';
 import { createWatcher, systemWatch, type WatchFn } from '../watcher';
 import { autoDocker } from './auto-docker';
+import { MAX_DOCKER_SCAN_BYTES } from './docker-need';
 import { createProjectPinStore } from './checkout-pins';
 import {
   createCheckoutTrustedHandler,
@@ -370,8 +373,6 @@ const UI_ORIGINS = ['tauri://localhost', 'http://tauri.localhost'] as const;
 const CLEAN_SHUTDOWN_KEY = 'daemon.clean_shutdown';
 /** How long a Shape tool call may take: propose_plan validates and writes, and answers at once. */
 const SHAPE_TOOL_TIMEOUT_MS = 60_000;
-/** The most of a Makefile or script read from the base to see whether a gate calls docker. */
-const MAX_DOCKER_SCAN_BYTES = 256 * 1024;
 
 /** The session env when none is wired (tests): enough PATH for a gate to find git and test. */
 const DEFAULT_SESSION_PATH = '/usr/bin:/bin';
@@ -1472,6 +1473,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     openPass: (input) => openPass(delivery, input, passOpenDeps),
     takeOut: (input) => takeOut(passTakeOuts, input),
     abandonPass: (passId) => abandonPass(passTakeOuts, passId),
+    joinPass: (passId, input) => joinPass(delivery, passId, input, passOpenDeps),
+    discardKeptWork: (taskId) => discardKeptWork(passWork, taskId),
     shipper,
     accounts: accountService,
     worktreeRoot,
@@ -1801,6 +1804,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       ledgerSweep?.stop();
       await preparer.idle();
       await loginStopped;
+      // A tick asked for before the stop may still be reading the branches; it launches nothing now,
+      // but it reads and writes the database until it ends.
+      await createdScheduler.idle();
       state.write((ctx) => {
         setAppSetting(ctx, CLEAN_SHUTDOWN_KEY, { at: ctx.now });
       });

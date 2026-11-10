@@ -25,13 +25,16 @@ import {
   insertPass,
   insertTask,
   insertWorkstream,
+  joinPass,
   leavePass,
   listPassDirt,
+  listLivePasses,
   listPassTasks,
   listUnfinishedAbandons,
   passHoldingFolder,
   passHoldingTask,
   passPageAreas,
+  renamePass,
   seedProject,
   setAbandonStep,
   setTaskKeptWork,
@@ -255,6 +258,21 @@ describe("a pass's hold on its tasks", () => {
   });
 });
 
+describe('the live passes', () => {
+  it.each<{ state: PassState; live: boolean }>([
+    { state: PassState.Open, live: true },
+    { state: PassState.Closing, live: true },
+    { state: PassState.Abandoning, live: true },
+    { state: PassState.Closed, live: true },
+    { state: PassState.Settled, live: false },
+    { state: PassState.Abandoned, live: false },
+  ])('lists a $state pass as live: $live', ({ state, live }) => {
+    const { pass } = store.write((ctx) => insertPass(ctx, passInput([task()]))).value;
+    store.db.update(schema.passes).set({ state }).where(eq(schema.passes.id, pass.id)).run();
+    expect(listLivePasses(store.db).map((p) => p.id)).toEqual(live ? [pass.id] : []);
+  });
+});
+
 describe('countLanes with a pass', () => {
   it("leaves a pass's lanes out of its project's count and counts them for the pass, the account and the daemon", () => {
     const inPass = task();
@@ -293,6 +311,87 @@ describe('countLanes with a pass', () => {
     const lanes = countLanes(store.db);
     expect(lanes.byProject.get(project.id)).toBe(1);
     expect(lanes.byPass.get(pass.id)).toBeUndefined();
+  });
+});
+
+describe('joining a pass', () => {
+  it('adds the tasks to the open pass, saying so, and the pass holds them', () => {
+    const { pass } = store.write((ctx) => insertPass(ctx, passInput([task()]))).value;
+    const joining = task(project, 'People: UI work');
+
+    const { events } = store.write((ctx) => {
+      joinPass(ctx, pass.id, [joining]);
+    });
+
+    expect(passHoldingTask(store.db, getTask(store.db, joining))?.id).toBe(pass.id);
+    expect(listPassTasks(store.db, pass.id).map((t) => t.id)).toContain(joining);
+    expect(events.map((e) => [e.type, e.entityId])).toEqual([
+      [EventType.TaskChanged, joining],
+      [EventType.PassChanged, pass.id],
+    ]);
+  });
+
+  it.each<{ name: string; arrange: (passId: PassId) => TaskId; refusal: RegExp }>([
+    {
+      name: 'a pass that is not open',
+      arrange: (passId) => {
+        endPass(passId, PassState.Abandoning);
+        return task();
+      },
+      refusal: /is abandoning: a page joins only an open pass/,
+    },
+    {
+      name: 'a task the pass holds already',
+      arrange: (passId) => {
+        const [held] = listPassTasks(store.db, passId);
+        if (!held) throw new Error('the pass holds one task');
+        return held.id;
+      },
+      refusal: /is already in pass "Polish settings"/,
+    },
+    {
+      name: 'a task of another project',
+      arrange: () =>
+        task(seedProject(store, { name: 'other', areas: [{ name: 'settings', globs: ['s/**'] }] })),
+      refusal: /belongs to another project/,
+    },
+  ])('refuses $name, joining nothing', ({ arrange, refusal }) => {
+    const { pass } = store.write((ctx) => insertPass(ctx, passInput([task()]))).value;
+    const joining = arrange(pass.id);
+    const before = getTask(store.db, joining).passId ?? null;
+
+    expect(() =>
+      store.write((ctx) => {
+        joinPass(ctx, pass.id, [joining]);
+      }),
+    ).toThrow(refusal);
+    expect(getTask(store.db, joining).passId ?? null).toBe(before);
+  });
+});
+
+describe('renaming a pass', () => {
+  it('names the pass and its batch anew in one write, and leaves the branch as it was', () => {
+    const { pass, batch } = store.write((ctx) => insertPass(ctx, passInput([task()]))).value;
+
+    const { value, events } = store.write((ctx) => renamePass(ctx, pass.id, 'Settings and people'));
+
+    expect(value.name).toBe('Settings and people');
+    expect(getPass(store.db, pass.id).name).toBe('Settings and people');
+    expect(getBatch(store.db, batch.id)).toMatchObject({
+      title: 'Settings and people',
+      branch: batch.branch,
+    });
+    expect(events.map((e) => [e.type, e.entityId])).toEqual([[EventType.PassChanged, pass.id]]);
+  });
+
+  it.each([PassState.Settled, PassState.Abandoned])('refuses a %s pass', (state) => {
+    const { pass } = store.write((ctx) => insertPass(ctx, passInput([task()]))).value;
+    endPass(pass.id, state);
+
+    expect(() => store.write((ctx) => renamePass(ctx, pass.id, 'Later'))).toThrow(
+      `is ${state.toLowerCase()}`,
+    );
+    expect(getPass(store.db, pass.id).name).toBe('Polish settings');
   });
 });
 

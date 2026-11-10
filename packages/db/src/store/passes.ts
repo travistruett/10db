@@ -89,6 +89,21 @@ export function passHoldingFolder(db: DbReader, projectId: ProjectId): PassDto |
 }
 
 /**
+ * Every project's passes the Workbench shows, oldest first: each that still holds Your folder, so an
+ * open, closing or abandoning one, and a closed one whose work is not yet in the base.
+ */
+export function listLivePasses(db: DbReader): PassDto[] {
+  const done = Object.values(PassState).filter((s) => !passHoldsFolder(s));
+  return db
+    .select()
+    .from(schema.passes)
+    .where(notInArray(schema.passes.state, done))
+    .orderBy(asc(schema.passes.openedAt), asc(schema.passes.id))
+    .all()
+    .map(toPassDto);
+}
+
+/**
  * The pass that still holds `task` as a pass task (`passHoldsTasks`), or undefined: a task of a
  * closed, settled or abandoned pass is ordinary work again.
  */
@@ -208,6 +223,62 @@ export function listPassTasks(db: DbReader, passId: PassId): TaskDto[] {
     .orderBy(asc(schema.tasks.createdAt), asc(schema.tasks.id))
     .all()
     .map((row) => getTask(db, row.id));
+}
+
+/**
+ * Adds open tasks to an open pass (Add Page), in the caller's write: each task's `pass_id`, and one
+ * `pass.changed` naming them. Refused for a pass that is not open, a task of another project or one a
+ * pass still holds; the caller makes each task's run in the pass's batch.
+ */
+export function joinPass(ctx: WriteContext, passId: PassId, taskIds: readonly TaskId[]): void {
+  const pass = getPass(ctx.tx, passId);
+  if (pass.state !== PassState.Open)
+    throw new ConflictError(
+      `Pass "${pass.name}" is ${pass.state.toLowerCase()}: a page joins only an open pass`,
+    );
+  for (const taskId of taskIds) {
+    const task = getTask(ctx.tx, taskId);
+    if (task.projectId !== pass.projectId)
+      throw new ConflictError(`Task ${task.title} belongs to another project`);
+    const holding = passHoldingTask(ctx.tx, task);
+    if (holding) throw new ConflictError(`Task ${task.title} is already in pass "${holding.name}"`);
+    ctx.tx
+      .update(schema.tasks)
+      .set({ passId, updatedAt: ctx.now })
+      .where(eq(schema.tasks.id, taskId))
+      .run();
+    ctx.emit({ type: EventType.TaskChanged, entityType: 'task', entityId: taskId });
+  }
+  ctx.emit({
+    type: EventType.PassChanged,
+    entityType: 'pass',
+    entityId: passId,
+    data: { joined: [...taskIds] },
+  });
+}
+
+/**
+ * Names the pass anew, and its batch, whose title its pull request takes, in the caller's write; the
+ * pass's branch keeps the name it was made with. Refused once the pass is settled or abandoned.
+ */
+export function renamePass(ctx: WriteContext, passId: PassId, name: string): PassDto {
+  const pass = getPass(ctx.tx, passId);
+  if (!passHoldsFolder(pass.state))
+    throw new ConflictError(
+      `Pass "${pass.name}" is ${pass.state.toLowerCase()}: it keeps its name`,
+    );
+  ctx.tx
+    .update(schema.passes)
+    .set({ name, updatedAt: ctx.now })
+    .where(eq(schema.passes.id, passId))
+    .run();
+  ctx.tx
+    .update(schema.batches)
+    .set({ title: name, updatedAt: ctx.now })
+    .where(eq(schema.batches.id, pass.batchId))
+    .run();
+  ctx.emit({ type: EventType.PassChanged, entityType: 'pass', entityId: passId, data: { name } });
+  return getPass(ctx.tx, passId);
 }
 
 /**

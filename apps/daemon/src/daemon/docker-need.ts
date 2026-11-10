@@ -1,4 +1,9 @@
 import { posix } from 'node:path';
+import type { ProjectDto } from '@10db/contracts';
+import type { Git } from '../git';
+
+/** The most of a Makefile or script read from the base to see whether a gate calls docker. */
+export const MAX_DOCKER_SCAN_BYTES = 256 * 1024;
 
 /** Reads a repository file as text, or null when it is absent; paths are relative to the repository root. */
 export type ReadRepoFile = (path: string) => Promise<string | null>;
@@ -147,4 +152,29 @@ export async function callsDocker(command: string, read: ReadRepoFile): Promise<
   }
 
   return scanText(command, '', 0);
+}
+
+/**
+ * Whether the project's gate is seen to call Docker in `origin/<base>`, as the auto switch reads it
+ * before a gate runs (`callsDocker`); false with no gate, and when git can't say.
+ */
+export async function gateCallsDocker(
+  git: Git,
+  project: Pick<ProjectDto, 'repoPath' | 'baseBranch' | 'gateCommand'>,
+): Promise<boolean> {
+  if (project.gateCommand === null) return false;
+  const ref = `origin/${project.baseBranch}`;
+  const read: ReadRepoFile = async (path) => {
+    try {
+      const file = await git.fileAt(project.repoPath, ref, path, MAX_DOCKER_SCAN_BYTES);
+      return file.kind === 'file' ? file.text : null;
+    } catch {
+      return null;
+    }
+  };
+  try {
+    return await callsDocker(project.gateCommand, read);
+  } catch {
+    return false;
+  }
 }

@@ -20,6 +20,7 @@ import type {
   ToolDecision,
   TurnResult,
 } from './types';
+import { claudeToolTarget } from './tool-target';
 
 export const SUMMARY_CHARS = 200;
 const BRIEF_CHARS = 80;
@@ -114,6 +115,7 @@ export function mapSdkMessage(
           type: 'activity',
           kind: 'tool',
           summary: `${block.name} ${toolBrief(block.input)}`.slice(0, SUMMARY_CHARS),
+          tool: claudeToolTarget(block.name, block.input),
         });
       }
     }

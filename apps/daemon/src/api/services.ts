@@ -62,10 +62,19 @@ import type {
   ModelProfileId,
   ModelProfilePatch,
   DecisionId,
+  GoalPassPagesDto,
+  PagesProposalDto,
+  PassDto,
   PassId,
   PassOpenedDto,
   PassAbandonedDto,
+  PassJoinRequest,
   PassOpenRequest,
+  PassRename,
+  PassStartDto,
+  PassTurnId,
+  PassTurnWithFilesDto,
+  TurnActivityDto,
   PassViewDto,
   TakeOutRequest,
   TakeOutResultDto,
@@ -265,6 +274,30 @@ export interface ApiServices {
    * neither open nor already abandoning.
    */
   abandonPass(passId: PassId): Promise<PassAbandonedDto>;
+  /** Every live pass as the Workbench reads it: open, closing, abandoning, or closed and not settled. */
+  livePasses(): PassViewDto[];
+  /** What Start Pass shows before a pass opens on the project; reads the folder with git. */
+  passStart(projectId: ProjectId): Promise<PassStartDto>;
+  /**
+   * Add Page: a task for each page named and the open tasks named join the open pass, each sent the
+   * builder's first message only when there is one. Refused (409) while the pass is not open or full,
+   * or for a task that can't join; (400) for a page it can't take.
+   */
+  addPassPages(passId: PassId, input: PassJoinRequest): Promise<PassViewDto>;
+  /** Names the pass anew; refused (409) once it is settled or abandoned. */
+  renamePass(passId: PassId, input: PassRename): PassDto;
+  /** Discard Saved Work: forgets the task's saved Workbench work and deletes its kept ref; 409 in a pass. */
+  discardKeptWork(taskId: TaskId): Promise<void>;
+  /** Propose Page Areas: the page areas the area proposer finds that the project can add, and why not the rest. */
+  proposePageAreas(projectId: ProjectId, signal?: AbortSignal): Promise<PagesProposalDto>;
+  /** The page areas the goal's tasks committed in, read from git, for Work on This. */
+  goalPassPages(goalId: GoalId): Promise<GoalPassPagesDto>;
+  /** The task's turns, each with the files it changed against the turn before; reads git. */
+  taskTurns(taskId: TaskId): Promise<PassTurnWithFilesDto[]>;
+  /** A turn's log, oldest first (Show Log). */
+  turnActivity(turnId: PassTurnId): TurnActivityDto[];
+  /** Notes the builder opened the Ready page of this turn, the first time only; 409 for another task's turn. */
+  openedTurn(taskId: TaskId, turnId: PassTurnId): void;
   /**
    * The project's goals, each with its digest and count of new items since the builder last opened
    * it, and the Ungrouped group. Leaves every view mark as it was.

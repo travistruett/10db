@@ -45,8 +45,18 @@ describe('mapSdkMessage', () => {
     ]);
     expect(mapSdkMessage(msg, ctx)).toEqual([
       { type: 'activity', kind: 'text', summary: 'Reading the task.' },
-      { type: 'activity', kind: 'tool', summary: 'Bash pnpm test' },
-      { type: 'activity', kind: 'tool', summary: 'Edit src/a.ts' },
+      {
+        type: 'activity',
+        kind: 'tool',
+        summary: 'Bash pnpm test',
+        tool: { name: 'Bash', target: 'pnpm', written: [] },
+      },
+      {
+        type: 'activity',
+        kind: 'tool',
+        summary: 'Edit src/a.ts',
+        tool: { name: 'Edit', target: 'src/a.ts', written: ['src/a.ts'] },
+      },
     ]);
   });
 

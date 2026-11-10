@@ -20,7 +20,9 @@ import {
   type SystemCheckDto,
   type PassAbandonedDto,
   type PassId,
+  type PassJoinRequest,
   type TakeOutResultDto,
+  type TaskId,
   type TaskLanding,
   type WorkstreamId,
 } from '@10db/contracts';
@@ -70,6 +72,7 @@ import {
   listTasks,
   listWorkstreams,
   moveTask,
+  listPassTasks,
   openPassTurn,
   passHoldingTask,
   patchBoardColumn,
@@ -78,6 +81,7 @@ import {
   patchPersona,
   patchProject,
   patchTask,
+  renamePass,
   resumeTask,
   runNext,
   setRoutingRules,
@@ -100,12 +104,24 @@ import {
 } from '../delivery';
 import { markGhRequired, withAgentStatus, type AgentTools } from '../environment';
 import type { EventBus, StateStore } from '../events';
-import { inspectFolder, proposeAreas, type AreaNamer } from '../folders';
+import { inspectFolder, proposeAreas, proposePageAreas, type AreaNamer } from '../folders';
 import { adoptGoal } from '../goals';
 import { GitError, type Git } from '../git';
 import { hazardAssessmentDto, type HazardAssessor } from '../hazards';
 import { earlierMcpApproval, requestMcpApproval, type InboxService } from '../inbox';
-import { passView, TakeOutWithin, type TakeOutInput } from '../pass';
+import {
+  createTurnFiles,
+  goalPassPages,
+  livePassViews,
+  openTurn,
+  passStartPreview,
+  passView,
+  TakeOutWithin,
+  taskTurns,
+  turnLog,
+  type PassJoined,
+  type TakeOutInput,
+} from '../pass';
 import type { KeepAwake } from '../keep-awake';
 import type { Runner } from '../runner';
 import type { Scheduler } from '../scheduler';
@@ -126,6 +142,7 @@ import type { JudgeApiServices } from './judge-services';
 import type { KnowledgeApiServices } from './knowledge-services';
 import { createModelSettingsServices } from './model-settings-services';
 import type { ShapeApiServices } from './shape-services';
+import { gateCallsDocker } from './docker-need';
 import { checkoutConflictsWithRoot } from './worktree-root';
 
 /** The HTTP layer's view of the daemon: reads go to the database, writes go through the state store. */
@@ -159,6 +176,10 @@ export function createServices(deps: {
   readonly takeOut: (input: TakeOutInput) => Promise<TakeOutResultDto>;
   /** Abandons a pass in the project's delivery queue, stopping its lanes through the runner. */
   readonly abandonPass: (passId: PassId) => Promise<PassAbandonedDto>;
+  /** Adds pages to an open pass in the project's delivery queue (`joinPass` with its lease and put-back). */
+  readonly joinPass: (passId: PassId, input: PassJoinRequest) => Promise<PassJoined>;
+  /** Discards a task's saved Workbench work in its project's delivery queue. */
+  readonly discardKeptWork: (taskId: TaskId) => Promise<void>;
   readonly shipper: Shipper;
   readonly accounts: AccountService;
   readonly moves: Pick<AccountMoves, 'move'>;
@@ -183,6 +204,8 @@ export function createServices(deps: {
     ...deps.catalogue.status(),
     ...(deps.catalogueOn ? {} : { lastAttempt: CatalogueAttempt.Off }),
   });
+  // A turn's files are read once per pair of kept commits, which never change.
+  const turnFiles = createTurnFiles(deps.git);
   // The tool check and gh's login are probed on the first request and on a recheck, never otherwise.
   let lastCheck: Promise<SystemCheckDto> | null = null;
 
@@ -339,17 +362,20 @@ export function createServices(deps: {
           name: input.name,
           taskIds: input.taskIds,
           ...(input.pageCap === undefined ? {} : { pageCap: input.pageCap }),
+          ...(input.pages === undefined ? {} : { pages: input.pages }),
+          ...(input.goalId === undefined ? {} : { goalId: input.goalId }),
         });
       } catch (error) {
         if (error instanceof GitError)
           throw new ConflictError(`Your folder could not be opened for a pass: ${error.message}`);
         throw error;
       }
-      // Each page's first turn starts from a message: the builder's, else the task's description.
+      // Each page's first turn starts from a message: the builder's, else the task's description. A
+      // page the open made a task for has none, so it waits for the builder's first word.
       deps.state.write((ctx) => {
-        for (const taskId of input.taskIds) {
-          const body = input.firstMessage ?? getTask(ctx.tx, taskId).description;
-          if (body.trim() !== '') insertBuilderMessage(ctx, taskId, { body, files: [] });
+        for (const task of listPassTasks(ctx.tx, opened.pass.id)) {
+          const body = input.firstMessage ?? task.description;
+          if (body.trim() !== '') insertBuilderMessage(ctx, task.id, { body, files: [] });
         }
       });
       deps.scheduler.requestTick();
@@ -379,6 +405,31 @@ export function createServices(deps: {
         );
       return deps.abandonPass(passId);
     },
+    livePasses: () => livePassViews(db),
+    passStart: (projectId) =>
+      passStartPreview(
+        { db, git: deps.git, gateCallsDocker: (project) => gateCallsDocker(deps.git, project) },
+        projectId,
+      ),
+    async addPassPages(passId, input) {
+      await deps.joinPass(passId, input);
+      deps.scheduler.requestTick();
+      return passView(db, passId);
+    },
+    renamePass: (passId, input) => deps.state.write((ctx) => renamePass(ctx, passId, input.name)),
+    discardKeptWork: (taskId) => deps.discardKeptWork(taskId),
+    goalPassPages: (goalId) => goalPassPages({ db, git: deps.git }, goalId),
+    taskTurns: (taskId) => taskTurns({ db, git: deps.git, files: turnFiles }, taskId),
+    turnActivity: (turnId) => turnLog(db, turnId),
+    openedTurn: (taskId, turnId) => {
+      openTurn(deps.state, taskId, turnId);
+    },
+    proposePageAreas: (projectId, signal) =>
+      proposePageAreas(
+        { git: deps.git, namer: deps.areaNamer, protectedRoots: deps.protectedRoots },
+        getProject(db, projectId),
+        signal,
+      ),
     async stopPage(taskId) {
       const task = getTask(db, taskId);
       const pass = passHoldingTask(db, task);

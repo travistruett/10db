@@ -30,6 +30,9 @@ export const RENDER_READS: readonly { readonly route: string }[] = [
   { route: '/projects/:projectId/proposals' },
   // Factory draws it: cards per task and minutes work waited on a person, per day. Database reads only.
   { route: '/projects/:projectId/human-touch' },
+  // The Workbench's reads of the database alone.
+  { route: '/passes' },
+  { route: '/pass-turns/:turnId/activity' },
 ];
 
 /** A GET a screen may not read, with why. A route nothing draws is refused as well: less to reach. */
@@ -64,6 +67,11 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/projects/:projectId/routing-rules': 'No screen draws a setting.',
   '/projects/:projectId/candidates': 'No screen draws what Run next would pick.',
   '/passes/:passId': 'Only the Workbench draws a pass, and it is not a screen.',
+  '/goals/:goalId/pass-pages': "A goal's pass pages are read from its tasks' commits with git.",
+  '/tasks/:taskId/turns':
+    "A page's turns list the files each changed, read from its kept commits with git.",
+  '/projects/:projectId/pass-start':
+    "Start Pass's preview reads Your folder with git: its changed files, its branch and the base.",
   '/shape-measures': 'No screen draws a measure.',
   '/accounts': 'No screen draws an account.',
   '/accounts/pauses': 'No screen draws an account.',

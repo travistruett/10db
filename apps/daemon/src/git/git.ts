@@ -516,6 +516,11 @@ export interface Git {
    * that brought another branch in is listed, the commits it brought are not.
    */
   commitsSince(repo: string, base: string, tip?: string): Promise<string[]>;
+  /**
+   * When HEAD's history last committed a change to a file one of the globs matches (git's `glob`
+   * pathspec), as an ISO time in UTC; null with no glob, no commit or none that touched one.
+   */
+  lastChangedAt(repo: string, globs: readonly string[]): Promise<string | null>;
   /** Filters the tree at `rev`, or the checkout's own attributes, ask for; empty when none. */
   filtersIn(repo: string, rev: string): Promise<{ path: string; filter: string }[]>;
   /**
@@ -3668,6 +3673,21 @@ export function createGit(opts: GitOptions = {}): Git {
       )
         .split('\n')
         .filter(Boolean);
+    },
+    async lastChangedAt(repo, globs) {
+      if (globs.length === 0) return null;
+      const c = await pinned(repo);
+      if ((await revParse(c, 'HEAD^{commit}')) === null) return null;
+      const out = await git(c, [
+        'log',
+        '-1',
+        '--format=%cI',
+        'HEAD',
+        '--',
+        ...globs.map((g) => `:(glob)${g}`),
+      ]);
+      const at = out.trim();
+      return at === '' ? null : new Date(at).toISOString();
     },
     async diffSince(repo, base, head, maxBytes) {
       const c = await pinned(repo);

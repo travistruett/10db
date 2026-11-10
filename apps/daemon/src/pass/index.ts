@@ -22,4 +22,10 @@ export {
 export { putBackKeptWork } from './put-back';
 export { abandonPass } from './abandon';
 export { resumePassWork } from './resume';
+export { discardKeptWork } from './discard';
+export { goalPassPages } from './goal-pages';
+export { joinPass, type PassJoined } from './join';
+export { livePassViews } from './live';
+export { passStartPreview } from './start-preview';
+export { createTurnFiles, openTurn, taskTurns, turnLog } from './turns';
 export { passView } from './view';

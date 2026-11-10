@@ -18,8 +18,13 @@ import {
   insertPass,
   insertPassTurn,
   insertTask,
+  insertSession,
   insertWorkstream,
   latestPassTurn,
+  latestTurnActivity,
+  listTaskTurns,
+  listTurnActivity,
+  markPassTurnOpened,
   listPassTurns,
   listTaskThreadRows,
   listTurnsEndedUnsettled,
@@ -93,6 +98,79 @@ function startTurn() {
     return insertPassTurn(ctx, { taskId, workstreamId, sessionId: null, messageId: message.id });
   });
 }
+
+/** A session of the workstream, and a write of one activity row of `turn` from it. */
+function activityFrom() {
+  const session = store.write((ctx) =>
+    insertSession(ctx, {
+      workstreamId,
+      provider: 'claude',
+      model: 'm',
+      effort: 'low',
+      mode: 'managed',
+      mcpTokenHash: mintId('Session'),
+    }),
+  ).value;
+  return (turnId: string | null, summary: string) => {
+    store.write((ctx) => {
+      ctx.emit({
+        type: EventType.SessionActivity,
+        entityType: 'session',
+        entityId: session.id,
+        data: {
+          workstreamId,
+          kind: 'tool',
+          summary,
+          tool: { name: 'Edit', target: summary },
+          turn: turnId === null ? null : { id: turnId, filesTouched: [summary] },
+        },
+      });
+    });
+  };
+}
+
+describe("a turn's latest activity", () => {
+  it("is the newest activity row naming the turn, from any of the run's sessions", () => {
+    const first = startTurn().value;
+    const activity = activityFrom();
+    activity(first.id, 'one');
+    store.write((ctx) => endPassTurn(ctx, first.id, { ending: 'ready', replyBody: null }));
+    const second = startTurn().value;
+    expect(latestTurnActivity(store.db, second)).toBeUndefined();
+    activity(second.id, 'two');
+    later(1);
+    activityFrom()(second.id, 'three');
+    activity(null, 'not a turn');
+
+    expect(latestTurnActivity(store.db, first)?.data['summary']).toBe('one');
+    expect(listTurnActivity(store.db, second).map((a) => a.data['summary'])).toEqual([
+      'two',
+      'three',
+    ]);
+    const latest = latestTurnActivity(store.db, second);
+    expect([latest?.data['summary'], latest?.at]).toEqual(['three', clock.toISOString()]);
+  });
+});
+
+describe('opening a Ready page', () => {
+  it("notes when the builder first opened the turn's page once it is Ready, and only the first time", () => {
+    const turn = startTurn().value;
+    expect(store.write((ctx) => markPassTurnOpened(ctx, turn.id)).value).toBe(false);
+    store.write((ctx) => endPassTurn(ctx, turn.id, { ending: 'ready', replyBody: null }));
+    store.write((ctx) => settlePassTurn(ctx, turn.id));
+    later(2);
+    const opened = clock.toISOString();
+
+    const { value, events } = store.write((ctx) => markPassTurnOpened(ctx, turn.id));
+    later(1);
+    const again = store.write((ctx) => markPassTurnOpened(ctx, turn.id));
+
+    expect([value, again.value]).toEqual([true, false]);
+    expect(events.map((e) => e.type)).toEqual([EventType.PassChanged]);
+    expect(again.events).toEqual([]);
+    expect(listTaskTurns(store.db, taskId).map((t) => [t.seq, t.openedAt])).toEqual([[1, opened]]);
+  });
+});
 
 describe("a pass task's turns", () => {
   it('ends a turn and writes its reply in one write, keeps its work, and settles it: a restart between finds it', () => {
