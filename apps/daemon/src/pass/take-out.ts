@@ -37,7 +37,6 @@ import { foldHandEdits } from './hand-edits';
 import {
   keepTurnWork,
   keptRef,
-  pageClaims,
   pageMatcher,
   passKeptRef,
   passTaskPlace,
@@ -127,7 +126,7 @@ async function changedSinceKept(
   },
 ): Promise<string[]> {
   const { git } = deps;
-  const mine = pageMatcher(place.project, pageClaims(deps.state.db, place.project, place.task));
+  const mine = pageMatcher(deps.state.db, place.project, place.task, place.pass.id);
   const paths = [
     ...new Set([
       ...kept.pageFiles.map((f) => f.path),
@@ -243,7 +242,7 @@ export async function takeOutSteps(
     row.keptSha === null
       ? []
       : (await git.filesChangedBetween(repo, keptBaseSha, row.keptSha)).filter(
-          pageMatcher(project, pageClaims(db, project, getTask(db, task.id))),
+          pageMatcher(db, project, getTask(db, task.id), pass.id),
         );
 
   if (row.step < TakeOutStep.PutBack) {

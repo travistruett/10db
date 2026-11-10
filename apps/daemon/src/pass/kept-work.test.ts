@@ -41,6 +41,40 @@ const startTurn = (task: TaskDto) => w.startTurn(task);
 const paths = (files: readonly { path: string }[]) => files.map((f) => f.path);
 
 describe('keepTurnWork', () => {
+  it("keeps a hazard's file only outside the pass's pages: a neighbour's page file is never in it", async () => {
+    w = await openPassWorld({
+      project: {
+        hazards: [
+          {
+            name: 'deps',
+            globs: ['pnpm-lock.yaml', 'src/**/package.json'],
+            commands: ['pnpm install'],
+          },
+        ],
+      },
+    });
+    h = w.h;
+    const { opened, settings } = w;
+    h.state.write((c) =>
+      acquireClaims(c, {
+        projectId: h.project.id,
+        workstreamId: runOf(settings),
+        requests: claimRequestsForTask(settings, getProject(c.tx, h.project.id)),
+        leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      }),
+    );
+    write('pnpm-lock.yaml', 'lock: 2\n');
+    write('src/settings/package.json', '{}\n');
+    write('src/people/package.json', '{}\n');
+
+    const kept = await keepTurnWork(deps(), { workstreamId: runOf(settings), turnId: null });
+
+    expect(paths(kept.pageFiles)).toEqual(['pnpm-lock.yaml', 'src/settings/package.json']);
+    expect(
+      h.git$('diff', '--name-only', opened.pass.startSha, passKeptRef(opened.pass.id, settings.id)),
+    ).toBe('pnpm-lock.yaml\nsrc/settings/package.json');
+  });
+
   it("keeps the task's page files on the tip and names them on the turn; a turn that changed nothing keeps no commit", async () => {
     const { opened, settings } = await openTwoPages();
     const tip = opened.pass.startSha;

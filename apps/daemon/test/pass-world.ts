@@ -50,9 +50,11 @@ export async function openPassWorld(
   opts: {
     readonly before?: (world: Pick<PassWorld, 'write'>) => void;
     readonly putBack?: PutBackKeptWork;
+    /** Laid over the pass project's areas and hazards. */
+    readonly project?: Partial<ProjectInput>;
   } = {},
 ): Promise<PassWorld> {
-  const h = createDeliveryHarness(PASS_PROJECT);
+  const h = createDeliveryHarness({ ...PASS_PROJECT, ...opts.project });
   const write = (path: string, content: string): void => {
     const file = join(h.repo, path);
     mkdirSync(dirname(file), { recursive: true });

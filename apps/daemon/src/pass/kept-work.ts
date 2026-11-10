@@ -24,6 +24,7 @@ import {
   listPassDirt,
   listPassTurns,
   passHoldingTask,
+  passPageAreas,
   setPassTurnKept,
   type DbReader,
 } from '@10db/db';
@@ -33,7 +34,7 @@ import type { StateStore } from '../events';
 import { KeptRefMovedError, PassFolderOffBranchError, type Git, type KeptCommit } from '../git';
 import type { InboxService } from '../inbox';
 import type { Logger } from '../log';
-import { findClaimed } from '../watcher';
+import { classifyPath } from '../guard';
 
 // Workbench spec §9.1: a turn's work is kept, not committed. At the end of each turn the task's page
 // files, as they are on disk, are kept as an unsigned commit on the pass branch's tip at the task's
@@ -110,7 +111,7 @@ export function passTaskPlace(db: DbReader, taskId: TaskId): PassTaskPlace {
   };
 }
 
-/** A claim as `findClaimed` reads it. */
+/** A claim on one of the task's page files. */
 interface HeldClaim {
   readonly kind: ClaimKind;
   readonly name: string;
@@ -121,7 +122,7 @@ interface HeldClaim {
  * holds now; once a crash path has released them, what the pass holds for it and the hazards it
  * names. A shared area is held a turn at a time, and its files are never page work.
  */
-export function pageClaims(db: DbReader, project: ProjectDto, task: TaskDto): readonly HeldClaim[] {
+function pageClaims(db: DbReader, project: ProjectDto, task: TaskDto): readonly HeldClaim[] {
   const shared = new Set(
     project.areas.filter((a) => a.role === AreaRole.Shared).map((a) => a.name),
   );
@@ -138,9 +139,29 @@ export function pageClaims(db: DbReader, project: ProjectDto, task: TaskDto): re
   );
 }
 
-/** Whether a path is one of the task's page files. */
-export function pageMatcher(project: ProjectDto, claims: readonly HeldClaim[]) {
-  return (path: string): boolean => findClaimed([path], project, claims).length > 0;
+/**
+ * Whether a path is one of the task's page files, as the guard's judge reads a pass (spec §7.1): a
+ * path in any page area of the pass belongs only to the task holding that page, whatever hazard also
+ * matches it; a hazard or another held area counts only outside the pass's pages.
+ */
+export function pageMatcher(
+  db: DbReader,
+  project: ProjectDto,
+  task: TaskDto,
+  passId: PassId,
+): (path: string) => boolean {
+  const claims = pageClaims(db, project, task);
+  const held = (kind: ClaimKind) =>
+    new Set(claims.filter((c) => c.kind === kind).map((c) => c.name));
+  const areas = held(ClaimKind.Area);
+  const hazards = held(ClaimKind.Hazard);
+  const passPages = new Set(passPageAreas(db, passId));
+  return (path) => {
+    const hit = classifyPath(path, project.areas, project.hazards);
+    const pages = hit.areas.filter((a) => passPages.has(a));
+    if (pages.length > 0) return pages.some((a) => areas.has(a));
+    return hit.hazards.some((h) => hazards.has(h)) || hit.areas.some((a) => areas.has(a));
+  };
 }
 
 /** What a kept ref names now, or null when there is none. */
@@ -190,7 +211,7 @@ async function factsOf(
   kept: { readonly sha: string | null; readonly base: string; readonly made: boolean },
   previous: string,
 ): Promise<KeptWork> {
-  const mine = pageMatcher(place.project, pageClaims(deps.state.db, place.project, place.task));
+  const mine = pageMatcher(deps.state.db, place.project, place.task, place.pass.id);
   const pageFiles =
     kept.sha === null ? [] : await filesBetween(deps.git, place.repo, kept.base, kept.sha, mine);
   return {
@@ -228,7 +249,7 @@ async function keepPageWork(
   const { repo, branch, task } = place;
   const found = await git.currentBranch(repo);
   if (found !== branch) throw new PassFolderOffBranchError(repo, branch, found);
-  const mine = pageMatcher(place.project, pageClaims(db, place.project, task));
+  const mine = pageMatcher(db, place.project, task, place.pass.id);
   const ref = passKeptRef(place.pass.id, task.id);
   const keep = async () => {
     const parent = await readKeptRef(git, repo, ref);
@@ -315,7 +336,7 @@ export async function keepNamedPaths(
 ): Promise<{ readonly sha: string; readonly alreadyCommitted: boolean }> {
   const db = deps.state.db;
   const place = passTaskPlace(db, getWorkstreamRow(db, input.workstreamId).taskId);
-  const mine = pageMatcher(place.project, pageClaims(db, place.project, place.task));
+  const mine = pageMatcher(db, place.project, place.task, place.pass.id);
   const shared = input.paths.filter((path) => !mine(path));
   if (shared.length > 0)
     throw new InvalidError(

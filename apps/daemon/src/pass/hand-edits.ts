@@ -11,7 +11,6 @@ import {
 import {
   keepTurnWork,
   keptWorkFacts,
-  pageClaims,
   pageMatcher,
   passKeptRef,
   passTaskPlace,
@@ -106,7 +105,7 @@ export async function foldHandEdits(
   if (openPassTurn(db, taskId)) return nothing();
   const place = passTaskPlace(db, taskId);
   const { git } = deps;
-  const mine = pageMatcher(place.project, pageClaims(db, place.project, place.task));
+  const mine = pageMatcher(db, place.project, place.task, place.pass.id);
   const last = await readKeptRef(git, place.repo, passKeptRef(place.pass.id, taskId));
   const tip = await git.commitAt(place.repo, place.branch);
   // What differs from the tip now, and what the last kept commit changed, which the builder may
