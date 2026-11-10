@@ -6,9 +6,9 @@ import { renderWithTheme } from '../../test/theme';
 import { CloseProgress, closeProgressLine, type CloseFacts } from './close-progress';
 
 /** What the close does on a pull request project with a gate, taking a page out. */
-const PR: CloseFacts = { delivery: 'pull_request', gated: true, takingOut: true };
+const PR: CloseFacts = { delivery: 'pull_request', gated: true, takingOut: true, stopped: false };
 /** A folder-only project: its gate runs in the folder, and nothing is pushed by the close's own step. */
-const LOCAL: CloseFacts = { delivery: 'local', gated: true, takingOut: true };
+const LOCAL: CloseFacts = { delivery: 'local', gated: true, takingOut: true, stopped: false };
 
 describe('closeProgressLine', () => {
   it.each<{
@@ -86,8 +86,15 @@ describe('closeProgressLine', () => {
       name: 'nothing to take out and no gate: the push is next',
       state: PassState.Closing,
       step: CloseStep.Landed,
-      facts: { delivery: 'pull_request', gated: false, takingOut: false },
+      facts: { delivery: 'pull_request', gated: false, takingOut: false, stopped: false },
       line: 'Pushing…',
+    },
+    {
+      name: 'closing, stopped on an error: nothing is under way until it goes on',
+      state: PassState.Closing,
+      step: CloseStep.ScratchGated,
+      facts: { ...PR, stopped: true },
+      line: null,
     },
     { name: 'abandoning', state: PassState.Abandoning, step: null, line: 'Abandoning the pass…' },
     { name: 'closed', state: PassState.Closed, step: CloseStep.Closed, line: null },

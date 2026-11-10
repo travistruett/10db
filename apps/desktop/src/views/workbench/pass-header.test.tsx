@@ -122,6 +122,26 @@ describe('PassHeader', () => {
     expect(props.onAbandon).toHaveBeenCalledTimes(1);
   });
 
+  it('while a close has stopped on an error, shows no step under way', () => {
+    const { ready } = pagesByStatus();
+    const stopped = {
+      id: 'close',
+      kind: 'close',
+      text: "The close stopped while taking out pages. 10db's log has the detail.",
+      sendable: false,
+      cardId: null,
+      at: PASS_NOW,
+    } as const;
+    draw(
+      passViewDto({
+        pass: { state: 'CLOSING' },
+        pages: [ready],
+        rest: { closeStep: 4, notices: [stopped] },
+      }),
+    );
+    expect(screen.queryByText(/…$/)).toBeNull();
+  });
+
   it('while abandoning, keeps Abandon in reach, so a stalled Abandon can be asked again', async () => {
     const { ready } = pagesByStatus();
     const props = draw(passViewDto({ pass: { state: 'ABANDONING' }, pages: [ready] }));

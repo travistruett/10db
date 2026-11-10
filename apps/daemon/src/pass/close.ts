@@ -510,6 +510,11 @@ export function createPassCloses(deps: CloseDeps): PassCloses {
         jobKey({ projectId: pass.projectId, worktreePath: null }, JobQueue.Cut),
         async (jobSignal) => {
           const signal = AbortSignal.any([jobSignal, abort.signal]);
+          // The close is going on: the notice that said it stopped comes down until it stops again.
+          deps.state.write((ctx) => {
+            if (getPass(ctx.tx, passId).state === PassState.Closing)
+              clearPassNotice(ctx, passId, CLOSE_NOTICE);
+          });
           try {
             // Your folder that left the pass's branch in the middle of a step is waited for, with
             // the folder card, and the close goes on from its recorded step. A refusal with the
@@ -537,7 +542,7 @@ export function createPassCloses(deps: CloseDeps): PassCloses {
               deps.logger.warn({ passId, err: errorText(error) }, 'close did not finish');
               deps.state.write((ctx) => {
                 if (getPass(ctx.tx, passId).state !== PassState.Closing) return;
-                noticeStuck(ctx, passId, error);
+                noticeStuck(ctx, passId, error, deps.gateWhere(getPass(ctx.tx, passId)));
               });
             }
           } finally {
@@ -638,20 +643,45 @@ export function createPassCloses(deps: CloseDeps): PassCloses {
 }
 
 /**
- * The header notice of a close that stopped on an error: Continue Close or the next start goes on, or,
- * before its fast-forward, Abandon ends it. From step 7 the return branch may have moved, and an
- * Abandon is refused.
+ * What a close was doing when it stopped, in words, from the last step it recorded and where the
+ * project gates a pass.
  */
-function noticeStuck(ctx: WriteContext, passId: PassId, error: unknown): void {
+function stoppedWhile(step: number, where: CloseGateWhere): string {
+  if (step < CloseStep.Landed) return "landing the close's changes";
+  if (step < CloseStep.ScratchGated && where === 'scratch')
+    return 'running the gate in a separate copy';
+  if (step < CloseStep.TakenOut) return 'taking out pages';
+  if (step < CloseStep.FolderGated && where === 'folder') return 'running the gate in your folder';
+  if (step < CloseStep.Pushed) return "pushing the pass's branch";
+  if (step < CloseStep.Closed) return "moving your folder's branch";
+  return 'closing the pass';
+}
+
+/**
+ * The header notice of a close that stopped on an error: a plain sentence naming what it was doing,
+ * the error itself only in the log, since it can be any library's or git's own text. Continue Close
+ * or the next start goes on, or, before its fast-forward, Abandon ends it. From step 7 the return
+ * branch may have moved, and an Abandon is refused.
+ */
+function noticeStuck(
+  ctx: WriteContext,
+  passId: PassId,
+  error: unknown,
+  where: CloseGateWhere,
+): void {
   const step = getPassProgress(ctx.tx, passId).closeStep ?? 0;
   const end =
     step >= CloseStep.FastForwarded
       ? `its fast-forward may have moved ${getPass(ctx.tx, passId).returnBranch}, so it can no longer be abandoned`
       : 'Abandon Pass ends it';
+  const why =
+    error instanceof CloseGateStoppedError
+      ? `The close stopped: ${error.message}.`
+      : `The close stopped while ${stoppedWhile(step, where)}. 10db's log has the detail.`;
   setPassNotice(ctx, passId, {
     id: CLOSE_NOTICE,
     kind: PassNoticeKind.Close,
-    text: `The close stopped: ${errorText(error)}. Continue Close goes on from where it stopped, as 10db does when it next starts; ${end}.`,
+    text: `${why} Continue Close goes on from where it stopped, as 10db does when it next starts; ${end}.`,
     sendable: false,
     cardId: null,
     at: ctx.now,

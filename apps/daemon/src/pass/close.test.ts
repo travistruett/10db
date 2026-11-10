@@ -451,26 +451,32 @@ describe('Close Pass', () => {
 
   it.each([
     {
-      name: 'its push failed',
-      ship: (real: CloseShip): Partial<CloseShip> => {
+      name: 'its push failed with raw text',
+      ship: (real: CloseShip, again: () => void): Partial<CloseShip> => {
         let failed = false;
         return {
           pushPassBranch: (passId, signal) => {
-            if (failed) return real.pushPassBranch(passId, signal);
+            if (failed) {
+              again();
+              return real.pushPassBranch(passId, signal);
+            }
             failed = true;
-            return Promise.reject(new Error('origin is offline'));
+            return Promise.reject(new Error('UNIQUE constraint failed: pass_take_outs.task_id'));
           },
         };
       },
-      notice: /^The close stopped: origin is offline\./,
+      notice: /^The close stopped while pushing the pass's branch\. 10db's log has the detail\./,
     },
     {
       name: 'its gate was stopped by something other than an Abandon',
-      ship: (real: CloseShip): Partial<CloseShip> => {
+      ship: (real: CloseShip, again: () => void): Partial<CloseShip> => {
         let stopped = false;
         return {
           gatePassTip: (i) => {
-            if (stopped) return real.gatePassTip(i);
+            if (stopped) {
+              again();
+              return real.gatePassTip(i);
+            }
             stopped = true;
             return Promise.resolve({ passed: false, aborted: true, logPath: '', dirtyNamed: [] });
           },
@@ -482,18 +488,30 @@ describe('Close Pass', () => {
     await world({ gateCommand: 'true' });
     await twoTurns();
     const deps = closeDeps();
-    const closes = await confirm({ ...deps, ship: { ...deps.ship, ...ship(deps.ship) } });
+    const stuckNow = () =>
+      getPassProgress(w.h.store.db, w.opened.pass.id).notices.find((n) => n.id === 'close');
+    // Whether the stopped close's notice was still up when the close went on.
+    let stuckWhenAgain: unknown = null;
+    const closes = await confirm({
+      ...deps,
+      ship: {
+        ...deps.ship,
+        ...ship(deps.ship, () => {
+          stuckWhenAgain = stuckNow() ?? false;
+        }),
+      },
+    });
     expect(passState()).toBe('CLOSING');
-    const stuck = getPassProgress(w.h.store.db, w.opened.pass.id).notices.find(
-      (n) => n.id === 'close',
-    );
+    const stuck = stuckNow();
     expect(stuck?.text).toMatch(notice);
+    expect(stuck?.text).not.toMatch(/UNIQUE|pass_take_outs/);
     expect(stuck?.text).toMatch(/Continue Close goes on from where it stopped/);
 
     const again = closes.continueClose(w.opened.pass.id);
     await w.h.jobs.idle();
 
     expect(again.outcome).toBe('closing');
+    expect(stuckWhenAgain).toBe(false);
     expect(passState()).toBe('CLOSED');
     expect(landed()).toEqual(['Settings: UI work']);
     expect(getPassProgress(w.h.store.db, w.opened.pass.id).notices).toEqual([]);
@@ -712,7 +730,7 @@ describe('Close Pass', () => {
     const stuck = getPassProgress(w.h.store.db, w.opened.pass.id).notices.find(
       (n) => n.id === 'close',
     );
-    expect(stuck?.text).toMatch(/^The close stopped: /);
+    expect(stuck?.text).toMatch(/^The close stopped while moving your folder's branch\. /);
     expect(stuck?.text).not.toMatch(/Abandon/);
   });
 

@@ -10,6 +10,8 @@ export interface CloseFacts {
   readonly gated: boolean;
   /** Some page of the pass is not signed off, so the close takes it out. */
   readonly takingOut: boolean;
+  /** The close stopped on an error: its header notice says so, and nothing runs until it goes on. */
+  readonly stopped: boolean;
 }
 
 /** A step of the close after the confirm, what it says while it runs, and whether it does anything. */
@@ -62,7 +64,7 @@ export function closeProgressLine(
 ): string | null {
   switch (state) {
     case PassState.Closing:
-      return closingLine(step, facts);
+      return facts.stopped ? null : closingLine(step, facts);
     case PassState.Abandoning:
       return 'Abandoning the pass…';
     case PassState.Open:
