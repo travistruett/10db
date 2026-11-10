@@ -1800,6 +1800,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       ledgerSweep?.stop();
       await preparer.idle();
       await loginStopped;
+      // A tick asked for before the stop may still be reading the branches; it launches nothing now,
+      // but it reads and writes the database until it ends.
+      await createdScheduler.idle();
       state.write((ctx) => {
         setAppSetting(ctx, CLEAN_SHUTDOWN_KEY, { at: ctx.now });
       });
