@@ -1,4 +1,4 @@
-import type { ClaimKind, ProjectDto, WorkstreamId } from '@10db/contracts';
+import type { ClaimKind, PassDirtEntry, ProjectDto, WorkstreamId } from '@10db/contracts';
 import { findClaimed } from './strays';
 
 // Workbench spec §6.4: while a pass holds its tasks, a write in Your folder inside a page is the
@@ -46,4 +46,15 @@ export function passWrites(input: {
     foreign: input.foreign.filter((path) => !inPass.has(path)),
     working,
   };
+}
+
+/**
+ * What each path of Your folder holds while the pass accounts for it, by path (null: not there): what
+ * the pass's open recorded of the folder's dirt (spec §5.1). A path that still holds it is no write
+ * made in the pass, whatever claim covers it.
+ */
+export function accountedContent(input: {
+  readonly dirt: readonly PassDirtEntry[];
+}): Map<string, string | null> {
+  return new Map(input.dirt.map((entry) => [entry.path, entry.blob]));
 }

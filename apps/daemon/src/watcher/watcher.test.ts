@@ -914,8 +914,14 @@ describe('watcher', () => {
 
 // Workbench spec §6.4: while a pass holds its tasks, the builder's writes in Your folder raise no card.
 describe('a Workbench pass in Your folder', () => {
-  /** A pass on Alpha (`api`, Ready) and Beta (`ui`), each claiming its page as a pass does at open. */
-  function pass(beta: WorkstreamState): { alpha: WorkstreamDto; beta: WorkstreamDto; id: PassId } {
+  /**
+   * A pass on Alpha (`api`, Ready) and Beta (`ui`), each claiming its page as a pass does at open, with
+   * the folder's dirt its open recorded.
+   */
+  function pass(
+    beta: WorkstreamState,
+    dirt: readonly { path: string; blob: string | null }[] = [],
+  ): { alpha: WorkstreamDto; beta: WorkstreamDto; id: PassId } {
     const a = seedWorkstream(base, { project, title: 'Alpha', areas: ['api'] });
     const b = seedWorkstream(base, { project, title: 'Beta', areas: ['ui'] });
     const id = mintId('Pass');
@@ -935,7 +941,7 @@ describe('a Workbench pass in Your folder', () => {
         baseBranch: 'main',
         repo: null,
         taskIds: [a.task.id, b.task.id],
-        dirt: [],
+        dirt,
       });
       for (const seeded of [a, b])
         acquireClaims(ctx, {
@@ -1044,6 +1050,89 @@ describe('a Workbench pass in Your folder', () => {
     touch('docs/notes.md');
     expect(await watcher.stepEnd(gamma.id)).toEqual(['docs/notes.md']);
     expect(flags().map((f) => f.body)).toEqual(['docs/notes.md\nWritten while Gamma was working']);
+  });
+
+  /** The blob git would make of `text`. */
+  const blobOf = (text: string): string =>
+    execFileSync('git', ['-C', repo.path, 'hash-object', '--stdin'], {
+      input: text,
+      env: isolatedGitEnv(),
+    })
+      .toString()
+      .trim();
+
+  /**
+   * Your folder before the pass: `docs/before.md` new, `docs/edited.md` new and edited again since,
+   * README.md deleted. What the pass's open recorded of each, as it was then.
+   */
+  function earlierDirt(): { path: string; blob: string | null }[] {
+    touch('docs/before.md');
+    writeFileSync(join(repo.path, 'docs', 'edited.md'), 'later');
+    rmSync(join(repo.path, 'README.md'));
+    return [
+      { path: 'README.md', blob: null },
+      { path: 'docs/before.md', blob: blobOf('x') },
+      { path: 'docs/edited.md', blob: blobOf('earlier') },
+    ];
+  }
+
+  it("at a session's end, cards no file that still holds what the pass's open recorded of it, and does one changed since", async () => {
+    const dirt = earlierDirt();
+    const gamma = state.write((ctx) => {
+      const task = insertTask(ctx, project.id, {
+        title: 'Gamma',
+        acceptanceCriteria: ['ok'],
+        areas: ['api'],
+      });
+      const { batch } = insertPass(ctx, {
+        id: mintId('Pass'),
+        projectId: project.id,
+        name: 'Polish',
+        pageCap: 4,
+        returnBranch: 'main',
+        startSha: 'a'.repeat(40),
+        branch: '10db/polish-abc123',
+        baseBranch: 'main',
+        repo: null,
+        taskIds: [task.id],
+        dirt,
+      });
+      const ws = insertWorkstream(ctx, task.id, {
+        first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        batchId: batch.id,
+      });
+      // Its session crashed mid-turn: queued to resume, the turn still open.
+      insertPassTurn(ctx, {
+        taskId: task.id,
+        workstreamId: ws.id,
+        sessionId: null,
+        messageId: null,
+      });
+      return ws;
+    });
+    touch('docs/notes.md');
+    expect(await watcher.stepEnd(gamma.id)).toEqual(['docs/edited.md', 'docs/notes.md']);
+    expect(flags().map((f) => f.body)).toEqual(
+      expect.arrayContaining([
+        'docs/edited.md\nWritten while Gamma was working',
+        'docs/notes.md\nWritten while Gamma was working',
+      ]),
+    );
+    expect(flags()).toHaveLength(2);
+  });
+
+  it("while a lane works, cards no write that leaves a file as the pass's open recorded it", async () => {
+    pass(WorkstreamState.Running, earlierDirt());
+    watcher.sync();
+    for (const rel of ['README.md', 'docs/before.md', 'docs/edited.md']) emit(rel);
+    await write('docs/notes.md');
+    expect(flags().map((f) => f.body)).toEqual(
+      expect.arrayContaining([
+        'docs/edited.md\nWritten while Beta was working',
+        'docs/notes.md\nWritten while Beta was working',
+      ]),
+    );
+    expect(flags()).toHaveLength(2);
   });
 
   it('cards a write outside every claim that arrives just after a lane of the pass ended its turn', async () => {
