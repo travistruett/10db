@@ -1,3 +1,4 @@
+import type { TurnActivityDto } from '@10db/contracts';
 import {
   GoalPassPagesDto,
   mintId,
@@ -14,7 +15,6 @@ import {
   TaskId,
   TaskMessageDto,
   TaskThreadDto,
-  TurnActivityDto,
   type InboxItemDto,
   type PassTurnActivity,
   type WorkstreamId,
@@ -308,15 +308,6 @@ export function passTurnWithFilesDto(
     openedAt: null,
     answeredAt: null,
     files: [{ path: 'src/settings/page.tsx', added: 4, removed: 1 }],
-    ...overrides,
-  });
-}
-
-export function turnActivityDto(overrides: Partial<TurnActivityDto> = {}): TurnActivityDto {
-  return TurnActivityDto.parse({
-    at: minutesBeforeNow(2),
-    kind: 'tool_use',
-    summary: 'Edit src/settings/page.tsx',
     ...overrides,
   });
 }

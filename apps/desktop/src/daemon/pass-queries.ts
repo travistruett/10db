@@ -138,12 +138,6 @@ export function livePassesOptions(connection: DaemonConnection) {
   });
 }
 
-/** Every project's live passes: open, closing, abandoning, and closed ones waiting to settle. */
-export function useLivePasses() {
-  const { connection } = useDaemon();
-  return useQuery(livePassesOptions(connection));
-}
-
 /** The project's pass the Workbench shows (`livePassOf`): null with none, undefined until read. */
 export function useLivePass(projectId: ProjectId) {
   const { connection } = useDaemon();
