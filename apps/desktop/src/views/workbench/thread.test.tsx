@@ -1,4 +1,4 @@
-import { TaskThreadDto } from '@10db/contracts';
+import { TaskScreensDto, TaskThreadDto } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -9,6 +9,7 @@ import {
   passHandlers,
   passTurnWithFilesDto,
   taskFileDto,
+  taskScreenDto,
   taskMessageDto,
 } from '../../test/pass-fixtures';
 import { Thread } from './thread';
@@ -74,6 +75,78 @@ describe('Thread', () => {
     const files = screen.getByRole('list', { name: 'Files this turn changed' });
     expect(files.textContent).toBe('src/settings/page.tsx+4 −1');
     expect(screen.getByText(notice.body).style.color).toBe('var(--mantine-color-dimmed)');
+  });
+
+  it("shows the before at the top and each turn's pictures under its reply", async () => {
+    const before = taskScreenDto({ taskId: page.taskId });
+    const ofTurn = taskScreenDto({
+      taskId: page.taskId,
+      kind: 'turn',
+      turnId: turn.id,
+      turnSeq: 1,
+      sha256: 'b'.repeat(64),
+    });
+    const ofAnotherTurn = taskScreenDto({
+      taskId: page.taskId,
+      kind: 'turn',
+      turnId: passTurnWithFilesDto({ taskId: page.taskId }).id,
+      turnSeq: 2,
+    });
+    const asked: string[] = [];
+    serve(TaskThreadDto.parse({ taskId: page.taskId, messages: [message, reply] }));
+    server.use(
+      http.get(daemonUrl('/tasks/:taskId/screens'), () =>
+        HttpResponse.json(
+          TaskScreensDto.parse({
+            taskId: page.taskId,
+            screens: [before, ofTurn, ofAnotherTurn],
+            fromGoal: [],
+          }),
+        ),
+      ),
+      http.get(daemonUrl('/screens/:screenId'), ({ params, request }) => {
+        asked.push(`${String(params['screenId'])} ${request.headers.get('authorization') ?? ''}`);
+        return new HttpResponse(PNG, { headers: { 'content-type': 'image/png' } });
+      }),
+    );
+    renderWithDaemon(<Thread page={page} turns={[turn]} openPage={null} canSend />);
+    const thread = await screen.findByRole('list', { name: 'Thread' });
+    await screen.findByRole('img', { name: 'Settings before, 1440 by 900' });
+    const items = [...thread.children];
+    expect(
+      within(items[0] as HTMLElement)
+        .getByRole('img')
+        .getAttribute('alt'),
+    ).toBe('Settings before, 1440 by 900');
+    const replyItem = await waitFor(() => {
+      const found = items.find((item) => item.textContent.includes(reply.body));
+      if (found === undefined) throw new Error('no reply');
+      return found as HTMLElement;
+    });
+    expect(
+      (await within(replyItem).findAllByRole('img')).map((img) => img.getAttribute('alt')),
+    ).toEqual(['Settings after, turn 1, 1440 by 900']);
+    expect(screen.queryByRole('img', { name: /turn 2/ })).toBeNull();
+    expect(asked).toContain(`${before.id} Bearer test-token`);
+  });
+
+  it('shows the before with the route before the first message', async () => {
+    const before = taskScreenDto({ taskId: page.taskId });
+    serve(TaskThreadDto.parse({ taskId: page.taskId, messages: [] }));
+    server.use(
+      http.get(daemonUrl('/tasks/:taskId/screens'), () =>
+        HttpResponse.json(
+          TaskScreensDto.parse({ taskId: page.taskId, screens: [before], fromGoal: [] }),
+        ),
+      ),
+      http.get(
+        daemonUrl('/screens/:screenId'),
+        () => new HttpResponse(PNG, { headers: { 'content-type': 'image/png' } }),
+      ),
+    );
+    renderWithDaemon(<Thread page={page} turns={[]} openPage={null} canSend />);
+    expect(await screen.findByRole('img', { name: 'Settings before, 1440 by 900' })).toBeTruthy();
+    expect(screen.getByText('/settings')).toBeTruthy();
   });
 
   it('before the first message, says where the page is', async () => {

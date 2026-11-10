@@ -1,9 +1,16 @@
-import { TaskMessageKind, type PassPageDto, type PassTurnWithFilesDto } from '@10db/contracts';
+import {
+  ScreenKind,
+  TaskMessageKind,
+  type PassPageDto,
+  type PassTurnWithFilesDto,
+} from '@10db/contracts';
 import { Code, Stack, Text } from '@mantine/core';
 import type { ReactNode } from 'react';
+import { useTaskScreens } from '../../daemon/screen-queries';
 import { useTaskThread } from '../../daemon/thread-queries';
 import { turnOfReply } from './reply-turns';
 import { ThreadMessage } from './thread-message';
+import { TurnPictures } from './turn-pictures';
 
 export interface ThreadProps {
   readonly page: PassPageDto;
@@ -30,9 +37,15 @@ function BeforeFirstMessage({ page }: { readonly page: PassPageDto }) {
   );
 }
 
+/** A page area's name as a picture names it: "settings" reads "Settings". */
+const pageName = (area: string): string => area.charAt(0).toUpperCase() + area.slice(1);
+
 /** A page's thread, oldest first: the builder's messages, the agent's replies and the notices. */
 export function Thread({ page, turns, openPage, canSend }: ThreadProps) {
   const thread = useTaskThread(page.taskId);
+  const screens = useTaskScreens(page.taskId).data?.screens ?? [];
+  const name = pageName(page.area);
+  const befores = screens.filter((s) => s.kind === ScreenKind.Before);
   if (thread.isError)
     return (
       <Text size="sm" c="red" px="md">
@@ -50,6 +63,7 @@ export function Thread({ page, turns, openPage, canSend }: ThreadProps) {
     return (
       <Stack gap="xs" px="md" py="sm" align="flex-start">
         <BeforeFirstMessage page={page} />
+        <TurnPictures screens={befores} name={name} />
         {openPage}
       </Stack>
     );
@@ -63,15 +77,25 @@ export function Thread({ page, turns, openPage, canSend }: ThreadProps) {
       py="sm"
       style={{ listStyle: 'none' }}
     >
-      {messages.map((message) => (
-        <li key={message.id}>
-          <ThreadMessage
-            message={message}
-            turn={message.kind === TaskMessageKind.Reply ? turnOfReply(message, turns) : null}
-            canSend={canSend}
-          />
+      {befores.length > 0 && (
+        <li>
+          <TurnPictures screens={befores} name={name} />
         </li>
-      ))}
+      )}
+      {messages.map((message) => {
+        const turn = message.kind === TaskMessageKind.Reply ? turnOfReply(message, turns) : null;
+        return (
+          <li key={message.id}>
+            <ThreadMessage message={message} turn={turn} canSend={canSend} />
+            {turn !== null && (
+              <TurnPictures
+                screens={screens.filter((s) => s.kind === ScreenKind.Turn && s.turnId === turn.id)}
+                name={name}
+              />
+            )}
+          </li>
+        );
+      })}
     </Stack>
   );
 }

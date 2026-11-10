@@ -11,6 +11,7 @@ import {
   PassStartDto,
   PassTurnTimingDto,
   PassTurnWithFilesDto,
+  TaskScreenDto,
   PassViewDto,
   TaskFileDto,
   TaskId,
@@ -483,4 +484,25 @@ export function passHandlers(routes: PassRoutes = {}): HttpHandler[] {
       HttpResponse.json(routes.proposal ?? pagesProposalDto()),
     ),
   ];
+}
+
+/** A picture of a task's page: a before of `/settings`, 1440 by 900, unless overridden. */
+export function taskScreenDto(overrides: Partial<TaskScreenDto> = {}): TaskScreenDto {
+  return TaskScreenDto.parse({
+    id: mintId('TaskScreen'),
+    taskId: mintId('Task'),
+    turnId: null,
+    turnSeq: null,
+    kind: 'before',
+    route: '/settings',
+    viewport: { width: 1440, height: 900 },
+    theme: 'default',
+    width: 1440,
+    height: 900,
+    size: 1234,
+    sha256: 'a'.repeat(64),
+    keptSha: null,
+    createdAt: minutesBeforeNow(20),
+    ...overrides,
+  });
 }

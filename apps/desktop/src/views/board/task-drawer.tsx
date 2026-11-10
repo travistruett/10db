@@ -69,6 +69,7 @@ import {
 import { sameSetting } from '../settings/model-setting-options';
 import { ModelSettingSelect } from '../settings/model-setting-select';
 import { KeptWork } from './kept-work';
+import { TaskPictures } from './task-pictures';
 import { LandingField } from './landing-field';
 import { placementOpen } from './placement';
 import { PlacementBadge } from './placement-badge';
@@ -422,6 +423,7 @@ export function TaskDrawer({
                   </Anchor>
                 </Group>
               ) : null}
+              <TaskPictures taskId={task.id} />
               <TaskSizeLine taskId={task.id} />
               {onOpenConversation ? (
                 <OpenConversation target={{ taskId: task.id }} onOpen={onOpenConversation} />

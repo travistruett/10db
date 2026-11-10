@@ -14,6 +14,7 @@ import { daemonEvent } from '../test/fixtures';
 import { passActivityData, passViewDto, pagesByStatus } from '../test/pass-fixtures';
 import { useAccounts, useAccountUsage } from './account-queries';
 import { EVENT_INVALIDATIONS, eventStreamUrl, INVALIDATIONS, useEventStream } from './events';
+import { screenKeys } from './screen-queries';
 import { passKeys, useTurnActivity } from './pass-queries';
 import { threadKeys } from './thread-queries';
 import { useBatches, useProjects } from './queries';
@@ -358,6 +359,12 @@ describe('useEventStream', () => {
       ...(EVENT_INVALIDATIONS['session.activity'] ?? []),
     ])
       expect(key[0]).not.toBe(passKeys.all[0]);
+  });
+
+  it("refetches a task's pictures when one is kept", () => {
+    expect(EVENT_INVALIDATIONS['task.screen_added']).toEqual(
+      expect.arrayContaining([screenKeys.all]),
+    );
   });
 
   it("writes a pass lane's tool call into its page's turn, and leaves other lanes' pages alone", async () => {

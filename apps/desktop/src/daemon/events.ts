@@ -14,6 +14,7 @@ import { NETWORK_HOSTS_KEY } from './network-host-queries';
 import { passKeys, writePassActivity } from './pass-queries';
 import { queryKeys } from './queries';
 import { shapeKeys } from './shape-queries';
+import { screenKeys } from './screen-queries';
 import { threadKeys } from './thread-queries';
 
 export const STREAM_RETRY_BASE_MS = 500;
@@ -89,6 +90,8 @@ export const EVENT_INVALIDATIONS: Readonly<Partial<Record<EventType, readonly Qu
   // A builder message, an agent's reply or a notice joined a task's thread; a reply ends a turn, and a
   // message to a page makes it working before its turn starts.
   'task.message_added': [threadKeys.all, passKeys.turnsAll, passKeys.live],
+  // A picture of a task's page was kept: its thread and its drawer show it.
+  'task.screen_added': [screenKeys.all],
 };
 
 export function eventStreamUrl(conn: DaemonConnection, after: number): string {
