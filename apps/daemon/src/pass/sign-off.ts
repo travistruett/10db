@@ -370,8 +370,8 @@ export function finishSignOff(
  * page's turn holds makes it wait (a row, and the job ends), except in a close, whose turns have all
  * stopped, which keeps it. Then 1 folds the builder's hand edits; 2 lands the shared changes the page
  * needs, in chain order; 3 lands the page's files as one commit; 4 the folder's index follows; 5 one
- * write ends the run. Every commit has its own operation id (the page's, from the kept commit it
- * lands), so a rerun makes only what is missing.
+ * write ends the run while the pass is still as the sign-off found it. Every commit has its own
+ * operation id (the page's, from the kept commit it lands), so a rerun makes only what is missing.
  */
 export async function signOffSteps(
   deps: SignOffDeps,
@@ -455,6 +455,16 @@ export async function signOffSteps(
 
   const at = landedSha;
   const refused = deps.state.write((ctx): string | null => {
+    // The pass is read again in this write: an Abandon that took it over as the page landed ends
+    // no run, and a close's Sign Off Now stops there.
+    const now = getPass(ctx.tx, pass.id).state;
+    if (now !== wanted) {
+      const reason = `the pass is ${now.toLowerCase()}`;
+      if (input.from === SignOffFrom.Close) throw new ConflictError(`Not signed off: ${reason}`);
+      deleteSignOffWait(ctx, task.id);
+      insertSystemNotice(ctx, task.id, `Not signed off: ${reason}.`);
+      return reason;
+    }
     // A message to the page as it landed reopens it, as one after its sign-off would (spec §9.2):
     // its commits stay on the branch, and the next sign-off lands what the turn adds.
     if (

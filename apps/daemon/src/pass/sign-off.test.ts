@@ -1,4 +1,5 @@
 import {
+  AbandonStep,
   ConflictError,
   InboxState,
   PASS_SIGN_OFF_CHOICE,
@@ -22,6 +23,8 @@ import {
   listSignOffWaits,
   listTaskThread,
   openHolds,
+  setAbandonStep,
+  setClosePlan,
   transitionWorkstream,
   updateInboxItem,
   type WriteContext,
@@ -275,6 +278,43 @@ describe('signOffSteps', () => {
       /^Not signed off: the page took a message as it landed/,
     );
   });
+
+  it.each([
+    { name: 'a page', from: SignOffFrom.Page, closing: false },
+    { name: "a close's Sign Off Now", from: SignOffFrom.Close, closing: true },
+  ])(
+    'of $name ends no run once an Abandon took the pass as it landed',
+    async ({ from, closing }) => {
+      w = await openPassWorld();
+      await turn(w.settings, () => {
+        w.write('src/settings/page.tsx', 'tidied\n');
+      });
+      ready(w.settings);
+      if (closing)
+        w.h.state.write((ctx) => {
+          setClosePlan(ctx, w.opened.pass.id, { token: 't', pages: [], files: [], shared: [] });
+        });
+      const abandoned: Git = {
+        ...w.deps.git,
+        landPaths: async (input) => {
+          const done = await w.deps.git.landPaths(input);
+          w.h.state.write((ctx) => {
+            setAbandonStep(ctx, w.opened.pass.id, AbandonStep.Abandoning);
+          });
+          return done;
+        },
+      };
+
+      const signing = signOffSteps(
+        { ...w.deps, git: abandoned, stopLane: stopped },
+        { taskId: w.settings.id, from },
+      );
+
+      if (closing) await expect(signing).rejects.toThrow(ConflictError);
+      else expect(await signing).toMatchObject({ kind: 'not_now' });
+      expect(getWorkstreamRow(w.h.store.db, w.runOf(w.settings)).state).toBe('WAITING_HUMAN');
+    },
+  );
 
   it('lands from the new tip once when a hand-typed git moved the branch as it landed', async () => {
     w = await openPassWorld();
