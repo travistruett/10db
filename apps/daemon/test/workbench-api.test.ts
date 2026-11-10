@@ -6,8 +6,11 @@ import {
   mintId,
   PagesProposalDto,
   PassAbandonedDto,
+  PassCloseAnswerDto,
+  PassClosePreviewDto,
   PassDto,
   PassOpenedDto,
+  PassSignOffDto,
   PassStartDto,
   PassTurnWithFilesDto,
   PassViewDto,
@@ -625,7 +628,7 @@ describe("a page's turns over HTTP", () => {
 });
 
 describe('the Milestone 1 loop over HTTP, as the desktop sends it', () => {
-  it('opens a pass on two pages, takes a message with a picture to Ready, stops one, takes one out and abandons', async () => {
+  it('opens a pass on two pages, takes a message with a picture to Ready, signs it off, stops and takes out the other, and closes', async () => {
     const project = await projectWith([
       { name: 'billing', globs: ['src/billing/**'], role: 'page', route: '/billing' },
       { name: 'home', globs: ['src/home/**'], role: 'page', route: '/' },
@@ -684,6 +687,14 @@ describe('the Milestone 1 loop over HTTP, as the desktop sends it', () => {
     const log = await api().get(`/pass-turns/${second.id}/activity`, z.array(TurnActivityDto));
     expect(log.length).toBeGreaterThan(0);
 
+    // Sign Off on the Ready page: its session stops and its work lands on the pass's branch.
+    const signing = await send('POST', `/passes/${passId}/tasks/${billing}/sign-off`);
+    expect(signing.status).toBe(202);
+    expect(PassSignOffDto.parse(signing.body)).toMatchObject({ taskId: billing, waitsFor: null });
+    await waitForAsync(async () => ((await page('billing')).signOff === 'done' ? true : undefined));
+    // The folder is on the pass's branch, whose last commit now holds the page.
+    expect(rawGit('show', 'HEAD:src/billing/page.tsx')).toBe('b');
+
     // An empty composer's Stop on the page still working.
     const home = await waitForAsync(async () => {
       const found = await page('home');
@@ -693,16 +704,32 @@ describe('the Milestone 1 loop over HTTP, as the desktop sends it', () => {
     expect(typeof (await page('home')).turn?.endedAt).toBe('string');
 
     // Take Out… keeps every shared change.
-    const takeOut = await send('POST', `/passes/${passId}/tasks/${billing}/take-out`, {
+    const takeOut = await send('POST', `/passes/${passId}/tasks/${home.taskId}/take-out`, {
       shared: [],
     });
     expect(takeOut.status).toBe(200);
     expect(TakeOutResultDto.parse(takeOut.body).tookOut).toBe(true);
-    expect((await live())[0]?.pages.map((p) => p.area)).toEqual(['home']);
+    expect((await live())[0]?.pages.map((p) => p.area)).toEqual(['billing']);
 
-    const abandoned = await send('POST', `/passes/${passId}/abandon`);
-    expect(abandoned.status).toBe(200);
-    PassAbandonedDto.parse(abandoned.body);
+    // Close Pass… reads its lists, which stop nothing, and closes on them as confirmed.
+    const preview = await api().get(`/passes/${passId}/close`, PassClosePreviewDto);
+    expect([preview.unfinished, preview.foreignCommits]).toEqual([[], []]);
+    const closing = await send('POST', `/passes/${passId}/close`, {
+      token: preview.token,
+      pages: [],
+      files: preview.unowned.map((file) => ({ path: file.path, placeIn: null })),
+      shared: [],
+    });
+    expect(closing.status).toBe(200);
+    expect(PassCloseAnswerDto.parse(closing.body).outcome).toBe('closing');
+    const closed = await waitForAsync(async () => {
+      const view = await api().get(`/passes/${passId}`, PassViewDto);
+      return view.pass.state === 'CLOSING' ? undefined : view.pass;
+    });
+    expect(closed.state).toBe('SETTLED');
     expect(await live()).toEqual([]);
+    // The folder is back on its branch, which now holds the signed-off page.
+    expect(rawGit('symbolic-ref', '--short', 'HEAD')).toBe('main');
+    expect(rawGit('show', 'main:src/billing/page.tsx')).toBe('b');
   });
 });
