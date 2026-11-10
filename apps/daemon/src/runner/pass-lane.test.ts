@@ -59,7 +59,13 @@ import { recoverOnStartup, systemProcesses } from '../recovery';
 import { createScheduler } from '../scheduler';
 import { untakenMessages } from './lane-messages';
 import { finishEndedTurn } from './pass-turn';
-import { closeHoldsOf, grantSharedHold, resumePassWork, type PassWorkDeps } from '../pass';
+import {
+  askSignOff,
+  closeHoldsOf,
+  grantSharedHold,
+  resumePassWork,
+  type PassWorkDeps,
+} from '../pass';
 import { DEFAULT_RUNNER_LIMITS } from './runner';
 import { handoffArgs, isolatedGitEnv, waitFor } from '../../test/fixtures';
 import type { FakeScriptBook } from '../sessions';
@@ -1613,4 +1619,43 @@ describe('a take-out or Abandon across a restart', () => {
       ).toEqual([[2, later.id, null]]);
     },
   );
+});
+
+describe('a message to a signed-off page', () => {
+  it('reopens the page in a new run, whose sign-off lands a second commit', async () => {
+    // Each run's first session plays this script, so the new run's page work is the builder's
+    // edit, which its turn folds in.
+    const { task, pass, id } = await openPage([
+      [...turn('one\n', 'Tidied the form.'), { do: 'await_message', contains: 'never sent' }],
+    ]);
+    await waitFor(isReady(id, 1));
+    const deps = { ...passWork(), stopLane: (ws: WorkstreamId) => engine.runner.stopPassLane(ws) };
+    askSignOff(deps, pass.id, task.id);
+    await deps.jobs.idle();
+    expect(row(id).state).toBe('DONE');
+
+    writeFileSync(join(engine.repoPath, 'src/settings/extra.tsx'), 'by hand\n');
+    await write(task, 'Bigger please');
+
+    const again = getTask(engine.store.db, task.id).workstreamId;
+    if (again === null || again === id) throw new Error('the page was not reopened');
+    expect(row(id).state).toBe('DONE');
+    expect(row(again)).toMatchObject({
+      state: 'QUEUED',
+      batchId: row(id).batchId,
+      nextAction: { kind: 'feedback', providerSessionId: null },
+    });
+    expect(getTask(engine.store.db, task.id).status).toBe('open');
+    engine.launch(again);
+    await waitFor(isReady(again, 2));
+    askSignOff(deps, pass.id, task.id);
+    await deps.jobs.idle();
+
+    expect(row(again).state).toBe('DONE');
+    expect(git('log', '--format=%s', `${pass.startSha}..10db/polish-abc123`).split('\n')).toEqual([
+      TITLE,
+      TITLE,
+    ]);
+    expect(git('show', '10db/polish-abc123:src/settings/extra.tsx')).toBe('by hand');
+  });
 });

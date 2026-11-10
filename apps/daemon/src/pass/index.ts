@@ -49,3 +49,4 @@ export {
   slowPageLine,
   type MoveToCopyDeps,
 } from './move-copy';
+export { reopenSignedOffPage } from './reopen';

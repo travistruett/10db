@@ -123,7 +123,7 @@ function pageWaitNotice(area: string, holder: TaskDto): Notice {
  * What a task in a pass runs: the project's implement step alone (D21). A pass is reviewed once, at
  * its pull request, so no plan, review or QA step runs per turn.
  */
-function passPlan(db: DbReader, task: TaskDto): StepPlanDto {
+export function passPlan(db: DbReader, task: TaskDto): StepPlanDto {
   const plan = resolveStepPlan(db, task.id);
   const at = plan.steps.findIndex((step) => step.role === StepRole.Implement);
   const step = plan.steps[at];

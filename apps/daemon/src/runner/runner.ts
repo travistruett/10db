@@ -188,6 +188,7 @@ import {
   foldHandEdits,
   keepTurnWork,
   passFolderOn,
+  reopenSignedOffPage,
   type PassWorkDeps,
 } from '../pass';
 import { allowedToolsFor, laneAutoMode, storableRule } from '../permissions';
@@ -3795,6 +3796,11 @@ export function createRunner(opts: RunnerOptions): Runner {
         if (deleteSignOffWait(ctx, taskId))
           insertSystemNotice(ctx, taskId, 'Sign-off cancelled: the page took a message.');
       });
+      // A signed-off page is reopened by its message: a new run of the task takes it.
+      if (opts.state.write((ctx) => reopenSignedOffPage(ctx, taskId, messageId)) !== null) {
+        opts.onLaneFreed();
+        return;
+      }
       const ctl = active.get(id);
       const lane = ctl?.messages ?? null;
       if (ctl && lane && ctl.stopReason === null) {
