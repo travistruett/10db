@@ -5,43 +5,45 @@ import { pageRouteLoads } from '../pictures';
 // report_pages keeps of the routes an agent names. The browser loads each one signed in as the
 // builder's dev login, so an agent must not be able to name any path at all: that would make 10db a
 // confused deputy, doing a signed-in GET (one that changes data, say) the agent cannot do itself. A
-// route is kept only when it is one of the project's page area routes, a parameter segment (`[id]`,
-// `[...slug]`, `:id`) standing for exactly one concrete segment, with any query kept. A turn (a pass
-// page) or a run (a task outside a pass) keeps at most REPORTED_ROUTES_MAX of them.
+// route is kept only as one of the project's page area routes: each parameter segment (`[id]`,
+// `[...slug]`, `:id`) filled with one plain value that no page area's route uses as a literal segment
+// at that depth, the reported query dropped and the area route's own query kept. A turn (a pass page)
+// or a run (a task outside a pass) keeps at most REPORTED_ROUTES_MAX of them.
 
 /** An area route's segment that stands for a value: Next's `[id]` and `[...slug]`, or `:id`. */
 const isParameter = (segment: string): boolean => segment.includes('[') || segment.startsWith(':');
 
-/**
- * A concrete path segment as the app's router reads it, or null for one that could reach another
- * path: empty, `.` or `..` (encoded too), a slash or backslash once decoded, or a bad escape.
- */
-function concreteSegment(segment: string): string | null {
-  let decoded: string;
-  try {
-    decoded = decodeURIComponent(segment);
-  } catch {
-    return null;
-  }
-  if (decoded === '' || decoded === '.' || decoded === '..') return null;
-  if (decoded.includes('/') || decoded.includes('\\')) return null;
-  return decoded;
-}
+/** A value a parameter may take: plain letters, digits, `_` and `-`, so it can never reach another path. */
+const PARAMETER_VALUE = /^[A-Za-z0-9_-]{1,64}$/;
 
-/** Whether `route` is the page area route `areaRoute`, each parameter one concrete segment; its query is kept. */
-export function matchesAreaRoute(areaRoute: string, route: string): boolean {
-  const [areaPath = ''] = areaRoute.split('?');
-  const [path = ''] = route.split('?');
-  const want = areaPath.split('/').slice(1);
-  const got = path.split('/').slice(1);
-  if (want.length !== got.length) return false;
-  return want.every((segment, i) => {
-    const raw = got[i] ?? '';
-    const concrete = concreteSegment(raw);
-    if (concrete === null) return false;
-    if (isParameter(segment)) return !isParameter(raw);
-    return concrete === segment;
-  });
+const pathOf = (route: string): string[] => (route.split('?')[0] ?? '').split('/').slice(1);
+
+/**
+ * The route the browser loads for `route`, when it is one of the page area routes `areaRoutes`; null
+ * otherwise. Its query is dropped and the matching area route's own query kept.
+ */
+export function keptRoute(areaRoutes: readonly string[], route: string): string | null {
+  const got = pathOf(route);
+  // A value equal to a literal segment of any page at the same depth may be that page, not a value.
+  const literals = areaRoutes.flatMap((r) =>
+    pathOf(r).flatMap((segment, depth) =>
+      isParameter(segment) ? [] : [`${String(depth)}:${segment}`],
+    ),
+  );
+  for (const areaRoute of areaRoutes) {
+    const want = pathOf(areaRoute);
+    if (want.length !== got.length) continue;
+    const matches = want.every((segment, depth) => {
+      const value = got[depth] ?? '';
+      return isParameter(segment)
+        ? PARAMETER_VALUE.test(value) && !literals.includes(`${String(depth)}:${value}`)
+        : value === segment;
+    });
+    if (!matches) continue;
+    const query = areaRoute.includes('?') ? areaRoute.slice(areaRoute.indexOf('?')) : '';
+    return `/${got.join('/')}${query}`;
+  }
+  return null;
 }
 
 export interface ReportedRoutes {
@@ -78,18 +80,21 @@ export function judgeReportedRoutes(input: {
       );
     else if (!pageRouteLoads(route))
       refuse('Name the route with its parameter filled in, such as /people/42, not /people/[id].');
-    else if (!input.areaRoutes.some((areaRoute) => matchesAreaRoute(areaRoute, route)))
-      refuse(
-        `This is not a page area's route, so 10db does not load it: name a page area's route, its parameters filled in (${input.areaRoutes.join(', ') || 'this project has none'}).`,
-      );
-    else if (kept.has(route)) accepted.push(route);
-    else if (kept.size >= REPORTED_ROUTES_MAX)
-      refuse(
-        `This ${input.per} already names four routes for its pictures, the most it may: this one is not loaded.`,
-      );
     else {
-      kept.add(route);
-      accepted.push(route);
+      const page = keptRoute(input.areaRoutes, route);
+      if (page === null)
+        refuse(
+          `This is not a page area's route, so 10db does not load it: name a page area's route, each parameter one plain value of letters, digits, _ or - (${input.areaRoutes.join(', ') || 'this project has none'}).`,
+        );
+      else if (kept.has(page)) accepted.push(page);
+      else if (kept.size >= REPORTED_ROUTES_MAX)
+        refuse(
+          `This ${input.per} already names four routes for its pictures, the most it may: this one is not loaded.`,
+        );
+      else {
+        kept.add(page);
+        accepted.push(page);
+      }
     }
   }
   return { accepted: [...new Set(accepted)], refused };
