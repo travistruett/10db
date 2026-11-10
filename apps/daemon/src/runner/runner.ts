@@ -258,7 +258,8 @@ import { threadInlineBytes } from './thread-pictures';
  */
 const HANDOFF_BASELINE_MARGIN_PCT = 5;
 
-export type StopReason = 'cancelled' | 'paused' | 'shutdown';
+/** Why a lane is stopped; `closed` is the runner closing a pass task's session itself. */
+export type StopReason = 'cancelled' | 'paused' | 'shutdown' | 'closed';
 
 export interface RunnerLimits {
   readonly maxRecoveryAttempts: number;
@@ -402,7 +403,17 @@ export interface Runner {
    * one's message, in a fresh session. A flag that is not the page's failed turn is left alone.
    */
   retryTurn(item: InboxItemDto, answer: InboxAnswer): void;
+  /**
+   * Ends a pass lane's session, if any (Workbench spec §5.4, §6.3): a working turn is stopped as a
+   * stop does and closes as `stopped`, its work kept, with no Ready item and no notification; the
+   * page goes back to the queue resuming that session, and runs nothing until the builder writes.
+   * Resolves at once with no session.
+   */
+  stopPassLane(id: WorkstreamId): Promise<void>;
 }
+
+/** What the pass module is given to end a pass lane's session. */
+export type StopPassLane = Runner['stopPassLane'];
 
 type Outcome =
   | { readonly kind: 'handoff'; readonly handoffId: HandoffId }
@@ -619,6 +630,8 @@ interface Control {
   unaskedHandoffs: UnaskedRun | null;
   /** Set while a pass task's session runs: the builder messages it was handed. */
   messages: LaneMessages | null;
+  /** The builder stopped the pass task's turn: it closes as stopped. */
+  builderStop: boolean;
   done: Promise<void>;
 }
 
@@ -1526,8 +1539,16 @@ export function createRunner(opts: RunnerOptions): Runner {
    */
   async function settlePage(id: WorkstreamId, ctl: Control, outcome: Terminal): Promise<boolean> {
     if (!passOfWorkstream(db, id)) return false;
-    const row = getWorkstreamRow(db, id);
     if (outcome.kind === 'stopped' && outcome.reason === 'cancelled') return false;
+    if (ctl.builderStop)
+      await stopTurn(id, ctl.fence, outcome.providerSessionId ?? lastProviderSession(id));
+    const row = getWorkstreamRow(db, id);
+    if (ctl.builderStop && row.state === S.Queued) {
+      opts.state.write((ctx) => {
+        clearLease(ctx, id);
+      });
+      return true;
+    }
     if (row.state === S.WaitingHuman && row.nextAction.kind === 'pass_review') {
       closeBetweenTurns(id, ctl, outcome.providerSessionId);
       return true;
@@ -1539,9 +1560,35 @@ export function createRunner(opts: RunnerOptions): Runner {
         : outcome.kind === 'crashed' && attempts > opts.limits.maxRecoveryAttempts
           ? `The session failed ${String(attempts)} times; last error: ${outcome.message}`
           : null;
-    if (failure === null) return false;
-    await failTurn(id, ctl, failure, outcome.providerSessionId);
+    if (failure !== null) {
+      await failTurn(id, ctl, failure, outcome.providerSessionId);
+      return true;
+    }
+    // A session the runner closed with its turn still open goes on from that turn.
+    if (outcome.kind === 'stopped' && outcome.reason === 'closed')
+      settle(id, ctl, {
+        kind: 'crashed',
+        message: 'the session was closed during its turn',
+        providerSessionId: outcome.providerSessionId,
+      });
+    else return false;
     return true;
+  }
+
+  /** Closes the page's open turn as stopped, if one is open: its work kept, and nothing Ready. */
+  async function stopTurn(
+    id: WorkstreamId,
+    fence: number | null,
+    providerSessionId: string | null,
+  ): Promise<void> {
+    await endTurnSteps(passWork, {
+      workstreamId: id,
+      ending: PassTurnEnding.Stopped,
+      reply: null,
+      fence,
+      providerSessionId,
+      reason: '',
+    });
   }
 
   /**
@@ -3504,6 +3551,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         endWaits: null,
         unaskedHandoffs: null,
         messages: null,
+        builderStop: false,
         done: Promise.resolve(),
       };
       active.set(id, ctl);
@@ -3614,6 +3662,20 @@ export function createRunner(opts: RunnerOptions): Runner {
         });
       });
       opts.onLaneFreed();
+    },
+    async stopPassLane(id) {
+      const ctl = active.get(id);
+      if (!ctl) {
+        if (openPassTurn(db, getWorkstreamRow(db, id).taskId))
+          await stopTurn(id, null, lastProviderSession(id));
+        return;
+      }
+      ctl.builderStop = true;
+      ctl.stopReason = 'closed';
+      ctl.holdAbort?.abort();
+      ctl.endWaits?.();
+      await ctl.handle?.stop();
+      await ctl.done;
     },
     retryTurn(item, answer) {
       if (answer.choice !== PASS_RETRY_TURN_CHOICE) return;

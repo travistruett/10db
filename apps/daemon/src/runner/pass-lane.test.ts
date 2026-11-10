@@ -20,6 +20,7 @@ import {
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTestEngine, type TestEngine } from '../../test/engine';
+import { untakenMessages } from './lane-messages';
 import { isolatedGitEnv, waitFor } from '../../test/fixtures';
 import type { FakeScriptBook } from '../sessions';
 
@@ -374,5 +375,43 @@ describe('the guard of a pass lane', () => {
     expect(engine.adapter.observations.some((o) => o.kind === 'tool_allowed' && o.step === 2)).toBe(
       true,
     );
+  });
+});
+
+describe("the builder's Stop", () => {
+  it('ends a working turn as stopped, its work kept, with nothing Ready, and queues nothing to run', async () => {
+    const { task, pass, id } = await openPage([
+      [
+        { do: 'consume' },
+        { do: 'tool', toolName: 'Write', input: { file_path: PAGE_FILE, content: 'half\n' } },
+        { do: 'await_message', contains: 'never sent' },
+      ],
+    ]);
+    await waitFor(() => engine.adapter.observations.some((o) => o.kind === 'tool_allowed'));
+
+    await engine.runner.stopPassLane(id);
+
+    const [stopped] = listPassTurns(engine.store.db, pass.id);
+    expect(stopped).toMatchObject({ seq: 1, ending: 'stopped', readyAt: null });
+    expect(stopped?.settledAt).not.toBeNull();
+    expect(git('show', `${stopped?.keptSha ?? ''}:${PAGE_FILE}`)).toBe('half');
+    expect(readyItems()).toEqual([]);
+    expect(row(id)).toMatchObject({
+      state: 'QUEUED',
+      currentSessionId: null,
+      leaseOwner: null,
+      nextAction: { kind: 'resume', reason: 'stopped' },
+    });
+    // Nothing waits for a turn, so the launch rule starts none until the builder writes.
+    expect(untakenMessages(engine.store.db, task.id)).toEqual([]);
+    expect(engine.runner.isRunning(id)).toBe(false);
+  });
+
+  it('resolves at once for a page with no session, changing nothing', async () => {
+    const { id } = await openPage([[...turn('one\n', 'Tidied.')]]);
+    await waitFor(() => !engine.runner.isRunning(id) && row(id).state === 'WAITING_HUMAN');
+    const before = row(id);
+    await engine.runner.stopPassLane(id);
+    expect(row(id)).toEqual(before);
   });
 });

@@ -154,17 +154,22 @@ function settleTurn(
       }
       case PassTurnEnding.Stopped: {
         withdrawPageItems(ctx, id);
-        toWaitingHuman(ctx, id, settle.fence);
         const next: NextAction =
           settle.providerSessionId === null
             ? { kind: 'start' }
             : { kind: 'resume', providerSessionId: settle.providerSessionId, reason: 'stopped' };
-        transitionWorkstream(ctx, id, {
-          to: S.Queued,
-          fence: settle.fence,
-          patch: { nextAction: next, currentSessionId: null },
-          reason: 'the builder stopped the turn',
-        });
+        const patch = { nextAction: next, currentSessionId: null };
+        // Never through a usage pause's state, which would show the page as paused.
+        if (row.state === S.Queued) patchWorkstream(ctx, id, settle.fence, patch);
+        else {
+          if (row.state !== S.PausedLimit) toWaitingHuman(ctx, id, settle.fence);
+          transitionWorkstream(ctx, id, {
+            to: S.Queued,
+            fence: settle.fence,
+            patch,
+            reason: 'the builder stopped the turn',
+          });
+        }
         clearLease(ctx, id);
         return;
       }
