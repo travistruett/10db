@@ -16,7 +16,6 @@ import {
   getProject,
   getWorkstreamRow,
   insertBuilderMessage,
-  insertInboxItem,
   insertWorkstream,
   latestPassTurn,
   listSharedChanges,
@@ -75,35 +74,6 @@ async function turn(task: TaskDto, edit: () => void, shared = false): Promise<vo
   await keepTurnWork(w.deps, { workstreamId: ws, turnId: open.id });
 }
 
-/** The page's run waits on the builder with an open `check` item, as a Ready page does. */
-function ready(task: TaskDto): void {
-  const ws = w.runOf(task);
-  w.h.state.write((ctx) => {
-    // A page waiting on the builder runs again when a message starts its next turn.
-    const path =
-      getWorkstreamRow(ctx.tx, ws).state === S.WaitingHuman ? [S.Running] : [S.Starting, S.Running];
-    for (const to of path) transitionWorkstream(ctx, ws, { to, fence: null });
-    const item = insertInboxItem(ctx, {
-      projectId: w.h.project.id,
-      kind: 'check',
-      title: `Ready: ${task.title}`,
-      body: 'Ready.',
-      options: [{ label: PASS_SIGN_OFF_CHOICE, description: 'The page is right' }],
-      recommendation: null,
-      category: 'product',
-      urgency: 'normal',
-      detail: null,
-      foldKey: null,
-      targets: [{ workstreamId: ws, sessionId: null }],
-    });
-    transitionWorkstream(ctx, ws, {
-      to: S.WaitingHuman,
-      fence: null,
-      patch: { nextAction: { kind: 'pass_review', inboxId: item.id } },
-    });
-  });
-}
-
 const signOff = (task: TaskDto, deps: SignOffDeps = { ...w.deps, stopLane: stopped }) =>
   signOffSteps(deps, { taskId: task.id, from: SignOffFrom.Page });
 
@@ -140,7 +110,7 @@ describe('signOffSteps', () => {
     });
     // The builder's edit after the turn rides the sign-off's fold.
     w.write('src/settings/old.tsx', 'edited by hand\n');
-    ready(w.settings);
+    w.ready(w.settings);
 
     const done = await signOff(w.settings);
 
@@ -180,7 +150,7 @@ describe('signOffSteps', () => {
   it('signs off a page with no changed file with no commit', async () => {
     w = await openPassWorld();
     await turn(w.people, () => undefined);
-    ready(w.people);
+    w.ready(w.people);
 
     expect(await signOff(w.people)).toMatchObject({ kind: 'signed_off', landedSha: null });
 
@@ -205,7 +175,7 @@ describe('signOffSteps', () => {
       await turn(w.settings, () => {
         w.write('src/settings/page.tsx', 'tidied\n');
       });
-      ready(w.settings);
+      w.ready(w.settings);
       const crashing: Git = {
         ...w.deps.git,
         landPaths: async (input) => {
@@ -221,7 +191,7 @@ describe('signOffSteps', () => {
         await turn(w.settings, () => {
           w.write(between.path, between.content);
         });
-        ready(w.settings);
+        w.ready(w.settings);
       }
 
       const again = await signOff(w.settings, { ...w.restart(), stopLane: stopped });
@@ -255,7 +225,7 @@ describe('signOffSteps', () => {
     await turn(w.settings, () => {
       w.write('src/settings/page.tsx', 'tidied\n');
     });
-    ready(w.settings);
+    w.ready(w.settings);
     const ws = w.runOf(w.settings);
     const messaged: Git = {
       ...w.deps.git,
@@ -290,7 +260,7 @@ describe('signOffSteps', () => {
       await turn(w.settings, () => {
         w.write('src/settings/page.tsx', 'tidied\n');
       });
-      ready(w.settings);
+      w.ready(w.settings);
       if (closing)
         w.h.state.write((ctx) => {
           setClosePlan(ctx, w.opened.pass.id, { token: 't', pages: [], files: [], shared: [] });
@@ -322,7 +292,7 @@ describe('signOffSteps', () => {
     await turn(w.settings, () => {
       w.write('src/settings/page.tsx', 'tidied\n');
     });
-    ready(w.settings);
+    w.ready(w.settings);
     let raced = false;
     const racing: Git = {
       ...w.deps.git,
@@ -371,8 +341,8 @@ describe('signOffSteps', () => {
       },
       true,
     );
-    ready(w.settings);
-    ready(w.people);
+    w.ready(w.settings);
+    w.ready(w.people);
 
     for (const name of order) await signOff(w[name]);
 
@@ -412,7 +382,7 @@ describe('signOffSteps', () => {
     await turn(w.people, () => {
       w.write('src/people/page.tsx', 'people page\n');
     });
-    ready(w.people);
+    w.ready(w.people);
 
     await signOff(w.people);
 
@@ -439,7 +409,7 @@ describe('signOffSteps', () => {
       },
       true,
     );
-    ready(w.people);
+    w.ready(w.people);
     let calls = 0;
     const crashing: Git = {
       ...w.deps.git,
@@ -473,7 +443,7 @@ describe('signOffSteps', () => {
     await turn(w.settings, () => {
       w.write('src/settings/page.tsx', 'settings page\n');
     });
-    ready(w.settings);
+    w.ready(w.settings);
 
     const waiting = await signOff(w.settings);
 
@@ -556,7 +526,7 @@ describe('a waiting sign-off', () => {
     await turn(w.settings, () => {
       w.write('src/settings/page.tsx', 'settings page\n');
     });
-    ready(w.settings);
+    w.ready(w.settings);
     expect(await signOff(w.settings)).toMatchObject({ kind: 'waiting' });
 
     await end();
@@ -616,7 +586,7 @@ describe('a Sign Off from the Ready card that does not land', () => {
     await turn(w.settings, () => {
       w.write('src/settings/page.tsx', 'tidied\n');
     });
-    ready(w.settings);
+    w.ready(w.settings);
     const card = answerCard(w.settings);
 
     await act();
@@ -626,6 +596,36 @@ describe('a Sign Off from the Ready card that does not land', () => {
     expect(listTaskThread(w.h.store.db, w.settings.id).at(-1)?.body).toMatch(line);
     // The builder can sign the page off again.
     expect(signOffRefusal(w.h.store.db, w.opened.pass.id, w.settings.id)).toBeNull();
+  });
+
+  it('puts the Ready card back when a Close Pass confirmed as it landed refuses its last write', async () => {
+    w = await openPassWorld();
+    await turn(w.settings, () => {
+      w.write('src/settings/page.tsx', 'tidied\n');
+    });
+    w.ready(w.settings);
+    const card = answerCard(w.settings);
+    const closing: Git = {
+      ...w.deps.git,
+      landPaths: async (input) => {
+        const done = await w.deps.git.landPaths(input);
+        // Close Pass writes its plan outside the delivery key, as the page lands inside it.
+        w.h.state.write((ctx) => {
+          setClosePlan(ctx, w.opened.pass.id, { token: 't', pages: [], files: [], shared: [] });
+        });
+        return done;
+      },
+    };
+
+    startSignOff({ ...w.deps, git: closing, stopLane: stopped }, w.settings.id);
+    await w.h.jobs.idle();
+
+    expect(getWorkstreamRow(w.h.store.db, w.runOf(w.settings)).state).toBe('WAITING_HUMAN');
+    expect(listTaskThread(w.h.store.db, w.settings.id).at(-1)?.body).toBe(
+      'Not signed off: the pass is closing.',
+    );
+    // A close that does not sign the page off leaves it Ready, as a failed gate reopens the pass.
+    expect(getInboxItem(w.h.store.db, card).state).toBe('OPEN');
   });
 });
 

@@ -178,6 +178,18 @@ function reopenReady(ctx: WriteContext, ws: WorkstreamId): void {
 }
 
 /**
+ * Ends every sign-off waiting in the pass, in the caller's write (a close takes them over): each
+ * page's Ready item opens again, so a page the close does not sign off is Ready as it was.
+ */
+export function endSignOffWaits(ctx: WriteContext, passId: PassId): void {
+  for (const wait of listSignOffWaits(ctx.tx, passId)) {
+    deleteSignOffWait(ctx, wait.taskId);
+    const ws = getTask(ctx.tx, wait.taskId).workstreamId;
+    if (ws !== null) reopenReady(ctx, ws);
+  }
+}
+
+/**
  * Whether a builder message waits for the page's next turn: one no turn has taken, as the runner's
  * `untakenMessages` reads them (the runner imports this module, so it is read here).
  */
@@ -464,6 +476,7 @@ export async function signOffSteps(
       if (input.from === SignOffFrom.Close) throw new ConflictError(`Not signed off: ${reason}`);
       deleteSignOffWait(ctx, task.id);
       insertSystemNotice(ctx, task.id, `Not signed off: ${reason}.`);
+      reopenReady(ctx, ws);
       return reason;
     }
     // A message to the page as it landed reopens it, as one after its sign-off would (spec §9.2):

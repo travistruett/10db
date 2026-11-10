@@ -23,7 +23,6 @@ import {
 import {
   clearPassNotice,
   closePass,
-  deleteSignOffWait,
   getBatch,
   getPass,
   getPassProgress,
@@ -32,7 +31,6 @@ import {
   listPassTasks,
   listPassesIn,
   listSharedChanges,
-  listSignOffWaits,
   maxGrantedSeq,
   openHolds,
   reopenClosingPass,
@@ -65,7 +63,7 @@ import {
   mergedWhileOpen,
 } from './merged-open';
 import { keepOrLetGo, landOnBranch, landSharedChanges } from './shared-chain';
-import { signOffSteps, SignOffFrom } from './sign-off';
+import { endSignOffWaits, signOffSteps, SignOffFrom } from './sign-off';
 import { takeOutSteps, TakeOutWithin, type TakeOutDeps } from './take-out';
 import { unfinishedPages } from './unowned';
 
@@ -536,7 +534,7 @@ export function createPassCloses(deps: CloseDeps): PassCloses {
     const wrote = deps.state.write((ctx) => {
       if (!mergedWhileOpen(ctx.tx, passId)) return false;
       setClosePlan(ctx, passId, mergedClosePlan(ctx.tx, passId));
-      for (const wait of listSignOffWaits(ctx.tx, passId)) deleteSignOffWait(ctx, wait.taskId);
+      endSignOffWaits(ctx, passId);
       return true;
     });
     if (wrote) run(passId);
@@ -575,9 +573,12 @@ export function createPassCloses(deps: CloseDeps): PassCloses {
       const now = await closePreview(deps, passId);
       if (now.token !== request.token)
         return { outcome: 'changed', preview: now, changed: closeChanges(request, now) };
+      // The stop kept each page's turn and may have ended its run: what a page set to Sign Off Now
+      // needs, and whether it can be signed off, are read again from what the stop left.
+      checkCloseRequest(now, request, closePages(db, passId));
       deps.state.write((ctx) => {
         setClosePlan(ctx, passId, request);
-        for (const wait of listSignOffWaits(ctx.tx, passId)) deleteSignOffWait(ctx, wait.taskId);
+        endSignOffWaits(ctx, passId);
       });
       run(passId);
       return { outcome: 'closing', pass: getPass(db, passId) };
