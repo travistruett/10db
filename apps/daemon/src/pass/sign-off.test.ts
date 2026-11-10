@@ -4,6 +4,7 @@ import {
   PASS_SIGN_OFF_CHOICE,
   WorkstreamState as S,
   type TaskDto,
+  type WorkstreamId,
   type WorkstreamState,
 } from '@10db/contracts';
 import {
@@ -13,6 +14,7 @@ import {
   getInboxItem,
   getProject,
   getWorkstreamRow,
+  insertBuilderMessage,
   insertInboxItem,
   insertWorkstream,
   latestPassTurn,
@@ -22,9 +24,11 @@ import {
   openHolds,
   transitionWorkstream,
   updateInboxItem,
+  type WriteContext,
 } from '@10db/db';
 import { afterEach, beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { openPassWorld, type PassWorld } from '../../test/pass-world';
+import { queueUntaken } from '../runner';
 import { GitTrustError, GitTrustFailure, type Git } from '../git';
 import {
   abandonPass,
@@ -227,6 +231,50 @@ describe('signOffSteps', () => {
       expect(getWorkstreamRow(w.h.store.db, w.runOf(w.settings)).state).toBe('DONE');
     },
   );
+
+  it.each([
+    {
+      name: 'queued its next turn',
+      after: (ctx: WriteContext, ws: WorkstreamId) => queueUntaken(ctx, ws, null, null),
+      state: 'QUEUED',
+    },
+    {
+      name: 'started its next turn',
+      after: (ctx: WriteContext, ws: WorkstreamId) => {
+        transitionWorkstream(ctx, ws, { to: S.Running, fence: null });
+      },
+      state: 'RUNNING',
+    },
+    { name: 'waits for its next turn', after: () => undefined, state: 'WAITING_HUMAN' },
+  ])('leaves the page unsigned when a message as it landed $name', async ({ after, state }) => {
+    w = await openPassWorld();
+    await turn(w.settings, () => {
+      w.write('src/settings/page.tsx', 'tidied\n');
+    });
+    ready(w.settings);
+    const ws = w.runOf(w.settings);
+    const messaged: Git = {
+      ...w.deps.git,
+      landPaths: async (input) => {
+        const done = await w.deps.git.landPaths(input);
+        w.h.state.write((ctx) => {
+          insertBuilderMessage(ctx, w.settings.id, { body: 'one more thing', files: [] });
+          after(ctx, ws);
+        });
+        return done;
+      },
+    };
+
+    const outcome = await signOff(w.settings, { ...w.deps, git: messaged, stopLane: stopped });
+
+    expect(outcome).toMatchObject({ kind: 'not_now' });
+    // The commit stays on the branch; the next sign-off lands what the turn adds.
+    expect(landed()).toEqual(['Settings: UI work']);
+    expect(getWorkstreamRow(w.h.store.db, ws).state).toBe(state);
+    expect(listTaskThread(w.h.store.db, w.settings.id).at(-1)?.body).toMatch(
+      /^Not signed off: the page took a message as it landed/,
+    );
+  });
 
   it('lands from the new tip once when a hand-typed git moved the branch as it landed', async () => {
     w = await openPassWorld();

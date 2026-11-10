@@ -5,6 +5,8 @@ import {
   InboxState,
   PASS_SIGN_OFF_CHOICE,
   PassState,
+  TaskMessageAuthor,
+  TaskMessageKind,
   WorkstreamState as S,
   type PassDto,
   type PassHoldDto,
@@ -173,6 +175,19 @@ function reopenReady(ctx: WriteContext, ws: WorkstreamId): void {
     item.answer?.choice === PASS_SIGN_OFF_CHOICE
   )
     updateInboxItem(ctx, item.id, { state: InboxState.Open, answer: null });
+}
+
+/**
+ * Whether a builder message waits for the page's next turn: one no turn has taken, as the runner's
+ * `untakenMessages` reads them (the runner imports this module, so it is read here).
+ */
+function messageWaits(db: DbReader, taskId: TaskId): boolean {
+  return listTaskThreadRows(db, taskId).some(
+    (m) =>
+      m.author === TaskMessageAuthor.Builder &&
+      m.kind === TaskMessageKind.Message &&
+      m.deliveredAt === null,
+  );
 }
 
 /** A sign-off's job failed: the thread says why, and the page is Ready again. */
@@ -439,7 +454,25 @@ export async function signOffSteps(
   }
 
   const at = landedSha;
-  deps.state.write((ctx) => {
+  const refused = deps.state.write((ctx): string | null => {
+    // A message to the page as it landed reopens it, as one after its sign-off would (spec §9.2):
+    // its commits stay on the branch, and the next sign-off lands what the turn adds.
+    if (
+      input.from !== SignOffFrom.Close &&
+      (!isReady(ctx.tx, ws, true) || messageWaits(ctx.tx, task.id))
+    ) {
+      const landedAs =
+        at === null ? '' : ` Its files are on the pass's branch as \`${at.slice(0, 7)}\`.`;
+      const reason = 'the page took a message as it landed';
+      deleteSignOffWait(ctx, task.id);
+      insertSystemNotice(
+        ctx,
+        task.id,
+        `Not signed off: ${reason}.${landedAs} Sign it off again once its turn is done.`,
+      );
+      reopenReady(ctx, ws);
+      return reason;
+    }
     finishSignOff(ctx, {
       passId: pass.id,
       taskId: task.id,
@@ -449,7 +482,9 @@ export async function signOffSteps(
       shared,
       indexStale,
     });
+    return null;
   });
+  if (refused !== null) return { kind: 'not_now', reason: refused };
   // A question the stopped turn left open is about work that is done now.
   deps.inbox.cancelForWorkstream(ws);
   return {
