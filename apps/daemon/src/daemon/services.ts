@@ -149,6 +149,7 @@ import {
 } from '../permissions';
 import { findRegistryHosts } from '../registries';
 import { proposeCandidates, resolveStepPlan, startTaskWithPlan } from '../team';
+import type { Pictures } from '../pictures';
 import type { ThreadService } from '../thread';
 import type { JudgeApiServices } from './judge-services';
 import type { KnowledgeApiServices } from './knowledge-services';
@@ -181,6 +182,7 @@ export function createServices(deps: {
   readonly shape: ShapeApiServices;
   readonly knowledge: KnowledgeApiServices;
   readonly thread: ThreadService;
+  readonly pictures: Pictures;
   readonly starter: BatchStarter;
   /** Opens a pass in the project's delivery queue (`openPass` with its lease and put-back). */
   readonly openPass: (input: PassOpenInput) => Promise<PassOpened>;
@@ -639,6 +641,9 @@ export function createServices(deps: {
     ...deps.shape,
     ...deps.knowledge,
     ...deps.thread,
+    taskScreens: (taskId) => deps.pictures.screens(taskId),
+    screenPicture: (screenId) => deps.pictures.screenFile(screenId),
+    picturesStatus: (projectId) => deps.pictures.status(projectId),
     benchmarkStatus: () => deps.benchmarks.status(),
     syncBenchmarks: () => deps.benchmarks.sync(),
     listAaModels: () => listAaModels(db),

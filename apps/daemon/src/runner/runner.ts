@@ -54,6 +54,7 @@ import {
   TakeOutStep,
   type PassId,
   type TaskId,
+  type TaskDto,
 } from '@10db/contracts';
 import {
   activeClaims,
@@ -320,6 +321,11 @@ export interface RunnerOptions {
   readonly baseUpdates: BaseUpdates;
   /** Asked whether a review that is next in line is needed. */
   readonly judge: Judge;
+  /**
+   * A task's first launch waits here for its before picture (Workbench spec §10), for at most the
+   * pictures' own bound; absent, a launch waits for none.
+   */
+  readonly awaitBeforePicture?: (task: TaskDto, signal: AbortSignal) => Promise<void>;
   /**
    * Brings a task's base into its branch before a run that holds the migrations hazard from its
    * start; absent, it isn't.
@@ -1861,6 +1867,19 @@ export function createRunner(opts: RunnerOptions): Runner {
       if (stoppedWhileHeld)
         return { kind: 'stopped', reason: stoppedWhileHeld, providerSessionId: savedResumeId };
       if (getProject(db, row.projectId).accountId !== ctl.accountId) return { kind: 'moved' };
+    }
+    // The page's before picture is taken before the session can edit it, unless a stop ends the wait.
+    if (opts.awaitBeforePicture) {
+      const waiting = new AbortController();
+      ctl.holdAbort = waiting;
+      try {
+        await opts.awaitBeforePicture(task, waiting.signal);
+      } finally {
+        ctl.holdAbort = null;
+      }
+      const stoppedWhileWaiting = stopRequested(ctl);
+      if (stoppedWhileWaiting)
+        return { kind: 'stopped', reason: stoppedWhileWaiting, providerSessionId: savedResumeId };
     }
     const answeredItem = action.kind === 'answer' ? getInboxItem(db, action.inboxId) : null;
     const resumeId = resumedSessionOf(action);

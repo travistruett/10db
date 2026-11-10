@@ -85,6 +85,7 @@ import {
   TakeOutRequest,
   PassCloseRequest,
   TaskFileId,
+  TaskScreenId,
   TaskId,
   TaskInput,
   TaskMessageInput,
@@ -1221,6 +1222,21 @@ export function createApp(deps: ApiDeps) {
         'x-content-type-options': 'nosniff',
       });
     })
+    // Pictures of the builder's app (Workbench spec §10): a task's, one picture's bytes, and Settings'
+    // status line for a project's browser and sign-in.
+    .get('/tasks/:taskId/screens', (c) =>
+      c.json(deps.services.taskScreens(TaskId.parse(c.req.param('taskId')))),
+    )
+    .get('/screens/:screenId', (c) =>
+      c.body(deps.services.screenPicture(TaskScreenId.parse(c.req.param('screenId'))), 200, {
+        'content-type': 'image/png',
+        'cache-control': 'private, max-age=31536000, immutable',
+        'x-content-type-options': 'nosniff',
+      }),
+    )
+    .get('/projects/:projectId/pictures', (c) =>
+      c.json(deps.services.picturesStatus(ProjectId.parse(c.req.param('projectId')))),
+    )
     .get('/tasks/:taskId/step-plan', (c) =>
       c.json(deps.services.stepPlan(TaskId.parse(c.req.param('taskId')))),
     )

@@ -129,6 +129,9 @@ import type {
   TaskId,
   TaskMessageDto,
   TaskPictureKind,
+  TaskScreenId,
+  TaskScreensDto,
+  PicturesStatusDto,
   TaskThreadDto,
   TaskInput,
   RunNextResult,
@@ -454,6 +457,12 @@ export interface ApiServices {
     taskId: TaskId,
     fileId: TaskFileId,
   ): { readonly bytes: Uint8Array<ArrayBuffer>; readonly mediaType: TaskPictureKind };
+  /** A task's pictures of the builder's app (Workbench spec §10), oldest first. */
+  taskScreens(taskId: TaskId): TaskScreensDto;
+  /** A picture's PNG; throws NotFoundError for a pruned or missing one. */
+  screenPicture(screenId: TaskScreenId): Uint8Array<ArrayBuffer>;
+  /** Settings › General: the browser for pictures and the project's last sign-in. */
+  picturesStatus(projectId: ProjectId): PicturesStatusDto;
   /** `start_shape`: a conversation from a terminal session, listed at once; starts no turn. */
   startShape(input: StartShapeInput): ShapeDto;
   /** Settings › Decisions: the Sizing hit rate and each Shape decision's shadow agreement. */

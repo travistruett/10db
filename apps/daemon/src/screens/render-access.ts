@@ -49,6 +49,12 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
     "A kept screenshot is for the conversation's transcript, not for a screen.",
   '/tasks/:taskId/thread':
     "A task's thread is the builder's own words to an agent, and no screen Plan draws shows it.",
+  '/tasks/:taskId/screens':
+    "A picture of the builder's app is for the Workbench and the drawer, not for a screen.",
+  '/screens/:screenId':
+    "A picture of the builder's app is for the Workbench and the drawer, not for a screen.",
+  '/projects/:projectId/pictures':
+    "The browser for pictures and its sign-in are Settings' own line, and no screen Plan draws shows them.",
   '/tasks/:taskId/thread/pictures/:fileId':
     "A picture pasted into a task's thread is for that thread, not for a screen.",
   '/events': 'The event log is not a screen; the window draws once and does not follow it.',

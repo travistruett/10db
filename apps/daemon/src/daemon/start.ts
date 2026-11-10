@@ -176,6 +176,7 @@ import {
   type PassWorkDeps,
   type TakeOutDeps,
 } from '../pass';
+import { refusedCamera, startPictures, type PageCamera, type Pictures } from '../pictures';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
 import { chooseModel, offeredModels, PLAN_NEED } from '../routing';
 import { createScreenBroker, createScreens, renderMayRead } from '../screens';
@@ -297,6 +298,11 @@ export interface DaemonOptions {
   /** better_sqlite3.node for bundled runs; source runs leave it unset. */
   readonly sqliteBinding?: string;
   readonly clock?: Clock;
+  /**
+   * The browser for pictures of the builder's app (Workbench spec §10): its camera, and how its pinned
+   * build is fetched. Tests pass a fake camera.
+   */
+  readonly pictures?: { readonly camera: PageCamera; readonly prepare: () => void };
   /** Lane caps across all projects; each account has its own `laneCap`. */
   readonly caps?: { readonly global: number };
   /** Recovery attempts, fix attempts, the gate timeout and the gate slots; merged over the runner defaults. */
@@ -614,6 +620,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let answerBatchCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerAccountCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerGitCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
+  // Started once recovery is through; a launch before then waits for no before picture.
+  let pictures: Pictures | null = null;
   let answerBranchCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerCiStopCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerGhCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
@@ -1293,6 +1301,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // The marks from an error's wording that ended, or will end, while the daemon was down.
   resumeModelMarks({ state, clock });
   const createdRunner = createRunner({
+    awaitBeforePicture: (task, signal) => pictures?.awaitBefore(task, signal) ?? Promise.resolve(),
     protectedPaths: guarded,
     laneSandbox,
     codexLaneTempRoot: (sandboxRoots ?? namedSandboxRoots({}, homedir())).codexLanes,
@@ -1486,6 +1495,28 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // The batches' recovery has stopped the gates the last daemon left: the checks recovery's Ready
   // turns asked for may run now.
   beginTurnChecks();
+  // Pictures of the builder's app (Workbench spec §10): after recovery, so a page recovery made Ready
+  // is not shot half settled. The dev login runs through the unslotted gate runner, as an install does.
+  const pictureCamera =
+    opts.pictures?.camera ?? refusedCamera('This build of 10db has no browser for pictures');
+  pictures = startPictures({
+    state,
+    bus,
+    camera: pictureCamera,
+    prepareBrowser: opts.pictures?.prepare ?? (() => undefined),
+    git,
+    signIn: {
+      gate: gateRunner,
+      dataDir: opts.dataDir,
+      now: () => clock.now().getTime(),
+      sessionEnv: () => launcher.projectEnv(),
+      rules: (project) => listPermissionRules(state.db, project.id, null),
+      checkouts: () => allCheckouts(state.db),
+    },
+    dataDir: opts.dataDir,
+    clock,
+    logger: logger.child({ component: 'pictures' }),
+  });
   // Tasks made for a branch that is gone from origin land in their project's default now. It asks
   // origin, so it runs beside the start (an offline start waits on no timeout) and ends with it.
   const retiredLandingsAbort = new AbortController();
@@ -1583,6 +1614,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       off: opts.judgeOff === true,
     }),
     shape: createShapeServices({ shape, state, clock }),
+    pictures,
     thread: createThreadService({
       state,
       dataDir: opts.dataDir,
@@ -1914,6 +1946,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       backupsAbort.abort();
       await rootsKeptOutOfBackups;
       // A pass's gate and review on its pushed tip run outside the delivery jobs, as its turn checks do.
+      // A capture in flight is dropped; its browser closes with it.
+      await pictures?.stop();
+      await pictureCamera.close();
       unsubscribeTurnChecks();
       await Promise.all([passPullRequests.stop(), turnChecks.stopAll()]);
       // A gate that waits must not start because shutdown freed the slot of the one it killed.

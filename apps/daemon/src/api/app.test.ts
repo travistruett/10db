@@ -157,6 +157,9 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     postTaskMessage: track('postTaskMessage'),
     stopPage: track('stopPage'),
     taskPicture: track('taskPicture'),
+    taskScreens: track('taskScreens'),
+    screenPicture: track('screenPicture'),
+    picturesStatus: track('picturesStatus'),
     startShape: track('startShape'),
     shapeMeasures: track('shapeMeasures'),
     getShapeJev: track('getShapeJev'),
@@ -552,6 +555,40 @@ describe('API', () => {
     expect(refused.status).toBe(400);
     expect(await refused.text()).toContain('An app address is an http origin on this Mac');
     expect(sent).toEqual([{ appUrl: 'http://localhost:5173' }, { appUrl: null }]);
+  });
+
+  it("passes a project's picture settings to the patch: a blank dev login is none, and a matrix over the cap is refused", async () => {
+    const sent: unknown[] = [];
+    const services = stubServices({
+      // The route's contract is what is under test: the service records the patch and refuses it.
+      patchProject: (_id, patch) => {
+        sent.push(patch);
+        throw new ConflictError('recorded');
+      },
+    });
+    const patch = (body: unknown) =>
+      app(services).request(`/projects/${mintId('Project')}`, {
+        method: 'PATCH',
+        ...json,
+        body: JSON.stringify(body),
+      });
+    expect((await patch({ devLoginCommand: '  \n ' })).status).toBe(409);
+    expect((await patch({ devLoginCommand: 'uv run manage.py dev_login' })).status).toBe(409);
+    const viewport = (width: number) => ({ width, height: 900 });
+    const over = await patch({
+      screens: {
+        viewports: [viewport(1440), viewport(768), viewport(390)],
+        themes: ['light', 'dark'],
+      },
+    });
+    expect(over.status).toBe(400);
+    const refusal = await over.text();
+    expect(refusal).toContain('screens');
+    expect(refusal).toContain('at most 4 pictures');
+    expect(sent).toEqual([
+      { devLoginCommand: null },
+      { devLoginCommand: 'uv run manage.py dev_login' },
+    ]);
   });
 
   it('answers 500 for an unexpected error and reports that error to the hook', async () => {
