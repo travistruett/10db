@@ -55,15 +55,18 @@ export interface DeliveryContext {
   onWorkQueued(): void;
 }
 
-export function networkCall(ctx: DeliveryContext, signal: AbortSignal): NetworkCall {
+/** What a network call reads of the context: the login environment and the time limits. */
+type NetworkContext = Pick<DeliveryContext, 'networkEnv' | 'limits'>;
+
+export function networkCall(ctx: NetworkContext, signal: AbortSignal): NetworkCall {
   return { env: ctx.networkEnv(), timeoutMs: ctx.limits.networkTimeoutMs, signal };
 }
 
-export function pushCall(ctx: DeliveryContext, signal: AbortSignal): NetworkCall {
+export function pushCall(ctx: NetworkContext, signal: AbortSignal): NetworkCall {
   return { ...networkCall(ctx, signal), timeoutMs: ctx.limits.pushTimeoutMs };
 }
 
-export function ghCall(ctx: DeliveryContext, signal: AbortSignal): GhCall {
+export function ghCall(ctx: NetworkContext, signal: AbortSignal): GhCall {
   return networkCall(ctx, signal);
 }
 
