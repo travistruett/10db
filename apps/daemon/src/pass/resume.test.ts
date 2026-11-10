@@ -8,7 +8,9 @@ import {
   lastTakeOut,
   listInbox,
   listSharedChanges,
+  listTaskThread,
   openHolds,
+  schema,
   setAbandonStep,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -45,6 +47,31 @@ const folderCards = (world: PassWorld) =>
   );
 
 describe('resumePassWork', () => {
+  it('lets go of a hold whose record is gone, freeing its area and saying so', async () => {
+    w = await openPassWorld();
+    w.startTurn(w.settings);
+    await grantSharedHold(w.deps, { workstreamId: w.runOf(w.settings), area: 'src' });
+    w.write('src/button.ts', 'a button\n');
+    const [hold] = openHolds(w.h.store.db, w.opened.pass.id);
+    if (!hold) throw new Error('no hold');
+    // The record's commit is gone with its ref.
+    w.h.store.db
+      .update(schema.passHolds)
+      .set({ recordSha: '0'.repeat(40) })
+      .run();
+    w.h.git$('update-ref', '-d', holdRef(w.opened.pass.id, hold.claimId));
+
+    const restarted = deps({ ...w, deps: w.restart() });
+    await resumePassWork(restarted);
+    await restarted.jobs.idle();
+
+    expect(openHolds(w.h.store.db, w.opened.pass.id)).toEqual([]);
+    expect(activeClaims(w.h.store.db, w.runOf(w.settings)).map((c) => c.name)).not.toContain('src');
+    expect(listTaskThread(w.h.store.db, w.settings.id).at(-1)?.body).toMatch(
+      /^What this page changed in shared src during its turn could not be kept/,
+    );
+  });
+
   it('leaves a shared hold open while the folder is off the pass branch, and keeps it once back', async () => {
     w = await openPassWorld();
     w.startTurn(w.settings);

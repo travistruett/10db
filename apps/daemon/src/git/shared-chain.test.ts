@@ -166,79 +166,74 @@ describe('blobsAt and keepRef', () => {
 });
 
 describe('landPaths', () => {
-  const OP = 'pass:pas_1:sign-off:wst_1';
-  /** A commit off the branch holding `files`, as a page's kept commit is. */
-  async function keptWith(files: Record<string, string | null>): Promise<string> {
-    for (const [path, text] of Object.entries(files))
-      if (text === null) unlinkSync(join(repo.path, path));
-      else write(path, text);
-    const { sha } = await git.recordPaths({
-      repo: repo.path,
-      base: start,
-      paths: Object.keys(files),
-    });
-    return sha;
-  }
-  const land = (from: string, paths: readonly string[], opId = OP) =>
+  const land = (from: string, paths: readonly string[], opId = 'shared-pas_1-1') =>
     git.landPaths({
       repo: repo.path,
       branch: '10db/polish',
       from,
       paths,
-      message: 'Settings: tidy the form\n\n10db-task: tsk_1',
+      message: 'Shared change 1 of Settings',
       opId,
     });
 
-  it('lands the named paths alone as one commit on the tip, a deleted one gone, and the index follows', async () => {
-    const kept = await keptWith({ 'src/shared.ts': 'tidied\n', 'src/button.ts': null });
-    write('src/notes.ts', 'never named\n');
+  it('lands the paths as the commit has them, writing no file, and the index follows', async () => {
+    write('src/shared.ts', 'kept\n');
+    const kept = await chain(null, ['src/shared.ts']);
+    if (kept.sha === null) throw new Error('nothing kept');
+    write('src/shared.ts', 'kept, then edited again\n');
 
-    const landed = await land(kept, ['src/shared.ts', 'src/button.ts']);
+    const landed = await land(kept.sha, ['src/shared.ts']);
 
     expect(landed).toMatchObject({ alreadyLanded: false, indexStale: false });
     expect(rawGit('rev-parse', '10db/polish')).toBe(landed.sha);
-    expect(rawGit('rev-parse', `${landed.sha ?? ''}^`)).toBe(start);
-    expect(rawGit('show', '10db/polish:src/shared.ts')).toBe('tidied');
-    expect(rawGit('ls-tree', '--name-only', '-r', '10db/polish', 'src')).toBe('src/shared.ts');
-    expect(
-      rawGit('log', '-1', '--format=%s%n%(trailers:key=10db-task,valueonly)', '10db/polish'),
-    ).toBe('Settings: tidy the form\ntsk_1');
-    // The folder's own git reads the landed paths as committed; the unnamed file is still its own.
-    expect(rawGit('status', '--porcelain')).toBe('?? src/notes.ts');
+    expect(rawGit('rev-parse', '10db/polish^')).toBe(start);
+    expect(rawGit('show', '10db/polish:src/shared.ts')).toBe('kept');
+    expect(readFileSync(join(repo.path, 'src/shared.ts'), 'utf8')).toBe(
+      'kept, then edited again\n',
+    );
+    // The index holds what landed: the later edit is unstaged, nothing is staged.
+    expect(rawGit('status', '--porcelain', '--', 'src/shared.ts')).toBe('M src/shared.ts');
   });
 
-  it('answers the commit a rerun already made by its operation id, and lands nothing twice', async () => {
-    const kept = await keptWith({ 'src/shared.ts': 'tidied\n' });
-    const first = await land(kept, ['src/shared.ts']);
+  it('answers a rerun with the commit its opId made, and makes none for nothing to land', async () => {
+    write('src/shared.ts', 'kept\n');
+    const kept = await chain(null, ['src/shared.ts']);
+    if (kept.sha === null) throw new Error('nothing kept');
+    const landed = await land(kept.sha, ['src/shared.ts']);
 
-    // The daemon stopped after the commit and before its row: the rerun names no path left to land.
-    const again = await land(kept, []);
-
-    expect(again).toMatchObject({ sha: first.sha, alreadyLanded: true });
-    expect(rawGit('rev-list', '--count', `${start}..10db/polish`)).toBe('1');
+    expect(await land(kept.sha, ['src/shared.ts'])).toEqual({
+      sha: landed.sha,
+      alreadyLanded: true,
+      indexStale: false,
+    });
+    expect(await land(kept.sha, ['src/shared.ts'], 'shared-pas_1-2')).toEqual({
+      sha: null,
+      alreadyLanded: false,
+      indexStale: false,
+    });
+    expect(rawGit('rev-parse', '10db/polish')).toBe(landed.sha);
   });
 
-  it('makes no commit for paths the tip already holds as named', async () => {
-    const landed = await land(start, ['src/shared.ts']);
-    expect(landed).toMatchObject({ sha: null, alreadyLanded: false });
-    expect(rawGit('rev-parse', '10db/polish')).toBe(start);
-  });
-
-  it('refuses while the folder is off the branch, and moves nothing', async () => {
-    const kept = await keptWith({ 'src/shared.ts': 'tidied\n' });
+  it('is refused while HEAD is off the branch, and moves nothing', async () => {
+    write('src/shared.ts', 'kept\n');
+    const kept = await chain(null, ['src/shared.ts']);
+    if (kept.sha === null) throw new Error('nothing kept');
     rawGit('switch', '-q', 'main');
-    await expect(land(kept, ['src/shared.ts'])).rejects.toThrow(PassFolderOffBranchError);
+
+    await expect(land(kept.sha, ['src/shared.ts'])).rejects.toThrow(PassFolderOffBranchError);
     expect(rawGit('rev-parse', '10db/polish')).toBe(start);
   });
 
   it("says the folder's index is stale when another git holds it, after landing the commit", async () => {
-    const kept = await keptWith({ 'src/shared.ts': 'tidied\n' });
+    write('src/shared.ts', 'kept\n');
+    const kept = await chain(null, ['src/shared.ts']);
+    if (kept.sha === null) throw new Error('nothing kept');
     writeFileSync(join(repo.path, '.git/index.lock'), '');
 
-    const landed = await land(kept, ['src/shared.ts']);
+    const landed = await land(kept.sha, ['src/shared.ts']);
 
     unlinkSync(join(repo.path, '.git/index.lock'));
     expect(landed.indexStale).toBe(true);
-    expect(rawGit('show', '10db/polish:src/shared.ts')).toBe('tidied');
+    expect(rawGit('show', '10db/polish:src/shared.ts')).toBe('kept');
   });
 });

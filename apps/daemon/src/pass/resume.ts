@@ -15,7 +15,7 @@ import { abandonPass } from './abandon';
 import { passFolderOn } from './folder';
 import { passBranch } from './kept-work';
 import { putBackKeptWork } from './put-back';
-import { keepHold } from './shared-chain';
+import { keepOrLetGo } from './shared-chain';
 import { holdRef } from './shared-hold';
 import { resumeSignOffWaits } from './sign-off';
 import { takeOut, TakeOutWithin, type TakeOutDeps } from './take-out';
@@ -63,8 +63,7 @@ async function settleHolds(deps: TakeOutDeps, pass: PassDto, repo: string): Prom
   // While the folder is off the pass's branch its files are not the hold's: the hold stays open,
   // and the next turn's end or start-up on the branch keeps it.
   if ((await deps.git.currentBranch(repo)) !== passBranch(deps.state.db, pass)) return;
-  for (const hold of openHolds(deps.state.db, pass.id))
-    await keepHold(deps, { claimId: hold.claimId });
+  for (const hold of openHolds(deps.state.db, pass.id)) await keepOrLetGo(deps, hold.claimId);
 }
 
 /**

@@ -107,8 +107,10 @@ function ago(at: string, now: string): string {
 }
 
 /** What the agent is told when the builder keeps the change to its page. */
-const keepInstruction = (area: string): string =>
-  `The builder answered ${SHARED_ASK_KEEP_CHOICE}: you did not get shared area ${area}. Keep this change inside your page and edit nothing in ${area}; carry on with your page's files.`;
+const keepInstruction = (area: string, note?: string): string =>
+  `The builder answered ${SHARED_ASK_KEEP_CHOICE}: you did not get shared area ${area}. Keep this change inside your page and edit nothing in ${area}; carry on with your page's files.${
+    note !== undefined && note.trim() !== '' ? ` The builder added: "${note.trim()}"` : ''
+  }`;
 
 /**
  * Asks the builder before the task changes shared `area` (spec §7.2 step 3), when another task of
@@ -243,7 +245,7 @@ function answerOf(
       instruction: `The builder replied instead of giving you shared area ${input.area}: "${words}". You did not get ${input.area}; edit nothing there, and do what the reply says.`,
     };
   }
-  return { allowed: false, instruction: keepInstruction(input.area) };
+  return { allowed: false, instruction: keepInstruction(input.area, given.note) };
 }
 
 /**

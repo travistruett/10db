@@ -6,6 +6,7 @@ import {
   listSharedChanges,
   listTaskThread,
   openHolds,
+  schema,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { isolatedGitEnv } from '../../test/fixtures';
@@ -88,6 +89,36 @@ describe('keepHold', () => {
     expect(h.git$('rev-parse', 'HEAD')).toBe(w.opened.pass.startSha);
   });
 
+  it("puts an early keep's file the hold took back on the chain as before the hold, not as dirt", async () => {
+    w = await openPassWorld();
+    w.write('src/shared.ts', "the builder's edit\n");
+    const hold = await grant(w.settings, 'src');
+    w.write('src/shared.ts', "the builder's edit\nand the agent's\n");
+    await keepHold(w.deps, { claimId: hold.claimId, keepOpen: true });
+    // The agent takes its edit back: the file is the builder's again.
+    w.write('src/shared.ts', "the builder's edit\n");
+
+    await keepHold(w.deps, { claimId: hold.claimId });
+
+    expect(w.h.git$('show', `${sharedRef(w.opened.pass.id)}:src/shared.ts`)).toBe('shared');
+    expect(getHold(w.h.store.db, hold.claimId)).toMatchObject({ empty: true });
+  });
+
+  it('takes two keeps of one hold at once as one, the second answering as the first kept it', async () => {
+    w = await openPassWorld();
+    const hold = await grant(w.settings, 'src');
+    w.write('src/button.ts', 'button\n');
+
+    const [one, two] = await Promise.all([
+      keepHold(w.deps, { claimId: hold.claimId }),
+      keepHold(w.deps, { claimId: hold.claimId }),
+    ]);
+
+    expect(two.sha).toBe(one.sha);
+    expect(listSharedChanges(w.h.store.db, w.opened.pass.id)).toHaveLength(1);
+    expect(getHold(w.h.store.db, hold.claimId).closedAt).not.toBeNull();
+  });
+
   it('closes a hold that changed nothing as empty, with no chain commit', async () => {
     w = await openPassWorld();
     w.write('src/shared.ts', "the builder's edit\n");
@@ -143,8 +174,11 @@ describe('keepHold', () => {
     expect(w.h.git$('rev-parse', `${tip}^`)).toBe(landed[0]?.landedSha);
     expect(w.h.git$('show', '--name-only', '--format=', `${tip}^`)).toBe('src/button.ts');
     expect(w.h.git$('show', '--name-only', '--format=', tip)).toBe('styles/app.css');
-    // Landing again lands nothing twice.
+    // Landing again lands nothing twice, even after a stop between the commits and their rows.
     expect(await landSharedChanges(w.deps, { passId: w.opened.pass.id, upTo: 2 })).toEqual([]);
+    w.h.store.db.update(schema.passes).set({ sharedLanded: 0 }).run();
+    w.h.store.db.update(schema.passSharedChanges).set({ landedSha: null }).run();
+    expect(await landSharedChanges(w.deps, { passId: w.opened.pass.id, upTo: 2 })).toEqual(landed);
     expect(w.h.git$('rev-parse', w.branch)).toBe(tip);
   });
 });

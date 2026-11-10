@@ -34,7 +34,8 @@ import {
   type DbReader,
 } from '@10db/db';
 import { claimScopeOf } from '../delivery';
-import type { ChainCommit } from '../git';
+import type { Logger } from '../log';
+import { PassFolderOffBranchError, type ChainCommit } from '../git';
 import { keepNamedPaths, passBranch, passTaskPlace, type PassWorkDeps } from './kept-work';
 import {
   chainTip,
@@ -97,16 +98,20 @@ export async function keepHold(
     also: kept?.paths ?? [],
   });
   const dirtyKept = changed.some((path) => record.some((r) => r.path === path));
-  // The paths of an earlier keep that are back as the grant found them go into the tree too, so
-  // the chain does not keep an edit the hold took back.
-  const treePaths = [...new Set([...changed, ...(kept?.paths ?? [])])].sort();
+  // An earlier keep's path that is back as the grant found it is set on the chain as it was before
+  // the hold (the record's parent, the chain's tip at the grant), never as the folder has it, which
+  // may be dirt from before the hold.
+  const takenBack = (kept?.paths ?? []).filter((path) => !changed.includes(path));
   let made: ChainCommit = { sha: null, made: false, files: [] };
-  if (treePaths.length > 0) {
+  if (changed.length + takenBack.length > 0) {
     made = await extendChain(deps, {
       repo,
       ref: sharedRef(pass.id),
       base: pass.startSha,
-      paths: treePaths,
+      paths: changed,
+      ...(takenBack.length > 0
+        ? { restore: { from: `${hold.recordSha}^`, paths: takenBack } }
+        : {}),
       message: `Shared change ${String(hold.seq)} of ${task.title}`,
       trailer: { key: HOLD_TRAILER, value: hold.claimId },
     });
@@ -115,6 +120,8 @@ export async function keepHold(
   const sha = made.sha;
   const empty = sha === null || files.length === 0;
   deps.state.write((ctx) => {
+    // Another keep of the hold, at the same turn's end, closed it first: it kept the same files.
+    if (getHold(ctx.tx, hold.claimId).closedAt !== null) return;
     if (sha !== null && (kept !== undefined || files.length > 0))
       upsertSharedChange(ctx, { passId: pass.id, seq: hold.seq, sha, files, dirtyKept });
     if (input.keepOpen === true) return;
@@ -133,6 +140,36 @@ export async function keepHold(
     made: made.made,
     paths: files.map((f) => f.path),
   };
+}
+
+/**
+ * Keeps an open hold, or, when it cannot be kept (its record is gone, the chain is unreadable), lets
+ * it go: closed as empty and its claim released in one write, with a line on its page's thread, so
+ * a start-up or an Abandon is never stuck on it. A folder off the pass's branch is not such a case:
+ * the hold stays open for the folder's return, and the refusal is thrown.
+ */
+export async function keepOrLetGo(
+  deps: SharedDeps & { readonly logger?: Logger },
+  claimId: ClaimId,
+): Promise<void> {
+  try {
+    await keepHold(deps, { claimId });
+  } catch (error) {
+    if (error instanceof PassFolderOffBranchError) throw error;
+    const why = error instanceof Error ? error.message : String(error);
+    deps.logger?.warn({ claimId, err: why }, 'a shared hold could not be kept; it is let go');
+    deps.state.write((ctx) => {
+      const hold = getHold(ctx.tx, claimId);
+      if (hold.closedAt !== null) return;
+      closeHold(ctx, claimId, { empty: true });
+      releaseClaim(ctx, claimId);
+      insertSystemNotice(
+        ctx,
+        hold.taskId,
+        `What this page changed in shared ${hold.area} during its turn could not be kept (${why}), so it is not a shared change: its files stay in the folder as they are.`,
+      );
+    });
+  }
 }
 
 /** The open holds of a workstream, by number. */
@@ -294,7 +331,7 @@ export async function keepCommitToolPaths(
  * no longer holds is kept first.
  */
 export async function grantSharedHold(
-  deps: SharedDeps,
+  deps: SharedDeps & { readonly logger?: Logger },
   input: { readonly workstreamId: WorkstreamId; readonly area: string },
 ): Promise<AcquireResult | null> {
   const db = deps.state.db;
@@ -308,7 +345,7 @@ export async function grantSharedHold(
       stale.area === input.area &&
       !activeClaims(db, stale.workstreamId).some((c) => c.id === stale.claimId)
     )
-      await keepHold(deps, { claimId: stale.claimId });
+      await keepOrLetGo(deps, stale.claimId);
   const tip = await chainTip(deps, repo, pass);
   const paths = await sharedPathsDiffering(deps, {
     repo,

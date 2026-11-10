@@ -8,6 +8,7 @@ import {
   listSharedChanges,
   openHolds,
   releaseClaim,
+  schema,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { isolatedGitEnv } from '../../test/fixtures';
@@ -112,5 +113,27 @@ describe('grantSharedHold', () => {
     expect(second).toMatchObject({ seq: 2, taskId: people.id });
     if (!second) throw new Error('no second hold');
     expect(holdRecord(h.store.db, second.claimId)).toEqual([]);
+  });
+
+  it("lets a lost claim's hold go when it cannot be kept, and grants the area all the same", async () => {
+    w = await openPassWorld();
+    const { h, settings, people } = w;
+    w.startTurn(settings);
+    await grantSharedHold(w.deps, { workstreamId: w.runOf(settings), area: 'src' });
+    const [first] = openHolds(h.store.db, w.opened.pass.id);
+    if (!first) throw new Error('no hold');
+    h.state.write((c) => releaseClaim(c, first.claimId));
+    // Its record's commit is gone too, so it cannot be kept.
+    h.store.db
+      .update(schema.passHolds)
+      .set({ recordSha: '0'.repeat(40) })
+      .run();
+
+    w.startTurn(people);
+    const granted = await grantSharedHold(w.deps, { workstreamId: w.runOf(people), area: 'src' });
+
+    expect(granted?.ok).toBe(true);
+    expect(getHold(h.store.db, first.claimId)).toMatchObject({ empty: true });
+    expect(openHolds(h.store.db, w.opened.pass.id).map((o) => o.taskId)).toEqual([people.id]);
   });
 });

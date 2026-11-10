@@ -97,6 +97,21 @@ describe('dropShared', () => {
     expect(read('src/shared.ts')).toBe('settings\npeople\n');
   });
 
+  it("is refused while another page's turn holds the area", async () => {
+    w = await openPassWorld();
+    const seq = await sharedTurn(w.settings, () => {
+      w.write('src/button.ts', 'a button\n');
+    });
+    w.startTurn(w.people);
+    await grantSharedHold(w.deps, { workstreamId: w.runOf(w.people), area: 'src' });
+
+    expect(await dropShared(w.deps, { passId: w.opened.pass.id, seq })).toMatchObject({
+      dropSeq: null,
+      refused: 'People: UI work holds src now',
+    });
+    expect(read('src/button.ts')).toBe('a button\n');
+  });
+
   it('is refused for a file changed on disk since, and an Abandon leaves that file and names it', async () => {
     w = await openPassWorld();
     const seq = await sharedTurn(w.settings, () => {

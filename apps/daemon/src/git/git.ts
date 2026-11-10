@@ -407,6 +407,8 @@ export interface ChainCommitInput {
   /** The paths the change sets: as the folder has them, or, with `from`, as that commit has them. */
   readonly paths: readonly string[];
   readonly from?: string;
+  /** More paths the change sets, as commit `from` has them (gone where it lacks them). */
+  readonly restore?: { readonly from: string; readonly paths: readonly string[] };
   readonly message: string;
   /** Names the change (`10db-hold: <claim id>`), so a rerun finds the commit it made. */
   readonly trailer: { readonly key: string; readonly value: string };
@@ -792,7 +794,7 @@ export interface Git {
   }): Promise<PathRecord>;
   /**
    * One change of a pass's shared chain (spec §7.2), under the repo lock: an unsigned commit whose tree
-   * is the chain tip's (`expect`, else `base`) with `paths` set, on that tip, at `ref` by
+   * is the chain tip's (`expect`, else `base`) with `paths` set (and `restore`'s), on that tip, at `ref` by
    * compare-and-swap. A tree equal to the tip's makes no commit: it answers the newest commit on the
    * chain carrying the same trailer, a rerun's own, else null. Refused with `KeptRefMovedError` when
    * `ref` no longer holds `expect`. No file, index, HEAD or branch is touched.
@@ -2700,6 +2702,25 @@ export function createGit(opts: GitOptions = {}): Git {
     });
   }
 
+  /** Sets each of `paths` in a private index as commit `from` has it, or removes it where it lacks it. */
+  async function takeInto(
+    c: Pinned,
+    env: { GIT_INDEX_FILE: string; GIT_LITERAL_PATHSPECS: string },
+    from: string,
+    paths: readonly string[],
+  ): Promise<void> {
+    for (const path of paths) {
+      const entry = await treeEntry(c, from, path);
+      await git(
+        c,
+        entry === null
+          ? ['update-index', '--force-remove', '--', path]
+          : ['update-index', '--add', '--cacheinfo', `${entry.mode},${entry.oid},${path}`],
+        { env },
+      );
+    }
+  }
+
   async function recordPaths(input: {
     readonly repo: string;
     readonly base: string;
@@ -2732,18 +2753,30 @@ export function createGit(opts: GitOptions = {}): Git {
       const tip = held ?? (await revParse(c, `${input.base}^{commit}`));
       if (tip === null) throw new InvalidError(`${input.base} names no commit`);
       const from = input.from;
+      const restore = input.restore;
       const { tree, files } =
-        from === undefined
-          ? await treeWithDisk(c, tip, named)
-          : {
-              tree: await treeTaking(c, tip, from, named),
-              files: await Promise.all(
-                named.map(async (path) => ({
-                  path,
-                  blob: (await treeEntry(c, from, path))?.oid ?? null,
-                })),
-              ),
-            };
+        restore !== undefined
+          ? await withPrivateIndex(c, tip, async (env) => {
+              if (from === undefined) await indexAsOnDisk(c, env, named);
+              else await takeInto(c, env, from, named);
+              const restored = [...new Set(restore.paths.map(checkPathName))].sort();
+              await takeInto(c, env, restore.from, restored);
+              return {
+                tree: (await git(c, ['write-tree'], { env })).trim(),
+                files: await indexBlobs(c, env, [...new Set([...named, ...restored])].sort()),
+              };
+            })
+          : from === undefined
+            ? await treeWithDisk(c, tip, named)
+            : {
+                tree: await treeTaking(c, tip, from, named),
+                files: await Promise.all(
+                  named.map(async (path) => ({
+                    path,
+                    blob: (await treeEntry(c, from, path))?.oid ?? null,
+                  })),
+                ),
+              };
       const { key, value } = input.trailer;
       if (tree === (await revParse(c, `${tip}^{tree}`))) {
         // Nothing to add: the chain holds this change already when a commit of its own is on it.
