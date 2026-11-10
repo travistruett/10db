@@ -8,7 +8,9 @@ import {
   PassTurnTimingDto,
   PassTurnWithFilesDto,
   PassViewDto,
+  TaskFileDto,
   TaskId,
+  TaskMessageDto,
   TaskThreadDto,
   TurnActivityDto,
   type InboxItemDto,
@@ -306,6 +308,44 @@ export function passActivityData(
       filesTouched: overrides.filesTouched ?? ['src/settings/page.tsx', 'src/settings/form.tsx'],
     },
   };
+}
+
+/** A message in `taskId`'s thread: the builder's, unless given. */
+export function taskMessageDto(
+  taskId: TaskId,
+  overrides: Partial<TaskMessageDto> = {},
+): TaskMessageDto {
+  return TaskMessageDto.parse({
+    id: mintId('TaskMessage'),
+    taskId,
+    author: 'builder',
+    kind: 'message',
+    body: 'The padding is too tight',
+    createdAt: minutesBeforeNow(12),
+    pushedAt: minutesBeforeNow(12),
+    deliveredAt: minutesBeforeNow(12),
+    files: [],
+    ...overrides,
+  });
+}
+
+/** A picture pasted with `message`. */
+export function taskFileDto(
+  message: Pick<TaskMessageDto, 'id' | 'taskId'>,
+  overrides: Partial<TaskFileDto> = {},
+): TaskFileDto {
+  return TaskFileDto.parse({
+    id: mintId('TaskFile'),
+    taskId: message.taskId,
+    messageId: message.id,
+    name: 'Screenshot 2026-11-09 at 12.17.03.png',
+    mediaType: 'image/png',
+    size: 4,
+    sha256: 'c'.repeat(64),
+    inlineSent: true,
+    createdAt: minutesBeforeNow(12),
+    ...overrides,
+  });
 }
 
 /** What the Workbench's routes answer; each left out answers as a project with no pass would. */

@@ -72,6 +72,8 @@ describe('PassWorkspace queue', () => {
     await renderWorkspace((pages) => pages.working.taskId);
     const current = queueRows().filter((row) => row.getAttribute('aria-current') === 'true');
     expect(current.map((row) => row.textContent)).toEqual(['BillingWorking · 4 min · median 5']);
+    const thread = screen.getByRole('region', { name: 'Billing' });
+    expect(await within(thread).findByText('Billing is at')).toBeTruthy();
   });
 
   it('names a page that waits on the builder heavier, and dims the rest', async () => {

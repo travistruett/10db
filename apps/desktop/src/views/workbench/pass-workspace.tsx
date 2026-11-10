@@ -4,6 +4,7 @@ import { useNow } from '../../shell/relative';
 import type { PassWorkspaceProps } from './pass-workspace-props';
 import { QueueList } from './queue-list';
 import { queueRows, shownRow } from './queue-rows';
+import { Thread } from './thread';
 import { WorkbenchLayout, workbenchLayout } from './workbench-layout';
 
 /** The queue's width beside the thread in the wide layout. */
@@ -45,6 +46,9 @@ export function PassWorkspace({ view, inbox, selected, onSelect }: PassWorkspace
           <Title order={2} size="h4" px="md" pt="sm">
             {shown.page.area}
           </Title>
+          <Box style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+            <Thread page={shown.page} turns={[]} />
+          </Box>
         </Box>
       )}
     </Flex>
