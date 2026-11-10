@@ -58,8 +58,9 @@ function backOf(db: DbReader, change: PassSharedChangeDto): string {
 }
 
 /**
- * Why the change cannot be dropped now (spec §7.2), or null: a later change touches its paths, or a
- * file on disk is neither what the change made nor already put back, which would be someone's edit.
+ * Why the change cannot be dropped now (spec §7.2), or null: another page's turn holds its area, a
+ * later change touches its paths, or a file on disk is neither what the change made nor already put
+ * back, which would be someone's edit.
  */
 async function refusalOf(
   deps: SharedDeps,
@@ -67,6 +68,12 @@ async function refusalOf(
   change: PassSharedChangeDto,
 ): Promise<string | null> {
   const db = deps.state.db;
+  // Another page's turn holding the area may be writing these files now.
+  const area = listHolds(db, change.passId).find((h) => h.seq === change.seq)?.area;
+  const holding = openHolds(db, change.passId).find(
+    (h) => h.area === area && h.taskId !== change.taskId,
+  );
+  if (holding) return `${getTask(db, holding.taskId).title} holds ${holding.area} now`;
   const later = laterTouching(db, change);
   if (later.length > 0)
     return `${[...new Set(later.map((c) => getTask(db, c.taskId).title))].join(', ')} changed ${quoted(
