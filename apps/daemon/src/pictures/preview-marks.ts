@@ -186,7 +186,8 @@ export function judgePreview(deps: PreviewMarksDeps, input: JudgedLoad): void {
             workstreamId: task.workstreamId,
             cause: { route: mark.route },
           });
-          if (!asked.notNow) setPreviewMarkCard(ctx, mark.id, asked.inboxId);
+          // Only a card raised for the broken preview is the mark's, for its mend to withdraw.
+          if (!asked.notNow && !asked.hazardCard) setPreviewMarkCard(ctx, mark.id, asked.inboxId);
         }
         break;
       }

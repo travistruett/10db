@@ -19,7 +19,7 @@ import {
 import { afterEach, describe, expect, it } from 'vitest';
 import { openPassWorld, type PassWorld } from '../../test/pass-world';
 import { silentLogger } from '../log';
-import { answerMoveToCopy } from '../pass';
+import { answerMoveToCopy, askMoveToCopy } from '../pass';
 import { ClaimWaits } from './claim-wait';
 import { createToolHandlers } from './tools';
 
@@ -230,5 +230,56 @@ describe("the Move to a Separate Copy card's answer", () => {
     expect(again.instruction).toMatch(/builder chose Not Now/);
     expect(w.h.cards()).toEqual([]);
     expect(hazardsHeld(w, w.settings)).toEqual([]);
+  });
+
+  it("still offers the move for a hazard after Not Now on a broken preview's card", async () => {
+    w = await openPassWorld();
+    const tools = laneTools(w, w.settings);
+    const preview = w.h.state.write((ctx) =>
+      askMoveToCopy(ctx, {
+        pass: w.opened.pass,
+        taskId: w.settings.id,
+        workstreamId: w.runOf(w.settings),
+        cause: { route: '/settings' },
+      }),
+    );
+    w.h.inbox.answer(preview.inboxId, { choice: PASS_NOT_NOW_CHOICE });
+
+    const asked = await tools.request_claim({
+      opId: 'op-deps-1',
+      kind: 'hazard',
+      name: 'deps',
+      reason: 'add a date library',
+    });
+    if (asked.granted || asked.inboxId === null) throw new Error('no card');
+    expect(asked.inboxId).not.toBe(preview.inboxId);
+    expect(asked.instruction).not.toMatch(/builder chose Not Now/);
+    expect(
+      PassMoveToCopyDetail.parse(getInboxItem(w.h.store.db, asked.inboxId).detail),
+    ).toMatchObject({ hazard: 'deps', route: null });
+  });
+
+  it("keeps an open hazard card's detail when the page then breaks the preview twice", async () => {
+    w = await openPassWorld();
+    const tools = laneTools(w, w.settings);
+    const asked = await tools.request_claim({
+      opId: 'op-deps-1',
+      kind: 'hazard',
+      name: 'deps',
+      reason: 'add a date library',
+    });
+    if (asked.granted || asked.inboxId === null) throw new Error('no card');
+    const preview = w.h.state.write((ctx) =>
+      askMoveToCopy(ctx, {
+        pass: w.opened.pass,
+        taskId: w.settings.id,
+        workstreamId: w.runOf(w.settings),
+        cause: { route: '/settings' },
+      }),
+    );
+    expect(preview).toMatchObject({ inboxId: asked.inboxId, hazardCard: true });
+    expect(
+      PassMoveToCopyDetail.parse(getInboxItem(w.h.store.db, asked.inboxId).detail),
+    ).toMatchObject({ hazard: 'deps', route: null });
   });
 });

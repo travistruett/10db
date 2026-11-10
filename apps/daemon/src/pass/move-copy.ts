@@ -71,8 +71,16 @@ export function moveToCopyInstruction(name: string, notNow = false): string {
     : `The ${name} hazard runs in a separate copy, not in the Workbench pass's folder, and the builder is asked whether to move this task to one. Don't change any file of the ${name} hazard: finish what you can without it, end your turn and say what is left.`;
 }
 
-/** The task's Move card in `pass` the builder answered Not Now: the page is asked no more. */
-function notNowAnswered(db: DbReader, pass: PassDto, taskId: TaskId): InboxItemDto | undefined {
+/**
+ * The task's Move card in `pass` for the same kind of cause (a hazard, or a broken preview) the
+ * builder answered Not Now: the page is asked no more for that kind of cause.
+ */
+function notNowAnswered(
+  db: DbReader,
+  pass: PassDto,
+  taskId: TaskId,
+  cause: MoveToCopyCause,
+): InboxItemDto | undefined {
   return listInbox(db, {
     projectId: pass.projectId,
     states: [InboxState.Answered, InboxState.Delivering, InboxState.Resolved],
@@ -83,6 +91,7 @@ function notNowAnswered(db: DbReader, pass: PassDto, taskId: TaskId): InboxItemD
       detail.success &&
       detail.data.passId === pass.id &&
       detail.data.taskId === taskId &&
+      (detail.data.hazard !== null) === 'hazard' in cause &&
       item.answer?.choice === PASS_NOT_NOW_CHOICE
     );
   });
@@ -125,12 +134,25 @@ export function askMoveToCopy(
     readonly workstreamId: WorkstreamId;
     readonly cause: MoveToCopyCause;
   },
-): { readonly inboxId: InboxItemId; readonly notNow: boolean } {
-  const answered = notNowAnswered(ctx.tx, input.pass, input.taskId);
-  if (answered !== undefined) return { inboxId: answered.id, notNow: true };
+): {
+  readonly inboxId: InboxItemId;
+  readonly notNow: boolean;
+  /** A broken preview met the task's open hazard card and left it as it is. */
+  readonly hazardCard: boolean;
+} {
+  const answered = notNowAnswered(ctx.tx, input.pass, input.taskId, input.cause);
+  if (answered !== undefined) return { inboxId: answered.id, notNow: true, hazardCard: false };
   const task = getTask(ctx.tx, input.taskId);
   const key = moveToCopyKey(input.taskId);
-  const raised = findOpenByFoldKey(ctx.tx, input.pass.projectId, key) === undefined;
+  const open = findOpenByFoldKey(ctx.tx, input.pass.projectId, key);
+  // A hazard's card says what the agent waits on: a broken preview never words it over.
+  if (open !== undefined && 'route' in input.cause) {
+    // The detail is JSON read back from the database: a boundary, so parse it.
+    const held = PassMoveToCopyDetail.safeParse(open.detail);
+    if (held.success && held.data.hazard !== null)
+      return { inboxId: open.id, notNow: false, hazardCard: true };
+  }
+  const raised = open === undefined;
   const detail: PassMoveToCopyDetail = {
     kind: 'pass_move_to_copy',
     passId: input.pass.id,
@@ -157,7 +179,7 @@ export function askMoveToCopy(
     ],
   });
   if (raised) insertSystemNotice(ctx, input.taskId, words.line);
-  return { inboxId: card.id, notNow: false };
+  return { inboxId: card.id, notNow: false, hazardCard: false };
 }
 
 /** What the move needs: a take-out's, and the start of a task in a separate copy. */
