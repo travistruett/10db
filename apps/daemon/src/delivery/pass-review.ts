@@ -43,6 +43,9 @@ export const PASS_REVIEW_TIMEOUT_MS = 10 * 60_000;
 /** How much of the diff the review reads; a longer one is cut and the review says so. */
 const PASS_REVIEW_DIFF_BYTES = 400_000;
 
+/** How the ids of the header's review findings start. */
+const FINDING_NOTICE = 'finding:';
+
 /** The header notice that says the last review read only part of its diff. */
 export const REVIEW_CUT_NOTICE = 'review-cut';
 
@@ -172,6 +175,9 @@ export async function reviewPassTip(
   }));
   const targets = findingTargets(findings, pages, project.areas);
   deps.state.write((w) => {
+    // The header's findings were the last review's: this one reads a newer tip.
+    for (const notice of getPassProgress(w.tx, input.passId).notices)
+      if (notice.id.startsWith(FINDING_NOTICE)) clearPassNotice(w, input.passId, notice.id);
     targets.forEach((target, n) => {
       const line = noticeLine(target.finding);
       if (target.taskId !== null) {
@@ -180,7 +186,7 @@ export async function reviewPassTip(
         return;
       }
       setPassNotice(w, input.passId, {
-        id: `finding:${input.sha.slice(0, 12)}:${String(n + 1)}`,
+        id: `${FINDING_NOTICE}${input.sha.slice(0, 12)}:${String(n + 1)}`,
         kind: PassNoticeKind.Finding,
         text: line,
         sendable: true,

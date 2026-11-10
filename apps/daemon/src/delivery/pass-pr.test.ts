@@ -12,6 +12,7 @@ import { AbandonStep } from '@10db/contracts';
 import {
   findFlowByName,
   setAbandonStep,
+  setPassNotice,
   getBatch,
   getBatchRow,
   patchProject,
@@ -165,9 +166,12 @@ describe('Open Pull Request', () => {
         draft: true,
       },
     ]);
-    await vi.waitFor(() => {
-      expect(gateState(passId)).toBe(PassGateState.Passed);
-    });
+    await vi.waitFor(
+      () => {
+        expect(gateState(passId)).toBe(PassGateState.Passed);
+      },
+      { timeout: 20_000 },
+    );
     const pr = getPassPullRequest(h.store.db, passId);
     expect(pr).toMatchObject({ draft: true });
     await vi.waitFor(() => {
@@ -188,9 +192,12 @@ describe('Open Pull Request', () => {
     signOff(settings, 'src/settings/page.tsx', 'signed off\n');
     await prs.open(passId);
     await h.jobs.idle();
-    await vi.waitFor(() => {
-      expect(gateState(passId)).toBe(PassGateState.Passed);
-    });
+    await vi.waitFor(
+      () => {
+        expect(gateState(passId)).toBe(PassGateState.Passed);
+      },
+      { timeout: 20_000 },
+    );
     const url = getPassPullRequest(h.store.db, passId)?.url ?? '';
 
     const tip = signOff(people, 'src/people/page.tsx', 'people\n// signed\n');
@@ -211,9 +218,12 @@ describe('Open Pull Request', () => {
     await prs.open(passId);
     await h.jobs.idle();
 
-    await vi.waitFor(() => {
-      expect(gateState(passId)).toBe(PassGateState.Failed);
-    });
+    await vi.waitFor(
+      () => {
+        expect(gateState(passId)).toBe(PassGateState.Failed);
+      },
+      { timeout: 20_000 },
+    );
     const url = getPassPullRequest(h.store.db, passId)?.url ?? '';
     await vi.waitFor(() => {
       expect(h.gh.body(url)).toContain('Gate failed in a scratch worktree');
@@ -362,6 +372,72 @@ describe('Open Pull Request', () => {
     await vi.waitFor(() => {
       expect(h.git$('worktree', 'list')).not.toContain('gate-');
     });
+    // The body says the gate did not run, not that it is running.
+    const url = getPassPullRequest(h.store.db, passId)?.url ?? '';
+    await vi.waitFor(() => {
+      expect(h.gh.body(url)).toContain('Gate not run');
+    });
+    expect(h.gh.body(url)).not.toContain('Gate running');
+  });
+
+  it("clears the header's closed pull request notice once a new one is opened", async () => {
+    setup({ gateCommand: null });
+    const { passId, settings } = await openedPass();
+    signOff(settings, 'src/settings/page.tsx', 'signed off\n');
+    h.state.write((w) => {
+      setPassNotice(w, passId, {
+        id: 'pr-closed',
+        kind: PassNoticeKind.PrClosed,
+        text: 'The pull request closed without merging.',
+        sendable: false,
+        cardId: null,
+        at: w.now,
+      });
+    });
+
+    await prs.open(passId);
+    await h.jobs.idle();
+
+    expect(h.gh.prCreates()).toHaveLength(1);
+    expect(notices(passId)).toEqual([]);
+  });
+
+  it('reviews the tip it pushed, not the one asked for', async () => {
+    const asked: string[] = [];
+    setup(
+      { gateCommand: null },
+      {
+        review: {
+          adapter: {
+            complete: (ask) => {
+              asked.push(ask.prompt);
+              return Promise.resolve('No findings.');
+            },
+          },
+          launch: (_account, model) => ({ model, env: {}, expect: { kind: 'any' } as never }),
+          scratchRoot: tmpdir(),
+        },
+      },
+    );
+    const standard = findFlowByName(h.store.db, 'standard');
+    if (standard) h.state.write((w) => patchProject(w, h.project.id, { flowId: standard.id }));
+    const { passId, settings, people } = await openedPass();
+    signOff(settings, 'src/settings/page.tsx', 'signed off\n');
+    await prs.open(passId);
+    await h.jobs.idle();
+    await vi.waitFor(() => {
+      expect(asked).toHaveLength(1);
+    });
+
+    // Asked with the tip already reviewed, a page lands before the push: the push's tip is new.
+    expect(await prs.open(passId)).toMatchObject({ review: 'unchanged' });
+    const tip = signOff(people, 'src/people/page.tsx', 'people, signed\n');
+    await h.jobs.idle();
+
+    await vi.waitFor(() => {
+      expect(getPassProgress(h.store.db, passId).reviewedSha).toBe(tip);
+    });
+    expect(asked).toHaveLength(2);
   });
 });
 

@@ -110,6 +110,11 @@ function setup(answer: string): {
   };
 }
 
+/** The same deps, with the model answering `answer` from now on. */
+function setupAnswer<D extends PassReviewDeps>(deps: D, answer: string): D {
+  return { ...deps, adapter: { complete: () => Promise.resolve(answer) } };
+}
+
 async function openedPass(): Promise<{ passId: PassId; settings: TaskDto; people: TaskDto }> {
   const settings = h.addTask('Settings page', { areas: ['settings'] });
   const people = h.addTask('People page', { areas: ['people'] });
@@ -195,6 +200,19 @@ describe('reviewPassTip', () => {
         text: expect.stringContaining('was not reviewed') as unknown,
       }),
     ]);
+  });
+
+  it("clears the header's findings of the last review when the next one reads a new tip", async () => {
+    const { deps } = setup('1. MAJOR src/lib/util.ts:4 a helper leaks');
+    const { passId } = await openedPass();
+    const tip = h.commit('src/settings/page.tsx', 'signed off\n');
+    await review(deps, passId, tip);
+    expect(getPassProgress(h.store.db, passId).notices).toHaveLength(1);
+
+    const fixed = setupAnswer(deps, 'No findings.');
+    await review(fixed, passId, h.commit('src/lib/util.ts', 'fixed\n'));
+
+    expect(getPassProgress(h.store.db, passId).notices).toEqual([]);
   });
 
   it('runs no review for a flow with no review step', async () => {

@@ -33,6 +33,7 @@ import { jobKey, JobQueue } from './jobs';
 import { shipCheck } from './local-check';
 import { createPassChecks } from './pass-checks';
 import { passHasReview, REVIEW_CUT_NOTICE, type PassReviewDeps } from './pass-review';
+import { PASS_PR_CLOSED_NOTICE } from './pass-watch';
 import { readPrTemplate } from './pr-template';
 import { passPrBody, prTitle, titlePrefix, type PassPrCheck } from './pr-text';
 import { gateInScratch, type ScratchGateDeps } from './scratch-gate';
@@ -184,8 +185,11 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
       signal: i.signal,
       beforeStart,
     });
-    if (ran.kind === 'aborted')
+    if (ran.kind === 'aborted') {
+      // Held back or stopped: the body says it did not run, not that it is running.
+      checked.set(pass.id, { kind: 'scratch', command, sha: i.sha, state: 'not_run' });
       return { passed: false, aborted: true, logPath: '', dirtyNamed: [] };
+    }
     const passed = ran.kind === 'ran' && ran.result.exitCode === 0;
     const logPath = ran.kind === 'ran' ? ran.result.logPath : (ran.logPath ?? '');
     checked.set(pass.id, {
@@ -283,6 +287,8 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
       );
       deps.state.write((w) => {
         setPassPullRequest(w, pass.id, { url, draft: !i.ready });
+        // A pull request that closed unmerged before this one is history now.
+        clearPassNotice(w, pass.id, PASS_PR_CLOSED_NOTICE);
       });
       deps.logger.info({ passId: pass.id, url, draft: !i.ready }, 'pass pull request opened');
       return { url };
@@ -315,8 +321,8 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
     ...deps,
     gate: async ({ passId, sha, signal }) => {
       await gatePassTip({ passId, sha, where: 'scratch', signal });
-      // The body says how the gate went.
-      await rewriteBody(passId, sha, signal);
+      // The body says how the gate went; a shutdown or a close that stopped it writes nothing.
+      if (!signal.aborted) await rewriteBody(passId, sha, signal);
     },
     review: deps.review,
     // The body says when the review read only part of the diff.
@@ -390,6 +396,7 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
             ? 'unchanged'
             : 'started';
       const stillOpen = (): boolean => getPass(db, passId).state === PassState.Open;
+      const reviews = review !== 'none';
       deps.jobs.run(jobKey(batch, JobQueue.Ship), async (signal) => {
         if (signal.aborted || getPass(db, passId).state !== PassState.Open || branch === null)
           return;
@@ -406,7 +413,8 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
             passId,
             sha,
             gate: shown.gate === PassPullRequestGate.Scratch,
-            review: review === 'started',
+            // Decided on the tip pushed: a page that landed since the request makes it new.
+            review: reviews && getPassProgress(db, passId).reviewedSha !== sha,
             baseRef: `refs/remotes/origin/${shown.base}`,
           });
         } catch (error) {

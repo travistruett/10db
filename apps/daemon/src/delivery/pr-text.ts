@@ -184,7 +184,8 @@ export type PassPrCheck =
       readonly command: string;
       /** The pushed commit the gate read, and where it is: running, passed or failed. */
       readonly sha: string;
-      readonly state: 'running' | 'passed' | 'failed';
+      /** `not_run`: it was held back or stopped before it finished. */
+      readonly state: 'running' | 'passed' | 'failed' | 'not_run';
     }
   /** The close's gate in the folder: it read the folder and its running stack, not the commit alone. */
   | {
@@ -250,6 +251,8 @@ function passChecked(
       case 'scratch': {
         const where = `in a scratch worktree of the pushed commit ${check.sha.slice(0, 7)}`;
         if (check.state === 'running') return [`Gate running ${where}: \`${check.command}\`.`];
+        if (check.state === 'not_run')
+          return [`Gate not run ${where}: it was stopped before it finished. \`${check.command}\``];
         return check.state === 'passed'
           ? [`Gate passed ${where}: \`${check.command}\`.`]
           : [`Gate failed ${where}: \`${check.command}\`. The pass's header in 10db says so.`];
