@@ -146,6 +146,10 @@ export function usePullRequestPreview(view: PassViewDto) {
   return useQuery({
     queryKey: [...pullRequestPreviewKey(passId), signedOff, view.pullRequest?.url ?? null],
     enabled: view.pass.state === PassState.Open,
+    // While a sign-off reads it again, the same pass's last answer stays, so an open confirm stays
+    // open until the new answer says otherwise; another pass's answer never stands in.
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === passId ? previous : undefined,
     queryFn: async () =>
       readJson(
         await client.passes[':passId']['pull-request'].$get({ param: { passId } }),

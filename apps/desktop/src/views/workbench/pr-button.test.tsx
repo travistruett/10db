@@ -140,6 +140,51 @@ describe('PrButton', () => {
     });
   });
 
+  it('keeps its confirm open while a page signed off meanwhile reads the preview again', async () => {
+    serve({});
+    let release = (): void => undefined;
+    const reread = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let reads = 0;
+    server.use(
+      http.get(daemonUrl('/passes/:passId/pull-request'), async () => {
+        reads += 1;
+        // The read a sign-off starts answers only once the test has looked at the confirm.
+        if (reads > 1) await reread;
+        return HttpResponse.json(
+          PassPullRequestPreviewDto.parse({
+            offered: true,
+            reason: null,
+            aheadOfBase: 0,
+            base: 'main',
+            existing: null,
+            gate: 'scratch',
+          }),
+        );
+      }),
+    );
+    const { ready, working } = pagesByStatus();
+    const view = passViewDto({ pages: [{ ...ready, signOff: 'done' }, working] });
+    const { rerender } = renderWithDaemon(<PrButton view={view} />);
+    const open = await button();
+    await waitFor(() => {
+      expect(open).toHaveProperty('disabled', false);
+    });
+    fireEvent.click(open);
+    await screen.findByRole('dialog', { name: 'Open Pull Request' });
+    rerender(
+      <PrButton
+        view={{ ...view, pages: [view.pages[0] ?? ready, { ...working, signOff: 'done' }] }}
+      />,
+    );
+    await waitFor(() => {
+      expect(reads).toBe(2);
+    });
+    expect(screen.getByRole('dialog', { name: 'Open Pull Request' })).toBeTruthy();
+    release();
+  });
+
   it("links the pass's pull request once the view has one", async () => {
     serve({});
     const view = passViewDto({
