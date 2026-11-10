@@ -638,6 +638,7 @@ describe('the Milestone 1 loop over HTTP, as the desktop sends it', () => {
       name: 'Billing and Home pass',
       taskIds: [],
       pages: ['billing', 'home'],
+      pageCap: 4,
       firstMessage: 'These feel cramped',
     });
     const passId = opened.pass.id;
@@ -689,7 +690,7 @@ describe('the Milestone 1 loop over HTTP, as the desktop sends it', () => {
       return found.turn?.activity?.filesTouched.includes('src/home/page.tsx') ? found : undefined;
     });
     expect((await send('POST', `/tasks/${home.taskId}/stop`)).status).toBe(204);
-    expect((await page('home')).turn?.endedAt).not.toBeNull();
+    expect(typeof (await page('home')).turn?.endedAt).toBe('string');
 
     // Take Out… keeps every shared change.
     const takeOut = await send('POST', `/passes/${passId}/tasks/${billing}/take-out`, {
