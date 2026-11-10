@@ -18,8 +18,10 @@ import {
   insertPass,
   insertPassTurn,
   insertTask,
+  insertSession,
   insertWorkstream,
   latestPassTurn,
+  latestTurnActivity,
   listPassTurns,
   listTaskThreadRows,
   listTurnsEndedUnsettled,
@@ -93,6 +95,55 @@ function startTurn() {
     return insertPassTurn(ctx, { taskId, workstreamId, sessionId: null, messageId: message.id });
   });
 }
+
+/** A session of the workstream, and a write of one activity row of `turn` from it. */
+function activityFrom() {
+  const session = store.write((ctx) =>
+    insertSession(ctx, {
+      workstreamId,
+      provider: 'claude',
+      model: 'm',
+      effort: 'low',
+      mode: 'managed',
+      mcpTokenHash: mintId('Session'),
+    }),
+  ).value;
+  return (turnId: string | null, summary: string) => {
+    store.write((ctx) => {
+      ctx.emit({
+        type: EventType.SessionActivity,
+        entityType: 'session',
+        entityId: session.id,
+        data: {
+          workstreamId,
+          kind: 'tool',
+          summary,
+          tool: { name: 'Edit', target: summary },
+          turn: turnId === null ? null : { id: turnId, filesTouched: [summary] },
+        },
+      });
+    });
+  };
+}
+
+describe("a turn's latest activity", () => {
+  it("is the newest activity row naming the turn, from any of the run's sessions", () => {
+    const first = startTurn().value;
+    const activity = activityFrom();
+    activity(first.id, 'one');
+    store.write((ctx) => endPassTurn(ctx, first.id, { ending: 'ready', replyBody: null }));
+    const second = startTurn().value;
+    expect(latestTurnActivity(store.db, second)).toBeUndefined();
+    activity(second.id, 'two');
+    later(1);
+    activityFrom()(second.id, 'three');
+    activity(null, 'not a turn');
+
+    expect(latestTurnActivity(store.db, first)?.data['summary']).toBe('one');
+    const latest = latestTurnActivity(store.db, second);
+    expect([latest?.data['summary'], latest?.at]).toEqual(['three', clock.toISOString()]);
+  });
+});
 
 describe("a pass task's turns", () => {
   it('ends a turn and writes its reply in one write, keeps its work, and settles it: a restart between finds it', () => {

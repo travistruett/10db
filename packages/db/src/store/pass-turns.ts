@@ -13,7 +13,8 @@ import {
   type TaskMessageId,
   type WorkstreamId,
 } from '@10db/contracts';
-import { and, asc, desc, eq, isNotNull, isNull, max } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, isNull, max, sql } from 'drizzle-orm';
+import type { Json } from '../json';
 import * as schema from '../schema';
 import { getBatch } from './batches';
 import type { DbReader, WriteContext } from './store';
@@ -247,4 +248,37 @@ export function listPassTurns(db: DbReader, passId: PassId): PassTurnDto[] {
     .orderBy(asc(schema.passTurns.id))
     .all()
     .map((r) => toPassTurnDto(r.turn));
+}
+
+/**
+ * The newest `session.activity` row that names the turn, from any session of its run (a handoff
+ * goes on with the turn in a fresh session), with when it was written; undefined before the turn
+ * reported any. The events index on entity type, entity and type, with its rows in order, finds a
+ * session's newest first.
+ */
+export function latestTurnActivity(
+  db: DbReader,
+  turn: Pick<PassTurnDto, 'id' | 'workstreamId'>,
+): { readonly data: Record<string, Json>; readonly at: string } | undefined {
+  const sessions = db
+    .select({ id: schema.sessions.id })
+    .from(schema.sessions)
+    .where(eq(schema.sessions.workstreamId, turn.workstreamId))
+    .all()
+    .map((s) => s.id);
+  if (sessions.length === 0) return undefined;
+  return db
+    .select({ data: schema.events.data, at: schema.events.at })
+    .from(schema.events)
+    .where(
+      and(
+        eq(schema.events.entityType, 'session'),
+        inArray(schema.events.entityId, sessions),
+        eq(schema.events.type, EventType.SessionActivity),
+        sql`json_extract(${schema.events.data}, '$.turn.id') = ${turn.id}`,
+      ),
+    )
+    .orderBy(desc(schema.events.seq))
+    .limit(1)
+    .get();
 }

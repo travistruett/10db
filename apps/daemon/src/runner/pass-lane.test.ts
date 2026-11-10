@@ -6,6 +6,7 @@ import {
   InvalidError,
   mintId,
   PassCheckDetail,
+  SessionActivityData,
   type PassDto,
   type TaskDto,
   type TaskMessageId,
@@ -20,6 +21,7 @@ import {
   insertTask,
   insertWorkstream,
   listInbox,
+  listEventsAfter,
   listPassTurns,
   listSessions,
   endPassTurn,
@@ -39,7 +41,7 @@ import { silentLogger } from '../log';
 import { recoverOnStartup, systemProcesses } from '../recovery';
 import { untakenMessages } from './lane-messages';
 import { finishEndedTurn } from './pass-turn';
-import type { PassWorkDeps } from '../pass';
+import { passView, type PassWorkDeps } from '../pass';
 import { DEFAULT_RUNNER_LIMITS } from './runner';
 import { handoffArgs, isolatedGitEnv, waitFor } from '../../test/fixtures';
 import type { FakeScriptBook } from '../sessions';
@@ -304,6 +306,44 @@ describe('a pass task turn by turn', () => {
         .filter((m) => m.author === 'builder')
         .every((m) => m.deliveredAt !== null),
     ).toBe(true);
+  });
+});
+
+describe("a working turn's live line", () => {
+  it('names the tool and the file it aims at, and counts the files the turn wrote, not those it read', async () => {
+    const form = 'src/settings/form.tsx';
+    const { pass, id } = await openPage([
+      [
+        { do: 'consume' },
+        { do: 'tool', toolName: 'Write', input: { file_path: PAGE_FILE, content: 'one\n' } },
+        { do: 'tool', toolName: 'Read', input: { file_path: 'src/shared.ts' } },
+        {
+          do: 'tool',
+          toolName: 'Edit',
+          input: { file_path: form, old_string: 'a', new_string: 'b' },
+        },
+        { do: 'await_message', contains: 'never sent' },
+      ],
+    ]);
+
+    const activity = await waitFor(() => {
+      const now = passView(engine.store.db, pass.id).pages[0]?.turn?.activity;
+      return now?.tool === 'Edit' ? now : undefined;
+    });
+
+    expect(activity).toMatchObject({
+      tool: 'Edit',
+      target: form,
+      filesTouched: [PAGE_FILE, form],
+    });
+    const rows = listEventsAfter(engine.store.db, 0, 1000).filter(
+      (e) => e.type === 'session.activity' && e.data['workstreamId'] === id,
+    );
+    expect(rows.map((e) => SessionActivityData.parse(e.data).turn?.filesTouched)).toEqual([
+      [PAGE_FILE],
+      [PAGE_FILE],
+      [PAGE_FILE, form],
+    ]);
   });
 });
 

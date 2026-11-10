@@ -4,12 +4,14 @@ import {
   InboxState,
   passHeldAreas,
   PassSignOff,
+  SessionActivityData,
   TaskMessageAuthor,
   WorkstreamState,
   type AreaDef,
   type PassDto,
   type PassId,
   type PassPageDto,
+  type PassTurnActivity,
   type PassTurnDto,
   type PassViewDto,
   type TaskDto,
@@ -20,6 +22,7 @@ import {
   getPass,
   getProject,
   getWorkstream,
+  latestTurnActivity,
   listPassTasks,
   listPassTurns,
   listTaskThreadRows,
@@ -33,6 +36,24 @@ function pageOf(areas: readonly AreaDef[], task: TaskDto): AreaDef | undefined {
   const named = (name: string | undefined) => areas.find((a) => a.name === name);
   const page = task.areas.find((name) => named(name)?.role === AreaRole.Page);
   return named(page ?? passHeldAreas(areas, task)[0]);
+}
+
+/**
+ * What a working turn is doing now: its newest activity row's tool and target, and the files the turn
+ * has written so far; null once the turn has ended, or before it reported anything.
+ */
+function activityOf(db: DbReader, turn: PassTurnDto): PassTurnActivity | null {
+  if (turn.endedAt !== null) return null;
+  const latest = latestTurnActivity(db, turn);
+  // A row the daemon wrote, read from disk: parsed before it is trusted.
+  const parsed = SessionActivityData.safeParse(latest?.data);
+  if (latest === undefined || !parsed.success) return null;
+  return {
+    tool: parsed.data.tool?.name ?? null,
+    target: parsed.data.tool?.target ?? null,
+    filesTouched: parsed.data.turn?.filesTouched ?? [],
+    at: latest.at,
+  };
 }
 
 /** The failed turn's flag the run waits on, whose Retry Turn sends the last message again; else null. */
@@ -74,7 +95,7 @@ function pageView(
             startedAt: turn.startedAt,
             endedAt: turn.endedAt,
             readyAt: turn.readyAt,
-            activity: null,
+            activity: activityOf(db, turn),
           },
     pausedUntil: run?.state === WorkstreamState.PausedLimit ? run.pausedUntil : null,
     failure: failureOf(db, run),
