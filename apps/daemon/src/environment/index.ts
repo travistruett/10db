@@ -41,12 +41,10 @@ export {
   downloadFile,
   ensurePinned,
   extractZipWithTar,
-  PinnedToolError,
   pinnedExecutable,
   pinnedToolsRoot,
   removePinned,
   tarballIntegrity,
-  type InstallDeps,
 } from './pinned-install';
 export {
   AUTOUPDATE_OFF,

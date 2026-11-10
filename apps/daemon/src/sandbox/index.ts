@@ -28,7 +28,7 @@ export {
   type LaneProcessSetup,
   type LedgerSweep,
 } from './lane-processes';
-export { systemProcessTable, type ProcessRow, type ProcessTable } from './process-table';
+export { systemProcessTable, type ProcessRow } from './process-table';
 export {
   claudeCodeTmpPath,
   codexLaneTempRoot,
