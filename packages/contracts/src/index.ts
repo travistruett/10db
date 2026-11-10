@@ -29,6 +29,7 @@ export * from './landing';
 export * from './mcp-tools';
 export * from './model-profiles';
 export * from './page-areas';
+export { globsOverlap } from './glob-overlap';
 export * from './pass-activity';
 export * from './pass-view';
 export * from './passes';
