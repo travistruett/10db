@@ -199,6 +199,7 @@ export async function createTestEngine(
       return applyCheckAnswer(runner, ctx, item, answer);
     },
     onFlagAnswer: (item, answer) => {
+      runner?.retryTurn(item, answer);
       answerAccountCard?.(item, answer);
     },
   });

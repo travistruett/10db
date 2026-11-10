@@ -7,6 +7,7 @@ import {
   type WorkstreamId,
 } from '@10db/contracts';
 import {
+  acquireClaims,
   getWorkstreamRow,
   insertBuilderMessage,
   insertPass,
@@ -218,5 +219,160 @@ describe('a pass task turn by turn', () => {
         .filter((m) => m.author === 'builder')
         .every((m) => m.deliveredAt !== null),
     ).toBe(true);
+  });
+});
+
+describe('a pass task turn that ends otherwise', () => {
+  it('parks a refused turn on a flag with Retry Turn, never failing, and Retry Turn runs it again', async () => {
+    const { pass, id } = await openPage([
+      [{ do: 'billing_refused', message: 'a billing check refused the session' }],
+      [...turn('one\n', 'Tidied the form.'), { do: 'await_message', contains: 'never sent' }],
+    ]);
+    await waitFor(() => listPassTurns(engine.store.db, pass.id)[0]?.settledAt);
+    await engine.runner.idle();
+
+    const failed = listInbox(engine.store.db, {}).find((i) => i.title.startsWith('Turn failed'));
+    expect(failed).toMatchObject({ kind: 'flag', state: 'OPEN' });
+    expect(failed?.options.map((o) => o.label)).toEqual(['retry_turn']);
+    expect(failed?.body).toContain('a billing check refused the session');
+    expect(row(id)).toMatchObject({
+      state: 'WAITING_HUMAN',
+      nextAction: { kind: 'pass_review', inboxId: failed?.id },
+      currentSessionId: null,
+    });
+    expect(listPassTurns(engine.store.db, pass.id).map((t) => [t.seq, t.ending])).toEqual([
+      [1, 'failed'],
+    ]);
+
+    engine.inbox.answer(failed?.id ?? mintId('InboxItem'), { choice: 'retry_turn' });
+    expect(row(id)).toMatchObject({ state: 'QUEUED', nextAction: { kind: 'feedback' } });
+    engine.launch(id);
+    await waitFor(isReady(id, 1));
+    expect(listPassTurns(engine.store.db, pass.id).map((t) => [t.seq, t.ending])).toEqual([
+      [1, 'failed'],
+      [2, 'ready'],
+    ]);
+    expect(engine.adapter.prompts[1]?.prompt).toContain('Make the form tidy');
+  });
+
+  it('is Ready at once with a command left running, and says on the thread when it finishes', async () => {
+    const { task, id } = await openPage([
+      [
+        { do: 'consume' },
+        { do: 'background', tasks: ['pnpm dev'] },
+        { do: 'tool', toolName: 'Write', input: { file_path: PAGE_FILE, content: 'one\n' } },
+        { do: 'turn_complete', text: 'Tidied the form.' },
+        { do: 'background', tasks: [] },
+        { do: 'await_message', contains: 'never sent' },
+      ],
+    ]);
+    await waitFor(isReady(id, 1));
+    await waitFor(() =>
+      listTaskThread(engine.store.db, task.id).find((m) => m.body.includes('"pnpm dev"')),
+    );
+    // Nothing was sent to the session: a nudge would be a turn nobody wrote.
+    expect(engine.adapter.sent).toEqual([]);
+    expect(row(id).nextAction.kind).toBe('pass_review');
+  });
+
+  it('queues a message the session never took when it ends, so it is not lost', async () => {
+    const { task, id } = await openPage([
+      [
+        ...turn('one\n', 'Tidied the form.'),
+        { do: 'await_message', contains: 'Next' },
+        { do: 'end' },
+      ],
+    ]);
+    await waitFor(isReady(id, 1));
+    await write(task, 'Next: make it bigger');
+    await waitFor(() => row(id).state === 'QUEUED');
+    const next = listTaskThread(engine.store.db, task.id).find((m) => m.body.startsWith('Next'));
+    expect(row(id).nextAction).toMatchObject({ kind: 'feedback', messageId: next?.id });
+    expect(next?.deliveredAt).toBeNull();
+  });
+});
+
+describe('the guard of a pass lane', () => {
+  it('denies a page of the pass another task holds, though a shared hold covers it', async () => {
+    engine = await createTestEngine(
+      {
+        [TITLE]: [
+          [
+            { do: 'consume' },
+            {
+              do: 'tool',
+              toolName: 'Write',
+              input: { file_path: 'src/people/list.tsx', content: 'x' },
+            },
+            { do: 'tool', toolName: 'Write', input: { file_path: PAGE_FILE, content: 'one\n' } },
+            { do: 'turn_complete', text: 'Tidied the form.' },
+            { do: 'await_message', contains: 'never sent' },
+          ],
+        ],
+      },
+      {
+        gateCommand: null,
+        areas: [
+          { name: 'settings', globs: ['src/settings/**'], role: 'page', route: '/settings' },
+          // An area with no role is a page in a pass: the task holding it is its one writer.
+          { name: 'people', globs: ['src/people/**'] },
+          { name: 'src', globs: ['src/**'], role: 'shared' },
+        ],
+      },
+    );
+    const branch = '10db/polish-abc123';
+    const startSha = git('rev-parse', 'HEAD');
+    git('switch', '-q', '-c', branch);
+    const lease = new Date(Date.now() + 60_000).toISOString();
+    const ids = engine.state.write((ctx) => {
+      const settings = insertTask(ctx, engine.project.id, {
+        title: TITLE,
+        acceptanceCriteria: ['x'],
+        areas: ['settings'],
+      });
+      const people = insertTask(ctx, engine.project.id, {
+        title: 'People: list',
+        acceptanceCriteria: ['x'],
+        areas: ['people'],
+      });
+      const opened = insertPass(ctx, {
+        id: mintId('Pass'),
+        projectId: engine.project.id,
+        name: 'Polish',
+        pageCap: 4,
+        returnBranch: 'main',
+        startSha,
+        branch,
+        baseBranch: 'main',
+        repo: null,
+        taskIds: [settings.id, people.id],
+        dirt: [],
+      });
+      const first = { model: 'claude-sonnet-5-5', effort: 'medium' } as const;
+      const mine = insertWorkstream(ctx, settings.id, { batchId: opened.batch.id, first });
+      const theirs = insertWorkstream(ctx, people.id, { batchId: opened.batch.id, first });
+      acquireClaims(ctx, {
+        projectId: engine.project.id,
+        workstreamId: theirs.id,
+        requests: [{ kind: 'area', name: 'people' }],
+        leaseExpiresAt: lease,
+      });
+      // This page's agent holds the shared area, as request_claim grants it for a turn.
+      acquireClaims(ctx, {
+        projectId: engine.project.id,
+        workstreamId: mine.id,
+        requests: [{ kind: 'area', name: 'src' }],
+        leaseExpiresAt: lease,
+      });
+      insertBuilderMessage(ctx, settings.id, { body: 'Make the form tidy', files: [] });
+      return { mine: mine.id };
+    });
+    engine.launch(ids.mine);
+    await waitFor(isReady(ids.mine, 1));
+    const denied = engine.adapter.observations.filter((o) => o.kind === 'denied_by_guard');
+    expect(denied.map((o) => o.step)).toEqual([1]);
+    expect(engine.adapter.observations.some((o) => o.kind === 'tool_allowed' && o.step === 2)).toBe(
+      true,
+    );
   });
 });

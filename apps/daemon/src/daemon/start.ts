@@ -621,6 +621,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       return applyCheckAnswer(runner, ctx, item, answer);
     },
     onFlagAnswer: (item, answer) => {
+      runner?.retryTurn(item, answer);
       answerBatchCard?.(item, answer);
       answerAccountCard?.(item, answer);
       answerGitCard?.(item, answer);

@@ -30,6 +30,7 @@ import {
   type AccountModelDto,
   type AccountRefusal,
   type HandoffId,
+  type InboxAnswer,
   type InboxItemDto,
   type InboxItemId,
   type InboxTarget,
@@ -42,7 +43,9 @@ import {
   type WorkstreamStep,
   MIGRATIONS_RENUMBERED_NOTICE_KEY,
   MIGRATIONS_UNCARRIED_NOTICE_KEY,
+  PASS_RETRY_TURN_CHOICE,
   PassTurnEnding,
+  PassTurnId,
   Provider,
   providerOf,
   type TaskId,
@@ -60,6 +63,7 @@ import {
   getProject,
   getSessionByProviderId,
   getTask,
+  getPassTurn,
   getTaskMessageRow,
   getWorkstream,
   getWorkstreamRow,
@@ -67,6 +71,7 @@ import {
   insertDeviation,
   insertEvidence,
   insertRetryLimitFollowUp,
+  insertPassTurn,
   insertSession,
   insertSource,
   insertSystemNotice,
@@ -229,6 +234,7 @@ import {
   untakenMessages,
   type LaneMessages,
 } from './lane-messages';
+import { PASS_TURN_DETAIL } from './pass-check';
 import {
   endTurnSteps,
   finishEndedTurn,
@@ -391,6 +397,11 @@ export interface Runner {
     messageId: TaskMessageId,
     opts: { readonly redo: boolean },
   ): Promise<void>;
+  /**
+   * The builder chose Retry Turn on a pass task's failed turn: a new turn starts from the failed
+   * one's message, in a fresh session. A flag that is not the page's failed turn is left alone.
+   */
+  retryTurn(item: InboxItemDto, answer: InboxAnswer): void;
 }
 
 type Outcome =
@@ -1513,7 +1524,7 @@ export function createRunner(opts: RunnerOptions): Runner {
    * it to `settle`. A page between turns, Ready or on its failed turn's flag, keeps waiting for the
    * builder whatever ended its session, but a cancel.
    */
-  function settlePage(id: WorkstreamId, ctl: Control, outcome: Terminal): boolean {
+  async function settlePage(id: WorkstreamId, ctl: Control, outcome: Terminal): Promise<boolean> {
     if (!passOfWorkstream(db, id)) return false;
     const row = getWorkstreamRow(db, id);
     if (outcome.kind === 'stopped' && outcome.reason === 'cancelled') return false;
@@ -1521,12 +1532,45 @@ export function createRunner(opts: RunnerOptions): Runner {
       closeBetweenTurns(id, ctl, outcome.providerSessionId);
       return true;
     }
-    return false;
+    const attempts = row.recoveryAttempts + 1;
+    const failure =
+      outcome.kind === 'refused' || outcome.kind === 'background_hung'
+        ? outcome.message
+        : outcome.kind === 'crashed' && attempts > opts.limits.maxRecoveryAttempts
+          ? `The session failed ${String(attempts)} times; last error: ${outcome.message}`
+          : null;
+    if (failure === null) return false;
+    await failTurn(id, ctl, failure, outcome.providerSessionId);
+    return true;
+  }
+
+  /**
+   * A pass task's turn that cannot go on (Workbench spec §6.2): it closes as failed, its work kept
+   * and its page still claimed, and the page waits on a flag whose Retry Turn sends the builder's
+   * message again. A pass lane never fails.
+   */
+  async function failTurn(
+    id: WorkstreamId,
+    ctl: Control,
+    reason: string,
+    providerSessionId: string | null,
+  ): Promise<void> {
+    await endTurnSteps(passWork, {
+      workstreamId: id,
+      ending: PassTurnEnding.Failed,
+      reply: null,
+      fence: ctl.fence,
+      providerSessionId,
+      reason,
+    });
+    opts.state.write((ctx) => {
+      patchWorkstream(ctx, id, ctl.fence, { recoveryAttempts: 0 });
+    });
   }
 
   /** Settles the lane's ending: a pass task's own way first, else as any lane's. */
-  function settleLane(id: WorkstreamId, ctl: Control, outcome: Terminal): void {
-    if (!settlePage(id, ctl, outcome)) settle(id, ctl, outcome);
+  async function settleLane(id: WorkstreamId, ctl: Control, outcome: Terminal): Promise<void> {
+    if (!(await settlePage(id, ctl, outcome))) settle(id, ctl, outcome);
   }
 
   /**
@@ -1624,6 +1668,8 @@ export function createRunner(opts: RunnerOptions): Runner {
       foldKey: `model-refused:${account.id}:${outcome.model}`,
     });
     if (retry) return 'retry';
+    // A pass task's turn fails in its own way, and the lane never does.
+    if (passOfWorkstream(db, id)) return 'stop';
     opts.state.write((ctx) => {
       failIn(ctx, id, ctl.fence, row, {
         kind: WorkstreamFailure.SessionFailed,
@@ -2268,6 +2314,23 @@ export function createRunner(opts: RunnerOptions): Runner {
             break;
           }
           case 'background_tasks': {
+            if (pass) {
+              // A command a turn left running never holds the page or wakes the session: its
+              // finishing is a notice on the thread, read once the builder looks.
+              const finished = st.backgroundTasks.filter(
+                (t) => !event.tasks.some((n) => n.id === t.id),
+              );
+              st.backgroundTasks = event.tasks;
+              if (finished.length > 0 && !openPassTurn(db, task.id))
+                opts.state.write((ctx) => {
+                  insertSystemNotice(
+                    ctx,
+                    task.id,
+                    `A command the agent left running finished: ${finished.map((t) => `"${t.description}"`).join(', ')}`,
+                  );
+                });
+              break;
+            }
             st.backgroundTasks = event.tasks;
             if (event.tasks.length > 0 || !st.heldForBackground) break;
             // The commands the turn ended on have finished. A session that ended its turn is not woken
@@ -3309,7 +3372,11 @@ export function createRunner(opts: RunnerOptions): Runner {
         const verifying = row.nextAction.kind === 'verify' || row.state === S.Verifying;
         // A pause only stops sessions; verification doesn't use the provider, so it carries on.
         if (ctl.stopReason && !(ctl.stopReason === 'paused' && verifying)) {
-          settleLane(id, ctl, { kind: 'stopped', reason: ctl.stopReason, providerSessionId: null });
+          await settleLane(id, ctl, {
+            kind: 'stopped',
+            reason: ctl.stopReason,
+            providerSessionId: null,
+          });
           return;
         }
         if (verifying) {
@@ -3341,6 +3408,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         if (outcome.kind === 'handoff' || outcome.kind === 'moved') continue;
         if (outcome.kind === 'model_refused') {
           if (refuseModel(id, ctl, outcome) === 'retry') continue;
+          if (pass) await failTurn(id, ctl, outcome.message, null);
           return;
         }
         if (outcome.kind === 'step_done') {
@@ -3391,7 +3459,7 @@ export function createRunner(opts: RunnerOptions): Runner {
           );
           continue;
         }
-        settleLane(id, ctl, outcome);
+        await settleLane(id, ctl, outcome);
         return;
       }
     } catch (error) {
@@ -3405,7 +3473,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         'runner failed',
       );
       try {
-        settleLane(id, ctl, {
+        await settleLane(id, ctl, {
           kind: 'crashed',
           message: error instanceof Error ? error.message : String(error),
           providerSessionId: null,
@@ -3510,6 +3578,15 @@ export function createRunner(opts: RunnerOptions): Runner {
         const fold = await foldHandEdits(passWork, { workstreamId: id });
         if (ctl.messages === lane) {
           opts.state.write((ctx) => {
+            // A Ready page's new turn resumes this session with the message if it ends untaken.
+            if (getWorkstreamRow(ctx.tx, id).nextAction.kind === 'pass_review')
+              patchWorkstream(ctx, id, ctl.fence, {
+                nextAction: {
+                  kind: 'feedback',
+                  messageId,
+                  providerSessionId: lastProviderSession(id),
+                },
+              });
             startTurn(ctx, {
               workstreamId: id,
               sessionId: getWorkstreamRow(ctx.tx, id).currentSessionId,
@@ -3534,6 +3611,41 @@ export function createRunner(opts: RunnerOptions): Runner {
             nextAction: { kind: 'feedback', messageId, providerSessionId: lastProviderSession(id) },
           },
           reason: 'the builder wrote to the page',
+        });
+      });
+      opts.onLaneFreed();
+    },
+    retryTurn(item, answer) {
+      if (answer.choice !== PASS_RETRY_TURN_CHOICE) return;
+      const turnId = PassTurnId.safeParse(item.detail?.[PASS_TURN_DETAIL]);
+      const target = item.targets[0];
+      if (!turnId.success || !target) return;
+      const id = target.workstreamId;
+      opts.state.write((ctx) => {
+        const row = getWorkstreamRow(ctx.tx, id);
+        if (
+          row.state !== S.WaitingHuman ||
+          row.nextAction.kind !== 'pass_review' ||
+          row.nextAction.inboxId !== item.id
+        )
+          throw new ConflictError('The page is no longer waiting on this failed turn');
+        const failed = getPassTurn(ctx.tx, turnId.data);
+        insertPassTurn(ctx, {
+          taskId: row.taskId,
+          workstreamId: id,
+          sessionId: null,
+          messageId: failed.messageId,
+        });
+        transitionWorkstream(ctx, id, {
+          to: S.Queued,
+          fence: null,
+          patch: {
+            nextAction:
+              failed.messageId === null
+                ? { kind: 'start' }
+                : { kind: 'feedback', messageId: failed.messageId, providerSessionId: null },
+          },
+          reason: 'the builder retried the turn',
         });
       });
       opts.onLaneFreed();
