@@ -28,6 +28,7 @@ const COLOR: Readonly<Record<PassNoticeKind, 'red' | 'yellow'>> = {
   [PassNoticeKind.PrNotOpened]: 'red',
   [PassNoticeKind.ReviewFailed]: 'red',
   [PassNoticeKind.Close]: 'red',
+  [PassNoticeKind.TurnCheck]: 'red',
   [PassNoticeKind.PrClosed]: 'yellow',
   [PassNoticeKind.Finding]: 'yellow',
   [PassNoticeKind.StackUnmerged]: 'yellow',

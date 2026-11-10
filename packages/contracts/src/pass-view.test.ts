@@ -176,7 +176,16 @@ describe("a pass lane's activity and turns", () => {
       checks: { gate: { state: 'not_run', logPath: null }, review: { reviewedSha: null } },
       closeStep: null,
       stackedOn: null,
-      notices: [],
+      notices: [
+        {
+          id: 'turn-check',
+          kind: 'turn_check',
+          text: 'Check failed: names src/settings/page.tsx',
+          sendable: true,
+          cardId: null,
+          at: AT,
+        },
+      ],
     };
     expect(PassViewDto.parse(view)).toEqual(view);
   });

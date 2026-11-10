@@ -321,6 +321,8 @@ export const PassNoticeKind = {
   ReviewFailed: 'review_failed',
   /** The close stopped on an error, or left its pull request to finish on GitHub. */
   Close: 'close',
+  /** The changed-files check after a page's turn failed, or could not run (spec §8.1). */
+  TurnCheck: 'turn_check',
 } as const;
 export type PassNoticeKind = (typeof PassNoticeKind)[keyof typeof PassNoticeKind];
 

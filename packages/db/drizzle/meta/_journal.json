@@ -400,6 +400,13 @@
       "when": 1794275161809,
       "tag": "0056_glossy_princess_powerful",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "6",
+      "when": 1794341199934,
+      "tag": "0057_little_gauntlet",
+      "breakpoints": true
     }
   ]
 }

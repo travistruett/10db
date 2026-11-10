@@ -27,6 +27,7 @@ import {
   listTaskTurns,
   listTurnActivity,
   markPassTurnOpened,
+  markTurnsChecked,
   listPassTurns,
   listTaskThreadRows,
   listTurnsEndedUnsettled,
@@ -384,5 +385,34 @@ describe("a pass task's turns", () => {
     ).value;
     expect(turn.seq).toBe(2);
     expect(latestPassTurn(store.db, taskId)?.id).toBe(turn.id);
+  });
+});
+
+describe("the turn check's result", () => {
+  it('marks each named turn with the result in one write and one pass.changed, and no other turn', () => {
+    const ended = () => {
+      const turn = startTurn().value;
+      store.write((ctx) => endPassTurn(ctx, turn.id, { ending: 'ready', replyBody: null }));
+      store.write((ctx) => settlePassTurn(ctx, turn.id));
+      return turn;
+    };
+    const first = ended();
+    const second = ended();
+    const third = startTurn().value;
+
+    const { events } = store.write((ctx) => {
+      markTurnsChecked(ctx, [first.id, second.id], 'failed');
+    });
+    const none = store.write((ctx) => {
+      markTurnsChecked(ctx, [], 'passed');
+    });
+
+    expect(events.map((e) => [e.type, e.entityId])).toEqual([[EventType.PassChanged, pass.id]]);
+    expect(none.events).toEqual([]);
+    expect(listTaskTurns(store.db, taskId).map((t) => [t.id, t.check])).toEqual([
+      [first.id, 'failed'],
+      [second.id, 'failed'],
+      [third.id, 'none'],
+    ]);
   });
 });

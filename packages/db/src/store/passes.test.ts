@@ -44,6 +44,7 @@ import {
   insertWorkstream,
   joinPass,
   leavePass,
+  listPassCheckPids,
   listPassDirt,
   listLivePasses,
   listPassTasks,
@@ -54,6 +55,7 @@ import {
   renamePass,
   seedProject,
   setAbandonStep,
+  setPassCheckPid,
   setTaskKeptWork,
   transitionBatch,
   transitionWorkstream,
@@ -746,5 +748,25 @@ describe("a pass's close", () => {
     expect(forgot.events.map((e) => e.type)).toContain(EventType.PassChanged);
     expect(getPassPullRequest(store.db, pass.id)).toBeNull();
     expect(getBatch(store.db, batch.id)).toMatchObject({ prUrl: null, pr: null });
+  });
+});
+
+describe("a pass's turn check", () => {
+  it('records the running check’s process group, lists it with the pass for start-up, and clears it', () => {
+    const { pass } = store.write((ctx) => insertPass(ctx, passInput([task()]))).value;
+    expect(listPassCheckPids(store.db)).toEqual([]);
+
+    const set = store.write((ctx) => {
+      setPassCheckPid(ctx, pass.id, { pid: 4242, start: 'Mon Nov  9 12:00:00 2026' });
+    });
+
+    expect(set.events.map((e) => e.type)).toEqual([EventType.PassChanged]);
+    expect(listPassCheckPids(store.db)).toEqual([
+      { passId: pass.id, name: 'Polish settings', pid: 4242, start: 'Mon Nov  9 12:00:00 2026' },
+    ]);
+    store.write((ctx) => {
+      setPassCheckPid(ctx, pass.id, null);
+    });
+    expect(listPassCheckPids(store.db)).toEqual([]);
   });
 });

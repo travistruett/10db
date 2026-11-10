@@ -1636,6 +1636,9 @@ export const passes = sqliteTable(
       .$type<PassNotice[]>()
       .notNull()
       .default(sql`'[]'`),
+    /** The process group of the changed-files check running after a turn, and its start time. */
+    checkPid: integer('check_pid'),
+    checkPidStart: text('check_pid_start'),
     openedAt: text('opened_at').notNull(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),

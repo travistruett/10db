@@ -806,7 +806,8 @@
               "gate_failed",
               "pr_not_opened",
               "review_failed",
-              "close"
+              "close",
+              "turn_check"
             ]
           },
           "text": {

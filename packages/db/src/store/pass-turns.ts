@@ -194,6 +194,31 @@ export function settlePassTurn(ctx: WriteContext, id: PassTurnId): PassTurnDto {
   return settled;
 }
 
+/**
+ * Writes the turn check's result on each named turn (spec §8.1), with one `pass.changed` naming the
+ * pass of the first. Nothing is written for no turns.
+ */
+export function markTurnsChecked(
+  ctx: WriteContext,
+  turnIds: readonly PassTurnId[],
+  check: PassTurnCheck,
+): void {
+  const [first] = turnIds;
+  if (first === undefined) return;
+  ctx.tx
+    .update(schema.passTurns)
+    .set({ check, updatedAt: ctx.now })
+    .where(inArray(schema.passTurns.id, [...turnIds]))
+    .run();
+  const turn = getPassTurn(ctx.tx, first);
+  ctx.emit({
+    type: EventType.PassChanged,
+    entityType: 'pass',
+    entityId: passOfTurn(ctx.tx, turn.workstreamId),
+    data: { turnIds: [...turnIds], check },
+  });
+}
+
 /** Notes when the builder first wrote after the turn's page was Ready; a later message changes nothing. */
 export function markPassTurnAnswered(ctx: WriteContext, id: PassTurnId): void {
   getPassTurn(ctx.tx, id);

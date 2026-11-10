@@ -26,7 +26,7 @@ import {
   type TaskDto,
   type TaskId,
 } from '@10db/contracts';
-import { and, asc, eq, inArray, lt, ne, notInArray, or } from 'drizzle-orm';
+import { and, asc, eq, inArray, isNotNull, lt, ne, notInArray, or } from 'drizzle-orm';
 import type { Json } from '../json';
 import * as schema from '../schema';
 import { findUnfinishedBatch, getBatchRow, insertBatch, transitionBatch } from './batches';
@@ -628,6 +628,48 @@ export function clearPassNotice(ctx: WriteContext, passId: PassId, id: string): 
   if (rest.length === notices.length) return false;
   setPassFields(ctx, passId, { notices: rest }, { noticeCleared: id });
   return true;
+}
+
+/**
+ * The process group of the pass's running turn check and its start time, or null once it ended, so
+ * start-up stops a check a stopped daemon left running.
+ */
+export function setPassCheckPid(
+  ctx: WriteContext,
+  passId: PassId,
+  check: { readonly pid: number; readonly start: string } | null,
+): void {
+  setPassFields(
+    ctx,
+    passId,
+    { checkPid: check?.pid ?? null, checkPidStart: check?.start ?? null },
+    { checkRunning: check !== null },
+  );
+}
+
+/** Every pass with a turn check's process group recorded, with its name. */
+export function listPassCheckPids(db: DbReader): {
+  readonly passId: PassId;
+  readonly name: string;
+  readonly pid: number;
+  readonly start: string;
+}[] {
+  return db
+    .select({
+      passId: schema.passes.id,
+      name: schema.passes.name,
+      pid: schema.passes.checkPid,
+      start: schema.passes.checkPidStart,
+    })
+    .from(schema.passes)
+    .where(and(isNotNull(schema.passes.checkPid), isNotNull(schema.passes.checkPidStart)))
+    .orderBy(asc(schema.passes.createdAt))
+    .all()
+    .flatMap((row) =>
+      row.pid === null || row.start === null
+        ? []
+        : [{ passId: row.passId, name: row.name, pid: row.pid, start: row.start }],
+    );
 }
 
 /** Records the pass's pull request on its batch: its url, and whether it is a draft, as made or read. */
