@@ -39,7 +39,7 @@ import {
 } from '@10db/db';
 import { jobKey, JobQueue, passDirtRef } from '../delivery';
 import { foldHandEdits } from './hand-edits';
-import { keepOrLetGo } from './shared-chain';
+import { keepOrLetGo, letGoHold } from './shared-chain';
 import { dropShared } from './shared-drop';
 import { PassFolderOffBranchError } from '../git';
 import {
@@ -326,11 +326,11 @@ export async function takeOutSteps(
     }
     // Every hold the stop left open is kept first: a Drop chosen for it has its change, and none
     // stays open once the page has left, with its claim released. A folder off the pass's branch
-    // holds another branch's files: the holds stay open for its return, as nothing of the page is
-    // kept or written then.
-    if (!offBranch)
-      for (const hold of openHolds(db, pass.id))
-        if (hold.taskId === task.id) await keepOrLetGo(deps, hold.claimId);
+    // holds another branch's files, so nothing of the page can be kept: its holds are let go.
+    for (const hold of openHolds(db, pass.id).filter((h) => h.taskId === task.id)) {
+      if (offBranch) letGoHold(deps, hold.claimId, `Your folder was on ${on ?? 'a detached HEAD'}`);
+      else await keepOrLetGo(deps, hold.claimId);
+    }
     // The shared changes chosen Drop, newest first, so each later one is back before an earlier.
     const kept: string[] = [];
     for (const seq of offBranch ? [] : [...row.drops].sort((a, b) => b - a)) {

@@ -165,18 +165,26 @@ export async function keepOrLetGo(
     if (error instanceof PassFolderOffBranchError) throw error;
     const why = error instanceof Error ? error.message : String(error);
     deps.logger?.warn({ claimId, err: why }, 'a shared hold could not be kept; it is let go');
-    deps.state.write((ctx) => {
-      const hold = getHold(ctx.tx, claimId);
-      if (hold.closedAt !== null) return;
-      closeHold(ctx, claimId, { empty: true });
-      releaseClaim(ctx, claimId);
-      insertSystemNotice(
-        ctx,
-        hold.taskId,
-        `What this page changed in shared ${hold.area} during its turn could not be kept (${why}), so it is not a shared change: its files stay in the folder as they are.`,
-      );
-    });
+    letGoHold(deps, claimId, why);
   }
+}
+
+/**
+ * Lets an open hold go without keeping it: closed as empty and its claim released in one write, with
+ * a line on its page's thread saying why, its files left in the folder as they are.
+ */
+export function letGoHold(deps: Pick<SharedDeps, 'state'>, claimId: ClaimId, why: string): void {
+  deps.state.write((ctx) => {
+    const hold = getHold(ctx.tx, claimId);
+    if (hold.closedAt !== null) return;
+    closeHold(ctx, claimId, { empty: true });
+    releaseClaim(ctx, claimId);
+    insertSystemNotice(
+      ctx,
+      hold.taskId,
+      `What this page changed in shared ${hold.area} during its turn could not be kept (${why}), so it is not a shared change: its files stay in the folder as they are.`,
+    );
+  });
 }
 
 /** The open holds of a workstream, by number. */
