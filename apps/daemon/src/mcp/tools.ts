@@ -42,6 +42,7 @@ import {
   insertInboxItem,
   insertProposal,
   insertSource,
+  insertSystemNotice,
   insertToolOp,
   listEvidence,
   listToolOps,
@@ -78,7 +79,15 @@ import {
 import type { InboxService, WaitObserver } from '../inbox';
 import { principleHit, proposePrinciple } from '../knowledge';
 import type { Logger } from '../log';
-import { askShared, grantSharedHold, keepCommitToolPaths } from '../pass';
+import {
+  askMoveToCopy,
+  askShared,
+  grantSharedHold,
+  keepCommitToolPaths,
+  moveToCopyInstruction,
+  passHazardAsk,
+  slowPageLine,
+} from '../pass';
 import { afterMarkersResolved, commitResultAsStored, fixingFailedGate, revertOfRun } from '../team';
 import {
   CLAIM_POLL_MS,
@@ -257,12 +266,20 @@ export function createToolHandlers(
     };
   };
 
-  /** A claim call's settled result, recorded under its opId. */
-  const recordClaim = (opId: string, settled: ClaimResult): Out<'request_claim'> => {
+  /**
+   * A claim call's settled result, recorded under its opId, with `line` added to the task's thread
+   * when it is the call that records it.
+   */
+  const recordClaim = (
+    opId: string,
+    settled: ClaimResult,
+    line: string | null = null,
+  ): Out<'request_claim'> => {
     const out = deps.state.write((ctx) => {
       // Two calls with the same opId can share one wait; the first records it, the second reads it.
       const recorded = findToolOp(ctx.tx, workstreamId, opId);
       if (recorded) return McpToolOutputs.request_claim.parse(recorded.result);
+      if (line !== null) insertSystemNotice(ctx, getWorkstream(ctx.tx, workstreamId).taskId, line);
       return record(
         'request_claim',
         opId,
@@ -552,7 +569,7 @@ export function createToolHandlers(
     request_claim: async (input) => {
       const done = prior(input.opId, McpToolName.RequestClaim);
       if (done !== undefined) return McpToolOutputs.request_claim.parse(done);
-      const { project } = context();
+      const { project, task } = context();
       // A name that is a project hazard is a hazard claim whatever kind the agent sent; claims are keyed on (kind, name).
       const hazardNames = project.hazards.map((h) => h.name);
       const areaNames = project.areas.map((a) => a.name);
@@ -565,6 +582,36 @@ export function createToolHandlers(
       // Claims the builder made this task give up are told before anything else is granted.
       const given = claimWaits.pendingYield(workstreamId);
       if (given) return recordClaim(input.opId, yieldRefusal(given, { kind, name: input.name }));
+      // A pass page asking for migrations or deps leaves Your folder for a copy where the project
+      // allows copies: the builder is asked to move it, and the claim is refused meanwhile. One its
+      // launch claimed already is its own, as any held claim is.
+      const passAsk =
+        kind === ClaimKind.Hazard
+          ? passHazardAsk(db, project, task, input.name)
+          : ({ kind: 'none' } as const);
+      const held = activeClaims(db, workstreamId).some(
+        (c) => c.kind === kind && c.name === input.name,
+      );
+      if (passAsk.kind === 'move' && !held)
+        return deps.state.write((ctx) =>
+          record(
+            'request_claim',
+            input.opId,
+            {
+              granted: false,
+              heldBy: null,
+              inboxId: askMoveToCopy(ctx, {
+                pass: passAsk.pass,
+                taskId: task.id,
+                workstreamId,
+                hazard: input.name,
+              }),
+              waiting: false,
+              instruction: moveToCopyInstruction(input.name),
+            },
+            ctx,
+          ),
+        );
       const signal = deps.sessionSignal(sessionId) ?? new AbortController().signal;
       const shared = sharedGrantOf(kind, input.name, input.reason, signal);
       // A claim another task holds is waited for, not given up on. Every call for the claim joins the
@@ -657,7 +704,11 @@ export function createToolHandlers(
             instruction: settled.instruction,
           };
         }
-        return recordClaim(input.opId, settled);
+        return recordClaim(
+          input.opId,
+          settled,
+          settled.granted && passAsk.kind === 'slow' ? slowPageLine(input.name) : null,
+        );
       } finally {
         clearTimeout(timer);
       }

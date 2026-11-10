@@ -358,7 +358,8 @@ describe("the builder's question before a second task changes a shared area", ()
 
 describe('a request_claim while a sign-off waits on its turn', () => {
   it('refuses at once a claim the signing page holds, so neither page waits on the other', async () => {
-    w = await openPassWorld();
+    // A project with no copies: where copies are allowed, a pass lane is never given deps at all.
+    w = await openPassWorld({ project: { delivery: 'local' } });
     // Settings' run holds the deps hazard, as its launch claimed it.
     w.h.state.write((c) =>
       acquireClaims(c, {

@@ -156,6 +156,7 @@ import {
   withdrawStaleClaimWaits,
 } from '../mcp';
 import {
+  answerMoveToCopy,
   answerPassCard,
   askSignOff,
   cancelSignOffWait,
@@ -168,6 +169,7 @@ import {
   subscribeSignOffWaits,
   takeOut,
   type AbandonDeps,
+  type MoveToCopyDeps,
   type PassWorkDeps,
   type TakeOutDeps,
 } from '../pass';
@@ -930,12 +932,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   };
   answerBranchCard = createBranchCardAnswers(delivery);
   answerCiStopCard = createCiStopAnswers(delivery);
-  // A pass's cards: its folder off the pass's branch.
+  // A pass's work in Your folder, and its cards (set below, once its take-outs are built).
   const passWork: PassWorkDeps = { state, git, inbox, jobs: delivery.jobs, logger, clock };
-  answerPassCards = (item, answer) => {
-    answerPassCard(passWork, item, answer);
-    answerPassMoveCard(delivery, item, answer);
-  };
   const starter = createBatchStarter(delivery);
   answerStartCard = createStartCardAnswers({ state, starter });
   answerLostMigrationsCard = createLostMigrationsAnswers(delivery);
@@ -1402,6 +1400,20 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     startSignOff(passTakeOuts, taskId);
   };
   const unsubscribeSignOffWaits = subscribeSignOffWaits(bus, passTakeOuts);
+  // A pass page that asked for migrations or deps: Move to a Separate Copy takes it out and starts
+  // it in a copy, as the Board's Start does.
+  const passMoves: MoveToCopyDeps = {
+    ...passTakeOuts,
+    startInCopy: (taskId) => {
+      starter.startTask(taskId);
+      createdScheduler.requestTick();
+    },
+  };
+  answerPassCards = (item, answer) => {
+    answerPassCard(passWork, item, answer);
+    answerPassMoveCard(delivery, item, answer);
+    void answerMoveToCopy(passMoves, item, answer);
+  };
   // Close Pass, its steps under the delivery key with its gate and pull request through 7b's seam.
   const passCloses = createPassCloses({
     ...passTakeOuts,

@@ -41,3 +41,11 @@ export {
 } from './sign-off';
 export { closeGateOf } from './close-lists';
 export { createPassCloses, type PassCloses } from './close';
+export {
+  answerMoveToCopy,
+  askMoveToCopy,
+  moveToCopyInstruction,
+  passHazardAsk,
+  slowPageLine,
+  type MoveToCopyDeps,
+} from './move-copy';
