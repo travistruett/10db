@@ -204,7 +204,8 @@ function ProjectWorkbench({ project }: { readonly project: ProjectViewDto }) {
   const live = useLivePass(project.id);
   const start = usePassStart(project.id, hasPages);
   const tasks = useTasks(project.id).data ?? [];
-  const inbox = useInbox().data ?? [];
+  const inboxRead = useInbox();
+  const inbox = inboxRead.data ?? [];
   const goalPages = useGoalPassPages(search.goal ?? null).data?.pages ?? [];
   const now = useNow(CLOCK_TICK_MS);
   const opening = useOpenPass(project.id);
@@ -223,7 +224,11 @@ function ProjectWorkbench({ project }: { readonly project: ProjectViewDto }) {
   // builder, and only the page on screen is marked opened.
   const view = live.data;
   const named = view?.pages.some((page) => page.taskId === search.task) ?? false;
-  const pin = view == null || named ? null : (queueRows(view, inbox, now)[0]?.page.taskId ?? null);
+  // The queue ranks a page by its Inbox items too, so the pin waits for the Inbox to have answered.
+  const pin =
+    view == null || named || !inboxRead.isSuccess
+      ? null
+      : (queueRows(view, inbox, now)[0]?.page.taskId ?? null);
   useEffect(() => {
     if (pin !== null) void navigate({ to: '/workbench', search: { task: pin }, replace: true });
   }, [pin, navigate]);
@@ -234,8 +239,12 @@ function ProjectWorkbench({ project }: { readonly project: ProjectViewDto }) {
     rename: (body) => renaming.mutateAsync({ passId: passId(), body }),
     abandon: () => abandoning.mutateAsync(passId()),
   };
-  // A read that failed says why; the picker needs what Start Pass says, an open pass does not.
-  const failed = live.error ?? (live.data === null && hasPages ? start.error : null);
+  // A read that failed with nothing read before says why; a refetch that fails keeps what was read, so
+  // a daemon blip never takes the pass, and its drafts, off the screen. The picker needs what Start Pass
+  // says, an open pass does not.
+  const failed =
+    (live.data === undefined ? live.error : null) ??
+    (live.data === null && hasPages && start.data === undefined ? start.error : null);
   if (failed !== null)
     return (
       <Stack gap="md">

@@ -5,13 +5,14 @@ import {
   PassRename,
   type AreaDef,
 } from '@10db/contracts';
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
-import { http, HttpResponse } from 'msw';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { delay, http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
 import { projectViewDto, taskDto } from '../../test/fixtures';
 import {
   goalPassPagesDto,
+  askItem,
   pagesByStatus,
   pagesProposalDto,
   passDto,
@@ -57,8 +58,8 @@ function open(
     ...passHandlers({ start: { [project.id]: start }, ...routes }),
     ...baseHandlers(),
   );
-  const { router } = renderApp(path);
-  return { opened, router };
+  const { router, queryClient } = renderApp(path);
+  return { opened, router, queryClient };
 }
 
 const row = (name: string) => screen.findByRole('checkbox', { name: new RegExp(`^${name}`) });
@@ -215,6 +216,52 @@ describe('WorkbenchView', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: 'Abandon Pass' }));
     await waitFor(() => {
       expect(abandoned).toEqual([live.pass.id]);
+    });
+  });
+
+  it("keeps the open pass and a page's draft when a refetch of the live passes fails", async () => {
+    const { ready, working } = pagesByStatus();
+    const live = passViewDto({ pass: passDto({ projectId: project.id }), pages: [ready, working] });
+    const { queryClient } = open(`/workbench?task=${ready.taskId}`, { live: [live] });
+    const input = await screen.findByRole<HTMLTextAreaElement>('textbox', {
+      name: 'Message to Settings',
+    });
+    fireEvent.change(input, { target: { value: 'half a thought' } });
+    server.use(
+      http.get(daemonUrl('/passes'), () =>
+        HttpResponse.json(
+          { error: 'internal', message: 'The database is locked' },
+          { status: 500 },
+        ),
+      ),
+    );
+    await act(() => queryClient.refetchQueries({ queryKey: ['passes', 'live'] }));
+    await waitFor(() => {
+      expect(queryClient.getQueryState(['passes', 'live'])?.status).toBe('error');
+    });
+    expect(screen.queryByText(/could not be read/)).toBeNull();
+    expect(
+      screen.getByRole<HTMLTextAreaElement>('textbox', { name: 'Message to Settings' }).value,
+    ).toBe('half a thought');
+  });
+
+  it('pins the first page only once the Inbox has answered, which ranks a page that asks first', async () => {
+    const { ready, asks } = pagesByStatus();
+    const live = passViewDto({ pass: passDto({ projectId: project.id }), pages: [ready, asks] });
+    const { router } = open(
+      '/workbench',
+      { live: [live] },
+      {
+        first: [
+          http.get(daemonUrl('/inbox'), async () => {
+            await delay(300);
+            return HttpResponse.json([askItem(asks, { projectId: project.id })]);
+          }),
+        ],
+      },
+    );
+    await waitFor(() => {
+      expect(router.state.location.search).toEqual({ task: asks.taskId });
     });
   });
 
