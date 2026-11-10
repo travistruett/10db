@@ -437,7 +437,7 @@ describe('the check after each turn', () => {
     }
   });
 
-  it('stops a running check when Close Pass begins, and its late result writes nothing', async () => {
+  it("stops a running check through the close's own stop, and its late result writes nothing", async () => {
     await world(() => checkScript('src/settings/page.tsx'));
     touch('hold');
     const turnChecks = await start();
@@ -447,6 +447,8 @@ describe('the check after each turn', () => {
       const pids = listPassCheckPids(w.h.store.db);
       return pids.length === 1 ? pids : undefined;
     });
+    // No longer following the pass's state: only the close's stopPassChecks can stop the check.
+    started?.unsubscribe();
     prs = createPassPullRequests({
       ...w.h.ctx,
       state: w.h.state,
