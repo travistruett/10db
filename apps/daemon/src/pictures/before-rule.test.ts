@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { beforeAllowed, wroteBefore, type BeforeFacts, type ToolCall } from './before-rule';
 
-// Workbench spec §10 (before is before the first edit); plan §3.2's before rule: a before is asked
+// Workbench spec §10 (before is before the first edit), the before rule: a before is asked
 // only while the task has started nothing, and kept only when the task wrote nothing before the shot
 // finished.
 
@@ -68,7 +68,19 @@ describe('wroteBefore', () => {
       ],
       wrote: false,
     },
+    { name: 'a Codex command', calls: [{ tool: 'command', at: at(5) }], wrote: true },
+    { name: 'a Codex patch', calls: [{ tool: 'apply_patch', at: at(5) }], wrote: true },
   ])('$name', ({ calls, wrote }) => {
-    expect(wroteBefore(calls, at(10))).toBe(wrote);
+    expect(wroteBefore({ calls, codexStarts: [] }, at(10))).toBe(wrote);
+  });
+
+  // Codex reports a call only once it has run, so a Codex session that began before the shot ended may
+  // have written with nothing reported yet.
+  it.each<{ name: string; codexStarts: string[]; wrote: boolean }>([
+    { name: 'a Codex session started before the shot ended', codexStarts: [at(4)], wrote: true },
+    { name: 'a Codex session started as the shot ended', codexStarts: [at(10)], wrote: true },
+    { name: 'a Codex session started after it', codexStarts: [at(11)], wrote: false },
+  ])('$name', ({ codexStarts, wrote }) => {
+    expect(wroteBefore({ calls: [], codexStarts }, at(10))).toBe(wrote);
   });
 });

@@ -634,8 +634,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let answerGitCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   // Started once recovery is through; a launch before then waits for no before picture.
   let pictures: Pictures | null = null;
-  // The API's port, once it listens: an app address may not name it.
+  // The API's port, once it listens: an app address may not name it, and no picture is taken before.
   let listenPort: number | null = null;
+  const listening = Promise.withResolvers<number>();
   let answerBranchCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerCiStopCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerGhCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
@@ -1541,7 +1542,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     state,
     bus,
     camera: pictureCamera,
-    daemonPort: () => listenPort,
+    daemonPort: listening.promise,
     prepareBrowser,
     git,
     signIn: {
@@ -1915,6 +1916,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // A server listening on a TCP port reports an AddressInfo.
   const port = (server.address() as AddressInfo).port;
   listenPort = port;
+  listening.resolve(port);
   const url = `http://127.0.0.1:${String(port)}`;
   mcpUrl = `${url}/mcp`;
   writeRuntimeFiles(

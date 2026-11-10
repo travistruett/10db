@@ -37,20 +37,11 @@ export {
   type ResolvedTools,
 } from './system-check';
 export { AgentTool, CODEX_VERIFIED_ON, type PinnedRelease } from './agent-pins';
-export {
-  downloadFile,
-  ensurePinned,
-  extractZipWithTar,
-  pinnedExecutable,
-  pinnedToolsRoot,
-  removePinned,
-  tarballIntegrity,
-} from './pinned-install';
+export { downloadFile, ensurePinned, extractZipWithTar, pinnedToolsRoot } from './pinned-install';
 export {
   AUTOUPDATE_OFF,
   AgentState,
   ensureAgent,
-  liveTestDataDir,
   startPinnedTools,
   type AgentStatus,
   type AgentTools,

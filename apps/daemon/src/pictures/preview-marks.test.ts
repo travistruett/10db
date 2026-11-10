@@ -69,7 +69,7 @@ async function world(
     state: w.h.state,
     bus: w.h.bus,
     camera: cam,
-    daemonPort: () => null,
+    daemonPort: Promise.resolve(4317),
     prepareBrowser: () => undefined,
     git: w.h.git,
     signIn: {

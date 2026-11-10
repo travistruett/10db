@@ -40,23 +40,25 @@ import {
   listTasks,
   listTaskScreens,
   listTaskThread,
+  listTaskCodexStarts,
   listTaskPageReports,
   listTaskToolCalls,
   listTaskTurns,
+  openPassTurn,
   taskStartFacts,
 } from '@10db/db';
 import type { Clock, Timer } from '../clock';
 import type { EventBus, StateStore } from '../events';
 import type { Git } from '../git';
 import type { Logger } from '../log';
-import { beforeAllowed, wroteBefore } from './before-rule';
+import { beforeAllowed, wroteBefore, type TaskActivity } from './before-rule';
 import type { PageCamera, Shot } from './camera';
 import { CAPTURE_IDLE, captureStep, type CaptureEvent, type CaptureRequest } from './capture-queue';
 import { keepScreen, sweepPictureTemps, type ScreenToKeep } from './picture-files';
 import { pageRoute, pictureRoutes, takesPictures, turnChangedSomething } from './picture-routes';
 import { judgePreview, routeLoad, type RouteLoad } from './preview-marks';
-import { signIn, type SignInDeps, type SignInProject } from './sign-in';
-import { readStorageState, type StorageState } from './storage-state';
+import { signIn, sweepLoginLogs, type SignInDeps, type SignInProject } from './sign-in';
+import { forgetStorageState, readStorageState, type StorageState } from './storage-state';
 
 // Workbench spec docs/superpowers/specs/2026-11-09-10db-workbench-design.md §10, §12: the pictures of a
 // task's pages, taken by the daemon's browser through one queue. A pass page gets a before when the pass
@@ -65,20 +67,26 @@ import { readStorageState, type StorageState } from './storage-state';
 // capture's route, outcome, milliseconds and bytes are logged; a picture is never sent anywhere.
 
 /** The longest a task's first launch waits for its before. */
-export const BEFORE_WAIT_MS = 20_000;
+const BEFORE_WAIT_MS = 20_000;
+
+/** How long a refused browser fetch rests before the next ask tries it again. */
+const FETCH_RETRY_MS = 10 * 60_000;
 
 /** How far back start-up looks for a finished Your-folder task whose after was missed. */
 const MISSED_AFTER_MS = 60 * 60_000;
 
 /** The start of the thread notice said once per task when a page lands elsewhere. */
-export const ELSEWHERE_NOTICE = 'Pictures of this page landed on another page of the app';
+const ELSEWHERE_NOTICE = 'Pictures of this page landed on another page of the app';
 
 export interface PicturesDeps {
   readonly state: StateStore;
   readonly bus: EventBus;
   readonly camera: PageCamera;
-  /** The port the daemon's API listens on, which no app address may name; null until it listens. */
-  readonly daemonPort: () => number | null;
+  /**
+   * The port the daemon's API listens on, which no app address may name; settles once it listens.
+   * No picture is taken before then.
+   */
+  readonly daemonPort: Promise<number>;
   /** Starts fetching the pinned browser when it is not there yet; returns at once. */
   readonly prepareBrowser: () => void;
   readonly git: Pick<Git, 'head'>;
@@ -124,7 +132,10 @@ export function startPictures(deps: PicturesDeps): Pictures {
   /** A task's first launch waiting on its before. */
   const beforeWaiters = new Map<TaskId, (() => void)[]>();
   const signIns = new Map<ProjectId, { problem: string | null; at: string }>();
+  /** A task's routes that landed elsewhere even after a fresh sign-in: no sign-in again for them. */
+  const redirectingRoutes = new Set<string>();
   const appUrls = new Map<ProjectId, AppUrl | null>();
+  const devLogins = new Map<ProjectId, string | null>();
   const passStates = new Map<PassId, PassState>();
 
   function apply(event: CaptureEvent): void {
@@ -162,7 +173,23 @@ export function startPictures(deps: PicturesDeps): Pictures {
     }
   }
 
+  /** When the browser's fetch was last asked for, by the clock. */
+  let preparedAt: number | null = null;
+
+  function prepareBrowser(): void {
+    preparedAt = deps.clock.now().getTime();
+    deps.prepareBrowser();
+  }
+
+  /** A refused fetch is tried again once it has rested, or at once when a pass opens. */
+  function retryRefusedFetch(now: boolean): void {
+    if (deps.camera.status().state !== BrowserState.Refused) return;
+    const rested = preparedAt === null || deps.clock.now().getTime() - preparedAt >= FETCH_RETRY_MS;
+    if (now || rested) prepareBrowser();
+  }
+
   function ask(request: CaptureRequest): void {
+    retryRefusedFetch(false);
     syncBrowser();
     apply({ kind: 'ask', request });
     pump();
@@ -200,11 +227,26 @@ export function startPictures(deps: PicturesDeps): Pictures {
       });
   }
 
+  /** The daemon's API port once it listens; null before. */
+  let listenPort: number | null = null;
+  void deps.daemonPort.then((port) => {
+    listenPort = port;
+  });
+
   /** An app address on the daemon's own port: a page there would reach 10db's API, so none is shot. */
-  function onDaemon(appUrl: AppUrl): boolean {
-    const port = deps.daemonPort();
-    return port !== null && isDaemonAddress(appUrl, port);
+  const onDaemon = (appUrl: AppUrl, port: number): boolean => isDaemonAddress(appUrl, port);
+
+  /** The project's app address as it stands, unless it names the daemon's own port. */
+  function shootableAddress(projectId: ProjectId, port: number): AppUrl | null {
+    const { appUrl } = getProject(db, projectId);
+    return appUrl === null || onDaemon(appUrl, port) ? null : appUrl;
   }
+
+  /** What the task's sessions did up to `until`, as the before rule reads it. */
+  const activityOf = (taskId: TaskId, until: string): TaskActivity => ({
+    calls: listTaskToolCalls(db, taskId, until),
+    codexStarts: listTaskCodexStarts(db, taskId),
+  });
 
   /** Asks a before for the task when it takes pictures, has none, and has started nothing. */
   function askBefore(task: TaskDto, passId: PassId | null): void {
@@ -213,6 +255,9 @@ export function startPictures(deps: PicturesDeps): Pictures {
     if (pictureRoutes(project, task).length === 0) return;
     if (hasTaskScreen(db, task.id, ScreenKind.Before)) return;
     if (!beforeAllowed({ inPass: passId !== null, ...taskStartFacts(db, task.id) })) return;
+    // A before taken now would be dropped at its end: the task has written already.
+    const now = deps.state.now();
+    if (wroteBefore(activityOf(task.id, now), now)) return;
     ask({ kind: ScreenKind.Before, projectId: project.id, passId, taskId: task.id, turnId: null });
   }
 
@@ -240,6 +285,8 @@ export function startPictures(deps: PicturesDeps): Pictures {
     signal: AbortSignal,
   ): Promise<StorageState | null> {
     const result = await signIn({ ...deps.signIn, camera: deps.camera }, project, signal);
+    // A login stopped with its capture says nothing of the project's sign-in.
+    if (signal.aborted) return null;
     signIns.set(project.id, {
       problem: result.ok ? null : result.problem,
       at: deps.clock.now().toISOString(),
@@ -254,7 +301,7 @@ export function startPictures(deps: PicturesDeps): Pictures {
   }
 
   /** Says once on the task's thread that its page lands elsewhere, however many turns it does. */
-  function noticeElsewhere(taskId: TaskId, route: string): void {
+  function noticeElsewhere(taskId: TaskId, route: string, signedIn: boolean): void {
     const said = listTaskThread(db, taskId).some(
       (m) => m.author === TaskMessageAuthor.System && m.body.startsWith(ELSEWHERE_NOTICE),
     );
@@ -263,7 +310,9 @@ export function startPictures(deps: PicturesDeps): Pictures {
       insertSystemNotice(
         ctx,
         taskId,
-        `${ELSEWHERE_NOTICE} instead of ${route}, even after signing in again, so no picture of it was kept. Check the dev login command in Settings › General.`,
+        signedIn
+          ? `${ELSEWHERE_NOTICE} instead of ${route}, even after signing in again, so no picture of it was kept. Check the dev login command in Settings › General.`
+          : `${ELSEWHERE_NOTICE} instead of ${route}, so no picture of it was kept. If the page needs a sign-in, set a dev login command in Settings › General.`,
       );
     });
   }
@@ -283,8 +332,19 @@ export function startPictures(deps: PicturesDeps): Pictures {
     const stopped = (): boolean => signal.aborted;
     const project = getProject(db, request.projectId);
     const task = getTask(db, request.taskId);
-    const appUrl = project.appUrl;
-    if (appUrl === null || onDaemon(appUrl)) return 0;
+    // A shutdown before the API listens ends the wait.
+    const port = await Promise.race([
+      deps.daemonPort,
+      new Promise<null>((resolve) => {
+        signal.addEventListener('abort', () => {
+          resolve(null);
+        });
+        if (signal.aborted) resolve(null);
+      }),
+    ]);
+    if (port === null || stopped()) return 0;
+    const appUrl = shootableAddress(project.id, port);
+    if (appUrl === null) return 0;
     const inPass = request.passId !== null;
     if (
       request.kind === ScreenKind.Before &&
@@ -295,6 +355,7 @@ export function startPictures(deps: PicturesDeps): Pictures {
     if (targets.length === 0) return 0;
     let storageState = readStorageState(deps.dataDir, project.id);
     if (storageState === null && project.devLoginCommand !== null) {
+      if (shootableAddress(project.id, port) !== appUrl) return 0;
       storageState = await runSignIn(project, signal);
       if (storageState === null) return 0;
     }
@@ -304,11 +365,20 @@ export function startPictures(deps: PicturesDeps): Pictures {
     const loads: Omit<RouteLoad, 'route'>[] = [];
     for (const target of targets) {
       const shoot = (state: StorageState | null): Promise<Shot> =>
-        deps.camera.shoot({ appUrl, ...target, storageState: state, signal });
+        shootableAddress(project.id, port) === appUrl
+          ? deps.camera.shoot({ appUrl, ...target, storageState: state, signal })
+          : Promise.reject(new Error("The app address changed or names 10db's own port"));
       const startedAt = deps.clock.now().getTime();
       let shot = await shoot(storageState);
-      if (shot.outcome === 'elsewhere' && project.devLoginCommand !== null && !signedInAgain) {
+      const redirects = `${task.id} ${target.route}`;
+      if (
+        shot.outcome === 'elsewhere' &&
+        project.devLoginCommand !== null &&
+        !signedInAgain &&
+        !redirectingRoutes.has(redirects)
+      ) {
         signedInAgain = true;
+        if (shootableAddress(project.id, port) !== appUrl) return 0;
         storageState = await runSignIn(project, signal);
         if (storageState === null) return 0;
         shot = await shoot(storageState);
@@ -328,12 +398,15 @@ export function startPictures(deps: PicturesDeps): Pictures {
       if (target.route === judged)
         loads.push({ outcome: shot.outcome, overlayText: shot.overlayText, reason: shot.reason });
       if (shot.outcome === 'elsewhere') {
-        if (signedInAgain)
+        if (signedInAgain) {
+          // Still elsewhere after a fresh sign-in: the route redirects by design for this task.
+          redirectingRoutes.add(redirects);
           signIns.set(project.id, {
             problem: `${target.route} landed on another page of the app after signing in`,
             at: deps.clock.now().toISOString(),
           });
-        noticeElsewhere(task.id, target.route);
+        }
+        noticeElsewhere(task.id, target.route, project.devLoginCommand !== null);
         continue;
       }
       if (shot.png === null || shot.outcome === 'failed') continue;
@@ -349,10 +422,7 @@ export function startPictures(deps: PicturesDeps): Pictures {
     }
     if (stopped()) return 0;
     const end = deps.state.now();
-    if (
-      request.kind === ScreenKind.Before &&
-      wroteBefore(listTaskToolCalls(db, task.id, end), end)
-    ) {
+    if (request.kind === ScreenKind.Before && wroteBefore(activityOf(task.id, end), end)) {
       log.info({ taskId: task.id }, 'dropped a before picture: the task wrote before it was taken');
       return 0;
     }
@@ -392,6 +462,8 @@ export function startPictures(deps: PicturesDeps): Pictures {
   }
 
   function onTurnReady(passId: PassId, taskId: TaskId, turnId: PassTurnId): void {
+    // A page already in its next turn may be half changed: its picture would show half a turn.
+    if (openPassTurn(db, taskId) !== undefined) return;
     const turn = getPassTurn(db, turnId);
     const earlier = listTaskTurns(db, taskId).filter(
       (t) => t.seq < turn.seq && t.ending === PassTurnEnding.Ready,
@@ -407,10 +479,21 @@ export function startPictures(deps: PicturesDeps): Pictures {
   function onProjectChanged(projectId: ProjectId): void {
     const project = getProject(db, projectId);
     const was = appUrls.get(projectId) ?? null;
+    const loginWas = devLogins.get(projectId) ?? null;
     appUrls.set(projectId, project.appUrl);
+    devLogins.set(projectId, project.devLoginCommand);
+    // A sign-in kept for another address or another dev login is not this one's.
+    if (was !== project.appUrl || loginWas !== project.devLoginCommand)
+      forgetStorageState(deps.dataDir, projectId);
     if (was === project.appUrl) return;
     if (was !== null) apply({ kind: 'app_changed', projectId });
-    if (project.appUrl !== null) deps.prepareBrowser();
+    if (project.appUrl !== null) {
+      prepareBrowser();
+      // The open pages' befores are taken at the new address, under the before rule.
+      for (const pass of listLivePasses(db))
+        if (pass.projectId === projectId && pass.state === PassState.Open)
+          for (const task of listPassTasks(db, pass.id)) askBefore(task, pass.id);
+    }
     pump();
   }
 
@@ -421,7 +504,12 @@ export function startPictures(deps: PicturesDeps): Pictures {
 
   /** What each event the pictures follow means for the queue. */
   const handlers: Partial<Record<EventType, (event: DaemonEvent) => void>> = {
-    [EventType.PassOpened]: onPass,
+    [EventType.PassOpened]: (event) => {
+      const projectId = ProjectId.safeParse(event.data['projectId']);
+      if (projectId.success && getProject(db, projectId.data).appUrl !== null)
+        retryRefusedFetch(true);
+      onPass(event);
+    },
     [EventType.PassChanged]: onPass,
     [EventType.PassTurnStarted]: (event) => {
       const taskId = TaskId.safeParse(event.data['taskId']);
@@ -472,11 +560,20 @@ export function startPictures(deps: PicturesDeps): Pictures {
   // states as they stand; befores for open pages that have none; afters missed in the last hour.
   const swept = sweepPictureTemps(deps.dataDir);
   if (swept > 0) log.info({ removed: swept }, 'removed pictures a stopped write left half written');
+  const logs = sweepLoginLogs(deps.dataDir);
+  if (logs > 0) log.info({ removed: logs }, 'removed dev login logs a stopped daemon left');
   const projects = listProjects(db);
-  for (const project of projects) appUrls.set(project.id, project.appUrl);
-  if (projects.some((p) => p.appUrl !== null)) deps.prepareBrowser();
+  for (const project of projects) {
+    appUrls.set(project.id, project.appUrl);
+    devLogins.set(project.id, project.devLoginCommand);
+  }
+  if (projects.some((p) => p.appUrl !== null)) prepareBrowser();
   syncBrowser();
-  for (const pass of listLivePasses(db)) passStates.set(pass.id, pass.state);
+  // A pass a restart finds closing or being abandoned holds its afters back, as it did before.
+  for (const pass of listLivePasses(db)) {
+    passStates.set(pass.id, pass.state);
+    if (HOLDING.includes(pass.state)) apply({ kind: 'pass_holding', passId: pass.id });
+  }
   for (const pass of listLivePasses(db))
     if (pass.state === PassState.Open)
       for (const task of listPassTasks(db, pass.id)) askBefore(task, pass.id);
@@ -514,7 +611,7 @@ export function startPictures(deps: PicturesDeps): Pictures {
     },
     status(projectId) {
       const { appUrl } = getProject(db, projectId);
-      if (appUrl !== null && onDaemon(appUrl))
+      if (appUrl !== null && listenPort !== null && onDaemon(appUrl, listenPort))
         return {
           browser: { state: BrowserState.Refused, problem: APP_URL_IS_DAEMON },
           signIn: signIns.get(projectId) ?? null,

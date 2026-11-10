@@ -5,16 +5,18 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type { AppUrl } from '@10db/contracts';
+import type { Browser } from 'playwright-core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { WebSocketServer } from 'ws';
 import { tempDir, waitForAsync, type TempDir } from '../../test/fixtures';
 import { systemClock } from '../clock';
 import { loadEnv } from '../env';
-import { downloadFile, ensurePinned, extractZipWithTar, liveTestDataDir } from '../environment';
+import { downloadFile, ensurePinned, extractZipWithTar } from '../environment';
+import { defaultDataDir } from '../runtime-files';
 import type { Logger } from '../log';
 import { createLedgerSweep, systemProcessTable, type LedgerSweep } from '../sandbox';
 import { BROWSER_PIN } from './browser-pin';
-import { createBrowserHost } from './browser-host';
+import { createBrowserHost, type BrowserHost } from './browser-host';
 import { ShotOutcome, type PageCamera } from './camera';
 import { launchChromium } from './playwright';
 import { createPlaywrightCamera } from './playwright-camera';
@@ -153,6 +155,14 @@ function appHandler(daemonPort: number, udpPort: number) {
           ),
         );
         return;
+      case 'loop':
+        html(
+          page(
+            '<h1>Busy</h1>',
+            "<script>addEventListener('load', () => { setTimeout(() => { for (;;) {} }, 50); });</script>",
+          ),
+        );
+        return;
       case 'boom':
         html(page('<h1>Internal Server Error</h1>'), 500);
         return;
@@ -219,14 +229,27 @@ function appHandler(daemonPort: number, udpPort: number) {
         });
         res.end();
         return;
+      case 'login-download':
+        res.writeHead(200, {
+          'content-type': 'application/octet-stream',
+          'content-disposition': 'attachment; filename="session.bin"',
+        });
+        res.end('not a page');
+        return;
       case 'login-away':
         toDaemon('localhost', '/stolen-login');
         return;
-      case 'whoami': {
-        const signedIn = (req.headers.cookie ?? '').includes(`session=${SECRET}`);
-        html(page(`<h1>${signedIn ? 'Signed in' : 'Signed out'}</h1>`));
+      case 'whoami':
+        if ((req.headers.cookie ?? '').includes(`session=${SECRET}`)) {
+          html(page('<h1>Signed in</h1>'));
+        } else {
+          res.writeHead(302, { location: '/signin' });
+          res.end();
+        }
         return;
-      }
+      case 'signin':
+        html(page('<h1>Sign in</h1>'));
+        return;
       default:
         html(page('<h1>Not found</h1>'), 404);
     }
@@ -274,6 +297,7 @@ describe.skipIf(!live)('the pinned browser, live', () => {
   let exe: string;
   let sweep: LedgerSweep;
   let camera: PageCamera;
+  let host: BrowserHost<Browser>;
   let daemon: Awaited<ReturnType<typeof countingDaemon>>;
   let app: Server;
   let appUrl: AppUrl;
@@ -284,7 +308,9 @@ describe.skipIf(!live)('the pinned browser, live', () => {
 
   beforeAll(async () => {
     // The pinned build, fetched into the live tests' own folder and checked against BROWSER_PIN.
-    exe = await ensurePinned(liveTestDataDir(), BROWSER_PIN, {
+    // The live tests' own tools folder, beside the app's, as the agents' live tests use: a newer pin
+    // tested here never touches the copy the running app runs.
+    exe = await ensurePinned(join(defaultDataDir(), 'live-tests'), BROWSER_PIN, {
       download: downloadFile,
       extract: extractZipWithTar,
     });
@@ -293,7 +319,7 @@ describe.skipIf(!live)('the pinned browser, live', () => {
     mkdirSync(ledgerRoot);
     sweep = createLedgerSweep(ledgerRoot, { table: systemProcessTable });
     const logger = recordingLogger(logs);
-    const host = createBrowserHost({
+    host = createBrowserHost({
       dataDir: join(dir.path, 'data'),
       ledgers: { sweep, root: ledgerRoot },
       processes: { table: systemProcessTable },
@@ -455,6 +481,92 @@ describe.skipIf(!live)('the pinned browser, live', () => {
     expect(renderers.filter((p) => !p.args.includes('--seatbelt-client='))).toEqual([]);
   }, 60_000);
 
+  it('settles a shot and a sign-in of a page that never stops running, and shoots again after', async () => {
+    const hasty = createPlaywrightCamera(host, recordingLogger(logs), { deadlineMs: 8_000 });
+    const started = Date.now();
+    const shot = await hasty.shoot({
+      appUrl,
+      route: '/loop',
+      viewport: VIEWPORT,
+      theme: 'default',
+      storageState: null,
+      signal: new AbortController().signal,
+    });
+    expect(shot).toMatchObject({ outcome: ShotOutcome.Failed, png: null });
+    expect(shot.reason).toMatch(/did not settle/);
+    await expect(
+      hasty.signIn({ appUrl, url: '/loop', signal: new AbortController().signal }),
+    ).rejects.toThrow(/did not settle/);
+    expect(Date.now() - started).toBeLessThan(40_000);
+    expect((await shoot('/clean')).outcome).toBe(ShotOutcome.Clean);
+  }, 90_000);
+
+  it('stops a shot aborted at any moment, long before its page would have loaded', async () => {
+    // Launched already: a launch under way runs to its end.
+    await shoot('/clean');
+    for (const delay of [0, 2, 5, 10, 20, 40]) {
+      const controller = new AbortController();
+      const started = Date.now();
+      const shot = camera.shoot({
+        appUrl,
+        route: '/ws-ok',
+        viewport: VIEWPORT,
+        theme: 'default',
+        storageState: null,
+        signal: controller.signal,
+      });
+      setTimeout(() => {
+        controller.abort();
+      }, delay);
+      await expect(shot).rejects.toThrow(/abort/i);
+      // The page holds its load for 2 s; an abort that went unseen would wait it out.
+      expect(Date.now() - started).toBeLessThan(1_500);
+    }
+    const aborted = new AbortController();
+    aborted.abort();
+    await expect(camera.signIn({ appUrl, url: '/login', signal: aborted.signal })).rejects.toThrow(
+      /abort/i,
+    );
+  }, 60_000);
+
+  it('says the app did not answer, for a shot and for a sign-in', async () => {
+    const closed = createServer();
+    const port = await listen(closed, '127.0.0.1', 0);
+    await new Promise<void>((resolve) => {
+      closed.close(() => {
+        resolve();
+      });
+    });
+    const gone = `http://127.0.0.1:${String(port)}`;
+    const shot = await camera.shoot({
+      appUrl: gone,
+      route: '/clean',
+      viewport: VIEWPORT,
+      theme: 'default',
+      storageState: null,
+      signal: new AbortController().signal,
+    });
+    expect(shot).toMatchObject({ outcome: ShotOutcome.Failed, reason: 'the app did not answer' });
+    await expect(
+      camera.signIn({ appUrl: gone, url: '/login', signal: new AbortController().signal }),
+    ).rejects.toThrow('the app did not answer');
+  }, 60_000);
+
+  it('names a failed sign-in without its token, in the error and in the log', async () => {
+    const marker = 'MARKER-IN-QUERY';
+    const failure = await camera
+      .signIn({
+        appUrl,
+        url: `/login-download?token=${marker}`,
+        signal: new AbortController().signal,
+      })
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(Error);
+    expect(String(failure)).toMatch(/the dev login's address did not load/);
+    expect(String(failure)).not.toContain(marker);
+    expect(logs.filter((l) => l.includes(marker))).toEqual([]);
+  }, 60_000);
+
   it('signs in, shoots signed in, and keeps the session out of its profile on disk', async () => {
     const state = await camera.signIn({
       appUrl,
@@ -462,6 +574,8 @@ describe.skipIf(!live)('the pinned browser, live', () => {
       signal: new AbortController().signal,
     });
     expect(state.cookies.find((c) => c.name === 'session')?.value).toBe(SECRET);
+    // Signed out, the app sends the page to its sign-in; signed in, it shows it.
+    expect((await shoot('/whoami')).outcome).toBe(ShotOutcome.Elsewhere);
     const shot = await shoot('/whoami', state);
     expect(shot.outcome).toBe(ShotOutcome.Clean);
     const processes = await browserProcesses(exe);

@@ -6,6 +6,7 @@ import type { Logger } from '../log';
 import type { LaneProcessFailure, LaneProcessSetup, LedgerSweep } from '../sandbox';
 import { startAppProxy, type AppProxy } from './app-proxy';
 import { BROWSER_PIN } from './browser-pin';
+import { withDeadline } from './deadline';
 import { openBrowserLedger, type BrowserLedger, type CommandReader } from './browser-ledger';
 import type { BrowserStatus } from './camera';
 
@@ -13,6 +14,18 @@ import type { BrowserStatus } from './camera';
 export const BROWSER_IDLE_MS = 5 * 60_000;
 /** How long a launch may take before it is given up. */
 const LAUNCH_TIMEOUT_MS = 30_000;
+
+/** How long the browser gets to close before what is left of it is stopped from its ledger. */
+export const BROWSER_CLOSE_MS = 10_000;
+
+/**
+ * A use left the browser in a state it can't be trusted in (a page that would not close, which could
+ * still reach the proxy once it lets the next app through). The host closes the browser, stopping its
+ * processes if it won't close, before the use settles; the next use launches a fresh one.
+ */
+export class BrowserStuckError extends Error {
+  override readonly name = 'BrowserStuckError';
+}
 
 /** Why there are no pictures when the daemon has no process ledger to hold the browser in. */
 export const NO_LEDGER_PROBLEM = "pictures need the sandbox's roots, which were refused";
@@ -148,6 +161,8 @@ export function createBrowserHost<B extends ClosableBrowser>(
   let running: Running<B> | null = null;
   let idle: Timer | null = null;
   let closed = false;
+  /** Aborted by `close`, so a use waiting for the download lets the shutdown through. */
+  const closing = new AbortController();
   /** Read through a call: `close` may run while a use awaits. */
   const isClosed = (): boolean => closed;
   /** Every use and every shut-down runs after the one before it. */
@@ -180,13 +195,19 @@ export function createBrowserHost<B extends ClosableBrowser>(
     running = null;
     if (r === null) return;
     try {
-      await r.browser.close();
+      await withDeadline(
+        deps.clock,
+        BROWSER_CLOSE_MS,
+        () => r.browser.close(),
+        () => undefined,
+      );
     } catch (error) {
       logger.warn(
         { err: error instanceof Error ? error.message : String(error) },
         'the browser for pictures did not close cleanly; its processes are stopped from its ledger',
       );
     }
+    // Stops whatever of the browser still runs, the browser itself when its close never ended.
     await r.ledger.end();
     await r.proxy.close();
     logger.info({}, 'closed the browser for pictures');
@@ -205,7 +226,20 @@ export function createBrowserHost<B extends ClosableBrowser>(
       if (running.browser.isConnected()) return running;
       await shut();
     }
-    if (!(await prepare())) {
+    const ready = await new Promise<boolean | 'closing'>((resolve) => {
+      const shutting = (): void => {
+        resolve('closing');
+      };
+      closing.signal.addEventListener('abort', shutting, { once: true });
+      void prepare().then((value) => {
+        closing.signal.removeEventListener('abort', shutting);
+        resolve(value);
+      });
+    });
+    if (ready === 'closing' || closing.signal.aborted) {
+      throw new BrowserHostError('the browser for pictures is shut down');
+    }
+    if (!ready) {
       throw new BrowserHostError(
         prepared.kind === 'refused' ? prepared.problem : 'the browser for pictures is not ready',
       );
@@ -291,6 +325,9 @@ export function createBrowserHost<B extends ClosableBrowser>(
         const r = await open();
         try {
           return await fn(r.browser, r.proxy);
+        } catch (error) {
+          if (error instanceof BrowserStuckError) await shut();
+          throw error;
         } finally {
           r.proxy.allow(null);
           if (!isClosed()) armIdle();
@@ -299,6 +336,7 @@ export function createBrowserHost<B extends ClosableBrowser>(
     },
     async close() {
       closed = true;
+      closing.abort();
       idle?.cancel();
       idle = null;
       await enqueue(shut);

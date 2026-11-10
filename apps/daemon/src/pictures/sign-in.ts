@@ -1,4 +1,12 @@
-import { closeSync, mkdirSync, openSync, readFileSync, rmSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import {
   PageRoute,
@@ -7,7 +15,7 @@ import {
   type PermissionRuleDto,
   type ProjectDto,
 } from '@10db/contracts';
-import type { GateRunner } from '../verify';
+import type { GateResult, GateRunner } from '../verify';
 import type { PageCamera } from './camera';
 import { browserDir, writeStorageState, type StorageState } from './storage-state';
 
@@ -18,13 +26,15 @@ import { browserDir, writeStorageState, type StorageState } from './storage-stat
 // made 0600 before the command writes it, and is deleted once read; the address is never logged.
 
 /** The longest a dev login may run. */
-export const DEV_LOGIN_TIMEOUT_MS = 60_000;
+const DEV_LOGIN_TIMEOUT_MS = 60_000;
 
-export { browserDir };
+/** The roots a file path printed by a command starts with; a route of the app never does. */
+const FILE_PATH =
+  /^\/(Users|home|tmp|private|var|opt|etc|usr|Volumes|Library|System|Applications|root|nix)(\/|$)/;
 
 /**
- * The address the dev login printed: its last line that is a route on the app or an absolute URL on
- * the app's own origin; null when it printed none.
+ * The address the dev login printed: its last line that is a route on the app (not a file path) or
+ * an absolute http(s) URL on the app's own origin; null when it printed none.
  */
 export function parseLoginUrl(appUrl: AppUrl, output: string): string | null {
   const lines = output
@@ -32,7 +42,11 @@ export function parseLoginUrl(appUrl: AppUrl, output: string): string | null {
     .map((line) => line.trim())
     .filter((line) => line !== '');
   for (const line of lines.reverse()) {
-    if (PageRoute.safeParse(line).success) return routeUrl(appUrl, line);
+    if (PageRoute.safeParse(line).success) {
+      // A path a tool printed to its own files is no page of the app.
+      if (FILE_PATH.test(line)) continue;
+      return routeUrl(appUrl, line);
+    }
     let url: URL;
     try {
       url = new URL(line);
@@ -70,6 +84,19 @@ export type SignInResult =
 
 const NEEDS_DOCKER = 'The dev login needs Docker: turn on Allow Docker in Settings › General';
 
+/** What went wrong with a dev login's run, in the status line's words; null for one that passed. */
+export function devLoginProblem(
+  result: Pick<GateResult, 'exitCode' | 'timedOut' | 'aborted' | 'dockerRefused'>,
+): string | null {
+  if (result.dockerRefused === true) return NEEDS_DOCKER;
+  if (result.timedOut)
+    return `The dev login command did not finish in ${String(DEV_LOGIN_TIMEOUT_MS / 1000)} seconds`;
+  if (result.aborted) return 'The dev login was stopped';
+  if (result.exitCode !== 0)
+    return `The dev login command failed (exit ${String(result.exitCode)})`;
+  return null;
+}
+
 /** Runs the project's dev login and opens what it printed; keeps the storage state it leads to. */
 export async function signIn(
   deps: SignInDeps,
@@ -101,18 +128,8 @@ export async function signIn(
       checkouts: deps.checkouts(),
       signal,
     });
-    if (result.dockerRefused === true) return { ok: false, problem: NEEDS_DOCKER };
-    if (result.timedOut)
-      return {
-        ok: false,
-        problem: `The dev login command did not finish in ${String(DEV_LOGIN_TIMEOUT_MS / 1000)} seconds`,
-      };
-    if (result.aborted) return { ok: false, problem: 'The dev login was stopped' };
-    if (result.exitCode !== 0)
-      return {
-        ok: false,
-        problem: `The dev login command failed (exit ${String(result.exitCode)})`,
-      };
+    const problem = devLoginProblem(result);
+    if (problem !== null) return { ok: false, problem };
     url = parseLoginUrl(appUrl, readFileSync(logPath, 'utf8'));
   } finally {
     rmSync(logPath, { force: true });
@@ -131,4 +148,20 @@ export async function signIn(
   }
   writeStorageState(deps.dataDir, project.id, state);
   return { ok: true, state };
+}
+
+/** At start-up: removes the dev login logs a stopped daemon left; they hold sign-in tokens. */
+export function sweepLoginLogs(dataDir: string): number {
+  const root = join(dataDir, 'browser');
+  if (!existsSync(root)) return 0;
+  let removed = 0;
+  for (const project of readdirSync(root, { withFileTypes: true })) {
+    if (!project.isDirectory()) continue;
+    for (const name of readdirSync(join(root, project.name)))
+      if (/^login-\d+\.log$/.test(name)) {
+        rmSync(join(root, project.name, name), { force: true });
+        removed += 1;
+      }
+  }
+  return removed;
 }
