@@ -46,5 +46,59 @@
       },
       { "do": "turn_complete" }
     ]
+  ],
+  "Settings: UI work": [
+    [
+      { "do": "consume" },
+      {
+        "do": "tool",
+        "toolName": "Write",
+        "input": { "file_path": "src/settings/page.tsx", "content": "export const padding = 4;\n" }
+      },
+      { "do": "turn_complete", "text": "Tidied the settings form." },
+      { "do": "await_message", "contains": "padding too tight" },
+      { "do": "consume" },
+      {
+        "do": "tool",
+        "toolName": "Edit",
+        "input": { "file_path": "src/settings/page.tsx", "old_string": "4", "new_string": "12" }
+      },
+      { "do": "await_message", "contains": "the header too" },
+      { "do": "consume" },
+      { "do": "turn_complete", "text": "Loosened the padding." },
+      { "do": "await_message", "contains": "never sent" }
+    ]
+  ],
+  "People: UI work": [
+    [
+      { "do": "consume" },
+      {
+        "do": "tool",
+        "toolName": "AskUserQuestion",
+        "input": {
+          "questions": [
+            {
+              "question": "Which spacing?",
+              "header": "Spacing",
+              "options": [
+                { "label": "Roomy", "description": "More space" },
+                { "label": "Compact", "description": "Less space" }
+              ],
+              "multiSelect": false
+            }
+          ]
+        }
+      },
+      {
+        "do": "tool",
+        "toolName": "Write",
+        "input": {
+          "file_path": "src/people/page.tsx",
+          "content": "export const spacing = 'roomy';\n"
+        }
+      },
+      { "do": "turn_complete", "text": "Gave the list more room." },
+      { "do": "await_message", "contains": "never sent" }
+    ]
   ]
 }

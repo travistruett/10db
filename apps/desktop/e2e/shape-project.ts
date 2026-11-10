@@ -35,8 +35,21 @@ function createRepository(repo: string): void {
   git('commit', '-m', 'Initial commit');
 }
 
+/** An area as `POST /projects` takes it. */
+interface Area {
+  readonly name: string;
+  readonly globs: readonly string[];
+  readonly catchAll?: boolean;
+  readonly role?: 'page' | 'shared';
+  readonly route?: string;
+}
+
 /** A project on its own repository, so one spec's tasks never meet another's. */
-export async function createProject(request: APIRequestContext, name: string): Promise<string> {
+export async function createProject(
+  request: APIRequestContext,
+  name: string,
+  areas: readonly Area[] = [{ name: 'repo', globs: ['**'] }],
+): Promise<string> {
   const repo = join(E2E_DIR, `${name}-repo`);
   createRepository(repo);
   const created = await request.post(`${daemonUrl}/projects`, {
@@ -45,7 +58,7 @@ export async function createProject(request: APIRequestContext, name: string): P
       name,
       repoPath: repo,
       gateCommand: 'true',
-      areas: [{ name: 'repo', globs: ['**'] }],
+      areas,
       handoffPct: 40,
       nudgePct: 50,
       delivery: 'local',
