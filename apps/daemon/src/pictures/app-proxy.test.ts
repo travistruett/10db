@@ -210,6 +210,12 @@ describe('the app proxy', () => {
     expect(refused).toEqual([`GET http://127.0.0.1:${String(other.port)}/tasks`]);
   });
 
+  it('names what it refused without the query, which may hold a dev login token', async () => {
+    await viaProxy(proxy.port, `http://127.0.0.1:${String(other.port)}/tasks?token=secret-1`);
+    await viaProxy(proxy.port, '/people?token=secret-2');
+    expect(refused).toEqual([`GET http://127.0.0.1:${String(other.port)}/tasks`, 'GET /people']);
+  });
+
   it('refuses a request made to it as a server', async () => {
     const got = await viaProxy(proxy.port, '/people');
     expect(got.status).toBe(403);

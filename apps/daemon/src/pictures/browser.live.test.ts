@@ -219,6 +219,13 @@ function appHandler(daemonPort: number, udpPort: number) {
         });
         res.end();
         return;
+      case 'login-download':
+        res.writeHead(200, {
+          'content-type': 'application/octet-stream',
+          'content-disposition': 'attachment; filename="session.bin"',
+        });
+        res.end('not a page');
+        return;
       case 'login-away':
         toDaemon('localhost', '/stolen-login');
         return;
@@ -453,6 +460,21 @@ describe.skipIf(!live)('the pinned browser, live', () => {
     // Playwright asked for no --no-sandbox, and Chromium hands each sandboxed child its seatbelt.
     expect(all.filter((p) => p.args.includes('--no-sandbox'))).toEqual([]);
     expect(renderers.filter((p) => !p.args.includes('--seatbelt-client='))).toEqual([]);
+  }, 60_000);
+
+  it('names a failed sign-in without its token, in the error and in the log', async () => {
+    const marker = 'MARKER-IN-QUERY';
+    const failure = await camera
+      .signIn({
+        appUrl,
+        url: `/login-download?token=${marker}`,
+        signal: new AbortController().signal,
+      })
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(Error);
+    expect(String(failure)).toMatch(/the dev login's address did not load/);
+    expect(String(failure)).not.toContain(marker);
+    expect(logs.filter((l) => l.includes(marker))).toEqual([]);
   }, 60_000);
 
   it('signs in, shoots signed in, and keeps the session out of its profile on disk', async () => {

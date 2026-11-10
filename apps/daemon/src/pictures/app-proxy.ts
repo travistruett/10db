@@ -6,6 +6,7 @@ import {
 } from 'node:http';
 import { connect, type Socket } from 'node:net';
 import type { Duplex } from 'node:stream';
+import { addressForLog } from './load-failure';
 import { proxyAllows } from './origin-guard';
 
 /**
@@ -23,7 +24,7 @@ export interface AppProxy {
 }
 
 export interface AppProxyOptions {
-  /** Told each request it refused, as `<method> <target>`. */
+  /** Told each request it refused, as `<method> <address>`: origin and path, never the query. */
   readonly onRefused?: (target: string) => void;
   /** Told each tunnel it opened to the app, as `host:port`. */
   readonly onTunnel?: (target: string) => void;
@@ -47,7 +48,7 @@ export async function startAppProxy(options: AppProxyOptions = {}): Promise<AppP
   /** Requests forwarded to the app whose answer the browser may still be reading. */
   const forwards = new Set<ClientRequest>();
   const refused = (method: string, target: string): void => {
-    options.onRefused?.(`${method} ${target}`);
+    options.onRefused?.(`${method} ${addressForLog(target)}`);
   };
 
   const server = createServer((req, res) => {

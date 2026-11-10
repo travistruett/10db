@@ -5,6 +5,7 @@ import type { AppProxy } from './app-proxy';
 import type { BrowserHost } from './browser-host';
 import { ShotOutcome, type PageCamera, type Shot } from './camera';
 import { requestAllowed } from './origin-guard';
+import { addressForLog, loadFailure } from './load-failure';
 import { capOverlayText, OVERLAY_SELECTORS } from './overlay';
 import { shotOutcome, type PageLoad } from './shot-outcome';
 import { StorageState } from './storage-state';
@@ -21,10 +22,6 @@ export class SignInError extends Error {
   override readonly name = 'SignInError';
 }
 
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 /**
  * Lets through only what `requestAllowed` allows, and names in the log what it refused. A redirect's
  * next hop never reaches a route, so the daemon's proxy is what holds; this is the first check.
@@ -36,7 +33,7 @@ async function guard(context: BrowserContext, appUrl: AppUrl, logger: Logger): P
       await route.continue();
       return;
     }
-    logger.info({ url }, 'the pictures browser refused a request off the app');
+    logger.info({ url: addressForLog(url) }, 'the pictures browser refused a request off the app');
     await route.abort('blockedbyclient');
   });
   await context.routeWebSocket(
@@ -47,7 +44,10 @@ async function guard(context: BrowserContext, appUrl: AppUrl, logger: Logger): P
         socket.connectToServer();
         return;
       }
-      logger.info({ url }, 'the pictures browser refused a WebSocket off the app');
+      logger.info(
+        { url: addressForLog(url) },
+        'the pictures browser refused a WebSocket off the app',
+      );
       void socket.close({ code: 1008, reason: 'off the app' });
     },
   );
@@ -74,7 +74,7 @@ async function load(page: Page, url: string): Promise<PageLoad> {
     const response = await page.goto(url, { waitUntil: 'load', timeout: LOAD_TIMEOUT_MS });
     status = response?.status() ?? null;
   } catch (error) {
-    return { error: message(error), landedUrl: null, status: null, overlayText: null };
+    return { error: loadFailure(error), landedUrl: null, status: null, overlayText: null };
   }
   await page.waitForLoadState('networkidle', { timeout: SETTLE_TIMEOUT_MS }).catch(() => undefined);
   await page
@@ -194,7 +194,7 @@ export function createPlaywrightCamera(host: BrowserHost<Browser>, logger: Logge
           try {
             await page.goto(target.href, { waitUntil: 'load', timeout: LOAD_TIMEOUT_MS });
           } catch (error) {
-            throw new SignInError(`the dev login's address did not load: ${message(error)}`);
+            throw new SignInError(`the dev login's address did not load: ${loadFailure(error)}`);
           }
           await page
             .waitForLoadState('networkidle', { timeout: SETTLE_TIMEOUT_MS })
