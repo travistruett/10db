@@ -36,7 +36,12 @@ export {
   type PassPageWait,
   type PutBackKeptWork,
 } from './pass-open';
-export { createPassPullRequests, passGateKind, type PassPullRequests } from './pass-pr';
+export {
+  createPassPullRequests,
+  PASS_GATE_NOTICE,
+  passGateKind,
+  type PassPullRequests,
+} from './pass-pr';
 export { createKeptWorkGate, subscribeKeptWorkLanding } from './kept-work-start';
 export { answerPassMoveCard, resumePassSettles, subscribePassSettles } from './pass-settle';
 export { createFailedRestarts } from './restart';

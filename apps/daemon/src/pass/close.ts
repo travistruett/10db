@@ -28,6 +28,7 @@ import {
   getPass,
   getPassProgress,
   getProject,
+  getTask,
   getWorkstreamRow,
   listPassTasks,
   listPassesIn,
@@ -42,7 +43,7 @@ import {
   transitionBatch,
   type WriteContext,
 } from '@10db/db';
-import { jobKey, JobQueue } from '../delivery';
+import { jobKey, JobQueue, PASS_GATE_NOTICE } from '../delivery';
 import { GitNetworkError, GitTrustError, PassFolderOffBranchError, shellWord } from '../git';
 import { flagCard } from '../inbox';
 import {
@@ -87,6 +88,8 @@ export interface CloseShip {
     passed: boolean;
     aborted: boolean;
     logPath: string;
+    /** The end of the gate's log; empty when it did not run. */
+    tail: string;
     dirtyNamed: readonly string[];
   }>;
   pushPassBranch(passId: PassId, signal: AbortSignal): Promise<'pushed' | 'no_origin'>;
@@ -220,9 +223,16 @@ async function failGate(
   deps: CloseDeps,
   pass: PassDto,
   where: 'scratch' | 'folder',
-  ran: { readonly logPath: string },
+  ran: { readonly logPath: string; readonly tail: string },
 ): Promise<void> {
   const tasks = await namedInLog(deps, pass, ran.logPath);
+  // The pages this close took out before a gate in the folder: those its plan set to Take Out.
+  const takenOut =
+    where === 'folder'
+      ? (getPassProgress(deps.state.db, pass.id).closePlan?.pages ?? [])
+          .filter((page) => page.choice === PassClosePageChoice.TakeOut)
+          .map((page) => getTask(deps.state.db, page.taskId).title)
+      : [];
   const detail: PassGateFailedDetail = {
     kind: 'pass_gate_failed',
     passId: pass.id,
@@ -232,10 +242,15 @@ async function failGate(
   };
   const named =
     tasks.length === 0 ? '' : ` It names files of ${tasks.map((t) => t.title).join(', ')}.`;
+  const one = takenOut.length === 1;
+  const inFolder =
+    takenOut.length === 0
+      ? 'in Your folder, so the pass is open again'
+      : `in Your folder, after ${takenOut.join(', ')} ${one ? 'was' : 'were'} taken out, so the pass is open again without ${one ? 'it' : 'them'}`;
   const place =
     where === 'scratch'
       ? 'in a scratch worktree of the tip, before any page was taken out, so the pass is open again as it was'
-      : 'in Your folder, after the pages set to Take Out were taken out, so the pass is open again without them; their work is kept with their tasks';
+      : `${inFolder}${takenOut.length === 0 ? '' : `; ${one ? 'its' : 'their'} work is kept with ${one ? 'its task' : 'their tasks'}`}`;
   deps.state.write((ctx) => {
     if (!reopenClosingPass(ctx, pass.id)) return;
     // A change chosen Drop was passed over at step 2 and its take-out has not dropped it: it lands
@@ -247,6 +262,16 @@ async function failGate(
     if (getBatch(ctx.tx, batch.id).state === BatchState.Failed)
       transitionBatch(ctx, batch.id, { to: BatchState.Open, reason: 'the pass is open again' });
     clearPassNotice(ctx, pass.id, CLOSE_NOTICE);
+    // A scratch gate's notice is its own; one in the folder is said here, once the pass is open.
+    if (where === 'folder')
+      setPassNotice(ctx, pass.id, {
+        id: PASS_GATE_NOTICE,
+        kind: PassNoticeKind.GateFailed,
+        text: `The gate failed ${inFolder}:\n${ran.tail}`,
+        sendable: true,
+        cardId: null,
+        at: ctx.now,
+      });
     flagCard(ctx, {
       projectId: pass.projectId,
       workstreamId: null,

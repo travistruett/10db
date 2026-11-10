@@ -205,7 +205,8 @@ describe('Close Pass', () => {
       name: 'in the folder, after the take-outs',
       project: { gateCommand: "echo 'the gate says no'; false", delivery: 'local' as const },
       takenOut: true,
-      notice: /^The gate failed in Your folder, after the pages set to Take Out were taken out/,
+      notice:
+        /^The gate failed in Your folder, after People: UI work was taken out, so the pass is open again without it:/,
     },
   ])('reopens the pass when its gate fails $name', async ({ project, takenOut, notice }) => {
     await world(project);
@@ -228,6 +229,65 @@ describe('Close Pass', () => {
     expect(said.map((n) => n.kind)).toEqual(['gate_failed']);
     expect(said[0]?.text).toMatch(notice);
     expect(said[0]?.text.split('\n').slice(1).join('\n')).toContain('the gate says no');
+  });
+
+  it('names no take-out when its folder gate fails with every page signed off', async () => {
+    await world({ gateCommand: "echo 'the gate says no'; false", delivery: 'local' });
+    await twoTurns();
+    const closes = createPassCloses(closeDeps());
+    const shown = await closes.preview(w.opened.pass.id);
+    await closes.close(w.opened.pass.id, {
+      token: shown.token,
+      pages: [
+        { taskId: w.settings.id, choice: PassClosePageChoice.SignOff },
+        { taskId: w.people.id, choice: PassClosePageChoice.SignOff },
+      ],
+      files: [],
+      shared: [],
+    });
+    await w.h.jobs.idle();
+
+    expect(passState()).toBe('OPEN');
+    const said = getPassProgress(w.h.store.db, w.opened.pass.id).notices;
+    expect(said.map((n) => n.text.split('\n')[0])).toEqual([
+      'The gate failed in Your folder, so the pass is open again:',
+    ]);
+  });
+
+  it('writes no gate notice when an Abandon takes the pass over as its folder gate fails', async () => {
+    await world({ gateCommand: "echo 'the gate says no'; false", delivery: 'local' });
+    await twoTurns();
+    const deps = closeDeps();
+    let gated = false;
+    let abandoned = false;
+    await confirm({
+      ...deps,
+      ship: {
+        ...deps.ship,
+        gatePassTip: async (i) => {
+          const ran = await deps.ship.gatePassTip(i);
+          gated = true;
+          return ran;
+        },
+      },
+      git: {
+        ...deps.git,
+        // The builder's Abandon lands while the close reads which pages the failure names.
+        commitAt: async (...a) => {
+          if (gated && !abandoned) {
+            abandoned = true;
+            deps.state.write((ctx) => {
+              setAbandonStep(ctx, w.opened.pass.id, AbandonStep.Abandoning);
+            });
+          }
+          return deps.git.commitAt(...a);
+        },
+      },
+    });
+
+    expect(abandoned).toBe(true);
+    expect(passState()).toBe('ABANDONING');
+    expect(getPassProgress(w.h.store.db, w.opened.pass.id).notices).toEqual([]);
   });
 
   describe('after its failed gate took a page out and Add Page put it back', () => {
@@ -518,7 +578,13 @@ describe('Close Pass', () => {
               return real.gatePassTip(i);
             }
             stopped = true;
-            return Promise.resolve({ passed: false, aborted: true, logPath: '', dirtyNamed: [] });
+            return Promise.resolve({
+              passed: false,
+              aborted: true,
+              logPath: '',
+              tail: '',
+              dirtyNamed: [],
+            });
           },
         };
       },
