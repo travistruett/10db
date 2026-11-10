@@ -196,4 +196,30 @@ describe("the Move to a Separate Copy card's answer", () => {
     expect(getTask(w.h.store.db, w.settings.id).passId).toBe(w.opened.pass.id);
     expect(w.runOf(w.settings)).toBe(run);
   });
+
+  it('asks no more after Not Now: a later ask is refused with no new card', async () => {
+    w = await openPassWorld();
+    const tools = laneTools(w, w.settings);
+    const refused = await tools.request_claim({
+      opId: 'op-deps-1',
+      kind: 'hazard',
+      name: 'deps',
+      reason: 'add a date library',
+    });
+    if (refused.granted || refused.inboxId === null) throw new Error('no card');
+    w.h.inbox.answer(refused.inboxId, { choice: PASS_NOT_NOW_CHOICE });
+
+    const again = await tools.request_claim({
+      opId: 'op-deps-2',
+      kind: 'hazard',
+      name: 'deps',
+      reason: 'add it after all',
+    });
+
+    if (again.granted) throw new Error('deps was granted in the folder');
+    expect(again.inboxId).toBe(refused.inboxId);
+    expect(again.instruction).toMatch(/builder chose Not Now/);
+    expect(w.h.cards()).toEqual([]);
+    expect(hazardsHeld(w, w.settings)).toEqual([]);
+  });
 });

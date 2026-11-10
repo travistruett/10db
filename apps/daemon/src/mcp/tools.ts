@@ -594,25 +594,26 @@ export function createToolHandlers(
           ? passHazardAsk(db, project, task, input.name)
           : ({ kind: 'none' } as const);
       if (passAsk.kind === 'move')
-        return deps.state.write((ctx) =>
-          record(
+        return deps.state.write((ctx) => {
+          const asked = askMoveToCopy(ctx, {
+            pass: passAsk.pass,
+            taskId: task.id,
+            workstreamId,
+            hazard: input.name,
+          });
+          return record(
             'request_claim',
             input.opId,
             {
               granted: false,
               heldBy: null,
-              inboxId: askMoveToCopy(ctx, {
-                pass: passAsk.pass,
-                taskId: task.id,
-                workstreamId,
-                hazard: input.name,
-              }),
+              inboxId: asked.inboxId,
               waiting: false,
-              instruction: moveToCopyInstruction(input.name),
+              instruction: moveToCopyInstruction(input.name, asked.notNow),
             },
             ctx,
-          ),
-        );
+          );
+        });
       const signal = deps.sessionSignal(sessionId) ?? new AbortController().signal;
       const shared = sharedGrantOf(kind, input.name, input.reason, signal);
       // A claim another task holds is waited for, not given up on. Every call for the claim joins the
