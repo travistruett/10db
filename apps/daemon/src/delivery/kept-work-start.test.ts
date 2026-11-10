@@ -19,7 +19,7 @@ import {
 import { afterEach, describe, expect, it } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
 import { startTaskWithPlan } from '../team';
-import { holdForPutBack, subscribeKeptWorkLanding } from './index';
+import { createKeptWorkGate, subscribeKeptWorkLanding } from './index';
 
 // Workbench spec §5.4, call 33: an ordinary start of a task taken out of a pass puts its saved work
 // back in the checkout it runs in before any lane can launch, names a file that did not go back on
@@ -109,17 +109,24 @@ describe('an ordinary start of a task with saved Workbench work', () => {
     expect(existsSync(join(h.repo, 'src/api/new.ts'))).toBe(false);
   });
 
-  it('holds a local start until the work is back, then queues it', async () => {
+  it('launches a local run only once its saved work is back in Your folder, after a restart too', async () => {
     h = createDeliveryHarness({ delivery: 'local' } satisfies Partial<ProjectInput>);
     const task = taskWithSavedWork();
     const run = startTaskWithPlan(h.state, task.id);
+    const gate = createKeptWorkGate(h.ctx);
 
-    holdForPutBack(h.ctx, run.id);
-    expect(getWorkstream(h.store.db, run.id).state).toBe(WorkstreamState.Held);
+    expect(gate.ready(run)).toBe(false);
+    // Asked again before the put-back has run, it queues no second one.
+    expect(gate.ready(run)).toBe(false);
+    expect(read(h.repo, 'src/api/a.ts')).toBe('a\n');
     await h.jobs.idle();
 
-    expect(getWorkstream(h.store.db, run.id).state).toBe(WorkstreamState.Queued);
+    expect(gate.ready(run)).toBe(true);
     expect(read(h.repo, 'src/api/a.ts')).toBe('kept\n');
+    expect(notices(task)).toEqual(['Put back its saved Workbench work: 2 files.']);
+    // A restart's gate knows nothing of the put-back: it finds the work already back.
+    expect(createKeptWorkGate(h.ctx).ready(run)).toBe(true);
+    expect(getWorkstream(h.store.db, run.id).state).toBe(WorkstreamState.Queued);
   });
 
   it("deletes the saved work's ref once the batch holding the work ships", async () => {

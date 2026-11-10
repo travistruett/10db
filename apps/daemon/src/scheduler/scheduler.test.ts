@@ -138,6 +138,8 @@ afterEach(() => {
 
 function scheduler(caps = { global: 4 }, awaited: ReadonlySet<WorkstreamId> = new Set()) {
   return createScheduler({
+    // The launch rule for saved Workbench work is the delivery harness's (kept-work-start.test.ts).
+    keptWork: { ready: () => true },
     state,
     clock,
     caps,

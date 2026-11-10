@@ -19,10 +19,8 @@ import {
   WorkstreamState,
   type SystemCheckDto,
   type PassAbandonedDto,
-  type WorkstreamDto,
   type PassId,
   type TakeOutResultDto,
-  type TaskId,
   TaskMessageId,
   TaskMessageKind,
   type TaskLanding,
@@ -169,8 +167,6 @@ export function createServices(deps: {
   readonly abandonPass: (passId: PassId) => Promise<PassAbandonedDto>;
   /** A pass's pull request: its preview, and Open Pull Request. */
   readonly passPullRequests: Pick<PassPullRequests, 'preview' | 'open'>;
-  /** Holds a run of a task with saved Workbench work until the work is back in Your folder. */
-  readonly holdForPutBack: (id: WorkstreamId) => void;
   readonly shipper: Shipper;
   readonly accounts: AccountService;
   readonly moves: Pick<AccountMoves, 'move'>;
@@ -191,13 +187,6 @@ export function createServices(deps: {
 }): ApiServices & TaskRemovalServices & TaskLookupServices {
   const db = deps.state.db;
   const restarts = createFailedRestarts(deps);
-
-  /** A start in a local project runs in Your folder; a taken-out task's saved work goes back first. */
-  function startLocally(taskId: TaskId): WorkstreamDto {
-    const run = startTaskWithPlan(deps.state, taskId);
-    deps.holdForPutBack(run.id);
-    return getWorkstream(db, run.id);
-  }
   const catalogueStatus = (): CatalogueStatusDto => ({
     ...deps.catalogue.status(),
     ...(deps.catalogueOn ? {} : { lastAttempt: CatalogueAttempt.Off }),
@@ -327,7 +316,7 @@ export function createServices(deps: {
       const started: TaskStarted =
         project.delivery === Delivery.PullRequest
           ? { kind: 'batch', batch: deps.starter.startTask(taskId) }
-          : { kind: 'workstream', workstream: startLocally(taskId) };
+          : { kind: 'workstream', workstream: startTaskWithPlan(deps.state, taskId) };
       // The batch it left no longer waits on the attempt it started over from.
       if (left) deps.shipper.checkBatch(left);
       // The failed run is left behind by the new one; its card's Retry would be refused.

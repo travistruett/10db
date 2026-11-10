@@ -107,6 +107,11 @@ export interface SchedulerOptions {
   readonly connecting?: () => { readonly accountId: AccountId } | null;
   /** Accounts with no model profile yet: their queued work is left alone, not claimed and given back each tick. */
   readonly modelWait?: Pick<ModelListWait, 'holds'>;
+  /**
+   * Whether a run may launch as far as its task's saved Workbench work goes (call 33): false while a
+   * run outside any batch waits for that work to be put back.
+   */
+  readonly keptWork: { ready(run: WorkstreamDto): boolean };
 }
 
 export interface Scheduler {
@@ -315,6 +320,8 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
     };
     const line = listWorkstreams(db, { states: [WorkstreamState.Queued] }).toSorted(queueOrder);
     for (const ws of line) {
+      // Before the caps: the put-back it waits for runs whether or not there is room yet.
+      if (!opts.keptWork.ready(ws)) continue;
       const overCaps = awaited.has(ws.id);
       // At the daemon-wide cap ordinary work waits, unless a warm pass session could close for it;
       // a page goes on to say it waits. The room check below decides either.

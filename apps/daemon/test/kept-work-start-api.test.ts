@@ -55,7 +55,7 @@ function commitFile(path: string, content: string): string {
 }
 
 describe('POST /tasks/:id/start of a task with saved Workbench work', () => {
-  it('puts the work back in Your folder of a local project, then queues the run', async () => {
+  it('puts the work back in Your folder of a local project, then lets the run launch', async () => {
     const project = await api().post('/projects', ProjectDto, {
       name: 'demo',
       repoPath: repo.path,
@@ -87,13 +87,16 @@ describe('POST /tasks/:id/start of a task with saved Workbench work', () => {
     });
 
     expect(res.status).toBe(201);
-    const run = await waitFor(() =>
-      listWorkstreams(daemon.state.db, { projectId: project.id }).find(
-        (ws) => ws.state === WorkstreamState.Queued,
-      ),
-    );
-    expect(run.taskId).toBe(taskId);
+    // The put-back's last write records that nothing is saved any more.
+    await waitFor(() => getTaskKeptWork(daemon.state.db, taskId) === null);
     expect(readFileSync(join(repo.path, 'src/settings.ts'), 'utf8')).toBe('saved\n');
+    // No lane can start here (the daemon-wide cap is 0): the put-back ran ahead of any launch.
+    expect(
+      listWorkstreams(daemon.state.db, { projectId: project.id }).map((ws) => [
+        ws.taskId,
+        ws.state,
+      ]),
+    ).toEqual([[taskId, WorkstreamState.Queued]]);
     expect(getTaskKeptWork(daemon.state.db, taskId)).toBeNull();
     expect(listTaskThread(daemon.state.db, taskId).map((m) => m.body)).toContain(
       'Put back its saved Workbench work: 1 file.',
