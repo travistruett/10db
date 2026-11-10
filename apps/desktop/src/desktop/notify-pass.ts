@@ -52,7 +52,11 @@ export function readyPageOf(item: InboxItemDto): PassCheckDetail | null {
   return detail.success ? detail.data : null;
 }
 
-const ClickedNotification = z.object({ id: z.number() });
+/**
+ * What the plugin reports for a click (tauri-plugin-notification 2.8 `ActionPerformed`): the action,
+ * `tap` for the notification itself, and the notification as shown, whose id names the page.
+ */
+const ClickedNotification = z.object({ notification: z.object({ id: z.number() }) });
 
 /**
  * Registers the one listener for clicks on ready notifications; later calls keep the first. Resolves
@@ -60,11 +64,10 @@ const ClickedNotification = z.object({ id: z.number() });
  */
 export function listenForPassClicks(onClick: (target: PassPageTarget) => void): Promise<void> {
   if (!isTauri()) return Promise.resolve();
-  listening ??= onAction((notification) => {
-    // The plugin's payload is the notification as sent, read back by its id.
-    const clicked = ClickedNotification.safeParse(notification);
+  listening ??= onAction((performed) => {
+    const clicked = ClickedNotification.safeParse(performed);
     if (!clicked.success) return;
-    const target = shown.find((n) => n.id === clicked.data.id);
+    const target = shown.find((n) => n.id === clicked.data.notification.id);
     if (target === undefined) return;
     markPassNotificationsActed(target.taskId);
     onClick({ projectId: target.projectId, taskId: target.taskId });

@@ -49,7 +49,11 @@ function mockNative() {
   });
   vi.stubGlobal('Notification', Object.assign(notify, { permission: 'granted' }));
   vi.spyOn(document, 'hasFocus').mockReturnValue(false);
-  return { calls, sent, click: (id: number) => clicks?.onmessage({ id }) };
+  // What tauri-plugin-notification 2.8 sends on a click (desktop.rs `performed`): the action, and the
+  // notification as it was shown.
+  const click = (id: number) =>
+    clicks?.onmessage({ actionId: 'tap', inputValue: null, notification: { id, title: '' } });
+  return { calls, sent, click };
 }
 
 describe('a ready notification', () => {
