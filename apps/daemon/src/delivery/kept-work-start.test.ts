@@ -1,7 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  EventType,
   TaskMessageAuthor,
   WorkspaceMode,
   WorkstreamState,
@@ -60,27 +59,41 @@ const notices = (task: TaskDto) =>
     .map((m) => m.body);
 
 describe('an ordinary start of a task with saved Workbench work', () => {
-  it('puts the work back in Your folder before its batch opens', async () => {
+  /** The task's run, once its start has cut its batch. */
+  const runOf = (task: TaskDto) => {
+    const id = getTask(h.store.db, task.id).workstreamId;
+    if (id === null) throw new Error('the task has no run');
+    return getWorkstream(h.store.db, id);
+  };
+
+  /** What the scheduler does before a launch: asks the gate, and on no, waits for the put-back. */
+  async function launchable(task: TaskDto): Promise<void> {
+    const gate = createKeptWorkGate(h.ctx);
+    expect(gate.ready(runOf(task))).toBe(false);
+    await h.jobs.idle();
+    expect(gate.ready(runOf(task))).toBe(true);
+  }
+
+  it('puts the work back in Your folder before its run can launch, and changes nothing before', async () => {
     h = createDeliveryHarness({}, { trigger: false });
     const task = taskWithSavedWork();
-    const seenAtOpen: string[] = [];
-    const unsubscribe = h.bus.subscribe((event) => {
-      if (event.type === EventType.BatchUpdated && event.data['to'] === 'OPEN')
-        seenAtOpen.push(read(h.repo, 'src/api/a.ts'));
-    });
 
     const batch = h.starter.startTask(task.id);
     await h.jobs.idle();
-    unsubscribe();
-
     expect(getBatch(h.store.db, batch.id).state).toBe('OPEN');
-    expect(seenAtOpen).toEqual(['kept\n']);
+    // The cut wrote nothing of the saved work: a start refused there would leave it as it was.
+    expect(read(h.repo, 'src/api/a.ts')).toBe('a\n');
+    expect(getTaskKeptWork(h.store.db, task.id)).not.toBeNull();
+
+    await launchable(task);
+
+    expect(read(h.repo, 'src/api/a.ts')).toBe('kept\n');
     expect(read(h.repo, 'src/api/new.ts')).toBe('new\n');
     expect(getTaskKeptWork(h.store.db, task.id)).toBeNull();
     expect(notices(task)).toEqual(['Put back its saved Workbench work: 2 files.']);
   });
 
-  it('names a file that does not go back on the thread, and keeps it saved', async () => {
+  it('names a file that does not go back on the thread, keeps it saved, and still lets the run launch', async () => {
     h = createDeliveryHarness({}, { trigger: false });
     const task = taskWithSavedWork();
     // The base moved on the same line since the work was kept: it does not merge.
@@ -88,6 +101,7 @@ describe('an ordinary start of a task with saved Workbench work', () => {
 
     h.starter.startTask(task.id);
     await h.jobs.idle();
+    await launchable(task);
 
     expect(read(h.repo, 'src/api/a.ts')).toBe('moved on\n');
     expect(read(h.repo, 'src/api/new.ts')).toBe('new\n');
@@ -97,12 +111,13 @@ describe('an ordinary start of a task with saved Workbench work', () => {
     expect(getTaskKeptWork(h.store.db, task.id)).not.toBeNull();
   });
 
-  it('puts the work back in a separate copy before its batch opens', async () => {
+  it('puts the work back in a separate copy before its run can launch', async () => {
     h = createDeliveryHarness({}, { trigger: false });
     const task = taskWithSavedWork({ workspaceMode: WorkspaceMode.Worktree });
 
     const batch = h.starter.startTask(task.id);
     await h.jobs.idle();
+    await launchable(task);
 
     const path = getBatch(h.store.db, batch.id).worktreePath ?? '';
     expect(read(path, 'src/api/a.ts')).toBe('kept\n');
@@ -135,6 +150,7 @@ describe('an ordinary start of a task with saved Workbench work', () => {
     const task = taskWithSavedWork();
     const batch = h.starter.startTask(task.id);
     await h.jobs.idle();
+    await launchable(task);
     expect(h.git$('for-each-ref', keptRef(task))).not.toBe('');
 
     // The run commits the work that went back, as its commit tool would.
@@ -146,6 +162,25 @@ describe('an ordinary start of a task with saved Workbench work', () => {
     unsubscribe();
 
     expect(getBatch(h.store.db, batch.id).state).toBe('SHIPPED');
+    expect(h.git$('for-each-ref', keptRef(task))).toBe('');
+  });
+});
+
+describe('a local run of a task with saved Workbench work', () => {
+  it("deletes the saved work's ref once the run is done", async () => {
+    h = createDeliveryHarness({ delivery: 'local' } satisfies Partial<ProjectInput>);
+    const unsubscribe = subscribeKeptWorkLanding(h.bus, h.ctx);
+    const task = taskWithSavedWork();
+    const run = startTaskWithPlan(h.state, task.id);
+    const gate = createKeptWorkGate(h.ctx);
+    gate.ready(run);
+    await h.jobs.idle();
+    expect(h.git$('for-each-ref', keptRef(task))).not.toBe('');
+
+    h.settle(run.id, 'DONE');
+    await h.jobs.idle();
+    unsubscribe();
+
     expect(h.git$('for-each-ref', keptRef(task))).toBe('');
   });
 });
