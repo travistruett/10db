@@ -95,6 +95,16 @@ export function listUnfinishedTakeOuts(db: DbReader): PassTakeOutRow[] {
     .all();
 }
 
+/** Every take-out of the pass, oldest first: what an Abandon put back and left. */
+export function listPassTakeOuts(db: DbReader, passId: PassId): PassTakeOutRow[] {
+  return db
+    .select()
+    .from(schema.passTakeOuts)
+    .where(eq(schema.passTakeOuts.passId, passId))
+    .orderBy(asc(schema.passTakeOuts.createdAt))
+    .all();
+}
+
 /** The task's latest take-out, from any pass, or undefined when it has none. */
 export function lastTakeOut(db: DbReader, taskId: TaskId): PassTakeOutRow | undefined {
   return db

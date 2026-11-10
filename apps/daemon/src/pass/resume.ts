@@ -6,8 +6,10 @@ import {
   lastTakeOut,
   listPassTasks,
   listProjects,
+  listUnfinishedAbandons,
   listUnfinishedTakeOuts,
 } from '@10db/db';
+import { abandonPass } from './abandon';
 import { passFolderOn } from './folder';
 import { putBackKeptWork } from './put-back';
 import { takeOut, TakeOutWithin, type TakeOutDeps } from './take-out';
@@ -41,7 +43,8 @@ async function putBackAgain(deps: TakeOutDeps, passId: PassId, repo: string): Pr
 /**
  * Start-up, after `recoverOnStartup`: each open pass whose folder is off its branch gets its one card
  * (never a repoint), one on it puts back saved work a restart cut short, and each take-out the builder asked for that a stop cut short goes on as a job.
- * The take-outs of an Abandon or a close go on with it. Nothing here waits for those jobs.
+ * An Abandon that has not finished goes on as a job from its recorded step, its take-outs inside it;
+ * a close's go on with it. Nothing here waits for those jobs.
  */
 export async function resumePassWork(deps: TakeOutDeps): Promise<void> {
   const db = deps.state.db;
@@ -57,6 +60,14 @@ export async function resumePassWork(deps: TakeOutDeps): Promise<void> {
       );
     }
   }
+  // An Abandon goes on from its own recorded step, its take-outs inside it.
+  for (const pass of listUnfinishedAbandons(db))
+    abandonPass(deps, pass.id).catch((error: unknown) => {
+      deps.logger.warn(
+        { passId: pass.id, err: errorText(error) },
+        'abandon not finished at start-up',
+      );
+    });
   for (const row of listUnfinishedTakeOuts(db)) {
     if (getPass(db, row.passId).state !== PassState.Open) continue;
     takeOut(deps, { taskId: row.taskId, within: TakeOutWithin.Alone }).catch((error: unknown) => {

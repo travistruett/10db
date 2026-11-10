@@ -1,5 +1,6 @@
 import { passHoldsFolder, PassId, type InboxAnswer, type InboxItemDto } from '@10db/contracts';
-import { findPass, getPass, getProject } from '@10db/db';
+import { findPass, getBatch, getPass, getProject } from '@10db/db';
+import { z } from 'zod';
 import { jobKey, JobQueue } from '../delivery';
 import { GitError, type SwitchBack } from '../git';
 import {
@@ -12,6 +13,9 @@ import {
   withdrawFolderCard,
 } from './folder';
 import { passBranch, type PassWorkDeps } from './kept-work';
+import { moveToLabel, raiseAbandonCard, withdrawAbandonCard } from './abandon';
+
+const PassCardKindSchema = z.enum(PassCardKind);
 
 // Workbench spec §5.1, §5.4: the answers to a pass's cards.
 
@@ -31,52 +35,108 @@ function refusal(outcome: Exclude<SwitchBack, { kind: 'switched' }>): string {
   }
 }
 
+/** The folder card's answer: the built switch back to the pass's branch. */
+async function switchToPass(deps: PassWorkDeps, passId: PassId, choice: string): Promise<void> {
+  const db = deps.state.db;
+  const pass = getPass(db, passId);
+  if (!passHoldsFolder(pass.state)) {
+    withdrawFolderCard(deps, pass);
+    return;
+  }
+  const branch = passBranch(db, pass);
+  if (choice !== switchBackLabel(branch)) return;
+  const repo = getProject(db, pass.projectId).repoPath;
+  const on = await deps.git.currentBranch(repo);
+  if (on === null) {
+    raiseFolderCard(deps, pass, on, 'check out a branch first: 10db switches only from one');
+    return;
+  }
+  if (on !== branch) {
+    const why = await switchFolder(deps, repo, on, branch, refusal({ kind: 'gone' }));
+    if (why !== null) {
+      raiseFolderCard(deps, pass, on, why);
+      return;
+    }
+  }
+  await passFolderOn(deps, pass.id);
+}
+
+/** The Abandon card's answer: the built switch from the pass's branch to the one it came from. */
+async function moveHome(deps: PassWorkDeps, passId: PassId, choice: string): Promise<void> {
+  const db = deps.state.db;
+  const pass = getPass(db, passId);
+  if (choice !== moveToLabel(pass.returnBranch)) return;
+  const repo = getProject(db, pass.projectId).repoPath;
+  const on = await deps.git.currentBranch(repo);
+  const { prUrl } = getBatch(db, pass.batchId);
+  const again = (why: string): void => {
+    raiseAbandonCard(deps, pass, { on, left: [], pullRequest: prUrl, why });
+  };
+  if (on === null) {
+    again('check out a branch first: 10db switches only from one');
+    return;
+  }
+  if (on !== pass.returnBranch) {
+    const why = await switchFolder(
+      deps,
+      repo,
+      on,
+      pass.returnBranch,
+      `${pass.returnBranch} is gone`,
+    );
+    if (why !== null) {
+      again(why);
+      return;
+    }
+  }
+  withdrawAbandonCard(deps, pass);
+}
+
 /**
- * Acts on the answer to a pass's card before the inbox records it. The folder card's switch runs as
- * a job under the project's delivery key: the built switch, keeping uncommitted changes the switch
- * does not write. A refusal, or a branch that cannot be read, raises the card again with the reason;
- * a folder back on the pass's branch loses its card, as does a pass that no longer holds the folder,
- * whose branch is no place to switch to.
+ * Switches the folder from `from` to `branch`, keeping uncommitted changes; why not, or null. `gone`
+ * says why when the branch cannot be read.
+ */
+async function switchFolder(
+  deps: PassWorkDeps,
+  repo: string,
+  from: string,
+  branch: string,
+  gone: string,
+): Promise<string | null> {
+  const sha = await deps.git.commitAt(repo, branch).catch((error: unknown) => {
+    if (error instanceof GitError) return null;
+    throw error;
+  });
+  if (sha === null) return gone;
+  const outcome = await deps.git.switchBack(repo, from, { branch, sha }, { keepChanges: true });
+  return outcome.kind === 'switched' ? null : refusal(outcome);
+}
+
+/**
+ * Acts on the answer to a pass's card before the inbox records it, as a job under the project's
+ * delivery key. The folder card switches back to the pass's branch while the pass holds the folder,
+ * else it is withdrawn; the Abandon card moves the folder to the branch the pass came from. Each runs
+ * the built switch, keeping uncommitted changes it does not write; a refusal, or a branch that cannot
+ * be read, raises the card again with the reason.
  */
 export function answerPassCard(deps: PassWorkDeps, item: InboxItemDto, answer: InboxAnswer): void {
   // The detail is JSON read back from the database: a boundary, so parse it.
   const passId = PassId.safeParse(item.detail?.[PASS_CARD_DETAIL]);
-  if (!passId.success || item.detail?.[PASS_CARD_KIND] !== PassCardKind.Folder) return;
-  const db = deps.state.db;
-  const found = findPass(db, passId.data);
+  const kind = PassCardKindSchema.safeParse(item.detail?.[PASS_CARD_KIND]);
+  if (!passId.success || !kind.success) return;
+  const found = findPass(deps.state.db, passId.data);
   if (!found) return;
   deps.jobs.run(
     jobKey({ projectId: found.projectId, worktreePath: null }, JobQueue.Cut),
     async () => {
-      const pass = getPass(db, found.id);
-      if (!passHoldsFolder(pass.state)) {
-        withdrawFolderCard(deps, pass);
-        return;
-      }
-      const branch = passBranch(db, pass);
-      if (answer.choice !== switchBackLabel(branch)) return;
-      const repo = getProject(db, pass.projectId).repoPath;
-      const on = await deps.git.currentBranch(repo);
-      if (on === null) {
-        raiseFolderCard(deps, pass, on, 'check out a branch first: 10db switches only from one');
-        return;
-      }
-      if (on !== branch) {
-        const sha = await deps.git.commitAt(repo, branch).catch((error: unknown) => {
-          if (error instanceof GitError) return null;
-          throw error;
-        });
-        if (sha === null) {
-          raiseFolderCard(deps, pass, on, refusal({ kind: 'gone' }));
+      switch (kind.data) {
+        case PassCardKind.Folder:
+          await switchToPass(deps, found.id, answer.choice);
           return;
-        }
-        const outcome = await deps.git.switchBack(repo, on, { branch, sha }, { keepChanges: true });
-        if (outcome.kind !== 'switched') {
-          raiseFolderCard(deps, pass, on, refusal(outcome));
+        case PassCardKind.Abandon:
+          await moveHome(deps, found.id, answer.choice);
           return;
-        }
       }
-      await passFolderOn(deps, pass.id);
     },
   );
 }

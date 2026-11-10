@@ -28,6 +28,7 @@ import {
   leavePass,
   listPassDirt,
   listPassTasks,
+  listUnfinishedAbandons,
   passHoldingFolder,
   passHoldingTask,
   passPageAreas,
@@ -371,6 +372,24 @@ describe("a pass's Abandon", () => {
     expect(getPass(store.db, pass.id).state).toBe(PassState.Abandoned);
     expect(getBatch(store.db, batch.id).state).toBe('ABANDONED');
     expect(findOpenPass(store.db, project.id)).toBeUndefined();
+  });
+
+  it('records its last step on the abandoned pass, and lists each pass whose Abandon has not finished', () => {
+    const { pass } = store.write((ctx) => insertPass(ctx, passInput([task()]))).value;
+    expect(listUnfinishedAbandons(store.db)).toEqual([]);
+    store.write((ctx) => {
+      setAbandonStep(ctx, pass.id, AbandonStep.Abandoning);
+    });
+    expect(listUnfinishedAbandons(store.db).map((p) => p.id)).toEqual([pass.id]);
+    store.write((ctx) => {
+      abandonPassAndBatch(ctx, pass.id);
+    });
+    expect(listUnfinishedAbandons(store.db).map((p) => p.id)).toEqual([pass.id]);
+    store.write((ctx) => {
+      setAbandonStep(ctx, pass.id, AbandonStep.IndexRefreshed);
+    });
+    expect(getPass(store.db, pass.id).state).toBe(PassState.Abandoned);
+    expect(listUnfinishedAbandons(store.db)).toEqual([]);
   });
 
   it('moves neither when the batch cannot be abandoned', () => {

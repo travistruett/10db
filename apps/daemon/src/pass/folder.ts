@@ -11,7 +11,7 @@ import { passBranch, type PassWorkDeps } from './kept-work';
 export const PASS_CARD_DETAIL = 'passId';
 /** The detail key that says which of a pass's cards it is. */
 export const PASS_CARD_KIND = 'passCard';
-export const PassCardKind = { Folder: 'folder' } as const;
+export const PassCardKind = { Folder: 'folder', Abandon: 'abandon' } as const;
 export type PassCardKind = (typeof PassCardKind)[keyof typeof PassCardKind];
 
 /** The fold key of a pass's one card about where the folder is. */

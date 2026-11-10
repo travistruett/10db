@@ -19,7 +19,7 @@ import {
   type TaskDto,
   type TaskId,
 } from '@10db/contracts';
-import { and, asc, eq, inArray, ne, notInArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, lt, ne, notInArray, or } from 'drizzle-orm';
 import * as schema from '../schema';
 import { findUnfinishedBatch, insertBatch, transitionBatch } from './batches';
 import { getProject } from './projects';
@@ -257,7 +257,8 @@ export function getAbandonStep(db: DbReader, passId: PassId): AbandonStep | null
 
 /**
  * Records a finished step of the pass's Abandon (spec §5.4), so a restart goes on from the next. The
- * first step moves an open pass to `ABANDONING`; a step is never recorded below the last one.
+ * first step moves an open pass to `ABANDONING`; a step is never recorded below the last one. The last,
+ * the folder's index refreshed, follows step 7's `abandonPassAndBatch` and leaves the pass `ABANDONED`.
  */
 export function setAbandonStep(ctx: WriteContext, passId: PassId, step: AbandonStep): void {
   const pass = getPass(ctx.tx, passId);
@@ -265,7 +266,10 @@ export function setAbandonStep(ctx: WriteContext, passId: PassId, step: AbandonS
   const from: readonly PassState[] =
     step === AbandonStep.Abandoning
       ? [PassState.Open, PassState.Abandoning]
-      : [PassState.Abandoning];
+      : step === AbandonStep.IndexRefreshed
+        ? [PassState.Abandoned]
+        : [PassState.Abandoning];
+  const state = step === AbandonStep.IndexRefreshed ? PassState.Abandoned : PassState.Abandoning;
   if (!from.includes(pass.state))
     throw new ConflictError(`Pass "${pass.name}" is ${pass.state.toLowerCase()}`);
   if (last !== null && step < last)
@@ -274,15 +278,37 @@ export function setAbandonStep(ctx: WriteContext, passId: PassId, step: AbandonS
     );
   ctx.tx
     .update(schema.passes)
-    .set({ state: PassState.Abandoning, abandonStep: step, updatedAt: ctx.now })
+    .set({ state, abandonStep: step, updatedAt: ctx.now })
     .where(eq(schema.passes.id, passId))
     .run();
   ctx.emit({
     type: EventType.PassChanged,
     entityType: 'pass',
     entityId: passId,
-    data: { projectId: pass.projectId, state: PassState.Abandoning, abandonStep: step },
+    data: { projectId: pass.projectId, state, abandonStep: step },
   });
+}
+
+/**
+ * Every pass whose Abandon has not finished, oldest first: `ABANDONING`, or `ABANDONED` before the
+ * folder's index was refreshed. Start-up goes on with each.
+ */
+export function listUnfinishedAbandons(db: DbReader): PassDto[] {
+  return db
+    .select()
+    .from(schema.passes)
+    .where(
+      or(
+        eq(schema.passes.state, PassState.Abandoning),
+        and(
+          eq(schema.passes.state, PassState.Abandoned),
+          lt(schema.passes.abandonStep, AbandonStep.IndexRefreshed),
+        ),
+      ),
+    )
+    .orderBy(asc(schema.passes.openedAt))
+    .all()
+    .map((row) => getPass(db, row.id));
 }
 
 /**

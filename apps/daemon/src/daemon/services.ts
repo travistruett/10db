@@ -18,6 +18,8 @@ import {
   type ProjectPatch,
   WorkstreamState,
   type SystemCheckDto,
+  type PassAbandonedDto,
+  type PassId,
   type TakeOutResultDto,
   type TaskLanding,
   type WorkstreamId,
@@ -155,6 +157,8 @@ export function createServices(deps: {
   readonly openPass: (input: PassOpenInput) => Promise<PassOpened>;
   /** Takes a task out of its pass in the project's delivery queue, stopping its lane through the runner. */
   readonly takeOut: (input: TakeOutInput) => Promise<TakeOutResultDto>;
+  /** Abandons a pass in the project's delivery queue, stopping its lanes through the runner. */
+  readonly abandonPass: (passId: PassId) => Promise<PassAbandonedDto>;
   readonly shipper: Shipper;
   readonly accounts: AccountService;
   readonly moves: Pick<AccountMoves, 'move'>;
@@ -366,6 +370,14 @@ export function createServices(deps: {
         within: TakeOutWithin.Alone,
         ...(input.shared === undefined ? {} : { shared: input.shared }),
       });
+    },
+    abandonPass(passId) {
+      const pass = getPass(db, passId);
+      if (pass.state !== PassState.Open && pass.state !== PassState.Abandoning)
+        throw new ConflictError(
+          `Pass "${pass.name}" is ${pass.state.toLowerCase()}: only an open pass is abandoned`,
+        );
+      return deps.abandonPass(passId);
     },
     async stopPage(taskId) {
       const task = getTask(db, taskId);

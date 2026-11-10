@@ -8,6 +8,7 @@ import {
   insertTakeOut,
   insertTask,
   lastTakeOut,
+  listPassTakeOuts,
   listUnfinishedTakeOuts,
   seedProject,
   type Store,
@@ -93,6 +94,11 @@ describe("a take-out's row", () => {
     store.write((ctx) => advanceTakeOut(ctx, key, { step: TakeOutStep.Done }));
     expect(listUnfinishedTakeOuts(store.db)).toEqual([]);
     expect(lastTakeOut(store.db, taskId)?.step).toBe(TakeOutStep.Done);
+    // The pass's take-outs, finished ones included, are what its Abandon reads back.
+    expect(listPassTakeOuts(store.db, passId)).toEqual([
+      expect.objectContaining({ ...key, step: TakeOutStep.Done, left: ['src/settings/a.tsx'] }),
+    ]);
+    expect(listPassTakeOuts(store.db, mintId('Pass'))).toEqual([]);
   });
 
   it('is deleted when a lone take-out stops, so the task has none', () => {

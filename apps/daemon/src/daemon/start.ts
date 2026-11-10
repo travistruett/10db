@@ -149,6 +149,7 @@ import {
   withdrawStaleClaimWaits,
 } from '../mcp';
 import {
+  abandonPass,
   answerPassCard,
   putBackKeptWork,
   resumePassWork,
@@ -1471,6 +1472,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     starter,
     openPass: (input) => openPass(delivery, input, passOpenDeps),
     takeOut: (input) => takeOut(passTakeOuts, input),
+    abandonPass: (passId) => abandonPass(passTakeOuts, passId),
     shipper,
     accounts: accountService,
     worktreeRoot,

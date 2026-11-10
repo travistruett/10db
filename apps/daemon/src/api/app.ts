@@ -740,6 +740,9 @@ export function createApp(deps: ApiDeps) {
           ),
         ),
     )
+    .post('/passes/:passId/abandon', async (c) =>
+      c.json(await deps.services.abandonPass(PassId.parse(c.req.param('passId')))),
+    )
     .post('/batches/:batchId/ship', (c) =>
       c.json(deps.services.shipBatch(BatchId.parse(c.req.param('batchId')))),
     )

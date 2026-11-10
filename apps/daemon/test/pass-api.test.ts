@@ -5,6 +5,7 @@ import {
   AccountCreatedDto,
   mintId,
   PASS_SIGN_OFF_CHOICE,
+  PassAbandonedDto,
   PassOpenedDto,
   PassViewDto,
   ProjectDto,
@@ -685,5 +686,32 @@ describe('POST /passes/:passId/tasks/:taskId/take-out', () => {
     daemon.state.db.update(schema.passes).set({ state: 'ABANDONING' }).run();
     expect((await takeOutOf(pass, task)).status).toBe(409);
     expect(getTaskRow(task).passId).toBe(pass.id);
+  });
+});
+
+describe('POST /passes/:passId/abandon', () => {
+  it('abandons a pass with a working page: its work kept, the folder home, and a new pass opens', async () => {
+    const { task, pass, project } = await openedPage(WORKING);
+    await waitFor(() => existsSync(join(repo.path, PAGE_FILE)));
+
+    const res = await post(`/passes/${pass.id}/abandon`, {});
+
+    expect(res.status).toBe(200);
+    expect(PassAbandonedDto.parse(res.body)).toMatchObject({
+      reverted: [task.id],
+      folder: { branch: 'main', returned: true },
+    });
+    expect(rawGit('symbolic-ref', '--short', 'HEAD')).toBe('main');
+    expect(existsSync(join(repo.path, PAGE_FILE))).toBe(false);
+    expect(rawGit('show', `refs/10db/kept/${task.id}:${PAGE_FILE}`)).toBe('half');
+    expect(getTaskRow(task).passId).toBeNull();
+    expect((await post(`/passes/${pass.id}/abandon`, {})).status).toBe(409);
+
+    const next = await taskOn(project, 'People: next', ['people']);
+    const opened = await api().post(`/projects/${project.id}/passes`, PassOpenedDto, {
+      name: 'Next',
+      taskIds: [next.id],
+    });
+    expect(opened.pass.state).toBe('OPEN');
   });
 });

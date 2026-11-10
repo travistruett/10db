@@ -64,6 +64,7 @@ import type {
   DecisionId,
   PassId,
   PassOpenedDto,
+  PassAbandonedDto,
   PassOpenRequest,
   PassViewDto,
   TakeOutRequest,
@@ -258,6 +259,12 @@ export interface ApiServices {
    * not open or does not hold the task; answers `tookOut: false` when the page's files kept changing.
    */
   takeOutPage(passId: PassId, taskId: TaskId, input: TakeOutRequest): Promise<TakeOutResultDto>;
+  /**
+   * Abandons the pass (spec §5.4, D23): every unsigned page taken out and put back, the pass and its
+   * batch `ABANDONED`, and the folder returned when nothing landed. Refused (409) once the pass is
+   * neither open nor already abandoning.
+   */
+  abandonPass(passId: PassId): Promise<PassAbandonedDto>;
   /**
    * The project's goals, each with its digest and count of new items since the builder last opened
    * it, and the Ungrouped group. Leaves every view mark as it was.
