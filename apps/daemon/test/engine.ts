@@ -60,7 +60,7 @@ import {
   secretFingerprint,
   type Keychain,
 } from '../src/environment';
-import { createEventBus, createStateStore, type StateStore } from '../src/events';
+import { createEventBus, createStateStore, type EventBus, type StateStore } from '../src/events';
 import { createDeliveryJobs } from '../src/delivery';
 import { createGit } from '../src/git';
 import type { Judge } from '../src/judge';
@@ -87,6 +87,8 @@ import { createMemoryKeychain, createTempRepo, tempDir } from './fixtures';
 export interface TestEngine {
   readonly store: Store;
   readonly state: StateStore;
+  /** Every event the engine's writes push, as the daemon's listeners get them. */
+  readonly bus: EventBus;
   readonly inbox: InboxService;
   readonly runner: Runner;
   readonly adapter: FakeAdapter;
@@ -169,7 +171,8 @@ export async function createTestEngine(
   // The store stamps sessions with the test clock, so the monthly cap reads the clock's month.
   const clock = new ManualClock();
   const { store, close } = createTestStore(() => clock.now());
-  const state = createStateStore(store, createEventBus());
+  const bus = createEventBus();
+  const state = createStateStore(store, bus);
   seedTeam(state, readDefaultPersonas());
   seedProfiles(state);
   measureForTests(state);
@@ -281,6 +284,9 @@ export async function createTestEngine(
       waitObserverFor: (id) => live.get(id)?.observer,
       sessionSignal: (id) => live.get(id)?.signal,
       askedToHandOff: (id) => live.get(id)?.askedToHandOff(),
+      // As the daemon does: a builder message the MCP side writes goes to the page's session.
+      deliverMessage: (taskId, messageId) =>
+        created.deliverMessage(taskId, messageId, { redo: false }),
       ...(setup.claims
         ? { claimWaitSliceMs: setup.claims.sliceMs, claimPollMs: setup.claims.pollMs }
         : {}),
@@ -362,6 +368,7 @@ export async function createTestEngine(
   const engine: TestEngine = {
     store,
     state,
+    bus,
     inbox,
     runner: created,
     adapter,

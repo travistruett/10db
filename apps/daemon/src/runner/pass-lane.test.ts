@@ -6,7 +6,9 @@ import {
   InvalidError,
   mintId,
   PassCheckDetail,
+  EventType,
   SHARED_ASK_ALLOW_CHOICE,
+  SHARED_ASK_REPLY_CHOICE,
   SharedAskDetail,
   type PassDto,
   type TaskDto,
@@ -629,22 +631,22 @@ describe("a pass turn's shared area", () => {
 });
 
 describe("a pass turn's question about a shared area", () => {
-  it('is withdrawn when the turn ends, and the area is never granted to a Ready page', async () => {
-    const PEOPLE = 'People: list';
+  const PEOPLE = 'People: list';
+  /** People's agent asks for the shared area another page changed. */
+  const asks: FakeStep = {
+    do: 'mcp',
+    tool: 'request_claim',
+    args: { opId: 'op-people-src', kind: 'area', name: 'src', reason: 'a wider button' },
+  };
+
+  /**
+   * Settings and People in a pass, Settings having changed the shared button in a turn of its own;
+   * People's session takes its message, asks for `src`, then runs `rest`.
+   */
+  async function askingAfterSettings(rest: FakeStep[]) {
     engine = await createTestEngine(
       {
-        [PEOPLE]: [
-          [
-            { do: 'consume' },
-            {
-              do: 'mcp',
-              tool: 'request_claim',
-              args: { opId: 'op-people-src', kind: 'area', name: 'src', reason: 'a wider button' },
-            },
-            { do: 'turn_complete', text: 'Kept it to the page.' },
-            { do: 'await_message', contains: 'never sent' },
-          ],
-        ],
+        [PEOPLE]: [[{ do: 'consume' }, asks, ...rest]],
       },
       {
         gateCommand: null,
@@ -696,7 +698,14 @@ describe("a pass turn's question about a shared area", () => {
     mkdirSync(join(engine.repoPath, 'src'), { recursive: true });
     writeFileSync(join(engine.repoPath, 'src/button.ts'), 'button\n');
     await closeHoldsOf(passWork(), settings);
+    return { people, passId, peopleTask: getWorkstreamRow(engine.store.db, people).taskId };
+  }
 
+  it('is withdrawn when the turn ends, and the area is never granted to a Ready page', async () => {
+    const { people, passId } = await askingAfterSettings([
+      { do: 'turn_complete', text: 'Kept it to the page.' },
+      { do: 'await_message', contains: 'never sent' },
+    ]);
     engine.launch(people);
     await waitFor(() => isWaiting(people));
 
@@ -712,6 +721,50 @@ describe("a pass turn's question about a shared area", () => {
     expect(activeClaims(engine.store.db, people).map((c) => c.name)).not.toContain('src');
     const result = engine.adapter.observations.find((o) => o.kind === 'mcp_result');
     expect(result?.detail).toMatchObject({ tool: 'request_claim', isError: false });
+  });
+
+  it("starts the page's next turn with a reply that came as its turn ended", async () => {
+    const { people, passId, peopleTask } = await askingAfterSettings([
+      { do: 'turn_complete', text: 'Kept it to the page.' },
+      { do: 'await_message', contains: 'Use the page one' },
+      { do: 'consume' },
+      { do: 'turn_complete', text: 'Used the page one.' },
+      { do: 'await_message', contains: 'never sent' },
+    ]);
+    // The builder answers as the turn's end is written, before its step 2 withdraws the question.
+    const unsubscribe = engine.bus.subscribe((event) => {
+      if (event.type !== EventType.PassTurnEnded) return;
+      unsubscribe();
+      const asked = listInbox(engine.store.db, {}).find(
+        (i) => SharedAskDetail.safeParse(i.detail).success && i.state === 'OPEN',
+      );
+      if (asked)
+        engine.inbox.answer(asked.id, {
+          choice: SHARED_ASK_REPLY_CHOICE,
+          note: 'Use the page one',
+        });
+    });
+
+    engine.launch(people);
+    await waitFor(
+      () =>
+        listPassTurns(engine.store.db, passId).filter(
+          (t) => t.taskId === peopleTask && t.settledAt !== null,
+        ).length === 2 && isWaiting(people),
+    );
+
+    const reply = listTaskThread(engine.store.db, peopleTask).find(
+      (m) => m.author === 'builder' && m.body === 'Use the page one',
+    );
+    expect(reply).toBeDefined();
+    expect(
+      listPassTurns(engine.store.db, passId)
+        .filter((t) => t.taskId === peopleTask)
+        .map((t) => [t.seq, t.ending, t.messageId]),
+    ).toEqual([
+      [1, 'ready', expect.anything()],
+      [2, 'ready', reply?.id],
+    ]);
   });
 });
 
