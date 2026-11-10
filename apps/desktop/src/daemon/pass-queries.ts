@@ -1,14 +1,43 @@
 import {
+  GoalPassPagesDto,
+  PagesProposalDto,
+  PASS_RETRY_TURN_CHOICE,
+  PassAbandonedDto,
+  PassDto,
   passHoldsTasks,
+  PassOpenedDto,
+  PassStartDto,
+  PassTurnWithFilesDto,
+  PassViewDto,
   SessionActivityData,
+  TakeOutResultDto,
+  TaskMessageDto,
   type DaemonEvent,
+  type GoalId,
+  type InboxItemId,
   type PassId,
+  type PassJoinRequest,
+  type PassOpenRequest,
+  type PassRename,
   type PassTurnId,
-  type PassViewDto,
   type ProjectId,
   type TaskId,
 } from '@10db/contracts';
-import type { QueryClient } from '@tanstack/react-query';
+import {
+  queryOptions,
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type QueryClient,
+  type QueryKey,
+} from '@tanstack/react-query';
+import { z } from 'zod';
+import { readJson } from './client';
+import type { DaemonConnection } from './connection';
+import { createPassRoutesClient } from './pass-routes';
+import { useDaemon } from './provider';
+import { queryKeys } from './queries';
+import { threadKeys, type TaskMessageSend } from './thread-queries';
 
 // Workbench spec §4.3: the passes the Workbench reads. Every pass event refetches them; a pass lane's
 // tool calls are written into its page's turn as they come, never refetched one by one.
@@ -25,6 +54,10 @@ export const passKeys = {
   turns: (taskId: TaskId) => ['passes', 'turns', taskId] as const,
   /** `GET /pass-turns/:turnId/activity`: a turn's log. */
   activity: (turnId: PassTurnId) => ['passes', 'activity', turnId] as const,
+  /** `GET /projects/:projectId/pass-start`: under `all`, so a pass opening or a page leaving reads it again. */
+  start: (projectId: ProjectId) => ['passes', 'start', projectId] as const,
+  /** `GET /goals/:goalId/pass-pages`. */
+  goalPages: (goalId: GoalId) => ['passes', 'goal-pages', goalId] as const,
 } as const;
 
 /**
@@ -88,4 +121,260 @@ export function writePassActivity(queryClient: QueryClient, event: DaemonEvent):
   queryClient.setQueriesData<PassViewDto>({ queryKey: passKeys.views }, (old) =>
     old ? withActivity(old, data, event.at) : old,
   );
+}
+
+const PassViewList = z.array(PassViewDto);
+const TurnList = z.array(PassTurnWithFilesDto);
+
+function livePassesOptions(connection: DaemonConnection) {
+  return queryOptions({
+    queryKey: passKeys.live,
+    queryFn: async () =>
+      readJson(
+        await createPassRoutesClient(connection).passes.$get({ query: { live: 'true' } }),
+        PassViewList,
+      ),
+  });
+}
+
+/** Every project's live passes: open, closing, abandoning, and closed ones waiting to settle. */
+export function useLivePasses() {
+  const { connection } = useDaemon();
+  return useQuery(livePassesOptions(connection));
+}
+
+/** The project's pass the Workbench shows (`livePassOf`): null with none, undefined until read. */
+export function useLivePass(projectId: ProjectId) {
+  const { connection } = useDaemon();
+  return useQuery({
+    ...livePassesOptions(connection),
+    select: (passes) => livePassOf(passes, projectId),
+  });
+}
+
+/** What Start Pass and Add Page offer: the project's pages, what is changed in them, what it lacks. */
+export function usePassStart(projectId: ProjectId) {
+  const { connection } = useDaemon();
+  return useQuery({
+    queryKey: passKeys.start(projectId),
+    queryFn: async () =>
+      readJson(
+        await createPassRoutesClient(connection).projects[':projectId']['pass-start'].$get({
+          param: { projectId },
+        }),
+        PassStartDto,
+      ),
+  });
+}
+
+/** The pages a goal's tasks committed in, which Work on This starts the picker with; none without a goal. */
+export function useGoalPassPages(goalId: GoalId | null) {
+  const { connection } = useDaemon();
+  return useQuery({
+    queryKey: goalId === null ? ['passes', 'goal-pages', 'none'] : passKeys.goalPages(goalId),
+    queryFn: async () =>
+      goalId === null
+        ? GoalPassPagesDto.parse({ pages: [], fromTasks: [] })
+        : readJson(
+            await createPassRoutesClient(connection).goals[':goalId']['pass-pages'].$get({
+              param: { goalId },
+            }),
+            GoalPassPagesDto,
+          ),
+    enabled: goalId !== null,
+  });
+}
+
+/** A page's turns with the files each changed, oldest first. */
+export function useTurns(taskId: TaskId) {
+  const { connection } = useDaemon();
+  return useQuery({
+    queryKey: passKeys.turns(taskId),
+    queryFn: async () =>
+      readJson(
+        await createPassRoutesClient(connection).tasks[':taskId'].turns.$get({
+          param: { taskId },
+        }),
+        TurnList,
+      ),
+  });
+}
+
+/** A mutation that reads the passes, and then these, again once it lands. */
+function useRefetchAfter(...more: readonly QueryKey[]) {
+  const queryClient = useQueryClient();
+  return () =>
+    Promise.all(
+      [passKeys.all, ...more].map((queryKey) => queryClient.invalidateQueries({ queryKey })),
+    );
+}
+
+/** Start Pass: opens a pass on the ticked pages and tasks. */
+export function useOpenPass(projectId: ProjectId) {
+  const { client } = useDaemon();
+  const refetch = useRefetchAfter(['tasks']);
+  return useMutation({
+    mutationFn: async (request: PassOpenRequest) =>
+      readJson(
+        await client.projects[':projectId'].passes.$post({ param: { projectId }, json: request }),
+        PassOpenedDto,
+      ),
+    onSuccess: refetch,
+  });
+}
+
+/** Add Page: new tasks for pages, and open tasks joining the pass. */
+export function useAddPages(passId: PassId) {
+  const { connection } = useDaemon();
+  const refetch = useRefetchAfter(['tasks']);
+  return useMutation({
+    mutationFn: async (request: PassJoinRequest) =>
+      readJson(
+        await createPassRoutesClient(connection).passes[':passId'].pages.$post({
+          param: { passId },
+          json: request,
+        }),
+        PassViewDto,
+      ),
+    onSuccess: refetch,
+  });
+}
+
+export function useRenamePass(passId: PassId) {
+  const { connection } = useDaemon();
+  const refetch = useRefetchAfter();
+  return useMutation({
+    mutationFn: async (body: PassRename) =>
+      readJson(
+        await createPassRoutesClient(connection).passes[':passId'].$patch({
+          param: { passId },
+          json: body,
+        }),
+        PassDto,
+      ),
+    onSuccess: refetch,
+  });
+}
+
+/** Abandon Pass: every unsigned page goes back, its task keeping the work. */
+export function useAbandonPass(passId: PassId) {
+  const { client } = useDaemon();
+  const refetch = useRefetchAfter(['tasks'], queryKeys.inbox);
+  return useMutation({
+    mutationFn: async () =>
+      readJson(
+        await client.passes[':passId'].abandon.$post({ param: { passId } }),
+        PassAbandonedDto,
+      ),
+    onSuccess: refetch,
+  });
+}
+
+/** Take Out: the page leaves the pass, its work kept with its task. Every shared change is kept. */
+export function useTakeOutPage(passId: PassId) {
+  const { client } = useDaemon();
+  const refetch = useRefetchAfter(['tasks'], queryKeys.inbox);
+  return useMutation({
+    mutationFn: async (taskId: TaskId) =>
+      readJson(
+        await client.passes[':passId'].tasks[':taskId']['take-out'].$post({
+          param: { passId, taskId },
+          json: {},
+        }),
+        TakeOutResultDto,
+      ),
+    onSuccess: refetch,
+  });
+}
+
+/** Propose Page Areas: the pages 10db finds in the project, for the builder to keep or leave out. */
+export function useProposePageAreas(projectId: ProjectId) {
+  const { connection } = useDaemon();
+  return useMutation({
+    mutationFn: async () =>
+      readJson(
+        await createPassRoutesClient(connection).projects[':projectId']['propose-page-areas'].$post(
+          { param: { projectId } },
+        ),
+        PagesProposalDto,
+      ),
+  });
+}
+
+/** A plain Stop: the page's turn ends and nothing is sent; the page waits for the next message. */
+export function useStopPage(taskId: TaskId) {
+  const { client } = useDaemon();
+  const refetch = useRefetchAfter(threadKeys.of(taskId));
+  return useMutation({
+    mutationFn: async () =>
+      readJson(await client.tasks[':taskId'].stop.$post({ param: { taskId } }), z.null()),
+    onSuccess: refetch,
+  });
+}
+
+/** Stop and Redo: the page's turn stops, then the builder's message starts the next. */
+export function useRedoTurn(taskId: TaskId) {
+  const { client } = useDaemon();
+  const refetch = useRefetchAfter(threadKeys.of(taskId));
+  return useMutation({
+    mutationFn: async ({ text, pictures }: TaskMessageSend) =>
+      readJson(
+        await client.tasks[':taskId'].thread.redo.$post({
+          param: { taskId },
+          form: { text, picture: [...pictures] },
+        }),
+        TaskMessageDto,
+      ),
+    onSuccess: refetch,
+  });
+}
+
+/** Retry Turn: answers the failed turn's flag, which sends the builder's last message again. */
+export function useRetryTurn() {
+  const { client } = useDaemon();
+  const refetch = useRefetchAfter(queryKeys.inbox, ['workstreams']);
+  return useMutation({
+    mutationFn: async (itemId: InboxItemId) =>
+      readJson(
+        await client.inbox[':id'].answer.$post({
+          param: { id: itemId },
+          json: { choice: PASS_RETRY_TURN_CHOICE },
+        }),
+        z.unknown(),
+      ),
+    onSuccess: refetch,
+  });
+}
+
+/** Marks a Ready turn opened: the builder has looked at it, which the timing hint reads. */
+export function useMarkOpened(taskId: TaskId) {
+  const { connection } = useDaemon();
+  const refetch = useRefetchAfter();
+  return useMutation({
+    // What it answers is not read: the pass view, read again, carries the mark.
+    mutationFn: async (turnId: PassTurnId) =>
+      readJson(
+        await createPassRoutesClient(connection).tasks[':taskId'].turns[':turnId'].opened.$post({
+          param: { taskId, turnId },
+        }),
+        z.unknown(),
+      ),
+    onSuccess: refetch,
+  });
+}
+
+/** Discard Saved Work: drops the work a task kept from a pass, which its next start would put back. */
+export function useDiscardKeptWork(taskId: TaskId) {
+  const { connection } = useDaemon();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () =>
+      readJson(
+        await createPassRoutesClient(connection).tasks[':taskId']['kept-work'].$delete({
+          param: { taskId },
+        }),
+        z.null(),
+      ),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['tasks'] }),
+  });
 }
