@@ -37,6 +37,7 @@ import {
   type ProjectId,
   type ReviewCardDetail,
   type SessionId,
+  type TaskMessageId,
   type WorkstreamId,
   type WorkstreamStep,
   MIGRATIONS_RENUMBERED_NOTICE_KEY,
@@ -217,6 +218,7 @@ import {
 } from './review-size';
 import { createLaneMessages, outgoingMessage } from './lane-messages';
 import {
+  keepingFeedback,
   nextActionAfterCrash,
   nextActionOnAnotherAccount,
   resumedSessionOf,
@@ -707,12 +709,22 @@ export function createRunner(opts: RunnerOptions): Runner {
   }
 
   /**
+   * The oldest builder message a session of the workstream was handed and no turn took, or null.
+   * The builder writes to the task's implementer, so only an implement step's sessions are handed
+   * messages and held to them (Workbench spec §6.3).
+   */
+  function untakenMessage(reader: DbReader, id: WorkstreamId): TaskMessageId | null {
+    const row = getWorkstreamRow(reader, id);
+    if (currentStep(row).role !== StepRole.Implement) return null;
+    return listUndeliveredTaskMessages(reader, row.taskId)[0]?.id ?? null;
+  }
+
+  /**
    * `next`, once a session of the workstream has ended: a builder message it was handed and no turn
    * took starts the next session as `feedback`, so it is not lost (Workbench spec §6.3).
    */
   function carryingUndelivered(reader: DbReader, id: WorkstreamId, next: NextAction): NextAction {
-    const untaken = listUndeliveredTaskMessages(reader, getWorkstreamRow(reader, id).taskId)[0];
-    return withUndelivered(next, untaken?.id ?? null);
+    return withUndelivered(next, untakenMessage(reader, id));
   }
 
   /**
@@ -1286,13 +1298,16 @@ export function createRunner(opts: RunnerOptions): Runner {
         const nextAction = carryingUndelivered(
           db,
           id,
-          outcome.providerSessionId
-            ? {
-                kind: 'resume',
-                providerSessionId: outcome.providerSessionId,
-                reason: 'the usage limit reset',
-              }
-            : freshAction(db, id),
+          keepingFeedback(
+            row.nextAction,
+            outcome.providerSessionId
+              ? {
+                  kind: 'resume',
+                  providerSessionId: outcome.providerSessionId,
+                  reason: 'the usage limit reset',
+                }
+              : freshAction(db, id),
+          ),
         );
         opts.state.write((ctx) => {
           transitionWorkstream(ctx, id, {
@@ -1316,13 +1331,16 @@ export function createRunner(opts: RunnerOptions): Runner {
               nextAction: carryingUndelivered(
                 ctx.tx,
                 id,
-                outcome.providerSessionId
-                  ? {
-                      kind: 'resume',
-                      providerSessionId: outcome.providerSessionId,
-                      reason: 'the account resumed',
-                    }
-                  : getWorkstreamRow(ctx.tx, id).nextAction,
+                keepingFeedback(
+                  getWorkstreamRow(ctx.tx, id).nextAction,
+                  outcome.providerSessionId
+                    ? {
+                        kind: 'resume',
+                        providerSessionId: outcome.providerSessionId,
+                        reason: 'the account resumed',
+                      }
+                    : getWorkstreamRow(ctx.tx, id).nextAction,
+                ),
               ),
             },
             reason: outcome.refusal
@@ -1585,14 +1603,39 @@ export function createRunner(opts: RunnerOptions): Runner {
     // blocks while they fit the account's limits and what the thread's budget has left.
     const limits = pictureLimitsFor(account.kind);
     const feedback = action.kind === 'feedback' ? getTaskMessageRow(db, action.messageId) : null;
+    // The builder writes to the task's implementer: only an implement step's sessions are handed what
+    // an earlier session was handed and no turn took (§12).
+    const untaken =
+      step.role === StepRole.Implement
+        ? listUndeliveredTaskMessages(db, task.id).filter((m) => m.id !== feedback?.id)
+        : [];
+    // Codex stamps no client uuid on a turn, so nothing would show it took a message, and a message
+    // held until a turn takes it would hold the lane for ever: a builder message goes to Claude only,
+    // as a pass does (Workbench spec W19).
+    if (provider === Provider.Codex && (feedback !== null || untaken.length > 0))
+      return {
+        kind: 'refused',
+        message: `The builder's message in this task's thread needs a Claude session, and the project's account "${account.label}" runs Codex, which cannot show that a turn took the message. Move the project to a Claude account and retry.`,
+        providerSessionId: savedResumeId,
+      };
     const fed =
       feedback === null
         ? null
-        : outgoingMessage(
-            feedback,
-            resumeId === null ? 0 : threadInlineBytes(listTaskFileRows(db, task.id), limits),
-            limits,
-          );
+        : resumeId === null
+          ? // A fresh session holds no picture: its start clears every mark an earlier one left.
+            outgoingMessage(
+              {
+                ...feedback,
+                files: feedback.files.map((file) => ({ ...file, inlineSent: false })),
+              },
+              0,
+              limits,
+            )
+          : outgoingMessage(
+              feedback,
+              threadInlineBytes(listTaskFileRows(db, task.id), limits),
+              limits,
+            );
     const digest =
       feedback === null || resumeId !== null
         ? null
@@ -1795,10 +1838,8 @@ export function createRunner(opts: RunnerOptions): Runner {
           baseHead,
           ...(fresh ? { nextAction: fresh } : {}),
         });
-        // A fresh session holds no picture an earlier one was sent, and the thread says it started.
+        // A fresh session holds no picture an earlier one was sent.
         if (resumeId === null) markTaskFilesInline(ctx, task.id, [], true);
-        if (feedback !== null && resumeId === null)
-          insertSystemNotice(ctx, task.id, FRESH_SESSION_NOTICE);
         // Every session's prompt carries the pack (spec §9); a resumed conversation gets it again.
         ctx.emit(
           contextPackedEvent(
@@ -1990,15 +2031,24 @@ export function createRunner(opts: RunnerOptions): Runner {
       throw error;
     }
     ctl.handle = handle;
-    const messages = createLaneMessages({ state: opts.state, taskId: task.id, handle, limits });
+    const messages = createLaneMessages({
+      state: opts.state,
+      taskId: task.id,
+      handle,
+      limits,
+      ...(feedback !== null && fed !== null
+        ? { prompt: { uuid: fed.uuid, messageId: feedback.id } }
+        : {}),
+    });
     if (feedback !== null && fed !== null)
       opts.state.write((ctx) => {
         markTaskMessagesPushed(ctx, [feedback.id]);
         markTaskFilesInline(ctx, task.id, fed.blocks, false);
       });
     // A message an earlier session was handed and no turn took goes to this one too (§12).
-    for (const untaken of listUndeliveredTaskMessages(db, task.id))
-      if (untaken.id !== feedback?.id) messages.push(untaken);
+    for (const message of untaken) messages.push(message);
+    /** Whether the thread has been told this fresh session began. */
+    let noticed = false;
     /** Asks the session to hand off, once: its context filled, or its account neared its usage limit. */
     const requestHandoff = (cause: HandoffCause, reason: string): void => {
       if (st.handoffRequested || st.outcome) return;
@@ -2027,6 +2077,11 @@ export function createRunner(opts: RunnerOptions): Runner {
             if (laneSession !== null) watchLaneProcesses(laneSession, event.pid, pidStart, log);
             opts.state.write((ctx) => {
               markSessionStarted(ctx, session.id, event.providerSessionId, event.pid, pidStart);
+              // The thread says a fresh session began for the builder's message, once it has.
+              if (feedback !== null && resumeId === null && !noticed) {
+                noticed = true;
+                insertSystemNotice(ctx, task.id, FRESH_SESSION_NOTICE);
+              }
               // The session has the answer now. Kept as `answer`, a restart would send it again and
               // re-grant a one-time permission; a fresh action resumes this session after a crash.
               if (action.kind === 'answer')
@@ -2393,11 +2448,23 @@ export function createRunner(opts: RunnerOptions): Runner {
     sessionId: SessionId,
     st: SessionState,
   ): Outcome {
-    const ended: Outcome = st.outcome ?? {
+    const reported: Outcome = st.outcome ?? {
       kind: 'crashed',
       message: 'the session ended without an outcome',
       providerSessionId: st.providerSessionId,
     };
+    // A step that ends with a builder message no turn took has not done what the builder asked: it
+    // runs again with the message, as after a crash, and counts toward the same limit (Workbench spec
+    // §6.3), so a message that is never taken cannot keep a lane running sessions.
+    const untaken = reported.kind === 'step_done' ? untakenMessage(db, id) : null;
+    const ended: Outcome =
+      untaken === null
+        ? reported
+        : {
+            kind: 'crashed',
+            message: `the session ended its step without taking the builder's message ${untaken}`,
+            providerSessionId: st.providerSessionId,
+          };
     // A session whose wait timer fired parks even if it was also limited or stopped meanwhile, so the
     // card (open or already answered) is never orphaned.
     const parkedAfterWait =

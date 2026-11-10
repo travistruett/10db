@@ -14,6 +14,13 @@ import { listTaskThreadRows, type DbReader, type TaskFileRow, type TaskMessageRo
 /** The thread's note that a lane started a fresh session, from the digest, for a builder message. */
 export const FRESH_SESSION_NOTICE = 'Started a fresh session';
 
+/**
+ * A message may reach a session more than once (Workbench spec §6.3: delivery is at least once), and
+ * always under its id.
+ */
+const REPEAT_LINE =
+  '(10db may send a message again: one with the same id as a message you have seen is the same message, so act on it once.)';
+
 /** What a fresh session is told of a picture it does not hold. */
 const pictureLine = (file: TaskFileRow): string =>
   `[Picture ${file.name}, kept at ${file.storedPath}: Read it to see it.]`;
@@ -34,6 +41,7 @@ export function builderMessageText(
       ? [`[${attached.map((file) => file.name).join(', ')} attached as pictures.]`]
       : []),
     ...message.files.filter((file) => !asBlocks.has(file.id)).map(pictureLine),
+    REPEAT_LINE,
   ]
     .filter((line) => line !== '')
     .join('\n');

@@ -7,7 +7,7 @@ import {
 } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { nextActionAfterCrash, nextActionOnAnotherAccount } from './index';
-import { withUndelivered } from './next-action';
+import { keepingFeedback, withUndelivered } from './next-action';
 
 const handoff = { id: mintId('Handoff') } as HandoffDto;
 const inboxId = mintId('InboxItem');
@@ -219,10 +219,10 @@ describe('withUndelivered', () => {
       { kind: 'feedback', messageId, providerSessionId: null },
     ],
     [
-      'names the oldest message not taken, keeping the session a feedback would resume',
+      'keeps the message a feedback was started for, which an older one does not displace',
       { kind: 'feedback', messageId: laterId, providerSessionId: 'p1' },
       messageId,
-      { kind: 'feedback', messageId, providerSessionId: 'p1' },
+      { kind: 'feedback', messageId: laterId, providerSessionId: 'p1' },
     ],
     [
       'keeps an answer, whose session is handed the message after it',
@@ -234,5 +234,30 @@ describe('withUndelivered', () => {
     ['keeps a fix', { kind: 'fix', evidenceId }, messageId, { kind: 'fix', evidenceId }],
   ])('%s', (_name, next, undelivered, expected) => {
     expect(withUndelivered(next, undelivered)).toEqual(expected);
+  });
+});
+
+describe('keepingFeedback', () => {
+  const resume: NextAction = {
+    kind: 'resume',
+    providerSessionId: 'p2',
+    reason: 'the usage limit reset',
+  };
+  it.each<[string, NextAction, NextAction, NextAction]>([
+    ['leaves an action without a message as the stop made it', { kind: 'start' }, resume, resume],
+    [
+      'keeps the message, resuming the session that stopped',
+      { kind: 'feedback', messageId, providerSessionId: null },
+      resume,
+      { kind: 'feedback', messageId, providerSessionId: 'p2' },
+    ],
+    [
+      'keeps the message and the session it would resume when the stopped one never started',
+      { kind: 'feedback', messageId, providerSessionId: 'p1' },
+      { kind: 'start' },
+      { kind: 'feedback', messageId, providerSessionId: 'p1' },
+    ],
+  ])('%s', (_name, previous, stopped, expected) => {
+    expect(keepingFeedback(previous, stopped)).toEqual(expected);
   });
 });

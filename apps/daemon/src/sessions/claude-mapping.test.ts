@@ -68,6 +68,33 @@ describe('mapSdkMessage', () => {
     ]);
   });
 
+  // A message folded into a running turn between tool rounds is stamped on no later assistant
+  // message: the turn's result lists it, which the live test saw on the pinned Claude Code.
+  it.each<[string, { user_message_uuid?: string; user_message_uuids?: string[] }, string[] | null]>(
+    [
+      [
+        'the prompt and each message folded in',
+        { user_message_uuid: TOOK_FIRST, user_message_uuids: [TOOK_FIRST, TOOK_SECOND] },
+        [TOOK_FIRST, TOOK_SECOND],
+      ],
+      ['the one uuid an older producer echoes', { user_message_uuid: TOOK_FIRST }, [TOOK_FIRST]],
+      ['nothing for a turn with no client uuid', {}, null],
+    ],
+  )(
+    'maps a result to the uuids its turn consumed, before the turn ends: %s',
+    (_name, stamp, uuids) => {
+      const events = mapSdkMessage(
+        { ...resultMessage({ input: 1, output: 1, costUsd: 0 }), ...stamp },
+        ctx,
+      );
+      expect(events.map((e) => e.type)).toEqual([
+        ...(uuids === null ? [] : ['consumed']),
+        'turn_complete',
+      ]);
+      if (uuids !== null) expect(events[0]).toEqual({ type: 'consumed', uuids });
+    },
+  );
+
   it('caps activity summaries', () => {
     const [event] = mapSdkMessage(assistantMessage([textBlock('x'.repeat(5_000))]), ctx);
     expect(event).toMatchObject({ type: 'activity' });

@@ -174,6 +174,12 @@ export class FakeAdapter implements SessionAdapter {
   /** Every lane session's interrupt, in order, with what it answered. */
   readonly interrupts: { sessionId: SessionId; receipt: InterruptReceipt }[] = [];
   /**
+   * The client uuids each conversation has been sent, by provider session id. Claude Code runs no
+   * turn for a user message under a uuid its transcript already holds, a resumed one's included: it
+   * acknowledges it and drops it, as the live test saw. So does the fake.
+   */
+  private readonly transcripts = new Map<string, Set<string>>();
+  /**
    * What a lane session's interrupt answers, from the uuids of the messages no turn has taken yet: by
    * default all of them as still queued, as a Claude Code that advertises `interrupt_receipt_v1` does;
    * null stands for one that answers nothing.
@@ -319,8 +325,20 @@ export class FakeAdapter implements SessionAdapter {
     const channel = createChannel<SessionEvent>();
     const abort = new AbortController();
     const messages: string[] = [];
+    const providerSessionId = spec.resumeProviderSessionId ?? `fake-${spec.sessionId}`;
+    const transcript = this.transcripts.get(providerSessionId) ?? new Set<string>();
+    this.transcripts.set(providerSessionId, transcript);
     /** The client uuids of the messages the session holds that no turn has taken yet, the prompt's first. */
-    const untaken: string[] = spec.promptUuid === undefined ? [] : [spec.promptUuid];
+    const untaken: string[] = [];
+    /** What the running turn has taken, which its result lists again. */
+    let takenThisTurn: string[] = [];
+    /** Takes in a message unless its uuid is one the conversation already holds. */
+    const receive = (uuid: string | undefined): void => {
+      if (uuid === undefined || transcript.has(uuid)) return;
+      transcript.add(uuid);
+      untaken.push(uuid);
+    };
+    receive(spec.promptUuid);
     let messageWaiter: (() => void) | null = null;
     let ended = false;
     let mcp: Client | null = null;
@@ -503,10 +521,14 @@ export class FakeAdapter implements SessionAdapter {
         }
         case 'consume': {
           const uuids = untaken.splice(0);
+          takenThisTurn = [...takenThisTurn, ...uuids];
           if (uuids.length > 0) channel.push({ type: 'consumed', uuids });
           return 'continue';
         }
         case 'turn_complete':
+          // The turn's result lists every message the turn took, as Claude Code's does.
+          if (takenThisTurn.length > 0) channel.push({ type: 'consumed', uuids: takenThisTurn });
+          takenThisTurn = [];
           channel.push({
             type: 'turn_complete',
             ...(step.result ? { result: step.result } : {}),
@@ -578,7 +600,7 @@ export class FakeAdapter implements SessionAdapter {
     void (async () => {
       channel.push({
         type: 'started',
-        providerSessionId: spec.resumeProviderSessionId ?? `fake-${spec.sessionId}`,
+        providerSessionId,
         pid: null,
       });
       // The real CLI reports its session before any tool call; let the consumer see `started` first.
@@ -619,7 +641,7 @@ export class FakeAdapter implements SessionAdapter {
       send(text, images = [], uuid) {
         sent.push({ sessionId: spec.sessionId, text, images: images.length, uuid: uuid ?? null });
         messages.push(text);
-        if (uuid !== undefined) untaken.push(uuid);
+        receive(uuid);
         messageWaiter?.();
         messageWaiter = null;
       },

@@ -64,6 +64,21 @@ export function resetsAtToDate(value: number | undefined): Date | null {
 }
 
 /**
+ * The client uuids of the user messages a frame says its turn consumed, the evidence each was taken
+ * (Workbench spec §6.3). The turn's first assistant message stamps those its prompt brought; a message
+ * folded into the running turn between tool rounds is stamped on no later assistant message of a turn
+ * a typed prompt started, only on the turn's result, which lists every one. An older producer stamps
+ * only the one it is answering.
+ */
+function consumedBy(
+  msg: Pick<SDKAssistantMessage, 'user_message_uuid' | 'user_message_uuids'>,
+): readonly string[] {
+  return (
+    msg.user_message_uuids ?? (msg.user_message_uuid === undefined ? [] : [msg.user_message_uuid])
+  );
+}
+
+/**
  * Maps one SDK message to session events. Never emits `context` or `ended`; the adapter owns those.
  * `if` rather than `switch`: the SDK adds message types often, and every other type maps to nothing.
  */
@@ -102,11 +117,7 @@ export function mapSdkMessage(
         });
       }
     }
-    // A turn stamps the client uuids of every message it has taken in so far: the evidence each was
-    // consumed. An older producer stamps only the one it is answering.
-    const taken =
-      msg.user_message_uuids ??
-      (msg.user_message_uuid === undefined ? [] : [msg.user_message_uuid]);
+    const taken = consumedBy(msg);
     if (taken.length > 0) events.push({ type: 'consumed', uuids: taken });
     if (msg.error === 'rate_limit')
       events.push({
@@ -128,7 +139,11 @@ export function mapSdkMessage(
           : 'success';
     // What the model wrote last: a review that never calls complete_step may have put its findings here.
     const text = msg.subtype === 'success' ? msg.result.trim().slice(0, TURN_TEXT_CHARS) : '';
+    // The result lists what the turn consumed, a message folded in between tool rounds among it,
+    // which no later assistant message stamps; it comes first, so the turn's end sees it taken.
+    const taken = consumedBy(msg);
     return [
+      ...(taken.length > 0 ? [{ type: 'consumed' as const, uuids: taken }] : []),
       {
         type: 'turn_complete',
         // Only a turn that didn't end normally says so; the others stay as they were.

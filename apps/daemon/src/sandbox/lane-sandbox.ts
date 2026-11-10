@@ -1,6 +1,7 @@
-import { realpathSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { Provider, type PermissionRuleDto, type ProjectDto } from '@10db/contracts';
 import type { Clock } from '../clock';
+import { besideTheWay } from './beside-the-way';
 import { prepareCommandEnv, withoutTempDirPaths } from './command-env';
 import { dockerAccess, dockerEnvNames } from './docker-access';
 import { deniedEnvNames } from './env-allowlist';
@@ -353,12 +354,18 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
         });
         // The config dir and its ancestors stay readable to the file tools, which open the
         // session's own saved tool results there; the guard, the broker and the kernel hold them.
-        // So do the task's pictures and theirs, which the file tools open to read them.
-        const deniedToFileTools = protectedList.filter(
-          (path) =>
-            !isEqualOrUnder(input.configDir, path) &&
-            !(input.taskFiles !== undefined && isEqualOrUnder(input.taskFiles, path)),
-        );
+        // A task with pictures keeps the way down to them open, and Claude Code denies everything
+        // beside it that is there now; what is made later, another task's folder among it, is left
+        // to the guard and the file tools' judge, which refuse it.
+        const pictures =
+          input.taskFiles !== undefined && existsSync(input.taskFiles) ? input.taskFiles : null;
+        const deniedToFileTools = protectedList
+          .filter((path) => !isEqualOrUnder(input.configDir, path))
+          .flatMap((path) =>
+            pictures !== null && isEqualOrUnder(pictures, path)
+              ? besideTheWay(path, pictures)
+              : [path],
+          );
         mcp = sandboxMcpServers({
           access,
           home: deps.home,

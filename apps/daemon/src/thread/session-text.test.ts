@@ -1,6 +1,7 @@
 import { mintId, type TaskDto, type TaskMessageId } from '@10db/contracts';
 import {
   createTestStore,
+  getTaskMessageRow,
   insertBuilderMessage,
   insertSystemNotice,
   insertTask,
@@ -9,7 +10,7 @@ import {
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ManualClock } from '../clock';
-import { buildThreadDigest } from './session-text';
+import { buildThreadDigest, builderMessageText } from './session-text';
 
 // Workbench spec §6.3: a fresh session starts from the thread's digest, built from rows, after the
 // latest handoff when there is one, with each pasted picture named by where it is kept.
@@ -95,5 +96,14 @@ describe('buildThreadDigest', () => {
     expect(digest).toContain('The thread since the latest handoff:');
     expect(digest).toContain('After the handoff');
     expect(digest).not.toContain('Before the handoff');
+  });
+});
+
+describe('builderMessageText', () => {
+  it('names the message by its id and says a message under an id seen before is that same one', () => {
+    const message = getTaskMessageRow(store.db, say('Make it blue').id);
+    const text = builderMessageText(message, new Set());
+    expect(text).toContain(`(message ${message.id}):\nMake it blue`);
+    expect(text).toMatch(/same id .* is the same message/);
   });
 });

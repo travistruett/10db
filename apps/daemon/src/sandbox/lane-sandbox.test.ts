@@ -931,15 +931,44 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         ).access,
       ).toBe('protected');
       expect(readAccess(dirname(own), session.fileAccess, true).access).toBe('protected');
-      // Claude Code's own deny would win over every allow, so the data dir leaves its rules; the
-      // guard and the file tools' judge hold it. The commands' profile still closes it whole.
+      // Claude Code's own deny would win over every allow and takes no exception, so its rules
+      // deny everything in the data dir beside the way down to the task's pictures. The commands'
+      // profile still closes the data dir whole.
+      const dataRules = session.spec.disallowedTools.filter((rule) =>
+        rule.startsWith(`Read(/${dataDir}`),
+      );
+      expect(dataRules).toEqual(
+        expect.arrayContaining([
+          `Read(/${db})`,
+          `Read(/${join(dataDir, 'tasks', 'tsk_other')})`,
+          `Read(/${join(dataDir, 'tasks', 'tsk_other')}/**)`,
+        ]),
+      );
       expect(
-        session.spec.disallowedTools.filter((rule) => rule.startsWith(`Read(/${dataDir}`)),
+        dataRules.filter((rule) =>
+          [dataDir, join(dataDir, 'tasks'), join(dataDir, 'tasks', 'tsk_own'), own].some(
+            (path) => rule === `Read(/${path})` || rule === `Read(/${path}/**)`,
+          ),
+        ),
       ).toEqual([]);
       expect(session.spec.settings.filesystem.denyRead).toContain(dataDir);
       expect(
         session.spec.settings.filesystem.allowRead.filter((path) => isEqualOrUnder(path, dataDir)),
       ).toEqual([]);
+    } finally {
+      session.dispose();
+    }
+  });
+
+  it("keeps the whole data dir in Claude Code's own denies for a task with no pictures", async () => {
+    writeIn(dataDir, 'db.sqlite');
+    const session = await sandbox().forSession(
+      input({ taskFiles: join(dataDir, 'tasks', 'tsk_none', 'files') }),
+    );
+    try {
+      expect(session.spec.disallowedTools).toEqual(
+        expect.arrayContaining([`Read(/${dataDir})`, `Read(/${dataDir}/**)`]),
+      );
     } finally {
       session.dispose();
     }

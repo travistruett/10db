@@ -78,14 +78,16 @@ export function nextActionOnAnotherAccount(
  * The next action once a session has ended with a builder message handed to it and never taken by a
  * turn: `messageId`, the oldest such, or null when there is none (Workbench spec §6.3). The message
  * starts the next session, resuming the conversation the action would resume, else fresh from the
- * thread's digest. An action that brings its own builder input or verification keeps it; the next
- * session is handed the message after its prompt.
+ * thread's digest. A `feedback` keeps the message it was started for, and an action that brings its
+ * own builder input or verification keeps it: every session start hands the session the other
+ * messages no turn took, after its prompt.
  */
 export function withUndelivered(next: NextAction, messageId: TaskMessageId | null): NextAction {
   if (messageId === null) return next;
   switch (next.kind) {
-    case 'resume':
     case 'feedback':
+      return next;
+    case 'resume':
       return { kind: 'feedback', messageId, providerSessionId: next.providerSessionId };
     case 'start':
     case 'continue_from_handoff':
@@ -99,6 +101,19 @@ export function withUndelivered(next: NextAction, messageId: TaskMessageId | nul
     case 'builder_review':
       return next;
   }
+}
+
+/**
+ * The next action once a session stopped for its account (a usage pause, a hold), where `stopped`
+ * resumes that session or starts fresh: a `feedback` the session was started for keeps its message,
+ * resuming the session `stopped` names, else the one it would have resumed.
+ */
+export function keepingFeedback(previous: NextAction, stopped: NextAction): NextAction {
+  if (previous.kind !== 'feedback') return stopped;
+  return {
+    ...previous,
+    providerSessionId: resumedSessionOf(stopped) ?? previous.providerSessionId,
+  };
 }
 
 /** The provider session the action resumes, or null for one that starts a fresh session. */

@@ -1,8 +1,10 @@
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { idUuid, mintId } from '@10db/contracts';
 import type { AccountRow } from '@10db/db';
 import { HARNESS_PLUGIN_DIR } from '@10db/harness';
 import { describe, expect, it } from 'vitest';
-import { createTempRepo } from '../../test/fixtures';
+import { createTempRepo, type TempDir } from '../../test/fixtures';
 import { loadEnv } from '../env';
 import {
   AgentTool,
@@ -18,11 +20,17 @@ import type { SessionEvent } from './types';
 const live = loadEnv(process.env).TENDB_LIVE_CLAUDE === '1';
 
 /** A live session on the default account's login, as the daemon starts one, with what it logs. */
-async function liveSession(spec: { readonly prompt: string; readonly promptUuid?: string }) {
+async function liveSession(spec: {
+  readonly prompt: string;
+  readonly promptUuid?: string;
+  readonly repo?: TempDir;
+  readonly resume?: string;
+  readonly allowRead?: boolean;
+}) {
   const login = await captureLoginEnv({ inherited: process.env });
   // The pinned release, as the daemon runs it: this test is what verifies a bump of that pin.
   const claudePath = await ensureAgent(AgentTool.Claude);
-  const repo = createTempRepo();
+  const repo = spec.repo ?? createTempRepo();
   const lines: Record<string, unknown>[] = [];
   const logger = createLogger({
     level: 'info',
@@ -82,11 +90,11 @@ async function liveSession(spec: { readonly prompt: string; readonly promptUuid?
     ...(spec.promptUuid === undefined ? {} : { promptUuid: spec.promptUuid }),
     model: launch.model,
     effort: 'low',
-    resumeProviderSessionId: null,
+    resumeProviderSessionId: spec.resume ?? null,
     env: launch.env,
     account: launch.expect,
     projectMcpServers: {},
-    allowedTools: [],
+    allowedTools: spec.allowRead === true ? ['Read'] : [],
     // Nothing listens here; the session runs without 10db's tools.
     mcp: { url: 'http://127.0.0.1:9/mcp', token: 'unused', toolTimeoutMs: 5_000 },
     preToolUse: () => ({ decision: 'allow' }),
@@ -95,6 +103,7 @@ async function liveSession(spec: { readonly prompt: string; readonly promptUuid?
   return {
     handle,
     lines,
+    repo,
     cleanup: () => {
       repo.cleanup();
     },
@@ -165,5 +174,81 @@ describe.skipIf(!live)('Claude adapter, live', () => {
     expect(consumed).toContain(midTurn);
     expect(consumed).toContain(atTurnEnd);
     expect(consumed.indexOf(prompt)).toBeLessThan(consumed.indexOf(atTurnEnd));
+  }, 180_000);
+
+  // A message sent with `next` priority while the turn makes tool calls is folded into that turn.
+  // The pinned Claude Code stamps it on no later assistant message of a turn a typed prompt started:
+  // the turn's result lists it, after the prompt's uuid.
+  it("lists a message folded into a turn that makes tool calls on that turn's result", async () => {
+    const prompt = idUuid(mintId('TaskMessage'));
+    const folded = idUuid(mintId('TaskMessage'));
+    const repo = createTempRepo();
+    for (const [name, word] of [
+      ['one.txt', 'apple'],
+      ['two.txt', 'pear'],
+      ['three.txt', 'plum'],
+    ] as const)
+      writeFileSync(join(repo.path, name), `${word}\n`);
+    const { handle, cleanup } = await liveSession({
+      prompt:
+        'Read one.txt, then two.txt, then three.txt with the Read tool, one call at a time, waiting for each result before the next call. Then reply with the three words they hold, in order.',
+      promptUuid: prompt,
+      repo,
+      allowRead: true,
+    });
+    const consumed: string[] = [];
+    let sent = false;
+    for await (const event of handle.events) {
+      if (event.type === 'consumed') consumed.push(...event.uuids);
+      if (event.type === 'activity' && event.kind === 'tool' && !sent) {
+        sent = true;
+        handle.send(
+          'When you are done with the files, also reply with the single word: blue',
+          [],
+          folded,
+        );
+      }
+      if (event.type === 'turn_complete') await handle.stop();
+    }
+    cleanup();
+
+    expect(sent).toBe(true);
+    expect(consumed).toContain(prompt);
+    expect(consumed).toContain(folded);
+  }, 180_000);
+
+  // Claude Code runs no turn for a message under a uuid its transcript already holds: it
+  // acknowledges it and drops it, a resumed conversation's prompt included (the live run saw a
+  // resumed session sent its first prompt's uuid again start no turn). A message is sent again,
+  // into a resumed conversation or after an interrupt, under a uuid of its own.
+  it('runs a turn for a message sent again into a resumed conversation under a uuid of its own', async () => {
+    const first = idUuid(mintId('TaskMessage'));
+    const again = idUuid(mintId('TaskMessage'));
+    const repo = createTempRepo();
+    const one = await liveSession({
+      prompt: 'Reply with the single word: ready',
+      promptUuid: first,
+      repo,
+    });
+    let providerSessionId = '';
+    for await (const event of one.handle.events) {
+      if (event.type === 'started') providerSessionId = event.providerSessionId;
+      if (event.type === 'turn_complete') await one.handle.stop();
+    }
+    const two = await liveSession({
+      prompt: 'Reply with the single word: again',
+      promptUuid: again,
+      repo,
+      resume: providerSessionId,
+    });
+    const consumed: string[] = [];
+    for await (const event of two.handle.events) {
+      if (event.type === 'consumed') consumed.push(...event.uuids);
+      if (event.type === 'turn_complete') await two.handle.stop();
+    }
+    two.cleanup();
+
+    expect(providerSessionId).not.toBe('');
+    expect(consumed).toContain(again);
   }, 180_000);
 });

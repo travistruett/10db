@@ -6,6 +6,7 @@ import {
   getTaskMessageRow,
   insertBuilderMessage,
   insertTask,
+  listTaskFileRows,
   listUndeliveredTaskMessages,
   seedProject,
   type TaskMessageRow,
@@ -23,6 +24,7 @@ import {
   type SessionSpec,
 } from '../sessions';
 import { createLaneMessages } from './lane-messages';
+import { threadInlineBytes } from './thread-pictures';
 
 // Workbench spec §6.3: a builder message reaches a lane session under its row's uuid, and is marked
 // delivered only when a turn is seen to take it (`user_message_uuids`, which the fake stamps as the SDK
@@ -171,10 +173,36 @@ describe('lane messages', () => {
     expect(adapter.interrupts).toHaveLength(1);
     const pushedAgain = adapter.sent.slice(2);
     expect(pushedAgain.map((m) => m.text.split('\n')[1])).toEqual(again);
-    // Sent again under the same uuid, so the session can tell it is one message.
-    for (const repeat of pushedAgain)
-      expect(adapter.sent.slice(0, 2).map((m) => m.uuid)).toContain(repeat.uuid);
+    // Sent again under a uuid of its own, which Claude Code would otherwise drop as one it holds,
+    // and under the same message id, so the session can tell it is one message.
+    for (const repeat of pushedAgain) {
+      expect(adapter.sent.slice(0, 2).map((m) => m.uuid)).not.toContain(repeat.uuid);
+      expect(adapter.sent.slice(0, 2).map((m) => m.text)).toContain(repeat.text);
+    }
     expect(undelivered()).toEqual(['Make it blue', 'And bigger']);
+    // A turn that takes a message under the uuid it was sent again under delivers it.
+    expect(messages.consumed(pushedAgain.map((m) => m.uuid ?? ''))).toHaveLength(again.length);
+    await handle.stop();
+  });
+
+  it('sends a picture the session already holds as a block by its path when its message is pushed again', async () => {
+    const adapter = new FakeAdapter({ Alpha: [[{ do: 'hang' }]] });
+    adapter.interruptReceipt = () => null;
+    const handle = startSession(adapter);
+    const limits = pictureLimitsFor(AccountKind.ClaudeSubscription);
+    const messages = createLaneMessages({ state, taskId, handle, limits });
+    const shot = say('Make it blue', 1);
+    messages.push(shot);
+    const spent = threadInlineBytes(listTaskFileRows(state.db, taskId), limits);
+    expect(spent).toBeGreaterThan(0);
+
+    await messages.interrupt();
+
+    const again = adapter.sent[1];
+    expect(messages.consumed([again?.uuid ?? ''])).toEqual([shot.id]);
+    expect(again?.images).toBe(0);
+    expect(again?.text).toContain(`kept at ${shot.files[0]?.storedPath ?? ''}`);
+    expect(threadInlineBytes(listTaskFileRows(state.db, taskId), limits)).toBe(spent);
     await handle.stop();
   });
 });
