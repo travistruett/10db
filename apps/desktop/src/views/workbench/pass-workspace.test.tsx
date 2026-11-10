@@ -106,6 +106,8 @@ describe('PassWorkspace queue', () => {
 
 describe('PassWorkspace working line', () => {
   it('ends a working page’s thread with what the agent does, and ticks the minutes without announcing', async () => {
+    // One set of fakes, the clock's interval with the date, in place before the workspace mounts.
+    vi.useRealTimers();
     vi.useFakeTimers({
       toFake: ['Date', 'setInterval', 'clearInterval'],
       now: Date.parse(PASS_NOW),
@@ -115,8 +117,10 @@ describe('PassWorkspace working line', () => {
     expect(within(thread).getByText('Working · 4 min · editing settings/page.tsx')).toBeTruthy();
     expect(within(thread).getByText('1 file changed so far')).toBeTruthy();
     expect(within(thread).queryByRole('status')).toBeNull();
-    act(() => {
-      vi.advanceTimersByTime(60_000);
+    // The clock's interval is set from an effect that may still be pending when the find resolves; the
+    // async advance lets it run first, so the minute lands on the fake clock.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
     });
     expect(within(thread).getByText('Working · 5 min · editing settings/page.tsx')).toBeTruthy();
   });
