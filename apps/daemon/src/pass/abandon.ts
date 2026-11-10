@@ -32,11 +32,11 @@ import {
   type WriteContext,
 } from '@10db/db';
 import { jobKey, JobQueue } from '../delivery';
+import { shellWord } from '../git';
 import { flagCard, withdrawCard } from '../inbox';
 import { PASS_CARD_DETAIL, PASS_CARD_KIND, PassCardKind, withdrawFolderCard } from './folder';
 import { passBranch, readKeptRef, type PassWorkDeps } from './kept-work';
 import { keepOrLetGo } from './shared-chain';
-import { shellWord } from './paste-command';
 import { dropShared } from './shared-drop';
 import { sharedRef } from './shared-hold';
 import { takeOutSteps, TakeOutWithin, type TakeOutDeps } from './take-out';

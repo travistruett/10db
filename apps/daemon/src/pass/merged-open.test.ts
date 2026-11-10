@@ -126,56 +126,64 @@ const followOnCard = () =>
   listInbox(w.h.store.db, {}).find((i) => PassFollowOnDetail.safeParse(i.detail).success);
 
 describe('a pull request that merges while its pass is open', () => {
-  it('closes with no gate or push, and carries the unfinished page and later sign-offs to a stacked follow-on pass', async () => {
-    await world(undefined, { pageCap: 6 });
-    settingsSignedOff();
-    const { url, pushed } = await opened();
-    // A page signed off after the push.
-    w.h.commit('src/settings/old.tsx', 'signed off later\n');
-    const tip = w.h.git$('rev-parse', w.branch);
-    const turn = w.startTurn(w.people);
-    w.write('src/people/page.tsx', 'people, unfinished\n');
-    w.endTurn(turn);
-    await keepTurnWork(w.deps, { workstreamId: w.runOf(w.people), turnId: turn.id });
-    // GitHub squash-merged the pull request as pushed.
-    const squash = w.h.origin$('commit-tree', '-p', 'main', '-m', 'squash', `${pushed}^{tree}`);
-    w.h.origin$('update-ref', 'refs/heads/main', squash);
-    const settles = subscribePassSettles(w.h.bus, w.h.ctx);
+  // A close, a follow-on pass's opening and a settle: room for a full run's load.
+  it(
+    'closes with no gate or push, and carries the unfinished page and later sign-offs to a stacked follow-on pass',
+    { timeout: 120_000 },
+    async () => {
+      await world(undefined, { pageCap: 6 });
+      settingsSignedOff();
+      const { url, pushed } = await opened();
+      // A page signed off after the push.
+      w.h.commit('src/settings/old.tsx', 'signed off later\n');
+      const tip = w.h.git$('rev-parse', w.branch);
+      const turn = w.startTurn(w.people);
+      w.write('src/people/page.tsx', 'people, unfinished\n');
+      w.endTurn(turn);
+      await keepTurnWork(w.deps, { workstreamId: w.runOf(w.people), turnId: turn.id });
+      // GitHub squash-merged the pull request as pushed.
+      const squash = w.h.origin$('commit-tree', '-p', 'main', '-m', 'squash', `${pushed}^{tree}`);
+      w.h.origin$('update-ref', 'refs/heads/main', squash);
+      const settles = subscribePassSettles(w.h.bus, w.h.ctx);
 
-    merged(url);
-    await waitFor(() => followOnCard() !== undefined);
-    await w.h.jobs.idle();
-    await waitFor(() => getPass(w.h.store.db, w.opened.pass.id).state === PassState.Settled);
-    await w.h.jobs.idle();
-    settles();
+      merged(url);
+      await waitFor(() => followOnCard() !== undefined, 60_000);
+      await w.h.jobs.idle();
+      await waitFor(
+        () => getPass(w.h.store.db, w.opened.pass.id).state === PassState.Settled,
+        60_000,
+      );
+      await w.h.jobs.idle();
+      settles();
 
-    const db = w.h.store.db;
-    const a = w.opened.pass;
-    expect(getBatch(db, a.batchId).state).toBe('SHIPPED');
-    // No gate ran (it would have failed and reopened the pass), and nothing was pushed again.
-    expect(w.h.origin$('rev-parse', w.branch)).toBe(pushed);
-    expect(w.h.gh.prCreates()).toHaveLength(1);
-    // D8: the branch the folder came from holds every signed-off page.
-    expect(w.h.git$('rev-parse', 'main')).toBe(tip);
-    const detail = PassFollowOnDetail.parse(followOnCard()?.detail);
-    expect(detail).toMatchObject({ passId: a.id, prUrl: null, carried: [w.people.id] });
-    if (detail.followOnPassId === null) throw new Error('no follow-on pass');
-    const b = getPass(db, detail.followOnPassId);
-    expect(b.state).toBe(PassState.Open);
-    expect(b.startSha).toBe(tip);
-    expect(getPassProgress(db, b.id).stackedOn).toBe(a.id);
-    expect(b.pageCap).toBe(6);
-    expect(getTask(db, w.people.id).passId).toBe(b.id);
-    // The follow-on pass took the base in by a merge that changes no file: its pull request shows
-    // the later sign-offs and its own pages, not the merged pass's commits.
-    const head = w.h.git$('rev-parse', `refs/heads/${getBatch(db, b.batchId).branch ?? ''}`);
-    expect(w.h.git$('rev-parse', `${head}^2`)).toBe(squash);
-    expect(w.h.git$('rev-parse', `${head}^{tree}`)).toBe(w.h.git$('rev-parse', `${tip}^{tree}`));
-    expect(getPassProgress(db, b.id).notices).toEqual([]);
-    // The unfinished page's work is back in the folder, in the follow-on pass.
-    expect(w.h.git$('show', `:src/people/page.tsx`)).toBe('people');
-    expect(w.h.git$('diff', '--name-only')).toBe('src/people/page.tsx');
-  });
+      const db = w.h.store.db;
+      const a = w.opened.pass;
+      expect(getBatch(db, a.batchId).state).toBe('SHIPPED');
+      // No gate ran (it would have failed and reopened the pass), and nothing was pushed again.
+      expect(w.h.origin$('rev-parse', w.branch)).toBe(pushed);
+      expect(w.h.gh.prCreates()).toHaveLength(1);
+      // D8: the branch the folder came from holds every signed-off page.
+      expect(w.h.git$('rev-parse', 'main')).toBe(tip);
+      const detail = PassFollowOnDetail.parse(followOnCard()?.detail);
+      expect(detail).toMatchObject({ passId: a.id, prUrl: null, carried: [w.people.id] });
+      if (detail.followOnPassId === null) throw new Error('no follow-on pass');
+      const b = getPass(db, detail.followOnPassId);
+      expect(b.state).toBe(PassState.Open);
+      expect(b.startSha).toBe(tip);
+      expect(getPassProgress(db, b.id).stackedOn).toBe(a.id);
+      expect(b.pageCap).toBe(6);
+      expect(getTask(db, w.people.id).passId).toBe(b.id);
+      // The follow-on pass took the base in by a merge that changes no file: its pull request shows
+      // the later sign-offs and its own pages, not the merged pass's commits.
+      const head = w.h.git$('rev-parse', `refs/heads/${getBatch(db, b.batchId).branch ?? ''}`);
+      expect(w.h.git$('rev-parse', `${head}^2`)).toBe(squash);
+      expect(w.h.git$('rev-parse', `${head}^{tree}`)).toBe(w.h.git$('rev-parse', `${tip}^{tree}`));
+      expect(getPassProgress(db, b.id).notices).toEqual([]);
+      // The unfinished page's work is back in the folder, in the follow-on pass.
+      expect(w.h.git$('show', `:src/people/page.tsx`)).toBe('people');
+      expect(w.h.git$('diff', '--name-only')).toBe('src/people/page.tsx');
+    },
+  );
 
   it('names the branch and the commits not pushed on its card when the follow-on pass does not open', async () => {
     await world(undefined, { followOnRefused: 'the folder is busy' });

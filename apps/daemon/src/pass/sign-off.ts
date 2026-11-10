@@ -272,6 +272,9 @@ export function startSignOff(deps: SignOffDeps, taskId: TaskId): PassSignOffDto 
  * ConflictError (409) by `signOffRefusal`, else started (`startSignOff`).
  */
 export function askSignOff(deps: SignOffDeps, passId: PassId, taskId: TaskId): PassSignOffDto {
+  // A page already waiting answers its wait: its Ready item is closed by the Sign Off that waits.
+  if (listSignOffWaits(deps.state.db, passId).some((w) => w.taskId === taskId))
+    return startSignOff(deps, taskId);
   const refused = signOffRefusal(deps.state.db, passId, taskId);
   if (refused !== null) throw new ConflictError(refused);
   return startSignOff(deps, taskId);
