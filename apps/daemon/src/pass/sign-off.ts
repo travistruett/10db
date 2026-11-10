@@ -28,7 +28,9 @@ import {
   insertSignOffWait,
   insertSystemNotice,
   latestPassTurn,
+  listPassTasks,
   listPassTurns,
+  listPassesIn,
   listSignOffWaits,
   listTaskThreadRows,
   markPassTurnAnswered,
@@ -137,6 +139,26 @@ function isReady(db: DbReader, id: WorkstreamId, asked = false): boolean {
 }
 
 /**
+ * Whether the page's sign-off is in flight: its Ready item closed by its Sign Off while the run still
+ * waits on it (spec §9.2 step 0, "Signing off…"). A sign-off that does not land opens it again.
+ */
+export function signingOff(db: DbReader, id: WorkstreamId): boolean {
+  return isReady(db, id, true) && !isReady(db, id);
+}
+
+/** Closes the page's open Ready item with its Sign Off, so the page reads as signing off. */
+function markSigningOff(ctx: WriteContext, ws: WorkstreamId): void {
+  const row = getWorkstreamRow(ctx.tx, ws);
+  if (row.state !== S.WaitingHuman || row.nextAction.kind !== 'pass_review') return;
+  const item = getInboxItem(ctx.tx, row.nextAction.inboxId);
+  if (item.kind === InboxKind.Check && item.state === InboxState.Open)
+    updateInboxItem(ctx, item.id, {
+      state: InboxState.Resolved,
+      answer: { choice: PASS_SIGN_OFF_CHOICE },
+    });
+}
+
+/**
  * Why the builder's Sign Off on the page is refused now, or null: the pass must be open, hold the
  * page, and the page be Ready. The route and the check item's answer both ask it.
  */
@@ -230,6 +252,12 @@ export function startSignOff(deps: SignOffDeps, taskId: TaskId): PassSignOffDto 
   const wait = listSignOffWaits(db).find((w) => w.taskId === taskId);
   if (wait) return waitingFor(wait.waitsForTaskId);
   if (task.passId == null) throw new ConflictError(`${task.title} is in no pass`);
+  // The page reads Signing off, and a second Sign Off is refused, until this one lands or does not.
+  const ws = task.workstreamId;
+  if (ws !== null)
+    deps.state.write((ctx) => {
+      markSigningOff(ctx, ws);
+    });
   signOff(deps, { taskId, from: SignOffFrom.Page }).catch((error: unknown) => {
     signOffFailed(deps, taskId, error);
   });
@@ -539,16 +567,29 @@ export function signOff(deps: SignOffDeps, input: SignOffInput): Promise<SignOff
   });
 }
 
-/** Queues again every sign-off that waits on a hold now closed (spec §9.2, §12). */
+/**
+ * Queues again every sign-off that waits on a hold now closed (spec §9.2, §12). With no pass named
+ * (start-up), also each sign-off a restart cut short in flight, its page still reading Signing off.
+ */
 export function resumeSignOffWaits(deps: SignOffDeps, passId?: PassId): void {
   const db = deps.state.db;
-  for (const wait of listSignOffWaits(db, passId)) {
+  const waits = listSignOffWaits(db, passId);
+  for (const wait of waits) {
     const pass = getPass(db, wait.passId);
     if (pass.state !== PassState.Open) continue;
     signOff(deps, { taskId: wait.taskId, from: SignOffFrom.Wait }).catch((error: unknown) => {
       signOffFailed(deps, wait.taskId, error);
     });
   }
+  if (passId !== undefined) return;
+  for (const pass of listPassesIn(db, PassState.Open))
+    for (const task of listPassTasks(db, pass.id)) {
+      const ws = task.workstreamId;
+      if (ws === null || waits.some((w) => w.taskId === task.id) || !signingOff(db, ws)) continue;
+      signOff(deps, { taskId: task.id, from: SignOffFrom.Page }).catch((error: unknown) => {
+        signOffFailed(deps, task.id, error);
+      });
+    }
 }
 
 /**

@@ -41,9 +41,13 @@ import {
   takeOut,
   TakeOutWithin,
 } from './index';
+import { jobKey, JobQueue } from '../delivery';
+import { passView } from './view';
 import {
+  askSignOff,
   cancelSignOffWait,
   finishSignOff,
+  resumeSignOffWaits,
   signOffRefusal,
   signOffSteps,
   SignOffFrom,
@@ -715,5 +719,65 @@ describe('finishSignOff', () => {
     }).toThrow(ConflictError);
     expect(getWorkstreamRow(w.h.store.db, run.ws).state).toBe(from);
     expect(listTaskThread(w.h.store.db, run.task.id)).toEqual([]);
+  });
+});
+
+describe('a Sign Off in flight', () => {
+  afterEach(() => {
+    w.close();
+  });
+
+  /** Holds the project's delivery queue until the answer is called, so a sign-off stays in flight. */
+  function holdQueue(): () => void {
+    let release = (): void => undefined;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    w.h.jobs.run(
+      jobKey({ projectId: w.h.project.id, worktreePath: null }, JobQueue.Cut),
+      () => held,
+    );
+    return release;
+  }
+  const pageOf = (task: TaskDto) =>
+    passView(w.h.store.db, w.opened.pass.id).pages.find((p) => p.taskId === task.id);
+
+  it('reads Signing off on the page, and refuses a second Sign Off until it lands', async () => {
+    w = await openPassWorld();
+    await turn(w.settings, () => {
+      w.write('src/settings/page.tsx', 'tidied\n');
+    });
+    w.ready(w.settings);
+    const release = holdQueue();
+    const deps = { ...w.deps, stopLane: stopped };
+
+    expect(askSignOff(deps, w.opened.pass.id, w.settings.id).state).toBe('signing_off');
+    expect(pageOf(w.settings)?.signOff).toBe('signing_off');
+    expect(() => askSignOff(deps, w.opened.pass.id, w.settings.id)).toThrow(ConflictError);
+    release();
+    await w.h.jobs.idle();
+
+    expect(pageOf(w.settings)?.signOff).toBe('done');
+    expect(landed()).toEqual(['Settings: UI work']);
+  });
+
+  it('goes on with a sign-off a restart cut short', async () => {
+    w = await openPassWorld();
+    await turn(w.settings, () => {
+      w.write('src/settings/page.tsx', 'tidied\n');
+    });
+    w.ready(w.settings);
+    const release = holdQueue();
+    askSignOff({ ...w.deps, stopLane: stopped }, w.opened.pass.id, w.settings.id);
+
+    const after = { ...w.restart(), stopLane: stopped };
+    resumeSignOffWaits(after);
+    await after.jobs.idle();
+
+    expect(getWorkstreamRow(w.h.store.db, w.runOf(w.settings)).state).toBe('DONE');
+    expect(pageOf(w.settings)?.signOff).toBe('done');
+    release();
+    await w.h.jobs.idle();
+    expect(landed()).toEqual(['Settings: UI work']);
   });
 });
