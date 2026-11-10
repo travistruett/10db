@@ -182,13 +182,15 @@ export interface LandedShared {
  * Lands the pass's shared chain up to `upTo` on its branch (spec §7.2, §9.2), from the number landed
  * so far, in number order: each change as one signed commit on the branch's tip with its paths as
  * its chain commit holds them, so the branch's shared files are always a state the folder was in;
- * an empty hold, a dropped change and a drop are passed over. Each number is recorded as it lands,
- * and a rerun finds a commit it made by its operation id. Refused at a hold still open, and while
- * the folder is off the pass's branch.
+ * an empty hold, a dropped change and a drop are passed over, as is each of `passOver`: a close's
+ * change chosen Drop, which its page's take-out drops after (no later change touches its paths, so
+ * the branch is still a state the folder will be in). Each number is recorded as it lands, and a
+ * rerun finds a commit it made by its operation id. Refused at a hold still open, and while the
+ * folder is off the pass's branch.
  */
 export async function landSharedChanges(
   deps: PassWorkDeps,
-  i: { readonly passId: PassId; readonly upTo: number },
+  i: { readonly passId: PassId; readonly upTo: number; readonly passOver?: readonly number[] },
 ): Promise<LandedShared[]> {
   const db = deps.state.db;
   const pass = getPass(db, i.passId);
@@ -209,7 +211,8 @@ export async function landSharedChanges(
       sha === null &&
       change.dropOf === null &&
       change.droppedBy === null &&
-      change.paths.length > 0
+      change.paths.length > 0 &&
+      !(i.passOver ?? []).includes(seq)
     ) {
       const done = await deps.git.landPaths({
         repo,

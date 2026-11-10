@@ -267,21 +267,26 @@ export function getAbandonStep(db: DbReader, passId: PassId): AbandonStep | null
 
 /**
  * Records a finished step of the pass's Abandon (spec §5.4), so a restart goes on from the next. The
- * first step moves an open pass to `ABANDONING`; a step is never recorded below the last one. The last,
- * the folder's index refreshed, follows step 7's `abandonPassAndBatch` and leaves the pass `ABANDONED`.
+ * first step moves an open pass to `ABANDONING`, and a closing one too until its close has moved the
+ * return branch (D23: from then on the pass is landing); a step is never recorded below the last one.
+ * The last, the folder's index refreshed, follows step 7's `abandonPassAndBatch` and leaves the pass
+ * `ABANDONED`.
  */
 export function setAbandonStep(ctx: WriteContext, passId: PassId, step: AbandonStep): void {
   const pass = getPass(ctx.tx, passId);
   const last = getAbandonStep(ctx.tx, passId);
   const from: readonly PassState[] =
     step === AbandonStep.Abandoning
-      ? [PassState.Open, PassState.Abandoning]
+      ? [PassState.Open, PassState.Closing, PassState.Abandoning]
       : step === AbandonStep.IndexRefreshed
         ? [PassState.Abandoned]
         : [PassState.Abandoning];
   const state = step === AbandonStep.IndexRefreshed ? PassState.Abandoned : PassState.Abandoning;
   if (!from.includes(pass.state))
     throw new ConflictError(`Pass "${pass.name}" is ${pass.state.toLowerCase()}`);
+  const closed = getPassProgress(ctx.tx, passId).closeStep;
+  if (pass.state === PassState.Closing && closed !== null && closed >= CloseStep.FastForwarded)
+    throw new ConflictError(`Pass "${pass.name}" is landing: its close has moved its branch`);
   if (last !== null && step < last)
     throw new ConflictError(
       `Pass "${pass.name}" has finished step ${String(last)} of its Abandon, past step ${String(step)}`,

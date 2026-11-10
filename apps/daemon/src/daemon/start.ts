@@ -100,6 +100,7 @@ import {
   createPrWatch,
   answerPassMoveCard,
   createPassPullRequests,
+  passGateKind,
   holdForPutBack,
   createShipper,
   createWorktreeDependencies,
@@ -155,15 +156,18 @@ import {
   withdrawStaleClaimWaits,
 } from '../mcp';
 import {
-  abandonPass,
   answerPassCard,
   askSignOff,
   cancelSignOffWait,
+  closeGateOf,
+  createPassCloses,
   putBackKeptWork,
   resumePassWork,
+  startAbandon,
   startSignOff,
   subscribeSignOffWaits,
   takeOut,
+  type AbandonDeps,
   type PassWorkDeps,
   type TakeOutDeps,
 } from '../pass';
@@ -1396,8 +1400,24 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     startSignOff(passTakeOuts, taskId);
   };
   const unsubscribeSignOffWaits = subscribeSignOffWaits(bus, passTakeOuts);
+  // Close Pass, its steps under the delivery key with its gate and pull request through 7b's seam.
+  const passCloses = createPassCloses({
+    ...passTakeOuts,
+    ship: passPullRequests,
+    gateWhere: (pass) => closeGateOf(passGateKind(getProject(state.db, pass.projectId))),
+  });
+  // Abandon Pass stops what ships for the pass first: its pull request's checks and its close.
+  const passAbandons: AbandonDeps = {
+    ...passTakeOuts,
+    stopShip: async (passId) => {
+      await passPullRequests.stopPassChecks(passId);
+      await passCloses.abort(passId);
+    },
+  };
   // Each open pass goes on from its rows: its folder card, a put-back, take-outs and sign-offs cut short.
   await resumePassWork(passTakeOuts);
+  // A close a restart cut short goes on from its last step.
+  passCloses.resume();
   // The previous daemon's claim waits ended with it; their cards would name holders nobody waits for.
   withdrawStaleClaimWaits(state, inbox);
   accountPauses.restore();
@@ -1526,8 +1546,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     starter,
     openPass: (input) => openPass(delivery, input, passOpenDeps),
     takeOut: (input) => takeOut(passTakeOuts, input),
-    abandonPass: (passId) => abandonPass(passTakeOuts, passId),
+    abandonPass: (passId) => startAbandon(passAbandons, passId),
     passPullRequests,
+    closes: passCloses,
     signOff: (passId, taskId) => askSignOff(passTakeOuts, passId, taskId),
     cancelSignOff: (passId, taskId) => {
       cancelSignOffWait(passTakeOuts, passId, taskId);

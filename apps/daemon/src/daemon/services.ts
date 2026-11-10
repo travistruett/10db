@@ -115,7 +115,13 @@ import { adoptGoal } from '../goals';
 import { GitError, type Git } from '../git';
 import { hazardAssessmentDto, type HazardAssessor } from '../hazards';
 import { earlierMcpApproval, requestMcpApproval, type InboxService } from '../inbox';
-import { passView, sharedUnlanded, TakeOutWithin, type TakeOutInput } from '../pass';
+import {
+  passView,
+  sharedUnlanded,
+  TakeOutWithin,
+  type PassCloses,
+  type TakeOutInput,
+} from '../pass';
 import type { KeepAwake } from '../keep-awake';
 import type { Runner } from '../runner';
 import type { Scheduler } from '../scheduler';
@@ -171,6 +177,8 @@ export function createServices(deps: {
   readonly abandonPass: (passId: PassId) => Promise<PassAbandonedDto>;
   /** A pass's pull request: its preview, and Open Pull Request. */
   readonly passPullRequests: Pick<PassPullRequests, 'preview' | 'open'>;
+  /** A pass's close: its lists and its confirm, which queues the close in the delivery queue. */
+  readonly closes: Pick<PassCloses, 'preview' | 'close'>;
   /** Signs off a Ready page in the project's delivery queue, stopping its lane through the runner. */
   readonly signOff: (passId: PassId, taskId: TaskId) => PassSignOffDto;
   /** Cancels a page's waiting sign-off. */
@@ -417,12 +425,19 @@ export function createServices(deps: {
     },
     abandonPass(passId) {
       const pass = getPass(db, passId);
-      if (pass.state !== PassState.Open && pass.state !== PassState.Abandoning)
+      const states: readonly PassState[] = [
+        PassState.Open,
+        PassState.Closing,
+        PassState.Abandoning,
+      ];
+      if (!states.includes(pass.state))
         throw new ConflictError(
-          `Pass "${pass.name}" is ${pass.state.toLowerCase()}: only an open pass is abandoned`,
+          `Pass "${pass.name}" is ${pass.state.toLowerCase()}: only an open or closing pass is abandoned`,
         );
       return deps.abandonPass(passId);
     },
+    passClosePreview: (passId) => deps.closes.preview(passId),
+    closePass: (passId, input) => deps.closes.close(passId, input),
     signOffPage: (passId, taskId) => deps.signOff(passId, taskId),
     cancelSignOff: (passId, taskId) => {
       deps.cancelSignOff(passId, taskId);

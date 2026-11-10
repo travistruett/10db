@@ -65,6 +65,9 @@ import type {
   PassId,
   PassOpenedDto,
   PassAbandonedDto,
+  PassCloseAnswerDto,
+  PassClosePreviewDto,
+  PassCloseRequest,
   PassOpenRequest,
   PassPullRequestDto,
   PassPullRequestPreviewDto,
@@ -272,8 +275,9 @@ export interface ApiServices {
   takeOutPreview(passId: PassId, taskId: TaskId): Promise<TakeOutPreviewDto>;
   /**
    * Abandons the pass (spec §5.4, D23): every unsigned page taken out and put back, the pass and its
-   * batch `ABANDONED`, and the folder returned when nothing landed. Refused (409) once the pass is
-   * neither open nor already abandoning.
+   * batch `ABANDONED`, and the folder returned when nothing landed. A closing pass is taken over,
+   * its close stopped, until its close has moved the return branch. Refused (409) once the pass is
+   * none of open, closing below that step, or already abandoning.
    */
   abandonPass(passId: PassId): Promise<PassAbandonedDto>;
   /**
@@ -285,6 +289,18 @@ export interface ApiServices {
   signOffPage(passId: PassId, taskId: TaskId): PassSignOffDto;
   /** Cancels the page's sign-off that waits for another page's turn. Refused (409) when none waits. */
   cancelSignOff(passId: PassId, taskId: TaskId): void;
+  /**
+   * What Close Pass… shows (spec §5.4, D25): the unfinished pages, the files no page owns, commits
+   * 10db did not make, the summary, where the gate runs, and the lists' token. It stops nothing.
+   */
+  passClosePreview(passId: PassId): Promise<PassClosePreviewDto>;
+  /**
+   * Close Pass, confirmed: stops every agent of the pass, and closes in the background only when the
+   * lists are still the ones the token names; otherwise answers them again with what changed.
+   * Refused (409) while the pass is not open or Your folder is off its branch, and for choices the
+   * lists do not allow.
+   */
+  closePass(passId: PassId, input: PassCloseRequest): Promise<PassCloseAnswerDto>;
   /** Whether Open Pull Request is offered for the pass (spec §8.3), why not, and what it would do. */
   passPullRequest(passId: PassId): Promise<PassPullRequestPreviewDto>;
   /**

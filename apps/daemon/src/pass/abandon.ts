@@ -1,10 +1,13 @@
 import {
   AbandonStep,
+  BatchState,
   PassState,
   TakeOutStep,
+  WorkstreamState,
   type PassAbandonedDto,
   type PassDto,
   type PassId,
+  type TaskDto,
 } from '@10db/contracts';
 import {
   abandonPassAndBatch,
@@ -15,6 +18,7 @@ import {
   getPass,
   getProject,
   getTask,
+  getWorkstreamRow,
   leavePass,
   listPassTakeOuts,
   listPassTasks,
@@ -22,6 +26,7 @@ import {
   listSignOffWaits,
   openHolds,
   setAbandonStep,
+  transitionBatch,
   type DbReader,
 } from '@10db/db';
 import { jobKey, JobQueue } from '../delivery';
@@ -36,6 +41,14 @@ import { takeOutSteps, TakeOutWithin, type TakeOutDeps } from './take-out';
 // back to their state before the pass, its work kept with its task, and the pass and its batch end
 // ABANDONED, step by recorded step (`passes.abandon_step`) so a restart goes on from the next.
 
+/**
+ * What an Abandon needs: a take-out's, and the stop of what ships for the pass (its pull request's
+ * checks and its close's job), which a restart has none of.
+ */
+export type AbandonDeps = TakeOutDeps & {
+  readonly stopShip?: (passId: PassId) => Promise<void>;
+};
+
 /** The fold key of the card an Abandon leaves. */
 export const passAbandonCardKey = (passId: PassId): string => `pass-abandon:${passId}`;
 
@@ -46,6 +59,14 @@ export const moveToLabel = (branch: string): string => `Move to ${branch}`;
 interface LeftFile {
   readonly path: string;
   readonly page: string;
+}
+
+/** Whether the page is signed off: its run is DONE, so an Abandon leaves it as landed. */
+function signedOff(db: DbReader, task: TaskDto): boolean {
+  return (
+    task.workstreamId !== null &&
+    getWorkstreamRow(db, task.workstreamId).state === WorkstreamState.Done
+  );
 }
 
 /** What the pass's take-outs put back and left, read from their rows. */
@@ -156,7 +177,7 @@ export function withdrawAbandonCard(deps: PassWorkDeps, pass: PassDto): void {
 /**
  * Abandons the pass (spec §5.4) for a caller already holding the project's delivery key, going on
  * from the last step it recorded: 1 the pass is ABANDONING, so no message, sign-off or close is taken;
- * 2 a ship in flight is aborted, which slice 7's sign-off and close bring; 3 every session of the pass
+ * 2 a ship in flight is aborted (the pull request's checks, a close's job) and a shipping batch fails; 3 every session of the pass
  * is stopped, its last work kept; 4 each shared change not landed is dropped, newest first, its files
  * put back as its hold found them, with no refusal but the hash before each write; 5 each page still in the pass is taken out by the take-out's own steps, inside the
  * Abandon, so files that keep changing are left and named rather than stopping it; 6 signed-off pages
@@ -165,7 +186,7 @@ export function withdrawAbandonCard(deps: PassWorkDeps, pass: PassDto): void {
  * the take-outs wrote. A card says where the folder is when it stays, and names each file left.
  */
 export async function abandonPassSteps(
-  deps: TakeOutDeps,
+  deps: AbandonDeps,
   passId: PassId,
 ): Promise<PassAbandonedDto> {
   const db = deps.state.db;
@@ -185,8 +206,17 @@ export async function abandonPassSteps(
       for (const wait of listSignOffWaits(ctx.tx, passId)) deleteSignOffWait(ctx, wait.taskId);
     });
   }
-  // Step 2's place: a pass ships only once slice 7 lands sign-off and its close.
-  if (before(AbandonStep.ShipAborted)) record(AbandonStep.ShipAborted);
+  if (before(AbandonStep.ShipAborted)) {
+    // A ship in flight is aborted: the pull request's checks and the close's job, each waited for
+    // to the end of its step; a batch the close was shipping fails, the edge to ABANDONED after.
+    await deps.stopShip?.(passId);
+    deps.state.write((ctx) => {
+      const batch = getBatch(ctx.tx, getPass(ctx.tx, passId).batchId);
+      if (batch.state === BatchState.Shipping)
+        transitionBatch(ctx, batch.id, { to: BatchState.Failed, reason: 'the pass is abandoned' });
+    });
+    record(AbandonStep.ShipAborted);
+  }
   if (before(AbandonStep.SessionsStopped)) {
     for (const task of listPassTasks(db, passId))
       if (task.workstreamId !== null) await deps.stopLane(task.workstreamId);
@@ -212,6 +242,7 @@ export async function abandonPassSteps(
   }
   if (before(AbandonStep.PagesTakenOut)) {
     for (const task of listPassTasks(db, passId)) {
+      if (signedOff(db, task)) continue;
       if (task.workstreamId === null)
         deps.state.write((ctx) => {
           leavePass(ctx, task.id);
@@ -220,7 +251,7 @@ export async function abandonPassSteps(
     }
     record(AbandonStep.PagesTakenOut);
   }
-  // Step 6's place: signed-off pages stay as landed; sign-off comes with slice 7.
+  // Step 6: signed-off pages stay as landed, their commits on the pass's branch.
   if (before(AbandonStep.SignedOffKept)) record(AbandonStep.SignedOffKept);
   if (before(AbandonStep.Abandoned)) {
     deps.state.write((ctx) => {
@@ -260,7 +291,9 @@ export async function abandonPassSteps(
   const on = await git.currentBranch(repo);
   return {
     reverted: done.reverted,
-    stays: [],
+    stays: listPassTasks(db, passId)
+      .filter((task) => signedOff(db, task))
+      .map((task) => task.id),
     left: done.left,
     folder: { branch: on ?? 'HEAD', returned: on === pass.returnBranch },
     droppedShared: dropped.drops,
@@ -272,7 +305,23 @@ export async function abandonPassSteps(
  * Abandons the pass as a job under the project's delivery key, as a pass opens and a page is taken
  * out, so it never interleaves with either. Refused once the pass is neither open nor abandoning.
  */
-export function abandonPass(deps: TakeOutDeps, passId: PassId): Promise<PassAbandonedDto> {
+/**
+ * Abandon Pass from its route (spec §5.4, D23): step 1's write decides, here and now, outside the
+ * delivery key, since a close running under that key stops only at its next conditional write; a
+ * closing pass is refused once its close has moved the return branch. What ships for the pass is
+ * stopped next, still outside the key, then the steps go on as a job.
+ */
+export async function startAbandon(deps: AbandonDeps, passId: PassId): Promise<PassAbandonedDto> {
+  deps.state.write((ctx) => {
+    if (getPass(ctx.tx, passId).state !== PassState.Abandoning)
+      setAbandonStep(ctx, passId, AbandonStep.Abandoning);
+  });
+  // A close holds the delivery key the Abandon's job waits for: its abort is raised out here.
+  await deps.stopShip?.(passId);
+  return abandonPass(deps, passId);
+}
+
+export function abandonPass(deps: AbandonDeps, passId: PassId): Promise<PassAbandonedDto> {
   const pass = getPass(deps.state.db, passId);
   return new Promise<PassAbandonedDto>((resolve, reject) => {
     deps.jobs.run(

@@ -66,6 +66,8 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/passes/:passId': 'Only the Workbench draws a pass, and it is not a screen.',
   '/passes/:passId/tasks/:taskId/take-out':
     "A take-out's shared changes are read by running git in Your folder, and no screen draws them.",
+  '/passes/:passId/close':
+    "A pass's close lists are read by running git in Your folder, and only the Workbench draws them.",
   '/passes/:passId/pull-request':
     "Reading a pass's pull request asks gh whether it is signed in, and only the Workbench draws it.",
   '/shape-measures': 'No screen draws a measure.',

@@ -80,6 +80,7 @@ import {
   StartTaskInput,
   SystemCheckDto,
   TakeOutRequest,
+  PassCloseRequest,
   TaskFileId,
   TaskId,
   TaskInput,
@@ -750,6 +751,17 @@ export function createApp(deps: ApiDeps) {
     )
     .post('/passes/:passId/abandon', async (c) =>
       c.json(await deps.services.abandonPass(PassId.parse(c.req.param('passId')))),
+    )
+    .get('/passes/:passId/close', async (c) =>
+      c.json(await deps.services.passClosePreview(PassId.parse(c.req.param('passId')))),
+    )
+    .post(
+      '/passes/:passId/close',
+      validator('json', (value): PassCloseRequest => PassCloseRequest.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.closePass(PassId.parse(c.req.param('passId')), c.req.valid('json')),
+        ),
     )
     .post('/passes/:passId/tasks/:taskId/sign-off', (c) =>
       c.json(

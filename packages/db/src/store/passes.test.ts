@@ -497,6 +497,29 @@ describe("a pass's close", () => {
     expect(getPass(store.db, pass.id).state).toBe(PassState.Abandoning);
   });
 
+  it.each([
+    { name: 'confirmed', step: CloseStep.Confirmed, takes: true },
+    { name: 'pushed', step: CloseStep.Pushed, takes: true },
+    { name: 'fast-forwarded', step: CloseStep.FastForwarded, takes: false },
+  ])('lets an Abandon take a closing pass over unless it is landing: $name', ({ step, takes }) => {
+    const t = task();
+    const { pass } = store.write((ctx) => insertPass(ctx, passInput([t]))).value;
+    store.write((ctx) => {
+      setClosePlan(ctx, pass.id, plan(t));
+      for (const s of [CloseStep.Landed, CloseStep.Pushed, CloseStep.FastForwarded])
+        if (s <= step) setCloseStep(ctx, pass.id, s);
+    });
+    const abandon = () =>
+      store.write((ctx) => {
+        setAbandonStep(ctx, pass.id, AbandonStep.Abandoning);
+      });
+    if (takes) abandon();
+    else expect(abandon).toThrow(/landing/);
+    expect(getPass(store.db, pass.id).state).toBe(takes ? PassState.Abandoning : PassState.Closing);
+    // Once it is abandoning, the close's next write stops it.
+    expect(store.write((ctx) => setCloseStep(ctx, pass.id, CloseStep.Closed)).value).toBe(!takes);
+  });
+
   it('closes, then settles; a local close settles at once; a failed gate reopens it', () => {
     const { pass } = store.write((ctx) => insertPass(ctx, passInput([task()]))).value;
     store.write((ctx) => {

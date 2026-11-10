@@ -19,7 +19,7 @@ export {
   type TakeOutInput,
 } from './take-out';
 export { putBackKeptWork } from './put-back';
-export { abandonPass } from './abandon';
+export { abandonPass, startAbandon, type AbandonDeps } from './abandon';
 export { resumePassWork } from './resume';
 export { passView } from './view';
 export { holdRef, sharedRef } from './shared-hold';
@@ -45,3 +45,12 @@ export {
   type SignOffDeps,
   type SignOffOutcome,
 } from './sign-off';
+export { closeGateOf, closePreview, type CloseGateWhere } from './close-lists';
+export {
+  closeSteps,
+  createPassCloses,
+  type CloseDeps,
+  type CloseShip,
+  type PassCloses,
+} from './close';
+export { fastForwardReturn } from './fast-forward';

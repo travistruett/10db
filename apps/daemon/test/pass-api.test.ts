@@ -6,6 +6,8 @@ import {
   mintId,
   PASS_SIGN_OFF_CHOICE,
   PassAbandonedDto,
+  PassCloseAnswerDto,
+  PassClosePreviewDto,
   PassOpenedDto,
   PassSignOffDto,
   PassViewDto,
@@ -23,6 +25,7 @@ import {
   endPassTurn,
   getBatch,
   getInboxItem,
+  getPass,
   getTask,
   getTaskKeptWork,
   insertBatch,
@@ -648,6 +651,36 @@ describe('Sign Off over HTTP', () => {
     daemon.state.db.update(schema.passes).set({ state: 'ABANDONING' }).run();
     expect((await signOffOf(pass, task)).status).toBe(409);
     expect(runOf(task).state).toBe('RUNNING');
+  });
+});
+
+describe('Close Pass over HTTP', () => {
+  it('shows the lists without stopping a working page, then stops it on confirm and closes', async () => {
+    const { task, pass } = await openedPage(WORKING);
+    await waitFor(() => existsSync(join(repo.path, PAGE_FILE)));
+
+    const shown = await api().get(`/passes/${pass.id}/close`, PassClosePreviewDto);
+
+    expect(shown.unfinished).toMatchObject([{ taskId: task.id, working: true }]);
+    expect(latestPassTurn(daemon.state.db, task.id)?.endedAt).toBeNull();
+    expect(runOf(task).state).toBe('RUNNING');
+
+    const res = await post(`/passes/${pass.id}/close`, {
+      token: shown.token,
+      pages: [{ taskId: task.id, choice: 'take_out' }],
+      files: [],
+      shared: [],
+    });
+
+    expect(res.status).toBe(200);
+    expect(PassCloseAnswerDto.parse(res.body)).toMatchObject({ outcome: 'closing' });
+    // No origin: the pass settles at its close, the page taken out and the folder home.
+    await waitFor(() => getPass(daemon.state.db, pass.id).state === 'SETTLED');
+    expect(latestPassTurn(daemon.state.db, task.id)?.ending).toBe('stopped');
+    expect(listInbox(daemon.state.db, {}).filter((i) => i.kind === 'check')).toEqual([]);
+    expect(rawGit('symbolic-ref', '--short', 'HEAD')).toBe('main');
+    expect(existsSync(join(repo.path, PAGE_FILE))).toBe(false);
+    expect(rawGit('show', `refs/10db/kept/${task.id}:${PAGE_FILE}`)).toBe('half');
   });
 });
 

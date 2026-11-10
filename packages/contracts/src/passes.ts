@@ -313,6 +313,8 @@ export const PassNoticeKind = {
   PrClosed: 'pr_closed',
   /** The gate on the pushed tip failed. */
   GateFailed: 'gate_failed',
+  /** The close stopped on an error, or left its pull request to finish on GitHub. */
+  Close: 'close',
 } as const;
 export type PassNoticeKind = (typeof PassNoticeKind)[keyof typeof PassNoticeKind];
 
