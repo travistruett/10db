@@ -58,6 +58,15 @@ describe('where a failed check goes', () => {
       ],
     },
     {
+      name: 'a path that ends a sentence, before a space or at the end',
+      output: 'Fix src/settings/page.tsx. Then src/people/page.tsx.',
+      named: ['src/people/page.tsx', 'src/settings/page.tsx'],
+      threads: [
+        { taskId: settings, paths: ['src/settings/page.tsx'] },
+        { taskId: people, paths: ['src/people/page.tsx'] },
+      ],
+    },
+    {
       name: 'a path under another directory is not the path',
       output: 'packages/web/src/settings/page.tsx:1:1 error',
       named: [],
