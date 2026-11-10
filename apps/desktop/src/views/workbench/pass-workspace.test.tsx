@@ -905,6 +905,32 @@ describe('PassWorkspace keys', () => {
     expect(document.activeElement).toBe(billing);
   });
 
+  it('puts the cursor in the composer of a row clicked with a pointer, even where a click focuses it', async () => {
+    const pages = pagesByStatus();
+    function Selecting() {
+      const [selected, setSelected] = useState<TaskId>(pages.ready.taskId);
+      return (
+        <PassWorkspace
+          view={passViewDto({ pages: Object.values(pages) })}
+          inbox={[]}
+          project={projectViewDto()}
+          selected={selected}
+          onSelect={setSelected}
+        />
+      );
+    }
+    renderWithDaemon(<Selecting />);
+    await screen.findByRole('textbox', { name: 'Message to Settings' });
+    const billing = screen.getByRole('button', { name: /^Billing/ });
+    // Chromium focuses a button it clicks; WebKit does not.
+    billing.focus();
+    fireEvent.click(billing, { detail: 1 });
+    const input = await screen.findByRole('textbox', { name: 'Message to Billing' });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(input);
+    });
+  });
+
   it('N selects the next page that waits on the builder', async () => {
     const { pages, onSelect } = await renderWorkspace();
     fireEvent.keyDown(document.body, { key: 'n' });

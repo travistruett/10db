@@ -31,7 +31,12 @@ export function QueueRow({ row, current, onSelect, menu }: QueueRowProps) {
         py={6}
         aria-current={current ? 'true' : undefined}
         {...(row.dimmed ? { c: 'dimmed' } : {})}
-        onClick={onSelect}
+        onClick={(event) => {
+          // A pointer click hands the cursor on to the page's composer, as WebKit does by never
+          // focusing the button; Enter on a focused row (detail 0) keeps it here for J and K.
+          if (event.detail > 0) event.currentTarget.blur();
+          onSelect();
+        }}
         style={{ display: 'block', flex: 1, minWidth: 0 }}
       >
         <Group gap="sm" wrap="nowrap" align="baseline">
