@@ -13,7 +13,7 @@ import {
   type TaskMessageId,
   type WorkstreamId,
 } from '@10db/contracts';
-import { and, asc, desc, eq, isNotNull, isNull, max } from 'drizzle-orm';
+import { and, asc, desc, eq, isNotNull, isNull, max, sql } from 'drizzle-orm';
 import * as schema from '../schema';
 import { getBatch } from './batches';
 import type { DbReader, WriteContext } from './store';
@@ -203,7 +203,39 @@ export function markPassTurnAnswered(ctx: WriteContext, id: PassTurnId): void {
     .run();
 }
 
-/** The task's turn that has not ended, or undefined: at most one. */
+/**
+ * The task's turns of its current run: a run in an earlier pass the task left is over, whatever its
+ * turns' rows say.
+ */
+function ofCurrentRun(db: DbReader, taskId: TaskId) {
+  // The task's run is its latest workstream, as `getTask` reads it.
+  const run = db
+    .select({ id: schema.workstreams.id })
+    .from(schema.workstreams)
+    .where(eq(schema.workstreams.taskId, taskId))
+    .orderBy(desc(schema.workstreams.createdAt), desc(schema.workstreams.id))
+    .limit(1)
+    .get();
+  return and(
+    eq(schema.passTurns.taskId, taskId),
+    run === undefined ? sql`0` : eq(schema.passTurns.workstreamId, run.id),
+  );
+}
+
+/** Takes back a turn's first answer, as when the message that answered it is taken back. */
+export function clearPassTurnAnswered(ctx: WriteContext, id: PassTurnId): void {
+  getPassTurn(ctx.tx, id);
+  ctx.tx
+    .update(schema.passTurns)
+    .set({ answeredAt: null, updatedAt: ctx.now })
+    .where(eq(schema.passTurns.id, id))
+    .run();
+}
+
+/**
+ * The task's turn that has not ended, or undefined: at most one, of any run, since a task leaving its
+ * pass ends its open turn (`settleTurnsLeaving`).
+ */
 export function openPassTurn(db: DbReader, taskId: TaskId): PassTurnDto | undefined {
   const row = db
     .select()
@@ -213,16 +245,43 @@ export function openPassTurn(db: DbReader, taskId: TaskId): PassTurnDto | undefi
   return row ? toPassTurnDto(row) : undefined;
 }
 
-/** The task's latest turn, or undefined before its first. */
+/** The latest turn of the task's current run, or undefined before its first. */
 export function latestPassTurn(db: DbReader, taskId: TaskId): PassTurnDto | undefined {
   const row = db
     .select()
     .from(schema.passTurns)
-    .where(eq(schema.passTurns.taskId, taskId))
+    .where(ofCurrentRun(db, taskId))
     .orderBy(desc(schema.passTurns.seq))
     .limit(1)
     .get();
   return row ? toPassTurnDto(row) : undefined;
+}
+
+/**
+ * A task leaving its pass, in the caller's write: a turn of it still open ends as stopped, with no
+ * reply, and every turn of it not settled is settled, none of them Ready, so no later run of the
+ * task finds one to finish.
+ */
+export function settleTurnsLeaving(ctx: WriteContext, taskId: TaskId): void {
+  const ofTask = eq(schema.passTurns.taskId, taskId);
+  for (const row of ctx.tx
+    .select({ id: schema.passTurns.id })
+    .from(schema.passTurns)
+    .where(and(ofTask, isNull(schema.passTurns.endedAt)))
+    .all())
+    endPassTurn(ctx, row.id, { ending: PassTurnEnding.Stopped, replyBody: null });
+  for (const row of ctx.tx
+    .select({ id: schema.passTurns.id })
+    .from(schema.passTurns)
+    .where(and(ofTask, isNull(schema.passTurns.settledAt)))
+    .all()) {
+    ctx.tx
+      .update(schema.passTurns)
+      .set({ settledAt: ctx.now, updatedAt: ctx.now })
+      .where(eq(schema.passTurns.id, row.id))
+      .run();
+    emitTurn(ctx, EventType.PassChanged, getPassTurn(ctx.tx, row.id));
+  }
 }
 
 /** Every turn that ended and was not settled, oldest first: start-up finishes each by its `ending`. */

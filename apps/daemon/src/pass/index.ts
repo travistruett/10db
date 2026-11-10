@@ -1,7 +1,6 @@
 // Workbench spec §5, §6, §9: a pass's own work in Your folder, and what the Workbench reads of it.
 
 export {
-  keepNamedPaths,
   keepTurnWork,
   keptRef,
   keptWorkFacts,
@@ -10,7 +9,7 @@ export {
   type PassWorkDeps,
 } from './kept-work';
 export { answerPassCard } from './cards';
-export { passFolderOn } from './folder';
+export { folderCardOpen, folderSeenOn, passFolderOn } from './folder';
 export { foldHandEdits } from './hand-edits';
 export {
   takeOut,
@@ -20,6 +19,25 @@ export {
   type TakeOutInput,
 } from './take-out';
 export { putBackKeptWork } from './put-back';
-export { abandonPass } from './abandon';
+export { abandonPass, startAbandon, type AbandonDeps } from './abandon';
 export { resumePassWork } from './resume';
 export { passView } from './view';
+export { holdRef, sharedRef } from './shared-hold';
+export { askShared, withdrawSharedAsks } from './shared-ask';
+export { dropShared, sharedUnlanded } from './shared-drop';
+export {
+  closeHoldsOf,
+  grantSharedHold,
+  keepCommitToolPaths,
+  keepHold,
+  landSharedChanges,
+} from './shared-chain';
+export {
+  askSignOff,
+  cancelSignOffWait,
+  signOffRefusal,
+  startSignOff,
+  subscribeSignOffWaits,
+} from './sign-off';
+export { closeGateOf } from './close-lists';
+export { createPassCloses, type PassCloses } from './close';

@@ -373,6 +373,57 @@ export interface KeepWorkInput {
   readonly trailer: { readonly key: string; readonly value: string };
 }
 
+/** A path as a commit or the folder holds it: the blob of its content, or null where it is not there. */
+export interface PathBlob {
+  readonly path: string;
+  readonly blob: string | null;
+}
+
+/** What `recordPaths` made: the unsigned commit on `base`, and what each path held in the folder. */
+export interface PathRecord {
+  readonly sha: string;
+  /** Each path recorded, sorted, as the commit holds it. */
+  readonly record: readonly PathBlob[];
+}
+
+/** What `landPaths` landed. */
+export interface LandedPaths {
+  /** The commit on the branch that holds the paths; null when the tip held them already. */
+  readonly sha: string | null;
+  /** A commit carrying the operation id was on the branch already: a rerun's own. */
+  readonly alreadyLanded: boolean;
+  /** Another git held the folder's index, so it still reads the landed paths as they were. */
+  readonly indexStale: boolean;
+}
+
+export interface ChainCommitInput {
+  readonly repo: string;
+  /** The chain's ref, under `refs/10db/`. */
+  readonly ref: string;
+  /** What `ref` holds now, or null when it does not exist: the only value it moves from. */
+  readonly expect: string | null;
+  /** The commit the first change is laid on while `ref` does not exist: the pass's start. */
+  readonly base: string;
+  /** The paths the change sets: as the folder has them, or, with `from`, as that commit has them. */
+  readonly paths: readonly string[];
+  readonly from?: string;
+  /** More paths the change sets, as commit `from` has them (gone where it lacks them). */
+  readonly restore?: { readonly from: string; readonly paths: readonly string[] };
+  readonly message: string;
+  /** Names the change (`10db-hold: <claim id>`), so a rerun finds the commit it made. */
+  readonly trailer: { readonly key: string; readonly value: string };
+}
+
+/** What `chainCommit` left on the chain. */
+export interface ChainCommit {
+  /** The change's commit: made now, or one the chain already holds; null when the paths changed nothing. */
+  readonly sha: string | null;
+  /** True when `sha` was made by this call. */
+  readonly made: boolean;
+  /** Each of `paths`, sorted, as the change's tree holds it. */
+  readonly files: readonly PathBlob[];
+}
+
 /** Work still kept at a ref that a move must not write over (`moveKeptRef`). */
 export interface KeptRefEarlier {
   /** The commit the ref holds. */
@@ -731,6 +782,46 @@ export interface Git {
   keptRefs(repo: string, prefix: string): Promise<string[]>;
   /** Deletes `ref`, under `refs/10db/`, whatever it names; one already gone is no error. */
   deleteKeptRef(repo: string, ref: string): Promise<void>;
+  /**
+   * A pass's shared hold (spec §7.2): an unsigned commit on `base` whose tree is `base`'s with each of
+   * `paths` as the folder has it (git's ignore rules aside; gone where nothing is there), under the
+   * repo lock, naming no ref. No file, index, HEAD or branch is touched.
+   */
+  recordPaths(input: {
+    readonly repo: string;
+    readonly base: string;
+    readonly paths: readonly string[];
+  }): Promise<PathRecord>;
+  /**
+   * One change of a pass's shared chain (spec §7.2), under the repo lock: an unsigned commit whose tree
+   * is the chain tip's (`expect`, else `base`) with `paths` set (and `restore`'s), on that tip, at `ref` by
+   * compare-and-swap. A tree equal to the tip's makes no commit: it answers the newest commit on the
+   * chain carrying the same trailer, a rerun's own, else null. Refused with `KeptRefMovedError` when
+   * `ref` no longer holds `expect`. No file, index, HEAD or branch is touched.
+   */
+  chainCommit(input: ChainCommitInput): Promise<ChainCommit>;
+  /**
+   * Lands paths on a branch the folder has checked out, under the repo lock: a signed commit on its
+   * tip whose tree is the tip's with each of `paths` as commit `from` has it (gone where it lacks
+   * it), named by `opId`, by compare-and-swap, while HEAD names the branch. No file is written; the
+   * folder's own index follows for those paths, so the builder's git reads them as committed;
+   * `indexStale` says another git held the index, which then still reads them as before (Workbench
+   * spec §18). A commit on the branch carrying the opId is answered as it is; a tree equal to the
+   * tip's makes none and answers null. Refused with `PassFolderOffBranchError` while HEAD names
+   * another branch.
+   */
+  landPaths(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly from: string;
+    readonly paths: readonly string[];
+    readonly message: string;
+    readonly opId: string;
+  }): Promise<LandedPaths>;
+  /** Sets `ref`, under `refs/10db/`, to commit `sha`, whatever it held. */
+  keepRef(repo: string, ref: string, sha: string): Promise<void>;
+  /** The blob each of `paths` holds in commit `rev`, sorted by path; null for one it lacks there. */
+  blobsAt(repo: string, rev: string, paths: readonly string[]): Promise<PathBlob[]>;
   /** True when commit `ancestor` is in the history of `tip`, `tip` itself included. */
   isAncestor(repo: string, ancestor: string, tip: string): Promise<boolean>;
   /** Whether the object store of `repo` holds commit `sha`. */
@@ -2575,6 +2666,196 @@ export function createGit(opts: GitOptions = {}): Git {
     return named.map((path) => ({ path, blob: blobs.get(path) ?? null }));
   }
 
+  /** What each of `paths` holds in a private index, by path; null for one it has no entry for. */
+  async function indexBlobs(
+    c: Pinned,
+    env: { GIT_INDEX_FILE: string; GIT_LITERAL_PATHSPECS: string },
+    paths: readonly string[],
+  ): Promise<PathBlob[]> {
+    if (paths.length === 0) return [];
+    const listed = await git(c, ['ls-files', '-s', '-z', '--', ...paths], { env });
+    const blobs = new Map(
+      listed
+        .split('\0')
+        .filter(Boolean)
+        .map((record) => {
+          const tab = record.indexOf('\t');
+          const [, oid = ''] = record.slice(0, tab).split(' ');
+          return [record.slice(tab + 1), oid] as const;
+        }),
+    );
+    return paths.map((path) => ({ path, blob: blobs.get(path) ?? null }));
+  }
+
+  /** The tree of commit `base` with each of `paths` as the folder has it, and what each then holds. */
+  async function treeWithDisk(
+    c: Pinned,
+    base: string,
+    paths: readonly string[],
+  ): Promise<{ readonly tree: string; readonly files: PathBlob[] }> {
+    return withPrivateIndex(c, base, async (env) => {
+      await indexAsOnDisk(c, env, paths);
+      return {
+        tree: (await git(c, ['write-tree'], { env })).trim(),
+        files: await indexBlobs(c, env, paths),
+      };
+    });
+  }
+
+  /** Sets each of `paths` in a private index as commit `from` has it, or removes it where it lacks it. */
+  async function takeInto(
+    c: Pinned,
+    env: { GIT_INDEX_FILE: string; GIT_LITERAL_PATHSPECS: string },
+    from: string,
+    paths: readonly string[],
+  ): Promise<void> {
+    for (const path of paths) {
+      const entry = await treeEntry(c, from, path);
+      await git(
+        c,
+        entry === null
+          ? ['update-index', '--force-remove', '--', path]
+          : ['update-index', '--add', '--cacheinfo', `${entry.mode},${entry.oid},${path}`],
+        { env },
+      );
+    }
+  }
+
+  async function recordPaths(input: {
+    readonly repo: string;
+    readonly base: string;
+    readonly paths: readonly string[];
+  }): Promise<PathRecord> {
+    const named = [...new Set(input.paths.map(checkPathName))].sort();
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const base = await revParse(c, `${input.base}^{commit}`);
+      if (base === null) throw new InvalidError(`${input.base} names no commit`);
+      const { tree, files } = await treeWithDisk(c, base, named);
+      // Never pushed, so never signed.
+      const sha = (
+        await git(c, ['commit-tree', '--no-gpg-sign', tree, '-p', base], {
+          input: '10db: shared hold record\n',
+        })
+      ).trim();
+      return { sha, record: files };
+    });
+  }
+
+  async function chainCommit(input: ChainCommitInput): Promise<ChainCommit> {
+    if (!input.ref.startsWith(KEPT_REF_PREFIX))
+      throw new InvalidError(`${input.ref} is not under ${KEPT_REF_PREFIX}`);
+    const named = [...new Set(input.paths.map(checkPathName))].sort();
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const held = await revParse(c, `${input.ref}^{commit}`);
+      if (held !== input.expect) throw new KeptRefMovedError(input.ref, input.expect, held);
+      const tip = held ?? (await revParse(c, `${input.base}^{commit}`));
+      if (tip === null) throw new InvalidError(`${input.base} names no commit`);
+      const from = input.from;
+      const restore = input.restore;
+      const { tree, files } =
+        restore !== undefined
+          ? await withPrivateIndex(c, tip, async (env) => {
+              if (from === undefined) await indexAsOnDisk(c, env, named);
+              else await takeInto(c, env, from, named);
+              const restored = [...new Set(restore.paths.map(checkPathName))].sort();
+              await takeInto(c, env, restore.from, restored);
+              return {
+                tree: (await git(c, ['write-tree'], { env })).trim(),
+                files: await indexBlobs(c, env, [...new Set([...named, ...restored])].sort()),
+              };
+            })
+          : from === undefined
+            ? await treeWithDisk(c, tip, named)
+            : {
+                tree: await treeTaking(c, tip, from, named),
+                files: await Promise.all(
+                  named.map(async (path) => ({
+                    path,
+                    blob: (await treeEntry(c, from, path))?.oid ?? null,
+                  })),
+                ),
+              };
+      const { key, value } = input.trailer;
+      if (tree === (await revParse(c, `${tip}^{tree}`))) {
+        // Nothing to add: the chain holds this change already when a commit of its own is on it.
+        const own = held === null ? null : await findCommitByTrailer(c, held, key, value);
+        return { sha: own, made: false, files };
+      }
+      // Never pushed, so never signed.
+      const sha = (
+        await git(c, ['commit-tree', '--no-gpg-sign', tree, '-p', tip], {
+          input: `${input.message.trimEnd()}\n\n${key}: ${value}\n`,
+        })
+      ).trim();
+      try {
+        await git(c, [
+          'update-ref',
+          '--no-deref',
+          '-m',
+          '10db: shared change',
+          input.ref,
+          sha,
+          held ?? '0'.repeat(sha.length),
+        ]);
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        throw new KeptRefMovedError(input.ref, held, await revParse(c, `${input.ref}^{commit}`));
+      }
+      return { sha, made: true, files };
+    });
+  }
+
+  async function landPaths(input: {
+    readonly repo: string;
+    readonly branch: string;
+    readonly from: string;
+    readonly paths: readonly string[];
+    readonly message: string;
+    readonly opId: string;
+  }): Promise<LandedPaths> {
+    const named = [...new Set(input.paths.map(checkPathName))].sort();
+    return withRepoLock(realpathSync(input.repo), async () => {
+      const c = await pinned(input.repo);
+      const ref = `refs/heads/${input.branch}`;
+      if (await isSymbolic(c, ref))
+        throw refusal(c.real, { kind: GitTrustFailure.Ref, ref, reason: 'symbolic' });
+      const head = await currentBranch(c);
+      if (head !== input.branch) throw new PassFolderOffBranchError(c.real, input.branch, head);
+      const tip = await revParse(c, `${ref}^{commit}`);
+      if (tip === null) throw new InvalidError(`Branch ${input.branch} does not exist`);
+      const existing = await findCommitByOp(c, tip, input.opId);
+      if (existing) return { sha: existing, alreadyLanded: true, indexStale: false };
+      const from = await revParse(c, `${input.from}^{commit}`);
+      if (from === null) throw new InvalidError(`${input.from} names no commit`);
+      const tree = await treeTaking(c, tip, from, named);
+      if (tree === (await revParse(c, `${tip}^{tree}`)))
+        return { sha: null, alreadyLanded: false, indexStale: false };
+      const sign = signing(c, await configEntries(c));
+      const sha = (
+        await git(c, ['commit-tree', ...sign.flags, tree, '-p', tip], {
+          input: withOpTrailer(input.message, input.opId),
+          config: sign.config,
+        })
+      ).trim();
+      try {
+        await git(c, ['update-ref', '--no-deref', '-m', `10db: ${input.opId}`, ref, sha, tip]);
+      } catch (error) {
+        if (!(error instanceof GitError)) throw error;
+        throw refusal(c.real, { kind: GitTrustFailure.Ref, ref, reason: 'raced' });
+      }
+      // Another git holding index.lock leaves the index stale, which the caller says.
+      const indexStale = await git(c, ['reset', '-q', sha, '--', ...named], {
+        env: { GIT_LITERAL_PATHSPECS: '1' },
+      }).then(
+        () => false,
+        () => true,
+      );
+      return { sha, alreadyLanded: false, indexStale };
+    });
+  }
+
   /** The blob each of `paths` holds on disk; null for one that is not a file or a link. */
   async function blobsOnDisk(c: Pinned, paths: readonly string[]): Promise<Map<string, string>> {
     const listed = await withPrivateIndex(c, null, async (env) => {
@@ -4029,6 +4310,30 @@ export function createGit(opts: GitOptions = {}): Git {
       const c = await pinned(repo);
       if ((await revParse(c, ref)) === null) return;
       await git(c, ['update-ref', '--no-deref', '-d', ref]);
+    },
+    recordPaths,
+    chainCommit,
+    landPaths,
+    async keepRef(repo, ref, sha) {
+      if (!ref.startsWith(KEPT_REF_PREFIX))
+        throw new InvalidError(`${ref} is not under ${KEPT_REF_PREFIX}`);
+      const c = await pinned(repo);
+      const commit = await revParse(c, `${sha}^{commit}`);
+      if (commit === null) throw new InvalidError(`${sha} names no commit`);
+      await git(c, ['update-ref', '--no-deref', '-m', '10db: kept ref', ref, commit]);
+    },
+    async blobsAt(repo, rev, paths) {
+      const named = [...new Set(paths.map(checkPathName))].sort();
+      if (named.length === 0) return [];
+      const c = await pinned(repo);
+      const found = new Map(
+        parseTree(
+          await git(c, ['ls-tree', '-r', '-z', '--full-tree', rev, '--', ...named], {
+            env: { GIT_LITERAL_PATHSPECS: '1' },
+          }),
+        ).map((entry) => [entry.path, entry.oid]),
+      );
+      return named.map((path) => ({ path, blob: found.get(path) ?? null }));
     },
     async isAncestor(repo, ancestor, tip) {
       return isAncestor(await pinned(repo), ancestor, tip);

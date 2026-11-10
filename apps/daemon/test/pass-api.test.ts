@@ -6,9 +6,13 @@ import {
   mintId,
   PASS_SIGN_OFF_CHOICE,
   PassAbandonedDto,
+  PassCloseAnswerDto,
+  PassClosePreviewDto,
   PassOpenedDto,
+  PassSignOffDto,
   PassViewDto,
   ProjectDto,
+  TakeOutPreviewDto,
   TakeOutResultDto,
   TaskDto,
   WorkstreamChangesDto,
@@ -19,11 +23,14 @@ import {
 } from '@10db/contracts';
 import {
   endPassTurn,
+  getBatch,
   getInboxItem,
+  getPass,
   getTask,
   getTaskKeptWork,
   insertBatch,
   insertTakeOut,
+  lastTakeOut,
   latestPassTurn,
   leavePass,
   getWorkstreamRow,
@@ -34,6 +41,7 @@ import {
   listEvidence,
   listInbox,
   listPassTurns,
+  listSharedChanges,
   listTaskThread,
   patchWorkstream,
   schema,
@@ -61,6 +69,9 @@ const READY = 'Settings: ready each turn';
 /** A page whose first session is refused, and whose second ends its turn Ready. */
 const REFUSED = 'Settings: refused once';
 const PAGE_FILE = 'src/settings/page.tsx';
+/** A page whose agent holds the shared area, writes a shared button and works on. */
+const SHARED = 'Settings: a shared button';
+const SHARED_FILE = 'src/button.ts';
 
 let data: { path: string; cleanup(): void };
 let repo: { path: string; cleanup(): void };
@@ -78,6 +89,18 @@ function startDaemon(): Promise<RunningDaemon> {
     dataDir: data.path,
     port: 0,
     adapter: new FakeAdapter({
+      [SHARED]: [
+        [
+          { do: 'consume' },
+          {
+            do: 'mcp',
+            tool: 'request_claim',
+            args: { opId: 'op-shared-src', kind: 'area', name: 'src', reason: 'a shared button' },
+          },
+          { do: 'tool', toolName: 'Write', input: { file_path: SHARED_FILE, content: 'button\n' } },
+          { do: 'await_message', contains: 'never sent' },
+        ],
+      ],
       [WORKING]: [
         [
           { do: 'consume' },
@@ -231,11 +254,6 @@ describe('a Ready pass page', () => {
   it.each([
     { name: 'Approve', answer: { choice: 'approve' }, status: 400 },
     { name: 'Send Back', answer: { choice: 'send_back', note: 'Bigger' }, status: 400 },
-    {
-      name: 'Sign Off, until closing lands',
-      answer: { choice: PASS_SIGN_OFF_CHOICE },
-      status: 409,
-    },
   ])('refuses $name and leaves the page as it was', async ({ answer, status }) => {
     const page = await readyPage();
     const before = getWorkstreamRow(daemon.state.db, page.ws.id);
@@ -567,6 +585,105 @@ describe("a page's messages and Stop over HTTP", () => {
   });
 });
 
+describe('Sign Off over HTTP', () => {
+  const signOffOf = (pass: { id: PassDto['id'] }, task: TaskDto, method = 'POST') =>
+    fetch(`${daemon.url}/passes/${pass.id}/tasks/${task.id}/sign-off`, {
+      method,
+      headers: { Authorization: `Bearer ${daemon.token}`, 'content-type': 'application/json' },
+      ...(method === 'POST' ? { body: '{}' } : {}),
+    });
+  const readyOf = async (title: string) => {
+    const page = await openedPage(title);
+    await waitFor(() => runOf(page.task).nextAction.kind === 'pass_review');
+    return page;
+  };
+  const passBranch = (pass: PassDto) => {
+    const { branch } = getBatch(daemon.state.db, pass.batchId);
+    if (branch === null) throw new Error('the pass has no branch');
+    return branch;
+  };
+
+  it("ends a warm Ready page's session and lands its files as one commit; Approve stays refused", async () => {
+    const { task, pass } = await readyOf(READY);
+    const ready = runOf(task);
+    if (ready.nextAction.kind !== 'pass_review') throw new Error('not Ready');
+    expect(ready.currentSessionId).not.toBeNull();
+    expect(
+      (await post(`/inbox/${ready.nextAction.inboxId}/answer`, { choice: 'approve' })).status,
+    ).toBe(400);
+
+    const res = await signOffOf(pass, task);
+
+    expect(res.status).toBe(202);
+    expect(PassSignOffDto.parse(await res.json())).toEqual({
+      taskId: task.id,
+      state: 'signing_off',
+      waitsFor: null,
+    });
+    await waitFor(() => runOf(task).state === 'DONE');
+    const branch = passBranch(pass);
+    expect(rawGit('log', '--format=%s', `${pass.startSha}..${branch}`)).toBe(task.title);
+    expect(rawGit('show', `${branch}:${PAGE_FILE}`)).toBe('one');
+    expect(runOf(task)).toMatchObject({ currentSessionId: null, attempt: ready.attempt });
+    expect(getInboxItem(daemon.state.db, ready.nextAction.inboxId).state).toBe('RESOLVED');
+    // Signed off is not Ready: the page waits on nothing, and a second Sign Off is refused.
+    expect((await signOffOf(pass, task)).status).toBe(409);
+  });
+
+  it("signs the page off from its check item's Sign Off", async () => {
+    const { task } = await readyOf(READY);
+    const ready = runOf(task);
+    if (ready.nextAction.kind !== 'pass_review') throw new Error('not Ready');
+
+    const res = await post(`/inbox/${ready.nextAction.inboxId}/answer`, {
+      choice: PASS_SIGN_OFF_CHOICE,
+    });
+
+    expect(res.status).toBe(200);
+    await waitFor(() => runOf(task).state === 'DONE');
+  });
+
+  it('refuses a working page, a pass not open, and a cancel with no sign-off waiting, with 409', async () => {
+    const { task, pass } = await openedPage(WORKING);
+    await waitFor(() => existsSync(join(repo.path, PAGE_FILE)));
+    expect((await signOffOf(pass, task)).status).toBe(409);
+    expect((await signOffOf(pass, task, 'DELETE')).status).toBe(409);
+    daemon.state.db.update(schema.passes).set({ state: 'ABANDONING' }).run();
+    expect((await signOffOf(pass, task)).status).toBe(409);
+    expect(runOf(task).state).toBe('RUNNING');
+  });
+});
+
+describe('Close Pass over HTTP', () => {
+  it('shows the lists without stopping a working page, then stops it on confirm and closes', async () => {
+    const { task, pass } = await openedPage(WORKING);
+    await waitFor(() => existsSync(join(repo.path, PAGE_FILE)));
+
+    const shown = await api().get(`/passes/${pass.id}/close`, PassClosePreviewDto);
+
+    expect(shown.unfinished).toMatchObject([{ taskId: task.id, working: true }]);
+    expect(latestPassTurn(daemon.state.db, task.id)?.endedAt).toBeNull();
+    expect(runOf(task).state).toBe('RUNNING');
+
+    const res = await post(`/passes/${pass.id}/close`, {
+      token: shown.token,
+      pages: [{ taskId: task.id, choice: 'take_out' }],
+      files: [],
+      shared: [],
+    });
+
+    expect(res.status).toBe(200);
+    expect(PassCloseAnswerDto.parse(res.body)).toMatchObject({ outcome: 'closing' });
+    // No origin: the pass settles at its close, the page taken out and the folder home.
+    await waitFor(() => getPass(daemon.state.db, pass.id).state === 'SETTLED');
+    expect(latestPassTurn(daemon.state.db, task.id)?.ending).toBe('stopped');
+    expect(listInbox(daemon.state.db, {}).filter((i) => i.kind === 'check')).toEqual([]);
+    expect(rawGit('symbolic-ref', '--short', 'HEAD')).toBe('main');
+    expect(existsSync(join(repo.path, PAGE_FILE))).toBe(false);
+    expect(rawGit('show', `refs/10db/kept/${task.id}:${PAGE_FILE}`)).toBe('half');
+  });
+});
+
 describe("a page's failed turn over HTTP", () => {
   async function failedPage() {
     const page = await openedPage(REFUSED);
@@ -675,6 +792,48 @@ describe('POST /passes/:passId/tasks/:taskId/take-out', () => {
     expect(listInbox(daemon.state.db, {}).filter((i) => i.kind === 'check')).toEqual([]);
     expect(getTaskRow(task).passId).toBeNull();
     expect(runOf(task).state).toBe('CANCELLED');
+  });
+
+  it('previews the shared changes it would ask about, and refuses a Drop the preview does not offer', async () => {
+    const { task, pass } = await openedPage(WORKING);
+    await waitFor(() => existsSync(join(repo.path, PAGE_FILE)));
+    const preview = await fetch(`${daemon.url}/passes/${pass.id}/tasks/${task.id}/take-out`, {
+      headers: { Authorization: `Bearer ${daemon.token}` },
+    });
+    expect(preview.status).toBe(200);
+    expect(TakeOutPreviewDto.parse(await preview.json())).toEqual({ shared: [] });
+
+    const res = await post(`/passes/${pass.id}/tasks/${task.id}/take-out`, {
+      shared: [{ seq: 1, choice: 'drop' }],
+    });
+    expect(res.status).toBe(409);
+    // Refused before anything ran: no take-out began, and the page works on.
+    expect(lastTakeOut(daemon.state.db, task.id)).toBeUndefined();
+    expect(getTaskRow(task).passId).toBe(pass.id);
+  });
+
+  it("drops the shared change a working page's turn is making when the builder chooses Drop", async () => {
+    const { task, pass } = await openedPage(SHARED);
+    await waitFor(() => existsSync(join(repo.path, SHARED_FILE)));
+    const preview = await fetch(`${daemon.url}/passes/${pass.id}/tasks/${task.id}/take-out`, {
+      headers: { Authorization: `Bearer ${daemon.token}` },
+    });
+    expect(TakeOutPreviewDto.parse(await preview.json())).toEqual({
+      shared: [{ seq: 1, paths: [SHARED_FILE], dropRefusal: null, laterPages: [] }],
+    });
+
+    const res = await post(`/passes/${pass.id}/tasks/${task.id}/take-out`, {
+      shared: [{ seq: 1, choice: 'drop' }],
+    });
+
+    expect(res.status).toBe(200);
+    expect(TakeOutResultDto.parse(res.body)).toMatchObject({ tookOut: true });
+    expect(existsSync(join(repo.path, SHARED_FILE))).toBe(false);
+    expect(listSharedChanges(daemon.state.db, pass.id)).toMatchObject([
+      { seq: 1, droppedBy: 2 },
+      { seq: 2, dropOf: 1 },
+    ]);
+    expect(getTaskRow(task).passId).toBeNull();
   });
 
   it('refuses with 409 while the pass is not open, or for a task it does not hold', async () => {

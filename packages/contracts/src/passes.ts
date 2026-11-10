@@ -317,6 +317,8 @@ export const PassNoticeKind = {
   PrNotOpened: 'pr_not_opened',
   /** The one review of the pull request could not run. */
   ReviewFailed: 'review_failed',
+  /** The close stopped on an error, or left its pull request to finish on GitHub. */
+  Close: 'close',
 } as const;
 export type PassNoticeKind = (typeof PassNoticeKind)[keyof typeof PassNoticeKind];
 

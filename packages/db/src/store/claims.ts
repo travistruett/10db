@@ -87,6 +87,23 @@ function activeHolder(
     .get();
 }
 
+/**
+ * The workstream holding the claim `request` names, as `acquireClaims` looks for it in the same
+ * scope, or null while it is free. Reads only: a caller whose grant needs more than one write learns
+ * here, without granting, whether the claim is free.
+ */
+export function claimHolder(
+  db: DbReader,
+  input: {
+    readonly projectId: ProjectId;
+    readonly request: ClaimRequest;
+    readonly areaScope?: BatchId;
+    readonly copyHazards?: ReadonlySet<string>;
+  },
+): WorkstreamId | null {
+  return activeHolder(db, scopeOf(input.request, input), input.request)?.workstreamId ?? null;
+}
+
 /** What a workstream asks to claim, and where. */
 export interface ClaimAsk {
   readonly projectId: ProjectId;

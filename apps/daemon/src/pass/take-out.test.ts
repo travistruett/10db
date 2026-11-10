@@ -2,6 +2,7 @@ import { existsSync, readFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   AbandonStep,
+  InboxState,
   isTerminal,
   mintId,
   TakeOutStep,
@@ -20,6 +21,7 @@ import {
   insertTask,
   insertWorkstream,
   lastTakeOut,
+  listInbox,
   listTaskThreadRows,
   seedProject,
   setAbandonStep,
@@ -30,6 +32,8 @@ import {
 import { afterEach, describe, expect, it } from 'vitest';
 import { openPassWorld, type PassWorld } from '../../test/pass-world';
 import type { Git } from '../git';
+import { silentLogger } from '../log';
+import { createWatcher } from '../watcher';
 import { keptRef, keepTurnWork, passKeptRef, takeOut, takeOutSteps, TakeOutWithin } from './index';
 import { leavePassForBoard } from './take-out';
 
@@ -50,6 +54,7 @@ const takeOutDeps = (world: PassWorld, git: Git = world.h.git) => ({
     stopped.push(id);
     return Promise.resolve();
   },
+  wrote: (): Promise<void> => Promise.resolve(),
 });
 
 const read = (world: PassWorld, rel: string) => readFileSync(join(world.h.repo, rel), 'utf8');
@@ -146,6 +151,56 @@ describe('takeOut', () => {
     expect(getTaskKeptWork(w.h.store.db, w.settings.id)?.keptBaseSha).toBe(landed);
   });
 
+  it("raises no card for the files its own put-back wrote, while another page's lane works", async () => {
+    w = await worked();
+    const db = w.h.store.db;
+    // People's lane is working, so a write outside every claim is carded as its shell's.
+    w.h.state.write((ctx) => {
+      for (const to of [WorkstreamState.Starting, WorkstreamState.Running])
+        transitionWorkstream(ctx, w.runOf(w.people), { to, fence: null });
+    });
+    const heard = new Map<string, (rel: string) => void>();
+    const watcher = createWatcher({
+      state: w.h.state,
+      inbox: w.h.inbox,
+      git: w.h.git,
+      logger: silentLogger,
+      clock: w.h.ctx.clock,
+      watch: (root, onChange) => {
+        heard.set(root, onChange);
+        return { close: () => undefined };
+      },
+    });
+    const strays = () =>
+      listInbox(db, { states: [InboxState.Open] }).filter((i) =>
+        i.title.includes('outside every claim'),
+      );
+    const change = async (rel: string) => {
+      for (const onChange of heard.values()) onChange(rel);
+      await watcher.flush();
+    };
+    try {
+      watcher.sync();
+      await takeOutSteps(
+        { ...takeOutDeps(w), wrote: (repo, paths) => watcher.daemonWrote(repo, paths) },
+        { taskId: w.settings.id, within: TakeOutWithin.Alone },
+      );
+      // The file went back to its earlier uncommitted content, outside every claim now.
+      expect(read(w, 'src/settings/page.tsx')).toBe('edited before the pass\n');
+      await change('src/settings/page.tsx');
+      expect(strays()).toEqual([]);
+
+      // A write to it after the put-back is someone's.
+      w.write('src/settings/page.tsx', 'written after the take-out\n');
+      await change('src/settings/page.tsx');
+      expect(strays().map((c) => c.body)).toEqual([
+        expect.stringContaining('src/settings/page.tsx'),
+      ]);
+    } finally {
+      watcher.stop();
+    }
+  });
+
   it('refuses a take-out asked for alone once the pass is no longer open, writing no row', async () => {
     stopped = [];
     w = await openPassWorld();
@@ -176,8 +231,23 @@ describe('takeOut', () => {
     expect(w.h.git$('rev-parse', keptRef(w.settings.id))).toBe(earlier);
   });
 
+  it('leaves no row when a take-out asked for alone fails before it puts files back, so the page goes on', async () => {
+    w = await worked();
+    // The builder moved Your folder off the pass's branch: nothing of the page can be kept.
+    w.h.git$('switch', '-q', 'main');
+    await expect(
+      takeOut(takeOutDeps(w), { taskId: w.settings.id, within: TakeOutWithin.Alone }),
+    ).rejects.toThrow(/not on the pass's branch/);
+    expect(lastTakeOut(w.h.store.db, w.settings.id)).toBeUndefined();
+    expect(getTask(w.h.store.db, w.settings.id).passId).toBe(w.opened.pass.id);
+    expect(read(w, 'src/settings/new.tsx')).toBe('added in the turn\nand by hand\n');
+  });
+
   describe('a restart after each step goes on from the step it reached', () => {
-    /** Dies at the `nth` call it is given, as the daemon dying inside that call would. */
+    /**
+     * Dies at the `nth` call it is given, as the daemon dying inside that call would: the call never
+     * returns, so nothing after it runs, not even a catch.
+     */
     type Die = <T>(nth: number, real: () => Promise<T>) => Promise<T>;
     const crashes: {
       readonly name: string;
@@ -223,16 +293,21 @@ describe('takeOut', () => {
     it.each(crashes)('$name', async ({ crash, step }) => {
       w = await worked();
       const calls = new Map<number, number>();
+      let died: () => void = () => undefined;
+      const dead = new Promise<void>((resolve) => {
+        died = resolve;
+      });
       const die: Die = (nth, real) => {
         const n = (calls.get(nth) ?? 0) + 1;
         calls.set(nth, n);
-        return n === nth ? Promise.reject(new Error('the daemon died')) : real();
+        if (n !== nth) return real();
+        died();
+        return new Promise(() => undefined);
       };
       const crashing = crash(w.h.git, die);
       const input = { taskId: w.settings.id, within: TakeOutWithin.Alone };
-      await expect(takeOutSteps(takeOutDeps(w, crashing), input)).rejects.toThrow(
-        'the daemon died',
-      );
+      void takeOutSteps(takeOutDeps(w, crashing), input);
+      await dead;
       expect(lastTakeOut(w.h.store.db, w.settings.id)?.step).toBe(step);
 
       // A daemon started again reads the step from the database file, holding nothing else.

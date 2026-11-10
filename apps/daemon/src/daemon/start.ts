@@ -101,6 +101,7 @@ import {
   answerPassMoveCard,
   createKeptWorkGate,
   createPassPullRequests,
+  passGateKind,
   createShipper,
   createWorktreeDependencies,
   createWorktreeGenerators,
@@ -155,11 +156,18 @@ import {
   withdrawStaleClaimWaits,
 } from '../mcp';
 import {
-  abandonPass,
   answerPassCard,
+  askSignOff,
+  cancelSignOffWait,
+  closeGateOf,
+  createPassCloses,
   putBackKeptWork,
   resumePassWork,
+  startAbandon,
+  startSignOff,
+  subscribeSignOffWaits,
   takeOut,
+  type AbandonDeps,
   type PassWorkDeps,
   type TakeOutDeps,
 } from '../pass';
@@ -173,6 +181,7 @@ import { createShapePreparer } from './shape-session-tools';
 import {
   applyCheckAnswer,
   RunnerNotStartedError,
+  type StartSignOff,
   createLiveSessions,
   createRunner,
   DEFAULT_RUNNER_LIMITS,
@@ -605,6 +614,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let answerLostMigrationsCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerWorktreeCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   let answerPassCards: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
+  let startPageSignOff: StartSignOff | null = null;
 
   // A claim deadlock card's answer makes a task yield its claim, or cancels it as the Board does.
   const answerDeadlockCard = createClaimDeadlockAnswers({
@@ -633,8 +643,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     onParkAnswer: parkAnswers,
     log: logger,
     onCheckAnswer: (ctx, item, answer) => {
-      if (!runner) throw new RunnerNotStartedError();
-      return applyCheckAnswer(runner, ctx, item, answer);
+      const signOffPage = startPageSignOff;
+      if (!runner || !signOffPage) throw new RunnerNotStartedError();
+      return applyCheckAnswer(runner, ctx, item, answer, signOffPage);
     },
     onFlagAnswer: (item, answer) => {
       runner?.retryTurn(item, answer);
@@ -1377,11 +1388,38 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger,
     cleanShutdown,
   });
-  // A pass's take-outs and Abandon stop its lanes through the runner.
+  // A pass's take-outs and Abandon stop its lanes through the runner, and tell the watcher which
+  // files their put-back wrote.
   const stopLane: StopPassLane = (id) => createdRunner.stopPassLane(id);
-  const passTakeOuts: TakeOutDeps = { ...passWork, stopLane };
-  // Each open pass goes on from its rows: its folder card, a put-back and take-outs cut short.
+  const passTakeOuts: TakeOutDeps = {
+    ...passWork,
+    stopLane,
+    wrote: (repo, paths) => watcher?.daemonWrote(repo, paths) ?? Promise.resolve(),
+  };
+  // A Ready page's Sign Off, from its route or its check item; one waiting for another page's hold
+  // goes on once that hold closes.
+  startPageSignOff = (taskId) => {
+    startSignOff(passTakeOuts, taskId);
+  };
+  const unsubscribeSignOffWaits = subscribeSignOffWaits(bus, passTakeOuts);
+  // Close Pass, its steps under the delivery key with its gate and pull request through 7b's seam.
+  const passCloses = createPassCloses({
+    ...passTakeOuts,
+    ship: passPullRequests,
+    gateWhere: (pass) => closeGateOf(passGateKind(getProject(state.db, pass.projectId))),
+  });
+  // Abandon Pass stops what ships for the pass first: its pull request's checks and its close.
+  const passAbandons: AbandonDeps = {
+    ...passTakeOuts,
+    stopShip: async (passId) => {
+      await passPullRequests.stopPassChecks(passId);
+      await passCloses.abort(passId);
+    },
+  };
+  // Each open pass goes on from its rows: its folder card, a put-back, take-outs and sign-offs cut short.
   await resumePassWork(passTakeOuts);
+  // A close a restart cut short goes on from its last step.
+  passCloses.resume();
   // The previous daemon's claim waits ended with it; their cards would name holders nobody waits for.
   withdrawStaleClaimWaits(state, inbox);
   accountPauses.restore();
@@ -1510,8 +1548,13 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     starter,
     openPass: (input) => openPass(delivery, input, passOpenDeps),
     takeOut: (input) => takeOut(passTakeOuts, input),
-    abandonPass: (passId) => abandonPass(passTakeOuts, passId),
+    abandonPass: (passId) => startAbandon(passAbandons, passId),
     passPullRequests,
+    closes: passCloses,
+    signOff: (passId, taskId) => askSignOff(passTakeOuts, passId, taskId),
+    cancelSignOff: (passId, taskId) => {
+      cancelSignOffWait(passTakeOuts, passId, taskId);
+    },
     shipper,
     accounts: accountService,
     worktreeRoot,
@@ -1719,6 +1762,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       sessionSignal: (id) => live.get(id)?.signal,
       askedToHandOff: (id) => live.get(id)?.askedToHandOff(),
       claimWaits,
+      deliverMessage: (taskId, messageId) =>
+        createdRunner.deliverMessage(taskId, messageId, { redo: false }),
       migrationsBase,
       dependencyChanges,
       shapeTools: shape.toolsFor,
@@ -1806,6 +1851,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       });
       unsubscribeShip();
       unsubscribePassSettles();
+      unsubscribeSignOffWaits();
       unsubscribeKeptWork();
       unsubscribePrWatch();
       await prWatch.stop();

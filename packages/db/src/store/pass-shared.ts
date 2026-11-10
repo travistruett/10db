@@ -153,6 +153,17 @@ export function closeHold(
   return getHold(ctx.tx, claimId);
 }
 
+/** Every hold of the pass, open and closed, by number. */
+export function listHolds(db: DbReader, passId: PassId): PassHoldDto[] {
+  return db
+    .select()
+    .from(schema.passHolds)
+    .where(eq(schema.passHolds.passId, passId))
+    .orderBy(asc(schema.passHolds.seq))
+    .all()
+    .map(toHoldDto);
+}
+
 /** The pass's holds whose turn has not kept them, by number. */
 export function openHolds(db: DbReader, passId: PassId): PassHoldDto[] {
   return db

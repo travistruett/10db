@@ -860,6 +860,48 @@ describe('Workbench passes', () => {
     expect(wrongBranch).toEqual([]);
   });
 
+  it("raises the pass's folder card once while a page waits on Your folder, and withdraws it once the folder is back", async () => {
+    const project = seedProject(store, { areas: PAGES });
+    const opened = openPass(project);
+    const folderCards = () =>
+      listInbox(store.db, { states: ['OPEN'] }).filter((i) => i.detail?.['passCard'] === 'folder');
+    // The builder switched Your folder to another branch and wrote to the page.
+    branchOf.set(project.repoPath, 'main');
+    write(opened.task);
+    const s = scheduler();
+    expect(await s.tick()).toBe(0);
+    expect(await s.tick()).toBe(0);
+    expect(folderCards().map((c) => c.body)).toEqual([
+      expect.stringContaining("Your folder is on main, not on the pass's branch"),
+    ]);
+
+    onPassBranch(opened, project);
+    expect(await s.tick()).toBe(1);
+    expect(folderCards()).toEqual([]);
+    expect(launched.map((l) => l.id)).toEqual([opened.workstream.id]);
+  });
+
+  it("withdraws the pass's folder card once Your folder is back, though no page of it is queued", async () => {
+    const project = seedProject(store, { areas: PAGES });
+    const opened = openPass(project);
+    const folderCards = () =>
+      listInbox(store.db, { states: ['OPEN'] }).filter((i) => i.detail?.['passCard'] === 'folder');
+    branchOf.set(project.repoPath, 'main');
+    write(opened.task);
+    const s = scheduler();
+    await s.tick();
+    expect(folderCards()).toHaveLength(1);
+    // The page is no longer queued: it waits for the builder.
+    state.write((ctx) => {
+      for (const to of ['STARTING', 'RUNNING', 'WAITING_HUMAN'] as const)
+        transitionWorkstream(ctx, opened.workstream.id, { to, fence: null });
+    });
+
+    onPassBranch(opened, project);
+    await s.tick();
+    expect(folderCards()).toEqual([]);
+  });
+
   it('runs a page that waited at the open only once it holds its page', async () => {
     const project = seedProject(store, { areas: PAGES });
     // Another task held the settings page when the pass opened.

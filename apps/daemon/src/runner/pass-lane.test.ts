@@ -1,34 +1,51 @@
 import { execFileSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import {
+  AbandonStep,
   ConflictError,
   InvalidError,
   mintId,
   PassCheckDetail,
+  SHARED_ASK_ALLOW_CHOICE,
+  SharedAskDetail,
   type PassDto,
   type TaskDto,
   type TaskMessageId,
   type WorkstreamId,
 } from '@10db/contracts';
 import {
+  abandonPassAndBatch,
   acquireClaims,
+  activeClaims,
+  getAccountRow,
+  getPass,
+  getTask,
   getWorkstreamRow,
   insertBuilderMessage,
+  insertHold,
   insertPass,
   insertPassTurn,
+  insertSignOffWait,
+  insertTakeOut,
   insertTask,
   insertWorkstream,
   listInbox,
   listPassTurns,
+  listSharedChanges,
+  listSignOffWaits,
+  latestPassTurn,
+  openHolds,
   listSessions,
   endPassTurn,
   listTaskThread,
   leavePass,
   listWorkstreams,
   openPassTurn,
+  patchAccount,
   patchProject,
   patchWorkstream,
+  setAbandonStep,
   type WorkstreamRow,
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -37,9 +54,10 @@ import { createDeliveryJobs } from '../delivery';
 import { createGit } from '../git';
 import { silentLogger } from '../log';
 import { recoverOnStartup, systemProcesses } from '../recovery';
+import { createScheduler } from '../scheduler';
 import { untakenMessages } from './lane-messages';
 import { finishEndedTurn } from './pass-turn';
-import type { PassWorkDeps } from '../pass';
+import { closeHoldsOf, grantSharedHold, resumePassWork, type PassWorkDeps } from '../pass';
 import { DEFAULT_RUNNER_LIMITS } from './runner';
 import { handoffArgs, isolatedGitEnv, waitFor } from '../../test/fixtures';
 import type { FakeScriptBook } from '../sessions';
@@ -83,8 +101,10 @@ async function openPage(
   sessions: FakeStep[][],
   first = 'Make the form tidy',
   beforeLaunch: () => void = () => undefined,
+  project: Parameters<typeof createTestEngine>[1] = PAGE_AREAS,
+  runner: Parameters<typeof createTestEngine>[2] = {},
 ): Promise<{ task: TaskDto; pass: PassDto; id: WorkstreamId }> {
-  engine = await createTestEngine({ [TITLE]: sessions }, PAGE_AREAS);
+  engine = await createTestEngine({ [TITLE]: sessions }, project, runner);
   const branch = '10db/polish-abc123';
   const startSha = git('rev-parse', 'HEAD');
   git('switch', '-q', '-c', branch);
@@ -318,21 +338,95 @@ describe("a builder message's hand-over to a warm session", () => {
     ],
   ];
 
-  it('hands the message over without the hand-edit note when the hand edits cannot be kept', async () => {
-    const { task, id } = await openPage(twoTurns());
+  it("holds a message to a warm session while Your folder is off the pass's branch, and the page goes on once it is back", async () => {
+    const { task, id } = await openPage([
+      [...turn('one\n', 'Tidied the form.'), { do: 'await_message', contains: 'never sent' }],
+      [...turn('two\n', 'Made it bigger.'), { do: 'await_message', contains: 'never sent' }],
+    ]);
     await waitFor(isReady(id, 1));
-    // The builder edits the page by hand and switches Your folder away, so the edit cannot be kept.
+    // The builder edits the page by hand and switches Your folder away.
     writeFileSync(join(engine.repoPath, PAGE_FILE), 'one by hand\n');
     git('switch', '-q', 'main');
 
     await write(task, 'Bigger please');
 
-    expect(engine.adapter.sent.map((m) => m.text).some((t) => t.includes('Bigger please'))).toBe(
-      true,
-    );
+    // No turn runs on a branch the pass does not own: the session closed, the message waits.
+    expect(engine.runner.isRunning(id)).toBe(false);
+    expect(engine.adapter.sent).toEqual([]);
+    expect(row(id)).toMatchObject({ state: 'QUEUED', nextAction: { kind: 'feedback' } });
+    expect(
+      listInbox(engine.store.db, { states: ['OPEN'] }).filter(
+        (i) => i.detail?.['passCard'] === 'folder',
+      ),
+    ).toHaveLength(1);
+
+    // The scheduler holds the page while the folder is away, and runs it once it is back.
+    const folderCards = () =>
+      listInbox(engine.store.db, { states: ['OPEN'] }).filter(
+        (i) => i.detail?.['passCard'] === 'folder',
+      );
+    const scheduler = createScheduler({
+      state: engine.state,
+      clock: engine.clock,
+      caps: { global: 4 },
+      instanceId: 'test-daemon',
+      leaseMs: 60_000,
+      tickMs: 2_000,
+      logger: silentLogger,
+      runner: engine.runner,
+      accounts: { ...engine.accounts, prepare: () => undefined },
+      branches: createGit(),
+      onWrongBranch: () => undefined,
+      onWorktreeMissing: () => undefined,
+      keptWork: { ready: () => true },
+    });
+    expect(await scheduler.tick()).toBe(0);
+    expect(folderCards()).toHaveLength(1);
     git('switch', '-q', '10db/polish-abc123');
-    engine.adapter.signal('go on');
+    expect(await scheduler.tick()).toBe(1);
+    expect(folderCards()).toEqual([]);
     await waitFor(isReady(id, 2));
+    expect(engine.adapter.prompts[1]?.prompt).toContain('Bigger please');
+    expect(engine.adapter.prompts[1]?.prompt).toContain(
+      `The builder edited these files by hand since your last turn. Keep their changes:\n- ${PAGE_FILE}`,
+    );
+  });
+
+  it('refuses a message whose page began leaving its pass while its hand edits were folded', async () => {
+    const real = createGit();
+    let duringFold: (() => void) | null = null;
+    const { task, pass, id } = await openPage(
+      [[...turn('one\n', 'Tidied the form.'), { do: 'await_message', contains: 'never sent' }]],
+      'Make the form tidy',
+      () => undefined,
+      PAGE_AREAS,
+      {
+        git: {
+          ...real,
+          pageChanges: (...a) => {
+            duringFold?.();
+            duringFold = null;
+            return real.pageChanges(...a);
+          },
+        },
+      },
+    );
+    await waitFor(isReady(id, 1));
+    // The builder asks for the page to be taken out while the message's fold runs.
+    duringFold = () => {
+      engine.state.write((ctx) =>
+        insertTakeOut(ctx, { taskId: task.id, passId: pass.id, drops: [] }),
+      );
+    };
+    const message = engine.state.write((ctx) =>
+      insertBuilderMessage(ctx, task.id, { body: 'Bigger please', files: [] }),
+    );
+
+    await expect(
+      engine.runner.deliverMessage(task.id, message.id, { redo: false }),
+    ).rejects.toThrow(ConflictError);
+    expect(engine.adapter.sent).toEqual([]);
+    expect(openPassTurn(engine.store.db, task.id)).toBeUndefined();
   });
 
   it('hands over with the next message every one no turn took that the session was never handed', async () => {
@@ -350,6 +444,126 @@ describe("a builder message's hand-over to a warm session", () => {
       'Bigger please',
     ]);
     expect(untakenMessages(engine.store.db, task.id)).toEqual([]);
+  });
+});
+
+// Workbench spec §6.4: what the builder changed by hand since the page's last turn is kept with the
+// page and named to the agent, whether its next turn goes into a warm session or starts one.
+describe('a message to a page whose sign-off waits', () => {
+  it("takes the sign-off back, and the page's next turn starts", async () => {
+    const { task, pass, id } = await openPage(
+      [
+        [
+          ...turn('one\n', 'Tidied the form.'),
+          { do: 'await_message', contains: 'Bigger' },
+          ...turn('two\n', 'Made it bigger.'),
+          { do: 'await_message', contains: 'never sent' },
+        ],
+      ],
+      'Make the form tidy',
+      () => undefined,
+      {
+        gateCommand: null,
+        areas: [...PAGE_AREAS.areas, { name: 'src', globs: ['src/**'], role: 'shared' as const }],
+      },
+    );
+    await waitFor(isReady(id, 1));
+    // The page's sign-off waits for a hold of the shared area.
+    engine.state.write((ctx) => {
+      const held = acquireClaims(ctx, {
+        projectId: engine.project.id,
+        workstreamId: id,
+        requests: [{ kind: 'area', name: 'src' }],
+        leaseExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+      });
+      const claim = held.ok ? held.claims.find((c) => c.name === 'src') : undefined;
+      if (!claim) throw new Error('src was not claimed');
+      const hold = insertHold(ctx, {
+        claimId: claim.id,
+        passId: pass.id,
+        taskId: task.id,
+        workstreamId: id,
+        area: 'src',
+        recordSha: pass.startSha,
+        record: [],
+      });
+      insertSignOffWait(ctx, { taskId: task.id, passId: pass.id, waitsFor: hold.claimId });
+    });
+
+    await write(task, 'Bigger please');
+
+    expect(listSignOffWaits(engine.store.db, pass.id)).toEqual([]);
+    expect(listTaskThread(engine.store.db, task.id).map((m) => m.body)).toContain(
+      'Sign-off cancelled: the page took a message.',
+    );
+    await waitFor(() => latestPassTurn(engine.store.db, task.id)?.seq === 2);
+  });
+});
+
+describe("the builder's hand edits before a turn that starts a session", () => {
+  const note = 'The builder edited these files by hand since your last turn. Keep their changes:';
+  const handNotices = (task: TaskDto) =>
+    listTaskThread(engine.store.db, task.id).filter(
+      (m) => m.author === 'system' && m.body.startsWith('You edited 1 file by hand'),
+    );
+
+  it('folds an edit made after the warm session closed into the page, and leads the message with it', async () => {
+    const { task, id } = await openPage([
+      [...turn('one\n', 'Tidied the form.'), { do: 'await_message', contains: 'never sent' }],
+      [...turn('two\n', 'Made it bigger.'), { do: 'await_message', contains: 'never sent' }],
+    ]);
+    await waitFor(isReady(id, 1));
+    engine.clock.advance(DEFAULT_RUNNER_LIMITS.warmIdleMs);
+    await waitFor(() => !engine.runner.isRunning(id));
+    writeFileSync(join(engine.repoPath, PAGE_FILE), 'one, and by hand\n');
+
+    await write(task, 'Bigger please');
+    engine.launch(id);
+    await waitFor(isReady(id, 2));
+
+    expect(engine.adapter.prompts[1]?.prompt).toContain(`${note}\n- ${PAGE_FILE} +1 −1`);
+    expect(handNotices(task)).toHaveLength(1);
+  });
+
+  it('leads the next session with the note when the launch that folded the edit went no further', async () => {
+    let identity: string | null = null;
+    const { id } = await openPage(
+      [[...turn('one\n', 'Tidied the form.'), { do: 'await_message', contains: 'never sent' }]],
+      'Make the form tidy',
+      () => {
+        mkdirSync(join(engine.repoPath, dirname(PAGE_FILE)), { recursive: true });
+        writeFileSync(join(engine.repoPath, PAGE_FILE), 'edited before the first turn\n');
+        // The account is not ready: the launch gives its lane back before any session starts.
+        engine.state.write((ctx) => {
+          identity = getAccountRow(ctx.tx, engine.project.accountId).expectedIdentity;
+          patchAccount(ctx, engine.project.accountId, { expectedIdentity: null });
+        });
+      },
+    );
+    await waitFor(() => !engine.runner.isRunning(id) && row(id).state === 'QUEUED');
+    expect(engine.adapter.prompts).toEqual([]);
+
+    engine.state.write((ctx) => {
+      patchAccount(ctx, engine.project.accountId, { expectedIdentity: identity });
+    });
+    engine.launch(id);
+    await waitFor(isReady(id, 1));
+    expect(engine.adapter.prompts[0]?.prompt).toContain(`${note}\n- ${PAGE_FILE}`);
+  });
+
+  it('folds an edit made before the first turn into the page, and leads its message with it', async () => {
+    const { task, id } = await openPage(
+      [[...turn('one\n', 'Tidied the form.'), { do: 'await_message', contains: 'never sent' }]],
+      'Make the form tidy',
+      () => {
+        mkdirSync(join(engine.repoPath, dirname(PAGE_FILE)), { recursive: true });
+        writeFileSync(join(engine.repoPath, PAGE_FILE), 'edited before the first turn\n');
+      },
+    );
+    await waitFor(isReady(id, 1));
+
+    expect(engine.adapter.prompts[0]?.prompt).toContain(`${note}\n- ${PAGE_FILE}`);
+    expect(handNotices(task)).toHaveLength(1);
   });
 });
 
@@ -391,6 +605,43 @@ describe('a pass task turn that ends otherwise', () => {
       [2, 'ready'],
     ]);
     expect(engine.adapter.prompts[1]?.prompt).toContain('Make the form tidy');
+  });
+
+  it.each<{ name: string; hold: (task: TaskDto, pass: PassDto) => void }>([
+    {
+      name: 'while the pass is abandoning',
+      hold: (_task, pass) => {
+        engine.state.write((ctx) => {
+          setAbandonStep(ctx, pass.id, AbandonStep.Abandoning);
+        });
+      },
+    },
+    {
+      name: 'while the page is being taken out',
+      hold: (task, pass) => {
+        engine.state.write((ctx) =>
+          insertTakeOut(ctx, { taskId: task.id, passId: pass.id, drops: [] }),
+        );
+      },
+    },
+  ])('refuses Retry Turn $name, starting no turn', async ({ hold }) => {
+    const { task, pass, id } = await openPage([
+      [{ do: 'billing_refused', message: 'a billing check refused the session' }],
+    ]);
+    await waitFor(() => listPassTurns(engine.store.db, pass.id)[0]?.settledAt);
+    await engine.runner.idle();
+    const failed = listInbox(engine.store.db, {}).find((i) => i.title.startsWith('Turn failed'));
+    if (!failed) throw new Error('no failed turn flag');
+    hold(task, pass);
+
+    expect(() => {
+      engine.runner.retryTurn(failed, { choice: 'retry_turn' });
+    }).toThrow(ConflictError);
+    expect(row(id)).toMatchObject({
+      state: 'WAITING_HUMAN',
+      nextAction: { kind: 'pass_review', inboxId: failed.id },
+    });
+    expect(listPassTurns(engine.store.db, pass.id).map((t) => t.seq)).toEqual([1]);
   });
 
   it.each<{ name: string; session: FakeStep[]; attempts: number }>([
@@ -551,6 +802,161 @@ describe('the guard of a pass lane', () => {
     expect(engine.adapter.observations.some((o) => o.kind === 'tool_allowed' && o.step === 2)).toBe(
       true,
     );
+  });
+});
+
+describe("a pass turn's shared area", () => {
+  const WITH_SHARED = {
+    gateCommand: null,
+    areas: [...PAGE_AREAS.areas, { name: 'src', globs: ['src/**'], role: 'shared' as const }],
+  };
+  /** The agent asks for the shared area, writes a shared file, then ends as `end` says. */
+  const sharedTurn = (end: FakeStep[]): FakeStep[] => [
+    { do: 'consume' },
+    {
+      do: 'mcp',
+      tool: 'request_claim',
+      args: { opId: 'op-shared-src', kind: 'area', name: 'src', reason: 'a shared button' },
+    },
+    { do: 'tool', toolName: 'Write', input: { file_path: 'src/button.ts', content: 'button\n' } },
+    ...end,
+  ];
+
+  it.each<{
+    name: string;
+    end: FakeStep[];
+    settled: (id: WorkstreamId) => boolean;
+    act?: (id: WorkstreamId) => Promise<void>;
+  }>([
+    {
+      name: 'at a stop',
+      end: [{ do: 'await_message', contains: 'never sent' }],
+      act: async (id) => {
+        await waitFor(wrote);
+        await engine.runner.stopPassLane(id);
+      },
+      settled: (id) => row(id).state === 'QUEUED' && !engine.runner.isRunning(id),
+    },
+    {
+      name: 'at Ready',
+      end: [
+        { do: 'turn_complete', text: 'Added a button.' },
+        { do: 'await_message', contains: 'never sent' },
+      ],
+      settled: (id) => isWaiting(id) && readyItems().length === 1,
+    },
+    {
+      name: 'at a failed turn',
+      end: [{ do: 'billing_refused', message: 'a billing check refused the session' }],
+      settled: (id) => isWaiting(id) && !engine.runner.isRunning(id),
+    },
+    {
+      name: 'at a usage pause',
+      end: [{ do: 'rate_limit', status: 'rejected', resetsInSeconds: 600 }],
+      settled: (id) => row(id).state === 'PAUSED_LIMIT' && !engine.runner.isRunning(id),
+    },
+  ])('is kept on the chain and released $name', async ({ end, settled, act }) => {
+    const { pass, id } = await openPage(
+      [sharedTurn(end)],
+      'Make the form tidy',
+      () => undefined,
+      WITH_SHARED,
+    );
+    await act?.(id);
+    await waitFor(() => settled(id));
+    await waitFor(() => listSharedChanges(engine.store.db, pass.id).length === 1);
+
+    expect(activeClaims(engine.store.db, id).map((c) => c.name)).not.toContain('src');
+    expect(openHolds(engine.store.db, pass.id)).toEqual([]);
+    expect(listSharedChanges(engine.store.db, pass.id)[0]?.paths).toEqual(['src/button.ts']);
+    expect(git('show', `refs/10db/passes/${pass.id}/shared:src/button.ts`)).toBe('button');
+  });
+});
+
+describe("a pass turn's question about a shared area", () => {
+  it('is withdrawn when the turn ends, and the area is never granted to a Ready page', async () => {
+    const PEOPLE = 'People: list';
+    engine = await createTestEngine(
+      {
+        [PEOPLE]: [
+          [
+            { do: 'consume' },
+            {
+              do: 'mcp',
+              tool: 'request_claim',
+              args: { opId: 'op-people-src', kind: 'area', name: 'src', reason: 'a wider button' },
+            },
+            { do: 'turn_complete', text: 'Kept it to the page.' },
+            { do: 'await_message', contains: 'never sent' },
+          ],
+        ],
+      },
+      {
+        gateCommand: null,
+        areas: [
+          { name: 'settings', globs: ['src/settings/**'], role: 'page', route: '/settings' },
+          { name: 'people', globs: ['src/people/**'], role: 'page', route: '/people' },
+          { name: 'src', globs: ['src/**'], role: 'shared' },
+        ],
+      },
+      {},
+      { claims: { sliceMs: 200, pollMs: 20 } },
+    );
+    const branch = '10db/polish-abc123';
+    const startSha = git('rev-parse', 'HEAD');
+    git('switch', '-q', '-c', branch);
+    const { settings, people, passId } = engine.state.write((ctx) => {
+      const tasks = ['Settings: form', PEOPLE].map((title, at) =>
+        insertTask(ctx, engine.project.id, {
+          title,
+          acceptanceCriteria: ['x'],
+          areas: [at === 0 ? 'settings' : 'people'],
+        }),
+      );
+      const [s, p] = tasks;
+      if (!s || !p) throw new Error('no tasks');
+      const opened = insertPass(ctx, {
+        id: mintId('Pass'),
+        projectId: engine.project.id,
+        name: 'Polish',
+        pageCap: 4,
+        returnBranch: 'main',
+        startSha,
+        branch,
+        baseBranch: 'main',
+        repo: null,
+        taskIds: [s.id, p.id],
+        dirt: [],
+      });
+      const first = { model: 'claude-sonnet-5-5', effort: 'medium' } as const;
+      const sw = insertWorkstream(ctx, s.id, { batchId: opened.batch.id, first });
+      const pw = insertWorkstream(ctx, p.id, { batchId: opened.batch.id, first });
+      insertPassTurn(ctx, { taskId: s.id, workstreamId: sw.id, sessionId: null, messageId: null });
+      insertBuilderMessage(ctx, p.id, { body: 'Make the list wider', files: [] });
+      return { settings: sw.id, people: pw.id, passId: opened.pass.id };
+    });
+    // Settings changed the shared button in a turn of its own.
+    const granted = await grantSharedHold(passWork(), { workstreamId: settings, area: 'src' });
+    if (!granted?.ok) throw new Error('src was not granted');
+    mkdirSync(join(engine.repoPath, 'src'), { recursive: true });
+    writeFileSync(join(engine.repoPath, 'src/button.ts'), 'button\n');
+    await closeHoldsOf(passWork(), settings);
+
+    engine.launch(people);
+    await waitFor(() => isWaiting(people));
+
+    const asked = listInbox(engine.store.db, {}).find(
+      (i) => SharedAskDetail.safeParse(i.detail).success,
+    );
+    expect(asked?.state).toBe('CANCELLED');
+    if (!asked) throw new Error('no question');
+    expect(() => engine.inbox.answer(asked.id, { choice: SHARED_ASK_ALLOW_CHOICE })).toThrow(
+      ConflictError,
+    );
+    expect(openHolds(engine.store.db, passId)).toEqual([]);
+    expect(activeClaims(engine.store.db, people).map((c) => c.name)).not.toContain('src');
+    const result = engine.adapter.observations.find((o) => o.kind === 'mcp_result');
+    expect(result?.detail).toMatchObject({ tool: 'request_claim', isError: false });
   });
 });
 
@@ -1049,4 +1455,109 @@ describe('a pass page across a restart', () => {
       listInbox(engine.store.db, {}).filter((i) => i.title.startsWith('Turn failed')),
     ).toHaveLength(1);
   });
+});
+
+// Workbench spec §5.4, §12: a take-out or an Abandon a restart cut short goes on at start-up, after
+// recovery, stopping its lanes through the runner itself, and leaves no turn of the task to finish.
+describe('a take-out or Abandon across a restart', () => {
+  /** The daemon stops; `whileDown` writes what it kept; recovery, then the pass work goes on. */
+  async function restartWith(whileDown: () => void): Promise<void> {
+    await engine.runner.stopAll('shutdown');
+    whileDown();
+    const work = passWork();
+    await recoverOnStartup({
+      ...work,
+      processes: systemProcesses,
+      maxRecoveryAttempts: 3,
+      cleanShutdown: false,
+    });
+    await resumePassWork({
+      ...work,
+      stopLane: (id) => engine.runner.stopPassLane(id),
+      wrote: () => Promise.resolve(),
+    });
+    await work.jobs.idle();
+  }
+
+  it.each<{ name: string; down: (task: TaskDto, pass: PassDto) => void }>([
+    {
+      name: 'a take-out of a page whose turn is open',
+      down: (task, pass) => {
+        engine.state.write((ctx) =>
+          insertTakeOut(ctx, { taskId: task.id, passId: pass.id, drops: [] }),
+        );
+      },
+    },
+    {
+      name: "an Abandon, with the page's turn ended but not kept and Your folder off the pass's branch",
+      down: (task, pass) => {
+        engine.state.write((ctx) => {
+          const open = openPassTurn(ctx.tx, task.id);
+          if (!open) throw new Error('no open turn');
+          endPassTurn(ctx, open.id, { ending: 'ready', replyBody: 'Tidied.' });
+          setAbandonStep(ctx, pass.id, AbandonStep.Abandoning);
+        });
+        git('switch', '-q', 'main');
+      },
+    },
+  ])(
+    '$name: the task leaves with every turn settled, and a later pass runs it',
+    async ({ down }) => {
+      const { task, pass, id } = await openPage([working]);
+      await waitFor(wrote);
+      await restartWith(() => {
+        down(task, pass);
+      });
+
+      const db = engine.store.db;
+      expect(getTask(db, task.id).passId).toBeNull();
+      expect(row(id).state).toBe('CANCELLED');
+      expect(
+        listPassTurns(db, pass.id).map((t) => [
+          t.endedAt !== null,
+          t.settledAt !== null,
+          t.readyAt,
+        ]),
+      ).toEqual([[true, true, null]]);
+
+      // A later pass takes the task, once the first has ended, and runs a turn of its own.
+      git('switch', '-q', '-c', '10db/again-def456');
+      const later = engine.state.write((ctx) => {
+        if (getPass(ctx.tx, pass.id).state === 'OPEN') {
+          setAbandonStep(ctx, pass.id, AbandonStep.Abandoning);
+          abandonPassAndBatch(ctx, pass.id);
+        }
+        const opened = insertPass(ctx, {
+          id: mintId('Pass'),
+          projectId: engine.project.id,
+          name: 'Again',
+          pageCap: 4,
+          returnBranch: 'main',
+          startSha: git('rev-parse', 'HEAD'),
+          branch: '10db/again-def456',
+          baseBranch: 'main',
+          repo: null,
+          taskIds: [task.id],
+          dirt: [],
+        });
+        const ws = insertWorkstream(ctx, task.id, {
+          batchId: opened.batch.id,
+          first: { model: 'claude-sonnet-5-5', effort: 'medium' },
+        });
+        insertBuilderMessage(ctx, task.id, { body: 'Tidy it again', files: [] });
+        return { pass: opened.pass, id: ws.id };
+      });
+      engine.launch(later.id);
+      // Its session takes the message and works the page in a turn of its own: the earlier run's
+      // turns are nothing for it to finish.
+      await waitFor(
+        () => engine.adapter.observations.filter((o) => o.kind === 'tool_allowed').length === 2,
+      );
+      expect(row(later.id).state).toBe('RUNNING');
+      expect(untakenMessages(db, task.id)).toEqual([]);
+      expect(
+        listPassTurns(db, later.pass.id).map((t) => [t.seq, t.workstreamId, t.endedAt]),
+      ).toEqual([[2, later.id, null]]);
+    },
+  );
 });

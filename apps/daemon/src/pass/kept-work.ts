@@ -23,6 +23,7 @@ import {
   getWorkstreamRow,
   listPassDirt,
   listPassTurns,
+  maxGrantedSeq,
   passHoldingTask,
   passPageAreas,
   setPassTurnKept,
@@ -315,7 +316,8 @@ export async function keepTurnWork(
       setPassTurnKept(ctx, turnId, {
         keptSha: facts.keptSha,
         keptBaseSha: facts.keptBaseSha,
-        sharedSeq: null,
+        // The page was built with every shared change granted so far, open holds included.
+        sharedSeq: maxGrantedSeq(ctx.tx, place.pass.id),
       }),
     );
   return facts;
@@ -339,8 +341,8 @@ export async function keepPutBackWork(
 /**
  * The commit tool of a pass lane (spec §6.2): keeps the task's page work, the named paths with it,
  * as `keepTurnWork` does, under the call's opId, and answers that kept commit; the pass's branch
- * never moves. A path that is not one of the task's pages is refused (shared code waits for shared
- * areas), then any the guard's judge refuses. A retry with the same opId answers the commit it made;
+ * never moves. A path that is not one of the task's pages is refused (a shared file under a held
+ * area goes to its hold instead, `keepCommitToolPaths`), then any the guard's judge refuses. A retry with the same opId answers the commit it made;
  * nothing to keep is refused.
  */
 export async function keepNamedPaths(
@@ -359,7 +361,7 @@ export async function keepNamedPaths(
   const shared = input.paths.filter((path) => !mine(path));
   if (shared.length > 0)
     throw new InvalidError(
-      `${shared.join(', ')} ${shared.length === 1 ? 'is' : 'are'} not in your page: shared code needs request_claim, which lands with shared areas. Keep the change inside your page.`,
+      `${shared.join(', ')} ${shared.length === 1 ? 'is' : 'are'} not in your page: shared code needs request_claim for its shared area first. Otherwise keep the change inside your page.`,
     );
   for (const path of input.paths) {
     const refused = input.judge(path);

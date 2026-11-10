@@ -9,6 +9,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   createTestStore,
+  deleteUnsentBuilderMessage,
   getTaskFile,
   getTaskMessageRow,
   insertBuilderMessage,
@@ -172,6 +173,38 @@ describe('a task thread', () => {
       markTaskFilesInline(ctx, taskId, [b], true);
     });
     expect(inline()).toEqual([false, true]);
+  });
+
+  it('takes back a message no session was handed, with its pictures, and never one a session was', () => {
+    // An earlier message holds the same picture, so its file stays.
+    store.write((ctx) =>
+      insertBuilderMessage(ctx, taskId, { body: 'Earlier', files: [picture('a.png', 'a')] }),
+    );
+    const refused = store.write((ctx) =>
+      insertBuilderMessage(ctx, taskId, {
+        body: 'Refused',
+        files: [picture('a.png', 'a'), picture('b.png', 'b')],
+      }),
+    ).value;
+    const handed = store.write((ctx) =>
+      insertBuilderMessage(ctx, taskId, { body: 'Handed', files: [] }),
+    ).value;
+    store.write((ctx) => {
+      markTaskMessagesPushed(ctx, [handed.id]);
+    });
+
+    const { value: removed, events } = store.write((ctx) =>
+      deleteUnsentBuilderMessage(ctx, taskId, refused.id),
+    );
+    expect(removed).toEqual([picture('b.png', 'b').storedPath]);
+    expect(events.map((e) => e.type)).toEqual([EventType.TaskChanged]);
+    expect(
+      store.write((ctx) => deleteUnsentBuilderMessage(ctx, taskId, handed.id)).value,
+    ).toBeNull();
+    expect(listTaskThread(store.db, taskId).map((m) => m.body)).toEqual(['Earlier', 'Handed']);
+    expect(() =>
+      store.write((ctx) => deleteUnsentBuilderMessage(ctx, otherTaskId, handed.id)),
+    ).toThrow(NotFoundError);
   });
 
   it('writes a notice of its own to the thread, from the system', () => {

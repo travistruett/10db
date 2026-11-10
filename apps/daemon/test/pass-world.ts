@@ -1,7 +1,14 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { PassTurnDto, ProjectInput, TaskDto, WorkstreamId } from '@10db/contracts';
-import { createStore, endPassTurn, getTask, insertPassTurn, openDatabase } from '@10db/db';
+import {
+  createStore,
+  endPassTurn,
+  getTask,
+  insertPassTurn,
+  openDatabase,
+  openPassTurn,
+} from '@10db/db';
 import {
   createDeliveryJobs,
   openPass,
@@ -43,7 +50,7 @@ export interface PassWorld {
   write(path: string, content: string): void;
   /** The task's run. */
   runOf(task: TaskDto): WorkstreamId;
-  /** Starts the task's next turn, as a message going into its session does. */
+  /** Starts the task's next turn, as a message going into its session does, or answers the open one. */
   startTurn(task: TaskDto): PassTurnDto;
   /** Ends the turn as Ready. */
   endTurn(turn: PassTurnDto): void;
@@ -110,13 +117,15 @@ export async function openPassWorld(
     write,
     runOf,
     startTurn: (task) =>
-      h.state.write((c) =>
-        insertPassTurn(c, {
-          taskId: task.id,
-          workstreamId: runOf(task),
-          sessionId: null,
-          messageId: null,
-        }),
+      h.state.write(
+        (c) =>
+          openPassTurn(c.tx, task.id) ??
+          insertPassTurn(c, {
+            taskId: task.id,
+            workstreamId: runOf(task),
+            sessionId: null,
+            messageId: null,
+          }),
       ),
     endTurn: (turn) => {
       h.state.write((c) => endPassTurn(c, turn.id, { ending: 'ready', replyBody: null }));

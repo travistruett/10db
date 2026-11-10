@@ -767,7 +767,8 @@
               "pr_closed",
               "gate_failed",
               "pr_not_opened",
-              "review_failed"
+              "review_failed",
+              "close"
             ]
           },
           "text": {

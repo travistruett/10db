@@ -1,10 +1,31 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AbandonStep, InboxState, TakeOutStep } from '@10db/contracts';
-import { abandonPassAndBatch, getTask, lastTakeOut, listInbox, setAbandonStep } from '@10db/db';
+import {
+  abandonPassAndBatch,
+  activeClaims,
+  getTask,
+  lastTakeOut,
+  listInbox,
+  listSharedChanges,
+  listTaskThread,
+  openHolds,
+  schema,
+  setAbandonStep,
+} from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { openPassWorld, type PassWorld } from '../../test/pass-world';
-import { answerPassCard, keepTurnWork, resumePassWork, takeOutSteps, TakeOutWithin } from './index';
+import { PassFolderOffBranchError } from '../git';
+import {
+  answerPassCard,
+  grantSharedHold,
+  holdRef,
+  keepHold,
+  keepTurnWork,
+  resumePassWork,
+  takeOutSteps,
+  TakeOutWithin,
+} from './index';
 
 // Workbench spec §12: at start-up a pass goes on from its rows. A folder switched away from the pass's
 // branch while the daemon was down is one card, never a repoint; an unfinished take-out goes on.
@@ -17,6 +38,7 @@ afterEach(() => {
 const deps = (world: PassWorld) => ({
   ...world.deps,
   stopLane: (): Promise<void> => Promise.resolve(),
+  wrote: (): Promise<void> => Promise.resolve(),
 });
 
 const folderCards = (world: PassWorld) =>
@@ -25,6 +47,85 @@ const folderCards = (world: PassWorld) =>
   );
 
 describe('resumePassWork', () => {
+  it('lets go of a hold whose record is gone, freeing its area and saying so', async () => {
+    w = await openPassWorld();
+    w.startTurn(w.settings);
+    await grantSharedHold(w.deps, { workstreamId: w.runOf(w.settings), area: 'src' });
+    w.write('src/button.ts', 'a button\n');
+    const [hold] = openHolds(w.h.store.db, w.opened.pass.id);
+    if (!hold) throw new Error('no hold');
+    // The record's commit is gone with its ref.
+    w.h.store.db
+      .update(schema.passHolds)
+      .set({ recordSha: '0'.repeat(40) })
+      .run();
+    w.h.git$('update-ref', '-d', holdRef(w.opened.pass.id, hold.claimId));
+
+    const restarted = deps({ ...w, deps: w.restart() });
+    await resumePassWork(restarted);
+    await restarted.jobs.idle();
+
+    expect(openHolds(w.h.store.db, w.opened.pass.id)).toEqual([]);
+    expect(activeClaims(w.h.store.db, w.runOf(w.settings)).map((c) => c.name)).not.toContain('src');
+    expect(listTaskThread(w.h.store.db, w.settings.id).at(-1)?.body).toMatch(
+      /^What this page changed in shared src during its turn could not be kept/,
+    );
+  });
+
+  it('leaves a shared hold open while the folder is off the pass branch, and keeps it once back', async () => {
+    w = await openPassWorld();
+    w.startTurn(w.settings);
+    await grantSharedHold(w.deps, { workstreamId: w.runOf(w.settings), area: 'src' });
+    w.write('src/button.ts', 'a button\n');
+    const [hold] = openHolds(w.h.store.db, w.opened.pass.id);
+    if (!hold) throw new Error('no hold');
+    // The builder switched the folder away while the daemon was down.
+    w.h.git$('switch', '-q', 'main');
+
+    await expect(keepHold(w.deps, { claimId: hold.claimId })).rejects.toThrow(
+      PassFolderOffBranchError,
+    );
+    await expect(
+      grantSharedHold(w.deps, { workstreamId: w.runOf(w.people), area: 'src' }),
+    ).rejects.toThrow(PassFolderOffBranchError);
+    const restarted = deps({ ...w, deps: w.restart() });
+    await resumePassWork(restarted);
+    await restarted.jobs.idle();
+    expect(openHolds(w.h.store.db, w.opened.pass.id).map((h) => h.claimId)).toEqual([hold.claimId]);
+    expect(listSharedChanges(w.h.store.db, w.opened.pass.id)).toEqual([]);
+
+    w.h.git$('switch', '-q', w.branch);
+    const again = deps({ ...w, deps: w.restart() });
+    await resumePassWork(again);
+    await again.jobs.idle();
+    expect(openHolds(w.h.store.db, w.opened.pass.id)).toEqual([]);
+    expect(listSharedChanges(w.h.store.db, w.opened.pass.id)[0]?.paths).toEqual(['src/button.ts']);
+  });
+
+  it("keeps a shared hold the stop left open on the chain, releases it, and remakes a lost hold's ref", async () => {
+    w = await openPassWorld();
+    w.write('src/shared.ts', "the builder's edit\n");
+    w.startTurn(w.settings);
+    await grantSharedHold(w.deps, { workstreamId: w.runOf(w.settings), area: 'src' });
+    w.write('src/button.ts', 'a button\n');
+    const [hold] = openHolds(w.h.store.db, w.opened.pass.id);
+    if (!hold) throw new Error('no hold');
+    const ref = holdRef(w.opened.pass.id, hold.claimId);
+    // The daemon died with the hold open, and the hold's ref was lost with it.
+    w.h.git$('update-ref', '-d', ref);
+
+    const restarted = deps({ ...w, deps: w.restart() });
+    await resumePassWork(restarted);
+
+    expect(openHolds(w.h.store.db, w.opened.pass.id)).toEqual([]);
+    expect(activeClaims(w.h.store.db, w.runOf(w.settings)).map((c) => c.name)).not.toContain('src');
+    expect(listSharedChanges(w.h.store.db, w.opened.pass.id)).toMatchObject([
+      { seq: hold.seq, paths: ['src/button.ts'] },
+    ]);
+    expect(w.h.git$('rev-parse', ref)).toBe(hold.recordSha);
+    await restarted.jobs.idle();
+  });
+
   it('raises one card for a folder switched away while the daemon was down; its answer switches back', async () => {
     w = await openPassWorld();
     w.write('src/settings/page.tsx', 'edited, not committed\n');
@@ -108,7 +209,11 @@ describe('resumePassWork', () => {
     ).rejects.toThrow('the daemon died');
     expect(lastTakeOut(w.h.store.db, w.settings.id)?.step).toBe(TakeOutStep.Checked);
 
-    const restarted = { ...w.restart(), stopLane: (): Promise<void> => Promise.resolve() };
+    const restarted = {
+      ...w.restart(),
+      stopLane: (): Promise<void> => Promise.resolve(),
+      wrote: (): Promise<void> => Promise.resolve(),
+    };
     await resumePassWork(restarted);
     await restarted.jobs.idle();
 

@@ -15,6 +15,7 @@ import {
 import {
   advanceTakeOut,
   clearLease,
+  deleteSignOffWait,
   deleteTakeOut,
   getPass,
   getProject,
@@ -25,10 +26,12 @@ import {
   insertTakeOut,
   lastTakeOut,
   leavePass,
+  openHolds,
   passHoldingTask,
   releaseClaims,
   setTaskKeptWork,
   setTaskStatus,
+  settleTurnsLeaving,
   transitionWorkstream,
   type PassTakeOutRow,
   type TaskKeptWork,
@@ -36,13 +39,19 @@ import {
 } from '@10db/db';
 import { jobKey, JobQueue, passDirtRef } from '../delivery';
 import { foldHandEdits } from './hand-edits';
+import { keepHold } from './shared-chain';
+import { dropShared } from './shared-drop';
+import { PassFolderOffBranchError } from '../git';
 import {
   keepTurnWork,
   keptRef,
+  keptWorkFacts,
   pageMatcher,
+  passBranch,
   passKeptRef,
   passTaskPlace,
   readKeptRef,
+  type KeptWork,
   type PassTaskPlace,
   type PassWorkDeps,
 } from './kept-work';
@@ -58,8 +67,14 @@ export type TakeOutWithin = (typeof TakeOutWithin)[keyof typeof TakeOutWithin];
 /** Ends a pass lane's session, if any, keeping its last work; the runner's, injected. */
 export type StopPassLane = (id: WorkstreamId) => Promise<void>;
 
-/** What a take-out needs: the pass's work in the folder, and the runner's stop. */
-export type TakeOutDeps = PassWorkDeps & { readonly stopLane: StopPassLane };
+/** Tells Your folder's watcher which files 10db just wrote there, so they raise no card. */
+type DaemonWrote = (repo: string, paths: readonly string[]) => Promise<void>;
+
+/** What a take-out needs: the pass's work in the folder, the runner's stop, the watcher's ear. */
+export type TakeOutDeps = PassWorkDeps & {
+  readonly stopLane: StopPassLane;
+  readonly wrote: DaemonWrote;
+};
 
 export interface TakeOutInput {
   readonly taskId: TaskId;
@@ -77,8 +92,8 @@ const listed = (paths: readonly string[]): string => paths.map((p) => `- ${p}`).
 /**
  * Step 5 of a take-out, in the caller's write: the task's run is cancelled from whatever state it is
  * in (a queued one would start an ordinary session in the folder the moment the pass let go of it),
- * its claims released, the task leaves the pass for the Board, open, with its kept work recorded, and
- * the thread says so.
+ * its claims released, every turn of it ended and settled with nothing Ready, the task leaves the
+ * pass for the Board, open, with its kept work recorded, and the thread says so.
  */
 export function leavePassForBoard(
   ctx: WriteContext,
@@ -104,6 +119,9 @@ export function leavePassForBoard(
     releaseClaims(ctx, run);
     clearLease(ctx, run);
   }
+  // No turn of the task is left for a later run of it to finish, nor a sign-off waiting for it.
+  settleTurnsLeaving(ctx, input.taskId);
+  deleteSignOffWait(ctx, input.taskId);
   leavePass(ctx, input.taskId);
   if (task.status !== TaskStatus.Open) setTaskStatus(ctx, input.taskId, TaskStatus.Open);
   setTaskKeptWork(ctx, input.taskId, input.kept);
@@ -156,8 +174,12 @@ function unfinishedTakeOut(deps: PassWorkDeps, taskId: TaskId): PassTakeOutRow |
  * (the task stays in the pass, the thread names the files), one inside an Abandon or a close leaves
  * those files as they are and goes on; 4 puts each page file back as the pass's branch has it where
  * something landed on it during the pass, else as it was before the pass, hashing each again just
- * before (one changed since is left and named); 5 leaves the pass for the Board, its work at its
- * kept ref.
+ * before (one changed since is left and named), then drops each shared change chosen Drop, newest
+ * first (inside an Abandon or a close without its refusals, never without the hash before each
+ * write; a refused one stays on the chain and the thread says why); 5 leaves the pass for the Board,
+ * its work at its kept ref. While Your folder is off the pass's branch nothing of the page can be
+ * kept and none of its files is written: a take-out asked for alone fails, and one inside an Abandon
+ * or a close keeps the last kept commit, writes no file and goes on to step 5.
  */
 export async function takeOutSteps(
   deps: TakeOutDeps,
@@ -191,54 +213,79 @@ export async function takeOutSteps(
     deps.state.write((ctx) => advanceTakeOut(ctx, key, patch));
   const { git } = deps;
 
-  if (row.step < TakeOutStep.Stopped) {
-    await deps.stopLane(workstreamId);
-    row = advance({ step: TakeOutStep.Stopped });
-  }
-
   let stillChanging: string[] = row.step >= TakeOutStep.Checked ? [...row.left] : [];
-  if (row.step < TakeOutStep.Checked) {
-    const place = passTaskPlace(db, task.id);
-    for (let tries = row.tries; ;) {
-      await foldHandEdits(deps, { workstreamId });
-      if (row.step < TakeOutStep.HandEditsFolded)
-        row = advance({ step: TakeOutStep.HandEditsFolded });
-      const kept = await keepTurnWork(deps, { workstreamId, turnId: null });
-      tries += 1;
-      row = advance({
-        step: TakeOutStep.Kept,
-        tries,
-        keptSha: kept.keptSha,
-        keptBaseSha: kept.keptBaseSha,
-      });
-      stillChanging = await changedSinceKept(deps, place, kept);
-      if (stillChanging.length === 0) {
-        row = advance({ step: TakeOutStep.Checked });
+  try {
+    if (row.step < TakeOutStep.Stopped) {
+      await deps.stopLane(workstreamId);
+      row = advance({ step: TakeOutStep.Stopped });
+    }
+    if (row.step < TakeOutStep.Checked) {
+      const place = passTaskPlace(db, task.id);
+      for (let tries = row.tries; ;) {
+        let kept: KeptWork;
+        try {
+          await foldHandEdits(deps, { workstreamId });
+          if (row.step < TakeOutStep.HandEditsFolded)
+            row = advance({ step: TakeOutStep.HandEditsFolded });
+          kept = await keepTurnWork(deps, { workstreamId, turnId: null });
+        } catch (error) {
+          if (!(error instanceof PassFolderOffBranchError) || input.within === TakeOutWithin.Alone)
+            throw error;
+          // An Abandon or a close must finish, and nothing of the page can be kept while Your
+          // folder is off the pass's branch: the last kept commit stands, and step 4 writes nothing.
+          const last = await keptWorkFacts(deps, task.id);
+          row = advance({
+            step: TakeOutStep.Checked,
+            keptSha: last.keptSha,
+            keptBaseSha: last.keptBaseSha,
+          });
+          break;
+        }
+        tries += 1;
+        row = advance({
+          step: TakeOutStep.Kept,
+          tries,
+          keptSha: kept.keptSha,
+          keptBaseSha: kept.keptBaseSha,
+        });
+        stillChanging = await changedSinceKept(deps, place, kept);
+        if (stillChanging.length === 0) {
+          row = advance({ step: TakeOutStep.Checked });
+          break;
+        }
+        if (tries < CHECK_TRIES) continue;
+        if (input.within === TakeOutWithin.Alone) {
+          const changing = stillChanging;
+          deps.state.write((ctx) => {
+            deleteTakeOut(ctx, key);
+            insertSystemNotice(
+              ctx,
+              task.id,
+              `The page's files kept changing while it was being taken out, so it stays in the pass:\n${listed(changing)}`,
+            );
+          });
+          return {
+            taskId: task.id,
+            passId: pass.id,
+            tookOut: false,
+            keptSha: kept.keptSha,
+            stillChanging: changing,
+            left: [],
+          };
+        }
+        row = advance({ step: TakeOutStep.Checked, left: stillChanging });
         break;
       }
-      if (tries < CHECK_TRIES) continue;
-      if (input.within === TakeOutWithin.Alone) {
-        const changing = stillChanging;
-        deps.state.write((ctx) => {
-          deleteTakeOut(ctx, key);
-          insertSystemNotice(
-            ctx,
-            task.id,
-            `The page's files kept changing while it was being taken out, so it stays in the pass:\n${listed(changing)}`,
-          );
-        });
-        return {
-          taskId: task.id,
-          passId: pass.id,
-          tookOut: false,
-          keptSha: kept.keptSha,
-          stillChanging: changing,
-          left: [],
-        };
-      }
-      row = advance({ step: TakeOutStep.Checked, left: stillChanging });
-      break;
     }
+  } catch (error) {
+    // A take-out the builder asked for alone that fails before a file is put back leaves the page
+    // in the pass as it was, taking messages again; one inside an Abandon or a close goes on from
+    // its row.
+    if (input.within === TakeOutWithin.Alone && row.step < TakeOutStep.Checked)
+      deps.state.write((ctx) => {
+        deleteTakeOut(ctx, key);
+      });
+    throw error;
   }
 
   const keptBaseSha = row.keptBaseSha;
@@ -255,7 +302,10 @@ export async function takeOutSteps(
   if (row.step < TakeOutStep.PutBack) {
     const keptSha = row.keptSha;
     let left: string[] = [];
-    if (keptSha !== null) {
+    // A folder on another branch holds that branch's files: the pass's are never written into it.
+    const on = await git.currentBranch(repo);
+    const offBranch = on !== passBranch(db, pass);
+    if (!offBranch && keptSha !== null) {
       const leftAlready = new Set(row.left);
       const touched = new Set(await git.filesChangedBetween(repo, pass.startSha, keptBaseSha));
       const before = (await readKeptRef(git, repo, passDirtRef(pass.id))) ?? pass.startSha;
@@ -269,16 +319,43 @@ export async function takeOutSteps(
         expect,
       );
       ({ left } = restored);
+      // The page's files go back as they were before the pass, outside every claim once step 5
+      // releases the page: they are 10db's writes, not a lane's.
+      await deps.wrote(repo, restored.written);
       await git.refreshIndex(repo, restored.written);
+    }
+    // A hold the stop left open is kept first, so a Drop chosen for it has its change.
+    if (!offBranch)
+      for (const hold of openHolds(db, pass.id))
+        if (hold.taskId === task.id && row.drops.includes(hold.seq))
+          await keepHold(deps, { claimId: hold.claimId });
+    // The shared changes chosen Drop, newest first, so each later one is back before an earlier.
+    const kept: string[] = [];
+    for (const seq of offBranch ? [] : [...row.drops].sort((a, b) => b - a)) {
+      const dropped = await dropShared(deps, {
+        passId: pass.id,
+        seq,
+        force: input.within !== TakeOutWithin.Alone,
+      });
+      if (dropped.refused !== null)
+        kept.push(`Shared change ${String(seq)} is kept on the chain: ${dropped.refused}.`);
+      left = [...left, ...dropped.left];
     }
     const changed = left;
     row = deps.state.write((ctx) => {
+      if (offBranch)
+        insertSystemNotice(
+          ctx,
+          task.id,
+          `Your folder was on ${on ?? 'a detached HEAD'}, not on the pass's branch, so the page's files were left as they are.`,
+        );
       if (changed.length > 0)
         insertSystemNotice(
           ctx,
           task.id,
           `Left as they are, because they changed after they were checked:\n${listed(changed)}`,
         );
+      for (const line of kept) insertSystemNotice(ctx, task.id, line);
       return advanceTakeOut(ctx, key, {
         step: TakeOutStep.PutBack,
         left: [...row.left, ...changed],

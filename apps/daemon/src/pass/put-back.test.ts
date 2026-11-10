@@ -32,6 +32,7 @@ afterEach(() => {
 });
 
 const stopLane = (): Promise<void> => Promise.resolve();
+const wrote = (): Promise<void> => Promise.resolve();
 const read = (rel: string) => readFileSync(join(w.h.repo, rel), 'utf8');
 const lastNotice = () =>
   listTaskThreadRows(w.h.store.db, w.settings.id)
@@ -49,7 +50,7 @@ async function takenOut(): Promise<void> {
   await keepTurnWork(w.deps, { workstreamId: w.runOf(w.settings), turnId: turn.id });
   w.endTurn(turn);
   await takeOutSteps(
-    { ...w.deps, stopLane },
+    { ...w.deps, stopLane, wrote },
     { taskId: w.settings.id, within: TakeOutWithin.Alone },
   );
   expect(read('src/settings/long.tsx')).toBe('one\ntwo\nthree\nfour\nfive\nsix\n');
@@ -65,7 +66,10 @@ const runOfSettings = () => {
 
 /** The first pass is abandoned and the folder goes home; a later pass takes Settings with `put`. */
 async function inLaterPass(put: PutBackKeptWork): Promise<void> {
-  await takeOutSteps({ ...w.deps, stopLane }, { taskId: w.people.id, within: TakeOutWithin.Alone });
+  await takeOutSteps(
+    { ...w.deps, stopLane, wrote },
+    { taskId: w.people.id, within: TakeOutWithin.Alone },
+  );
   w.h.state.write((ctx) => {
     setAbandonStep(ctx, w.opened.pass.id, AbandonStep.Abandoning);
     abandonPassAndBatch(ctx, w.opened.pass.id);
@@ -163,7 +167,7 @@ describe('putBackKeptWork', () => {
     // The page works in the new pass and is taken out again: the saved file is not written over.
     w.write('src/settings/long.tsx', 'one\ntwo, by the task\nthree, again\nfour\nfive\nsix\n');
     await takeOutSteps(
-      { ...w.deps, stopLane },
+      { ...w.deps, stopLane, wrote },
       { taskId: w.settings.id, within: TakeOutWithin.Alone },
     );
     const second = getTaskKeptWork(w.h.store.db, w.settings.id);
@@ -181,7 +185,7 @@ describe('putBackKeptWork', () => {
     await inLaterPass(() => Promise.reject(new Error('the daemon died')));
     expect(read('src/settings/long.tsx')).toBe('one\ntwo\nthree\nfour\nfive\nsix\n');
 
-    const restarted = { ...w.restart(), stopLane };
+    const restarted = { ...w.restart(), stopLane, wrote };
     await resumePassWork(restarted);
     await restarted.jobs.idle();
 
