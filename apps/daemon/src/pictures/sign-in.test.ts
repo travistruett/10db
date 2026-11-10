@@ -9,7 +9,7 @@ import type { PageCamera } from './camera';
 import { devLoginProblem, parseLoginUrl, signIn, sweepLoginLogs, type SignInDeps } from './sign-in';
 import { readStorageState } from './storage-state';
 
-// Workbench spec §10, §13; plan B3: the dev login runs under the gate's runner with no project id, so
+// Workbench spec §10, §13: the dev login runs under the gate's runner with no project id, so
 // it never turns Docker on; its log holds a token, so it lives under the data directory at 0600 and is
 // deleted once read; the storage state it leads to is kept there at 0600.
 

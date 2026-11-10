@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { beforeAllowed, wroteBefore, type BeforeFacts, type ToolCall } from './before-rule';
 
-// Workbench spec §10 (before is before the first edit); plan §3.2's before rule: a before is asked
+// Workbench spec §10 (before is before the first edit), the before rule: a before is asked
 // only while the task has started nothing, and kept only when the task wrote nothing before the shot
 // finished.
 

@@ -8,7 +8,7 @@ import {
   type CaptureRequest,
 } from './capture-queue';
 
-// Workbench spec §10, §12; plan §3.2: one capture at a time per daemon, raced by turns, sign-off,
+// Workbench spec §10, §12: one capture at a time per daemon, raced by turns, sign-off,
 // take-out, close, Abandon, the app address and the browser's download. Each row is one cell the
 // queue decides; the before rule and the write are decided elsewhere.
 

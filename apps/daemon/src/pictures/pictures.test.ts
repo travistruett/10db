@@ -32,7 +32,7 @@ import { createGateRunner } from '../verify';
 import { ManualClock } from '../clock';
 import { startPictures, type Pictures } from './pictures';
 
-// Workbench spec §10, §12, plan B5: the service end to end on a real pass in a real folder and
+// Workbench spec §10, §12: the service end to end on a real pass in a real folder and
 // database, with a fake camera standing in for the browser, a child process 10db does not own.
 
 const APP = 'http://localhost:8800';
