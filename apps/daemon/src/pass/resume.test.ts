@@ -43,6 +43,8 @@ const deps = (world: PassWorld) => ({
   wrote: (): Promise<void> => Promise.resolve(),
 });
 
+const read = (world: PassWorld, rel: string) => readFileSync(join(world.h.repo, rel), 'utf8');
+
 const folderCards = (world: PassWorld) =>
   listInbox(world.h.store.db, { states: [InboxState.Open] }).filter(
     (item) => item.detail?.['passId'] === world.opened.pass.id,
@@ -246,6 +248,45 @@ describe('resumePassWork', () => {
     await restarted.jobs.idle();
 
     expect(readFileSync(join(w.h.repo, 'src/settings/page.tsx'), 'utf8')).toBe('the turn\n');
+    expect(getTaskKeptWork(w.h.store.db, w.settings.id)).toBeNull();
+  });
+
+  it("keeps a page's first take-out row when a second one fails, so start-up puts its work back by it", async () => {
+    w = await openPassWorld({
+      before: ({ write }) => {
+        write('src/settings/page.tsx', 'edited before the pass\n');
+      },
+    });
+    w.write('src/settings/page.tsx', 'edited before the pass\nand the turn\n');
+    await takeOutSteps(deps(w), { taskId: w.settings.id, within: TakeOutWithin.Alone });
+    const first = lastTakeOut(w.h.store.db, w.settings.id);
+    expect(read(w, 'src/settings/page.tsx')).toBe('edited before the pass\n');
+    // The daemon stopped before the join's put-back wrote a file.
+    await joinPass(
+      w.h.ctx,
+      w.opened.pass.id,
+      { pages: [], taskIds: [w.settings.id], firstMessage: null },
+      { leaseMs: 60_000, putBack: () => Promise.reject(new Error('the daemon died')) },
+    );
+    // Taken out again, the take-out fails at its first step and leaves the page in the pass.
+    await expect(
+      takeOutSteps(
+        { ...deps(w), stopLane: () => Promise.reject(new Error('the lane would not stop')) },
+        { taskId: w.settings.id, within: TakeOutWithin.Alone },
+      ),
+    ).rejects.toThrow('the lane would not stop');
+    expect(lastTakeOut(w.h.store.db, w.settings.id)).toEqual(first);
+
+    const restarted = {
+      ...w.restart(),
+      stopLane: (): Promise<void> => Promise.resolve(),
+      wrote: (): Promise<void> => Promise.resolve(),
+    };
+    await resumePassWork(restarted);
+    await restarted.jobs.idle();
+
+    // The file was as the first take-out left it, so the saved work goes back whole.
+    expect(read(w, 'src/settings/page.tsx')).toBe('edited before the pass\nand the turn\n');
     expect(getTaskKeptWork(w.h.store.db, w.settings.id)).toBeNull();
   });
 });

@@ -4,6 +4,7 @@ import {
   advanceTakeOut,
   createTestStore,
   deleteTakeOut,
+  findTakeOut,
   insertPass,
   insertTakeOut,
   insertTask,
@@ -122,6 +123,7 @@ describe("a take-out's row", () => {
     );
     store.write((ctx) => advanceTakeOut(ctx, key, { step: TakeOutStep.Done }));
 
+    const finished = findTakeOut(store.db, key) ?? null;
     store.write((ctx) => insertTakeOut(ctx, { ...key, drops: [3] }));
 
     // The row tells of the latest take-out alone: what a later put-back and an Abandon read.
@@ -129,5 +131,10 @@ describe("a take-out's row", () => {
       expect.objectContaining({ ...key, step: TakeOutStep.Written, left: [], drops: [3] }),
     ]);
     expect(listUnfinishedTakeOuts(store.db)).toHaveLength(1);
+    // One that stops gives the finished row back.
+    store.write((ctx) => {
+      deleteTakeOut(ctx, key, finished);
+    });
+    expect(findTakeOut(store.db, key)).toEqual(finished);
   });
 });

@@ -9,7 +9,9 @@ A task keeps one `pass_take_outs` row per pass, and that row describes its lates
 Add Page puts a taken-out task back into the same pass and the builder, a close or an Abandon takes it out
 again, `insertTakeOut` deletes the finished row and writes a fresh one in the same write. While the task's
 take-out has not finished, a second one is refused (`ConflictError`); the unfinished one goes on from its own
-row, as before. Start-up puts back the saved work of a task the pass holds unless its take-out from this pass
+row, as before. A fresh take-out asked for alone that stops before it finishes (its stop or keep failed, or the
+page's files kept changing) deletes its own row and writes the finished one it replaced back
+(`deleteTakeOut(ctx, key, replaced)`), so the page stays in the pass with the row its put-back reads. Start-up puts back the saved work of a task the pass holds unless its take-out from this pass
 is unfinished. A finished take-out from this pass no longer stops that, so a page added back whose put-back the
 daemon cut short gets its work back.
 

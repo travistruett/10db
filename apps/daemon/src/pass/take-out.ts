@@ -17,6 +17,7 @@ import {
   clearLease,
   deleteSignOffWait,
   deleteTakeOut,
+  findTakeOut,
   getPass,
   getProject,
   getTask,
@@ -189,6 +190,9 @@ export async function takeOutSteps(
   const task = getTask(db, input.taskId);
   const workstreamId = task.workstreamId;
   if (workstreamId === null) throw new ConflictError(`${task.title} has no run to take out`);
+  // A finished take-out of the task from this pass, which a fresh one replaces: one asked for alone
+  // that stops puts it back, so the put-back of a page added back again still reads it.
+  let replaced: PassTakeOutRow | null = null;
   let row =
     unfinishedTakeOut(deps, task.id) ??
     deps.state.write((ctx) => {
@@ -199,6 +203,7 @@ export async function takeOutSteps(
         throw new ConflictError(
           `Pass "${pass.name}" is ${pass.state.toLowerCase()}: a page is taken out only while it is open`,
         );
+      replaced = findTakeOut(ctx.tx, { taskId: task.id, passId: pass.id }) ?? null;
       return insertTakeOut(ctx, {
         taskId: task.id,
         passId: pass.id,
@@ -257,7 +262,7 @@ export async function takeOutSteps(
         if (input.within === TakeOutWithin.Alone) {
           const changing = stillChanging;
           deps.state.write((ctx) => {
-            deleteTakeOut(ctx, key);
+            deleteTakeOut(ctx, key, replaced);
             insertSystemNotice(
               ctx,
               task.id,
@@ -283,7 +288,7 @@ export async function takeOutSteps(
     // its row.
     if (input.within === TakeOutWithin.Alone && row.step < TakeOutStep.Checked)
       deps.state.write((ctx) => {
-        deleteTakeOut(ctx, key);
+        deleteTakeOut(ctx, key, replaced);
       });
     throw error;
   }
