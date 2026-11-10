@@ -179,9 +179,10 @@ export function closePages(db: DbReader, passId: PassId): ClosePages {
 
 /**
  * Refuses a confirmed close whose choices the lists do not allow (409): a page that is not one of
- * the unfinished pages, a file placed in a task that is neither signed off nor set to Sign Off Now,
- * a Drop of a shared change that is not of a page set to Take Out, or whose Drop is refused, and a
- * Drop of a change a page set to Sign Off Now needs, since that page's sign-off lands it.
+ * the unfinished pages, a file placed that is not one no page owns or in a task that is neither
+ * signed off nor set to Sign Off Now, a Drop of a shared change that is not of a page set to Take
+ * Out, or whose Drop is refused, and a Drop of a change a page set to Sign Off Now needs, since that
+ * page's sign-off lands it.
  */
 export function checkCloseRequest(
   preview: PassClosePreviewDto,
@@ -196,6 +197,10 @@ export function checkCloseRequest(
     ...closing.signedOff,
     ...request.pages.filter((p) => p.choice === PassClosePageChoice.SignOff).map((p) => p.taskId),
   ]);
+  const unowned = new Set(preview.unowned.map((f) => f.path));
+  for (const file of request.files)
+    if (file.placeIn !== null && !unowned.has(file.path))
+      throw new ConflictError(`${file.path} is not a file no page owns: only those are placed`);
   for (const file of request.files)
     if (file.placeIn !== null && !signing.has(file.placeIn))
       throw new ConflictError(
