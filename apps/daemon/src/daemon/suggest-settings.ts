@@ -17,6 +17,7 @@ import {
   devLoginEvidence,
   devLoginPrompt,
   devLoginScriptFiles,
+  devLoginWords,
   findDevLogins,
   NAMING_MS,
   oneLine,
@@ -177,7 +178,7 @@ async function devLogin(
     deps.askMs ?? NAMING_MS,
     signal,
   );
-  const command = text === null ? null : devLoginAnswer(text, found);
+  const command = text === null ? null : devLoginAnswer(text, found, devLoginWords(found, scripts));
   if (command === null) return null;
   return {
     field: SettingField.DevLoginCommand,

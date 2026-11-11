@@ -18,6 +18,7 @@ export {
   devLoginEvidence,
   devLoginPrompt,
   devLoginScriptFiles,
+  devLoginWords,
   findDevLogins,
   type DevLogin,
 } from './detect-dev-login';

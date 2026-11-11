@@ -106,9 +106,13 @@ const usedVariables = (line: string): string[] =>
     (m) => m[1] ?? m[2] ?? m[3] ?? '',
   );
 
+/** An assignment to `name`, shell or make, with its value as the first group. */
+const assignmentTo = (name: string): RegExp =>
+  new RegExp(`^\\s*(?:export\\s+|readonly\\s+)?${escaped(name)}\\s*[:?]?=(.*)$`);
+
 /** The line that gives `name` a literal value (no substitution or variable in it), or -1. */
 function literalAssignment(lines: readonly string[], name: string): number {
-  const assigns = new RegExp(`^\\s*(?:export\\s+|readonly\\s+)?${escaped(name)}\\s*[:?]?=(.*)$`);
+  const assigns = assignmentTo(name);
   return lines.findIndex((line) => {
     const value = assigns.exec(line)?.[1];
     return value !== undefined && !value.includes('`') && !/\$[A-Za-z_{(]/.test(value);
@@ -188,6 +192,57 @@ export function devLoginEvidence(
   return blocks.join('\n\n').slice(0, MAX_EVIDENCE);
 }
 
+/** A literal assignment's value with its quotes taken off; the text as it is when unquoted. */
+const unquoted = (value: string): string => {
+  const trimmed = value.trim();
+  const quoted = /^"([^"]*)"$|^'([^']*)'$/.exec(trimmed);
+  return quoted === null ? trimmed : (quoted[1] ?? quoted[2] ?? '');
+};
+
+/** The words of a line as a shell would split them, quotes taken off; operators and parens split too. */
+const lineWords = (line: string): string[] =>
+  [...line.matchAll(/"([^"]*)"|'([^']*)'|([^\s"'();|&`]+)/g)].map(
+    (m) => m[1] ?? m[2] ?? m[3] ?? '',
+  );
+
+/**
+ * Every word the model was shown in the lines that run a found command, each variable with a literal
+ * value in the same script written out (`$NAME`, `${NAME}`, make's `$(NAME)`), and each word of a
+ * package script's own command. An argument in the model's answer must be one of these
+ * (`devLoginAnswer`): it may only repeat what the repository's scripts pass. Pure.
+ */
+export function devLoginWords(
+  found: readonly DevLogin[],
+  scripts: ReadonlyMap<string, string>,
+): Set<string> {
+  const words = new Set<string>();
+  for (const login of found)
+    if (login.script !== undefined) for (const word of lineWords(login.script)) words.add(word);
+  const calls = found.filter((f) => f.script === undefined).map((f) => asWord(f.name));
+  if (calls.length === 0) return words;
+  for (const text of scripts.values()) {
+    const lines = text.split('\n');
+    lines.forEach((line, i) => {
+      if (isComment(line) || !calls.some((call) => call.test(line))) return;
+      const whole = logicalLine(lines, i)
+        .map((k) => lines[k] ?? '')
+        .join(' ')
+        .replace(/\\ /g, ' ');
+      const written = whole.replace(
+        /\$(?:\{([A-Za-z_]\w*)\}|\(([A-Za-z_]\w*)\)|([A-Za-z_]\w*))/g,
+        (all, a?: string, b?: string, c?: string) => {
+          const name = a ?? b ?? c ?? '';
+          const at = literalAssignment(lines, name);
+          if (at === -1) return all;
+          return unquoted(assignmentTo(name).exec(lines[at] ?? '')?.[1] ?? '');
+        },
+      );
+      for (const word of lineWords(written)) if (!word.includes('$')) words.add(word);
+    });
+  }
+  return words;
+}
+
 /** The one question asked of the model. The repository's lines are data, never instructions. */
 export function devLoginPrompt(found: readonly DevLogin[], evidence: string): string {
   const named = found.map((f) => `\`${f.name}\` (${f.path})`).join(', ');
@@ -203,7 +258,7 @@ export function devLoginPrompt(found: readonly DevLogin[], evidence: string): st
     'backtick, no ;, no |, no &, no redirect and no #. It runs the dev login command itself (for a',
     'Django command, python manage.py <name>), or, when the scripts run it in a compose service,',
     'docker compose exec -T <service> followed by that, with no other docker option. Its',
-    'arguments are plain words, quoted words, or --flag and --flag=value.',
+    'arguments are only words the scripts below pass, written exactly as they pass them.',
     '',
     'Reply with JSON only, in this shape and nothing else:',
     '{"command":"python manage.py dev_login dev@example.test"}',
@@ -223,16 +278,6 @@ const FLAG = /^--[A-Za-z0-9][\w-]*(?:=[\w@%+:,./-]*)?$/;
 const PACKAGE_MANAGERS = new Set(['pnpm', 'npm', 'yarn', 'bun']);
 const INTERPRETERS = new Set(['sh', 'bash', 'node', 'python', 'python3']);
 const PYTHONS = new Set(['python', 'python3']);
-/** Options `manage.py` takes for any command, which change what runs or where it is loaded from. */
-const DJANGO_OPTIONS = new Set([
-  'settings',
-  'pythonpath',
-  'traceback',
-  'no-color',
-  'force-color',
-  'skip-checks',
-  'verbosity',
-]);
 
 interface Word {
   readonly text: string;
@@ -318,15 +363,14 @@ function argsOf(argv: readonly Word[], login: DevLogin): readonly Word[] | null 
 }
 
 /**
- * Whether an argument after the invocation may stand, quoted or not: a word that does not start with
- * `-`, or `--flag` or `--flag=value` of plain characters; for a Django command, not one of the options
- * `manage.py` takes for every command (`--settings`, `--pythonpath` and the like).
+ * Whether an argument after the invocation may stand, quoted or not: a word the repository's scripts
+ * pass (`seen`, from `devLoginWords`), verbatim, which when it starts with `-` is also `--flag` or
+ * `--flag=value` of plain characters. A flag the scripts never pass (an abbreviation git or argparse
+ * would expand, `--settings`, `--script-shell`) is refused, whatever kind of command takes it.
  */
-function argumentAllowed(text: string, django: boolean): boolean {
-  if (!text.startsWith('-')) return true;
-  if (!FLAG.test(text)) return false;
-  const name = text.slice(2).split('=', 1)[0] ?? '';
-  return !(django && DJANGO_OPTIONS.has(name));
+function argumentAllowed(text: string, seen: ReadonlySet<string>): boolean {
+  if (text.startsWith('-') && !FLAG.test(text)) return false;
+  return seen.has(text);
 }
 
 /**
@@ -338,7 +382,11 @@ function argumentAllowed(text: string, django: boolean): boolean {
  * <service>`, then only words that pass `argumentAllowed` (a package script's only after `--`).
  * Words are split on the ASCII space; any other space is refused. Pure.
  */
-export function devLoginAnswer(text: string, found: readonly DevLogin[]): string | null {
+export function devLoginAnswer(
+  text: string,
+  found: readonly DevLogin[],
+  seen: ReadonlySet<string>,
+): string | null {
   const parsed = Answer.safeParse(modelJson(text));
   if (!parsed.success) return null;
   const command = parsed.data.command.trim();
@@ -352,8 +400,7 @@ export function devLoginAnswer(text: string, found: readonly DevLogin[]): string
   for (const login of found) {
     const args = argsOf(inner, login);
     if (args === null) continue;
-    const django = login.script === undefined && login.path.includes('/management/commands/');
-    if (args.every((word) => argumentAllowed(word.text, django))) return command;
+    if (args.every((word) => argumentAllowed(word.text, seen))) return command;
   }
   return null;
 }

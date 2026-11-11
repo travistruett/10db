@@ -45,9 +45,11 @@ the settings a project lacks, each with where it was found in one line, and note
   invocation (`python manage.py <name>` for a Django management command, the script's path alone or after `sh`,
   `bash`, `node` or `python`, or `<pnpm|npm|yarn|bun> run <script>` with the script's package folder as `--dir`,
   `--prefix` or `--cwd`), optionally inside exactly `docker compose exec [-T] <service>` or `docker-compose exec [-T]
-<service>`; then only words that do not start with `-`, or `--flag` / `--flag=value` of plain characters, quoted or
-  not (a package script's only after a literal `--`; for a Django command never one of `manage.py`'s global options:
-  `settings`, `pythonpath`, `traceback`, `no-color`, `force-color`, `skip-checks`, `verbosity`). Words split on the
+<service>`; then only arguments the repository's own scripts pass, verbatim
+  (`devLoginWords`: every word of the lines that run the command, each variable with a literal value in the same script
+  written out, and every word of a package script's command), a `-` word also being `--flag` or `--flag=value` of plain
+  characters, and a package script's only after a literal `--`. An allowlist, not a list of refused options: argparse
+  expands abbreviations (`--set` for `--settings`), and a wrapper can reach `manage.py` too. Words split on the
   ASCII space; any other space (a tab, a no-break space, a line separator) is refused. A command that runs `docker` or
   `docker-compose` carries the note "Needs Allow Docker". No candidate, no invocation line, no model or a failed check:
   no row.

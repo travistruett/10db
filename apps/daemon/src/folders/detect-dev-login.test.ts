@@ -4,6 +4,7 @@ import {
   devLoginEvidence,
   devLoginPrompt,
   devLoginScriptFiles,
+  devLoginWords,
   findDevLogins,
   type DevLogin,
 } from './detect-dev-login';
@@ -155,6 +156,31 @@ describe('devLoginEvidence', () => {
   });
 });
 
+describe('devLoginWords', () => {
+  it('takes the words of the invocation lines, with the literal variables written out', () => {
+    const words = devLoginWords([DJANGO], new Map([['amps/frontend/e2e/run.sh', RUN_SH]]));
+    for (const word of ['frontend-e2e@example.test', '--tenant', 'frontend-e2e', 'dev_login'])
+      expect(words.has(word)).toBe(true);
+    // A variable with no literal value, the comment and the unused assignment add nothing.
+    for (const word of ['x', 'comment', '$QA_EMAIL', 'QA_EMAIL'])
+      expect(words.has(word)).toBe(false);
+  });
+
+  it("reads make's $(NAME) and a package script's own command", () => {
+    const makefile =
+      'EMAIL := dev@example.test\nlogin:\n\tpython manage.py dev_login $(EMAIL) --tenant=acme\n';
+    expect([...devLoginWords([DJANGO], new Map([['Makefile', makefile]]))]).toEqual(
+      expect.arrayContaining(['dev@example.test', '--tenant=acme']),
+    );
+    const script: DevLogin = {
+      name: 'dev-login',
+      path: 'package.json',
+      script: 'node x.mjs --user=dev',
+    };
+    expect(devLoginWords([script], new Map()).has('--user=dev')).toBe(true);
+  });
+});
+
 describe('devLoginPrompt', () => {
   it('names the found command and carries the evidence as data', () => {
     const prompt = devLoginPrompt([DJANGO], 'EVIDENCE');
@@ -177,6 +203,19 @@ describe('devLoginAnswer', () => {
     script: 'node x.mjs',
   };
   const asked = (command: string) => JSON.stringify({ command });
+  /** The words the model was shown in the invocation lines, variables written out. */
+  const SEEN = new Set([
+    'frontend-e2e@example.test',
+    '--tenant',
+    'frontend-e2e',
+    'a@example.test',
+    'dev user',
+    '--tenant=acme',
+    'dev@example.test',
+    'dev',
+    '--user=dev@example.test',
+    'x',
+  ]);
   interface Row {
     readonly name: string;
     readonly text: string;
@@ -290,6 +329,37 @@ describe('devLoginAnswer', () => {
       text: asked("python manage.py dev_login 'a\u00a0b'"),
       ok: false,
     },
+    {
+      name: 'an argument the scripts never pass',
+      text: asked(`${good} other@example.test`),
+      ok: false,
+    },
+    {
+      name: 'a seen flag with another value',
+      text: asked('python manage.py dev_login x --tenant=other'),
+      ok: false,
+    },
+    {
+      name: 'a seen flag written another way',
+      text: asked('python manage.py dev_login x --tenant=frontend-e2e'),
+      ok: false,
+    },
+    {
+      name: 'an abbreviated --settings',
+      text: asked('python manage.py dev_login x --set=evil.mod'),
+      ok: false,
+    },
+    {
+      name: 'an abbreviated --pythonpath',
+      text: asked('python manage.py dev_login x --pythonp'),
+      ok: false,
+    },
+    {
+      name: 'an option to a package script the scripts never pass',
+      text: asked('pnpm --dir web run dev-login -- --script-shell=/bin/sh'),
+      found: [WEB_SCRIPT],
+      ok: false,
+    },
     { name: 'not JSON', text: good, ok: false },
     { name: 'empty', text: asked(''), ok: false },
     { name: 'too long', text: asked(`${good} ${'x'.repeat(500)}`), ok: false },
@@ -365,7 +435,7 @@ describe('devLoginAnswer', () => {
     { name: 'a variable left unexpanded', text: asked(`${good} "$QA_EMAIL"`), ok: false },
   ];
   it.each(rows)('$name', ({ text, found, ok }) => {
-    const answer = devLoginAnswer(text, found ?? [DJANGO]);
+    const answer = devLoginAnswer(text, found ?? [DJANGO], SEEN);
     if (ok)
       expect(answer).toBe(
         (
