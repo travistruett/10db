@@ -238,7 +238,7 @@ describe('where the base is read from', () => {
     });
     await reading.run(request('make gate'));
     expect(refs.length).toBeGreaterThan(0);
-    expect(new Set(refs)).toEqual(new Set([`origin/${project.baseBranch}`]));
+    expect(new Set(refs)).toEqual(new Set([`refs/remotes/origin/${project.baseBranch}`]));
     expect(getProject(state.db, project.id).sandboxDocker).toBe(false);
     expect(notes()).toEqual([]);
   });
@@ -250,7 +250,7 @@ describe('where the base is read from', () => {
       logger: silentLogger,
       readBase: (_repo, ref, path) =>
         Promise.resolve(
-          ref === `origin/${project.baseBranch}` && path === 'Makefile'
+          ref === `refs/remotes/origin/${project.baseBranch}` && path === 'Makefile'
             ? 'gate:\n\tdocker compose run t\n'
             : null,
         ),

@@ -155,18 +155,36 @@ export async function callsDocker(command: string, read: ReadRepoFile): Promise<
 }
 
 /**
+ * The commit `refs/remotes/origin/<base>` is at, or null when there is none. Named in full: a short
+ * `origin/<base>` loses to a local branch or tag of that name, which a lane can make.
+ */
+export async function originBaseCommit(
+  git: Git,
+  repoPath: string,
+  baseBranch: string,
+): Promise<string | null> {
+  try {
+    return await git.commitAt(repoPath, `refs/remotes/origin/${baseBranch}`);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Whether the project's gate is seen to call Docker in `origin/<base>`, as the auto switch reads it
- * before a gate runs (`callsDocker`); false with no gate, and when git can't say.
+ * before a gate runs (`callsDocker`), read from the remote-tracking branch's commit only; false with
+ * no gate, with no remote-tracking branch, and when git can't say.
  */
 export async function gateCallsDocker(
   git: Git,
   project: Pick<ProjectDto, 'repoPath' | 'baseBranch' | 'gateCommand'>,
 ): Promise<boolean> {
   if (project.gateCommand === null) return false;
-  const ref = `origin/${project.baseBranch}`;
+  const commit = await originBaseCommit(git, project.repoPath, project.baseBranch);
+  if (commit === null) return false;
   const read: ReadRepoFile = async (path) => {
     try {
-      const file = await git.fileAt(project.repoPath, ref, path, MAX_DOCKER_SCAN_BYTES);
+      const file = await git.fileAt(project.repoPath, commit, path, MAX_DOCKER_SCAN_BYTES);
       return file.kind === 'file' ? file.text : null;
     } catch {
       return null;

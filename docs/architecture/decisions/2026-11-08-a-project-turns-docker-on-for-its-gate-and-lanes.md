@@ -27,7 +27,10 @@
   gate command, or the Makefile target or script it runs, is seen to call docker (`daemon/docker-need.ts`: the command,
   `make` and `$(MAKE) -C dir target`, the targets a target needs, a script named in a recipe, a few levels deep, comments
   ignored). The files are read **from `origin/<base>`'s commit only**, never the working tree and never the local base
-  branch (a local-delivery project's lanes commit there, so a file only it has is lane-written).
+  branch (a local-delivery project's lanes commit there, so a file only it has is lane-written). The ref is named in full,
+  `refs/remotes/origin/<base>` (`gateCallsDocker` resolves it to its commit first, `originBaseCommit`): git resolves a short
+  `origin/<base>` to a local branch or tag of that name before the remote-tracking one, and a lane can make either. With no
+  remote-tracking branch nothing is read and Docker is not turned on.
 
   The turning on leaves the project's one Inbox card (`inbox/docker-card.ts`, fold key `docker-on:<projectId>`, a flag with
   answers Keep it on and Turn it off) saying that it did, why, and the warning. It is a card rather than the notice of

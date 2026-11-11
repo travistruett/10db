@@ -47,10 +47,12 @@ export function autoDocker(inner: GateRunner, deps: AutoDockerDeps): GateRunner 
 
   async function seenToCallDocker(project: ProjectDto, command: string): Promise<boolean> {
     // Reads origin's base branch only. The local branch is where a local-delivery project's lanes
-    // commit, so a file only it has is lane-written.
+    // commit, so a file only it has is lane-written. The ref is named in full: a short
+    // `origin/<base>` loses to a local branch or tag of that name, which a lane can make.
+    const ref = `refs/remotes/origin/${project.baseBranch}`;
     const read = async (path: string): Promise<string | null> => {
       try {
-        return await deps.readBase(project.repoPath, `origin/${project.baseBranch}`, path);
+        return await deps.readBase(project.repoPath, ref, path);
       } catch {
         return null;
       }
