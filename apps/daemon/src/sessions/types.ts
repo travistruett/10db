@@ -285,6 +285,11 @@ export interface ShapeImage {
   readonly mediaType: 'image/png' | 'image/jpeg' | 'image/webp';
   /** Base64 of the file's bytes. */
   readonly data: string;
+  /**
+   * The stored file the bytes were read from, when there is one: Codex takes a picture as a local
+   * image it reads itself, and Claude Code takes the bytes.
+   */
+  readonly path?: string;
 }
 
 /** A Plan conversation's session, which takes the same messages and interrupts a lane's does. */

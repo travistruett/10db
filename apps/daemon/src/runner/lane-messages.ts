@@ -56,10 +56,17 @@ export interface OutgoingMessage {
   readonly blocks: readonly TaskFileId[];
 }
 
-/** The picture's bytes as a block, or null when they can no longer be read: it then goes as its path. */
+/**
+ * The picture as a block, its bytes with the file they were read from, or null when they can no
+ * longer be read: it then goes as its path.
+ */
 function asBlock(file: TaskMessageRow['files'][number]): ShapeImage | null {
   try {
-    return { mediaType: file.mediaType, data: readFileSync(file.storedPath).toString('base64') };
+    return {
+      mediaType: file.mediaType,
+      data: readFileSync(file.storedPath).toString('base64'),
+      path: file.storedPath,
+    };
   } catch {
     return null;
   }

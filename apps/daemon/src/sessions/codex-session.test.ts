@@ -27,7 +27,7 @@ import {
 } from './codex-session';
 import { fakeAppServer, type FakeAppServer } from './codex-test-support';
 import type { SignInState } from './sign-in-check';
-import type { SessionEvent, SessionHandle, SessionSpec } from './types';
+import type { SessionEvent, SessionHandle, SessionSpec, ShapeImage } from './types';
 import { CODEX_VERIFIED_ON } from '../environment';
 
 const FINE = {
@@ -1026,6 +1026,9 @@ async function settled(running: Running): Promise<void> {
   });
 }
 
+/** A stored picture, as a lane message carries it: its bytes and the file they were read from. */
+const picture = (path: string): ShapeImage => ({ mediaType: 'image/png', data: 'iVBO', path });
+
 const types = (seen: readonly SessionEvent[]): string[] => seen.map((e) => e.type);
 const endedOf = (seen: readonly SessionEvent[]): SessionEvent[] =>
   seen.filter((e) => e.type === 'ended');
@@ -1099,6 +1102,55 @@ describe('the turns', () => {
       threadId: THREAD,
       expectedTurnId: 'turn-1',
       input: [{ type: 'text', text: 'hand off' }],
+    });
+  });
+
+  it("sends a message's pictures as local images after its text, in order, whether it steers or starts a turn", async () => {
+    const running = await inTurn();
+    const { handle, server } = running;
+    handle.send('look', [picture('/data/a.png'), picture('/data/b.png')]);
+    await vi.waitFor(() => {
+      expect(methods(server)).toContain('turn/steer');
+    });
+    expect(sentParams(server, 'turn/steer')).toMatchObject({
+      input: [
+        { type: 'text', text: 'look' },
+        { type: 'localImage', path: '/data/a.png' },
+        { type: 'localImage', path: '/data/b.png' },
+      ],
+    });
+    server.notify('turn/completed', {
+      threadId: THREAD,
+      turn: { id: 'turn-1', status: 'completed' },
+    });
+    await settled(running);
+    handle.send('again', [picture('/data/c.png')]);
+    await vi.waitFor(() => {
+      expect(methods(server).filter((m) => m === 'turn/start')).toHaveLength(2);
+    });
+    expect(server.sent().filter((r) => r.method === 'turn/start')[1]?.params).toMatchObject({
+      input: [
+        { type: 'text', text: 'again' },
+        { type: 'localImage', path: '/data/c.png' },
+      ],
+    });
+  });
+
+  it("sends the prompt's pictures with the first turn, and a picture with no file as an image of its bytes", async () => {
+    const { handle, server } = startWith(
+      {},
+      { images: [picture('/data/a.png'), { mediaType: 'image/jpeg', data: 'QUJD' }] },
+    );
+    await firstEvent(handle);
+    await vi.waitFor(() => {
+      expect(methods(server)).toContain('turn/start');
+    });
+    expect(sentParams(server, 'turn/start')).toMatchObject({
+      input: [
+        { type: 'text', text: 'Do the task' },
+        { type: 'localImage', path: '/data/a.png' },
+        { type: 'image', url: 'data:image/jpeg;base64,QUJD' },
+      ],
     });
   });
 

@@ -1,4 +1,4 @@
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AccountKind, idUuid, mintId, type TaskId } from '@10db/contracts';
 import {
@@ -23,7 +23,7 @@ import {
   type SessionHandle,
   type SessionSpec,
 } from '../sessions';
-import { createLaneMessages } from './lane-messages';
+import { createLaneMessages, outgoingMessage } from './lane-messages';
 import { threadInlineBytes } from './thread-pictures';
 
 // Workbench spec §6.3: a builder message reaches a lane session under its row's uuid, and is marked
@@ -183,6 +183,19 @@ describe('lane messages', () => {
     // A turn that takes a message under the uuid it was sent again under delivers it.
     expect(messages.consumed(pushedAgain.map((m) => m.uuid ?? ''))).toHaveLength(again.length);
     await handle.stop();
+  });
+
+  it('sends a picture that goes as a block with the file it was read from, which Codex reads itself', () => {
+    const shot = say('Make it blue', 1);
+    const file = shot.files[0];
+    const out = outgoingMessage(shot, 0, pictureLimitsFor(AccountKind.CodexSignin));
+    expect(out.images).toEqual([
+      {
+        mediaType: 'image/png',
+        data: readFileSync(file?.storedPath ?? '').toString('base64'),
+        path: file?.storedPath,
+      },
+    ]);
   });
 
   it('sends a picture the session already holds as a block by its path when its message is pushed again', async () => {

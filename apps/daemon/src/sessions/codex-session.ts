@@ -48,6 +48,7 @@ import {
   type SessionEvent,
   type SessionHandle,
   type SessionSpec,
+  type ShapeImage,
 } from './types';
 
 export interface CodexSessionDeps extends CodexAdapterOptions {
@@ -108,6 +109,23 @@ function errorKind(info: unknown): string | null {
   if (typeof info === 'object' && info !== null) return Object.keys(info)[0] ?? null;
   return null;
 }
+
+/** A message on its way to Codex: its text and the pictures that go with it. */
+interface Outgoing {
+  readonly text: string;
+  readonly images: readonly ShapeImage[];
+}
+
+/**
+ * The pictures as Codex's user input, after the text, in order: a stored picture as a local image
+ * Codex reads itself, one with no file as an image of its bytes.
+ */
+const pictureInputs = (images: readonly ShapeImage[]): readonly Record<string, string>[] =>
+  images.map((image) =>
+    image.path === undefined
+      ? { type: 'image', url: `data:${image.mediaType};base64,${image.data}` }
+      : { type: 'localImage', path: image.path },
+  );
 
 /** The text of a message a session that has started sends; nothing was prompted before then. */
 const unlessStarted = (started: boolean): string => (started ? '' : ` ${NO_PROMPT}`);
@@ -438,14 +456,17 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
     return tail === '' ? '' : ` Codex printed: "${tail}"`;
   };
 
-  /** Begins a turn with `text`. The reply names the turn if its `turn/started` has not been read yet. */
-  const startTurn = async (thread: string, text: string): Promise<void> => {
+  /** Begins a turn with `message`. The reply names the turn if its `turn/started` has not been read yet. */
+  const startTurn = async (thread: string, message: Outgoing): Promise<void> => {
     const before = turnsCompleted;
     const reply = await ask(
       'turn/start',
       {
         threadId: thread,
-        input: [{ type: 'text', text, text_elements: [] }],
+        input: [
+          { type: 'text', text: message.text, text_elements: [] },
+          ...pictureInputs(message.images),
+        ],
         approvalPolicy: 'never',
         model: spec.model,
         effort: spec.effort,
@@ -538,7 +559,7 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
   }
 
   /** Steers the active turn, or starts one between turns. */
-  const deliver = async (text: string): Promise<void> => {
+  const deliver = async (message: Outgoing): Promise<void> => {
     if (done || closing || threadId === null) return;
     try {
       if (state.turnId !== null) {
@@ -548,7 +569,7 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
             {
               threadId,
               expectedTurnId: state.turnId,
-              input: [{ type: 'text', text }],
+              input: [{ type: 'text', text: message.text }, ...pictureInputs(message.images)],
             },
             Acknowledged,
           );
@@ -559,7 +580,7 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
           log.warn({ method: 'turn/steer' }, 'codex refused to steer the turn');
         }
       }
-      await startTurn(threadId, text);
+      await startTurn(threadId, message);
     } catch (error) {
       if (error instanceof SessionOver) return;
       log.error(
@@ -692,7 +713,7 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
     started = true;
     events.push({ type: 'started', providerSessionId: thread.thread.id, pid: child.pid ?? null });
     try {
-      await startTurn(thread.thread.id, spec.prompt);
+      await startTurn(thread.thread.id, { text: spec.prompt, images: spec.images ?? [] });
     } catch (error) {
       if (isModelRefusal(error))
         throw new StartRefused(SessionEndReason.ModelRefused, modelRefusal(spec.model));
@@ -729,15 +750,9 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
 
   return {
     events,
-    // A pass is Claude only (Workbench spec W19): Codex takes text, and has no client uuid to stamp.
     send: (text, images = []) => {
-      if (images.length > 0)
-        log.warn(
-          { images: images.length },
-          'codex takes no pictures; the message went without them',
-        );
       // One at a time, so messages reach Codex in the order they were sent.
-      sends = sends.then(() => deliver(text));
+      sends = sends.then(() => deliver({ text, images }));
     },
     // Codex answers an interrupt with no receipt of what is still queued.
     interrupt: async () => {
