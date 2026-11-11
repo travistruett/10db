@@ -190,8 +190,11 @@ class ImportScanner {
   skipString(): void {
     const quote = this.text[this.at];
     this.at += 1;
-    while (this.at < this.text.length && this.text[this.at] !== quote)
+    while (this.at < this.text.length && this.text[this.at] !== quote) {
+      // A `'` or `"` string ends at a line's end, so an apostrophe in JSX text hides nothing after it.
+      if (this.text[this.at] === '\n' && quote !== '`') return;
       this.at += this.text[this.at] === '\\' ? 2 : 1;
+    }
     this.at += 1;
   }
 

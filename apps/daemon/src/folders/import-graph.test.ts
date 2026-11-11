@@ -42,6 +42,11 @@ describe('importSpecifiers', () => {
       text: `// import a from './a'\n/* import('./b') */\nconst s = "import c from './c'";\nloader.import('./d');`,
       found: [],
     },
+    {
+      name: 'an apostrophe in JSX text hides no later import',
+      text: `const t = <p>Don't panic</p>;\nconst L = lazy(() => import('./lazy'));`,
+      found: ['./lazy'],
+    },
   ])('$name', ({ text, found }) => {
     expect(importSpecifiers(text)).toEqual(found);
   });

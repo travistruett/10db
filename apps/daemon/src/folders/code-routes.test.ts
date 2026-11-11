@@ -102,6 +102,39 @@ const other = createRoute({ path: '/settings/team/$member/$tab', component: Sett
       unrouted: ['ui/src/views/board', 'ui/src/views/inbox', 'ui/src/views/review'],
     },
     {
+      name: 'a nested relative path joins its parent route, in JSX, children and getParentRoute',
+      router: `
+import { BoardView } from './views/board/board-view';
+import { InboxView } from './views/inbox/inbox-view';
+import { SettingsView } from './views/settings/settings-view';
+export const App = () => (
+  <Routes>
+    <Route path="/admin" element={<Shell />}>
+      <Route path="board" element={<BoardView />} />
+    </Route>
+  </Routes>
+);
+const routes = [{ path: '/mail', children: [{ path: 'inbox', component: InboxView }] }];
+const team = createRoute({ getParentRoute: () => root, path: '/team' });
+const settings = createRoute({ getParentRoute: () => team, path: 'settings', component: SettingsView });`,
+      pages: [
+        { name: 'board', folder: 'ui/src/views/board', route: '/admin/board' },
+        { name: 'inbox', folder: 'ui/src/views/inbox', route: '/mail/inbox' },
+        { name: 'settings', folder: 'ui/src/views/settings', route: '/team/settings' },
+      ],
+      unrouted: ['ui/src/views/review'],
+    },
+    {
+      name: 'an apostrophe in JSX text hides no later route',
+      router: `
+import { InboxView } from './views/inbox/inbox-view';
+const Note = () => <p>Don't panic</p>;
+const inbox = createRoute({ path: '/inbox', component: InboxView });
+const tag = <Route path="/inbox2" element={<InboxView />} />;`,
+      pages: [{ name: 'inbox', folder: 'ui/src/views/inbox', route: '/inbox' }],
+      unrouted: ['ui/src/views/board', 'ui/src/views/review', 'ui/src/views/settings'],
+    },
+    {
       name: 'a route to a module directly in views, or to a package, is no page',
       router: `
 import { Shared } from './views/shared';
@@ -152,6 +185,14 @@ describe('codeRoutes over a hostile router file', () => {
       text: `function A() {}\n${'{ path: "/a", component: A },'.repeat(8_000)}`,
     },
     {
+      name: 'a run of Route tags with no end',
+      text: '<Route '.repeat(70_000),
+    },
+    {
+      name: 'Route tags left open with no closing one',
+      text: '<Route path="/a" element={<A/>}>'.repeat(16_000),
+    },
+    {
       name: 'routes to many components defined nowhere',
       text: Array.from(
         { length: 8_000 },
@@ -185,6 +226,13 @@ describe('routerFiles', () => {
         ],
         'ui',
       ),
-    ).toEqual(['ui/src/router.tsx', 'ui/src/app/routes.ts', 'ui/src/App.jsx', 'ui/src/main.tsx']);
+    ).toEqual(['ui/src/router.tsx', 'ui/src/App.jsx', 'ui/src/main.tsx', 'ui/src/app/routes.ts']);
+  });
+
+  it('reads at most 20 of them, the shallowest first', () => {
+    const many = Array.from({ length: 100 }, (_, i) => `ui/src/deep${String(i)}/router.tsx`);
+    const found = routerFiles([...many, 'ui/src/main.tsx'], 'ui');
+    expect(found).toHaveLength(20);
+    expect(found[0]).toBe('ui/src/main.tsx');
   });
 });
