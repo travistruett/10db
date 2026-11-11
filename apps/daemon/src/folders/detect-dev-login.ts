@@ -223,6 +223,16 @@ const FLAG = /^--[A-Za-z0-9][\w-]*(?:=[\w@%+:,./-]*)?$/;
 const PACKAGE_MANAGERS = new Set(['pnpm', 'npm', 'yarn', 'bun']);
 const INTERPRETERS = new Set(['sh', 'bash', 'node', 'python', 'python3']);
 const PYTHONS = new Set(['python', 'python3']);
+/** Options `manage.py` takes for any command, which change what runs or where it is loaded from. */
+const DJANGO_OPTIONS = new Set([
+  'settings',
+  'pythonpath',
+  'traceback',
+  'no-color',
+  'force-color',
+  'skip-checks',
+  'verbosity',
+]);
 
 interface Word {
   readonly text: string;
@@ -232,10 +242,10 @@ interface Word {
 /** The answer split into words, or null when a word is neither plain nor wholly quoted. */
 function words(command: string): Word[] | null {
   const found: Word[] = [];
-  const word = /'([^']*)'|"([^"]*)"|([^\s'"]+)/y;
+  const word = /'([^']*)'|"([^"]*)"|([^ '"]+)/y;
   let at = 0;
   while (at < command.length) {
-    if (/\s/.test(command[at] ?? '')) {
+    if (command[at] === ' ') {
       at++;
       continue;
     }
@@ -244,7 +254,7 @@ function words(command: string): Word[] | null {
     if (match === null) return null;
     at = word.lastIndex;
     // A word must end at a space or the end: `a'b'` is one word to a shell, and none of these.
-    if (at < command.length && !/\s/.test(command[at] ?? '')) return null;
+    if (at < command.length && command[at] !== ' ') return null;
     const plain = match[3];
     if (plain !== undefined) {
       if (!PLAIN.test(plain)) return null;
@@ -291,7 +301,10 @@ function argsOf(argv: readonly Word[], login: DevLogin): readonly Word[] | null 
     where();
     if (!is(argv[at], login.name)) return null;
     if (places.length > 1 || (places[0] ?? '.') !== dir) return null;
-    return argv.slice(at + 1);
+    // The script's own arguments come after `--`; anything else would be the manager's options.
+    const rest = argv.slice(at + 1);
+    if (rest.length === 0) return rest;
+    return is(rest[0], '--') ? rest.slice(1) : null;
   }
   if (login.path.includes('/management/commands/') && login.path.endsWith('.py')) {
     return is(argv[0], ...PYTHONS) && is(argv[1], 'manage.py') && is(argv[2], login.name)
@@ -305,29 +318,42 @@ function argsOf(argv: readonly Word[], login: DevLogin): readonly Word[] | null 
 }
 
 /**
+ * Whether an argument after the invocation may stand, quoted or not: a word that does not start with
+ * `-`, or `--flag` or `--flag=value` of plain characters; for a Django command, not one of the options
+ * `manage.py` takes for every command (`--settings`, `--pythonpath` and the like).
+ */
+function argumentAllowed(text: string, django: boolean): boolean {
+  if (!text.startsWith('-')) return true;
+  if (!FLAG.test(text)) return false;
+  const name = text.slice(2).split('=', 1)[0] ?? '';
+  return !(django && DJANGO_OPTIONS.has(name));
+}
+
+/**
  * The model's command when it passes every check, else null. It is one line of at most
  * `MAX_DEV_LOGIN_COMMAND` characters with none of `< > | ; & $ \` \\ #`, split into plain words
  * (no glob) and wholly quoted ones. Its words are a found command's invocation (`python manage.py
  * <name>` for a Django command, the script's path, alone or after its interpreter, or `<manager>
  * run <script>` in the script's package folder), optionally inside `docker compose exec [-T]
- * <service>`, then only quoted words, plain words and `--flag` or `--flag=value`. Pure.
+ * <service>`, then only words that pass `argumentAllowed` (a package script's only after `--`).
+ * Words are split on the ASCII space; any other space is refused. Pure.
  */
 export function devLoginAnswer(text: string, found: readonly DevLogin[]): string | null {
   const parsed = Answer.safeParse(modelJson(text));
   if (!parsed.success) return null;
   const command = parsed.data.command.trim();
   if (command === '' || command.length > MAX_DEV_LOGIN_COMMAND) return null;
-  if (REFUSED.test(command) || /\p{Cc}/u.test(command)) return null;
+  // Words are split on the ASCII space only; any other space (a tab, a no-break space, a line
+  // separator) is refused, inside quotes too.
+  if (REFUSED.test(command) || /\p{Cc}/u.test(command) || /[^\S ]/u.test(command)) return null;
   const argv = words(command);
   const inner = argv === null ? null : insideCompose(argv);
   if (inner === null) return null;
   for (const login of found) {
     const args = argsOf(inner, login);
     if (args === null) continue;
-    const plainArgs = args.every(
-      (word) => word.quoted || (word.text.startsWith('-') ? FLAG.test(word.text) : true),
-    );
-    if (plainArgs) return command;
+    const django = login.script === undefined && login.path.includes('/management/commands/');
+    if (args.every((word) => argumentAllowed(word.text, django))) return command;
   }
   return null;
 }
