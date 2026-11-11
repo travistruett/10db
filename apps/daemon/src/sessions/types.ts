@@ -368,6 +368,12 @@ export interface ConversationReadSpec {
   readonly cwd: string;
   /** The conversation, as the agent names it: a Codex thread's id. */
   readonly providerSessionId: string;
+  /** The client uuids looked for: those of the messages pushed and never seen taken. */
+  readonly wanted: readonly string[];
+  /** When the oldest of those messages was written (ISO): a turn that ended before holds none. */
+  readonly since: string;
+  /** Ends the read at once, as a stop of the lane does. */
+  readonly signal?: AbortSignal;
 }
 
 /**
@@ -392,9 +398,10 @@ export interface SessionAdapter {
   /** Starts the account's agent with no prompt only to read who it is. */
   probeAccount(probe: AccountProbeSpec): Promise<SeenAccount>;
   /**
-   * The client uuids of every user message the conversation holds, read back without running a
-   * turn: how a message pushed before a restart is told taken or not (Workbench spec §12). Rejects
-   * with a `ConversationUnreadError` when it cannot be read; an agent with no such read always does.
+   * Which of the `wanted` client uuids the conversation's turns took, read back without running a
+   * turn: how a message pushed and never seen taken is told taken or not before the conversation is
+   * resumed (Workbench spec §12). Rejects with a `ConversationUnreadError` when it can't tell for
+   * every one, or is stopped; an agent with no such read always does.
    */
   readClientUuids(spec: ConversationReadSpec): Promise<readonly string[]>;
   /**

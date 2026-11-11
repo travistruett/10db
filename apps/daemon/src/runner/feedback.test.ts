@@ -23,11 +23,11 @@ import {
 } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTestEngine, type TestEngine } from '../../test/engine';
-import { handoffArgs } from '../../test/fixtures';
+import { handoffArgs, waitFor } from '../../test/fixtures';
 import { pngOfSize } from '../../test/png';
 import { ConversationUnreadError, type FakeScriptBook } from '../sessions';
 import { FRESH_SESSION_NOTICE, taskFilesDir } from '../thread';
-import { TAKEN_BEFORE_RESTART } from './read-back';
+import { THREAD_UNREAD_NOTICE, TURN_CUT_SHORT } from './read-back';
 
 // Workbench spec §6.3, §12: a builder message from the task's thread, as the `feedback` action. A
 // session that can be resumed is handed it; one that cannot starts fresh from the thread's digest and
@@ -397,12 +397,12 @@ describe("a builder's message from the task's thread", () => {
       expect(resumed?.resume).toBe('thr-before-restart');
       expect(resumed?.promptUuid).toBeNull();
       expect(resumed?.prompt).not.toContain('Make it blue');
-      expect(resumed?.prompt).toContain(TAKEN_BEFORE_RESTART);
+      expect(resumed?.prompt).toContain(TURN_CUT_SHORT);
       expect(engine.adapter.sent).toEqual([]);
       expect(getTaskMessageRow(engine.store.db, message).deliveredAt).not.toBeNull();
     });
 
-    it('fails the lane, naming the thread, when the thread cannot be read back: nothing is guessed', async () => {
+    it('starts a fresh session that is sent the message again, and says so, when the thread cannot be read back', async () => {
       engine = await codexEngine({ Alpha: [[working, crash]] });
       const { task, workstream } = engine.addTask('Alpha');
       const message = say(task.id, 'Make it blue');
@@ -418,11 +418,78 @@ describe("a builder's message from the task's thread", () => {
       engine.launch(workstream.id);
       await engine.runner.idle();
 
+      const [fresh] = engine.adapter.prompts;
+      expect(fresh?.resume).toBeNull();
+      expect(fresh?.prompt).toContain(`(message ${message}):\nMake it blue`);
+      // Under a uuid of its own: the unread thread may hold the row's.
+      expect(fresh?.promptUuid).not.toBe(idUuid(message));
+      expect(getWorkstream(engine.store.db, workstream.id).state).not.toBe('FAILED');
+      expect(
+        listTaskThread(engine.store.db, task.id)
+          .filter((m) => m.author === 'system')
+          .map((m) => m.body),
+      ).toContain(THREAD_UNREAD_NOTICE);
+    });
+
+    it('keeps what the read decided when the launch goes no further, so the message is not sent again', async () => {
+      engine = await codexEngine({ Alpha: [[working, crash]] });
+      // An account with no confirmed identity is not ready: the launch stops after the read.
+      engine.state.write((ctx) => {
+        patchAccount(ctx, engine.project.accountId, { expectedIdentity: null });
+      });
+      const { task, workstream } = engine.addTask('Alpha');
+      const message = say(task.id, 'Make it blue');
+      pushedUnderItsUuid(message);
+      feedbackOn(workstream.id, message, 'thr-before-restart');
+      engine.adapter.readBack = () => Promise.resolve([idUuid(message)]);
+
+      engine.launch(workstream.id);
+      await engine.runner.idle();
       expect(engine.adapter.prompts).toEqual([]);
-      const failed = getWorkstream(engine.store.db, workstream.id);
-      expect(failed.state).toBe('FAILED');
-      expect(failed.failureReason).toContain('thr-before-restart');
+      expect(getWorkstream(engine.store.db, workstream.id).nextAction).toEqual({
+        kind: 'resume',
+        providerSessionId: 'thr-before-restart',
+        reason: TURN_CUT_SHORT,
+      });
+
+      engine.state.write((ctx) => {
+        patchAccount(ctx, engine.project.accountId, {
+          expectedIdentity: 'chatgpt@example.com · ws-1',
+        });
+      });
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+
+      const [resumed] = engine.adapter.prompts;
+      expect(resumed?.resume).toBe('thr-before-restart');
+      expect(resumed?.prompt).not.toContain('Make it blue');
+      expect(engine.adapter.sent).toEqual([]);
+      expect(engine.adapter.reads).toHaveLength(1);
+    });
+
+    it('ends the read at once when the lane is stopped, sending nothing', async () => {
+      engine = await codexEngine({ Alpha: [[working, crash]] });
+      const { task, workstream } = engine.addTask('Alpha');
+      const message = say(task.id, 'Make it blue');
+      pushedUnderItsUuid(message);
+      feedbackOn(workstream.id, message, 'thr-before-restart');
+      engine.adapter.readBack = (spec) =>
+        new Promise((_, reject) => {
+          spec.signal?.addEventListener('abort', () => {
+            reject(new ConversationUnreadError('the read was stopped'));
+          });
+        });
+
+      engine.launch(workstream.id);
+      await waitFor(() => engine.adapter.reads.length === 1);
+      await engine.runner.stop(workstream.id, 'paused');
+      await engine.runner.idle();
+
+      expect(engine.adapter.prompts).toEqual([]);
       expect(getTaskMessageRow(engine.store.db, message).deliveredAt).toBeNull();
+      expect(listTaskThread(engine.store.db, task.id).filter((m) => m.author === 'system')).toEqual(
+        [],
+      );
     });
   });
 

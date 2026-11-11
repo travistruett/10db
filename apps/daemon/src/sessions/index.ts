@@ -23,6 +23,7 @@ export {
 } from './types';
 export type {
   AccountLogin,
+  ConversationReadSpec,
   InterruptReceipt,
   SessionAdapter,
   SessionEvent,

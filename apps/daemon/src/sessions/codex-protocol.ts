@@ -177,7 +177,10 @@ export const MODEL_ITEMS: ReadonlySet<string> = new Set([
 export const ThreadTurnsPage = z.looseObject({
   data: z.array(
     z.looseObject({
-      status: TurnStatus,
+      // Read as text: a status this Codex does not name counts as a turn that did not complete.
+      status: z.string(),
+      /** Unix seconds; absent or null for a turn that has not ended. */
+      completedAt: z.number().nullable().optional(),
       items: z.array(
         z.looseObject({ type: z.string(), clientId: z.string().nullable().optional() }),
       ),

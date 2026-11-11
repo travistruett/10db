@@ -71,6 +71,7 @@ import {
   resumePassWork,
   type PassWorkDeps,
 } from '../pass';
+import { THREAD_UNREAD_NOTICE } from './read-back';
 import { DEFAULT_RUNNER_LIMITS } from './runner';
 import { handoffArgs, isolatedGitEnv, waitFor } from '../../test/fixtures';
 import { ConversationUnreadError, type FakeScriptBook } from '../sessions';
@@ -661,13 +662,28 @@ describe('a pass on a ChatGPT account', () => {
     ]);
   });
 
-  it('fails the turn on a flag with Retry Turn when the thread it would resume after a crash cannot be read back', async () => {
-    const { pass, id } = await openPage(
+  /** Codex's read of any thread fails. */
+  const unreadable = () => {
+    engine.adapter.readBack = (spec) =>
+      Promise.reject(
+        new ConversationUnreadError(
+          `Codex could not read back thread ${spec.providerSessionId}: an error from Codex`,
+        ),
+      );
+  };
+  const systemNotices = (task: TaskDto) =>
+    listTaskThread(engine.store.db, task.id)
+      .filter((m) => m.author === 'system')
+      .map((m) => m.body);
+
+  it('starts the page afresh, sending the message again, when the thread it would resume after a crash cannot be read back', async () => {
+    const { task, id } = await openPage(
       [
         [
           { do: 'tool', toolName: 'Write', input: { file_path: PAGE_FILE, content: 'half\n' } },
           { do: 'crash', message: 'the session stopped' },
         ],
+        [...turn('one\n', 'Tidied the form.'), { do: 'await_message', contains: 'never sent' }],
       ],
       undefined,
       signedIn,
@@ -678,25 +694,49 @@ describe('a pass on a ChatGPT account', () => {
     await waitFor(() => row(id).state === 'QUEUED');
     await engine.runner.idle();
     expect(row(id).nextAction).toMatchObject({ kind: 'feedback' });
-    engine.adapter.readBack = (spec) =>
-      Promise.reject(
-        new ConversationUnreadError(
-          `Codex could not read back thread ${spec.providerSessionId}: an error from Codex`,
-        ),
-      );
+    unreadable();
 
     engine.launch(id);
+    await waitFor(isReady(id, 1));
+
+    expect(engine.adapter.prompts[1]?.resume).toBeNull();
+    expect(engine.adapter.prompts[1]?.prompt).toContain('Make the form tidy');
+    expect(systemNotices(task)).toContain(THREAD_UNREAD_NOTICE);
+    expect(listInbox(engine.store.db, {}).some((i) => i.title.startsWith('Turn failed'))).toBe(
+      false,
+    );
+  });
+
+  it("sends a failed turn's message again in a fresh session on Retry Turn when its thread cannot be read back", async () => {
+    const { task, pass, id } = await openPage(
+      [
+        [{ do: 'billing_refused', message: 'a billing check refused the session' }],
+        [...turn('one\n', 'Tidied the form.'), { do: 'await_message', contains: 'never sent' }],
+      ],
+      undefined,
+      signedIn,
+      PAGE_AREAS,
+      {},
+      onChatGpt,
+    );
     await waitFor(() => listPassTurns(engine.store.db, pass.id)[0]?.settledAt);
     await engine.runner.idle();
-
     const failed = listInbox(engine.store.db, {}).find((i) => i.title.startsWith('Turn failed'));
-    expect(failed?.options.map((o) => o.label)).toEqual(['retry_turn']);
-    expect(failed?.body).toContain('Retry Turn sends it again');
-    expect(engine.adapter.prompts).toHaveLength(1);
-    expect(row(id)).toMatchObject({
-      state: 'WAITING_HUMAN',
-      nextAction: { kind: 'pass_review', inboxId: failed?.id },
-    });
+    if (!failed) throw new Error('no failed turn flag');
+    unreadable();
+
+    engine.inbox.answer(failed.id, { choice: 'retry_turn' });
+    engine.launch(id);
+    await waitFor(isReady(id, 1));
+
+    expect(engine.adapter.reads).toHaveLength(1);
+    expect(engine.adapter.prompts[1]?.resume).toBeNull();
+    expect(engine.adapter.prompts[1]?.prompt).toContain('Make the form tidy');
+    expect(systemNotices(task)).toContain(THREAD_UNREAD_NOTICE);
+    expect(listPassTurns(engine.store.db, pass.id).map((t) => [t.seq, t.ending])).toEqual([
+      [1, 'failed'],
+      [2, 'ready'],
+    ]);
   });
 });
 

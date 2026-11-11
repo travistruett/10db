@@ -265,7 +265,7 @@ import {
   resumedSessionOf,
   withUndelivered,
 } from './next-action';
-import { readBackThread } from './read-back';
+import { readBackThread, type ReadBack } from './read-back';
 import { takesPictures } from '../pictures';
 import { threadInlineBytes } from './thread-pictures';
 
@@ -1821,26 +1821,41 @@ export function createRunner(opts: RunnerOptions): Runner {
     const fresh = actionOnAnotherAccount(id, ctl, row);
     // A Codex thread the lane resumes with a builder message pushed to it and never seen taken is read
     // back first (Workbench spec §12): what it took is delivered, never sent again, and a thread that
-    // can't be read fails the turn rather than guess.
-    const readBack =
-      fresh === null
-        ? await readBackThread(
-            { state: opts.state, adapter: opts.adapter, launcher: opts.launcher },
-            {
-              taskId: task.id,
-              account: getAccountRow(db, ctl.accountId),
-              cwd: checkout,
-              action: row.nextAction,
-            },
-          )
-        : null;
-    if (readBack?.kind === 'unread')
-      return {
-        kind: 'refused',
-        message: readBack.message,
-        providerSessionId: resumedSessionOf(row.nextAction),
-      };
-    const planned = fresh ?? readBack?.action ?? row.nextAction;
+    // can't be read gives way to a fresh session, which is sent the message again. A stop ends the read.
+    let readBack: ReadBack | null = null;
+    if (fresh === null) {
+      const reading = new AbortController();
+      ctl.holdAbort = reading;
+      try {
+        readBack = await readBackThread(
+          { state: opts.state, adapter: opts.adapter, launcher: opts.launcher },
+          {
+            workstreamId: id,
+            fence: ctl.fence,
+            taskId: task.id,
+            account: getAccountRow(db, ctl.accountId),
+            cwd: checkout,
+            action: row.nextAction,
+            onUnread: nextActionOnAnotherAccount(
+              row.nextAction,
+              latestHandoffForStep(db, row),
+              outstandingFixEvidence(db, row),
+            ),
+            signal: reading.signal,
+          },
+        );
+      } finally {
+        ctl.holdAbort = null;
+      }
+      const stoppedReading = stopRequested(ctl);
+      if (stoppedReading || readBack.kind === 'stopped')
+        return {
+          kind: 'stopped',
+          reason: stoppedReading ?? 'closed',
+          providerSessionId: resumedSessionOf(row.nextAction),
+        };
+    }
+    const planned = fresh ?? (readBack?.kind === 'read' ? readBack.action : row.nextAction);
     // A pass task's session starts from the oldest message no turn has taken, whatever it was queued for.
     const action = pass
       ? turnMessageFirst(

@@ -7,23 +7,38 @@ import { InitializeResponse, MODEL_ITEMS, ThreadTurnsPage } from './codex-protoc
 import { CodexRpcError, createCodexRpc, spawnAppServer } from './codex-rpc';
 import { ConversationUnreadError, type ConversationReadSpec } from './types';
 
-// Workbench spec §12. After a restart, a builder message pushed to a Codex thread and never seen
-// taken is looked for in the thread itself: every message goes under a client uuid, which the thread
-// records on the user message a turn takes it in. The read runs no turn and loads no thread to run one.
+// Workbench spec §12. A builder message pushed to a Codex thread and never seen taken is looked for
+// in the thread itself before the thread is resumed: every message goes under a client uuid, which
+// the thread records on the user message a turn takes it in. The read runs no turn and loads no
+// thread to run one, reads the newest turns first, and stops as soon as it knows.
 
 /** How long the whole read may take before it is given up on. */
 export const THREAD_READ_MS = 60_000;
+
+/** How many turns one page of the read asks for. */
+export const TURNS_PER_PAGE = 20;
+
+/** How many pages the read asks for before it gives up without knowing. */
+export const THREAD_READ_PAGES = 10;
+
+/**
+ * What Codex answers for a thread no user message has reached: it holds nothing, for certain. A
+ * thread that is not loaded in the reading process is "not loaded" instead, which proves nothing.
+ */
+const NOTHING_SENT_YET = /is not materialized yet; .*before first user message/;
 
 export interface ThreadReadDeps extends CodexAdapterOptions {
   /** The home for an account's `CODEX_HOME`. */
   readonly homes: (path: string) => CodexHome;
 }
 
+type Turn = z.infer<typeof ThreadTurnsPage>['data'][number];
+
 /**
  * The client uuids a turn took, on the evidence a live session reads (`mapCodexNotification`): a user
  * message is taken once a model item follows it in the turn, or the turn completed.
  */
-function takenIn(turn: z.infer<typeof ThreadTurnsPage>['data'][number]): string[] {
+function takenIn(turn: Turn): string[] {
   const taken: string[] = [];
   let recorded: string[] = [];
   for (const item of turn.items) {
@@ -37,14 +52,15 @@ function takenIn(turn: z.infer<typeof ThreadTurnsPage>['data'][number]): string[
   return turn.status === 'completed' ? [...taken, ...recorded] : taken;
 }
 
-/** The read went unanswered for `THREAD_READ_MS`. */
-class ReadTimeout extends Error {
-  override readonly name = 'ReadTimeout';
+/** The read could not finish: it went unanswered, ran past its budget, or was stopped. */
+class ReadEnded extends Error {
+  override readonly name = 'ReadEnded';
 }
 
 /**
- * The client uuid of every user message the thread holds, newest turn first, read page by page with
- * `thread/turns/list`. Rejects with a `ConversationUnreadError` that names the thread and how the
+ * Which of `spec.wanted` the thread's turns took, newest turn first, read a page at a time with
+ * `thread/turns/list`. It stops once every wanted uuid is found or a turn that ended before
+ * `spec.since` is passed. Rejects with a `ConversationUnreadError` that names the thread and how the
  * read failed, never what Codex printed; the child is always closed.
  */
 export async function readThreadClientUuids(
@@ -69,41 +85,68 @@ export async function readThreadClientUuids(
     (deps.spawn ?? spawnAppServer)(deps.codexPath, { ...spec.env, HOME: home.emptyHome }),
     deps.logger,
   );
+  const wanted = new Set(spec.wanted);
+  const since = Date.parse(spec.since);
   const readAll = async (): Promise<string[]> => {
     await rpc.call('initialize', { clientInfo: CODEX_CLIENT_INFO }, InitializeResponse);
     rpc.notify('initialized');
-    const uuids: string[] = [];
+    const found: string[] = [];
     let cursor: string | null = null;
-    do {
-      const page: z.infer<typeof ThreadTurnsPage> = await rpc.call(
-        'thread/turns/list',
-        { threadId: spec.providerSessionId, itemsView: 'full', cursor },
-        ThreadTurnsPage,
-      );
-      for (const turn of page.data) uuids.push(...takenIn(turn));
+    for (let pages = 0; pages < THREAD_READ_PAGES; pages += 1) {
+      let page: z.infer<typeof ThreadTurnsPage>;
+      try {
+        page = await rpc.call(
+          'thread/turns/list',
+          {
+            threadId: spec.providerSessionId,
+            itemsView: 'full',
+            sortDirection: 'desc',
+            limit: TURNS_PER_PAGE,
+            cursor,
+          },
+          ThreadTurnsPage,
+        );
+      } catch (error) {
+        if (error instanceof CodexRpcError && NOTHING_SENT_YET.test(error.message)) return [];
+        throw error;
+      }
+      for (const turn of page.data) {
+        for (const uuid of takenIn(turn))
+          if (wanted.has(uuid) && !found.includes(uuid)) found.push(uuid);
+        if (found.length === wanted.size) return found;
+        const ended = turn.completedAt ?? null;
+        if (ended !== null && ended * 1_000 < since) return found;
+      }
       cursor = page.nextCursor ?? null;
-    } while (cursor !== null);
-    return uuids;
+      if (cursor === null) return found;
+    }
+    throw new ReadEnded(`more than ${String(THREAD_READ_PAGES * TURNS_PER_PAGE)} turns to read`);
   };
   let timer: { cancel(): void } = { cancel: () => undefined };
-  const deadline = new Promise<never>((_, reject) => {
+  let onAbort: () => void = () => undefined;
+  const ended = new Promise<never>((_, reject) => {
     timer = clock.setTimeout(() => {
-      reject(new ReadTimeout());
+      reject(new ReadEnded(`no answer within ${String(THREAD_READ_MS / 1_000)} s`));
     }, THREAD_READ_MS);
+    onAbort = () => {
+      reject(new ReadEnded('the read was stopped'));
+    };
+    if (spec.signal?.aborted === true) onAbort();
+    else spec.signal?.addEventListener('abort', onAbort, { once: true });
   });
   const reading = readAll();
   try {
-    return await Promise.race([reading, deadline]);
+    return await Promise.race([reading, ended]);
   } catch (error) {
-    if (error instanceof ReadTimeout)
-      throw unread(`no answer within ${String(THREAD_READ_MS / 1_000)} s`);
+    if (error instanceof ReadEnded) throw unread(error.message);
     if (error instanceof CodexRpcError) throw unread('an error from Codex');
     throw error;
   } finally {
     timer.cancel();
+    spec.signal?.removeEventListener('abort', onAbort);
     rpc.close();
     // Whichever lost the race must not become an unhandled rejection.
     reading.catch(() => undefined);
-    deadline.catch(() => undefined);
+    ended.catch(() => undefined);
   }
 }

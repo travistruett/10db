@@ -108,6 +108,8 @@ async function callAll(adapter: SessionAdapter, kind: SupportedAccountKind): Pro
     env: {},
     cwd: '/d',
     providerSessionId: 'thr-1',
+    wanted: ['u1'],
+    since: '2026-11-11T00:00:00.000Z',
   });
 }
 
