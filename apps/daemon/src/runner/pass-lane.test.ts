@@ -24,6 +24,7 @@ import {
   getAccountRow,
   getPass,
   getTask,
+  getTaskMessageRow,
   getWorkstreamRow,
   insertBuilderMessage,
   insertHold,
@@ -696,6 +697,103 @@ describe('a pass on a ChatGPT account', () => {
       state: 'WAITING_HUMAN',
       nextAction: { kind: 'pass_review', inboxId: failed?.id },
     });
+  });
+});
+
+describe('a pass on a ChatGPT account whose Codex drops a message', () => {
+  const onChatGpt = { account: { kind: 'codex_signin' as const, label: 'ChatGPT plan' } };
+  const signedIn = () => {
+    engine.state.write((ctx) => {
+      patchAccount(ctx, engine.project.accountId, {
+        expectedIdentity: 'chatgpt@example.com · ws-1',
+      });
+    });
+  };
+  const messageRow = (task: TaskDto, body: string) => {
+    const found = listTaskThread(engine.store.db, task.id).find((m) => m.body === body);
+    if (!found) throw new Error(`no message ${body}`);
+    return getTaskMessageRow(engine.store.db, found.id);
+  };
+
+  it('ends a turn that failed without taking a steered message as a failed turn, the message handed back, and Retry Turn sends it', async () => {
+    const { task, pass, id } = await openPage(
+      [
+        [
+          { do: 'consume' },
+          { do: 'tool', toolName: 'Write', input: { file_path: PAGE_FILE, content: 'half\n' } },
+          { do: 'await_message', contains: 'Second' },
+          { do: 'turn_complete', result: 'error', drops: true },
+        ],
+        [...turn('two\n', 'Did both.'), { do: 'await_message', contains: 'never sent' }],
+      ],
+      undefined,
+      signedIn,
+      PAGE_AREAS,
+      {},
+      onChatGpt,
+    );
+    await waitFor(wrote);
+    await write(task, 'Second: and the button');
+    await waitFor(() => listPassTurns(engine.store.db, pass.id)[0]?.settledAt);
+    await engine.runner.idle();
+
+    const failed = listInbox(engine.store.db, {}).find((i) => i.title.startsWith('Turn failed'));
+    expect(failed?.options.map((o) => o.label)).toEqual(['retry_turn']);
+    expect(row(id)).toMatchObject({
+      state: 'WAITING_HUMAN',
+      nextAction: { kind: 'pass_review', inboxId: failed?.id },
+    });
+    // Handed back to 10db's queue: not pushed, so not in doubt, and its uuid kept.
+    const second = messageRow(task, 'Second: and the button');
+    expect(second).toMatchObject({ pushedAt: null, deliveredAt: null });
+    expect(second.pushUuids).toHaveLength(1);
+
+    if (!failed) throw new Error('no failed turn flag');
+    engine.inbox.answer(failed.id, { choice: 'retry_turn' });
+    engine.launch(id);
+    await waitFor(isReady(id, 1));
+    expect(messageRow(task, 'Second: and the button').deliveredAt).not.toBeNull();
+    expect(listPassTurns(engine.store.db, pass.id).map((t) => [t.seq, t.ending])).toEqual([
+      [1, 'failed'],
+      [2, 'ready'],
+    ]);
+  });
+
+  it('sends a Stop and Redo message to the next session when Codex never ends the interrupted turn', async () => {
+    const { task, pass, id } = await openPage(
+      [
+        [
+          { do: 'consume' },
+          { do: 'tool', toolName: 'Write', input: { file_path: PAGE_FILE, content: 'half\n' } },
+          { do: 'await_message', contains: 'never sent' },
+        ],
+        [
+          ...turn('other\n', 'Did it the other way.'),
+          { do: 'await_message', contains: 'never sent' },
+        ],
+      ],
+      undefined,
+      signedIn,
+      PAGE_AREAS,
+      {},
+      onChatGpt,
+    );
+    engine.adapter.interruptEndsSession = true;
+    await waitFor(wrote);
+    const message = engine.state.write((ctx) =>
+      insertBuilderMessage(ctx, task.id, { body: 'Instead: the other way', files: [] }),
+    );
+    await engine.runner.deliverMessage(task.id, message.id, { redo: true });
+    await waitFor(() => row(id).state === 'QUEUED');
+    await engine.runner.idle();
+    engine.launch(id);
+    await waitFor(isReady(id, 1));
+
+    expect(engine.adapter.prompts).toHaveLength(2);
+    expect(getTaskMessageRow(engine.store.db, message.id).deliveredAt).not.toBeNull();
+    expect(listPassTurns(engine.store.db, pass.id).map((t) => [t.seq, t.ending])).toEqual([
+      [1, 'ready'],
+    ]);
   });
 });
 

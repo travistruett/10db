@@ -20,6 +20,7 @@ import {
   markTaskFilesInline,
   markTaskMessagesDelivered,
   markTaskMessagePushedUnder,
+  markTaskMessagesHandedBack,
   markTaskMessagesPushed,
   markTaskMessagesTakenUnder,
   offeredText,
@@ -310,6 +311,38 @@ describe('a task thread', () => {
     expect(() =>
       store.write((ctx) => deleteUnsentBuilderMessage(ctx, otherTaskId, handed.id)),
     ).toThrow(NotFoundError);
+  });
+
+  it('hands back a message a session dropped: no longer pushed, its uuids kept, and never taken back', () => {
+    const add = (id: TaskId, body: string) =>
+      store.write((ctx) => insertBuilderMessage(ctx, id, { body, files: [] })).value;
+    const dropped = add(taskId, 'Dropped');
+    const delivered = add(taskId, 'Delivered');
+    const elsewhere = add(otherTaskId, 'Another task');
+    store.write((ctx) => {
+      markTaskMessagePushedUnder(ctx, dropped.id, U1);
+      markTaskMessagePushedUnder(ctx, delivered.id, U2);
+      markTaskMessagesDelivered(ctx, taskId, [delivered.id]);
+      markTaskMessagePushedUnder(ctx, elsewhere.id, U3);
+    });
+
+    const handed = store.write((ctx) =>
+      markTaskMessagesHandedBack(ctx, taskId, [dropped.id, delivered.id, elsewhere.id]),
+    ).value;
+
+    expect(handed).toEqual([dropped.id]);
+    expect(getTaskMessageRow(store.db, dropped.id)).toMatchObject({
+      pushedAt: null,
+      deliveredAt: null,
+      pushUuids: [U1],
+    });
+    expect(getTaskMessageRow(store.db, delivered.id).pushedAt).not.toBeNull();
+    expect(getTaskMessageRow(store.db, elsewhere.id).pushedAt).not.toBeNull();
+    // It went to a session once, so it is never taken back as unsent; nor is it in doubt.
+    expect(
+      store.write((ctx) => deleteUnsentBuilderMessage(ctx, taskId, dropped.id)).value,
+    ).toBeNull();
+    expect(listUndeliveredTaskMessages(store.db, taskId)).toEqual([]);
   });
 
   it('writes a notice of its own to the thread, from the system', () => {

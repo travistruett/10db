@@ -218,6 +218,12 @@ export type SessionEvent =
       readonly result?: TurnResult;
       /** What the model wrote in the turn's last message, when it wrote any (capped by the adapter). */
       readonly text?: string;
+      /**
+       * The client uuids of the messages the turn was handed and ended without taking, which the agent
+       * dropped and will never run (Codex). Absent when there are none, or when the turn ended for the
+       * handle's own `interrupt`, whose caller pushes again what its receipt does not name.
+       */
+      readonly dropped?: readonly string[];
       readonly inputTokens: number;
       readonly outputTokens: number;
       readonly cachedTokens: number;

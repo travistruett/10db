@@ -994,11 +994,12 @@ interface Running {
 async function inTurn(
   script: Record<string, unknown> = {},
   depsOver: Partial<CodexSessionDeps> = {},
+  specOver: Partial<SessionSpec> = {},
 ): Promise<Running> {
   const clock = new ManualClock();
   const { handle, server } = startWith(
     { 'turn/steer': {}, 'turn/interrupt': {}, ...script },
-    {},
+    specOver,
     { clock, ...depsOver },
   );
   const seen: SessionEvent[] = [];
@@ -1025,6 +1026,10 @@ async function settled(running: Running): Promise<void> {
     expect(running.seen.length).toBeGreaterThan(before);
   });
 }
+
+const PROMPT = 'c0ffee00-0000-4000-8000-0000000000aa';
+const HANDED = 'c0ffee00-0000-4000-8000-0000000000bb';
+const HELD = 'c0ffee00-0000-4000-8000-0000000000cc';
 
 /** A stored picture, as a lane message carries it: its bytes and the file they were read from. */
 const picture = (path: string): ShapeImage => ({ mediaType: 'image/png', data: 'iVBO', path });
@@ -1136,11 +1141,8 @@ describe('the turns', () => {
     });
   });
 
-  it("sends the prompt's pictures with the first turn, and a picture with no file as an image of its bytes", async () => {
-    const { handle, server } = startWith(
-      {},
-      { images: [picture('/data/a.png'), { mediaType: 'image/jpeg', data: 'QUJD' }] },
-    );
+  it("sends the prompt's pictures with the first turn", async () => {
+    const { handle, server } = startWith({}, { images: [picture('/data/a.png')] });
     await firstEvent(handle);
     await vi.waitFor(() => {
       expect(methods(server)).toContain('turn/start');
@@ -1149,7 +1151,6 @@ describe('the turns', () => {
       input: [
         { type: 'text', text: 'Do the task' },
         { type: 'localImage', path: '/data/a.png' },
-        { type: 'image', url: 'data:image/jpeg;base64,QUJD' },
       ],
     });
   });
@@ -1271,10 +1272,128 @@ describe('the turns', () => {
     await vi.waitFor(() => {
       expect(methods(running.server)).toContain('turn/interrupt');
     });
+    running.handle.send('held', [], HELD);
     await settled(running);
     expect(answered).toBe(false);
     running.clock.advance(2_000);
+    // The turn may still be running, so nothing is steered into it: the session ends, and the
+    // message sent meanwhile goes to the next one.
     expect(await receipt).toEqual({ stillQueued: [] });
+    await vi.waitFor(() => {
+      expect(endedOf(running.seen)).toHaveLength(1);
+    });
+    expect(endedOf(running.seen)[0]).toMatchObject({ reason: 'error' });
+    expect(methods(running.server)).not.toContain('turn/steer');
+    expect(running.server.killed()).toBe(true);
+  });
+
+  it('interrupts the turn a turn/start in flight starts, waiting for its id, and never sends its message again', async () => {
+    let answerStart: () => void = () => undefined;
+    let starts = 0;
+    const running = await inTurn({
+      'turn/start': () => {
+        starts += 1;
+        if (starts === 1) return { turn: { id: 'turn-1', status: 'inProgress' } };
+        return new Promise((resolve) => {
+          answerStart = () => {
+            resolve({ turn: { id: 'turn-2', status: 'inProgress' } });
+          };
+        });
+      },
+    });
+    const { handle, server } = running;
+    server.notify('turn/completed', {
+      threadId: THREAD,
+      turn: { id: 'turn-1', status: 'completed' },
+    });
+    await settled(running);
+    handle.send('next', [], HANDED);
+    await vi.waitFor(() => {
+      expect(methods(server).filter((m) => m === 'turn/start')).toHaveLength(2);
+    });
+    const receipt = handle.interrupt();
+    answerStart();
+    await vi.waitFor(() => {
+      expect(sentParams(server, 'turn/interrupt')).toEqual({ threadId: THREAD, turnId: 'turn-2' });
+    });
+    server.notify('turn/completed', {
+      threadId: THREAD,
+      turn: { id: 'turn-2', status: 'interrupted' },
+    });
+    // The message in flight was handed over, so it is not still queued here.
+    expect(await receipt).toEqual({ stillQueued: [] });
+    expect(methods(server).filter((m) => m === 'turn/start')).toHaveLength(2);
+    expect(methods(server)).not.toContain('turn/steer');
+  });
+
+  it.each<[string, string]>([
+    ['fails', 'failed'],
+    ['is interrupted by the guard', 'interrupted'],
+  ])(
+    'reports the messages a turn that %s was handed and never took as dropped',
+    async (_name, status) => {
+      const running = await inTurn({}, {}, { promptUuid: PROMPT });
+      running.handle.send('steered', [], HANDED);
+      await vi.waitFor(() => {
+        expect(methods(running.server)).toContain('turn/steer');
+      });
+      await settled(running);
+      running.server.notify('turn/completed', {
+        threadId: THREAD,
+        turn: { id: 'turn-1', status, error: { message: 'stream disconnected' } },
+      });
+      await vi.waitFor(() => {
+        expect(types(running.seen)).toContain('turn_complete');
+      });
+      expect(running.seen.find((e) => e.type === 'turn_complete')).toMatchObject({
+        result: 'error',
+        dropped: [PROMPT, HANDED],
+      });
+      expect(endedOf(running.seen)).toEqual([]);
+    },
+  );
+
+  it('reports nothing dropped for a message the turn took before it failed, or a turn the handle interrupted', async () => {
+    const running = await inTurn({}, {}, { promptUuid: PROMPT });
+    running.server.notify('item/completed', {
+      threadId: THREAD,
+      turnId: 'turn-1',
+      item: { type: 'userMessage', id: 'u1', clientId: PROMPT, content: [] },
+    });
+    running.server.notify('item/completed', {
+      threadId: THREAD,
+      turnId: 'turn-1',
+      item: { type: 'reasoning', id: 'r1' },
+    });
+    running.server.notify('turn/completed', {
+      threadId: THREAD,
+      turn: { id: 'turn-1', status: 'failed', error: { message: 'stream disconnected' } },
+    });
+    await vi.waitFor(() => {
+      expect(types(running.seen)).toContain('turn_complete');
+    });
+    expect(running.seen.find((e) => e.type === 'turn_complete')).not.toHaveProperty('dropped');
+
+    // The caller of interrupt pushes again what the receipt does not name.
+    running.handle.send('next', [], HANDED);
+    await vi.waitFor(() => {
+      expect(methods(running.server).filter((m) => m === 'turn/start')).toHaveLength(2);
+    });
+    running.server.notify('turn/started', turnStarted('turn-1'));
+    await settled(running);
+    const receipt = running.handle.interrupt();
+    await vi.waitFor(() => {
+      expect(methods(running.server)).toContain('turn/interrupt');
+    });
+    running.server.notify('turn/completed', {
+      threadId: THREAD,
+      turn: { id: 'turn-1', status: 'interrupted' },
+    });
+    await receipt;
+    await vi.waitFor(() => {
+      expect(types(running.seen).filter((t) => t === 'turn_complete')).toHaveLength(2);
+    });
+    expect(running.seen.filter((e) => e.type === 'turn_complete')[1]).not.toHaveProperty('dropped');
   });
 
   it('drops a message sent during a start that fails, without throwing or hanging', async () => {

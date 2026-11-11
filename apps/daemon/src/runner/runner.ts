@@ -2724,6 +2724,19 @@ export function createRunner(opts: RunnerOptions): Runner {
             // A parked or limited session may still finish its interrupted turn before it exits.
             if (st.outcome || st.parkedFor) break;
             if (pass) {
+              // A Codex turn that ended without taking a message it was handed dropped it: the
+              // message goes back to 10db's queue and the turn fails, so Retry Turn or the builder's
+              // next message sends it (Workbench spec §6.3).
+              const handedBack = messages.handBack(event.dropped ?? []);
+              if (handedBack.length > 0) {
+                st.outcome = {
+                  kind: 'refused',
+                  message: `Codex ended the turn without taking ${handedBack.length === 1 ? "the builder's message" : `${String(handedBack.length)} of the builder's messages`}; Retry Turn sends ${handedBack.length === 1 ? 'it' : 'them'} again.`,
+                  providerSessionId: st.providerSessionId,
+                };
+                await handle.stop();
+                break;
+              }
               if (await passHandoff()) break;
               await passTurnComplete(event.text ?? null);
               break;

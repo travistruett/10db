@@ -111,6 +111,11 @@ export const FakeStep = z.discriminatedUnion('do', [
     result: z.enum(['success', 'max_turns', 'error']).optional(),
     /** What the model wrote in the turn's last message. */
     text: z.string().optional(),
+    /**
+     * The turn ends without taking what it holds, and drops it, as a Codex turn that fails or that
+     * the guard interrupts does: their client uuids come as the completion's `dropped`.
+     */
+    drops: z.boolean().optional(),
   }),
   z.object({
     do: z.literal('rate_limit'),
@@ -202,6 +207,11 @@ export class FakeAdapter implements SessionAdapter {
    * default all of them as still queued, as a Claude Code that advertises `interrupt_receipt_v1` does;
    * null stands for one that answers nothing.
    */
+  /**
+   * Whether a lane session's interrupt ends the session after its receipt, as a Codex session does
+   * when Codex never reports the interrupted turn ended.
+   */
+  interruptEndsSession = false;
   interruptReceipt: (untaken: readonly string[]) => InterruptReceipt = (untaken) => ({
     stillQueued: [...untaken],
   });
@@ -373,7 +383,11 @@ export class FakeAdapter implements SessionAdapter {
     /** A turn is running: a step of it ran and its result has not come. */
     let inTurn = false;
     /** The running turn's result, as Claude Code reports it: what it took, then its completion. */
-    const completeTurn = (result: 'success' | 'max_turns' | 'error' | undefined, text?: string) => {
+    const completeTurn = (
+      result: 'success' | 'max_turns' | 'error' | undefined,
+      text?: string,
+      dropped: readonly string[] = [],
+    ) => {
       if (takenThisTurn.length > 0) channel.push({ type: 'consumed', uuids: takenThisTurn });
       takenThisTurn = [];
       inTurn = false;
@@ -381,6 +395,7 @@ export class FakeAdapter implements SessionAdapter {
         type: 'turn_complete',
         ...(result ? { result } : {}),
         ...(text ? { text } : {}),
+        ...(dropped.length > 0 ? { dropped } : {}),
         inputTokens: 1000,
         outputTokens: 200,
         cachedTokens: 0,
@@ -603,7 +618,7 @@ export class FakeAdapter implements SessionAdapter {
         }
         case 'turn_complete':
           // The turn's result lists every message the turn took, as Claude Code's does.
-          completeTurn(step.result, step.text);
+          completeTurn(step.result, step.text, step.drops === true ? untaken.splice(0) : []);
           return 'continue';
         case 'rate_limit':
           channel.push({
@@ -700,6 +715,7 @@ export class FakeAdapter implements SessionAdapter {
     })();
 
     const interrupts = this.interrupts;
+    const endsOnInterrupt = (): boolean => this.interruptEndsSession;
     const stopGate = (): Promise<void> | null => this.laneStopGate;
     const receiptFor = (untakenNow: readonly string[]): InterruptReceipt =>
       this.interruptReceipt(untakenNow);
@@ -716,8 +732,12 @@ export class FakeAdapter implements SessionAdapter {
         // What no turn has taken yet stays queued and runs next, as far as the receipt says. The
         // running turn ends with an error result, as Claude Code's interrupted turn does.
         const receipt = receiptFor(untaken);
-        if (inTurn) completeTurn('error');
         interrupts.push({ sessionId: spec.sessionId, receipt });
+        if (endsOnInterrupt()) {
+          end(SessionEndReason.Error, 'Codex did not end the interrupted turn in time.');
+          return Promise.resolve(receipt);
+        }
+        if (inTurn) completeTurn('error');
         return Promise.resolve(receipt);
       },
       async stop() {

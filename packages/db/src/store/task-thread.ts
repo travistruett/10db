@@ -127,6 +127,7 @@ export function deleteUnsentBuilderMessage(
   if (
     message.author !== TaskMessageAuthor.Builder ||
     message.pushedAt !== null ||
+    message.pushUuids.length > 0 ||
     message.deliveredAt !== null ||
     message.turnId !== null
   )
@@ -266,6 +267,36 @@ export function markTaskMessagePushedUnder(
     .set({ pushedAt: ctx.now, pushUuids: [...pushUuids, uuid] })
     .where(eq(schema.taskMessages.id, id))
     .run();
+}
+
+/**
+ * Hands back to 10db's queue this task's messages among `ids` that a session was handed and dropped
+ * without a turn taking them (a Codex turn that ended first): they are no longer pushed, so none is in
+ * doubt, and they keep every uuid they went under. Answers those handed back; a delivered one, or
+ * another task's, is left.
+ */
+export function markTaskMessagesHandedBack(
+  ctx: WriteContext,
+  taskId: TaskId,
+  ids: readonly TaskMessageId[],
+): TaskMessageId[] {
+  if (ids.length === 0) return [];
+  const where = and(
+    eq(schema.taskMessages.taskId, taskId),
+    inArray(schema.taskMessages.id, [...ids]),
+    isNotNull(schema.taskMessages.pushedAt),
+    isNull(schema.taskMessages.deliveredAt),
+  );
+  const handed = ctx.tx
+    .select({ id: schema.taskMessages.id })
+    .from(schema.taskMessages)
+    .where(where)
+    .orderBy(asc(schema.taskMessages.id))
+    .all()
+    .map((row) => row.id);
+  if (handed.length > 0)
+    ctx.tx.update(schema.taskMessages).set({ pushedAt: null }).where(where).run();
+  return handed;
 }
 
 /**

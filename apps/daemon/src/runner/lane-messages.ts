@@ -17,6 +17,7 @@ import {
   markTaskFilesInline,
   markTaskMessagePushedUnder,
   markTaskMessagesDelivered,
+  markTaskMessagesHandedBack,
   type DbReader,
   type TaskMessageRow,
 } from '@10db/db';
@@ -74,10 +75,13 @@ function asBlock(file: TaskMessageRow['files'][number]): ShapeImage | null {
 
 /**
  * The client uuid a push of the message goes under: its row's, the first time it is pushed anywhere,
- * else a new one, since the conversation may already hold the row's.
+ * else a new one, since the conversation may already hold the row's (a message handed back is no
+ * longer pushed, but went under it).
  */
 function clientUuid(message: TaskMessageRow): string {
-  return message.pushedAt === null ? idUuid(message.id) : randomUUID();
+  return message.pushedAt === null && message.pushUuids.length === 0
+    ? idUuid(message.id)
+    : randomUUID();
 }
 
 /**
@@ -145,6 +149,12 @@ export interface LaneMessages {
   interrupt(): Promise<void>;
   /** The builder messages this session was handed that no turn has taken, oldest first. */
   untaken(): TaskMessageId[];
+  /**
+   * Hands back to 10db's queue the messages among the uuids the session dropped without a turn
+   * taking them: they are no longer pushed, keep their uuids, and the session is no longer counted
+   * as holding them. Answers those handed back.
+   */
+  handBack(uuids: readonly string[]): TaskMessageId[];
 }
 
 export interface LaneMessagesDeps {
@@ -196,6 +206,12 @@ export function createLaneMessages(deps: LaneMessagesDeps): LaneMessages {
       const ids = messagesOf(uuids);
       if (ids.length === 0) return [];
       return state.write((ctx) => markTaskMessagesDelivered(ctx, taskId, ids));
+    },
+    handBack(uuids) {
+      const ids = messagesOf(uuids);
+      const handed = state.write((ctx) => markTaskMessagesHandedBack(ctx, taskId, ids));
+      for (const [uuid, id] of [...sentUnder]) if (handed.includes(id)) sentUnder.delete(uuid);
+      return handed;
     },
     untaken() {
       const handed = new Set(sentUnder.values());
