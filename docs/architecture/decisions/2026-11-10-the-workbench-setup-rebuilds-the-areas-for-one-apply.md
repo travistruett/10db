@@ -25,9 +25,14 @@ Areas, its dialog and `POST /projects/:projectId/propose-page-areas` are gone: t
   no role, each route a page with its route, the root layout and the source folders pages share marked
   shared, and each file in exactly one area that is not a page, beside the pages that overlap shared
   areas only (spec §7.3).
+- **A first setup rebuilds; later ones ask.** With no page area the rebuilt list is applied unless the
+  builder unticks its pages. Once the project has page areas, the rebuild is one row of its own,
+  unticked, and Apply sends the areas only when it is ticked. A rebuild that finds no page, or changes
+  nothing, offers no areas.
 - **Only areas open tasks name are kept**, exactly as they are, each said with its count ("kept: 146
   open tasks name it"). A kept area whose globs are exactly a page's route folder becomes that page, its
-  globs only growing by the page's code, so no open task loses a file it could write. A new area with no
+  globs only growing by the page's code, so no open task loses a file it could write; unticking that
+  page puts the area back exactly. A new area with no
   role whose files kept areas already hold is left out; a page that would share files with a kept page
   is left out with why. Hazards are never touched. An existing page area that no open task names is
   rebuilt like any other area.
@@ -50,6 +55,9 @@ Areas, its dialog and `POST /projects/:projectId/propose-page-areas` are gone: t
   what a component defined there renders, resolved to a folder directly under `views/`, `pages/`,
   `screens/` or `routes/`, with the shortest static path naming it; a page named only by a path with a
   parameter takes the longest static start of it the router also defines, else no route. Its unit is split into its `src/`, shared, and the rest.
+- **Reading never reaches a remote.** A partial clone is not read (a missing blob would be fetched,
+  running the remote's programs), the object reads run with lazy fetches and every transport off, and
+  one setup reads at most 32 MB.
 - **Pushing stays the builder's act.** The branch note is a command to copy, never a button: a push
   runs the repository's hooks and sends commits to a remote.
 
