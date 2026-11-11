@@ -208,6 +208,17 @@ describe('codeRoutes over a hostile router file', () => {
     });
     expect(performance.now() - started).toBeLessThan(500);
   });
+
+  it('reads Route tags nested 20,000 deep in under 100 ms, joining no path past the nesting cap', () => {
+    const started = performance.now();
+    const found = codeRoutes({
+      files: VIEWS,
+      routers: new Map([['ui/src/router.tsx', '<Route path="aaaa">'.repeat(20_000)]]),
+      aliases: NO_ALIASES,
+    });
+    expect(performance.now() - started).toBeLessThan(100);
+    expect(found.pages).toEqual([]);
+  });
 });
 
 describe('routerFiles', () => {

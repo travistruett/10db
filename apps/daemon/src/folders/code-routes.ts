@@ -217,6 +217,10 @@ const PATH_ATTR = /\bpath\s*=\s*(?:(['"])([^'"\n]*)\1|\{\s*(['"`])([^'"`\n]*)\3\
 const ROUTE_TAG_CHARS = 4096;
 /** How many parents a nested route's path is joined through. */
 const MAX_NESTING = 20;
+/** A joined path longer than a route can be (`AreaRoute`) is dropped. */
+const MAX_PATH_CHARS = 500;
+/** How many paths one router file may define. */
+const MAX_DEFINED = 2000;
 
 /** `path` under `parent`: a path from the root stays as it is. */
 function joinPath(parent: string | undefined, path: string): string {
@@ -280,7 +284,8 @@ function routesOf(text: string): { defs: RouteDef[]; defined: string[] } {
           )
             if (objectAt(up).path !== undefined) parent = fullPath(up, depth + 1);
       }
-      whole = joinPath(parent, path);
+      const joined = joinPath(parent, path);
+      whole = joined.length > MAX_PATH_CHARS ? undefined : joined;
     }
     fullPaths.set(open, whole);
     return whole;
@@ -292,13 +297,14 @@ function routesOf(text: string): { defs: RouteDef[]; defined: string[] } {
     if (open === -1) continue;
     const path = fullPath(open, 0);
     if (path === undefined) continue;
-    defined.push(path);
+    if (defined.length < MAX_DEFINED) defined.push(path);
     const { component } = objectAt(open);
     if (component !== undefined) defs.push({ at: open, path, component });
   }
 
   // JSX: each `<Route` tag read once, a tag left open holding the routes nested in it.
   const stack: (string | undefined)[] = [];
+  let depth = 0;
   // The next `</Route` is looked for again only once the scan has passed it, so a file of open tags
   // with no closing one is read once, not once a tag.
   let closing = text.indexOf('</Route');
@@ -307,7 +313,8 @@ function routesOf(text: string): { defs: RouteDef[]; defined: string[] } {
     if (closing !== -1 && closing < at) closing = text.indexOf('</Route', at);
     if (opening === -1 && closing === -1) break;
     if (closing !== -1 && (opening === -1 || closing < opening)) {
-      stack.pop();
+      if (depth <= MAX_NESTING) stack.pop();
+      depth = Math.max(0, depth - 1);
       at = closing + 7;
       continue;
     }
@@ -326,15 +333,21 @@ function routesOf(text: string): { defs: RouteDef[]; defined: string[] } {
     const attrs = text.slice(opening, Math.min(end, limit));
     const literal = PATH_ATTR.exec(attrs);
     const raw = literal?.[2] ?? literal?.[4];
+    // Past the nesting cap a tag's path is not joined, and the tags it holds are counted, not kept.
     const parent = stack.at(-1);
-    const path = raw === undefined ? undefined : joinPath(parent, raw);
+    const nested = depth >= MAX_NESTING;
+    const joined = raw === undefined || nested ? undefined : joinPath(parent, raw);
+    const path = joined !== undefined && joined.length <= MAX_PATH_CHARS ? joined : undefined;
     const found = COMPONENT_ATTR.exec(attrs);
     const component = found?.[1] ?? found?.[2];
     if (path !== undefined) {
-      defined.push(path);
+      if (defined.length < MAX_DEFINED) defined.push(path);
       if (component !== undefined) defs.push({ at: opening, path, component });
     }
-    if (end < limit && text[end - 1] !== '/') stack.push(path ?? parent);
+    if (end < limit && text[end - 1] !== '/') {
+      if (!nested) stack.push(path ?? parent);
+      depth += 1;
+    }
     at = Math.max(end + 1, opening + 6);
   }
   return { defs: defs.sort((a, b) => a.at - b.at), defined };
