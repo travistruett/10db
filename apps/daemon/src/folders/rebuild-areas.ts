@@ -171,7 +171,9 @@ export function rebuildAreas(input: RebuildInput): WorkbenchSetupAreas {
     });
     problem = setupAreasProblem(proposed, input.hazards);
   }
-  if (problem !== null || sameList(proposed, input.existing))
+  // A rebuild that finds no page has nothing to offer the Workbench: the project keeps its own list.
+  const noPage = !proposed.some((a) => a.role === AreaRole.Page);
+  if (problem !== null || noPage || sameList(proposed, input.existing))
     return {
       proposed: input.existing.map((a) => ({ ...a })),
       kept: keptReasons,
@@ -190,8 +192,14 @@ export function rebuildAreas(input: RebuildInput): WorkbenchSetupAreas {
         const path = shownPath(g);
         return path === null ? [] : [path];
       });
-      const row = { name: a.name, folders: folders.length > 0 ? folders : [...a.globs] };
-      return a.route === undefined ? row : { ...row, route: a.route };
+      const row: PageRow = { name: a.name, folders: folders.length > 0 ? folders : [...a.globs] };
+      if (a.route !== undefined) row.route = a.route;
+      // A kept area that became this page is put back exactly when the page is unticked.
+      const was = input.keep.has(a.name)
+        ? input.existing.find((e) => e.name === a.name)
+        : undefined;
+      if (was !== undefined) row.was = { ...was, globs: [...was.globs] };
+      return row;
     }),
     skipped,
   };

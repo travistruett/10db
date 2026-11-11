@@ -510,6 +510,17 @@ const RESOLVABLE_BYTES = 1_000_000;
 
 /** The modes git stores a regular file with. */
 const REGULAR_FILE_MODES: readonly string[] = ['100644', '100755'];
+/** Config for a read that must reach no remote: no transport, ssh command, credential helper or askpass. */
+const NO_TRANSPORT: readonly string[] = [
+  '-c',
+  'protocol.allow=never',
+  '-c',
+  'core.sshCommand=false',
+  '-c',
+  'credential.helper=',
+  '-c',
+  'core.askPass=',
+];
 /** How many blob bytes one `cat-file --batch` call of `surveyTexts` is asked for, about. */
 const SURVEY_TEXT_BATCH_BYTES = 16 * 1024 * 1024;
 
@@ -1052,15 +1063,39 @@ export interface Git {
   /**
    * The text of each of `paths` at HEAD of the repository at or above `path`, read as `survey` reads:
    * the object store only, unpinned, nothing written, no program the repository configures run. Only
-   * a regular file of at most `maxBytes` that holds no NUL byte is answered; any other path is left
-   * out, as is every path when git won't read the repository.
+   * a regular file of at most `options.maxBytes` that holds no NUL byte is answered; any other path is
+   * left out, as is every path when git won't read the repository. A partial clone is not read at all
+   * (a missing blob would be fetched, running its remote's programs), nor are files that together
+   * hold more than `options.maxTotalBytes`; `refused` says which. `options.signal` stops between
+   * batches.
    */
   surveyTexts(
     path: string,
     paths: readonly string[],
-    maxBytes: number,
-  ): Promise<ReadonlyMap<string, string>>;
+    options: SurveyTextsOptions,
+  ): Promise<SurveyTexts>;
 }
+
+export interface SurveyTextsOptions {
+  readonly maxBytes: number;
+  readonly maxTotalBytes: number;
+  readonly signal?: AbortSignal;
+}
+
+/** What `surveyTexts` read: each text by path, the bytes read, and why it read nothing, if it refused. */
+export interface SurveyTexts {
+  readonly texts: ReadonlyMap<string, string>;
+  readonly bytes: number;
+  readonly refused: string | null;
+}
+
+/** Said when `surveyTexts` meets a partial clone. */
+const PARTIAL_CLONE_REFUSAL = 'a partial clone: page code is not read';
+/** Said when the files `surveyTexts` is asked for hold more than it may read. */
+export const OVER_BUDGET_REFUSAL =
+  'the source is over what one read may take: page code is not read';
+/** Said when `surveyTexts` can't read the repository's config to tell. */
+const UNREAD_CONFIG_REFUSAL = "the repository's config could not be read: page code is not read";
 
 export interface GitOptions {
   /** Called with every refusal, so the builder hears of it whoever called. */
@@ -4672,22 +4707,52 @@ export function createGit(opts: GitOptions = {}): Git {
         return refusalOf(error);
       }
     },
-    async surveyTexts(path, paths, maxBytes) {
-      const texts = new Map<string, string>();
+    async surveyTexts(path, paths, { maxBytes, maxTotalBytes, signal }) {
+      const none = (refused: string | null): SurveyTexts => ({
+        texts: new Map(),
+        bytes: 0,
+        refused,
+      });
       const wanted = new Set(paths);
-      if (wanted.size === 0) return texts;
+      if (wanted.size === 0) return none(null);
+      // A missing blob is never fetched: the fetch would run the remote's programs. Should the config
+      // change after the check below, no transport, ssh command or credential helper is reachable.
+      // GIT_ALLOW_PROTOCOL overrides every protocol.* setting, the repository's own among them, and
+      // no protocol is named `none`.
+      const noFetch = {
+        env: { GIT_NO_LAZY_FETCH: '1', GIT_ALLOW_PROTOCOL: 'none' },
+        config: NO_TRANSPORT,
+      };
       try {
         const at = observed(
           realpathSync((await git(observed(path), ['rev-parse', '--show-toplevel'])).trim()),
         );
+        // Git before 2.45 has no GIT_NO_LAZY_FETCH, so a partial clone is not read at all. Reading
+        // config runs no program; a config git can't read refuses too, never reads.
+        let partial: string;
+        let promisors: string;
+        try {
+          // `--get-regexp` prints the key whatever its value: an empty one still names a partial clone.
+          partial = await git(at, ['config', '--get-regexp', '^extensions\\.partialclone$'], {
+            answerExitCodes: [1],
+          });
+          promisors = await git(
+            at,
+            ['config', '--type=bool', '--get-regexp', '^remote\\..*\\.promisor$'],
+            { answerExitCodes: [1] },
+          );
+        } catch {
+          return none(UNREAD_CONFIG_REFUSAL);
+        }
+        if (partial !== '' || /\strue$/mu.test(promisors)) return none(PARTIAL_CLONE_REFUSAL);
         const head = await git(at, ['rev-parse', '-q', '--verify', 'HEAD^{commit}'], {
           answerExitCodes: [1],
         });
-        if (head.trim() === '') return texts;
+        if (head.trim() === '') return none(null);
         const blobs: { path: string; oid: string; bytes: number }[] = [];
-        for (const record of (await git(at, ['ls-tree', '-r', '-z', '--long', head.trim()])).split(
-          '\0',
-        )) {
+        for (const record of (
+          await git(at, ['ls-tree', '-r', '-z', '--long', head.trim()], noFetch)
+        ).split('\0')) {
           const entry = LS_TREE_ENTRY.exec(record);
           if (!entry) continue;
           const [, mode = '', type, oid = '', size = '', file = ''] = entry;
@@ -4701,20 +4766,25 @@ export function createGit(opts: GitOptions = {}): Git {
           )
             blobs.push({ path: file, oid, bytes });
         }
+        const total = blobs.reduce((sum, b) => sum + b.bytes, 0);
+        if (total > maxTotalBytes) return none(OVER_BUDGET_REFUSAL);
+        const texts = new Map<string, string>();
         // `cat-file --batch` prints `<oid> blob <size>\n<bytes>\n` per line it is given, in batches
         // that keep each call's output well under what one git call may print.
         for (let start = 0; start < blobs.length;) {
+          signal?.throwIfAborted();
           let end = start;
-          let total = 0;
+          let size = 0;
           while (
             end < blobs.length &&
-            (end === start || total + (blobs[end]?.bytes ?? 0) < SURVEY_TEXT_BATCH_BYTES)
+            (end === start || size + (blobs[end]?.bytes ?? 0) < SURVEY_TEXT_BATCH_BYTES)
           ) {
-            total += (blobs[end]?.bytes ?? 0) + 100;
+            size += (blobs[end]?.bytes ?? 0) + 100;
             end += 1;
           }
           const batch = blobs.slice(start, end);
-          const out = await gitCapped(at, ['cat-file', '--batch'], total + 1, {
+          const out = await gitCapped(at, ['cat-file', '--batch'], size + 1, {
+            ...noFetch,
             input: batch.map((b) => `${b.oid}\n`).join(''),
           });
           let offset = 0;
@@ -4727,9 +4797,10 @@ export function createGit(opts: GitOptions = {}): Git {
           }
           start = end;
         }
-        return texts;
-      } catch {
-        return new Map<string, string>();
+        return { texts, bytes: total, refused: null };
+      } catch (error) {
+        if (signal?.aborted === true) throw error;
+        return none(null);
       }
     },
     async ignoredDirectories(repo) {

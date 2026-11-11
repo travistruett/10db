@@ -1,5 +1,5 @@
 import { posix } from 'node:path';
-import type { Git } from '../git';
+import type { SurveyTexts } from '../git';
 import { treeGlobs } from './area-candidates';
 import {
   importSpecifiers,
@@ -21,10 +21,14 @@ export const PAGE_CODE_MAX_FILE_BYTES = 2 * 1024 * 1024;
 /** A page with this many single files outside its folders leaves them all shared. */
 const MAX_SINGLE_FILES = 20;
 
-/** A proposed page: its name and the folder that is its route. */
+/**
+ * A proposed page: its name and the folder that is its route, or, for an index page that has no
+ * folder of its own (a route group's `page.tsx`), the files its reach starts from.
+ */
 export interface PageSeed {
   readonly name: string;
-  readonly folder: string;
+  readonly folder?: string;
+  readonly files?: readonly string[];
 }
 
 export interface PageCodeInput {
@@ -36,7 +40,10 @@ export interface PageCodeInput {
   readonly texts: ReadonlyMap<string, string>;
   readonly aliases: PathAliases;
   readonly pages: readonly PageSeed[];
-  /** Files every page renders inside (root layouts): what they reach is no page's. */
+  /**
+   * Files every page renders inside (root layouts, a router and its entry): what they reach outside
+   * the pages' route folders is no page's. Their reach never enters a route folder.
+   */
   readonly sharedRoots: readonly string[];
 }
 
@@ -66,6 +73,11 @@ export function unitSourceFiles(files: readonly string[], unit: string): string[
   );
 }
 
+/** A test or story beside the page's code: what only it imports is test support, not the page's. */
+const isTestFile = (path: string): boolean =>
+  /\.(?:test|spec|stories|test-d)\.[cm]?[jt]sx?$/u.test(path) ||
+  path.split('/').includes('__tests__');
+
 /** Who reaches each file below a folder: one page, no one, or more than one (or the shared roots). */
 const MIXED = Symbol('mixed');
 type FolderOwner = string | null | typeof MIXED;
@@ -73,16 +85,17 @@ type FolderOwner = string | null | typeof MIXED;
 const combine = (one: FolderOwner, other: FolderOwner): FolderOwner =>
   one === null ? other : other === null || other === one ? one : MIXED;
 
-/** The files reachable from `starts` along `edges`, the starts included. */
+/** The files reachable from `starts` along `edges`, the starts included, never entering a `blocked` one. */
 function reachFrom(
   starts: readonly string[],
   edges: (file: string) => readonly string[],
+  blocked: (file: string) => boolean = () => false,
 ): string[] {
   const seen = new Set(starts);
   const queue = [...starts];
   for (let next = queue.shift(); next !== undefined; next = queue.shift())
     for (const to of edges(next))
-      if (!seen.has(to)) {
+      if (!seen.has(to) && !blocked(to)) {
         seen.add(to);
         queue.push(to);
       }
@@ -92,8 +105,8 @@ function reachFrom(
 /**
  * The code each page takes beyond its route folder. A file is a page's when that page alone reaches
  * it and the shared roots do not. A page takes the largest folder holding one of its files whose
- * source files are all its own or reached by nothing, that is not the unit's root and neither holds
- * nor sits in a route folder; its other files become exact globs while it has fewer than 20. Pure.
+ * source files, tests aside, are all its own, that is not the unit's root and neither holds nor sits
+ * in a route folder; its other files become exact globs while it has fewer than 20. Pure.
  */
 export function pageCode(input: PageCodeInput): PageCode {
   const sources = unitSourceFiles(input.files, input.unit);
@@ -121,11 +134,16 @@ export function pageCode(input: PageCodeInput): PageCode {
   const reachedBy = (who: FolderOwner, files: readonly string[]) => {
     for (const file of files) owners.set(file, combine(owners.get(file) ?? null, who));
   };
+  const routeFolders = input.pages.flatMap((p) => (p.folder === undefined ? [] : [p.folder]));
+  const inRoute = (file: string) => routeFolders.some((r) => under(file, r));
   for (const page of input.pages)
     reachedBy(
       page.name,
       reachFrom(
-        sources.filter((f) => under(f, page.folder)),
+        page.files?.filter((f) => sourceSet.has(f)) ??
+          sources.filter(
+            (f) => page.folder !== undefined && under(f, page.folder) && !isTestFile(f),
+          ),
         edges,
       ),
     );
@@ -134,13 +152,16 @@ export function pageCode(input: PageCodeInput): PageCode {
     reachFrom(
       input.sharedRoots.filter((f) => sourceSet.has(f)),
       edges,
+      inRoute,
     ),
   );
 
-  // Each folder of the unit, by who reaches the source files below it.
+  // Each folder of the unit, by who reaches the source files below it, tests aside: a file nothing
+  // reaches counts as no page's, so a folder holding one is never taken whole.
   const folders = new Map<string, FolderOwner>();
   for (const file of sources) {
-    const owner = owners.get(file) ?? null;
+    if (isTestFile(file)) continue;
+    const owner = owners.get(file) ?? MIXED;
     for (
       let dir = parentOf(file);
       dir !== input.unit && under(dir, input.unit);
@@ -148,20 +169,13 @@ export function pageCode(input: PageCodeInput): PageCode {
     )
       folders.set(dir, combine(folders.has(dir) ? (folders.get(dir) ?? null) : null, owner));
   }
-  const routeFolders = input.pages.map((p) => p.folder);
-  const takeable = (dir: string, page: string): boolean => {
-    const owner = folders.get(dir) ?? null;
-    return (
-      (owner === page || owner === null) &&
-      !routeFolders.some((r) => r === dir || under(r, dir) || under(dir, r))
-    );
-  };
+  const takeable = (dir: string, page: string): boolean =>
+    folders.get(dir) === page &&
+    !routeFolders.some((r) => r === dir || under(r, dir) || under(dir, r));
 
   const taken = new Map<string, readonly string[]>();
   for (const page of input.pages) {
-    const own = sources.filter(
-      (f) => owners.get(f) === page.name && !routeFolders.some((r) => under(f, r)),
-    );
+    const own = sources.filter((f) => owners.get(f) === page.name && !inRoute(f));
     let held: string[] = [];
     for (const file of own) {
       if (held.some((d) => under(file, d))) continue;
@@ -195,26 +209,29 @@ function configPath(files: readonly string[], unit: string): string | null {
   return null;
 }
 
+/** Reads files' texts at HEAD, each at most `maxBytes`, within what the setup may still read. */
+export type TextReader = (paths: readonly string[], maxBytes: number) => Promise<SurveyTexts>;
+
 /**
- * `pageCode` over the repository at `repo`, its texts read at HEAD from git's object store; nothing
- * of the checkout is opened. Over the cap, nothing is read.
+ * `pageCode` over a unit's texts as `read` gives them from git's object store; nothing of the
+ * checkout is opened. Over the file cap nothing is read; a read refused (a partial clone, the byte
+ * budget) leaves every page its route folder, with the reason as the note.
  */
 export async function readPageCode(
-  git: Pick<Git, 'surveyTexts'>,
-  repo: string,
+  read: TextReader,
   input: Omit<PageCodeInput, 'texts' | 'aliases'>,
 ): Promise<PageCode> {
   const sources = unitSourceFiles(input.files, input.unit);
   const config = configPath(input.files, input.unit);
   const wanted = sources.length > PAGE_CODE_MAX_FILES ? [] : sources;
-  const texts = await git.surveyTexts(
-    repo,
+  const found = await read(
     config === null ? wanted : [...wanted, config],
     PAGE_CODE_MAX_FILE_BYTES,
   );
-  const configText = config === null ? undefined : texts.get(config);
+  if (found.refused !== null) return { taken: new Map(), note: found.refused };
+  const configText = config === null ? undefined : found.texts.get(config);
   const aliases = readPathAliases(
     config === null || configText === undefined ? null : { path: config, text: configText },
   );
-  return pageCode({ ...input, texts, aliases });
+  return pageCode({ ...input, texts: found.texts, aliases });
 }

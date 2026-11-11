@@ -1,6 +1,6 @@
 import { AreaRole, SettingField, type AreaDef, type WorkbenchSetupDto } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { areasChanged, areasSummary, setupPatch, suggestionCount } from './setup-rules';
+import { areasChanged, areasSummary, setUpCount, setupPatch, suggestionCount } from './setup-rules';
 
 const CURRENT: AreaDef[] = [
   { name: 'repo', globs: ['**'] },
@@ -57,6 +57,27 @@ describe('setupPatch', () => {
     expect(setupPatch(SETUP, CURRENT, unticked, settings)).toEqual(patch);
   });
 
+  it('puts a kept area that became a page back exactly when that page is unticked', () => {
+    const was: AreaDef = { name: 'board', globs: ['src/views/board/**', 'docs/board.md'] };
+    const kept = {
+      ...SETUP,
+      areas: {
+        ...SETUP.areas,
+        pages: SETUP.areas.pages.map((p) => (p.name === 'board' ? { ...p, was } : p)),
+      },
+    };
+    expect(setupPatch(kept, CURRENT, ['board'], {})?.areas).toEqual(
+      PROPOSED.map((a) => (a.name === 'board' ? was : a)),
+    );
+  });
+
+  it('leaves the areas out when the rebuild is not ticked', () => {
+    expect(setupPatch(SETUP, CURRENT, [], { appUrl: 'http://localhost:1420' }, false)).toEqual({
+      appUrl: 'http://localhost:1420',
+    });
+    expect(setupPatch(SETUP, CURRENT, [], {}, false)).toBeNull();
+  });
+
   it('leaves the areas out when the result is the list the project has', () => {
     const same = { ...SETUP, areas: { ...SETUP.areas, proposed: CURRENT, pages: [] } };
     expect(setupPatch(same, CURRENT, [], { appUrl: 'http://localhost:1420' })).toEqual({
@@ -71,6 +92,19 @@ describe('areasChanged and suggestionCount', () => {
     expect(suggestionCount(SETUP)).toBe(3);
     expect(areasChanged(PROPOSED, CURRENT)).toBe(true);
     expect(areasChanged([...CURRENT].reverse(), CURRENT)).toBe(false);
+  });
+});
+
+describe('setUpCount', () => {
+  it('counts the settings and the branch note only, never the page rows', () => {
+    expect(setUpCount(SETUP)).toBe(1);
+    expect(
+      setUpCount({
+        ...SETUP,
+        branch: { branch: 'build', ahead: 3, command: 'git push origin build' },
+      }),
+    ).toBe(2);
+    expect(setUpCount({ ...SETUP, settings: [] })).toBe(0);
   });
 });
 

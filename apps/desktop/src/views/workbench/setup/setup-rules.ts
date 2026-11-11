@@ -26,19 +26,28 @@ export function suggestionCount(setup: WorkbenchSetupDto): number {
 }
 
 /**
- * The one `PATCH /projects/:id` Apply sends: the rebuilt areas with each unticked page folded back
- * (left out when that is the list the project has) and the ticked settings (`settingsPatch`); null
- * when it changes nothing.
+ * What the picker's Set Up (n) counts once the project has pages: the settings and the branch note.
+ * New page rows still show in the setup, but a page the builder left out is not asked for again.
+ */
+export function setUpCount(setup: WorkbenchSetupDto): number {
+  return setup.settings.length + (setup.branch === null ? 0 : 1);
+}
+
+/**
+ * The one `PATCH /projects/:id` Apply sends: the rebuilt areas, when `rebuildAreas`, with each
+ * unticked page folded back (left out when that is the list the project has), and the ticked
+ * settings as edited (`settingsPatch`); null when it changes nothing.
  */
 export function setupPatch(
   setup: WorkbenchSetupDto,
   current: readonly AreaDef[],
   untickedPages: readonly string[],
   settings: ProjectPatch,
+  rebuildAreas = true,
 ): ProjectPatch | null {
   const patch: ProjectPatch = { ...settings };
-  const areas = withoutPages(setup.areas.proposed, untickedPages);
-  if (areasChanged(areas, current)) patch.areas = areas;
+  const areas = withoutPages(setup.areas.proposed, untickedPages, setup.areas.pages);
+  if (rebuildAreas && areasChanged(areas, current)) patch.areas = areas;
   return Object.keys(patch).length === 0 ? null : patch;
 }
 

@@ -24,6 +24,8 @@ export const PageRow = z.object({
   route: AreaRoute.optional(),
   /** Its route folder, then the folders and files of its code outside it, as repository paths. */
   folders: z.array(z.string().min(1)).min(1),
+  /** For an area open tasks name that becomes this page: the area as it is, which unticking restores. */
+  was: AreaDef.optional(),
 });
 export type PageRow = z.infer<typeof PageRow>;
 
@@ -91,15 +93,22 @@ export const WorkbenchSetupDto = z.object({
 export type WorkbenchSetupDto = z.infer<typeof WorkbenchSetupDto>;
 
 /**
- * `proposed` with each page named in `unticked` dropped and its files folded back: the globs a shared
- * area of the list also covers go (that area holds those files), and what is left stays an area of
- * the same name with no role and no route. A name that is no page is passed over. Pure; `proposed`
- * is not touched.
+ * `proposed` with each page named in `unticked` dropped and its files folded back: a page whose row
+ * says what area it `was` (one open tasks name) is that area again, exactly; any other loses the
+ * globs a shared area of the list also covers (that area holds those files), and what is left stays
+ * an area of the same name with no role and no route. A name that is no page is passed over. Pure;
+ * `proposed` is not touched.
  */
-export function withoutPages(proposed: readonly AreaDef[], unticked: readonly string[]): AreaDef[] {
+export function withoutPages(
+  proposed: readonly AreaDef[],
+  unticked: readonly string[],
+  rows: readonly PageRow[] = [],
+): AreaDef[] {
   const shared = proposed.filter((a) => a.role === AreaRole.Shared);
   return proposed.flatMap((area): AreaDef[] => {
     if (area.role !== AreaRole.Page || !unticked.includes(area.name)) return [{ ...area }];
+    const was = rows.find((row) => row.name === area.name)?.was;
+    if (was !== undefined) return [{ ...was, globs: [...was.globs] }];
     const globs = area.globs.filter(
       (glob) => !shared.some((s) => s.globs.some((other) => globsOverlap(glob, other))),
     );

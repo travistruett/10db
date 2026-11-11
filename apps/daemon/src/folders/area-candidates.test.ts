@@ -176,6 +176,10 @@ describe('deriveAreaCandidates', () => {
       'frontend/app/api/users/route.ts',
       'frontend/app/(hooks)/stripe/route.ts',
       `${product}/webhooks/route.ts`,
+      `${product}/(content)/layout.tsx`,
+      `${product}/(content)/resources/page.tsx`,
+      `${product}/(content)/compare/[slug]/page.tsx`,
+      `${product}/reports/[id]/page.tsx`,
       'backend/pyproject.toml',
       'backend/main.py',
     ];
@@ -198,6 +202,25 @@ describe('deriveAreaCandidates', () => {
         undefined,
       ],
       ['a private folder among the screens is shared', `${product}/_parts`, 'shared', undefined],
+      [
+        'a nested route group is passed through: its screens are pages at their paths',
+        `${product}/(content)/resources`,
+        'page',
+        '/app/resources',
+      ],
+      [
+        'a screen in a nested group with only a dynamic page below it is a page with no route',
+        `${product}/(content)/compare`,
+        'page',
+        undefined,
+      ],
+      [
+        'a screen with only a dynamic page below it is a page with no route',
+        `${product}/reports`,
+        'page',
+        undefined,
+      ],
+      ["a nested route group's own files are shared", `${product}/(content)`, 'shared', undefined],
       [
         'a screen whose path no route can be (a space) is a page with no route',
         `${product}/my page`,

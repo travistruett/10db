@@ -116,6 +116,44 @@ describe('WorkbenchSetup', () => {
     });
   });
 
+  it('once the project has pages, offers the rebuild unticked and applies only what is ticked', async () => {
+    const paged = projectViewDto({
+      name: 'ampsio',
+      areas: [{ name: 'repo', globs: ['**'] }, ...SETUP.areas.proposed.slice(1, 2)],
+    });
+    const setting = {
+      field: SettingField.AppUrl,
+      value: 'http://localhost:1420',
+      source: 'from tauri.conf.json',
+    } as const;
+    const patches = serve({ ...SETUP, settings: [setting] });
+    await renderWithDaemonAndRouter(<WorkbenchSetup project={paged} />);
+    const rebuild = await screen.findByRole('checkbox', { name: /^Rebuild areas: 2 new pages/ });
+    expect(rebuild).toHaveProperty('checked', false);
+    expect(screen.queryByRole('checkbox', { name: 'Make board a page at /board' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Apply (1)' }));
+    await waitFor(() => {
+      expect(patches).toEqual([{ appUrl: 'http://localhost:1420' }]);
+    });
+    fireEvent.click(rebuild);
+    expect(screen.getByRole('checkbox', { name: 'Make board a page at /board' })).toBeTruthy();
+  });
+
+  it('offers no Areas when the rebuild changes nothing, and applies the settings alone', async () => {
+    const patches = serve({
+      ...SETUP,
+      areas: { proposed: PROJECT.areas, kept: [], pages: [], skipped: [] },
+      settings: [{ field: SettingField.AppUrl, value: 'http://localhost:1420', source: 'from x' }],
+    });
+    await renderWithDaemonAndRouter(<WorkbenchSetup project={PROJECT} />);
+    expect(await screen.findByText('from x')).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Areas' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Apply (1)' }));
+    await waitFor(() => {
+      expect(patches).toEqual([{ appUrl: 'http://localhost:1420' }]);
+    });
+  });
+
   it('sends a setting as edited in place, and leaves out an unticked Allow Docker', async () => {
     const warning = 'Docker can mount any host folder into a container.';
     const patches = serve({

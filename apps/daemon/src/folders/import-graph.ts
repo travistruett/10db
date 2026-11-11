@@ -144,9 +144,19 @@ export interface ImportBinding {
   readonly locals: readonly string[];
 }
 
-const isIdStart = (ch: string | undefined): boolean => ch !== undefined && /[A-Za-z_$]/u.test(ch);
-const isIdPart = (ch: string | undefined): boolean => ch !== undefined && /[\w$]/u.test(ch);
-const isSpace = (ch: string | undefined): boolean => ch !== undefined && /\s/u.test(ch);
+/** Letters, `_` and `$` start an identifier; digits continue one. Code points, not a regex, per character. */
+function isIdStart(ch: string | undefined): boolean {
+  if (ch === undefined) return false;
+  const c = ch.charCodeAt(0);
+  return (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || c === 95 || c === 36;
+}
+function isIdPart(ch: string | undefined): boolean {
+  if (ch === undefined) return false;
+  const c = ch.charCodeAt(0);
+  return isIdStart(ch) || (c >= 48 && c <= 57);
+}
+const isSpace = (ch: string | undefined): boolean =>
+  ch === ' ' || ch === '\n' || ch === '\t' || ch === '\r' || ch === '\f' || ch === '\v';
 const isQuote = (ch: string | undefined): boolean => ch === "'" || ch === '"' || ch === '`';
 
 /**
@@ -180,8 +190,11 @@ class ImportScanner {
   skipString(): void {
     const quote = this.text[this.at];
     this.at += 1;
-    while (this.at < this.text.length && this.text[this.at] !== quote)
+    while (this.at < this.text.length && this.text[this.at] !== quote) {
+      // A `'` or `"` string ends at a line's end, so an apostrophe in JSX text hides nothing after it.
+      if (this.text[this.at] === '\n' && quote !== '`') return;
       this.at += this.text[this.at] === '\\' ? 2 : 1;
+    }
     this.at += 1;
   }
 

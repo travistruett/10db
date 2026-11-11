@@ -166,8 +166,9 @@ state is the picker for the first way in, not a blank page with a button:
 If "What's bothering you?" is filled, every new page task starts at once with it as its first message. If it is
 empty, each new page waits for the builder's first message.
 
-A project with no page area shows, in place of the list, why a pass needs one and two actions: **Propose Page
-Areas** (the area proposer of §7.1) and a link to Settings › Areas and hazards.
+A project with no page area shows, in place of the list, the Workbench setup: its areas rebuilt with a page per
+route and the settings a pass wants, applied in one click
+(`decisions/2026-11-10-the-workbench-setup-rebuilds-the-areas-for-one-apply.md`).
 
 - A task with no brief costs nothing until spoken to: its session starts on the builder's first message. A
   task with a description starts working when the pass opens.

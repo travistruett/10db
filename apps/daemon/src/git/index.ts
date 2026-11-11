@@ -18,6 +18,8 @@ export {
   type CheckoutPlace,
   type FolderAt,
   type Git,
+  OVER_BUDGET_REFUSAL,
+  type SurveyTexts,
   type KeptCommit,
   type LandedPaths,
   type PassDirtRecord,

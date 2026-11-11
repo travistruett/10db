@@ -107,9 +107,19 @@ const holdsUnit = (dir: Dir): boolean =>
 const isRouteGroup = (name: string) => /^\(.+\)$/u.test(name);
 
 /** The file that makes a route folder a screen (Next's `page.tsx`); `route.ts` alone is an endpoint. */
-const isPageFile = (path: string) => /^page\.(?:tsx|jsx|ts|js|mdx|md)$/u.test(baseName(path));
+export const isPageFile = (path: string): boolean =>
+  /^page\.(?:tsx|jsx|ts|js|mdx|md)$/u.test(baseName(path));
 const holdsPage = (dir: Dir): boolean =>
   dir.direct.some(isPageFile) || [...dir.dirs.values()].some(holdsPage);
+const pageAtPath = (dir: Dir): boolean =>
+  dir.direct.some(isPageFile) ||
+  [...dir.dirs].some(([name, child]) => isRouteGroup(name) && pageAtPath(child));
+
+/** The route groups inside a container of screens, nested ones too: they add nothing to a path. */
+const nestedGroups = (container: Dir): Dir[] =>
+  [...container.dirs].flatMap(([name, child]) =>
+    isRouteGroup(name) ? [child, ...nestedGroups(child)] : [],
+  );
 
 /** Where in the repository a draft candidate lives: whole folders and folders' own files. */
 interface Draft extends Holder, Roled {
@@ -138,6 +148,8 @@ const SHARED: Roled = { role: AreaRole.Shared };
 function screenRole(screen: Dir, below: readonly string[]): Roled {
   if (below.some((name) => name.startsWith('_'))) return SHARED;
   if (!holdsPage(screen)) return {};
+  // Only a page file at the screen's own path (or in a route group there) is shown at that path.
+  if (!pageAtPath(screen)) return { role: AreaRole.Page };
   const names = below.filter((name) => !isRouteGroup(name));
   const route = `/${names.join('/')}`;
   if (
@@ -237,15 +249,29 @@ function splitRoutes(unit: Dir, { routes, between }: RouteRoot): Draft[] {
       directs: [child.path, ...screens.passed.map((d) => d.path), screens.container.path],
       ...SHARED,
     };
-    for (const screen of screens.container.dirs.values())
-      drafts.push(
-        draftOf(
-          AreaCandidateKind.Route,
-          screen.path,
-          screen.path,
-          screenRole(screen, below(screen)),
-        ),
-      );
+    // A route group among the screens is passed through: its own files are shared, and its folders
+    // are screens like their neighbours.
+    for (const container of [screens.container, ...nestedGroups(screens.container)]) {
+      if (container !== screens.container)
+        drafts.push({
+          kind: AreaCandidateKind.Route,
+          label: container.path,
+          trees: [],
+          directs: [container.path],
+          ...SHARED,
+        });
+      for (const [name, screen] of container.dirs) {
+        if (isRouteGroup(name)) continue;
+        drafts.push(
+          draftOf(
+            AreaCandidateKind.Route,
+            screen.path,
+            screen.path,
+            screenRole(screen, below(screen)),
+          ),
+        );
+      }
+    }
     drafts.push(left);
   }
   for (const [n, dir] of way.slice(0, -1).entries()) {
@@ -427,7 +453,12 @@ function routeAppOf(unit: Dir): FileRouteApp | null {
       const screens = screensOf(group);
       return screens === null
         ? [group.path]
-        : [group.path, ...screens.passed.map((d) => d.path), screens.container.path];
+        : [
+            group.path,
+            ...screens.passed.map((d) => d.path),
+            screens.container.path,
+            ...nestedGroups(screens.container).map((d) => d.path),
+          ];
     });
   return {
     unit: unit.path,

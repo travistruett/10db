@@ -85,6 +85,43 @@
                   "type": "string",
                   "minLength": 1
                 }
+              },
+              "was": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]*$"
+                  },
+                  "globs": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "catchAll": {
+                    "type": "boolean"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "page",
+                      "shared"
+                    ]
+                  },
+                  "route": {
+                    "type": "string",
+                    "maxLength": 500,
+                    "format": "starts_with",
+                    "pattern": "^\\/.*"
+                  }
+                },
+                "required": [
+                  "name",
+                  "globs"
+                ]
               }
             },
             "required": [

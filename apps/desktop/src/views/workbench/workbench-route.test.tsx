@@ -119,6 +119,26 @@ describe('WorkbenchView', () => {
     });
   });
 
+  it('reads the setup for Set Up (n) only while no pass is open', async () => {
+    let asked = 0;
+    const { ready } = pagesByStatus();
+    const live = passViewDto({ pass: passDto({ projectId: project.id }), pages: [ready] });
+    open(
+      '/workbench',
+      { live: [live] },
+      {
+        first: [
+          http.post(daemonUrl('/projects/:projectId/workbench-setup'), () => {
+            asked += 1;
+            return HttpResponse.json(workbenchSetupDto());
+          }),
+        ],
+      },
+    );
+    expect(await screen.findByRole('button', { name: 'More pass actions' })).toBeTruthy();
+    expect(asked).toBe(0);
+  });
+
   it('pins the page it shows into the address, so a reordered queue never swaps the page under a draft', async () => {
     const { ready, working } = pagesByStatus();
     const live = passViewDto({ pass: passDto({ projectId: project.id }), pages: [working, ready] });

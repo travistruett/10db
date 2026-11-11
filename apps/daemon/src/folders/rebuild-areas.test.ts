@@ -1,4 +1,4 @@
-import { AreaRole, setupAreasProblem, type AreaDef } from '@10db/contracts';
+import { AreaRole, setupAreasProblem, withoutPages, type AreaDef } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { rebuildAreas, type PlannedPage, type RebuildInput } from './rebuild-areas';
 
@@ -100,6 +100,20 @@ describe('rebuildAreas', () => {
     ]);
   });
 
+  it('unticking a kept area that became a page puts it back exactly, never folding it away', () => {
+    const fri: AreaDef = { name: 'fri', globs: ['web/app/(app)/friday/**'], catchAll: false };
+    const result = rebuildAreas(
+      input({
+        existing: [fri, { name: 'repo', globs: ['**'] }],
+        keep: new Map([['fri', 'kept: 2 open tasks name it']]),
+      }),
+    );
+    expect(result.pages.find((p) => p.name === 'fri')?.was).toEqual(fri);
+    const unticked = withoutPages(result.proposed, ['fri'], result.pages);
+    expect(unticked.find((a) => a.name === 'fri')).toEqual(fri);
+    expect(setupAreasProblem(unticked, [])).toBeNull();
+  });
+
   it('leaves out a page that would share files with a kept page, saying which', () => {
     const result = rebuildAreas(
       input({
@@ -121,16 +135,49 @@ describe('rebuildAreas', () => {
     });
   });
 
-  it('renames a new area whose name a kept area or a hazard has', () => {
+  it('drops the code a page would take from a kept page, keeping the page', () => {
     const result = rebuildAreas(
       input({
-        existing: [{ name: 'api', globs: ['api/legacy/**'] }],
-        keep: new Map([['api', 'kept: 1 open task names it']]),
+        existing: [
+          { name: 'books', globs: ['web/src/friday/**'], role: AreaRole.Page, route: '/b' },
+        ],
+        keep: new Map([['books', 'kept: 1 open task names it']]),
+      }),
+    );
+    expect(result.proposed.find((a) => a.name === 'friday')).toEqual({
+      name: 'friday',
+      globs: ['web/app/(app)/friday/**'],
+      role: AreaRole.Page,
+      route: '/friday',
+    });
+  });
+
+  it('renames a new page or area whose name a kept area or a hazard has', () => {
+    const result = rebuildAreas(
+      input({
+        existing: [
+          { name: 'api', globs: ['api/legacy/**'] },
+          { name: 'people', globs: ['docs/people/**'] },
+        ],
+        keep: new Map([
+          ['api', 'kept: 1 open task names it'],
+          ['people', 'kept: 1 open task names it'],
+        ]),
         others: [...OTHERS, { name: 'deps', globs: ['web/package.json'] }],
       }),
     );
     const names = result.proposed.map((a) => a.name);
-    expect(names).toEqual(['api', 'friday', 'people', 'web', 'src', 'api-2', 'root', 'deps-2']);
+    expect(names).toEqual([
+      'api',
+      'people',
+      'friday',
+      'people-2',
+      'web',
+      'src',
+      'api-2',
+      'root',
+      'deps-2',
+    ]);
   });
 
   it('marks a new area with no role that a page overlaps shared, and drops one a page holds whole', () => {
@@ -175,6 +222,13 @@ describe('rebuildAreas', () => {
       reason: expect.stringMatching(/can share a file/u) as string,
     });
     expect(setupAreasProblem(result.proposed, [])).toBeNull();
+  });
+
+  it('answers the project’s own list when the rebuild finds no page', () => {
+    const existing = [{ name: 'repo', globs: ['**'] }];
+    const result = rebuildAreas(input({ existing, pages: [] }));
+    expect(result.proposed).toEqual(existing);
+    expect(result.pages).toEqual([]);
   });
 
   it('proposes nothing new when the rebuilt list is the one the project has', () => {

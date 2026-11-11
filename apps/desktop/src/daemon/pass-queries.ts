@@ -336,7 +336,8 @@ export function useWorkbenchSetup(projectId: ProjectId, enabled = true) {
     enabled,
     retry: false,
     refetchOnWindowFocus: false,
-    staleTime: 60_000,
+    // A setup reads the repository; once read it stands for ten minutes or until Apply.
+    staleTime: 10 * 60_000,
   });
 }
 

@@ -11,11 +11,27 @@ import { auth, createProject } from './shape-project';
 // Settings is Ready after its first turn and works on the builder's message until a second one adds to
 // its turn; People asks a question first.
 
-const AREAS = [
-  { name: 'settings', globs: ['src/settings/**'], role: 'page', route: '/settings' },
-  { name: 'people', globs: ['src/people/**'], role: 'page', route: '/people' },
-  { name: 'repo', globs: ['**'], catchAll: true, role: 'shared' },
-] as const;
+/**
+ * An app that names its routes in code, with three views and a component they share. The project
+ * starts with one area and no page; the setup makes the pages.
+ */
+const APP: Readonly<Record<string, string>> = {
+  'package.json': '{ "name": "workbench-app" }\n',
+  'src/router.tsx': [
+    "import { createRoute } from '@tanstack/react-router';",
+    "import { SettingsView } from './views/settings/settings-view';",
+    "import { PeopleView } from './views/people/people-view';",
+    "import { BillingView } from './views/billing/billing-view';",
+    "const settings = createRoute({ path: '/settings', component: SettingsView });",
+    "const people = createRoute({ path: '/people', component: PeopleView });",
+    "const billing = createRoute({ path: '/billing', component: BillingView });",
+    '',
+  ].join('\n'),
+  'src/views/settings/settings-view.tsx': "import { Button } from '../../ui/button';\n",
+  'src/views/people/people-view.tsx': "import { Button } from '../../ui/button';\n",
+  'src/views/billing/billing-view.tsx': "import { Button } from '../../ui/button';\n",
+  'src/ui/button.tsx': 'export const Button = () => null;\n',
+};
 
 const Live = z.array(z.looseObject({ pass: z.looseObject({ projectId: z.string() }) }));
 
@@ -120,7 +136,12 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
   page,
   request,
 }) => {
-  const projectId = await createProject(request, 'workbench', AREAS);
+  const projectId = await createProject(
+    request,
+    'workbench',
+    [{ name: 'repo', globs: ['**'], catchAll: true }],
+    APP,
+  );
   const patched = await request.patch(`${daemonUrl}/projects/${projectId}`, {
     headers: auth,
     data: { appUrl: `http://127.0.0.1:${String(await unusedPort())}` },
@@ -137,9 +158,21 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
   await page.addInitScript(record);
   const announced: string[] = [];
 
-  // The picker, narrow and dark.
+  // No page area yet: the setup, narrow and wide, dark. Billing is left out; Apply makes the pages.
   await page.setViewportSize({ width: 480, height: 900 });
   await page.goto('/workbench');
+  await expect(
+    page.getByRole('heading', { name: 'Set up workbench for the Workbench' }),
+  ).toBeVisible();
+  const billing = page.getByRole('checkbox', { name: 'Make billing a page at /billing' });
+  await expect(billing).toBeChecked();
+  await scan(page, 480, 'dark', 'setup');
+  await scan(page, 1280, 'dark', 'setup');
+  await billing.uncheck();
+  await page.getByRole('button', { name: 'Apply (2)' }).click();
+
+  // The picker, narrow and dark.
+  await page.setViewportSize({ width: 480, height: 900 });
   await expect(page.getByRole('checkbox', { name: 'settings' })).toBeVisible();
   await scan(page, 480, 'dark', 'picker');
 
@@ -201,7 +234,7 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
   await expect(settings.getByText('Loosened the padding.')).toBeVisible();
   await expect(
     settings.getByRole('list', { name: 'Files this turn changed' }).last(),
-  ).toContainText('src/settings/page.tsx');
+  ).toContainText('src/views/settings/page.tsx');
 
   // Sign Off: "Signing off…", then green "Signed off".
   await settings.getByRole('button', { name: 'Sign Off' }).click();

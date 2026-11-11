@@ -53,7 +53,10 @@
       {
         "do": "tool",
         "toolName": "Write",
-        "input": { "file_path": "src/settings/page.tsx", "content": "export const padding = 4;\n" }
+        "input": {
+          "file_path": "src/views/settings/page.tsx",
+          "content": "export const padding = 4;\n"
+        }
       },
       { "do": "turn_complete", "text": "Tidied the settings form." },
       { "do": "await_message", "contains": "padding too tight" },
@@ -61,7 +64,11 @@
       {
         "do": "tool",
         "toolName": "Edit",
-        "input": { "file_path": "src/settings/page.tsx", "old_string": "4", "new_string": "12" }
+        "input": {
+          "file_path": "src/views/settings/page.tsx",
+          "old_string": "4",
+          "new_string": "12"
+        }
       },
       { "do": "await_message", "contains": "the header too" },
       { "do": "consume" },
@@ -93,7 +100,7 @@
         "do": "tool",
         "toolName": "Write",
         "input": {
-          "file_path": "src/people/page.tsx",
+          "file_path": "src/views/people/page.tsx",
           "content": "export const spacing = 'roomy';\n"
         }
       },

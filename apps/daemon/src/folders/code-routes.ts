@@ -34,11 +34,18 @@ export interface CodeRoutesInput {
 const under = (path: string, folder: string): boolean =>
   folder === '' || path.startsWith(`${folder}/`);
 
+/** At most this many router files are read per app, the shallowest first. */
+const MAX_ROUTER_FILES = 20;
+
 /** The files under the unit's source folder (`src/` when it has one) that may define its routes. */
 export function routerFiles(files: readonly string[], unit: string): string[] {
   const src = unit === '' ? 'src' : `${unit}/src`;
   const base = files.some((f) => under(f, src)) ? src : unit;
-  return files.filter((f) => under(f, base) && ROUTER_NAME.test(posix.basename(f)));
+  const depth = (f: string) => f.split('/').length;
+  return files
+    .filter((f) => under(f, base) && ROUTER_NAME.test(posix.basename(f)))
+    .sort((a, b) => depth(a) - depth(b))
+    .slice(0, MAX_ROUTER_FILES);
 }
 
 /** An area name from a folder's name: lowercase words joined by hyphens. */
@@ -50,11 +57,17 @@ export function areaNameOf(folderName: string): string {
   return /^[a-z]/u.test(words) ? words : `page-${words === '' ? 'x' : words}`;
 }
 
-/** The index just past the string literal that opens at `start`, looking no further than `limit`. */
+/**
+ * The index just past the string literal that opens at `start`, looking no further than `limit`. A
+ * `'` or `"` string ends at a line's end too, so an apostrophe in JSX text hides nothing after it.
+ */
 function stringEnd(text: string, start: number, limit = text.length): number {
   const quote = text[start];
   let i = start + 1;
-  while (i < limit && text[i] !== quote) i += text[i] === '\\' ? 2 : 1;
+  while (i < limit && text[i] !== quote) {
+    if (text[i] === '\n' && quote !== '`') return i;
+    i += text[i] === '\\' ? 2 : 1;
+  }
   return Math.min(i + 1, limit);
 }
 
@@ -68,12 +81,15 @@ interface Brackets {
   readonly closes: ReadonlyMap<number, number>;
   /** For each position asked, the `{` of the innermost object around it, or -1. */
   readonly around: ReadonlyMap<number, number>;
+  /** For each `{`, the `{` of the object around it, or -1. */
+  readonly parents: ReadonlyMap<number, number>;
 }
 
 /** One linear pass over `text`, strings and comments stepped over. `asked` is sorted. */
 function bracketsOf(text: string, asked: readonly number[]): Brackets {
   const closes = new Map<number, number>();
   const around = new Map<number, number>();
+  const parents = new Map<number, number>();
   const open: number[] = [];
   const objects: number[] = [];
   let next = 0;
@@ -97,7 +113,10 @@ function bracketsOf(text: string, asked: readonly number[]): Brackets {
     } else {
       if (isOpen(ch)) {
         open.push(i);
-        if (ch === '{') objects.push(i);
+        if (ch === '{') {
+          parents.set(i, objects.at(-1) ?? -1);
+          objects.push(i);
+        }
       } else if (isClose(ch)) {
         const at = open.pop();
         if (at !== undefined) {
@@ -110,7 +129,7 @@ function bracketsOf(text: string, asked: readonly number[]): Brackets {
   }
   reach(text.length);
   for (const at of open) closes.set(at, text.length);
-  return { closes, around };
+  return { closes, around, parents };
 }
 
 /** What the object opening at `open` holds outside its nested brackets, strings kept. */
@@ -179,57 +198,185 @@ function localComponents(text: string): Map<string, string[]> {
   return rendered;
 }
 
-/** A route definition: its path and the component it shows. */
+/** A route definition: its whole path and the component it shows. */
 interface RouteDef {
   readonly at: number;
   readonly path: string;
   readonly component: string;
 }
 
+const PATH_KEY = /\bpath\s*:\s*(['"`])([^'"`\n]*)\1/u;
 const COMPONENT_KEY =
   /(?:\b(?:component|Component)\s*:\s*([A-Z][\w$]*)|\belement\s*:\s*<\s*([A-Z][\w$]*))/u;
+// `getParentRoute: () => parent`, its `()` left out as a nested bracket is at an object's top level.
+const PARENT_KEY = /\bgetParentRoute\s*:\s*=>\s*([\w$]+)/u;
 const COMPONENT_ATTR =
   /(?:\b(?:component|Component)\s*=\s*\{\s*([A-Z][\w$]*)\s*\}|\belement\s*=\s*\{\s*<\s*([A-Z][\w$]*))/u;
+const PATH_ATTR = /\bpath\s*=\s*(?:(['"])([^'"\n]*)\1|\{\s*(['"`])([^'"`\n]*)\3\s*\})/u;
 /** How far a `<Route` tag's attributes are read. */
 const ROUTE_TAG_CHARS = 4096;
+/** How many parents a nested route's path is joined through. */
+const MAX_NESTING = 20;
+/** A joined path longer than a route can be (`AreaRoute`) is dropped. */
+const MAX_PATH_CHARS = 500;
+/** How many paths one router file may define. */
+const MAX_DEFINED = 2000;
 
-function routeDefs(text: string): RouteDef[] {
-  const defs: RouteDef[] = [];
-  const paths = [...text.matchAll(/\bpath\s*:\s*(['"`])([^'"`\n]*)\1/gu)];
+/** `path` under `parent`: a path from the root stays as it is. */
+function joinPath(parent: string | undefined, path: string): string {
+  if (path.startsWith('/')) return path;
+  const head = (parent ?? '').replace(/\/+$/u, '');
+  const tail = path.replace(/^\.?\//u, '');
+  return tail === '' ? (head === '' ? '/' : head) : `${head}/${tail}`;
+}
+
+/** What one route object says at its top level. */
+interface RouteObject {
+  readonly path: string | undefined;
+  readonly component: string | undefined;
+  readonly parentVar: string | undefined;
+}
+
+/**
+ * Each route a router file defines, with its whole path (a relative path joined to its parent: the
+ * object around it, the route `getParentRoute` names, or the `<Route>` tag around it), and every path
+ * it defines whatever the route shows. One pass over the brackets; each `<Route` tag is read once.
+ */
+function routesOf(text: string): { defs: RouteDef[]; defined: string[] } {
+  const keys = [...text.matchAll(new RegExp(PATH_KEY.source, 'gu'))];
   const brackets = bracketsOf(
     text,
-    paths.map((m) => m.index),
+    keys.map((m) => m.index),
   );
-  const objects = new Map<number, string | null>();
-  for (const match of paths) {
-    const open = brackets.around.get(match.index) ?? -1;
-    if (open === -1) continue;
-    let component = objects.get(open);
-    if (component === undefined) {
-      const found = COMPONENT_KEY.exec(topLevelOf(text, brackets, open));
-      component = found?.[1] ?? found?.[2] ?? null;
-      objects.set(open, component);
+  const variables = new Map<string, number>();
+  for (const m of text.matchAll(/(?:const|let|var)\s+([\w$]+)\s*=\s*createRoute\(\s*\{/gu))
+    if (m[1] !== undefined) variables.set(m[1], m.index + m[0].length - 1);
+  const objects = new Map<number, RouteObject>();
+  const objectAt = (open: number): RouteObject => {
+    let found = objects.get(open);
+    if (found === undefined) {
+      const top = topLevelOf(text, brackets, open);
+      const component = COMPONENT_KEY.exec(top);
+      found = {
+        path: PATH_KEY.exec(top)?.[2],
+        component: component?.[1] ?? component?.[2],
+        parentVar: PARENT_KEY.exec(top)?.[1],
+      };
+      objects.set(open, found);
     }
-    if (component !== null && match[2] !== undefined)
-      defs.push({ at: match.index, path: match[2], component });
+    return found;
+  };
+  // The nearest object at or around a bracket that names a path, found once per bracket: a walk up
+  // through objects with none is remembered for each of them, so deep nesting reads in linear time.
+  const nearest = new Map<number, number>();
+  const nearestRoute = (from: number): number => {
+    const passed: number[] = [];
+    let found = -1;
+    for (let up = from; up !== -1; up = brackets.parents.get(up) ?? -1) {
+      const known = nearest.get(up);
+      if (known !== undefined) {
+        found = known;
+        break;
+      }
+      if (objectAt(up).path !== undefined) {
+        found = up;
+        break;
+      }
+      passed.push(up);
+    }
+    for (const bracket of passed) nearest.set(bracket, found);
+    return found;
+  };
+  const fullPaths = new Map<number, string | undefined>();
+  const fullPath = (open: number, depth: number): string | undefined => {
+    if (fullPaths.has(open)) return fullPaths.get(open);
+    const { path, parentVar } = objectAt(open);
+    let whole: string | undefined;
+    if (path !== undefined && depth < MAX_NESTING) {
+      let parent: string | undefined;
+      if (!path.startsWith('/')) {
+        const named = parentVar === undefined ? undefined : variables.get(parentVar);
+        if (named !== undefined) parent = fullPath(named, depth + 1);
+        else {
+          const up = nearestRoute(brackets.parents.get(open) ?? -1);
+          if (up !== -1) parent = fullPath(up, depth + 1);
+        }
+      }
+      const joined = joinPath(parent, path);
+      whole = joined.length > MAX_PATH_CHARS ? undefined : joined;
+    }
+    fullPaths.set(open, whole);
+    return whole;
+  };
+
+  const defs: RouteDef[] = [];
+  const defined: string[] = [];
+  for (const open of new Set(keys.map((m) => brackets.around.get(m.index) ?? -1))) {
+    if (open === -1) continue;
+    const path = fullPath(open, 0);
+    if (path === undefined) continue;
+    if (defined.length < MAX_DEFINED) defined.push(path);
+    const { component } = objectAt(open);
+    if (component !== undefined) defs.push({ at: open, path, component });
   }
-  for (const match of text.matchAll(/<Route\b/gu)) {
-    const limit = Math.min(text.length, match.index + ROUTE_TAG_CHARS);
-    let end = match.index + match[0].length;
+
+  // JSX: each `<Route` tag read once, a tag left open holding the routes nested in it.
+  const stack: (string | undefined)[] = [];
+  let depth = 0;
+  // The next `</Route` is looked for again only once the scan has passed it, so a file of open tags
+  // with no closing one is read once, not once a tag.
+  // A `</Route` counts only as a whole tag name: `</Routes>` and `</RouteGuard>` close no route.
+  const closeFrom = (from: number): number => {
+    let found = text.indexOf('</Route', from);
+    while (found !== -1 && !/[\s>]/u.test(text[found + 7] ?? ''))
+      found = text.indexOf('</Route', found + 7);
+    return found;
+  };
+  let closing = closeFrom(0);
+  for (let at = 0; at < text.length;) {
+    const opening = text.indexOf('<Route', at);
+    if (closing !== -1 && closing < at) closing = closeFrom(at);
+    if (opening === -1 && closing === -1) break;
+    if (closing !== -1 && (opening === -1 || closing < opening)) {
+      if (depth <= MAX_NESTING) stack.pop();
+      depth = Math.max(0, depth - 1);
+      at = closing + 7;
+      continue;
+    }
+    const after = text[opening + 6];
+    if (after !== undefined && /[\w$]/u.test(after)) {
+      at = opening + 6;
+      continue;
+    }
+    const limit = Math.min(text.length, opening + ROUTE_TAG_CHARS);
+    let end = opening + 6;
     while (end < limit && text[end] !== '>') {
       if (text[end] === '{') end = (brackets.closes.get(end) ?? limit) + 1;
       else if (isQuote(text[end])) end = stringEnd(text, end, limit);
       else end += 1;
     }
-    const attrs = text.slice(match.index, Math.min(end, limit));
-    const path = /\bpath\s*=\s*(?:(['"])([^'"\n]*)\1|\{\s*(['"`])([^'"`\n]*)\3\s*\})/u.exec(attrs);
+    const attrs = text.slice(opening, Math.min(end, limit));
+    const literal = PATH_ATTR.exec(attrs);
+    const raw = literal?.[2] ?? literal?.[4];
+    // Past the nesting cap a tag's path is not joined, and the tags it holds are counted, not kept.
+    const parent = stack.at(-1);
+    const nested = depth >= MAX_NESTING;
+    const joined = raw === undefined || nested ? undefined : joinPath(parent, raw);
+    const path = joined !== undefined && joined.length <= MAX_PATH_CHARS ? joined : undefined;
     const found = COMPONENT_ATTR.exec(attrs);
     const component = found?.[1] ?? found?.[2];
-    const literal = path?.[2] ?? path?.[4];
-    if (component !== undefined && literal !== undefined)
-      defs.push({ at: match.index, path: literal, component });
+    if (path !== undefined) {
+      if (defined.length < MAX_DEFINED) defined.push(path);
+      if (component !== undefined) defs.push({ at: opening, path, component });
+    }
+    // A tag too long to read whole counts as open, so the `</Route>` that ends it pops it alone.
+    if (end >= limit || text[end - 1] !== '/') {
+      if (!nested) stack.push(path ?? parent);
+      depth += 1;
+    }
+    at = Math.max(end + 1, opening + 6);
   }
-  return defs.sort((a, b) => a.at - b.at);
+  return { defs: defs.sort((a, b) => a.at - b.at), defined };
 }
 
 /** The page folder a module sits in: a folder directly under a `views/`-like folder. */
@@ -244,6 +391,24 @@ const hasParameter = (path: string) =>
   path
     .split('/')
     .some((s) => s.startsWith('$') || s.startsWith(':') || s.startsWith('[') || s.includes('*'));
+
+/**
+ * For a page named only by paths with a parameter, the longest static start of one of them that the
+ * router also defines (`/settings` for `/settings/$section`); undefined when it defines none.
+ */
+function definedPrefix(paths: readonly string[], defined: ReadonlySet<string>): string | undefined {
+  const prefixes = paths.flatMap((path) => {
+    const route = asRoute(path);
+    if (route === null) return [];
+    const segments = route.split('/').slice(1);
+    const fixed = segments.findIndex(
+      (s) => s.startsWith('$') || s.startsWith(':') || s.startsWith('[') || s.includes('*'),
+    );
+    const head = fixed === -1 ? segments : segments.slice(0, fixed);
+    return head.map((_, i) => `/${head.slice(0, i + 1).join('/')}`);
+  });
+  return prefixes.filter((p) => defined.has(p)).sort((a, b) => b.length - a.length)[0];
+}
 
 /** `path` as a page's route, or null when no route can be it. */
 function asRoute(path: string): string | null {
@@ -260,7 +425,13 @@ function asRoute(path: string): string | null {
 export function codeRoutes(input: CodeRoutesInput): CodeRoutes {
   const tracked = new Set(input.files);
   const found = new Map<string, string[]>();
+  const defined = new Set<string>();
   for (const [file, text] of input.routers) {
+    const routes = routesOf(text);
+    for (const path of routes.defined) {
+      const route = asRoute(path);
+      if (route !== null) defined.add(route);
+    }
     const imports = importedNames(text);
     const folderOf = (name: string): string | null => {
       const specifier = imports.get(name);
@@ -281,18 +452,19 @@ export function codeRoutes(input: CodeRoutesInput): CodeRoutes {
       }
       return folder;
     };
-    for (const def of routeDefs(text)) {
+    for (const def of routes.defs) {
       const folder = pageOf(def.component);
       if (folder !== null) found.set(folder, [...(found.get(folder) ?? []), def.path]);
     }
   }
   const pages = [...found].map(([folder, paths]): CodePage => {
     const name = areaNameOf(posix.basename(folder));
-    const route = paths
-      .filter((p) => !hasParameter(p))
-      .map(asRoute)
-      .filter((r) => r !== null)
-      .sort((a, b) => a.length - b.length)[0];
+    const route =
+      paths
+        .filter((p) => !hasParameter(p))
+        .map(asRoute)
+        .filter((r) => r !== null)
+        .sort((a, b) => a.length - b.length)[0] ?? definedPrefix(paths, defined);
     return route === undefined ? { name, folder } : { name, folder, route };
   });
   const pageDirs = new Set(pages.map((p) => posix.dirname(p.folder)));
