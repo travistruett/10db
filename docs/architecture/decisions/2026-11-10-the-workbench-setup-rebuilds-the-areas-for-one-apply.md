@@ -8,7 +8,8 @@
 ## Decision
 
 Opening the Workbench on a project with no page area shows the setup in place of the picker; a project
-with page areas reaches it from the picker's Set Up (n) while the setup still has rows. Propose Page
+with page areas reaches it from the picker's Set Up (n), which counts the setup's settings and branch
+note only, so a page the builder left out is not asked for again. Propose Page
 Areas, its dialog and `POST /projects/:projectId/propose-page-areas` are gone: there is one path.
 
 - **One read, one Apply.** `POST /projects/:projectId/workbench-setup` answers `WorkbenchSetupDto`: the
@@ -32,17 +33,23 @@ Areas, its dialog and `POST /projects/:projectId/propose-page-areas` are gone: t
   rebuilt like any other area.
 - **A page's code is what only it imports.** Each page's reach is every source file its route folder's
   files import, directly or not (static imports and re-exports, `import()` and `require()` with a
-  literal, relative or through tsconfig `paths` and `baseUrl`). A file one page alone reaches is the
-  page's; one two pages reach, or one a layout reaches, stays shared. The page takes the largest folder
-  of its own files and files nothing reaches, never the app's root nor a folder holding or inside a
-  route folder; fewer than 20 single files left over become exact globs. Over 5,000 source files no
+  literal, relative or through tsconfig `paths` and `baseUrl`); a test or story starts no reach. A
+  file one page alone reaches is the page's; one two pages reach, or one a layout, router or entry
+  file reaches outside the route folders, stays shared. The page takes the largest folder every
+  source file of which, tests aside, is its alone (a file nothing reaches keeps its folder out),
+  never the app's root nor a folder holding or inside a route folder; fewer than 20 single files left
+  over become exact globs.
+- **Which screens are pages.** An index page (a route folder's or route group's own `page.*`) is a
+  page at the path it shows, `home` at `/`. A screen whose page files only `redirect(` is left out,
+  "redirects to another page". A nested route group adds nothing: its screens are pages of their own.
+  A screen with no page file at its own path is a page with no route. Over 5,000 source files no
   graph is built and the setup says so. Source text is read by a linear scanner, never by a regex whose
   quantifiers can match the same text, so no repository's file can stall the daemon.
 - **An app that names its routes in code** (a Vite or Tauri UI) gets its pages from its `router.*`,
   `routes.*`, `App.*` and `main.*` files: each route's component, through the file's imports or through
   what a component defined there renders, resolved to a folder directly under `views/`, `pages/`,
   `screens/` or `routes/`, with the shortest static path naming it; a page named only by a path with a
-  parameter has no route. Its unit is split into its `src/`, shared, and the rest.
+  parameter takes the longest static start of it the router also defines, else no route. Its unit is split into its `src/`, shared, and the rest.
 - **Pushing stays the builder's act.** The branch note is a command to copy, never a button: a push
   runs the repository's hooks and sends commits to a remote.
 
