@@ -207,8 +207,8 @@ interface DockerSources {
 
 /**
  * Allow Docker, when the switch is off and the builder has not turned it off, and the gate command
- * or a saved turn check (the builder's own) calls docker, or a script a suggested turn check runs
- * does, as `callsDocker` reads a gate: Makefiles and scripts from the remote-tracking branch's commit
+ * or a saved turn check (the builder's own) calls docker, or a script at origin that a suggested turn
+ * check runs does, as `callsDocker` reads a gate: Makefiles and scripts from the remote-tracking branch's commit
  * (`tracking`) only, nothing with none. The command 10db wrote for the check is never read as text
  * (its folder could be named `docker`), and the dev login never counts: a model wrote it.
  */
@@ -319,9 +319,11 @@ export async function suggestSettings(
           source: oneLine(found.source),
           note: CHANGED_CHECK_NOTE,
         };
+  // With no origin commit the scripts were read from HEAD, which lanes write: only the builder's own
+  // saved commands may then suggest Docker.
   const dockerRow = await docker(deps.git, project, tracking, {
     savedCheck: project.changedCheckCommand,
-    checkScripts: found?.scripts ?? [],
+    checkScripts: tracking === null ? [] : (found?.scripts ?? []),
   });
   const settings = [address, login, check, dockerRow].filter(
     (s): s is SettingSuggestion => s !== null,

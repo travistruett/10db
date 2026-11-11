@@ -385,4 +385,22 @@ describe('suggestSettings', () => {
     expect(result.branch).toBeNull();
     expect(calls.prompts).toEqual([]);
   });
+
+  it("with no origin, never suggests Docker from the repository's own scripts", async () => {
+    const repo = createTempRepo();
+    cleanups.push(() => {
+      repo.cleanup();
+    });
+    commit(repo.path, {
+      'pnpm-lock.yaml': 'lockfileVersion: 9.0\n',
+      'web/package.json':
+        '{"scripts":{"typecheck":"docker compose run --rm web tsc"},"dependencies":{"next":"16.0.0"}}',
+    });
+    const { deps: d } = deps(null, []);
+    const result = await suggestSettings(d, project(realpathSync(repo.path), { areas: [] }), []);
+    expect(result.settings.map((s) => s.field)).toEqual([
+      SettingField.AppUrl,
+      SettingField.ChangedCheckCommand,
+    ]);
+  });
 });
