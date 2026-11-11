@@ -11,6 +11,7 @@ import {
   AreaCandidateKind,
   deriveAreaCandidates,
   fileRouteApps,
+  isPageFile,
   mergeCoupledCandidates,
   treeGlobs,
   type AreaCandidate,
@@ -20,7 +21,17 @@ import { areaNameOf, codeRoutes, routerFiles, type CodePage } from './code-route
 import { isSourceFile, readPathAliases } from './import-graph';
 import { literalGlob } from './literal-glob';
 import { readPageCode, type PageSeed } from './page-code';
+import { indexPageFiles, isRedirectOnly } from './route-pages';
 import { rebuildAreas, type PlannedPage } from './rebuild-areas';
+
+/** A page of an app as the setup plans it: a screen folder, or an index page's own file. */
+interface GroupPage {
+  name: string;
+  readonly folder?: string;
+  readonly files?: readonly string[];
+  readonly route: string | undefined;
+  readonly routeGlobs: readonly string[];
+}
 
 /** How many of the latest commits are read for folders that change together. */
 const HISTORY_COMMITS = 400;
@@ -123,6 +134,8 @@ async function codePages(
 ): Promise<{
   pages: (CodePage & { unit: string })[];
   skipped: { name: string; reason: string }[];
+  /** Each unit's router and entry files, which every page of it renders inside. */
+  routers: { unit: string; file: string }[];
 }> {
   const units = packageUnits(files).filter((u) => !skipUnits.has(u));
   const all = packageUnits(files);
@@ -137,7 +150,7 @@ async function codePages(
       .map((name) => (unit === '' ? name : `${unit}/${name}`))
       .filter((path) => files.includes(path)),
   );
-  if (routers.length === 0) return { pages: [], skipped: [] };
+  if (routers.length === 0) return { pages: [], skipped: [], routers: [] };
   const texts = await deps.git.surveyTexts(
     repo,
     [...routers.map((r) => r.file), ...configs],
@@ -167,7 +180,7 @@ async function codePages(
     pages.push(...found.pages.map((p) => ({ ...p, unit: unitOf(p.folder, units) })));
     skipped.push(...found.unrouted.map((u) => ({ name: u.name, reason: u.reason })));
   }
-  return { pages, skipped };
+  return { pages, skipped, routers };
 }
 
 /**
@@ -197,9 +210,43 @@ export async function proposeSetupAreas(
   const code = await codePages(deps, project.repoPath, files, fileUnits);
   signal?.throwIfAborted();
 
+  // A screen whose page files only redirect is no page: its folder stays an area with no role.
+  const indexes = apps.flatMap((app) =>
+    indexPageFiles(files, app).map((index) => ({ ...index, app })),
+  );
+  const screenPages = (c: AreaCandidate) => files.filter((f) => isPageFile(f) && under(f, c.label));
+  const pageTexts = await deps.git.surveyTexts(
+    project.repoPath,
+    [...candidates.filter(isPage).flatMap(screenPages), ...indexes.map((i) => i.file)],
+    ROUTER_MAX_BYTES,
+  );
+  signal?.throwIfAborted();
+  const redirects = (paths: readonly string[]) =>
+    paths.length > 0 &&
+    paths.every((f) => {
+      const text = pageTexts.get(f);
+      return text !== undefined && isRedirectOnly(text);
+    });
+  const skipped = [...code.skipped];
+  const routed = candidates.map((c): AreaCandidate => {
+    if (!isPage(c) || !redirects(screenPages(c))) return c;
+    skipped.push({
+      name: areaNameOf(posix.basename(c.label)),
+      reason: 'redirects to another page',
+    });
+    return {
+      kind: c.kind,
+      label: c.label,
+      globs: c.globs,
+      files: c.files,
+      trees: c.trees,
+      directs: c.directs,
+    };
+  });
+
   // The units of apps with routes in code are split, so their pages overlap only shared code.
   const codeUnits = new Set(code.pages.map((p) => p.unit));
-  const structural = candidates.flatMap((c) =>
+  const structural = routed.flatMap((c) =>
     !isPage(c) &&
     c.kind === AreaCandidateKind.Unit &&
     codeUnits.has(c.label) &&
@@ -253,7 +300,6 @@ export async function proposeSetupAreas(
 
   // Each app's pages and the code only each imports.
   const planned: PlannedPage[] = [];
-  const skipped = [...code.skipped];
   // A layout's code is every page's; a screen of its own there (`page.tsx`, the `/` route) is not.
   const sourceIn = (folders: readonly string[]) =>
     files.filter(
@@ -267,14 +313,40 @@ export async function proposeSetupAreas(
       pages: pageCandidates
         .map((c, i) => ({ c, name: named[i]?.name ?? areaNameOf(posix.basename(c.label)) }))
         .filter(({ c }) => under(c.label, app.routes))
-        .map(({ c, name }) => ({ name, folder: c.label, route: c.route, routeGlobs: c.globs })),
+        .map(({ c, name }): GroupPage => ({
+          name,
+          folder: c.label,
+          route: c.route,
+          routeGlobs: c.globs,
+        }))
+        .concat(
+          // An index page (a group's own `page.tsx`) is a page of its own, at the path it shows.
+          indexes
+            .filter((index) => index.app === app)
+            .flatMap((index): GroupPage[] => {
+              if (redirects([index.file])) {
+                skipped.push({ name: index.file, reason: 'redirects to another page' });
+                return [];
+              }
+              const last = index.route.split('/').at(-1) ?? '';
+              return [
+                {
+                  name: last === '' ? 'home' : areaNameOf(last),
+                  files: [index.file],
+                  route: index.route,
+                  routeGlobs: [literalGlob(index.file)],
+                },
+              ];
+            }),
+        ),
     })),
     ...[...codeUnits].map((unit) => ({
       unit,
-      sharedRoots: [],
+      // The router and its entry, and the shell they reach outside the pages, are every page's.
+      sharedRoots: code.routers.filter((r) => r.unit === unit).map((r) => r.file),
       pages: code.pages
         .filter((p) => p.unit === unit)
-        .map((p) => ({
+        .map((p): GroupPage => ({
           name: p.name,
           folder: p.folder,
           route: p.route,
@@ -292,7 +364,10 @@ export async function proposeSetupAreas(
       names.add(name);
       page.name = name;
     }
-    const seeds: PageSeed[] = group.pages.map((p) => ({ name: p.name, folder: p.folder }));
+    const seeds = group.pages.map((p): PageSeed => {
+      if (p.files !== undefined) return { name: p.name, files: p.files };
+      return p.folder === undefined ? { name: p.name } : { name: p.name, folder: p.folder };
+    });
     const found = await readPageCode(deps.git, project.repoPath, {
       unit: group.unit,
       files,

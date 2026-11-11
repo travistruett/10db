@@ -536,6 +536,10 @@ describe('POST /projects/:projectId/workbench-setup', () => {
       'src/friday-book/session.ts': '\n',
       'src/ui/button.tsx': '\n',
       'src/shell/frame.tsx': '\n',
+      'app/(app)/page.tsx': "import { Board } from '@/src/home/board';\n",
+      'src/home/board.tsx': '\n',
+      'app/(app)/coaching/page.tsx':
+        "import { redirect } from 'next/navigation';\nexport default function Page() {\n  redirect('/people');\n}\n",
       'docs/notes.md': 'notes\n',
     });
     const project = await projectWith([
@@ -553,7 +557,13 @@ describe('POST /projects/:projectId/workbench-setup', () => {
       { name: 'friday', route: '/friday', folders: ['app/(app)/friday/', 'src/friday-book/'] },
       { name: 'people', route: '/people', folders: ['app/(app)/people/'] },
       { name: 'settings', route: '/settings', folders: ['app/(app)/settings/'] },
+      // The group's own page is the home screen, with the code only it imports.
+      { name: 'home', route: '/', folders: ['app/(app)/page.tsx', 'src/home/'] },
     ]);
+    expect(setup.areas.skipped).toContainEqual({
+      name: 'coaching',
+      reason: 'redirects to another page',
+    });
     const byName = new Map(setup.areas.proposed.map((a) => [a.name, a]));
     expect(byName.get('rest')).toEqual({ name: 'rest', globs: ['**'], catchAll: true });
     expect(byName.has('bundle')).toBe(false);
