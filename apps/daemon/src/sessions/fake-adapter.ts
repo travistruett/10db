@@ -25,6 +25,7 @@ import {
   type AccountLoginOutcome,
   type AccountProbeSpec,
   type CompletionSpec,
+  type ConversationReadSpec,
   type InterruptReceipt,
   type SessionAdapter,
   type SessionEvent,
@@ -185,6 +186,17 @@ export class FakeAdapter implements SessionAdapter {
    * acknowledges it and drops it, as the live test saw. So does the fake.
    */
   private readonly transcripts = new Map<string, Set<string>>();
+  /** The client uuids each conversation's turns took, by provider session id, as a Codex thread keeps them. */
+  private readonly taken = new Map<string, string[]>();
+  /** Every conversation read back, in order. */
+  readonly reads: ConversationReadSpec[] = [];
+  /**
+   * What reading a conversation back answers: by default the client uuids its turns took here, as a
+   * Codex thread keeps them. A test sets it to stand for a thread a daemon that died left behind, or
+   * one that can't be read.
+   */
+  readBack: (spec: ConversationReadSpec) => Promise<readonly string[]> = (spec) =>
+    Promise.resolve([...(this.taken.get(spec.providerSessionId) ?? [])]);
   /**
    * What a lane session's interrupt answers, from the uuids of the messages no turn has taken yet: by
    * default all of them as still queued, as a Claude Code that advertises `interrupt_receipt_v1` does;
@@ -237,6 +249,11 @@ export class FakeAdapter implements SessionAdapter {
   complete(ask: CompletionSpec): Promise<string> {
     this.completions.push(ask);
     return this.answer(ask);
+  }
+
+  readClientUuids(spec: ConversationReadSpec): Promise<readonly string[]> {
+    this.reads.push(spec);
+    return this.readBack(spec);
   }
 
   probeAccount(probe: AccountProbeSpec): Promise<SeenAccount> {
@@ -347,6 +364,8 @@ export class FakeAdapter implements SessionAdapter {
     const providerSessionId = spec.resumeProviderSessionId ?? `fake-${spec.sessionId}`;
     const transcript = this.transcripts.get(providerSessionId) ?? new Set<string>();
     this.transcripts.set(providerSessionId, transcript);
+    const takenHere = this.taken.get(providerSessionId) ?? [];
+    this.taken.set(providerSessionId, takenHere);
     /** The client uuids of the messages the session holds that no turn has taken yet, the prompt's first. */
     const untaken: string[] = [];
     /** What the running turn has taken, which its result lists again. */
@@ -578,6 +597,7 @@ export class FakeAdapter implements SessionAdapter {
         case 'consume': {
           const uuids = untaken.splice(0);
           takenThisTurn = [...takenThisTurn, ...uuids];
+          takenHere.push(...uuids);
           if (uuids.length > 0) channel.push({ type: 'consumed', uuids });
           return 'continue';
         }

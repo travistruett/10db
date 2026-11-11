@@ -265,6 +265,7 @@ import {
   resumedSessionOf,
   withUndelivered,
 } from './next-action';
+import { readBackThread } from './read-back';
 import { takesPictures } from '../pictures';
 import { threadInlineBytes } from './thread-pictures';
 
@@ -343,7 +344,7 @@ export interface RunnerOptions {
   /** A craft skill's text, for a session that has no plugin to load it from; null when there is none. */
   skillBody(name: string): string | null;
   /** Builds each session's launch, and the env the gate runs in. */
-  readonly launcher: Pick<Launcher, 'projectEnv' | 'session'>;
+  readonly launcher: Pick<Launcher, 'projectEnv' | 'session' | 'probe'>;
   /** Usage limits, refusals and the monthly cap, per account. */
   readonly accounts: Pick<AccountRuntime, 'blocked' | 'rateLimited' | 'refused' | 'sessionEnded'> &
     Pick<AccountPreparer, 'prepare'> &
@@ -1818,14 +1819,36 @@ export function createRunner(opts: RunnerOptions): Runner {
     // A page of a pass (Workbench spec §6.2): its session runs turn after turn, each from a builder message.
     const pass = passOfWorkstream(db, id) ?? null;
     const fresh = actionOnAnotherAccount(id, ctl, row);
+    // A Codex thread the lane resumes with a builder message pushed to it and never seen taken is read
+    // back first (Workbench spec §12): what it took is delivered, never sent again, and a thread that
+    // can't be read fails the turn rather than guess.
+    const readBack =
+      fresh === null
+        ? await readBackThread(
+            { state: opts.state, adapter: opts.adapter, launcher: opts.launcher },
+            {
+              taskId: task.id,
+              account: getAccountRow(db, ctl.accountId),
+              cwd: checkout,
+              action: row.nextAction,
+            },
+          )
+        : null;
+    if (readBack?.kind === 'unread')
+      return {
+        kind: 'refused',
+        message: readBack.message,
+        providerSessionId: resumedSessionOf(row.nextAction),
+      };
+    const planned = fresh ?? readBack?.action ?? row.nextAction;
     // A pass task's session starts from the oldest message no turn has taken, whatever it was queued for.
     const action = pass
       ? turnMessageFirst(
           db,
           task.id,
-          withUndelivered(fresh ?? row.nextAction, untakenMessages(db, task.id)[0] ?? null),
+          withUndelivered(planned, untakenMessages(db, task.id)[0] ?? null),
         )
-      : (fresh ?? row.nextAction);
+      : planned;
     const step = currentStep(row);
     const persona = step.personaId ? getPersona(db, step.personaId) : null;
     const priorResults = row.steps.flatMap((s, i) =>

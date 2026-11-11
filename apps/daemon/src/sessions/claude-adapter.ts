@@ -49,6 +49,7 @@ import { claudeAuthStatus, type SignInCheck, type SignInState } from './sign-in-
 import {
   AccountProbeError,
   CompletionError,
+  ConversationUnreadError,
   SessionEndReason,
   type AccountProbeSpec,
   type CompletionSpec,
@@ -1177,5 +1178,12 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): SessionAdapter 
         ...(opts.clock === undefined ? {} : { clock: opts.clock }),
       }),
     complete: (ask) => complete(ask, opts, runQuery),
+    // A message pushed before a restart is pushed again to a resumed Claude Code session.
+    readClientUuids: (spec) =>
+      Promise.reject(
+        new ConversationUnreadError(
+          `10db does not read back Claude Code conversation ${spec.providerSessionId}`,
+        ),
+      ),
   };
 }

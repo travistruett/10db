@@ -146,3 +146,18 @@ export const ItemCompleted = z.looseObject({
 });
 
 export const TurnStarted = z.looseObject({ threadId: z.string(), turn: Turn });
+
+/**
+ * One page of a thread's turns (`thread/turns/list` with `itemsView: "full"`), as far as 10db reads
+ * it: each user message item's client uuid, which `clientUserMessageId` set when it was sent.
+ */
+export const ThreadTurnsPage = z.looseObject({
+  data: z.array(
+    z.looseObject({
+      items: z.array(
+        z.looseObject({ type: z.string(), clientId: z.string().nullable().optional() }),
+      ),
+    }),
+  ),
+  nextCursor: z.string().nullable().optional(),
+});

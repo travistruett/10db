@@ -14,6 +14,7 @@ import {
   type CodexSpawn,
 } from './codex-rpc';
 import { startCodexSession } from './codex-session';
+import { readThreadClientUuids } from './codex-thread-read';
 import type { SignInCheck } from './sign-in-check';
 import {
   AccountProbeError,
@@ -109,6 +110,7 @@ export function createCodexAdapter(opts: CodexAdapterOptions): SessionAdapter {
     startLogin: (login) => startCodexLogin(login, opts),
     complete: () => Promise.reject(new CompletionError(NO_QUESTIONS)),
     start: (spec) => startCodexSession(spec, { ...opts, homes }),
+    readClientUuids: (spec) => readThreadClientUuids(spec, { ...opts, homes }),
     startShape(): ShapeSessionHandle {
       return endedAtOnce(NO_BRAINSTORM);
     },

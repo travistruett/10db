@@ -14,7 +14,13 @@ export {
 export { scriptedShapeBehaviour } from './fake-shape';
 export type { FakeShapeBehaviour, FakeShapeTurn } from './fake-shape';
 export { checkAccount, loginIdentity, type SeenAccount, type SeenModel } from './account-check';
-export { AccountLoginError, AccountProbeError, CompletionError, SessionEndReason } from './types';
+export {
+  AccountLoginError,
+  AccountProbeError,
+  CompletionError,
+  ConversationUnreadError,
+  SessionEndReason,
+} from './types';
 export type {
   AccountLogin,
   InterruptReceipt,

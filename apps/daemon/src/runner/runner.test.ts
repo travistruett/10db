@@ -1482,6 +1482,9 @@ describe('runner', () => {
           session: () => {
             throw new Error('The launch could not be built.');
           },
+          probe: () => {
+            throw new Error('The launch could not be built.');
+          },
         },
       },
     );

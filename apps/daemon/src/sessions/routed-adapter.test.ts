@@ -54,6 +54,10 @@ function recording(name: string): SessionAdapter & { readonly calls: string[] } 
         stop: () => Promise.resolve(),
       } satisfies SessionHandle;
     },
+    readClientUuids: () => {
+      calls.push('readClientUuids');
+      return Promise.resolve([name]);
+    },
     startShape: () => {
       calls.push('startShape');
       return {
@@ -84,7 +88,14 @@ const CLAUDE_KINDS = [
   AccountKind.AnthropicApiKey,
 ] as const;
 
-const METHODS = ['start', 'startShape', 'complete', 'probeAccount', 'startLogin'] as const;
+const METHODS = [
+  'start',
+  'startShape',
+  'complete',
+  'probeAccount',
+  'startLogin',
+  'readClientUuids',
+] as const;
 
 async function callAll(adapter: SessionAdapter, kind: SupportedAccountKind): Promise<void> {
   adapter.start(asSession(kind));
@@ -92,6 +103,12 @@ async function callAll(adapter: SessionAdapter, kind: SupportedAccountKind): Pro
   await adapter.complete({ cwd: '/d', prompt: 'q', model: 'm', env: {}, account: account(kind) });
   await adapter.probeAccount({ cwd: '/d', env: {}, kind });
   await adapter.startLogin({ cwd: '/d', env: {}, kind });
+  await adapter.readClientUuids({
+    account: account(kind),
+    env: {},
+    cwd: '/d',
+    providerSessionId: 'thr-1',
+  });
 }
 
 describe('createRoutedAdapter', () => {

@@ -355,6 +355,23 @@ export interface CompletionSpec {
   readonly effort?: Effort;
 }
 
+/** A conversation to read back, on the account and in the checkout it ran in. */
+export interface ConversationReadSpec {
+  readonly account: AccountExpectation;
+  readonly env: Readonly<Record<string, string>>;
+  readonly cwd: string;
+  /** The conversation, as the agent names it: a Codex thread's id. */
+  readonly providerSessionId: string;
+}
+
+/**
+ * A conversation could not be read back, so what it holds is not known. The message names the
+ * conversation and how the read failed, never what the agent printed.
+ */
+export class ConversationUnreadError extends Error {
+  override readonly name = 'ConversationUnreadError';
+}
+
 /** The model gave no answer: it was refused, it failed, or it did not answer in time. */
 export class CompletionError extends Error {
   override readonly name = 'CompletionError';
@@ -368,6 +385,12 @@ export interface SessionAdapter {
   startShape(spec: ShapeSessionSpec): ShapeSessionHandle;
   /** Starts the account's agent with no prompt only to read who it is. */
   probeAccount(probe: AccountProbeSpec): Promise<SeenAccount>;
+  /**
+   * The client uuids of every user message the conversation holds, read back without running a
+   * turn: how a message pushed before a restart is told taken or not (Workbench spec §12). Rejects
+   * with a `ConversationUnreadError` when it cannot be read; an agent with no such read always does.
+   */
+  readClientUuids(spec: ConversationReadSpec): Promise<readonly string[]>;
   /**
    * Starts the account's browser sign-in with its own agent; rejects with an `AccountLoginError` when it
    * cannot start. Only a kind that signs in with a login has one.

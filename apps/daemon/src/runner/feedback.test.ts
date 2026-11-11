@@ -13,6 +13,7 @@ import {
   getWorkstreamRow,
   insertBuilderMessage,
   listTaskThread,
+  markTaskMessagePushedUnder,
   markTaskMessagesPushed,
   patchAccount,
   patchProject,
@@ -24,8 +25,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createTestEngine, type TestEngine } from '../../test/engine';
 import { handoffArgs } from '../../test/fixtures';
 import { pngOfSize } from '../../test/png';
-import type { FakeScriptBook } from '../sessions';
+import { ConversationUnreadError, type FakeScriptBook } from '../sessions';
 import { FRESH_SESSION_NOTICE, taskFilesDir } from '../thread';
+import { TAKEN_BEFORE_RESTART } from './read-back';
 
 // Workbench spec §6.3, §12: a builder message from the task's thread, as the `feedback` action. A
 // session that can be resumed is handed it; one that cannot starts fresh from the thread's digest and
@@ -355,6 +357,72 @@ describe("a builder's message from the task's thread", () => {
     expect(getWorkstream(engine.store.db, workstream.id)).toMatchObject({ state: 'FAILED' });
     expect(getWorkstream(engine.store.db, workstream.id).failureReason).toMatch(/Claude/);
     expect(getTaskMessageRow(engine.store.db, message).pushedAt).toBeNull();
+  });
+
+  describe('a Codex thread resumed after a restart with a message pushed to it and never seen taken', () => {
+    const codexEngine = async (book: FakeScriptBook): Promise<TestEngine> => {
+      const made = await createTestEngine(
+        book,
+        {},
+        {},
+        { account: { kind: 'codex_signin', label: 'ChatGPT plan' } },
+      );
+      made.state.write((ctx) => {
+        patchAccount(ctx, made.project.accountId, {
+          expectedIdentity: 'chatgpt@example.com · ws-1',
+        });
+      });
+      return made;
+    };
+    const pushedUnderItsUuid = (id: TaskMessageId): void => {
+      engine.state.write((ctx) => {
+        markTaskMessagePushedUnder(ctx, id, idUuid(id));
+      });
+    };
+
+    it('is read back, and a message it took is delivered and never sent again: the thread resumes', async () => {
+      engine = await codexEngine({ Alpha: [[working, crash]] });
+      const { task, workstream } = engine.addTask('Alpha');
+      const message = say(task.id, 'Make it blue');
+      pushedUnderItsUuid(message);
+      feedbackOn(workstream.id, message, 'thr-before-restart');
+      engine.adapter.readBack = () => Promise.resolve([idUuid(message)]);
+
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+
+      expect(engine.adapter.reads.map((r) => r.providerSessionId)).toEqual(['thr-before-restart']);
+      const [resumed] = engine.adapter.prompts;
+      expect(resumed?.resume).toBe('thr-before-restart');
+      expect(resumed?.promptUuid).toBeNull();
+      expect(resumed?.prompt).not.toContain('Make it blue');
+      expect(resumed?.prompt).toContain(TAKEN_BEFORE_RESTART);
+      expect(engine.adapter.sent).toEqual([]);
+      expect(getTaskMessageRow(engine.store.db, message).deliveredAt).not.toBeNull();
+    });
+
+    it('fails the lane, naming the thread, when the thread cannot be read back: nothing is guessed', async () => {
+      engine = await codexEngine({ Alpha: [[working, crash]] });
+      const { task, workstream } = engine.addTask('Alpha');
+      const message = say(task.id, 'Make it blue');
+      pushedUnderItsUuid(message);
+      feedbackOn(workstream.id, message, 'thr-before-restart');
+      engine.adapter.readBack = () =>
+        Promise.reject(
+          new ConversationUnreadError(
+            'Codex could not read back thread thr-before-restart: an error from Codex',
+          ),
+        );
+
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+
+      expect(engine.adapter.prompts).toEqual([]);
+      const failed = getWorkstream(engine.store.db, workstream.id);
+      expect(failed.state).toBe('FAILED');
+      expect(failed.failureReason).toContain('thr-before-restart');
+      expect(getTaskMessageRow(engine.store.db, message).deliveredAt).toBeNull();
+    });
   });
 
   it('notes a fresh session on the thread only once it has started', async () => {
