@@ -174,11 +174,12 @@ export function createLaneMessages(deps: LaneMessagesDeps): LaneMessages {
     const spent = threadInlineBytes(listTaskFileRows(state.db, taskId), limits);
     const out = outgoingMessage(message, spent, limits);
     sentUnder.set(out.uuid, message.id);
-    handle.send(lead ? `${lead}\n\n${out.text}` : out.text, out.images, out.uuid);
+    // Kept before the session is handed it: a restart then finds every uuid a turn could hold.
     state.write((ctx) => {
       markTaskMessagePushedUnder(ctx, message.id, out.uuid);
       markTaskFilesInline(ctx, taskId, out.blocks, false);
     });
+    handle.send(lead ? `${lead}\n\n${out.text}` : out.text, out.images, out.uuid);
   };
   return {
     push,

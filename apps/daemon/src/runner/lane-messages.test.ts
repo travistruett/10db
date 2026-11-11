@@ -193,6 +193,26 @@ describe('lane messages', () => {
     await handle.stop();
   });
 
+  it('keeps the uuid on the row before the session is handed the message', () => {
+    const message = say('Make it blue');
+    let keptWhenSent: readonly string[] | null = null;
+    // The session boundary: what the row holds at the moment the message is handed over.
+    const handle: Pick<SessionHandle, 'send' | 'interrupt'> = {
+      send: () => {
+        keptWhenSent = getTaskMessageRow(state.db, message.id).pushUuids;
+      },
+      interrupt: () => Promise.resolve(null),
+    };
+    const messages = createLaneMessages({
+      state,
+      taskId,
+      handle,
+      limits: pictureLimitsFor(AccountKind.CodexSignin),
+    });
+    messages.push(message);
+    expect(keptWhenSent).toEqual([idUuid(message.id)]);
+  });
+
   it('sends a picture that goes as a block with the file it was read from, which Codex reads itself', () => {
     const shot = say('Make it blue', 1);
     const file = shot.files[0];
