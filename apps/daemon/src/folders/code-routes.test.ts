@@ -91,6 +91,17 @@ const inbox = createRoute({
       unrouted: ['ui/src/views/board', 'ui/src/views/review', 'ui/src/views/settings'],
     },
     {
+      name: 'a page named only by a parameter path takes the longest static prefix the router defines',
+      router: `
+import { SettingsView } from './views/settings/settings-view';
+const index = createRoute({ path: '/settings', beforeLoad: () => { throw redirect({ to: '/settings/general' }); } });
+const deep = createRoute({ path: '/settings/team', beforeLoad: () => undefined });
+const section = createRoute({ path: '/settings/$section', component: SettingsView });
+const other = createRoute({ path: '/settings/team/$member/$tab', component: SettingsView });`,
+      pages: [{ name: 'settings', folder: 'ui/src/views/settings', route: '/settings/team' }],
+      unrouted: ['ui/src/views/board', 'ui/src/views/inbox', 'ui/src/views/review'],
+    },
+    {
       name: 'a route to a module directly in views, or to a package, is no page',
       router: `
 import { Shared } from './views/shared';

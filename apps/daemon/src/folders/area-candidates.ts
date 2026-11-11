@@ -107,7 +107,8 @@ const holdsUnit = (dir: Dir): boolean =>
 const isRouteGroup = (name: string) => /^\(.+\)$/u.test(name);
 
 /** The file that makes a route folder a screen (Next's `page.tsx`); `route.ts` alone is an endpoint. */
-const isPageFile = (path: string) => /^page\.(?:tsx|jsx|ts|js|mdx|md)$/u.test(baseName(path));
+export const isPageFile = (path: string): boolean =>
+  /^page\.(?:tsx|jsx|ts|js|mdx|md)$/u.test(baseName(path));
 const holdsPage = (dir: Dir): boolean =>
   dir.direct.some(isPageFile) || [...dir.dirs.values()].some(holdsPage);
 const pageAtPath = (dir: Dir): boolean =>

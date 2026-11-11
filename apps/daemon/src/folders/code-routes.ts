@@ -245,6 +245,32 @@ const hasParameter = (path: string) =>
     .split('/')
     .some((s) => s.startsWith('$') || s.startsWith(':') || s.startsWith('[') || s.includes('*'));
 
+/** Every path a router file names, whatever the route shows: a redirect's path counts. */
+function definedPaths(text: string): string[] {
+  return [
+    ...[...text.matchAll(/\bpath\s*:\s*(['"`])([^'"`\n]*)\1/gu)].map((m) => m[2] ?? ''),
+    ...[...text.matchAll(/\bpath\s*=\s*(['"])([^'"\n]*)\1/gu)].map((m) => m[2] ?? ''),
+  ];
+}
+
+/**
+ * For a page named only by paths with a parameter, the longest static start of one of them that the
+ * router also defines (`/settings` for `/settings/$section`); undefined when it defines none.
+ */
+function definedPrefix(paths: readonly string[], defined: ReadonlySet<string>): string | undefined {
+  const prefixes = paths.flatMap((path) => {
+    const route = asRoute(path);
+    if (route === null) return [];
+    const segments = route.split('/').slice(1);
+    const fixed = segments.findIndex(
+      (s) => s.startsWith('$') || s.startsWith(':') || s.startsWith('[') || s.includes('*'),
+    );
+    const head = fixed === -1 ? segments : segments.slice(0, fixed);
+    return head.map((_, i) => `/${head.slice(0, i + 1).join('/')}`);
+  });
+  return prefixes.filter((p) => defined.has(p)).sort((a, b) => b.length - a.length)[0];
+}
+
 /** `path` as a page's route, or null when no route can be it. */
 function asRoute(path: string): string | null {
   const route = path.startsWith('/') ? path : `/${path}`;
@@ -260,7 +286,12 @@ function asRoute(path: string): string | null {
 export function codeRoutes(input: CodeRoutesInput): CodeRoutes {
   const tracked = new Set(input.files);
   const found = new Map<string, string[]>();
+  const defined = new Set<string>();
   for (const [file, text] of input.routers) {
+    for (const path of definedPaths(text)) {
+      const route = asRoute(path);
+      if (route !== null) defined.add(route);
+    }
     const imports = importedNames(text);
     const folderOf = (name: string): string | null => {
       const specifier = imports.get(name);
@@ -288,11 +319,12 @@ export function codeRoutes(input: CodeRoutesInput): CodeRoutes {
   }
   const pages = [...found].map(([folder, paths]): CodePage => {
     const name = areaNameOf(posix.basename(folder));
-    const route = paths
-      .filter((p) => !hasParameter(p))
-      .map(asRoute)
-      .filter((r) => r !== null)
-      .sort((a, b) => a.length - b.length)[0];
+    const route =
+      paths
+        .filter((p) => !hasParameter(p))
+        .map(asRoute)
+        .filter((r) => r !== null)
+        .sort((a, b) => a.length - b.length)[0] ?? definedPrefix(paths, defined);
     return route === undefined ? { name, folder } : { name, folder, route };
   });
   const pageDirs = new Set(pages.map((p) => posix.dirname(p.folder)));
