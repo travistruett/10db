@@ -1,10 +1,11 @@
 import { z } from 'zod';
 import { AppUrl, AreaDef, AreaName, PathPattern, ProjectPatch } from './entities';
 import { BranchName } from './git-names';
+import { globsOverlap } from './glob-overlap';
 import { AreaRole, AreaRoute } from './page-areas';
 
 // Workbench setup (`POST /projects/:projectId/workbench-setup`): what 10db proposes so a project is
-// ready for its first pass, each change a row the builder ticks, all of it saved by one Apply.
+// ready for its first pass: its areas rebuilt with pages, and settings, all saved by one Apply.
 
 /** One line the setup screen shows. */
 const Line = z
@@ -13,55 +14,33 @@ const Line = z
   .max(500)
   .refine((t) => !/\p{Cc}/u.test(t), 'one line, with no control characters');
 
-/** An area's globs as a project accepts them. */
-const Globs = z.array(PathPattern);
+/** An area as a project accepts it in a patch. */
+const SetupArea = AreaDef.extend({ globs: z.array(PathPattern).min(1) });
 
-/** An area a change writes whole. */
-const ProposedAreaDef = AreaDef.extend({ globs: Globs.min(1) });
+/** A page the rebuilt list makes: one row the builder may untick. */
+export const PageRow = z.object({
+  name: AreaName,
+  /** Absent for a page no single path shows. */
+  route: AreaRoute.optional(),
+  /** Its route folder, then the folders and files of its code outside it, as repository paths. */
+  folders: z.array(z.string().min(1)).min(1),
+});
+export type PageRow = z.infer<typeof PageRow>;
 
-/** A page area a split makes. */
-const SplitPage = ProposedAreaDef.extend({ role: z.literal(AreaRole.Page) });
+const Named = z.object({ name: z.string(), reason: z.string() });
 
-/** What a change does to the project's areas. */
-export const AreaChangeKind = {
-  /** An area whose globs are one page's route folder becomes that page: role, route and its code. */
-  Update: 'update',
-  /** An area holding several pages' route folders gives each its own page area; the rest keeps the name. */
-  Split: 'split',
-  /** An area of code the pages share is marked so. */
-  MarkShared: 'markShared',
-  /** A new area: a page no area holds, or the app's shared source folder. */
-  Add: 'add',
-} as const;
-export type AreaChangeKind = (typeof AreaChangeKind)[keyof typeof AreaChangeKind];
-
-const Said = { sentence: Line, reason: Line };
-
-export const AreaChange = z.discriminatedUnion('kind', [
-  z.object({
-    kind: z.literal(AreaChangeKind.Update),
-    ...Said,
-    /** The existing area, which keeps its name. */
-    area: AreaName,
-    /** Absent for a page no single path shows. */
-    route: AreaRoute.optional(),
-    /** The page's code outside its route folder, added to the area's globs. */
-    addGlobs: Globs,
-  }),
-  z.object({
-    kind: z.literal(AreaChangeKind.Split),
-    ...Said,
-    area: AreaName,
-    pages: z.array(SplitPage).min(1),
-    /** What the area keeps under its name; null when it held only the pages' folders and goes. */
-    remainder: z
-      .object({ globs: Globs.min(1), role: z.literal(AreaRole.Shared).optional() })
-      .nullable(),
-  }),
-  z.object({ kind: z.literal(AreaChangeKind.MarkShared), ...Said, area: AreaName }),
-  z.object({ kind: z.literal(AreaChangeKind.Add), ...Said, area: ProposedAreaDef }),
-]);
-export type AreaChange = z.infer<typeof AreaChange>;
+/** The project's areas rebuilt: the whole new list, and what it keeps, adds as pages and leaves out. */
+export const WorkbenchSetupAreas = z.object({
+  /** The new area list, every page ticked; Apply saves it (less any unticked page, `withoutPages`). */
+  proposed: z.array(SetupArea),
+  /** Existing areas kept exactly as they are, each with why (open tasks or a live pass name it). */
+  kept: z.array(Named),
+  /** The pages of `proposed` the project does not have yet, in its order. */
+  pages: z.array(PageRow),
+  /** Pages and areas left out, each with why. */
+  skipped: z.array(Named),
+});
+export type WorkbenchSetupAreas = z.infer<typeof WorkbenchSetupAreas>;
 
 /** A project setting the setup suggests, by the `ProjectPatch` field it sets. */
 export const SettingField = {
@@ -105,77 +84,30 @@ export type BranchNote = z.infer<typeof BranchNote>;
 
 /** `POST /projects/:projectId/workbench-setup`. */
 export const WorkbenchSetupDto = z.object({
-  pages: z.object({
-    changes: z.array(AreaChange),
-    /** Pages proposed and left out, each with why. */
-    skipped: z.array(z.object({ name: z.string(), reason: z.string() })),
-  }),
+  areas: WorkbenchSetupAreas,
   settings: z.array(SettingSuggestion),
   branch: BranchNote.nullable(),
 });
 export type WorkbenchSetupDto = z.infer<typeof WorkbenchSetupDto>;
 
-/** `area` with `role` set, or with no role and no route when `role` is absent. */
-function withRole(area: AreaDef, role: AreaRole | undefined): AreaDef {
-  const rest: AreaDef = { name: area.name, globs: area.globs };
-  if (area.catchAll !== undefined) rest.catchAll = area.catchAll;
-  return role === undefined ? rest : { ...rest, role };
-}
-
 /**
- * The areas with `changes` applied, in order: each change is independent, so any subset applies and
- * gives each area it writes what that change alone would. A change whose area is gone, or whose new
- * name an area has already, is passed over. Pure; `areas` is not touched.
+ * `proposed` with each page named in `unticked` dropped and its files folded back: the globs a shared
+ * area of the list also covers go (that area holds those files), and what is left stays an area of
+ * the same name with no role and no route. A name that is no page is passed over. Pure; `proposed`
+ * is not touched.
  */
-export function applyAreaChanges(
-  areas: readonly AreaDef[],
-  changes: readonly AreaChange[],
-): AreaDef[] {
-  let result = [...areas];
-  for (const change of changes) {
-    if (change.kind === AreaChangeKind.Add) {
-      if (!result.some((a) => a.name === change.area.name)) result.push({ ...change.area });
-      continue;
-    }
-    const at = result.findIndex((a) => a.name === change.area);
-    const area = result[at];
-    if (area === undefined) continue;
-    switch (change.kind) {
-      case AreaChangeKind.Update: {
-        const globs = [...new Set([...area.globs, ...change.addGlobs])];
-        const page = { ...withRole(area, AreaRole.Page), globs };
-        result[at] = change.route === undefined ? page : { ...page, route: change.route };
-        break;
-      }
-      case AreaChangeKind.MarkShared:
-        result[at] = withRole(area, AreaRole.Shared);
-        break;
-      case AreaChangeKind.Split: {
-        const pages = change.pages.filter((p) => !result.some((a) => a.name === p.name));
-        const kept =
-          change.remainder === null
-            ? []
-            : [
-                {
-                  ...withRole(
-                    area,
-                    change.remainder.role ??
-                      (area.role === AreaRole.Shared ? AreaRole.Shared : undefined),
-                  ),
-                  globs: [...change.remainder.globs],
-                },
-              ];
-        result = [
-          ...result.slice(0, at),
-          ...kept,
-          ...pages.map((p) => ({ ...p })),
-          ...result.slice(at + 1),
-        ];
-        break;
-      }
-    }
-  }
-  return result;
+export function withoutPages(proposed: readonly AreaDef[], unticked: readonly string[]): AreaDef[] {
+  const shared = proposed.filter((a) => a.role === AreaRole.Shared);
+  return proposed.flatMap((area): AreaDef[] => {
+    if (area.role !== AreaRole.Page || !unticked.includes(area.name)) return [{ ...area }];
+    const globs = area.globs.filter(
+      (glob) => !shared.some((s) => s.globs.some((other) => globsOverlap(glob, other))),
+    );
+    if (globs.length === 0) return [];
+    const folded: AreaDef = { name: area.name, globs };
+    if (area.catchAll !== undefined) folded.catchAll = area.catchAll;
+    return [folded];
+  });
 }
 
 /**
