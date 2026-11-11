@@ -361,16 +361,25 @@ const withNote = (candidate: AddressCandidate, note: string | undefined): Addres
 };
 
 /**
- * The app address to suggest from the probed candidates whose url `answered` holds: the first that
- * was stated or is listening, else a framework's default (a guess wins only when nothing else that was
- * probed answered), else the first candidate with a note to start the dev server; null with none.
+ * The app address to suggest from the probed candidates whose url `answered` holds: the first stated
+ * one that answered; only when the repository states no address, a server listening in the checkout
+ * that answered, then a framework's default that did; else the first candidate with a note to start
+ * the dev server. Neither a listener nor a guess beats a stated address, even one that did not answer:
+ * any tool (a docs server, a browser helper) can listen in a checkout, and anything can hold port
+ * 3000, while the app is down. Null with no candidate.
  */
 export function chooseAppAddress(
   candidates: readonly AddressCandidate[],
   answered: ReadonlySet<string>,
 ): AddressCandidate | null {
   const live = probedCandidates(candidates).filter((c) => answered.has(c.url));
-  const chosen = live.find((c) => c.kind !== CandidateKind.Guess) ?? live[0];
+  const stated = candidates.some((c) => c.kind === CandidateKind.Stated);
+  const chosen =
+    live.find((c) => c.kind === CandidateKind.Stated) ??
+    (stated
+      ? undefined
+      : (live.find((c) => c.kind === CandidateKind.Listener) ??
+        live.find((c) => c.kind === CandidateKind.Guess)));
   if (chosen !== undefined) return withNote(chosen, undefined);
   const first = candidates[0];
   return first === undefined ? null : withNote(first, NOTHING_ANSWERED);

@@ -384,6 +384,14 @@ describe('probedCandidates and chooseAppAddress', () => {
     }),
   );
 
+  const listenerOnly = appAddressCandidates(
+    input({
+      uiUnit: 'web',
+      listeners: [listener(3000)],
+      texts: new Map([['web/package.json', '{"devDependencies":{"vite":"7.0.0"}}']]),
+    }),
+  );
+
   it('keeps a probe for a server listening in the checkout', () => {
     expect(probedCandidates(stated).map((c) => c.url)).toEqual([
       'http://localhost:8800',
@@ -401,10 +409,24 @@ describe('probedCandidates and chooseAppAddress', () => {
       note: undefined,
     },
     {
-      name: 'the listener, when no stated address answers',
+      name: 'a stated address that did not answer, over a listener that did (a dev tool can listen in a checkout)',
       from: stated,
       answered: ['http://localhost:3000'],
+      url: 'http://localhost:8800',
+      note: NOTHING_ANSWERED,
+    },
+    {
+      name: 'the listener, when the repository states no address',
+      from: listenerOnly,
+      answered: ['http://localhost:3000', 'http://localhost:5173'],
       url: 'http://localhost:3000',
+      note: undefined,
+    },
+    {
+      name: 'a framework default, when nothing is stated and no listener answered',
+      from: listenerOnly,
+      answered: ['http://localhost:5173'],
+      url: 'http://localhost:5173',
       note: undefined,
     },
     {
@@ -422,11 +444,11 @@ describe('probedCandidates and chooseAppAddress', () => {
       note: undefined,
     },
     {
-      name: 'a framework default wins only when nothing stated answers',
+      name: 'a stated address that did not answer, over a framework default that did',
       from: guessed,
       answered: ['http://localhost:3000'],
-      url: 'http://localhost:3000',
-      note: undefined,
+      url: 'http://localhost:8800',
+      note: NOTHING_ANSWERED,
     },
   ])('$name', ({ from, answered, url, note }) => {
     const chosen = chooseAppAddress(from, new Set(answered));

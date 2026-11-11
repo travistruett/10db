@@ -609,11 +609,12 @@ describe('POST /projects/:projectId/workbench-setup', () => {
 
     const setup = await api().post(`/projects/${project.id}/workbench-setup`, WorkbenchSetupDto);
 
-    // The stated address and the framework's default are probed; only the default answers, so it wins.
+    // The stated address and the framework's default are probed. Only the default answers, which never
+    // beats a stated address: the stated one is suggested, with the note to start the dev server.
     expect(probed).toEqual(['http://localhost:18899', 'http://localhost:3000']);
     // No origin: no trusted copy to write a dev login from, and nothing to push.
     expect(setup.settings.map((s) => [s.field, s.value])).toEqual([
-      ['appUrl', 'http://localhost:3000'],
+      ['appUrl', 'http://localhost:18899'],
       ['changedCheckCommand', 'pnpm --dir web run typecheck && pnpm --dir web run lint'],
     ]);
     expect(setup.branch).toBeNull();

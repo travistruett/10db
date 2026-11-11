@@ -31,9 +31,11 @@ the settings a project lacks, each with where it was found in one line, and note
   compose file; a server listening now whose working directory is in the repository; the UI package's Vite
   `server.port`, its `dev` script's `--port`/`-p`, then its framework's default (Next 3000, Vite 5173), a guess. Three
   are probed with one GET each (1 s, no redirect followed, any status an answer, only those three hosts ever asked): the
-  first three, with the last slot kept for a server listening in the checkout when there is one. The first stated or
-  listening address that answers wins; a guess wins only when nothing else probed answered; else the first candidate,
-  with the note "Nothing answered there just now: start your dev server".
+  first three, with the last slot kept for a server listening in the checkout when there is one. The first stated address that answers wins.
+  Only when the repository states no address does a listener that answered win, then a guess that did; neither ever beats
+  a stated address, even one that did not answer: the first stated one is then suggested with the note "Nothing answered
+  there just now: start your dev server". In a run on the builder's repositories, gstack's browser helper (a `bun`
+  server started from the checkout) answered while ampsio's and 10db's dev servers were down.
 - **Dev login** (`detect-dev-login.ts`). A tracked file or package script named `dev_login`, `dev-login`, `devlogin`,
   `login_as` or the like (a runnable extension; a test, component or stylesheet named so is not one). The lines of
   tracked shell scripts, Makefiles and workflows that run it, continuations included, with the literal variable
