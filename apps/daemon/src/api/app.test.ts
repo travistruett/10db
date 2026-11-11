@@ -118,7 +118,7 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     addPassPages: track('addPassPages'),
     renamePass: track('renamePass'),
     discardKeptWork: track('discardKeptWork'),
-    proposePageAreas: track('proposePageAreas'),
+    workbenchSetup: track('workbenchSetup'),
     goalPassPages: track('goalPassPages'),
     taskTurns: track('taskTurns'),
     turnActivity: track('turnActivity'),

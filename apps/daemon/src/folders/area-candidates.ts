@@ -559,7 +559,8 @@ export function deriveAreaCandidates(files: readonly string[]): AreaCandidate[] 
 /** Stands in for a dot while a glob is matched, as the guard does, so `?` and `*` read a dot name like any other. */
 const DOT = '';
 
-const reaches = (file: string, glob: string) =>
+/** Whether `glob` matches `file` as an area glob is matched: a dot name read like any other. */
+export const globReaches = (file: string, glob: string): boolean =>
   matchesGlob(file.replaceAll('.', DOT), glob.replaceAll('.', DOT));
 
 /**
@@ -583,7 +584,7 @@ function mergeOverlapping(
     for (const file of files) {
       const j = candidateOf(file);
       if (j === undefined || find(j) === find(i)) continue;
-      if (globs.some((glob) => reaches(file, glob))) group.set(find(j), find(i));
+      if (globs.some((glob) => globReaches(file, glob))) group.set(find(j), find(i));
     }
   }
   return mergeGroups(candidates, find);

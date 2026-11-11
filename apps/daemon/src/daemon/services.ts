@@ -7,6 +7,7 @@ import {
   type BatchId,
   ConflictError,
   Delivery,
+  TaskStatus,
   InvalidError,
   isDaemonAddress,
   APP_URL_IS_DAEMON,
@@ -116,7 +117,7 @@ import {
 } from '../delivery';
 import { markGhRequired, withAgentStatus, type AgentTools } from '../environment';
 import type { EventBus, StateStore } from '../events';
-import { inspectFolder, proposeAreas, proposePageAreas, type AreaNamer } from '../folders';
+import { inspectFolder, proposeAreas, proposeSetupAreas, type AreaNamer } from '../folders';
 import { adoptGoal } from '../goals';
 import { GitError, type Git } from '../git';
 import { hazardAssessmentDto, type HazardAssessor } from '../hazards';
@@ -474,12 +475,15 @@ export function createServices(deps: {
     openedTurn: (taskId, turnId) => {
       openTurn(deps.state, taskId, turnId);
     },
-    proposePageAreas: (projectId, signal) =>
-      proposePageAreas(
-        { git: deps.git, namer: deps.areaNamer, protectedRoots: deps.protectedRoots },
-        getProject(db, projectId),
-        signal,
-      ),
+    workbenchSetup: async (projectId, signal) => {
+      const project = getProject(db, projectId);
+      const open = listTasks(db, projectId).filter((t) => t.status === TaskStatus.Open);
+      return {
+        areas: await proposeSetupAreas({ git: deps.git }, project, open, signal),
+        settings: [],
+        branch: null,
+      };
+    },
     passClosePreview: (passId) => deps.closes.preview(passId),
     closePass: (passId, input) => deps.closes.close(passId, input),
     continueClose: (passId) => deps.closes.continueClose(passId),

@@ -783,9 +783,9 @@ export function createApp(deps: ApiDeps) {
       await deps.services.discardKeptWork(TaskId.parse(c.req.param('taskId')));
       return c.body(null, 204);
     })
-    .post('/projects/:projectId/propose-page-areas', async (c) =>
+    .post('/projects/:projectId/workbench-setup', async (c) =>
       c.json(
-        await deps.services.proposePageAreas(
+        await deps.services.workbenchSetup(
           ProjectId.parse(c.req.param('projectId')),
           c.req.raw.signal,
         ),

@@ -78,6 +78,19 @@ const routes = [
       unrouted: ['ui/src/views/inbox', 'ui/src/views/review'],
     },
     {
+      name: 'a comment in a route object, holding brackets and quotes, is read past',
+      router: `
+import { InboxView } from './views/inbox/inbox-view';
+const inbox = createRoute({
+  path: '/inbox',
+  // \`inbox\` opens a card (a link from elsewhere) and isn't { closed
+  /* nor is this ( one */
+  component: InboxView,
+});`,
+      pages: [{ name: 'inbox', folder: 'ui/src/views/inbox', route: '/inbox' }],
+      unrouted: ['ui/src/views/board', 'ui/src/views/review', 'ui/src/views/settings'],
+    },
+    {
       name: 'a route to a module directly in views, or to a package, is no page',
       router: `
 import { Shared } from './views/shared';

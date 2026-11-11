@@ -123,6 +123,12 @@ function topLevelOf(text: string, brackets: Brackets, open: number): string {
       const end = stringEnd(text, i, close);
       out += text.slice(i, end);
       i = end;
+    } else if (ch === '/' && text[i + 1] === '/') {
+      const end = text.indexOf('\n', i);
+      i = end === -1 || end > close ? close : end;
+    } else if (ch === '/' && text[i + 1] === '*') {
+      const end = text.indexOf('*/', i + 2);
+      i = end === -1 || end > close ? close : end + 2;
     } else if (isOpen(ch)) {
       i = (brackets.closes.get(i) ?? close) + 1;
       out += ' ';
