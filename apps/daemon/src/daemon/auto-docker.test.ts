@@ -268,7 +268,7 @@ describe('where the base is read from', () => {
 });
 
 describe('with no remote-tracking branch', () => {
-  it('reads nothing and turns nothing on', async () => {
+  it('reads no file, so a Makefile call turns nothing on', async () => {
     let reads = 0;
     const reading = autoDocker(runner, {
       state,
@@ -283,6 +283,18 @@ describe('with no remote-tracking branch', () => {
     await reading.run(request('make gate'));
     expect(reads).toBe(0);
     expect(getProject(state.db, project.id).sandboxDocker).toBe(false);
+  });
+
+  it("still reads the gate command's own text, which the builder wrote", async () => {
+    const reading = autoDocker(runner, {
+      state,
+      inbox,
+      logger: silentLogger,
+      baseCommit: () => Promise.resolve(null),
+      readBase: () => Promise.resolve(null),
+    });
+    await reading.run(request('docker compose run --rm t'));
+    expect(seen[0]?.project.sandboxDocker).toBe(true);
   });
 });
 

@@ -174,8 +174,9 @@ export async function originBaseCommit(
 
 /**
  * Whether the project's gate is seen to call Docker in `origin/<base>`, as the auto switch reads it
- * before a gate runs (`callsDocker`), read from the remote-tracking branch's commit only; false with
- * no gate, with no remote-tracking branch, and when git can't say.
+ * before a gate runs (`callsDocker`), its files read from the remote-tracking branch's commit only;
+ * with no such branch only the command's own text, the builder's, counts. False with no gate and
+ * when git can't say.
  */
 export async function gateCallsDocker(
   git: Git,
@@ -183,8 +184,9 @@ export async function gateCallsDocker(
 ): Promise<boolean> {
   if (project.gateCommand === null) return false;
   const commit = await originBaseCommit(git, project.repoPath, project.baseBranch);
-  if (commit === null) return false;
   const read: ReadRepoFile = async (path) => {
+    // With no remote-tracking commit no file is read: only the command's own text counts.
+    if (commit === null) return null;
     try {
       const file = await git.fileAt(project.repoPath, commit, path, MAX_DOCKER_SCAN_BYTES);
       return file.kind === 'file' ? file.text : null;

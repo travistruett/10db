@@ -55,8 +55,9 @@ export function autoDocker(inner: GateRunner, deps: AutoDockerDeps): GateRunner 
     // is where a local-delivery project's lanes commit, so a file only it has is lane-written, and a
     // guessed name could be a lane-made branch or tag.
     const commit = await deps.baseCommit(project.repoPath, project.baseBranch).catch(() => null);
-    if (commit === null) return false;
     const read = async (path: string): Promise<string | null> => {
+      // With no remote-tracking commit no file is read: only the gate command, the builder's, counts.
+      if (commit === null) return null;
       try {
         return await deps.readBase(project.repoPath, commit, path);
       } catch {

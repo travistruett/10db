@@ -133,6 +133,9 @@ describe('gateCallsDocker', () => {
       // No remote-tracking branch `lane`, but a local branch named like it in full.
       gitIn(repo, 'branch', 'refs/remotes/origin/lane');
       expect(await gateCallsDocker(createGit(), { ...project, baseBranch: 'lane' })).toBe(false);
+      // With no commit to read, the builder's own command still says it.
+      const direct = { ...project, baseBranch: 'lane', gateCommand: 'docker compose run --rm t' };
+      expect(await gateCallsDocker(createGit(), direct)).toBe(true);
     } finally {
       pair.cleanup();
     }

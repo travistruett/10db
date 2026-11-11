@@ -30,7 +30,8 @@
   branch (a local-delivery project's lanes commit there, so a file only it has is lane-written). The commit is found once, by the exact name
   `refs/remotes/origin/<base>` (`Git.remoteTrackingCommit`, `originBaseCommit`: an exact-name listing, peeled by object id),
   and every read takes that commit: git's guessing of a name (a short `origin/<base>`, or a full one that is missing)
-  finds a local branch or tag a lane can make. With no remote-tracking branch nothing is read and Docker is not turned on.
+  finds a local branch or tag a lane can make. With no remote-tracking branch no file is read, and only the gate
+  command's own text, which the builder wrote, can turn Docker on.
 
   The turning on leaves the project's one Inbox card (`inbox/docker-card.ts`, fold key `docker-on:<projectId>`, a flag with
   answers Keep it on and Turn it off) saying that it did, why, and the warning. It is a card rather than the notice of
