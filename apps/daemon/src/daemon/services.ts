@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   ACTIVE_STATES,
+  AreaRole,
   CatalogueAttempt,
   type CatalogueStatusDto,
   type BatchId,
@@ -159,6 +160,9 @@ import type { KnowledgeApiServices } from './knowledge-services';
 import { createModelSettingsServices } from './model-settings-services';
 import type { ShapeApiServices } from './shape-services';
 import { gateCallsDocker } from './docker-need';
+import type { ListenerReader } from './listening-ports';
+import type { AddressProbe } from './loopback-probe';
+import { suggestSettings } from './suggest-settings';
 import { checkoutConflictsWithRoot } from './worktree-root';
 
 /** The HTTP layer's view of the daemon: reads go to the database, writes go through the state store. */
@@ -220,6 +224,10 @@ export function createServices(deps: {
   readonly protectedRoots: readonly string[];
   /** Names and merges proposed areas; null leaves them named from their paths. */
   readonly areaNamer: AreaNamer | null;
+  /** What listens on this Mac, for the Workbench setup's app address. */
+  readonly listeners: ListenerReader;
+  /** Whether something answers at a loopback address, for the Workbench setup's app address. */
+  readonly probe: AddressProbe;
   /** Works out each project's hazards from its repository. */
   readonly hazards: Pick<HazardAssessor, 'assess'>;
   /** Records a new project's checkout as the daemon trusts it (lane sandbox spec D13). */
@@ -478,11 +486,21 @@ export function createServices(deps: {
     workbenchSetup: async (projectId, signal) => {
       const project = getProject(db, projectId);
       const open = listTasks(db, projectId).filter((t) => t.status === TaskStatus.Open);
-      return {
-        areas: await proposeSetupAreas({ git: deps.git }, project, open, signal),
-        settings: [],
-        branch: null,
-      };
+      const areas = await proposeSetupAreas({ git: deps.git }, project, open, signal);
+      const pages = areas.proposed.filter((a) => a.role === AreaRole.Page).map((a) => a.globs);
+      const suggested = await suggestSettings(
+        {
+          git: deps.git,
+          listeners: deps.listeners,
+          probe: deps.probe,
+          asker: deps.areaNamer,
+          daemonPort: deps.daemonPort,
+        },
+        project,
+        pages,
+        signal,
+      );
+      return { areas, ...suggested };
     },
     passClosePreview: (passId) => deps.closes.preview(passId),
     closePass: (passId, input) => deps.closes.close(passId, input),

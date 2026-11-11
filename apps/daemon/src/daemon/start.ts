@@ -260,6 +260,8 @@ import {
 import { acquireInstanceLock } from './instance-lock';
 import { removeRuntimeFiles, writeRuntimeFiles } from '../runtime-files';
 import { createAreaNamer } from './area-namer';
+import { systemListeners } from './listening-ports';
+import { loopbackProbe } from './loopback-probe';
 import { createServices } from './services';
 import {
   allSandboxRootsOf,
@@ -1697,6 +1699,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       }),
     protectedRoots: [opts.dataDir, ...allSandboxRoots, worktreeRoot],
     areaNamer,
+    listeners: systemListeners,
+    probe: loopbackProbe(),
     hazards: hazardAssessor,
     pinCheckout: (repoPath) => {
       // A checkout git can't read yet is recorded at the first git call that succeeds there.

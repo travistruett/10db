@@ -572,6 +572,28 @@ describe('POST /projects/:projectId/workbench-setup', () => {
     });
   });
 
+  it('suggests the settings the repository shows, with the UI package found from the proposed pages', async () => {
+    commitFiles({
+      'pnpm-lock.yaml': 'lockfileVersion: 9.0\n',
+      'docker-compose.yml': 'services:\n  proxy:\n    ports: ["18899:80"]\n',
+      'web/package.json':
+        '{"scripts":{"typecheck":"tsc","lint":"eslint"},"dependencies":{"next":"16.0.0"}}\n',
+      'web/app/layout.tsx': '\n',
+      'web/app/friday/page.tsx': '\n',
+      'web/app/people/page.tsx': '\n',
+    });
+    const project = await projectWith([{ name: 'rest', globs: ['**'], catchAll: true }]);
+
+    const setup = await api().post(`/projects/${project.id}/workbench-setup`, WorkbenchSetupDto);
+
+    // No origin: no trusted copy to write a dev login from, and nothing to push.
+    expect(setup.settings.map((s) => [s.field, s.value])).toEqual([
+      ['appUrl', 'http://localhost:18899'],
+      ['changedCheckCommand', 'pnpm --dir web run typecheck && pnpm --dir web run lint'],
+    ]);
+    expect(setup.branch).toBeNull();
+  });
+
   it('answers 404 for a project there is none of', async () => {
     expect((await send('POST', `/projects/${mintId('Project')}/workbench-setup`)).status).toBe(404);
   });
