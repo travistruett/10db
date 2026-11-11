@@ -169,43 +169,159 @@ describe('devLoginPrompt', () => {
 describe('devLoginAnswer', () => {
   const good =
     'docker compose exec -T backend python manage.py dev_login frontend-e2e@example.test --tenant frontend-e2e';
-  it.each([
+  const SCRIPT: DevLogin = { name: 'login-as', path: 'scripts/login-as.sh' };
+  const ROOT_SCRIPT: DevLogin = { name: 'dev-login', path: 'package.json', script: 'node x.mjs' };
+  const WEB_SCRIPT: DevLogin = {
+    name: 'dev-login',
+    path: 'web/package.json',
+    script: 'node x.mjs',
+  };
+  const asked = (command: string) => JSON.stringify({ command });
+  interface Row {
+    readonly name: string;
+    readonly text: string;
+    readonly found?: readonly DevLogin[];
+    readonly ok: boolean;
+  }
+  const rows: Row[] = [
+    { name: 'the found command in compose', text: asked(good), ok: true },
+    { name: 'with prose round it', text: `Here: {"command": "${good}"} done`, ok: true },
     {
-      name: 'a command that names the found one',
-      text: JSON.stringify({ command: good }),
-      expected: good,
+      name: 'docker-compose, quoted words, python3',
+      text: asked('docker-compose exec backend python3 manage.py dev_login "a@example.test"'),
+      ok: true,
     },
-    { name: 'with prose round it', text: `Here: {"command": "  ${good}  "} done`, expected: good },
-    { name: 'not JSON', text: good, expected: null },
     {
-      name: 'another command',
-      text: '{"command":"python manage.py createsuperuser"}',
-      expected: null,
+      name: 'on the Mac, a flag with a value',
+      text: asked("python manage.py dev_login 'dev user' --tenant=acme"),
+      ok: true,
+    },
+    {
+      name: 'a script by its path',
+      text: asked('./scripts/login-as.sh dev@example.test'),
+      found: [SCRIPT],
+      ok: true,
+    },
+    {
+      name: 'a script through its shell',
+      text: asked('bash scripts/login-as.sh dev'),
+      found: [SCRIPT],
+      ok: true,
+    },
+    {
+      name: 'a root package script',
+      text: asked('pnpm run dev-login'),
+      found: [ROOT_SCRIPT],
+      ok: true,
+    },
+    {
+      name: "a package's script, pnpm",
+      text: asked('pnpm --dir web run dev-login'),
+      found: [WEB_SCRIPT],
+      ok: true,
+    },
+    {
+      name: "a package's script, npm",
+      text: asked('npm --prefix web run dev-login'),
+      found: [WEB_SCRIPT],
+      ok: true,
+    },
+    {
+      name: "a package's script, yarn",
+      text: asked('yarn --cwd web dev-login'),
+      found: [WEB_SCRIPT],
+      ok: true,
+    },
+    {
+      name: "a package's script, bun",
+      text: asked('bun run --cwd web dev-login'),
+      found: [WEB_SCRIPT],
+      ok: true,
+    },
+    { name: 'not JSON', text: good, ok: false },
+    { name: 'empty', text: asked(''), ok: false },
+    { name: 'too long', text: asked(`${good} ${'x'.repeat(500)}`), ok: false },
+    {
+      name: 'options for docker beyond -T',
+      text: asked('docker compose exec -T -e WORKOS_API_KEY= backend python manage.py dev_login x'),
+      ok: false,
+    },
+    {
+      name: 'docker with no service',
+      text: asked('docker compose exec python manage.py dev_login x'),
+      ok: false,
+    },
+    {
+      name: 'docker run',
+      text: asked('docker run -v /:/host img python manage.py dev_login x'),
+      ok: false,
+    },
+    { name: 'another program', text: asked('curl http://localhost/dev_login'), ok: false },
+    {
+      name: 'a shell running a string',
+      text: asked("bash -c 'python manage.py dev_login x'"),
+      ok: false,
+    },
+    {
+      name: 'another management command',
+      text: asked('python manage.py createsuperuser'),
+      ok: false,
     },
     {
       name: 'the name inside another word',
-      text: '{"command":"python manage.py dev_login_all x"}',
-      expected: null,
-    },
-    { name: 'two lines', text: JSON.stringify({ command: `${good}\necho hi` }), expected: null },
-    { name: 'a semicolon', text: JSON.stringify({ command: `${good}; rm -rf x` }), expected: null },
-    { name: 'a pipe', text: JSON.stringify({ command: `${good} | cat` }), expected: null },
-    { name: 'an and', text: JSON.stringify({ command: `cd x && ${good}` }), expected: null },
-    { name: 'a background job', text: JSON.stringify({ command: `${good} &` }), expected: null },
-    { name: 'a backtick', text: JSON.stringify({ command: `${good} \`id\`` }), expected: null },
-    { name: 'a substitution', text: JSON.stringify({ command: `${good} $(id)` }), expected: null },
-    {
-      name: 'a variable left unexpanded',
-      text: JSON.stringify({ command: `${good} $QA_EMAIL` }),
-      expected: null,
+      text: asked('python manage.py dev_login_all x'),
+      ok: false,
     },
     {
-      name: 'too long',
-      text: JSON.stringify({ command: `${good} ${'x'.repeat(500)}` }),
-      expected: null,
+      name: 'a script run as a management command',
+      text: asked('python manage.py login-as x'),
+      found: [SCRIPT],
+      ok: false,
     },
-    { name: 'empty', text: '{"command":""}', expected: null },
-  ])('$name', ({ text, expected }) => {
-    expect(devLoginAnswer(text, [DJANGO])).toBe(expected);
+    {
+      name: 'another script path',
+      text: asked('./scripts/other.sh login-as'),
+      found: [SCRIPT],
+      ok: false,
+    },
+    {
+      name: "a package's script from the root",
+      text: asked('pnpm run dev-login'),
+      found: [WEB_SCRIPT],
+      ok: false,
+    },
+    {
+      name: "a package's script in another folder",
+      text: asked('pnpm --dir api run dev-login'),
+      found: [WEB_SCRIPT],
+      ok: false,
+    },
+    { name: 'a short option', text: asked('python manage.py dev_login -u x'), ok: false },
+    { name: 'a glob outside quotes', text: asked('python manage.py dev_login *'), ok: false },
+    { name: 'a comment', text: asked('python manage.py dev_login x #'), ok: false },
+    { name: 'a redirect', text: asked('python manage.py dev_login x > out'), ok: false },
+    { name: 'an escape', text: asked('python manage.py dev_login a\\ b'), ok: false },
+    { name: 'an unclosed quote', text: asked("python manage.py dev_login 'a"), ok: false },
+    { name: 'a word glued to a quote', text: asked("python manage.py dev_login a'b'"), ok: false },
+    { name: 'two lines', text: asked(`${good}\necho hi`), ok: false },
+    { name: 'a semicolon', text: asked(`${good}; rm -rf x`), ok: false },
+    { name: 'a pipe', text: asked(`${good} | cat`), ok: false },
+    { name: 'an and', text: asked(`cd x && ${good}`), ok: false },
+    { name: 'a background job', text: asked(`${good} &`), ok: false },
+    { name: 'a backtick', text: asked(`${good} \`id\``), ok: false },
+    { name: 'a substitution', text: asked(`${good} $(id)`), ok: false },
+    { name: 'a variable left unexpanded', text: asked(`${good} "$QA_EMAIL"`), ok: false },
+  ];
+  it.each(rows)('$name', ({ text, found, ok }) => {
+    const answer = devLoginAnswer(text, found ?? [DJANGO]);
+    if (ok)
+      expect(answer).toBe(
+        (
+          JSON.parse(text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)) as {
+            command: string;
+          }
+        ).command,
+      );
+    else expect(answer).toBeNull();
   });
 });

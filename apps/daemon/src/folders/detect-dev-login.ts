@@ -200,7 +200,10 @@ export function devLoginPrompt(found: readonly DevLogin[], evidence: string): st
     'Write the one shell command, run from the top of the repository, that prints the address a',
     'browser opens to be signed in, for the same user and options the scripts use. Write out the',
     'variables and functions in full: the command uses no variable, no function, no $( ), no',
-    'backtick, no ;, no | and no &.',
+    'backtick, no ;, no |, no &, no redirect and no #. It runs the dev login command itself (for a',
+    'Django command, python manage.py <name>), or, when the scripts run it in a compose service,',
+    'docker compose exec -T <service> followed by that, with no other docker option. Its',
+    'arguments are plain words, quoted words, or --flag and --flag=value.',
     '',
     'Reply with JSON only, in this shape and nothing else:',
     '{"command":"python manage.py dev_login dev@example.test"}',
@@ -211,16 +214,120 @@ export function devLoginPrompt(found: readonly DevLogin[], evidence: string): st
 
 const Answer = z.object({ command: z.string() });
 
+/** Characters refused anywhere in the answer: a redirect, a pipe, a second command, a job, an
+ * expansion, an escape, a comment. */
+const REFUSED = /[<>|;&$`\\#\n\r]/;
+/** A word with no quotes: letters, digits and the punctuation of paths, emails and flags; no glob. */
+const PLAIN = /^[\w@%+=:,./-]+$/;
+const FLAG = /^--[A-Za-z0-9][\w-]*(?:=[\w@%+:,./-]*)?$/;
+const PACKAGE_MANAGERS = new Set(['pnpm', 'npm', 'yarn', 'bun']);
+const INTERPRETERS = new Set(['sh', 'bash', 'node', 'python', 'python3']);
+const PYTHONS = new Set(['python', 'python3']);
+
+interface Word {
+  readonly text: string;
+  readonly quoted: boolean;
+}
+
+/** The answer split into words, or null when a word is neither plain nor wholly quoted. */
+function words(command: string): Word[] | null {
+  const found: Word[] = [];
+  const word = /'([^']*)'|"([^"]*)"|([^\s'"]+)/y;
+  let at = 0;
+  while (at < command.length) {
+    if (/\s/.test(command[at] ?? '')) {
+      at++;
+      continue;
+    }
+    word.lastIndex = at;
+    const match = word.exec(command);
+    if (match === null) return null;
+    at = word.lastIndex;
+    // A word must end at a space or the end: `a'b'` is one word to a shell, and none of these.
+    if (at < command.length && !/\s/.test(command[at] ?? '')) return null;
+    const plain = match[3];
+    if (plain !== undefined) {
+      if (!PLAIN.test(plain)) return null;
+      found.push({ text: plain, quoted: false });
+    } else found.push({ text: match[1] ?? match[2] ?? '', quoted: true });
+  }
+  return found;
+}
+
+const is = (word: Word | undefined, ...texts: string[]): boolean =>
+  word !== undefined && !word.quoted && texts.includes(word.text);
+
+/** What follows `docker compose exec [-T] <service>` (or `docker-compose`), else all of `argv`. */
+function insideCompose(argv: readonly Word[]): readonly Word[] | null {
+  let at: number;
+  if (is(argv[0], 'docker') && is(argv[1], 'compose') && is(argv[2], 'exec')) at = 3;
+  else if (is(argv[0], 'docker-compose') && is(argv[1], 'exec')) at = 2;
+  else return argv;
+  if (is(argv[at], '-T')) at++;
+  const service = argv[at];
+  if (service === undefined || service.quoted || service.text.startsWith('-')) return null;
+  return argv.slice(at + 1);
+}
+
+/** The words after `login`'s own invocation in `argv`, or null when `argv` does not run it. */
+function argsOf(argv: readonly Word[], login: DevLogin): readonly Word[] | null {
+  const dir = posix.dirname(login.path);
+  if (login.script !== undefined) {
+    const manager = argv[0];
+    if (!is(manager, ...PACKAGE_MANAGERS)) return null;
+    let at = 1;
+    const places: string[] = [];
+    /** Steps past `--dir <folder>` (or `--prefix`, `--cwd`) at `at`, keeping the folder. */
+    const where = (): void => {
+      const folder = argv[at + 1];
+      if (is(argv[at], '--dir', '--prefix', '--cwd') && folder !== undefined && !folder.quoted) {
+        places.push(folder.text);
+        at += 2;
+      }
+    };
+    where();
+    if (is(argv[at], 'run')) at++;
+    else if (manager?.text !== 'yarn') return null;
+    where();
+    if (!is(argv[at], login.name)) return null;
+    if (places.length > 1 || (places[0] ?? '.') !== dir) return null;
+    return argv.slice(at + 1);
+  }
+  if (login.path.includes('/management/commands/') && login.path.endsWith('.py')) {
+    return is(argv[0], ...PYTHONS) && is(argv[1], 'manage.py') && is(argv[2], login.name)
+      ? argv.slice(3)
+      : null;
+  }
+  const paths = [login.path, `./${login.path}`];
+  if (is(argv[0], ...paths)) return argv.slice(1);
+  if (is(argv[0], ...INTERPRETERS) && is(argv[1], ...paths)) return argv.slice(2);
+  return null;
+}
+
 /**
- * The model's command when it passes every check, else null: one line of at most
- * `MAX_DEV_LOGIN_COMMAND` characters that runs a found command by its name, with no `;`, `|`, `&`,
- * backtick or `$` (no second command, no substitution, no variable left to expand). Pure.
+ * The model's command when it passes every check, else null. It is one line of at most
+ * `MAX_DEV_LOGIN_COMMAND` characters with none of `< > | ; & $ \` \\ #`, split into plain words
+ * (no glob) and wholly quoted ones. Its words are a found command's invocation (`python manage.py
+ * <name>` for a Django command, the script's path, alone or after its interpreter, or `<manager>
+ * run <script>` in the script's package folder), optionally inside `docker compose exec [-T]
+ * <service>`, then only quoted words, plain words and `--flag` or `--flag=value`. Pure.
  */
 export function devLoginAnswer(text: string, found: readonly DevLogin[]): string | null {
   const parsed = Answer.safeParse(modelJson(text));
   if (!parsed.success) return null;
   const command = parsed.data.command.trim();
   if (command === '' || command.length > MAX_DEV_LOGIN_COMMAND) return null;
-  if (/[;|&`$]/.test(command) || /\p{Cc}/u.test(command)) return null;
-  return found.some((f) => asWord(f.name).test(command)) ? command : null;
+  if (REFUSED.test(command) || /\p{Cc}/u.test(command)) return null;
+  const argv = words(command);
+  const inner = argv === null ? null : insideCompose(argv);
+  if (inner === null) return null;
+  for (const login of found) {
+    const args = argsOf(inner, login);
+    if (args === null) continue;
+    const plainArgs = args.every(
+      (word) => word.quoted || (word.text.startsWith('-') ? FLAG.test(word.text) : true),
+    );
+    if (plainArgs) return command;
+  }
+  return null;
 }
