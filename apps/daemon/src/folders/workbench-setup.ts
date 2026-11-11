@@ -20,7 +20,7 @@ import { areasFromStructure } from './area-naming';
 import { areaNameOf, codeRoutes, routerFiles, type CodePage } from './code-routes';
 import { isSourceFile, readPathAliases } from './import-graph';
 import { literalGlob } from './literal-glob';
-import { readPageCode, type PageSeed } from './page-code';
+import { readPageCode, type PageSeed, type TextReader } from './page-code';
 import { indexPageFiles, isRedirectOnly } from './route-pages';
 import { rebuildAreas, type PlannedPage } from './rebuild-areas';
 
@@ -35,6 +35,8 @@ interface GroupPage {
 
 /** How many of the latest commits are read for folders that change together. */
 const HISTORY_COMMITS = 400;
+/** What one setup may read of a repository's files, all reads together. */
+export const SETUP_READ_BYTES = 32 * 1024 * 1024;
 /** A router or config file larger than this is not read. */
 const ROUTER_MAX_BYTES = 512 * 1024;
 
@@ -127,8 +129,7 @@ function splitCodeUnit(
 
 /** Pages named in code, for each unit with no file routes, and the folders beside them left out. */
 async function codePages(
-  deps: WorkbenchSetupDeps,
-  repo: string,
+  read: TextReader,
   files: readonly string[],
   skipUnits: ReadonlySet<string>,
 ): Promise<{
@@ -151,11 +152,7 @@ async function codePages(
       .filter((path) => files.includes(path)),
   );
   if (routers.length === 0) return { pages: [], skipped: [], routers: [] };
-  const texts = await deps.git.surveyTexts(
-    repo,
-    [...routers.map((r) => r.file), ...configs],
-    ROUTER_MAX_BYTES,
-  );
+  const { texts } = await read([...routers.map((r) => r.file), ...configs], ROUTER_MAX_BYTES);
   const pages: (CodePage & { unit: string })[] = [];
   const skipped: { name: string; reason: string }[] = [];
   for (const unit of units) {
@@ -207,7 +204,21 @@ export async function proposeSetupAreas(
     c.trees.length === 1 &&
     c.trees[0] === c.label;
   const fileUnits = new Set(apps.map((a) => a.unit));
-  const code = await codePages(deps, project.repoPath, files, fileUnits);
+  // Every read of the setup together stays within one budget, and stops when the request goes.
+  let budget = SETUP_READ_BYTES;
+  const refusals = new Set<string>();
+  const read: TextReader = async (paths, maxBytes) => {
+    signal?.throwIfAborted();
+    const found = await deps.git.surveyTexts(project.repoPath, paths, {
+      maxBytes,
+      maxTotalBytes: budget,
+      ...(signal === undefined ? {} : { signal }),
+    });
+    budget -= found.bytes;
+    if (found.refused !== null) refusals.add(found.refused);
+    return found;
+  };
+  const code = await codePages(read, files, fileUnits);
   signal?.throwIfAborted();
 
   // A screen whose page files only redirect is no page: its folder stays an area with no role.
@@ -215,8 +226,7 @@ export async function proposeSetupAreas(
     indexPageFiles(files, app).map((index) => ({ ...index, app })),
   );
   const screenPages = (c: AreaCandidate) => files.filter((f) => isPageFile(f) && under(f, c.label));
-  const pageTexts = await deps.git.surveyTexts(
-    project.repoPath,
+  const { texts: pageTexts } = await read(
     [...candidates.filter(isPage).flatMap(screenPages), ...indexes.map((i) => i.file)],
     ROUTER_MAX_BYTES,
   );
@@ -368,13 +378,13 @@ export async function proposeSetupAreas(
       if (p.files !== undefined) return { name: p.name, files: p.files };
       return p.folder === undefined ? { name: p.name } : { name: p.name, folder: p.folder };
     });
-    const found = await readPageCode(deps.git, project.repoPath, {
+    const found = await readPageCode(read, {
       unit: group.unit,
       files,
       pages: seeds,
       sharedRoots: group.sharedRoots,
     });
-    if (found.note !== null)
+    if (found.note !== null && !refusals.has(found.note))
       skipped.push({ name: group.unit === '' ? 'app' : group.unit, reason: found.note });
     for (const page of group.pages) {
       const base = {
@@ -386,6 +396,7 @@ export async function proposeSetupAreas(
     }
   }
 
+  for (const reason of refusals) skipped.push({ name: 'page code', reason });
   return rebuildAreas({
     files,
     existing: project.areas,

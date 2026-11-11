@@ -1048,15 +1048,34 @@ export interface Git {
   /**
    * The text of each of `paths` at HEAD of the repository at or above `path`, read as `survey` reads:
    * the object store only, unpinned, nothing written, no program the repository configures run. Only
-   * a regular file of at most `maxBytes` that holds no NUL byte is answered; any other path is left
-   * out, as is every path when git won't read the repository.
+   * a regular file of at most `options.maxBytes` that holds no NUL byte is answered; any other path is
+   * left out, as is every path when git won't read the repository. A partial clone is not read at all
+   * (a missing blob would be fetched, running its remote's programs), nor are files that together
+   * hold more than `options.maxTotalBytes`; `refused` says which. `options.signal` stops between
+   * batches.
    */
   surveyTexts(
     path: string,
     paths: readonly string[],
-    maxBytes: number,
-  ): Promise<ReadonlyMap<string, string>>;
+    options: SurveyTextsOptions,
+  ): Promise<SurveyTexts>;
 }
+
+export interface SurveyTextsOptions {
+  readonly maxBytes: number;
+  readonly maxTotalBytes: number;
+  readonly signal?: AbortSignal;
+}
+
+/** What `surveyTexts` read: each text by path, the bytes read, and why it read nothing, if it refused. */
+export interface SurveyTexts {
+  readonly texts: ReadonlyMap<string, string>;
+  readonly bytes: number;
+  readonly refused: string | null;
+}
+
+/** Said when `surveyTexts` meets a partial clone. */
+export const PARTIAL_CLONE_REFUSAL = 'a partial clone: page code is not read';
 
 export interface GitOptions {
   /** Called with every refusal, so the builder hears of it whoever called. */
@@ -4656,22 +4675,40 @@ export function createGit(opts: GitOptions = {}): Git {
         return refusalOf(error);
       }
     },
-    async surveyTexts(path, paths, maxBytes) {
-      const texts = new Map<string, string>();
+    async surveyTexts(path, paths, { maxBytes, maxTotalBytes, signal }) {
+      const none = (refused: string | null): SurveyTexts => ({
+        texts: new Map(),
+        bytes: 0,
+        refused,
+      });
       const wanted = new Set(paths);
-      if (wanted.size === 0) return texts;
+      if (wanted.size === 0) return none(null);
+      // A missing blob is never fetched: the fetch would run the remote's programs.
+      const noFetch = { env: { GIT_NO_LAZY_FETCH: '1' } };
       try {
         const at = observed(
           realpathSync((await git(observed(path), ['rev-parse', '--show-toplevel'])).trim()),
         );
+        // Git before 2.45 has no GIT_NO_LAZY_FETCH, so a partial clone is not read at all. Reading
+        // config runs no program.
+        const partial = await git(at, ['config', '--get', 'extensions.partialClone'], {
+          answerExitCodes: [1],
+        });
+        const promisors = await git(
+          at,
+          ['config', '--type=bool', '--get-regexp', '^remote\\..*\\.promisor$'],
+          { answerExitCodes: [1] },
+        );
+        if (partial.trim() !== '' || /\strue$/mu.test(promisors))
+          return none(PARTIAL_CLONE_REFUSAL);
         const head = await git(at, ['rev-parse', '-q', '--verify', 'HEAD^{commit}'], {
           answerExitCodes: [1],
         });
-        if (head.trim() === '') return texts;
+        if (head.trim() === '') return none(null);
         const blobs: { path: string; oid: string; bytes: number }[] = [];
-        for (const record of (await git(at, ['ls-tree', '-r', '-z', '--long', head.trim()])).split(
-          '\0',
-        )) {
+        for (const record of (
+          await git(at, ['ls-tree', '-r', '-z', '--long', head.trim()], noFetch)
+        ).split('\0')) {
           const entry = LS_TREE_ENTRY.exec(record);
           if (!entry) continue;
           const [, mode = '', type, oid = '', size = '', file = ''] = entry;
@@ -4685,20 +4722,28 @@ export function createGit(opts: GitOptions = {}): Git {
           )
             blobs.push({ path: file, oid, bytes });
         }
+        const total = blobs.reduce((sum, b) => sum + b.bytes, 0);
+        if (total > maxTotalBytes)
+          return none(
+            `the source is over ${maxTotalBytes.toLocaleString('en-US')} bytes: page code is not read`,
+          );
+        const texts = new Map<string, string>();
         // `cat-file --batch` prints `<oid> blob <size>\n<bytes>\n` per line it is given, in batches
         // that keep each call's output well under what one git call may print.
         for (let start = 0; start < blobs.length;) {
+          signal?.throwIfAborted();
           let end = start;
-          let total = 0;
+          let size = 0;
           while (
             end < blobs.length &&
-            (end === start || total + (blobs[end]?.bytes ?? 0) < SURVEY_TEXT_BATCH_BYTES)
+            (end === start || size + (blobs[end]?.bytes ?? 0) < SURVEY_TEXT_BATCH_BYTES)
           ) {
-            total += (blobs[end]?.bytes ?? 0) + 100;
+            size += (blobs[end]?.bytes ?? 0) + 100;
             end += 1;
           }
           const batch = blobs.slice(start, end);
-          const out = await gitCapped(at, ['cat-file', '--batch'], total + 1, {
+          const out = await gitCapped(at, ['cat-file', '--batch'], size + 1, {
+            ...noFetch,
             input: batch.map((b) => `${b.oid}\n`).join(''),
           });
           let offset = 0;
@@ -4711,9 +4756,10 @@ export function createGit(opts: GitOptions = {}): Git {
           }
           start = end;
         }
-        return texts;
-      } catch {
-        return new Map<string, string>();
+        return { texts, bytes: total, refused: null };
+      } catch (error) {
+        if (signal?.aborted === true) throw error;
+        return none(null);
       }
     },
     async ignoredDirectories(repo) {

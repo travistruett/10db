@@ -18,6 +18,7 @@ export {
   type CheckoutPlace,
   type FolderAt,
   type Git,
+  type SurveyTexts,
   type KeptCommit,
   type LandedPaths,
   type PassDirtRecord,

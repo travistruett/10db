@@ -174,7 +174,11 @@ describe('no program from the checkout runs in a daemon git call', () => {
     { name: 'survey', act: (git) => git.survey(repo.path, 50) },
     {
       name: 'surveyTexts',
-      act: (git) => git.surveyTexts(repo.path, ['README.md', '.gitattributes'], 1024),
+      act: (git) =>
+        git.surveyTexts(repo.path, ['README.md', '.gitattributes'], {
+          maxBytes: 1024,
+          maxTotalBytes: 4096,
+        }),
     },
     { name: 'deleteKeptRef', act: (git) => git.deleteKeptRef(repo.path, 'refs/10db/starts/x') },
     {
@@ -1652,14 +1656,63 @@ describe('survey', () => {
     rawGit('add', 'src');
     rawGit('commit', '-q', '-m', 'texts');
     write('src/a.ts', 'edited in the checkout\n');
-    const texts = await createGit().surveyTexts(
+    const read = await createGit().surveyTexts(
       join(repo.path, 'src'),
       ['src/a.ts', 'src/b.ts', 'src/bin.dat', 'src/big.ts', 'src/gone.ts'],
-      1000,
+      { maxBytes: 1000, maxTotalBytes: 100_000 },
     );
-    expect(Object.fromEntries(texts)).toEqual({
+    expect(read.refused).toBeNull();
+    expect(Object.fromEntries(read.texts)).toEqual({
       'src/a.ts': "export const a = 'é';\n",
       'src/b.ts': 'import { a } from "./a";\n',
+    });
+  });
+
+  it('reads nothing of a partial clone, so no lazy fetch runs a program its config names', async () => {
+    write('src/a.ts', 'export const a = 1;\n');
+    rawGit('add', 'src');
+    rawGit('commit', '-q', '-m', 'a');
+    rawGit('config', 'uploadpack.allowFilter', 'true');
+    const clone = join(scratch.path, 'partial');
+    gitIn(
+      scratch.path,
+      'clone',
+      '-q',
+      '--filter=blob:none',
+      '--no-checkout',
+      `file://${repo.path}`,
+      clone,
+    );
+    for (const [key, value] of Object.entries(TEST_REPO_CONFIG)) gitIn(clone, 'config', key, value);
+    const ssh = marker('ssh');
+    const uploadPack = marker('upload-pack');
+    gitIn(clone, 'config', 'core.sshCommand', ssh.path);
+    gitIn(clone, 'config', 'remote.origin.uploadpack', uploadPack.path);
+
+    const read = await createGit().surveyTexts(clone, ['src/a.ts'], {
+      maxBytes: 1000,
+      maxTotalBytes: 1000,
+    });
+
+    expect(read.texts.size).toBe(0);
+    expect(read.refused).toBe('a partial clone: page code is not read');
+    expect(ssh.ran()).toBe(false);
+    expect(uploadPack.ran()).toBe(false);
+  });
+
+  it('reads nothing when the files wanted hold more than the budget together', async () => {
+    write('src/a.ts', 'a'.repeat(600));
+    write('src/b.ts', 'b'.repeat(600));
+    rawGit('add', 'src');
+    rawGit('commit', '-q', '-m', 'big');
+    const read = await createGit().surveyTexts(repo.path, ['src/a.ts', 'src/b.ts'], {
+      maxBytes: 1000,
+      maxTotalBytes: 1000,
+    });
+    expect(read).toEqual({
+      texts: new Map(),
+      bytes: 0,
+      refused: 'the source is over 1,000 bytes: page code is not read',
     });
   });
 

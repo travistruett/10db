@@ -1,5 +1,5 @@
 import { posix } from 'node:path';
-import type { Git } from '../git';
+import type { SurveyTexts } from '../git';
 import { treeGlobs } from './area-candidates';
 import {
   importSpecifiers,
@@ -209,26 +209,29 @@ function configPath(files: readonly string[], unit: string): string | null {
   return null;
 }
 
+/** Reads files' texts at HEAD, each at most `maxBytes`, within what the setup may still read. */
+export type TextReader = (paths: readonly string[], maxBytes: number) => Promise<SurveyTexts>;
+
 /**
- * `pageCode` over the repository at `repo`, its texts read at HEAD from git's object store; nothing
- * of the checkout is opened. Over the cap, nothing is read.
+ * `pageCode` over a unit's texts as `read` gives them from git's object store; nothing of the
+ * checkout is opened. Over the file cap nothing is read; a read refused (a partial clone, the byte
+ * budget) leaves every page its route folder, with the reason as the note.
  */
 export async function readPageCode(
-  git: Pick<Git, 'surveyTexts'>,
-  repo: string,
+  read: TextReader,
   input: Omit<PageCodeInput, 'texts' | 'aliases'>,
 ): Promise<PageCode> {
   const sources = unitSourceFiles(input.files, input.unit);
   const config = configPath(input.files, input.unit);
   const wanted = sources.length > PAGE_CODE_MAX_FILES ? [] : sources;
-  const texts = await git.surveyTexts(
-    repo,
+  const found = await read(
     config === null ? wanted : [...wanted, config],
     PAGE_CODE_MAX_FILE_BYTES,
   );
-  const configText = config === null ? undefined : texts.get(config);
+  if (found.refused !== null) return { taken: new Map(), note: found.refused };
+  const configText = config === null ? undefined : found.texts.get(config);
   const aliases = readPathAliases(
     config === null || configText === undefined ? null : { path: config, text: configText },
   );
-  return pageCode({ ...input, texts, aliases });
+  return pageCode({ ...input, texts: found.texts, aliases });
 }
