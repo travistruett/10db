@@ -20,6 +20,8 @@
 
 ## Invariants
 
+- Every feature runs on every account kind 10db supports (a Claude plan, Claude through Bedrock or an API key, a ChatGPT/Codex plan); the project's account is the builder's billing line and nothing asks the builder to move it to reach a feature. A feature a provider can't fully serve still runs there and says what it lacks, with a follow-up to close the gap (`AGENTS.md`, Provider parity). Known gap: Brainstorm chat is refused on a ChatGPT account (below).
+
 - An account keeps no model map. The models it can run are its own list (what its agent reports) joined to the catalogue, and its settings hold `tierOverrides` (a model ID per tier, absent for Automatic) and nothing else about models. The drawer shows one dropdown per tier from the account's list, or a text field per tier for a gateway that reports none; an override the list lacks or has marked unusable gives way to the tier's automatic choice. The launcher sets no variable that names a model. The decision is `decisions/2026-11-07-models-come-from-a-catalogue.md`.
 - A session sends its prompt only after `accountInfo()` matched the account's identity and credential kind; a mismatch pauses the account with a card and sends nothing. A model mismatch fails the workstream, not the account.
 - The default account runs on the builder's own login (the login shell's `CLAUDE_CONFIG_DIR`, else Claude Code's default directory); every other account, keyed kinds included, runs on its own config directory under the data directory.
