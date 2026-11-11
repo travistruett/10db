@@ -266,6 +266,27 @@ function routesOf(text: string): { defs: RouteDef[]; defined: string[] } {
     }
     return found;
   };
+  // The nearest object at or around a bracket that names a path, found once per bracket: a walk up
+  // through objects with none is remembered for each of them, so deep nesting reads in linear time.
+  const nearest = new Map<number, number>();
+  const nearestRoute = (from: number): number => {
+    const passed: number[] = [];
+    let found = -1;
+    for (let up = from; up !== -1; up = brackets.parents.get(up) ?? -1) {
+      const known = nearest.get(up);
+      if (known !== undefined) {
+        found = known;
+        break;
+      }
+      if (objectAt(up).path !== undefined) {
+        found = up;
+        break;
+      }
+      passed.push(up);
+    }
+    for (const bracket of passed) nearest.set(bracket, found);
+    return found;
+  };
   const fullPaths = new Map<number, string | undefined>();
   const fullPath = (open: number, depth: number): string | undefined => {
     if (fullPaths.has(open)) return fullPaths.get(open);
@@ -276,13 +297,10 @@ function routesOf(text: string): { defs: RouteDef[]; defined: string[] } {
       if (!path.startsWith('/')) {
         const named = parentVar === undefined ? undefined : variables.get(parentVar);
         if (named !== undefined) parent = fullPath(named, depth + 1);
-        else
-          for (
-            let up = brackets.parents.get(open) ?? -1;
-            up !== -1 && parent === undefined;
-            up = brackets.parents.get(up) ?? -1
-          )
-            if (objectAt(up).path !== undefined) parent = fullPath(up, depth + 1);
+        else {
+          const up = nearestRoute(brackets.parents.get(open) ?? -1);
+          if (up !== -1) parent = fullPath(up, depth + 1);
+        }
       }
       const joined = joinPath(parent, path);
       whole = joined.length > MAX_PATH_CHARS ? undefined : joined;
@@ -307,10 +325,17 @@ function routesOf(text: string): { defs: RouteDef[]; defined: string[] } {
   let depth = 0;
   // The next `</Route` is looked for again only once the scan has passed it, so a file of open tags
   // with no closing one is read once, not once a tag.
-  let closing = text.indexOf('</Route');
+  // A `</Route` counts only as a whole tag name: `</Routes>` and `</RouteGuard>` close no route.
+  const closeFrom = (from: number): number => {
+    let found = text.indexOf('</Route', from);
+    while (found !== -1 && !/[\s>]/u.test(text[found + 7] ?? ''))
+      found = text.indexOf('</Route', found + 7);
+    return found;
+  };
+  let closing = closeFrom(0);
   for (let at = 0; at < text.length;) {
     const opening = text.indexOf('<Route', at);
-    if (closing !== -1 && closing < at) closing = text.indexOf('</Route', at);
+    if (closing !== -1 && closing < at) closing = closeFrom(at);
     if (opening === -1 && closing === -1) break;
     if (closing !== -1 && (opening === -1 || closing < opening)) {
       if (depth <= MAX_NESTING) stack.pop();
@@ -344,7 +369,8 @@ function routesOf(text: string): { defs: RouteDef[]; defined: string[] } {
       if (defined.length < MAX_DEFINED) defined.push(path);
       if (component !== undefined) defs.push({ at: opening, path, component });
     }
-    if (end < limit && text[end - 1] !== '/') {
+    // A tag too long to read whole counts as open, so the `</Route>` that ends it pops it alone.
+    if (end >= limit || text[end - 1] !== '/') {
       if (!nested) stack.push(path ?? parent);
       depth += 1;
     }

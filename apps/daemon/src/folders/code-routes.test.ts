@@ -135,6 +135,26 @@ const tag = <Route path="/inbox2" element={<InboxView />} />;`,
       unrouted: ['ui/src/views/board', 'ui/src/views/review', 'ui/src/views/settings'],
     },
     {
+      name: 'a </Routes> or </RouteGuard> closes no Route, and a tag too long to read still nests',
+      router: `
+import { BoardView } from './views/board/board-view';
+import { InboxView } from './views/inbox/inbox-view';
+export const App = () => (
+  <Route path="/admin" element={<Shell />}>
+    <Routes></Routes>
+    <RouteGuard></RouteGuard>
+    <Route path="x" element={<Wide />} data-pad="${'a'.repeat(5000)}"></Route>
+    <Route path="board" element={<BoardView />} />
+  </Route>
+);
+const tail = <Route path="/inbox" element={<InboxView />} />;`,
+      pages: [
+        { name: 'board', folder: 'ui/src/views/board', route: '/admin/board' },
+        { name: 'inbox', folder: 'ui/src/views/inbox', route: '/inbox' },
+      ],
+      unrouted: ['ui/src/views/review', 'ui/src/views/settings'],
+    },
+    {
       name: 'a route to a module directly in views, or to a package, is no page',
       router: `
 import { Shared } from './views/shared';
@@ -207,6 +227,17 @@ describe('codeRoutes over a hostile router file', () => {
       aliases: NO_ALIASES,
     });
     expect(performance.now() - started).toBeLessThan(500);
+  });
+
+  it('joins relative paths under deep plain objects in linear time', () => {
+    const text = `${'{a:'.repeat(20_000)}[${"{path:'a'},".repeat(4_000)}]${'}'.repeat(20_000)}`;
+    const started = performance.now();
+    codeRoutes({
+      files: VIEWS,
+      routers: new Map([['ui/src/router.tsx', text]]),
+      aliases: NO_ALIASES,
+    });
+    expect(performance.now() - started).toBeLessThan(1000);
   });
 
   it('reads Route tags nested 20,000 deep in under 100 ms, joining no path past the nesting cap', () => {
