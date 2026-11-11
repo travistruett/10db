@@ -58,15 +58,16 @@ describe('pageCode', () => {
       taken: {},
     },
     {
-      name: 'a file no page reaches goes with the folder of the page beside it',
+      name: 'a folder holding a file no page reaches is not swept in: the page takes its files alone',
       repo: {
         'web/app/(app)/people/page.tsx': `import { Table } from '@/src/people/table';`,
         'web/src/people/table.tsx': '',
         'web/src/people/old-table.tsx': '',
         'web/app/(app)/friday/page.tsx': `import '@/src/other/x';`,
         'web/src/other/x.ts': '',
+        'web/src/other/x.test.ts': `import './x';`,
       },
-      taken: { people: ['web/src/people/**'], friday: ['web/src/other/**'] },
+      taken: { people: ['web/src/people/table.tsx'], friday: ['web/src/other/**'] },
     },
     {
       name: 'a folder index, a dynamic import and a re-export are followed',
@@ -152,6 +153,41 @@ describe('pageCode', () => {
       taken: {},
     },
     {
+      name: 'an index page reaches from its own file: what only it imports beside it, and its folders',
+      repo: {
+        'web/app/(app)/layout.tsx': `import './shell';`,
+        'web/app/(app)/shell.tsx': '',
+        'web/app/(app)/page.tsx': `import './home-picker';\nimport '@/src/home/board';`,
+        'web/app/(app)/home-picker.tsx': `import './shell';`,
+        'web/src/home/board.tsx': '',
+        'web/app/(app)/friday/page.tsx': `import '@/src/ui/x';`,
+        'web/src/ui/x.ts': '',
+      },
+      pages: [{ name: 'home', files: ['web/app/(app)/page.tsx'] }, FRIDAY],
+      sharedRoots: ['web/app/(app)/layout.tsx'],
+      taken: {
+        home: ['web/src/home/**', 'web/app/(app)/page.tsx', 'web/app/(app)/home-picker.tsx'],
+        friday: ['web/src/ui/**'],
+      },
+    },
+    {
+      name: 'what a router reaches outside the route components is shared, and it never enters them',
+      repo: {
+        'web/src/router.tsx': `import './shell/frame';\nimport './views/board/board-view';\nimport './views/inbox/inbox-view';`,
+        'web/src/shell/frame.tsx': `import '../lib/menu';`,
+        'web/src/lib/menu.tsx': '',
+        'web/src/views/board/board-view.tsx': `import '../../board-bits/card';\nimport '../../lib/menu';`,
+        'web/src/board-bits/card.tsx': '',
+        'web/src/views/inbox/inbox-view.tsx': '',
+      },
+      pages: [
+        { name: 'board', folder: 'web/src/views/board' },
+        { name: 'inbox', folder: 'web/src/views/inbox' },
+      ],
+      sharedRoots: ['web/src/router.tsx'],
+      taken: { board: ['web/src/board-bits/**'] },
+    },
+    {
       name: 'a page that imports nothing takes nothing',
       repo: { 'web/app/(app)/friday/page.tsx': '', 'web/src/x.ts': '' },
       aliases: NO_ALIASES,
@@ -169,7 +205,7 @@ describe('pageCode', () => {
       repo: {
         'web/app/(app)/friday/page.tsx': `import '@/src/friday/view';`,
         'web/src/friday/view.tsx': '',
-        'web/src/friday/.eslintrc.js': '',
+        'web/src/friday/.eslintrc': '',
         'web/app/(app)/people/page.tsx': `import '@/src/other';`,
         'web/src/other.ts': '',
       },
