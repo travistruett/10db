@@ -252,10 +252,10 @@ const relative = (repo: string, path: string): string =>
 
 /**
  * Where the app may answer, most likely first, each a loopback origin once with where it was found:
- * a server listening now whose working directory is in the repository; a compose app service's
- * published port; a Tauri `devUrl`; an app origin variable in a workflow, `.env.example` or compose
- * file; the UI unit's Vite `server.port`, its dev script's `--port`, then its framework's default.
- * The daemon's own port is never one. Pure.
+ * a compose app service's published port; a Tauri `devUrl`; an app origin variable in a workflow,
+ * `.env.example` or compose file; a server listening now whose working directory is in the
+ * repository; then the UI unit's Vite `server.port`, its dev script's `--port`, and its framework's
+ * default. The daemon's own port is never one. Pure.
  */
 export function appAddressCandidates(input: AppAddressInput): AddressCandidate[] {
   const found: AddressCandidate[] = [];
@@ -266,15 +266,6 @@ export function appAddressCandidates(input: AppAddressInput): AddressCandidate[]
   };
   const text = (path: string): string | undefined => input.texts.get(path);
   const paths = [...input.texts.keys()];
-
-  for (const l of input.listeners) {
-    if (l.cwd === null || !equalOrUnder(l.cwd, input.repoPath)) continue;
-    if (!LOOPBACK_BINDS.has(l.host) && !l.host.startsWith('127.')) continue;
-    add(
-      onPort(l.port),
-      `listening now: ${l.command} in ${relative(input.repoPath, l.cwd)} on port ${String(l.port)}`,
-    );
-  }
 
   const composes = composeFiles(paths);
   const published = composes.flatMap((path) =>
@@ -299,6 +290,17 @@ export function appAddressCandidates(input: AppAddressInput): AddressCandidate[]
     for (const match of (text(path) ?? '').matchAll(ORIGIN_VALUE)) {
       add(loopbackOrigin(match[2] ?? ''), `from ${path}: ${match[1] ?? ''}`);
     }
+  }
+
+  // A server running now comes after what the repository says, since any tool can listen in a
+  // checkout (a static preview, a docs server), and before the guesses.
+  for (const l of input.listeners) {
+    if (l.cwd === null || !equalOrUnder(l.cwd, input.repoPath)) continue;
+    if (!LOOPBACK_BINDS.has(l.host) && !l.host.startsWith('127.')) continue;
+    add(
+      onPort(l.port),
+      `listening now: ${l.command} in ${relative(input.repoPath, l.cwd)} on port ${String(l.port)}`,
+    );
   }
 
   if (input.uiUnit !== null) {

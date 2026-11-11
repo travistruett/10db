@@ -279,20 +279,27 @@ const rows: Row[] = [
     ],
   },
   {
-    name: 'the order: listener, compose, tauri, origins',
+    name: 'the order: compose, tauri, origins, a listener, then the guesses',
     input: {
-      listeners: [listener(3000)],
+      uiUnit: 'web',
+      listeners: [listener(3100)],
       texts: new Map([
         ['.env.example', 'APP_URL=http://localhost:4100\n'],
         ['src-tauri/tauri.conf.json', '{"build":{"devUrl":"http://localhost:1420"}}'],
         ['docker-compose.yml', compose('  proxy:\n    ports: ["8800:80"]\n')],
+        [
+          'web/package.json',
+          '{"scripts":{"dev":"next dev -p 3200"},"dependencies":{"next":"16.0.0"}}',
+        ],
       ]),
     },
     expected: [
-      ['http://localhost:3000', 'listening now: node in web on port 3000'],
       ['http://localhost:8800', 'from docker-compose.yml: proxy publishes 8800'],
       ['http://localhost:1420', 'from src-tauri/tauri.conf.json: devUrl'],
       ['http://localhost:4100', 'from .env.example: APP_URL'],
+      ['http://localhost:3100', 'listening now: node in web on port 3100'],
+      ['http://localhost:3200', 'from web/package.json: the dev script'],
+      ['http://localhost:3000', "Next.js's default port"],
     ],
   },
 ];
@@ -349,19 +356,19 @@ describe('chooseAppAddress', () => {
     {
       name: 'the first that answers wins',
       answered: [false, true, true],
-      url: 'http://localhost:8800',
+      url: 'http://localhost:1420',
       note: undefined,
     },
     {
       name: 'the first answers',
       answered: [true, false, false],
-      url: 'http://localhost:3000',
+      url: 'http://localhost:8800',
       note: undefined,
     },
     {
       name: 'nothing answers: the first, with a note',
       answered: [false, false, false],
-      url: 'http://localhost:3000',
+      url: 'http://localhost:8800',
       note: NOTHING_ANSWERED,
     },
   ])('$name', ({ answered, url, note }) => {
