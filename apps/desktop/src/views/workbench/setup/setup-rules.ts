@@ -26,11 +26,12 @@ export function suggestionCount(setup: WorkbenchSetupDto): number {
 }
 
 /**
- * What the picker's Set Up (n) counts once the project has pages: the settings and the branch note.
- * New page rows still show in the setup, but a page the builder left out is not asked for again.
+ * What the picker's Set Up (n) counts once the project has pages: the settings only. New page rows
+ * still show in the setup, but a page the builder left out is not asked for again, and the branch
+ * note is not counted: Apply can't clear it, so it would keep the link up.
  */
 export function setUpCount(setup: WorkbenchSetupDto): number {
-  return setup.settings.length + (setup.branch === null ? 0 : 1);
+  return setup.settings.length;
 }
 
 /**

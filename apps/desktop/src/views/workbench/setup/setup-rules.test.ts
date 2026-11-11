@@ -96,14 +96,14 @@ describe('areasChanged and suggestionCount', () => {
 });
 
 describe('setUpCount', () => {
-  it('counts the settings and the branch note only, never the page rows', () => {
+  it('counts the settings only: never the page rows, nor the branch note Apply cannot clear', () => {
     expect(setUpCount(SETUP)).toBe(1);
     expect(
       setUpCount({
         ...SETUP,
         branch: { branch: 'build', ahead: 3, command: 'git push origin build' },
       }),
-    ).toBe(2);
+    ).toBe(1);
     expect(setUpCount({ ...SETUP, settings: [] })).toBe(0);
   });
 });
