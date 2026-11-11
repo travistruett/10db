@@ -12,8 +12,9 @@ import { setupKeys, useWorkbenchSetup } from '../../../daemon/pass-queries';
 import { usePatchProject } from '../../../daemon/queries';
 import { SettingsSectionKey } from '../../settings/sections';
 import { AreasSection } from './areas-section';
-import { BranchSection } from './branch-section';
-import { SettingsSection } from './settings-section';
+import { BranchRow } from './branch-row';
+import { settingDrafts, settingsPatch, tickedSettings, type SettingDraft } from './setting-drafts';
+import { SettingRows, type SettingChange } from './setting-rows';
 import { areasChanged, setupPatch, suggestionCount } from './setup-rules';
 
 function SettingsLink() {
@@ -47,7 +48,10 @@ export function WorkbenchSetup({ project, onBack, onApplied }: WorkbenchSetupPro
   const queryClient = useQueryClient();
   const apply = usePatchProject(project.id);
   const [unticked, setUnticked] = useState<readonly string[]>([]);
-  const [untickedSettings, setUntickedSettings] = useState<readonly SettingField[]>([]);
+  // The builder's ticks and edits by field, over the suggestions as the daemon gave them.
+  const [settingEdits, setSettingEdits] = useState<Partial<Record<SettingField, SettingChange>>>(
+    {},
+  );
   const back =
     onBack === undefined ? null : (
       <Button variant="default" onClick={onBack}>
@@ -99,9 +103,10 @@ export function WorkbenchSetup({ project, onBack, onApplied }: WorkbenchSetupPro
     );
 
   const setup = read.data;
-  const tickedSettings = setup.settings
-    .map((s) => s.field)
-    .filter((field) => !untickedSettings.includes(field));
+  const drafts: SettingDraft[] = settingDrafts(setup.settings).map((d) => ({
+    ...d,
+    ...settingEdits[d.field],
+  }));
   const result = withoutPages(setup.areas.proposed, unticked);
   const changed = areasChanged(result, project.areas);
   if (
@@ -126,8 +131,8 @@ export function WorkbenchSetup({ project, onBack, onApplied }: WorkbenchSetupPro
         project.hazards.map((h) => h.name),
       )
     : null;
-  const body = setupPatch(setup, project.areas, unticked, tickedSettings);
-  const count = setup.areas.pages.length - unticked.length + tickedSettings.length;
+  const body = setupPatch(setup, project.areas, unticked, settingsPatch(drafts));
+  const count = setup.areas.pages.length - unticked.length + tickedSettings(drafts);
   const toggle = <T,>(list: readonly T[], item: T, ticked: boolean): readonly T[] =>
     ticked ? list.filter((x) => x !== item) : [...list, item];
   return (
@@ -142,16 +147,23 @@ export function WorkbenchSetup({ project, onBack, onApplied }: WorkbenchSetupPro
           setUnticked((list) => toggle(list, page, ticked));
         }}
       />
-      {setup.settings.length === 0 ? null : (
-        <SettingsSection
-          settings={setup.settings}
-          ticked={tickedSettings}
-          onTick={(field, ticked) => {
-            setUntickedSettings((list) => toggle(list, field, ticked));
-          }}
-        />
+      {drafts.length === 0 ? null : (
+        <Stack gap="sm" component="section" aria-label="Settings">
+          <Title order={3}>Settings</Title>
+          <SettingRows
+            drafts={drafts}
+            onChange={(field, change) => {
+              setSettingEdits((edits) => ({ ...edits, [field]: { ...edits[field], ...change } }));
+            }}
+          />
+        </Stack>
       )}
-      {setup.branch === null ? null : <BranchSection branch={setup.branch} />}
+      {setup.branch === null ? null : (
+        <Stack gap="sm" component="section" aria-label="Branch">
+          <Title order={3}>Branch</Title>
+          <BranchRow note={setup.branch} />
+        </Stack>
+      )}
       <Stack gap="xs">
         {problem === null && apply.error === null ? null : (
           <Text size="sm" c="red" role="alert">

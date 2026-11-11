@@ -34,19 +34,19 @@ describe('setupPatch', () => {
     {
       name: 'everything ticked saves the proposed list and the setting',
       unticked: [],
-      settings: [SettingField.AppUrl],
+      settings: { appUrl: 'http://localhost:1420' },
       patch: { areas: PROPOSED, appUrl: 'http://localhost:1420' },
     },
     {
       name: 'an unticked page is folded back into the shared area that holds its files',
       unticked: ['board'],
-      settings: [],
+      settings: {},
       patch: { areas: PROPOSED.filter((a) => a.name !== 'board') },
     },
     {
       name: 'an unticked page no shared area holds stays an area with no role',
       unticked: ['inbox'],
-      settings: [],
+      settings: {},
       patch: {
         areas: PROPOSED.map((a) =>
           a.name === 'inbox' ? { name: 'inbox', globs: ['app/inbox/**'] } : a,
@@ -59,10 +59,10 @@ describe('setupPatch', () => {
 
   it('leaves the areas out when the result is the list the project has', () => {
     const same = { ...SETUP, areas: { ...SETUP.areas, proposed: CURRENT, pages: [] } };
-    expect(setupPatch(same, CURRENT, [], [SettingField.AppUrl])).toEqual({
+    expect(setupPatch(same, CURRENT, [], { appUrl: 'http://localhost:1420' })).toEqual({
       appUrl: 'http://localhost:1420',
     });
-    expect(setupPatch(same, CURRENT, [], [])).toBeNull();
+    expect(setupPatch(same, CURRENT, [], {})).toBeNull();
   });
 });
 

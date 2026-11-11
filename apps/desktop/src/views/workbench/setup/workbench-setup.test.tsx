@@ -116,6 +116,33 @@ describe('WorkbenchSetup', () => {
     });
   });
 
+  it('sends a setting as edited in place, and leaves out an unticked Allow Docker', async () => {
+    const warning = 'Docker can mount any host folder into a container.';
+    const patches = serve({
+      ...SETUP,
+      settings: [
+        { field: SettingField.AppUrl, value: 'http://localhost:1420', source: 'from tauri' },
+        {
+          field: SettingField.SandboxDocker,
+          value: true,
+          source: 'the gate runs docker',
+          note: warning,
+        },
+      ],
+    });
+    await renderWithDaemonAndRouter(<WorkbenchSetup project={PROJECT} />);
+    fireEvent.change(await screen.findByRole('textbox', { name: 'App address value' }), {
+      target: { value: 'http://localhost:3000' },
+    });
+    expect(screen.getByText(warning)).toBeTruthy();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Allow Docker' }));
+    expect(screen.queryByText(warning)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Apply (3)' }));
+    await waitFor(() => {
+      expect(patches).toEqual([{ areas: SETUP.areas.proposed, appUrl: 'http://localhost:3000' }]);
+    });
+  });
+
   it('says there is nothing to set up when the rebuilt list is the project’s own', async () => {
     serve({ ...SETUP, areas: { proposed: PROJECT.areas, kept: [], pages: [], skipped: [] } });
     await renderWithDaemonAndRouter(<WorkbenchSetup project={PROJECT} />);

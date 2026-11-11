@@ -3,7 +3,6 @@ import {
   withoutPages,
   type AreaDef,
   type ProjectPatch,
-  type SettingField,
   type WorkbenchSetupDto,
 } from '@10db/contracts';
 
@@ -28,35 +27,18 @@ export function suggestionCount(setup: WorkbenchSetupDto): number {
 
 /**
  * The one `PATCH /projects/:id` Apply sends: the rebuilt areas with each unticked page folded back
- * (left out when that is the list the project has) and each ticked setting; null when it changes
- * nothing.
+ * (left out when that is the list the project has) and the ticked settings (`settingsPatch`); null
+ * when it changes nothing.
  */
 export function setupPatch(
   setup: WorkbenchSetupDto,
   current: readonly AreaDef[],
   untickedPages: readonly string[],
-  tickedSettings: readonly SettingField[],
+  settings: ProjectPatch,
 ): ProjectPatch | null {
-  const patch: ProjectPatch = {};
+  const patch: ProjectPatch = { ...settings };
   const areas = withoutPages(setup.areas.proposed, untickedPages);
   if (areasChanged(areas, current)) patch.areas = areas;
-  for (const setting of setup.settings) {
-    if (!tickedSettings.includes(setting.field)) continue;
-    switch (setting.field) {
-      case 'appUrl':
-        patch.appUrl = setting.value;
-        break;
-      case 'devLoginCommand':
-        patch.devLoginCommand = setting.value;
-        break;
-      case 'changedCheckCommand':
-        patch.changedCheckCommand = setting.value;
-        break;
-      case 'sandboxDocker':
-        patch.sandboxDocker = setting.value;
-        break;
-    }
-  }
   return Object.keys(patch).length === 0 ? null : patch;
 }
 
