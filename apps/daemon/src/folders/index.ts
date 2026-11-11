@@ -8,7 +8,7 @@ export {
   appAddressCandidates,
   appAddressFiles,
   chooseAppAddress,
-  PROBED,
+  probedCandidates,
   type Listener,
 } from './detect-app-address';
 export { CHANGED_CHECK_NOTE, changedCheckFor, uiUnitOf } from './detect-changed-check';

@@ -1,11 +1,10 @@
 import { posix } from 'node:path';
-import { isLoopbackOrigin } from '@10db/contracts';
 import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
 import { equalOrUnder } from '../git';
 
 // Workbench setup: where the builder's dev server answers, from what is running now and from the
-// repository's own files at HEAD. Nothing of the repository runs.
+// repository's files at the commit its caller trusts (origin's base). Nothing of the repository runs.
 
 /** A TCP port a process on this Mac listens on, as `lsof` lists it. */
 export interface Listener {
@@ -21,7 +20,20 @@ export interface Listener {
 export interface AddressCandidate {
   readonly url: string;
   readonly source: string;
+  /** Said in the repository, listening now, or a framework's default port guessed. */
+  readonly kind: CandidateKind;
+  /** What the builder should know about it, such as that it is https. */
+  readonly note?: string;
 }
+
+export const CandidateKind = { Stated: 'stated', Listener: 'listener', Guess: 'guess' } as const;
+export type CandidateKind = (typeof CandidateKind)[keyof typeof CandidateKind];
+
+/** Said of an https address: the pinned browser checks its certificate. */
+export const HTTPS_NOTE = 'https: pictures need a trusted certificate';
+
+/** The hosts an app address may name: this Mac's loopback, by the names that need no resolver. */
+const APP_HOSTS: readonly string[] = ['localhost', '127.0.0.1', '[::1]'];
 
 export interface AppAddressInput {
   /** The repository's top level, links resolved, as `lsof` reports a working directory. */
@@ -121,7 +133,9 @@ function loopbackOrigin(raw: string): string | null {
   } catch {
     return null;
   }
-  return isLoopbackOrigin(url.origin) ? url.origin : null;
+  return (url.protocol === 'http:' || url.protocol === 'https:') && APP_HOSTS.includes(url.hostname)
+    ? url.origin
+    : null;
 }
 
 const onPort = (port: number): string | null =>
@@ -259,10 +273,14 @@ const relative = (repo: string, path: string): string =>
  */
 export function appAddressCandidates(input: AppAddressInput): AddressCandidate[] {
   const found: AddressCandidate[] = [];
-  const add = (url: string | null, source: string): void => {
+  const add = (
+    url: string | null,
+    source: string,
+    kind: CandidateKind = CandidateKind.Stated,
+  ): void => {
     if (url === null || found.some((c) => c.url === url)) return;
     if (input.daemonPort !== null && new URL(url).port === String(input.daemonPort)) return;
-    found.push({ url, source });
+    found.push({ url, source, kind, ...(url.startsWith('https:') ? { note: HTTPS_NOTE } : {}) });
   };
   const text = (path: string): string | undefined => input.texts.get(path);
   const paths = [...input.texts.keys()];
@@ -300,6 +318,7 @@ export function appAddressCandidates(input: AppAddressInput): AddressCandidate[]
     add(
       onPort(l.port),
       `listening now: ${l.command} in ${relative(input.repoPath, l.cwd)} on port ${String(l.port)}`,
+      CandidateKind.Listener,
     );
   }
 
@@ -318,23 +337,41 @@ export function appAddressCandidates(input: AppAddressInput): AddressCandidate[]
       const port = dev === undefined ? null : devScriptPort(dev);
       if (port !== null) add(onPort(port), `from ${pkgPath}: the dev script`);
       const deps = { ...pkg.data.dependencies, ...pkg.data.devDependencies };
-      if ('next' in deps) add(onPort(3000), "Next.js's default port");
-      if ('vite' in deps) add(onPort(5173), "Vite's default port");
+      if ('next' in deps) add(onPort(3000), "Next.js's default port", CandidateKind.Guess);
+      if ('vite' in deps) add(onPort(5173), "Vite's default port", CandidateKind.Guess);
     }
   }
   return found;
 }
 
 /**
- * The app address to suggest: the first of the probed candidates that answered (`answered[i]` for
- * `candidates[i]`), else the first candidate with a note to start the dev server; null with none.
+ * The candidates to probe: the first `PROBED`, with the last slot given to the first server listening
+ * in the checkout when one is listed and none of the others is one.
+ */
+export function probedCandidates(candidates: readonly AddressCandidate[]): AddressCandidate[] {
+  const top = candidates.slice(0, PROBED);
+  const listener = candidates.find((c) => c.kind === CandidateKind.Listener);
+  if (listener === undefined || top.includes(listener) || top.length < PROBED) return top;
+  return [...top.slice(0, PROBED - 1), listener];
+}
+
+const withNote = (candidate: AddressCandidate, note: string | undefined): AddressCandidate => {
+  const notes = [candidate.note, note].filter((n): n is string => n !== undefined);
+  return { ...candidate, ...(notes.length === 0 ? {} : { note: notes.join('; ') }) };
+};
+
+/**
+ * The app address to suggest from the probed candidates whose url `answered` holds: the first that
+ * was stated or is listening, else a framework's default (a guess wins only when nothing else that was
+ * probed answered), else the first candidate with a note to start the dev server; null with none.
  */
 export function chooseAppAddress(
   candidates: readonly AddressCandidate[],
-  answered: readonly boolean[],
-): (AddressCandidate & { readonly note?: string }) | null {
-  const live = candidates.slice(0, PROBED).find((_, i) => answered[i] === true);
-  if (live !== undefined) return live;
+  answered: ReadonlySet<string>,
+): AddressCandidate | null {
+  const live = probedCandidates(candidates).filter((c) => answered.has(c.url));
+  const chosen = live.find((c) => c.kind !== CandidateKind.Guess) ?? live[0];
+  if (chosen !== undefined) return withNote(chosen, undefined);
   const first = candidates[0];
-  return first === undefined ? null : { ...first, note: NOTHING_ANSWERED };
+  return first === undefined ? null : withNote(first, NOTHING_ANSWERED);
 }

@@ -20,7 +20,7 @@ import {
   findDevLogins,
   NAMING_MS,
   oneLine,
-  PROBED,
+  probedCandidates,
   shellWord,
   uiUnitOf,
   type AreaNamer,
@@ -130,9 +130,11 @@ async function appAddress(
     uiUnit,
     daemonPort: deps.daemonPort(),
   });
-  const answered = await Promise.all(
-    candidates.slice(0, PROBED).map((c) => deps.probe(c.url, signal).catch(() => false)),
+  const probed = probedCandidates(candidates);
+  const answers = await Promise.all(
+    probed.map((c) => deps.probe(c.url, signal).catch(() => false)),
   );
+  const answered = new Set(probed.filter((_, i) => answers[i] === true).map((c) => c.url));
   const chosen = chooseAppAddress(candidates, answered);
   if (chosen === null) return null;
   return {

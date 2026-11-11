@@ -3,7 +3,9 @@ import {
   appAddressCandidates,
   appAddressFiles,
   chooseAppAddress,
+  HTTPS_NOTE,
   NOTHING_ANSWERED,
+  probedCandidates,
   type AppAddressInput,
   type Listener,
 } from './detect-app-address';
@@ -302,6 +304,15 @@ const rows: Row[] = [
       ['http://localhost:3000', "Next.js's default port"],
     ],
   },
+  {
+    name: 'an address on a .localhost name or 0.0.0.0 is not one',
+    input: {
+      texts: new Map([
+        ['.env.example', 'APP_URL=http://app.localhost:3000\nBASE_URL=http://0.0.0.0:3100\n'],
+      ]),
+    },
+    expected: [],
+  },
 ];
 
 describe('appAddressCandidates', () => {
@@ -340,8 +351,20 @@ describe('appAddressFiles', () => {
   });
 });
 
-describe('chooseAppAddress', () => {
-  const candidates = appAddressCandidates(
+describe('an https address', () => {
+  it('is kept, with a note that pictures need a trusted certificate', () => {
+    const [found] = appAddressCandidates(
+      input({ texts: new Map([['.env.example', 'APP_URL=https://localhost:8443\n']]) }),
+    );
+    expect(found).toMatchObject({ url: 'https://localhost:8443', note: HTTPS_NOTE });
+    expect(chooseAppAddress(found === undefined ? [] : [found], new Set())?.note).toBe(
+      `${HTTPS_NOTE}; ${NOTHING_ANSWERED}`,
+    );
+  });
+});
+
+describe('probedCandidates and chooseAppAddress', () => {
+  const stated = appAddressCandidates(
     input({
       listeners: [listener(3000)],
       texts: new Map([
@@ -351,33 +374,67 @@ describe('chooseAppAddress', () => {
       ]),
     }),
   );
+  const guessed = appAddressCandidates(
+    input({
+      uiUnit: 'web',
+      texts: new Map([
+        ['docker-compose.yml', compose('  proxy:\n    ports: ["8800:80"]\n')],
+        ['web/package.json', '{"dependencies":{"next":"16.0.0"}}'],
+      ]),
+    }),
+  );
+
+  it('keeps a probe for a server listening in the checkout', () => {
+    expect(probedCandidates(stated).map((c) => c.url)).toEqual([
+      'http://localhost:8800',
+      'http://localhost:1420',
+      'http://localhost:3000',
+    ]);
+  });
 
   it.each([
     {
-      name: 'the first that answers wins',
-      answered: [false, true, true],
+      name: 'the first stated address that answers wins',
+      from: stated,
+      answered: ['http://localhost:1420', 'http://localhost:3000'],
       url: 'http://localhost:1420',
       note: undefined,
     },
     {
-      name: 'the first answers',
-      answered: [true, false, false],
-      url: 'http://localhost:8800',
+      name: 'the listener, when no stated address answers',
+      from: stated,
+      answered: ['http://localhost:3000'],
+      url: 'http://localhost:3000',
       note: undefined,
     },
     {
       name: 'nothing answers: the first, with a note',
-      answered: [false, false, false],
+      from: stated,
+      answered: [],
       url: 'http://localhost:8800',
       note: NOTHING_ANSWERED,
     },
-  ])('$name', ({ answered, url, note }) => {
-    const chosen = chooseAppAddress(candidates, answered);
+    {
+      name: 'a framework default never outranks a stated address that answered',
+      from: guessed,
+      answered: ['http://localhost:3000', 'http://localhost:8800'],
+      url: 'http://localhost:8800',
+      note: undefined,
+    },
+    {
+      name: 'a framework default wins only when nothing stated answers',
+      from: guessed,
+      answered: ['http://localhost:3000'],
+      url: 'http://localhost:3000',
+      note: undefined,
+    },
+  ])('$name', ({ from, answered, url, note }) => {
+    const chosen = chooseAppAddress(from, new Set(answered));
     expect(chosen?.url).toBe(url);
     expect(chosen?.note).toBe(note);
   });
 
   it('is null with no candidate', () => {
-    expect(chooseAppAddress([], [])).toBeNull();
+    expect(chooseAppAddress([], new Set())).toBeNull();
   });
 });
