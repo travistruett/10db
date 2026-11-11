@@ -69,7 +69,29 @@ describe('loopbackProbe', () => {
     await expect(probe(origin)).resolves.toBe(false);
   });
 
-  it('is false for an address off this Mac, without asking it', async () => {
-    await expect(probe('http://192.0.2.1:80')).resolves.toBe(false);
+  it.each([
+    'http://192.0.2.1',
+    'http://example.com:8080',
+    'http://app.localhost:3000',
+    'http://0.0.0.0:3000',
+  ])('is false for %s, without asking it', async (url) => {
+    const asked: string[] = [];
+    const recording = loopbackProbe(500, (input) => {
+      asked.push(input instanceof Request ? input.url : input.toString());
+      return Promise.resolve(new Response(null, { status: 200 }));
+    });
+    await expect(recording(url)).resolves.toBe(false);
+    expect(asked).toEqual([]);
+  });
+
+  it('asks localhost, 127.0.0.1 and [::1]', async () => {
+    const asked: string[] = [];
+    const recording = loopbackProbe(500, (input) => {
+      asked.push(input instanceof Request ? input.url : input.toString());
+      return Promise.resolve(new Response(null, { status: 200 }));
+    });
+    for (const url of ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://[::1]:3000'])
+      await expect(recording(url)).resolves.toBe(true);
+    expect(asked).toHaveLength(3);
   });
 });
