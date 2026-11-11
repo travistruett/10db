@@ -349,7 +349,14 @@ function aliasTargets(specifier: string, aliases: PathAliases): string[] {
     )
       continue;
     const match = specifier.slice(alias.prefix.length, specifier.length - alias.suffix.length);
-    targets.push(...alias.targets.map((t) => t.replace('*', match)));
+    // A target holds one `*` (tsconfig refuses more); the match is spliced in as written, so a `$`
+    // in an import path is never read as a replacement pattern.
+    targets.push(
+      ...alias.targets.map((t) => {
+        const star = t.indexOf('*');
+        return star === -1 ? t : t.slice(0, star) + match + t.slice(star + 1);
+      }),
+    );
   }
   if (aliases.base !== null) {
     const based = within(aliases.base, specifier);

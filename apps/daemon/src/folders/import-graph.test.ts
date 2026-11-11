@@ -124,6 +124,12 @@ describe('readPathAliases', () => {
       resolved: 'web/src/x.ts',
     },
     {
+      name: 'a $ pattern in the matched part is taken as written',
+      config: { path: 'web/tsconfig.json', text: '{"compilerOptions":{"paths":{"@/*":["./*"]}}}' },
+      specifier: '@/src/$&',
+      resolved: 'web/src/$&.ts',
+    },
+    {
       name: 'an unreadable config has no aliases',
       config: { path: 'web/tsconfig.json', text: '{ "compilerOptions": ' },
       specifier: '@/src/x',
@@ -136,7 +142,7 @@ describe('readPathAliases', () => {
       resolved: null,
     },
   ])('$name', ({ config, specifier, resolved }) => {
-    const tracked = new Set(['web/src/x.ts', 'web/src/lib/y.tsx']);
+    const tracked = new Set(['web/src/x.ts', 'web/src/lib/y.tsx', 'web/src/$&.ts']);
     expect(resolveImport('web/app/page.tsx', specifier, readPathAliases(config), tracked)).toBe(
       resolved,
     );
