@@ -309,7 +309,7 @@ export interface ApiServices {
   discardKeptWork(taskId: TaskId): Promise<void>;
   /**
    * The Workbench setup: the project's areas rebuilt from its repository with a page per route, and
-   * the settings and branch note W2 fills. Reads only; 404 for a project there is none of.
+   * the settings it suggests and the branch's unpushed commits. Reads only; 404 for a project there is none of.
    */
   workbenchSetup(projectId: ProjectId, signal?: AbortSignal): Promise<WorkbenchSetupDto>;
   /** The page areas the goal's tasks committed in, read from git, for Work on This. */

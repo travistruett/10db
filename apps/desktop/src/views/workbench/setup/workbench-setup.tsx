@@ -38,7 +38,7 @@ export interface WorkbenchSetupProps {
 }
 
 /**
- * The Workbench setup (plan §1): 10db read the repository and proposes the project's areas rebuilt
+ * The Workbench setup: 10db read the repository and proposes the project's areas rebuilt
  * with a page per route, and the settings a pass wants; the builder unticks what they don't want and
  * saves it all with one Apply, a single `PATCH /projects/:id`.
  */
