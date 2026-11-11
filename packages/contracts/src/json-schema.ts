@@ -28,6 +28,7 @@ import {
   PassTurnWithFilesDto,
 } from './pass-view';
 import { PassCardDetail } from './pass-cards';
+import { WorkbenchSetupDto } from './workbench-setup';
 import {
   PassCloseAnswerDto,
   PassCloseContinueDto,
@@ -384,6 +385,7 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'pass-join-request': PassJoinRequest,
   'pass-rename': PassRename,
   'pages-proposal-dto': PagesProposalDto,
+  'workbench-setup-dto': WorkbenchSetupDto,
   'goal-pass-pages-dto': GoalPassPagesDto,
   'pass-turn-with-files-dto': PassTurnWithFilesDto,
   'turn-activity-dto': TurnActivityDto,

@@ -57,5 +57,6 @@ export * from './system';
 export * from './task-screens';
 export * from './task-thread';
 export * from './team';
+export * from './workbench-setup';
 export * from './workflow';
 export * from './workstream-changes';
