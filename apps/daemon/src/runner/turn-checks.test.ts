@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   PassClosePageChoice,
@@ -377,20 +377,26 @@ describe('the check after each turn', () => {
     const firstAnswer = new Promise<void>((resolve) => {
       letFirstAnswer = resolve;
     });
-    // ps answers the first check late, after the next one has started and been recorded.
+    // ps reads the first check while it runs and answers late, after the next one has started and
+    // been recorded.
     const turnChecks = await start({
       identify: async (pid) => {
+        const startTime = await systemProcesses.identify(pid);
         if (first === 0) {
           first = pid;
           await firstAnswer;
         }
-        return systemProcesses.identify(pid);
+        return startTime;
       },
     });
     await readyTurn(w.settings, 'src/settings/page.tsx');
-    await waitFor(() => first !== 0);
+    await waitFor(() => first !== 0 && lines('runs').length === 1);
 
     const stopped = turnChecks.stop(passId());
+    // The stop kills the first check's group, which leaves the script's lock behind: without
+    // clearing it the newer check exits at once as a collision instead of running past the first.
+    await waitFor(() => !alive(first));
+    rmSync(join(dir.path, 'lock'), { recursive: true });
     await readyTurn(w.people, 'src/people/page.tsx');
     const [newer] = await waitFor(() => {
       const pids = listPassCheckPids(w.h.store.db);
@@ -401,6 +407,7 @@ describe('the check after each turn', () => {
 
     expect(newer?.pid).not.toBe(first);
     expect(listPassCheckPids(w.h.store.db).map((p) => p.pid)).toEqual([newer?.pid]);
+    expect(lines('collisions')).toEqual([]);
     touch('go');
   });
 
