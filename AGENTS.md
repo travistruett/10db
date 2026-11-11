@@ -24,6 +24,12 @@ A local macOS control plane that runs Claude Code sessions as a software factory
 ## Rules
 
 - Code style: `.claude/rules/code-style.md`. Testing: `.claude/rules/testing.md`. Both bind Codex too.
+- **Provider parity.** Every feature works on every kind of account 10db supports: a Claude plan,
+  Claude through Bedrock or an API key, and a ChatGPT/Codex plan. A project's account is the
+  builder's billing line, so 10db never asks the builder to move a project to another provider to
+  use a feature. Where a provider can't do something yet, the feature still runs there and says what
+  it lacks, and a follow-up task closes the gap. Specs and plans state how each feature behaves per
+  provider; plan review checks it.
 - Import workspace packages by name through their entry point only. Packages never import apps.
 - Pin every dependency exactly, latest stable when added. A held-back pin gets a decision saying
   why.
