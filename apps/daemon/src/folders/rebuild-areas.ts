@@ -171,7 +171,9 @@ export function rebuildAreas(input: RebuildInput): WorkbenchSetupAreas {
     });
     problem = setupAreasProblem(proposed, input.hazards);
   }
-  if (problem !== null || sameList(proposed, input.existing))
+  // A rebuild that finds no page has nothing to offer the Workbench: the project keeps its own list.
+  const noPage = !proposed.some((a) => a.role === AreaRole.Page);
+  if (problem !== null || noPage || sameList(proposed, input.existing))
     return {
       proposed: input.existing.map((a) => ({ ...a })),
       kept: keptReasons,

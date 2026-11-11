@@ -224,6 +224,13 @@ describe('rebuildAreas', () => {
     expect(setupAreasProblem(result.proposed, [])).toBeNull();
   });
 
+  it('answers the project’s own list when the rebuild finds no page', () => {
+    const existing = [{ name: 'repo', globs: ['**'] }];
+    const result = rebuildAreas(input({ existing, pages: [] }));
+    expect(result.proposed).toEqual(existing);
+    expect(result.pages).toEqual([]);
+  });
+
   it('proposes nothing new when the rebuilt list is the one the project has', () => {
     const existing = [FRIDAY_AREA, PEOPLE_AREA, ...OTHERS];
     const result = rebuildAreas(input({ existing: [...existing].reverse() }));
