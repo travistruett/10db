@@ -395,6 +395,72 @@ const prefixed = (dir: string, glob: string) => (dir === '' ? glob : `${literalG
 
 const REST_LABEL = '.';
 
+/**
+ * The globs that hold `folder` whole, as an area candidate holding it is written: `<folder>/**`, and
+ * the dotfile and dot folder patterns its tracked `files` need.
+ */
+export function treeGlobs(folder: string, files: readonly string[]): string[] {
+  const globs = new Set([prefixed(folder, '**')]);
+  const prefix = folder === '' ? '' : `${folder}/`;
+  for (const file of files) {
+    if (!file.startsWith(prefix)) continue;
+    const at = globOf(file, { holder: null, folder, direct: false });
+    globs.add(prefixed(at.folder, at.pattern));
+  }
+  return [...globs];
+}
+
+/** A framework app with route groups: its unit, its route folder, and the folders whose own files are its layouts. */
+export interface FileRouteApp {
+  readonly unit: string;
+  readonly routes: string;
+  /** The unit, the folders down to its routes, the route folder and each route group's own folders. */
+  readonly layoutFolders: readonly string[];
+}
+
+function routeAppOf(unit: Dir): FileRouteApp | null {
+  const root = routeRootOf(unit);
+  if (root === null) return null;
+  const groups = [...root.routes.dirs]
+    .filter(([name]) => isRouteGroup(name))
+    .flatMap(([, group]) => {
+      const screens = screensOf(group);
+      return screens === null
+        ? [group.path]
+        : [group.path, ...screens.passed.map((d) => d.path), screens.container.path];
+    });
+  return {
+    unit: unit.path,
+    routes: root.routes.path,
+    layoutFolders: [
+      ...new Set([unit.path, ...root.between.map((d) => d.path), root.routes.path, ...groups]),
+    ],
+  };
+}
+
+/**
+ * The framework apps `deriveAreaCandidates` splits by route group and screen, found the way it finds
+ * them: each package or app, and the top of a repository that is one package.
+ */
+export function fileRouteApps(files: readonly string[]): FileRouteApp[] {
+  const root = buildTree(files);
+  const apps: FileRouteApp[] = [];
+  const walk = (dir: Dir): void => {
+    if (isManifestDir(dir)) {
+      const app = routeAppOf(dir);
+      if (app !== null) apps.push(app);
+      return;
+    }
+    if (holdsUnit(dir)) for (const child of dir.dirs.values()) walk(child);
+  };
+  if (holdsUnit(root) || !isManifestDir(root)) for (const child of root.dirs.values()) walk(child);
+  else {
+    const app = routeAppOf(root);
+    if (app !== null) apps.push(app);
+  }
+  return apps;
+}
+
 /** A draft's files: how many, and the patterns that take them in, by the folder they are held at. */
 interface Holding {
   files: number;
