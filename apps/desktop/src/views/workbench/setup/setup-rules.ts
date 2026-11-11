@@ -35,19 +35,20 @@ export function setUpCount(setup: WorkbenchSetupDto): number {
 }
 
 /**
- * The one `PATCH /projects/:id` Apply sends: the rebuilt areas with each unticked page folded back
- * (left out when that is the list the project has) and each ticked setting; null when it changes
- * nothing.
+ * The one `PATCH /projects/:id` Apply sends: the rebuilt areas, when `rebuildAreas`, with each
+ * unticked page folded back (left out when that is the list the project has), and each ticked
+ * setting; null when it changes nothing.
  */
 export function setupPatch(
   setup: WorkbenchSetupDto,
   current: readonly AreaDef[],
   untickedPages: readonly string[],
   tickedSettings: readonly SettingField[],
+  rebuildAreas = true,
 ): ProjectPatch | null {
   const patch: ProjectPatch = {};
-  const areas = withoutPages(setup.areas.proposed, untickedPages);
-  if (areasChanged(areas, current)) patch.areas = areas;
+  const areas = withoutPages(setup.areas.proposed, untickedPages, setup.areas.pages);
+  if (rebuildAreas && areasChanged(areas, current)) patch.areas = areas;
   for (const setting of setup.settings) {
     if (!tickedSettings.includes(setting.field)) continue;
     switch (setting.field) {

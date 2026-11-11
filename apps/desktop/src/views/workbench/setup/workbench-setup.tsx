@@ -1,10 +1,11 @@
 import {
+  AreaRole,
   setupAreasProblem,
   withoutPages,
   type ProjectViewDto,
   type SettingField,
 } from '@10db/contracts';
-import { Anchor, Button, Group, Loader, Stack, Text, Title } from '@mantine/core';
+import { Anchor, Button, Checkbox, Group, Loader, Stack, Text, Title } from '@mantine/core';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
@@ -14,7 +15,7 @@ import { SettingsSectionKey } from '../../settings/sections';
 import { AreasSection } from './areas-section';
 import { BranchSection } from './branch-section';
 import { SettingsSection } from './settings-section';
-import { areasChanged, setupPatch, suggestionCount } from './setup-rules';
+import { areasChanged, areasSummary, setupPatch } from './setup-rules';
 
 function SettingsLink() {
   return (
@@ -48,6 +49,9 @@ export function WorkbenchSetup({ project, onBack, onApplied }: WorkbenchSetupPro
   const apply = usePatchProject(project.id);
   const [unticked, setUnticked] = useState<readonly string[]>([]);
   const [untickedSettings, setUntickedSettings] = useState<readonly SettingField[]>([]);
+  // A first setup rebuilds the areas by default; once the project has pages, rebuilding is opt-in.
+  const hasPages = project.areas.some((area) => area.role === AreaRole.Page);
+  const [rebuild, setRebuild] = useState(!hasPages);
   const back =
     onBack === undefined ? null : (
       <Button variant="default" onClick={onBack}>
@@ -102,13 +106,12 @@ export function WorkbenchSetup({ project, onBack, onApplied }: WorkbenchSetupPro
   const tickedSettings = setup.settings
     .map((s) => s.field)
     .filter((field) => !untickedSettings.includes(field));
-  const result = withoutPages(setup.areas.proposed, unticked);
-  const changed = areasChanged(result, project.areas);
-  if (
-    !areasChanged(setup.areas.proposed, project.areas) &&
-    suggestionCount(setup) === 0 &&
-    setup.branch === null
-  )
+  const result = withoutPages(setup.areas.proposed, unticked, setup.areas.pages);
+  // A rebuild that changes nothing is not offered: no Areas section, Apply for settings alone.
+  const offered = areasChanged(setup.areas.proposed, project.areas);
+  const areasOn = offered && rebuild;
+  const changed = areasOn && areasChanged(result, project.areas);
+  if (!offered && setup.settings.length === 0 && setup.branch === null)
     return (
       <Stack gap="md" maw={720}>
         {heading}
@@ -126,22 +129,40 @@ export function WorkbenchSetup({ project, onBack, onApplied }: WorkbenchSetupPro
         project.hazards.map((h) => h.name),
       )
     : null;
-  const body = setupPatch(setup, project.areas, unticked, tickedSettings);
-  const count = setup.areas.pages.length - unticked.length + tickedSettings.length;
+  const body = setupPatch(setup, project.areas, unticked, tickedSettings, areasOn);
+  const pagesTicked = setup.areas.pages.length - unticked.length;
+  const count = (areasOn ? Math.max(pagesTicked, 1) : 0) + tickedSettings.length;
   const toggle = <T,>(list: readonly T[], item: T, ticked: boolean): readonly T[] =>
     ticked ? list.filter((x) => x !== item) : [...list, item];
   return (
     <Stack gap="lg" maw={720}>
       {heading}
-      <AreasSection
-        project={project}
-        areas={setup.areas}
-        result={result}
-        unticked={unticked}
-        onTick={(page, ticked) => {
-          setUnticked((list) => toggle(list, page, ticked));
-        }}
-      />
+      {!offered ? null : (
+        <Stack gap="sm">
+          {hasPages ? (
+            <Checkbox
+              checked={rebuild}
+              onChange={(event) => {
+                setRebuild(event.currentTarget.checked);
+              }}
+              label={`Rebuild areas: ${String(setup.areas.pages.length)} new ${
+                setup.areas.pages.length === 1 ? 'page' : 'pages'
+              }, ${areasSummary(project.areas, result)}`}
+            />
+          ) : null}
+          {areasOn ? (
+            <AreasSection
+              project={project}
+              areas={setup.areas}
+              result={result}
+              unticked={unticked}
+              onTick={(page, ticked) => {
+                setUnticked((list) => toggle(list, page, ticked));
+              }}
+            />
+          ) : null}
+        </Stack>
+      )}
       {setup.settings.length === 0 ? null : (
         <SettingsSection
           settings={setup.settings}

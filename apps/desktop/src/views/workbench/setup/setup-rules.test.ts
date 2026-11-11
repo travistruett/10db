@@ -57,6 +57,27 @@ describe('setupPatch', () => {
     expect(setupPatch(SETUP, CURRENT, unticked, settings)).toEqual(patch);
   });
 
+  it('puts a kept area that became a page back exactly when that page is unticked', () => {
+    const was: AreaDef = { name: 'board', globs: ['src/views/board/**', 'docs/board.md'] };
+    const kept = {
+      ...SETUP,
+      areas: {
+        ...SETUP.areas,
+        pages: SETUP.areas.pages.map((p) => (p.name === 'board' ? { ...p, was } : p)),
+      },
+    };
+    expect(setupPatch(kept, CURRENT, ['board'], [])?.areas).toEqual(
+      PROPOSED.map((a) => (a.name === 'board' ? was : a)),
+    );
+  });
+
+  it('leaves the areas out when the rebuild is not ticked', () => {
+    expect(setupPatch(SETUP, CURRENT, [], [SettingField.AppUrl], false)).toEqual({
+      appUrl: 'http://localhost:1420',
+    });
+    expect(setupPatch(SETUP, CURRENT, [], [], false)).toBeNull();
+  });
+
   it('leaves the areas out when the result is the list the project has', () => {
     const same = { ...SETUP, areas: { ...SETUP.areas, proposed: CURRENT, pages: [] } };
     expect(setupPatch(same, CURRENT, [], [SettingField.AppUrl])).toEqual({
