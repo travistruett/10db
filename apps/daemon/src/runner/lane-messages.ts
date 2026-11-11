@@ -15,8 +15,8 @@ import {
   listTaskThreadRows,
   listUndeliveredTaskMessages,
   markTaskFilesInline,
+  markTaskMessagePushedUnder,
   markTaskMessagesDelivered,
-  markTaskMessagesPushed,
   type DbReader,
   type TaskMessageRow,
 } from '@10db/db';
@@ -176,7 +176,7 @@ export function createLaneMessages(deps: LaneMessagesDeps): LaneMessages {
     sentUnder.set(out.uuid, message.id);
     handle.send(lead ? `${lead}\n\n${out.text}` : out.text, out.images, out.uuid);
     state.write((ctx) => {
-      markTaskMessagesPushed(ctx, [message.id]);
+      markTaskMessagePushedUnder(ctx, message.id, out.uuid);
       markTaskFilesInline(ctx, taskId, out.blocks, false);
     });
   };

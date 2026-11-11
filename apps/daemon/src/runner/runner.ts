@@ -95,7 +95,7 @@ import {
   listUndeliveredTaskMessages,
   markSessionStarted,
   markTaskFilesInline,
-  markTaskMessagesPushed,
+  markTaskMessagePushedUnder,
   answeredCardsForTask,
   deniedPermissionsForWorkstream,
   openItemsForWorkstream,
@@ -2386,7 +2386,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     });
     if (feedback !== null && fed !== null)
       opts.state.write((ctx) => {
-        markTaskMessagesPushed(ctx, [feedback.id]);
+        markTaskMessagePushedUnder(ctx, feedback.id, fed.uuid);
         markTaskFilesInline(ctx, task.id, fed.blocks, false);
       });
     // A message an earlier session was handed and no turn took goes to this one too (§12). A pass

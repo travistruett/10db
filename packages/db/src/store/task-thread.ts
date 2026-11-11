@@ -85,6 +85,7 @@ export function insertBuilderMessage(
     createdAt: ctx.now,
     pushedAt: null,
     deliveredAt: null,
+    pushUuids: [],
     turnId: null,
   };
   ctx.tx.insert(schema.taskMessages).values(message).run();
@@ -251,6 +252,41 @@ export function markTaskMessagesPushed(ctx: WriteContext, ids: readonly TaskMess
 }
 
 /**
+ * Notes that the message was handed to a session now under the client uuid `uuid`, which it keeps
+ * beside every earlier one: a conversation read back after a restart is matched against them.
+ */
+export function markTaskMessagePushedUnder(
+  ctx: WriteContext,
+  id: TaskMessageId,
+  uuid: string,
+): void {
+  const { pushUuids } = getTaskMessageRow(ctx.tx, id);
+  ctx.tx
+    .update(schema.taskMessages)
+    .set({ pushedAt: ctx.now, pushUuids: [...pushUuids, uuid] })
+    .where(eq(schema.taskMessages.id, id))
+    .run();
+}
+
+/**
+ * Marks delivered, once each, this task's messages pushed and not delivered that a conversation took:
+ * one of the client uuids it was pushed under is among `held`, the uuids the conversation's user
+ * messages carry. Answers those it marked, oldest first. A message pushed under no uuid is never
+ * taken here.
+ */
+export function markTaskMessagesTakenUnder(
+  ctx: WriteContext,
+  taskId: TaskId,
+  held: readonly string[],
+): TaskMessageId[] {
+  const holds = new Set(held);
+  const taken = listUndeliveredTaskMessages(ctx.tx, taskId)
+    .filter((m) => m.pushUuids.some((uuid) => holds.has(uuid)))
+    .map((m) => m.id);
+  return markTaskMessagesDelivered(ctx, taskId, taken);
+}
+
+/**
  * Marks delivered the messages of this task among `ids` that a turn was seen to take, once each, and
  * answers those it marked now. An id of another task, or one already delivered, is left as it is.
  */
@@ -336,6 +372,7 @@ export function insertSystemNotice(
     createdAt: ctx.now,
     pushedAt: null,
     deliveredAt: null,
+    pushUuids: [],
     turnId: null,
   };
   ctx.tx.insert(schema.taskMessages).values(message).run();
@@ -364,6 +401,7 @@ export function insertAgentReply(
     createdAt: ctx.now,
     pushedAt: null,
     deliveredAt: null,
+    pushUuids: [],
     turnId: input.turnId,
   };
   ctx.tx.insert(schema.taskMessages).values(message).run();

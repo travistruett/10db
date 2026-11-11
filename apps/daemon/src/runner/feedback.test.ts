@@ -105,6 +105,7 @@ describe("a builder's message from the task's thread", () => {
     const [started] = engine.adapter.prompts;
     expect(started?.resume).toBeNull();
     expect(started?.promptUuid).toBe(idUuid(message));
+    expect(getTaskMessageRow(engine.state.db, message).pushUuids).toEqual([idUuid(message)]);
     const prompt = started?.prompt ?? '';
     const digestAt = prompt.indexOf("This task's thread continues in a fresh session");
     expect(digestAt).toBeGreaterThan(-1);

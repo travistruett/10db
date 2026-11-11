@@ -1362,6 +1362,11 @@ export const taskMessages = sqliteTable(
     pushedAt: text('pushed_at'),
     /** When a turn took it in; a message pushed and not delivered is sent again. */
     deliveredAt: text('delivered_at'),
+    /**
+     * Every client uuid a push of it went under, oldest first: after a restart, a conversation that
+     * holds one of them took the message (Workbench spec §12).
+     */
+    pushUuids: text('push_uuids', { mode: 'json' }).$type<string[]>().notNull().default([]),
     /** The pass turn the message started, or the turn whose reply it is; null outside a pass's turns. */
     turnId: text('turn_id')
       .$type<PassTurnId>()

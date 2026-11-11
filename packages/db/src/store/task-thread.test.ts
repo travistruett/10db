@@ -19,7 +19,9 @@ import {
   listUndeliveredTaskMessages,
   markTaskFilesInline,
   markTaskMessagesDelivered,
+  markTaskMessagePushedUnder,
   markTaskMessagesPushed,
+  markTaskMessagesTakenUnder,
   offeredText,
   offerToAgent,
   seedProject,
@@ -46,6 +48,10 @@ beforeEach(() => {
 afterEach(() => {
   close();
 });
+
+const U1 = 'c0ffee00-0000-4000-8000-000000000001';
+const U2 = 'c0ffee00-0000-4000-8000-000000000002';
+const U3 = 'c0ffee00-0000-4000-8000-000000000003';
 
 const picture = (name: string, sha: string) => ({
   name,
@@ -156,6 +162,103 @@ describe('a task thread', () => {
     expect(getTaskMessageRow(store.db, unpushed.id).pushedAt).toBeNull();
     expect(() => getTaskMessageRow(store.db, mintId('TaskMessage'))).toThrow(NotFoundError);
   });
+
+  it('keeps every client uuid a message was pushed under, in order, and stamps it pushed', () => {
+    const message = store.write((ctx) =>
+      insertBuilderMessage(ctx, taskId, { body: 'Make it blue', files: [] }),
+    ).value;
+    expect(getTaskMessageRow(store.db, message.id).pushUuids).toEqual([]);
+    store.write((ctx) => {
+      markTaskMessagePushedUnder(ctx, message.id, U1);
+      markTaskMessagePushedUnder(ctx, message.id, U2);
+    });
+    const row = getTaskMessageRow(store.db, message.id);
+    expect(row.pushUuids).toEqual([U1, U2]);
+    expect(row.pushedAt).not.toBeNull();
+    expect(row.deliveredAt).toBeNull();
+  });
+
+  // Workbench spec §12: after a restart, a message pushed and not seen taken is taken when the
+  // conversation it went to holds a client uuid it was pushed under; else it is sent again.
+  it.each<{
+    readonly name: string;
+    readonly pushes: readonly string[];
+    /** How the message was marked pushed: under client uuids, or by id alone. */
+    readonly byIdAlone?: boolean;
+    readonly delivered?: boolean;
+    readonly otherTask?: boolean;
+    readonly held: readonly string[];
+    readonly taken: boolean;
+  }>([
+    {
+      name: 'pushed once, under a uuid the conversation holds',
+      pushes: [U1],
+      held: [U1],
+      taken: true,
+    },
+    {
+      name: 'pushed twice, the conversation holding the later uuid',
+      pushes: [U1, U2],
+      held: [U2],
+      taken: true,
+    },
+    {
+      name: 'pushed twice, the conversation holding the first uuid',
+      pushes: [U1, U2],
+      held: [U1],
+      taken: true,
+    },
+    {
+      name: 'pushed, the conversation holding only other uuids',
+      pushes: [U1],
+      held: [U3],
+      taken: false,
+    },
+    { name: 'pushed, the conversation holding nothing', pushes: [U1], held: [], taken: false },
+    { name: 'never pushed', pushes: [], held: [U1], taken: false },
+    {
+      name: 'pushed by id alone, under no uuid',
+      pushes: [],
+      byIdAlone: true,
+      held: [U1],
+      taken: false,
+    },
+    {
+      name: 'already delivered',
+      pushes: [U1],
+      delivered: true,
+      held: [U1],
+      taken: false,
+    },
+    {
+      name: "another task's, under a uuid the conversation holds",
+      pushes: [U1],
+      otherTask: true,
+      held: [U1],
+      taken: false,
+    },
+  ])(
+    'a message $name is taken: $taken',
+    ({ pushes, byIdAlone, delivered, otherTask, held, taken }) => {
+      const owner = otherTask === true ? otherTaskId : taskId;
+      const message = store.write((ctx) =>
+        insertBuilderMessage(ctx, owner, { body: 'Make it blue', files: [] }),
+      ).value;
+      store.write((ctx) => {
+        for (const uuid of pushes) markTaskMessagePushedUnder(ctx, message.id, uuid);
+        if (byIdAlone === true) markTaskMessagesPushed(ctx, [message.id]);
+        if (delivered === true) markTaskMessagesDelivered(ctx, owner, [message.id]);
+      });
+      const deliveredBefore = getTaskMessageRow(store.db, message.id).deliveredAt;
+
+      const marked = store.write((ctx) => markTaskMessagesTakenUnder(ctx, taskId, held)).value;
+
+      expect(marked).toEqual(taken ? [message.id] : []);
+      const after = getTaskMessageRow(store.db, message.id).deliveredAt;
+      if (taken) expect(after).not.toBeNull();
+      else expect(after).toBe(deliveredBefore);
+    },
+  );
 
   it("marks the pictures a session holds as blocks, and a fresh session's start clears the rest", () => {
     const message = store.write((ctx) =>

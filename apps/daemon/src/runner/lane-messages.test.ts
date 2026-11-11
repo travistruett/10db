@@ -124,6 +124,8 @@ describe('lane messages', () => {
       [idUuid(second.id), 0],
     ]);
     expect(getTaskMessageRow(state.db, first.id).pushedAt).not.toBeNull();
+    // The uuid is kept with the row, so a conversation read back after a restart can be matched.
+    expect(getTaskMessageRow(state.db, first.id).pushUuids).toEqual([idUuid(first.id)]);
     expect(getTaskMessageRow(state.db, first.id).files[0]?.inlineSent).toBe(true);
 
     for await (const event of handle.events) {
@@ -180,6 +182,12 @@ describe('lane messages', () => {
       expect(adapter.sent.slice(0, 2).map((m) => m.text)).toContain(repeat.text);
     }
     expect(undelivered()).toEqual(['Make it blue', 'And bigger']);
+    for (const repeat of pushedAgain) {
+      const row = listUndeliveredTaskMessages(state.db, taskId).find((m) =>
+        repeat.text.includes(m.id),
+      );
+      expect(row?.pushUuids.at(-1)).toBe(repeat.uuid);
+    }
     // A turn that takes a message under the uuid it was sent again under delivers it.
     expect(messages.consumed(pushedAgain.map((m) => m.uuid ?? ''))).toHaveLength(again.length);
     await handle.stop();
