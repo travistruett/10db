@@ -510,6 +510,8 @@ const RESOLVABLE_BYTES = 1_000_000;
 
 /** The modes git stores a regular file with. */
 const REGULAR_FILE_MODES: readonly string[] = ['100644', '100755'];
+/** How many blob bytes one `cat-file --batch` call of `surveyTexts` is asked for, about. */
+const SURVEY_TEXT_BATCH_BYTES = 16 * 1024 * 1024;
 
 /** One `ls-tree --long -z` entry: mode, type, object, size (`-` for a tree), then the path. */
 const LS_TREE_ENTRY = /^(\d{6}) (\w+) ([0-9a-f]+) +(\S+)\t([\s\S]*)$/;
@@ -1047,6 +1049,17 @@ export interface Git {
    * and no signature check.
    */
   survey(path: string, maxCommits: number): Promise<RepoSurvey | RepoRefusal>;
+  /**
+   * The text of each of `paths` at HEAD of the repository at or above `path`, read as `survey` reads:
+   * the object store only, unpinned, nothing written, no program the repository configures run. Only
+   * a regular file of at most `maxBytes` that holds no NUL byte is answered; any other path is left
+   * out, as is every path when git won't read the repository.
+   */
+  surveyTexts(
+    path: string,
+    paths: readonly string[],
+    maxBytes: number,
+  ): Promise<ReadonlyMap<string, string>>;
 }
 
 export interface GitOptions {
@@ -4657,6 +4670,66 @@ export function createGit(opts: GitOptions = {}): Git {
         return { files: tree.split('\0').filter((f) => f !== ''), commits: parseSurveyLog(log) };
       } catch (error) {
         return refusalOf(error);
+      }
+    },
+    async surveyTexts(path, paths, maxBytes) {
+      const texts = new Map<string, string>();
+      const wanted = new Set(paths);
+      if (wanted.size === 0) return texts;
+      try {
+        const at = observed(
+          realpathSync((await git(observed(path), ['rev-parse', '--show-toplevel'])).trim()),
+        );
+        const head = await git(at, ['rev-parse', '-q', '--verify', 'HEAD^{commit}'], {
+          answerExitCodes: [1],
+        });
+        if (head.trim() === '') return texts;
+        const blobs: { path: string; oid: string; bytes: number }[] = [];
+        for (const record of (await git(at, ['ls-tree', '-r', '-z', '--long', head.trim()])).split(
+          '\0',
+        )) {
+          const entry = LS_TREE_ENTRY.exec(record);
+          if (!entry) continue;
+          const [, mode = '', type, oid = '', size = '', file = ''] = entry;
+          const bytes = Number(size);
+          if (
+            wanted.has(file) &&
+            type === 'blob' &&
+            REGULAR_FILE_MODES.includes(mode) &&
+            Number.isSafeInteger(bytes) &&
+            bytes <= maxBytes
+          )
+            blobs.push({ path: file, oid, bytes });
+        }
+        // `cat-file --batch` prints `<oid> blob <size>\n<bytes>\n` per line it is given, in batches
+        // that keep each call's output well under what one git call may print.
+        for (let start = 0; start < blobs.length;) {
+          let end = start;
+          let total = 0;
+          while (
+            end < blobs.length &&
+            (end === start || total + (blobs[end]?.bytes ?? 0) < SURVEY_TEXT_BATCH_BYTES)
+          ) {
+            total += (blobs[end]?.bytes ?? 0) + 100;
+            end += 1;
+          }
+          const batch = blobs.slice(start, end);
+          const out = await gitCapped(at, ['cat-file', '--batch'], total + 1, {
+            input: batch.map((b) => `${b.oid}\n`).join(''),
+          });
+          let offset = 0;
+          for (const blob of batch) {
+            const header = out.indexOf(0x0a, offset);
+            if (header === -1) break;
+            const body = out.subarray(header + 1, header + 1 + blob.bytes);
+            offset = header + 1 + blob.bytes + 1;
+            if (!body.includes(0)) texts.set(blob.path, body.toString('utf8'));
+          }
+          start = end;
+        }
+        return texts;
+      } catch {
+        return new Map<string, string>();
       }
     },
     async ignoredDirectories(repo) {

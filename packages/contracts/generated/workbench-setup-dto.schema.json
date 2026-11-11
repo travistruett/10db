@@ -2,244 +2,94 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "properties": {
-    "pages": {
+    "areas": {
       "type": "object",
       "properties": {
-        "changes": {
+        "proposed": {
           "type": "array",
           "items": {
-            "oneOf": [
-              {
-                "type": "object",
-                "properties": {
-                  "kind": {
-                    "type": "string",
-                    "const": "update"
-                  },
-                  "sentence": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 500
-                  },
-                  "reason": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 500
-                  },
-                  "area": {
-                    "type": "string",
-                    "pattern": "^[a-z][a-z0-9-]*$"
-                  },
-                  "route": {
-                    "type": "string",
-                    "maxLength": 500,
-                    "format": "starts_with",
-                    "pattern": "^\\/.*"
-                  },
-                  "addGlobs": {
-                    "type": "array",
-                    "items": {
-                      "type": "string",
-                      "minLength": 1
-                    }
-                  }
-                },
-                "required": [
-                  "kind",
-                  "sentence",
-                  "reason",
-                  "area",
-                  "addGlobs"
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]*$"
+              },
+              "globs": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "catchAll": {
+                "type": "boolean"
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "page",
+                  "shared"
                 ]
               },
-              {
-                "type": "object",
-                "properties": {
-                  "kind": {
-                    "type": "string",
-                    "const": "split"
-                  },
-                  "sentence": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 500
-                  },
-                  "reason": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 500
-                  },
-                  "area": {
-                    "type": "string",
-                    "pattern": "^[a-z][a-z0-9-]*$"
-                  },
-                  "pages": {
-                    "minItems": 1,
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "name": {
-                          "type": "string",
-                          "pattern": "^[a-z][a-z0-9-]*$"
-                        },
-                        "globs": {
-                          "minItems": 1,
-                          "type": "array",
-                          "items": {
-                            "type": "string",
-                            "minLength": 1
-                          }
-                        },
-                        "catchAll": {
-                          "type": "boolean"
-                        },
-                        "role": {
-                          "type": "string",
-                          "const": "page"
-                        },
-                        "route": {
-                          "type": "string",
-                          "maxLength": 500,
-                          "format": "starts_with",
-                          "pattern": "^\\/.*"
-                        }
-                      },
-                      "required": [
-                        "name",
-                        "globs",
-                        "role"
-                      ]
-                    }
-                  },
-                  "remainder": {
-                    "anyOf": [
-                      {
-                        "type": "object",
-                        "properties": {
-                          "globs": {
-                            "minItems": 1,
-                            "type": "array",
-                            "items": {
-                              "type": "string",
-                              "minLength": 1
-                            }
-                          },
-                          "role": {
-                            "type": "string",
-                            "const": "shared"
-                          }
-                        },
-                        "required": [
-                          "globs"
-                        ]
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  }
-                },
-                "required": [
-                  "kind",
-                  "sentence",
-                  "reason",
-                  "area",
-                  "pages",
-                  "remainder"
-                ]
-              },
-              {
-                "type": "object",
-                "properties": {
-                  "kind": {
-                    "type": "string",
-                    "const": "markShared"
-                  },
-                  "sentence": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 500
-                  },
-                  "reason": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 500
-                  },
-                  "area": {
-                    "type": "string",
-                    "pattern": "^[a-z][a-z0-9-]*$"
-                  }
-                },
-                "required": [
-                  "kind",
-                  "sentence",
-                  "reason",
-                  "area"
-                ]
-              },
-              {
-                "type": "object",
-                "properties": {
-                  "kind": {
-                    "type": "string",
-                    "const": "add"
-                  },
-                  "sentence": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 500
-                  },
-                  "reason": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 500
-                  },
-                  "area": {
-                    "type": "object",
-                    "properties": {
-                      "name": {
-                        "type": "string",
-                        "pattern": "^[a-z][a-z0-9-]*$"
-                      },
-                      "globs": {
-                        "minItems": 1,
-                        "type": "array",
-                        "items": {
-                          "type": "string",
-                          "minLength": 1
-                        }
-                      },
-                      "catchAll": {
-                        "type": "boolean"
-                      },
-                      "role": {
-                        "type": "string",
-                        "enum": [
-                          "page",
-                          "shared"
-                        ]
-                      },
-                      "route": {
-                        "type": "string",
-                        "maxLength": 500,
-                        "format": "starts_with",
-                        "pattern": "^\\/.*"
-                      }
-                    },
-                    "required": [
-                      "name",
-                      "globs"
-                    ]
-                  }
-                },
-                "required": [
-                  "kind",
-                  "sentence",
-                  "reason",
-                  "area"
-                ]
+              "route": {
+                "type": "string",
+                "maxLength": 500,
+                "format": "starts_with",
+                "pattern": "^\\/.*"
               }
+            },
+            "required": [
+              "name",
+              "globs"
+            ]
+          }
+        },
+        "kept": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "reason"
+            ]
+          }
+        },
+        "pages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]*$"
+              },
+              "route": {
+                "type": "string",
+                "maxLength": 500,
+                "format": "starts_with",
+                "pattern": "^\\/.*"
+              },
+              "folders": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            },
+            "required": [
+              "name",
+              "folders"
             ]
           }
         },
@@ -263,7 +113,9 @@
         }
       },
       "required": [
-        "changes",
+        "proposed",
+        "kept",
+        "pages",
         "skipped"
       ]
     },
@@ -420,7 +272,7 @@
     }
   },
   "required": [
-    "pages",
+    "areas",
     "settings",
     "branch"
   ]

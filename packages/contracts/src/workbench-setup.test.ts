@@ -1,187 +1,72 @@
 import { describe, expect, it } from 'vitest';
 import {
-  applyAreaChanges,
-  AreaChangeKind,
   AreaRole,
   SettingField,
   setupAreasProblem,
   WorkbenchSetupDto,
-  type AreaChange,
+  withoutPages,
   type AreaDef,
 } from './index';
 
-const AREAS: AreaDef[] = [
-  { name: 'friday', globs: ['app/(app)/friday/**'] },
+const PROPOSED: AreaDef[] = [
   {
-    name: 'bundle',
-    globs: ['app/(app)/accounts/**', 'app/(app)/issues/**', 'app/(app)/*', 'docs/**'],
+    name: 'friday',
+    globs: ['app/(app)/friday/**', 'src/capture/friday/**'],
+    role: AreaRole.Page,
+    route: '/friday',
   },
-  { name: 'frontend', globs: ['app/*', 'app/login/**'] },
-  { name: 'people', globs: ['app/(app)/people/**'], role: AreaRole.Page, route: '/people' },
+  { name: 'board', globs: ['src/views/board/**'], role: AreaRole.Page, route: '/board' },
+  { name: 'web-shared', globs: ['src/**', 'src/**/.*'], role: AreaRole.Shared },
+  { name: 'docs', globs: ['docs/**'] },
   { name: 'root', globs: ['*', '.*'], catchAll: true },
 ];
 
-const UPDATE: AreaChange = {
-  kind: AreaChangeKind.Update,
-  sentence: 'Make `friday` a page at /friday, with `src/capture/friday-book/`',
-  reason: 'Its globs are exactly the route folder of /friday',
-  area: 'friday',
-  route: '/friday',
-  addGlobs: ['src/capture/friday-book/**'],
-};
-const SPLIT: AreaChange = {
-  kind: AreaChangeKind.Split,
-  sentence: 'Split `bundle` into the pages `accounts` and `issues`',
-  reason: 'It holds the route folders of two pages',
-  area: 'bundle',
-  pages: [
-    {
-      name: 'accounts',
-      globs: ['app/(app)/accounts/**'],
-      role: AreaRole.Page,
-      route: '/accounts',
-    },
-    { name: 'issues', globs: ['app/(app)/issues/**'], role: AreaRole.Page, route: '/issues' },
-  ],
-  remainder: { globs: ['app/(app)/*', 'docs/**'] },
-};
-const MARK: AreaChange = {
-  kind: AreaChangeKind.MarkShared,
-  sentence: 'Mark `frontend` shared',
-  reason: "It holds the app's root layout",
-  area: 'frontend',
-};
-const ADD: AreaChange = {
-  kind: AreaChangeKind.Add,
-  sentence: 'Add `frontend-shared` over `src/`, shared',
-  reason: "The app's source folder, which pages import from",
-  area: { name: 'frontend-shared', globs: ['src/**'], role: AreaRole.Shared },
-};
-
-const byName = (areas: readonly AreaDef[]) => new Map(areas.map((a) => [a.name, a]));
-
-/** The names of the areas a change writes. */
-function touched(change: AreaChange): string[] {
-  switch (change.kind) {
-    case AreaChangeKind.Update:
-    case AreaChangeKind.MarkShared:
-      return [change.area];
-    case AreaChangeKind.Split:
-      return [change.area, ...change.pages.map((p) => p.name)];
-    case AreaChangeKind.Add:
-      return [change.area.name];
-  }
-}
-
-describe('applyAreaChanges', () => {
+describe('withoutPages', () => {
   it.each([
+    { name: 'nothing unticked leaves the list as it is', unticked: [], expected: PROPOSED },
     {
-      name: 'no change leaves the areas as they are',
-      changes: [],
-      expected: AREAS,
+      name: 'an unticked page keeps its route folder as an area with no role, its shared code folded back',
+      unticked: ['friday'],
+      expected: [{ name: 'friday', globs: ['app/(app)/friday/**'] }, ...PROPOSED.slice(1)],
     },
     {
-      name: 'an update makes the area a page with its route and adds the taken globs, keeping its name',
-      changes: [UPDATE],
-      expected: [
-        {
-          name: 'friday',
-          globs: ['app/(app)/friday/**', 'src/capture/friday-book/**'],
-          role: AreaRole.Page,
-          route: '/friday',
-        },
-        ...AREAS.slice(1),
-      ],
+      name: 'an unticked page a shared area holds whole goes',
+      unticked: ['board'],
+      expected: [PROPOSED[0], ...PROPOSED.slice(2)],
     },
     {
-      name: 'a split keeps the remainder under the old name in place and adds a page per route folder after it',
-      changes: [SPLIT],
-      expected: [
-        AREAS[0],
-        { name: 'bundle', globs: ['app/(app)/*', 'docs/**'] },
-        {
-          name: 'accounts',
-          globs: ['app/(app)/accounts/**'],
-          role: AreaRole.Page,
-          route: '/accounts',
-        },
-        { name: 'issues', globs: ['app/(app)/issues/**'], role: AreaRole.Page, route: '/issues' },
-        ...AREAS.slice(2),
-      ],
+      name: 'a name that is no page is passed over',
+      unticked: ['docs', 'web-shared', 'nowhere'],
+      expected: PROPOSED,
     },
-    {
-      name: 'mark shared sets the role and nothing else',
-      changes: [MARK],
-      expected: [
-        ...AREAS.slice(0, 2),
-        { name: 'frontend', globs: ['app/*', 'app/login/**'], role: AreaRole.Shared },
-        ...AREAS.slice(3),
-      ],
-    },
-    {
-      name: 'an add appends the area',
-      changes: [ADD],
-      expected: [...AREAS, { name: 'frontend-shared', globs: ['src/**'], role: AreaRole.Shared }],
-    },
-  ])('$name', ({ changes, expected }) => {
-    expect(applyAreaChanges(AREAS, changes)).toEqual(expected);
+  ])('$name', ({ unticked, expected }) => {
+    const before = structuredClone(PROPOSED);
+    expect(withoutPages(PROPOSED, unticked)).toEqual(expected);
+    expect(PROPOSED).toEqual(before);
   });
 
-  it('takes any subset, in any order, and each change does what it does alone', () => {
-    const all = [UPDATE, SPLIT, MARK, ADD];
-    const subsets = Array.from({ length: 1 << all.length }, (_, mask) =>
-      all.filter((_, i) => (mask & (1 << i)) !== 0),
-    );
-    for (const subset of subsets) {
-      const together = byName(applyAreaChanges(AREAS, subset));
-      const reversed = byName(applyAreaChanges(AREAS, [...subset].reverse()));
-      expect(reversed).toEqual(together);
-      for (const change of subset) {
-        const alone = byName(applyAreaChanges(AREAS, [change]));
-        for (const name of touched(change)) expect(together.get(name)).toEqual(alone.get(name));
-      }
-    }
-  });
-
-  it('a split that leaves no remainder removes the old area', () => {
-    const whole: AreaChange = { ...SPLIT, remainder: null };
-    expect(applyAreaChanges(AREAS, [whole]).map((a) => a.name)).toEqual([
-      'friday',
-      'accounts',
-      'issues',
-      'frontend',
-      'people',
-      'root',
-    ]);
-  });
-
-  it('passes over a change whose area has gone or whose added name is taken, and never touches the input', () => {
-    const before = structuredClone(AREAS);
-    const gone: AreaChange = { ...MARK, area: 'nowhere' };
-    const taken: AreaChange = {
-      ...ADD,
-      area: { name: 'people', globs: ['x/**'], role: AreaRole.Shared },
-    };
-    expect(applyAreaChanges(AREAS, [gone, taken])).toEqual(AREAS);
-    expect(AREAS).toEqual(before);
+  it('gives each page alone the same result whatever else is unticked', () => {
+    const both = withoutPages(PROPOSED, ['friday', 'board']);
+    expect(both).toEqual(withoutPages(withoutPages(PROPOSED, ['board']), ['friday']));
+    expect(setupAreasProblem(both, [])).toBeNull();
   });
 });
 
 describe('setupAreasProblem', () => {
   it.each([
-    { name: 'a valid list', areas: AREAS, hazards: [], problem: null },
+    { name: 'a valid list', areas: PROPOSED, hazards: [], problem: null },
     {
       name: 'two pages that share a file',
       areas: [
-        ...AREAS,
-        { name: 'more', globs: ['app/(app)/people/**'], role: AreaRole.Page, route: '/more' },
+        ...PROPOSED,
+        { name: 'more', globs: ['app/(app)/friday/x/**'], role: AreaRole.Page, route: '/more' },
       ],
       hazards: [],
-      problem: /Pages "people" and "more" can share a file/u,
+      problem: /Pages "friday" and "more" can share a file/u,
     },
     {
       name: 'a name a hazard has',
-      areas: AREAS,
+      areas: PROPOSED,
       hazards: ['friday'],
       problem: /friday/u,
     },
@@ -201,7 +86,19 @@ describe('setupAreasProblem', () => {
 describe('WorkbenchSetupDto', () => {
   it('reads every kind of change, each kind of setting and a branch note', () => {
     const dto = {
-      pages: { changes: [UPDATE, SPLIT, MARK, ADD], skipped: [{ name: 'x', reason: 'why' }] },
+      areas: {
+        proposed: PROPOSED,
+        kept: [{ name: 'root', reason: 'kept: 3 open tasks name it' }],
+        pages: [
+          {
+            name: 'friday',
+            route: '/friday',
+            folders: ['app/(app)/friday/', 'src/capture/friday/'],
+          },
+          { name: 'board', folders: ['src/views/board/'] },
+        ],
+        skipped: [{ name: 'x', reason: 'why' }],
+      },
       settings: [
         {
           field: SettingField.AppUrl,
@@ -223,7 +120,11 @@ describe('WorkbenchSetupDto', () => {
   });
 
   it('refuses an app address off this Mac and a branch note with nothing ahead', () => {
-    const empty = { pages: { changes: [], skipped: [] }, settings: [], branch: null };
+    const empty = {
+      areas: { proposed: [], kept: [], pages: [], skipped: [] },
+      settings: [],
+      branch: null,
+    };
     expect(WorkbenchSetupDto.safeParse(empty).success).toBe(true);
     expect(
       WorkbenchSetupDto.safeParse({

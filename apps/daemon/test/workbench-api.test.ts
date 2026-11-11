@@ -4,7 +4,6 @@ import { dirname, join } from 'node:path';
 import {
   GoalPassPagesDto,
   mintId,
-  PagesProposalDto,
   PassAbandonedDto,
   PassCloseAnswerDto,
   PassClosePreviewDto,
@@ -21,6 +20,8 @@ import {
   TaskDto,
   TaskMessageDto,
   TurnActivityDto,
+  WorkbenchSetupDto,
+  withoutPages,
   type ProjectInput,
 } from '@10db/contracts';
 import {
@@ -510,43 +511,69 @@ describe('DELETE /tasks/:taskId/kept-work', () => {
   });
 });
 
-/** Commits each file, with its path as its content, in the test's repository. */
-function commitFiles(paths: readonly string[]): void {
-  for (const path of paths) {
+/** Commits each file with its text in the test's repository. */
+function commitFiles(files: Readonly<Record<string, string>>): void {
+  for (const [path, text] of Object.entries(files)) {
     const file = join(repo.path, path);
     mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, `${path}\n`);
+    writeFileSync(file, text);
   }
-  rawGit('add', ...paths);
+  rawGit('add', ...Object.keys(files));
   rawGit('commit', '-q', '--no-gpg-sign', '-m', 'An app');
 }
 
-describe('POST /projects/:projectId/propose-page-areas', () => {
-  it('proposes the screens the project has no page for, and says why it left out the one it has', async () => {
-    commitFiles([
-      'package.json',
-      'app/layout.tsx',
-      'app/(marketing)/page.tsx',
-      'app/settings/page.tsx',
-      'app/people/page.tsx',
-      'app/billing/page.tsx',
-    ]);
+describe('POST /projects/:projectId/workbench-setup', () => {
+  it('rebuilds the areas from the repository: each route a page with the code only it imports, shared code marked, an area open tasks name kept, and the list saves', async () => {
+    commitFiles({
+      'package.json': '{}\n',
+      'tsconfig.json': '{ "compilerOptions": { "paths": { "@/*": ["./*"] } } }\n',
+      'app/layout.tsx': "import '@/src/shell/frame';\n",
+      'app/(app)/layout.tsx': '\n',
+      'app/(app)/friday/page.tsx': "import { Book } from '@/src/friday-book/workspace';\n",
+      'app/(app)/people/page.tsx': "import { Button } from '@/src/ui/button';\n",
+      'app/(app)/settings/page.tsx': "import { Button } from '../../../src/ui/button';\n",
+      'src/friday-book/workspace.tsx': "import './session';\n",
+      'src/friday-book/session.ts': '\n',
+      'src/ui/button.tsx': '\n',
+      'src/shell/frame.tsx': '\n',
+      'docs/notes.md': 'notes\n',
+    });
     const project = await projectWith([
-      { name: 'settings', globs: ['app/settings/**'], role: 'page', route: '/settings' },
-      { name: 'repo', globs: ['**'], catchAll: true },
+      { name: 'bundle', globs: ['app/(app)/people/**', 'app/(app)/settings/**', 'docs/**'] },
+      { name: 'rest', globs: ['**'], catchAll: true },
     ]);
+    await taskOn(project, 'Tidy everything', ['rest']);
 
-    const proposal = await api().post(
-      `/projects/${project.id}/propose-page-areas`,
-      PagesProposalDto,
+    const setup = await api().post(`/projects/${project.id}/workbench-setup`, WorkbenchSetupDto);
+
+    expect(setup.settings).toEqual([]);
+    expect(setup.branch).toBeNull();
+    expect(setup.areas.kept).toEqual([{ name: 'rest', reason: 'kept: 1 open task names it' }]);
+    expect(setup.areas.pages).toEqual([
+      { name: 'friday', route: '/friday', folders: ['app/(app)/friday/', 'src/friday-book/'] },
+      { name: 'people', route: '/people', folders: ['app/(app)/people/'] },
+      { name: 'settings', route: '/settings', folders: ['app/(app)/settings/'] },
+    ]);
+    const byName = new Map(setup.areas.proposed.map((a) => [a.name, a]));
+    expect(byName.get('rest')).toEqual({ name: 'rest', globs: ['**'], catchAll: true });
+    expect(byName.has('bundle')).toBe(false);
+    // The source folder the pages import from, and the root layout, are shared.
+    expect(setup.areas.proposed.filter((a) => a.role === 'shared').flatMap((a) => a.globs)).toEqual(
+      expect.arrayContaining(['src/**', 'app/*']),
     );
 
-    expect(proposal.pages.map((p) => [p.globs, p.role, p.route ?? null])).toEqual([
-      [['app/(marketing)/**'], 'page', null],
-      [['app/billing/**'], 'page', '/billing'],
-      [['app/people/**'], 'page', '/people'],
-    ]);
-    expect(proposal.skipped.map((s) => s.name)).toEqual(['settings']);
+    const saved = await api().patch(`/projects/${project.id}`, ProjectDto, {
+      areas: withoutPages(setup.areas.proposed, ['settings']),
+    });
+    expect(saved.areas.find((a) => a.name === 'friday')?.role).toBe('page');
+    expect(saved.areas.find((a) => a.name === 'settings')).toEqual({
+      name: 'settings',
+      globs: ['app/(app)/settings/**'],
+    });
+  });
+
+  it('answers 404 for a project there is none of', async () => {
+    expect((await send('POST', `/projects/${mintId('Project')}/workbench-setup`)).status).toBe(404);
   });
 });
 

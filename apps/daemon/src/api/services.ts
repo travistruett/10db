@@ -63,7 +63,7 @@ import type {
   ModelProfilePatch,
   DecisionId,
   GoalPassPagesDto,
-  PagesProposalDto,
+  WorkbenchSetupDto,
   PassDto,
   PassId,
   PassOpenedDto,
@@ -307,8 +307,11 @@ export interface ApiServices {
   renamePass(passId: PassId, input: PassRename): PassDto;
   /** Discard Saved Work: forgets the task's saved Workbench work and deletes its kept ref; 409 in a pass. */
   discardKeptWork(taskId: TaskId): Promise<void>;
-  /** Propose Page Areas: the page areas the area proposer finds that the project can add, and why not the rest. */
-  proposePageAreas(projectId: ProjectId, signal?: AbortSignal): Promise<PagesProposalDto>;
+  /**
+   * The Workbench setup: the project's areas rebuilt from its repository with a page per route, and
+   * the settings and branch note W2 fills. Reads only; 404 for a project there is none of.
+   */
+  workbenchSetup(projectId: ProjectId, signal?: AbortSignal): Promise<WorkbenchSetupDto>;
   /** The page areas the goal's tasks committed in, read from git, for Work on This. */
   goalPassPages(goalId: GoalId): Promise<GoalPassPagesDto>;
   /** The task's turns, each with the files it changed against the turn before; reads git. */

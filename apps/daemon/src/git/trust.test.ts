@@ -172,6 +172,10 @@ describe('no program from the checkout runs in a daemon git call', () => {
     },
     { name: 'keptRefs', act: (git) => git.keptRefs(repo.path, 'refs/10db/starts/') },
     { name: 'survey', act: (git) => git.survey(repo.path, 50) },
+    {
+      name: 'surveyTexts',
+      act: (git) => git.surveyTexts(repo.path, ['README.md', '.gitattributes'], 1024),
+    },
     { name: 'deleteKeptRef', act: (git) => git.deleteKeptRef(repo.path, 'refs/10db/starts/x') },
     {
       // After the commits, so main has its own: a merge commit, read-tree -m -u and update-ref.
@@ -1638,6 +1642,25 @@ describe('survey', () => {
     }
     await surveyed;
     expect(first).toBe('surveyed');
+  });
+
+  it('reads the texts HEAD holds, not the checkout, and leaves out what is no small text', async () => {
+    write('src/a.ts', "export const a = 'é';\n");
+    write('src/b.ts', 'import { a } from "./a";\n');
+    write('src/bin.dat', 'x\0y');
+    write('src/big.ts', 'x'.repeat(2000));
+    rawGit('add', 'src');
+    rawGit('commit', '-q', '-m', 'texts');
+    write('src/a.ts', 'edited in the checkout\n');
+    const texts = await createGit().surveyTexts(
+      join(repo.path, 'src'),
+      ['src/a.ts', 'src/b.ts', 'src/bin.dat', 'src/big.ts', 'src/gone.ts'],
+      1000,
+    );
+    expect(Object.fromEntries(texts)).toEqual({
+      'src/a.ts': "export const a = 'é';\n",
+      'src/b.ts': 'import { a } from "./a";\n',
+    });
   });
 
   it('surveys a checkout that holds a file named HEAD', async () => {

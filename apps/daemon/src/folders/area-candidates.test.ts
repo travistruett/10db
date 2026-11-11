@@ -1,7 +1,13 @@
 import { matchesGlob } from 'node:path';
 import { areaRolesProblem, PathPattern } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { AreaCandidateKind, deriveAreaCandidates, mergeCoupledCandidates } from './area-candidates';
+import {
+  AreaCandidateKind,
+  deriveAreaCandidates,
+  fileRouteApps,
+  mergeCoupledCandidates,
+  treeGlobs,
+} from './area-candidates';
 
 const covered = (globs: readonly string[], file: string) =>
   globs.some((glob) => matchesGlob(file, glob));
@@ -587,5 +593,73 @@ describe('mergeCoupledCandidates', () => {
   it('leaves candidates alone when there is no history', () => {
     const candidates = deriveAreaCandidates(folders(['alpha', 'beta']));
     expect(mergeCoupledCandidates(candidates, [])).toEqual(candidates);
+  });
+});
+
+describe('treeGlobs', () => {
+  it.each([
+    {
+      name: 'a folder of plain files',
+      folder: 'src/a',
+      files: ['src/a/x.ts', 'src/a/b/y.ts'],
+      globs: ['src/a/**'],
+    },
+    {
+      name: 'a folder with a dotfile and a dot folder',
+      folder: 'src/a',
+      files: ['src/a/x.ts', 'src/a/.eslintrc', 'src/a/.storybook/main.ts'],
+      globs: ['src/a/**', 'src/a/**/.*', 'src/a/**/.*/**'],
+    },
+    {
+      name: 'a folder named with glob syntax',
+      folder: 'app/[id]',
+      files: ['app/[id]/page.tsx'],
+      globs: ['app/[[]id]/**'],
+    },
+    {
+      name: 'files outside the folder count for nothing',
+      folder: 'src/a',
+      files: ['src/ab/.x', 'src/a/y.ts'],
+      globs: ['src/a/**'],
+    },
+  ])('$name', ({ folder, files, globs }) => {
+    expect(treeGlobs(folder, files)).toEqual(globs);
+  });
+});
+
+describe('fileRouteApps', () => {
+  it('finds each framework app with route groups, its route folder and the folders its layouts sit in', () => {
+    const tracked = [
+      'package.json',
+      'web/package.json',
+      'web/app/layout.tsx',
+      'web/app/(app)/layout.tsx',
+      'web/app/(app)/a/page.tsx',
+      'web/app/(app)/b/page.tsx',
+      'web/app/(app)/c/page.tsx',
+      'web/app/(site)/about/page.tsx',
+      'api/package.json',
+      'api/src/index.ts',
+    ];
+    expect(fileRouteApps(tracked)).toEqual([
+      {
+        unit: 'web',
+        routes: 'web/app',
+        layoutFolders: ['web', 'web/app', 'web/app/(app)', 'web/app/(site)'],
+      },
+    ]);
+  });
+
+  it('finds the app at the top of a repository that is one package', () => {
+    const tracked = [
+      'package.json',
+      'src/app/layout.tsx',
+      'src/app/(shop)/cart/page.tsx',
+      'src/app/(shop)/list/page.tsx',
+      'src/app/(shop)/item/page.tsx',
+    ];
+    expect(fileRouteApps(tracked)).toEqual([
+      { unit: '', routes: 'src/app', layoutFolders: ['', 'src', 'src/app', 'src/app/(shop)'] },
+    ]);
   });
 });
