@@ -121,16 +121,49 @@ describe('rebuildAreas', () => {
     });
   });
 
-  it('renames a new area whose name a kept area or a hazard has', () => {
+  it('drops the code a page would take from a kept page, keeping the page', () => {
     const result = rebuildAreas(
       input({
-        existing: [{ name: 'api', globs: ['api/legacy/**'] }],
-        keep: new Map([['api', 'kept: 1 open task names it']]),
+        existing: [
+          { name: 'books', globs: ['web/src/friday/**'], role: AreaRole.Page, route: '/b' },
+        ],
+        keep: new Map([['books', 'kept: 1 open task names it']]),
+      }),
+    );
+    expect(result.proposed.find((a) => a.name === 'friday')).toEqual({
+      name: 'friday',
+      globs: ['web/app/(app)/friday/**'],
+      role: AreaRole.Page,
+      route: '/friday',
+    });
+  });
+
+  it('renames a new page or area whose name a kept area or a hazard has', () => {
+    const result = rebuildAreas(
+      input({
+        existing: [
+          { name: 'api', globs: ['api/legacy/**'] },
+          { name: 'people', globs: ['docs/people/**'] },
+        ],
+        keep: new Map([
+          ['api', 'kept: 1 open task names it'],
+          ['people', 'kept: 1 open task names it'],
+        ]),
         others: [...OTHERS, { name: 'deps', globs: ['web/package.json'] }],
       }),
     );
     const names = result.proposed.map((a) => a.name);
-    expect(names).toEqual(['api', 'friday', 'people', 'web', 'src', 'api-2', 'root', 'deps-2']);
+    expect(names).toEqual([
+      'api',
+      'people',
+      'friday',
+      'people-2',
+      'web',
+      'src',
+      'api-2',
+      'root',
+      'deps-2',
+    ]);
   });
 
   it('marks a new area with no role that a page overlaps shared, and drops one a page holds whole', () => {
