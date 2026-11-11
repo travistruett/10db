@@ -110,11 +110,19 @@ function errorKind(info: unknown): string | null {
   return null;
 }
 
-/** A message on its way to Codex: its text and the pictures that go with it. */
+/**
+ * A message on its way to Codex: its text, the pictures that go with it, and the client uuid it goes
+ * under, which the thread records on the user message a turn takes it in.
+ */
 interface Outgoing {
   readonly text: string;
   readonly images: readonly ShapeImage[];
+  readonly uuid: string | undefined;
 }
+
+/** The `clientUserMessageId` a message goes under, when it has one. */
+const clientIdOf = (message: Outgoing): { clientUserMessageId?: string } =>
+  message.uuid === undefined ? {} : { clientUserMessageId: message.uuid };
 
 /**
  * The pictures as Codex's user input, after the text, in order: a stored picture as a local image
@@ -463,6 +471,7 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
       'turn/start',
       {
         threadId: thread,
+        ...clientIdOf(message),
         input: [
           { type: 'text', text: message.text, text_elements: [] },
           ...pictureInputs(message.images),
@@ -569,6 +578,7 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
             {
               threadId,
               expectedTurnId: state.turnId,
+              ...clientIdOf(message),
               input: [{ type: 'text', text: message.text }, ...pictureInputs(message.images)],
             },
             Acknowledged,
@@ -713,7 +723,11 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
     started = true;
     events.push({ type: 'started', providerSessionId: thread.thread.id, pid: child.pid ?? null });
     try {
-      await startTurn(thread.thread.id, { text: spec.prompt, images: spec.images ?? [] });
+      await startTurn(thread.thread.id, {
+        text: spec.prompt,
+        images: spec.images ?? [],
+        uuid: spec.promptUuid,
+      });
     } catch (error) {
       if (isModelRefusal(error))
         throw new StartRefused(SessionEndReason.ModelRefused, modelRefusal(spec.model));
@@ -750,9 +764,9 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
 
   return {
     events,
-    send: (text, images = []) => {
+    send: (text, images = [], uuid) => {
       // One at a time, so messages reach Codex in the order they were sent.
-      sends = sends.then(() => deliver({ text, images }));
+      sends = sends.then(() => deliver({ text, images, uuid }));
     },
     // Codex answers an interrupt with no receipt of what is still queued.
     interrupt: async () => {

@@ -1154,6 +1154,54 @@ describe('the turns', () => {
     });
   });
 
+  it('sends each message under its client uuid, and reports the uuid once a turn took the message', async () => {
+    const promptUuid = 'c0ffee00-0000-4000-8000-000000000001';
+    const steered = 'c0ffee00-0000-4000-8000-000000000002';
+    const started = 'c0ffee00-0000-4000-8000-000000000003';
+    const clock = new ManualClock();
+    const { handle, server } = startWith(
+      { 'turn/steer': {}, 'turn/interrupt': {} },
+      { promptUuid },
+      { clock },
+    );
+    const seen: SessionEvent[] = [];
+    void (async () => {
+      for await (const event of handle.events) seen.push(event);
+    })();
+    await vi.waitFor(() => {
+      expect(methods(server)).toContain('turn/start');
+    });
+    expect(sentParams(server, 'turn/start')).toMatchObject({ clientUserMessageId: promptUuid });
+    server.notify('turn/started', turnStarted('turn-1'));
+    const running = { handle, server, seen, clock };
+    await settled(running);
+    handle.send('more', [], steered);
+    await vi.waitFor(() => {
+      expect(methods(server)).toContain('turn/steer');
+    });
+    expect(sentParams(server, 'turn/steer')).toMatchObject({ clientUserMessageId: steered });
+    server.notify('item/completed', {
+      threadId: THREAD,
+      turnId: 'turn-1',
+      item: { type: 'userMessage', id: 'u2', clientId: steered, content: [] },
+    });
+    await vi.waitFor(() => {
+      expect(seen).toContainEqual({ type: 'consumed', uuids: [steered] });
+    });
+    server.notify('turn/completed', {
+      threadId: THREAD,
+      turn: { id: 'turn-1', status: 'completed' },
+    });
+    await settled(running);
+    handle.send('next', [], started);
+    await vi.waitFor(() => {
+      expect(methods(server).filter((m) => m === 'turn/start')).toHaveLength(2);
+    });
+    expect(server.sent().filter((r) => r.method === 'turn/start')[1]?.params).toMatchObject({
+      clientUserMessageId: started,
+    });
+  });
+
   it('drops a message sent during a start that fails, without throwing or hanging', async () => {
     const { handle, server } = startWith({ 'account/read': { account: null } });
     handle.send('too early');

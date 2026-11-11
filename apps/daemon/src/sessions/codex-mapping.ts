@@ -94,6 +94,11 @@ const McpItem = z.looseObject({
   tool: z.string(),
 });
 const MessageItem = z.looseObject({ type: z.literal('agentMessage'), text: z.string() });
+/**
+ * A user message the thread recorded in a turn, under the client uuid it was sent with
+ * (`clientUserMessageId`): the evidence a turn took it, as Claude Code's `user_message_uuids` is.
+ */
+const UserMessageItem = z.looseObject({ type: z.literal('userMessage'), clientId: z.string() });
 
 /** The activity an item stands for, or null for one 10db does not show. */
 function itemActivity(item: z.infer<typeof ItemCompleted>['item']): SessionEvent | null {
@@ -193,6 +198,8 @@ export function mapCodexNotification(
       // Codex 0.154 reports a compaction only as this item, never as `thread/compacted`.
       if (parsed.data.item.type === 'contextCompaction')
         return [{ type: 'compacted', trigger: 'auto' }];
+      const taken = UserMessageItem.safeParse(parsed.data.item);
+      if (taken.success) return [{ type: 'consumed', uuids: [taken.data.clientId] }];
       const activity = itemActivity(parsed.data.item);
       return activity === null ? [] : [activity];
     }

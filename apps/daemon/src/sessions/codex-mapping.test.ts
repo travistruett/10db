@@ -88,6 +88,26 @@ describe('mapCodexNotification', () => {
       itemCompleted({ type: 'agentMessage', text: 'hi' }),
       [{ type: 'activity', kind: 'text', summary: 'hi' }],
     ],
+    [
+      'a user message the turn took under a client uuid',
+      itemCompleted({
+        type: 'userMessage',
+        id: 'u1',
+        clientId: 'c0ffee00-0000-4000-8000-000000000001',
+        content: [{ type: 'text', text: 'Make it blue', text_elements: [] }],
+      }),
+      [{ type: 'consumed', uuids: ['c0ffee00-0000-4000-8000-000000000001'] }],
+    ],
+    [
+      'a user message with no client uuid',
+      itemCompleted({ type: 'userMessage', id: 'u1', clientId: null, content: [] }),
+      [],
+    ],
+    [
+      'a user message from a Codex that names no client uuid',
+      itemCompleted({ type: 'userMessage', id: 'u1', content: [] }),
+      [],
+    ],
     ['reasoning', itemCompleted({ type: 'reasoning' }), []],
     [
       'token use',

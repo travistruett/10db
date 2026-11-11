@@ -54,7 +54,8 @@ export interface SessionSpec {
   readonly prompt: string;
   /**
    * The client uuid the prompt carries, when it holds a builder message: the turn that takes it lists
-   * it in `user_message_uuids`, the evidence it was consumed (Workbench spec §6.3).
+   * it (Claude Code's `user_message_uuids`, the `clientId` of Codex's user message item), the evidence
+   * it was consumed (Workbench spec §6.3).
    */
   readonly promptUuid?: string;
   /** Pictures that go with the prompt as image blocks. */
@@ -235,7 +236,8 @@ export type SessionEvent =
   | {
       /**
        * The client uuids of the user messages the running turn has taken in so far, as an assistant
-       * message stamps them: the evidence a message was consumed, not only received.
+       * message stamps them (Claude Code) or a user message item records one (Codex): the evidence a
+       * message was consumed, not only received.
        */
       readonly type: 'consumed';
       readonly uuids: readonly string[];
