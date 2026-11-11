@@ -1,6 +1,5 @@
 import { z } from 'zod';
 import { Title } from './entities';
-import { ProposedArea } from './folders';
 import { TaskId } from './ids';
 import { PASS_PAGE_CAP_MAX, PassFileChange, PassTurnDto } from './passes';
 import { TASK_MESSAGE_MAX_CHARS } from './task-thread';
@@ -74,13 +73,6 @@ export type PassJoinRequest = z.infer<typeof PassJoinRequest>;
 /** `PATCH /passes/:passId`. */
 export const PassRename = z.object({ name: Title });
 export type PassRename = z.infer<typeof PassRename>;
-
-/** `POST /projects/:projectId/propose-page-areas`: page areas to add, and the ones left out with why. */
-export const PagesProposalDto = z.object({
-  pages: z.array(ProposedArea),
-  skipped: z.array(z.object({ name: z.string(), reason: z.string() })),
-});
-export type PagesProposalDto = z.infer<typeof PagesProposalDto>;
 
 /** `GET /goals/:goalId/pass-pages`: the page areas a goal's tasks committed in, and those tasks. */
 export const GoalPassPagesDto = z.object({

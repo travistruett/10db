@@ -21,7 +21,6 @@ import {
 import { SessionActivityData, TurnActivityDto } from './pass-activity';
 import {
   GoalPassPagesDto,
-  PagesProposalDto,
   PassJoinRequest,
   PassRename,
   PassStartDto,
@@ -384,7 +383,6 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'pass-start-dto': PassStartDto,
   'pass-join-request': PassJoinRequest,
   'pass-rename': PassRename,
-  'pages-proposal-dto': PagesProposalDto,
   'workbench-setup-dto': WorkbenchSetupDto,
   'goal-pass-pages-dto': GoalPassPagesDto,
   'pass-turn-with-files-dto': PassTurnWithFilesDto,

@@ -2,7 +2,6 @@ import type { TurnActivityDto } from '@10db/contracts';
 import {
   GoalPassPagesDto,
   mintId,
-  PagesProposalDto,
   PassDto,
   PassNotice,
   PassOpenedDto,
@@ -17,6 +16,7 @@ import {
   TaskId,
   TaskMessageDto,
   TaskThreadDto,
+  WorkbenchSetupDto,
   type InboxItemDto,
   type PassTurnActivity,
   type WorkstreamId,
@@ -316,18 +316,20 @@ export function passStartDto(overrides: Partial<PassStartDto> = {}): PassStartDt
   });
 }
 
-export function pagesProposalDto(overrides: Partial<PagesProposalDto> = {}): PagesProposalDto {
-  return PagesProposalDto.parse({
-    pages: [
-      {
-        name: 'Settings',
-        globs: ['src/settings/**'],
-        role: 'page',
-        route: '/settings',
-        reason: 'The settings screen and its forms',
-      },
-    ],
-    skipped: [],
+/** The setup for a project with one area, `src`: a Settings page and a shared `src`, unless overridden. */
+export function workbenchSetupDto(overrides: Partial<WorkbenchSetupDto> = {}): WorkbenchSetupDto {
+  return WorkbenchSetupDto.parse({
+    areas: {
+      proposed: [
+        { name: 'settings', globs: ['src/settings/**'], role: 'page', route: '/settings' },
+        { name: 'src', globs: ['src/**'], role: 'shared' },
+      ],
+      kept: [],
+      pages: [{ name: 'settings', route: '/settings', folders: ['src/settings/'] }],
+      skipped: [],
+    },
+    settings: [],
+    branch: null,
     ...overrides,
   });
 }
@@ -442,7 +444,7 @@ export interface PassRoutes {
   /** By task id. */
   readonly threads?: Readonly<Record<string, TaskThreadDto>>;
   readonly goalPages?: GoalPassPagesDto;
-  readonly proposal?: PagesProposalDto;
+  readonly setup?: WorkbenchSetupDto;
 }
 
 /** MSW handlers for the Workbench's reads. Put them before `baseHandlers()` in `server.use`. */
@@ -482,8 +484,8 @@ export function passHandlers(routes: PassRoutes = {}): HttpHandler[] {
     http.get(daemonUrl('/goals/:goalId/pass-pages'), () =>
       HttpResponse.json(routes.goalPages ?? goalPassPagesDto({ pages: [], fromTasks: [] })),
     ),
-    http.post(daemonUrl('/projects/:projectId/propose-page-areas'), () =>
-      HttpResponse.json(routes.proposal ?? pagesProposalDto()),
+    http.post(daemonUrl('/projects/:projectId/workbench-setup'), () =>
+      HttpResponse.json(routes.setup ?? workbenchSetupDto()),
     ),
   ];
 }
