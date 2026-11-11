@@ -1668,7 +1668,8 @@ describe('survey', () => {
     });
   });
 
-  it('reads nothing of a partial clone, so no lazy fetch runs a program its config names', async () => {
+  /** A blobless clone of the test repository whose ssh command and upload-pack are markers. */
+  function partialClone() {
     write('src/a.ts', 'export const a = 1;\n');
     rawGit('add', 'src');
     rawGit('commit', '-q', '-m', 'a');
@@ -1688,16 +1689,27 @@ describe('survey', () => {
     const uploadPack = marker('upload-pack');
     gitIn(clone, 'config', 'core.sshCommand', ssh.path);
     gitIn(clone, 'config', 'remote.origin.uploadpack', uploadPack.path);
+    return { clone, ssh, uploadPack };
+  }
 
+  it('fetches nothing of a partial clone, so no program its config names runs', async () => {
+    const { clone, ssh, uploadPack } = partialClone();
     const read = await createGit().surveyTexts(clone, ['src/a.ts'], {
       maxBytes: 1000,
       maxTotalBytes: 1000,
     });
-
     expect(read.texts.size).toBe(0);
-    expect(read.refused).toBe('a partial clone: page code is not read');
     expect(ssh.ran()).toBe(false);
     expect(uploadPack.ran()).toBe(false);
+  });
+
+  it('says it reads no page code of a partial clone', async () => {
+    const { clone } = partialClone();
+    const read = await createGit().surveyTexts(clone, ['src/a.ts'], {
+      maxBytes: 1000,
+      maxTotalBytes: 1000,
+    });
+    expect(read.refused).toBe('a partial clone: page code is not read');
   });
 
   it('reads nothing when the files wanted hold more than the budget together', async () => {

@@ -510,6 +510,17 @@ const RESOLVABLE_BYTES = 1_000_000;
 
 /** The modes git stores a regular file with. */
 const REGULAR_FILE_MODES: readonly string[] = ['100644', '100755'];
+/** Config for a read that must reach no remote: no transport, ssh command, credential helper or askpass. */
+const NO_TRANSPORT: readonly string[] = [
+  '-c',
+  'protocol.allow=never',
+  '-c',
+  'core.sshCommand=false',
+  '-c',
+  'credential.helper=',
+  '-c',
+  'core.askPass=',
+];
 /** How many blob bytes one `cat-file --batch` call of `surveyTexts` is asked for, about. */
 const SURVEY_TEXT_BATCH_BYTES = 16 * 1024 * 1024;
 
@@ -1076,6 +1087,9 @@ export interface SurveyTexts {
 
 /** Said when `surveyTexts` meets a partial clone. */
 export const PARTIAL_CLONE_REFUSAL = 'a partial clone: page code is not read';
+/** Said when `surveyTexts` can't read the repository's config to tell. */
+export const UNREAD_CONFIG_REFUSAL =
+  "the repository's config could not be read: page code is not read";
 
 export interface GitOptions {
   /** Called with every refusal, so the builder hears of it whoever called. */
@@ -4683,22 +4697,29 @@ export function createGit(opts: GitOptions = {}): Git {
       });
       const wanted = new Set(paths);
       if (wanted.size === 0) return none(null);
-      // A missing blob is never fetched: the fetch would run the remote's programs.
-      const noFetch = { env: { GIT_NO_LAZY_FETCH: '1' } };
+      // A missing blob is never fetched: the fetch would run the remote's programs. Should the config
+      // change after the check below, no transport, ssh command or credential helper is reachable.
+      const noFetch = { env: { GIT_NO_LAZY_FETCH: '1' }, config: NO_TRANSPORT };
       try {
         const at = observed(
           realpathSync((await git(observed(path), ['rev-parse', '--show-toplevel'])).trim()),
         );
         // Git before 2.45 has no GIT_NO_LAZY_FETCH, so a partial clone is not read at all. Reading
-        // config runs no program.
-        const partial = await git(at, ['config', '--get', 'extensions.partialClone'], {
-          answerExitCodes: [1],
-        });
-        const promisors = await git(
-          at,
-          ['config', '--type=bool', '--get-regexp', '^remote\\..*\\.promisor$'],
-          { answerExitCodes: [1] },
-        );
+        // config runs no program; a config git can't read refuses too, never reads.
+        let partial: string;
+        let promisors: string;
+        try {
+          partial = await git(at, ['config', '--get', 'extensions.partialClone'], {
+            answerExitCodes: [1],
+          });
+          promisors = await git(
+            at,
+            ['config', '--type=bool', '--get-regexp', '^remote\\..*\\.promisor$'],
+            { answerExitCodes: [1] },
+          );
+        } catch {
+          return none(UNREAD_CONFIG_REFUSAL);
+        }
         if (partial.trim() !== '' || /\strue$/mu.test(promisors))
           return none(PARTIAL_CLONE_REFUSAL);
         const head = await git(at, ['rev-parse', '-q', '--verify', 'HEAD^{commit}'], {
