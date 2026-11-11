@@ -15,23 +15,38 @@
   Codex under a client uuid (`clientUserMessageId` on `turn/start` and `turn/steer`, Codex 0.167.0). The thread
   records it as the `clientId` of the `userMessage` item a turn takes the input in. A recorded message is taken
   once a model item (`MODEL_ITEMS`: a message, reasoning, a tool call, a patch, ...) follows it in its turn, or the
-  turn completes; the session reports it then as the `consumed` event the runner already reads. A message a
-  turn failed or was interrupted on before the model answered is not taken, and is pushed again.
-- **Pictures go as local images.** A message's pictures go after its text as `localImage` items naming the
-  stored file, which Codex reads and sends the model; a picture with no file as an `image` of its bytes. The
-  thread's picture budget is counted as for any account, under the ChatGPT account's limits.
+  turn completes; the session reports it then as the `consumed` event the runner already reads.
+- **A message a turn dropped goes back to 10db's queue.** A turn that fails, or that the guard interrupts, before
+  taking a message it was handed drops it; the session reports it on `turn_complete` as `dropped`. For a page
+  the runner hands it back (`markTaskMessagesHandedBack`: no longer pushed, its uuids kept, never taken back as
+  unsent) and fails the turn, so Retry Turn or the builder's next message sends it, under a fresh uuid. A turn
+  the handle's own `interrupt` stopped reports nothing dropped: its caller pushes again what the receipt does not
+  name.
+- **Pictures go as local images, every time.** A message's pictures go after its text as `localImage` items
+  naming the stored file, which Codex reads and sends the model. A Codex lane can open no stored picture by its
+  path (its guard refuses `view_image`, its sandbox the data directory), so every push sends every picture,
+  whatever the thread's budget or an earlier send.
 - **Stop and Redo has a receipt.** A Codex session's queue is 10db's own: the messages its session has not handed
   over yet. `interrupt` answers those as `stillQueued`, waits up to the stop grace for Codex to report the
   interrupted turn ended, and steers nothing into the turn it stops; each held message starts the next turn.
   Codex drops a steered message an interrupted turn had not taken, so every other untaken one is pushed again.
-- **A restart never sends a taken message twice.** A message keeps every client uuid it was pushed under
-  (`task_messages.push_uuids`), written in the same write as its pushed stamp, before Codex can see it. Before a
-  lane resumes a Codex thread while a message pushed under a uuid was never seen taken, 10db reads the thread
-  back with a short-lived app-server (`thread/turns/list`, every page, full items; no turn runs) and applies the
-  same rule to each turn: a message the thread took is delivered, and a `feedback` whose message was taken
-  resumes the thread with no message. A thread that can't be read is never guessed at: the lane is refused, which
-  for a page of a pass is a failed turn whose Retry Turn sends the message again. A resumed Claude Code session
-  is still pushed the message again (at least once, its id in the text).
+  An interrupt while a `turn/start` is in flight waits (within the grace) for the turn it starts and stops it. A
+  turn Codex has not reported ended by the end of the grace may still run, so nothing is steered into it: the
+  session ends, and what it held goes to the next session.
+- **Exactly once where the thread can be read, at least once elsewhere.** A message keeps every client uuid it
+  was pushed under (`task_messages.push_uuids`), written before the session is handed it. Before a lane resumes
+  a Codex thread while a message pushed under a uuid was never seen taken (after a restart or a stop), 10db
+  reads the thread back with a short-lived app-server (`thread/turns/list`, newest turns first, 20 a page and at
+  most 10 pages, full items; no turn runs), stopping once every such uuid is found or a turn that ended before
+  the oldest such message was written is passed, and applies the same rule to each turn: a message the thread
+  took is delivered, and a `feedback` whose message was taken resumes the thread with no message. What it decides
+  is kept in one write, so a launch that stops after it never decides it again, and a stop ends the read at once.
+  A thread Codex says no user message has reached took nothing, for certain. Any other thread that can't be read
+  is not guessed at: the lane starts a fresh session, which is sent the messages again under fresh uuids, and
+  the thread says so. So delivery is exactly once where the thread can be read, and at least once, as Claude's
+  is, for a session that resumed and crashed (the next starts fresh from the digest), a move to another account,
+  and an unreadable thread; the message's id travels in its text and the brief says a repeated id is one
+  message. A resumed Claude Code session is still pushed the message again.
 
 ## Why
 
@@ -48,6 +63,12 @@ Counting the record alone as taken was turned down: Codex records a message as i
 answers, so a turn that failed on the usage limit at its first model call would mark the message delivered and
 the session on the fallback account would start without it. Claude Code stamps a message with the turn's first
 assistant message; a model item after the record is the same evidence.
+
+Failing the turn on an unreadable thread was turned down: Retry Turn would read the same thread again, and the
+page would never move. A fresh session costs at most a repeat the brief already tells the agent to recognise.
+
+Opening the task's files directory to a Codex lane's profile was turned down for pictures: a shell read gives the
+model bytes, not a picture, and the one tool that shows one, `view_image`, is refused by the guard.
 
 Matching the thread's last user input by text and picture count, for a `turn/start` whose reply never came
 back, was turned down: the client uuid is written to the row before the call is made and the thread keeps it,

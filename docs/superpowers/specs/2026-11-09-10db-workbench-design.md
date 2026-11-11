@@ -812,8 +812,10 @@ a turn never ends with work that nothing has kept, whether or not the agent call
     turn begins, before the model answers, so the message is delivered once a model item follows it in its
     turn, or the turn completes. An interrupt's receipt is the messages the session has not handed to Codex
     yet; Codex drops a steered message the interrupted turn had not taken, so every other one is pushed again.
-    Pictures go as local images Codex reads from the stored file. `test/codex.live.test.ts` runs the real
-    binary.
+    A turn that fails, or that the guard interrupts, drops what it was handed and did not take: the message
+    goes back to 10db's queue and the turn fails, so Retry Turn or the next message sends it. A Codex lane can
+    open no stored picture by its path, so every push sends every picture as a local image Codex reads from
+    the stored file. `test/codex.live.test.ts` runs the real binary.
 - A picture is sent as an image block when it fits the account's limits, otherwise as a path the session
   reads; the budget is counted per thread as Plan counts it per conversation.
 
@@ -1206,7 +1208,7 @@ Every new GET is classified in `screens/render-access.ts`, as that module requir
 | with a page Open | nothing to do: it is `QUEUED`, skipped by the scheduler, and its claim is still held (§2) |
 | mid-turn | the session is resumed once, as after any crash (`apps/daemon/src/runner/next-action.ts:11-37`); `feedback` survives as `answer` does |
 | mid-turn, and the session cannot be resumed | a fresh session from the digest and the latest handoff, with the builder's message (§6.3); the same after a move to another account |
-| with a message pushed and not delivered | it is sent again to the resumed or fresh session; the page is not Ready until a turn after it ends. A Codex thread is read back first: a message pushed under a client uuid the thread took (`task_messages.push_uuids`) is delivered and not sent again, and a thread that can't be read fails the turn with Retry Turn rather than guess |
+| with a message pushed and not delivered | it is sent again to the resumed or fresh session; the page is not Ready until a turn after it ends. A Codex thread is read back first: a message pushed under a client uuid the thread took (`task_messages.push_uuids`) is delivered and not sent again (exactly once); a thread that can't be read starts a fresh session that is sent the message again, and the thread says so (at least once, as for Claude) |
 | between a turn's end and its kept commit | the files are on disk; the kept commit is made at start-up for any turn with `ended_at` and no `kept_sha` |
 | during sign-off | each commit's operation id finds what already landed; the rest are made, in order; the approval is applied if it was not |
 | with a shared claim held for a turn | released with the turn's recovery; its changes are kept on the shared chain first if they differ from the record taken at the grant (`pass_holds` survives the restart) |
