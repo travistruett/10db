@@ -217,42 +217,47 @@ describe('the pinned copy', () => {
     );
   });
 
-  it('installs a pin shipped as a zip, as Chrome for Testing ships, from its top folder', async () => {
-    const src = join(dir.path, 'zip-src', 'shell-mac-arm64');
-    mkdirSync(join(src, 'resources'), { recursive: true });
-    writeFileSync(join(src, 'shell'), '#!/bin/sh\necho shell 9.9\n', { mode: 0o755 });
-    writeFileSync(join(src, 'resources', 'a.pak'), 'pak');
-    const zip = join(dir.path, 'shell.zip');
-    execFileSync('/usr/bin/tar', [
-      '--format',
-      'zip',
-      '-cf',
-      zip,
-      '-C',
-      join(dir.path, 'zip-src'),
-      'shell-mac-arm64',
-    ]);
-    const pin: PinnedRelease = {
-      tool: 'shell',
-      label: 'A shell',
-      version: '9.9',
-      sha512: await tarballIntegrity(zip),
-      tarballUrl: 'https://cdn.example.test/shell.zip',
-      member: 'shell-mac-arm64',
-      strip: 1,
-      executable: 'shell',
-    };
-    const exe = await ensurePinned(dataDir, pin, {
-      download: (_url, to) => {
-        copyFileSync(zip, to);
-        return Promise.resolve();
-      },
-      extract: extractZipWithTar,
-    });
-    expect(exe).toBe(pinnedExecutable(dataDir, pin));
-    expect(execFileSync(exe, [], { encoding: 'utf8' })).toBe('shell 9.9\n');
-    expect(readFileSync(join(pinnedDir(dataDir, pin), 'resources', 'a.pak'), 'utf8')).toBe('pak');
-  });
+  // The only zip pin is the mac-arm64 browser, unpacked by macOS's tar (bsdtar). GNU tar, Linux's,
+  // neither writes nor reads a zip, so on Linux there is nothing to unpack it with.
+  it.skipIf(process.platform !== 'darwin')(
+    'installs a pin shipped as a zip, as Chrome for Testing ships, from its top folder',
+    async () => {
+      const src = join(dir.path, 'zip-src', 'shell-mac-arm64');
+      mkdirSync(join(src, 'resources'), { recursive: true });
+      writeFileSync(join(src, 'shell'), '#!/bin/sh\necho shell 9.9\n', { mode: 0o755 });
+      writeFileSync(join(src, 'resources', 'a.pak'), 'pak');
+      const zip = join(dir.path, 'shell.zip');
+      execFileSync('/usr/bin/tar', [
+        '--format',
+        'zip',
+        '-cf',
+        zip,
+        '-C',
+        join(dir.path, 'zip-src'),
+        'shell-mac-arm64',
+      ]);
+      const pin: PinnedRelease = {
+        tool: 'shell',
+        label: 'A shell',
+        version: '9.9',
+        sha512: await tarballIntegrity(zip),
+        tarballUrl: 'https://cdn.example.test/shell.zip',
+        member: 'shell-mac-arm64',
+        strip: 1,
+        executable: 'shell',
+      };
+      const exe = await ensurePinned(dataDir, pin, {
+        download: (_url, to) => {
+          copyFileSync(zip, to);
+          return Promise.resolve();
+        },
+        extract: extractZipWithTar,
+      });
+      expect(exe).toBe(pinnedExecutable(dataDir, pin));
+      expect(execFileSync(exe, [], { encoding: 'utf8' })).toBe('shell 9.9\n');
+      expect(readFileSync(join(pinnedDir(dataDir, pin), 'resources', 'a.pak'), 'utf8')).toBe('pak');
+    },
+  );
 });
 
 describe('downloadFile', () => {
