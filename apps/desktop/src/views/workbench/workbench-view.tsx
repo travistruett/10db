@@ -3,7 +3,6 @@ import {
   PassState,
   passHoldsTasks,
   type InboxItemDto,
-  type PagesProposalDto,
   type PassJoinRequest,
   type PassDto,
   type PassOpenRequest,
@@ -25,7 +24,7 @@ import {
   useLivePass,
   useOpenPass,
   usePassStart,
-  useProposePageAreas,
+  useWorkbenchSetup,
   useRenamePass,
 } from '../../daemon/pass-queries';
 import { useInbox, useTasks } from '../../daemon/queries';
@@ -41,8 +40,9 @@ import { PassWorkspace } from './pass-workspace';
 import { PrButton, PrReason } from './pr-button';
 import { queueRows } from './queue-rows';
 import type { PassWorkspaceProps } from './pass-workspace-props';
-import { NoPageAreas, ProposePagesModal } from './propose-pages-modal';
 import { RenameModal } from './rename-modal';
+import { WorkbenchSetup } from './setup/workbench-setup';
+import { suggestionCount } from './setup/setup-rules';
 import { StartPass } from './start-pass';
 import type { WorkbenchSearch } from './workbench-search';
 
@@ -50,8 +50,6 @@ import type { WorkbenchSearch } from './workbench-search';
 export interface WorkbenchActions {
   /** Opens a pass: `POST /projects/:projectId/passes`. */
   readonly start: (request: PassOpenRequest) => Promise<unknown>;
-  /** Proposes page areas: `POST /projects/:projectId/propose-page-areas`. */
-  readonly propose: () => Promise<PagesProposalDto>;
   /** Adds pages to the open pass: `POST /passes/:passId/pages`. */
   readonly addPages: (request: PassJoinRequest) => Promise<unknown>;
   /** Renames the open pass: `PATCH /passes/:passId`. */
@@ -71,6 +69,8 @@ export interface WorkbenchScreenProps {
   /** The open Inbox items. */
   readonly inbox: readonly InboxItemDto[];
   readonly search: WorkbenchSearch;
+  /** How many setup suggestions are left for a project that has pages; 0 offers no Set Up. */
+  readonly setupCount: number;
   /** The pages a `goal` link's tasks committed in, which the picker starts ticked. */
   readonly goalPages: readonly string[];
   /** Now, in epoch milliseconds. */
@@ -83,7 +83,7 @@ export interface WorkbenchScreenProps {
 }
 
 /** Which dialog the screen holds open. */
-type Dialog = 'propose' | 'add-page' | 'close' | 'rename' | 'abandon' | null;
+type Dialog = 'setup' | 'add-page' | 'close' | 'rename' | 'abandon' | null;
 
 /**
  * The pass whose close finished between two reads of the live pass: it was closing or closed, and now
@@ -102,7 +102,7 @@ function closeFinished(before: PassDto | null, after: PassDto | null): PassDto |
  * while no pass is open, else the pass's header over its workspace.
  */
 export function WorkbenchScreen(props: WorkbenchScreenProps) {
-  const { project, live, start, tasks, inbox, search, goalPages, now } = props;
+  const { project, live, start, tasks, inbox, search, goalPages, now, setupCount } = props;
   const { onSelect, renderWorkspace, actions } = props;
   const [dialog, setDialog] = useState<Dialog>(null);
   // The live pass last read, and the one whose close finished while it was on screen, which the picker
@@ -126,27 +126,11 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
       <Loader size="sm" role="status" aria-label="Loading the pages" />
     </Group>
   );
-  if (!hasPages)
-    return (
-      <Stack gap="md">
-        <Title order={2}>Workbench</Title>
-        <NoPageAreas
-          onPropose={() => {
-            setDialog('propose');
-          }}
-        />
-        {dialog === 'propose' ? (
-          <ProposePagesModal
-            project={project}
-            opened
-            onClose={closeDialog}
-            propose={actions.propose}
-          />
-        ) : null}
-      </Stack>
-    );
+  if (!hasPages) return <WorkbenchSetup project={project} />;
   if (live === undefined) return loading;
   // A pass that has closed and not settled is one line above the picker: the next pass may stack on it.
+  if ((live === null || !passHoldsTasks(live.pass.state)) && dialog === 'setup')
+    return <WorkbenchSetup project={project} onBack={closeDialog} onApplied={closeDialog} />;
   if (live === null || !passHoldsTasks(live.pass.state))
     return (
       <Stack gap="md">
@@ -179,6 +163,16 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
             }}
             starting={opening.isPending}
             error={opening.error?.message ?? null}
+            setUp={
+              setupCount === 0
+                ? null
+                : {
+                    count: setupCount,
+                    onOpen: () => {
+                      setDialog('setup');
+                    },
+                  }
+            }
           />
         )}
       </Stack>
@@ -256,7 +250,7 @@ function ProjectWorkbench({ project }: { readonly project: ProjectViewDto }) {
   const goalPages = useGoalPassPages(search.goal ?? null).data?.pages ?? [];
   const now = useNow(CLOCK_TICK_MS);
   const opening = useOpenPass(project.id);
-  const proposing = useProposePageAreas(project.id);
+  const setup = useWorkbenchSetup(project.id, hasPages);
   const adding = useAddPages();
   const renaming = useRenamePass();
   const abandoning = useAbandonPass();
@@ -282,7 +276,6 @@ function ProjectWorkbench({ project }: { readonly project: ProjectViewDto }) {
   }, [pin, navigate]);
   const actions: WorkbenchActions = {
     start: (request) => opening.mutateAsync(request),
-    propose: () => proposing.mutateAsync(),
     addPages: (request) => adding.mutateAsync({ passId: passId(), request }),
     rename: (body) => renaming.mutateAsync({ passId: passId(), body }),
     abandon: () => abandoning.mutateAsync(passId()),
@@ -314,6 +307,7 @@ function ProjectWorkbench({ project }: { readonly project: ProjectViewDto }) {
       inbox={inbox}
       search={search}
       goalPages={goalPages}
+      setupCount={setup.data === undefined ? 0 : suggestionCount(setup.data)}
       now={now}
       onSelect={(task) => {
         void navigate({ to: '/workbench', search: { task } });

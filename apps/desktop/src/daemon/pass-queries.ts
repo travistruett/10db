@@ -1,6 +1,5 @@
 import {
   GoalPassPagesDto,
-  PagesProposalDto,
   PASS_RETRY_TURN_CHOICE,
   PassAbandonedDto,
   PassDto,
@@ -13,6 +12,7 @@ import {
   TakeOutResultDto,
   TaskMessageDto,
   TurnActivityDto,
+  WorkbenchSetupDto,
   type DaemonEvent,
   type GoalId,
   type InboxItemId,
@@ -312,15 +312,31 @@ export function useTakeOutPage() {
   });
 }
 
-/** Propose Page Areas: the pages 10db finds in the project, for the builder to keep or leave out. */
-export function useProposePageAreas(projectId: ProjectId) {
+/** `POST /projects/:projectId/workbench-setup`: read again once Apply saves the project. */
+export const setupKeys = {
+  of: (projectId: ProjectId) => ['workbench-setup', projectId] as const,
+};
+
+/**
+ * The Workbench setup: the project's areas rebuilt and the settings 10db suggests. Leaving the screen
+ * aborts the request, which stops the daemon's reading; a failure is shown, not retried.
+ */
+export function useWorkbenchSetup(projectId: ProjectId, enabled = true) {
   const { client } = useDaemon();
-  return useMutation({
-    mutationFn: async () =>
+  return useQuery({
+    queryKey: setupKeys.of(projectId),
+    queryFn: async ({ signal }) =>
       readJson(
-        await client.projects[':projectId']['propose-page-areas'].$post({ param: { projectId } }),
-        PagesProposalDto,
+        await client.projects[':projectId']['workbench-setup'].$post(
+          { param: { projectId } },
+          { init: { signal } },
+        ),
+        WorkbenchSetupDto,
       ),
+    enabled,
+    retry: false,
+    refetchOnWindowFocus: false,
+    staleTime: 60_000,
   });
 }
 

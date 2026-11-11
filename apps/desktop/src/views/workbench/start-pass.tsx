@@ -6,7 +6,7 @@ import type {
   TaskDto,
   TaskId,
 } from '@10db/contracts';
-import { Button, Group, Stack, Text, Textarea } from '@mantine/core';
+import { Anchor, Button, Group, Stack, Text, Textarea } from '@mantine/core';
 import { useState } from 'react';
 import { PagePicker } from './page-picker';
 import { StartLines } from './start-lines';
@@ -27,6 +27,8 @@ export interface StartPassProps {
   readonly starting: boolean;
   /** Why the daemon refused the last Start Pass; said beside the button. */
   readonly error: string | null;
+  /** The setup's suggestions still to look at, and how to open them; null when there are none. */
+  readonly setUp?: { readonly count: number; readonly onOpen: () => void } | null;
 }
 
 /**
@@ -34,7 +36,7 @@ export interface StartPassProps {
  * is bothering the builder, and Start Pass.
  */
 export function StartPass(props: StartPassProps) {
-  const { project, start, tasks, initial, goalId, now, onStart, starting, error } = props;
+  const { project, start, tasks, initial, goalId, now, onStart, starting, error, setUp } = props;
   const joinable = joinableTasks(tasks, project.areas);
   const [ticks, setTicks] = useState<PickTicks>(() => ({
     pages: initial.pages.filter((page) => start.pages.some((p) => p.area === page)),
@@ -45,7 +47,14 @@ export function StartPass(props: StartPassProps) {
   const refusal = error ?? start.refusal?.message ?? null;
   return (
     <Stack gap="lg" maw={640}>
-      <Text>Work through pages with the agents, live.</Text>
+      <Group justify="space-between" gap="sm">
+        <Text>Work through pages with the agents, live.</Text>
+        {setUp == null ? null : (
+          <Anchor component="button" type="button" size="sm" onClick={setUp.onOpen}>
+            {`Set Up (${String(setUp.count)})`}
+          </Anchor>
+        )}
+      </Group>
       <PagePicker
         pages={start.pages}
         tasks={joinable}

@@ -10,12 +10,12 @@ import { act, fireEvent, screen, waitFor, within } from '@testing-library/react'
 import { delay, http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderApp, server } from '../../test/daemon';
-import { projectViewDto, taskDto } from '../../test/fixtures';
+import { projectDto, projectViewDto, taskDto } from '../../test/fixtures';
 import {
   goalPassPagesDto,
   askItem,
   pagesByStatus,
-  pagesProposalDto,
+  workbenchSetupDto,
   passDto,
   passHandlers,
   passOpenedDto,
@@ -341,21 +341,27 @@ describe('WorkbenchView', () => {
     expect(await screen.findByText(/The database is locked/)).toBeTruthy();
   });
 
-  it('with no page area, proposes some through the daemon', async () => {
-    let proposed = 0;
+  it('with no page area, is the setup, and Apply saves the rebuilt areas in one patch', async () => {
+    let asked = 0;
+    const patches: unknown[] = [];
     const bare = projectViewDto({ areas: [{ name: 'src', globs: ['src/**'] }] });
     server.use(
-      http.post(daemonUrl('/projects/:projectId/propose-page-areas'), () => {
-        proposed += 1;
-        return HttpResponse.json(pagesProposalDto());
+      http.post(daemonUrl('/projects/:projectId/workbench-setup'), () => {
+        asked += 1;
+        return HttpResponse.json(workbenchSetupDto());
+      }),
+      http.patch(daemonUrl('/projects/:projectId'), async ({ request }) => {
+        patches.push(await request.json());
+        return HttpResponse.json(projectDto());
       }),
       http.get(daemonUrl('/projects'), () => HttpResponse.json([bare])),
       ...baseHandlers(),
     );
     renderApp('/workbench');
-    fireEvent.click(await screen.findByRole('button', { name: 'Propose Page Areas' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Apply (1)' }));
     await waitFor(() => {
-      expect(proposed).toBe(1);
+      expect(patches).toEqual([{ areas: workbenchSetupDto().areas.proposed }]);
     });
+    expect(asked).toBe(1);
   });
 });

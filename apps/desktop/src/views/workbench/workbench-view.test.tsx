@@ -7,7 +7,7 @@ import { projectViewDto } from '../../test/fixtures';
 import {
   PASS_NOW,
   pagesByStatus,
-  pagesProposalDto,
+  passHandlers,
   passNotice,
   passStartDto,
   passViewDto,
@@ -55,12 +55,12 @@ function screenProps(overrides: Partial<WorkbenchScreenProps> = {}) {
     inbox: [],
     search: {},
     goalPages: [],
+    setupCount: 0,
     now: Date.parse(PASS_NOW),
     onSelect,
     renderWorkspace: (workspace) => <Workspace {...workspace} />,
     actions: {
       start: vi.fn(() => Promise.resolve()),
-      propose: vi.fn(() => Promise.resolve(pagesProposalDto())),
       addPages: vi.fn(() => Promise.resolve()),
       rename: vi.fn(() => Promise.resolve()),
       abandon: vi.fn(() => Promise.resolve()),
@@ -78,11 +78,33 @@ async function draw(overrides: Partial<WorkbenchScreenProps> = {}) {
 }
 
 describe('WorkbenchScreen', () => {
-  it('shows why a pass needs a page area when the project has none', async () => {
-    await draw({ project: projectViewDto({ areas: [{ name: 'src', globs: ['src/**'] }] }) });
-    expect(await screen.findByRole('heading', { name: 'Workbench' })).toBeTruthy();
-    expect(screen.getByText(/this project has no page area yet/)).toBeTruthy();
+  it('is the setup when the project has no page area', async () => {
+    server.use(...passHandlers());
+    await draw({
+      project: projectViewDto({ name: 'ampsio', areas: [{ name: 'src', globs: ['src/**'] }] }),
+    });
+    expect(
+      await screen.findByRole('heading', { name: 'Set up ampsio for the Workbench' }),
+    ).toBeTruthy();
+    expect(await screen.findByRole('checkbox', { name: /settings/ })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /^Start Pass/ })).toBeNull();
+  });
+
+  it('offers Set Up (n) above the picker while suggestions are left, and Back to Pages returns', async () => {
+    server.use(...passHandlers());
+    await draw({ setupCount: 2 });
+    fireEvent.click(await screen.findByRole('button', { name: 'Set Up (2)' }));
+    expect(
+      await screen.findByRole('heading', { name: 'Set up ampsio for the Workbench' }),
+    ).toBeTruthy();
+    fireEvent.click(await screen.findByRole('button', { name: 'Back to Pages' }));
+    expect(await screen.findByText('Work through pages with the agents, live.')).toBeTruthy();
+  });
+
+  it('offers no Set Up when nothing is left to suggest', async () => {
+    await draw();
+    expect(await screen.findByText('Work through pages with the agents, live.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^Set Up/ })).toBeNull();
   });
 
   it('is the picker while no pass is open', async () => {
@@ -112,7 +134,6 @@ describe('WorkbenchScreen', () => {
     await draw({
       actions: {
         start,
-        propose: () => Promise.resolve(pagesProposalDto()),
         addPages: () => Promise.resolve(),
         rename: () => Promise.resolve(),
         abandon: () => Promise.resolve(),

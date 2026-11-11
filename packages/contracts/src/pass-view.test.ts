@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   GoalPassPagesDto,
   mintId,
-  PagesProposalDto,
   PassJoinRequest,
   PassOpenRequest,
   PassRename,
@@ -83,20 +82,7 @@ describe("the Workbench's start, join and rename", () => {
     expect(PassRename.safeParse({ name: 'two\nlines' }).success).toBe(false);
   });
 
-  it('reads the proposed page areas, with the ones skipped and why, and the pages a goal touched', () => {
-    const proposal = {
-      pages: [
-        {
-          name: 'settings',
-          globs: ['src/settings/**'],
-          role: 'page',
-          route: '/settings',
-          reason: 'The settings screen',
-        },
-      ],
-      skipped: [{ name: 'people', reason: 'An area of that name already exists' }],
-    };
-    expect(PagesProposalDto.parse(proposal)).toEqual(proposal);
+  it('reads the pages a goal touched', () => {
     const pages = { pages: ['settings'], fromTasks: [mintId('Task')] };
     expect(GoalPassPagesDto.parse(pages)).toEqual(pages);
   });
