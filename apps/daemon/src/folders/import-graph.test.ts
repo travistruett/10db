@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { importSpecifiers, NO_ALIASES, readPathAliases, resolveImport } from './import-graph';
+import {
+  importBindings,
+  importSpecifiers,
+  NO_ALIASES,
+  readPathAliases,
+  resolveImport,
+} from './import-graph';
 
 describe('importSpecifiers', () => {
   it.each([
@@ -31,8 +37,37 @@ describe('importSpecifiers', () => {
       text: `export const x = 1;\nexport function f() {}\nconst y = "from './nowhere'";`,
       found: [],
     },
+    {
+      name: 'imports in comments and strings, and a method named import',
+      text: `// import a from './a'\n/* import('./b') */\nconst s = "import c from './c'";\nloader.import('./d');`,
+      found: [],
+    },
   ])('$name', ({ text, found }) => {
     expect(importSpecifiers(text)).toEqual(found);
+  });
+
+  it.each([
+    { name: 'an import with no from', text: `import ${'a '.repeat(100_000)}` },
+    { name: 'an export with no from', text: `export { ${'a, '.repeat(70_000)}` },
+    { name: 'a run of import words', text: 'import '.repeat(30_000) },
+  ])('reads $name of some 200 KB in linear time', ({ text }) => {
+    const started = performance.now();
+    expect(importSpecifiers(text)).toEqual([]);
+    expect(performance.now() - started).toBeLessThan(100);
+  });
+});
+
+describe('importBindings', () => {
+  it('names each local an import binds, with its specifier', () => {
+    expect(
+      importBindings(
+        `import Board, { InboxView as Inbox, type T, people } from './views';\nimport * as all from './all';\nimport './side';`,
+      ),
+    ).toEqual([
+      { specifier: './views', locals: ['Board', 'Inbox', 'T', 'people'] },
+      { specifier: './all', locals: ['all'] },
+      { specifier: './side', locals: [] },
+    ]);
   });
 });
 

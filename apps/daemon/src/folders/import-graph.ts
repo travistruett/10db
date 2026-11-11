@@ -137,19 +137,166 @@ export function readPathAliases(config: { path: string; text: string } | null): 
   return { base, paths };
 }
 
-// Static imports and re-exports (`import x from`, `import {…} from`, `export * from`, `import '…'`),
-// and `import('…')` or `require('…')` with a literal.
-const STATIC_IMPORT =
-  /(?:^|[^\w$.])(?:import|export)\s+(?:type\s+)?(?:[\w$*{}\s,]+?\s+from\s*)?(['"])([^'"\n]+)\1/gu;
-const CALL_IMPORT = /(?:^|[^\w$.])(?:import|require)\s*\(\s*(['"])([^'"\n]+)\1\s*\)/gu;
+/** What one import statement, re-export, `import('…')` or `require('…')` names. */
+export interface ImportBinding {
+  readonly specifier: string;
+  /** The local names it binds (`import A, { b as c }` binds `A` and `c`). */
+  readonly locals: readonly string[];
+}
+
+const isIdStart = (ch: string | undefined): boolean => ch !== undefined && /[A-Za-z_$]/u.test(ch);
+const isIdPart = (ch: string | undefined): boolean => ch !== undefined && /[\w$]/u.test(ch);
+const isSpace = (ch: string | undefined): boolean => ch !== undefined && /\s/u.test(ch);
+const isQuote = (ch: string | undefined): boolean => ch === "'" || ch === '"' || ch === '`';
+
+/**
+ * A linear scanner over a source file's text for what it imports. Strings, template literals and
+ * comments are stepped over whole; each character is read a bounded number of times, so no text a
+ * repository holds can make it slow.
+ */
+class ImportScanner {
+  readonly text: string;
+  at = 0;
+  constructor(text: string) {
+    this.text = text;
+  }
+
+  /** Steps past whitespace and comments. */
+  skipSpace(): void {
+    const { text } = this;
+    for (;;) {
+      if (isSpace(text[this.at])) this.at += 1;
+      else if (text[this.at] === '/' && text[this.at + 1] === '/') {
+        const end = text.indexOf('\n', this.at);
+        this.at = end === -1 ? text.length : end;
+      } else if (text[this.at] === '/' && text[this.at + 1] === '*') {
+        const end = text.indexOf('*/', this.at + 2);
+        this.at = end === -1 ? text.length : end + 2;
+      } else return;
+    }
+  }
+
+  /** Steps past the string or template literal that opens here. */
+  skipString(): void {
+    const quote = this.text[this.at];
+    this.at += 1;
+    while (this.at < this.text.length && this.text[this.at] !== quote)
+      this.at += this.text[this.at] === '\\' ? 2 : 1;
+    this.at += 1;
+  }
+
+  /** The one-line `'…'` or `"…"` literal that opens here, read past; null (reading nothing) otherwise. */
+  readSpecifier(): string | null {
+    const quote = this.text[this.at];
+    if (quote !== "'" && quote !== '"') return null;
+    let end = this.at + 1;
+    while (end < this.text.length && this.text[end] !== quote && this.text[end] !== '\n') end += 1;
+    if (this.text[end] !== quote || end === this.at + 1) return null;
+    const value = this.text.slice(this.at + 1, end);
+    this.at = end + 1;
+    return value;
+  }
+
+  readWord(): string {
+    const start = this.at;
+    while (isIdPart(this.text[this.at])) this.at += 1;
+    return this.text.slice(start, this.at);
+  }
+
+  /** `( '…' )` after `import` or `require`. */
+  call(): ImportBinding | null {
+    this.at += 1;
+    this.skipSpace();
+    const specifier = this.readSpecifier();
+    if (specifier === null) return null;
+    this.skipSpace();
+    if (this.text[this.at] !== ')') return null;
+    this.at += 1;
+    return { specifier, locals: [] };
+  }
+
+  /** The clause of `import …` or `export …` up to `from '…'`; null at anything else. */
+  clause(): ImportBinding | null {
+    const locals: string[] = [];
+    let braces = false;
+    let renaming = false;
+    let words = 0;
+    for (;;) {
+      this.skipSpace();
+      const ch = this.text[this.at];
+      if (ch === '{' || ch === '}' || ch === ',' || ch === '*') {
+        braces = ch === '{' ? true : ch === '}' ? false : braces;
+        this.at += 1;
+        continue;
+      }
+      if (!isIdStart(ch)) return null;
+      const word = this.readWord();
+      words += 1;
+      if (word === 'from' && !braces && !renaming) {
+        this.skipSpace();
+        const specifier = this.readSpecifier();
+        return specifier === null ? null : { specifier, locals };
+      }
+      if (word === 'as') renaming = true;
+      else if (word === 'type' && (words === 1 || braces)) continue;
+      else if (renaming) {
+        locals.pop();
+        locals.push(word);
+        renaming = false;
+      } else locals.push(word);
+    }
+  }
+
+  /** What the `import`, `export` or `require` just read starts, if it imports. */
+  statement(keyword: string): ImportBinding | null {
+    this.skipSpace();
+    const ch = this.text[this.at];
+    if (keyword === 'require') return ch === '(' ? this.call() : null;
+    if (keyword === 'import') {
+      if (ch === '(') return this.call();
+      if (ch === "'" || ch === '"') {
+        const specifier = this.readSpecifier();
+        return specifier === null ? null : { specifier, locals: [] };
+      }
+    }
+    return this.clause();
+  }
+
+  scan(): ImportBinding[] {
+    const found: ImportBinding[] = [];
+    const { text } = this;
+    let member = false;
+    while (this.at < text.length) {
+      const ch = text[this.at];
+      if (isQuote(ch)) {
+        this.skipString();
+        member = false;
+      } else if (ch === '/' && (text[this.at + 1] === '/' || text[this.at + 1] === '*')) {
+        this.skipSpace();
+      } else if (isIdStart(ch)) {
+        const word = this.readWord();
+        if (!member && (word === 'import' || word === 'export' || word === 'require')) {
+          const binding = this.statement(word);
+          if (binding !== null) found.push(binding);
+        }
+        member = false;
+      } else {
+        if (!isSpace(ch)) member = ch === '.';
+        this.at += 1;
+      }
+    }
+    return found;
+  }
+}
+
+/** Each import, re-export, `import('…')` and `require('…')` with a literal, in the order they appear. */
+export function importBindings(text: string): ImportBinding[] {
+  return new ImportScanner(text).scan();
+}
 
 /** The specifiers a source file imports, in the order they appear. */
 export function importSpecifiers(text: string): string[] {
-  const found: { at: number; specifier: string }[] = [];
-  for (const pattern of [STATIC_IMPORT, CALL_IMPORT])
-    for (const match of text.matchAll(pattern))
-      if (match[2] !== undefined) found.push({ at: match.index, specifier: match[2] });
-  return found.sort((a, b) => a.at - b.at).map((f) => f.specifier);
+  return importBindings(text).map((b) => b.specifier);
 }
 
 const ESM_NAMES: Readonly<Record<string, readonly string[]>> = {
