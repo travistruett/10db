@@ -1202,6 +1202,73 @@ describe('the turns', () => {
     });
   });
 
+  it('answers an interrupt with the messages 10db still holds, and starts a turn with them once the interrupted turn ended', async () => {
+    const handed = 'c0ffee00-0000-4000-8000-00000000000a';
+    const held = 'c0ffee00-0000-4000-8000-00000000000b';
+    let answerSteer: () => void = () => undefined;
+    const running = await inTurn({
+      'turn/steer': () =>
+        new Promise((resolve) => {
+          answerSteer = () => {
+            resolve({ turnId: 'turn-1' });
+          };
+        }),
+    });
+    const { handle, server } = running;
+    handle.send('first', [], handed);
+    await vi.waitFor(() => {
+      expect(methods(server)).toContain('turn/steer');
+    });
+    handle.send('second', [], held);
+    const receipt = handle.interrupt();
+    await vi.waitFor(() => {
+      expect(methods(server)).toContain('turn/interrupt');
+    });
+    // The handed message's steer is answered while the turn is stopping: the held one must not be
+    // steered into the turn the interrupt ends, which would drop it.
+    answerSteer();
+    await settled(running);
+    server.notify('turn/completed', {
+      threadId: THREAD,
+      turn: { id: 'turn-1', status: 'interrupted' },
+    });
+    expect(await receipt).toEqual({ stillQueued: [held] });
+    await vi.waitFor(() => {
+      expect(methods(server).filter((m) => m === 'turn/start')).toHaveLength(2);
+    });
+    expect(methods(server).filter((m) => m === 'turn/steer')).toHaveLength(1);
+    expect(server.sent().filter((r) => r.method === 'turn/start')[1]?.params).toMatchObject({
+      clientUserMessageId: held,
+    });
+  });
+
+  it('answers an interrupt between turns with nothing still queued, interrupting nothing', async () => {
+    const running = await inTurn();
+    running.server.notify('turn/completed', {
+      threadId: THREAD,
+      turn: { id: 'turn-1', status: 'completed' },
+    });
+    await settled(running);
+    expect(await running.handle.interrupt()).toEqual({ stillQueued: [] });
+    expect(methods(running.server)).not.toContain('turn/interrupt');
+  });
+
+  it('ends the wait for an interrupted turn after the grace when Codex never reports it ended', async () => {
+    const running = await inTurn({}, { stopGraceMs: 2_000 });
+    let answered = false;
+    const receipt = running.handle.interrupt().then((r) => {
+      answered = true;
+      return r;
+    });
+    await vi.waitFor(() => {
+      expect(methods(running.server)).toContain('turn/interrupt');
+    });
+    await settled(running);
+    expect(answered).toBe(false);
+    running.clock.advance(2_000);
+    expect(await receipt).toEqual({ stillQueued: [] });
+  });
+
   it('drops a message sent during a start that fails, without throwing or hanging', async () => {
     const { handle, server } = startWith({ 'account/read': { account: null } });
     handle.send('too early');

@@ -217,6 +217,15 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
   const state = createTurnState();
   const graceMs = deps.stopGraceMs ?? STOP_GRACE_MS;
   let sends: Promise<void> = Promise.resolve();
+  /**
+   * Messages sent and not yet handed to Codex: 10db's own queue. Codex drops a steered message that
+   * an interrupted turn had not taken yet, so these are what an interrupt leaves still to run.
+   */
+  const waiting = new Set<Outgoing>();
+  /** The interrupt in flight, if any: no message is steered into the turn it stops. */
+  let interrupting: Promise<void> = Promise.resolve();
+  /** What each turn an interrupt waits on resolves when its `turn/completed` is read. */
+  const turnEnds = new Map<string, () => void>();
   let guardSocket: GuardSocket | null = null;
   let stderrTail = '';
   /** What the process runs with beyond the spec's env; set once the home is known. */
@@ -551,6 +560,8 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
       }
       if (n.method === 'turn/completed') {
         turnsCompleted += 1;
+        const completed = TurnCompleted.safeParse(n.params);
+        if (completed.success) turnEnds.get(completed.data.turn.id)?.();
         const end = endOfTurn(n.params);
         if (end !== null) {
           void endOnTurn(end);
@@ -567,8 +578,14 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
     }
   }
 
-  /** Steers the active turn, or starts one between turns. */
+  /** Steers the active turn, or starts one between turns; never the turn an interrupt is stopping. */
   const deliver = async (message: Outgoing): Promise<void> => {
+    // An interrupt that starts while this one is awaited is waited on too: its receipt names the message.
+    for (let awaited = interrupting; ; awaited = interrupting) {
+      await awaited;
+      if (awaited === interrupting) break;
+    }
+    waiting.delete(message);
     if (done || closing || threadId === null) return;
     try {
       if (state.turnId !== null) {
@@ -616,6 +633,30 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
     } finally {
       timer.cancel();
       interrupt.catch(() => undefined);
+    }
+  };
+
+  /**
+   * Interrupts the active turn and waits, up to `graceMs`, for Codex to report it ended, so a message
+   * sent after it starts a turn of its own.
+   */
+  const stopTurn = async (thread: string, turnId: string): Promise<void> => {
+    const ended = new Promise<void>((resolve) => {
+      turnEnds.set(turnId, resolve);
+    });
+    let timer: { cancel(): void } = { cancel: () => undefined };
+    const grace = new Promise<void>((resolve) => {
+      timer = clock.setTimeout(resolve, graceMs);
+    });
+    try {
+      await Promise.race([
+        Promise.all([interruptTurn(thread, turnId), ended]),
+        grace,
+        over.catch(() => undefined),
+      ]);
+    } finally {
+      timer.cancel();
+      turnEnds.delete(turnId);
     }
   };
 
@@ -765,14 +806,20 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
   return {
     events,
     send: (text, images = [], uuid) => {
+      const message: Outgoing = { text, images, uuid };
+      waiting.add(message);
       // One at a time, so messages reach Codex in the order they were sent.
-      sends = sends.then(() => deliver({ text, images, uuid }));
+      sends = sends.then(() => deliver(message));
     },
-    // Codex answers an interrupt with no receipt of what is still queued.
+    // The receipt names what 10db still holds: each runs once the interrupted turn has ended.
     interrupt: async () => {
+      const stillQueued = [...waiting].flatMap((m) => (m.uuid === undefined ? [] : [m.uuid]));
       const turnId = state.turnId;
-      if (!done && threadId !== null && turnId !== null) await interruptTurn(threadId, turnId);
-      return null;
+      if (!done && threadId !== null && turnId !== null) {
+        interrupting = stopTurn(threadId, turnId);
+        await interrupting;
+      }
+      return { stillQueued };
     },
     stop: async () => {
       if (done) return;

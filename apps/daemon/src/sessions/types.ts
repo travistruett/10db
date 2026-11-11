@@ -264,7 +264,8 @@ export type SessionEvent =
 
 /**
  * What an interrupt reports: the uuids of the messages still queued, which will run unless cancelled,
- * or null when the agent gives no receipt (a Claude Code without `interrupt_receipt_v1`, or Codex).
+ * or null when the agent gives no receipt (a Claude Code without `interrupt_receipt_v1`). Codex's
+ * queue is 10db's own: the messages its session has not yet handed over.
  */
 export type InterruptReceipt = { readonly stillQueued: readonly string[] } | null;
 
