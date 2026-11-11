@@ -370,6 +370,18 @@ describe('history queries', () => {
     expect(await git.countCommits(repo.path, base, tip)).toBe(3);
     expect(await git.countCommits(repo.path, tip, base)).toBe(0);
   });
+
+  it("lists a commit's tracked files, not the checkout's, nor a link's target", async () => {
+    const first = rawGit('rev-parse', 'HEAD');
+    mkdirSync(join(repo.path, 'dir'));
+    write('dir/a.txt', 'a');
+    symlinkSync('dir', join(repo.path, 'link'));
+    rawGit('add', 'dir/a.txt', 'link');
+    rawGit('commit', '-q', '-m', 'files');
+    write('untracked.txt', 'u');
+    expect(await git.filesAt(repo.path, 'HEAD')).toEqual(['README.md', 'dir/a.txt', 'link']);
+    expect(await git.filesAt(repo.path, first)).toEqual(['README.md']);
+  });
 });
 
 describe('folderAt', () => {
