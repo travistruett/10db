@@ -1086,10 +1086,12 @@ export interface SurveyTexts {
 }
 
 /** Said when `surveyTexts` meets a partial clone. */
-export const PARTIAL_CLONE_REFUSAL = 'a partial clone: page code is not read';
+const PARTIAL_CLONE_REFUSAL = 'a partial clone: page code is not read';
+/** Said when the files `surveyTexts` is asked for hold more than it may read. */
+export const OVER_BUDGET_REFUSAL =
+  'the source is over what one read may take: page code is not read';
 /** Said when `surveyTexts` can't read the repository's config to tell. */
-export const UNREAD_CONFIG_REFUSAL =
-  "the repository's config could not be read: page code is not read";
+const UNREAD_CONFIG_REFUSAL = "the repository's config could not be read: page code is not read";
 
 export interface GitOptions {
   /** Called with every refusal, so the builder hears of it whoever called. */
@@ -4699,7 +4701,12 @@ export function createGit(opts: GitOptions = {}): Git {
       if (wanted.size === 0) return none(null);
       // A missing blob is never fetched: the fetch would run the remote's programs. Should the config
       // change after the check below, no transport, ssh command or credential helper is reachable.
-      const noFetch = { env: { GIT_NO_LAZY_FETCH: '1' }, config: NO_TRANSPORT };
+      // GIT_ALLOW_PROTOCOL overrides every protocol.* setting, the repository's own among them, and
+      // no protocol is named `none`.
+      const noFetch = {
+        env: { GIT_NO_LAZY_FETCH: '1', GIT_ALLOW_PROTOCOL: 'none' },
+        config: NO_TRANSPORT,
+      };
       try {
         const at = observed(
           realpathSync((await git(observed(path), ['rev-parse', '--show-toplevel'])).trim()),
@@ -4709,7 +4716,8 @@ export function createGit(opts: GitOptions = {}): Git {
         let partial: string;
         let promisors: string;
         try {
-          partial = await git(at, ['config', '--get', 'extensions.partialClone'], {
+          // `--get-regexp` prints the key whatever its value: an empty one still names a partial clone.
+          partial = await git(at, ['config', '--get-regexp', '^extensions\\.partialclone$'], {
             answerExitCodes: [1],
           });
           promisors = await git(
@@ -4720,8 +4728,7 @@ export function createGit(opts: GitOptions = {}): Git {
         } catch {
           return none(UNREAD_CONFIG_REFUSAL);
         }
-        if (partial.trim() !== '' || /\strue$/mu.test(promisors))
-          return none(PARTIAL_CLONE_REFUSAL);
+        if (partial !== '' || /\strue$/mu.test(promisors)) return none(PARTIAL_CLONE_REFUSAL);
         const head = await git(at, ['rev-parse', '-q', '--verify', 'HEAD^{commit}'], {
           answerExitCodes: [1],
         });
@@ -4744,10 +4751,7 @@ export function createGit(opts: GitOptions = {}): Git {
             blobs.push({ path: file, oid, bytes });
         }
         const total = blobs.reduce((sum, b) => sum + b.bytes, 0);
-        if (total > maxTotalBytes)
-          return none(
-            `the source is over ${maxTotalBytes.toLocaleString('en-US')} bytes: page code is not read`,
-          );
+        if (total > maxTotalBytes) return none(OVER_BUDGET_REFUSAL);
         const texts = new Map<string, string>();
         // `cat-file --batch` prints `<oid> blob <size>\n<bytes>\n` per line it is given, in batches
         // that keep each call's output well under what one git call may print.

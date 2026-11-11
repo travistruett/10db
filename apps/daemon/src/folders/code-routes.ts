@@ -35,7 +35,7 @@ const under = (path: string, folder: string): boolean =>
   folder === '' || path.startsWith(`${folder}/`);
 
 /** At most this many router files are read per app, the shallowest first. */
-export const MAX_ROUTER_FILES = 20;
+const MAX_ROUTER_FILES = 20;
 
 /** The files under the unit's source folder (`src/` when it has one) that may define its routes. */
 export function routerFiles(files: readonly string[], unit: string): string[] {

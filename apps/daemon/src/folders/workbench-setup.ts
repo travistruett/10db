@@ -6,7 +6,7 @@ import {
   type ProjectDto,
   type WorkbenchSetupAreas,
 } from '@10db/contracts';
-import type { Git } from '../git';
+import { OVER_BUDGET_REFUSAL, type Git } from '../git';
 import {
   AreaCandidateKind,
   deriveAreaCandidates,
@@ -36,7 +36,9 @@ interface GroupPage {
 /** How many of the latest commits are read for folders that change together. */
 const HISTORY_COMMITS = 400;
 /** What one setup may read of a repository's files, all reads together. */
-export const SETUP_READ_BYTES = 32 * 1024 * 1024;
+const SETUP_READ_BYTES = 32 * 1024 * 1024;
+/** What the setup says when a read would pass its budget. */
+const OVER_BUDGET = 'the source is over 32 MB: page code is not read';
 /** A router or config file larger than this is not read. */
 const ROUTER_MAX_BYTES = 512 * 1024;
 
@@ -215,8 +217,10 @@ export async function proposeSetupAreas(
       ...(signal === undefined ? {} : { signal }),
     });
     budget -= found.bytes;
-    if (found.refused !== null) refusals.add(found.refused);
-    return found;
+    if (found.refused === null) return found;
+    const refused = found.refused === OVER_BUDGET_REFUSAL ? OVER_BUDGET : found.refused;
+    refusals.add(refused);
+    return { ...found, refused };
   };
   const code = await codePages(read, files, fileUnits);
   signal?.throwIfAborted();

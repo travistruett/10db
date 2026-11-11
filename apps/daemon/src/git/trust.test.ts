@@ -1689,8 +1689,69 @@ describe('survey', () => {
     const uploadPack = marker('upload-pack');
     gitIn(clone, 'config', 'core.sshCommand', ssh.path);
     gitIn(clone, 'config', 'remote.origin.uploadpack', uploadPack.path);
+    // A repository-level allow beats the daemon's `-c protocol.allow=never`.
+    gitIn(clone, 'config', 'protocol.file.allow', 'always');
     return { clone, ssh, uploadPack };
   }
+
+  /**
+   * A git that behaves as one before 2.45 (it drops GIT_NO_LAZY_FETCH) and whose config answers as
+   * if the clone were whole: the read goes ahead, so only the object reads' own guards stop a fetch.
+   */
+  function oldGitBlindToPartial() {
+    return gitWrapper(
+      'for a in "$@"; do [ "$a" = config ] && exit 1; done\nunset GIT_NO_LAZY_FETCH\nexec "$GIT" "$@"',
+    );
+  }
+
+  it('fetches nothing of a partial clone even past the config check, on a git before 2.45', async () => {
+    const { clone, ssh, uploadPack } = partialClone();
+    const wrapper = oldGitBlindToPartial();
+    try {
+      const git = createGit({ bin: join(wrapper.path.split(':')[0] ?? '', 'git') });
+      const read = await git.surveyTexts(clone, ['src/a.ts'], {
+        maxBytes: 1000,
+        maxTotalBytes: 1000,
+      });
+      expect(read.texts.size).toBe(0);
+      expect(ssh.ran()).toBe(false);
+      expect(uploadPack.ran()).toBe(false);
+    } finally {
+      wrapper.cleanup();
+    }
+  });
+
+  it('takes an empty extensions.partialClone for a partial clone', async () => {
+    const { clone, ssh, uploadPack } = partialClone();
+    gitIn(clone, 'config', 'extensions.partialClone', '');
+    gitIn(clone, 'config', '--unset', 'remote.origin.promisor');
+    const wrapper = gitWrapper('unset GIT_NO_LAZY_FETCH\nexec "$GIT" "$@"');
+    try {
+      const git = createGit({ bin: join(wrapper.path.split(':')[0] ?? '', 'git') });
+      const read = await git.surveyTexts(clone, ['src/a.ts'], {
+        maxBytes: 1000,
+        maxTotalBytes: 1000,
+      });
+      expect(read.refused).toBe('a partial clone: page code is not read');
+      expect(ssh.ran()).toBe(false);
+      expect(uploadPack.ran()).toBe(false);
+    } finally {
+      wrapper.cleanup();
+    }
+  });
+
+  it('reads nothing when it cannot read the config that says whether the clone is partial', async () => {
+    rawGit('config', 'remote.origin.promisor', 'maybe');
+    const read = await createGit().surveyTexts(repo.path, ['README.md'], {
+      maxBytes: 1000,
+      maxTotalBytes: 1000,
+    });
+    expect(read).toEqual({
+      texts: new Map(),
+      bytes: 0,
+      refused: "the repository's config could not be read: page code is not read",
+    });
+  });
 
   it('fetches nothing of a partial clone, so no program its config names runs', async () => {
     const { clone, ssh, uploadPack } = partialClone();
@@ -1724,7 +1785,7 @@ describe('survey', () => {
     expect(read).toEqual({
       texts: new Map(),
       bytes: 0,
-      refused: 'the source is over 1,000 bytes: page code is not read',
+      refused: 'the source is over what one read may take: page code is not read',
     });
   });
 
