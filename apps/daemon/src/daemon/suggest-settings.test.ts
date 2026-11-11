@@ -95,17 +95,32 @@ function deps(answer: string | null, answers: readonly string[] = ['http://local
   };
 }
 
+/** A repository with an origin holding `files` on main, pushed. */
+function pushedRepo(files: Record<string, string>): string {
+  const pair = createTempRepoWithOrigin();
+  cleanups.push(() => {
+    pair.cleanup();
+  });
+  commit(pair.repo.path, files);
+  gitIn(pair.repo.path, 'push', '-q', 'origin', 'main');
+  return realpathSync(pair.repo.path);
+}
+
+const CHECK_ROW = {
+  field: SettingField.ChangedCheckCommand,
+  value: 'pnpm --dir web run typecheck && pnpm --dir web run lint',
+  source: 'from web/package.json: its typecheck and lint scripts',
+  note: "Reads the files on disk, so it sees a turn's work before sign-off",
+};
+
 describe('suggestSettings', () => {
-  it('suggests each setting the repository shows, in the order the screen lists them', async () => {
-    const repo = createTempRepo();
-    cleanups.push(() => {
-      repo.cleanup();
-    });
-    commit(repo.path, APP);
+  it('suggests each setting origin shows, in the order the screen lists them', async () => {
+    const repo = pushedRepo(APP);
     const { deps: d, calls } = deps(LOGIN);
 
-    const result = await suggestSettings(d, project(realpathSync(repo.path)), []);
+    const result = await suggestSettings(d, project(repo), []);
 
+    // The dev login runs docker, but a command a model wrote never suggests Allow Docker.
     expect(result.settings).toEqual([
       {
         field: SettingField.AppUrl,
@@ -117,24 +132,52 @@ describe('suggestSettings', () => {
         value: LOGIN,
         source: 'from e2e/run.sh, which runs dev_login',
       },
-      {
-        field: SettingField.ChangedCheckCommand,
-        value: 'pnpm --dir web run typecheck && pnpm --dir web run lint',
-        source: 'from web/package.json: its typecheck and lint scripts',
-        note: "Reads the files on disk, so it sees a turn's work before sign-off",
-      },
-      {
-        field: SettingField.SandboxDocker,
-        value: true,
-        source: 'the dev login command runs docker',
-        note: DOCKER_NOTE,
-      },
+      CHECK_ROW,
     ]);
     expect(calls.prompts).toHaveLength(1);
     expect(calls.prompts[0]).toContain('url=$(backend python manage.py dev_login "$EMAIL")');
     expect(calls.prompts[0]).toContain('  docker compose exec -T backend "$@"');
     expect(calls.prompts[0]).toContain('EMAIL="dev@example.test"');
-    // No origin: nothing to push.
+    expect(result.branch).toBeNull();
+  });
+
+  it('reads nothing a local commit added, which a lane could have made', async () => {
+    const { 'docker-compose.yml': compose, 'e2e/run.sh': runSh, ...rest } = APP;
+    const login = 'backend/identity/management/commands/dev_login.py';
+    const { [login]: loginPy, ...base } = rest;
+    const repo = pushedRepo(base);
+    commit(
+      repo,
+      { 'docker-compose.yml': compose, 'e2e/run.sh': runSh, [login]: loginPy },
+      'a lane',
+    );
+    const { deps: d, calls } = deps(LOGIN, ['http://localhost:8800']);
+
+    const result = await suggestSettings(d, project(repo), []);
+
+    expect(result.settings.map((s) => [s.field, s.value])).toEqual([
+      [SettingField.AppUrl, 'http://localhost:3000'],
+      [SettingField.ChangedCheckCommand, CHECK_ROW.value],
+    ]);
+    expect(calls.prompts).toEqual([]);
+    expect(result.branch).toEqual({ branch: 'main', ahead: 1, command: 'git push origin main' });
+  });
+
+  it('with no origin, reads HEAD but suggests no dev login', async () => {
+    const repo = createTempRepo();
+    cleanups.push(() => {
+      repo.cleanup();
+    });
+    commit(repo.path, APP);
+    const { deps: d, calls } = deps(LOGIN);
+
+    const result = await suggestSettings(d, project(realpathSync(repo.path)), []);
+
+    expect(result.settings.map((s) => s.field)).toEqual([
+      SettingField.AppUrl,
+      SettingField.ChangedCheckCommand,
+    ]);
+    expect(calls.prompts).toEqual([]);
     expect(result.branch).toBeNull();
   });
 
@@ -152,12 +195,12 @@ describe('suggestSettings', () => {
     },
     {
       name: 'Docker, once the builder turned it off',
-      over: { sandboxDockerOptOut: true },
+      over: { gateCommand: 'docker compose run --rm app pytest', sandboxDockerOptOut: true },
       answer: LOGIN,
       fields: [SettingField.AppUrl, SettingField.DevLoginCommand, SettingField.ChangedCheckCommand],
     },
     {
-      name: 'a dev login with no model to write it, nor Docker for it',
+      name: 'a dev login with no model to write it',
       over: {},
       answer: null,
       fields: [SettingField.AppUrl, SettingField.ChangedCheckCommand],
@@ -169,28 +212,20 @@ describe('suggestSettings', () => {
       fields: [SettingField.AppUrl, SettingField.ChangedCheckCommand],
     },
   ])('never suggests $name', async ({ over, answer, fields }) => {
-    const repo = createTempRepo();
-    cleanups.push(() => {
-      repo.cleanup();
-    });
-    commit(repo.path, APP);
+    const repo = pushedRepo(APP);
     const { deps: d, calls } = deps(answer);
-    const result = await suggestSettings(d, project(realpathSync(repo.path), over), []);
+    const result = await suggestSettings(d, project(repo, over), []);
     expect(result.settings.map((s) => s.field)).toEqual(fields);
     if ('devLoginCommand' in over) expect(calls.prompts).toEqual([]);
     if ('appUrl' in over) expect(calls.probed).toEqual([]);
   });
 
   it('says when nothing answers at the address, and finds the UI package from the proposed pages', async () => {
-    const repo = createTempRepo();
-    cleanups.push(() => {
-      repo.cleanup();
-    });
-    commit(repo.path, APP);
+    const repo = pushedRepo(APP);
     const { deps: d } = deps(null, []);
     const result = await suggestSettings(
       d,
-      project(realpathSync(repo.path), { areas: [{ name: 'repo', globs: ['**'] }] }),
+      project(repo, { areas: [{ name: 'repo', globs: ['**'] }] }),
       [['web/src/app/friday/**']],
     );
     expect(result.settings.map((s) => [s.field, s.value, s.note])).toEqual([
@@ -199,29 +234,19 @@ describe('suggestSettings', () => {
         'http://localhost:8800',
         'Nothing answered there just now: start your dev server',
       ],
-      [
-        SettingField.ChangedCheckCommand,
-        'pnpm --dir web run typecheck && pnpm --dir web run lint',
-        "Reads the files on disk, so it sees a turn's work before sign-off",
-      ],
+      [SettingField.ChangedCheckCommand, CHECK_ROW.value, CHECK_ROW.note],
     ]);
   });
 
   it("notes the base branch's commits origin lacks, and suggests Docker for a gate that calls it on origin", async () => {
-    const pair = createTempRepoWithOrigin();
-    cleanups.push(() => {
-      pair.cleanup();
-    });
-    const repo = pair.repo.path;
-    commit(repo, { Makefile: 'gate:\n\tdocker compose run --rm app pytest\n' }, 'the gate');
-    gitIn(repo, 'push', '-q', 'origin', 'main');
+    const repo = pushedRepo({ Makefile: 'gate:\n\tdocker compose run --rm app pytest\n' });
     commit(repo, { 'a.txt': 'a' }, 'one');
     commit(repo, { 'b.txt': 'b' }, 'two');
     const { deps: d } = deps(null, []);
 
     const result = await suggestSettings(
       d,
-      project(realpathSync(repo), { gateCommand: 'make gate', areas: [] }),
+      project(repo, { gateCommand: 'make gate', areas: [] }),
       [],
     );
     expect(result.branch).toEqual({ branch: 'main', ahead: 2, command: 'git push origin main' });
@@ -235,22 +260,16 @@ describe('suggestSettings', () => {
     ]);
 
     gitIn(repo, 'push', '-q', 'origin', 'main');
-    expect(
-      (await suggestSettings(d, project(realpathSync(repo), { areas: [] }), [])).branch,
-    ).toBeNull();
+    expect((await suggestSettings(d, project(repo, { areas: [] }), [])).branch).toBeNull();
   });
 
-  it('never reads the need for Docker from a commit origin lacks, which a lane could have made', async () => {
-    const pair = createTempRepoWithOrigin();
-    cleanups.push(() => {
-      pair.cleanup();
-    });
-    const repo = pair.repo.path;
+  it('never reads the need for Docker from a commit origin lacks', async () => {
+    const repo = pushedRepo({ 'a.txt': 'a' });
     commit(repo, { Makefile: 'gate:\n\tdocker compose run --rm app pytest\n' }, 'a lane');
     const { deps: d } = deps(null, []);
     const result = await suggestSettings(
       d,
-      project(realpathSync(repo), { gateCommand: 'make gate', areas: [] }),
+      project(repo, { gateCommand: 'make gate', areas: [] }),
       [],
     );
     expect(result.settings).toEqual([]);

@@ -31,8 +31,9 @@ import type { ListenerReader } from './listening-ports';
 import type { AddressProbe } from './loopback-probe';
 
 // Workbench setup (plan §3): the settings 10db suggests for pictures and turn checks, and the note
-// on the base branch's unpushed commits. Everything is read from git's object store, one look at
-// what listens on this Mac and one probe of each likely address; nothing of the repository runs.
+// on the base branch's unpushed commits. Every file is read from `origin/<base>`'s commit in git's
+// object store, never HEAD or the checkout, which a lane can write; besides that, one look at what
+// listens on this Mac and one probe of each likely address. Nothing of the repository runs.
 
 /** Shown with the Allow Docker suggestion, as Settings › General says it. */
 export const DOCKER_NOTE =
@@ -181,22 +182,20 @@ function baseReader(git: Git, project: SettingsProject): ReadRepoFile {
 }
 
 /**
- * Allow Docker, when the switch is off and the builder has not turned it off, and a command the
- * project runs or this setup suggests calls docker: the gate, the dev login or the turn check, read
- * as `callsDocker` reads a gate, its Makefiles and scripts from `origin/<base>` only, never what a
- * lane could have committed locally.
+ * Allow Docker, when the switch is off and the builder has not turned it off, and the gate command
+ * (the builder's own) or the turn check (built from origin's scripts, never by a model) calls docker,
+ * read as `callsDocker` reads a gate: its Makefiles and scripts from `origin/<base>` only. The dev
+ * login command never counts: a model wrote it.
  */
 async function docker(
   git: Git,
   project: SettingsProject,
-  devLoginCommand: string | null,
   checkCommand: string | null,
 ): Promise<SettingSuggestion | null> {
   if (project.sandboxDocker || project.sandboxDockerOptOut) return null;
   const read = baseReader(git, project);
   const commands: [string, string | null][] = [
     ['the gate command', project.gateCommand],
-    ['the dev login command', devLoginCommand],
     ['the check after each turn', checkCommand],
   ];
   for (const [what, command] of commands) {
@@ -212,14 +211,15 @@ async function docker(
   return null;
 }
 
-/** The base branch's commits `origin/<base>` lacks, when there are any; null with no origin ref. */
-async function branchNote(git: Git, project: SettingsProject): Promise<BranchNote | null> {
+/** The base branch's commits `origin/<base>` (at `tracking`) lacks, when there are any. */
+async function branchNote(
+  git: Git,
+  project: SettingsProject,
+  tracking: string,
+): Promise<BranchNote | null> {
   const branch = project.baseBranch;
-  const [tip, tracking] = await Promise.all([
-    git.branchTip(project.repoPath, branch),
-    git.trackingTip(project.repoPath, branch),
-  ]);
-  if (tip === null || tracking === null) return null;
+  const tip = await git.branchTip(project.repoPath, branch);
+  if (tip === null) return null;
   const ahead = await git.countCommits(project.repoPath, tracking, tip);
   return ahead > 0 ? { branch, ahead, command: `git push origin ${branch}` } : null;
 }
@@ -230,8 +230,10 @@ const settingOf = (row: SettingSuggestion | null, field: SettingField): string |
 /**
  * What the Workbench setup suggests besides areas: the settings the project lacks, in the order the
  * screen lists them (app address, dev login, turn check, Allow Docker), and the branch note. A
- * setting the project has is never suggested. The UI package is the one holding `pageGlobs` (the
- * proposed pages) and the project's page areas. A part that fails is left out; the rest stands.
+ * setting the project has is never suggested. Files are read from `origin/<base>`'s commit; with no
+ * such ref they are read from HEAD, and then no dev login is suggested, since a model would write it
+ * from lines a lane may have committed. The UI package is the one holding `pageGlobs` (the proposed
+ * pages) and the project's page areas. A part that fails is left out; the rest stands.
  */
 export async function suggestSettings(
   deps: SuggestSettingsDeps,
@@ -239,15 +241,19 @@ export async function suggestSettings(
   pageGlobs: readonly (readonly string[])[],
   signal?: AbortSignal,
 ): Promise<SuggestedSettings> {
-  const branch = branchNote(deps.git, project).catch(() => null);
-  const survey = await deps.git.survey(project.repoPath, 0);
-  const files = 'refused' in survey ? [] : survey.files;
-  if (files.length === 0) return { settings: [], branch: await branch };
+  const tracking = await deps.git
+    .trackingTip(project.repoPath, project.baseBranch)
+    .catch(() => null);
+  const branch =
+    tracking === null ? null : await branchNote(deps.git, project, tracking).catch(() => null);
   // One commit for every read, so they cannot span a branch that moves.
-  const head = await deps.git.commitAt(project.repoPath, 'HEAD');
+  const rev = tracking ?? (await deps.git.commitAt(project.repoPath, 'HEAD').catch(() => null));
+  if (rev === null) return { settings: [], branch };
+  const files = await deps.git.filesAt(project.repoPath, rev).catch(() => []);
+  if (files.length === 0) return { settings: [], branch };
   const read: Reader = async (path) => {
     try {
-      const file = await deps.git.fileAt(project.repoPath, head, path, MAX_FILE_BYTES);
+      const file = await deps.git.fileAt(project.repoPath, rev, path, MAX_FILE_BYTES);
       return file.kind === 'file' ? file.text : null;
     } catch {
       return null;
@@ -269,7 +275,7 @@ export async function suggestSettings(
     project.appUrl === null
       ? appAddress(deps, project.repoPath, files, read, uiUnit, signal).catch(() => null)
       : null,
-    project.devLoginCommand === null
+    project.devLoginCommand === null && tracking !== null
       ? devLogin(deps, files, packages, read, signal).catch(() => null)
       : null,
   ]);
@@ -293,11 +299,10 @@ export async function suggestSettings(
   const dockerRow = await docker(
     deps.git,
     project,
-    settingOf(login, SettingField.DevLoginCommand) ?? project.devLoginCommand,
     settingOf(check, SettingField.ChangedCheckCommand) ?? project.changedCheckCommand,
   );
   const settings = [address, login, check, dockerRow].filter(
     (s): s is SettingSuggestion => s !== null,
   );
-  return { settings, branch: await branch };
+  return { settings, branch };
 }
