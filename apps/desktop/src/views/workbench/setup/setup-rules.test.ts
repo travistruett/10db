@@ -1,6 +1,6 @@
 import { AreaRole, SettingField, type AreaDef, type WorkbenchSetupDto } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { areasChanged, areasSummary, setupPatch, suggestionCount } from './setup-rules';
+import { areasChanged, areasSummary, setUpCount, setupPatch, suggestionCount } from './setup-rules';
 
 const CURRENT: AreaDef[] = [
   { name: 'repo', globs: ['**'] },
@@ -71,6 +71,19 @@ describe('areasChanged and suggestionCount', () => {
     expect(suggestionCount(SETUP)).toBe(3);
     expect(areasChanged(PROPOSED, CURRENT)).toBe(true);
     expect(areasChanged([...CURRENT].reverse(), CURRENT)).toBe(false);
+  });
+});
+
+describe('setUpCount', () => {
+  it('counts the settings and the branch note only, never the page rows', () => {
+    expect(setUpCount(SETUP)).toBe(1);
+    expect(
+      setUpCount({
+        ...SETUP,
+        branch: { branch: 'build', ahead: 3, command: 'git push origin build' },
+      }),
+    ).toBe(2);
+    expect(setUpCount({ ...SETUP, settings: [] })).toBe(0);
   });
 });
 

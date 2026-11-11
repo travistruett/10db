@@ -27,6 +27,14 @@ export function suggestionCount(setup: WorkbenchSetupDto): number {
 }
 
 /**
+ * What the picker's Set Up (n) counts once the project has pages: the settings and the branch note.
+ * New page rows still show in the setup, but a page the builder left out is not asked for again.
+ */
+export function setUpCount(setup: WorkbenchSetupDto): number {
+  return setup.settings.length + (setup.branch === null ? 0 : 1);
+}
+
+/**
  * The one `PATCH /projects/:id` Apply sends: the rebuilt areas with each unticked page folded back
  * (left out when that is the list the project has) and each ticked setting; null when it changes
  * nothing.

@@ -42,7 +42,7 @@ import { queueRows } from './queue-rows';
 import type { PassWorkspaceProps } from './pass-workspace-props';
 import { RenameModal } from './rename-modal';
 import { WorkbenchSetup } from './setup/workbench-setup';
-import { suggestionCount } from './setup/setup-rules';
+import { setUpCount } from './setup/setup-rules';
 import { StartPass } from './start-pass';
 import type { WorkbenchSearch } from './workbench-search';
 
@@ -69,7 +69,7 @@ export interface WorkbenchScreenProps {
   /** The open Inbox items. */
   readonly inbox: readonly InboxItemDto[];
   readonly search: WorkbenchSearch;
-  /** How many setup suggestions are left for a project that has pages; 0 offers no Set Up. */
+  /** The settings and branch note the setup still has for a project with pages; 0 offers no Set Up. */
   readonly setupCount: number;
   /** The pages a `goal` link's tasks committed in, which the picker starts ticked. */
   readonly goalPages: readonly string[];
@@ -307,7 +307,7 @@ function ProjectWorkbench({ project }: { readonly project: ProjectViewDto }) {
       inbox={inbox}
       search={search}
       goalPages={goalPages}
-      setupCount={setup.data === undefined ? 0 : suggestionCount(setup.data)}
+      setupCount={setup.data === undefined ? 0 : setUpCount(setup.data)}
       now={now}
       onSelect={(task) => {
         void navigate({ to: '/workbench', search: { task } });
