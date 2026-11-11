@@ -1953,6 +1953,9 @@ export function createRunner(opts: RunnerOptions): Runner {
     // one starts from the handoff, then the thread's digest, then the message. Its pictures go as
     // blocks while they fit the account's limits and what the thread's budget has left.
     const limits = pictureLimitsFor(account.kind);
+    // A Codex lane can open no stored picture by its path (its guard refuses `view_image`, its
+    // sandbox the data directory), so Codex is sent every picture as its file, every time.
+    const readsPictureFiles = provider === Provider.Codex;
     const feedback = action.kind === 'feedback' ? getTaskMessageRow(db, action.messageId) : null;
     // The builder writes to the task's implementer: only an implement step's sessions are handed what
     // an earlier session was handed and no turn took (§12).
@@ -2108,11 +2111,13 @@ export function createRunner(opts: RunnerOptions): Runner {
               },
               0,
               limits,
+              readsPictureFiles,
             )
           : outgoingMessage(
               feedback,
               threadInlineBytes(listTaskFileRows(db, task.id), limits),
               limits,
+              readsPictureFiles,
             );
     const digest =
       feedback === null || resumeId !== null
@@ -2409,6 +2414,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       taskId: task.id,
       handle,
       limits,
+      readsPictureFiles,
       ...(feedback !== null && fed !== null
         ? { prompt: { uuid: fed.uuid, messageId: feedback.id } }
         : {}),

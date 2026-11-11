@@ -88,18 +88,22 @@ function clientUuid(message: TaskMessageRow): string {
  * The message as the session is sent it: each picture that fits as a block after `spent` bytes the
  * session already holds goes as one, and the others are named by the paths the session reads. A
  * picture the session already holds as a block (`inline_sent`, as when its message is pushed again)
- * goes by its path, so the session never holds a copy the thread's budget does not count.
+ * goes by its path, so the session never holds a copy the thread's budget does not count. An agent
+ * that reads each picture from its file (`readsPictureFiles`, Codex) is sent every one so.
  */
 export function outgoingMessage(
   message: TaskMessageRow,
   spent: number,
   limits: PictureLimits,
+  readsPictureFiles = false,
 ): OutgoingMessage {
-  const chosen = blockPictures(
-    message.files.filter((file) => !file.inlineSent),
-    spent,
-    limits,
-  );
+  const chosen = readsPictureFiles
+    ? new Set(message.files.map((file) => file.id))
+    : blockPictures(
+        message.files.filter((file) => !file.inlineSent),
+        spent,
+        limits,
+      );
   const blocks = message.files.flatMap((file) => {
     if (!chosen.has(file.id)) return [];
     const image = asBlock(file);
@@ -165,6 +169,11 @@ export interface LaneMessagesDeps {
   readonly limits: PictureLimits;
   /** The builder message the session's prompt carried, and the uuid it went under. */
   readonly prompt?: { readonly uuid: string; readonly messageId: TaskMessageId };
+  /**
+   * The agent reads each picture from its stored file (Codex), and its lane can open none by its
+   * path, so every push sends every picture of the message so, whatever the budget or an earlier send.
+   */
+  readonly readsPictureFiles?: boolean;
 }
 
 /** One lane session's side of the task's thread. */
@@ -182,7 +191,7 @@ export function createLaneMessages(deps: LaneMessagesDeps): LaneMessages {
     });
   const push = (message: TaskMessageRow, lead?: string | null): void => {
     const spent = threadInlineBytes(listTaskFileRows(state.db, taskId), limits);
-    const out = outgoingMessage(message, spent, limits);
+    const out = outgoingMessage(message, spent, limits, deps.readsPictureFiles === true);
     sentUnder.set(out.uuid, message.id);
     // Kept before the session is handed it: a restart then finds every uuid a turn could hold.
     state.write((ctx) => {

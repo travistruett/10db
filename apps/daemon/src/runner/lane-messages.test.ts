@@ -8,6 +8,7 @@ import {
   insertTask,
   listTaskFileRows,
   listUndeliveredTaskMessages,
+  markTaskFilesInline,
   seedProject,
   type TaskMessageRow,
 } from '@10db/db';
@@ -224,6 +225,24 @@ describe('lane messages', () => {
         path: file?.storedPath,
       },
     ]);
+  });
+
+  it('sends Codex every picture as its file on every push, held already or over the budget: a Codex lane cannot open one by its path', () => {
+    const shot = say('Make it blue', 2);
+    state.write((ctx) => {
+      markTaskFilesInline(ctx, taskId, [shot.files[0]?.id ?? mintId('TaskFile')], false);
+    });
+    const limits = pictureLimitsFor(AccountKind.CodexSignin);
+    const spentAll = limits.inlineMaxBytes;
+
+    const out = outgoingMessage(getTaskMessageRow(state.db, shot.id), spentAll, limits, true);
+
+    expect(out.images.map((image) => image.path)).toEqual(shot.files.map((f) => f.storedPath));
+    expect(out.text).not.toContain('kept at');
+    // A Claude session is sent neither: one it holds, and one over what the budget has left.
+    expect(outgoingMessage(getTaskMessageRow(state.db, shot.id), spentAll, limits).images).toEqual(
+      [],
+    );
   });
 
   it('sends a picture the session already holds as a block by its path when its message is pushed again', async () => {

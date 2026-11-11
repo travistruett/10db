@@ -590,6 +590,8 @@ function laneInput(
     readonly reads?: readonly string[];
     readonly resume?: string | null;
     readonly claude?: boolean;
+    /** The task's pictures folder, as the runner names it for a lane of a task with pictures. */
+    readonly taskFiles?: string;
   } = {},
 ): LaneSessionInput {
   return {
@@ -608,6 +610,7 @@ function laneInput(
     configDir: world.codexHome,
     checkouts: [world.checkout, world.other],
     mcpServers: {},
+    ...(opts.taskFiles === undefined ? {} : { taskFiles: opts.taskFiles }),
     ...(opts.claude === true ? {} : { tempRoot: world.roots.codexLanes, provider: Provider.Codex }),
   };
 }
@@ -624,6 +627,7 @@ async function runSession(
     /** A builder message's client uuid and pictures, as a pass page's prompt carries them. */
     readonly promptUuid?: string;
     readonly images?: readonly ShapeImage[];
+    readonly taskFiles?: string;
   } = {},
 ): Promise<SessionRun> {
   const launch = launcher.session(world.account, MODEL, []);
@@ -1124,9 +1128,12 @@ describe.skipIf(!live)(
       const resumed = await runSession(world, [{ say: 'Made it smaller.' }], {
         resume: page.threadId,
         promptUuid: second,
+        images: [picture],
       });
       expectTurn(resumed);
       expect(resumed.threadId).toBe(page.threadId);
+      // The picture goes again with the message sent again: the thread holds both sends.
+      expect(resumed.request?.images).toBe(2);
       expect(resumed.events).toContainEqual({ type: 'consumed', uuids: [second] });
       const launch = launcher.session(world.account, MODEL, []);
       const held = await world.adapter.readClientUuids({
@@ -1134,8 +1141,31 @@ describe.skipIf(!live)(
         env: launch.env,
         cwd: world.checkout,
         providerSessionId: page.threadId ?? '',
+        wanted: [first, second, randomUUID()],
+        since: new Date(0).toISOString(),
       });
       expect([...held].sort()).toEqual([first, second].sort());
+    });
+
+    it("cannot open its task's stored picture by its path: the guard refuses view_image, the sandbox the shell", async () => {
+      const files = join(world.root, 'Application Support', '10db', 'tasks', 'tsk_live', 'files');
+      mkdirSync(files, { recursive: true });
+      const shot = join(files, 'shot.png');
+      writeFileSync(shot, noisePng(4, 4));
+      const outputs = expectTurn(
+        await runSession(
+          world,
+          [
+            codeMode(`tools.view_image({ path: ${JSON.stringify(shot)} })`),
+            run(`wc -c < '${shot}'; echo exit=$?`),
+          ],
+          { taskFiles: files },
+        ),
+      );
+      // So 10db sends Codex every picture as a local image, on every push.
+      expect(outputs[0]).toContain('does not allow the tool "view_image" in a lane');
+      expect(outputs[1]).toContain('operation not permitted');
+      expect(outputs[1]).toContain('exit=1');
     });
 
     it('resumes a thread after the process restarts', async () => {

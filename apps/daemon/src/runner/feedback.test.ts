@@ -13,6 +13,7 @@ import {
   getWorkstreamRow,
   insertBuilderMessage,
   listTaskThread,
+  markTaskFilesInline,
   markTaskMessagePushedUnder,
   markTaskMessagesPushed,
   patchAccount,
@@ -465,6 +466,28 @@ describe("a builder's message from the task's thread", () => {
       expect(resumed?.prompt).not.toContain('Make it blue');
       expect(engine.adapter.sent).toEqual([]);
       expect(engine.adapter.reads).toHaveLength(1);
+    });
+
+    it('sends a picture again as its file when its message is sent again, though the session was sent it before', async () => {
+      engine = await codexEngine({ Alpha: [[working, crash]] });
+      const { task, workstream } = engine.addTask('Alpha');
+      const shot = picture(task.id);
+      const message = say(task.id, 'Make the header smaller', [shot]);
+      pushedUnderItsUuid(message);
+      engine.state.write((ctx) => {
+        const file = getTaskMessageRow(ctx.tx, message).files[0];
+        if (file) markTaskFilesInline(ctx, task.id, [file.id], false);
+      });
+      feedbackOn(workstream.id, message, 'thr-before-restart');
+      engine.adapter.readBack = () => Promise.resolve([]);
+
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+
+      const [resumed] = engine.adapter.prompts;
+      expect(resumed?.resume).toBe('thr-before-restart');
+      expect(resumed?.images).toBe(1);
+      expect(resumed?.prompt).not.toContain(`kept at ${shot.storedPath}`);
     });
 
     it('ends the read at once when the lane is stopped, sending nothing', async () => {
