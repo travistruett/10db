@@ -3,10 +3,12 @@ import { promisify } from 'node:util';
 import type { Listener } from '../folders';
 
 /** Reads the TCP ports processes of this Mac listen on, each with its process's working directory. */
-export type ListenerReader = () => Promise<readonly Listener[]>;
+export type ListenerReader = (signal?: AbortSignal) => Promise<readonly Listener[]>;
 
 const run = promisify(execFile);
 const LSOF = '/usr/sbin/lsof';
+/** How long one lsof call may take before it is stopped. */
+const LSOF_MS = 3_000;
 
 interface Listening {
   readonly pid: number;
@@ -55,30 +57,43 @@ export function listenersFrom(listening: string, cwds: string): Listener[] {
   }));
 }
 
-/** `lsof`'s output; exit status 1 with output means some of what it was asked for was not there. */
-async function lsof(args: readonly string[]): Promise<string> {
+/**
+ * What a failed `lsof` printed when it ran to an exit status (1 when some of what it was asked for was
+ * not there): its output then still counts. Null when it did not run, was stopped, or `error` is not
+ * a child process's failure.
+ */
+export function outputOfExit(error: unknown): string | null {
+  if (!(error instanceof Error)) return null;
+  const code: unknown = Reflect.get(error, 'code');
+  const stdout: unknown = Reflect.get(error, 'stdout');
+  return typeof code === 'number' && typeof stdout === 'string' ? stdout : null;
+}
+
+async function lsof(args: readonly string[], signal: AbortSignal | undefined): Promise<string> {
   try {
     const { stdout } = await run(LSOF, [...args], {
       env: { LC_ALL: 'C' },
       maxBuffer: 16 * 1024 * 1024,
+      timeout: LSOF_MS,
+      ...(signal === undefined ? {} : { signal }),
     });
     return stdout;
   } catch (error) {
-    // A failure to run lsof at all (no exit code) is thrown; an exit status with output is read.
-    const failed = error as { code?: unknown; stdout?: unknown };
-    if (typeof failed.code === 'number' && typeof failed.stdout === 'string') return failed.stdout;
-    throw error;
+    const output = outputOfExit(error);
+    if (output === null) throw error;
+    return output;
   }
 }
 
 /**
  * Every TCP listener of this Mac, read with `lsof` (read-only, the daemon's own user): one call for
- * the listening sockets, one for their processes' working directories. Throws when lsof cannot run.
+ * the listening sockets, one for their processes' working directories, each stopped after a few seconds
+ * or when `signal` is aborted. Throws when lsof cannot run or is stopped.
  */
-export const systemListeners: ListenerReader = async () => {
-  const listening = await lsof(['-w', '-nP', '-iTCP', '-sTCP:LISTEN', '-Fpcn']);
+export const systemListeners: ListenerReader = async (signal) => {
+  const listening = await lsof(['-w', '-nP', '-iTCP', '-sTCP:LISTEN', '-Fpcn'], signal);
   const pids = [...new Set(records(listening).map((r) => r.pid))];
   if (pids.length === 0) return [];
-  const cwds = await lsof(['-w', '-a', '-d', 'cwd', '-p', pids.join(','), '-Fn']);
+  const cwds = await lsof(['-w', '-a', '-d', 'cwd', '-p', pids.join(','), '-Fn'], signal);
   return listenersFrom(listening, cwds);
 };

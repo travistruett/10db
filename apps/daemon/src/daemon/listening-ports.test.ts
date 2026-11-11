@@ -3,7 +3,7 @@ import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { listenersFrom, systemListeners } from './listening-ports';
+import { listenersFrom, outputOfExit, systemListeners } from './listening-ports';
 
 describe('listenersFrom', () => {
   it('pairs each listening address with its process and working directory', () => {
@@ -42,6 +42,29 @@ describe('listenersFrom', () => {
   });
 });
 
+describe('outputOfExit', () => {
+  it.each([
+    {
+      name: 'an exit status with output',
+      error: Object.assign(new Error('x'), { code: 1, stdout: 'p1\n' }),
+      out: 'p1\n',
+    },
+    {
+      name: 'no exit status (lsof did not run)',
+      error: Object.assign(new Error('x'), { code: 'ENOENT', stdout: '' }),
+      out: null,
+    },
+    {
+      name: 'killed at the bound',
+      error: Object.assign(new Error('x'), { code: null, killed: true, stdout: 'p1\n' }),
+      out: null,
+    },
+    { name: 'not an error', error: 'boom', out: null },
+  ])('$name', ({ error, out }) => {
+    expect(outputOfExit(error)).toBe(out);
+  });
+});
+
 const started: ChildProcess[] = [];
 const dirs: string[] = [];
 afterEach(() => {
@@ -69,6 +92,10 @@ function serverIn(cwd: string): Promise<number> {
 }
 
 describe('systemListeners', () => {
+  it('reads nothing once its signal is aborted', async () => {
+    await expect(systemListeners(AbortSignal.abort())).rejects.toThrow();
+  });
+
   it('finds a listening process by its port and its working directory', async (ctx) => {
     try {
       await systemListeners();

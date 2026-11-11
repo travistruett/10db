@@ -122,7 +122,7 @@ async function appAddress(
   uiUnit: string | null,
   signal: AbortSignal | undefined,
 ): Promise<SettingSuggestion | null> {
-  const listeners = await deps.listeners().catch(() => []);
+  const listeners = await deps.listeners(signal).catch(() => []);
   const candidates = appAddressCandidates({
     repoPath: realOrSame(repoPath),
     texts: await readAll(read, appAddressFiles(files, uiUnit)),
