@@ -12,6 +12,7 @@ export {
   type Listener,
 } from './detect-app-address';
 export { CHANGED_CHECK_NOTE, changedCheckFor, uiUnitOf } from './detect-changed-check';
+export { shellWord } from './shell-word';
 export {
   devLoginAnswer,
   devLoginEvidence,

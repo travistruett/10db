@@ -21,12 +21,18 @@ import {
   NAMING_MS,
   oneLine,
   PROBED,
+  shellWord,
   uiUnitOf,
   type AreaNamer,
   type DevLogin,
 } from '../folders';
 import type { Git } from '../git';
-import { callsDocker, MAX_DOCKER_SCAN_BYTES, type ReadRepoFile } from './docker-need';
+import {
+  callsDocker,
+  MAX_DOCKER_SCAN_BYTES,
+  originBaseCommit,
+  type ReadRepoFile,
+} from './docker-need';
 import type { ListenerReader } from './listening-ports';
 import type { AddressProbe } from './loopback-probe';
 
@@ -45,6 +51,11 @@ const MAX_FILE_BYTES = 256 * 1024;
 const MAX_PACKAGE_FILES = 50;
 /** The most scripts, Makefiles and workflows read for a dev login's invocation lines. */
 const MAX_SCRIPT_FILES = 200;
+/** The most files read from git at once. */
+const READS_AT_ONCE = 8;
+
+/** Said on a dev login row that runs docker: it can't run under the gate's sandbox without the switch. */
+export const DEV_LOGIN_DOCKER_NOTE = 'Needs Allow Docker';
 
 export interface SuggestSettingsDeps {
   readonly git: Git;
@@ -79,9 +90,14 @@ type Reader = (path: string) => Promise<string | null>;
 
 const depth = (path: string): number => path.split('/').length;
 
-/** The texts of `paths` that could be read, by path, in the order given. */
+/** The texts of `paths` that could be read, by path, in the order given, a few reads at a time. */
 async function readAll(read: Reader, paths: readonly string[]): Promise<Map<string, string>> {
-  const texts = await Promise.all(paths.map(read));
+  const texts: (string | null)[] = new Array<string | null>(paths.length).fill(null);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    for (let i = next++; i < paths.length; i = next++) texts[i] = await read(paths[i] ?? '');
+  };
+  await Promise.all(Array.from({ length: Math.min(READS_AT_ONCE, paths.length) }, worker));
   const found = new Map<string, string>();
   paths.forEach((path, i) => {
     const text = texts[i];
@@ -165,15 +181,15 @@ async function devLogin(
     field: SettingField.DevLoginCommand,
     value: command,
     source: oneLine(devLoginSource(found, scripts)),
+    ...(/^docker(?:-compose)? /.test(command) ? { note: DEV_LOGIN_DOCKER_NOTE } : {}),
   };
 }
 
-/** A reader of the committed base, as the gate's own Docker check reads it (`gateCallsDocker`). */
-function baseReader(git: Git, project: SettingsProject): ReadRepoFile {
-  const ref = `origin/${project.baseBranch}`;
+/** A reader of `commit`, the remote-tracking branch's, as the gate's own Docker check reads it. */
+function commitReader(git: Git, repoPath: string, commit: string): ReadRepoFile {
   return async (path) => {
     try {
-      const file = await git.fileAt(project.repoPath, ref, path, MAX_DOCKER_SCAN_BYTES);
+      const file = await git.fileAt(repoPath, commit, path, MAX_DOCKER_SCAN_BYTES);
       return file.kind === 'file' ? file.text : null;
     } catch {
       return null;
@@ -181,22 +197,34 @@ function baseReader(git: Git, project: SettingsProject): ReadRepoFile {
   };
 }
 
+/** What Allow Docker is judged from: commands the builder saved, and the scripts a suggested check runs. */
+interface DockerSources {
+  /** The turn check the project has saved; null when it has none. */
+  readonly savedCheck: string | null;
+  /** The bodies, at origin, of the package scripts a suggested turn check runs. */
+  readonly checkScripts: readonly string[];
+}
+
 /**
  * Allow Docker, when the switch is off and the builder has not turned it off, and the gate command
- * (the builder's own) or the turn check (built from origin's scripts, never by a model) calls docker,
- * read as `callsDocker` reads a gate: its Makefiles and scripts from `origin/<base>` only. The dev
- * login command never counts: a model wrote it.
+ * or a saved turn check (the builder's own) calls docker, or a script a suggested turn check runs
+ * does, as `callsDocker` reads a gate: Makefiles and scripts from the remote-tracking branch's commit
+ * (`tracking`) only, nothing with none. The command 10db wrote for the check is never read as text
+ * (its folder could be named `docker`), and the dev login never counts: a model wrote it.
  */
 async function docker(
   git: Git,
   project: SettingsProject,
-  checkCommand: string | null,
+  tracking: string | null,
+  sources: DockerSources,
 ): Promise<SettingSuggestion | null> {
   if (project.sandboxDocker || project.sandboxDockerOptOut) return null;
-  const read = baseReader(git, project);
+  const read: ReadRepoFile =
+    tracking === null ? () => Promise.resolve(null) : commitReader(git, project.repoPath, tracking);
   const commands: [string, string | null][] = [
     ['the gate command', project.gateCommand],
-    ['the check after each turn', checkCommand],
+    ['the check after each turn', sources.savedCheck],
+    ...sources.checkScripts.map((body): [string, string] => ['the check after each turn', body]),
   ];
   for (const [what, command] of commands) {
     if (command === null) continue;
@@ -221,11 +249,8 @@ async function branchNote(
   const tip = await git.branchTip(project.repoPath, branch);
   if (tip === null) return null;
   const ahead = await git.countCommits(project.repoPath, tracking, tip);
-  return ahead > 0 ? { branch, ahead, command: `git push origin ${branch}` } : null;
+  return ahead > 0 ? { branch, ahead, command: `git push origin ${shellWord(branch)}` } : null;
 }
-
-const settingOf = (row: SettingSuggestion | null, field: SettingField): string | null =>
-  row !== null && row.field === field && typeof row.value === 'string' ? row.value : null;
 
 /**
  * What the Workbench setup suggests besides areas: the settings the project lacks, in the order the
@@ -241,9 +266,7 @@ export async function suggestSettings(
   pageGlobs: readonly (readonly string[])[],
   signal?: AbortSignal,
 ): Promise<SuggestedSettings> {
-  const tracking = await deps.git
-    .trackingTip(project.repoPath, project.baseBranch)
-    .catch(() => null);
+  const tracking = await originBaseCommit(deps.git, project.repoPath, project.baseBranch);
   const branch =
     tracking === null ? null : await branchNote(deps.git, project, tracking).catch(() => null);
   // One commit for every read, so they cannot span a branch that moves.
@@ -296,11 +319,10 @@ export async function suggestSettings(
           source: oneLine(found.source),
           note: CHANGED_CHECK_NOTE,
         };
-  const dockerRow = await docker(
-    deps.git,
-    project,
-    settingOf(check, SettingField.ChangedCheckCommand) ?? project.changedCheckCommand,
-  );
+  const dockerRow = await docker(deps.git, project, tracking, {
+    savedCheck: project.changedCheckCommand,
+    checkScripts: found?.scripts ?? [],
+  });
   const settings = [address, login, check, dockerRow].filter(
     (s): s is SettingSuggestion => s !== null,
   );

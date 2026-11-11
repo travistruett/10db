@@ -9,7 +9,8 @@ the settings a project lacks, each with where it was found in one line, and note
 `suggestSettings` (`apps/daemon/src/daemon/suggest-settings.ts`) assembles it; each detector is pure and table-tested in
 `apps/daemon/src/folders/`.
 
-- **Trusted source.** Every file is read from `origin/<base>`'s commit in git's object store (`Git.filesAt`,
+- **Trusted source.** Every file is read from `origin/<base>`'s commit, found once by the exact name
+  `refs/remotes/origin/<base>` (`originBaseCommit`; never a guessed name, which a lane-made branch or tag could answer), in git's object store (`Git.filesAt`,
   `Git.fileAt`), never HEAD or the checkout: a local-delivery project's lanes commit to the base branch, so HEAD is
   lane-written. With no `refs/remotes/origin/<base>` the files are read from HEAD, and then no dev login is suggested
   (its row is absent), because a model would write it from lines a lane may have committed. Nothing of the repository

@@ -1,5 +1,6 @@
 import { posix } from 'node:path';
 import { z } from 'zod';
+import { shellWord } from './shell-word';
 
 // Workbench setup: the check 10db runs after each turn, made of the UI package's own typecheck and
 // lint scripts, run by the package manager its nearest lockfile names.
@@ -93,19 +94,22 @@ export function uiUnitOf(
   return web[0] ?? null;
 }
 
-const shellWord = (word: string): string =>
-  /^[\w@./-]+$/.test(word) ? word : `'${word.replace(/'/g, `'\\''`)}'`;
-
 /**
  * The changed-files check for the UI package at `unit`: its typecheck and lint scripts (either alone
  * when it has one), each run by the manager of the nearest lockfile from `unit` up to the root among
- * the tracked `files`, joined by ` && `. Null with no such script or no lockfile. Pure.
+ * the tracked `files`, joined by ` && `, with the bodies of the scripts it runs (`scripts`), which is
+ * what a reader of what the check does looks at, never the command 10db wrote. Null with no such
+ * script or no lockfile. Pure.
  */
 export function changedCheckFor(
   unit: string,
   packageJson: string,
   files: readonly string[],
-): { readonly command: string; readonly source: string } | null {
+): {
+  readonly command: string;
+  readonly source: string;
+  readonly scripts: readonly string[];
+} | null {
   const scripts = packageOf(packageJson)?.scripts ?? {};
   const picked = [TYPECHECK_SCRIPTS, LINT_SCRIPTS]
     .map((names) => names.find((name) => name in scripts))
@@ -128,5 +132,6 @@ export function changedCheckFor(
   return {
     command: picked.map((script) => run(dir, script)).join(' && '),
     source: `from ${pkg}: its ${picked.join(' and ')} ${picked.length === 1 ? 'script' : 'scripts'}`,
+    scripts: picked.map((script) => scripts[script] ?? ''),
   };
 }

@@ -131,6 +131,7 @@ describe('suggestSettings', () => {
         field: SettingField.DevLoginCommand,
         value: LOGIN,
         source: 'from e2e/run.sh, which runs dev_login',
+        note: 'Needs Allow Docker',
       },
       CHECK_ROW,
     ]);
@@ -273,5 +274,115 @@ describe('suggestSettings', () => {
       [],
     );
     expect(result.settings).toEqual([]);
+  });
+
+  it('never reads the Docker need from a local branch named like the remote-tracking one', async () => {
+    const repo = pushedRepo({ Makefile: 'gate:\n\tpnpm test\n' });
+    gitIn(repo, 'checkout', '-q', '-b', 'origin/main');
+    commit(repo, { Makefile: 'gate:\n\tdocker compose run --rm app pytest\n' }, 'a lane');
+    gitIn(repo, 'checkout', '-q', 'main');
+    const { deps: d } = deps(null, []);
+    const result = await suggestSettings(
+      d,
+      project(repo, { gateCommand: 'make gate', areas: [] }),
+      [],
+    );
+    expect(result.settings).toEqual([]);
+  });
+
+  it.each([
+    {
+      name: 'a check whose folder is named docker does not call it',
+      files: {
+        'apps/docker/package.json':
+          '{"scripts":{"typecheck":"tsc"},"dependencies":{"next":"16.0.0"}}',
+      },
+      saved: null,
+      docker: false,
+    },
+    {
+      name: 'a check whose script at origin calls docker',
+      files: {
+        'web/package.json':
+          '{"scripts":{"typecheck":"docker compose run --rm web tsc"},"dependencies":{"next":"16.0.0"}}',
+      },
+      saved: null,
+      docker: true,
+    },
+    {
+      name: "the builder's own check that calls docker",
+      files: {
+        'web/package.json': '{"scripts":{"typecheck":"tsc"},"dependencies":{"next":"16.0.0"}}',
+      },
+      saved: 'docker compose exec web pnpm lint',
+      docker: true,
+    },
+  ])('Allow Docker and the turn check: $name', async ({ files, saved, docker }) => {
+    const repo = pushedRepo({ 'pnpm-lock.yaml': 'lockfileVersion: 9.0\n', ...files });
+    const { deps: d } = deps(null, []);
+    const result = await suggestSettings(
+      d,
+      project(repo, { changedCheckCommand: saved, areas: [] }),
+      [],
+    );
+    const row = result.settings.find((s) => s.field === SettingField.SandboxDocker);
+    expect(row?.source ?? null).toBe(docker ? 'the check after each turn runs docker' : null);
+  });
+
+  it('reads at most eight files at once', async () => {
+    const many = Object.fromEntries(
+      Array.from({ length: 30 }, (_, i) => [`pkgs/p${String(i)}/package.json`, '{}']),
+    );
+    const repo = pushedRepo(many);
+    let open = 0;
+    let most = 0;
+    const counting = {
+      ...git,
+      fileAt: async (...args: Parameters<typeof git.fileAt>) => {
+        open++;
+        most = Math.max(most, open);
+        try {
+          return await git.fileAt(...args);
+        } finally {
+          open--;
+        }
+      },
+    };
+    const { deps: d } = deps(null, []);
+    await suggestSettings({ ...d, git: counting }, project(repo, { areas: [] }), []);
+    expect(most).toBeGreaterThan(1);
+    expect(most).toBeLessThanOrEqual(8);
+  });
+
+  it('quotes a base branch name the shell would read otherwise', async () => {
+    const repo = pushedRepo({ 'a.txt': 'a' });
+    gitIn(repo, 'branch', 'rel+1');
+    gitIn(repo, 'push', '-q', 'origin', 'rel+1');
+    gitIn(repo, 'checkout', '-q', 'rel+1');
+    commit(repo, { 'b.txt': 'b' }, 'one');
+    const { deps: d } = deps(null, []);
+    const result = await suggestSettings(d, project(repo, { baseBranch: 'rel+1', areas: [] }), []);
+    expect(result.branch).toEqual({
+      branch: 'rel+1',
+      ahead: 1,
+      command: "git push origin 'rel+1'",
+    });
+  });
+
+  it('with no remote-tracking branch, never takes a local branch named like one in full', async () => {
+    const repo = pushedRepo({ Makefile: 'gate:\n\tpnpm test\n' });
+    gitIn(repo, 'checkout', '-q', '-b', 'refs/remotes/origin/lane');
+    commit(repo, { Makefile: 'gate:\n\tdocker compose run --rm app pytest\n' }, 'a lane');
+    gitIn(repo, 'checkout', '-q', 'main');
+    gitIn(repo, 'branch', 'lane');
+    const { deps: d, calls } = deps(LOGIN, []);
+    const result = await suggestSettings(
+      d,
+      project(repo, { baseBranch: 'lane', gateCommand: 'make gate', areas: [] }),
+      [],
+    );
+    expect(result.settings).toEqual([]);
+    expect(result.branch).toBeNull();
+    expect(calls.prompts).toEqual([]);
   });
 });
