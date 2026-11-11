@@ -101,7 +101,13 @@ let repo: { path: string; cleanup(): void };
 let daemon: RunningDaemon;
 /** Other repositories a test made, removed after it. */
 const repos: { cleanup(): void }[] = [];
+/** The addresses the setup probed, and those that answer it. */
+const probed: string[] = [];
+const answering = new Set<string>();
+
 beforeEach(async () => {
+  probed.length = 0;
+  answering.clear();
   data = tempDir('workbench api');
   repo = createTempRepo();
   daemon = await startDaemonWithProfiles({
@@ -118,6 +124,12 @@ beforeEach(async () => {
     watch: false,
     // A tick long enough that nothing starts while the test looks.
     tickMs: 3_600_000,
+    // The setup's look at this Mac: nothing listens, and only the addresses in `answering` answer.
+    listeners: () => Promise.resolve([]),
+    probe: (url) => {
+      probed.push(url);
+      return Promise.resolve(answering.has(url));
+    },
   });
 });
 afterEach(async () => {
@@ -593,12 +605,15 @@ describe('POST /projects/:projectId/workbench-setup', () => {
       'web/app/people/page.tsx': '\n',
     });
     const project = await projectWith([{ name: 'rest', globs: ['**'], catchAll: true }]);
+    answering.add('http://localhost:3000');
 
     const setup = await api().post(`/projects/${project.id}/workbench-setup`, WorkbenchSetupDto);
 
+    // The stated address and the framework's default are probed; only the default answers, so it wins.
+    expect(probed).toEqual(['http://localhost:18899', 'http://localhost:3000']);
     // No origin: no trusted copy to write a dev login from, and nothing to push.
     expect(setup.settings.map((s) => [s.field, s.value])).toEqual([
-      ['appUrl', 'http://localhost:18899'],
+      ['appUrl', 'http://localhost:3000'],
       ['changedCheckCommand', 'pnpm --dir web run typecheck && pnpm --dir web run lint'],
     ]);
     expect(setup.branch).toBeNull();

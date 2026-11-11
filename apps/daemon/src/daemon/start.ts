@@ -260,8 +260,8 @@ import {
 import { acquireInstanceLock } from './instance-lock';
 import { removeRuntimeFiles, writeRuntimeFiles } from '../runtime-files';
 import { createAreaNamer } from './area-namer';
-import { systemListeners } from './listening-ports';
-import { loopbackProbe } from './loopback-probe';
+import { systemListeners, type ListenerReader } from './listening-ports';
+import { loopbackProbe, type AddressProbe } from './loopback-probe';
 import { createServices } from './services';
 import {
   allSandboxRootsOf,
@@ -352,6 +352,10 @@ export interface DaemonOptions {
   readonly catalogueSnapshot?: string;
   /** `TENDB_JUDGE=off`: the OpenRouter key is never read and no decision calls OpenRouter. */
   readonly judgeOff?: boolean;
+  /** What listens on this Mac, for the Workbench setup's app address; `lsof` unless given. */
+  readonly listeners?: ListenerReader;
+  /** Whether a loopback address answers, for the Workbench setup's app address; one GET unless given. */
+  readonly probe?: AddressProbe;
   /** The harness plugin folder the default personas are read from. */
   readonly harnessDir?: string;
   readonly allowedOrigins?: readonly string[];
@@ -1700,8 +1704,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       }),
     protectedRoots: [opts.dataDir, ...allSandboxRoots, worktreeRoot],
     areaNamer,
-    listeners: systemListeners,
-    probe: loopbackProbe(),
+    listeners: opts.listeners ?? systemListeners,
+    probe: opts.probe ?? loopbackProbe(),
     hazards: hazardAssessor,
     pinCheckout: (repoPath) => {
       // A checkout git can't read yet is recorded at the first git call that succeeds there.
