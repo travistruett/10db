@@ -17,8 +17,6 @@ import {
   PassState,
   SharedChoiceKind,
   ProjectLanding,
-  Provider,
-  providerOf,
   type ProjectDto,
   type ProjectPatch,
   WorkstreamState,
@@ -40,7 +38,6 @@ import {
   closeTask,
   reopenTask,
   deleteBoardColumn,
-  getAccountRow,
   getGoal,
   getMcpApproval,
   getProject,
@@ -383,13 +380,6 @@ export function createServices(deps: {
     // The store lists oldest first; the API answers newest first.
     listBatches: (projectId) => listBatches(db, { projectId }).reverse(),
     async openPass(projectId, input) {
-      const project = getProject(db, projectId);
-      const account = getAccountRow(db, project.accountId);
-      // A pass's page waits until a turn is seen to take the builder's message (Workbench spec W19).
-      if (providerOf(account.kind) === Provider.Codex)
-        throw new ConflictError(
-          `${project.name} runs on the ChatGPT account "${account.label}", which cannot show that a turn took the builder's message; move the project to a Claude account to open a pass`,
-        );
       let opened: PassOpened;
       try {
         opened = await deps.openPass({

@@ -72,7 +72,7 @@ import {
 } from '../pass';
 import { DEFAULT_RUNNER_LIMITS } from './runner';
 import { handoffArgs, isolatedGitEnv, waitFor } from '../../test/fixtures';
-import type { FakeScriptBook } from '../sessions';
+import { ConversationUnreadError, type FakeScriptBook } from '../sessions';
 
 /** One step of a fake session's script. */
 type FakeStep = FakeScriptBook[string][number][number];
@@ -115,8 +115,9 @@ async function openPage(
   beforeLaunch: () => void = () => undefined,
   project: Parameters<typeof createTestEngine>[1] = PAGE_AREAS,
   runner: Parameters<typeof createTestEngine>[2] = {},
+  setup: Parameters<typeof createTestEngine>[3] = {},
 ): Promise<{ task: TaskDto; pass: PassDto; id: WorkstreamId }> {
-  engine = await createTestEngine({ [TITLE]: sessions }, project, runner);
+  engine = await createTestEngine({ [TITLE]: sessions }, project, runner, setup);
   const branch = '10db/polish-abc123';
   const startSha = git('rev-parse', 'HEAD');
   git('switch', '-q', '-c', branch);
@@ -614,6 +615,87 @@ describe("the builder's hand edits before a turn that starts a session", () => {
 
     expect(engine.adapter.prompts[0]?.prompt).toContain(`${note}\n- ${PAGE_FILE}`);
     expect(handNotices(task)).toHaveLength(1);
+  });
+});
+
+describe('a pass on a ChatGPT account', () => {
+  const onChatGpt = { account: { kind: 'codex_signin' as const, label: 'ChatGPT plan' } };
+  /** The account's sign-in, as the fake Codex reports it. */
+  const signedIn = () => {
+    engine.state.write((ctx) => {
+      patchAccount(ctx, engine.project.accountId, {
+        expectedIdentity: 'chatgpt@example.com · ws-1',
+      });
+    });
+  };
+
+  it("runs the page's turns on the project's own account, each message taken on evidence, as on Claude", async () => {
+    const { task, pass, id } = await openPage(
+      [
+        [
+          ...turn('one\n', 'Tidied the form.'),
+          { do: 'await_message', contains: 'Second' },
+          ...turn('two\n', 'Moved the button.'),
+          { do: 'await_message', contains: 'never sent' },
+        ],
+      ],
+      undefined,
+      signedIn,
+      PAGE_AREAS,
+      {},
+      onChatGpt,
+    );
+    await waitFor(isReady(id, 1));
+    await write(task, 'Second: move the button');
+    await waitFor(isReady(id, 2));
+
+    expect(getAccountRow(engine.store.db, engine.project.accountId).kind).toBe('codex_signin');
+    expect(engine.adapter.prompts).toHaveLength(1);
+    // A Codex session is briefed for Codex: it changes files with apply_patch.
+    expect(engine.adapter.prompts[0]?.prompt).toContain('apply_patch');
+    expect(untakenMessages(engine.store.db, task.id)).toEqual([]);
+    expect(listPassTurns(engine.store.db, pass.id).map((t) => [t.seq, t.ending])).toEqual([
+      [1, 'ready'],
+      [2, 'ready'],
+    ]);
+  });
+
+  it('fails the turn on a flag with Retry Turn when the thread it would resume after a crash cannot be read back', async () => {
+    const { pass, id } = await openPage(
+      [
+        [
+          { do: 'tool', toolName: 'Write', input: { file_path: PAGE_FILE, content: 'half\n' } },
+          { do: 'crash', message: 'the session stopped' },
+        ],
+      ],
+      undefined,
+      signedIn,
+      PAGE_AREAS,
+      {},
+      onChatGpt,
+    );
+    await waitFor(() => row(id).state === 'QUEUED');
+    await engine.runner.idle();
+    expect(row(id).nextAction).toMatchObject({ kind: 'feedback' });
+    engine.adapter.readBack = (spec) =>
+      Promise.reject(
+        new ConversationUnreadError(
+          `Codex could not read back thread ${spec.providerSessionId}: an error from Codex`,
+        ),
+      );
+
+    engine.launch(id);
+    await waitFor(() => listPassTurns(engine.store.db, pass.id)[0]?.settledAt);
+    await engine.runner.idle();
+
+    const failed = listInbox(engine.store.db, {}).find((i) => i.title.startsWith('Turn failed'));
+    expect(failed?.options.map((o) => o.label)).toEqual(['retry_turn']);
+    expect(failed?.body).toContain('Retry Turn sends it again');
+    expect(engine.adapter.prompts).toHaveLength(1);
+    expect(row(id)).toMatchObject({
+      state: 'WAITING_HUMAN',
+      nextAction: { kind: 'pass_review', inboxId: failed?.id },
+    });
   });
 });
 

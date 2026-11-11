@@ -1946,15 +1946,6 @@ export function createRunner(opts: RunnerOptions): Runner {
       step.role === StepRole.Implement && !pass
         ? listUndeliveredTaskMessages(db, task.id).filter((m) => m.id !== feedback?.id)
         : [];
-    // Codex stamps no client uuid on a turn, so nothing would show it took a message, and a message
-    // held until a turn takes it would hold the lane for ever: a builder message goes to Claude only,
-    // as a pass does (Workbench spec W19).
-    if (provider === Provider.Codex && (feedback !== null || untaken.length > 0))
-      return {
-        kind: 'refused',
-        message: `The builder's message in this task's thread needs a Claude session, and the project's account "${account.label}" runs Codex, which cannot show that a turn took the message. Move the project to a Claude account and retry.`,
-        providerSessionId: savedResumeId,
-      };
     const { token, hash } = mintSessionToken();
     const notReady = unready(account);
     if (notReady) return { kind: 'unready', refusal: notReady, providerSessionId: null };

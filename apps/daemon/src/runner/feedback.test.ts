@@ -331,7 +331,7 @@ describe("a builder's message from the task's thread", () => {
     });
   });
 
-  it('refuses a builder message on a Codex lane, which gives no evidence a turn took it', async () => {
+  it('hands a builder message to a Codex lane under its uuid, delivered once a turn took it', async () => {
     const book: FakeScriptBook = { Alpha: [[{ do: 'consume' }, { do: 'turn_complete' }]] };
     engine = await createTestEngine(
       book,
@@ -353,10 +353,11 @@ describe("a builder's message from the task's thread", () => {
     engine.launch(workstream.id);
     await engine.runner.idle();
 
-    expect(engine.adapter.prompts).toEqual([]);
-    expect(getWorkstream(engine.store.db, workstream.id)).toMatchObject({ state: 'FAILED' });
-    expect(getWorkstream(engine.store.db, workstream.id).failureReason).toMatch(/Claude/);
-    expect(getTaskMessageRow(engine.store.db, message).pushedAt).toBeNull();
+    const [started] = engine.adapter.prompts;
+    expect(started?.promptUuid).toBe(idUuid(message));
+    expect(started?.prompt).toContain(`(message ${message}):\nMake it blue`);
+    expect(getTaskMessageRow(engine.store.db, message).deliveredAt).not.toBeNull();
+    expect(getWorkstream(engine.store.db, workstream.id).state).not.toBe('FAILED');
   });
 
   describe('a Codex thread resumed after a restart with a message pushed to it and never seen taken', () => {

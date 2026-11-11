@@ -390,6 +390,25 @@ describe('POST /projects/:projectId/passes', () => {
     ]);
   });
 
+  it('opens a pass on a project whose account is a ChatGPT plan, with its first message', async () => {
+    const project = await projectWith(PAGES);
+    const settings = await taskOn(project, 'Settings: tidy', ['settings']);
+    const { account } = await api().post('/accounts', AccountCreatedDto, {
+      kind: 'codex_signin',
+      label: 'ChatGPT plan',
+    });
+    await api().patch(`/projects/${project.id}`, ProjectDto, { accountId: account.id });
+
+    const opened = await api().post(`/projects/${project.id}/passes`, PassOpenedDto, {
+      name: 'Polish pages',
+      taskIds: [settings.id],
+      firstMessage: 'Tidy the form',
+    });
+
+    expect(opened.pass).toMatchObject({ state: 'OPEN' });
+    expect(firstMessages(settings)).toEqual(['Tidy the form']);
+  });
+
   it("sends the builder's first message to every page, over a task's description", async () => {
     const project = await projectWith(PAGES);
     const settings = await taskOn(project, 'Settings: tidy', ['settings'], 'Tidy the form');
@@ -454,20 +473,6 @@ describe('POST /projects/:projectId/passes', () => {
         const settings = await taskOn(project, 'Settings: tidy', ['settings']);
         const people = await taskOn(project, 'People: tidy', ['people']);
         return { project, taskIds: [settings.id, people.id], pageCap: 1 };
-      },
-    },
-    {
-      name: 'a project on a ChatGPT account',
-      status: 409,
-      arrange: async () => {
-        const project = await projectWith(PAGES);
-        const task = await taskOn(project, 'Settings: tidy', ['settings']);
-        const { account } = await api().post('/accounts', AccountCreatedDto, {
-          kind: 'codex_signin',
-          label: 'ChatGPT plan',
-        });
-        await api().patch(`/projects/${project.id}`, ProjectDto, { accountId: account.id });
-        return { project, taskIds: [task.id] };
       },
     },
   ])('refuses $name with $status, opening nothing', async ({ arrange, status }) => {

@@ -267,8 +267,8 @@ export interface ApiServices {
   listBatches(projectId: ProjectId): BatchDto[];
   /**
    * Opens a Workbench pass on the project's folder and writes each page's first message: the one
-   * given, else the task's description when it has one. Refused (409) on a ChatGPT account, whose
-   * sessions cannot show that a turn took a message, and for whatever the open itself refuses.
+   * given, else the task's description when it has one. Refused (409) for whatever the open itself
+   * refuses. A pass runs on the project's own account, Claude or Codex.
    */
   openPass(projectId: ProjectId, input: PassOpenRequest): Promise<PassOpenedDto>;
   /** The pass as the Workbench reads it: its pages and every turn's timing. */

@@ -1,8 +1,6 @@
 import {
   AreaRole,
   PassLackKind,
-  Provider,
-  providerOf,
   type AreaDef,
   type PassLackDto,
   type PassStartDto,
@@ -14,7 +12,6 @@ import {
   findOpenPass,
   findUnfinishedBatch,
   folderAreaHolder,
-  getAccountRow,
   getProject,
   getTask,
   getWorkstreamRow,
@@ -36,7 +33,6 @@ export interface PassStartDeps {
 
 /** Why a pass can't open now, as a code the picker keys on, beside the words it shows. */
 const PassStartRefusal = {
-  ChatGptAccount: 'chatgpt_account',
   NoPageArea: 'no_page_area',
   PassOpen: 'pass_open',
   UnfinishedBatch: 'unfinished_batch',
@@ -48,12 +44,6 @@ const PassStartRefusal = {
 
 /** The first of what refuses the project a pass from its rows, in the order opening checks them. */
 function rowRefusal(db: DbReader, project: ProjectDto): PassStartDto['refusal'] {
-  const account = getAccountRow(db, project.accountId);
-  if (providerOf(account.kind) === Provider.Codex)
-    return {
-      code: PassStartRefusal.ChatGptAccount,
-      message: `${project.name} runs on the ChatGPT account "${account.label}", which cannot show that a turn took the builder's message; move the project to a Claude account to open a pass`,
-    };
   if (!project.areas.some((a) => a.role === AreaRole.Page))
     return {
       code: PassStartRefusal.NoPageArea,

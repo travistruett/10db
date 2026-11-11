@@ -137,6 +137,20 @@ describe('the Start Pass preview', () => {
     expect((await preview()).lacks).toEqual([]);
   });
 
+  it("refuses nothing for a project on a ChatGPT account: a pass runs on the project's own account", async () => {
+    harness();
+    h.state.write((ctx) => {
+      const account = insertAccount(
+        ctx,
+        { kind: 'codex_signin', label: 'ChatGPT plan' },
+        { configDirFor: (id) => join(h.dataDir, 'accounts', id) },
+      );
+      patchProject(ctx, h.project.id, { accountId: account.id });
+    });
+
+    expect((await preview()).refusal).toBeNull();
+  });
+
   it.each<{ name: string; code: string; arrange: () => Promise<void> | void }>([
     {
       name: 'a project with no page area',
@@ -203,20 +217,6 @@ describe('the Start Pass preview', () => {
       code: 'detached_head',
       arrange: () => {
         h.git$('switch', '-q', '--detach');
-      },
-    },
-    {
-      name: 'a project on a ChatGPT account',
-      code: 'chatgpt_account',
-      arrange: () => {
-        h.state.write((ctx) => {
-          const account = insertAccount(
-            ctx,
-            { kind: 'codex_signin', label: 'ChatGPT plan' },
-            { configDirFor: (id) => join(h.dataDir, 'accounts', id) },
-          );
-          patchProject(ctx, h.project.id, { accountId: account.id });
-        });
       },
     },
   ])('refuses $name with its reason, as opening would', async ({ arrange, code }) => {
