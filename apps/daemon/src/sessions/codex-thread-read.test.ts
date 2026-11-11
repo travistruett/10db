@@ -41,12 +41,13 @@ const userMessage = (clientId: string | null) => ({
   clientId,
   content: [{ type: 'text', text: 'Make it blue', text_elements: [] }],
 });
-const turn = (id: string, items: readonly unknown[]) => ({
+const turn = (id: string, items: readonly unknown[], status = 'completed') => ({
   id,
-  status: 'completed',
+  status,
   items,
   itemsView: 'full',
 });
+const item = (type: string) => ({ type, id: `item-${type}` });
 
 function specOf(over: Partial<ConversationReadSpec> = {}): ConversationReadSpec {
   return {
@@ -108,6 +109,35 @@ describe('reading a Codex thread back', () => {
       'thread/turns/list',
     ]);
     expect(server.killed()).toBe(true);
+  });
+
+  // As a live turn's: a message is taken once the model answered after it in its turn, or the turn
+  // completed; a turn cut short before that took none of what it recorded.
+  it.each<[string, ReturnType<typeof turn>, readonly string[]]>([
+    ['a completed turn', turn('t', [userMessage('u1')]), ['u1']],
+    [
+      'an interrupted turn the model answered in',
+      turn('t', [userMessage('u1'), item('reasoning')], 'interrupted'),
+      ['u1'],
+    ],
+    [
+      'an interrupted turn, a message steered in after the last answer',
+      turn('t', [userMessage('u1'), item('reasoning'), userMessage('u2')], 'interrupted'),
+      ['u1'],
+    ],
+    ['a turn cut short before any answer', turn('t', [userMessage('u1')], 'interrupted'), []],
+    ['a turn still in progress, unanswered', turn('t', [userMessage('u1')], 'inProgress'), []],
+    [
+      'a failed turn with only a compaction after the message',
+      turn('t', [userMessage('u1'), item('contextCompaction')], 'failed'),
+      [],
+    ],
+  ])('takes a message in %s only on evidence', async (_name, one, held) => {
+    const server = fakeAppServer({
+      initialize: INITIALIZE,
+      'thread/turns/list': { data: [one], nextCursor: null },
+    });
+    expect(await read(server)).toEqual(held);
   });
 
   it("runs the child with the account's home and its empty HOME", async () => {

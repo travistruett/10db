@@ -148,12 +148,36 @@ export const ItemCompleted = z.looseObject({
 export const TurnStarted = z.looseObject({ threadId: z.string(), turn: Turn });
 
 /**
+ * The thread items the model writes as it answers: one of these after a user message in a turn shows
+ * the model took the message in. A user message, a hook's prompt, a compaction and the review-mode
+ * markers are written without the model.
+ */
+export const MODEL_ITEMS: ReadonlySet<string> = new Set([
+  'agentMessage',
+  'reasoning',
+  'plan',
+  'commandExecution',
+  'fileChange',
+  'mcpToolCall',
+  'dynamicToolCall',
+  'collabAgentToolCall',
+  'functionCallOutput',
+  'webSearch',
+  'imageView',
+  'imageGeneration',
+  'subAgentActivity',
+  'sleep',
+]);
+
+/**
  * One page of a thread's turns (`thread/turns/list` with `itemsView: "full"`), as far as 10db reads
- * it: each user message item's client uuid, which `clientUserMessageId` set when it was sent.
+ * it: each turn's status and its items in order, a user message item with the client uuid
+ * `clientUserMessageId` set when it was sent.
  */
 export const ThreadTurnsPage = z.looseObject({
   data: z.array(
     z.looseObject({
+      status: TurnStatus,
       items: z.array(
         z.looseObject({ type: z.string(), clientId: z.string().nullable().optional() }),
       ),

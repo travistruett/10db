@@ -3,7 +3,7 @@ import { systemClock } from '../clock';
 import { CODEX_CLIENT_INFO } from './codex-account-read';
 import type { CodexAdapterOptions } from './codex-adapter';
 import type { CodexHome } from './codex-home';
-import { InitializeResponse, ThreadTurnsPage } from './codex-protocol';
+import { InitializeResponse, MODEL_ITEMS, ThreadTurnsPage } from './codex-protocol';
 import { CodexRpcError, createCodexRpc, spawnAppServer } from './codex-rpc';
 import { ConversationUnreadError, type ConversationReadSpec } from './types';
 
@@ -17,6 +17,24 @@ export const THREAD_READ_MS = 60_000;
 export interface ThreadReadDeps extends CodexAdapterOptions {
   /** The home for an account's `CODEX_HOME`. */
   readonly homes: (path: string) => CodexHome;
+}
+
+/**
+ * The client uuids a turn took, on the evidence a live session reads (`mapCodexNotification`): a user
+ * message is taken once a model item follows it in the turn, or the turn completed.
+ */
+function takenIn(turn: z.infer<typeof ThreadTurnsPage>['data'][number]): string[] {
+  const taken: string[] = [];
+  let recorded: string[] = [];
+  for (const item of turn.items) {
+    if (item.type === 'userMessage' && typeof item.clientId === 'string')
+      recorded.push(item.clientId);
+    else if (MODEL_ITEMS.has(item.type)) {
+      taken.push(...recorded);
+      recorded = [];
+    }
+  }
+  return turn.status === 'completed' ? [...taken, ...recorded] : taken;
 }
 
 /** The read went unanswered for `THREAD_READ_MS`. */
@@ -62,10 +80,7 @@ export async function readThreadClientUuids(
         { threadId: spec.providerSessionId, itemsView: 'full', cursor },
         ThreadTurnsPage,
       );
-      for (const turn of page.data)
-        for (const item of turn.items)
-          if (item.type === 'userMessage' && typeof item.clientId === 'string')
-            uuids.push(item.clientId);
+      for (const turn of page.data) uuids.push(...takenIn(turn));
       cursor = page.nextCursor ?? null;
     } while (cursor !== null);
     return uuids;

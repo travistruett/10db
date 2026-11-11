@@ -1185,6 +1185,14 @@ describe('the turns', () => {
       turnId: 'turn-1',
       item: { type: 'userMessage', id: 'u2', clientId: steered, content: [] },
     });
+    // Recorded is not yet taken: the model's answer after it is the evidence.
+    await settled(running);
+    expect(seen.filter((e) => e.type === 'consumed')).toEqual([]);
+    server.notify('item/completed', {
+      threadId: THREAD,
+      turnId: 'turn-1',
+      item: { type: 'reasoning', id: 'r1' },
+    });
     await vi.waitFor(() => {
       expect(seen).toContainEqual({ type: 'consumed', uuids: [steered] });
     });

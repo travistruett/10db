@@ -36,6 +36,15 @@ const tokenUsage = (usage: { last: number; window: number | null; total?: Counts
   },
 });
 
+const U1 = 'c0ffee00-0000-4000-8000-000000000001';
+const U2 = 'c0ffee00-0000-4000-8000-000000000002';
+const userMessage = (clientId: string) => ({
+  type: 'userMessage',
+  id: `item-${clientId}`,
+  clientId,
+  content: [{ type: 'text', text: 'Make it blue', text_elements: [] }],
+});
+
 const turnStarted = {
   method: 'turn/started',
   params: { threadId: 'thr-1', turn: { id: 'turn-1', status: 'inProgress' } },
@@ -89,14 +98,9 @@ describe('mapCodexNotification', () => {
       [{ type: 'activity', kind: 'text', summary: 'hi' }],
     ],
     [
-      'a user message the turn took under a client uuid',
-      itemCompleted({
-        type: 'userMessage',
-        id: 'u1',
-        clientId: 'c0ffee00-0000-4000-8000-000000000001',
-        content: [{ type: 'text', text: 'Make it blue', text_elements: [] }],
-      }),
-      [{ type: 'consumed', uuids: ['c0ffee00-0000-4000-8000-000000000001'] }],
+      'a user message recorded under a client uuid, which no model item has followed yet',
+      itemCompleted(userMessage(U1)),
+      [],
     ],
     [
       'a user message with no client uuid',
@@ -277,6 +281,73 @@ describe('mapCodexNotification', () => {
     expect(
       mapCodexNotification(turnCompleted({ status, error: { message: 'boom' } }), state),
     ).toMatchObject([{ type: 'turn_complete', result }]);
+  });
+
+  // Workbench spec §6.3: a message is consumed, not only received. Codex records a user message as a
+  // turn begins to take it, before the model answers, so it counts as taken once a model item follows
+  // it in the turn, as Claude Code's first assistant message stamps it, or once the turn completes.
+  it.each<[string, readonly { method: string; params: unknown }[], readonly unknown[]]>([
+    [
+      'a model item after the message: taken, before the item',
+      [turnStarted, itemCompleted(userMessage(U1)), itemCompleted({ type: 'reasoning', id: 'r' })],
+      [{ type: 'consumed', uuids: [U1] }],
+    ],
+    [
+      'two messages, then a command: both taken at once, then the command',
+      [
+        turnStarted,
+        itemCompleted(userMessage(U1)),
+        itemCompleted(userMessage(U2)),
+        itemCompleted({ type: 'commandExecution', command: 'ls' }),
+      ],
+      [
+        { type: 'consumed', uuids: [U1, U2] },
+        expect.objectContaining({ type: 'activity', kind: 'tool', summary: 'ls' }),
+      ],
+    ],
+    [
+      'a compaction after the message: not a model answer',
+      [turnStarted, itemCompleted(userMessage(U1)), itemCompleted({ type: 'contextCompaction' })],
+      [{ type: 'compacted', trigger: 'auto' }],
+    ],
+    [
+      'the turn fails before the model answered, on a usage limit: not taken',
+      [
+        turnStarted,
+        itemCompleted(userMessage(U1)),
+        turnCompleted({ status: 'failed', error: { message: 'limit' } }),
+      ],
+      [expect.objectContaining({ type: 'turn_complete', result: 'error' })],
+    ],
+    [
+      'the turn is interrupted before the model answered: not taken',
+      [turnStarted, itemCompleted(userMessage(U1)), turnCompleted({ status: 'interrupted' })],
+      [expect.objectContaining({ type: 'turn_complete', result: 'error' })],
+    ],
+    [
+      'the turn completes: taken, before its completion',
+      [turnStarted, itemCompleted(userMessage(U1)), turnCompleted({ status: 'completed' })],
+      [{ type: 'consumed', uuids: [U1] }, expect.objectContaining({ type: 'turn_complete' })],
+    ],
+    [
+      'a message the last turn recorded and dropped is not taken by the next',
+      [
+        turnStarted,
+        itemCompleted(userMessage(U1)),
+        turnCompleted({ status: 'interrupted' }),
+        turnStarted,
+        itemCompleted(userMessage(U2)),
+        itemCompleted({ type: 'agentMessage', text: 'done' }),
+      ],
+      [
+        expect.objectContaining({ type: 'turn_complete' }),
+        { type: 'consumed', uuids: [U2] },
+        expect.objectContaining({ type: 'activity', kind: 'text' }),
+      ],
+    ],
+  ])('takes a message on evidence: %s', (_name, notifications, expected) => {
+    const state = createTurnState();
+    expect(notifications.flatMap((n) => mapCodexNotification(n, state))).toEqual(expected);
   });
 
   it('tracks the active turn from turn/started to turn/completed', () => {
