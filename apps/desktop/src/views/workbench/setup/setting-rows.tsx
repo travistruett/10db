@@ -45,6 +45,7 @@ function SettingRow({
             aria-label={`${label} value`}
             value={draft.value}
             disabled={!draft.ticked}
+            error={draft.ticked && draft.value.trim() === '' ? 'Empty: not saved' : undefined}
             styles={{ input: { fontFamily: 'var(--mantine-font-family-monospace)' } }}
             onChange={(event) => {
               onChange({ value: event.currentTarget.value });

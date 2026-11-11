@@ -76,4 +76,14 @@ describe('SettingRows', () => {
       changedCheckCommand: 'pnpm lint',
     });
   });
+
+  it('says an emptied row is not saved, and leaves it out of the patch', () => {
+    renderWithTheme(<Harness />);
+    expect(screen.queryByText('Empty: not saved')).toBeNull();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Check after each turn value' }), {
+      target: { value: '  ' },
+    });
+    expect(screen.getByText('Empty: not saved')).toBeTruthy();
+    expect(patch()).toEqual({ appUrl: 'http://localhost:8800', sandboxDocker: true });
+  });
 });
