@@ -155,8 +155,10 @@ export async function callsDocker(command: string, read: ReadRepoFile): Promise<
 }
 
 /**
- * The commit `refs/remotes/origin/<base>` is at, or null when there is none. Named in full: a short
- * `origin/<base>` loses to a local branch or tag of that name, which a lane can make.
+ * The commit `refs/remotes/origin/<base>` is at, found by that exact name (`Git.remoteTrackingCommit`),
+ * or null when there is none. Never a guessed name: git takes a local branch or tag named
+ * `origin/<base>`, or `refs/remotes/origin/<base>` under `refs/heads/`, for a short or missing one,
+ * and a lane can make either.
  */
 export async function originBaseCommit(
   git: Git,
@@ -164,7 +166,7 @@ export async function originBaseCommit(
   baseBranch: string,
 ): Promise<string | null> {
   try {
-    return await git.commitAt(repoPath, `refs/remotes/origin/${baseBranch}`);
+    return await git.remoteTrackingCommit(repoPath, baseBranch);
   } catch {
     return null;
   }

@@ -130,6 +130,9 @@ describe('gateCallsDocker', () => {
       gitIn(repo, 'push', '-q', 'origin', 'main');
       expect(await gateCallsDocker(createGit(), project)).toBe(true);
       expect(await gateCallsDocker(createGit(), { ...project, baseBranch: 'none' })).toBe(false);
+      // No remote-tracking branch `lane`, but a local branch named like it in full.
+      gitIn(repo, 'branch', 'refs/remotes/origin/lane');
+      expect(await gateCallsDocker(createGit(), { ...project, baseBranch: 'lane' })).toBe(false);
     } finally {
       pair.cleanup();
     }

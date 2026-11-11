@@ -640,6 +640,13 @@ export interface Git {
   commitsSince(repo: string, base: string, tip?: string): Promise<string[]>;
   /** How many commits `tip` has that `base` lacks, every parent followed (`rev-list --count`). */
   countCommits(repo: string, base: string, tip: string): Promise<number>;
+  /**
+   * The commit `refs/remotes/origin/<branch>` is at, found by that exact name (`show-ref --verify`,
+   * never git's guessing of a short or partial name, which would take a local branch named
+   * `origin/<branch>` or `refs/remotes/origin/<branch>`) and peeled by its object id; null when there
+   * is no such ref or it names no commit.
+   */
+  remoteTrackingCommit(repo: string, branch: string): Promise<string | null>;
   /** The paths commit `rev` tracks, read from the object store (`ls-tree -r`), sorted by git. */
   filesAt(repo: string, rev: string): Promise<string[]>;
   /**
@@ -4301,6 +4308,18 @@ export function createGit(opts: GitOptions = {}): Git {
       )
         .split('\n')
         .filter(Boolean);
+    },
+    async remoteTrackingCommit(repo, branch) {
+      const ref = `refs/remotes/origin/${branch}`;
+      const c = await pinned(repo);
+      // for-each-ref matches names, never guesses one: the line whose name is exactly `ref`, if any.
+      const listed = await git(c, ['for-each-ref', '--format=%(objectname) %(refname)', ref]);
+      const oid = listed
+        .split('\n')
+        .map((line) => line.split(' '))
+        .find(([, name]) => name === ref)?.[0];
+      if (oid === undefined || !OBJECT_ID.test(oid)) return null;
+      return revParse(c, `${oid}^{commit}`);
     },
     async filesAt(repo, rev) {
       // A rev that starts with a dash would be read as an option by ls-tree.

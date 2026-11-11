@@ -371,6 +371,22 @@ describe('history queries', () => {
     expect(await git.countCommits(repo.path, tip, base)).toBe(0);
   });
 
+  it("resolves origin's remote-tracking branch by its exact name, never a branch named like it", async () => {
+    const first = rawGit('rev-parse', 'HEAD');
+    // No remote ref, but local branches a lane could make, named like it in full and short.
+    rawGit('branch', 'refs/remotes/origin/main');
+    rawGit('branch', 'origin/main');
+    expect(await git.remoteTrackingCommit(repo.path, 'main')).toBeNull();
+    rawGit('update-ref', 'refs/remotes/origin/main', first);
+    rawGit('commit', '-q', '--allow-empty', '-m', 'later');
+    rawGit('update-ref', 'refs/heads/origin/main', 'HEAD');
+    expect(await git.remoteTrackingCommit(repo.path, 'main')).toBe(first);
+    // An annotated tag stored at the ref is peeled to its commit.
+    rawGit('tag', '-a', '-m', 'tagged', 'v1', first);
+    rawGit('update-ref', 'refs/remotes/origin/main', rawGit('rev-parse', 'v1'));
+    expect(await git.remoteTrackingCommit(repo.path, 'main')).toBe(first);
+  });
+
   it("lists a commit's tracked files, not the checkout's, nor a link's target", async () => {
     const first = rawGit('rev-parse', 'HEAD');
     mkdirSync(join(repo.path, 'dir'));

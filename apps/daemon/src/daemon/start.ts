@@ -249,7 +249,7 @@ import { createGateRunner, createGateSlots, limitGates } from '../verify';
 import { CLIENT_APP } from '../version';
 import { createWatcher, systemWatch, type WatchFn } from '../watcher';
 import { autoDocker } from './auto-docker';
-import { MAX_DOCKER_SCAN_BYTES } from './docker-need';
+import { MAX_DOCKER_SCAN_BYTES, originBaseCommit } from './docker-need';
 import { createProjectPinStore } from './checkout-pins';
 import {
   createCheckoutTrustedHandler,
@@ -891,8 +891,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       state,
       inbox,
       logger: logger.child({ component: 'gate' }),
-      readBase: async (repoPath, ref, path) => {
-        const read = await git.fileAt(repoPath, ref, path, MAX_DOCKER_SCAN_BYTES);
+      baseCommit: (repoPath, baseBranch) => originBaseCommit(git, repoPath, baseBranch),
+      readBase: async (repoPath, commit, path) => {
+        const read = await git.fileAt(repoPath, commit, path, MAX_DOCKER_SCAN_BYTES);
         return read.kind === 'file' ? read.text : null;
       },
     },

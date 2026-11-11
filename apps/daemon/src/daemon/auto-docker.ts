@@ -17,10 +17,15 @@ export interface AutoDockerDeps {
   readonly inbox: InboxService;
   readonly logger: Logger;
   /**
-   * The text of a repository file as the project's base branch commits it, or null when absent. Never
+   * The commit `refs/remotes/origin/<base>` is at, found by that exact name (`originBaseCommit`), or
+   * null when there is none.
+   */
+  readonly baseCommit: (repoPath: string, baseBranch: string) => Promise<string | null>;
+  /**
+   * The text of a repository file in `commit` (the one `baseCommit` gave), or null when absent. Never
    * the working tree: a lane writes that, and a lane's edit must not be what turns Docker on.
    */
-  readonly readBase: (repoPath: string, ref: string, path: string) => Promise<string | null>;
+  readonly readBase: (repoPath: string, commit: string, path: string) => Promise<string | null>;
 }
 
 /**
@@ -46,13 +51,14 @@ export function autoDocker(inner: GateRunner, deps: AutoDockerDeps): GateRunner 
   }
 
   async function seenToCallDocker(project: ProjectDto, command: string): Promise<boolean> {
-    // Reads origin's base branch only. The local branch is where a local-delivery project's lanes
-    // commit, so a file only it has is lane-written. The ref is named in full: a short
-    // `origin/<base>` loses to a local branch or tag of that name, which a lane can make.
-    const ref = `refs/remotes/origin/${project.baseBranch}`;
+    // Reads origin's base branch only, by the commit its exact ref name gives, once. The local branch
+    // is where a local-delivery project's lanes commit, so a file only it has is lane-written, and a
+    // guessed name could be a lane-made branch or tag.
+    const commit = await deps.baseCommit(project.repoPath, project.baseBranch).catch(() => null);
+    if (commit === null) return false;
     const read = async (path: string): Promise<string | null> => {
       try {
-        return await deps.readBase(project.repoPath, ref, path);
+        return await deps.readBase(project.repoPath, commit, path);
       } catch {
         return null;
       }
