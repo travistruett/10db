@@ -358,6 +358,18 @@ describe('history queries', () => {
     expect(await git.filesChangedBetween(repo.path, base, sha)).toEqual(['b.txt', 'dir/a.txt']);
     expect(await git.filesChangedBetween(repo.path, sha, sha)).toEqual([]);
   });
+
+  it('counts the commits a tip has that a base lacks, those a merge brought in too', async () => {
+    const base = rawGit('rev-parse', 'HEAD');
+    rawGit('checkout', '-q', '-b', 'side');
+    rawGit('commit', '-q', '--allow-empty', '-m', 'on the side');
+    rawGit('checkout', '-q', 'main');
+    rawGit('commit', '-q', '--allow-empty', '-m', 'on main');
+    rawGit('merge', '-q', '--no-ff', '--no-edit', 'side');
+    const tip = rawGit('rev-parse', 'HEAD');
+    expect(await git.countCommits(repo.path, base, tip)).toBe(3);
+    expect(await git.countCommits(repo.path, tip, base)).toBe(0);
+  });
 });
 
 describe('folderAt', () => {

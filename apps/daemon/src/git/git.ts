@@ -625,6 +625,8 @@ export interface Git {
    * that brought another branch in is listed, the commits it brought are not.
    */
   commitsSince(repo: string, base: string, tip?: string): Promise<string[]>;
+  /** How many commits `tip` has that `base` lacks, every parent followed (`rev-list --count`). */
+  countCommits(repo: string, base: string, tip: string): Promise<number>;
   /**
    * When HEAD's history last committed a change to a file one of the globs matches (git's `glob`
    * pathspec), as an ISO time in UTC; null with no glob, no commit or none that touched one.
@@ -4249,6 +4251,11 @@ export function createGit(opts: GitOptions = {}): Git {
       )
         .split('\n')
         .filter(Boolean);
+    },
+    async countCommits(repo, base, tip) {
+      return Number(
+        (await git(await pinned(repo), ['rev-list', '--count', `${base}..${tip}`, '--'])).trim(),
+      );
     },
     async operationInProgress(repo) {
       return operationIn(await pinned(repo));
