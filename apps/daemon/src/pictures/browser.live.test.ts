@@ -30,7 +30,8 @@ const live = loadEnv(process.env).TENDB_LIVE_BROWSER === '1';
 const run = promisify(execFile);
 
 const SPELLINGS = ['localhost', '127.0.0.1', '[::1]'] as const;
-const SECRET = 'dev-session-5f0c2a9e7b1d4c3a';
+/** The dev login's session cookie: a value unique enough to find in any file the browser writes. */
+const COOKIE_MARKER = 'dev-session-5f0c2a9e7b1d4c3a';
 const VIEWPORT = { width: 800, height: 600 };
 
 /** A logger that keeps every line it is given. */
@@ -225,7 +226,7 @@ function appHandler(daemonPort: number, udpPort: number) {
       case 'login':
         res.writeHead(302, {
           location: '/whoami',
-          'set-cookie': `session=${SECRET}; Path=/; HttpOnly; SameSite=Lax; Max-Age=3600`,
+          'set-cookie': `session=${COOKIE_MARKER}; Path=/; HttpOnly; SameSite=Lax; Max-Age=3600`,
         });
         res.end();
         return;
@@ -240,7 +241,7 @@ function appHandler(daemonPort: number, udpPort: number) {
         toDaemon('localhost', '/stolen-login');
         return;
       case 'whoami':
-        if ((req.headers.cookie ?? '').includes(`session=${SECRET}`)) {
+        if ((req.headers.cookie ?? '').includes(`session=${COOKIE_MARKER}`)) {
           html(page('<h1>Signed in</h1>'));
         } else {
           res.writeHead(302, { location: '/signin' });
@@ -573,7 +574,7 @@ describe.skipIf(!live)('the pinned browser, live', () => {
       url: `${appUrl}/login`,
       signal: new AbortController().signal,
     });
-    expect(state.cookies.find((c) => c.name === 'session')?.value).toBe(SECRET);
+    expect(state.cookies.find((c) => c.name === 'session')?.value).toBe(COOKIE_MARKER);
     // Signed out, the app sends the page to its sign-in; signed in, it shows it.
     expect((await shoot('/whoami')).outcome).toBe(ShotOutcome.Elsewhere);
     const shot = await shoot('/whoami', state);
@@ -586,7 +587,7 @@ describe.skipIf(!live)('the pinned browser, live', () => {
     expect(profiles.size).toBe(1);
     const files = [...profiles].flatMap(filesUnder);
     expect(files.length).toBeGreaterThan(0);
-    expect(files.filter((f) => readFileSync(f).includes(SECRET))).toEqual([]);
+    expect(files.filter((f) => readFileSync(f).includes(COOKIE_MARKER))).toEqual([]);
   }, 60_000);
 
   it('leaves no browser process once closed', async () => {
