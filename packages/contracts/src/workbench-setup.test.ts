@@ -50,6 +50,16 @@ describe('withoutPages', () => {
     expect(both).toEqual(withoutPages(withoutPages(PROPOSED, ['board']), ['friday']));
     expect(setupAreasProblem(both, [])).toBeNull();
   });
+
+  it('puts a kept area that became a page back exactly as it was when its page is unticked', () => {
+    const was: AreaDef = { name: 'friday', globs: ['app/(app)/friday/**', 'docs/friday.md'] };
+    const rows = [
+      { name: 'friday', route: '/friday', folders: ['app/(app)/friday/'], was },
+      { name: 'board', route: '/board', folders: ['src/views/board/'] },
+    ];
+    expect(withoutPages(PROPOSED, ['friday'], rows)).toEqual([was, ...PROPOSED.slice(1)]);
+    expect(withoutPages(PROPOSED, ['board'], rows)).toEqual([PROPOSED[0], ...PROPOSED.slice(2)]);
+  });
 });
 
 describe('setupAreasProblem', () => {
