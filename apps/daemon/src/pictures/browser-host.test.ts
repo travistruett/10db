@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir, waitForAsync, type TempDir } from '../../test/fixtures';
@@ -129,7 +129,7 @@ describe('the browser host', () => {
       });
     });
 
-  function makeHost(withLedger = true): BrowserHost<StandIn> {
+  function makeHost(withLedger = true, exe = '/bin/sleep'): BrowserHost<StandIn> {
     host = createBrowserHost({
       dataDir,
       ledgers: withLedger ? { sweep, root: ledgerRoot } : null,
@@ -137,7 +137,7 @@ describe('the browser host', () => {
       clock,
       logger: silentLogger,
       launch,
-      ensure: () => Promise.resolve('/bin/sleep'),
+      ensure: () => Promise.resolve(exe),
       env: { HOME: dir.path, TMPDIR: dir.path },
     });
     return host;
@@ -258,6 +258,18 @@ describe('the browser host', () => {
     await h.close();
     expect(alive(pid)).toBe(false);
     expect(readdirSync(ledgerRoot)).toEqual([]);
+  });
+
+  it('holds a browser whose executable path goes through a link', async () => {
+    const link = join(dir.path, 'chrome-link');
+    symlinkSync('/bin/sleep', link);
+    const h = makeHost(true, link);
+    const pid = await h.use((browser) => Promise.resolve(browser.pid));
+    expect(readFileSync(join(ledgerRoot, readdirSync(ledgerRoot)[0] ?? ''), 'utf8')).toContain(
+      `"pid":${String(pid)}`,
+    );
+    await h.close();
+    expect(alive(pid)).toBe(false);
   });
 
   it('a browser left by a daemon that died is stopped by the next start', async () => {

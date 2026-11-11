@@ -114,12 +114,13 @@ The fake adapter (`sessions/fake-adapter.ts`) is the test boundary for Claude Co
   `extractZipWithTar`). `browser-host.ts` launches it on first use with the renderer sandbox on, `HOME` and
   `TMPDIR` only, artifacts under `<data dir>/browser/artifacts`, and every request, loopback included, through
   `app-proxy.ts`'s proxy as Chromium's own switches (`launchOptions`); it runs one shot or sign-in at a time,
-  holds the browser's processes in a lane process ledger (`browser-ledger.ts`), refuses to launch with no ledger
-  sweep, and closes after five idle minutes. The proxy forwards only the app's origin and a `CONNECT` to its
-  host and port (`origin-guard.ts`, `proxyAllows`); Playwright's routing (`requestAllowed`) is a first check
-  only, because it never sees a redirect's next hop. `shotOutcome` and `OVERLAY_SELECTORS` are pure.
-  `src/pictures/browser.live.test.ts` runs the real headless shell behind `TENDB_LIVE_BROWSER=1`, never in CI;
-  a bump of `BROWSER_PIN` or `playwright-core` passes it first.
+  holds the browser's processes in a lane process ledger (`browser-ledger.ts`: the browser is the daemon's child
+  whose executable, by its real path, is the pinned one; `ps`'s `comm` on macOS, `/proc/<pid>/exe` on Linux, whose
+  `comm` is a cut name), refuses to launch with no ledger sweep, and closes after five idle minutes. The proxy
+  forwards only the app's origin and a `CONNECT` to its host and port (`origin-guard.ts`, `proxyAllows`);
+  Playwright's routing (`requestAllowed`) is a first check only, because it never sees a redirect's next hop.
+  `shotOutcome` and `OVERLAY_SELECTORS` are pure. `src/pictures/browser.live.test.ts` runs the real headless
+  shell behind `TENDB_LIVE_BROWSER=1`, never in CI; a bump of `BROWSER_PIN` or `playwright-core` passes it first.
 - `pictures/`'s service (Workbench spec §10-§13): `startPictures` (`pictures.ts`) starts after recovery and drives
   one capture queue (`capture-queue.ts`, a pure step over §3.2 of the plan: one load at a time; a newer turn
   picture replaces the waiting one; the page's next turn, a take-out, a pass entering CLOSING or ABANDONING and a
