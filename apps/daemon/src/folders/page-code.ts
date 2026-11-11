@@ -66,6 +66,11 @@ export function unitSourceFiles(files: readonly string[], unit: string): string[
   );
 }
 
+/** A test or story beside the page's code: what only it imports is test support, not the page's. */
+const isTestFile = (path: string): boolean =>
+  /\.(?:test|spec|stories|test-d)\.[cm]?[jt]sx?$/u.test(path) ||
+  path.split('/').includes('__tests__');
+
 /** Who reaches each file below a folder: one page, no one, or more than one (or the shared roots). */
 const MIXED = Symbol('mixed');
 type FolderOwner = string | null | typeof MIXED;
@@ -125,7 +130,7 @@ export function pageCode(input: PageCodeInput): PageCode {
     reachedBy(
       page.name,
       reachFrom(
-        sources.filter((f) => under(f, page.folder)),
+        sources.filter((f) => under(f, page.folder) && !isTestFile(f)),
         edges,
       ),
     );

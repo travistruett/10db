@@ -141,6 +141,17 @@ describe('pageCode', () => {
       taken: { people: ['web/src/mixed/both.ts'] },
     },
     {
+      name: 'what only a test in the route folder imports is no page’s',
+      repo: {
+        'web/app/(app)/friday/page.tsx': `import '@/src/ui/button';`,
+        'web/app/(app)/friday/page.test.tsx': `import '@/src/test/friday-fixtures';`,
+        'web/src/test/friday-fixtures.ts': '',
+        'web/src/ui/button.tsx': '',
+        'web/app/(app)/people/page.tsx': `import '@/src/ui/button';`,
+      },
+      taken: {},
+    },
+    {
       name: 'a page that imports nothing takes nothing',
       repo: { 'web/app/(app)/friday/page.tsx': '', 'web/src/x.ts': '' },
       aliases: NO_ALIASES,
