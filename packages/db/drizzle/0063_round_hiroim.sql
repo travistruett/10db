@@ -66,8 +66,9 @@ CREATE TABLE `stakeholder_sends` (
 	FOREIGN KEY (`inbox_item_id`) REFERENCES `inbox_items`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `stakeholder_sends_inbox_item_id_unique` ON `stakeholder_sends` (`inbox_item_id`);--> statement-breakpoint
 CREATE INDEX `stakeholder_sends_state_idx` ON `stakeholder_sends` (`state`);--> statement-breakpoint
+CREATE INDEX `stakeholder_sends_card_idx` ON `stakeholder_sends` (`inbox_item_id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `stakeholder_sends_live_card` ON `stakeholder_sends` (`inbox_item_id`) WHERE "stakeholder_sends"."state" IN ('draft', 'sending', 'sent');--> statement-breakpoint
 ALTER TABLE `inbox_items` ADD `assignees` text DEFAULT '[]' NOT NULL;--> statement-breakpoint
 ALTER TABLE `inbox_items` ADD `rule_assignees` text DEFAULT '[]' NOT NULL;--> statement-breakpoint
 ALTER TABLE `inbox_items` ADD `routed_by` text DEFAULT 'rule' NOT NULL;--> statement-breakpoint

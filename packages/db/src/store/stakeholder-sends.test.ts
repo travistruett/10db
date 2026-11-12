@@ -419,12 +419,41 @@ describe('sends', () => {
     });
   });
 
-  it('refuses a second draft for one card', () => {
+  it('refuses a second live send for one card', () => {
     const w = world();
     const id = w.card('q');
     draft(id, [w.mark.id]);
     expect(() => draft(id, [w.mark.id])).toThrow();
   });
+
+  it.each(['closed', 'failed', 'answered'] as const)(
+    'allows a new send after the last one is %s, and the card reads the new one',
+    (state) => {
+      const w = world();
+      const id = w.card('q');
+      const first = draft(id, [w.mark.id]);
+      sent(first.id);
+      if (state === 'closed')
+        store.write((ctx) => {
+          closeSend(ctx, first.id, 'taken_back');
+        });
+      else if (state === 'failed')
+        store.write((ctx) => {
+          failSend(ctx, first.id, 'down');
+        });
+      else
+        store.write((ctx) => {
+          markAnswered(ctx, first.id, {
+            reply: { text: 'A', userId: 'U1', ts: '5.1' },
+            readAs: 'option',
+            answeredBy: w.mark.id,
+            replyVia: 'thread',
+          });
+        });
+      const second = draft(id, [w.ana.id]);
+      expect(sendForCard(store.db, id)).toMatchObject({ id: second.id, state: 'draft' });
+    },
+  );
 });
 
 describe('the daily limit counts new threads', () => {

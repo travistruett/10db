@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "7b39a23a-9d7a-49de-9699-575dbc7ab569",
-  "prevId": "8847c20d-2aed-40b9-8631-df83e602d883",
+  "id": "a8f060f9-a586-4296-b4eb-0d1087d7f541",
+  "prevId": "59d16d35-68a9-47c1-b6e2-c10cc4b65337",
   "tables": {
     "aa_models": {
       "name": "aa_models",
@@ -6940,19 +6940,27 @@
         }
       },
       "indexes": {
-        "stakeholder_sends_inbox_item_id_unique": {
-          "name": "stakeholder_sends_inbox_item_id_unique",
-          "columns": [
-            "inbox_item_id"
-          ],
-          "isUnique": true
-        },
         "stakeholder_sends_state_idx": {
           "name": "stakeholder_sends_state_idx",
           "columns": [
             "state"
           ],
           "isUnique": false
+        },
+        "stakeholder_sends_card_idx": {
+          "name": "stakeholder_sends_card_idx",
+          "columns": [
+            "inbox_item_id"
+          ],
+          "isUnique": false
+        },
+        "stakeholder_sends_live_card": {
+          "name": "stakeholder_sends_live_card",
+          "columns": [
+            "inbox_item_id"
+          ],
+          "isUnique": true,
+          "where": "\"stakeholder_sends\".\"state\" IN ('draft', 'sending', 'sent')"
         }
       },
       "foreignKeys": {

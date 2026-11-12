@@ -1,6 +1,6 @@
 {
-  "id": "bd1e110c-70b7-43e2-a4d0-f0d8a65e77ec",
-  "prevId": "7b39a23a-9d7a-49de-9699-575dbc7ab569",
+  "id": "dba6d15c-1687-4294-957e-cecdd83d8da1",
+  "prevId": "a8f060f9-a586-4296-b4eb-0d1087d7f541",
   "version": "6",
   "dialect": "sqlite",
   "tables": {
@@ -6940,19 +6940,27 @@
         }
       },
       "indexes": {
-        "stakeholder_sends_inbox_item_id_unique": {
-          "name": "stakeholder_sends_inbox_item_id_unique",
-          "columns": [
-            "inbox_item_id"
-          ],
-          "isUnique": true
-        },
         "stakeholder_sends_state_idx": {
           "name": "stakeholder_sends_state_idx",
           "columns": [
             "state"
           ],
           "isUnique": false
+        },
+        "stakeholder_sends_card_idx": {
+          "name": "stakeholder_sends_card_idx",
+          "columns": [
+            "inbox_item_id"
+          ],
+          "isUnique": false
+        },
+        "stakeholder_sends_live_card": {
+          "name": "stakeholder_sends_live_card",
+          "columns": [
+            "inbox_item_id"
+          ],
+          "where": "\"stakeholder_sends\".\"state\" IN ('draft', 'sending', 'sent')",
+          "isUnique": true
         }
       },
       "foreignKeys": {

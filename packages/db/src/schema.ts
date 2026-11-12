@@ -1071,7 +1071,6 @@ export const stakeholderSends = sqliteTable(
     inboxItemId: text('inbox_item_id')
       .$type<InboxItemId>()
       .notNull()
-      .unique()
       .references(() => inboxItems.id),
     state: text('state').$type<SendState>().notNull(),
     text: text('text').notNull(),
@@ -1120,7 +1119,14 @@ export const stakeholderSends = sqliteTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index('stakeholder_sends_state_idx').on(t.state)],
+  (t) => [
+    index('stakeholder_sends_state_idx').on(t.state),
+    index('stakeholder_sends_card_idx').on(t.inboxItemId),
+    // A card has one live send; after a Take Back or a failure it may get a new one.
+    uniqueIndex('stakeholder_sends_live_card')
+      .on(t.inboxItemId)
+      .where(sql`${t.state} IN ('draft', 'sending', 'sent')`),
+  ],
 );
 
 /** Who a send went to, and who joined its conversation. */

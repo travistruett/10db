@@ -429,11 +429,17 @@ export function dropDraft(ctx: WriteContext, id: StakeholderSendId): void {
   });
 }
 
+/** The card's live send, or its latest if none is live: a card may get a new one after a Take Back. */
 export function sendForCard(db: DbReader, inboxItemId: InboxItemId): StakeholderSendDto | null {
   const row = db
     .select()
     .from(schema.stakeholderSends)
     .where(eq(schema.stakeholderSends.inboxItemId, inboxItemId))
+    .orderBy(
+      sql`CASE WHEN ${schema.stakeholderSends.state} IN ('draft', 'sending', 'sent') THEN 0 ELSE 1 END`,
+      desc(schema.stakeholderSends.createdAt),
+      desc(schema.stakeholderSends.id),
+    )
     .get();
   return row ? toDto(db, row) : null;
 }
