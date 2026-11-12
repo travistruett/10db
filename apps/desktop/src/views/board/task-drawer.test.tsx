@@ -733,7 +733,7 @@ describe('TaskDrawer', () => {
       ).toBeTruthy();
     });
 
-    it('links a task waiting for the pass that holds the folder to the Workbench', async () => {
+    it('links a task waiting for the pass that holds the folder to the UI Workbench', async () => {
       serve();
       let opened = 0;
       open({
@@ -743,7 +743,7 @@ describe('TaskDrawer', () => {
             key: PASS_FOLDER_WAIT_NOTICE_KEY,
             tone: 'info',
             line: PASS_FOLDER_WAIT_LINE,
-            body: 'Your folder is in the Workbench pass "Settings pass".',
+            body: 'Your folder is in the UI Workbench pass "Settings pass".',
           },
         }),
         onOpenWorkbench: () => {
@@ -752,23 +752,23 @@ describe('TaskDrawer', () => {
       });
       const d = await dialog();
       expect(within(d).getByText(PASS_FOLDER_WAIT_LINE)).toBeTruthy();
-      fireEvent.click(within(d).getByRole('button', { name: 'Open Workbench' }));
+      fireEvent.click(within(d).getByRole('button', { name: 'Open UI Workbench' }));
       expect(opened).toBe(1);
     });
 
     it.each([
-      { name: 'holds saved Workbench work', keptWork: true },
+      { name: 'holds saved UI Workbench work', keptWork: true },
       { name: 'holds none', keptWork: false },
     ])('says so when the task $name', async ({ keptWork }) => {
       serve();
       open({ task: { keptWork } });
       const d = await dialog();
       expect(
-        within(d).queryByText('Has saved Workbench work: its next start puts it back.') !== null,
+        within(d).queryByText('Has saved UI Workbench work: its next start puts it back.') !== null,
       ).toBe(keptWork);
     });
 
-    it('discards saved Workbench work after a confirm, for that task only', async () => {
+    it('discards saved UI Workbench work after a confirm, for that task only', async () => {
       const discarded: string[] = [];
       serve(
         http.delete(daemonUrl('/tasks/:taskId/kept-work'), ({ params }) => {

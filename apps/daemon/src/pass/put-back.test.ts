@@ -97,7 +97,7 @@ describe('putBackKeptWork', () => {
     // The work is in the folder now; its ref stays until it lands.
     expect(getTaskKeptWork(w.h.store.db, w.settings.id)).toBeNull();
     expect(w.h.git$('for-each-ref', keptRef(w.settings.id))).not.toBe('');
-    expect(lastNotice()).toBe('Put back its saved Workbench work: 3 files.');
+    expect(lastNotice()).toBe('Put back its saved UI Workbench work: 3 files.');
   });
 
   it('finds every file it already put back on a rerun after a restart cut it short', async () => {
@@ -130,7 +130,7 @@ describe('putBackKeptWork', () => {
     );
     expect(read('src/settings/new.tsx')).toBe('the builder made this file too\n');
     expect(lastNotice()).toBe(
-      'Put back its saved Workbench work: 2 files.\n' +
+      'Put back its saved UI Workbench work: 2 files.\n' +
         'Left as they are, because the saved work does not merge with them:\n' +
         '- src/settings/new.tsx',
     );

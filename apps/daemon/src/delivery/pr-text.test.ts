@@ -494,7 +494,7 @@ describe('passPrBody', () => {
     for (const line of not) expect(text).not.toContain(line);
     expect(text).toContain('- Settings page\n- People page');
     expect(text).toContain(`https://github.com/acme/widgets/commit/${SHA}/checks`);
-    expect(text).toContain('Opened by 10db, Workbench pass pas_1');
+    expect(text).toContain('Opened by 10db, UI Workbench pass pas_1');
     expect(text).not.toContain('The review read');
   });
 

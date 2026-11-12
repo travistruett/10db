@@ -114,14 +114,14 @@ const rows: readonly Row[] = [
     project: { passHoldsFolder: true },
     task: { areas: ['app'], workspaceMode: 'shared' },
     mode: 'worktree',
-    reason: 'Your folder is in a Workbench pass',
+    reason: 'Your folder is in a UI Workbench pass',
   },
   {
     name: 'a pass holding Your folder sends a shared default to a copy',
     project: { passHoldsFolder: true },
     task: { areas: ['app'] },
     mode: 'worktree',
-    reason: 'Your folder is in a Workbench pass',
+    reason: 'Your folder is in a UI Workbench pass',
   },
   {
     name: 'a pass holding Your folder keeps the isolate reason',

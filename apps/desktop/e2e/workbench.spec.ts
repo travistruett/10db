@@ -70,7 +70,7 @@ function record(): void {
   const recorded: Recorded = { announced: [], rowLines: [] };
   Object.assign(window, { recorded });
   new MutationObserver(() => {
-    const region = document.querySelector('[aria-label="Workbench announcements"]');
+    const region = document.querySelector('[aria-label="UI Workbench announcements"]');
     const said = region?.textContent ?? '';
     if (said !== '' && recorded.announced.at(-1) !== said) recorded.announced.push(said);
     for (const row of document.querySelectorAll('[aria-label="Pages in this pass"] li')) {
@@ -162,7 +162,7 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
   await page.setViewportSize({ width: 480, height: 900 });
   await page.goto('/workbench');
   await expect(
-    page.getByRole('heading', { name: 'Set up workbench for the Workbench' }),
+    page.getByRole('heading', { name: 'Set up workbench for the UI Workbench' }),
   ).toBeVisible();
   const billing = page.getByRole('checkbox', { name: 'Make billing a page at /billing' });
   await expect(billing).toBeChecked();

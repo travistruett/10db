@@ -14,7 +14,7 @@ import {
 
 const AT = '2026-11-09T12:00:00.000Z';
 
-describe("the Workbench's start, join and rename", () => {
+describe("the UI Workbench's start, join and rename", () => {
   it('reads what Start Pass says: a page with changed files, the files elsewhere, and what the project lacks', () => {
     const start = {
       pages: [

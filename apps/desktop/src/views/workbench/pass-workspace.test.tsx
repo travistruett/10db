@@ -962,7 +962,7 @@ describe('PassWorkspace keys', () => {
     expect(document.activeElement).toBe(rows[1]);
   });
 
-  it('leaves the cursor where it was when the Workbench opens, so J and K work at once', async () => {
+  it('leaves the cursor where it was when the UI Workbench opens, so J and K work at once', async () => {
     await renderWorkspace();
     await screen.findByRole('textbox', { name: 'Message to People' });
     expect(document.activeElement).toBe(document.body);
@@ -1089,7 +1089,7 @@ describe('PassWorkspace announcer', () => {
       />
     );
     const { rerender } = renderWithDaemon(ui(pages.working));
-    const region = await screen.findByRole('status', { name: 'Workbench announcements' });
+    const region = await screen.findByRole('status', { name: 'UI Workbench announcements' });
     expect(region.getAttribute('aria-live')).toBe('polite');
     expect(region.textContent).toBe('');
     act(() => {

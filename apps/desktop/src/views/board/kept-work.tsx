@@ -18,7 +18,7 @@ export function KeptWork({ taskId }: { readonly taskId: TaskId }) {
   return (
     <Group gap="sm" wrap="wrap">
       <Text size="sm" c="dimmed">
-        Has saved Workbench work: its next start puts it back.
+        Has saved UI Workbench work: its next start puts it back.
       </Text>
       <Button
         size="compact-sm"
@@ -53,8 +53,8 @@ export function KeptWork({ taskId }: { readonly taskId: TaskId }) {
         }
       >
         <Text size="sm">
-          Discard the work this task kept from its Workbench pass? Its next start begins without it.
-          This can't be undone.
+          Discard the work this task kept from its UI Workbench pass? Its next start begins without
+          it. This can't be undone.
         </Text>
       </FormModal>
     </Group>

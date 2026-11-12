@@ -45,7 +45,7 @@ export function Announcer({ rows }: { readonly rows: readonly QueueRow[] }) {
     }
   }
   return (
-    <VisuallyHidden role="status" aria-live="polite" aria-label="Workbench announcements">
+    <VisuallyHidden role="status" aria-live="polite" aria-label="UI Workbench announcements">
       {message}
     </VisuallyHidden>
   );

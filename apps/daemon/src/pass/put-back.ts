@@ -100,7 +100,7 @@ export async function putBackKeptWork(
     insertSystemNotice(
       ctx,
       taskId,
-      `Put back its saved Workbench work: ${count(applied.length)}.` +
+      `Put back its saved UI Workbench work: ${count(applied.length)}.` +
         (left.length === 0
           ? ''
           : `\nLeft as they are, because the saved work does not merge with them:\n${left.map((p) => `- ${p}`).join('\n')}`),

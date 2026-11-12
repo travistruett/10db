@@ -39,7 +39,7 @@ describe('what a render token may do', () => {
       expect(renderMayRead('GET', path), path).toBe(false);
   });
 
-  it('never reads a Workbench pass, its turns or its preview, which no screen draws', () => {
+  it('never reads a UI Workbench pass, its turns or its preview, which no screen draws', () => {
     for (const path of [
       '/passes',
       '/passes/pas_1',

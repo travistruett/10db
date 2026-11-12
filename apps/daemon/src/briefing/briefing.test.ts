@@ -167,7 +167,7 @@ describe('buildSessionPrompt', () => {
   });
 
   // Workbench spec §6.2: a pass lane works on one page in the builder's folder, turn by turn.
-  describe('a page of a Workbench pass', () => {
+  describe('a page of a UI Workbench pass', () => {
     const pass = buildSessionPrompt({ ...base, action: { kind: 'start' }, inPass: true });
     const ordinary = buildSessionPrompt({ ...base, action: { kind: 'start' } });
 

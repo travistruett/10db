@@ -85,7 +85,7 @@ describe('WorkbenchScreen', () => {
       project: projectViewDto({ name: 'ampsio', areas: [{ name: 'src', globs: ['src/**'] }] }),
     });
     expect(
-      await screen.findByRole('heading', { name: 'Set up ampsio for the Workbench' }),
+      await screen.findByRole('heading', { name: 'Set up ampsio for the UI Workbench' }),
     ).toBeTruthy();
     expect(await screen.findByRole('checkbox', { name: /settings/ })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /^Start Pass/ })).toBeNull();
@@ -96,7 +96,7 @@ describe('WorkbenchScreen', () => {
     await draw({ setupCount: 2 });
     fireEvent.click(await screen.findByRole('button', { name: /^Set Up/ }));
     expect(
-      await screen.findByRole('heading', { name: 'Set up ampsio for the Workbench' }),
+      await screen.findByRole('heading', { name: 'Set up ampsio for the UI Workbench' }),
     ).toBeTruthy();
     fireEvent.click(await screen.findByRole('button', { name: 'Back to Pages' }));
     expect(await screen.findByText('Work through pages with the agents, live.')).toBeTruthy();

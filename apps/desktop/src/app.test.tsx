@@ -64,7 +64,7 @@ describe('App shell', () => {
       'switcher',
       'Board',
       'Plan',
-      'Workbench',
+      'UI Workbench',
       'Knowledge',
       'Project Settings',
       'Settings',
@@ -188,7 +188,7 @@ describe('App shell', () => {
     expect(await screen.findByRole('link', { name: /Inbox.*1 open card/ })).toBeTruthy();
   });
 
-  it("counts the selected project's pass pages that wait on the builder on the Workbench link", async () => {
+  it("counts the selected project's pass pages that wait on the builder on the UI Workbench link", async () => {
     const project = projectViewDto({ name: 'ampsio' });
     const pages = pagesByStatus();
     const live = passViewDto({
@@ -203,10 +203,10 @@ describe('App shell', () => {
       ...baseHandlers(),
     );
     renderApp('/factory');
-    expect(await screen.findByRole('link', { name: /Workbench.*2 pages waiting/ })).toBeTruthy();
+    expect(await screen.findByRole('link', { name: /UI Workbench.*2 pages waiting/ })).toBeTruthy();
   });
 
-  it('counts nothing on the Workbench link for a closed pass still to settle', async () => {
+  it('counts nothing on the UI Workbench link for a closed pass still to settle', async () => {
     const project = projectViewDto({ name: 'ampsio' });
     const pages = pagesByStatus();
     const closed = passViewDto({
@@ -222,7 +222,7 @@ describe('App shell', () => {
     await waitFor(() => {
       expect(queryClient.getQueryState(passKeys.live)?.status).toBe('success');
     });
-    expect(screen.getByRole('link', { name: /Workbench/ }).textContent).toBe('Workbench');
+    expect(screen.getByRole('link', { name: /UI Workbench/ }).textContent).toBe('UI Workbench');
   });
 
   it('draws the color scheme toggle icon at the 20px size DESIGN.md sets', async () => {
@@ -258,13 +258,13 @@ describe('App shell', () => {
     expect(screen.getByRole('button', { name: 'Hide navigation' })).toBeTruthy();
   });
 
-  it('opens the Workbench from the sidebar, between Plan and Knowledge', async () => {
+  it('opens the UI Workbench from the sidebar, between Plan and Knowledge', async () => {
     server.use(...baseHandlers());
     const { router } = renderApp('/factory');
-    fireEvent.click(await screen.findByRole('link', { name: 'Workbench' }));
+    fireEvent.click(await screen.findByRole('link', { name: 'UI Workbench' }));
     await waitFor(() => {
       expect(router.state.location.pathname).toBe('/workbench');
     });
-    expect(await screen.findByRole('heading', { name: 'Workbench' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'UI Workbench' })).toBeTruthy();
   });
 });

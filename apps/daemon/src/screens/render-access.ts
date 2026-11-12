@@ -50,9 +50,9 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/tasks/:taskId/thread':
     "A task's thread is the builder's own words to an agent, and no screen Plan draws shows it.",
   '/tasks/:taskId/screens':
-    "A picture of the builder's app is for the Workbench and the drawer, not for a screen.",
+    "A picture of the builder's app is for the UI Workbench and the drawer, not for a screen.",
   '/screens/:screenId':
-    "A picture of the builder's app is for the Workbench and the drawer, not for a screen.",
+    "A picture of the builder's app is for the UI Workbench and the drawer, not for a screen.",
   '/projects/:projectId/pictures':
     "The browser for pictures and its sign-in are Settings' own line, and no screen Plan draws shows them.",
   '/tasks/:taskId/thread/pictures/:fileId':
@@ -69,9 +69,9 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/projects/:projectId/team': 'No screen draws a setting.',
   '/projects/:projectId/routing-rules': 'No screen draws a setting.',
   '/projects/:projectId/candidates': 'No screen draws what Run next would pick.',
-  '/passes/:passId': 'Only the Workbench draws a pass, and it is not a screen.',
-  '/passes': 'Only the Workbench draws a pass, and it is not a screen.',
-  '/pass-turns/:turnId/activity': 'Only the Workbench draws a pass, and it is not a screen.',
+  '/passes/:passId': 'Only the UI Workbench draws a pass, and it is not a screen.',
+  '/passes': 'Only the UI Workbench draws a pass, and it is not a screen.',
+  '/pass-turns/:turnId/activity': 'Only the UI Workbench draws a pass, and it is not a screen.',
   '/goals/:goalId/pass-pages': "A goal's pass pages are read from its tasks' commits with git.",
   '/tasks/:taskId/turns':
     "A page's turns list the files each changed, read from its kept commits with git.",
@@ -80,9 +80,9 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/passes/:passId/tasks/:taskId/take-out':
     "A take-out's shared changes are read by running git in Your folder, and no screen draws them.",
   '/passes/:passId/close':
-    "A pass's close lists are read by running git in Your folder, and only the Workbench draws them.",
+    "A pass's close lists are read by running git in Your folder, and only the UI Workbench draws them.",
   '/passes/:passId/pull-request':
-    "Reading a pass's pull request asks gh whether it is signed in, and only the Workbench draws it.",
+    "Reading a pass's pull request asks gh whether it is signed in, and only the UI Workbench draws it.",
   '/shape-measures': 'No screen draws a measure.',
   '/accounts': 'No screen draws an account.',
   '/accounts/pauses': 'No screen draws an account.',

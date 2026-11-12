@@ -537,7 +537,7 @@ export function createServices(deps: {
       const task = getTask(db, taskId);
       const pass = passHoldingTask(db, task);
       if (pass?.state !== PassState.Open)
-        throw new ConflictError(`${task.title} is not a page of an open Workbench pass`);
+        throw new ConflictError(`${task.title} is not a page of an open UI Workbench pass`);
       if (task.workstreamId === null) return;
       // A turn running, or a lane starting one: a page waiting for the builder is left as it is.
       const working =

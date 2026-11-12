@@ -52,7 +52,7 @@ const GLOBAL_NAV = [
 const PROJECT_NAV = [
   { to: '/board', label: 'Board', icon: IconLayoutKanban },
   { to: '/shape', label: 'Plan', icon: IconRoute },
-  { to: '/workbench', label: 'Workbench', icon: IconTools },
+  { to: '/workbench', label: 'UI Workbench', icon: IconTools },
   { to: '/knowledge', label: 'Knowledge', icon: IconBulb },
 ] as const;
 

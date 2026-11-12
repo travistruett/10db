@@ -878,7 +878,7 @@ describe("a pass's saved work and start-up over HTTP", () => {
       (item) => item.detail?.['passId'] === pass.id,
     );
     expect(cards.map((c) => c.title)).toEqual([
-      'Workbench pass "Polish" is waiting for Your folder',
+      'UI Workbench pass "Polish" is waiting for Your folder',
     ]);
     expect(rawGit('symbolic-ref', '--short', 'HEAD')).toBe('main');
     expect(listPassTurnsOf(pass.id)).toEqual(turns);

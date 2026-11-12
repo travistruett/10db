@@ -175,7 +175,7 @@ describe('BatchSheet', () => {
     },
   );
 
-  it('sends the ticked tasks to the Workbench when every one names a page area', async () => {
+  it('sends the ticked tasks to the UI Workbench when every one names a page area', async () => {
     serve(
       projectViewDto({
         ...pr(null),

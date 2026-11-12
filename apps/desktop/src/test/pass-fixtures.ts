@@ -217,7 +217,7 @@ export function passCard(
   return inboxItemDto({
     projectId: view.pass.projectId,
     kind: 'flag',
-    title: 'Workbench',
+    title: 'UI Workbench',
     body: '',
     options: [],
     detail,

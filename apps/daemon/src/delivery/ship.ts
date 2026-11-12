@@ -1338,7 +1338,7 @@ export function createShipper(deps: ShipperDeps): Shipper {
   function refusePassBatch(batch: BatchDto): void {
     if (batch.passId != null)
       throw new ConflictError(
-        `Batch "${batch.title}" is a Workbench pass's; it ships when the pass closes and is abandoned with the pass`,
+        `Batch "${batch.title}" is a UI Workbench pass's; it ships when the pass closes and is abandoned with the pass`,
       );
   }
 

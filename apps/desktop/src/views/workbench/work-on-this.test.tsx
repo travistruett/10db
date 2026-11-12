@@ -15,7 +15,7 @@ const running = taskDto({ areas: ['settings'], boardStatus: 'in_progress' });
 const waiting = taskDto({ areas: ['settings'], boardStatus: 'ready' });
 
 describe('WorkOnThis', () => {
-  it("opens the Workbench on the goal's pages once its UI work is nearly done", async () => {
+  it("opens the UI Workbench on the goal's pages once its UI work is nearly done", async () => {
     const { router } = await renderWithRouter(
       <WorkOnThis
         goalId={goalId}

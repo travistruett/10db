@@ -665,7 +665,7 @@ function TaskNotices({
           </Text>
           {notice.key === PASS_FOLDER_WAIT_NOTICE_KEY && onOpenWorkbench ? (
             <Anchor component="button" type="button" size="sm" mt="xs" onClick={onOpenWorkbench}>
-              Open Workbench
+              Open UI Workbench
             </Anchor>
           ) : null}
         </Alert>

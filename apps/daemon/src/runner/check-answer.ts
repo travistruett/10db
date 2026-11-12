@@ -67,7 +67,7 @@ export function applyCheckAnswer(
     const target = item.targets[0];
     if (answer.choice !== PASS_SIGN_OFF_CHOICE || target === undefined)
       throw new ConflictError(
-        `A page of Workbench pass "${pass.name}" is signed off, not approved or sent back`,
+        `A page of UI Workbench pass "${pass.name}" is signed off, not approved or sent back`,
       );
     const { taskId } = getWorkstreamRow(ctx.tx, target.workstreamId);
     const refused = signOffRefusal(ctx.tx, pass.id, taskId);

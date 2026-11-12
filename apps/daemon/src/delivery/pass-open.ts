@@ -198,7 +198,7 @@ export function returnBranchProblem(
   const batch = listBatches(db, { projectId: project.id }).find((b) => b.branch === branch);
   if (batch?.passId != null && getPass(db, batch.passId).state === PassState.Abandoned) return null;
   if (batch)
-    return `Your folder is on ${branch}, the branch of ${batch.passId == null ? 'batch' : 'Workbench pass'} "${batch.title}"; switch it back to your own branch (git switch <your branch>) before opening a pass`;
+    return `Your folder is on ${branch}, the branch of ${batch.passId == null ? 'batch' : 'UI Workbench pass'} "${batch.title}"; switch it back to your own branch (git switch <your branch>) before opening a pass`;
   if (branch.startsWith(BRANCH_PREFIX))
     return `Your folder is on ${branch}, a 10db branch no task names; switch it to your own branch (git switch <your branch>) before opening a pass`;
   return null;

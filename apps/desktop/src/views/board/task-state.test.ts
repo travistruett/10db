@@ -400,10 +400,10 @@ describe('taskState', () => {
     });
   });
 
-  it("sends a pass's page that waits on the builder to the Workbench, not the Inbox", () => {
+  it("sends a pass's page that waits on the builder to the UI Workbench, not the Inbox", () => {
     const pass = batchDto({ passId: mintId('Pass') });
     expect(taskState(workstreamDto({ state: 'WAITING_HUMAN' }), pass, null)).toEqual({
-      line: 'Waiting on you in the Workbench',
+      line: 'Waiting on you in the UI Workbench',
       color: 'yellow',
     });
   });

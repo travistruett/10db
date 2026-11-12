@@ -39,7 +39,7 @@ describe('PassReadyRow', () => {
     });
   });
 
-  it("opens the Workbench in the pass's project, at a page when its title is clicked", async () => {
+  it("opens the UI Workbench in the pass's project, at a page when its title is clicked", async () => {
     server.use(...baseHandlers());
     window.localStorage.removeItem('tendb.project');
     const { ready, asks } = pagesByStatus();
@@ -49,7 +49,7 @@ describe('PassReadyRow', () => {
     const { router } = await renderWithDaemonAndRouter(
       <PassReadyRow items={items} selected onSelect={vi.fn()} />,
     );
-    fireEvent.click(await screen.findByRole('button', { name: 'Open Workbench' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Open UI Workbench' }));
     await waitFor(() => {
       expect(router.state.location.pathname).toBe('/workbench');
     });

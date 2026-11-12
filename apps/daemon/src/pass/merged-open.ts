@@ -201,7 +201,7 @@ export async function carryOver(deps: CloseDeps, passId: PassId): Promise<void> 
             `${titles} carried over to pass "${getPass(db, followOnPassId).name}", with the pages signed off after the last push.`,
           ];
   const body = [
-    `The pull request of Workbench pass "${pass.name}" merged while the pass was open, so 10db closed it.`,
+    `The pull request of UI Workbench pass "${pass.name}" merged while the pass was open, so 10db closed it.`,
     ...carriedLine,
     ...(prUrl === null ? [] : [`The pages signed off after the last push are in ${prUrl}.`]),
     ...(unpushed.length === 0
@@ -214,7 +214,7 @@ export async function carryOver(deps: CloseDeps, passId: PassId): Promise<void> 
     flagCard(ctx, {
       projectId: pass.projectId,
       workstreamId: null,
-      title: `Workbench pass "${pass.name}" closed when its pull request merged`,
+      title: `UI Workbench pass "${pass.name}" closed when its pull request merged`,
       body,
       foldKey: followOnKey(passId),
       refresh: true,

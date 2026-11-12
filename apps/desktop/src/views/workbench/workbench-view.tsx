@@ -134,7 +134,7 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
   if (live === null || !passHoldsTasks(live.pass.state))
     return (
       <Stack gap="md">
-        <Title order={2}>Workbench</Title>
+        <Title order={2}>UI Workbench</Title>
         {closed === null ? null : (
           <Text size="sm" role="status">
             {`${closed.name} closed; its work is on ${closed.returnBranch}.`}
@@ -297,8 +297,8 @@ function ProjectWorkbench({ project }: { readonly project: ProjectViewDto }) {
   if (failed !== null)
     return (
       <Stack gap="md">
-        <Title order={2}>Workbench</Title>
-        <Text size="sm" c="red">{`The Workbench could not be read: ${failed.message}`}</Text>
+        <Title order={2}>UI Workbench</Title>
+        <Text size="sm" c="red">{`The UI Workbench could not be read: ${failed.message}`}</Text>
       </Stack>
     );
   return (
@@ -327,7 +327,7 @@ export function WorkbenchView() {
   if (project === null)
     return (
       <Stack gap="md">
-        <Title order={2}>Workbench</Title>
+        <Title order={2}>UI Workbench</Title>
       </Stack>
     );
   return <ProjectWorkbench key={project.id} project={project} />;

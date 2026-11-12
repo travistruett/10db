@@ -22,7 +22,7 @@ type ProjectPlacement = Pick<ProjectDto, 'delivery' | 'workspaceMode'> & {
 };
 
 /** Why a task goes to a separate copy while a pass holds the project's folder. */
-export const PASS_HOLDS_FOLDER_REASON = 'Your folder is in a Workbench pass';
+export const PASS_HOLDS_FOLDER_REASON = 'Your folder is in a UI Workbench pass';
 
 /** The name a risk tag adds to the reason; a tag the rule ignores has none. */
 const RISK_TAG_TOUCHES: Partial<Record<RiskTag, string>> = {

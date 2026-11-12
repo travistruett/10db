@@ -462,7 +462,7 @@ function stateOf(
       // A pass's page is answered and signed off in the Workbench.
       return batch?.passId == null
         ? { line: 'Waiting on you: answer in Inbox', color: 'yellow' }
-        : { line: 'Waiting on you in the Workbench', color: 'yellow' };
+        : { line: 'Waiting on you in the UI Workbench', color: 'yellow' };
     case S.PausedLimit:
       return { line: 'Paused: usage limit', color: 'orange' };
     case S.Recovering:

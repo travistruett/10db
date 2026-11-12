@@ -239,7 +239,7 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
         </SettingRow>
         <SettingRow
           label="App address"
-          description="Where your dev server answers, such as http://localhost:5173. The Workbench's Open Page opens a page's route here, and pictures of pages are taken here; an https server with a self-signed certificate gets no pictures."
+          description="Where your dev server answers, such as http://localhost:5173. The UI Workbench's Open Page opens a page's route here, and pictures of pages are taken here; an https server with a self-signed certificate gets no pictures."
         >
           <TextInput
             aria-label="App address"

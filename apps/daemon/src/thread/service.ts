@@ -85,10 +85,10 @@ export interface ThreadService {
  */
 function refusedByPass(db: DbReader, task: TaskDto): void {
   const pass = passHoldingTask(db, getTask(db, task.id));
-  if (!pass) throw new ConflictError(`${task.title} is no longer in a Workbench pass`);
+  if (!pass) throw new ConflictError(`${task.title} is no longer in a UI Workbench pass`);
   if (pass.state !== PassState.Open)
     throw new ConflictError(
-      `Workbench pass "${pass.name}" is ${pass.state.toLowerCase()}; its pages take no message`,
+      `UI Workbench pass "${pass.name}" is ${pass.state.toLowerCase()}; its pages take no message`,
     );
   const takeOut = lastTakeOut(db, task.id);
   if (takeOut?.passId === pass.id && takeOut.step < TakeOutStep.Done)
@@ -118,7 +118,7 @@ export function createThreadService(deps: {
       // open and the page is not being taken out; nothing is kept for one refused.
       const pass = passHoldingTask(state.db, task);
       if (pass) refusedByPass(state.db, task);
-      else if (redo) throw new ConflictError(`${task.title} is in no Workbench pass to redo`);
+      else if (redo) throw new ConflictError(`${task.title} is in no UI Workbench pass to redo`);
       const body = input.text.trim();
       if (body === '' && input.pictures.length === 0)
         throw new InvalidError('A message needs words or a picture');

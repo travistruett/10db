@@ -187,7 +187,7 @@ describe('the overload card', () => {
     rows = [{ pid: 4002, ppid: 1, pgid: 4000, cpu: 95, command: 'tsc --noEmit' }];
     load = 20 * CORES;
     await sampleFor(5 * MINUTE);
-    expect(openCards()[0]?.body).toContain('the Workbench check of pass "Polish"');
+    expect(openCards()[0]?.body).toContain('the UI Workbench check of pass "Polish"');
   });
 
   it('says a process that is not 10db’s is not', async () => {

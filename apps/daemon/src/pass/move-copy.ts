@@ -67,8 +67,8 @@ export function slowPageLine(name: string): string {
 /** What the agent is told when its ask for hazard `name` waits for the builder's move. */
 export function moveToCopyInstruction(name: string, notNow = false): string {
   return notNow
-    ? `The ${name} hazard runs in a separate copy, not in the Workbench pass's folder, and the builder chose Not Now: this task stays in the pass without it. Don't change any file of the ${name} hazard: finish what you can without it, end your turn and say what is left.`
-    : `The ${name} hazard runs in a separate copy, not in the Workbench pass's folder, and the builder is asked whether to move this task to one. Don't change any file of the ${name} hazard: finish what you can without it, end your turn and say what is left.`;
+    ? `The ${name} hazard runs in a separate copy, not in the UI Workbench pass's folder, and the builder chose Not Now: this task stays in the pass without it. Don't change any file of the ${name} hazard: finish what you can without it, end your turn and say what is left.`
+    : `The ${name} hazard runs in a separate copy, not in the UI Workbench pass's folder, and the builder is asked whether to move this task to one. Don't change any file of the ${name} hazard: finish what you can without it, end your turn and say what is left.`;
 }
 
 /**
@@ -110,12 +110,12 @@ function moveWords(
     'Move takes the page out of the pass with its work kept and starts the task in a separate copy, its work put back there.';
   return 'hazard' in cause
     ? {
-        body: `"${task.title}" asked for the ${cause.hazard} hazard, which runs in a separate copy, not in Your folder while Workbench pass "${pass.name}" is open. ${move} Not Now leaves it in the pass without the hazard.`,
+        body: `"${task.title}" asked for the ${cause.hazard} hazard, which runs in a separate copy, not in Your folder while UI Workbench pass "${pass.name}" is open. ${move} Not Now leaves it in the pass without the hazard.`,
         line: `The agent asked for the ${cause.hazard} hazard, which runs in a separate copy: "Move to a Separate Copy" waits in the Inbox.`,
         notNow: 'Leaves the page in the pass without the hazard',
       }
     : {
-        body: `"${task.title}" broke the preview of \`${cause.route}\` on two turns running in Workbench pass "${pass.name}". ${move} Not Now leaves it in the pass as it is.`,
+        body: `"${task.title}" broke the preview of \`${cause.route}\` on two turns running in UI Workbench pass "${pass.name}". ${move} Not Now leaves it in the pass as it is.`,
         line: `The preview of \`${cause.route}\` broke on two turns running: "Move to a Separate Copy" waits in the Inbox.`,
         notNow: 'Leaves the page in the pass as it is',
       };

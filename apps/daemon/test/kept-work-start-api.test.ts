@@ -65,7 +65,7 @@ function commitFile(path: string, content: string): string {
   return git('rev-parse', 'HEAD');
 }
 
-describe('POST /tasks/:id/start of a task with saved Workbench work', () => {
+describe('POST /tasks/:id/start of a task with saved UI Workbench work', () => {
   it('puts the work back in Your folder of a local project before its run launches', async () => {
     const project = await api().post('/projects', ProjectDto, {
       name: 'demo',
@@ -106,7 +106,7 @@ describe('POST /tasks/:id/start of a task with saved Workbench work', () => {
     ).toEqual([taskId]);
     expect(getTaskKeptWork(daemon.state.db, taskId)).toBeNull();
     expect(listTaskThread(daemon.state.db, taskId).map((m) => m.body)).toContain(
-      'Put back its saved Workbench work: 1 file.',
+      'Put back its saved UI Workbench work: 1 file.',
     );
   });
 });

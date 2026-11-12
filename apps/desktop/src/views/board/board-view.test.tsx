@@ -350,7 +350,7 @@ describe('BoardView', () => {
     });
   });
 
-  it("shows a pass's pages as the Workbench's, and a task taken out of it as its own", async () => {
+  it("shows a pass's pages as the UI Workbench's, and a task taken out of it as its own", async () => {
     const passId = mintId('Pass');
     const batch = batchDto({ passId, branch: '10db/settings-pass-0a1b2c3d' });
     const project = projectViewDto({ id: batch.projectId });
@@ -389,10 +389,12 @@ describe('BoardView', () => {
     await screen.findByRole('button', { name: /^Settings: UI work/ });
     // A Ready page waits on the builder in the Workbench, not in the Inbox, and shares no branch.
     expect(
-      within(card('Settings: UI work')).getByText('Waiting on you in the Workbench'),
+      within(card('Settings: UI work')).getByText('Waiting on you in the UI Workbench'),
     ).toBeTruthy();
     for (const title of ['Settings: UI work', 'Billing: UI work']) {
-      expect(within(card(title)).getByTestId('indicator-workbench').textContent).toBe('Workbench');
+      expect(within(card(title)).getByTestId('indicator-workbench').textContent).toBe(
+        'UI Workbench',
+      );
       expect(within(card(title)).queryByTestId('indicator-shared-branch')).toBeNull();
     }
     expect(within(card('Home: UI work')).queryByTestId('indicator-row')).toBeNull();
@@ -404,10 +406,10 @@ describe('BoardView', () => {
     expect(within(drawer).queryByRole('button', { name: 'Abandon' })).toBeNull();
     expect(
       within(drawer).getByText(
-        'It ships when the Workbench pass closes, and is abandoned with it.',
+        'It ships when the UI Workbench pass closes, and is abandoned with it.',
       ),
     ).toBeTruthy();
-    expect(within(drawer).getByRole('button', { name: 'Open Workbench' })).toBeTruthy();
+    expect(within(drawer).getByRole('button', { name: 'Open UI Workbench' })).toBeTruthy();
     // Its run is the Workbench's: no Hold and no Cancel Run, in the drawer or on the card's menu.
     for (const action of [/^Hold/, 'Cancel Run'])
       expect(within(drawer).queryByRole('button', { name: action })).toBeNull();

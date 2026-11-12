@@ -25,7 +25,7 @@ export interface PassReadyRowProps {
 
 /** "Workbench: 3 pages ready". */
 export function passReadyTitle(count: number): string {
-  return `Workbench: ${String(count)} ${count === 1 ? 'page' : 'pages'} ready`;
+  return `UI Workbench: ${String(count)} ${count === 1 ? 'page' : 'pages'} ready`;
 }
 
 /** Opens the Workbench in the pass's project, at one of its pages when given. */
@@ -107,7 +107,7 @@ export function PassReadyRow({ items, selected, onSelect }: PassReadyRowProps) {
     <Group gap="sm" wrap="nowrap">
       {/* Every card waits on the builder: yellow, never the red of a failure. */}
       <Badge size="sm" variant="light" color="yellow" style={{ flexShrink: 0 }}>
-        Workbench
+        UI Workbench
       </Badge>
       <ProjectLabel projectId={first.projectId} />
       <Text size="sm" fw={selected ? 600 : undefined} lineClamp={1} style={{ minWidth: 0 }}>
@@ -145,7 +145,7 @@ export function PassReadyRow({ items, selected, onSelect }: PassReadyRowProps) {
               open();
             }}
           >
-            Open Workbench
+            Open UI Workbench
           </Button>
         </Group>
       </Stack>

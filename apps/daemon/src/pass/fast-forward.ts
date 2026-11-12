@@ -49,7 +49,7 @@ function raiseBranchMoved(
       projectId: pass.projectId,
       workstreamId: null,
       title: `Your folder stays on ${branch}`,
-      body: `Workbench pass "${pass.name}" closed. ${why} Your folder stays on ${branch}, which holds every signed-off page. To bring them into ${pass.returnBranch}, run \`${detail.mergeCommand}\`.`,
+      body: `UI Workbench pass "${pass.name}" closed. ${why} Your folder stays on ${branch}, which holds every signed-off page. To bring them into ${pass.returnBranch}, run \`${detail.mergeCommand}\`.`,
       foldKey: branchMovedKey(pass.id),
       refresh: true,
       detail,

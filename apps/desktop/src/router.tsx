@@ -53,7 +53,7 @@ function BoardPage() {
 
 function WorkbenchPage() {
   return (
-    <ViewBoundary name="Workbench">
+    <ViewBoundary name="UI Workbench">
       <WorkbenchView />
     </ViewBoundary>
   );

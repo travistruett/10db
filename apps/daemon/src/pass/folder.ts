@@ -36,7 +36,7 @@ export function raiseFolderCard(
     flagCard(ctx, {
       projectId: pass.projectId,
       workstreamId: null,
-      title: `Workbench pass "${pass.name}" is waiting for Your folder`,
+      title: `UI Workbench pass "${pass.name}" is waiting for Your folder`,
       body:
         `Your folder is on ${where}, not on the pass's branch ${branch}, so no page of the pass ` +
         `runs a turn or keeps its work. Switch back to ${branch} to go on.` +

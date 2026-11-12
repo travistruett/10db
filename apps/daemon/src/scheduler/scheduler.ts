@@ -191,7 +191,7 @@ export function createScheduler(opts: SchedulerOptions): Scheduler {
         key: PASS_FOLDER_WAIT_NOTICE_KEY,
         tone: 'info',
         line,
-        body: `Your folder is in the Workbench pass "${pass.name}". This task starts there once the pass has closed and its work is in the base.`,
+        body: `Your folder is in the UI Workbench pass "${pass.name}". This task starts there once the pass has closed and its work is in the base.`,
       });
     });
   }

@@ -371,7 +371,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     if (pass) {
       const titles = tasks.map((t) => t.title).join(', ');
       throw new ConflictError(
-        `Your folder is in the Workbench pass "${pass.name}", so ${titles} can't start there until the pass closes. Set ${tasks.length === 1 ? 'it' : 'them'} to a separate copy, or start ${tasks.length === 1 ? 'it' : 'them'} once the pass has closed.`,
+        `Your folder is in the UI Workbench pass "${pass.name}", so ${titles} can't start there until the pass closes. Set ${tasks.length === 1 ? 'it' : 'them'} to a separate copy, or start ${tasks.length === 1 ? 'it' : 'them'} once the pass has closed.`,
       );
     }
     const unfinished = findUnfinishedBatch(db, project.id) ?? null;
@@ -548,7 +548,7 @@ export function createBatchStarter(ctx: DeliveryContext): BatchStarter {
     const pass = passHoldingTask(db, task);
     if (pass)
       throw new ConflictError(
-        `Task ${task.title} is in the Workbench pass "${pass.name}"; it runs there until the pass takes it out or ends`,
+        `Task ${task.title} is in the UI Workbench pass "${pass.name}"; it runs there until the pass takes it out or ends`,
       );
   }
 

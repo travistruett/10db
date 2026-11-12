@@ -917,7 +917,7 @@ describe('watcher', () => {
 });
 
 // Workbench spec §6.4: while a pass holds its tasks, the builder's writes in Your folder raise no card.
-describe('a Workbench pass in Your folder', () => {
+describe('a UI Workbench pass in Your folder', () => {
   /** What a pass's open made of Your folder: its id, and the dirt it recorded at the pass's dirt ref. */
   interface OpenedFolder {
     readonly id: PassId;

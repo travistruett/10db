@@ -160,7 +160,7 @@ export function raiseAbandonCard(
     flagCard(ctx, {
       projectId: pass.projectId,
       workstreamId: null,
-      title: `Workbench pass "${pass.name}" was abandoned`,
+      title: `UI Workbench pass "${pass.name}" was abandoned`,
       body: parts.join('\n\n'),
       foldKey: passAbandonCardKey(pass.id),
       ...(input.why === undefined ? {} : { refresh: true }),

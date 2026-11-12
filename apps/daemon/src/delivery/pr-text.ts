@@ -214,7 +214,7 @@ export function passPrBody(input: {
   readonly reviewCut?: boolean;
 }): string {
   const what = [
-    `Workbench pass "${input.pass.name}": the pages signed off so far.`,
+    `UI Workbench pass "${input.pass.name}": the pages signed off so far.`,
     '',
     ...(input.pages.length > 0 ? input.pages.map((title) => `- ${title}`) : ['- (none yet)']),
   ].join('\n');
@@ -233,7 +233,7 @@ export function passPrBody(input: {
       ].join('\n'),
     },
   ]);
-  return `${body}\n\n---\n\nOpened by 10db, Workbench pass ${input.pass.id}\n`;
+  return `${body}\n\n---\n\nOpened by 10db, UI Workbench pass ${input.pass.id}\n`;
 }
 
 function passChecked(

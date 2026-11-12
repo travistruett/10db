@@ -1328,9 +1328,9 @@ export const passCards = {
    * written, and something has moved since, so start-up could not take it back.
    */
   unopened: (record: PassDirtRecord): Card => ({
-    title: `${record.branch} is left from a Workbench pass that did not open`,
+    title: `${record.branch} is left from a UI Workbench pass that did not open`,
     body:
-      `10db stopped while opening a Workbench pass, after it made ${record.branch} at the commit ${record.returnBranch} was on and before the pass was recorded. ` +
+      `10db stopped while opening a UI Workbench pass, after it made ${record.branch} at the commit ${record.returnBranch} was on and before the pass was recorded. ` +
       `Something has changed there since, so 10db leaves it as it is. ` +
       `If Your folder is on it, switch back with git switch ${shellWord(record.returnBranch)}; a commit made on ${record.branch} is only there, so merge it into ${record.returnBranch} first if you want it. ` +
       `Then delete the branch with git branch -D ${record.branch}, and the pass's copy of your uncommitted files with git update-ref -d ${record.ref}.`,

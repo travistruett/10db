@@ -191,7 +191,7 @@ async function openOn(project: ProjectDto, tasks: readonly TaskDto[]) {
 }
 
 describe('GET /passes?live=true', () => {
-  it('answers each live pass as the Workbench reads it, and none once it is abandoned', async () => {
+  it('answers each live pass as the UI Workbench reads it, and none once it is abandoned', async () => {
     const project = await projectWith(PAGES);
     const settings = await taskOn(project, 'Settings: tidy', ['settings']);
     const opened = await openOn(project, [settings]);
@@ -381,7 +381,7 @@ describe('POST /projects/:projectId/passes with pages', () => {
 });
 
 describe('POST /passes/:passId/pages', () => {
-  it('adds a page and an open task to the pass, and answers the pass as the Workbench reads it', async () => {
+  it('adds a page and an open task to the pass, and answers the pass as the UI Workbench reads it', async () => {
     const project = await projectWith(PAGES);
     const settings = await taskOn(project, 'Settings: tidy', ['settings']);
     const opened = await openOn(project, [settings]);

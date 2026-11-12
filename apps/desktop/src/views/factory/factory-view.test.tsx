@@ -1651,8 +1651,8 @@ describe('FactoryView human-touch panel', () => {
   });
 });
 
-describe('FactoryView ways into the Workbench', () => {
-  it("names a project's live pass and what waits in it, and opens the Workbench in that project", async () => {
+describe('FactoryView ways into the UI Workbench', () => {
+  it("names a project's live pass and what waits in it, and opens the UI Workbench in that project", async () => {
     const alpha = projectViewDto({ name: 'alpha' });
     const beta = projectViewDto({ name: 'beta' });
     const { ready, failed, working } = pagesByStatus();
@@ -1708,7 +1708,7 @@ describe('FactoryView ways into the Workbench', () => {
     return { linked, asked, ...renderApp('/factory') };
   }
 
-  it('offers Work on This on a goal whose UI work is nearly done, opening the Workbench on the goal', async () => {
+  it('offers Work on This on a goal whose UI work is nearly done, opening the UI Workbench on the goal', async () => {
     const { router, linked, asked } = goalReadyForAPass();
     fireEvent.click(await screen.findByRole('button', { name: /^Settings polish/ }));
     const region = await screen.findByRole('region', { name: 'Settings polish' });

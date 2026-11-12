@@ -296,7 +296,7 @@ describe('a message to a page of a pass', () => {
     }).value;
     // A take-out finished while the message went in: the runner refuses to hand it over.
     deliver = () =>
-      Promise.reject(new ConflictError('Settings page is no longer in a Workbench pass'));
+      Promise.reject(new ConflictError('Settings page is no longer in a UI Workbench pass'));
 
     const res = await post(taskId, 'Make it bigger', [{ name: 'shot.png', bytes: PNG }]);
 

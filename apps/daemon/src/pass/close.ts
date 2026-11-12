@@ -275,7 +275,7 @@ async function failGate(
     flagCard(ctx, {
       projectId: pass.projectId,
       workstreamId: null,
-      title: `The gate failed as Workbench pass "${pass.name}" closed`,
+      title: `The gate failed as UI Workbench pass "${pass.name}" closed`,
       body: `The gate ran ${place}.${named} Close Pass runs it again.`,
       foldKey: gateFailedKey(pass.id),
       refresh: true,

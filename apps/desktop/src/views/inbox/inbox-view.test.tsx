@@ -767,7 +767,7 @@ describe('InboxView', () => {
         'Move between cards',
         'Choose an option',
         'Write a note',
-        'Send the answer, dismiss a flag, or open the Workbench',
+        'Send the answer, dismiss a flag, or open the UI Workbench',
         'Send from the note',
         'Show these shortcuts',
       ])
@@ -936,7 +936,7 @@ describe('InboxView', () => {
 });
 
 // Workbench spec §6.1: a pass's Ready pages are one row, which offers neither Approve nor Send Back.
-describe("a Workbench pass's Ready pages", () => {
+describe("a UI Workbench pass's Ready pages", () => {
   const pass = mintId('Pass');
   const ready = (title: string): InboxItemDto =>
     inboxItemDto({
@@ -957,10 +957,10 @@ describe("a Workbench pass's Ready pages", () => {
       },
     });
 
-  it('show as one row naming each page, with no Approve or Send Back; Enter opens the Workbench', async () => {
+  it('show as one row naming each page, with no Approve or Send Back; Enter opens the UI Workbench', async () => {
     const { answers } = inbox([ready('Ready: Settings'), ready('Ready: People')]);
     const { router } = renderApp('/inbox');
-    expect(await screen.findByText('Workbench: 2 pages ready')).toBeTruthy();
+    expect(await screen.findByText('UI Workbench: 2 pages ready')).toBeTruthy();
     expect(screen.getByRole('radio', { name: 'Open 1' })).toBeTruthy();
     const card = selectedCard();
     expect(within(card).getByText('Ready: Settings')).toBeTruthy();
@@ -975,7 +975,7 @@ describe("a Workbench pass's Ready pages", () => {
   });
 });
 
-describe("a Workbench pass's shared-area question", () => {
+describe("a UI Workbench pass's shared-area question", () => {
   it('offers Allow, Keep It to This Page and a reply, and sends the reply with its note', async () => {
     const asked = inboxItemDto({
       kind: 'question',
@@ -1013,7 +1013,7 @@ describe("a Workbench pass's shared-area question", () => {
   });
 });
 
-describe("a Workbench pass's cards", () => {
+describe("a UI Workbench pass's cards", () => {
   const passId = mintId('Pass');
   const prUrl = 'https://github.com/acme/widgets/pull/7';
   const mergeCommand = 'git switch main && git merge 10db/pass-settings';
@@ -1043,7 +1043,7 @@ describe("a Workbench pass's cards", () => {
     },
     {
       name: 'a follow-on links the pull request its later sign-offs went to',
-      card: passFlag('Workbench pass "Settings" closed when its pull request merged', {
+      card: passFlag('UI Workbench pass "Settings" closed when its pull request merged', {
         kind: 'pass_follow_on',
         passId,
         followOnPassId: null,
@@ -1055,7 +1055,7 @@ describe("a Workbench pass's cards", () => {
     },
     {
       name: 'a follow-on with no pull request links none',
-      card: passFlag('Workbench pass "Settings" closed when its pull request merged', {
+      card: passFlag('UI Workbench pass "Settings" closed when its pull request merged', {
         kind: 'pass_follow_on',
         passId,
         followOnPassId: mintId('Pass'),

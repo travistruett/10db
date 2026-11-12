@@ -91,11 +91,11 @@ export function BatchPanel({ batch, workstreams, gateCommand, onOpenWorkbench }:
       <Stack gap="xs" aria-label="Delivery" role="group" align="flex-start">
         {batch.branch ? <Code>{batch.branch}</Code> : null}
         <Text size="xs" c="dimmed">
-          It ships when the Workbench pass closes, and is abandoned with it.
+          It ships when the UI Workbench pass closes, and is abandoned with it.
         </Text>
         {onOpenWorkbench ? (
           <Button size="xs" variant="default" onClick={onOpenWorkbench}>
-            Open Workbench
+            Open UI Workbench
           </Button>
         ) : null}
       </Stack>

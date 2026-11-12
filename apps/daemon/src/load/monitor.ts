@@ -95,7 +95,7 @@ export function knownProcesses(
       gates.push({ pid: gatePid, label: `the shipping gate of batch "${batch.title}"` });
   }
   for (const check of listPassCheckPids(db))
-    gates.push({ pid: check.pid, label: `the Workbench check of pass "${check.name}"` });
+    gates.push({ pid: check.pid, label: `the UI Workbench check of pass "${check.name}"` });
   return {
     daemonPid: facts.daemonPid,
     tempRoot: facts.tempRoot,

@@ -85,7 +85,7 @@ export function moveCard(
     title: `Move ${pass.returnBranch} to origin/${input.base}`,
     body: [
       ...(input.why === null ? [] : [`10db moved nothing: ${input.why}.`, '']),
-      `Workbench pass "${pass.name}"${named} ${says}`,
+      `UI Workbench pass "${pass.name}"${named} ${says}`,
       '',
       `Move checks out origin/${input.base} on ${pass.returnBranch}, keeping uncommitted changes it does not write, and settles the pass. It is refused while one lies where it writes, and while ${pass.returnBranch} holds a commit of your own.`,
     ].join('\n'),

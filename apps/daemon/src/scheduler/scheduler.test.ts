@@ -647,7 +647,7 @@ describe('scheduler', () => {
 // Workbench spec §5.2, §5.3 (W9), §5.5, §12: a pass's task runs a turn when its rows say so (a builder
 // message no turn took, a turn not ended), never from its next action alone, and while a pass holds
 // Your folder ordinary work waits for it there.
-describe('Workbench passes', () => {
+describe('UI Workbench passes', () => {
   const PAGES = [
     { name: 'settings', globs: ['src/settings/**'], role: 'page' as const, route: '/settings' },
     { name: 'api', globs: ['api/**'] },
@@ -1079,7 +1079,7 @@ describe('Workbench passes', () => {
     const ordinary = add(project, ['api']);
     expect(await scheduler().tick()).toBe(0);
     expect(getWorkstream(store.db, ordinary.workstream.id).notice?.line).toBe(
-      'Waits for the Workbench pass to close',
+      'Waits for the UI Workbench pass to close',
     );
     // A closed pass still holds the folder until its work is in the base. The test has one pass,
     // whose close took its task out.
@@ -1088,7 +1088,7 @@ describe('Workbench passes', () => {
     expect(await scheduler().tick()).toBe(0);
     // Closed, the wait is for the pass's pull request now (D22).
     expect(getWorkstream(store.db, ordinary.workstream.id).notice?.line).toBe(
-      "Waits for the Workbench pass's pull request to merge",
+      "Waits for the UI Workbench pass's pull request to merge",
     );
     store.db.update(schema.passes).set({ state: 'SETTLED' }).run();
     expect(await scheduler().tick()).toBe(1);

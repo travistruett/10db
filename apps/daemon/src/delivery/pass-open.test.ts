@@ -599,7 +599,7 @@ describe("a pass's batch", () => {
     const ws = runOf(task);
     if (!ws) throw new Error('the pass task has no workstream');
     h.settle(ws.id, 'DONE');
-    expect(() => act(opened.batch.id, ws.id)).toThrow(/Workbench pass/);
+    expect(() => act(opened.batch.id, ws.id)).toThrow(/UI Workbench pass/);
     await h.jobs.idle();
     expect(getBatch(h.store.db, opened.batch.id).state).toBe('OPEN');
     expect(h.git$('symbolic-ref', '--short', 'HEAD')).toBe(opened.batch.branch);
@@ -625,7 +625,7 @@ describe('a pass task', () => {
     const ws = runOf(task);
     if (!ws) throw new Error('the pass task has no workstream');
     h.settle(ws.id, 'CANCELLED');
-    expect(() => h.starter.startTask(task.id)).toThrow(/in the Workbench pass "Polish pages"/);
+    expect(() => h.starter.startTask(task.id)).toThrow(/in the UI Workbench pass "Polish pages"/);
     await h.jobs.idle();
     expect(runOf(task)?.id).toBe(ws.id);
   });
@@ -692,7 +692,7 @@ describe('other work in Your folder while a pass is open (W9)', () => {
     });
     const placed = h.addTask('Placed', { areas: ['src'] });
     h.state.write((w) => patchTask(w, placed.id, { workspaceMode: 'shared' }));
-    expect(() => h.starter.startTask(placed.id)).toThrow(/Workbench pass "Polish pages"/);
+    expect(() => h.starter.startTask(placed.id)).toThrow(/UI Workbench pass "Polish pages"/);
     await h.jobs.idle();
   });
 });

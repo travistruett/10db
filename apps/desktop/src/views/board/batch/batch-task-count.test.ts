@@ -14,7 +14,7 @@ describe('batchTaskCount', () => {
     expect(batchTaskCount(batch, [first, retried, member('CANCELLED'), member('DONE')])).toBe(2);
   });
 
-  it("counts a pass's pages as one, which share the Workbench's branch, not a batch's", () => {
+  it("counts a pass's pages as one, which share the UI Workbench's branch, not a batch's", () => {
     const pass = batchDto({ passId: mintId('Pass') });
     expect(batchTaskCount(pass, [member('RUNNING', pass), member('WAITING_HUMAN', pass)])).toBe(1);
   });

@@ -62,7 +62,7 @@ const notices = (task: TaskDto) =>
     .filter((m) => m.author === TaskMessageAuthor.System)
     .map((m) => m.body);
 
-describe('an ordinary start of a task with saved Workbench work', () => {
+describe('an ordinary start of a task with saved UI Workbench work', () => {
   /** The task's run, once its start has cut its batch. */
   const runOf = (task: TaskDto) => {
     const id = getTask(h.store.db, task.id).workstreamId;
@@ -94,7 +94,7 @@ describe('an ordinary start of a task with saved Workbench work', () => {
     expect(read(h.repo, 'src/api/a.ts')).toBe('kept\n');
     expect(read(h.repo, 'src/api/new.ts')).toBe('new\n');
     expect(getTaskKeptWork(h.store.db, task.id)).toBeNull();
-    expect(notices(task)).toEqual(['Put back its saved Workbench work: 2 files.']);
+    expect(notices(task)).toEqual(['Put back its saved UI Workbench work: 2 files.']);
   });
 
   it('names a file that does not go back on the thread, keeps it saved, and still lets the run launch', async () => {
@@ -110,7 +110,7 @@ describe('an ordinary start of a task with saved Workbench work', () => {
     expect(read(h.repo, 'src/api/a.ts')).toBe('moved on\n');
     expect(read(h.repo, 'src/api/new.ts')).toBe('new\n');
     expect(notices(task)).toEqual([
-      'Put back its saved Workbench work: 1 file.\nLeft as they are, because the saved work does not merge with them:\n- src/api/a.ts',
+      'Put back its saved UI Workbench work: 1 file.\nLeft as they are, because the saved work does not merge with them:\n- src/api/a.ts',
     ]);
     expect(getTaskKeptWork(h.store.db, task.id)).not.toBeNull();
   });
@@ -142,7 +142,7 @@ describe('an ordinary start of a task with saved Workbench work', () => {
 
     expect(gate.ready(run)).toBe(true);
     expect(read(h.repo, 'src/api/a.ts')).toBe('kept\n');
-    expect(notices(task)).toEqual(['Put back its saved Workbench work: 2 files.']);
+    expect(notices(task)).toEqual(['Put back its saved UI Workbench work: 2 files.']);
     // A restart's gate knows nothing of the put-back: it finds the work already back.
     expect(createKeptWorkGate(h.ctx).ready(run)).toBe(true);
     expect(getWorkstream(h.store.db, run.id).state).toBe(WorkstreamState.Queued);
@@ -238,7 +238,7 @@ describe('an ordinary start of a task with saved Workbench work', () => {
   });
 });
 
-describe('a local run of a task with saved Workbench work', () => {
+describe('a local run of a task with saved UI Workbench work', () => {
   it("deletes the saved work's ref once the run is done", async () => {
     h = createDeliveryHarness({ delivery: 'local' } satisfies Partial<ProjectInput>);
     const unsubscribe = subscribeKeptWorkLanding(h.bus, h.ctx);

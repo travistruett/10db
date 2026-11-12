@@ -3874,10 +3874,10 @@ export function createRunner(opts: RunnerOptions): Runner {
       const stillAPage = (): void => {
         const pass = passOfWorkstream(db, id);
         const title = getTask(db, taskId).title;
-        if (!pass) throw new ConflictError(`${title} is no longer in a Workbench pass`);
+        if (!pass) throw new ConflictError(`${title} is no longer in a UI Workbench pass`);
         if (pass.state !== PassState.Open)
           throw new ConflictError(
-            `Workbench pass "${pass.name}" is ${pass.state.toLowerCase()}; its pages take no message`,
+            `UI Workbench pass "${pass.name}" is ${pass.state.toLowerCase()}; its pages take no message`,
           );
         const takeOut = lastTakeOut(db, taskId);
         if (takeOut?.passId === pass.id && takeOut.step < TakeOutStep.Done)
@@ -4007,12 +4007,12 @@ export function createRunner(opts: RunnerOptions): Runner {
         const pass = passOfWorkstream(ctx.tx, id);
         if (!pass)
           throw new ConflictError(
-            'The task is no longer in a Workbench pass, so its turn is not retried',
+            'The task is no longer in a UI Workbench pass, so its turn is not retried',
           );
         // A turn opened now would leave with the task, and run in its next pass unasked.
         if (pass.state !== PassState.Open)
           throw new ConflictError(
-            `Workbench pass "${pass.name}" is ${pass.state.toLowerCase()}; its turns are not retried`,
+            `UI Workbench pass "${pass.name}" is ${pass.state.toLowerCase()}; its turns are not retried`,
           );
         const row = getWorkstreamRow(ctx.tx, id);
         const takeOut = lastTakeOut(ctx.tx, row.taskId);
