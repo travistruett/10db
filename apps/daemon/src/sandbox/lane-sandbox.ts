@@ -1,4 +1,4 @@
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync, realpathSync, statSync } from 'node:fs';
 import { Provider, type PermissionRuleDto, type ProjectDto } from '@10db/contracts';
 import type { Clock } from '../clock';
 import { besideTheWays } from './beside-the-way';
@@ -257,6 +257,18 @@ function tempDirLimit(provider: Provider): number | null {
 /** Claude Code's spelling of an absolute path in a permission rule: `//` stands for the root. */
 const ruleScope = (path: string): string => `/${path}`;
 
+/** The file tools' rules that keep a secret closed: a file by its path, a folder with its tree. */
+function secretReadRules(path: string): string[] {
+  let folder = false;
+  try {
+    folder = statSync(path).isDirectory();
+  } catch {
+    // Gone or unreadable now: its own path is still denied.
+  }
+  const rule = `Read(${ruleScope(path)})`;
+  return folder ? [rule, `Read(${ruleScope(path)}/**)`] : [rule];
+}
+
 /** The refusal a session's setup reads are judged by, from the project's access. */
 function setupRefusal(
   home: string,
@@ -451,7 +463,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
               `Read(${ruleScope(path)})`,
               `Read(${ruleScope(path)}/**)`,
             ]),
-            ...[...secretFiles, ...setupSecrets].map((path) => `Read(${ruleScope(path)})`),
+            ...[...secretFiles, ...setupSecrets].flatMap(secretReadRules),
           ],
           askRules: [
             ...claudeProtected.files.flatMap((path) => [

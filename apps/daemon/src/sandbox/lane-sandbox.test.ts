@@ -1174,6 +1174,22 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       }
     });
 
+    it('keeps a .env folder inside an opened skill folder denied with its tree', async () => {
+      const setup = setupInput();
+      const file = writeIn(join(home, '.claude/skills/s/.env'), 'prod', 'TOKEN=x');
+      const secret = join(home, '.claude/skills/s/.env');
+      const session = await sandbox().forSession(input({ setup }));
+      try {
+        expect(session.spec.settings.filesystem.denyRead).toContain(secret);
+        expect(session.spec.disallowedTools).toEqual(
+          expect.arrayContaining([`Read(/${secret})`, `Read(/${secret}/**)`]),
+        );
+        expect(readAccess(file, session.fileAccess).access).toBe('protected');
+      } finally {
+        session.dispose();
+      }
+    });
+
     it('gives an MCP server none of the setup reads', async () => {
       const session = await sandbox().forSession(
         input({
