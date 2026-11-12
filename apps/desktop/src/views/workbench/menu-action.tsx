@@ -30,7 +30,7 @@ export function MenuAction({
       <Text size="sm" c="inherit">
         {label}
       </Text>
-      <Text id={id} size="xs" c="dimmed" maw={240}>
+      <Text id={id} size="xs" c="dimmed" maw={300}>
         {byline}
       </Text>
     </Menu.Item>
