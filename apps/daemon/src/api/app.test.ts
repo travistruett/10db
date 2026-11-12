@@ -5,6 +5,7 @@ import {
   GoalListDto,
   HazardAssessmentDto,
   HazardLookAgainResult,
+  DevUiConnectionDto,
   HealthResponse,
   HumanTouchDto,
   InvalidError,
@@ -363,6 +364,48 @@ describe('API', () => {
       mcp: () => Promise.resolve(new Response('mcp')),
     }).request('/health');
     expect(HealthResponse.parse(await res.json()).devUiOrigin).toBe('http://localhost:1420');
+  });
+
+  describe("the dev UI's read-only token", () => {
+    const DEV_TOKEN = 'dev-ui-token-for-tests';
+    const devApp = (devUiToken: string | null) =>
+      createApp({
+        startedAt,
+        allowedOrigins: ['http://localhost:1420'],
+        devUiOrigin: devUiToken === null ? null : 'http://localhost:1420',
+        devUiToken,
+        token: TOKEN,
+        services: stubServices(),
+        upgradeWebSocket: noUpgrade,
+        onUnexpectedError: () => undefined,
+        mcp: () => Promise.resolve(new Response('mcp')),
+      });
+    const as = (token: string, method = 'GET') => ({
+      method,
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    it.each([
+      { name: 'a read of what a page shows', path: '/projects', method: 'GET', status: 200 },
+      { name: 'any write', path: '/projects', method: 'POST', status: 403 },
+      {
+        name: "a read that moves a goal's mark",
+        path: `/goals/${mintId('Goal')}/digest`,
+        method: 'GET',
+        status: 403,
+      },
+      { name: 'a read that runs a command', path: '/system', method: 'GET', status: 403 },
+      { name: 'its own connection', path: '/dev-ui/connection', method: 'GET', status: 403 },
+    ])('$name: $status', async ({ path, method, status }) => {
+      expect((await devApp(DEV_TOKEN).request(path, as(DEV_TOKEN, method))).status).toBe(status);
+    });
+
+    it('is handed to the app over its full token only, and exists only with a dev UI origin', async () => {
+      const res = await devApp(DEV_TOKEN).request('/dev-ui/connection', auth);
+      expect(DevUiConnectionDto.parse(await res.json())).toEqual({ token: DEV_TOKEN });
+      expect((await devApp(null).request('/dev-ui/connection', auth)).status).toBe(404);
+      expect((await devApp(null).request('/projects', as(DEV_TOKEN))).status).toBe(401);
+    });
   });
 
   it('requires the UI token everywhere else', async () => {

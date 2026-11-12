@@ -1,5 +1,6 @@
-import type { PassId, TaskId } from '@10db/contracts';
+import { DevUiConnectionDto, type PassId, type TaskId } from '@10db/contracts';
 import { useState } from 'react';
+import { readJson } from '../../daemon/client';
 import { handOffTo } from '../../daemon/dev-ui-handoff';
 import { useDaemon, useDaemonStatus } from '../../daemon/provider';
 import { appPageUrl, openAppPage } from '../../desktop/tauri';
@@ -68,7 +69,7 @@ export function useOpenPage(target: OpenPageTarget): OpenPageControl {
   const [refused, setRefused] = useState<{ readonly key: string; readonly reason: string } | null>(
     null,
   );
-  const { connection } = useDaemon();
+  const { client, connection } = useDaemon();
   const status = useDaemonStatus();
   const devUiOrigin = status.kind === 'connected' ? status.devUiOrigin : null;
   const key = `${target.passId}/${target.taskId}`;
@@ -86,9 +87,16 @@ export function useOpenPage(target: OpenPageTarget): OpenPageControl {
   const act = () =>
     attempt(async (address) => {
       if (opened) return copy(address);
-      // 10db's own dev UI gets the daemon's connection in the fragment; a copied link never does.
+      // 10db's own dev UI gets the daemon's read-only dev UI token in the fragment, never the app's
+      // own; a copied link carries neither.
+      const devUi = devUiOrigin !== null && new URL(address.appUrl).origin === devUiOrigin;
+      const handed = devUi
+        ? await readJson(await client['dev-ui'].connection.$get(), DevUiConnectionDto)
+        : null;
       await openAppPage(address.appUrl, address.route, (url) =>
-        handOffTo(url, devUiOrigin, connection),
+        handed === null
+          ? url
+          : handOffTo(url, devUiOrigin, { url: connection.url, token: handed.token }),
       );
       rememberOpened(target.passId, target.taskId);
       setOpenedHere((held) => new Set(held).add(key));

@@ -1894,6 +1894,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const app = createApp({
     commit: build?.commit ?? null,
     devUiOrigin: opts.devUiOrigin ?? null,
+    // Minted afresh at each start, only when a dev UI is opted in; it reads and nothing else.
+    devUiToken: opts.devUiOrigin ? randomBytes(32).toString('base64url') : null,
     selfUpdate: selfUpdateServices,
     startedAt,
     allowedOrigins: [

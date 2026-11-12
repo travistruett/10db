@@ -18,7 +18,7 @@ export * from './goals';
 export * from './handoff';
 export * from './hazard-assessment';
 export * from './human-touch';
-export { HealthResponse } from './health';
+export { DevUiConnectionDto, HealthResponse } from './health';
 export * from './ids';
 export * from './judge';
 export * from './knowledge';

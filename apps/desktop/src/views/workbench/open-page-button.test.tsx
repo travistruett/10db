@@ -125,8 +125,11 @@ describe('OpenPageButton', () => {
     expect(screen.getByRole('button', { name: 'Open Page' })).toBeTruthy();
   });
 
-  it("hands 10db's own dev UI the daemon's connection, and copies its link without it", async () => {
+  it("hands 10db's own dev UI the daemon's read-only token, never the app's, and copies its link without it", async () => {
     server.use(
+      http.get(daemonUrl('/dev-ui/connection'), () =>
+        HttpResponse.json({ token: 'dev-ui-read-token' }),
+      ),
       http.get(daemonUrl('/health'), () =>
         HttpResponse.json({
           status: 'ok',
@@ -141,7 +144,11 @@ describe('OpenPageButton', () => {
     await click('Open Page');
     const [url] = opened;
     expect(url?.startsWith('http://localhost:1420/factory#tendb=')).toBe(true);
-    expect(takenHandOff(new URL(url ?? '').hash)).toEqual(TEST_CONNECTION);
+    expect(takenHandOff(new URL(url ?? '').hash)).toEqual({
+      url: TEST_CONNECTION.url,
+      token: 'dev-ui-read-token',
+    });
+    expect(url).not.toContain(TEST_CONNECTION.token);
     await click('Copy Link');
     expect(writeText).toHaveBeenCalledWith('http://localhost:1420/factory');
   });

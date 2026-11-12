@@ -30,6 +30,7 @@ import {
   FolderInspectInput,
   GoalAdoptInput,
   GoalId,
+  DevUiConnectionDto,
   HealthResponse,
   InboxAnswer,
   InboxItemId,
@@ -108,6 +109,7 @@ import type { UpgradeWebSocket } from 'hono/ws';
 import { z } from 'zod';
 import type { ApiServices } from './services';
 import type { SelfUpdateServices, TaskRemovalServices } from './services';
+import { devUiMayRead } from './dev-ui-access';
 import { streamEvents } from './stream';
 
 /** What the screen routes need from the screens module: the broker's window side and the kept pictures. */
@@ -137,6 +139,8 @@ export interface ApiDeps {
   readonly commit?: string | null;
   /** The browser origin opted in as 10db's own dev UI, for `/health`; absent when none is. */
   readonly devUiOrigin?: string | null;
+  /** The dev UI's read-only token (`devUiMayRead`); absent when no dev UI origin is opted in. */
+  readonly devUiToken?: string | null;
   /** The self-update setting; its routes answer 501 without it. */
   readonly selfUpdate?: SelfUpdateServices;
   readonly upgradeWebSocket: UpgradeWebSocket;
@@ -252,6 +256,14 @@ export function createApp(deps: ApiDeps) {
           ? (c.req.query('token') ?? '')
           : (/^Bearer (.+)$/.exec(c.req.header('authorization') ?? '')?.[1] ?? '');
       if (sameToken(presented, deps.token)) return next();
+      // The dev UI's token: the page is code a pass's agents may be editing, so it only reads.
+      if (presented !== '' && deps.devUiToken && sameToken(presented, deps.devUiToken))
+        return devUiMayRead(c.req.method, c.req.path)
+          ? next()
+          : c.json(
+              { error: 'forbidden', message: 'The dev UI reads only: act in the 10db app' },
+              403,
+            );
       // A render token (Shape spec §5.5) belongs to one screen being drawn: it reads what a screen
       // shows and nothing else, so no write, no digest and no command can be reached with it.
       if (presented !== '' && deps.screens?.tokenValid(presented) === true)
@@ -1236,6 +1248,11 @@ export function createApp(deps: ApiDeps) {
         'cache-control': 'private, max-age=31536000, immutable',
         'x-content-type-options': 'nosniff',
       }),
+    )
+    .get('/dev-ui/connection', (c) =>
+      deps.devUiToken
+        ? c.json(DevUiConnectionDto.parse({ token: deps.devUiToken }))
+        : c.json({ error: 'not_found', message: 'No dev UI origin is opted in' }, 404),
     )
     .get('/projects/:projectId/pictures', (c) =>
       c.json(deps.services.picturesStatus(ProjectId.parse(c.req.param('projectId')))),

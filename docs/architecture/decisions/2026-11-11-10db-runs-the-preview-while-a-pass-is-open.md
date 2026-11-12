@@ -32,19 +32,24 @@ when it gave up or could not start. A preview that runs says nothing. With a pre
 finds nothing answering raises no "Nothing answers" notice (`pictures/preview-marks.ts`): the module starts the
 preview instead.
 
-**Open Page hands 10db's own dev UI its connection.** When the page's origin is the dev UI origin the builder opted
-into (`TENDB_DEV_UI_ORIGIN`, `decisions/2026-10-29-dev-ui-over-the-factory.md`), Open Page puts the daemon's address
-and UI token in the URL's fragment, which the browser never sends to a server. The dev UI takes them from there,
-keeps them in the tab's session storage and removes the fragment from the address bar. The repository's server
-process never holds the token, so 10db's preview command (`pnpm dev:preview`) serves the UI with none. Any other
-origin gets the plain address.
+**Open Page hands 10db's own dev UI a read-only token.** 10db's dev UI is code a pass's agents may be editing,
+so it never gets the app's UI token. When a dev UI origin is opted in (`TENDB_DEV_UI_ORIGIN`,
+`decisions/2026-10-29-dev-ui-over-the-factory.md`), the daemon mints a second token at each start that only reads:
+any GET but the ones that write, run a command or hand out this token (`api/dev-ui-access.ts`); everything else
+answers 403. `/health` names the origin; `GET /dev-ui/connection` gives the token, over the app's own token only.
+When the page's origin is that origin, Open Page puts the daemon's address and the dev UI token in the URL's
+fragment, which the browser never sends to a server; the dev UI keeps them in the tab's session storage and removes
+the fragment from the address bar. A copied link carries neither, and any other origin gets the plain address. The
+repository's server process holds no token, so 10db's preview command (`pnpm dev:preview`) serves the UI with none.
+Acting (answering a card, changing a setting) is done in the 10db app.
 
 ## Why
 
 The builder's call during the Workbench's QA: running and restarting the dev server by hand, and remembering to,
 is the friction the Workbench exists to remove. §13's rule stands: nothing repository-controlled runs outside a
 sandbox, which is why the command runs under the gate's sandbox rather than as the builder's own process, and why
-10db's own dev UI gets its token from Open Page instead of from the server it serves from. `pnpm dev:factory`
+10db's own dev UI gets a read-only token from Open Page instead of the app's token from the server it serves from:
+code an agent wrote runs in that tab, and it must not be able to answer the agent's own cards. `pnpm dev:factory`
 remains for running the dev UI by hand; it reads the token itself and holds it in Vite's process, which is fine for
 a command the builder starts and not for one 10db starts.
 
