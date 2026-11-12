@@ -460,6 +460,8 @@ export function createSetupDir(
           );
           linked.push(skill.name);
         } catch (error) {
+          // A half-made folder of links would still load: it goes with the skill.
+          rmSync(join(yours, 'skills', skill.name), { recursive: true, force: true });
           changed(shown(skill.path, home), error);
         }
       }
