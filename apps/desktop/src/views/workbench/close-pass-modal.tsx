@@ -27,7 +27,7 @@ import { SharedChoices } from './shared-choices';
 const LEAVE_OUT = 'leave-out';
 
 const PAGE_CHOICES = [
-  { value: PassClosePageChoice.TakeOut, label: 'Take Out' },
+  { value: PassClosePageChoice.TakeOut, label: 'Remove' },
   { value: PassClosePageChoice.SignOff, label: 'Sign Off Now' },
 ];
 
@@ -202,7 +202,7 @@ export function ClosePassModal({ view, onClose }: ClosePassModalProps) {
     <FormModal
       opened
       onClose={onClose}
-      title="Close Pass"
+      title="Finish"
       size="lg"
       // What changed goes beside Close Pass, where the next click lands, and is announced there.
       error={closing.error?.message ?? read.error?.message ?? changedLine(again?.changed ?? [])}
@@ -227,7 +227,7 @@ export function ClosePassModal({ view, onClose }: ClosePassModalProps) {
               );
             }}
           >
-            Close Pass
+            Finish
           </Button>
         </>
       }

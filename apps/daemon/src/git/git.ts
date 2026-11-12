@@ -866,6 +866,21 @@ export interface Git {
   }): Promise<LandedPaths>;
   /** Sets `ref`, under `refs/10db/`, to commit `sha`, whatever it held. */
   keepRef(repo: string, ref: string, sha: string): Promise<void>;
+  /**
+   * A commit of `files` alone, at the root, with no parent and never signed, by `author`: the
+   * pictures a pass's pull request shows. Each file is read from its path on disk; nothing in the
+   * checkout or its index is touched, and no ref names the commit.
+   */
+  picturesCommit(
+    repo: string,
+    input: {
+      readonly files: readonly { readonly name: string; readonly path: string }[];
+      readonly author: { readonly name: string; readonly email: string };
+      readonly message: string;
+    },
+  ): Promise<string>;
+  /** Pushes commit `sha` to `refs/heads/<branch>` of origin, replacing whatever that branch held. */
+  pushCommitTo(repo: string, sha: string, branch: string, net: NetworkCall): Promise<NetworkRun>;
   /** The blob and mode each of `paths` holds in commit `rev`, sorted by path; null for one it lacks there. */
   blobsAt(repo: string, rev: string, paths: readonly string[]): Promise<PathEntry[]>;
   /** True when commit `ancestor` is in the history of `tip`, `tip` itself included. */
@@ -4451,6 +4466,38 @@ export function createGit(opts: GitOptions = {}): Git {
     recordPaths,
     chainCommit,
     landPaths,
+    async picturesCommit(repo, { files, author, message }) {
+      const c = await pinned(repo);
+      const entries: string[] = [];
+      for (const file of files) {
+        const oid = (await git(c, ['hash-object', '-w', '--no-filters', '--', file.path])).trim();
+        entries.push(`100644 blob ${oid}\t${file.name}`);
+      }
+      const tree = (await git(c, ['mktree'], { input: `${entries.join('\n')}\n` })).trim();
+      const env = {
+        GIT_AUTHOR_NAME: author.name,
+        GIT_AUTHOR_EMAIL: author.email,
+        GIT_COMMITTER_NAME: author.name,
+        GIT_COMMITTER_EMAIL: author.email,
+      };
+      return (
+        await git(c, ['commit-tree', '--no-gpg-sign', tree], { input: `${message}\n`, env })
+      ).trim();
+    },
+    async pushCommitTo(repo, sha, branch, net) {
+      const c = await pinned(repo);
+      const commit = await revParse(c, `${sha}^{commit}`);
+      if (commit === null) throw new InvalidError(`${sha} names no commit`);
+      const network = await networkConfig(c, net);
+      const url = await pinnedUrl(c, 'push');
+      return gitNetwork(
+        c.real,
+        network.config,
+        ['push', '--recurse-submodules=no', '--', url, `+${commit}:refs/heads/${branch}`],
+        net,
+        { bin, env: { ...c.env, ...network.env } },
+      );
+    },
     async keepRef(repo, ref, sha) {
       if (!ref.startsWith(KEPT_REF_PREFIX))
         throw new InvalidError(`${ref} is not under ${KEPT_REF_PREFIX}`);

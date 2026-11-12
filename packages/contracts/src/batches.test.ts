@@ -398,6 +398,7 @@ describe('worktree mode contracts', () => {
       prTitlePrefix: null,
       allowedCommands: [],
       sandboxLoopback: false,
+      prPictures: false,
       sandboxDocker: false,
       sandboxDockerOptOut: false,
       workspaceMode: 'shared',

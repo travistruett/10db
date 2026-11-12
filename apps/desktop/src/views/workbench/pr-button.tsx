@@ -20,7 +20,7 @@ function gateLine(gate: PassPullRequestGate): string {
     case PassPullRequestGate.Scratch:
       return 'The gate runs on the pushed commit in a separate copy, so you can keep working.';
     case PassPullRequestGate.FolderAtClose:
-      return 'The gate runs in your folder when the pass closes.';
+      return 'The gate runs in your folder when the pass finishes.';
     case PassPullRequestGate.None:
       return 'No gate runs for it.';
   }

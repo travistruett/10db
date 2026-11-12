@@ -701,13 +701,13 @@ describe('PassWorkspace Take Out', () => {
 
   async function openTakeOut(area: string) {
     fireEvent.click(screen.getByRole('button', { name: `More actions for ${area}` }));
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Take Out', hidden: true }));
-    return screen.findByRole('dialog', { name: `Take Out ${area}` });
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Remove', hidden: true }));
+    return screen.findByRole('dialog', { name: `Remove ${area}` });
   }
 
   /** Take Out, once the preview it waits for has answered. */
   async function confirmTakeOut(dialog: HTMLElement) {
-    const button = within(dialog).getByRole('button', { name: 'Take Out' });
+    const button = within(dialog).getByRole('button', { name: 'Remove' });
     await waitFor(() => {
       expect(button).toHaveProperty('disabled', false);
     });

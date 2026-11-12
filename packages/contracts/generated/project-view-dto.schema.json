@@ -227,6 +227,9 @@
         "null"
       ]
     },
+    "prPictures": {
+      "type": "boolean"
+    },
     "allowedCommands": {
       "type": "array",
       "items": {
@@ -1295,6 +1298,7 @@
     "landing",
     "landingBranch",
     "prTitlePrefix",
+    "prPictures",
     "allowedCommands",
     "sandboxLoopback",
     "sandboxDocker",

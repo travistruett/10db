@@ -103,7 +103,7 @@ describe('ClosePassModal', () => {
   it('shows every loose end with its safe default, and closes on the choices made', async () => {
     const { asked, sent } = serve(preview(), [closing]);
     const onClose = draw(view);
-    const dialog = await screen.findByRole('dialog', { name: 'Close Pass' });
+    const dialog = await screen.findByRole('dialog', { name: 'Finish' });
     const billing = await within(dialog).findByRole('group', { name: 'Billing' });
     expect(within(billing).getByText('Working · will be stopped')).toBeTruthy();
     expect(within(dialog).getByText('+4 −1')).toBeTruthy();
@@ -118,7 +118,7 @@ describe('ClosePassModal', () => {
     await choose(dialog, 'What happens to Settings', 'Sign Off Now');
     await choose(dialog, 'Where src/app.css goes', 'Add to Settings');
     fireEvent.click(within(billing).getByRole('radio', { name: 'Drop' }));
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Close Pass' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Finish' }));
     await waitFor(() => {
       expect(sent).toEqual([
         {
@@ -157,12 +157,12 @@ describe('ClosePassModal', () => {
       closing,
     ]);
     const onClose = draw(view);
-    const dialog = await screen.findByRole('dialog', { name: 'Close Pass' });
+    const dialog = await screen.findByRole('dialog', { name: 'Finish' });
     const billing = await within(dialog).findByRole('group', { name: 'Billing' });
     // Choices made before the lists changed carry over to the lists shown again.
     await choose(dialog, 'What happens to Settings', 'Sign Off Now');
     fireEvent.click(within(billing).getByRole('radio', { name: 'Drop' }));
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Close Pass' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Finish' }));
     // Said beside Close Pass, where the second click lands, and announced.
     const alert = within(dialog).getByRole('alert');
     expect(
@@ -172,7 +172,7 @@ describe('ClosePassModal', () => {
     ).toBeTruthy();
     expect(select(dialog, 'Where src/new.css goes')).toBeTruthy();
     expect(onClose).not.toHaveBeenCalled();
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Close Pass' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Finish' }));
     await waitFor(() => {
       expect(sent.map((s) => s.body.token)).toEqual(['lists-1', 'lists-2']);
     });
@@ -193,14 +193,14 @@ describe('ClosePassModal', () => {
   it('opened again, never shows the lists an earlier opening read', async () => {
     const { asked } = serve(preview(), []);
     const { rerender } = renderWithDaemon(<ClosePassModal view={view} onClose={vi.fn()} />);
-    let dialog = await screen.findByRole('dialog', { name: 'Close Pass' });
+    let dialog = await screen.findByRole('dialog', { name: 'Finish' });
     await within(dialog).findByRole('group', { name: 'Billing' });
     rerender(<></>);
     await waitFor(() => {
-      expect(screen.queryByRole('dialog', { name: 'Close Pass' })).toBeNull();
+      expect(screen.queryByRole('dialog', { name: 'Finish' })).toBeNull();
     });
     rerender(<ClosePassModal view={view} onClose={vi.fn()} />);
-    dialog = await screen.findByRole('dialog', { name: 'Close Pass' });
+    dialog = await screen.findByRole('dialog', { name: 'Finish' });
     expect(within(dialog).queryByRole('group', { name: 'Billing' })).toBeNull();
     expect(await within(dialog).findByRole('group', { name: 'Billing' })).toBeTruthy();
     expect(asked).toEqual([view.pass.id, view.pass.id]);
@@ -217,7 +217,7 @@ describe('ClosePassModal', () => {
       [],
     );
     draw(passViewDto({ pages: [signedOff] }));
-    const dialog = await screen.findByRole('dialog', { name: 'Close Pass' });
+    const dialog = await screen.findByRole('dialog', { name: 'Finish' });
     expect(await within(dialog).findByText(preview().summary)).toBeTruthy();
     for (const section of ['Not signed off', 'Edits no page owns', 'Commits 10db did not make'])
       expect(within(dialog).queryByRole('heading', { name: section })).toBeNull();

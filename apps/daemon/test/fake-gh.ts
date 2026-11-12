@@ -18,6 +18,7 @@ const NO_REQUIRED: RequiredChecks = { state: 'none', failing: [], pending: [], c
 export type GhMethod =
   | 'authStatus'
   | 'authLogin'
+  | 'noreplyEmail'
   | 'repoView'
   | 'repoAllowsAutoMerge'
   | 'prView'
@@ -120,6 +121,10 @@ export class FakeGh implements Gh {
       return Promise.resolve(null);
     }
     return this.call('authLogin', {}, () => 'octocat');
+  }
+
+  noreplyEmail(): Promise<string> {
+    return this.call('noreplyEmail', {}, () => '583231+octocat@users.noreply.github.com');
   }
 
   repoView(): Promise<string> {

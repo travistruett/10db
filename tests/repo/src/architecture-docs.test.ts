@@ -15,6 +15,7 @@ const PUBLIC_RESEARCH = [
   'external-research-recheck.md',
   'gbrain-lessons.md',
   'm1-live-acceptance.md',
+  'slack-stakeholder-questions.md',
   'spikes-summary.md',
   'spike-01-runtime.md',
   'spike-02-context-usage.md',

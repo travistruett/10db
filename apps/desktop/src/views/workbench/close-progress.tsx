@@ -20,13 +20,13 @@ const STEPS: readonly {
   readonly line: string;
   readonly runs: (facts: CloseFacts) => boolean;
 }[] = [
-  { after: CloseStep.Confirmed, line: "Landing the close's changes…", runs: () => true },
+  { after: CloseStep.Confirmed, line: 'Landing the changes…', runs: () => true },
   {
     after: CloseStep.Landed,
     line: 'Running the gate in a separate copy…',
     runs: (facts) => facts.gated && facts.delivery === Delivery.PullRequest,
   },
-  { after: CloseStep.ScratchGated, line: 'Taking out pages…', runs: (facts) => facts.takingOut },
+  { after: CloseStep.ScratchGated, line: 'Removing pages…', runs: (facts) => facts.takingOut },
   {
     after: CloseStep.TakenOut,
     line: 'Running the gate in your folder…',
@@ -39,12 +39,12 @@ const STEPS: readonly {
     runs: (facts) => facts.delivery === Delivery.PullRequest,
   },
   { after: CloseStep.Pushed, line: "Moving your folder's branch…", runs: () => true },
-  { after: CloseStep.FastForwarded, line: 'Closing the pass…', runs: () => true },
+  { after: CloseStep.FastForwarded, line: 'Finishing the pass…', runs: () => true },
 ];
 
 /** What a closing pass does next: the first step after the last finished that does anything. */
 function closingLine(step: CloseStep | null, facts: CloseFacts): string {
-  if (step === null) return 'Closing the pass…';
+  if (step === null) return 'Finishing the pass…';
   const next = STEPS.find((candidate) => candidate.after >= step && candidate.runs(facts));
   // A local project after its folder gate: a push if it has an origin, then the folder's branch.
   if (
@@ -53,7 +53,7 @@ function closingLine(step: CloseStep | null, facts: CloseFacts): string {
     next?.after === CloseStep.Pushed
   )
     return 'Finishing the close…';
-  return next?.line ?? 'Closing the pass…';
+  return next?.line ?? 'Finishing the pass…';
 }
 
 /** What a pass that is ending is doing, in words; null while it is open or once it has ended. */

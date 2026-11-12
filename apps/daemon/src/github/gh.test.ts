@@ -122,6 +122,28 @@ describe('createGh', () => {
 
   it.each([
     {
+      name: 'the address gh printed',
+      answer: { exitCode: 0, stdout: '583231+octocat@users.noreply.github.com\n' },
+      expected: '583231+octocat@users.noreply.github.com',
+    },
+    {
+      name: 'an answer that is not one',
+      answer: { exitCode: 0, stdout: 'null+null@x\n' },
+      kind: 'failed',
+    },
+    { name: 'a failure', answer: { exitCode: 1, stderr: 'HTTP 502' }, kind: 'failed' },
+  ])('noreplyEmail: $name', async ({ answer, expected, kind }) => {
+    const { exec, seen } = scripted({ 'api user': answer });
+    const email = createGh(exec).noreplyEmail(CALL);
+    if (kind === undefined) await expect(email).resolves.toBe(expected);
+    else await expect(email).rejects.toMatchObject({ name: 'GhError', kind });
+    expect(seen).toEqual([
+      ['api', 'user', '--jq', '"\\(.id)+\\(.login)@users.noreply.github.com"'],
+    ]);
+  });
+
+  it.each([
+    {
       name: 'an open PR',
       answer: {
         exitCode: 0,

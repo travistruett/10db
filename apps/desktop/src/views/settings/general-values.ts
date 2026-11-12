@@ -76,6 +76,7 @@ export interface GeneralValues {
   /** One command prefix per line; blank lines are ignored. */
   readonly allowedCommands: string;
   readonly sandboxLoopback: boolean;
+  readonly prPictures: boolean;
   readonly sandboxDocker: boolean;
   readonly workspaceMode: WorkspaceMode;
   /** Directory names; blanks are dropped on save. */
@@ -127,6 +128,7 @@ export function generalValues(project: ProjectDto): GeneralValues {
     prTitlePrefix: project.prTitlePrefix ?? '',
     allowedCommands: project.allowedCommands.join('\n'),
     sandboxLoopback: project.sandboxLoopback,
+    prPictures: project.prPictures,
     sandboxDocker: project.sandboxDocker,
     workspaceMode: project.workspaceMode,
     worktreeSeed: project.worktreeSeed,
@@ -270,6 +272,7 @@ export function checkGeneral(
     patch.allowedCommands = allowed.commands;
   if (values.sandboxLoopback !== project.sandboxLoopback)
     patch.sandboxLoopback = values.sandboxLoopback;
+  if (values.prPictures !== project.prPictures) patch.prPictures = values.prPictures;
   if (values.sandboxDocker !== project.sandboxDocker) patch.sandboxDocker = values.sandboxDocker;
   if (values.workspaceMode !== project.workspaceMode) patch.workspaceMode = values.workspaceMode;
   if (!sameCommands(seed, project.worktreeSeed)) patch.worktreeSeed = seed;
