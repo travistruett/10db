@@ -125,7 +125,7 @@ describe('OpenPageButton', () => {
     expect(screen.getByRole('button', { name: 'Open Page' })).toBeTruthy();
   });
 
-  it("hands 10db's own dev UI the daemon's read-only token, never the app's, and copies its link without it", async () => {
+  it("hands 10db's own dev UI the daemon's read-only token, never the app's, on every click", async () => {
     server.use(
       http.get(daemonUrl('/dev-ui/connection'), () =>
         HttpResponse.json({ token: 'dev-ui-read-token' }),
@@ -149,8 +149,11 @@ describe('OpenPageButton', () => {
       token: 'dev-ui-read-token',
     });
     expect(url).not.toContain(TEST_CONNECTION.token);
-    await click('Copy Link');
-    expect(writeText).toHaveBeenCalledWith('http://localhost:1420/factory');
+    // The daemon's port moves at each start, so the dev UI is handed the connection again on every
+    // click, never turned to Copy Link; ⌘L still copies the plain address.
+    await click('Open Page');
+    expect(opened).toHaveLength(2);
+    expect(takenHandOff(new URL(opened[1] ?? '').hash)?.url).toBe(TEST_CONNECTION.url);
   });
 
   it('in a plain browser opens a tab', async () => {

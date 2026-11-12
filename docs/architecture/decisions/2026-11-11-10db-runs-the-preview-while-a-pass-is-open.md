@@ -40,7 +40,8 @@ command, or hands out this token is refused, and a test fails on a GET that is n
 answers 403. `/health` names the origin; `GET /dev-ui/connection` gives the token, over the app's own token only.
 When the page's origin is that origin, Open Page puts the daemon's address and the dev UI token in the URL's
 fragment, which the browser never sends to a server; the dev UI keeps them in the tab's session storage and removes
-the fragment from the address bar. A copied link carries neither, and any other origin gets the plain address. The
+the fragment from the address bar. A copied link carries neither, and any other origin gets the plain address. The daemon's port moves at each start, so at
+that origin Open Page opens and hands the connection over on every click, never turning to Copy Link. The
 repository's server process holds no token, so 10db's preview command (`pnpm dev:preview`) serves the UI with none.
 Acting (answering a card, changing a setting) is done in the 10db app.
 

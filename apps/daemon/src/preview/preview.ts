@@ -189,8 +189,17 @@ export function startPreview(deps: PreviewDeps): Preview {
     log.info({ projectId }, 'the preview was stopped');
   }
 
-  /** Looks at the address until the started preview answers or the deadline passes. */
-  function watchAnswer(projectId: ProjectId, appUrl: string, run: Run, startedAt: number): void {
+  /**
+   * Looks at the address until the preview answers, then clears the notice. Past the deadline a
+   * starting preview's notice says nothing answers yet; `sayLate` false keeps the notice as it is.
+   */
+  function watchAnswer(
+    projectId: ProjectId,
+    appUrl: string,
+    run: Run,
+    startedAt: number,
+    sayLate = true,
+  ): void {
     later(() => {
       if (runs.get(projectId) !== run || run.abort.signal.aborted) return;
       void answers(appUrl).then((up) => {
@@ -201,7 +210,7 @@ export function startPreview(deps: PreviewDeps): Preview {
           log.info({ projectId }, 'the preview answers');
           return;
         }
-        if (Date.now() - startedAt > timing.answerWithinMs) {
+        if (sayLate && Date.now() - startedAt > timing.answerWithinMs) {
           const pass = findOpenPass(db, projectId);
           if (pass)
             notice(
@@ -211,7 +220,7 @@ export function startPreview(deps: PreviewDeps): Preview {
             );
         }
         // Still looked at after the deadline: a slow first build answers late, and the notice goes then.
-        watchAnswer(projectId, appUrl, run, startedAt);
+        watchAnswer(projectId, appUrl, run, startedAt, sayLate);
       });
     }, timing.probeEveryMs);
   }
@@ -389,6 +398,9 @@ export function startPreview(deps: PreviewDeps): Preview {
           PassNoticeKind.PreviewStopped,
           `The preview runs, but it doesn't answer at ${run.appUrl} any more: Restart Preview starts it again.`,
         );
+        // A dev server that restarts itself answers again: the notice goes once it does.
+        run.seen.answered = false;
+        watchAnswer(projectId, run.appUrl, run, Date.now(), false);
       });
     },
     async restart(projectId) {

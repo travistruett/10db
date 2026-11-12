@@ -63,6 +63,11 @@ function addressOf(target: OpenPageTarget): Address {
   return { appUrl: target.appUrl, route: target.route };
 }
 
+/** The origin of an app address, or null for none or one that doesn't parse. */
+function originOf(appUrl: string | null): string | null {
+  return appUrl === null ? null : (URL.parse(appUrl)?.origin ?? null);
+}
+
 /** Open Page, then Copy Link, for one page of a pass. */
 export function useOpenPage(target: OpenPageTarget): OpenPageControl {
   const [openedHere, setOpenedHere] = useState<ReadonlySet<string>>(new Set());
@@ -73,7 +78,11 @@ export function useOpenPage(target: OpenPageTarget): OpenPageControl {
   const status = useDaemonStatus();
   const devUiOrigin = status.kind === 'connected' ? status.devUiOrigin : null;
   const key = `${target.passId}/${target.taskId}`;
-  const opened = openedHere.has(key) || readOpened(target.passId).includes(target.taskId);
+  // 10db's own dev UI is handed the daemon's connection, whose port moves at each start, so its
+  // button opens (and hands it again) every time instead of turning to Copy Link.
+  const devUi = devUiOrigin !== null && originOf(target.appUrl) === devUiOrigin;
+  const opened =
+    !devUi && (openedHere.has(key) || readOpened(target.passId).includes(target.taskId));
   const attempt = async (step: (address: Address) => Promise<void>): Promise<void> => {
     try {
       await step(addressOf(target));
@@ -89,7 +98,6 @@ export function useOpenPage(target: OpenPageTarget): OpenPageControl {
       if (opened) return copy(address);
       // 10db's own dev UI gets the daemon's read-only dev UI token in the fragment, never the app's
       // own; a copied link carries neither.
-      const devUi = devUiOrigin !== null && new URL(address.appUrl).origin === devUiOrigin;
       const handed = devUi
         ? await readJson(await client['dev-ui'].connection.$get(), DevUiConnectionDto)
         : null;

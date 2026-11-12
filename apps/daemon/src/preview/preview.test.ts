@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { PassNoticeKind, type ProjectId } from '@10db/contracts';
 import { getPassProgress, patchProject, setPassNotice } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import { tempDir, waitFor, waitForAsync, type TempDir } from '../../test/fixtures';
 import { captureLogs, type LogCapture } from '../../test/log-capture';
 import { openPassWorld, type PassWorld } from '../../test/pass-world';
@@ -19,6 +20,9 @@ import { createLedgerSweep, reapLaneProcessLedgers, systemProcessTable } from '.
 // preview command, 10db runs the command (under the gate's sandbox; none here, as for the gate
 // tests that need none) unless something answers at the app address already, restarts it a few
 // times, and says in the pass header only what needs a look. Real pass, database and child process.
+
+/** The part of a process ledger this test reads: the processes it names. */
+const LedgerFile = z.object({ members: z.array(z.object({ pid: z.int() })) });
 
 let w: PassWorld;
 let dir: TempDir;
@@ -226,7 +230,7 @@ describe('the preview of a project with a pass open', () => {
   });
 
   it('says so, with Restart, when a preview that answered stops answering', async () => {
-    const { app, projectId } = await world(
+    const { app, port, projectId } = await world(
       (p, marks) =>
         `echo start >> '${marks}'; exec '${process.execPath}' -e "const s = require('http').createServer((q, r) => { r.end('ok', () => { s.close(); s.closeAllConnections(); }); }); s.listen(${String(p)}, '127.0.0.1'); setInterval(() => {}, 1000)"`,
     );
@@ -237,6 +241,11 @@ describe('the preview of a project with a pass open', () => {
     const [said] = previewNotices();
     expect(said).toMatchObject({ kind: PassNoticeKind.PreviewStopped });
     expect(said?.text).toContain("doesn't answer");
+    // It serves again, as a dev server that restarted itself does: the notice goes by itself.
+    const back = createServer((_q, r) => r.end('back'));
+    servers.push(back);
+    await new Promise<void>((resolve) => back.listen(port, '127.0.0.1', resolve));
+    await waitFor(() => previewNotices().length === 0);
   });
 
   it("clears its stopped notice once the builder's own server answers", async () => {
@@ -289,10 +298,7 @@ describe('the preview of a project with a pass open', () => {
     const pid = await waitFor(() => {
       const [ledger] = readdirSync(root);
       if (ledger === undefined) return undefined;
-      const members = (
-        JSON.parse(readFileSync(join(root, ledger), 'utf8')) as { members: { pid: number }[] }
-      ).members;
-      return members[0]?.pid;
+      return LedgerFile.parse(JSON.parse(readFileSync(join(root, ledger), 'utf8'))).members[0]?.pid;
     });
     const alive = (): boolean => {
       try {
