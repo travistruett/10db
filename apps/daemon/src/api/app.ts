@@ -37,6 +37,7 @@ import {
   InboxState,
   JudgeConfigPatch,
   JudgeKeyInput,
+  ModelPicksQuery,
   ModelsQuery,
   KeepAwakeInput,
   LanePermissionsDto,
@@ -1231,6 +1232,11 @@ export function createApp(deps: ApiDeps) {
       '/models',
       validator('query', (query) => ModelsQuery.parse(query)),
       (c) => c.json(deps.services.listModels(c.req.valid('query').account)),
+    )
+    .get(
+      '/models/picks',
+      validator('query', (query) => ModelPicksQuery.parse(query)),
+      (c) => c.json(deps.services.modelPicks(c.req.valid('query').account)),
     )
     .get('/models/offers', (c) => c.json(deps.services.listAccountOffers()))
     .get('/models/status', (c) => c.json(deps.services.catalogueStatus()))

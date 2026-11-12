@@ -1,5 +1,5 @@
 import type { ModelRowDto } from '@10db/contracts';
-import { Button, Group, Stack, Text } from '@mantine/core';
+import { Button, Group, SegmentedControl, Stack, Text } from '@mantine/core';
 import { IconRefresh } from '@tabler/icons-react';
 import { useDataTableColumns } from 'mantine-datatable';
 import { useState } from 'react';
@@ -12,8 +12,8 @@ import {
 } from '../../daemon/model-queries';
 import { columnChoices, ColumnsMenu, hiddenColumns, toggleColumn } from '../../shell/columns-menu';
 import { useNow } from '../../shell/relative';
-import { ModelDrawer } from './model-drawer';
 import { ArtificialAnalysisCredit } from './artificial-analysis-credit';
+import { ModelDrawer } from './model-drawer';
 import { catalogueLine, costNote } from './model-format';
 import {
   filterModels,
@@ -24,7 +24,13 @@ import {
   type ModelFilter,
   type ModelSort,
 } from './model-order';
+import { ModelsChartView } from './models-chart-view';
 import { ModelsTable, TOGGLEABLE_COLUMNS } from './models-table';
+
+const View = { Table: 'table', Chart: 'chart' } as const;
+type View = (typeof View)[keyof typeof View];
+
+const isView = (value: string): value is View => Object.values(View).some((v) => v === value);
 
 const NO_FILTER: ModelFilter = { query: '', tiers: [], accountId: null };
 
@@ -41,6 +47,7 @@ export function ModelsSection() {
   const status = useCatalogueStatus();
   const accounts = useAccounts();
   const refresh = useRefreshModels();
+  const [view, setView] = useState<View>(View.Table);
   const [sort, setSort] = useState<ModelSort>({
     column: ModelColumn.Tier,
     direction: SortDirection.Descending,
@@ -56,6 +63,15 @@ export function ModelsSection() {
   const labels = new Map((accounts.data ?? []).map((a) => [a.id, a.label]));
   const earliest = earliestFirstSeen(models.data);
   const rows = sortModels(filterModels(models.data, filter), sort);
+  const chartAccount = live.find((a) => a.id === filter.accountId)?.id ?? null;
+  // The chart prices on one account, so entering it with Available on at Any account picks the default one;
+  // the table then shows that account too.
+  const chooseView = (next: View): void => {
+    setView(next);
+    const fallback = live.find((a) => a.isDefault) ?? live[0];
+    if (next === View.Chart && chartAccount === null && fallback)
+      setFilter({ ...filter, accountId: fallback.id });
+  };
 
   return (
     <Stack>
@@ -68,7 +84,7 @@ export function ModelsSection() {
                 ? 'The catalogue status could not be read.'
                 : 'Reading the catalogue…'}
           </Text>
-          <ArtificialAnalysisCredit />
+          {view === View.Table ? <ArtificialAnalysisCredit /> : null}
         </Stack>
         <Group gap="xs" wrap="nowrap">
           {refresh.isError ? (
@@ -76,14 +92,28 @@ export function ModelsSection() {
               {refresh.error.message}
             </Text>
           ) : null}
-          <ColumnsMenu
-            choices={columnChoices(TOGGLEABLE_COLUMNS, layout.columnsToggle)}
-            onToggle={(accessor) => {
-              layout.setColumnsToggle(
-                toggleColumn(TOGGLEABLE_COLUMNS, layout.columnsToggle, accessor),
-              );
+          <SegmentedControl
+            size="xs"
+            aria-label="View"
+            data={[
+              { value: View.Table, label: 'Table' },
+              { value: View.Chart, label: 'Chart' },
+            ]}
+            value={view}
+            onChange={(value) => {
+              if (isView(value)) chooseView(value);
             }}
           />
+          {view === View.Table ? (
+            <ColumnsMenu
+              choices={columnChoices(TOGGLEABLE_COLUMNS, layout.columnsToggle)}
+              onToggle={(accessor) => {
+                layout.setColumnsToggle(
+                  toggleColumn(TOGGLEABLE_COLUMNS, layout.columnsToggle, accessor),
+                );
+              }}
+            />
+          ) : null}
           <Button
             variant="default"
             size="xs"
@@ -102,6 +132,17 @@ export function ModelsSection() {
           No models yet. They appear once an account has been read; Refresh Models reads every
           account now.
         </Text>
+      ) : view === View.Chart ? (
+        <ModelsChartView
+          rows={rows}
+          names={new Map(models.data.map((r) => [r.model, r.name]))}
+          accounts={live}
+          accountId={chartAccount}
+          onAccount={(id) => {
+            setFilter({ ...filter, accountId: id });
+          }}
+          settling={models.isPlaceholderData}
+        />
       ) : (
         <ModelsTable
           rows={rows}

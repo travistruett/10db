@@ -202,6 +202,31 @@ export const ModelRowDto = z.object({
 });
 export type ModelRowDto = z.infer<typeof ModelRowDto>;
 
+/** Which account's offer the router's picks are made on. */
+export const ModelPicksQuery = z.strictObject({ account: AccountId });
+export type ModelPicksQuery = z.infer<typeof ModelPicksQuery>;
+
+/** What routing chooses for one role at its starting need. */
+export const RolePickDto = z.object({
+  role: z.enum(StepRole),
+  /** The Intelligence the role asks for before any floor. */
+  need: z.number(),
+  /** Null for a pick with no profile: nothing chosen, a tier name, or an override launched as named. */
+  profileId: ModelProfileId.nullable(),
+  model: z.string().min(1).nullable(),
+  effort: z.enum(Effort).nullable(),
+  intelligence: z.number().nullable(),
+  /** On the account asked for; null when AA has not measured the model. */
+  costPerTaskUsd: z.number().min(0).nullable(),
+  /** Routing's own words for the choice, or why it found none. */
+  reason: z.string().min(1),
+});
+export type RolePickDto = z.infer<typeof RolePickDto>;
+
+/** One pick per role in flow order, on one account. */
+export const RolePicksDto = z.object({ accountId: AccountId, picks: z.array(RolePickDto) });
+export type RolePicksDto = z.infer<typeof RolePicksDto>;
+
 /** Where the catalogue came from and how many models it holds. */
 export const CatalogueStatusDto = z.object({
   /** Null when no catalogue has ever been loaded. */

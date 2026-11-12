@@ -16,6 +16,8 @@ import {
   modelEffortDto,
   modelProfileDto,
   modelRowDto,
+  rolePickDto,
+  rolePicksDto,
 } from '../../test/model-fixtures';
 import { ModelsSection } from './models-section';
 
@@ -81,6 +83,34 @@ const BLANK = modelRowDto({
   availableOn: [SUBSCRIPTION.id],
 });
 
+const [STRONG_HIGH] = STRONG.efforts;
+const PICKS = [
+  rolePickDto({
+    role: 'plan',
+    need: 45,
+    profileId: STRONG_HIGH?.profileId ?? null,
+    model: 'alpha-max',
+    effort: 'high',
+    intelligence: 60,
+    costPerTaskUsd: 2.5,
+    reason: 'by score: cheapest profile at or above 45 intelligence',
+  }),
+  rolePickDto({
+    role: 'implement',
+    need: 40,
+    profileId: STRONG_HIGH?.profileId ?? null,
+    model: 'alpha-max',
+    effort: 'high',
+    intelligence: 60,
+    costPerTaskUsd: 2.5,
+  }),
+  rolePickDto({
+    role: 'qa',
+    need: 35,
+    reason: 'No profile reaches 35 intelligence; a task planned on this account is refused here',
+  }),
+];
+
 function serve(
   opts: {
     rows?: ModelRowDto[];
@@ -90,6 +120,9 @@ function serve(
     /** The rows for a request that names an account; the account asked for is recorded in `asked`. */
     forAccount?: (account: string) => ModelRowDto[];
     asked?: (string | null)[];
+    /** The accounts asked for picks; the picks answered are `PICKS` unless `accounts` is empty. */
+    askedPicks?: string[];
+    accounts?: AccountDto[];
   } = {},
 ) {
   server.use(
@@ -102,12 +135,19 @@ function serve(
           : (opts.rows ?? [FAST, STRONG, UNKNOWN, BLANK]),
       );
     }),
+    http.get(daemonUrl('/models/picks'), ({ request }) => {
+      const account = new URL(request.url).searchParams.get('account') ?? '';
+      opts.askedPicks?.push(account);
+      return HttpResponse.json(rolePicksDto(account as AccountDto['id'], PICKS));
+    }),
     http.get(daemonUrl('/models/status'), () =>
       HttpResponse.json(opts.status ?? catalogueStatusDto()),
     ),
     http.get(daemonUrl('/models/offers'), () => HttpResponse.json(opts.offers ?? [])),
     http.get(daemonUrl('/model-profiles'), () => HttpResponse.json(opts.profiles ?? [])),
-    http.get(daemonUrl('/accounts'), () => HttpResponse.json([SUBSCRIPTION, KEYED])),
+    http.get(daemonUrl('/accounts'), () =>
+      HttpResponse.json(opts.accounts ?? [SUBSCRIPTION, KEYED]),
+    ),
     ...baseHandlers(),
   );
 }
@@ -214,6 +254,80 @@ describe('the Models page', () => {
       expect(asked.at(-1)).toBe(KEYED.id);
     });
     expect(await within(rowOf('Alpha Max')).findByText('$2.75')).toBeTruthy();
+  });
+
+  describe('the Chart view', () => {
+    const openChart = async () => {
+      renderWithDaemon(<ModelsSection />);
+      await screen.findByRole('button', { name: 'Open Alpha Max' });
+      fireEvent.click(screen.getByRole('radio', { name: 'Chart' }));
+    };
+
+    it('prices the models and the picks on the default account when no account was chosen', async () => {
+      const asked: (string | null)[] = [];
+      const askedPicks: string[] = [];
+      serve({ asked, askedPicks, forAccount: () => [STRONG] });
+      await openChart();
+      expect(await screen.findByText('Who each role gets')).toBeTruthy();
+      await waitFor(() => {
+        expect(asked.at(-1)).toBe(SUBSCRIPTION.id);
+        expect(askedPicks).toEqual([SUBSCRIPTION.id]);
+      });
+    });
+
+    it('lists what each role gets, and says where a pick is not on the chart', async () => {
+      serve({ forAccount: () => [STRONG] });
+      await openChart();
+      const panel = await screen.findByRole('region', { name: 'Who each role gets' });
+      const plan = within(panel).getByText('Plan').closest('button');
+      expect(plan).not.toBeNull();
+      expect(within(plan as HTMLElement).getByText('Alpha Max')).toBeTruthy();
+      expect(within(plan as HTMLElement).getByText(/high/)).toBeTruthy();
+      expect(within(plan as HTMLElement).getByText(/\$2\.50/)).toBeTruthy();
+      const qa = within(panel).getByText('QA').closest('button');
+      expect(within(qa as HTMLElement).getByText(/refused here/)).toBeTruthy();
+      expect(within(qa as HTMLElement).getByText('Not on the chart')).toBeTruthy();
+      expect(within(plan as HTMLElement).queryByText('Not on the chart')).toBeNull();
+    });
+
+    it('asks for the picks of the account chosen in the chart, which the table then shows too', async () => {
+      const askedPicks: string[] = [];
+      serve({ askedPicks, forAccount: () => [STRONG] });
+      await openChart();
+      await screen.findByText('Who each role gets');
+      fireEvent.click(screen.getByRole('combobox', { name: 'Chart account' }));
+      fireEvent.click(await screen.findByRole('option', { name: 'Work key', hidden: true }));
+      await waitFor(() => {
+        expect(askedPicks.at(-1)).toBe(KEYED.id);
+      });
+      fireEvent.click(screen.getByRole('radio', { name: 'Table' }));
+      fireEvent.click(await screen.findByRole('button', { name: 'Filter Available on' }));
+      expect(await screen.findByDisplayValue('Work key')).toBeTruthy();
+    });
+
+    it('marks the selected role pressed, and clears it on a second click', async () => {
+      serve({ forAccount: () => [STRONG] });
+      await openChart();
+      const panel = await screen.findByRole('region', { name: 'Who each role gets' });
+      const implement = within(panel).getByText('Build').closest('button') as HTMLElement;
+      expect(implement.getAttribute('aria-pressed')).toBe('false');
+      fireEvent.click(implement);
+      expect(implement.getAttribute('aria-pressed')).toBe('true');
+      expect(
+        (within(panel).getByText('Plan').closest('button') as HTMLElement).getAttribute(
+          'aria-pressed',
+        ),
+      ).toBe('false');
+      fireEvent.click(implement);
+      expect(implement.getAttribute('aria-pressed')).toBe('false');
+    });
+
+    it('says to add an account when there is none, and credits Artificial Analysis under the chart', async () => {
+      serve({ accounts: [], forAccount: () => [STRONG] });
+      await openChart();
+      expect(await screen.findByText('Add an account to see what each role gets.')).toBeTruthy();
+      expect(screen.getByRole('link', { name: 'Artificial Analysis' })).toBeTruthy();
+    });
   });
 
   it('filters by tier from the Tier column, one tier or several', async () => {

@@ -103,6 +103,7 @@ export const RENDER_REFUSED_READS: Readonly<Record<string, string>> = {
   '/benchmarks/status': 'No screen draws a benchmark.',
   '/benchmarks/models': 'No screen draws a benchmark.',
   '/models': 'No screen draws the model list.',
+  '/models/picks': 'No screen draws the model list.',
   '/models/offers': 'No screen draws the model list.',
   '/models/status': 'No screen draws the model list.',
   '/settings/keep-awake': 'No screen draws a setting.',

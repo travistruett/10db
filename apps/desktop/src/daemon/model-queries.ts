@@ -3,6 +3,7 @@ import {
   CatalogueStatusDto,
   ModelProfileDto,
   ModelRowDto,
+  RolePicksDto,
   type AccountId,
 } from '@10db/contracts';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -37,6 +38,20 @@ export function useModels(accountId: AccountId | null) {
         ModelRowList,
       ),
     placeholderData: keepPreviousData,
+  });
+}
+
+/** What routing chooses for each role on the account; off until one is chosen. */
+export function useModelPicks(accountId: AccountId | null) {
+  const { client } = useDaemon();
+  return useQuery({
+    queryKey: [...modelKeys.all, 'picks', accountId],
+    enabled: accountId !== null,
+    queryFn: async () =>
+      readJson(
+        await client.models.picks.$get({ query: { account: accountId ?? '' } }),
+        RolePicksDto,
+      ),
   });
 }
 

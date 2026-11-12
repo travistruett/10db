@@ -7,6 +7,7 @@ import {
   CatalogueStatusDto,
   mintId,
   ModelRowDto,
+  RolePicksDto,
   type Effort,
 } from '@10db/contracts';
 import { findModelProfile, listAccountModels } from '@10db/db';
@@ -15,6 +16,7 @@ import { z } from 'zod';
 import { startDaemon, type RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient } from './api-client';
+import { measureForTests } from './catalogue';
 import { tempDir, waitFor } from './fixtures';
 import { readModelsDevFixture } from './models-dev-fixture';
 
@@ -102,6 +104,38 @@ describe('the model list over HTTP', () => {
     });
     await api.post(`/accounts/${spare.id}/archive`, z.unknown());
     await expect(api.get(`/models?account=${spare.id}`, z.array(ModelRowDto))).rejects.toThrow(
+      '-> 404',
+    );
+  });
+
+  it('answers what routing picks for each role on an account, and refuses a bad or archived one', async () => {
+    const { running, api } = await start([{ id: 'opus', resolvedId: 'claude-opus-5-5' }]);
+    // Invented measurements: low scores 45, high 51, so the roles that need 48 are the ones that go up.
+    measureForTests(running.state);
+    const [account] = await api.get('/accounts', z.array(AccountDto));
+    if (!account) throw new Error('the daemon has no default account');
+    const { accountId, picks } = await api.get(`/models/picks?account=${account.id}`, RolePicksDto);
+    expect(accountId).toBe(account.id);
+    expect(picks.map((p) => `${p.role}:${String(p.model)}@${String(p.effort)}`)).toEqual([
+      'plan:claude-opus-5-5@low',
+      'plan_review:claude-opus-5-5@high',
+      'implement:claude-opus-5-5@low',
+      'review:claude-opus-5-5@high',
+      'qa:claude-opus-5-5@low',
+    ]);
+    expect(picks[0]).toMatchObject({ intelligence: 45, costPerTaskUsd: 1 });
+
+    await expect(api.get('/models/picks', RolePicksDto)).rejects.toThrow('-> 400');
+    await expect(api.get('/models/picks?account=nope', RolePicksDto)).rejects.toThrow('-> 400');
+    await expect(
+      api.get(`/models/picks?account=${mintId('Account')}`, RolePicksDto),
+    ).rejects.toThrow('-> 404');
+    const { account: spare } = await api.post('/accounts', AccountCreatedDto, {
+      kind: 'codex_signin',
+      label: 'Spare',
+    });
+    await api.post(`/accounts/${spare.id}/archive`, z.unknown());
+    await expect(api.get(`/models/picks?account=${spare.id}`, RolePicksDto)).rejects.toThrow(
       '-> 404',
     );
   });

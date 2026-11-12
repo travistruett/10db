@@ -49,6 +49,7 @@ export const DEV_UI_READS: readonly string[] = [
   '/benchmarks/status',
   '/benchmarks/models',
   '/models',
+  '/models/picks',
   '/models/offers',
   '/models/status',
   '/settings/keep-awake',

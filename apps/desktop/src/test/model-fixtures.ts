@@ -6,8 +6,11 @@ import {
   ModelProfileDto,
   ModelRowDto,
   PatternDto,
+  RolePickDto,
+  RolePicksDto,
   mintId,
   type AccountId,
+  type StepRole,
 } from '@10db/contracts';
 import type { z } from 'zod';
 
@@ -48,6 +51,23 @@ export function modelEffortDto(over: Partial<ModelEffortDto> = {}): ModelEffortD
     ...over,
   });
 }
+
+/** One role's pick; a pick of nothing unless a test gives it a model. */
+export function rolePickDto(over: Partial<RolePickDto> & { role: StepRole }): RolePickDto {
+  return RolePickDto.parse({
+    need: 40,
+    profileId: null,
+    model: null,
+    effort: null,
+    intelligence: null,
+    costPerTaskUsd: null,
+    reason: 'by score: cheapest profile at or above 40 intelligence',
+    ...over,
+  });
+}
+
+export const rolePicksDto = (accountId: AccountId, picks: RolePickDto[]): RolePicksDto =>
+  RolePicksDto.parse({ accountId, picks });
 
 export function catalogueStatusDto(over: Partial<CatalogueStatusDto> = {}): CatalogueStatusDto {
   return CatalogueStatusDto.parse({

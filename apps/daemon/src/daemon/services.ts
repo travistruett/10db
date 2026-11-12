@@ -13,6 +13,8 @@ import {
   TaskStatus,
   InvalidError,
   NotFoundError,
+  providerOf,
+  SUPPORTED_ACCOUNT_KINDS,
   isDaemonAddress,
   APP_URL_IS_DAEMON,
   type McpServerStatusDto,
@@ -154,7 +156,8 @@ import {
   unallowedFoundHosts,
 } from '../permissions';
 import { findRegistryHosts } from '../registries';
-import { proposeCandidates, resolveStepPlan, startTaskWithPlan } from '../team';
+import { rolePicks } from '../routing';
+import { proposeCandidates, resolveStepPlan, routingInputs, startTaskWithPlan } from '../team';
 import type { Pictures } from '../pictures';
 import type { Preview } from '../preview';
 import type { ThreadService } from '../thread';
@@ -170,10 +173,15 @@ import type { AddressProbe } from './loopback-probe';
 import { suggestSettings } from './suggest-settings';
 import { checkoutConflictsWithRoot } from './worktree-root';
 
-/** An account that is still in use; an archived one is as good as unknown to a read that prices on it. */
+/**
+ * An account that is still in use and of a kind 10db can run: an archived one is as good as unknown to a read
+ * that prices on it, and a kind it cannot run has no provider to read a list for.
+ */
 function liveAccount(db: DbReader, id: AccountId): AccountDto {
   const account = getAccount(db, id);
   if (account.archived) throw new NotFoundError('account', id);
+  if (!SUPPORTED_ACCOUNT_KINDS.some((kind) => kind === account.kind))
+    throw new InvalidError(`10db cannot run an account of kind ${account.kind}`);
   return account;
 }
 
@@ -698,6 +706,16 @@ export function createServices(deps: {
         catalogue: deps.catalogue.catalogue(),
         ...(accountId === undefined ? {} : { account: liveAccount(db, accountId) }),
       }),
+    modelPicks: (accountId) => {
+      const account = liveAccount(db, accountId);
+      return {
+        accountId,
+        picks: rolePicks({
+          ...routingInputs(db, { accountId, provider: providerOf(account.kind) }),
+          personas: listPersonas(db),
+        }),
+      };
+    },
     listAccountOffers: () => listAccountModels(db),
     catalogueStatus,
     // The builder asked, so every account is read whatever the day's earlier reads were.

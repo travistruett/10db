@@ -72,12 +72,13 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   handoff: WORK,
   evidence: WORK,
   // An account pause moves workstreams, which send their own events.
-  account: [accountKeys.all],
+  account: [accountKeys.all, modelKeys.all],
   inbox: [queryKeys.inbox, ['workstreams'], goalKeys.all, humanTouchKeys.all],
   app_setting: [queryKeys.keepAwake],
   // Settings › People lists people and the routes each answers; Who Answers and a task's question routes
-  // name them. Step plans, which only the batch sheet shows, are not read from people.
-  persona: [CANDIDATES],
+  // name them. Step plans, which only the batch sheet shows, are not read from people; they follow personas,
+  // and so do the Models page's picks.
+  persona: [CANDIDATES, modelKeys.all],
   person: [PEOPLE_KEY, ROUTING_RULES_KEY, QUESTION_ROUTES_KEY],
   slack: [SLACK_KEY],
   stakeholder_timers: [TIMERS_KEY],
@@ -86,9 +87,9 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   // The Models page lists profiles and what each account offers.
   model_profile: [CANDIDATES, modelKeys.all],
   account_models: [modelKeys.all],
-  // Settings › Team and Personas and flows read a role's setting and the patterns.
-  role_setting: [modelSettingKeys.all],
-  pattern: [modelSettingKeys.all],
+  // Settings › Team and Personas and flows read a role's setting and the patterns, and so do the Models page's picks.
+  role_setting: [modelSettingKeys.all, modelKeys.all],
+  pattern: [modelSettingKeys.all, modelKeys.all],
   team: [CANDIDATES],
   routing_rules: [CANDIDATES, ROUTING_RULES_KEY, QUESTION_ROUTES_KEY],
   benchmarks: [CANDIDATES],

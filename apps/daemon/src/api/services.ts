@@ -63,6 +63,7 @@ import type {
   ModelProfileDto,
   ModelSettingsInput,
   ModelRowDto,
+  RolePicksDto,
   ModelSettingsDto,
   NetworkHostDto,
   ModelProfileId,
@@ -625,6 +626,11 @@ export interface ApiServices {
    * offers, priced on it. Throws NotFoundError for an unknown or archived account.
    */
   listModels(accountId?: AccountId): ModelRowDto[];
+  /**
+   * What routing chooses for each role on an account at the role's starting need, for a task and a project with
+   * no settings of their own. Throws NotFoundError for an unknown or archived account.
+   */
+  modelPicks(accountId: AccountId): RolePicksDto;
   /** What each account offers, with its launch ID and its own price. */
   listAccountOffers(): AccountModelDto[];
   /** Where the model catalogue came from and when. */
