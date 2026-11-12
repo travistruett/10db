@@ -994,7 +994,7 @@ icon, the DESIGN.md form for a condition that affects a view:
 | modelSwitch | next_turn | next_turn | decided in the ACP spec |
 | takeover | yes | yes | decided in the ACP spec |
 | costUsd | metered kinds only | no | decided in the ACP spec |
-| judge | `native` (auto mode), or `tendb` on a gateway or an unsupported model | `native` (Auto-review) if live check L1 passes, else `tendb` | `tendb` |
+| judge | `native` (auto mode), or `tendb` on a gateway or an unsupported model | `tendb` (10db's judge, after T5) | `tendb` |
 
 The mockups' frame (c) shows the inject composer with its read receipt, beside an inset of the queue composer.
 

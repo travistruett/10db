@@ -34,7 +34,7 @@ M1 → T2 → M2a → M2b → T3 → M2c → M3 and M4a (in parallel) → M4b �
 | M4a | Conversation stores and the migration | `2026-11-12-10db-sessions-m4a-stores.md` | M2c | `feat/sessions-m4a` |
 | M4b | Explore engine; Plan on it, streaming, in auto mode | `2026-11-12-10db-sessions-m4b-engine.md` | M4a, M3 | `feat/sessions-m4b` |
 | T4 | Unattended never waits: skips, `skipped_actions`, the Inbox item, network hosts to the judge | `2026-11-12-10db-trust-t4-unattended-never-waits.md` | M4b | `feat/trust-t4` |
-| T5 | 10db's judge and Codex: `crossesLimit`, Auto-review or the hook judge, gateway accounts, and Plan and passes on a `tendb` judge | `2026-11-12-10db-trust-t5-tendb-judge-and-codex.md` | T4, live check L1 | `feat/trust-t5` |
+| T5 | 10db's judge and Codex: `crossesLimit`, the hook judge on Codex, gateway accounts, and Plan and passes on a `tendb` judge | `2026-11-12-10db-trust-t5-tendb-judge-and-codex.md` | T4, live check L1 | `feat/trust-t5` |
 | M4c | Task threads through the library; Workbench thread on the kit | outlined below | T5 | `feat/sessions-m4c` |
 | M5a | Sessions on Claude, attended and judged | `2026-11-12-10db-sessions-m5a-sessions.md` | M4c | `feat/sessions-m5a` |
 | M5b | Codex conversations on the attended profile, and Plan without subagents | outlined below | M5a | `feat/sessions-m5b` |
@@ -117,14 +117,13 @@ predecessors have merged.
 - The explore profile on Codex is the trust line's attended profile (spec §5.5, trust line §4, §5):
   - a chat's thread on Plan's read-only `sandboxPolicy` (named as in `codex-generated/`) until M6 lets it write;
     Plan's stays read-only, as its role
-  - the judge T5 built: Auto-review (`approval_policy: on-request`, `approvals_reviewer: auto_review`, the
-    session's policy passed at `thread/start`) since live check L1 passed, else `approvalPolicy: 'never'` with the hook sending each
-    call to 10db's judge
+  - the judge T5 built: `approvalPolicy: 'never'` with the hook sending each call to 10db's judge. Auto-review
+    reviews only escalations, which stay closed, so Codex is not on it (T5 call 1, live checks L1 and L5)
   - the project pinned `untrusted`
   - the guard socket with the coordination rules and the `rules` floor; a call 10db's judge asks about reaches the
     broker as a card
-  - T2's setup: `skills/extraRoots/set` and the instructions in `developerInstructions` (L4); `tools.web_search`
-    on, since T5 gives Codex a judge
+  - T2's setup: `skills/extraRoots/set` and the instructions in `developerInstructions` (L4); `web_search: 'cached'`,
+    as T5 sets it
   - a judged denial stored as a `denied` call with `deniedBy: 'judge'`, its `limit` and `soft`; the row offers
     Allow This only on a `soft` denial
   - 10db's `/mcp` with `tool_timeout_sec` raised to the chat's tool wait (spec §6.6), so an `asks` card can wait
@@ -134,7 +133,7 @@ predecessors have merged.
 - Plan on Codex runs without `agents`. The header notice comes from `capabilities.subagents`.
 - A follow-up task on the Board: "Plan's researchers and reviewers on Codex".
 - **Tests:**
-  - the Codex attended profile options table, one row per judge (Auto-review, the hook judge, the `rules` floor)
+  - the Codex attended profile options table, one row per judge (the hook judge, the `rules` floor)
   - a guard row: a write attempt in Plan's thread is refused
   - the live Codex chat test (opt-in): the judge stops a call at a limit, and the builder's go-ahead (L1)
 - **Decision:** M5b's §14 record, which amends the ChatGPT decision.

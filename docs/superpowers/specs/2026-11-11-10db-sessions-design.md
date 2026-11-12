@@ -353,7 +353,7 @@ gateway and for Codex.
 | modelSwitch | next_turn (`setModel`) | next_turn (turn override) |
 | takeover | yes | yes |
 | costUsd | metered kinds only | no |
-| judge | `native` (auto mode) on a plan, an API key or Bedrock, on a model auto mode supports; `tendb` on a gateway account, an unsupported model or with auto mode turned off by an admin | `native` (Auto-review) if live check L1 passes, else `tendb` |
+| judge | `native` (auto mode) on a plan, an API key or Bedrock, on a model auto mode supports; `tendb` on a gateway account, an unsupported model or with auto mode turned off by an admin | `tendb`: 10db's judge through the hook, after T5 (Auto-review reviews only escalations, which stay closed; live checks L1, L5) |
 
 Without an OpenRouter key, or with 10db's judge turned off, `tendb` falls to `rules`, and the session says so
 (trust line §4, §10). Until T5 builds 10db's judge, `tendb` is `rules`.
@@ -422,9 +422,8 @@ the folder. Running the darwin binary in CI's Linux shards or a lane's gate is i
 
 - **The sandbox.** A chat's thread may write the checkout (`sandboxPolicy` workspace-write, by the generated type's
   name), since a chat writes in Your folder (§7.3). Plan's stays read-only, as its role.
-- **The judge.** Auto-review (`approval_policy: on-request`, `approvals_reviewer: auto_review`, and the session's
-  policy, passed at `thread/start`) since live check L1 passed. Otherwise `approvalPolicy: 'never'`, with the hook sending each call to
-  10db's judge. The trust line's T5 builds both.
+- **The judge.** 10db's judge: `approvalPolicy: 'never'`, with the hook sending each call to it. Auto-review reviews
+  only escalations, which stay closed, so it is not used (live checks L1, L5). The trust line's T5 builds it.
 - The project is pinned `untrusted`.
 - **The guard hook socket** stays, with the coordination rules and the `rules` floor
   (`decisions/2026-11-05-codex-lanes-use-codex-sandbox-and-hooks.md`). A call 10db's judge asks about reaches the
@@ -619,7 +618,7 @@ The transcript is `conversation_items`, in `seq` order. `seq` is an integer, uni
 - **Cards.** A card has a `card` item in its conversation and renders inline. Answering it in the session or in the
   Inbox answers the same card (S13). An answer is Allow once, Always in this project, or Deny (trust line §5). T5
 builds the project's grants store and the card's third option, and gives the grants to every judge as allow lines:
-auto mode's `allow`, Auto-review's policy and 10db's judge. Until T5, a card offers Allow once and Deny.
+auto mode's `allow` and 10db's judge's prompt. Until T5, a card offers Allow once and Deny.
 - **The builder tools in a chat (S14)** come from the chat's own server, mounted per session with its own token. The
   UI's token never reaches a session. Every tool is present. A `runs` tool is in the session's allowed tools; a
   `judged` one reaches the judge like any call; an `asks` one raises its own card, attended.
