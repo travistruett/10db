@@ -206,6 +206,14 @@ const REFUSED: readonly (readonly [string, () => ShapeCall])[] = [
     ] as const,
   ]),
   [
+    'a Skill from the web researcher',
+    () => call('Skill', { skill: 'yours:s' }, { agentId: 'a', agentType: 'researcher' }),
+  ],
+  [
+    'a Skill from an agent Plan does not launch',
+    () => call('Skill', { skill: 'yours:s' }, { agentId: 'a', agentType: 'general-purpose' }),
+  ],
+  [
     'a WebSearch from a subagent of no type',
     () => call('WebSearch', { query: 'x' }, { agentId: 'a' }),
   ],
@@ -346,6 +354,15 @@ const ALLOWED: readonly (readonly [string, () => ShapeCall])[] = [
     () => call('Read', { file_path: path('shapes/shp_own/files/brief.md') }),
   ],
   ['an Agent for a reviewer', () => call('Agent', { subagent_type: 'rehearsal', prompt: 'x' })],
+  ['a Skill in the session', () => call('Skill', { skill: 'yours:s' })],
+  [
+    'a Skill from a code researcher',
+    () => call('Skill', { skill: 'project:x' }, { agentId: 'a', agentType: 'code-researcher' }),
+  ],
+  [
+    'a Skill from a reviewer',
+    () => call('Skill', { skill: 'yours:s' }, { agentId: 'a', agentType: 'engineering' }),
+  ],
   ['note_heard', () => call('mcp__10db__note_heard', { items: [] })],
   ['propose_plan', () => call('mcp__10db__propose_plan', {})],
   ['similar_tasks', () => call('mcp__10db__similar_tasks', { query: 'x' })],

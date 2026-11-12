@@ -1280,6 +1280,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
             protectedPaths: guarded,
             projectEnv: () => launcher.projectEnv(),
             exportAwsCredentials,
+            builderHome: homedir(),
+            laneWritableRoots: [worktreeRoot, ...allSandboxRoots],
           }),
         }),
     models(projectId) {

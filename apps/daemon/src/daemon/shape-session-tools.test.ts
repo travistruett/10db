@@ -123,6 +123,8 @@ function preparer(
     // The project env: the login shell's, with every billing switch and account secret stripped.
     projectEnv: () => ({ PATH: '/usr/bin:/bin', HOME: join(root, 'home') }),
     lookup,
+    builderHome: join(root, 'home'),
+    laneWritableRoots: [join(root, 't')],
     exportAwsCredentials: (profile) => {
       profiles.push(profile);
       return Promise.resolve({
@@ -201,6 +203,28 @@ describe.skipIf(SANDBOXED)('a Plan conversation’s prepared session', () => {
       await prepared.release();
     }
     expect(existsSync(prepared.sandbox?.env['CLAUDE_CODE_TMPDIR'] ?? '/nonexistent')).toBe(false);
+  });
+
+  it('starts a Plan session with the instructions, the builder’s skills and their reads', async () => {
+    const owner = conversation({ mcpServers: {} });
+    writeFileSync(join(checkout, 'AGENTS.md'), '# Rules\n\nUse pnpm.\n');
+    const skill = join(root, 'home', '.claude', 'skills', 's');
+    mkdirSync(skill, { recursive: true });
+    writeFileSync(join(skill, 'SKILL.md'), '---\nname: s\ndescription: a skill\n---\n');
+    writeFileSync(join(skill, '.env'), 'TOKEN=x');
+    const { prepare } = preparer();
+    const prepared = await prepare(inputFor(owner));
+    try {
+      expect(prepared.instructions).toContain('Use pnpm.');
+      expect(prepared.setup.loaded.skills).toEqual(['s']);
+      expect(prepared.setup.pluginDirs[0]).toMatch(/\/yours$/);
+      expect(prepared.setup.secretFiles).toEqual([join(skill, '.env')]);
+      expect(prepared.sandbox?.settings.filesystem.allowRead).toContain(
+        join(root, 'home', '.claude', 'skills'),
+      );
+    } finally {
+      await prepared.release();
+    }
   });
 
   it('expands an approved server’s variables from the project env, never the account’s key in the session env', async () => {
