@@ -49,7 +49,7 @@ import type { StateStore } from '../events';
 import type { Logger } from '../log';
 import { SlackError, tsMillis, type SlackClient, type SlackMessage } from '../slack';
 import { closingLine, type ClosingReason } from './closing-lines';
-import { draftContext, draftFor } from './drafts';
+import { draftContext, draftFor, previewDraft } from './drafts';
 import { OPTION_LETTERS } from './letters';
 import { scanOutbound } from './outbound-scan';
 import { neutralizeAngles } from './escape';
@@ -152,6 +152,8 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
       const people = failed.people.flatMap((p) =>
         p.recipient && p.personId ? [getPerson(ctx.tx, p.personId)] : [],
       );
+      // Composed again, not copied: the builder's name or the card may have changed since.
+      const fresh = previewDraft(ctx.tx, card, people);
       setInboxRecipients(ctx, card.id, {
         assignees: people.map((p) => p.handle),
         routedBy: RoutedBy.Builder,
@@ -160,8 +162,8 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
       return insertDraft(ctx, {
         inboxItemId: card.id,
         recipients: people.map((p) => p.id),
-        text: failed.text,
-        hits: failed.hits,
+        text: fresh.text,
+        hits: fresh.hits,
       });
     });
     deps.parkFor?.(card.id);
@@ -173,6 +175,19 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
    * counts toward the person's limit at once. Two cards decided together cannot both pass a limit, and a
    * draft is never left unheld and unsent: if the post fails here, `recoverSending` finishes it.
    */
+  /**
+   * A draft the builder did not edit is composed again at Send, so it carries the builder's name as it is
+   * now and the card as it is now, not as they were when it was drafted.
+   */
+  function recomposed(card: InboxItemDto, stored: StakeholderSendDto): StakeholderSendDto {
+    const fresh = previewDraft(state.db, card, recipientsOf(stored));
+    if (fresh.text === stored.text) return stored;
+    state.write((ctx) => {
+      updateDraft(ctx, stored.id, { text: fresh.text, hits: fresh.hits });
+    });
+    return { ...stored, text: fresh.text, hits: fresh.hits };
+  }
+
   async function afterDraft(cardId: InboxItemId): Promise<void> {
     if (slack === null) return;
     const reserved = state.write((ctx) => {
@@ -444,11 +459,12 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
     async send(cardId, input) {
       if (slack === null) throw new ConflictError('Slack is not connected');
       const card = getInboxItem(state.db, cardId);
-      const draft = liveSend(cardId) ?? redraftFailed(card);
-      if (card.state !== InboxState.Open || draft?.state !== 'draft')
+      const stored = liveSend(cardId) ?? redraftFailed(card);
+      if (card.state !== InboxState.Open || stored?.state !== 'draft')
         throw new ConflictError('There is no draft to send');
       if (builderUnnamed(card))
         throw new ConflictError('Set your name in Settings › People before you send a question');
+      const draft = input.text === undefined ? recomposed(card, stored) : stored;
       const hits: OutboundHit[] =
         input.text === undefined
           ? mergeHits(draft.hits, scanOutbound(draft.text))

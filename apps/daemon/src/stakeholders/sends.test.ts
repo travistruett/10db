@@ -721,6 +721,45 @@ describe('Send on a card whose send failed', () => {
   });
 });
 
+describe('a draft written before the builder had a name', () => {
+  const rename = (name: string) => {
+    store.db.$client.prepare('UPDATE people SET name = ? WHERE is_builder = 1').run(name);
+  };
+
+  it('is composed again at Send, so the message carries his name', async () => {
+    const w = world();
+    w.route([w.person('mark', { sendMode: 'review' })]);
+    rename('You');
+    const id = w.card();
+    expect(send(id).text).toContain("You's 10db build");
+    rename('Travis');
+    await sends.send(id, {});
+    expect(slack.posts[0]?.text).toContain("Travis's 10db build");
+    expect(slack.posts[0]?.text).not.toContain("You's");
+    expect(send(id).text).toContain("Travis's 10db build");
+  });
+
+  it('is composed again when a failed send is drafted again', async () => {
+    const w = world();
+    w.route([w.person('mark', { sendMode: 'review' })]);
+    const id = w.card();
+    await sends.afterDraft(id);
+    slack.failNext('chat.postMessage', 'channel_not_found');
+    await sends.send(id, {});
+    rename('Ana-the-builder');
+    await sends.send(id, {});
+    expect(slack.posts[0]?.text).toContain("Ana-the-builder's 10db build");
+  });
+
+  it('keeps a text the builder wrote himself', async () => {
+    const w = world();
+    w.route([w.person('mark', { sendMode: 'review' })]);
+    const id = w.card();
+    await sends.send(id, { text: 'My own words' });
+    expect(slack.posts[0]?.text).toBe('My own words');
+  });
+});
+
 describe('a builder who has not set his name', () => {
   const seedName = () => {
     store.db.$client.prepare("UPDATE people SET name = 'You' WHERE is_builder = 1").run();
