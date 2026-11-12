@@ -40,7 +40,12 @@ import { AccountProbeError } from './index';
 import { SKILL_NAMES_LINE } from './setup-prompt';
 import type { SignInCheck, SignInState } from './sign-in-check';
 import { autoModeRules, type LaneSandboxSpec } from '../sandbox';
-import { CompletionError, type SessionEvent, type SessionSpec } from './types';
+import {
+  CompletionError,
+  type SessionEvent,
+  type SessionSpec,
+  type ShapeSessionSpec,
+} from './types';
 
 function spec(overrides: Partial<SessionSpec> = {}): SessionSpec {
   return {
@@ -64,6 +69,37 @@ function spec(overrides: Partial<SessionSpec> = {}): SessionSpec {
     mcp: { url: 'http://127.0.0.1:4317/mcp', token: 'session-token', toolTimeoutMs: 900_000 },
     preToolUse: () => ({ decision: 'allow' }),
     canUseTool: () => Promise.resolve({ behavior: 'allow' }),
+    ...overrides,
+  };
+}
+
+/** A Plan conversation's spec, as `startShape` takes it. */
+function shapeSpec(overrides: Partial<ShapeSessionSpec> = {}): ShapeSessionSpec {
+  return {
+    sessionId: mintId('Session'),
+    shapeId: mintId('Shape'),
+    cwd: '/repo',
+    systemPrompt: 'You are Shape.',
+    prompt: 'First message',
+    model: 'claude-sonnet-5-5',
+    effort: 'high',
+    resumeProviderSessionId: null,
+    env: { PATH: '/usr/bin:/bin' },
+    account: {
+      accountId: mintId('Account'),
+      label: 'Claude plan',
+      kind: 'claude_subscription',
+      identity: 'builder@example.com',
+    },
+    tools: ['Read', 'Grep', 'Glob', 'Agent'],
+    allowedTools: ['Read', 'Grep', 'Glob', 'mcp__10db__note_heard'],
+    disallowedTools: ['Edit', 'Bash'],
+    agents: { scope: { description: 'Scope review', prompt: 'Review scope', tools: ['Read'] } },
+    mcp: { url: 'http://127.0.0.1:4317/mcp', token: 'shape-token', toolTimeoutMs: 60_000 },
+    sandbox: null,
+    projectMcpServers: {},
+    preToolUse: () => ({ decision: 'allow' }),
+    canUseTool: () => Promise.resolve({ behavior: 'deny', message: 'not in this test' }),
     ...overrides,
   };
 }
@@ -2434,6 +2470,365 @@ describe('createClaudeAdapter', () => {
     await handle.stop();
     expect(record.inputs).toHaveLength(1);
     expect(record.interrupts).toBe(0);
+  });
+
+  it('logs a refusal as a claude session, with its workstream', async () => {
+    const logs = captureLogs();
+    const fake = fakeQuery({
+      messages: [initMessage()],
+      then: 'hang',
+      account: {
+        apiProvider: 'firstParty',
+        subscriptionType: 'Claude Max',
+        email: 'other@example.com',
+      },
+    });
+    const adapter = createClaudeAdapter({
+      claudePath: '/usr/local/bin/claude',
+      pluginDir: '/harness',
+      logger: logs.logger,
+      query: fake.query,
+      allowUnsandboxed: true,
+    });
+    const lane = spec();
+    await collect(adapter.start(lane).events);
+    const refused = logs.lines().filter((l) => l['msg'] === 'claude session refused');
+    expect(refused).toHaveLength(1);
+    expect(refused[0]?.['workstreamId']).toBe(lane.workstreamId);
+    expect(refused[0]).not.toHaveProperty('shapeId');
+  });
+
+  it('answers an interrupt before its prompt is sent with null, leaving claude alone', async () => {
+    const clock = new ManualClock();
+    const { adapter, record } = adapterFor(
+      { messages: [], then: 'hang', account: new Promise<AccountInfo>(() => undefined) },
+      1_000,
+      clock,
+    );
+    const handle = adapter.start(spec());
+    const done = collect(handle.events);
+    expect(await handle.interrupt()).toBeNull();
+    expect(record.interrupts).toBe(0);
+    await handle.stop();
+    await done;
+  });
+});
+
+describe('a Plan session through the adapter', () => {
+  const otherAccount: AccountInfo = {
+    apiProvider: 'firstParty',
+    subscriptionType: 'Claude Max',
+    email: 'other@example.com',
+  };
+  /** A promise the test settles itself, for an account Claude Code reports late. */
+  function deferred<T>(): { readonly promise: Promise<T>; resolve(value: T): void } {
+    let resolve: (value: T) => void = () => undefined;
+    const promise = new Promise<T>((settle) => {
+      resolve = settle;
+    });
+    return {
+      promise,
+      resolve: (value) => {
+        resolve(value);
+      },
+    };
+  }
+  const flush = async (): Promise<void> => {
+    for (let turn = 0; turn < 5; turn += 1) await new Promise((resolve) => setImmediate(resolve));
+  };
+  const builder: AccountInfo = {
+    apiProvider: 'firstParty',
+    subscriptionType: 'Claude Max',
+    email: 'builder@example.com',
+  };
+  const lastOf = async (events: Promise<SessionEvent[]>) => (await events).at(-1);
+
+  it('waits 30 s once for the account, asks no sign-in check, and refuses as billing', async () => {
+    const clock = new ManualClock();
+    const signInCheck = vi.fn<SignInCheck>(() => Promise.resolve('signed_in'));
+    const { adapter, record } = adapterFor(
+      {
+        messages: [initMessage()],
+        then: 'hang',
+        account: new Promise<AccountInfo>(() => undefined),
+      },
+      1_000,
+      clock,
+      signInCheck,
+    );
+    const done = collect(adapter.startShape(shapeSpec()).events);
+    clock.advance(30_000);
+    expect(await lastOf(done)).toEqual({
+      type: 'ended',
+      reason: 'billing_refused',
+      message: 'Claude Code reported no account within 30 s. No message was sent.',
+    });
+    expect(record.queries).toBe(1);
+    expect(signInCheck).not.toHaveBeenCalled();
+  }, 2_000);
+
+  it('ends with Plan’s words when the email differs', async () => {
+    const { adapter } = adapterFor({
+      messages: [initMessage()],
+      then: 'hang',
+      account: otherAccount,
+    });
+    const ended = await lastOf(collect(adapter.startShape(shapeSpec()).events));
+    expect(ended).toMatchObject({ type: 'ended', reason: 'account_refused' });
+    expect(endMessage(ended)).toMatch(/No message was sent\.$/);
+  });
+
+  it('ends with Plan’s words when the model differs', async () => {
+    const { adapter } = adapterFor({
+      messages: [initMessage('none', undefined, 'claude-opus-5-5')],
+      then: 'hang',
+    });
+    expect(await lastOf(collect(adapter.startShape(shapeSpec()).events))).toEqual({
+      type: 'ended',
+      reason: 'billing_refused',
+      message:
+        'Model check failed: 10db asked for claude-sonnet-5-5 but Claude Code runs claude-opus-5-5. The session stopped at its first turn, before any tool ran.',
+    });
+  });
+
+  it('ends with Plan’s words when 10db’s tools fail to register', async () => {
+    const { adapter } = adapterFor({ messages: [initMessage()], then: 'hang', mcpSet: 'reject' });
+    expect(await lastOf(collect(adapter.startShape(shapeSpec()).events))).toEqual({
+      type: 'ended',
+      reason: 'error',
+      message: 'Claude Code could not register 10db’s tools. No message was sent.',
+    });
+  });
+
+  it('ends completed, not rate_limited, when a rejected limit is the last word', async () => {
+    const { adapter } = adapterFor({
+      messages: [initMessage(), rateLimitEvent({ status: 'rejected', resetsAt: 1_791_000_000 })],
+    });
+    const events = await collect(adapter.startShape(shapeSpec()).events);
+    expect(events).toContainEqual({
+      type: 'rate_limit',
+      status: 'rejected',
+      resetsAt: new Date(1_791_000_000_000),
+      utilization: null,
+      limitType: null,
+    });
+    expect(events.at(-1)).toEqual({ type: 'ended', reason: 'completed', message: null });
+  });
+
+  it('calls Claude Code’s interrupt even before the first message is sent', async () => {
+    const clock = new ManualClock();
+    const { adapter, record } = adapterFor(
+      { messages: [], then: 'hang', account: new Promise<AccountInfo>(() => undefined) },
+      1_000,
+      clock,
+    );
+    const handle = adapter.startShape(shapeSpec());
+    const done = collect(handle.events);
+    expect(await handle.interrupt()).toBeNull();
+    expect(record.interrupts).toBe(1);
+    await handle.stop();
+    await done;
+  });
+
+  it('ends at once when claude exits before it reports an account', async () => {
+    const clock = new ManualClock();
+    const { adapter } = adapterFor(
+      { messages: [], then: 'end', account: new Promise<AccountInfo>(() => undefined) },
+      1_000,
+      clock,
+    );
+    expect(await lastOf(collect(adapter.startShape(shapeSpec()).events))).toEqual({
+      type: 'ended',
+      reason: 'completed',
+      message: null,
+    });
+  }, 2_000);
+
+  it('ends with an error, not sandbox_refused, when its read-only sandbox fails to start', async () => {
+    const { adapter } = adapterFor({
+      messages: [],
+      then: { throws: 'Error processing settings: sandbox' },
+    });
+    expect(
+      await lastOf(collect(adapter.startShape(shapeSpec({ sandbox: laneSandbox })).events)),
+    ).toMatchObject({ type: 'ended', reason: 'error' });
+  });
+
+  it('hands canUseTool escalated: false, whatever the classifier marked', async () => {
+    const asked = vi.fn<ShapeSessionSpec['canUseTool']>(() =>
+      Promise.resolve({ behavior: 'allow' }),
+    );
+    const { adapter, record } = adapterFor({
+      messages: [initMessage(), resultMessage({ input: 1, output: 1, costUsd: 0 })],
+      then: 'hang',
+    });
+    const handle = adapter.startShape(shapeSpec({ canUseTool: asked }));
+    const seen: SessionEvent[] = [];
+    for await (const event of handle.events) {
+      seen.push(event);
+      if (event.type === 'turn_complete') break;
+    }
+    const bridge = record.options?.canUseTool;
+    if (!bridge) throw new Error('the adapter passed no canUseTool');
+    await bridge(
+      'Bash',
+      {},
+      // The SDK passes these two fields at runtime, but its typings omit them (`isClassifierEscalation`).
+      {
+        signal: new AbortController().signal,
+        toolUseID: 't1',
+        decisionReasonType: 'classifier',
+        requiresUserInteraction: true,
+      } as never,
+    );
+    expect(asked).toHaveBeenCalledWith(expect.objectContaining({ escalated: false }));
+    await handle.stop();
+  });
+
+  it('starts claude at the daemon’s own priority, not the lane tier', async () => {
+    laneTiers.length = 0;
+    const { adapter, record } = adapterFor({
+      messages: [initMessage(), resultMessage({ input: 1, output: 1, costUsd: 0 })],
+      stderr: '',
+    });
+    await collect(adapter.startShape(shapeSpec()).events);
+    await vi.waitFor(() => {
+      expect(record.printed).toBe(1);
+    });
+    expect(record.spawned).toBe(1);
+    expect(laneTiers).toEqual([]);
+  });
+
+  it('starts unsandboxed on an adapter that refuses an unsandboxed lane', async () => {
+    const fake = fakeQuery({
+      messages: [initMessage(), resultMessage({ input: 1, output: 1, costUsd: 0 })],
+    });
+    const strict = createClaudeAdapter({
+      claudePath: '/usr/local/bin/claude',
+      pluginDir: '/harness',
+      logger: silentLogger,
+      query: fake.query,
+    });
+    const events = await collect(strict.startShape(shapeSpec({ sandbox: null })).events);
+    expect(events.map((e) => e.type)).toContain('turn_complete');
+    expect(events.filter((e) => endMessage(e) === UNSANDBOXED_REFUSAL)).toEqual([]);
+  });
+
+  it('stops during the account wait: ended stopped, nothing registered or sent', async () => {
+    const account = deferred<AccountInfo>();
+    const { adapter, record } = adapterFor({
+      messages: [],
+      then: 'hang',
+      account: account.promise,
+    });
+    const handle = adapter.startShape(shapeSpec());
+    const done = collect(handle.events);
+    await handle.stop();
+    account.resolve(builder);
+    await flush();
+    expect(await lastOf(done)).toEqual({ type: 'ended', reason: 'stopped', message: null });
+    expect(record.mcpCalls).toEqual([]);
+    expect(record.inputs).toEqual([]);
+  });
+
+  it('sends a message sent during the account wait after the first message', async () => {
+    const account = deferred<AccountInfo>();
+    const { adapter, record } = adapterFor({
+      messages: [initMessage()],
+      then: 'hang',
+      account: account.promise,
+    });
+    const handle = adapter.startShape(shapeSpec());
+    const done = collect(handle.events);
+    handle.send('later');
+    account.resolve(builder);
+    await vi.waitFor(() => {
+      expect(record.inputs).toHaveLength(2);
+    });
+    expect(record.inputs.map((m) => m.message.content)).toEqual(['First message', 'later']);
+    await handle.stop();
+    await done;
+  });
+
+  it('ends stopped, not account_refused, when a stop is waiting on a hung interrupt as a wrong account arrives', async () => {
+    const clock = new ManualClock();
+    const account = deferred<AccountInfo>();
+    const { adapter } = adapterFor(
+      { messages: [], then: 'stall', interruptHangs: true, account: account.promise },
+      1_000,
+      clock,
+    );
+    const handle = adapter.startShape(shapeSpec());
+    const done = collect(handle.events);
+    const stopping = handle.stop();
+    account.resolve(otherAccount);
+    await flush();
+    clock.advance(1_000);
+    await flush();
+    clock.advance(1_000);
+    await stopping;
+    const ended = await lastOf(done);
+    expect(ended).toEqual({ type: 'ended', reason: 'stopped', message: null });
+    expect(ended).not.toHaveProperty('refusal');
+  });
+
+  it('emits a second started with the new session id at a later init', async () => {
+    const { adapter } = adapterFor({
+      messages: [
+        initMessage(),
+        assistantMessage([textBlock('a')]),
+        resultMessage({ input: 1, output: 1, costUsd: 0 }),
+        { ...initMessage(), session_id: 'prov-session-2' },
+      ],
+    });
+    const events = await collect(adapter.startShape(shapeSpec()).events);
+    expect(events.flatMap((e) => (e.type === 'started' ? [e.providerSessionId] : []))).toEqual([
+      PROVIDER_SESSION,
+      'prov-session-2',
+    ]);
+  });
+
+  it('leaves a rate limit with no reset time at null', async () => {
+    const { adapter } = adapterFor({
+      messages: [
+        initMessage(),
+        rateLimitEvent({ status: 'allowed_warning', resetsAt: 1_791_000_000 }),
+        assistantMessage([], 'rate_limit'),
+        resultMessage({ input: 1, output: 1, costUsd: 0 }),
+      ],
+    });
+    const events = await collect(adapter.startShape(shapeSpec()).events);
+    const limits = events.filter((e) => e.type === 'rate_limit');
+    expect(limits).toHaveLength(2);
+    expect(limits[1]).toMatchObject({ resetsAt: null });
+  });
+
+  it('logs as a shape session, and none of the lane’s lines', async () => {
+    const logs = captureLogs();
+    const fake = fakeQuery([
+      { messages: [initMessage(), resultMessage({ input: 1, output: 1, costUsd: 0 })] },
+      { messages: [initMessage()], then: 'hang', account: otherAccount },
+    ]);
+    const adapter = createClaudeAdapter({
+      claudePath: '/usr/local/bin/claude',
+      pluginDir: '/harness',
+      logger: logs.logger,
+      query: fake.query,
+    });
+    await collect(adapter.startShape(shapeSpec()).events);
+    const refusedSpec = shapeSpec();
+    await collect(adapter.startShape(refusedSpec).events);
+    const refused = logs.lines().filter((l) => l['msg'] === 'shape session refused');
+    expect(refused).toHaveLength(1);
+    expect(refused[0]?.['shapeId']).toBe(refusedSpec.shapeId);
+    const laneLines = [
+      'claude session billing',
+      'claude session mcp',
+      'claude session mcp status',
+      'claude session permission mode',
+      'claude session refused',
+    ];
+    expect(logs.lines().filter((l) => laneLines.includes(String(l['msg'])))).toEqual([]);
   });
 });
 
