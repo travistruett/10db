@@ -49,8 +49,6 @@ export const DEV_UI_READS: readonly string[] = [
   '/models/status',
   '/settings/keep-awake',
   '/settings/lane-permissions',
-  '/settings/trust',
-  '/projects/:projectId/trust',
   '/settings/self-update',
   '/decisions/:id/provenance',
   '/principles/:id/provenance',
@@ -71,6 +69,9 @@ export const DEV_UI_REFUSED_READS: Readonly<Record<string, string>> = {
   '/passes/:passId/close': "A pass's close lists are read with git.",
   '/passes/:passId/pull-request': "Reading a pass's pull request runs gh.",
   '/dev-ui/connection': "The dev UI's own token is for the 10db app's Open Page.",
+  '/settings/trust': "Trust lists the plugins installed in the builder's home.",
+  '/projects/:projectId/trust':
+    "Trust's preview runs git in every checkout and lists the builder's home.",
   '/health': 'Open to every caller; it needs no token.',
 };
 

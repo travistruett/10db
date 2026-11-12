@@ -4,7 +4,7 @@ import {
   type SetupPreviewDto,
   type TrustSwitchKey,
 } from '@10db/contracts';
-import { List, SegmentedControl, Stack, Text, Title } from '@mantine/core';
+import { Alert, List, SegmentedControl, Stack, Text, Title } from '@mantine/core';
 import { useId } from 'react';
 import { useProjectTrust, useSetProjectTrust, useTrust } from '../../daemon/trust-queries';
 import { SettingRow, SettingsCard } from './setting-row';
@@ -126,6 +126,7 @@ export function ProjectTrustSection({ project }: { readonly project: ProjectDto 
   const set = useSetProjectTrust(project.id);
   const overrides = trust.data?.overrides;
   const plugins = app.data?.plugins ?? [];
+  if (trust.isError) return <Alert color="red">{trust.error.message}</Alert>;
   return (
     <Stack gap="lg">
       <SettingsCard>

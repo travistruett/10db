@@ -1,5 +1,5 @@
 import type { InstalledPluginDto, TrustSwitches } from '@10db/contracts';
-import { Group, Stack, Switch, Text } from '@mantine/core';
+import { Alert, Group, Stack, Switch, Text } from '@mantine/core';
 import { useSetTrust, useTrust } from '../../daemon/trust-queries';
 import { SettingRow, SettingsCard } from './setting-row';
 import { TRUST_ROWS } from './trust-rows';
@@ -50,6 +50,7 @@ export function TrustSection() {
   const set = useSetTrust();
   const switches = trust.data?.switches;
   const plugins = trust.data?.plugins ?? [];
+  if (trust.isError) return <Alert color="red">{trust.error.message}</Alert>;
   return (
     <Stack gap="lg">
       <SettingsCard>

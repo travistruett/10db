@@ -94,4 +94,18 @@ describe('Settings › project Trust', () => {
     expect(within(list).getByText('~/.claude/skills/lane')).toBeTruthy();
     expect(within(list).getByText('it lies in, or holds, a folder a lane can write')).toBeTruthy();
   });
+
+  it("shows the daemon's refusal when the read is refused", async () => {
+    serve(NOTHING);
+    server.use(
+      http.get(daemonUrl('/projects/:projectId/trust'), () =>
+        HttpResponse.json(
+          { error: 'forbidden', message: 'The dev UI reads only: act in the 10db app' },
+          { status: 403 },
+        ),
+      ),
+    );
+    renderApp('/settings/project-trust');
+    expect(await screen.findByText('The dev UI reads only: act in the 10db app')).toBeTruthy();
+  });
 });

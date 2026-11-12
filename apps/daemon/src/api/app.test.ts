@@ -401,6 +401,13 @@ describe('API', () => {
       },
       { name: 'a read that runs a command', path: '/system', method: 'GET', status: 403 },
       { name: 'its own connection', path: '/dev-ui/connection', method: 'GET', status: 403 },
+      { name: "the builder's trust settings", path: '/settings/trust', method: 'GET', status: 403 },
+      {
+        name: "a project's trust preview",
+        path: `/projects/${mintId('Project')}/trust`,
+        method: 'GET',
+        status: 403,
+      },
     ])('$name: $status', async ({ path, method, status }) => {
       expect((await devApp(DEV_TOKEN).request(path, as(DEV_TOKEN, method))).status).toBe(status);
     });

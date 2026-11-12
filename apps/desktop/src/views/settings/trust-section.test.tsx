@@ -70,4 +70,18 @@ describe('Settings › Trust', () => {
     });
     expect(screen.queryByText('Off in Claude Code')).toBeNull();
   });
+
+  it("shows the daemon's refusal when the read is refused", async () => {
+    server.use(
+      http.get(daemonUrl('/settings/trust'), () =>
+        HttpResponse.json(
+          { error: 'forbidden', message: 'The dev UI reads only: act in the 10db app' },
+          { status: 403 },
+        ),
+      ),
+      ...baseHandlers(),
+    );
+    renderApp('/settings/trust');
+    expect(await screen.findByText('The dev UI reads only: act in the 10db app')).toBeTruthy();
+  });
 });
