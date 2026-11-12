@@ -262,6 +262,9 @@ export async function createTestEngine(
   const inbox = createInboxService({
     state,
     judgeOff: triageJudge.off,
+    parkWaiting: (id) => {
+      runner?.parkFor(id);
+    },
     onQuestionOpened: (ctx, item) =>
       item.routedBy === RoutedBy.TriagePending
         ? () => {

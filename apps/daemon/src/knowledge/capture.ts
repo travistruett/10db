@@ -47,24 +47,42 @@ export function answerRecording(item: InboxItemDto, answer: InboxAnswer): Decisi
   return DECISION_CATEGORIES.includes(item.category) ? PROJECT_RECORDING : null;
 }
 
-/** Records the answer as a decision where it says (or its category implies), with the card as its source. */
+/** Who answered in Slack, for the decision an option pick or an approval becomes. */
+export interface SlackAnswerer {
+  readonly handle: string;
+  readonly permalink: string;
+  /** Others who spoke in the conversation, by name. */
+  readonly with: readonly string[];
+}
+
+/**
+ * Records the answer as a decision where it says (or its category implies), with the card as its source.
+ * For an answer from Slack the decision is the person's own, with the conversation's permalink as its
+ * source and the others who spoke named in its rationale.
+ */
 export function recordAnswerDecision(
   ctx: WriteContext,
   item: InboxItemDto,
   answer: InboxAnswer,
   project: ProjectDto,
+  by?: SlackAnswerer,
 ): DecisionId | null {
   const recording = answerRecording(item, answer);
   if (recording === null) return null;
   if (recording.area !== null && !project.areas.some((a) => a.name === recording.area))
     throw new InvalidError(`${project.name} has no area named ${recording.area}`);
-  const sourceId = insertSource(ctx, SourceKind.InboxAnswer, { inboxId: item.id });
+  const sourceId = by
+    ? insertSource(ctx, SourceKind.SlackReply, { inboxId: item.id, permalink: by.permalink })
+    : insertSource(ctx, SourceKind.InboxAnswer, { inboxId: item.id });
+  const spoke = by && by.with.length > 0 ? ` with ${by.with.join(' and ')}` : '';
   return insertDecision(ctx, {
     ...targetColumns(recordingTarget(recording, item.projectId)),
     question: item.title,
     choice: answer.choice,
-    rationale: answer.note ?? 'Answered in the inbox',
-    decidedBy: BUILDER_HANDLE,
+    rationale: by
+      ? `Answered in Slack${spoke}: ${by.permalink}${answer.note ? `\n${answer.note}` : ''}`
+      : (answer.note ?? 'Answered in the inbox'),
+    decidedBy: by ? by.handle : BUILDER_HANDLE,
     sourceId,
   });
 }

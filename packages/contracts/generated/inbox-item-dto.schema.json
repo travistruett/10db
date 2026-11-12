@@ -540,6 +540,27 @@
               "items": {
                 "type": "string"
               }
+            },
+            "conversation": {
+              "maxItems": 100,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "text": {
+                    "type": "string",
+                    "maxLength": 4000
+                  }
+                },
+                "required": [
+                  "name",
+                  "text"
+                ]
+              }
             }
           },
           "required": [

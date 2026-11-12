@@ -17,8 +17,10 @@ import {
   STOCK_HAZARD_REVISIONS,
   WORKSTREAM_FAILED_TITLE_PREFIX,
   WorkstreamState,
-  type InboxItemDto,
+  InboxItemDto,
+  type InboxItemId,
   type InboxTarget,
+  type PersonId,
   type ProposalId,
   type QuestionCategory,
   type ProposalKind,
@@ -34,7 +36,10 @@ import {
   humanTouchDays,
   insertInboxItem,
   insertPermissionRule,
+  insertDraft,
   insertPerson,
+  markSending,
+  markSent,
   patchJudgeConfig,
   setRoutingRules,
   insertProposal,
@@ -466,6 +471,232 @@ describe('routed questions fold by their recipients', () => {
     ]);
     // The first card is open under the other order; a fresh ask in the new order is the same set.
     expect(ask(w.b).item.id).toBe(first.item.id);
+  });
+});
+
+describe('answerAs: an answer that comes from a stakeholder', () => {
+  const parkWaiting: InboxItemId[] = [];
+  const delivered: string[] = [];
+  let svc: InboxService;
+  beforeEach(() => {
+    parkWaiting.length = 0;
+    delivered.length = 0;
+    svc = createInboxService({
+      state,
+      onParkedAnswer: (target) => delivered.push(target.workstreamId),
+      parkWaiting: (id) => parkWaiting.push(id),
+    });
+  });
+
+  function world(recipients: ('mark' | 'ana')[] = ['mark']) {
+    const ws = seedWorkstream(base);
+    const person = (handle: string, name: string, userId: string) =>
+      base.write((ctx) =>
+        insertPerson(ctx, {
+          handle,
+          name,
+          slack: { teamId: 'T1', userId, sendMode: 'review', dailyLimit: 10 },
+        }),
+      ).value;
+    const mark = person('mark', 'Mark', 'U1');
+    const ana = person('ana', 'Ana', 'U2');
+    const outsider = person('priya', 'Priya', 'U3');
+    const by = { mark, ana }[recipients[0] ?? 'mark'];
+    base.write((ctx) =>
+      setRoutingRules(ctx, ws.project.id, {
+        rules: recipients.map((r) => ({
+          category: 'design' as const,
+          area: 'api',
+          personId: { mark, ana }[r].id,
+        })),
+      }),
+    );
+    const { item, answer } = ask(ws);
+    const send = base.write((ctx) => {
+      const draft = insertDraft(ctx, {
+        inboxItemId: item.id,
+        recipients: recipients.map((r) => ({ mark, ana })[r].id),
+        text: 'Q',
+        hits: [],
+      });
+      markSending(ctx, draft.id, {
+        textSha256: 'x',
+        threadTs: null,
+        startedAt: '2026-11-12T10:00:00.000Z',
+      });
+      markSent(ctx, draft.id, {
+        channelId: 'D1',
+        threadTs: '1.1',
+        messageTs: '1.1',
+        permalink: 'https://slack/p',
+        at: '2026-11-12T10:00:00.000Z',
+      });
+      return draft;
+    }).value;
+    return { ws, item, answer, mark, ana, outsider, by, send };
+  }
+  const who = (personId: PersonId) => ({
+    personId,
+    permalink: 'https://slack/p/1',
+    with: [] as string[],
+  });
+  const noTx = () => undefined;
+  const optionReply = (choice: string, words = choice) => ({
+    readAs: 'option' as const,
+    answer: { choice, note: words },
+    words,
+    conversation: [],
+  });
+  const decisions = (w: ReturnType<typeof world>) =>
+    listDecisions(state.db, { projectId: w.ws.project.id });
+
+  it("records an option pick as the person's decision, with the permalink and a slack_reply source", () => {
+    const w = world();
+    svc.answerAs(w.item.id, optionReply('Teal', 'Teal please'), who(w.mark.id), noTx);
+    const [decision] = decisions(w);
+    expect(decision).toMatchObject({ decidedBy: 'mark', choice: 'Teal' });
+    expect(decision?.rationale).toContain('https://slack/p/1');
+    const sources = state.db.select().from(schema.sources).all();
+    expect(sources.map((s) => s.kind)).toContain('slack_reply');
+    expect(getInboxItem(state.db, w.item.id)).toMatchObject({
+      state: 'RESOLVED',
+      answer: { choice: 'Teal', answeredBy: 'mark', via: 'slack', words: 'Teal please' },
+    });
+  });
+
+  it('records nothing for words that match no option, and keeps the words on the card', () => {
+    const w = world();
+    svc.answerAs(
+      w.item.id,
+      { readAs: 'own_words', answer: null, words: 'Neither, ask legal.', conversation: [] },
+      who(w.mark.id),
+      noTx,
+    );
+    expect(decisions(w)).toEqual([]);
+    expect(getInboxItem(state.db, w.item.id).answer).toMatchObject({
+      choice: "In Mark's words",
+      note: 'Neither, ask legal.',
+      words: 'Neither, ask legal.',
+      via: 'slack',
+    });
+  });
+
+  it("records an approval as the approver's decision, naming the others who spoke", () => {
+    const w = world();
+    svc.answerAs(
+      w.item.id,
+      {
+        readAs: 'approved',
+        answer: { choice: 'Red' },
+        words: 'ok',
+        conversation: [{ name: 'Priya', text: 'Red.' }],
+      },
+      { personId: w.mark.id, permalink: 'https://slack/p/2', with: ['Priya'] },
+      noTx,
+    );
+    const [decision] = decisions(w);
+    expect(decision).toMatchObject({ decidedBy: 'mark', choice: 'Red' });
+    expect(decision?.rationale).toContain('with Priya');
+    expect(getInboxItem(state.db, w.item.id).answer).toMatchObject({
+      with: ['Priya'],
+      conversation: [{ name: 'Priya', text: 'Red.' }],
+    });
+  });
+
+  it("records Ana's decision when Ana answers a tie", () => {
+    const w = world(['mark', 'ana']);
+    svc.answerAs(w.item.id, optionReply('Red'), who(w.ana.id), noTx);
+    expect(decisions(w)[0]).toMatchObject({ decidedBy: 'ana' });
+  });
+
+  it('refuses a person who is not a recipient of the send, and a park choice', () => {
+    const w = world();
+    expect(() => svc.answerAs(w.item.id, optionReply('Teal'), who(w.outsider.id), noTx)).toThrow(
+      InvalidError,
+    );
+    expect(() =>
+      svc.answerAs(w.item.id, optionReply(PARK_TASK_CHOICE), who(w.mark.id), noTx),
+    ).toThrow(InvalidError);
+    expect(getInboxItem(state.db, w.item.id).state).toBe('OPEN');
+  });
+
+  it('refuses a choice that is not one of the options for an option read', () => {
+    const w = world();
+    expect(() => svc.answerAs(w.item.id, optionReply('Purple'), who(w.mark.id), noTx)).toThrow(
+      InvalidError,
+    );
+  });
+
+  it('cuts a 5,000-character reply to 4,000 in the note and keeps it whole in words', () => {
+    const w = world();
+    const words = 'x'.repeat(5000);
+    svc.answerAs(
+      w.item.id,
+      { readAs: 'own_words', answer: null, words, conversation: [] },
+      who(w.mark.id),
+      noTx,
+    );
+    const answer = getInboxItem(state.db, w.item.id).answer;
+    expect(answer?.note).toHaveLength(4000);
+    expect(answer?.words).toHaveLength(5000);
+  });
+
+  it('cuts a 50,000-character reply at the schema limit and the card still parses', () => {
+    const w = world();
+    svc.answerAs(
+      w.item.id,
+      { readAs: 'own_words', answer: null, words: 'y'.repeat(50_000), conversation: [] },
+      who(w.mark.id),
+      noTx,
+    );
+    const card = getInboxItem(state.db, w.item.id);
+    expect(card.answer?.words).toHaveLength(20_000);
+    expect(InboxItemDto.safeParse(card).success).toBe(true);
+  });
+
+  it('rolls the answer back when inTx throws', () => {
+    const w = world();
+    expect(() =>
+      svc.answerAs(w.item.id, optionReply('Teal'), who(w.mark.id), () => {
+        throw new Error('no');
+      }),
+    ).toThrow('no');
+    expect(getInboxItem(state.db, w.item.id)).toMatchObject({ state: 'OPEN', answer: null });
+    expect(decisions(w)).toEqual([]);
+  });
+
+  it('never resolves a live waiter: it parks the sessions and delivers through onParkedAnswer', async () => {
+    const w = world();
+    let settled = 'pending';
+    w.answer.then(
+      () => (settled = 'resolved'),
+      () => (settled = 'rejected'),
+    );
+    svc.answerAs(w.item.id, optionReply('Teal'), who(w.mark.id), noTx);
+    await Promise.resolve();
+    expect(settled).toBe('pending');
+    expect(parkWaiting).toEqual([w.item.id]);
+    expect(delivered).toEqual([w.ws.workstream.id]);
+  });
+
+  it('refuses a second answer, from Slack or the builder, and changes nothing', () => {
+    const w = world();
+    svc.answerAs(w.item.id, optionReply('Teal'), who(w.mark.id), noTx);
+    const before = getInboxItem(state.db, w.item.id);
+    expect(() => svc.answerAs(w.item.id, optionReply('Red'), who(w.mark.id), noTx)).toThrow(
+      ConflictError,
+    );
+    expect(() => svc.answer(w.item.id, { choice: 'Red' })).toThrow(ConflictError);
+    expect(getInboxItem(state.db, w.item.id)).toEqual(before);
+  });
+
+  it('refuses a card with no send', () => {
+    const ws = seedWorkstream(base);
+    const mark = base.write((ctx) => insertPerson(ctx, { handle: 'mark', name: 'Mark' })).value;
+    const { item } = ask(ws);
+    expect(() => svc.answerAs(item.id, optionReply('Teal'), who(mark.id), noTx)).toThrow(
+      InvalidError,
+    );
   });
 });
 

@@ -1084,8 +1084,13 @@ export const RecordedAnswer = InboxAnswer.extend({
   via: z.enum(['inbox', 'slack']).optional(),
   /** The answerer's own words, when they chose none of the options. */
   words: z.string().max(20000).optional(),
-  /** Others in the conversation who agreed, by handle. */
+  /** Others in the conversation, by name. */
   with: z.array(z.string()).optional(),
+  /** What was said in the conversation that settled it, one entry per message, for the lane's resume. */
+  conversation: z
+    .array(z.object({ name: z.string().max(200), text: z.string().max(4000) }))
+    .max(100)
+    .optional(),
 });
 export type RecordedAnswer = z.infer<typeof RecordedAnswer>;
 

@@ -730,6 +730,9 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const inbox = createInboxService({
     state,
     judgeOff: opts.judgeOff === true,
+    parkWaiting: (id) => {
+      runner?.parkFor(id);
+    },
     onQuestionOpened: (ctx, item) =>
       item.routedBy === RoutedBy.TriagePending
         ? () => {

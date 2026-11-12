@@ -11,6 +11,8 @@ import {
   InboxKind,
   InboxState,
   JudgeDecision,
+  RecordedAnswer,
+  type PersonId,
   InvalidError,
   isParkChoice,
   MCP_TOOL_GRANT_DETAIL,
@@ -38,6 +40,8 @@ import {
   findOpenByFoldKey,
   getInboxItem,
   getJudgeConfig,
+  getPerson,
+  sendForCard,
   areasForProposal,
   getProject,
   getProposal,
@@ -141,10 +145,36 @@ interface Rewording {
   readonly detail?: Record<string, Json>;
 }
 
+/** What a stakeholder's reply came to once read against the card's options. */
+export interface SlackAnswerInput {
+  readonly readAs: 'option' | 'own_words' | 'approved';
+  /** The option picked or approved; null for words that match none. */
+  readonly answer: InboxAnswer | null;
+  readonly words: string;
+  readonly conversation: readonly { readonly name: string; readonly text: string }[];
+}
+
+/** An answer's note is cut here; the words are kept to the schema's limit. */
+const NOTE_LIMIT = 4000;
+const WORDS_LIMIT = 20_000;
+
 export interface InboxService {
   /** Folds into an open identical card; the returned promise never causes an unhandled rejection. */
   ask(input: AskInput): { item: InboxItemDto; answer: Promise<InboxAnswer> };
   answer(id: InboxItemId, answer: InboxAnswer): InboxItemDto;
+  /**
+   * Answers a question as a stakeholder who replied in Slack (spec §8.3). It refuses a park choice and a
+   * person who is not a recipient of the card's send, accepts words that match no option, and stores who
+   * answered. It never resolves a live waiter: their sessions are parked and the words reach the lane only
+   * in the quoted resume. `inTx` runs in the same transaction, so what it writes stands or falls with the
+   * answer. An answered card is a `ConflictError` that changes nothing.
+   */
+  answerAs(
+    id: InboxItemId,
+    input: SlackAnswerInput,
+    by: { personId: PersonId; permalink: string; with: string[] },
+    inTx: (ctx: WriteContext, item: InboxItemDto) => void,
+  ): InboxItemDto;
   flag(input: FlagInput): InboxItemDto;
   cancelForWorkstream(workstreamId: WorkstreamId): void;
   /**
@@ -446,6 +476,11 @@ export function createInboxService(deps: {
    * committed: it starts the judge's triage, so the network call never sits inside a transaction.
    */
   onQuestionOpened?(ctx: WriteContext, item: InboxItemDto): (() => void) | null;
+  /**
+   * Parks every session waiting on the card (`Runner.parkFor`). `answerAs` calls it so a stakeholder's
+   * words are never handed to a live `ask_human` call.
+   */
+  parkWaiting?(id: InboxItemId): void;
   /** The daemon was started with `TENDB_JUDGE=off`: no question is left waiting for triage. */
   readonly judgeOff?: boolean;
 }): InboxService {
@@ -467,7 +502,7 @@ export function createInboxService(deps: {
     });
   }
 
-  function deliver(item: InboxItemDto): InboxItemDto {
+  function deliver(item: InboxItemDto, resolveWaiters = true): InboxItemDto {
     const answer = item.answer;
     if (answer === null) throw new ConflictError(`Inbox item ${item.id} has no answer to deliver`);
     if (item.state === InboxState.Answered) {
@@ -477,7 +512,7 @@ export function createInboxService(deps: {
     if (item.kind === InboxKind.Check) {
       return transition(item.id, [InboxState.Delivering], InboxState.Resolved);
     }
-    const live = waiters.get(item.id);
+    const live = resolveWaiters ? waiters.get(item.id) : undefined;
     waiters.delete(item.id);
     for (const target of item.targets) {
       const waiter = target.sessionId ? live?.get(target.sessionId) : undefined;
@@ -748,6 +783,55 @@ export function createInboxService(deps: {
         releaseCoveredEditCards(answered);
       }
       return delivered;
+    },
+
+    answerAs(id, input, by, inTx) {
+      if (input.answer !== null && isParkChoice(input.answer.choice))
+        throw new InvalidError('A stakeholder cannot park the task');
+      const current = getInboxItem(deps.state.db, id);
+      const send = sendForCard(deps.state.db, id);
+      if (!send?.people.some((p) => p.recipient && p.personId === by.personId))
+        throw new InvalidError('Only a person the question was sent to can answer it');
+      const person = getPerson(deps.state.db, by.personId);
+      const words = input.words.slice(0, WORDS_LIMIT);
+      let given: InboxAnswer;
+      if (input.readAs === 'own_words') {
+        given = { choice: `In ${person.name}'s words`, note: input.words.slice(0, NOTE_LIMIT) };
+      } else {
+        if (input.answer === null) throw new InvalidError('There is no option to record');
+        given = { ...input.answer };
+        assertKnownChoice(current, given);
+      }
+      const recorded = RecordedAnswer.parse({
+        ...given,
+        answeredBy: person.handle,
+        via: 'slack',
+        words,
+        with: by.with,
+        conversation: input.conversation.slice(0, 100).map((m) => ({
+          name: m.name.slice(0, 200),
+          text: m.text.slice(0, 4000),
+        })),
+      });
+      const answered = deps.state.write((ctx) => {
+        const item = getInboxItem(ctx.tx, id);
+        if (item.state !== InboxState.Open)
+          throw new ConflictError(`Inbox item ${id} is already ${item.state}`);
+        const updated = updateInboxItem(ctx, id, { state: InboxState.Answered, answer: recorded });
+        if (item.kind === InboxKind.Question && input.readAs !== 'own_words') {
+          recordAnswerDecision(ctx, updated, recorded, getProject(ctx.tx, item.projectId), {
+            handle: person.handle,
+            permalink: by.permalink,
+            with: by.with,
+          });
+        }
+        inTx(ctx, updated);
+        return updated;
+      });
+      // Their sessions park first, so each answer reaches the lane through the card and the resume.
+      waiters.delete(id);
+      deps.parkWaiting?.(id);
+      return deliver(answered, false);
     },
 
     flag(input) {
