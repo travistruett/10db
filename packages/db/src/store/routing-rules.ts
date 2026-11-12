@@ -184,14 +184,12 @@ export function assigneesFor(db: DbReader, input: AssigneesInput): AssigneesResu
     const handles = handlesOf(topicRoute.length > 0 ? topicRoute : byCategory);
     return { handles: handles.length > 0 ? handles : [BUILDER_HANDLE], tier: 'triage', note: null };
   };
-  const perTask = resolved.map((r) => {
-    if (r) return { tier: r.tier, handles: handlesOf(r.matched), matched: r.matched };
+  const perTask = resolved.map((r): { tier: RouteTier; handles: string[] } => {
+    if (r) return { tier: r.tier, handles: handlesOf(r.matched) };
     const hasTriageRoutes = projectScope.some(
       (x) => x.topic !== null || (x.category !== null && x.area === null),
     );
-    return hasTriageRoutes
-      ? { ...triage(), matched: [] as RoutingRuleDto[] }
-      : { tier: 'builder' as const, handles: [BUILDER_HANDLE], matched: [] as RoutingRuleDto[] };
+    return hasTriageRoutes ? triage() : { tier: 'builder', handles: [BUILDER_HANDLE] };
   });
   const first = perTask[0];
   if (!first) return toBuilder();
