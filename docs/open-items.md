@@ -128,7 +128,7 @@
 - [ ] Settings: the base branch as a Select of the checkout's branches; it needs inspection of an existing project's checkout, so it stays a text input.
 - [ ] Settings: the global Models section, and the fallback model as two selects.
 - [ ] Goals and Factory as goal mission control, designed in `docs/superpowers/specs/2026-10-29-10db-goals-design.md` (phases 1–4; its §14 lists what is open).
-- [ ] Board: voice capture for a task, and a sharpen assist that rewrites vague acceptance criteria.
+- [ ] Board: a sharpen assist that rewrites vague acceptance criteria.
 - [ ] Factory: row keys like the Inbox's (up/down or j/k between goals, Enter to open, a ? list), sharing `use-inbox-keys.ts`'s approach; after the goals spec's phase 1 Factory.
 - [ ] Desktop: a written type scale and spacing rhythm in `DESIGN.md`, with one pass over every view.
 - [ ] First run: the native folder panel and the Tauri window are checked by hand; the browser run covers the form and its axe scan (`e2e/first-run.spec.ts`).

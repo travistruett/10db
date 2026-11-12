@@ -1012,8 +1012,8 @@ All in scope; this is build order. Each slice ships something usable.
    Factory and Adopt a Plan…'s UI removed; the live confinement test (§15). Acceptance: the six-item list.
 2. **Editing and input.** Editable rows, pins, Restore, Drop; round marks and Why? (§6); file drop and pasted
    screenshots; `start_shape` (§5.6); a check that macOS dictation works in the Tauri window's input.
-   _Built, except the dictation check, which needs a person on a Mac (`pnpm --filter @10db/desktop dev:shell`,
-   open Shape, Fn twice, speak; a test pins only the input's structure). Enter on a row still opens its details
+   _Built. macOS dictation (Fn twice in the Shape input) was checked by hand in the Tauri window on macOS 27.2;
+   a test pins only the input's structure. Enter on a row still opens its details
    (slice 1's behaviour), so E edits, P pins and W asks why. Files upload to `POST /shapes/:id/files` as the raw
    body (20 MB limit on that route only), not base64 JSON. The edit note reaches the next turn from memory and
    stays out of the transcript view. See `decisions/2026-11-02-shape-editing-and-dropped-files.md`._
