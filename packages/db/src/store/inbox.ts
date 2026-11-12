@@ -10,6 +10,7 @@ import {
   type InboxKind,
   type InboxOption,
   type InboxTarget,
+  type PersonId,
   type ProjectId,
   type ProposalId,
   type QuestionCategory,
@@ -22,7 +23,9 @@ import { and, asc, desc, eq, inArray, notInArray, sql, type SQL } from 'drizzle-
 import * as schema from '../schema';
 import type { Json } from '../json';
 import { assigneeFor } from './routing-rules';
+import { sendForCard } from './stakeholder-sends';
 import type { DbReader, WriteContext } from './store';
+import { BUILDER_HANDLE } from './team';
 
 export interface NewInboxItem {
   readonly projectId: ProjectId;
@@ -40,8 +43,8 @@ export interface NewInboxItem {
 
 const LIVE_STATES: InboxState[] = [InboxState.Open, InboxState.Answered, InboxState.Delivering];
 
-/** Every column except `foldKey`, which stays internal to folding. */
-function toDto(row: typeof schema.inboxItems.$inferSelect): InboxItemDto {
+/** Every column except `foldKey` and `ruleAssignees`, which stay internal to routing and folding. */
+function toDto(db: DbReader, row: typeof schema.inboxItems.$inferSelect): InboxItemDto {
   return {
     id: row.id,
     projectId: row.projectId,
@@ -54,10 +57,10 @@ function toDto(row: typeof schema.inboxItems.$inferSelect): InboxItemDto {
     category: row.category,
     urgency: row.urgency,
     assignee: row.assignee,
-    assignees: [row.assignee],
-    routedBy: RoutedBy.Rule,
-    routeSuggestion: null,
-    send: null,
+    assignees: row.assignees.length > 0 ? row.assignees : [row.assignee],
+    routedBy: row.routedBy,
+    routeSuggestion: row.routeSuggestion,
+    send: sendForCard(db, row.id),
     detail: row.detail,
     answer: row.answer,
     targets: row.targets,
@@ -82,13 +85,26 @@ function targetAreas(db: DbReader, targets: readonly InboxTarget[]): string[] {
 }
 
 export function insertInboxItem(ctx: WriteContext, item: NewInboxItem): InboxItemDto {
+  const assignee = assigneeFor(
+    ctx.tx,
+    item.projectId,
+    item.category,
+    targetAreas(ctx.tx, item.targets),
+  );
+  const recipients = {
+    assignee,
+    assignees: [assignee],
+    ruleAssignees: [assignee],
+    routedBy: RoutedBy.Rule,
+    routeSuggestion: null,
+  };
   const row = {
     id: mintId('InboxItem'),
     ...item,
     options: [...item.options],
     targets: [...item.targets],
     state: InboxState.Open,
-    assignee: assigneeFor(ctx.tx, item.projectId, item.category, targetAreas(ctx.tx, item.targets)),
+    ...recipients,
     answer: null,
     createdAt: ctx.now,
     updatedAt: ctx.now,
@@ -100,13 +116,13 @@ export function insertInboxItem(ctx: WriteContext, item: NewInboxItem): InboxIte
     entityId: row.id,
     data: { kind: item.kind, projectId: item.projectId },
   });
-  return toDto(row);
+  return toDto(ctx.tx, row);
 }
 
 export function getInboxItem(db: DbReader, id: InboxItemId): InboxItemDto {
   const row = db.select().from(schema.inboxItems).where(eq(schema.inboxItems.id, id)).get();
   if (!row) throw new NotFoundError('inbox item', id);
-  return toDto(row);
+  return toDto(db, row);
 }
 
 const URGENCY_ORDER = sql`CASE ${schema.inboxItems.urgency} WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END`;
@@ -135,7 +151,7 @@ export function listInbox(
           .orderBy(desc(schema.inboxItems.updatedAt), desc(schema.inboxItems.id))
           .limit(filter.recent)
           .all();
-  return rows.map(toDto);
+  return rows.map((row) => toDto(db, row));
 }
 
 export function findOpenByFoldKey(
@@ -154,7 +170,7 @@ export function findOpenByFoldKey(
       ),
     )
     .get();
-  return row ? toDto(row) : undefined;
+  return row ? toDto(db, row) : undefined;
 }
 
 /** The open card that asks the builder about a proposal, if it is still open. */
@@ -173,7 +189,7 @@ export function findOpenProposalCard(
       ),
     )
     .get();
-  return row ? toDto(row) : undefined;
+  return row ? toDto(db, row) : undefined;
 }
 
 /** The states of a card the builder answered, whether or not the answer has been delivered. */
@@ -241,6 +257,59 @@ export function updateInboxItem(
   return item;
 }
 
+/**
+ * Sets who a card is routed to, in routing order, and by whom. `assignee` is the first handle, or the
+ * builder when the list is empty. Leaving `triage_pending` is announced as `inbox.triaged`.
+ */
+export function setInboxRecipients(
+  ctx: WriteContext,
+  id: InboxItemId,
+  input: {
+    readonly assignees: readonly string[];
+    readonly routedBy: RoutedBy;
+    readonly suggestion: {
+      readonly personIds: readonly PersonId[];
+      readonly confidence: number;
+    } | null;
+  },
+): InboxItemDto {
+  const before = getInboxItem(ctx.tx, id);
+  const assignees = input.assignees.length > 0 ? [...input.assignees] : [BUILDER_HANDLE];
+  ctx.tx
+    .update(schema.inboxItems)
+    .set({
+      assignees,
+      assignee: assignees[0] ?? BUILDER_HANDLE,
+      routedBy: input.routedBy,
+      routeSuggestion: input.suggestion && {
+        personIds: [...input.suggestion.personIds],
+        confidence: input.suggestion.confidence,
+      },
+      updatedAt: ctx.now,
+    })
+    .where(eq(schema.inboxItems.id, id))
+    .run();
+  const item = getInboxItem(ctx.tx, id);
+  ctx.emit({
+    type: EventType.InboxChanged,
+    entityType: 'inbox',
+    entityId: id,
+    data: { state: item.state },
+  });
+  if (before.routedBy === RoutedBy.TriagePending && input.routedBy !== RoutedBy.TriagePending) {
+    ctx.emit({
+      type: EventType.InboxTriaged,
+      entityType: 'inbox',
+      entityId: id,
+      data: {
+        routedBy: input.routedBy,
+        toBuilder: item.assignees.length === 1 && item.assignees[0] === BUILDER_HANDLE,
+      },
+    });
+  }
+  return item;
+}
+
 export function openItemsForWorkstream(db: DbReader, workstreamId: WorkstreamId): InboxItemDto[] {
   return db
     .select()
@@ -253,7 +322,7 @@ export function openItemsForWorkstream(db: DbReader, workstreamId: WorkstreamId)
     )
     .orderBy(asc(schema.inboxItems.createdAt), asc(schema.inboxItems.id))
     .all()
-    .map(toDto);
+    .map((row) => toDto(db, row));
 }
 
 /** A card the builder answered, as a reviewer of its task is shown it. */

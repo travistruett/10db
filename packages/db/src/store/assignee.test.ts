@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { insertInboxItem } from './inbox';
+import { EventType, RoutedBy } from '@10db/contracts';
+import { getInboxItem, insertInboxItem, setInboxRecipients } from './inbox';
 import { assigneeFor, setRoutingRules } from './routing-rules';
 import type { Store } from './store';
 import { insertTask } from './tasks';
@@ -81,5 +82,73 @@ describe('assigneeFor', () => {
       }),
     ).value;
     expect(card.assignee).toBe('ana');
+  });
+});
+
+describe('setInboxRecipients', () => {
+  const newCard = (project: ReturnType<typeof setup>) =>
+    store.write((ctx) =>
+      insertInboxItem(ctx, {
+        projectId: project.id,
+        kind: 'question',
+        title: 'Which?',
+        body: '',
+        options: [],
+        recommendation: null,
+        category: 'engineering',
+        urgency: 'normal',
+        detail: null,
+        foldKey: null,
+        targets: [],
+      }),
+    ).value;
+
+  it('sets the first handle as the assignee, keeps the list and the suggestion', () => {
+    const card = newCard(setup());
+    const ana = store.write((ctx) => insertPerson(ctx, { handle: 'zed', name: 'Zed' })).value;
+    store.write((ctx) =>
+      setInboxRecipients(ctx, card.id, {
+        assignees: ['sam', 'ana'],
+        routedBy: RoutedBy.Judge,
+        suggestion: { personIds: [ana.id], confidence: 0.7 },
+      }),
+    );
+    expect(getInboxItem(store.db, card.id)).toMatchObject({
+      assignee: 'sam',
+      assignees: ['sam', 'ana'],
+      routedBy: 'judge',
+      routeSuggestion: { personIds: [ana.id], confidence: 0.7 },
+    });
+  });
+
+  it('falls to the builder when the list is empty, and announces leaving triage_pending once', () => {
+    const card = newCard(setup());
+    store.write((ctx) =>
+      setInboxRecipients(ctx, card.id, {
+        assignees: ['sam'],
+        routedBy: RoutedBy.TriagePending,
+        suggestion: null,
+      }),
+    );
+    const first = store.write((ctx) =>
+      setInboxRecipients(ctx, card.id, {
+        assignees: [],
+        routedBy: RoutedBy.Builder,
+        suggestion: null,
+      }),
+    );
+    expect(first.value.assignee).toBe('me');
+    expect(first.events.find((e) => e.type === EventType.InboxTriaged)?.data).toEqual({
+      routedBy: 'builder',
+      toBuilder: true,
+    });
+    const second = store.write((ctx) =>
+      setInboxRecipients(ctx, card.id, {
+        assignees: ['sam'],
+        routedBy: RoutedBy.Rule,
+        suggestion: null,
+      }),
+    );
+    expect(second.events.some((e) => e.type === EventType.InboxTriaged)).toBe(false);
   });
 });

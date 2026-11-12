@@ -2,7 +2,7 @@ import {
   EventType,
   InvalidError,
   mintId,
-  QuestionCategory,
+  type QuestionCategory,
   RoutingRulesInput,
   type ProjectId,
   type RoutingRuleDto,
@@ -18,12 +18,15 @@ export function listRoutingRules(db: DbReader, projectId: ProjectId): RoutingRul
     .select()
     .from(schema.routingRules)
     .where(eq(schema.routingRules.projectId, projectId))
-    .orderBy(asc(schema.routingRules.category), asc(schema.routingRules.area))
-    .all()
-    .map((row) => ({ ...row, topic: null, goalId: null, taskId: null }));
+    .orderBy(asc(schema.routingRules.id))
+    .all();
 }
 
-/** Replaces the project's rule list; an area must be one of the project's areas. */
+/**
+ * Replaces the project's whole rule list at every scope. An area must be one of the project's areas,
+ * and a goal or task must belong to the project. Ids are time-ordered, so listing by id keeps the order
+ * the list gave, which is the routing order of a tie.
+ */
 export function setRoutingRules(
   ctx: WriteContext,
   projectId: ProjectId,
@@ -32,10 +35,26 @@ export function setRoutingRules(
   const { rules } = RoutingRulesInput.parse(input);
   const areas = new Set(getProject(ctx.tx, projectId).areas.map((a) => a.name));
   for (const rule of rules) {
-    if (rule.category === null || rule.goalId !== null || rule.taskId !== null)
-      throw new InvalidError('Routes by topic, goal or task are not stored yet');
     if (rule.area !== null && !areas.has(rule.area))
       throw new InvalidError(`The project has no area "${rule.area}"`);
+    if (rule.goalId !== null) {
+      const goal = ctx.tx
+        .select({ projectId: schema.goals.projectId })
+        .from(schema.goals)
+        .where(eq(schema.goals.id, rule.goalId))
+        .get();
+      if (goal?.projectId !== projectId)
+        throw new InvalidError(`The project has no goal ${rule.goalId}`);
+    }
+    if (rule.taskId !== null) {
+      const task = ctx.tx
+        .select({ projectId: schema.tasks.projectId })
+        .from(schema.tasks)
+        .where(eq(schema.tasks.id, rule.taskId))
+        .get();
+      if (task?.projectId !== projectId)
+        throw new InvalidError(`The project has no task ${rule.taskId}`);
+    }
   }
   const personIds = [...new Set(rules.map((r) => r.personId))];
   if (personIds.length > 0) {
@@ -58,10 +77,7 @@ export function setRoutingRules(
         rules.map((r) => ({
           id: mintId('RoutingRule'),
           projectId,
-          // Narrowed above: topic, goal and task rules are refused until they are stored.
-          category: r.category ?? QuestionCategory.Other,
-          area: r.area,
-          personId: r.personId,
+          ...r,
           createdAt: ctx.now,
           updatedAt: ctx.now,
         })),
@@ -78,7 +94,9 @@ export function assigneeFor(
   category: QuestionCategory,
   areas: readonly string[],
 ): string {
-  const rules = listRoutingRules(db, projectId).filter((r) => r.category === category);
+  const rules = listRoutingRules(db, projectId).filter(
+    (r) => r.category === category && r.goalId === null && r.taskId === null,
+  );
   const rule =
     rules.find((r) => r.area !== null && areas.includes(r.area)) ??
     rules.find((r) => r.area === null);

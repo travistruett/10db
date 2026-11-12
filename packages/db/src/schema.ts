@@ -69,6 +69,12 @@ import type {
   PermissionRuleId,
   PersonaId,
   PersonId,
+  PersonContactId,
+  RoutedBy,
+  SendMode,
+  SendState,
+  StakeholderSendId,
+  OutboundHit,
   PrincipleId,
   PrincipleKind,
   PrincipleStatus,
@@ -729,6 +735,15 @@ export const inboxItems = sqliteTable(
     category: text('category').$type<QuestionCategory>().notNull(),
     urgency: text('urgency').$type<Urgency>().notNull(),
     assignee: text('assignee').notNull(),
+    /** Every handle the card is routed to, in routing order; `assignee` is the first. */
+    assignees: text('assignees', { mode: 'json' }).$type<string[]>().notNull().default([]),
+    /** What the rules alone gave when the card was made, so a fold compares like with like. */
+    ruleAssignees: text('rule_assignees', { mode: 'json' }).$type<string[]>().notNull().default([]),
+    routedBy: text('routed_by').$type<RoutedBy>().notNull().default('rule'),
+    routeSuggestion: text('route_suggestion', { mode: 'json' }).$type<{
+      personIds: PersonId[];
+      confidence: number;
+    }>(),
     detail: text('detail', { mode: 'json' }).$type<Record<string, Json>>(),
     answer: text('answer', { mode: 'json' }).$type<InboxAnswer>(),
     foldKey: text('fold_key'),
@@ -999,8 +1014,16 @@ export const routingRules = sqliteTable(
       .$type<ProjectId>()
       .notNull()
       .references(() => projects.id),
-    category: text('category').$type<QuestionCategory>().notNull(),
+    /** Null on a topic route, which names `topic` instead. */
+    category: text('category').$type<QuestionCategory>(),
     area: text('area'),
+    goalId: text('goal_id')
+      .$type<GoalId>()
+      .references(() => goals.id),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .references(() => tasks.id),
+    topic: text('topic'),
     personId: text('person_id')
       .$type<PersonId>()
       .notNull()
@@ -1008,7 +1031,115 @@ export const routingRules = sqliteTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index('routing_rules_project_idx').on(t.projectId)],
+  (t) => [
+    index('routing_rules_project_idx').on(t.projectId),
+    check(
+      'routing_rules_scope',
+      sql`(${t.category} IS NULL) <> (${t.topic} IS NULL)
+        AND (${t.goalId} IS NULL OR ${t.taskId} IS NULL)
+        AND (${t.topic} IS NULL OR (${t.goalId} IS NULL AND ${t.taskId} IS NULL AND ${t.area} IS NULL))
+        AND (${t.taskId} IS NULL OR ${t.area} IS NULL)`,
+    ),
+  ],
+);
+
+/** How to reach a person in Slack, one row per person (stakeholder questions spec §5). */
+export const personContacts = sqliteTable('person_contacts', {
+  id: text('id').$type<PersonContactId>().primaryKey(),
+  personId: text('person_id')
+    .$type<PersonId>()
+    .notNull()
+    .unique()
+    .references(() => people.id),
+  teamId: text('team_id').notNull(),
+  userId: text('user_id').notNull(),
+  dmChannelId: text('dm_channel_id'),
+  sendMode: text('send_mode').$type<SendMode>().notNull(),
+  /** New questions a day; null is no limit. */
+  dailyLimit: integer('daily_limit'),
+  /** The `ts` the reply watch has read this person's DM through. */
+  dmCursor: text('dm_cursor'),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+/** One question card's conversation in Slack: its draft, its message, and what came back. */
+export const stakeholderSends = sqliteTable(
+  'stakeholder_sends',
+  {
+    id: text('id').$type<StakeholderSendId>().primaryKey(),
+    inboxItemId: text('inbox_item_id')
+      .$type<InboxItemId>()
+      .notNull()
+      .unique()
+      .references(() => inboxItems.id),
+    state: text('state').$type<SendState>().notNull(),
+    text: text('text').notNull(),
+    hits: text('hits', { mode: 'json' }).$type<OutboundHit[]>().notNull(),
+    /** Set when the builder released a hold, so its thread's follow-ups skip review. */
+    reviewed: integer('reviewed', { mode: 'boolean' }).notNull().default(false),
+    heldBy: text('held_by').$type<'review' | 'first_send' | 'limit' | 'scan'>(),
+    textSha256: text('text_sha256'),
+    channelId: text('channel_id'),
+    threadTs: text('thread_ts'),
+    messageTs: text('message_ts'),
+    permalink: text('permalink'),
+    /** Whether this send opened a thread of its own, which is what the daily limit counts. */
+    newThread: integer('new_thread', { mode: 'boolean' }).notNull().default(false),
+    startedAt: text('started_at'),
+    sentAt: text('sent_at'),
+    lastReadTs: text('last_read_ts'),
+    waitStartedAt: text('wait_started_at'),
+    remindedAt: text('reminded_at'),
+    returnedAt: text('returned_at'),
+    returnedReason: text('returned_reason').$type<'timer' | 'disagreed'>(),
+    settledThroughTs: text('settled_through_ts'),
+    askedWhichWayAt: text('asked_which_way_at'),
+    askedWhichWayTs: text('asked_which_way_ts'),
+    approvalSeenAt: text('approval_seen_at'),
+    approvalBy: text('approval_by').$type<PersonId>(),
+    loneReplyPendingSince: text('lone_reply_pending_since'),
+    proposal: text('proposal', { mode: 'json' }).$type<{
+      choice: string;
+      confidence: number;
+      ts: string | null;
+    }>(),
+    /** The channel, thread and cursor a moved question left behind. */
+    movedFrom: text('moved_from', { mode: 'json' }).$type<{
+      channelId: string;
+      threadTs: string;
+      lastReadTs: string | null;
+    }>(),
+    reply: text('reply', { mode: 'json' }).$type<{ text: string; userId: string; ts: string }>(),
+    replyVia: text('reply_via').$type<'thread' | 'top_level'>(),
+    readAs: text('read_as').$type<'option' | 'own_words' | 'approved'>(),
+    answeredBy: text('answered_by').$type<PersonId>(),
+    answeredAt: text('answered_at'),
+    closedReason: text('closed_reason').$type<'builder' | 'taken_back' | 'cancelled'>(),
+    error: text('error'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index('stakeholder_sends_state_idx').on(t.state)],
+);
+
+/** Who a send went to, and who joined its conversation. */
+export const stakeholderSendPeople = sqliteTable(
+  'stakeholder_send_people',
+  {
+    sendId: text('send_id')
+      .$type<StakeholderSendId>()
+      .notNull()
+      .references(() => stakeholderSends.id),
+    userId: text('user_id').notNull(),
+    personId: text('person_id')
+      .$type<PersonId>()
+      .references(() => people.id),
+    name: text('name').notNull(),
+    recipient: integer('recipient', { mode: 'boolean' }).notNull(),
+    position: integer('position').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.sendId, t.userId] })],
 );
 
 export const modelProfiles = sqliteTable(

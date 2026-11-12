@@ -40,6 +40,8 @@ export * from './sessions';
 export * from './shape-state';
 export * from './shapes';
 export * from './store';
+export * from './stakeholder-sends';
+export * from './stakeholder-timers';
 export * from './team';
 export * from './task-screens';
 export * from './task-page-reports';
