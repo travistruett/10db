@@ -711,6 +711,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     slack: slackClient,
     clock,
     log: logger.child({ component: 'stakeholder-sends' }),
+    hasToken: async () => (await judgeKeychain.readAsync(SLACK_BOT_ACCOUNT)) !== null,
     parkFor: (id) => {
       runner?.parkFor(id);
     },

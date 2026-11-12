@@ -66,6 +66,8 @@ export interface SendsDeps {
   readonly log: Logger;
   /** Parks the sessions waiting on a card that moved to someone else (`Runner.parkFor`). */
   readonly parkFor?: (id: InboxItemId) => void;
+  /** Whether the bot token is stored; Send is a 409 with the draft kept when it is not. */
+  readonly hasToken?: () => Promise<boolean>;
 }
 
 export interface StakeholderSends {
@@ -185,7 +187,8 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
   async function post(cardId: InboxItemId): Promise<void> {
     const client = slack;
     const draft = liveSend(cardId);
-    if (client === null) throw new ConflictError('Slack is not connected');
+    if (client === null || (await deps.hasToken?.()) === false)
+      throw new ConflictError('Slack is not connected');
     if (draft?.state !== 'draft') throw new ConflictError('There is no draft to send');
     const card = getInboxItem(state.db, cardId);
     const people = recipientsOf(draft);

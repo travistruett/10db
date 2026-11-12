@@ -586,6 +586,28 @@ describe('connection and in-flight cells', () => {
   });
 });
 
+describe('Send without a token', () => {
+  it('is a 409 that keeps the draft, even when the DM is already known', async () => {
+    const w = world();
+    w.route([w.person('mark', { sendMode: 'review' })]);
+    const id = w.card();
+    store.db.$client.prepare("UPDATE person_contacts SET dm_channel_id = 'D-U-mark'").run();
+    await sends.afterDraft(id);
+    const noToken = createStakeholderSends({
+      state,
+      slack,
+      clock,
+      log: silentLogger,
+      hasToken: () => Promise.resolve(false),
+    });
+    await expect(noToken.send(id, {})).rejects.toBeInstanceOf(ConflictError);
+    expect(send(id).state).toBe('draft');
+    expect(slack.posts).toEqual([]);
+    await sends.send(id, {});
+    expect(send(id).state).toBe('sent');
+  });
+});
+
 describe('askSomeone', () => {
   it('writes one route per category and person, sets the recipients, drafts for review and parks the session', () => {
     const w = world();
