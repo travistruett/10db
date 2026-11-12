@@ -110,7 +110,7 @@ describe('a ready notification', () => {
         ]),
       );
     });
-    const queue = await screen.findByRole('list', { name: 'Pages in this pass' });
+    const queue = await screen.findByRole('list', { name: 'Open pages' });
     expect(
       within(queue)
         .getByRole('button', { name: /^Settings/ })
@@ -171,7 +171,7 @@ describe('a ready notification', () => {
     await waitFor(() => {
       expect(router.state.location.search).toEqual({ task: ready.taskId });
     });
-    await screen.findByRole('list', { name: 'Pages in this pass' });
+    await screen.findByRole('list', { name: 'Open pages' });
     fireEvent.focus(window);
     expect(router.state.location.search).toEqual({ task: ready.taskId });
   });

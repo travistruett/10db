@@ -16,7 +16,7 @@ export interface TakeOutModalProps {
 
 /** What a take-out that stopped short says: the page stays, and why. */
 function stillChangingLine(area: string, files: readonly string[]): string {
-  return `${area} stays in the pass: its files kept changing (${files.join(', ')}). Try again once they settle.`;
+  return `${area} stays open: its files kept changing (${files.join(', ')}). Try again once they settle.`;
 }
 
 /**
@@ -71,7 +71,7 @@ export function TakeOutModal({ passId, taskId, area, onClose }: TakeOutModalProp
     >
       <Stack gap="sm">
         <Text size="sm">
-          {`Take ${area} out of the pass? A turn that is working stops. Its task keeps the work for its next start, and its files go back to how they were before the pass.`}
+          {`Remove ${area}? A turn that is working stops. Its changes leave your folder and wait on its Board task, which puts them back when it next starts.`}
         </Text>
         {preview.isPending ? (
           <Loader size="xs" role="status" aria-label="Reading its shared changes" />

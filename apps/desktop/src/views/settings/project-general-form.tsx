@@ -257,7 +257,7 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
         </SettingRow>
         <SettingRow
           label="Preview command"
-          description="Optional. Starts your dev server at the app address while a UI Workbench pass is open, and stops it when the pass ends, so you never run it yourself. It runs under the gate's sandbox, which needs Allow loopback."
+          description="Optional. Starts your dev server at the app address while pages are open in the UI Workbench, and stops it once they are finished or abandoned, so you never run it yourself. It runs under the gate's sandbox, which needs Allow loopback."
         >
           <TextInput
             aria-label="Preview command"
@@ -303,7 +303,7 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
         </SettingRow>
         <SettingRow
           label="Pictures in pull requests"
-          description="A pass's pull request shows each signed-off page before and after. The pictures are pushed to a 10db-pictures branch on GitHub, so anyone who can see the repository can see them, data on the page included."
+          description="A UI Workbench pull request shows each signed-off page before and after. The pictures are pushed to a 10db-pictures branch on GitHub, so anyone who can see the repository can see them, data on the page included."
         >
           <Group justify="flex-end">
             <Switch
