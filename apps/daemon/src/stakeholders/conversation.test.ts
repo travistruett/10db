@@ -566,6 +566,48 @@ describe('conversationState: several recipients', () => {
       expect(noProposal({ messages, quietSince: at(20), now: minutes(2) }).kind).toBe('settled');
     });
 
+    it("one recipient taking back their letter with later words stops the other's pick", () => {
+      const messages = [
+        msg(10, MARK, 'B'),
+        msg(20, ANA, 'B'),
+        msg(30, ANA, 'hold on, I am not sure'),
+      ];
+      expect(noProposal({ messages, quietSince: at(30), now: minutes(2) }).kind).toBe('settled');
+    });
+
+    it('a recipient who never named a letter and only chatted does not take back anyone', () => {
+      const messages = [msg(10, MARK, 'B'), msg(20, ANA, 'good question')];
+      expect(noProposal({ messages, quietSince: at(20) })).toEqual({
+        kind: 'picked',
+        by: MARK,
+        choice: 'B',
+      });
+    });
+
+    describe('after a disagreement (the returned card)', () => {
+      const afterDisagreement = { afterDisagreement: true, settledThroughTs: at(20) };
+
+      it("counts a letter only when every recipient's latest letter agrees", () => {
+        const alone = [msg(10, MARK, 'B'), msg(20, MARK, 'C'), msg(300, MARK, 'C')];
+        expect(
+          noProposal({ messages: alone, quietSince: at(300), ...afterDisagreement }).kind,
+        ).not.toBe('picked');
+        const both = [msg(10, MARK, 'B'), msg(20, ANA, 'C'), msg(300, MARK, 'C')];
+        expect(noProposal({ messages: both, quietSince: at(300), ...afterDisagreement })).toEqual({
+          kind: 'picked',
+          by: ANA,
+          choice: 'C',
+        });
+      });
+
+      it('does not count a letter from one recipient while the other has not written one', () => {
+        const messages = [msg(300, MARK, 'B')];
+        expect(noProposal({ messages, quietSince: at(300), ...afterDisagreement }).kind).not.toBe(
+          'picked',
+        );
+      });
+    });
+
     it("after a disagreement, a recipient moving to the other's letter is agreement", () => {
       const messages = [msg(10, MARK, 'B'), msg(20, ANA, 'C'), msg(300, MARK, 'C')];
       expect(noProposal({ messages, quietSince: at(300), settledThroughTs: at(20) })).toEqual({

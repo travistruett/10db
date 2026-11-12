@@ -52,6 +52,11 @@ export interface ConversationInput {
   readonly approvalSeen: { readonly at: string; readonly by: string } | null;
   /** How many options the question has, so a letter past them is not a pick. Default four. */
   readonly optionCount?: number;
+  /**
+   * The recipients disagreed before and the card came back: a pick then needs every recipient's latest letter
+   * to be the same letter, not one recipient's letter beside another's silence.
+   */
+  readonly afterDisagreement?: boolean;
   /** A reply's message `ts` mapped to whether the judge read it as approving the proposal. */
   readonly judgedApprovals?: ReadonlyMap<string, boolean>;
 }
@@ -241,7 +246,11 @@ function joined(messages: readonly CountedMessage[]): ConversationState {
   };
 }
 
-/** Several recipients: different letters disagree at once, one agreed letter is a pick once quiet. */
+/**
+ * Several recipients: different letters disagree at once, one agreed letter is a pick once quiet. A recipient
+ * whose latest message is not a letter, after they named one, has taken it back: that is no pick. After a
+ * disagreement every recipient must have a latest letter, and they must agree.
+ */
 function recipientPicks(
   reading: Reading,
   recent: readonly CountedMessage[],
@@ -251,13 +260,21 @@ function recipientPicks(
     (m) => recipients.includes(m.userId) && letterOf(m.text, reading.optionCount) !== null,
   );
   if (!triggered) return null;
-  const latest = recipients.flatMap((userId) => {
-    const last = reading.counted.filter((m) => m.userId === userId).at(-1);
-    const letter = last === undefined ? null : letterOf(last.text, reading.optionCount);
-    return last === undefined || letter === null ? [] : [{ userId, letter, ts: last.ts }];
-  });
+  const latest: { userId: string; letter: string; ts: string }[] = [];
+  for (const userId of recipients) {
+    const mine = reading.counted.filter((m) => m.userId === userId);
+    const last = mine.at(-1);
+    if (last === undefined) continue;
+    const letter = letterOf(last.text, reading.optionCount);
+    if (letter !== null) {
+      latest.push({ userId, letter, ts: last.ts });
+    } else if (mine.some((m) => letterOf(m.text, reading.optionCount) !== null)) {
+      return null;
+    }
+  }
   const letters = new Set(latest.map((l) => l.letter));
   if (letters.size > 1) return { kind: 'disagreed' };
+  if (reading.input.afterDisagreement === true && latest.length < recipients.length) return null;
   const newest = recent.at(-1);
   const first = earliest(latest);
   if (first === undefined || newest === undefined || !isQuiet(reading, newest.ts)) return null;
