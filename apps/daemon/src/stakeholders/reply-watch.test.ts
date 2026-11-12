@@ -814,6 +814,15 @@ describe('bringing someone in', () => {
     expect(judgeAnswers.filter((r) => r.decision === 'thread_answer')).toEqual([]);
   });
 
+  it('reads a lone "B" after the move as an option, not joined with the mention that brought someone in', async () => {
+    const { sent } = await mentioned();
+    await ticks(1);
+    const open = openSends(store.db)[0];
+    slack.say(open?.channelId ?? '', 'UMARK', 'B', open?.threadTs);
+    await ticks(2);
+    expect(send(sent.cardId)).toMatchObject({ state: 'answered', readAs: 'option' });
+  });
+
   it('opens a new group DM with all three when a brought-in person mentions another', async () => {
     const { sent } = await mentioned();
     await ticks(1);
@@ -1088,6 +1097,29 @@ describe('agreeing an answer', () => {
       choice: "In Mark's words",
       conversation: expect.arrayContaining([{ name: 'Priya', text: 'B is right' }]) as unknown,
     });
+  });
+
+  it('reads a single message after the which-way line as an option, whatever he said before it', async () => {
+    const s = scene();
+    const sent = await s.send([s.mark]);
+    store.write((ctx) => {
+      moveSend(ctx, sent.sendId as never, {
+        channelId: sent.channel,
+        threadTs: sent.threadTs,
+        messageTs: sent.threadTs,
+        permalink: null,
+        added: [{ userId: 'UPRIYA', personId: null, name: 'Priya', recipient: false }],
+      });
+    });
+    judgeReply = fallback;
+    slack.say(sent.channel, 'UMARK', 'hmm, let me think about this', sent.threadTs);
+    slack.say(sent.channel, 'UPRIYA', 'B is right', sent.threadTs);
+    await ticks(2);
+    expect(whichWays()).toHaveLength(1);
+    slack.say(sent.channel, 'UMARK', 'B', sent.threadTs);
+    await ticks(2);
+    expect(send(sent.cardId)).toMatchObject({ state: 'answered', readAs: 'option' });
+    expect(card(sent.cardId).answer?.choice).toBe('No');
   });
 
   it('answers B when the recipient names B after the which-way line', async () => {

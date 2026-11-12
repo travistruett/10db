@@ -224,16 +224,15 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
   });
 
   /** Answers the card from a lone recipient's reply, in one transaction with the send's own state. */
-  function answerLone(c: Conversation, words: string): void {
+  function answerLone(c: Conversation, reply: { words: string; messageCount: number }): void {
+    const { words } = reply;
     const { open } = c;
     const person = open.people.find((p) => p.recipient && p.personId !== null);
     const last = c.counted.at(-1);
     if (!person?.personId || !last) return;
     const personId: PersonId = person.personId;
-    const read = readReply(
-      { words, messageCount: c.counted.filter((m) => m.userId === person.userId).length },
-      stakeholderOptions(c.card),
-    );
+    // The reply is the messages the conversation reader joined, not everything he ever wrote.
+    const read = readReply({ words, messageCount: reply.messageCount }, stakeholderOptions(c.card));
     const via = c.topLevel.has(last.ts) ? 'top_level' : 'thread';
     // After a "which way" line the whole conversation is quoted to the lane, not only his words.
     const conversation =
@@ -350,7 +349,7 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
     const agree = agreeDeps(client);
     switch (verdict.kind) {
       case 'lone_reply':
-        if (recipients.length === 1) answerLone(conversation, verdict.words);
+        if (recipients.length === 1) answerLone(conversation, verdict);
         break;
       case 'settled':
         await settleConversation(agree, conversation);
