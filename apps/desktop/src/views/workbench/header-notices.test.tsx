@@ -257,6 +257,54 @@ describe('HeaderNotices', () => {
     expect(posted).toEqual([view.pass.id, view.pass.id]);
   });
 
+  it('restarts a stopped preview from its notice, and offers nothing while it starts', async () => {
+    record();
+    const posted: string[] = [];
+    server.use(
+      http.post(daemonUrl('/projects/:projectId/preview/restart'), ({ params }) => {
+        posted.push(String(params['projectId']));
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    const view = passViewDto({
+      rest: {
+        notices: [
+          passNotice({
+            id: 'preview-server',
+            kind: 'preview_stopped',
+            text: 'The preview stopped: `pnpm dev:preview` exited 4 times in 10 minutes.\nPort 1420 is in use',
+            sendable: false,
+          }),
+        ],
+      },
+    });
+    const { rerender } = renderWithDaemon(<HeaderNotices view={view} inbox={[]} />);
+    const shown = await screen.findByRole('listitem');
+    fireEvent.click(within(shown).getByRole('button', { name: 'Restart Preview' }));
+    await waitFor(() => {
+      expect(posted).toEqual([view.pass.projectId]);
+    });
+    rerender(
+      <HeaderNotices
+        view={passViewDto({
+          rest: {
+            notices: [
+              passNotice({
+                id: 'preview-server',
+                kind: 'preview_starting',
+                text: 'Starting the preview: `pnpm dev:preview`',
+                sendable: false,
+              }),
+            ],
+          },
+        })}
+        inbox={[]}
+      />,
+    );
+    await screen.findByText('Starting the preview:', { exact: false });
+    expect(screen.queryByRole('button', { name: 'Restart Preview' })).toBeNull();
+  });
+
   it('draws nothing while the pass has no notice', () => {
     record();
     renderWithDaemon(<HeaderNotices view={passViewDto()} inbox={[]} />);
