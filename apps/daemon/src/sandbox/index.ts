@@ -76,4 +76,5 @@ export {
 } from './lane-sandbox';
 export { singleQuoted } from './posix-quote';
 export type { SetupInput } from './setup-input';
+export { readFrontmatter, writeFrontmatter } from './frontmatter';
 export { EMPTY_SETUP, type SessionSetup } from './setup-dir';

@@ -7,16 +7,17 @@ import {
   readdirSync,
   realpathSync,
   rmSync,
-  symlinkSync,
+  statSync,
   writeFileSync,
   type Dirent,
 } from 'node:fs';
 import { dirname, isAbsolute, join, normalize, relative, sep } from 'node:path';
 import { foldPathCase } from '../guard';
-import { wrapPlugin } from './plugin-wrapper';
+import { carriedEntries, wrapPlugin } from './plugin-wrapper';
 import { isSandboxPath, SandboxProfileError } from './profile';
 import { isEqualOrUnder } from './protected-reads';
 import type { SetupInput } from './setup-input';
+import { linkWithRewrites, pluginChanges, skillChanges, type Rewrite } from './setup-definitions';
 import { collapseReads, setupReadRoots } from './setup-reads';
 
 interface LeftOut {
@@ -58,10 +59,14 @@ export interface KeptPlugin {
   readonly id: string;
   readonly path: string;
   readonly real: string;
+  /** Its definitions re-emitted without the keys 10db strips, or left out; relative to `real`. */
+  readonly rewrites: readonly Rewrite[];
 }
 
 export interface KeptSetup {
   readonly keptSkills: Skill[];
+  /** Each kept skill's re-emitted `SKILL.md`, by name, when it held a key 10db strips. */
+  readonly skillRewrites: ReadonlyMap<string, readonly Rewrite[]>;
   readonly keptPlugins: KeptPlugin[];
   /** The project's copies but those whose checkout file is a secret. */
   readonly keptProjectFiles: SetupInput['projectFiles'];
@@ -75,8 +80,17 @@ export interface KeptSetup {
 const SECRET_FILE_PREFIX = foldPathCase('.env');
 const UNWALKED_DIRECTORIES: ReadonlySet<string> = new Set(['node_modules', '.git']);
 const GONE = 'its folder is gone; Claude Code may have updated it';
+const TOO_MANY = 'it holds more files than 10db reads to strip hooks and pre-approved tools';
 const UNNAMEABLE =
   "a path in it holds a character the sandbox profile can't take ([ ] * ? { } \\ or a line break)";
+
+function isFolder(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
 
 function realOrNull(path: string): string | null {
   try {
@@ -224,6 +238,9 @@ export function keepSetup(
   });
   const skillNames = new Map<string, string>();
   const pluginNames = new Map<string, string>();
+  const skillRewrites = new Map<string, readonly Rewrite[]>();
+  // What each skill's or plugin's definitions lost, told only for those still kept at the end.
+  const notes = new Map<string, LeftOut[]>();
   const skills: { skill: Skill; folder: string; fileDir: string }[] = [];
   for (const skill of input.skills) {
     const what = shown(skill.path, home);
@@ -234,8 +251,21 @@ export function keepSetup(
     }
     const fileDir = dirname(skill.skillFile);
     const why = refuse(folder) ?? refuse(fileDir) ?? taken(skillNames, skill.name, 'skill');
-    if (why !== null) leftOut.push({ what, why });
-    else skills.push({ skill, folder, fileDir });
+    if (why !== null) {
+      leftOut.push({ what, why });
+      continue;
+    }
+    const changes = skillChanges(folder);
+    const unread = changes.notes.find((_, i) => changes.rewrites[i]?.text === null);
+    if (unread !== undefined) leftOut.push({ what, why: unread.why });
+    else {
+      skills.push({ skill, folder, fileDir });
+      skillRewrites.set(skill.name, changes.rewrites);
+      notes.set(
+        skill.name,
+        changes.notes.map((note) => ({ what, why: note.why })),
+      );
+    }
   }
   const plugins: KeptPlugin[] = [];
   for (const plugin of input.plugins) {
@@ -245,8 +275,20 @@ export function keepSetup(
       continue;
     }
     const why = refuse(real) ?? taken(pluginNames, pluginName(plugin.id), 'plugin');
-    if (why !== null) leftOut.push({ what: plugin.id, why });
-    else plugins.push({ ...plugin, real });
+    if (why !== null) {
+      leftOut.push({ what: plugin.id, why });
+      continue;
+    }
+    const changes = isFolder(real) ? pluginChanges(real, carriedEntries(real)) : null;
+    if (changes === null) {
+      leftOut.push({ what: plugin.id, why: TOO_MANY });
+      continue;
+    }
+    plugins.push({ ...plugin, real, rewrites: changes.rewrites });
+    notes.set(
+      plugin.id,
+      changes.notes.map((note) => ({ what: `${plugin.id}: ${note.where}`, why: note.why })),
+    );
   }
   const roots = setupReadRoots(home)
     .filter((root) => !root.endsWith(`${sep}plugins`))
@@ -276,11 +318,17 @@ export function keepSetup(
     if (!('at' in blocked))
       return {
         keptSkills: skills.map(({ skill }) => skill),
+        skillRewrites,
         keptPlugins: plugins,
         keptProjectFiles,
         reads,
         secretFiles: blocked.secretFiles,
-        leftOut,
+        leftOut: [
+          ...leftOut,
+          ...[...skills.map(({ skill }) => skill.name), ...plugins.map((p) => p.id)].flatMap(
+            (key) => notes.get(key) ?? [],
+          ),
+        ],
       };
     const { at, why } = blocked;
     for (const root of roots) if (isEqualOrUnder(at, root.real)) root.whole = false;
@@ -379,7 +427,12 @@ export function createSetupDir(
       makeDir(join(yours, 'skills'));
       for (const skill of kept.keptSkills) {
         try {
-          symlinkSync(realpathSync.native(skill.path), join(yours, 'skills', skill.name));
+          linkWithRewrites(
+            realpathSync.native(skill.path),
+            join(yours, 'skills', skill.name),
+            '',
+            kept.skillRewrites.get(skill.name) ?? [],
+          );
           linked.push(skill.name);
         } catch (error) {
           changed(shown(skill.path, home), error);
@@ -403,7 +456,7 @@ export function createSetupDir(
       let skills: string | null;
       try {
         makeDir(wrapper);
-        notes = wrapPlugin(plugin.real, wrapper).leftOut;
+        notes = wrapPlugin(plugin.real, wrapper, plugin.rewrites).leftOut;
         const inPlugin = join(plugin.real, 'skills');
         skills = existsSync(inPlugin) && lstatSync(inPlugin).isDirectory() ? inPlugin : null;
       } catch (error) {

@@ -413,6 +413,44 @@ describe('keepSetup and createSetupDir', () => {
     expect(readdirSync(filesRoot)).toEqual([]);
   });
 
+  it.each([
+    ['hooks', 'hooks:\n  PreToolUse: []\n', 'hooks left out'],
+    ['allowed-tools', 'allowed-tools: Bash\n', 'pre-approved tools left out'],
+  ])(
+    'lays out a builder skill whose SKILL.md holds %s as links, the SKILL.md re-emitted without it',
+    (_name, keys, note) => {
+      const dir = skillAt(join(home, '.claude/skills/s'));
+      writeFileSync(join(dir, 'SKILL.md'), `---\nname: s\n${keys}---\nBody !\`date\`\n`);
+      writeFileSync(join(dir, 'run.sh'), 'echo hi\n');
+      const s = builderSkill('s', dir);
+      const leftOut = [{ what: '~/.claude/skills/s', why: note }];
+      // The Settings preview names it as the session does.
+      expect(keepSetup(input({ skills: [s] }), refuse, home, noSecrets).leftOut).toEqual(leftOut);
+      const made = createSetupDir(filesRoot, input({ skills: [s] }), refuse, home, noSecrets);
+      const linked = join(made.setup.pluginDirs[0] ?? '', 'skills/s');
+      expect(readFileSync(join(linked, 'SKILL.md'), 'utf8')).toBe(
+        '---\nname: s\n---\nBody !`date`\n',
+      );
+      expect(readlinkSync(join(linked, 'run.sh'))).toBe(join(dir, 'run.sh'));
+      expect(made.setup.loaded.skills).toEqual(['s']);
+      expect(made.setup.leftOut).toEqual(leftOut);
+      made.remove();
+    },
+  );
+
+  it('leaves out a builder skill whose frontmatter it cannot read and that could name hooks', () => {
+    const dir = skillAt(join(home, '.claude/skills/s'));
+    writeFileSync(join(dir, 'SKILL.md'), '---\nname: s\n"\\x68ooks": [\n---\nBody\n');
+    const kept = keepSetup(input({ skills: [builderSkill('s', dir)] }), refuse, home, noSecrets);
+    expect(kept.keptSkills).toEqual([]);
+    expect(kept.leftOut).toEqual([
+      {
+        what: '~/.claude/skills/s',
+        why: 'left out: its frontmatter is not YAML 10db reads, and it may hold hooks or pre-approved tools',
+      },
+    ]);
+  });
+
   it('remove() leaves nothing', () => {
     const made = createSetupDir(
       filesRoot,

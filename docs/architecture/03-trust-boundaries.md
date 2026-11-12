@@ -180,6 +180,14 @@ without it):
     10db's guard allowed it, so the rewritten call runs unjudged, and a plugin's allow skips 10db's broker, so a
     call that would wait on a card runs without one. Each plugin's hooks are named in the left-out list and
     Settings says so. Bringing them back, with the guard and the broker seeing their answers, is a follow-up.
+  - **Definitions come along without their hooks or grants.** A builder's or a plugin's skill, command or agent
+    whose frontmatter holds `hooks`, `allowed-tools` or `mcpServers` (any case, `-` or `_`) is re-emitted from
+    its parsed frontmatter without them, every other key and the body kept, and its folder is laid out in the
+    setup dir as links with that file written in place (`sandbox/setup-definitions.ts`); one 10db can't parse
+    whose text could name such a key is left out. The live check showed why (research, L3c): a skill's hook runs
+    once the skill is invoked and its rewrite of a call holds, and its `allowed-tools` skips the broker for a call
+    the guard passes on and lets its `` !`…` `` lines run. Each is named in the left-out list and in Settings
+    ("hooks left out", "pre-approved tools left out", "MCP servers left out").
   - **Plugin MCP servers stay out** until 10db runs the builder's MCP servers (T6). The wrapper carries no
     `.mcp.json`, `.lsp.json`, `settings.json` or `mcpServers`: it links only `skills`, `agents` and `commands`,
     matched by their names folded as APFS folds them (case and Unicode normalization), so `Hooks/` or `.MCP.json`
@@ -926,7 +934,17 @@ guard task tests each one.
 - **Skills 10db refuses to open.** A skill kept directly in the home (`~/x`), under a dot folder of it or in a
   project's folder is left out, and Settings › Trust › Comes along says why.
 - **Plugin hooks are left out.** A builder's plugin comes along without its hooks (§4.3), so a plugin that needs
-  one runs without it, until 10db can order or judge their answers.
+  one runs without it, until 10db can order or judge their answers. The same holds for the hooks and
+  pre-approved tools in a builder's or a plugin's skill, command or agent: a skill that relies on them runs with
+  cards and without its hook.
+- **A builder skill's `` !`…` `` lines run, unjudged by the guard.** Claude Code runs one when it expands the
+  skill, inside the kernel sandbox (research, L3c), after its own permission check against the session's allow
+  rules; the guard and the broker never see it. With the skill's `allowed-tools` stripped, only the lane's own
+  allow rules can pass one, so such a line runs only a command 10db already lets a lane run without a card. A
+  project definition's `!` lines are dropped (§4.3); `disableSkillShellExecution` is not set.
+- **Setup is judged when it is read.** A builder's skill or plugin file that gains a hook or a grant between the
+  setup's judgement and the setup dir's write, or while the session runs, is linked without a second look, so
+  Claude Code loads what it then holds. Neither is ground a lane can write.
 - **The file tools' snapshot.** Where a setup read or a task's pictures lie under a protected read, Claude Code's
   `Read(...)` rules deny every entry beside the way down to them as the session starts (`besideTheWays`); an
   entry made later is refused by the guard and the judge alone, and the kernel denies it to commands.

@@ -1,14 +1,8 @@
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  symlinkSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { z } from 'zod';
 import { foldPathCase } from '../guard';
+import { linkWithRewrites, type Rewrite } from './setup-definitions';
 
 interface LeftOut {
   readonly what: string;
@@ -37,6 +31,20 @@ const Manifest = z.looseObject({
   description: z.string().optional(),
 });
 
+/** The plugin's folders the wrapper carries, each as written beside the name it takes in the wrapper. */
+export function carriedEntries(
+  installPath: string,
+): (readonly [string, (typeof CARRIED)[number]])[] {
+  const carried: (readonly [string, (typeof CARRIED)[number]])[] = [];
+  for (const entry of readdirSync(installPath).sort()) {
+    // Folded as the file system folds names: `Skills` is `skills`, under the wrapper's own spelling.
+    const name = CARRIED.find((kind) => kind === foldPathCase(entry));
+    if (name === undefined || carried.some(([, taken]) => taken === name)) continue;
+    carried.push([entry, name]);
+  }
+  return carried;
+}
+
 function readJson(path: string): unknown {
   try {
     return JSON.parse(readFileSync(path, 'utf8'));
@@ -48,8 +56,14 @@ function readJson(path: string): unknown {
 /**
  * Writes a wrapper for one installed plugin at `into`: the plugin's name, version and description, and a
  * link to its skills, agents and commands, and nothing else: never its MCP or LSP servers or its hooks.
+ * A folder holding one of `rewrites` (relative to the install path) is laid out as links with that file
+ * re-emitted or left out (`pluginChanges`).
  */
-export function wrapPlugin(installPath: string, into: string): { leftOut: LeftOut[] } {
+export function wrapPlugin(
+  installPath: string,
+  into: string,
+  rewrites: readonly Rewrite[],
+): { leftOut: LeftOut[] } {
   const leftOut: LeftOut[] = [];
   const raw = readJson(join(installPath, '.claude-plugin', 'plugin.json'));
   const parsed = Manifest.safeParse(raw ?? {});
@@ -73,13 +87,7 @@ export function wrapPlugin(installPath: string, into: string): { leftOut: LeftOu
     }),
     { mode: 0o600 },
   );
-  const linked = new Set<string>();
-  for (const entry of readdirSync(installPath)) {
-    // Folded as the file system folds names: `Skills` is `skills`, under the wrapper's own spelling.
-    const name = CARRIED.find((carried) => carried === foldPathCase(entry));
-    if (name === undefined || linked.has(name)) continue;
-    linked.add(name);
-    symlinkSync(join(installPath, entry), join(into, name));
-  }
+  for (const [entry, name] of carriedEntries(installPath))
+    linkWithRewrites(join(installPath, entry), join(into, name), entry, rewrites);
   return { leftOut };
 }
