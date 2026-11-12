@@ -55,12 +55,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /** How far before a send started a search for its post begins, for clocks that differ a little. */
 const SEARCH_SKEW_SECONDS = 60;
 /** Slack failures that say the connection is down, not that Slack refused: the post may or may not have landed. */
-const TRANSPORT_CODES: ReadonlySet<string> = new Set([
-  'unreachable',
-  'timeout',
-  'ratelimited',
-  'bad_reply',
-]);
+const TRANSPORT = /^(?:unreachable|timeout|ratelimited|bad_reply|http_5\d\d)$/;
 const SEND_METADATA = 'tendb_send';
 
 export interface SendsDeps {
@@ -200,7 +195,7 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
       channelId = await channelFor(client, people, thread);
     } catch (error) {
       const code = slackCode(error);
-      if (TRANSPORT_CODES.has(code) || code === 'no_token')
+      if (TRANSPORT.test(code) || code === 'no_token')
         throw new ConflictError(`Slack could not be reached (${code}); the draft is kept`);
       state.write((ctx) => {
         markSending(ctx, draft.id, {
@@ -243,7 +238,7 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
     } catch (error) {
       if (error instanceof ConflictError) throw error;
       const code = slackCode(error);
-      if (TRANSPORT_CODES.has(code)) {
+      if (TRANSPORT.test(code)) {
         log.warn(
           { sendId, code },
           'a question may or may not have posted; it is checked next tick',

@@ -530,6 +530,25 @@ describe('connection and in-flight cells', () => {
     expect(getInboxItem(store.db, id).assignees).toEqual(['me']);
   });
 
+  it.each(['http_500', 'http_502', 'http_503'])(
+    'treats %s like an unreachable Slack: the post stays in flight, the open keeps the draft',
+    async (code) => {
+      const w = world();
+      w.route([w.person('mark', { sendMode: 'review' })]);
+      const id = w.card();
+      await sends.afterDraft(id);
+      slack.failNext('chat.postMessage', code);
+      await sends.send(id, {});
+      expect(send(id).state).toBe('sending');
+      const other = w.card('Other?', 'o');
+      store.db.$client.prepare('UPDATE person_contacts SET dm_channel_id = NULL').run();
+      await sends.afterDraft(other);
+      slack.failNext('conversations.open', code);
+      await expect(sends.send(other, {})).rejects.toBeInstanceOf(ConflictError);
+      expect(send(other).state).toBe('draft');
+    },
+  );
+
   it('refuses Send and Ask Someone on a send that is mid-post', async () => {
     const { id, w } = await inFlight();
     const ana = w.person('ana');
