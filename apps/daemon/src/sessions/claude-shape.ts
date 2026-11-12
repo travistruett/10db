@@ -23,13 +23,18 @@ import {
   interruptReceipt,
   mapSdkMessage,
   modelRefusalOf,
-  toHookOutput,
-  toPermissionResult,
   toSdkMcpServer,
   toShapeHookOutput,
   userMessage,
 } from './claude-mapping';
 import { claudeQueryOptions } from './claude-query-options';
+import {
+  canUseToolBridge,
+  createHookCwds,
+  measurementHooks,
+  preToolUseHook,
+  type ToolGate,
+} from './claude-session-hooks';
 import { contextEvent } from './context-event';
 import { currentToolNames } from './mcp-tool-names';
 import { TENDB_MCP_SERVER } from './project-mcp';
@@ -54,8 +59,6 @@ export interface ShapeSessionDeps {
 /** How long Claude Code may take to report its account before the first message is sent. */
 const ACCOUNT_MS = 30_000;
 const STOP_GRACE_MS = 5_000;
-const UNVERIFIED =
-  'The billing check for this session did not pass, so 10db allows no tools in it.';
 /** A line for the first message naming project servers that didn't connect, so the session doesn't hunt for their tools. */
 function failedServersNote(names: readonly string[]): string {
   return (
@@ -63,9 +66,6 @@ function failedServersNote(names: readonly string[]): string {
     "Don't look for their tools; tell the builder when the plan needs one."
   );
 }
-
-/** How many calls' hook directories are kept for `canUseTool`: a call the hook allowed never reaches it. */
-const HOOK_CWDS_KEPT = 256;
 
 /**
  * The SDK options of a Shape session (Shape spec §5.2): no settings file and no plugin, the project's
@@ -76,7 +76,7 @@ const HOOK_CWDS_KEPT = 256;
 function shapeOptions(
   spec: ShapeSessionSpec,
   deps: ShapeSessionDeps,
-  gate: { readonly verified: Promise<boolean>; readonly refused: () => boolean },
+  gate: ToolGate,
   abortController: AbortController,
   onSpawn: (pid: number | null) => void,
   listedTools: () => Promise<readonly string[]>,
@@ -95,7 +95,7 @@ function shapeOptions(
     spec.sandbox,
   );
   // `canUseTool` hears nothing of where a call runs; the hook does, by the same tool use id.
-  const hookCwds = new Map<string, string>();
+  const cwds = createHookCwds();
   return {
     cwd: spec.cwd,
     model: spec.model,
@@ -105,101 +105,31 @@ function shapeOptions(
     env: { ...spec.env, ...sandboxEnv, ...AUTOUPDATE_OFF },
     pathToClaudeCodeExecutable: deps.claudePath,
     ...profileOptions,
-    canUseTool: async (toolName, input, options) => {
-      if (!(await gate.verified) || gate.refused())
-        return { behavior: 'deny', message: UNVERIFIED, interrupt: true };
-      const cwd = hookCwds.get(options.toolUseID);
-      hookCwds.delete(options.toolUseID);
-      // Only a call to an MCP tool is offered a server rule, and only it needs the tool list.
-      const tools = toolName.startsWith('mcp__') ? await listedTools() : undefined;
-      const decision = await spec.canUseTool({
-        toolName,
-        input,
-        toolUseId: options.toolUseID,
-        escalated: false,
-        signal: options.signal,
-        ...(cwd === undefined ? {} : { cwd }),
-        ...(tools === undefined ? {} : { listedTools: tools }),
-      });
-      // The session can be refused while the answer was pending.
-      if (gate.refused()) return { behavior: 'deny', message: UNVERIFIED, interrupt: true };
-      return toPermissionResult(decision, input);
-    },
+    canUseTool: canUseToolBridge({
+      gate,
+      cwds,
+      canUseTool: (req) => spec.canUseTool(req),
+      escalated: () => false,
+      listedTools,
+    }),
     hooks: {
       PreToolUse: [
-        {
-          hooks: [
-            async (hookInput) => {
-              if (hookInput.hook_event_name !== 'PreToolUse') return {};
-              if (!(await gate.verified) || gate.refused())
-                return toHookOutput({ decision: 'deny', reason: UNVERIFIED });
-              try {
-                hookCwds.set(hookInput.tool_use_id, hookInput.cwd);
-                const oldest = hookCwds.keys().next();
-                if (hookCwds.size > HOOK_CWDS_KEPT && !oldest.done) hookCwds.delete(oldest.value);
-                return toShapeHookOutput(
-                  spec.preToolUse({
-                    toolName: hookInput.tool_name,
-                    input: hookInput.tool_input,
-                    agentId: hookInput.agent_id,
-                    agentType: hookInput.agent_type,
-                    cwd: hookInput.cwd,
-                  }),
-                );
-              } catch (error) {
-                // A guard that fails must never let the call run.
-                return toHookOutput({
-                  decision: 'deny',
-                  reason: `10db's guard failed: ${error instanceof Error ? error.message : String(error)}`,
-                });
-              }
-            },
-          ],
-        },
+        preToolUseHook({
+          gate,
+          cwds,
+          judge: (hookInput) =>
+            toShapeHookOutput(
+              spec.preToolUse({
+                toolName: hookInput.tool_name,
+                input: hookInput.tool_input,
+                agentId: hookInput.agent_id,
+                agentType: hookInput.agent_type,
+                cwd: hookInput.cwd,
+              }),
+            ),
+        }),
       ],
-      PostToolUse: [
-        {
-          hooks: [
-            (hookInput) => {
-              if (hookInput.hook_event_name !== 'PostToolUse') return Promise.resolve({});
-              try {
-                spec.postToolUse?.({
-                  toolName: hookInput.tool_name,
-                  input: hookInput.tool_input,
-                  response: hookInput.tool_response,
-                  agentId: hookInput.agent_id,
-                  agentType: hookInput.agent_type,
-                });
-              } catch (error) {
-                // A measurement that fails leaves the Read counted as it was, which is the safe side.
-                deps.logger.warn({ err: String(error) }, 'a tool result could not be measured');
-              }
-              return Promise.resolve({});
-            },
-          ],
-        },
-      ],
-      PostToolUseFailure: [
-        {
-          hooks: [
-            (hookInput) => {
-              if (hookInput.hook_event_name !== 'PostToolUseFailure') return Promise.resolve({});
-              try {
-                spec.toolFailed?.({
-                  toolName: hookInput.tool_name,
-                  input: hookInput.tool_input,
-                  agentId: hookInput.agent_id,
-                  agentType: hookInput.agent_type,
-                });
-              } catch (error) {
-                // As with a measurement that fails, the Read stays counted, which is the safe side.
-                deps.logger.warn({ err: String(error) }, 'a failed tool call could not be noted');
-              }
-              return Promise.resolve({});
-            },
-          ],
-        },
-      ],
+      ...measurementHooks(spec, deps.logger),
     },
     abortController,
     ...(spawn === undefined

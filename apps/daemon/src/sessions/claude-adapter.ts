@@ -12,7 +12,6 @@ import {
   type SpawnOptions,
 } from '@anthropic-ai/claude-agent-sdk';
 import { AccountKind, type AccountRefusal, type ModelMarkBasis } from '@10db/contracts';
-import { z } from 'zod';
 import { systemClock, type Clock } from '../clock';
 import type { Logger } from '../log';
 import { atPriority } from '../priority';
@@ -34,13 +33,20 @@ import {
   mapSdkMessage,
   modelRefusalOf,
   toHookOutput,
-  toPermissionResult,
   toSdkMcpServer,
   userMessage,
 } from './claude-mapping';
 import { AUTOUPDATE_OFF } from '../environment';
 import { contextEvent } from './context-event';
 import { claudeQueryOptions } from './claude-query-options';
+import {
+  canUseToolBridge,
+  createHookCwds,
+  isClassifierEscalation,
+  preToolUseHook,
+  settingsRecheckHooks,
+  type ToolGate,
+} from './claude-session-hooks';
 import { startShapeSession } from './claude-shape';
 import { currentToolNames } from './mcp-tool-names';
 import { TENDB_MCP_SERVER } from './project-mcp';
@@ -84,8 +90,6 @@ const HALT_GRACE_MS = 1_000;
 const STDERR_LOG_CHARS = 2_000;
 /** What Claude Code's error says when it rejects the settings it was started with, the sandbox among them. */
 const SANDBOX_SETTINGS_ERROR = 'Error processing settings';
-const BILLING_UNVERIFIED =
-  'The billing check for this session did not pass, so 10db allows no tools in it.';
 
 export type QueryFn = (params: {
   prompt: AsyncIterable<SDKUserMessage>;
@@ -224,52 +228,6 @@ export function buildMcpServers(spec: SessionSpec): Record<string, McpServerConf
   };
 }
 
-/**
- * What Claude Code adds to a permission request when it says the call needs a person. Its auto mode
- * classifier sets them; a marked call becomes a card that no stored rule answers. The SDK passes
- * these fields at runtime but its typings omit them.
- */
-const EscalationFields = z.looseObject({
-  requiresUserInteraction: z.boolean().optional(),
-  decisionReasonType: z.string().optional(),
-});
-
-function isClassifierEscalation(options: unknown): boolean {
-  const parsed = EscalationFields.safeParse(options);
-  return (
-    parsed.success &&
-    (parsed.data.requiresUserInteraction === true ||
-      parsed.data.decisionReasonType === 'classifier')
-  );
-}
-
-/** A tool can write the project's settings mid-session, where no billing check would look again. */
-function settingsRecheckHooks(deps: QueryDeps): NonNullable<Options['hooks']> {
-  return {
-    PostToolUse: [{ hooks: [() => Promise.resolve(deps.recheckSettings('A tool changed'))] }],
-    PostToolUseFailure: [
-      { hooks: [() => Promise.resolve(deps.recheckSettings('A tool changed'))] },
-    ],
-    // Writers that are not tool calls: a background command, a repo MCP server, a dev server.
-    ConfigChange: [
-      {
-        hooks: [
-          (hookInput) =>
-            Promise.resolve(
-              hookInput.hook_event_name === 'ConfigChange' &&
-                hookInput.source === 'project_settings'
-                ? deps.recheckSettings('Something changed')
-                : {},
-            ),
-        ],
-      },
-    ],
-  };
-}
-
-/** How many calls' hook directories are kept for `canUseTool`: a call the hook allowed never reaches it. */
-const HOOK_CWDS_KEPT = 256;
-
 export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
   const { sandboxEnv, ...profileOptions } = claudeQueryOptions(
     {
@@ -282,10 +240,8 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
     spec.sandbox ?? null,
   );
   const sandbox = spec.sandbox ?? null;
-  // The PreToolUse hook is the only place Claude Code says where a call runs (its `cwd`, which an
-  // earlier Bash call's `cd` moves); `canUseTool` for the same call gets it by the tool use id, so the
-  // permission broker reads a relative path from the same directory the guard does.
-  const hookCwds = new Map<string, string>();
+  const gate: ToolGate = { verified: deps.billingVerified, refused: deps.isRefused };
+  const cwds = createHookCwds();
   return {
     cwd: spec.cwd,
     model: spec.model,
@@ -294,57 +250,29 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
     env: { ...spec.env, ...sandboxEnv, ...AUTOUPDATE_OFF },
     pathToClaudeCodeExecutable: deps.claudePath,
     ...profileOptions,
-    canUseTool: async (toolName, input, options) => {
-      if (!(await deps.billingVerified) || deps.isRefused())
-        return { behavior: 'deny', message: BILLING_UNVERIFIED, interrupt: true };
-      const cwd = hookCwds.get(options.toolUseID);
-      hookCwds.delete(options.toolUseID);
-      const listedTools = toolName.startsWith('mcp__') ? await deps.listedTools?.() : undefined;
-      const decision = await spec.canUseTool({
-        toolName,
-        input,
-        toolUseId: options.toolUseID,
-        escalated: isClassifierEscalation(options),
-        signal: options.signal,
-        ...(cwd === undefined ? {} : { cwd }),
-        ...(listedTools === undefined ? {} : { listedTools }),
-      });
-      // The session can be refused while the answer was pending.
-      if (deps.isRefused())
-        return { behavior: 'deny', message: BILLING_UNVERIFIED, interrupt: true };
-      return toPermissionResult(decision, input);
-    },
+    canUseTool: canUseToolBridge({
+      gate,
+      cwds,
+      canUseTool: (req) => spec.canUseTool(req),
+      escalated: isClassifierEscalation,
+      listedTools: deps.listedTools,
+    }),
     hooks: {
       PreToolUse: [
-        {
-          hooks: [
-            async (hookInput) => {
-              if (hookInput.hook_event_name !== 'PreToolUse') return {};
-              if (!(await deps.billingVerified) || deps.isRefused())
-                return toHookOutput({ decision: 'deny', reason: BILLING_UNVERIFIED });
-              try {
-                hookCwds.set(hookInput.tool_use_id, hookInput.cwd);
-                const oldest = hookCwds.keys().next();
-                if (hookCwds.size > HOOK_CWDS_KEPT && !oldest.done) hookCwds.delete(oldest.value);
-                return toHookOutput(
-                  spec.preToolUse({
-                    toolName: hookInput.tool_name,
-                    input: hookInput.tool_input,
-                    cwd: hookInput.cwd,
-                  }),
-                );
-              } catch (error) {
-                // A guard that fails must never let the call run.
-                return toHookOutput({
-                  decision: 'deny',
-                  reason: `10db's guard failed: ${error instanceof Error ? error.message : String(error)}`,
-                });
-              }
-            },
-          ],
-        },
+        preToolUseHook({
+          gate,
+          cwds,
+          judge: (hookInput) =>
+            toHookOutput(
+              spec.preToolUse({
+                toolName: hookInput.tool_name,
+                input: hookInput.tool_input,
+                cwd: hookInput.cwd,
+              }),
+            ),
+        }),
       ],
-      ...(sandbox ? {} : settingsRecheckHooks(deps)),
+      ...(sandbox ? {} : settingsRecheckHooks(deps.recheckSettings)),
     },
     abortController: deps.abortController,
     spawnClaudeCodeProcess: (options) => spawnClaude(options, deps),
