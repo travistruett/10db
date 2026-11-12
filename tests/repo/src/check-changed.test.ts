@@ -171,7 +171,7 @@ describe('scripts/check-changed.mjs --precheck', () => {
   it('checks a daemon change and its dependents only', () => {
     const plan = precheckPlanFor('apps/daemon/src/runner/runner.ts');
     expect(plan.changed).toEqual(['apps/daemon']);
-    expect(plan.drift).toEqual([]);
+    expect(plan.drift).toEqual(['@10db/daemon']);
   });
 
   it.each([

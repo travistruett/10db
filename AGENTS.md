@@ -36,7 +36,9 @@ A local macOS control plane that runs Claude Code sessions as a software factory
 - A design decision is its own file in `docs/architecture/decisions/` (its README gives the format).
   The numbered log `decisions.md` is closed; never add a row to it.
 - Generated files are never edited by hand: `packages/contracts/generated/`,
-  `packages/db/drizzle/`. `make gate` fails when they drift. The exception is a
+  `packages/db/drizzle/`, `apps/daemon/src/sessions/codex-generated/`. `make gate` fails when they
+  drift. The Codex folder is written only by `pnpm --filter @10db/daemon generate:codex`, run on a
+  Mac, and `make gate` checks its `STAMP`. The exception is a
   `drizzle-kit generate --custom` migration: it is authored by hand once and its SQL never changes.
   Until the first published release the migration baseline is regenerated instead of extended
   (`packages/db/AGENTS.md`).

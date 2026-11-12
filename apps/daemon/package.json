@@ -8,7 +8,9 @@
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "dev": "tsx watch --env-file-if-exists=.env src/main.ts",
-    "build": "tsx scripts/build.ts"
+    "build": "tsx scripts/build.ts",
+    "generate:codex": "tsx scripts/codex-generate.ts",
+    "drift": "tsx scripts/codex-stamp-check.ts"
   },
   "dependencies": {
     "@10db/contracts": "workspace:*",
