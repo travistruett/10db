@@ -6,7 +6,6 @@ export const ModelColumn = {
   Tier: 'tier',
   AvailableOn: 'available',
   Intelligence: 'intelligence',
-  Coding: 'coding',
   Speed: 'speed',
   InputPrice: 'input',
   OutputPrice: 'output',
@@ -51,8 +50,6 @@ function valueOf(row: ModelRowDto, column: ModelColumn): string | number | null 
       return row.availableOn.length;
     case ModelColumn.Intelligence:
       return row.intelligence;
-    case ModelColumn.Coding:
-      return row.coding;
     case ModelColumn.Speed:
       return row.outputTokensPerSecond;
     case ModelColumn.InputPrice:

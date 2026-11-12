@@ -12,7 +12,7 @@ interface FloorRule {
   readonly why: string;
 }
 
-/** Rule floors (spec §5.2.3), in the role's index points: a matching role and risk tag needs at least this. */
+/** Rule floors (spec §5.2.3), in Intelligence Index points: a matching role and risk tag needs at least this. */
 const FLOOR_RULES: readonly FloorRule[] = [
   {
     roles: [StepRole.Review, StepRole.PlanReview],

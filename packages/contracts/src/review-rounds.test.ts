@@ -167,7 +167,6 @@ const step = (over: Partial<WorkstreamStep>): WorkstreamStep => ({
   personaId: null,
   personaName: 'Reviewer',
   tools: 'read_only',
-  score: 'intelligence',
   profileId: null,
   model: 'opus',
   effort: 'medium',

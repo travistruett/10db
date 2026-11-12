@@ -1,7 +1,6 @@
 import {
   BenchmarkStatusDto,
   ModelStatus,
-  ScoreKind,
   type AaModelDto,
   type ModelProfileDto,
 } from '@10db/contracts';
@@ -49,7 +48,6 @@ const NEVER: StoredStatus = {
   outcome: null,
   message: null,
   unmeasuredProfiles: [],
-  missingScores: [],
   indexVersion: null,
 };
 
@@ -84,11 +82,7 @@ export interface BenchmarkSync {
 function measurement(model: AaModelDto) {
   const e = model.evaluations;
   return {
-    scores: {
-      intelligence: e['artificial_analysis_intelligence_index'] ?? null,
-      coding: e['artificial_analysis_coding_index'] ?? null,
-      agentic: e['artificial_analysis_agentic_index'] ?? null,
-    },
+    scores: { intelligence: e['artificial_analysis_intelligence_index'] ?? null },
     costPerTaskUsd: model.costPerTaskUsd,
     outputTokensPerSecond: model.performance['mean_output_tokens_per_second'] ?? null,
     indexVersion: model.indexVersion,
@@ -98,7 +92,7 @@ function measurement(model: AaModelDto) {
 
 /** Clears a profile AA no longer lists, so a stale score can't keep routing steps. */
 const unmeasured = (now: string) => ({
-  scores: { intelligence: null, coding: null, agentic: null },
+  scores: { intelligence: null },
   costPerTaskUsd: null,
   outputTokensPerSecond: null,
   indexVersion: null,
@@ -119,10 +113,6 @@ const profileName = (p: ModelProfileDto) => `${p.model}@${p.effort}`;
 /** A profile routing can use for the Intelligence comparison: a cost and an Intelligence score. */
 const routable = (p: ModelProfileDto) =>
   p.costPerTaskUsd !== null && p.scores.intelligence !== null;
-
-/** The score kinds AA gave no value for. */
-const missingKinds = (p: ModelProfileDto) =>
-  Object.values(ScoreKind).filter((kind) => p.scores[kind] === null);
 
 /** The major part of AA's `major.minor` index version. */
 const majorOf = (version: string): string => version.split('.')[0] ?? version;
@@ -218,16 +208,8 @@ export function createBenchmarkSync(deps: BenchmarkSyncDeps): BenchmarkSync {
     });
     const enabled = listModelProfiles(state.db).filter((p) => p.enabled);
     const unmeasuredProfiles = enabled.filter((p) => !routable(p)).map(profileName);
-    const missingScores = enabled
-      .filter((p) => p.costPerTaskUsd !== null)
-      .map((p) => ({ profile: profileName(p), kinds: missingKinds(p) }))
-      .filter((m) => m.kinds.length > 0);
     deps.logger.info(
-      {
-        models: outcome.models.length,
-        unmeasured: unmeasuredProfiles.length,
-        missingScores: missingScores.length,
-      },
+      { models: outcome.models.length, unmeasured: unmeasuredProfiles.length },
       'artificial analysis synced',
     );
     const indexVersion = outcome.models.find((m) => m.indexVersion !== null)?.indexVersion ?? null;
@@ -248,7 +230,6 @@ export function createBenchmarkSync(deps: BenchmarkSyncDeps): BenchmarkSync {
       message: `${String(outcome.models.length)} models${versionNote}`,
       indexVersion: indexVersion ?? before,
       unmeasuredProfiles,
-      missingScores,
     });
   }
 

@@ -143,7 +143,6 @@ function Efforts({
         <Table.Tr>
           <Table.Th>Effort</Table.Th>
           <Table.Th ta="right">Intelligence</Table.Th>
-          <Table.Th ta="right">Coding</Table.Th>
           <Table.Th ta="right">Speed</Table.Th>
           <Table.Th ta="right">First pass</Table.Th>
           <Table.Th ta="right">Escalations</Table.Th>
@@ -155,7 +154,6 @@ function Efforts({
           <Table.Tr key={p.id}>
             <Table.Td>{p.effort}</Table.Td>
             <Table.Td ta="right">{formatScore(p.scores.intelligence)}</Table.Td>
-            <Table.Td ta="right">{formatScore(p.scores.coding)}</Table.Td>
             <Table.Td ta="right">{formatScore(p.outputTokensPerSecond)}</Table.Td>
             <Table.Td ta="right">{formatFirstPass(p.firstPassSteps, p.stepsRun)}</Table.Td>
             <Table.Td ta="right">{p.stepsRun === 0 ? NO_DATA : String(p.escalations)}</Table.Td>

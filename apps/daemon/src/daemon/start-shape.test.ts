@@ -182,7 +182,7 @@ describe('a Shape conversation on a started daemon', () => {
       );
       for (const p of listModelProfiles(ctx.tx))
         applyAaMeasurement(ctx, p.id, {
-          scores: { intelligence: 30, coding: 30, agentic: 30 },
+          scores: { intelligence: 30 },
           costPerTaskUsd: 0.1,
           outputTokensPerSecond: 100,
           indexVersion: 'test',

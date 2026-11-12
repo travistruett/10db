@@ -1,6 +1,6 @@
 import { StepRole, type FlowInput } from '@10db/contracts';
 
-/** Starting needs, in the role's index points (spec §15): heuristics to tune, not AA data. */
+/** Starting needs, in Intelligence Index points (spec §15): heuristics to tune, not AA data. */
 const NEED = { plan: 45, planReview: 48, implement: 40, review: 48, qa: 35 } as const;
 
 /** The need a Plan conversation's model is chosen for: the plan step's. */

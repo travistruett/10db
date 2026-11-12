@@ -16,7 +16,6 @@ const step = (role: StepRole, verdict: Verdict | null | 'none' = 'none'): Workst
   personaId: null,
   personaName: role,
   tools: role === 'implement' ? 'edit' : 'read_only',
-  score: role === 'implement' ? 'coding' : 'intelligence',
   profileId: null,
   model: 'sonnet',
   effort: 'medium',

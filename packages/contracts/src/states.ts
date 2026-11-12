@@ -301,23 +301,6 @@ export const StepStatus = {
 } as const;
 export type StepStatus = ValueOf<typeof StepStatus>;
 
-/** The Artificial Analysis indexes a step can be measured against. */
-export const ScoreKind = {
-  Intelligence: 'intelligence',
-  Coding: 'coding',
-  Agentic: 'agentic',
-} as const;
-export type ScoreKind = ValueOf<typeof ScoreKind>;
-
-/** The score each role is routed on (the builder's choice): code is measured by coding, QA by agentic work. */
-export const ROLE_SCORE: Readonly<Record<StepRole, ScoreKind>> = {
-  plan: ScoreKind.Intelligence,
-  plan_review: ScoreKind.Intelligence,
-  implement: ScoreKind.Coding,
-  review: ScoreKind.Intelligence,
-  qa: ScoreKind.Agentic,
-};
-
 /** Where a profile's scores come from: the AA sync, or the builder's own numbers. */
 export const ProfileSource = { Aa: 'aa', Manual: 'manual' } as const;
 export type ProfileSource = ValueOf<typeof ProfileSource>;

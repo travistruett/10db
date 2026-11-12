@@ -30,7 +30,6 @@ const FAST = modelRowDto({
   inputPrice: 1,
   outputPrice: 5,
   intelligence: 31.5,
-  coding: 28,
   outputTokensPerSecond: 180,
   stepsRun: 4,
   firstSeenAt: '2026-09-01T10:00:00.000Z',
@@ -43,7 +42,6 @@ const STRONG = modelRowDto({
   inputPrice: 5,
   outputPrice: 25,
   intelligence: 60,
-  coding: 55,
   outputTokensPerSecond: 40,
   stepsRun: 12,
   firstSeenAt: '2026-11-05T10:00:00.000Z',
@@ -116,7 +114,7 @@ describe('the Models page', () => {
     expect(row.getByText('alpha-max')).toBeTruthy();
     expect(row.getByText('Strongest')).toBeTruthy();
     expect(row.getByText('Claude plan, Work key')).toBeTruthy();
-    for (const cell of ['60', '55', '40', '$5.00', '$25.00', '12']) {
+    for (const cell of ['60', '40', '$5.00', '$25.00', '12']) {
       expect(row.getByText(cell)).toBeTruthy();
     }
   });
@@ -126,8 +124,8 @@ describe('the Models page', () => {
     renderWithDaemon(<ModelsSection />);
     await screen.findByRole('button', { name: 'Open Beta Plain' });
     const cells = within(rowOf('Beta Plain')).getAllByRole('cell');
-    // Intelligence, Coding, Speed, Input and Output.
-    expect(cells.slice(3, 8).map((c) => c.textContent)).toEqual(['—', '—', '—', '—', '—']);
+    // Intelligence, Speed, Input and Output.
+    expect(cells.slice(3, 7).map((c) => c.textContent)).toEqual(['—', '—', '—', '—']);
   });
 
   it('marks an Unknown model and a model first seen in the last seven days', async () => {
@@ -335,7 +333,7 @@ describe('the Models page', () => {
         modelProfileDto({
           model: 'alpha-max',
           effort: 'low',
-          scores: { intelligence: 50, coding: 40, agentic: null },
+          scores: { intelligence: 50 },
           stepsRun: 4,
           firstPassSteps: 3,
           escalations: 1,
@@ -344,7 +342,7 @@ describe('the Models page', () => {
         modelProfileDto({
           model: 'alpha-max',
           effort: 'high',
-          scores: { intelligence: 60, coding: 55, agentic: null },
+          scores: { intelligence: 60 },
         }),
       ],
     });

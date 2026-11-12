@@ -82,7 +82,6 @@ const step = (role: 'implement' | 'review'): WorkstreamStep => ({
   personaId: null,
   personaName: role,
   tools: role === 'implement' ? 'edit' : 'read_only',
-  score: role === 'implement' ? 'coding' : 'intelligence',
   profileId: null,
   model: 'sonnet',
   effort: 'medium',

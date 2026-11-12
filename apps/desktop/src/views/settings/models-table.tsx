@@ -167,7 +167,6 @@ export function ModelsTable({
       textAlign: 'right',
       columns: [
         numeric(ModelColumn.Intelligence, 'Intelligence', (row) => formatScore(row.intelligence)),
-        numeric(ModelColumn.Coding, 'Coding', (row) => formatScore(row.coding)),
         numeric(ModelColumn.Speed, 'Speed (tokens/s)', (row) =>
           formatScore(row.outputTokensPerSecond),
         ),

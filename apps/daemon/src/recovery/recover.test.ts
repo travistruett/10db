@@ -122,7 +122,6 @@ const flowStep = (role: 'implement' | 'review', sessionFloor: number): Workstrea
   personaId: null,
   personaName: role,
   tools: role === 'implement' ? 'edit' : 'read_only',
-  score: role === 'implement' ? 'coding' : 'intelligence',
   profileId: null,
   model: 'sonnet',
   effort: 'medium',

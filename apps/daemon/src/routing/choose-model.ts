@@ -1,7 +1,5 @@
 import {
   isPickableModel,
-  ROLE_SCORE,
-  ScoreKind,
   type AccountModelDto,
   type Effort,
   type FlowStepDef,
@@ -78,7 +76,6 @@ export interface ModelChoice {
   /** The setting that decided: the first that applied, or Automatic when none did. */
   readonly setting: ModelSetting;
   readonly reason: string;
-  readonly score: ScoreKind;
   readonly overBudget: boolean;
   readonly pinned: boolean;
 }
@@ -150,7 +147,6 @@ function decide(input: ChooseInput): Decided {
 interface Made {
   readonly profile: ModelProfileDto;
   readonly reason: string;
-  readonly score: ScoreKind;
   readonly overBudget: boolean;
 }
 
@@ -179,7 +175,6 @@ function scored(request: Request, considered: readonly ModelProfileDto[]): Made 
   return {
     profile: choice.profile,
     reason: choice.reason,
-    score: choice.score,
     overBudget: choice.overBudget,
   };
 }
@@ -204,7 +199,6 @@ function pickByRole(
     picked && {
       profile: picked.profile,
       reason: `${picked.reason}${note}`,
-      score: ROLE_SCORE[input.def.role],
       overBudget: false,
     }
   );
@@ -222,13 +216,11 @@ function pickIn(request: Request, top: boolean): Made | undefined {
     return scored(request, considered);
   } catch (error) {
     if (!(error instanceof UnmeasuredError)) throw error;
-    const note = `; no profile has ${article(error.kind)} ${error.kind} score to compare on yet (sync Artificial Analysis to route by score)`;
+    const note =
+      '; no profile has an intelligence score to compare on yet (sync Artificial Analysis to route by score)';
     return pickByRole(request, considered, top, note);
   }
 }
-
-/** The indefinite article for a score kind's name. */
-const article = (kind: ScoreKind): string => (kind === ScoreKind.Coding ? 'a' : 'an');
 
 const describeSetting = (setting: ModelSetting): string => {
   switch (setting.kind) {
@@ -253,7 +245,6 @@ const describeSetting = (setting: ModelSetting): string => {
 export function chooseModel(input: ChooseInput): ModelChoice {
   const { def, persona } = input;
   const byScore = input.byScore ?? true;
-  const roleScore = ROLE_SCORE[def.role];
   const personaFloor: Floor =
     persona && persona.minimumScore !== null
       ? { minimum: persona.minimumScore, why: `${persona.key} minimum` }
@@ -280,7 +271,6 @@ export function chooseModel(input: ChooseInput): ModelChoice {
         tier: profile.tier ?? roleTier,
         setting: { kind: 'model', model: pin.model },
         reason: `pinned by ${persona.key}`,
-        score: roleScore,
         overBudget: false,
         pinned: true,
       };
@@ -298,7 +288,6 @@ export function chooseModel(input: ChooseInput): ModelChoice {
         tier,
         setting: decided.setting,
         reason: `${pinNote}${source}${note}no model offered for the ${tier} tier`,
-        score: roleScore,
         overBudget: false,
         pinned: false,
       };
@@ -309,7 +298,6 @@ export function chooseModel(input: ChooseInput): ModelChoice {
       tier: made.profile.tier ?? tier,
       setting: decided.setting,
       reason: `${pinNote}${source}${note}${made.reason}`,
-      score: made.score,
       overBudget: made.overBudget,
       pinned: false,
     };
@@ -342,7 +330,6 @@ export function chooseModel(input: ChooseInput): ModelChoice {
       tier,
       setting: decided.setting,
       reason: `${pinNote}${source}${note}the account's ${tier} model ${name}`,
-      score: roleScore,
       overBudget: false,
       pinned: false,
     };

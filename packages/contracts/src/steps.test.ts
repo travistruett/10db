@@ -7,7 +7,6 @@ const base: WorkstreamStep = {
   personaId: mintId('Persona'),
   personaName: 'Reviewer',
   tools: 'read_only',
-  score: 'intelligence',
   profileId: mintId('ModelProfile'),
   model: 'sonnet',
   effort: 'high',
@@ -101,7 +100,6 @@ describe('currentStep', () => {
     expect(currentStep({ steps: [], stepIndex: 0, model: 'opus', effort: 'high' })).toMatchObject({
       role: 'implement',
       tools: 'edit',
-      score: 'coding',
       model: 'opus',
       effort: 'high',
       pinned: true,
@@ -113,7 +111,6 @@ describe('currentStep', () => {
       ...base,
       role: 'implement',
       tools: 'edit',
-      score: 'coding',
     };
     expect(
       currentStep({ steps: [implement, base], stepIndex: 1, model: 'a', effort: 'low' }),

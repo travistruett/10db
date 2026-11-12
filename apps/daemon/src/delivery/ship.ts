@@ -574,7 +574,6 @@ export function createShipper(deps: ShipperDeps): Shipper {
               personaId: implement.personaId,
               personaName: implement.personaName,
               tools: implement.tools,
-              score: implement.score,
               profileId: implement.profileId,
               model: implement.model,
               effort: implement.effort,

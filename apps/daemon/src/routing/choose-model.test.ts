@@ -18,7 +18,7 @@ import { label, testCatalogue, unscoredCatalogue } from './test-catalogue';
 
 /** What a reason says when no profile has a score to route on. */
 const UNSCORED =
-  '; no profile has a coding score to compare on yet (sync Artificial Analysis to route by score)';
+  '; no profile has an intelligence score to compare on yet (sync Artificial Analysis to route by score)';
 const NOW = '2026-10-17T12:00:00.000Z';
 const PROJECT = mintId('Project');
 const OTHER_PROJECT = mintId('Project');
@@ -29,7 +29,7 @@ const peakRows = (): ModelProfileDto[] => unscoredCatalogue({}, ['peak']);
 const scoredPeak = (): ModelProfileDto[] =>
   peakRows().map((p, i) => ({
     ...p,
-    scores: { intelligence: 52 + 2 * i, coding: 52 + 2 * i, agentic: 52 + 2 * i },
+    scores: { intelligence: 52 + 2 * i },
     costPerTaskUsd: 8 + i,
   }));
 
@@ -135,7 +135,7 @@ describe('chooseModel: which setting decides', () => {
         : []),
       ...(from <= 5 ? [roleSetting('implement', { kind: 'model', model: 'peak' }, null)] : []),
     ],
-    def: { role: 'implement', need: 20 },
+    def: { role: 'implement', need: 25 },
   });
 
   it.each(levels.map((level, from) => ({ ...level, from })))(
@@ -426,7 +426,7 @@ describe('chooseModel: a tier and the top of it', () => {
   });
 
   it.each([
-    { name: 'a small need stays in the tier it lands in', need: 20, want: 'small@high' },
+    { name: 'a small need stays in the tier it lands in', need: 25, want: 'small@high' },
     { name: 'a larger need takes its tier to the top', need: 40, want: 'mid@high' },
     {
       name: 'a need only the strongest tier meets takes it to the dearest model',
@@ -461,7 +461,7 @@ describe('chooseModel: a tier and the top of it', () => {
       }),
     );
     expect(label(choice.profile ?? failed())).toBe('small@high');
-    expect(choice.reason).toContain('none reaches 90 coding, so the highest scoring');
+    expect(choice.reason).toContain('none reaches 90 intelligence, so the highest scoring');
   });
 
   it('moves to the nearest tier when the account offers none in the one asked for', () => {
@@ -575,7 +575,7 @@ describe('chooseModel: a role with no setting and no score', () => {
         }),
       ).reason,
     ).toBe(
-      `by role default: the top model of the strongest tier, one effort up (floor: security-sensitive review)${UNSCORED.replace('a coding', 'an intelligence')}`,
+      `by role default: the top model of the strongest tier, one effort up (floor: security-sensitive review)${UNSCORED}`,
     );
   });
 });

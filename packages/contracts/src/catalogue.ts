@@ -173,7 +173,6 @@ export const ModelRowDto = z.object({
   /** The maker's list price, not what any one account pays. */
   outputPrice: z.number().min(0).nullable(),
   intelligence: z.number().nullable(),
-  coding: z.number().nullable(),
   outputTokensPerSecond: z.number().nullable(),
   /** Steps 10db has run on this model. */
   stepsRun: z.int().min(0),

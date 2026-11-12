@@ -75,7 +75,6 @@ function routedStep(
     personaId: persona?.id ?? null,
     personaName: persona?.name ?? ROLE_LABEL[def.role],
     tools: def.role === StepRole.Implement ? ToolAccess.Edit : ToolAccess.ReadOnly,
-    score: choice.score,
     need: def.need,
     status: 'pending',
     attempts: 0,

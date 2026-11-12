@@ -17,7 +17,6 @@ const stepOn = (name: string, extra: Partial<WorkstreamStep> = {}): WorkstreamSt
     personaId: null,
     personaName: 'Implementer',
     tools: 'edit',
-    score: 'coding',
     profileId: p.id,
     model: p.model,
     effort: p.effort,

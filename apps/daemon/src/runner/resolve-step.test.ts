@@ -42,7 +42,7 @@ const everything: ModelProfileDto[] = MODELS.flatMap(({ model, tier, price }) =>
     inputPrice: price / 5,
     outputPrice: price,
     releaseDate: '2026-09-01',
-    scores: { intelligence: null, coding: null, agentic: null },
+    scores: { intelligence: null },
     costPerTaskUsd: null,
     outputTokensPerSecond: null,
     indexVersion: null,
@@ -88,7 +88,6 @@ function planned(name: string, over: Partial<WorkstreamStep> = {}): WorkstreamSt
     personaId: null,
     personaName: 'Implementer',
     tools: 'edit',
-    score: 'coding',
     profileId: profile.id,
     model: profile.model,
     effort: profile.effort,
@@ -195,7 +194,7 @@ describe('resolveStep', () => {
     });
     const ELSEWHERE = 'big is not offered by Bedrock, so the step was resolved again: ';
     const ROUTED =
-      'by role default: the cheapest model of the balanced tier; no profile has a coding score to compare on yet (sync Artificial Analysis to route by score)';
+      'by role default: the cheapest model of the balanced tier; no profile has an intelligence score to compare on yet (sync Artificial Analysis to route by score)';
     it.each<{
       name: string;
       over: Partial<StepContext>;
@@ -364,7 +363,7 @@ describe('resolveStep', () => {
     expect(out.model).toBe('peak');
     expect(out.setting).toEqual({ kind: 'automatic' });
     expect(out.reason).toBe(
-      "big is marked unusable on Bedrock, so the step was resolved again: the refused model's tier (strongest): by role default: the cheapest model of the strongest tier; no profile has a coding score to compare on yet (sync Artificial Analysis to route by score)",
+      "big is marked unusable on Bedrock, so the step was resolved again: the refused model's tier (strongest): by role default: the cheapest model of the strongest tier; no profile has an intelligence score to compare on yet (sync Artificial Analysis to route by score)",
     );
   });
 
