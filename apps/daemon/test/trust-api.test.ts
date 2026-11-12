@@ -130,6 +130,9 @@ describe.skipIf(SANDBOXED)('Settings › Trust over HTTP', () => {
     expect(saved.switches).toEqual(off);
     expect(saved.plugins[0]).toMatchObject({ id: 'p@m', enabledInClaude: false, on: true });
     expect((await settings('GET')).switches).toEqual(off);
+    // With Your plugins off none comes along, whatever its own switch says.
+    const none = await settings('PUT', { ...off, yourPlugins: false });
+    expect(none.plugins[0]).toMatchObject({ id: 'p@m', on: false });
   });
 
   it("a project's override shows in its effective switches and not in another project's", async () => {
@@ -155,14 +158,21 @@ describe.skipIf(SANDBOXED)('Settings › Trust over HTTP', () => {
       '---\nname: lane\ndescription: lane written\n---\n',
     );
     symlinkSync(inCheckout, join(home, '.claude/skills/lane'));
+    // A skill folder directly in the home: refused by where it lies in the builder's home, which the
+    // sandbox judges by as the setup was found in.
+    const top = join(home, 'top-skill');
+    mkdirSync(top);
+    writeFileSync(join(top, 'SKILL.md'), '---\nname: top\ndescription: top\n---\n');
+    symlinkSync(top, join(home, '.claude/skills/top'));
     const { preview } = await projectTrust(one.id, 'GET');
     expect(preview.skills).toEqual(['s']);
     expect(preview.plugins).toEqual([]);
-    // Named from the sandbox's home, which in a test is not the builder's.
-    expect(preview.leftOut).toContainEqual({
-      what: expect.stringMatching(/\/\.claude\/skills\/lane$/) as string,
-      why: 'it lies in, or holds, a folder a lane can write',
-    });
+    expect(preview.leftOut).toEqual(
+      expect.arrayContaining([
+        { what: '~/.claude/skills/lane', why: 'it lies in, or holds, a folder a lane can write' },
+        { what: '~/.claude/skills/top', why: 'it lies directly in your home folder' },
+      ]),
+    );
   });
 
   it('refuses a body that is not the shape with 400', async () => {

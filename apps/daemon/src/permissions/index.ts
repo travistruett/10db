@@ -29,6 +29,7 @@ export {
   setAppTrustSwitches,
   setProjectTrustOverrides,
   trustSwitchesFor,
+  warnInvalidTrust,
 } from './trust-switches';
 export {
   allowedToolsFor,

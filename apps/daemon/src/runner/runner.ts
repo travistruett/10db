@@ -193,8 +193,19 @@ import {
   reopenSignedOffPage,
   type PassWorkDeps,
 } from '../pass';
-import { allowedToolsFor, laneAutoMode, storableRule, trustSwitchesFor } from '../permissions';
-import { leftOutNote, loadedLine, planSessionSetup } from '../session-setup';
+import {
+  allowedToolsFor,
+  laneAutoMode,
+  storableRule,
+  trustSwitchesFor,
+  warnInvalidTrust,
+} from '../permissions';
+import {
+  leftOutNote,
+  loadedLine,
+  planSessionSetup,
+  projectInstructionsLoaded,
+} from '../session-setup';
 import { takeFoundHostsReading } from '../registries';
 import { retryStep } from '../routing';
 import { resolveStep } from './resolve-step';
@@ -2029,7 +2040,7 @@ export function createRunner(opts: RunnerOptions): Runner {
     const inheritedBaselinePct = resumed?.briefingBaselinePct ?? null;
     // Read when each session starts: a switch flipped or a skill added meanwhile applies from the next one.
     // Read before the start slot is taken, so nothing it throws can hold the slot.
-    const switches = trustSwitchesFor(db, project.id);
+    const switches = trustSwitchesFor(db, project.id, warnInvalidTrust(opts.logger));
     const setupPlan = planSessionSetup({
       home: opts.builderHome,
       checkout,
@@ -2169,12 +2180,13 @@ export function createRunner(opts: RunnerOptions): Runner {
       inPass: pass !== null,
       pictures: project.appUrl !== null && takesPictures(project, task),
       sandboxed: Boolean(opts.laneSandbox),
-      instructionsLoaded: setupPlan.instructions.text !== null,
+      instructionsLoaded: projectInstructionsLoaded(setupPlan.instructions),
       webJudged,
       setupLine:
         laneSession === null
           ? null
           : loadedLine({
+              provider,
               skills: laneSession.setup.loaded.skills,
               plugins: laneSession.setup.loaded.plugins,
               projectFiles: setupPlan.input.projectFiles,

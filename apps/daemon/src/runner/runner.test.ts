@@ -64,6 +64,7 @@ import {
   patchWorkstream,
   schema,
   seedAccount,
+  setAppSetting,
   setBatchNotice,
   setWorkstreamNotice,
   transitionBatch,
@@ -4864,6 +4865,46 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       expect(first?.spec.prompt).toContain('- Loaded for you: 1 of your skills.');
       // The session ended, so its setup dir is gone with its sandbox.
       expect(readdirSync(probe.filesRoot)).toEqual([]);
+    });
+
+    it("keeps the read-first rule when only the builder's own instructions loaded", async () => {
+      const probe = sandboxProbe();
+      engine = await setupEngine(probe, { Alpha: [[turn]] });
+      mkdirSync(join(probe.home, '.claude'), { recursive: true });
+      writeFileSync(join(probe.home, '.claude/CLAUDE.md'), 'Builder rules.\n');
+      const seen = recordSetups();
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+
+      expect(seen[0]?.spec.instructions).toContain('Builder rules.');
+      expect(seen[0]?.spec.prompt).toContain(
+        "Read the repository's agent instructions first: `AGENTS.md`",
+      );
+      expect(seen[0]?.spec.prompt).not.toContain('are in your system prompt');
+    });
+
+    it('logs a stored trust setting that is not a shape 10db reads, and starts with it off', async () => {
+      const probe = sandboxProbe();
+      const logs = captureLogs();
+      engine = await setupEngine(probe, { Alpha: [[turn]] }, logs.logger);
+      builderSkill(probe.home, 's');
+      engine.state.write((ctx) => {
+        setAppSetting(ctx, 'trust', 'on');
+      });
+      const seen = recordSetups();
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+
+      expect(seen[0]?.links).toEqual({});
+      expect(logs.lines()).toContainEqual(
+        expect.objectContaining({
+          key: 'trust',
+          stored: 'on',
+          msg: 'a stored trust switch is not a shape 10db reads, so it reads as off',
+        }),
+      );
     });
 
     it('a switch flipped while a session runs applies from the next one', async () => {

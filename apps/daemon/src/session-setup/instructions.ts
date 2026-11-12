@@ -176,3 +176,15 @@ export function readInstructions(input: InstructionsInput): Instructions {
   const text = sections.length === 0 ? null : [PRECEDENCE_LINE, ...sections].join('\n\n');
   return { text, sources, leftOut };
 }
+
+/**
+ * Whether the project's own instructions are in the session's prompt in full, so the briefing may say so
+ * instead of telling the session to read `AGENTS.md`: a project file was read and none was left out. The
+ * builder's file alone is not the project's.
+ */
+export function projectInstructionsLoaded(instructions: Instructions): boolean {
+  const project = (source: string): boolean => source !== YOURS;
+  return (
+    instructions.sources.some(project) && !instructions.leftOut.some((item) => project(item.what))
+  );
+}

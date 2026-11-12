@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import type { ProjectDto } from '@10db/contracts';
 import { getProject, listPermissionRules } from '@10db/db';
 import { allCheckouts } from '../delivery';
-import { trustSwitchesFor } from '../permissions';
+import { trustSwitchesFor, warnInvalidTrust } from '../permissions';
 import { sessionConfigDir, type AwsCredentialsExporter } from '../environment';
 import type { StateStore } from '../events';
 import type { Git } from '../git';
@@ -165,7 +165,7 @@ export function createShapePreparer(deps: {
     const setupPlan = planSessionSetup({
       home: deps.builderHome,
       checkout: project.repoPath,
-      switches: trustSwitchesFor(state.db, project.id),
+      switches: trustSwitchesFor(state.db, project.id, warnInvalidTrust(logger)),
       laneWritable: [...allCheckouts(state.db), ...deps.laneWritableRoots],
     });
     const instructions = setupPlan.instructions.text;

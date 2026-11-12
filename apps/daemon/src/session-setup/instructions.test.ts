@@ -6,6 +6,7 @@ import { tempDir, type TempDir } from '../../test/fixtures';
 import {
   INSTRUCTIONS_MAX_CHARS,
   INSTRUCTIONS_MAX_RULES,
+  projectInstructionsLoaded,
   readInstructions,
   type Instructions,
 } from './instructions';
@@ -249,5 +250,33 @@ describe('leftOutNote', () => {
         '- CLAUDE.md: it must be a regular file, not a link\n' +
         '- skill x: no SKILL.md',
     );
+  });
+});
+
+describe('projectInstructionsLoaded', () => {
+  it.each<[string, () => void, { project?: boolean; yours?: boolean }, boolean]>([
+    ['every project file read', writeAll, {}, true],
+    ['only the builder’s file, the project’s switch off', writeAll, { project: false }, false],
+    [
+      'only the builder’s file, the checkout holding none',
+      () => {
+        write(join(home, '.claude/CLAUDE.md'), 'yours text');
+      },
+      {},
+      false,
+    ],
+    [
+      'CLAUDE.md read but AGENTS.md left out',
+      () => {
+        write(join(checkout, 'CLAUDE.md'), 'claude text');
+        symlinkSync(join(elsewhere, 'x.md'), join(checkout, 'AGENTS.md'));
+        write(join(elsewhere, 'x.md'), 'linked');
+      },
+      {},
+      false,
+    ],
+  ])('%s', (_name, arrange, opts, loaded) => {
+    arrange();
+    expect(projectInstructionsLoaded(read(opts))).toBe(loaded);
   });
 });

@@ -1,5 +1,5 @@
 import type { InstalledPluginDto, TrustSwitches } from '@10db/contracts';
-import { Alert, Group, Stack, Switch, Text } from '@mantine/core';
+import { Alert, Button, Group, Stack, Switch, Text } from '@mantine/core';
 import { useSetTrust, useTrust } from '../../daemon/trust-queries';
 import { SettingRow, SettingsCard } from './setting-row';
 import { TRUST_ROWS } from './trust-rows';
@@ -44,6 +44,11 @@ function PluginText({
   );
 }
 
+/** The plugin switches without `id`'s, so it follows Claude Code again. */
+function without(plugins: Readonly<Record<string, boolean>>, id: string): Record<string, boolean> {
+  return Object.fromEntries(Object.entries(plugins).filter(([key]) => key !== id));
+}
+
 /** Settings › Trust: what comes along into every session, app-wide, and the builder's plugins. */
 export function TrustSection() {
   const trust = useTrust();
@@ -66,8 +71,8 @@ export function TrustSection() {
                 checked={switches?.[row.key] ?? false}
                 disabled={switches === undefined}
                 onChange={(e) => {
-                  if (switches !== undefined)
-                    set.mutate({ ...switches, [row.key]: e.currentTarget.checked });
+                  const on = e.currentTarget.checked;
+                  set.mutate((saved) => ({ ...saved, [row.key]: on }));
                 }}
               />
             </Group>
@@ -88,15 +93,34 @@ export function TrustSection() {
                 label={plugin.id}
                 description={<PluginText plugin={plugin} switches={switches} />}
               >
-                <Group justify="flex-end">
+                <Group justify="flex-end" gap="xs" wrap="nowrap">
+                  {switches.plugins[plugin.id] === undefined ? null : (
+                    <Button
+                      variant="subtle"
+                      size="compact-xs"
+                      aria-label={`Follow Claude Code: ${plugin.id}`}
+                      disabled={!switches.yourPlugins}
+                      onClick={() => {
+                        set.mutate((saved) => ({
+                          ...saved,
+                          plugins: without(saved.plugins, plugin.id),
+                        }));
+                      }}
+                    >
+                      Follow Claude Code
+                    </Button>
+                  )}
                   <Switch
                     aria-label={plugin.id}
                     checked={plugin.on}
+                    // With Your plugins off no plugin comes along, whatever its own switch says.
+                    disabled={!switches.yourPlugins}
                     onChange={(e) => {
-                      set.mutate({
-                        ...switches,
-                        plugins: { ...switches.plugins, [plugin.id]: e.currentTarget.checked },
-                      });
+                      const on = e.currentTarget.checked;
+                      set.mutate((saved) => ({
+                        ...saved,
+                        plugins: { ...saved.plugins, [plugin.id]: on },
+                      }));
                     }}
                   />
                 </Group>

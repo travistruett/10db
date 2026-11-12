@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { Provider } from '@10db/contracts';
 import { loadedLine } from './loaded-line';
 
 const file = (relative: string) => ({
@@ -9,7 +10,7 @@ const file = (relative: string) => ({
 });
 
 describe('loadedLine', () => {
-  it.each<[string, Parameters<typeof loadedLine>[0], string | null]>([
+  it.each<[string, Omit<Parameters<typeof loadedLine>[0], 'provider'>, string | null]>([
     [
       'nothing loaded or left out',
       { skills: [], plugins: [], projectFiles: [], leftOut: [] },
@@ -54,6 +55,18 @@ describe('loadedLine', () => {
       'Loaded for you: nothing. Left out: ~/x, see the note at the end.',
     ],
   ])('%s', (_name, input, expected) => {
-    expect(loadedLine(input)).toBe(expected);
+    expect(loadedLine({ ...input, provider: Provider.Claude })).toBe(expected);
+  });
+
+  it('tells a Codex session it has the plugins’ skills, which are all it takes of them', () => {
+    expect(
+      loadedLine({
+        provider: Provider.Codex,
+        skills: [],
+        plugins: ['superpowers@official', 'gstack@local'],
+        projectFiles: [],
+        leftOut: [],
+      }),
+    ).toBe('Loaded for you: the skills of the plugins superpowers and gstack.');
   });
 });

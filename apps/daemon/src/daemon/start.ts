@@ -864,7 +864,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       ? sandboxesFor(sandboxRoots, {
           lane: () =>
             createLaneSandbox({
-              home: homedir(),
+              // The home the setup is found in is the one its paths are judged and named by.
+              home: builderHome,
               dataDir: opts.dataDir,
               loginConfigDir: launcher.loginConfigDir(),
               loginCodexHome: launcher.loginCodexHome(),
@@ -1701,6 +1702,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       builderHome,
       laneWritableRoots: [worktreeRoot, ...allSandboxRoots],
       laneSandbox,
+      log: logger.child({ component: 'trust' }),
     }),
     judge: createJudgeServices({
       state,

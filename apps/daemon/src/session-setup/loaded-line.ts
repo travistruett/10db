@@ -1,7 +1,10 @@
+import { Provider } from '@10db/contracts';
 import type { SetupInput } from '../sandbox';
 import type { LeftOut } from './left-out';
 
 interface Loaded {
+  /** The agent the session runs: Codex takes a plugin's skills and nothing else of it. */
+  readonly provider: Provider;
   /** The builder's skills the sandbox kept, by name. */
   readonly skills: readonly string[];
   /** The plugins the sandbox kept, by id (`name@marketplace`). */
@@ -37,7 +40,9 @@ export function loadedLine(loaded: Loaded): string | null {
   const parts = [
     ...(loaded.skills.length > 0 ? [`${String(loaded.skills.length)} of your skills`] : []),
     ...(plugins.length > 0
-      ? [`the plugin${plugins.length > 1 ? 's' : ''} ${listed(plugins)}`]
+      ? [
+          `${loaded.provider === Provider.Codex ? 'the skills of ' : ''}the plugin${plugins.length > 1 ? 's' : ''} ${listed(plugins)}`,
+        ]
       : []),
     ...(projectSkills > 0 ? [`${String(projectSkills)} project skills`] : []),
   ];

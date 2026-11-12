@@ -69,7 +69,7 @@ export const InstalledPluginDto = z.object({
   version: z.string(),
   /** Its state in Claude Code's own `enabledPlugins`. */
   enabledInClaude: z.boolean(),
-  /** Whether it comes along: the builder's switch here, else `enabledInClaude`. */
+  /** Whether it comes along: never with Your plugins off, else the builder's switch here, else `enabledInClaude`. */
   on: z.boolean(),
 });
 export type InstalledPluginDto = z.infer<typeof InstalledPluginDto>;

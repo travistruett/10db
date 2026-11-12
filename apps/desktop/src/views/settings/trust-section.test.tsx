@@ -19,7 +19,7 @@ function serve(initial: TrustSettingsDto) {
         switches,
         plugins: settings.plugins.map((p) => ({
           ...p,
-          on: switches.plugins[p.id] ?? p.enabledInClaude,
+          on: switches.yourPlugins && (switches.plugins[p.id] ?? p.enabledInClaude),
         })),
       };
       return HttpResponse.json(settings);
@@ -69,6 +69,49 @@ describe('Settings › Trust', () => {
       expect(screen.getByRole('switch', { name: 'p@m' })).toHaveProperty('checked', true);
     });
     expect(screen.queryByText('Off in Claude Code')).toBeNull();
+  });
+
+  it('keeps both of two quick changes, each sent on what the daemon last saved', async () => {
+    const { put } = serve({ switches: TRUST_DEFAULTS, plugins: [] });
+    renderApp('/settings/trust');
+    const web = await screen.findByRole('switch', { name: 'Web' });
+    await waitFor(() => {
+      expect(web).toHaveProperty('disabled', false);
+    });
+    fireEvent.click(web);
+    fireEvent.click(screen.getByRole('switch', { name: 'Your skills' }));
+    await waitFor(() => {
+      expect(put).toHaveLength(2);
+    });
+    expect(put[1]).toEqual({ ...TRUST_DEFAULTS, web: false, yourSkills: false });
+  });
+
+  it('puts a plugin the builder switched back to following Claude Code', async () => {
+    const { put } = serve({
+      switches: { ...TRUST_DEFAULTS, plugins: { 'p@m': true } },
+      plugins: [{ id: 'p@m', name: 'p', version: '1.2.0', enabledInClaude: false, on: true }],
+    });
+    renderApp('/settings/trust');
+    fireEvent.click(await screen.findByRole('button', { name: 'Follow Claude Code: p@m' }));
+    await waitFor(() => {
+      expect(put).toEqual([TRUST_DEFAULTS]);
+    });
+    await waitFor(() => {
+      expect(screen.getByRole('switch', { name: 'p@m' })).toHaveProperty('checked', false);
+    });
+    expect(screen.getByText('Off in Claude Code')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Follow Claude Code: p@m' })).toBeNull();
+  });
+
+  it('shows every plugin off, and unswitchable, while Your plugins is off', async () => {
+    serve({
+      switches: { ...TRUST_DEFAULTS, yourPlugins: false },
+      plugins: [{ id: 'p@m', name: 'p', version: '1.2.0', enabledInClaude: true, on: false }],
+    });
+    renderApp('/settings/trust');
+    const toggle = await screen.findByRole('switch', { name: 'p@m' });
+    expect(toggle).toHaveProperty('checked', false);
+    expect(toggle).toHaveProperty('disabled', true);
   });
 
   it("shows the daemon's refusal when the read is refused", async () => {

@@ -21,7 +21,18 @@ function projectTrustSetting(projectId: ProjectId): string {
   return `trust.${projectId}`;
 }
 
-type OnInvalid = (key: string, stored: unknown) => void;
+/** Told each stored value that is not the shape 10db reads, which then reads as off. */
+export type OnInvalid = (key: string, stored: unknown) => void;
+
+/** Logs each stored switch value that reads as off for not being the shape 10db reads. */
+export function warnInvalidTrust(log: { warn(fields: object, message: string): void }): OnInvalid {
+  return (key, stored) => {
+    log.warn(
+      { key, stored },
+      'a stored trust switch is not a shape 10db reads, so it reads as off',
+    );
+  };
+}
 
 const StoredObject = z.record(z.string(), z.unknown());
 
@@ -78,10 +89,7 @@ function asJson(overrides: TrustOverrides): Json {
 }
 
 /** The app-wide switches; an absent key takes its default. */
-export function appTrustSwitches(
-  db: DbReader,
-  onInvalid: OnInvalid = () => undefined,
-): TrustSwitches {
+export function appTrustSwitches(db: DbReader, onInvalid: OnInvalid): TrustSwitches {
   const stored = parseStored(APP_TRUST_SETTING, getAppSetting(db, APP_TRUST_SETTING), onInvalid);
   return effectiveTrust(TRUST_DEFAULTS, stored);
 }
@@ -94,7 +102,7 @@ export function setAppTrustSwitches(ctx: WriteContext, switches: TrustSwitches):
 export function projectTrustOverrides(
   db: DbReader,
   projectId: ProjectId,
-  onInvalid: OnInvalid = () => undefined,
+  onInvalid: OnInvalid,
 ): TrustOverrides {
   const setting = projectTrustSetting(projectId);
   return parseStored(setting, getAppSetting(db, setting), onInvalid);
@@ -109,6 +117,13 @@ export function setProjectTrustOverrides(
 }
 
 /** The switches a project's next session starts with. */
-export function trustSwitchesFor(db: DbReader, projectId: ProjectId): TrustSwitches {
-  return effectiveTrust(appTrustSwitches(db), projectTrustOverrides(db, projectId));
+export function trustSwitchesFor(
+  db: DbReader,
+  projectId: ProjectId,
+  onInvalid: OnInvalid,
+): TrustSwitches {
+  return effectiveTrust(
+    appTrustSwitches(db, onInvalid),
+    projectTrustOverrides(db, projectId, onInvalid),
+  );
 }

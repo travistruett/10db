@@ -1,12 +1,14 @@
-import type {
-  ProjectId,
-  ProjectTrustDto,
-  SetupPreviewDto,
-  TrustOverrides,
-  TrustSettingsDto,
-  TrustSwitches,
+import {
+  Provider,
+  providerOf,
+  type ProjectId,
+  type ProjectTrustDto,
+  type SetupPreviewDto,
+  type TrustOverrides,
+  type TrustSettingsDto,
+  type TrustSwitches,
 } from '@10db/contracts';
-import { getProject } from '@10db/db';
+import { getAccountRow, getProject } from '@10db/db';
 import type { ApiServices } from '../api';
 import { allCheckouts } from '../delivery';
 import type { StateStore } from '../events';
@@ -16,6 +18,7 @@ import {
   setAppTrustSwitches,
   setProjectTrustOverrides,
   trustSwitchesFor,
+  warnInvalidTrust,
 } from '../permissions';
 import type { LaneSandbox } from '../sandbox';
 import {
@@ -63,11 +66,14 @@ export function createTrustServices(deps: {
   readonly laneWritableRoots: readonly string[];
   /** Judges the preview's real paths; null (no sandbox) shows the plan alone. */
   readonly laneSandbox: LaneSandbox | null;
+  /** Told each stored switch that reads as off for not being a shape 10db reads. */
+  readonly log: { warn(fields: object, message: string): void };
 }): TrustServices {
   const db = deps.state.db;
+  const onInvalid = warnInvalidTrust(deps.log);
 
   const trustSettings = (): TrustSettingsDto => {
-    const switches = appTrustSwitches(db);
+    const switches = appTrustSwitches(db, onInvalid);
     return {
       switches,
       plugins: installedPlugins(deps.builderHome).map((plugin) => ({
@@ -75,7 +81,7 @@ export function createTrustServices(deps: {
         name: plugin.name,
         version: plugin.version,
         enabledInClaude: plugin.enabledInClaude,
-        on: switches.plugins[plugin.id] ?? plugin.enabledInClaude,
+        on: switches.yourPlugins && (switches.plugins[plugin.id] ?? plugin.enabledInClaude),
       })),
     };
   };
@@ -102,18 +108,20 @@ export function createTrustServices(deps: {
             leftOut: [],
           }
         : await deps.laneSandbox.judgeSetup(project, plan.input, checkouts);
+    // Codex takes a plugin's skills and nothing else of it: the preview says what the session gets.
+    const codex = providerOf(getAccountRow(db, project.accountId).kind) === Provider.Codex;
     return {
       skills: [...judged.loaded.skills, ...projectSkills(plan.input.projectFiles)],
-      plugins: [...judged.loaded.plugins],
+      plugins: judged.loaded.plugins.map((id) => (codex ? `${id} (its skills only)` : id)),
       leftOut: [...plan.leftOut, ...judged.leftOut],
     };
   };
 
   const projectTrust = async (projectId: ProjectId): Promise<ProjectTrustDto> => {
     getProject(db, projectId);
-    const effective = trustSwitchesFor(db, projectId);
+    const effective = trustSwitchesFor(db, projectId, onInvalid);
     return {
-      overrides: projectTrustOverrides(db, projectId),
+      overrides: projectTrustOverrides(db, projectId, onInvalid),
       effective,
       preview: await preview(projectId, effective),
     };

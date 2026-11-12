@@ -143,8 +143,8 @@ export function ProjectTrustSection({ project }: { readonly project: ProjectDto 
               value={choiceOf(overrides?.[row.key])}
               data={CHOICES}
               onChange={(value) => {
-                if (overrides !== undefined && isChoice(value))
-                  set.mutate(withSwitch(overrides, row.key, boolOf(value)));
+                if (isChoice(value))
+                  set.mutate((saved) => withSwitch(saved, row.key, boolOf(value)));
               }}
             />
           </SettingRow>
@@ -161,8 +161,8 @@ export function ProjectTrustSection({ project }: { readonly project: ProjectDto 
                 value={choiceOf(overrides?.plugins?.[plugin.id])}
                 data={CHOICES}
                 onChange={(value) => {
-                  if (overrides !== undefined && isChoice(value))
-                    set.mutate(withPlugin(overrides, plugin.id, boolOf(value)));
+                  if (isChoice(value))
+                    set.mutate((saved) => withPlugin(saved, plugin.id, boolOf(value)));
                 }}
               />
             </SettingRow>

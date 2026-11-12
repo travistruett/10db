@@ -13,11 +13,13 @@ import {
 const one = mintId('Project');
 const two = mintId('Project');
 
+const ignore = (): void => undefined;
+
 describe('trust switches', () => {
   it('starts with every switch on', () => {
     const test = createTestStore();
-    expect(appTrustSwitches(test.store.db)).toEqual(TRUST_DEFAULTS);
-    expect(trustSwitchesFor(test.store.db, one)).toEqual(TRUST_DEFAULTS);
+    expect(appTrustSwitches(test.store.db, ignore)).toEqual(TRUST_DEFAULTS);
+    expect(trustSwitchesFor(test.store.db, one, ignore)).toEqual(TRUST_DEFAULTS);
     test.close();
   });
 
@@ -27,7 +29,7 @@ describe('trust switches', () => {
     test.store.write((ctx) => {
       setAppTrustSwitches(ctx, set);
     });
-    expect(appTrustSwitches(test.store.db)).toEqual(set);
+    expect(appTrustSwitches(test.store.db, ignore)).toEqual(set);
     test.close();
   });
 
@@ -44,7 +46,7 @@ describe('trust switches', () => {
     test.store.write((ctx) => {
       setAppSetting(ctx, 'trust', stored);
     });
-    expect(appTrustSwitches(test.store.db)).toEqual({
+    expect(appTrustSwitches(test.store.db, ignore)).toEqual({
       ...TRUST_DEFAULTS,
       yourSkills: false,
       projectSkills: true,
@@ -93,17 +95,17 @@ describe('trust switches', () => {
       setAppTrustSwitches(ctx, { ...TRUST_DEFAULTS, plugins: { 'p@m': true } });
       setProjectTrustOverrides(ctx, one, { web: false, plugins: { 'p@m': false } });
     });
-    expect(projectTrustOverrides(test.store.db, one)).toEqual({
+    expect(projectTrustOverrides(test.store.db, one, ignore)).toEqual({
       web: false,
       plugins: { 'p@m': false },
     });
-    expect(projectTrustOverrides(test.store.db, two)).toEqual({});
-    expect(trustSwitchesFor(test.store.db, one)).toEqual({
+    expect(projectTrustOverrides(test.store.db, two, ignore)).toEqual({});
+    expect(trustSwitchesFor(test.store.db, one, ignore)).toEqual({
       ...TRUST_DEFAULTS,
       web: false,
       plugins: { 'p@m': false },
     });
-    expect(trustSwitchesFor(test.store.db, two)).toEqual({
+    expect(trustSwitchesFor(test.store.db, two, ignore)).toEqual({
       ...TRUST_DEFAULTS,
       plugins: { 'p@m': true },
     });
