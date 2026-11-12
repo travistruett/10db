@@ -582,6 +582,8 @@ describe.skipIf(!live)('the pinned browser, live', () => {
     try {
       expect((await shootDevUi(true)).outcome).toBe(ShotOutcome.Clean);
       expect(hits).toContain('GET /projects Bearer dev-ui-token');
+      // The page did try its write, and the proxy refused it: it never reached the daemon.
+      expect(logs.filter((line) => line.includes(`POST ${daemonUrl}/passes`))).not.toEqual([]);
       expect(hits.filter((hit) => !hit.startsWith('GET ') && !hit.startsWith('OPTIONS '))).toEqual(
         [],
       );

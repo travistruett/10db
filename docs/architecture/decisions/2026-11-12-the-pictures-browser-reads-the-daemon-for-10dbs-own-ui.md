@@ -41,3 +41,8 @@ Turned down:
 - **Giving the dev server the token again.** The 2026-11-11 decision moved it off on purpose: the dev server
   runs the repository's code under the gate's sandbox.
 - **The app's own UI token for the camera.** That token writes.
+
+Accepted: the rule is by origin, as Open Page's is. Another project whose app address is the dev UI origin
+(`http://localhost:1420`, the default port of Tauri and Vite templates) would be handed the token too, and
+pictures do that on every turn, not on a click. That is accepted while the dev UI is opted in only by
+10db's own `scripts/dev.sh`. Tying the token to 10db's own project, not its origin, is a follow-up.

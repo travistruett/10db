@@ -118,7 +118,8 @@ The fake adapter (`sessions/fake-adapter.ts`) is the test boundary for Claude Co
   holds the browser's processes in a lane process ledger (`browser-ledger.ts`: the browser is the daemon's child
   whose executable, by its real path, is the pinned one; `ps`'s `comm` on macOS, `/proc/<pid>/exe` on Linux, whose
   `comm` is a cut name), refuses to launch with no ledger sweep, and closes after five idle minutes. The proxy
-  forwards only the app's origin and a `CONNECT` to its host and port (`origin-guard.ts`, `proxyAllows`);
+  forwards only the app's origin and a `CONNECT` to its host and port (`origin-guard.ts`, `proxyAllows`), and,
+  for a shot of 10db's own dev UI, reads of the daemon's exact origin (`decisions/2026-11-12-the-pictures-browser-reads-the-daemon-for-10dbs-own-ui.md`);
   Playwright's routing (`requestAllowed`) is a first check only, because it never sees a redirect's next hop.
   `shotOutcome` and `OVERLAY_SELECTORS` are pure. `src/pictures/browser.live.test.ts` runs the real headless
   shell behind `TENDB_LIVE_BROWSER=1`, never in CI; a bump of `BROWSER_PIN` or `playwright-core` passes it first.
