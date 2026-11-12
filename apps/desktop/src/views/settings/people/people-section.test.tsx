@@ -14,6 +14,8 @@ import {
 } from '../../../test/people-fixtures';
 import { SLACK_MANIFEST } from './slack-manifest';
 
+const connectedState = { state: 'connected', teamId: 'T1', teamName: 'Acme', botUserId: 'UBOT' };
+
 interface Options {
   readonly people?: PersonDto[];
   readonly connection?: Record<string, unknown>;
@@ -64,7 +66,15 @@ function serve(options: Options = {}) {
     http.put(daemonUrl('/people/:personId'), async ({ request, params }) => {
       const input = PersonInput.parse(await request.json());
       saved.push(input);
-      people = people.map((p) => (p.id === params['personId'] ? { ...p, name: input.name } : p));
+      people = people.map((p) =>
+        p.id === params['personId']
+          ? {
+              ...p,
+              name: input.name,
+              slack: input.slack ? slackContact(input.slack.userId, input.slack) : null,
+            }
+          : p,
+      );
       return HttpResponse.json(people.find((p) => p.id === params['personId']));
     }),
     http.delete(daemonUrl('/people/:personId'), ({ params }) => {
@@ -126,19 +136,77 @@ describe('Settings › People: the Slack connection', () => {
     expect(screen.queryByLabelText('Bot User OAuth Token')).toBeNull();
   });
 
-  it("asks for the builder's name before Connect while it is the seeded You", async () => {
+  it('Connect needs nothing but a token while Slack is not connected', async () => {
     const you = personDto({ name: 'You', handle: 'me', isBuilder: true });
-    const { saved } = serve({ people: [you] });
-    const name = await screen.findByLabelText('Your name');
-    expect(screen.getByRole('button', { name: 'Connect' })).toHaveProperty('disabled', true);
-    fireEvent.change(name, { target: { value: 'Travis' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save Name' }));
+    serve({ people: [you] });
+    fireEvent.change(await screen.findByLabelText('Bot User OAuth Token'), {
+      target: { value: 'xoxb-abc' },
+    });
+    expect(screen.getByRole('button', { name: 'Connect' })).toHaveProperty('disabled', false);
+  });
+
+  it('connected, with the builder not yet picked, shows "Which one is you?" as unfinished', async () => {
+    const you = personDto({ name: 'You', handle: 'me', isBuilder: true });
+    serve({ people: [you], connection: connectedState });
+    expect(await screen.findByText('Which one is you?')).toBeTruthy();
+    expect(screen.getByRole('button', { name: "That's Me" })).toHaveProperty('disabled', true);
+  });
+
+  it("picking saves the builder's Slack contact and takes the name from the member", async () => {
+    const you = personDto({ name: 'You', handle: 'me', isBuilder: true });
+    const { saved } = serve({ people: [you], connection: connectedState });
+    await screen.findByText('Which one is you?');
+    await pickOption(screen.getByLabelText('Slack member', { selector: 'input' }), /Mark Ellis/);
+    fireEvent.click(screen.getByRole('button', { name: "That's Me" }));
     await waitFor(() => {
-      expect(saved).toEqual([{ handle: 'me', name: 'Travis', slack: null }]);
+      expect(saved).toEqual([
+        {
+          handle: 'me',
+          name: 'Mark Ellis',
+          slack: { teamId: 'T1', userId: 'U1', sendMode: 'review', dailyLimit: 10 },
+        },
+      ]);
     });
     await waitFor(() => {
-      expect(screen.queryByLabelText('Your name')).toBeNull();
+      expect(screen.queryByText('Which one is you?')).toBeNull();
     });
+  });
+
+  it('is finished once the builder has a Slack contact', async () => {
+    const me = personDto({
+      name: 'Mark Ellis',
+      handle: 'me',
+      isBuilder: true,
+      slack: slackContact('U1'),
+    });
+    serve({ people: [me], connection: connectedState });
+    await screen.findByText(/Connected to Acme/);
+    expect(screen.queryByText('Which one is you?')).toBeNull();
+  });
+
+  it("the builder's row can change the pick later, and still has no Remove", async () => {
+    const me = personDto({
+      name: 'Mark Ellis',
+      handle: 'me',
+      isBuilder: true,
+      slack: slackContact('U1'),
+    });
+    const { saved } = serve({ people: [me], connection: connectedState });
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Mark Ellis' }));
+    const dialog = await screen.findByRole('dialog');
+    await pickOption(within(dialog).getByLabelText('Slack member'), /Ana Ortiz/);
+    expect(within(dialog).getByLabelText('Name')).toHaveProperty('value', 'Ana Ortiz');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save Person' }));
+    await waitFor(() => {
+      expect(saved).toEqual([
+        {
+          handle: 'me',
+          name: 'Ana Ortiz',
+          slack: { teamId: 'T1', userId: 'U2', sendMode: 'review', dailyLimit: 10 },
+        },
+      ]);
+    });
+    expect(screen.queryByRole('button', { name: /Remove/ })).toBeNull();
   });
 });
 

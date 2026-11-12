@@ -1,4 +1,5 @@
-import { Alert, Button, Group, List, PasswordInput, Stack, Text, TextInput } from '@mantine/core';
+import { SendMode, type SlackMemberDto } from '@10db/contracts';
+import { Alert, Button, Group, List, PasswordInput, Stack, Text } from '@mantine/core';
 import { useState } from 'react';
 import {
   usePeople,
@@ -8,54 +9,71 @@ import {
   useSlackConnection,
 } from '../../../daemon/people';
 import { ExternalLink } from '../../board/pull-request-link';
+import { MemberSelect } from './member-select';
+import { DEFAULT_DAILY_LIMIT } from './person-modal';
 import { SLACK_APPS_URL, SLACK_MANIFEST } from './slack-manifest';
 
-/** The name a fresh install gives the builder; Slack messages say whose build it is, so it needs a real one. */
-const SEEDED_BUILDER_NAME = 'You';
-
-function BuilderName() {
+/**
+ * Which Slack member is the builder. Messages name the builder, so connecting is unfinished until the
+ * builder's own person is bound to their Slack member; the member's name becomes the builder's name.
+ */
+function WhichIsYou() {
   const people = usePeople();
   const save = useSavePerson();
-  const [name, setName] = useState('');
+  const [picked, setPicked] = useState<SlackMemberDto | null>(null);
   const builder = people.data?.find((p) => p.isBuilder);
-  if (builder === undefined) return null;
+  if (builder?.slack !== null) return null;
   return (
-    <Group align="flex-end" gap="sm">
-      <TextInput
-        label="Your name"
-        description="Slack messages say whose build is asking."
-        value={name}
-        onChange={(event) => {
-          setName(event.currentTarget.value);
-        }}
-      />
-      <Button
-        variant="default"
-        disabled={name.trim() === ''}
-        loading={save.isPending}
-        onClick={() => {
-          save.mutate({
-            id: builder.id,
-            input: { handle: builder.handle, name: name.trim(), slack: null },
-          });
-        }}
-      >
-        Save Name
-      </Button>
-    </Group>
+    <Stack gap="xs">
+      <Text size="sm" fw={600}>
+        Which one is you?
+      </Text>
+      <Group align="flex-end" gap="sm" wrap="nowrap">
+        <div style={{ flex: 1 }}>
+          <MemberSelect value={picked} onPick={setPicked} />
+        </div>
+        <Button
+          disabled={picked === null}
+          loading={save.isPending}
+          onClick={() => {
+            if (picked === null) return;
+            save.mutate({
+              id: builder.id,
+              input: {
+                handle: builder.handle,
+                name: picked.realName,
+                slack: {
+                  teamId: picked.teamId,
+                  userId: picked.userId,
+                  sendMode: SendMode.Review,
+                  dailyLimit: DEFAULT_DAILY_LIMIT,
+                },
+              },
+            });
+          }}
+        >
+          That's Me
+        </Button>
+      </Group>
+      <Text size="xs" c="dimmed">
+        Slack questions say whose build is asking. Until you pick yourself, they can't be sent.
+      </Text>
+      {save.isError ? (
+        <Alert color="red" variant="light">
+          {save.error.message}
+        </Alert>
+      ) : null}
+    </Stack>
   );
 }
 
 /** Slack's state, and the three steps that connect it. */
 export function SlackConnection() {
   const connection = useSlackConnection();
-  const people = usePeople();
   const setToken = useSetSlackToken();
   const remove = useRemoveSlackToken();
   const [token, setTokenText] = useState('');
   const [copied, setCopied] = useState(false);
-  const builder = people.data?.find((p) => p.isBuilder);
-  const needsName = builder?.name === SEEDED_BUILDER_NAME;
   const state = connection.data?.state ?? 'off';
 
   if (connection.isError)
@@ -89,6 +107,7 @@ export function SlackConnection() {
             Disconnect
           </Button>
         </Group>
+        {state === 'connected' ? <WhichIsYou /> : null}
         {state === 'refused' ? (
           <TokenField token={token} setToken={setTokenText} disabled={false} setter={setToken} />
         ) : null}
@@ -136,13 +155,7 @@ export function SlackConnection() {
         </List.Item>
         <List.Item>Paste the Bot User OAuth Token below and press Connect.</List.Item>
       </List>
-      {needsName ? <BuilderName /> : null}
-      <TokenField token={token} setToken={setTokenText} disabled={needsName} setter={setToken} />
-      {needsName ? (
-        <Text size="xs" c="dimmed">
-          Set your name first.
-        </Text>
-      ) : null}
+      <TokenField token={token} setToken={setTokenText} disabled={false} setter={setToken} />
     </Stack>
   );
 }

@@ -15,7 +15,7 @@ import { useState } from 'react';
 import { useSavePerson, useSlackConnection } from '../../../daemon/people';
 import { MemberSelect } from './member-select';
 
-const DEFAULT_DAILY_LIMIT = 10;
+export const DEFAULT_DAILY_LIMIT = 10;
 
 /** A handle proposed from a name: lowercase words joined by hyphens, starting with a letter. */
 export function proposeHandle(name: string): string {
@@ -38,7 +38,7 @@ interface FormState {
 
 function initial(person: PersonDto | null): FormState {
   return {
-    inSlack: person?.slack !== null,
+    inSlack: person?.isBuilder === true || person?.slack !== null,
     member: null,
     name: person?.name ?? '',
     handle: person?.handle ?? '',
@@ -88,17 +88,22 @@ function PersonForm({
   const slack = person?.slack ?? null;
   // Editing keeps the contact's member; adding needs one picked.
   const hasContact = form.inSlack && (form.member !== null || slack !== null);
-  const valid = form.name.trim() !== '' && form.handle !== '' && (!form.inSlack || hasContact);
+  // The builder may have no Slack member yet; everyone else in Slack needs one.
+  const valid =
+    form.name.trim() !== '' &&
+    form.handle !== '' &&
+    (!form.inSlack || hasContact || person?.isBuilder === true);
 
   const submit = (): void => {
-    const contact = !form.inSlack
-      ? null
-      : {
-          teamId: form.member?.teamId ?? slack?.teamId ?? '',
-          userId: form.member?.userId ?? slack?.userId ?? '',
-          sendMode: form.sendMode,
-          dailyLimit: form.dailyLimit,
-        };
+    const contact =
+      !form.inSlack || !hasContact
+        ? null
+        : {
+            teamId: form.member?.teamId ?? slack?.teamId ?? '',
+            userId: form.member?.userId ?? slack?.userId ?? '',
+            sendMode: form.sendMode,
+            dailyLimit: form.dailyLimit,
+          };
     const input: PersonInput = { handle: form.handle, name: form.name.trim(), slack: contact };
     save.mutate({ id: person?.id ?? null, input }, { onSuccess: onClose });
   };
@@ -127,7 +132,7 @@ function PersonForm({
           Connect Slack first to pick a member, or add someone not in Slack.
         </Alert>
       ) : null}
-      {form.inSlack && !person?.isBuilder ? (
+      {form.inSlack && (slackReady || !person?.isBuilder) ? (
         <MemberSelect
           value={form.member}
           onPick={(member) => {
