@@ -132,6 +132,7 @@ describe('the camera, on a page that will not close', () => {
         viewport: { width: 800, height: 600 },
         theme: 'default',
         storageState: null,
+        devUi: null,
         signal: controller.signal,
       })
       .then((value) => {

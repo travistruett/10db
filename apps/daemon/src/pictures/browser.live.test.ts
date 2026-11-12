@@ -370,6 +370,7 @@ describe.skipIf(!live)('the pinned browser, live', () => {
       viewport: VIEWPORT,
       theme: 'default',
       storageState,
+      devUi: null,
       signal: new AbortController().signal,
     });
 
@@ -491,6 +492,7 @@ describe.skipIf(!live)('the pinned browser, live', () => {
       viewport: VIEWPORT,
       theme: 'default',
       storageState: null,
+      devUi: null,
       signal: new AbortController().signal,
     });
     expect(shot).toMatchObject({ outcome: ShotOutcome.Failed, png: null });
@@ -514,6 +516,7 @@ describe.skipIf(!live)('the pinned browser, live', () => {
         viewport: VIEWPORT,
         theme: 'default',
         storageState: null,
+        devUi: null,
         signal: controller.signal,
       });
       setTimeout(() => {
@@ -528,6 +531,68 @@ describe.skipIf(!live)('the pinned browser, live', () => {
     await expect(camera.signIn({ appUrl, url: '/login', signal: aborted.signal })).rejects.toThrow(
       /abort/i,
     );
+  }, 60_000);
+
+  it("lets 10db's own dev UI read the daemon with the token it is handed, and write nothing", async () => {
+    // The "daemon" answers a read only with the token, as the dev UI's token is held; the "dev UI" draws
+    // what the fragment hands it, as 10db's own does: a read, then a write the proxy must refuse.
+    const hits: string[] = [];
+    let devUiOrigin = '';
+    let daemonUrl = '';
+    const daemon = createServer((req, res) => {
+      hits.push(`${req.method ?? ''} ${req.url ?? ''} ${req.headers.authorization ?? '-'}`);
+      res.setHeader('access-control-allow-origin', devUiOrigin);
+      res.setHeader('access-control-allow-headers', 'authorization');
+      res.setHeader('access-control-allow-methods', 'GET, POST');
+      res.end(req.headers.authorization === 'Bearer dev-ui-token' ? 'projects' : 'no');
+    });
+    const devUi = createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(
+        page(
+          '<h1 id="out">Connecting</h1>',
+          `<script>
+            // Handed nothing, it tries the daemon anyway, which the browser must refuse.
+            const handed = location.hash.startsWith('#tendb=')
+              ? JSON.parse(decodeURIComponent(location.hash.slice('#tendb='.length)))
+              : { url: '${daemonUrl}', token: 'guessed' };
+            const auth = { authorization: 'Bearer ' + handed.token };
+            fetch(handed.url + '/projects', { headers: auth })
+              .then((r) => r.text())
+              .then((t) => { document.getElementById('out').textContent = t; });
+            fetch(handed.url + '/passes', { method: 'POST', headers: auth }).catch(() => undefined);
+          </script>`,
+        ),
+      );
+    });
+    const daemonPort = await listen(daemon, '127.0.0.1', 0);
+    const devUiPort = await listen(devUi, '127.0.0.1', 0);
+    devUiOrigin = `http://127.0.0.1:${String(devUiPort)}`;
+    daemonUrl = `http://127.0.0.1:${String(daemonPort)}`;
+    const shootDevUi = (handed: boolean) =>
+      camera.shoot({
+        appUrl: devUiOrigin,
+        route: '/settings',
+        viewport: VIEWPORT,
+        theme: 'default',
+        storageState: null,
+        devUi: handed ? { url: daemonUrl, token: 'dev-ui-token' } : null,
+        signal: new AbortController().signal,
+      });
+    try {
+      expect((await shootDevUi(true)).outcome).toBe(ShotOutcome.Clean);
+      expect(hits).toContain('GET /projects Bearer dev-ui-token');
+      expect(hits.filter((hit) => !hit.startsWith('GET ') && !hit.startsWith('OPTIONS '))).toEqual(
+        [],
+      );
+      // Any other app is shot as before: the daemon sees nothing of it.
+      hits.length = 0;
+      await shootDevUi(false);
+      expect(hits).toEqual([]);
+    } finally {
+      daemon.close();
+      devUi.close();
+    }
   }, 60_000);
 
   it('says the app did not answer, for a shot and for a sign-in', async () => {
@@ -545,9 +610,10 @@ describe.skipIf(!live)('the pinned browser, live', () => {
       viewport: VIEWPORT,
       theme: 'default',
       storageState: null,
+      devUi: null,
       signal: new AbortController().signal,
     });
-    expect(shot).toMatchObject({ outcome: ShotOutcome.Failed, reason: 'the app did not answer' });
+    expect(shot).toMatchObject({ outcome: ShotOutcome.NoAnswer, reason: 'the app did not answer' });
     await expect(
       camera.signIn({ appUrl: gone, url: '/login', signal: new AbortController().signal }),
     ).rejects.toThrow('the app did not answer');

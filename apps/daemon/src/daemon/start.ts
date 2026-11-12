@@ -1568,6 +1568,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     onNoAnswer: (projectId) => {
       void previewNow.lost(projectId);
     },
+    // 10db's own dev UI draws nothing without the daemon, so its pictures read it as Open Page's tab does.
+    devUi: opts.devUiOrigin ? { origin: opts.devUiOrigin, token: devUiToken(opts.dataDir) } : null,
     state,
     bus,
     camera: pictureCamera,

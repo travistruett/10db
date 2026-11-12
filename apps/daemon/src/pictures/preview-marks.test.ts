@@ -71,6 +71,7 @@ async function world(
   clock = new ManualClock(new Date('2026-11-10T12:00:00.000Z'));
   logs = captureLogs();
   pictures = startPictures({
+    devUi: null,
     state: w.h.state,
     bus: w.h.bus,
     camera: cam,

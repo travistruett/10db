@@ -77,7 +77,30 @@ describe('proxyAllows', () => {
     ['nonsense', 'http://localhost:3000', 'GET', 'http://', false],
     ['a userinfo trick', 'http://localhost:3000', 'GET', 'http://localhost:3000@evil.test/', false],
   ])('%s', (_name, appUrl, method, target, allowed) => {
-    expect(proxyAllows(appUrl, { method, target })).toBe(allowed);
+    const reach = appUrl === null ? null : { app: appUrl, daemon: null };
+    expect(proxyAllows(reach, { method, target })).toBe(allowed);
+  });
+});
+
+describe('proxyAllows while 10db shoots its own dev UI, which reads the daemon', () => {
+  const reach = { app: 'http://localhost:1420', daemon: 'http://127.0.0.1:7433' };
+  it.each<[string, string, string, boolean]>([
+    ['a read of the daemon', 'GET', 'http://127.0.0.1:7433/projects', true],
+    ['a read with a query', 'GET', 'http://127.0.0.1:7433/events?after=4', true],
+    ['a HEAD of the daemon', 'HEAD', 'http://127.0.0.1:7433/projects', true],
+    ['the CORS preflight of a read', 'OPTIONS', 'http://127.0.0.1:7433/projects', true],
+    ['a POST to the daemon', 'POST', 'http://127.0.0.1:7433/passes', false],
+    ['a DELETE on the daemon', 'DELETE', 'http://127.0.0.1:7433/tasks/x', false],
+    ['a PATCH on the daemon', 'PATCH', 'http://127.0.0.1:7433/projects/x', false],
+    ['a CONNECT to the daemon', 'CONNECT', '127.0.0.1:7433', false],
+    ['the daemon spelled localhost', 'GET', 'http://localhost:7433/projects', false],
+    ['the daemon over https', 'GET', 'https://127.0.0.1:7433/projects', false],
+    ['the next port', 'GET', 'http://127.0.0.1:7434/projects', false],
+    ['a userinfo trick', 'GET', 'http://127.0.0.1:7433@evil.test/', false],
+    ['the app, still', 'POST', 'http://localhost:1420/api/x', true],
+    ['the app’s WebSocket, still', 'CONNECT', 'localhost:1420', true],
+  ])('%s', (_name, method, target, allowed) => {
+    expect(proxyAllows(reach, { method, target })).toBe(allowed);
   });
 });
 
@@ -99,6 +122,17 @@ describe('requestAllowed', () => {
     ['a file URL', 'file:///etc/passwd', false],
     ['nonsense', 'not a url', false],
   ])('%s', (_name, url, allowed) => {
-    expect(requestAllowed('http://localhost:3000', url)).toBe(allowed);
+    expect(requestAllowed({ app: 'http://localhost:3000', daemon: null }, url)).toBe(allowed);
+  });
+
+  it.each<[string, string, boolean]>([
+    ['a read of the daemon', 'http://127.0.0.1:7433/projects', true],
+    ['the daemon spelled localhost', 'http://localhost:7433/projects', false],
+    ['a WebSocket to the daemon', 'ws://127.0.0.1:7433/events', false],
+    ['the app', 'http://localhost:1420/settings', true],
+  ])('while 10db shoots its own dev UI: %s', (_name, url, allowed) => {
+    expect(
+      requestAllowed({ app: 'http://localhost:1420', daemon: 'http://127.0.0.1:7433' }, url),
+    ).toBe(allowed);
   });
 });

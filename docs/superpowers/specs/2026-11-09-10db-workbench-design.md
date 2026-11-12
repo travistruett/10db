@@ -1135,8 +1135,9 @@ The desktop's e2e suite keeps WebKit; this is a second, separate use of Playwrig
 
 **Signing in.** The daemon runs the dev login command under the gate's sandbox, opens the printed address in a
 fresh browser context, and keeps the context's storage state for the project. It runs the command again when a
-capture lands somewhere other than the route asked for. A project with no login needs no command (10db's own
-UI, served by `pnpm dev:factory`, takes its token from the dev server).
+capture lands somewhere other than the route asked for. A project with no login needs no command. 10db's own
+UI needs none either: each shot of it is handed the daemon's address and the read-only dev UI token, as Open Page
+hands them, and may read the daemon (`decisions/2026-11-12-the-pictures-browser-reads-the-daemon-for-10dbs-own-ui.md`).
 
 **Which pages.** Every page area the task has changed files in, by its `route`. In addition, routes the agent
 names with a new lane tool, `report_pages { routes }`: needed for a route with a parameter (`/people/42`) and

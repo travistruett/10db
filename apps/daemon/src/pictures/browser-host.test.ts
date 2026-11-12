@@ -324,7 +324,7 @@ describe('the browser host', () => {
     const used = h.use((browser, proxy) => {
       pid = browser.pid;
       proxyPort = proxy.port;
-      proxy.allow('http://127.0.0.1:9');
+      proxy.allow({ app: 'http://127.0.0.1:9', daemon: null });
       return Promise.reject(new BrowserStuckError('a page would not close'));
     });
     let settled = false;
