@@ -276,7 +276,7 @@ async function failGate(
       projectId: pass.projectId,
       workstreamId: null,
       title: `The gate failed as UI Workbench pass "${pass.name}" closed`,
-      body: `The gate ran ${place}.${named} Close Pass runs it again.`,
+      body: `The gate ran ${place}.${named} Finish runs it again.`,
       foldKey: gateFailedKey(pass.id),
       refresh: true,
       detail,
@@ -721,7 +721,7 @@ function noticeStuck(
   const end =
     step >= CloseStep.FastForwarded
       ? `its fast-forward may have moved ${getPass(ctx.tx, passId).returnBranch}, so it can no longer be abandoned`
-      : 'Abandon Pass ends it';
+      : 'Abandon ends it';
   const because = stoppedBecause(error);
   const doing = stoppedWhile(step, where);
   const why =

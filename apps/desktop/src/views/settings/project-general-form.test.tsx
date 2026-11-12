@@ -94,6 +94,14 @@ const rows: readonly Row[] = [
     sent: { devLoginCommand: 'uv run manage.py dev_login' },
   },
   {
+    name: 'Pictures in pull requests',
+    label: 'Pictures in pull requests',
+    line: "A pass's pull request shows each signed-off page before and after. The pictures are pushed to a 10db-pictures branch on GitHub, so anyone who can see the repository can see them, data on the page included.",
+    change: () =>
+      fireEvent.click(screen.getByRole('switch', { name: 'Pictures in pull requests' })),
+    sent: { prPictures: true },
+  },
+  {
     name: 'Screenshot matrix: a second viewport',
     label: 'Screenshot matrix',
     line: 'Each page is pictured in each viewport and theme: at most 4 pictures a route.',

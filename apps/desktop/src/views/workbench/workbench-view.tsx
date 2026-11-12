@@ -137,7 +137,7 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
         <Title order={2}>UI Workbench</Title>
         {closed === null ? null : (
           <Text size="sm" role="status">
-            {`${closed.name} closed; its work is on ${closed.returnBranch}.`}
+            {`${closed.name} finished; its work is on ${closed.returnBranch}.`}
           </Text>
         )}
         {live === null ? null : (
@@ -178,7 +178,8 @@ export function WorkbenchScreen(props: WorkbenchScreenProps) {
       </Stack>
     );
   return (
-    <Stack gap="sm">
+    // The open pass takes the height the shell leaves, so the queue and the page run to its foot.
+    <Stack gap="sm" style={{ flex: 1, minHeight: 0 }}>
       <PassHeader
         project={project}
         view={live}

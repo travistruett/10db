@@ -23,13 +23,13 @@ describe('closeProgressLine', () => {
       name: 'closing, no step yet',
       state: PassState.Closing,
       step: null,
-      line: 'Closing the pass…',
+      line: 'Finishing the pass…',
     },
     {
       name: 'confirmed',
       state: PassState.Closing,
       step: CloseStep.Confirmed,
-      line: "Landing the close's changes…",
+      line: 'Landing the changes…',
     },
     {
       name: 'landed, gate in a copy',
@@ -41,7 +41,7 @@ describe('closeProgressLine', () => {
       name: 'copy gated',
       state: PassState.Closing,
       step: CloseStep.ScratchGated,
-      line: 'Taking out pages…',
+      line: 'Removing pages…',
     },
     {
       name: 'taken out, pushes next',
@@ -59,14 +59,14 @@ describe('closeProgressLine', () => {
       name: 'fast-forwarded',
       state: PassState.Closing,
       step: CloseStep.FastForwarded,
-      line: 'Closing the pass…',
+      line: 'Finishing the pass…',
     },
     {
       name: 'folder-only, landed: no gate in a copy, so take-outs next',
       state: PassState.Closing,
       step: CloseStep.Landed,
       facts: LOCAL,
-      line: 'Taking out pages…',
+      line: 'Removing pages…',
     },
     {
       name: 'folder-only, taken out: the gate runs in the folder',
@@ -159,8 +159,8 @@ describe('CloseProgress while pages leave', () => {
     renderWithTheme(<TakingOut />);
     const line = (): string | null =>
       screen.getByText(/…$/, { ignore: '[role="status"]' }).textContent;
-    expect(line()).toBe('Taking out pages…');
+    expect(line()).toBe('Removing pages…');
     fireEvent.click(screen.getByRole('button', { name: 'Take out the last page' }));
-    expect(line()).toBe('Taking out pages…');
+    expect(line()).toBe('Removing pages…');
   });
 });

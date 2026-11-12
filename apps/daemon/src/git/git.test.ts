@@ -1006,6 +1006,47 @@ describe('network calls', () => {
     expect(origin('rev-parse', 'refs/heads/10db/x-0a1b2c3d')).toBe(theirs);
   });
 
+  it('pushes a commit of pictures alone to a branch of origin, replacing it, and leaves the checkout be', async () => {
+    const files = tempDir('pr-pictures');
+    try {
+      writeFileSync(join(files.path, 'b.png'), 'before');
+      writeFileSync(join(files.path, 'a.png'), 'after');
+      const head = local('rev-parse', 'HEAD');
+      const status = local('status', '--porcelain');
+      const author = { name: '10db', email: '1+octo@users.noreply.github.com' };
+      const sha = await git.picturesCommit(remote.repo.path, {
+        files: [
+          { name: '1-settings-before.png', path: join(files.path, 'b.png') },
+          { name: '1-settings-after.png', path: join(files.path, 'a.png') },
+        ],
+        author,
+        message: 'Pictures',
+      });
+      await git.pushCommitTo(remote.repo.path, sha, '10db-pictures/pass-1', net);
+      expect(origin('rev-parse', 'refs/heads/10db-pictures/pass-1')).toBe(sha);
+      expect(origin('ls-tree', '--name-only', sha)).toBe(
+        '1-settings-after.png\n1-settings-before.png',
+      );
+      expect(origin('cat-file', 'blob', `${sha}:1-settings-before.png`)).toBe('before');
+      // No parent, and the no-reply address as author and committer, which GitHub accepts.
+      expect(origin('show', '-s', '--format=%ae|%ce|%P', sha)).toBe(
+        `${author.email}|${author.email}|`,
+      );
+      expect(local('rev-parse', 'HEAD')).toBe(head);
+      expect(local('status', '--porcelain')).toBe(status);
+      // The pictures changed: the branch is replaced, not added to.
+      const next = await git.picturesCommit(remote.repo.path, {
+        files: [{ name: '1-settings-after.png', path: join(files.path, 'b.png') }],
+        author,
+        message: 'Pictures',
+      });
+      await git.pushCommitTo(remote.repo.path, next, '10db-pictures/pass-1', net);
+      expect(origin('rev-parse', 'refs/heads/10db-pictures/pass-1')).toBe(next);
+    } finally {
+      files.cleanup();
+    }
+  });
+
   it('reports how long a push ran and what git printed', async () => {
     await git.switchNewBranch(remote.repo.path, '10db/x-0a1b2c3d', 'main');
     const run = await git.push(remote.repo.path, '10db/x-0a1b2c3d', net);

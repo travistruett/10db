@@ -159,7 +159,7 @@ const landed = () =>
     .split('\n')
     .filter(Boolean);
 
-describe('Close Pass', () => {
+describe('Finish', () => {
   it('closes a dirty folder: signs off, places, takes out, pushes, fast-forwards, and writes no other file', async () => {
     await world({ gateCommand: 'true' });
     await twoTurns();

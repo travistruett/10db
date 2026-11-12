@@ -38,7 +38,8 @@ Tauri 2 with `tauri-plugin-dialog` 2.8.4 and `tauri-plugin-opener` 2.7.2, Vitest
   and `PREVIEW_CHARS` are exported by `@10db/contracts` (`packages/contracts/src/tool-call-view.ts`). Every
   variant carries `harnessTool`, and optional fields are `nullable` (M2c calls 1 and 2). `title` is the call's
   subject; the kit adds the verb (M2c call 4). Every variant also carries `refusal: string | null` (10db's reason)
-  and `deniedBy: 'builder' | '10db' | null` (M2c Task 1, its call 21), set only when `status` is `denied`.
+  and `deniedBy: 'builder' | '10db' | 'judge' | null` with `limit` (M2c Task 1, its calls 21 and 23), set only when
+  `status` is `denied`.
 - **M4b, later:** the conversation library writes full output and patches to disk
   (`<dataDir>/conversations/<id>/items/<itemId>/`) and serves them. M3 never reads them (call 7).
 - **Morning check 5** (spec §16): the streamdown spike, a 20k-token message streaming at 50 ms frames in Plan's
@@ -108,8 +109,12 @@ Each is marked **(call)** where it is made.
 7. **Full output is not fetched in M3.** `ToolCallCard` takes an optional `loadFull`. Without it, Show All Output
    and Open Full Patch don't show. M4b passes it, over `GET /conversations/:id/items/:itemId/full`.
 8. **Who denied a call is the call's own `deniedBy`** (M2c). `10db` reads "10db stopped this", `builder` "You
-   denied this", and null (the agent gave no way to tell) shows no meta words, only the dimmed row, whose name ends ", denied". The
-   opened row shows `refusal` in words.
+   denied this", `judge` "Held back: this would {limit}" (or "Held back at a limit" with no `limit`; UI spec §7.3), and null (the
+   agent gave no way to tell) shows no meta words, only the dimmed row, whose name ends ", denied". The
+   opened row shows `refusal` in words. **Allow This** is the kit's: `ToolCallCard` and `ConversationList` take
+   an optional `onAllow(call)`, and a `judge` row with `soft: true` shows Allow This when it is given (spec §5.2,
+   §6.6). A hard deny never shows it. M3 has no sender, so nothing passes `onAllow` yet: M4b passes Plan's, M4c a
+   pass's and M5a a chat's, each posting "Go ahead: {title}" as the builder's message.
 9. **The gutter uses the `diff` package's line diff**, at the version `@mantine/code-highlight` 9.8.0 resolves. A
    rendered test checks that the gutter has one row per line `Diff` draws, of the same kind, for every row of
    Task 3's table.
@@ -492,7 +497,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>'
   - `groupWords(entries: readonly ToolEntry[]): { text: string; name: string }`
   - `editGroupWords(entries: readonly ToolEntry[]): { text: string; name: string }`: "Edited 5 files · +40 −12"
   - `formatDuration(ms: number | null): string | null`: "9 s" under a minute, "1 min", "12 min", null for null
-  - `ToolCallCard({ entry, nested, loadFull }: { readonly entry: ToolEntry; readonly nested: readonly ToolEntry[]; readonly loadFull?: (callId: string) => Promise<string> })`
+  - `ToolCallCard({ entry, nested, loadFull, onAllow }: { readonly entry: ToolEntry; readonly nested: readonly ToolEntry[]; readonly loadFull?: (callId: string) => Promise<string>; readonly onAllow?: (call: ToolCallView) => void })`
     (call 7), `ToolGroupRow({ entries })` and `EditGroupRow({ entries, loadFull })`: opened, it lists each file with
     its counts; the last edit's peek always shows under it
 
@@ -517,6 +522,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>'
 | denied by 10db | `deniedBy: '10db'`, no refusal | meta "10db stopped this", dimmed | |
 | denied with a refusal | `deniedBy: '10db'`, `refusal: 'writes outside the checkout'` | meta "10db stopped this"; the name ends ", writes outside the checkout" | |
 | denied by builder | `deniedBy: 'builder'` | meta "You denied this", dimmed | |
+| denied by the judge | `deniedBy: 'judge'`, `limit` set, `soft: true`, `onAllow` given | meta "Held back: this would {limit}", dimmed, and an Allow This button that calls `onAllow` once | |
+| a hard deny by the judge | `deniedBy: 'judge'`, `soft: false`, `onAllow` given | meta "Held back at a limit", dimmed, no Allow This | |
 | denied, unknown | `deniedBy: null` | no meta, dimmed | the name ends ", denied" |
 
   And `groupWords`, one row each: 5 reads and 2 searches read "Read 5 files, searched 2 times"; 1 read and 1 search
@@ -588,6 +595,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>'
     - `highlight: { readonly ids: readonly string[]; readonly nonce: number } | null`: marks those rows and scrolls
       the first to the centre on each new `nonce` (Plan's Why?)
     - `loadFull?: (callId: string) => Promise<string>`
+    - `onAllow?: (call: ToolCallView) => void` (call 8)
     - `agentLabel: string`: the agent's hidden speaker heading, `capabilities.label` (call 15)
   - `conversationArticles(rows: readonly ConversationRow[]): readonly ConversationArticle[]`, pure:
     `ConversationArticle = { id: string; speaker: 'builder' | 'agent'; rows: readonly ConversationRow[] }`. A
