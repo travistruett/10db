@@ -904,7 +904,7 @@ The steps run in order. Generated migrations do the schema changes; one `--custo
    - `sessions` (dropping `shape_id`)
    - `shapes` (dropping `sdk_session_id` and `model`)
 4. **Generated:** drop `shape_messages`, `shape_files`, `task_messages` and `task_files`.
-5. **The test.** A database at migration 0061, seeded with every referencing table filled, is migrated through
+5. **The test.** A database at migration 0064, seeded with every referencing table filled, is migrated through
    `migrateDatabase` and must pass:
    - `foreign_key_check`
    - transcript order
@@ -1056,7 +1056,7 @@ The rules in `.claude/rules/testing.md` apply. These are the rows for this spec,
 
 **Real SQLite:**
 
-- the migration from a seeded 0061 database (§9.2 step 5)
+- the migration from a seeded 0064 database (§9.2 step 5)
 - the stores
 - per-project usage across all three owners
 

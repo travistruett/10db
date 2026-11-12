@@ -129,7 +129,7 @@ Each is marked **(call)** where it is used.
     spec §7.4), passes `loadFull`, and builds the kit's `WorkingLine`, which Plan is the first to use. `Composer`,
     `PermissionRequest` and `Announcer` are M5a's; Plan keeps its composer and `waiting-permissions.tsx`.
 16. **`ShapeViewDto` loses `messages`** (the transcript moves to `/conversations/:id/items`) and gains
-    `conversationId`; `PROTOCOL_VERSION` goes from 7 to 8, recorded in the M4b decision.
+    `conversationId`; `PROTOCOL_VERSION` goes from 8 to 9 (the stakeholder questions build takes 8), recorded in the M4b decision.
 17. **Refusal words the table leaves blank:** `starting` "The session is starting", `waiting_card` "Answer the card
     first", `stopping` "The turn is stopping", `sealed` "This session handed its work to a task". Send Now where
     nothing would run: "Nothing can run while <the state's words>" (call 29).
@@ -993,7 +993,7 @@ Plan's `FRESH_START_LINE` is Plan's `outgoing`, in Task 16.
   stored and announced by id. Full tool output, patches and bodies over 32 KB are kept under
   `<dataDir>/conversations/<id>/items/<itemId>/`.
 - Plan's transcript is read through `/conversations/:id/items`; `ShapeViewDto.messages` is removed and
-  `PROTOCOL_VERSION` is 8.
+  `PROTOCOL_VERSION` is 9.
 
 ## Why
 
@@ -1069,7 +1069,7 @@ A vertical slice through the real daemon (`renderWithDaemon`), then e2e.
   `history-button.tsx` (read items), and `working-line.tsx` (removed; the kit's replaces it); `loadFull` maps a call
   id to its item and reads `/full`
 - Modify: `packages/contracts/src/shape-view.ts:176` (`messages` removed, `conversationId` added),
-  `protocol.ts` (8), `apps/daemon/src/shape/view.ts`, `api/app.ts` (the two Plan routes removed),
+  `protocol.ts` (9), `apps/daemon/src/shape/view.ts`, `api/app.ts` (the two Plan routes removed),
   `apps/desktop/src/daemon/shape-queries.ts`, `apps/desktop/AGENTS.md` (the Plan bullet)
 - Modify: `apps/desktop/e2e/shape.spec.ts`, only these lines: the long-transcript test (`:195-300`) fulfils
   `GET /conversations/:id/items` instead of `GET /shapes/:id`, building 2,000 `ConversationItemDto` rows
