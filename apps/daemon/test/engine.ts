@@ -67,10 +67,15 @@ import { createGit } from '../src/git';
 import { startSignOff } from '../src/pass';
 import { createJudge, type Judge } from '../src/judge';
 import {
+  createReplyWatch,
+  createSlackConnection,
   createStakeholderSends,
+  createTimerWatch,
   createTriage,
   draftOnOpen,
+  type ReplyWatch,
   type StakeholderSends,
+  type TimerWatch,
 } from '../src/stakeholders';
 import type { SlackClient } from '../src/slack';
 import { createInboxService, createParkAnswers, type InboxService } from '../src/inbox';
@@ -104,6 +109,8 @@ export interface TestEngine {
   readonly live: LiveSessions;
   /** The stakeholder sends, over the fake Slack the engine was given (none: every draft stays). */
   readonly sends: StakeholderSends;
+  readonly replyWatch: ReplyWatch;
+  readonly timerWatch: TimerWatch;
   readonly runner: Runner;
   readonly adapter: FakeAdapter;
   readonly clock: ManualClock;
@@ -298,6 +305,21 @@ export async function createTestEngine(
       answerAccountCard?.(item, answer);
     },
   });
+  const slackConnection = createSlackConnection({
+    state,
+    initial: setup.slack ? 'connected' : 'off',
+  });
+  const replyWatch = createReplyWatch({
+    state,
+    slack: setup.slack ?? null,
+    inbox,
+    judge: triageJudge,
+    sends,
+    clock,
+    log: silentLogger,
+    connection: slackConnection,
+  });
+  const timerWatch = createTimerWatch({ state, clock, log: silentLogger });
   const pauses = createAccountPauses({
     state,
     clock,
@@ -459,6 +481,8 @@ export async function createTestEngine(
     inbox,
     live,
     sends,
+    replyWatch,
+    timerWatch,
     runner: created,
     adapter,
     clock,

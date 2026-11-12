@@ -316,6 +316,14 @@ The fake adapter (`sessions/fake-adapter.ts`) is the test boundary for Claude Co
   and the post carries `tendb_send` metadata so `recoverSending` finds a post a crash left in flight instead of
   posting twice. `onCardChanged`, subscribed to `inbox.changed`, closes the send and says why in every thread it
   used (`closing-lines.ts`). With Slack off (`TENDB_SLACK=off`, no token) every draft stays as it is.
+- `reply-watch.ts` reads each open send's thread and the DM's top level every minute (and twice at once after the
+  clock jumped), on the injected clock. A lone recipient's reply is joined and answers the card through
+  `InboxService.answerAs` once a tick finds nothing newer (`quietSince` is in memory, so a restart costs one tick);
+  it also posts the reminder, looks for sends left mid-post (`recoverSending`) on every good tick, and keeps the
+  connection state (`slack-connection.ts`: `refused` and `none` stop the watch until `reconnect()`, three failed
+  ticks make it `unreachable`). With several open questions in one DM a top-level reply is matched by the judge
+  (`reply_match`) or by asking "Which one is this for?" (`reply-match.ts`). `timer-watch.ts` returns an overdue
+  send to the builder from the wall clock alone, with no Slack (`timers.ts` holds the pure rule).
 - A question card routed to anyone but the builder parks its session at once (`onWaitStart` reads the card again),
   even with another wait open, so a stakeholder's words never reach a live `ask_human` call.
 

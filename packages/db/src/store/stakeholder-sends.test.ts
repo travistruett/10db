@@ -27,6 +27,7 @@ import {
   sendThreadsOf,
   sendsInThread,
   setHeldBy,
+  setLastRead,
   setProposal,
   updateDraft,
 } from './stakeholder-sends';
@@ -393,6 +394,24 @@ describe('sends', () => {
       { channelId: 'G1', threadTs: '200.1' },
       { channelId: 'D1', threadTs: '100.1' },
     ]);
+  });
+
+  it('moves the read cursor forward and never back', () => {
+    const w = world();
+    const s = draft(w.card('q'), [w.mark.id]);
+    sent(s.id);
+    store.write((ctx) => {
+      setLastRead(ctx, s.id, '200.5');
+    });
+    store.write((ctx) => {
+      setLastRead(ctx, s.id, '150.9');
+    });
+    expect(openSends(store.db)[0]?.lastReadTs).toBe('200.5');
+    expect(() =>
+      store.write((ctx) => {
+        setLastRead(ctx, 'snd_missing' as never, '1.1');
+      }),
+    ).toThrow();
   });
 
   it('keepWaiting clears the reminder and the return and restarts the wait', () => {

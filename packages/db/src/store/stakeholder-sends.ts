@@ -344,6 +344,20 @@ export function moveSend(
   });
 }
 
+/** Moves the read cursor of a send forward; it never moves back. */
+export function setLastRead(ctx: WriteContext, id: StakeholderSendId, ts: string): void {
+  const row = guarded(ctx, id, 'move its read cursor', [SendState.Sent]);
+  if (row.lastReadTs === null || compareTsText(ts, row.lastReadTs) > 0)
+    change(ctx, row, { lastReadTs: ts });
+}
+
+/** Slack timestamps compare as numbers: seconds, then the part after the dot. */
+function compareTsText(a: string, b: string): number {
+  const [aSec = '0', aFrac = '0'] = a.split('.');
+  const [bSec = '0', bFrac = '0'] = b.split('.');
+  return Number(aSec) - Number(bSec) || Number(aFrac) - Number(bFrac);
+}
+
 export function markReminded(ctx: WriteContext, id: StakeholderSendId, at: string): void {
   const row = guarded(ctx, id, 'be reminded', [SendState.Sent]);
   change(ctx, row, { remindedAt: at });

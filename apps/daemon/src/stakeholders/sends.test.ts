@@ -617,6 +617,37 @@ describe('askSomeone', () => {
   });
 });
 
+describe('keepWaiting', () => {
+  it('refuses unless the card has come back, then restarts both timers from now', async () => {
+    const w = world();
+    w.route([w.person('mark', { sendMode: 'review' })]);
+    const id = w.card();
+    await sends.afterDraft(id);
+    await sends.send(id, {});
+    expect(() => {
+      sends.keepWaiting(id);
+    }).toThrow(ConflictError);
+    clock.advance(9 * 3600_000);
+    store.write((ctx) => {
+      markReturned(ctx, send(id).id, 'timer');
+    });
+    sends.keepWaiting(id);
+    expect(send(id)).toMatchObject({ state: 'sent', returnedAt: null, remindedAt: null });
+    const waitStartedAt = store.db.$client
+      .prepare('SELECT wait_started_at AS at FROM stakeholder_sends')
+      .get() as { at: string };
+    expect(waitStartedAt.at).toBe(clock.now().toISOString());
+  });
+
+  it('refuses a card with no live send, or one that was not sent', () => {
+    const w = world();
+    const id = w.card();
+    expect(() => {
+      sends.keepWaiting(id);
+    }).toThrow(ConflictError);
+  });
+});
+
 describe('takeBack', () => {
   it('closes the send and returns the card to the builder', async () => {
     const w = world();

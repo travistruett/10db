@@ -24,3 +24,7 @@ export { closingLine, type ClosingReason } from './closing-lines';
 export { draftContext, draftFor, draftOnOpen, sweepDrafts, type DraftDeps } from './drafts';
 export { holdFor, type Held } from './send-holds';
 export { createStakeholderSends, type StakeholderSends, type SendsDeps } from './sends';
+export { createReplyWatch, type ReplyWatch, type ReplyWatchDeps } from './reply-watch';
+export { createSlackConnection, type SlackConnection } from './slack-connection';
+export { createTimerWatch, type TimerWatch } from './timer-watch';
+export { dueTimers, type DueTimer, type TimedSend } from './timers';

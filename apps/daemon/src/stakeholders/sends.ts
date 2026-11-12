@@ -22,6 +22,7 @@ import {
   failSend,
   getInboxItem,
   getPerson,
+  keepWaiting,
   latestThreadFor,
   listRoutingRules,
   markSending,
@@ -47,6 +48,7 @@ import { closingLine, type ClosingReason } from './closing-lines';
 import { draftContext, draftFor } from './drafts';
 import { OPTION_LETTERS } from './letters';
 import { scanOutbound } from './outbound-scan';
+import { blocksOf } from './slack-text';
 import { holdFor } from './send-holds';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -78,6 +80,8 @@ export interface StakeholderSends {
   /** Reroutes the card to the people chosen and drafts for them; sending waits on review as usual. */
   askSomeone(cardId: InboxItemId, input: AskSomeoneInput): void;
   takeBack(cardId: InboxItemId): Promise<void>;
+  /** The builder keeps waiting on a card that came back: both timers start again from now. */
+  keepWaiting(cardId: InboxItemId): void;
   /** Looks for the post of every send that was mid-flight, and posts the ones it finds none for. */
   recoverSending(): Promise<void>;
   /** A card changed: closes its send, and says so in the thread, when the builder settled it. */
@@ -85,15 +89,6 @@ export interface StakeholderSends {
 }
 
 const sha256 = (text: string): string => createHash('sha256').update(text).digest('hex');
-
-const blocksOf = (text: string) =>
-  text
-    .split(/\n{2,}/)
-    .filter((section) => section.trim() !== '')
-    .map((section) => ({
-      type: 'section' as const,
-      text: { type: 'mrkdwn' as const, text: section, verbatim: true as const },
-    }));
 
 const slackCode = (error: unknown): string => (error instanceof SlackError ? error.code : 'error');
 
@@ -450,6 +445,15 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
       // A post still in flight is closed, and the line said, once it lands (`landed`).
       if (found.state === 'sent')
         await closeAndSay(found.id, getInboxItem(state.db, cardId), 'taken_back');
+    },
+
+    keepWaiting(cardId) {
+      const found = liveSend(cardId);
+      if (found?.state !== 'sent' || found.returnedAt === null)
+        throw new ConflictError('This question has not come back to you');
+      state.write((ctx) => {
+        keepWaiting(ctx, found.id, nowIso());
+      });
     },
 
     async recoverSending() {

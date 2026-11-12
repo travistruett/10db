@@ -79,7 +79,15 @@ import {
 } from '../catalogue';
 import { createJudge, JUDGE_LOG_RETENTION_MS, type JudgeService } from '../judge';
 import { createJudgeServices } from './judge-services';
-import { createStakeholderSends, createTriage, draftOnOpen, sweepDrafts } from '../stakeholders';
+import {
+  createReplyWatch,
+  createSlackConnection,
+  createStakeholderSends,
+  createTimerWatch,
+  createTriage,
+  draftOnOpen,
+  sweepDrafts,
+} from '../stakeholders';
 import { createSlackClient, type SlackClient } from '../slack';
 import {
   backupDatabase,
@@ -1515,7 +1523,26 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // A card a crash left waiting for triage takes the lane's rule, a routed card without its message gets
   // one, and a send that was mid-post is looked for in Slack.
   for (const after of state.write((ctx) => sweepDrafts(ctx, draftOpts))) after();
-  void sends.recoverSending();
+  const slackConnection = createSlackConnection({
+    state,
+    initial: slackClient === null ? 'off' : 'connected',
+  });
+  const replyWatch = createReplyWatch({
+    state,
+    slack: slackClient,
+    inbox,
+    judge,
+    sends,
+    clock,
+    log: logger.child({ component: 'reply-watch' }),
+    connection: slackConnection,
+  });
+  // The timers need no Slack: a card comes back to the builder even while Slack is down.
+  const timerWatch = createTimerWatch({
+    state,
+    clock,
+    log: logger.child({ component: 'stakeholder-timers' }),
+  });
   bus.subscribe((event) => {
     if (event.type !== EventType.InboxChanged) return;
     const id = InboxItemId.safeParse(event.entityId);
@@ -2071,6 +2098,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   createdScheduler.requestTick();
   loadGuard.start();
   prWatch.start();
+  // After recovery: a send left mid-post is looked for in Slack, then replies and timers are watched.
+  void sends.recoverSending();
+  replyWatch.start();
+  timerWatch.start();
   if (selfUpdate) {
     selfUpdate.start();
     selfUpdate.tick().catch((error: unknown) => {
@@ -2102,6 +2133,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       unsubscribeKeptWork();
       unsubscribePrWatch();
       await prWatch.stop();
+      await Promise.all([replyWatch.stop(), timerWatch.stop()]);
       retiredLandingsAbort.abort();
       await retiredLandings;
       systemTempAbort.abort();
