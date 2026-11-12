@@ -36,7 +36,12 @@ export interface OpenSendRow {
   readonly threadTs: string;
   readonly messageTs: string;
   readonly lastReadTs: string;
-  readonly movedFrom: { channelId: string; threadTs: string; lastReadTs: string | null } | null;
+  readonly movedFrom: {
+    channelId: string;
+    threadTs: string;
+    messageTs: string;
+    lastReadTs: string | null;
+  } | null;
   readonly sentAt: string;
   readonly waitStartedAt: string;
   readonly remindedAt: string | null;
@@ -340,8 +345,13 @@ export function moveSend(
   addPeople(ctx, id, input.added);
   change(ctx, row, {
     movedFrom:
-      row.channelId !== null && row.threadTs !== null
-        ? { channelId: row.channelId, threadTs: row.threadTs, lastReadTs: row.lastReadTs }
+      row.channelId !== null && row.threadTs !== null && row.messageTs !== null
+        ? {
+            channelId: row.channelId,
+            threadTs: row.threadTs,
+            messageTs: row.messageTs,
+            lastReadTs: row.lastReadTs,
+          }
         : null,
     channelId: input.channelId,
     threadTs: input.threadTs,

@@ -1103,10 +1103,12 @@ export const stakeholderSends = sqliteTable(
       confidence: number;
       ts: string | null;
     }>(),
-    /** The channel, thread and cursor a moved question left behind. */
+    /** The channel, thread, question and cursor a moved question left behind. */
     movedFrom: text('moved_from', { mode: 'json' }).$type<{
       channelId: string;
       threadTs: string;
+      /** The `ts` of the question's own message there, where its part of the thread begins. */
+      messageTs: string;
       lastReadTs: string | null;
     }>(),
     reply: text('reply', { mode: 'json' }).$type<{ text: string; userId: string; ts: string }>(),

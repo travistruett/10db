@@ -753,6 +753,25 @@ describe('bringing someone in', () => {
     );
   });
 
+  it('never answers a moved question from a reply to the follow-up left in the old thread', async () => {
+    const s = scene();
+    slack.names.set('UPRIYA', 'Priya');
+    const task = s.asker();
+    const first = await s.send([s.mark], { asker: task, title: 'First?' });
+    slack.say(first.channel, 'UMARK', 'Asking <@UPRIYA> to weigh in', first.threadTs);
+    const second = await s.send([s.mark], { asker: task, title: 'Second?' });
+    expect(second.threadTs).toBe(first.threadTs);
+    await ticks(1);
+    expect(openSends(store.db).find((o) => o.id === first.sendId)?.movedFrom).toMatchObject({
+      threadTs: first.threadTs,
+    });
+    slack.say(first.channel, 'UMARK', 'A', first.threadTs);
+    await ticks(3);
+    expect(card(second.cardId).answer).toMatchObject({ choice: 'Yes', via: 'slack' });
+    expect(card(first.cardId).state).toBe('OPEN');
+    expect(judgeAnswers.filter((r) => r.decision === 'thread_answer')).toEqual([]);
+  });
+
   it('opens a new group DM with all three when a brought-in person mentions another', async () => {
     const { sent } = await mentioned();
     await ticks(1);

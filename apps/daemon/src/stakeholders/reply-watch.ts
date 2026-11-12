@@ -101,7 +101,23 @@ function dedupe(messages: readonly SlackMessage[]): SlackMessage[] {
 }
 
 /** The first `ts` of a conversation: the question's own, or where it started before it moved. */
-const floorOf = (open: OpenSendRow): string => open.movedFrom?.threadTs ?? open.messageTs;
+const floorOf = (open: OpenSendRow): string => open.movedFrom?.messageTs ?? open.messageTs;
+
+/**
+ * Where each open send's own part of a thread begins, in `channel` and `thread`: its question there, or the
+ * question it left behind when it moved. A send's part ends where the next one begins.
+ */
+function startsIn(opens: readonly OpenSendRow[], channel: string, thread: string): string[] {
+  return opens.flatMap((o) => {
+    if (o.channelId === channel && o.threadTs === thread) return [o.messageTs];
+    if (o.movedFrom?.channelId === channel && o.movedFrom.threadTs === thread)
+      return [o.movedFrom.messageTs];
+    return [];
+  });
+}
+
+const firstAfter = (starts: readonly string[], ts: string): string | undefined =>
+  starts.filter((t) => compareTs(t, ts) > 0).sort(compareTs)[0];
 
 /**
  * How a sent question is named in a line posted to Slack: its title, escaped and cut, or a link to the message
@@ -170,13 +186,13 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
         { channel, bot, opens: here, messages: top },
       );
       for (const open of here) {
-        const next = here.find(
-          (o) => o.threadTs === open.threadTs && compareTs(o.messageTs, open.messageTs) > 0,
+        // Only what was said after this send's own question, and before the next question in that thread.
+        const within = (from: string, until: string | undefined) => (m: SlackMessage) =>
+          compareTs(m.ts, from) > 0 && (until === undefined || compareTs(m.ts, until) < 0);
+        const inCurrent = within(
+          open.messageTs,
+          firstAfter(startsIn(opens, open.channelId, open.threadTs), open.messageTs),
         );
-        // Only what was said after this send's own question, and before a follow-up's.
-        const inWindow = (m: SlackMessage): boolean =>
-          compareTs(m.ts, floorOf(open)) > 0 &&
-          (next === undefined || compareTs(m.ts, next.messageTs) < 0);
         const thread = threadMessages.get(open.threadTs) ?? [];
         const old = open.movedFrom
           ? await client.replies(
@@ -185,10 +201,19 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
               open.movedFrom.lastReadTs ?? open.movedFrom.threadTs,
             )
           : [];
+        const inOld = open.movedFrom
+          ? within(
+              open.movedFrom.messageTs,
+              firstAfter(
+                startsIn(opens, open.movedFrom.channelId, open.movedFrom.threadTs),
+                open.movedFrom.messageTs,
+              ),
+            )
+          : () => false;
         const own = top.filter((m) => assigned.get(m.ts) === open.id);
         out.push({
           open,
-          messages: dedupe([...thread.filter(inWindow), ...old.filter(inWindow), ...own]),
+          messages: dedupe([...thread.filter(inCurrent), ...old.filter(inOld), ...own]),
           thread,
           topLevel: new Set(own.map((m) => m.ts)),
         });
@@ -295,8 +320,14 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
         : [];
     const approver =
       open.approvalBy === null ? null : open.people.find((p) => p.personId === open.approvalBy);
+    // Once someone is brought in, what was said before the move is context for the judge, not a reply:
+    // the mention that brought them in must not answer the card as the recipient's own words.
+    const sinceMove =
+      open.movedFrom === null
+        ? r.messages
+        : r.messages.filter((m) => compareTs(m.ts, open.messageTs) > 0);
     const verdict = conversationState({
-      messages: r.messages,
+      messages: sinceMove,
       recipients,
       participants,
       botUserId: bot,
@@ -320,7 +351,12 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
       judgedApprovals: await judgeApprovals(agreeDeps(client), conversation, judged),
     });
     const newest = counted.at(-1);
-    if (newest) quiet.set(open.id, newest.ts);
+    const countedSinceMove =
+      open.movedFrom === null
+        ? counted
+        : counted.filter((m) => compareTs(m.ts, open.messageTs) > 0);
+    const newestSinceMove = countedSinceMove.at(-1);
+    if (newestSinceMove) quiet.set(open.id, newestSinceMove.ts);
     const agree = agreeDeps(client);
     switch (verdict.kind) {
       case 'lone_reply':
@@ -369,7 +405,11 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
         });
         break;
       case 'waiting':
-        if (recipients.length === 1 && counted.length > 0 && open.loneReplyPendingSince === null)
+        if (
+          recipients.length === 1 &&
+          countedSinceMove.length > 0 &&
+          open.loneReplyPendingSince === null
+        )
           state.write((ctx) => {
             markLoneReplyPending(ctx, open.id, ctx.now);
           });
