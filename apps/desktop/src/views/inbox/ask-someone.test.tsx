@@ -14,16 +14,23 @@ const goalId = mintId('Goal');
 const task = taskDto({ goalId });
 const workstream = workstreamDto({ taskId: task.id });
 
-function serve(item: InboxItemDto) {
+function serve(item: InboxItemDto, options: { copyForAfterAsk?: string[] } = {}) {
+  let current = item;
   const asked: unknown[] = [];
   server.use(
-    http.get(daemonUrl('/inbox'), () => HttpResponse.json([item])),
+    http.get(daemonUrl('/inbox'), () => HttpResponse.json([current])),
     http.get(daemonUrl('/people'), () => HttpResponse.json([BUILDER_PERSON, mark, sarah, priya])),
     http.get(daemonUrl('/workstreams'), () => HttpResponse.json([workstream])),
     http.get(daemonUrl('/projects/:projectId/tasks'), () => HttpResponse.json([task])),
     http.post(daemonUrl('/inbox/:id/ask'), async ({ request }) => {
       asked.push(AskSomeoneInput.parse(await request.json()));
-      return HttpResponse.json({ ...item, routedBy: 'builder', assignees: ['mark'] });
+      current = {
+        ...item,
+        routedBy: 'builder',
+        assignees: ['me'],
+        copyFor: options.copyForAfterAsk ?? [],
+      };
+      return HttpResponse.json(current);
     }),
     http.get(daemonUrl('/inbox/:id/compose'), () =>
       HttpResponse.json({ text: 'Travis asks Priya: how long?', hits: [] }),
@@ -132,8 +139,8 @@ describe('a card asked of someone not in Slack', () => {
   it('makes the primary Copy for Priya, which copies the composed message and leaves the card open', async () => {
     const writeText = vi.fn(() => Promise.resolve());
     vi.stubGlobal('navigator', { clipboard: { writeText } });
-    // The daemon keeps such a card with the builder, so the screen remembers whom it was asked of.
-    serve(unrouted());
+    // The daemon keeps such a card with the builder and names her in copyFor.
+    serve(unrouted(), { copyForAfterAsk: ['priya'] });
     fireEvent.click(await screen.findByRole('button', { name: 'Ask Someone…' }));
     const popover = await screen.findByRole('dialog');
     await pickOption(

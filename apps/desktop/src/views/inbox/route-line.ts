@@ -32,12 +32,16 @@ export function recipientsOf(item: InboxItemDto, people: readonly PersonDto[]): 
   });
 }
 
-export function stakeholderMode(
-  item: InboxItemDto,
-  people: readonly PersonDto[],
-  /** Who the builder just asked and has no Slack for: the daemon keeps such a card with the builder. */
-  copyFor: readonly PersonDto[] = [],
-): StakeholderMode {
+/** The people the builder asked who have no Slack: the daemon keeps such a card, and names them in `copyFor`. */
+export function copyPeople(item: InboxItemDto, people: readonly PersonDto[]): PersonDto[] {
+  return item.copyFor.flatMap((handle) => {
+    const person = people.find((p) => p.handle === handle);
+    return person === undefined ? [] : [person];
+  });
+}
+
+export function stakeholderMode(item: InboxItemDto, people: readonly PersonDto[]): StakeholderMode {
+  const copyFor = copyPeople(item, people);
   if (item.kind !== InboxKind.Question) return StakeholderMode.None;
   if (item.routedBy === RoutedBy.TriagePending) return StakeholderMode.Pending;
   if (item.send?.state === SendState.Draft) return StakeholderMode.Draft;

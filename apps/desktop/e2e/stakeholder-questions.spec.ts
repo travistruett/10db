@@ -114,6 +114,13 @@ test('routes a question to someone outside Slack from its card, and the table sh
 
   // The card now offers to copy the message for her, and the builder answers it with her answer.
   await expect(page.getByRole('button', { name: 'Copy for Priya Shah' })).toBeVisible();
+
+  // The daemon remembers whom the card was asked of: after a reload Copy is still there.
+  await page.reload();
+  await expect(page.getByText(QUESTION)).toBeVisible();
+  const reselect = page.getByRole('button', { name: new RegExp(QUESTION) });
+  if ((await reselect.count()) > 0) await reselect.click();
+  await expect(page.getByRole('button', { name: 'Copy for Priya Shah' })).toBeVisible();
   await expect(page.getByText('Product question → Priya Shah · chosen by you')).toBeVisible();
   await expectAccessible(page, 'inbox, routed to a person not in Slack, dark');
   await page.getByRole('radio', { name: /Seven days/ }).check();

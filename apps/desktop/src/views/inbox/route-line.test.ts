@@ -47,11 +47,10 @@ describe('routeLine', () => {
 });
 
 describe('stakeholderMode', () => {
-  it('is copy for people not in Slack the builder just asked, and not for people in Slack', () => {
-    const card = inboxItemDto();
-    expect(stakeholderMode(card, people, [priya])).toBe('copy');
-    expect(stakeholderMode(card, people, [mark])).toBe('unrouted');
-    expect(stakeholderMode(card, people, [])).toBe('unrouted');
+  it('is copy for people not in Slack that the card names in copyFor, and not for people in Slack', () => {
+    expect(stakeholderMode(inboxItemDto({ copyFor: ['priya'] }), people)).toBe('copy');
+    expect(stakeholderMode(inboxItemDto({ copyFor: ['mark'] }), people)).toBe('unrouted');
+    expect(stakeholderMode(inboxItemDto({ copyFor: [] }), people)).toBe('unrouted');
   });
 
   const rows: readonly [string, Partial<InboxItemDto>, string][] = [

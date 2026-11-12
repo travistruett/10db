@@ -9,24 +9,24 @@ import {
   useTakeBack,
 } from '../../daemon/people';
 import { AskSomeone } from './ask-someone';
-import { joinNames, routeLine, StakeholderMode } from './route-line';
+import { copyPeople, joinNames, routeLine, StakeholderMode } from './route-line';
 
 /** The route line of a card that is not showing a draft: why this person, and Change. */
 export function RouteLineRow({
   item,
   people,
   mode,
-  copyFor,
-  onAsked,
 }: {
   readonly item: InboxItemDto;
   readonly people: readonly PersonDto[];
   readonly mode: StakeholderMode;
-  readonly copyFor: readonly PersonDto[];
-  readonly onAsked: (people: PersonDto[]) => void;
 }) {
   if (mode === StakeholderMode.None || mode === StakeholderMode.Unrouted) return null;
-  const line = routeLine(item, people, mode === StakeholderMode.Copy ? copyFor : undefined);
+  const line = routeLine(
+    item,
+    people,
+    mode === StakeholderMode.Copy ? copyPeople(item, people) : undefined,
+  );
   return (
     <Group gap="xs">
       {line.pending ? <Loader size="xs" /> : null}
@@ -34,7 +34,7 @@ export function RouteLineRow({
         {line.text}
       </Text>
       {mode === StakeholderMode.Copy ? (
-        <AskSomeone item={item} people={people} label="Change" variant="subtle" onAsked={onAsked} />
+        <AskSomeone item={item} people={people} label="Change" variant="subtle" />
       ) : null}
     </Group>
   );
@@ -97,11 +97,9 @@ export function CopyForPeople({
 export function AskSomeoneFooter({
   item,
   people,
-  onAsked,
 }: {
   readonly item: InboxItemDto;
   readonly people: readonly PersonDto[];
-  readonly onAsked: (people: PersonDto[]) => void;
 }) {
   const suggestion = item.routeSuggestion;
   const suggested =
@@ -117,7 +115,7 @@ export function AskSomeoneFooter({
         item={item}
         people={people}
         label="Ask Someone…"
-        onAsked={onAsked}
+
         {...(suggested === undefined ? {} : { suggestedPersonId: suggested.id })}
       />
     </>
