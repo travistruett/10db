@@ -51,8 +51,8 @@ describe('Ask Someone…', () => {
     const asked = serve(unrouted());
     fireEvent.click(await screen.findByRole('button', { name: 'Ask Someone…' }));
     const popover = await screen.findByRole('dialog');
-    await within(popover).findByLabelText('Person');
-    await pickOption(within(popover).getByLabelText('Person'), /Mark/);
+    await within(popover).findByLabelText('Person', { selector: 'input' });
+    await pickOption(within(popover).getByLabelText('Person', { selector: 'input' }), /Mark/);
     expect(await within(popover).findByRole('checkbox', { name: /Product/ })).toHaveProperty(
       'checked',
       true,
@@ -77,8 +77,8 @@ describe('Ask Someone…', () => {
     const asked = serve(unrouted());
     fireEvent.click(await screen.findByRole('button', { name: 'Ask Someone…' }));
     const popover = await screen.findByRole('dialog');
-    await within(popover).findByLabelText('Person');
-    await pickOption(within(popover).getByLabelText('Person'), /Mark/);
+    await within(popover).findByLabelText('Person', { selector: 'input' });
+    await pickOption(within(popover).getByLabelText('Person', { selector: 'input' }), /Mark/);
     fireEvent.click(await within(popover).findByRole('checkbox', { name: /Always send/ }));
     fireEvent.click(await within(popover).findByRole('button', { name: 'Ask Mark' }));
     await waitFor(() => {
@@ -90,9 +90,9 @@ describe('Ask Someone…', () => {
     const asked = serve(unrouted());
     fireEvent.click(await screen.findByRole('button', { name: 'Ask Someone…' }));
     const popover = await screen.findByRole('dialog');
-    await within(popover).findByLabelText('Person');
-    await pickOption(within(popover).getByLabelText('Person'), /Mark/);
-    await pickOption(within(popover).getByLabelText('On'), /this task/);
+    await within(popover).findByLabelText('Person', { selector: 'input' });
+    await pickOption(within(popover).getByLabelText('Person', { selector: 'input' }), /Mark/);
+    await pickOption(within(popover).getByLabelText('On', { selector: 'input' }), /this task/);
     fireEvent.click(await within(popover).findByRole('button', { name: 'Ask Mark' }));
     await waitFor(() => {
       expect(asked).toEqual([
@@ -112,8 +112,11 @@ describe('Ask Someone…', () => {
     expect(await screen.findByText('Suggested: Sarah (64%)')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Ask Someone…' }));
     const popover = await screen.findByRole('dialog');
-    await within(popover).findByLabelText('Person');
-    expect(within(popover).getByLabelText('Person')).toHaveProperty('value', 'Sarah · @sarah');
+    await within(popover).findByLabelText('Person', { selector: 'input' });
+    expect(within(popover).getByLabelText('Person', { selector: 'input' })).toHaveProperty(
+      'value',
+      'Sarah · @sarah',
+    );
     expect(await within(popover).findByRole('checkbox', { name: /Always send/ })).toHaveProperty(
       'checked',
       false,
@@ -125,19 +128,21 @@ describe('Ask Someone…', () => {
   });
 });
 
-describe('a card routed to someone not in Slack', () => {
+describe('a card asked of someone not in Slack', () => {
   it('makes the primary Copy for Priya, which copies the composed message and leaves the card open', async () => {
     const writeText = vi.fn(() => Promise.resolve());
     vi.stubGlobal('navigator', { clipboard: { writeText } });
-    serve(
-      inboxItemDto({
-        title: 'How long?',
-        options: [{ label: 'Seven days', description: '' }],
-        routedBy: 'builder',
-        assignees: ['priya'],
-      }),
+    // The daemon keeps such a card with the builder, so the screen remembers whom it was asked of.
+    serve(unrouted());
+    fireEvent.click(await screen.findByRole('button', { name: 'Ask Someone…' }));
+    const popover = await screen.findByRole('dialog');
+    await pickOption(
+      await within(popover).findByLabelText('Person', { selector: 'input' }),
+      /Priya/,
     );
+    fireEvent.click(await within(popover).findByRole('button', { name: 'Ask Priya' }));
     const copy = await screen.findByRole('button', { name: 'Copy for Priya' });
+    expect(screen.getByText('Product question → Priya · chosen by you')).toBeTruthy();
     await waitFor(() => {
       expect(copy).toHaveProperty('disabled', false);
     });

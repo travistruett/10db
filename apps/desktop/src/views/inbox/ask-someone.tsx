@@ -57,6 +57,7 @@ export function AskSomeone({
   label,
   variant = 'default',
   suggestedPersonId,
+  onAsked,
 }: {
   readonly item: InboxItemDto;
   readonly people: readonly PersonDto[];
@@ -64,6 +65,8 @@ export function AskSomeone({
   readonly variant?: 'default' | 'subtle';
   /** Triage's pick below the floor: the popover opens on it, with Always unticked. */
   readonly suggestedPersonId?: PersonId;
+  /** Called with the people asked once the daemon has taken the route. */
+  readonly onAsked?: (people: PersonDto[]) => void;
 }) {
   const [opened, setOpened] = useState(false);
   return (
@@ -94,6 +97,7 @@ export function AskSomeone({
             item={item}
             people={people}
             suggestedPersonId={suggestedPersonId}
+            onAsked={onAsked}
             onDone={() => {
               setOpened(false);
             }}
@@ -108,11 +112,13 @@ function AskForm({
   item,
   people,
   suggestedPersonId,
+  onAsked,
   onDone,
 }: {
   readonly item: InboxItemDto;
   readonly people: readonly PersonDto[];
   readonly suggestedPersonId: PersonId | undefined;
+  readonly onAsked: ((people: PersonDto[]) => void) | undefined;
   readonly onDone: () => void;
 }) {
   const ask = useAskSomeone();
@@ -149,7 +155,12 @@ function AskForm({
             : null,
         },
       },
-      { onSuccess: onDone },
+      {
+        onSuccess: () => {
+          onAsked?.([person]);
+          onDone();
+        },
+      },
     );
   };
 
@@ -157,6 +168,8 @@ function AskForm({
     <Stack gap="sm">
       <Select
         label="Person"
+        // Inside the popover, so choosing an option is not a click outside it, which would close it.
+        comboboxProps={{ withinPortal: false }}
         placeholder="Who should answer?"
         data={candidates.map((p) => ({ value: p.id, label: personLabel(p) }))}
         value={personId}
@@ -184,6 +197,7 @@ function AskForm({
           </Chip.Group>
           <Select
             label="On"
+            comboboxProps={{ withinPortal: false }}
             data={scopes}
             value={chosenScope}
             allowDeselect={false}

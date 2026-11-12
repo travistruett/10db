@@ -2,6 +2,7 @@ import {
   InboxKind,
   type DecisionRecording,
   type InboxItemDto,
+  type PersonDto,
   type ProjectId,
 } from '@10db/contracts';
 import { Alert, Badge, Group, SegmentedControl, Stack, Text, Title } from '@mantine/core';
@@ -167,6 +168,8 @@ function OpenInbox({
   const [sendBackNotes, setSendBackNotes] = useState<Readonly<Record<string, string>>>({});
   const noteRef = useRef<HTMLTextAreaElement>(null);
   const people = usePeople().data ?? [];
+  // Whom the builder asked who has no Slack, by card: the daemon keeps such a card with the builder.
+  const [copyFor, setCopyFor] = useState<Readonly<Record<string, PersonDto[]>>>({});
   // Cards the builder chose to answer themselves instead of sending the drafted message.
   const [myself, setMyself] = useState<ReadonlySet<string>>(new Set());
 
@@ -363,6 +366,10 @@ function OpenInbox({
                   setSelectedId(row.key);
                 }}
                 onSubmit={submit}
+                copyFor={copyFor[row.items[0].id] ?? []}
+                onAsked={(asked) => {
+                  setCopyFor((current) => ({ ...current, [row.items[0].id]: asked }));
+                }}
                 answeringMyself={myself.has(row.items[0].id)}
                 onAnswerMyself={(value) => {
                   setMyself((current) => {

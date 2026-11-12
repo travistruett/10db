@@ -6,6 +6,7 @@ import {
   isParkChoice,
   type DecisionRecording,
   type InboxItemDto,
+  type PersonDto,
 } from '@10db/contracts';
 import {
   Alert,
@@ -79,6 +80,9 @@ export interface InboxCardProps {
   /** Whether the builder chose Answer Myself on a drafted question, which swaps the preview for the options. */
   readonly answeringMyself?: boolean;
   readonly onAnswerMyself?: (value: boolean) => void;
+  /** People the builder asked who are not in Slack, whom the daemon does not name on the card. */
+  readonly copyFor?: readonly PersonDto[];
+  readonly onAsked?: (people: PersonDto[]) => void;
 }
 
 /** Card text is untrusted (agent and tool output): it is only ever rendered as text. */
@@ -141,9 +145,11 @@ export function InboxCard({
   shortcuts = true,
   answeringMyself = false,
   onAnswerMyself = () => undefined,
+  copyFor = [],
+  onAsked = () => undefined,
 }: InboxCardProps) {
   const people = usePeople().data ?? [];
-  const mode = stakeholderMode(item, people);
+  const mode = stakeholderMode(item, people, copyFor);
   const review = mcpReview(item);
   const rejection = reviewRejection(item);
   const principle = usePrincipleOf(item, selected);
@@ -313,9 +319,11 @@ export function InboxCard({
             Open Accounts in Settings
           </Anchor>
         ) : null}
-        <RouteLineRow item={item} people={people} mode={mode} />
+        <RouteLineRow item={item} people={people} mode={mode} copyFor={copyFor} onAsked={onAsked} />
         <SentNotice item={item} />
-        {mode === StakeholderMode.Copy ? <ComposedMessage item={item} people={people} /> : null}
+        {mode === StakeholderMode.Copy ? (
+          <ComposedMessage item={item} recipients={copyFor} />
+        ) : null}
         {answeringMyself && item.send !== null ? (
           <SendInsteadLink
             names={joinNames(item.send.people.filter((p) => p.recipient).map((p) => p.name))}
@@ -379,9 +387,11 @@ export function InboxCard({
         ) : null}
         <Group justify="flex-end">
           {mode === StakeholderMode.Unrouted && hasOptions ? (
-            <AskSomeoneFooter item={item} people={people} />
+            <AskSomeoneFooter item={item} people={people} onAsked={onAsked} />
           ) : null}
-          {mode === StakeholderMode.Copy ? <CopyForPeople item={item} people={people} /> : null}
+          {mode === StakeholderMode.Copy ? (
+            <CopyForPeople item={item} recipients={copyFor} />
+          ) : null}
           <Button
             size="sm"
             loading={pending}

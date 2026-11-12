@@ -20,11 +20,6 @@ export interface InboxRow {
   readonly passId: PassId | null;
 }
 
-/** What the sidebar and the menu bar count: the rows the inbox shows, not the cards folded into them. */
-export function inboxRowCount(items: readonly InboxItemDto[]): number {
-  return inboxRows(items).length;
-}
-
 /**
  * Whether a question is out with someone and needs nothing from the builder: sent and not returned, while
  * Slack is connected. With Slack off, unreachable, refused or without a token nobody can read a reply, so

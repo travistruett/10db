@@ -9,20 +9,24 @@ import {
   useTakeBack,
 } from '../../daemon/people';
 import { AskSomeone } from './ask-someone';
-import { joinNames, recipientsOf, routeLine, StakeholderMode } from './route-line';
+import { joinNames, routeLine, StakeholderMode } from './route-line';
 
 /** The route line of a card that is not showing a draft: why this person, and Change. */
 export function RouteLineRow({
   item,
   people,
   mode,
+  copyFor,
+  onAsked,
 }: {
   readonly item: InboxItemDto;
   readonly people: readonly PersonDto[];
   readonly mode: StakeholderMode;
+  readonly copyFor: readonly PersonDto[];
+  readonly onAsked: (people: PersonDto[]) => void;
 }) {
   if (mode === StakeholderMode.None || mode === StakeholderMode.Unrouted) return null;
-  const line = routeLine(item, people);
+  const line = routeLine(item, people, mode === StakeholderMode.Copy ? copyFor : undefined);
   return (
     <Group gap="xs">
       {line.pending ? <Loader size="xs" /> : null}
@@ -30,7 +34,7 @@ export function RouteLineRow({
         {line.text}
       </Text>
       {mode === StakeholderMode.Copy ? (
-        <AskSomeone item={item} people={people} label="Change" variant="subtle" />
+        <AskSomeone item={item} people={people} label="Change" variant="subtle" onAsked={onAsked} />
       ) : null}
     </Group>
   );
@@ -39,12 +43,11 @@ export function RouteLineRow({
 /** The message a person not in Slack would get, to paste to them. */
 export function ComposedMessage({
   item,
-  people,
+  recipients,
 }: {
   readonly item: InboxItemDto;
-  readonly people: readonly PersonDto[];
+  readonly recipients: readonly PersonDto[];
 }) {
-  const recipients = recipientsOf(item, people);
   const compose = useCompose(
     item.id,
     recipients.map((p) => p.id),
@@ -63,12 +66,11 @@ export function ComposedMessage({
 /** Copies the composed message for someone who is not in Slack; the card stays open for their answer. */
 export function CopyForPeople({
   item,
-  people,
+  recipients,
 }: {
   readonly item: InboxItemDto;
-  readonly people: readonly PersonDto[];
+  readonly recipients: readonly PersonDto[];
 }) {
-  const recipients = recipientsOf(item, people);
   const compose = useCompose(
     item.id,
     recipients.map((p) => p.id),
@@ -95,9 +97,11 @@ export function CopyForPeople({
 export function AskSomeoneFooter({
   item,
   people,
+  onAsked,
 }: {
   readonly item: InboxItemDto;
   readonly people: readonly PersonDto[];
+  readonly onAsked: (people: PersonDto[]) => void;
 }) {
   const suggestion = item.routeSuggestion;
   const suggested =
@@ -113,6 +117,7 @@ export function AskSomeoneFooter({
         item={item}
         people={people}
         label="Ask Someone…"
+        onAsked={onAsked}
         {...(suggested === undefined ? {} : { suggestedPersonId: suggested.id })}
       />
     </>

@@ -32,13 +32,20 @@ export function recipientsOf(item: InboxItemDto, people: readonly PersonDto[]): 
   });
 }
 
-export function stakeholderMode(item: InboxItemDto, people: readonly PersonDto[]): StakeholderMode {
+export function stakeholderMode(
+  item: InboxItemDto,
+  people: readonly PersonDto[],
+  /** Who the builder just asked and has no Slack for: the daemon keeps such a card with the builder. */
+  copyFor: readonly PersonDto[] = [],
+): StakeholderMode {
   if (item.kind !== InboxKind.Question) return StakeholderMode.None;
   if (item.routedBy === RoutedBy.TriagePending) return StakeholderMode.Pending;
   if (item.send?.state === SendState.Draft) return StakeholderMode.Draft;
   if (item.send?.state === SendState.Failed) return StakeholderMode.Failed;
   // Sending, sent or answered: the Waiting tab and Resolved show it, not this card.
   if (item.send !== null && item.send.state !== SendState.Closed) return StakeholderMode.None;
+  if (item.send === null && copyFor.length > 0 && copyFor.every((p) => p.slack === null))
+    return StakeholderMode.Copy;
   const recipients = recipientsOf(item, people);
   if (recipients.length === 0) return StakeholderMode.Unrouted;
   return recipients.every((p) => p.slack === null)
@@ -71,16 +78,20 @@ export function categoryWord(category: string): string {
 export function routeLine(
   item: InboxItemDto,
   people: readonly PersonDto[],
+  /** Recipients the card itself does not name, such as people not in Slack. */
+  named?: readonly PersonDto[],
 ): { readonly text: string; readonly pending: boolean } {
   if (item.routedBy === RoutedBy.TriagePending)
     return { text: 'Finding who answers…', pending: true };
-  const names = recipientsOf(item, people).map((p) => p.name);
+  const names = (named ?? recipientsOf(item, people)).map((p) => p.name);
   const who = joinNames(names.length > 0 ? names : item.assignees);
   const by =
-    item.routedBy === RoutedBy.Judge
-      ? ' · chosen by Jev'
-      : item.routedBy === RoutedBy.Builder
-        ? ' · chosen by you'
-        : '';
+    named !== undefined
+      ? ' · chosen by you'
+      : item.routedBy === RoutedBy.Judge
+        ? ' · chosen by Jev'
+        : item.routedBy === RoutedBy.Builder
+          ? ' · chosen by you'
+          : '';
   return { text: `${categoryWord(item.category)} question → ${who}${by}`, pending: false };
 }

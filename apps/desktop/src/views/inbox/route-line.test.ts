@@ -47,6 +47,13 @@ describe('routeLine', () => {
 });
 
 describe('stakeholderMode', () => {
+  it('is copy for people not in Slack the builder just asked, and not for people in Slack', () => {
+    const card = inboxItemDto();
+    expect(stakeholderMode(card, people, [priya])).toBe('copy');
+    expect(stakeholderMode(card, people, [mark])).toBe('unrouted');
+    expect(stakeholderMode(card, people, [])).toBe('unrouted');
+  });
+
   const rows: readonly [string, Partial<InboxItemDto>, string][] = [
     ['a card nobody was asked about', {}, 'unrouted'],
     ['a pending triage', { routedBy: 'triage_pending' }, 'pending'],
@@ -56,7 +63,6 @@ describe('stakeholderMode', () => {
       { assignees: ['mark'], send: sendDto({ state: 'failed', error: 'x' }) },
       'failed',
     ],
-    ['a person not in Slack', { assignees: ['priya'], routedBy: 'builder' }, 'copy'],
     ['a person in Slack with no send yet', { assignees: ['mark'], routedBy: 'rule' }, 'unrouted'],
     ['a sent question', { assignees: ['mark'], send: sendDto({ state: 'sent' }) }, 'none'],
     ['a card that is not a question', { kind: 'flag' }, 'none'],
