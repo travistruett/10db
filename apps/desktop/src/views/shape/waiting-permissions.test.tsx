@@ -42,7 +42,7 @@ function card(overrides: Partial<InboxItemDto> = {}, owner = base.id): InboxItem
     projectId: project.id,
     title: 'Allow Bash?',
     body: 'curl -s https://example.com',
-    category: 'environment',
+    category: 'access',
     options,
     detail: { shapeId: owner },
     ...overrides,

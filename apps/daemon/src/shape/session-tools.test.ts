@@ -144,7 +144,7 @@ describe('a conversation’s prepared session', () => {
         body: 'pnpm test',
         options: [],
         recommendation: null,
-        category: 'environment',
+        category: 'access',
         urgency: 'normal',
         detail: null,
         foldKey: 'k',

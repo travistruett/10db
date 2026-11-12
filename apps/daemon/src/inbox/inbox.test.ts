@@ -20,6 +20,7 @@ import {
   type InboxItemDto,
   type InboxTarget,
   type ProposalId,
+  type QuestionCategory,
   type ProposalKind,
 } from '@10db/contracts';
 import {
@@ -222,7 +223,7 @@ describe('inbox questions', () => {
         { label: 'deny', description: '' },
       ],
       recommendation: null,
-      category: 'environment',
+      category: 'access',
       urgency: 'normal',
       detail: { toolName: 'Bash', summary: 'docker compose up -d' },
       signal: abort.signal,
@@ -681,7 +682,7 @@ describe('proposal verdicts', () => {
 });
 
 describe('knowledge capture', () => {
-  function askIn(ws: ReturnType<typeof seedWorkstream>, category: 'design' | 'other') {
+  function askIn(ws: ReturnType<typeof seedWorkstream>, category: QuestionCategory) {
     return inbox.ask({
       projectId: ws.project.id,
       workstreamId: ws.workstream.id,
@@ -707,6 +708,20 @@ describe('knowledge capture', () => {
       category: 'design',
       record: undefined,
       scope: 'project',
+      fromOther: false,
+    },
+    {
+      name: 'a business answer, by default',
+      category: 'business',
+      record: undefined,
+      scope: 'project',
+      fromOther: false,
+    },
+    {
+      name: 'an access answer, by default',
+      category: 'access',
+      record: undefined,
+      scope: null,
       fromOther: false,
     },
     {
@@ -1386,7 +1401,7 @@ describe('inbox lifecycle guards', () => {
           { label: 'deny', description: '' },
         ],
         recommendation: null,
-        category: 'environment',
+        category: 'access',
         urgency: 'normal',
         detail: { toolName: 'Bash', summary: 'docker compose up -d' },
         signal: new AbortController().signal,
@@ -1455,7 +1470,7 @@ describe('permission cards store scoped rules', () => {
         { label: 'deny', description: '' },
       ],
       recommendation: null,
-      category: 'environment',
+      category: 'access',
       urgency: 'normal',
       detail: { toolName, summary },
       signal: new AbortController().signal,

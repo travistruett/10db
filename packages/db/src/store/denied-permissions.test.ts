@@ -25,7 +25,7 @@ function permissionCard(
       body: summary,
       options: [],
       recommendation: null,
-      category: 'environment',
+      category: 'access',
       urgency: 'normal',
       detail: { toolName, summary },
       foldKey: null,

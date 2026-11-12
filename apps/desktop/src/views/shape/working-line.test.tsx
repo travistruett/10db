@@ -30,7 +30,7 @@ function card(): InboxItemDto {
     projectId: project.id,
     title: 'Allow Bash?',
     body: 'curl -s https://example.com',
-    category: 'environment',
+    category: 'access',
     options: [
       { label: 'allow_once', description: 'Allow this call once' },
       { label: 'deny', description: 'Deny; your note is passed to the agent' },

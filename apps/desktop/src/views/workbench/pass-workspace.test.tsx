@@ -1139,7 +1139,7 @@ describe('PassWorkspace question in place', () => {
       item: (page: PassPageDto) =>
         askItem(page, {
           kind: 'permission',
-          category: 'environment',
+          category: 'access',
           title: 'Allow Bash?',
           body: 'pnpm test',
           options: [

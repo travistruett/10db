@@ -19,6 +19,7 @@ import {
   KnowledgeScope,
   PrincipleKind,
   ProposalKind,
+  QUESTION_CATEGORY_HINTS,
   QuestionCategory,
   RiskTag,
   Severity,
@@ -166,7 +167,13 @@ export const McpToolInputs = {
   }),
   ask_human: z.object({
     opId: OpId,
-    category: z.enum(QuestionCategory),
+    category: z.enum(QuestionCategory).describe(
+      Object.values(QuestionCategory)
+        .map(
+          (c) => `${c}: ${QUESTION_CATEGORY_HINTS[c].hint} (${QUESTION_CATEGORY_HINTS[c].covers})`,
+        )
+        .join('; '),
+    ),
     question: z.string().min(1).max(2000),
     options: z.array(InboxOption).min(2).max(4),
     topic: z

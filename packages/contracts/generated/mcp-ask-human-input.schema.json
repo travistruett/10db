@@ -13,9 +13,11 @@
         "product",
         "design",
         "engineering",
-        "environment",
+        "business",
+        "access",
         "other"
-      ]
+      ],
+      "description": "product: What should it do? (scope, behaviour, priorities, who it's for); design: How should it look, feel or read? (screens, flows, wording); engineering: How should it be built? (architecture, libraries, trade-offs); business: Is it allowed / what's the policy? (pricing, legal, policy, customers, commitments); access: I need something I can't get myself (keys, accounts, permissions, data, a service turned on); other: Anything else (everything else, and Claude Code's AskUserQuestion)"
     },
     "question": {
       "type": "string",

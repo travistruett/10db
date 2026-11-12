@@ -11,7 +11,10 @@ import {
   mintId,
   PersonDto,
   PersonInput,
+  DECISION_CATEGORIES,
   PROTOCOL_VERSION,
+  QUESTION_CATEGORY_HINTS,
+  QuestionCategory,
   RecordedAnswer,
   renderJsonSchemas,
   RoutingRulesInput,
@@ -68,8 +71,8 @@ describe('HealthResponse', () => {
 });
 
 describe('PROTOCOL_VERSION', () => {
-  it('is 7: the knowledge list answers one page and its total', () => {
-    expect(PROTOCOL_VERSION).toBe(7);
+  it('is 8: the environment question category became access', () => {
+    expect(PROTOCOL_VERSION).toBe(8);
   });
 });
 
@@ -230,5 +233,48 @@ describe('slack contacts and timers', () => {
       error: 'offline',
     };
     expect(SlackConnectionDto.safeParse(connection).success).toBe(true);
+  });
+});
+
+describe('question categories', () => {
+  it('are the six, each with a hint and what it covers', () => {
+    expect(Object.values(QuestionCategory).sort()).toEqual([
+      'access',
+      'business',
+      'design',
+      'engineering',
+      'other',
+      'product',
+    ]);
+    for (const category of Object.values(QuestionCategory)) {
+      expect(QUESTION_CATEGORY_HINTS[category].hint.length).toBeGreaterThan(0);
+      expect(QUESTION_CATEGORY_HINTS[category].covers.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('record a decision for product, business, design and engineering only', () => {
+    expect([...DECISION_CATEGORIES].sort()).toEqual([
+      'business',
+      'design',
+      'engineering',
+      'product',
+    ]);
+  });
+
+  it.each([
+    ['business', true],
+    ['access', true],
+    ['environment', false],
+  ])('ask_human takes %s: %s', (category, ok) => {
+    const input = {
+      opId: 'op-12345678',
+      category,
+      question: 'q',
+      options: [
+        { label: 'A', description: 'a' },
+        { label: 'B', description: 'b' },
+      ],
+    };
+    expect(McpToolInputs.ask_human.safeParse(input).success).toBe(ok);
   });
 });

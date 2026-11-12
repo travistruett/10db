@@ -217,7 +217,7 @@ describe('InboxView', () => {
       kind: 'permission',
       title: 'Allow Bash?',
       body: 'curl -s https://example.com',
-      category: 'environment',
+      category: 'access',
       options: [
         { label: 'allow_once', description: 'Allow this call once' },
         { label: 'allow_workstream', description: 'Allow for the rest of this workstream' },
@@ -260,7 +260,7 @@ describe('InboxView', () => {
       kind: 'permission',
       title: 'Allow mcp__aws-billing__credits?',
       body: '{}',
-      category: 'environment',
+      category: 'access',
       options: [
         { label: 'allow_once', description: 'Allow this call once' },
         { label: 'allow_project', description: 'Always allow in this project' },
@@ -1376,7 +1376,8 @@ describe('knowledge on cards', () => {
     ['product', true],
     ['design', true],
     ['engineering', true],
-    ['environment', false],
+    ['business', true],
+    ['access', false],
     ['other', false],
   ] as const)('checks Record as a decision for a %s question: %s', async (category, checked) => {
     inbox([queue(category)]);
