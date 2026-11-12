@@ -234,9 +234,9 @@ describe('WorkbenchView', () => {
     );
     open('/workbench', { live: [live] });
     fireEvent.click(await screen.findByRole('button', { name: 'More pass actions' }));
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Abandon Pass', hidden: true }));
-    const dialog = await screen.findByRole('dialog', { name: 'Abandon Pass' });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Abandon Pass' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Abandon', hidden: true }));
+    const dialog = await screen.findByRole('dialog', { name: 'Abandon' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Abandon' }));
     await waitFor(() => {
       expect(abandoned).toEqual([live.pass.id]);
     });
@@ -270,8 +270,8 @@ describe('WorkbenchView', () => {
     );
     open('/workbench', { live: [live] });
     fireEvent.click(await screen.findByRole('button', { name: 'More pass actions' }));
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Close Pass', hidden: true }));
-    const dialog = await screen.findByRole('dialog', { name: 'Close Pass' });
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Finish', hidden: true }));
+    const dialog = await screen.findByRole('dialog', { name: 'Finish' });
     expect(await within(dialog).findByText('Lands 1 page on main.')).toBeTruthy();
     expect(asked).toEqual([live.pass.id]);
     expect(posted).toEqual([]);

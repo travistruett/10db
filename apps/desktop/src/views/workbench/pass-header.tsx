@@ -1,3 +1,4 @@
+import { MenuAction } from './menu-action';
 import {
   InboxKind,
   InboxState,
@@ -120,16 +121,26 @@ export function PassHeader(props: PassHeaderProps) {
             </Menu.Target>
             <Menu.Dropdown>
               {onClose ? (
-                <Menu.Item disabled={!open} onClick={onClose}>
-                  Close Pass
-                </Menu.Item>
+                <MenuAction
+                  label="Finish"
+                  byline="Ship the signed-off pages and end the pass."
+                  disabled={!open}
+                  onClick={onClose}
+                />
               ) : null}
-              <Menu.Item disabled={!open} onClick={onRename}>
-                Rename
-              </Menu.Item>
-              <Menu.Item color="red" disabled={!abandonable} onClick={onAbandon}>
-                Abandon Pass
-              </Menu.Item>
+              <MenuAction
+                label="Rename"
+                byline="Change the pass's name."
+                disabled={!open}
+                onClick={onRename}
+              />
+              <MenuAction
+                label="Abandon"
+                byline="Put unfinished pages back. Their work is saved."
+                color="red"
+                disabled={!abandonable}
+                onClick={onAbandon}
+              />
             </Menu.Dropdown>
           </Menu>
         </Group>

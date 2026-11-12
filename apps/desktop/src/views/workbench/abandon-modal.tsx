@@ -46,7 +46,7 @@ function closingLine(
   if (view.pass.state !== PassState.Closing) return null;
   return view.closeStep !== null && view.closeStep >= CloseStep.FastForwarded
     ? { line: 'The pass is landing: it can no longer be abandoned.', refused: true }
-    : { line: 'Its close stops where it is; what has landed stays.', refused: false };
+    : { line: 'Finishing stops where it is; what has landed stays.', refused: false };
 }
 
 /**
@@ -66,7 +66,7 @@ export function AbandonModal({ view, inbox, now, onClose, abandon }: AbandonModa
     <FormModal
       opened
       onClose={onClose}
-      title="Abandon Pass"
+      title="Abandon"
       size="md"
       error={leaving.error?.message ?? null}
       actions={
@@ -82,7 +82,7 @@ export function AbandonModal({ view, inbox, now, onClose, abandon }: AbandonModa
               leaving.mutate();
             }}
           >
-            Abandon Pass
+            Abandon
           </Button>
         </>
       }
