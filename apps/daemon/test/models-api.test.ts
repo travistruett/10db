@@ -10,7 +10,7 @@ import {
   RolePicksDto,
   type Effort,
 } from '@10db/contracts';
-import { findModelProfile, listAccountModels } from '@10db/db';
+import { findModelProfile, listAccountModels, replaceAccountModels } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { startDaemon, type RunningDaemon } from '../src/daemon';
@@ -87,11 +87,31 @@ describe('the model list over HTTP', () => {
   });
 
   it('prices the list on an account, one line per effort, and refuses a bad or archived account', async () => {
-    const { api } = await start([{ id: 'opus', resolvedId: 'claude-opus-5-5' }]);
+    const { running, api } = await start([{ id: 'opus', resolvedId: 'claude-opus-5-5' }]);
     const [account] = await api.get('/accounts', z.array(AccountDto));
     if (!account) throw new Error('the daemon has no default account');
-    const rows = await api.get(`/models?account=${account.id}`, z.array(ModelRowDto));
-    expect(rows[0]?.efforts.map((e) => e.effort).sort()).toEqual(['high', 'low']);
+    // The account's stored list names only `low`; the model has a profile at every effort.
+    running.state.write((ctx) => {
+      replaceAccountModels(
+        ctx,
+        account.id,
+        listAccountModels(ctx.tx, account.id).map((m) => ({
+          model: m.model,
+          family: m.family,
+          launchId: m.launchId,
+          efforts: ['low'],
+          inputPrice: m.inputPrice,
+          outputPrice: m.outputPrice,
+        })),
+      );
+    });
+    const efforts = async (path: string) =>
+      (await api.get(path, z.array(ModelRowDto)))
+        .find((r) => r.model === 'claude-opus-5-5')
+        ?.efforts.map((e) => e.effort)
+        .sort();
+    expect(await efforts(`/models?account=${account.id}`)).toEqual(['low']);
+    expect(await efforts('/models')).toEqual(['high', 'low', 'max', 'medium', 'xhigh']);
 
     await expect(api.get('/models?account=nope', z.array(ModelRowDto))).rejects.toThrow('-> 400');
     await expect(

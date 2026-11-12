@@ -1,6 +1,6 @@
 import type { AccountDto, AccountId, ModelRowDto, StepRole } from '@10db/contracts';
 import { SegmentedControl, Select, Stack, Text, Group } from '@mantine/core';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useModelOffers, useModelPicks } from '../../daemon/model-queries';
 import { ArtificialAnalysisCredit } from './artificial-analysis-credit';
 import { costNote } from './model-format';
@@ -27,6 +27,7 @@ export function ModelsChartView({
   accounts,
   accountId,
   onAccount,
+  accountsReady,
   settling,
 }: {
   readonly rows: readonly ModelRowDto[];
@@ -35,6 +36,8 @@ export function ModelsChartView({
   readonly accounts: readonly AccountDto[];
   readonly accountId: AccountId | null;
   readonly onAccount: (id: AccountId) => void;
+  /** Whether the accounts have loaded, so an empty list means there are none. */
+  readonly accountsReady: boolean;
   readonly settling: boolean;
 }) {
   const offers = useModelOffers();
@@ -42,6 +45,15 @@ export function ModelsChartView({
   const [role, setRole] = useState<StepRole | null>(null);
   const [dots, setDots] = useState<DotsMode>(DotsMode.Every);
 
+  // The chart prices on one account, so with none chosen (or the chosen one gone) it takes the default one, and the
+  // table then shows that account too.
+  const fallback = accounts.find((a) => a.isDefault) ?? accounts[0];
+  const fallbackId = fallback?.id ?? null;
+  useEffect(() => {
+    if (accountId === null && fallbackId !== null) onAccount(fallbackId);
+  }, [accountId, fallbackId, onAccount]);
+
+  if (!accountsReady) return <Text c="dimmed">Reading accounts…</Text>;
   if (accounts.length === 0)
     return (
       <Stack gap="xs">
@@ -52,7 +64,7 @@ export function ModelsChartView({
 
   const drawnPicks = settling ? [] : (picks.data?.picks ?? []);
   const result = rightsizingSeries({ rows, picks: drawnPicks, role, dots });
-  const costLabel = `Cost per task (USD, log scale). ${costNote(accountId, offers.data ?? [])}`;
+  const costLabel = `Cost per task (USD, log scale). ${costNote(accounts.find((a) => a.id === accountId) ?? null, offers.data ?? [])}`;
   return (
     <Stack>
       <Group justify="space-between">
@@ -90,6 +102,10 @@ export function ModelsChartView({
       {picks.isError ? (
         <Text size="sm" c="red">
           What each role gets could not be loaded.
+        </Text>
+      ) : accountId === null ? (
+        <Text size="sm" c="dimmed">
+          Choose an account
         </Text>
       ) : picks.data === undefined ? (
         <Text size="sm" c="dimmed">

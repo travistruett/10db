@@ -259,12 +259,27 @@ describe('buildModelRows', () => {
     });
 
     it('keeps the maker’s efforts and costs for a model the account does not offer', () => {
+      // The account lists another model, narrowed to one effort and priced; this model is not in its list.
       const rows = buildModelRows({
         catalogue: CATALOGUE,
-        accounts: [subscription, bedrock],
+        accounts: [bedrock],
         profiles: [priced('low', 30, 1), priced('high', 40, 2)],
-        offers: [listed(subscription.id), listed(bedrock.id, { outputPrice: 27.5 })],
-        account: { ...subscription, id: mintId('Account') },
+        offers: [listed(bedrock.id, { model: 'other-model', efforts: ['low'], outputPrice: 27.5 })],
+        account: bedrock,
+      });
+      expect(efforts(rows.filter((r) => r.model === 'claude-opus-5-5'))).toEqual([
+        'high:2',
+        'low:1',
+      ]);
+    });
+
+    it('keeps the maker’s cost where the account’s offer of the model is marked unusable', () => {
+      const rows = buildModelRows({
+        catalogue: CATALOGUE,
+        accounts: [bedrock],
+        profiles: [priced('low', 30, 1), priced('high', 40, 2)],
+        offers: [listed(bedrock.id, { unusable: true, outputPrice: 27.5 })],
+        account: bedrock,
       });
       expect(efforts(rows)).toEqual(['high:2', 'low:1']);
     });

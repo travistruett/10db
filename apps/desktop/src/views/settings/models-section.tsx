@@ -56,23 +56,17 @@ export function ModelsSection() {
   const [opened, setOpened] = useState(false);
 
   if (models.isPending) return <Text c="dimmed">Loading models…</Text>;
-  if (models.data === undefined)
+  // A failed read for one account leaves the toolbar, so the filter can be put back.
+  const failedForAccount = models.data === undefined && filter.accountId !== null;
+  if (models.data === undefined && !failedForAccount)
     return <Text c="red">Models could not be loaded. Check that the daemon is running.</Text>;
 
   const live = (accounts.data ?? []).filter((a) => !a.archived);
   const labels = new Map((accounts.data ?? []).map((a) => [a.id, a.label]));
-  const earliest = earliestFirstSeen(models.data);
-  const rows = sortModels(filterModels(models.data, filter), sort);
+  const data = models.data ?? [];
+  const earliest = earliestFirstSeen(data);
+  const rows = sortModels(filterModels(data, filter), sort);
   const chartAccount = live.find((a) => a.id === filter.accountId)?.id ?? null;
-  // The chart prices on one account, so entering it with Available on at Any account picks the default one;
-  // the table then shows that account too.
-  const chooseView = (next: View): void => {
-    setView(next);
-    const fallback = live.find((a) => a.isDefault) ?? live[0];
-    if (next === View.Chart && chartAccount === null && fallback)
-      setFilter({ ...filter, accountId: fallback.id });
-  };
-
   return (
     <Stack>
       <Group justify="space-between" align="flex-start" wrap="nowrap">
@@ -101,7 +95,7 @@ export function ModelsSection() {
             ]}
             value={view}
             onChange={(value) => {
-              if (isView(value)) chooseView(value);
+              if (isView(value)) setView(value);
             }}
           />
           {view === View.Table ? (
@@ -127,7 +121,22 @@ export function ModelsSection() {
           </Button>
         </Group>
       </Group>
-      {models.data.length === 0 ? (
+      {failedForAccount ? (
+        <Group gap="sm">
+          <Text c="red" role="alert">
+            The models of this account could not be read.
+          </Text>
+          <Button
+            variant="default"
+            size="xs"
+            onClick={() => {
+              setFilter({ ...filter, accountId: null });
+            }}
+          >
+            Show every account
+          </Button>
+        </Group>
+      ) : data.length === 0 ? (
         <Text c="dimmed">
           No models yet. They appear once an account has been read; Refresh Models reads every
           account now.
@@ -135,9 +144,10 @@ export function ModelsSection() {
       ) : view === View.Chart ? (
         <ModelsChartView
           rows={rows}
-          names={new Map(models.data.map((r) => [r.model, r.name]))}
+          names={new Map(data.map((r) => [r.model, r.name]))}
           accounts={live}
           accountId={chartAccount}
+          accountsReady={!accounts.isPending}
           onAccount={(id) => {
             setFilter({ ...filter, accountId: id });
           }}
@@ -155,7 +165,10 @@ export function ModelsSection() {
           now={now}
           earliest={earliest}
           hidden={hiddenColumns(TOGGLEABLE_COLUMNS, layout.columnsToggle)}
-          costNote={costNote(filter.accountId, offers.data ?? [])}
+          costNote={costNote(
+            live.find((a) => a.id === filter.accountId) ?? null,
+            offers.data ?? [],
+          )}
           onOpen={(r) => {
             setSelected(r);
             setOpened(true);

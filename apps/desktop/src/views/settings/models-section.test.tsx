@@ -1,9 +1,11 @@
-import type {
-  AccountDto,
-  AccountModelDto,
-  CatalogueStatusDto,
-  ModelProfileDto,
-  ModelRowDto,
+import {
+  AccountId,
+  mintId,
+  type AccountDto,
+  type AccountModelDto,
+  type CatalogueStatusDto,
+  type ModelProfileDto,
+  type ModelRowDto,
 } from '@10db/contracts';
 import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
@@ -105,6 +107,15 @@ const PICKS = [
     costPerTaskUsd: 2.5,
   }),
   rolePickDto({
+    role: 'review',
+    need: 48,
+    profileId: mintId('ModelProfile'),
+    model: 'alpha-fast',
+    effort: 'low',
+    intelligence: 30,
+    costPerTaskUsd: 0.2,
+  }),
+  rolePickDto({
     role: 'qa',
     need: 35,
     reason: 'No profile reaches 35 intelligence; a task planned on this account is refused here',
@@ -138,7 +149,7 @@ function serve(
     http.get(daemonUrl('/models/picks'), ({ request }) => {
       const account = new URL(request.url).searchParams.get('account') ?? '';
       opts.askedPicks?.push(account);
-      return HttpResponse.json(rolePicksDto(account as AccountDto['id'], PICKS));
+      return HttpResponse.json(rolePicksDto(AccountId.parse(account), PICKS));
     }),
     http.get(daemonUrl('/models/status'), () =>
       HttpResponse.json(opts.status ?? catalogueStatusDto()),
@@ -275,6 +286,28 @@ describe('the Models page', () => {
       });
     });
 
+    it('waits for the accounts, then takes the default one', async () => {
+      const asked: (string | null)[] = [];
+      serve({ asked, forAccount: () => [STRONG] });
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      server.use(
+        http.get(daemonUrl('/accounts'), async () => {
+          await gate;
+          return HttpResponse.json([SUBSCRIPTION, KEYED]);
+        }),
+      );
+      await openChart();
+      expect(await screen.findByText('Reading accounts…')).toBeTruthy();
+      expect(screen.queryByText('Add an account to see what each role gets.')).toBeNull();
+      release();
+      await waitFor(() => {
+        expect(asked.at(-1)).toBe(SUBSCRIPTION.id);
+      });
+    });
+
     it('lists what each role gets, and says where a pick is not on the chart', async () => {
       serve({ forAccount: () => [STRONG] });
       await openChart();
@@ -284,9 +317,12 @@ describe('the Models page', () => {
       expect(within(plan as HTMLElement).getByText('Alpha Max')).toBeTruthy();
       expect(within(plan as HTMLElement).getByText(/high/)).toBeTruthy();
       expect(within(plan as HTMLElement).getByText(/\$2\.50/)).toBeTruthy();
+      const review = within(panel).getByText('Review').closest('button');
+      expect(within(review as HTMLElement).getByText('Not on the chart')).toBeTruthy();
+      // A role with nothing chosen says why, not that it is off the chart.
       const qa = within(panel).getByText('QA').closest('button');
       expect(within(qa as HTMLElement).getByText(/refused here/)).toBeTruthy();
-      expect(within(qa as HTMLElement).getByText('Not on the chart')).toBeTruthy();
+      expect(within(qa as HTMLElement).queryByText('Not on the chart')).toBeNull();
       expect(within(plan as HTMLElement).queryByText('Not on the chart')).toBeNull();
     });
 
@@ -328,6 +364,26 @@ describe('the Models page', () => {
       expect(await screen.findByText('Add an account to see what each role gets.')).toBeTruthy();
       expect(screen.getByRole('link', { name: 'Artificial Analysis' })).toBeTruthy();
     });
+  });
+
+  it('keeps the toolbar and offers every account when one account’s models cannot be read', async () => {
+    serve();
+    renderWithDaemon(<ModelsSection />);
+    await screen.findByRole('button', { name: 'Open Alpha Max' });
+    server.use(
+      http.get(daemonUrl('/models'), ({ request }) =>
+        new URL(request.url).searchParams.has('account')
+          ? HttpResponse.json({ error: 'boom' }, { status: 500 })
+          : HttpResponse.json([FAST, STRONG, UNKNOWN, BLANK]),
+      ),
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Filter Available on' }));
+    fireEvent.click(await screen.findByRole('combobox', { name: 'Account' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'Work key', hidden: true }));
+    expect(await screen.findByText('The models of this account could not be read.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Refresh Models' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Show every account' }));
+    expect(await screen.findByRole('button', { name: 'Open Alpha Max' })).toBeTruthy();
   });
 
   it('filters by tier from the Tier column, one tier or several', async () => {

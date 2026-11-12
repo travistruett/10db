@@ -58,9 +58,34 @@ export interface RightsizingSeries {
   /** Roles whose pick has no drawn point: unmeasured, a cost of 0, hidden by a filter, or no profile. */
   readonly notOnChart: readonly StepRole[];
   /** From a need up, as far right as the dearest drawn pick; null where no pick is drawn. */
-  readonly area: { readonly need: number; readonly cost: number } | null;
+  readonly area: { readonly need: number; readonly top: number; readonly cost: number } | null;
+  /** The log axis's ticks: a 1-2-5 ladder from the rung under the cheapest drawn point to the one over the dearest. */
+  readonly ticks: readonly number[];
   /** Efforts with no Intelligence or no cost above 0, which have no place on the chart. */
   readonly omitted: number;
+}
+
+/** The top of the Intelligence scale, where the shaded area ends. */
+const SCALE_TOP = 100;
+const LADDER = [1, 2, 5] as const;
+
+/** The 1-2-5 rungs around a span of costs, from the last at or under `min` to the first over it at or past `max`. */
+export function costTicks(min: number, max: number): number[] {
+  if (!(min > 0) || max < min) return [];
+  const lowExp = Math.floor(Math.log10(min)) - 1;
+  const highExp = Math.ceil(Math.log10(max)) + 1;
+  const rungs: number[] = [];
+  for (let exp = lowExp; exp <= highExp; exp += 1)
+    for (const m of LADDER) rungs.push(Number((m * Math.pow(10, exp)).toPrecision(12)));
+  const from = rungs.findLastIndex((r) => r <= min);
+  const to = rungs.findIndex((r, i) => i > from && r >= max);
+  return rungs.slice(from, to + 1);
+}
+
+/** A tick on the cost axis: whole dollars bare, cents to two places, and sub-cent rungs as they are. */
+export function costTickLabel(value: number): string {
+  if (value >= 1) return `$${String(value)}`;
+  return value < 0.01 ? `$${String(value)}` : `$${value.toFixed(2)}`;
 }
 
 const SERIES_COLORS: Readonly<Record<ModelTier, string>> = {
@@ -167,7 +192,7 @@ export function rightsizingSeries(input: {
   const area =
     lowest === null || inScope.length === 0
       ? null
-      : { need: lowest, cost: Math.max(...inScope.map((r) => r.cost)) };
+      : { need: lowest, top: SCALE_TOP, cost: Math.max(...inScope.map((r) => r.cost)) };
 
   return {
     points,
@@ -177,6 +202,7 @@ export function rightsizingSeries(input: {
     rings,
     notOnChart,
     area,
+    ticks: costTicks(Math.min(...drawn.map((p) => p.cost)), Math.max(...drawn.map((p) => p.cost))),
     omitted,
   };
 }

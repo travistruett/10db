@@ -1,7 +1,8 @@
 import {
   CatalogueAttempt,
   CatalogueSource,
-  type AccountId,
+  AccountKind,
+  type AccountDto,
   type AccountModelDto,
   type CatalogueStatusDto,
 } from '@10db/contracts';
@@ -26,17 +27,30 @@ export function formatCost(value: number | null): string {
   return value > 0 && value < 0.01 ? '<$0.01' : `$${value.toFixed(2)}`;
 }
 
+/** The kinds that pay per token, whose own prices come with the account's list. */
+const METERED_KINDS: readonly AccountKind[] = [
+  AccountKind.AnthropicApiKey,
+  AccountKind.Bedrock,
+  AccountKind.Gateway,
+];
+
 /**
  * What a cost per task is at. Without an account it is the maker's API list price; an account that lists its own
- * per-token price scales it, and one with none (a plan, a gateway without prices) keeps the maker's.
+ * per-token price scales it, a plan or a list without prices keeps the maker's, and a metered account whose list
+ * has not been read yet cannot say.
  */
-export function costNote(accountId: AccountId | null, offers: readonly AccountModelDto[]): string {
+export function costNote(
+  account: Pick<AccountDto, 'id' | 'kind'> | null,
+  offers: readonly AccountModelDto[],
+): string {
   const base = "At the maker's API list price";
-  if (accountId === null) return base;
-  const priced = offers.some((o) => o.accountId === accountId && o.outputPrice !== null);
-  return priced
-    ? `${base}, scaled to this account's own output price`
-    : `${base}; this account has no per-token price`;
+  if (account === null) return base;
+  const own = offers.filter((o) => o.accountId === account.id);
+  if (own.some((o) => o.outputPrice !== null))
+    return `${base}, scaled to this account's own output price`;
+  if (own.length === 0 && METERED_KINDS.includes(account.kind))
+    return `${base}; this account's own price is unknown until its list is read`;
+  return `${base}; this account has no per-token price`;
 }
 
 /** The share of steps that passed first time; no steps, no rate. */

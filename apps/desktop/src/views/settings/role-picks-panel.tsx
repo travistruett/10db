@@ -61,7 +61,7 @@ export function RolePicksPanel({
                       {formatCost(pick.costPerTaskUsd)} a task
                     </Text>
                   )}
-                  {notOnChart.includes(role) ? (
+                  {pick.model !== null && notOnChart.includes(role) ? (
                     <Badge size="sm" variant="light" color="gray">
                       Not on the chart
                     </Badge>

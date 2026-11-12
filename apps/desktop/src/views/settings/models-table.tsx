@@ -240,22 +240,34 @@ export function ModelsTable({
       },
     },
   ];
-  const cost = head(
-    numeric(ModelColumn.CostPerTask, 'Cost per task', (row) => formatCost(row.costPerTaskUsd)),
-  );
+  const tipped = (
+    column: DataTableColumn<ModelRowDto>,
+    label: string,
+  ): DataTableColumn<ModelRowDto> => ({
+    ...column,
+    title: (
+      <Tooltip label={label} multiline maw={260} withArrow>
+        <span>{column.title}</span>
+      </Tooltip>
+    ),
+  });
   const columns: DataTableColumn<ModelRowDto>[] = [
     ...described.map(head),
     head(numeric(ModelColumn.Intelligence, 'Intelligence', (row) => formatScore(row.intelligence))),
-    {
-      ...cost,
-      title: (
-        <Tooltip label={costNote} multiline maw={260} withArrow>
-          <span>{cost.title}</span>
-        </Tooltip>
+    tipped(
+      head(
+        numeric(ModelColumn.CostPerTask, 'Cost per task', (row) => formatCost(row.costPerTaskUsd)),
       ),
-    },
-    head(numeric(ModelColumn.InputPrice, 'Input $/1M', (row) => formatPrice(row.inputPrice))),
-    head(numeric(ModelColumn.OutputPrice, 'Output $/1M', (row) => formatPrice(row.outputPrice))),
+      costNote,
+    ),
+    tipped(
+      head(numeric(ModelColumn.InputPrice, 'Input $/1M', (row) => formatPrice(row.inputPrice))),
+      "The maker's list price",
+    ),
+    tipped(
+      head(numeric(ModelColumn.OutputPrice, 'Output $/1M', (row) => formatPrice(row.outputPrice))),
+      "The maker's list price",
+    ),
     head(numeric(ModelColumn.StepsRun, 'Steps run', (row) => row.stepsRun)),
     {
       ...head(

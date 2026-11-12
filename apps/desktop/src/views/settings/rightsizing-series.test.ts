@@ -1,7 +1,7 @@
 import type { ModelRowDto, RolePickDto, StepRole } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { modelEffortDto, modelRowDto } from '../../test/model-fixtures';
-import { DotsMode, rightsizingSeries } from './rightsizing-series';
+import { costTickLabel, costTicks, DotsMode, rightsizingSeries } from './rightsizing-series';
 
 const effort = (
   name: 'low' | 'medium' | 'high',
@@ -152,15 +152,15 @@ describe('rightsizingSeries rings and area', () => {
   });
 
   it('shades from the lowest need up to the dearest drawn pick', () => {
-    expect(build().area).toEqual({ need: 35, cost: 2 });
+    expect(build().area).toEqual({ need: 35, top: 100, cost: 2 });
   });
 
   it('takes the area from the drawn picks only', () => {
-    expect(build({ rows: [small, mid] }).area).toEqual({ need: 35, cost: 1 });
+    expect(build({ rows: [small, mid] }).area).toEqual({ need: 35, top: 100, cost: 1 });
   });
 
   it('shades from the selected role’s need to its pick’s cost', () => {
-    expect(build({ role: 'implement' }).area).toEqual({ need: 40, cost: 1 });
+    expect(build({ role: 'implement' }).area).toEqual({ need: 40, top: 100, cost: 1 });
   });
 
   it('shades nothing where no pick is drawn', () => {
@@ -175,5 +175,49 @@ describe('rightsizingSeries identity', () => {
     const ids = result.series.flatMap((s) => s.data.map((d) => d.id));
     expect(ids.sort()).toEqual(result.points.map((p) => p.id).sort());
     expect(result.points.every((p, i) => p.id === i)).toBe(true);
+  });
+});
+
+describe('costTicks', () => {
+  it.each([
+    { name: 'a span across decades', min: 0.05, max: 2, want: [0.05, 0.1, 0.2, 0.5, 1, 2] },
+    {
+      name: 'values between rungs reach out to the rungs around them',
+      min: 0.06,
+      max: 1.5,
+      want: [0.05, 0.1, 0.2, 0.5, 1, 2],
+    },
+    { name: 'one value between rungs', min: 0.4, max: 0.4, want: [0.2, 0.5] },
+    { name: 'one value on a rung', min: 1, max: 1, want: [1, 2] },
+    {
+      name: 'a span under a cent',
+      min: 0.004,
+      max: 0.03,
+      want: [0.002, 0.005, 0.01, 0.02, 0.05],
+    },
+    { name: 'a span into the tens', min: 3, max: 12, want: [2, 5, 10, 20] },
+  ])('$name', ({ min, max, want }) => {
+    expect(costTicks(min, max)).toEqual(want);
+  });
+
+  it('has no ticks where nothing is drawn', () => {
+    expect(build({ rows: [] }).ticks).toEqual([]);
+    expect(build().ticks).toEqual(costTicks(0.05, 2));
+  });
+});
+
+describe('costTickLabel', () => {
+  it.each([
+    [0.002, '$0.002'],
+    [0.005, '$0.005'],
+    [0.01, '$0.01'],
+    [0.02, '$0.02'],
+    [0.1, '$0.10'],
+    [0.5, '$0.50'],
+    [1, '$1'],
+    [2, '$2'],
+    [10, '$10'],
+  ])('%s reads %s', (value, want) => {
+    expect(costTickLabel(value)).toBe(want);
   });
 });

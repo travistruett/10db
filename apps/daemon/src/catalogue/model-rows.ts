@@ -159,7 +159,8 @@ export function buildModelRows(input: ModelRowsInput): ModelRowDto[] {
       offeredToAccount && accountProvider !== undefined
         ? offeredProfiles(profiles, accountOffers, accountProvider)
         : profiles,
-      accountOffers,
+      // A model the account does not offer, or offers unusably, keeps the maker's price.
+      offeredToAccount ? accountOffers : undefined,
     );
     const first = efforts[0];
 

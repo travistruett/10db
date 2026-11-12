@@ -280,7 +280,7 @@ cards).
 4. **Invalidation.** Picks live under `modelKeys.all`, and `account`, `role_setting`, `pattern` and `persona` events
    also invalidate `modelKeys.all` (`apps/desktop/src/daemon/events.ts`). Add a row to its table test if one exists.
 5. **Archived or unknown account.** Both routes refuse an archived account explicitly with a 404; `getAccount`
-   only throws for unknown ids. An account of a kind 10db cannot run (`providerOf` refuses it) is a 400. The
+   only throws for unknown ids. The account's kind type already limits it to kinds 10db can run, so no kind check is needed. The
    chart's account select lists live, supported accounts only. Test archived and unknown on both routes.
 6. **Plan accounts say what the number is.** On an account with no per-token price (Claude subscription,
    ChatGPT/Codex sign-in, a gateway without catalogue prices), the Cost per task header tooltip and the chart's X

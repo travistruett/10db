@@ -14,7 +14,6 @@ import {
   InvalidError,
   NotFoundError,
   providerOf,
-  SUPPORTED_ACCOUNT_KINDS,
   isDaemonAddress,
   APP_URL_IS_DAEMON,
   type McpServerStatusDto,
@@ -173,15 +172,10 @@ import type { AddressProbe } from './loopback-probe';
 import { suggestSettings } from './suggest-settings';
 import { checkoutConflictsWithRoot } from './worktree-root';
 
-/**
- * An account that is still in use and of a kind 10db can run: an archived one is as good as unknown to a read
- * that prices on it, and a kind it cannot run has no provider to read a list for.
- */
+/** An account that is still in use: an archived one is as good as unknown to a read that prices on it. */
 function liveAccount(db: DbReader, id: AccountId): AccountDto {
   const account = getAccount(db, id);
   if (account.archived) throw new NotFoundError('account', id);
-  if (!SUPPORTED_ACCOUNT_KINDS.some((kind) => kind === account.kind))
-    throw new InvalidError(`10db cannot run an account of kind ${account.kind}`);
   return account;
 }
 

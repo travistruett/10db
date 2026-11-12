@@ -2,7 +2,7 @@ import { ScatterChart } from '@mantine/charts';
 import { Paper, Text } from '@mantine/core';
 import { z } from 'zod';
 import { formatCost, formatScore } from './model-format';
-import type { RightsizingSeries } from './rightsizing-series';
+import { costTickLabel, type RightsizingSeries } from './rightsizing-series';
 
 const TooltipPoint = z.object({ id: z.number() });
 
@@ -29,6 +29,9 @@ export function RightsizingChart({
       },
     ];
   });
+  const { ticks } = result;
+  const first = ticks[0];
+  const last = ticks.at(-1);
   return (
     <ScatterChart
       h={420}
@@ -44,8 +47,11 @@ export function RightsizingChart({
       xAxisProps={{
         scale: 'log',
         type: 'number',
-        domain: ['auto', 'auto'],
-        tickFormatter: (value: number) => formatCost(value),
+        // A fixed 1-2-5 ladder, every rung labelled, with the axis ending on its first and last rung.
+        ...(first === undefined || last === undefined || first === last
+          ? { domain: ['auto', 'auto'] }
+          : { domain: [first, last], ticks, interval: 0 }),
+        tickFormatter: (value: number) => costTickLabel(value),
       }}
       yAxisProps={{ type: 'number', domain: [0, 'auto'] }}
       referenceLines={[
@@ -63,6 +69,7 @@ export function RightsizingChart({
           : [
               {
                 y1: result.area.need,
+                y2: result.area.top,
                 x2: result.area.cost,
                 color: 'teal.6',
                 ifOverflow: 'hidden' as const,
@@ -74,8 +81,8 @@ export function RightsizingChart({
         y: ring.intelligence,
         r: 9,
         fill: 'none',
-        color: 'orange.6',
-        strokeWidth: 2,
+        stroke: 'var(--mantine-color-orange-6)',
+        strokeWidth: 2.5,
         opacity: ring.dimmed ? 0.25 : 1,
       }))}
       tooltipProps={{
