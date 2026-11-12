@@ -39,10 +39,10 @@ export function setupReadRefusal(real: string, ctx: SetupReadContext): string | 
   const inRoots = underAny(real, roots);
   if (isEqualOrUnder(real, ctx.home) && !inRoots) {
     const parts = relative(foldPathCase(ctx.home), foldPathCase(real)).split(sep);
-    if (parts.length < 2) return 'it lies directly in your home folder';
     const top = parts[0] ?? '';
     if (top === 'library' || top === 'Library' || top.startsWith('.'))
       return 'it lies under ~/Library or a hidden folder of your home';
+    if (parts.length < 2) return 'it lies directly in your home folder';
   }
   if (!inRoots && underAny(real, ctx.protectedReads))
     return 'it lies in a folder 10db keeps closed';
