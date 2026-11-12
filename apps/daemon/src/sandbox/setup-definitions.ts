@@ -2,7 +2,6 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
-  realpathSync,
   statSync,
   symlinkSync,
   writeFileSync,
@@ -52,21 +51,44 @@ function rawBlock(text: string): string {
   return end < 0 ? source : source.slice(0, end);
 }
 
+/** A key another YAML reader may follow to merge in keys 10db never sees as its own. */
+const MERGE_KEY = '<<';
+
+const unreadable = (why: string): string => `${why}, and it may hold hooks or pre-approved tools`;
+
+/** Why what Claude Code would read of `text` may still hold a stripped key, or null when it holds none. */
+function strippedLeft(text: string): string | null {
+  const split = readFrontmatter(text);
+  if ('refused' in split)
+    return MIGHT_HOLD_STRIPPED.test(rawBlock(text)) ? unreadable(split.refused) : null;
+  if (split.pairs.some(([key]) => key === MERGE_KEY))
+    return "its frontmatter merges in keys 10db can't see";
+  return split.pairs.some(([key]) => STRIPPED.has(normalized(key)))
+    ? 'what Claude Code would read of it still holds hooks or pre-approved tools'
+    : null;
+}
+
 /**
  * A definition with its stripped keys removed and every other key kept, the body as written; null when
- * it holds none. Frontmatter 10db can't read is refused when its text could spell one.
+ * it holds none. What it would then be is read again as Claude Code reads it, so a body that opens a
+ * second block, once the first is gone, is refused; so is frontmatter 10db can't read whose text could
+ * spell a stripped key, and a merge key.
  */
 export function withoutStrippedKeys(text: string): Stripped {
   const split = readFrontmatter(text);
-  if ('refused' in split)
-    return MIGHT_HOLD_STRIPPED.test(rawBlock(text))
-      ? { refused: `${split.refused}, and it may hold hooks or pre-approved tools` }
-      : null;
+  if ('refused' in split) {
+    const why = strippedLeft(text);
+    return why === null ? null : { refused: why };
+  }
+  if (split.pairs.some(([key]) => key === MERGE_KEY))
+    return { refused: "its frontmatter merges in keys 10db can't see" };
   const notes = [...new Set(split.pairs.flatMap(([key]) => STRIPPED.get(normalized(key)) ?? []))];
   if (notes.length === 0) return null;
   const kept = Object.fromEntries(split.pairs.filter(([key]) => !STRIPPED.has(normalized(key))));
   const written = writeFrontmatter(kept, split.body);
-  return 'refused' in written ? written : { text: written.text, notes };
+  if ('refused' in written) return written;
+  const left = strippedLeft(written.text);
+  return left === null ? { text: written.text, notes } : { refused: left };
 }
 
 function readDefinition(path: string): Stripped {
@@ -133,7 +155,7 @@ export function skillChanges(folder: string): DefinitionChanges {
 /**
  * A plugin's carried folders (`entries`, each `[folder as written, its kind]`): each skill's `SKILL.md`
  * and every `.md` under its agents and commands, followed through links as Claude Code follows them.
- * Null when there are more entries than 10db walks.
+ * Null when there are more entries, or deeper folders, than 10db walks.
  */
 export function pluginChanges(
   installPath: string,
@@ -141,25 +163,17 @@ export function pluginChanges(
 ): DefinitionChanges | null {
   const changes: DefinitionChanges = { rewrites: [], notes: [] };
   const budget = { left: PLUGIN_MAX_ENTRIES };
-  const seen = new Set<string>();
+  // Walked by path, never by real path, so a folder two links reach is judged under each, as the
+  // wrapper links it under each; a loop or a nesting past the cap leaves the plugin out.
   const walk = (relative: string, depth: number): boolean => {
-    const path = join(installPath, relative);
-    let real: string;
-    try {
-      real = realpathSync.native(path);
-    } catch {
-      return true;
-    }
-    // A folder link back up would never end the walk; Claude Code's own walk is not this one's to judge.
-    if (seen.has(real) || depth > MAX_DEPTH) return true;
-    seen.add(real);
-    for (const entry of entriesOf(path)) {
+    if (depth > MAX_DEPTH) return false;
+    for (const entry of entriesOf(join(installPath, relative))) {
       budget.left -= 1;
       if (budget.left < 0) return false;
       const inner = `${relative}/${entry}`;
       if (isFolder(join(installPath, inner))) {
         if (!walk(inner, depth + 1)) return false;
-      } else if (foldPathCase(entry).endsWith('.md')) {
+      } else if (entry.toLowerCase().endsWith('.md')) {
         change(changes, inner, readDefinition(join(installPath, inner)));
       }
     }

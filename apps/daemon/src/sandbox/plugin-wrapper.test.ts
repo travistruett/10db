@@ -8,6 +8,7 @@ import {
   readlinkSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -220,5 +221,25 @@ describe('wrapPlugin', () => {
     ]);
     expect(existsSync(join(into, 'agents/a.md'))).toBe(false);
     expect(readlinkSync(join(into, 'agents/b.md'))).toBe(join(plugin, 'agents/b.md'));
+  });
+
+  it('re-emits a definition under each path a folder link reaches it by', () => {
+    write(join(plugin, 'shared/x.md'), '---\nname: x\nhooks: {}\n---\nBody\n');
+    mkdirSync(join(plugin, 'commands/one'), { recursive: true });
+    symlinkSync(join(plugin, 'shared'), join(plugin, 'commands/one/a'));
+    symlinkSync(join(plugin, 'shared'), join(plugin, 'commands/b'));
+    wrap();
+    for (const path of ['commands/one/a/x.md', 'commands/b/x.md'])
+      expect(readFileSync(join(into, path), 'utf8'), path).toBe('---\nname: x\n---\nBody\n');
+  });
+
+  it('leaves the plugin out when its definition folders nest past what 10db walks', () => {
+    write(join(plugin, `commands/${'d/'.repeat(12)}x.md`), '---\nhooks: {}\n---\nBody\n');
+    expect(pluginChanges(plugin, carriedEntries(plugin))).toBeNull();
+  });
+
+  it('leaves the plugin out when a folder link loops', () => {
+    symlinkSync(join(plugin, 'commands'), join(plugin, 'commands/loop'));
+    expect(pluginChanges(plugin, carriedEntries(plugin))).toBeNull();
   });
 });
