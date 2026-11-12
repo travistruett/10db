@@ -2,7 +2,7 @@ import type { AddressInfo } from 'node:net';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { serve } from '@hono/node-server';
-import { mintId } from '@10db/contracts';
+import { mintId, RoutedBy } from '@10db/contracts';
 import type {
   AccountId,
   BatchId,
@@ -64,7 +64,8 @@ import { createEventBus, createStateStore, type EventBus, type StateStore } from
 import { createDeliveryJobs } from '../src/delivery';
 import { createGit } from '../src/git';
 import { startSignOff } from '../src/pass';
-import type { Judge } from '../src/judge';
+import { createJudge, type Judge } from '../src/judge';
+import { createTriage } from '../src/stakeholders';
 import { createInboxService, createParkAnswers, type InboxService } from '../src/inbox';
 import { silentLogger } from '../src/log';
 import { protectedPaths } from '../src/guard';
@@ -166,6 +167,11 @@ export async function createTestEngine(
     readonly secret?: string;
     /** How long one request_claim call waits before it answers "still waiting", and how often it looks. */
     readonly claims?: { readonly sliceMs: number; readonly pollMs: number };
+    /**
+     * A fake OpenRouter: with it the engine triages questions through a real judge on this `fetch`, as
+     * the daemon does. Without it the judge is off and the lane's tags decide at insert.
+     */
+    readonly openRouter?: { readonly fetch: typeof fetch; readonly key?: string };
   } = {},
 ): Promise<TestEngine> {
   const repo = createTempRepo();
@@ -199,8 +205,31 @@ export async function createTestEngine(
     },
     log: silentLogger,
   });
+  const triageJudge: Judge = setup.openRouter
+    ? createJudge({
+        state,
+        clock,
+        fetch: setup.openRouter.fetch,
+        readKey: () => Promise.resolve(setup.openRouter?.key ?? 'test-key-0123456789'),
+        off: false,
+        logger: silentLogger,
+      })
+    : offJudge;
+  const triage = createTriage({
+    state,
+    judge: triageJudge,
+    log: silentLogger,
+    afterRouted: () => undefined,
+  });
   const inbox = createInboxService({
     state,
+    judgeOff: triageJudge.off,
+    onQuestionOpened: (_ctx, item) =>
+      item.routedBy === RoutedBy.TriagePending
+        ? () => {
+            void triage.run(item.id);
+          }
+        : null,
     onParkedAnswer: (target, item) => {
       runner?.deliverParkedAnswer(target, item);
     },

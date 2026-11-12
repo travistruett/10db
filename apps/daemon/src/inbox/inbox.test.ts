@@ -35,6 +35,7 @@ import {
   insertInboxItem,
   insertPermissionRule,
   insertPerson,
+  patchJudgeConfig,
   setRoutingRules,
   insertProposal,
   insertSource,
@@ -465,6 +466,88 @@ describe('routed questions fold by their recipients', () => {
     ]);
     // The first card is open under the other order; a fresh ask in the new order is the same set.
     expect(ask(w.b).item.id).toBe(first.item.id);
+  });
+});
+
+describe('a question left to triage', () => {
+  function project() {
+    const ws = seedWorkstream(base);
+    const mark = base.write((ctx) => insertPerson(ctx, { handle: 'mark', name: 'Mark' })).value;
+    base.write((ctx) =>
+      setRoutingRules(ctx, ws.project.id, {
+        rules: [{ category: 'design', area: null, personId: mark.id }],
+      }),
+    );
+    return ws;
+  }
+  const service = (extra: { judgeOff?: boolean; opened?: string[] } = {}) =>
+    createInboxService({
+      state,
+      onParkedAnswer: () => undefined,
+      ...(extra.judgeOff === undefined ? {} : { judgeOff: extra.judgeOff }),
+      onQuestionOpened: (_ctx, item) => {
+        extra.opened?.push(`write:${item.routedBy}`);
+        return () => extra.opened?.push(`commit:${item.id}`);
+      },
+    });
+  const askOn = (svc: InboxService, ws: ReturnType<typeof seedWorkstream>) =>
+    svc.ask({
+      projectId: ws.project.id,
+      workstreamId: ws.workstream.id,
+      sessionId: mintId('Session'),
+      kind: 'question',
+      title: 'Which color?',
+      body: '',
+      options: [
+        { label: 'Teal', description: '' },
+        { label: 'Red', description: '' },
+      ],
+      recommendation: null,
+      category: 'design',
+      urgency: 'normal',
+      detail: null,
+      signal: new AbortController().signal,
+    });
+
+  it('waits with the builder as pending when the judge can run, and starts triage after the commit', () => {
+    const ws = project();
+    const opened: string[] = [];
+    const { item } = askOn(service({ opened }), ws);
+    expect(item).toMatchObject({ routedBy: 'triage_pending', assignees: ['me'] });
+    expect(opened).toEqual(['write:triage_pending', `commit:${item.id}`]);
+  });
+
+  it('does not start triage again for an ask that folds into the open card', () => {
+    const ws = project();
+    const opened: string[] = [];
+    const svc = service({ opened });
+    askOn(svc, ws);
+    askOn(svc, ws);
+    expect(opened).toHaveLength(2);
+  });
+
+  it.each([
+    ['TENDB_JUDGE=off', () => service({ judgeOff: true })],
+    [
+      'question_route switched off',
+      () => {
+        base.write((ctx) =>
+          patchJudgeConfig(ctx, { decisions: { question_route: { enabled: false } } }),
+        );
+        return service();
+      },
+    ],
+    [
+      'the judge switched off',
+      () => {
+        base.write((ctx) => patchJudgeConfig(ctx, { enabled: false }));
+        return service();
+      },
+    ],
+  ])('routes by the lane tags at insert with %s, never pending', (_name, make) => {
+    const ws = project();
+    const { item } = askOn(make(), ws);
+    expect(item).toMatchObject({ routedBy: 'rule', assignees: ['mark'] });
   });
 });
 

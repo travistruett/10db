@@ -10,6 +10,7 @@ import {
   InboxAnswerRefused,
   InboxKind,
   InboxState,
+  JudgeDecision,
   InvalidError,
   isParkChoice,
   MCP_TOOL_GRANT_DETAIL,
@@ -36,6 +37,7 @@ import {
 import {
   findOpenByFoldKey,
   getInboxItem,
+  getJudgeConfig,
   areasForProposal,
   getProject,
   getProposal,
@@ -439,6 +441,13 @@ export function createInboxService(deps: {
   onParkAnswer?(item: InboxItemDto): void;
   /** Where a failure that must not fail the builder's answer is logged. */
   readonly log?: Logger;
+  /**
+   * Runs inside the write that inserts a new question card. The result runs once that write has
+   * committed: it starts the judge's triage, so the network call never sits inside a transaction.
+   */
+  onQuestionOpened?(ctx: WriteContext, item: InboxItemDto): (() => void) | null;
+  /** The daemon was started with `TENDB_JUDGE=off`: no question is left waiting for triage. */
+  readonly judgeOff?: boolean;
 }): InboxService {
   const waiters = new Map<InboxItemId, Map<SessionId, Waiter>>();
 
@@ -565,8 +574,19 @@ export function createInboxService(deps: {
     }
   }
 
+  /**
+   * Whether a question could be triaged now: something is wired to run triage and the judge is on. If
+   * not, the lane's tags decide at insert and the card is never pending.
+   */
+  function judgeCanTriage(db: DbReader): boolean {
+    if (deps.onQuestionOpened === undefined || deps.judgeOff === true) return false;
+    const config = getJudgeConfig(db);
+    return config.enabled && config.decisions[JudgeDecision.QuestionRoute].enabled;
+  }
+
   const service: InboxService = {
     ask(raw) {
+      let afterCommit: (() => void) | undefined;
       // Whatever the lane wrote, a question can be answered by parking the task, except a pass
       // page's: a page leaves its pass by Take Out, never by parking.
       const input =
@@ -606,7 +626,7 @@ export function createInboxService(deps: {
               : {}),
           });
         }
-        return insertInboxItem(ctx, {
+        const created = insertInboxItem(ctx, {
           projectId: input.projectId,
           kind: input.kind,
           title: input.title,
@@ -620,8 +640,19 @@ export function createInboxService(deps: {
           targets: target === null ? [] : [target],
           topic: input.topic ?? null,
           passPage,
+          pendingTriage: judgeCanTriage(ctx.tx),
         });
+        if (created.kind === InboxKind.Question) {
+          afterCommit = deps.onQuestionOpened?.(ctx, created) ?? undefined;
+        }
+        return created;
       });
+      // A callback that throws must not fail the ask: the card is stored and the lane waits on it.
+      try {
+        afterCommit?.();
+      } catch (error) {
+        deps.log?.warn({ err: error, cardId: item.id }, 'could not start triage');
+      }
       const answer = new Promise<InboxAnswer>((resolve, reject) => {
         const forItem = waiters.get(item.id) ?? new Map<SessionId, Waiter>();
         forItem.set(input.sessionId, { resolve });

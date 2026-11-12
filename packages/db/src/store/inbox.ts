@@ -43,7 +43,17 @@ export interface NewInboxItem {
   readonly topic?: string | null;
   /** The card is a Workbench pass page's question, which the builder answers. */
   readonly passPage?: boolean;
+  /**
+   * Leave a triage-tier card with the builder until the judge routes it: the rules' recipients are kept
+   * for folding, and `routedBy` is `triage_pending`.
+   */
+  readonly pendingTriage?: boolean;
 }
+
+/** The detail key holding why a tie went to the builder. */
+export const ROUTE_NOTE_KEY = 'routeNote';
+/** The detail key holding the topic the lane named. */
+export const ASKED_TOPIC_KEY = 'askedTopic';
 
 const LIVE_STATES: InboxState[] = [InboxState.Open, InboxState.Answered, InboxState.Delivering];
 
@@ -87,8 +97,22 @@ export function targetTaskIds(db: DbReader, targets: readonly InboxTarget[]): Ta
   return [...ids];
 }
 
+/** The lane's topic and a too-big tie's note ride in the card's detail, where triage and the card read them. */
+function withRouting(
+  detail: Record<string, Json> | null,
+  note: string | null,
+  topic: string | null,
+): Record<string, Json> | null {
+  if (note === null && topic === null) return detail;
+  return {
+    ...detail,
+    ...(note === null ? {} : { [ROUTE_NOTE_KEY]: note }),
+    ...(topic === null ? {} : { [ASKED_TOPIC_KEY]: topic }),
+  };
+}
+
 export function insertInboxItem(ctx: WriteContext, newItem: NewInboxItem): InboxItemDto {
-  const { topic, passPage, ...item } = newItem;
+  const { topic, passPage, pendingTriage, ...item } = newItem;
   const routed = assigneesFor(ctx.tx, {
     projectId: item.projectId,
     kind: item.kind,
@@ -97,18 +121,20 @@ export function insertInboxItem(ctx: WriteContext, newItem: NewInboxItem): Inbox
     taskIds: targetTaskIds(ctx.tx, item.targets),
     passPage: passPage ?? false,
   });
+  const pending = pendingTriage === true && routed.tier === 'triage';
+  const shown = pending ? [BUILDER_HANDLE] : routed.handles;
   const recipients = {
-    assignee: routed.handles[0] ?? BUILDER_HANDLE,
-    assignees: routed.handles,
+    assignee: shown[0] ?? BUILDER_HANDLE,
+    assignees: shown,
     ruleAssignees: routed.handles,
-    routedBy: RoutedBy.Rule,
+    routedBy: pending ? RoutedBy.TriagePending : RoutedBy.Rule,
     routeSuggestion: null,
   };
   const row = {
     id: mintId('InboxItem'),
     ...item,
     // A tie too big for a group DM is explained on the card.
-    detail: routed.note === null ? item.detail : { ...item.detail, routeNote: routed.note },
+    detail: withRouting(item.detail, routed.note, topic ?? null),
     options: [...item.options],
     targets: [...item.targets],
     state: InboxState.Open,

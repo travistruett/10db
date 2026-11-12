@@ -8,8 +8,10 @@ import {
   BRAINSTORM_REFUSED_ON_CHATGPT,
   EventType,
   InvalidError,
+  InboxState,
   PROTOCOL_VERSION,
   Provider,
+  RoutedBy,
   providerOf,
   StepRole,
   type Effort,
@@ -27,6 +29,7 @@ import {
   countBatchesInFlight,
   countWaitingOnCard,
   isLaneWaitingOnCard,
+  listInbox,
   createStore,
   DB_MIGRATIONS_DIR,
   deleteAppSetting,
@@ -76,6 +79,7 @@ import {
 } from '../catalogue';
 import { createJudge, JUDGE_LOG_RETENTION_MS, type JudgeService } from '../judge';
 import { createJudgeServices } from './judge-services';
+import { createTriage } from '../stakeholders';
 import {
   backupDatabase,
   hasPendingMigrations,
@@ -673,8 +677,22 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     log: logger,
   });
+  // A question no explicit route claimed is routed by the judge right after its card commits.
+  const triage = createTriage({
+    state,
+    judge,
+    log: logger.child({ component: 'triage' }),
+    afterRouted: () => undefined,
+  });
   const inbox = createInboxService({
     state,
+    judgeOff: opts.judgeOff === true,
+    onQuestionOpened: (_ctx, item) =>
+      item.routedBy === RoutedBy.TriagePending
+        ? () => {
+            void triage.run(item.id);
+          }
+        : null,
     onParkedAnswer: (target, item) => {
       runner?.deliverParkedAnswer(target, item);
     },
@@ -1448,6 +1466,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger,
     cleanShutdown,
   });
+  // A card a crash left waiting for triage is routed now; the judge or the lane's tags settle it.
+  for (const card of listInbox(state.db, { states: [InboxState.Open] })) {
+    if (card.routedBy === RoutedBy.TriagePending) void triage.run(card.id);
+  }
   // A pass's take-outs and Abandon stop its lanes through the runner, and tell the watcher which
   // files their put-back wrote.
   const stopLane: StopPassLane = (id) => createdRunner.stopPassLane(id);
