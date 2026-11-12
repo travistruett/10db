@@ -1,8 +1,14 @@
-import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { Worker } from 'node:worker_threads';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir, type TempDir } from '../../test/fixtures';
-import { INSTRUCTIONS_MAX_CHARS, readInstructions, type Instructions } from './instructions';
+import {
+  INSTRUCTIONS_MAX_CHARS,
+  INSTRUCTIONS_MAX_RULES,
+  readInstructions,
+  type Instructions,
+} from './instructions';
 import { leftOutNote } from './left-out';
 
 let root: TempDir;
@@ -146,6 +152,66 @@ describe('readInstructions', () => {
       { what: '.claude/rules/c.md', why: 'over the size 10db puts in a system prompt' },
       { what: '~/.claude/CLAUDE.md', why: 'over the size 10db puts in a system prompt' },
     ]);
+  });
+
+  it('a file past the cap is listed without being read', () => {
+    for (const name of ['a', 'b'])
+      write(join(checkout, `.claude/rules/${name}.md`), name.repeat(40_000));
+    // Unreadable: reading it would name the read's error instead of the cap.
+    write(join(checkout, '.claude/rules/c.md'), 'c');
+    chmodSync(join(checkout, '.claude/rules/c.md'), 0o000);
+    const result = read({ yours: false });
+    expect(result.leftOut).toEqual([
+      { what: '.claude/rules/b.md', why: 'over the size 10db puts in a system prompt' },
+      { what: '.claude/rules/c.md', why: 'over the size 10db puts in a system prompt' },
+    ]);
+  });
+
+  it('considers only the first rule files by name, and lists the rest', () => {
+    const names = Array.from(
+      { length: INSTRUCTIONS_MAX_RULES + 2 },
+      (_, i) => `r${String(i).padStart(4, '0')}.md`,
+    );
+    for (const name of names) write(join(checkout, `.claude/rules/${name}`), 'r');
+    const result = read({ yours: false });
+    expect(headings(result)).toHaveLength(INSTRUCTIONS_MAX_RULES);
+    expect(result.leftOut).toEqual(
+      names.slice(INSTRUCTIONS_MAX_RULES).map((name) => ({
+        what: `.claude/rules/${name}`,
+        why: `past the ${String(INSTRUCTIONS_MAX_RULES)} rule files 10db reads`,
+      })),
+    );
+  });
+
+  it('a .claude/rules swapped for a link while it is read never yields the link’s files', async () => {
+    write(join(checkout, '.claude/rules/a.md'), 'inside');
+    write(join(elsewhere, 'a.md'), 'OUTSIDE');
+    const rules = join(checkout, '.claude/rules');
+    const link = join(checkout, '.claude/link');
+    const parked = join(checkout, '.claude/parked');
+    symlinkSync(elsewhere, link);
+    const stop = new Int32Array(new SharedArrayBuffer(4));
+    // A lane swapping the folder for a link and back as fast as it can, on its own thread.
+    const swapper = new Worker(
+      `const { renameSync } = require('node:fs');
+       const { workerData: w } = require('node:worker_threads');
+       while (Atomics.load(w.stop, 0) === 0) {
+         renameSync(w.rules, w.parked); renameSync(w.link, w.rules);
+         renameSync(w.rules, w.link); renameSync(w.parked, w.rules);
+       }`,
+      { eval: true, workerData: { stop, rules, link, parked } },
+    );
+    const leaked: string[] = [];
+    try {
+      for (let i = 0; i < 3000; i += 1) {
+        const text = read({ yours: false }).text;
+        if (text?.includes('OUTSIDE')) leaked.push(text);
+      }
+    } finally {
+      Atomics.store(stop, 0, 1);
+      await new Promise((resolve) => swapper.once('exit', resolve));
+    }
+    expect(leaked).toEqual([]);
   });
 
   it('the builder’s file through a link to a dotfiles folder loads', () => {

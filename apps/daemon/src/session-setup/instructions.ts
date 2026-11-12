@@ -1,10 +1,14 @@
 import { lstatSync, readdirSync, realpathSync } from 'node:fs';
 import { isAbsolute, join, relative, sep } from 'node:path';
-import { readRepoConfigFile, RepoConfigFileError } from '../sessions';
+import { readRepoConfigFile, RepoConfigFileError, REPO_CONFIG_MAX_BYTES } from '../sessions';
+import { readCheckoutFile } from './checkout-file';
 import type { LeftOut } from './left-out';
 
 /** The most instruction text 10db puts in a session's system prompt; whole files past it are left out. */
 export const INSTRUCTIONS_MAX_CHARS = 64_000;
+
+/** The most `.claude/rules` files considered, by name; the rest are listed unread. */
+export const INSTRUCTIONS_MAX_RULES = 100;
 
 /**
  * Coordination outranks project text: a project's or the builder's file never overrides 10db's own rules
@@ -41,6 +45,12 @@ type Candidate =
   | { readonly label: string; readonly source: string; readonly content: string }
   | { readonly source: string; readonly refused: string };
 
+/** A source in order, read only when the text still has room for it. */
+interface Pending {
+  readonly source: string;
+  readonly load: () => Candidate | null;
+}
+
 function realOrSelf(path: string): string {
   try {
     return realpathSync.native(path);
@@ -54,45 +64,49 @@ function isAtOrUnder(path: string, root: string): boolean {
   return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 }
 
-function isLink(path: string): boolean {
-  try {
-    return lstatSync(path).isSymbolicLink();
-  } catch {
-    return false;
-  }
+/** A checkout file through the safe reader, inside the checkout's real path only. */
+function checkoutFile(checkoutReal: string, source: string, label: string): Pending {
+  return {
+    source,
+    load: () => {
+      try {
+        const read = readCheckoutFile(checkoutReal, source, REPO_CONFIG_MAX_BYTES);
+        return read === null ? null : { label, source, content: read.bytes.toString('utf8') };
+      } catch (error) {
+        if (error instanceof RepoConfigFileError) return { source, refused: error.message };
+        throw error;
+      }
+    },
+  };
 }
 
-/** A checkout file through the safe reader: no link, no FIFO or device, nothing over its cap. */
-function checkoutFile(checkout: string, source: string, label: string): Candidate | null {
-  try {
-    const content = readRepoConfigFile(join(checkout, source));
-    return content === null ? null : { label, source, content };
-  } catch (error) {
-    if (error instanceof RepoConfigFileError) return { source, refused: error.message };
-    throw error;
-  }
+function refused(source: string, why: string): Pending {
+  return { source, load: () => ({ source, refused: why }) };
 }
 
-function projectCandidates(checkout: string): Candidate[] {
-  const found: Candidate[] = [];
-  for (const name of ['AGENTS.md', 'CLAUDE.md']) {
-    const file = checkoutFile(checkout, name, 'Project instructions');
-    if (file) found.push(file);
-  }
+function projectSources(checkout: string): Pending[] {
+  const checkoutReal = realOrSelf(checkout);
+  const found = ['AGENTS.md', 'CLAUDE.md'].map((name) =>
+    checkoutFile(checkoutReal, name, 'Project instructions'),
+  );
   const rulesSource = '.claude/rules';
-  if (isLink(join(checkout, '.claude')) || isLink(join(checkout, rulesSource))) {
-    found.push({ source: rulesSource, refused: 'it is a link' });
-    return found;
-  }
+  const rules = join(checkoutReal, rulesSource);
   let names: string[];
   try {
-    names = readdirSync(join(checkout, rulesSource)).filter((name) => name.endsWith('.md'));
+    if (realpathSync.native(rules) !== rules)
+      return [...found, refused(rulesSource, 'it is a link')];
+    names = readdirSync(rules).filter((name) => name.endsWith('.md'));
   } catch {
     return found;
   }
-  for (const name of names.sort()) {
-    const file = checkoutFile(checkout, `${rulesSource}/${name}`, 'Project rule');
-    if (file) found.push(file);
+  names.sort();
+  for (const [index, name] of names.entries()) {
+    const source = `${rulesSource}/${name}`;
+    found.push(
+      index < INSTRUCTIONS_MAX_RULES
+        ? checkoutFile(checkoutReal, source, 'Project rule')
+        : refused(source, `past the ${String(INSTRUCTIONS_MAX_RULES)} rule files 10db reads`),
+    );
   }
   return found;
 }
@@ -129,25 +143,29 @@ function yoursCandidate(home: string, laneWritable: readonly string[]): Candidat
  * `@path` imports are not expanded, and a rule's `paths:` frontmatter does not filter it.
  */
 export function readInstructions(input: InstructionsInput): Instructions {
-  const candidates: Candidate[] = [];
-  if (input.project) candidates.push(...projectCandidates(input.checkout));
-  if (input.yours) {
-    const yours = yoursCandidate(input.home, input.laneWritable);
-    if (yours) candidates.push(yours);
-  }
+  const pending: Pending[] = [];
+  if (input.project) pending.push(...projectSources(input.checkout));
+  if (input.yours)
+    pending.push({ source: YOURS, load: () => yoursCandidate(input.home, input.laneWritable) });
   const sections: string[] = [];
   const sources: string[] = [];
   const leftOut: LeftOut[] = [];
   let length = PRECEDENCE_LINE.length;
   let full = false;
-  for (const candidate of candidates) {
+  for (const next of pending) {
+    if (full) {
+      leftOut.push({ what: next.source, why: OVER_THE_CAP });
+      continue;
+    }
+    const candidate = next.load();
+    if (candidate === null) continue;
     if ('refused' in candidate) {
       leftOut.push({ what: candidate.source, why: candidate.refused });
       continue;
     }
     const section = `## ${candidate.label} (${candidate.source})\n\n${candidate.content.trimEnd()}`;
-    full ||= length + 2 + section.length > INSTRUCTIONS_MAX_CHARS;
-    if (full) {
+    if (length + 2 + section.length > INSTRUCTIONS_MAX_CHARS) {
+      full = true;
       leftOut.push({ what: candidate.source, why: OVER_THE_CAP });
       continue;
     }

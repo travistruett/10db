@@ -52,4 +52,10 @@ export {
 } from './project-mcp';
 export { createUnavailableAdapter } from './unavailable-adapter';
 export { createPinnedAdapter, type AdapterSource } from './pinned-adapter';
-export { readRepoConfigFile, RepoConfigFileError, REPO_CONFIG_MAX_BYTES } from './repo-config-file';
+export {
+  readRepoConfigFile,
+  readRepoFileBytes,
+  RepoConfigFileError,
+  REPO_CONFIG_MAX_BYTES,
+  type RepoFileBytes,
+} from './repo-config-file';
