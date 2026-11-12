@@ -106,6 +106,7 @@ import type {
 import { allowedToolsFor, listNetworkHosts, setLaneAutoMode } from '../permissions';
 import {
   createLaneSandbox,
+  EMPTY_SETUP,
   SandboxedMcpServer,
   SandboxProfileError,
   SandboxTempDirError,
@@ -4622,6 +4623,7 @@ describe("a lane's settled read-only line", () => {
   });
 
   const standInSandbox = (): LaneSandbox => ({
+    judgeSetup: () => Promise.reject(new Error('no preview here')),
     forSession: (input) =>
       Promise.resolve({
         spec: {} as LaneSession['spec'],
@@ -4638,6 +4640,7 @@ describe("a lane's settled read-only line", () => {
         commandEnv: {},
         mcpServers: {},
         mcpFailures: [],
+        setup: EMPTY_SETUP,
         setProviderSession: () => undefined,
         trackProcesses: () => Promise.resolve(true),
         endProcesses: () => Promise.resolve(),
@@ -4715,6 +4718,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     const sessions: LaneSession[] = [];
     return {
       laneSandbox: {
+        judgeSetup: (project, setup, checkouts) => real.judgeSetup(project, setup, checkouts),
         async forSession(input) {
           inputs.push(input);
           if (fail) fail();

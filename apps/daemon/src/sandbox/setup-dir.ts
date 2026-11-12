@@ -268,7 +268,8 @@ function writeProject(project: string, files: SetupInput['projectFiles']): void 
 }
 
 /**
- * Makes a session's setup dir in the files root, which no lane can write: `yours/` links the kept skill
+ * Makes a session's setup dir in the files root, which no lane can write, and names the `.env*` files
+ * under its reads for the profile to deny: `yours/` links the kept skill
  * folders, `project/` holds the project's cleaned copies, and `plugins/<name>/` wraps each kept plugin.
  */
 export function createSetupDir(
@@ -276,7 +277,7 @@ export function createSetupDir(
   input: SetupInput,
   refuse: (real: string) => string | null,
   home: string,
-): { setup: SessionSetup; remove(): void } {
+): { setup: SessionSetup; secretFiles: readonly string[]; remove(): void } {
   const kept = keepSetup(input, refuse, home);
   const dir = join(filesRoot, `10db-setup-${randomBytes(6).toString('hex')}`);
   mkdirSync(dir, { mode: 0o700 });
@@ -332,6 +333,7 @@ export function createSetupDir(
         },
         leftOut,
       },
+      secretFiles: kept.secretFiles,
       remove,
     };
   } catch (error) {

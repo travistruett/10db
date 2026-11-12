@@ -104,9 +104,13 @@ const lookupWith =
     Promise.resolve(names[host] ?? ['93.184.216.34']);
 
 function preparer(
-  laneSandbox: LaneSandbox = realSandbox(),
+  given: Pick<LaneSandbox, 'forSession'> = realSandbox(),
   lookup: (host: string) => Promise<readonly string[]> = lookupWith(),
 ) {
+  const laneSandbox: LaneSandbox = {
+    judgeSetup: () => Promise.reject(new Error('a Plan session never previews its setup')),
+    ...given,
+  };
   const inbox = createInboxService({ state, onParkedAnswer: () => undefined });
   const profiles: string[] = [];
   const prepare = createShapePreparer({

@@ -42,6 +42,7 @@ import {
   type LaneSessionInput,
 } from './index';
 import type { LaneSandboxDeps } from './lane-sandbox';
+import type { SetupInput } from './setup-input';
 import { childListingGrant, listingGrant } from './profile';
 import { secretFilesIn } from './project-access';
 import { isEqualOrUnder } from './protected-reads';
@@ -1119,6 +1120,120 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
     } finally {
       session.dispose();
     }
+  });
+
+  describe('a session with a setup', () => {
+    function setupInput(): SetupInput {
+      const skill = join(home, '.claude/skills/s');
+      writeIn(skill, 'SKILL.md', '---\nname: s\n---\n');
+      const plugin = join(home, '.claude/plugins/cache/m/p/1');
+      writeIn(plugin, '.claude-plugin/plugin.json', JSON.stringify({ name: 'p' }));
+      writeIn(plugin, 'skills/x/SKILL.md', '---\nname: x\n---\n');
+      return {
+        skills: [{ name: 's', path: skill, skillFile: join(skill, 'SKILL.md') }],
+        plugins: [{ id: 'p@m', path: plugin }],
+        projectFiles: [{ relative: 'commands/c.md', content: Buffer.from('c'), mode: 0o600 }],
+      };
+    }
+
+    it('gets its plugin dirs, its reads in the profile and its setup dir in ownFiles', async () => {
+      const session = await sandbox().forSession(input({ setup: setupInput() }));
+      try {
+        const setupDir = session.setup.reads[0] ?? '';
+        expect(setupDir).toMatch(/\/10db-setup-[0-9a-f]{12}$/);
+        expect(isEqualOrUnder(setupDir, filesRoot)).toBe(true);
+        expect(session.setup.pluginDirs).toEqual([
+          join(setupDir, 'yours'),
+          join(setupDir, 'project'),
+          join(setupDir, 'plugins/p'),
+        ]);
+        const { allowRead, allowWrite } = session.spec.settings.filesystem;
+        expect(allowRead).toEqual(
+          expect.arrayContaining([
+            setupDir,
+            join(home, '.claude/skills'),
+            join(home, '.claude/plugins/cache/m/p/1'),
+          ]),
+        );
+        expect(allowWrite.some((path) => isEqualOrUnder(path, home))).toBe(false);
+        expect(session.setup.loaded).toEqual({ skills: ['s'], plugins: ['p@m'] });
+      } finally {
+        session.dispose();
+      }
+    });
+
+    it('keeps a .env file inside an opened skill folder denied', async () => {
+      const setup = setupInput();
+      const secret = writeIn(join(home, '.claude/skills/s'), '.env.local', 'TOKEN=x');
+      const session = await sandbox().forSession(input({ setup }));
+      try {
+        expect(session.spec.settings.filesystem.denyRead).toContain(secret);
+        expect(session.spec.disallowedTools).toContain(`Read(/${secret})`);
+      } finally {
+        session.dispose();
+      }
+    });
+
+    it('gives an MCP server none of the setup reads', async () => {
+      const session = await sandbox().forSession(
+        input({
+          setup: setupInput(),
+          mcpServers: { probe: { command: '/usr/bin/true', args: [], env: {}, hosts: [] } },
+        }),
+      );
+      try {
+        const launch = session.mcpServers['probe']?.launch();
+        const settingsFile = launch?.args[launch.args.indexOf('--settings') + 1] ?? '';
+        const settings = readFileSync(settingsFile, 'utf8');
+        expect(settings).not.toContain(join(home, '.claude/skills'));
+        expect(settings).not.toContain('10db-setup-');
+      } finally {
+        session.dispose();
+      }
+    });
+
+    it('judges a setup for the preview as a session would, and writes nothing', async () => {
+      const setup = setupInput();
+      const inCheckout = join(checkout, 'skill');
+      writeIn(inCheckout, 'SKILL.md', 'lane written');
+      symlinkSync(inCheckout, join(home, '.claude/skills/lane'));
+      const judged = await sandbox().judgeSetup(input().project, {
+        ...setup,
+        skills: [
+          ...setup.skills,
+          {
+            name: 'lane',
+            path: join(home, '.claude/skills/lane'),
+            skillFile: join(inCheckout, 'SKILL.md'),
+          },
+        ],
+      });
+      expect(judged).toEqual({
+        loaded: { skills: ['s'], plugins: ['p@m'] },
+        leftOut: [
+          { what: '~/.claude/skills/lane', why: 'it lies in, or holds, a folder a lane can write' },
+        ],
+      });
+      expect(readdirSync(filesRoot).filter((name) => name.startsWith('10db-setup-'))).toEqual([]);
+    });
+
+    it('removes the setup dir on dispose', async () => {
+      const session = await sandbox().forSession(input({ setup: setupInput() }));
+      const setupDir = session.setup.reads[0] ?? '';
+      expect(existsSync(setupDir)).toBe(true);
+      session.dispose();
+      expect(existsSync(setupDir)).toBe(false);
+    });
+
+    it('has no setup dir when it is given no setup', async () => {
+      const session = await sandbox().forSession(input());
+      try {
+        expect(session.setup.reads).toEqual([]);
+        expect(readdirSync(filesRoot).filter((name) => name.startsWith('10db-setup-'))).toEqual([]);
+      } finally {
+        session.dispose();
+      }
+    });
   });
 
   it('removes the env file on dispose', async () => {

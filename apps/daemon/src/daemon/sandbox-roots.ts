@@ -137,7 +137,7 @@ export function sandboxesFor(
   const { refusal } = roots;
   if (refusal === null) return { lane: build.lane(), gate: build.gate() };
   return {
-    lane: { forSession: () => Promise.reject(refusal) },
+    lane: { forSession: () => Promise.reject(refusal), judgeSetup: () => Promise.reject(refusal) },
     gate: { forRun: () => Promise.reject(refusal) },
   };
 }
