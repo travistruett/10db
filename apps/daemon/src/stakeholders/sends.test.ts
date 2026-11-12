@@ -770,6 +770,25 @@ describe('a draft written before the builder had a name', () => {
     expect(slack.posts[0]?.text).toContain("Ana-the-builder's 10db build");
   });
 
+  it('keeps an edit whose Send failed before posting, so the next Send posts it', async () => {
+    const w = world();
+    w.route([w.person('mark', { sendMode: 'review' })]);
+    const id = w.card();
+    const noToken = createStakeholderSends({
+      state,
+      slack,
+      clock,
+      log: silentLogger,
+      hasToken: () => Promise.resolve(false),
+    });
+    await expect(noToken.send(id, { text: 'My own words, kept' })).rejects.toBeInstanceOf(
+      ConflictError,
+    );
+    expect(send(id).state).toBe('draft');
+    await sends.send(id, {});
+    expect(slack.posts[0]?.text).toBe('My own words, kept');
+  });
+
   it('keeps a text the builder wrote himself', async () => {
     const w = world();
     w.route([w.person('mark', { sendMode: 'review' })]);

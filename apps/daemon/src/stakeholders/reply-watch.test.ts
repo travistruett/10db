@@ -985,6 +985,21 @@ describe('bringing someone in', () => {
     expect(opens()).toBe(after);
   });
 
+  it('brings in a later mention after an earlier one was refused', async () => {
+    const s = scene();
+    slack.names.set('UPRIYA', 'Priya');
+    slack.names.set('UDANA', 'Dana');
+    const sent = await s.send([s.mark]);
+    slack.say(sent.channel, 'UMARK', 'adding <@UDANA>', sent.threadTs);
+    slack.failNext('conversations.open', 'user_not_found');
+    await ticks(1);
+    expect(slack.posts.some((p) => p.text.includes("couldn't add Dana"))).toBe(true);
+    slack.say(sent.channel, 'UMARK', 'and <@UPRIYA> too', sent.threadTs);
+    await ticks(1);
+    expect(openSends(store.db)[0]?.people.map((p) => p.userId)).toEqual(['UMARK', 'UPRIYA']);
+    expect(slack.opened.at(-1)).toEqual({ kind: 'group', users: ['UMARK', 'UPRIYA'] });
+  });
+
   it('finds the repost by its metadata after a restart between the repost and the move, and does not repost', async () => {
     const { sent } = await mentioned();
     const real = slack.post.bind(slack);

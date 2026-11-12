@@ -48,11 +48,17 @@ export async function bringIn(
     botUserId: bot,
     afterTs: open.messageTs,
   });
-  const mention = counted.find((m) => mentionsToAdd([toSlack(m)], participants, bot).length > 0);
+  // Mentions an earlier tick answered with a refusal or a full line are passed over; a later one is still tried.
+  const keyOf = (m: { ts: string }): string => `${open.id}/${m.ts}`;
+  const fresh = counted.filter(
+    (m) => !deps.handled.has(keyOf(m)) && mentionsToAdd([toSlack(m)], participants, bot).length > 0,
+  );
+  const mention = fresh[0];
   if (!mention) return false;
-  const mentionKey = `${open.id}/${mention.ts}`;
-  if (deps.handled.has(mentionKey)) return false;
-  const newIds = mentionsToAdd(counted.map(toSlack), participants, bot);
+  const markHandled = (): void => {
+    for (const m of fresh) deps.handled.add(keyOf(m));
+  };
+  const newIds = mentionsToAdd(fresh.map(toSlack), participants, bot);
   const names = new Map<string, string>();
   for (const id of newIds) names.set(id, await client.userInfo(id).catch(() => id));
   const newNames = newIds.map((id) => names.get(id) ?? id);
@@ -62,7 +68,7 @@ export async function bringIn(
   if (participants.length + newIds.length > GROUP_MAX) {
     if (!findLine(input.thread, open.id, 'full', { key: mention.ts }))
       await postLine(client, { ...inCurrent, text: fullLine(), line: 'full', key: mention.ts });
-    deps.handled.add(mentionKey);
+    markHandled();
     return false;
   }
 
@@ -81,7 +87,7 @@ export async function bringIn(
           key: id,
         });
     }
-    deps.handled.add(mentionKey);
+    markHandled();
     return false;
   }
 

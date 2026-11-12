@@ -180,6 +180,8 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
    * now and the card as it is now, not as they were when it was drafted.
    */
   function recomposed(card: InboxItemDto, stored: StakeholderSendDto): StakeholderSendDto {
+    // A text the builder wrote, even if its Send failed before posting, is posted as he wrote it.
+    if (sendSummary(state.db, stored.id).byBuilder) return stored;
     const fresh = previewDraft(state.db, card, recipientsOf(stored));
     if (fresh.text === stored.text) return stored;
     state.write((ctx) => {
@@ -488,7 +490,7 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
       if (input.text !== undefined) {
         const text = neutralizeAngles(input.text);
         state.write((ctx) => {
-          updateDraft(ctx, draft.id, { text, hits });
+          updateDraft(ctx, draft.id, { text, hits, byBuilder: true });
         });
       }
       await post(cardId);

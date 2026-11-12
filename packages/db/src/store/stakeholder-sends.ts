@@ -17,6 +17,9 @@ import { and, asc, desc, eq, gte, inArray, isNotNull, ne, sql } from 'drizzle-or
 import * as schema from '../schema';
 import type { DbReader, WriteContext } from './store';
 
+/** Stands in `text_sha256` of a draft the builder edited, until a post replaces it with the text's hash. */
+const BUILDER_EDITED = 'builder-edited';
+
 type SendRow = typeof schema.stakeholderSends.$inferSelect;
 type HeldBy = NonNullable<SendRow['heldBy']>;
 
@@ -200,10 +203,19 @@ export function insertDraft(
 export function updateDraft(
   ctx: WriteContext,
   id: StakeholderSendId,
-  edit: { readonly text: string; readonly hits: readonly OutboundHit[] },
+  edit: {
+    readonly text: string;
+    readonly hits: readonly OutboundHit[];
+    /** The builder wrote this text: a later Send posts it, and the draft is not composed again. */
+    readonly byBuilder?: boolean;
+  },
 ): void {
   const row = guarded(ctx, id, 'be edited', [SendState.Draft]);
-  change(ctx, row, { text: edit.text, hits: [...edit.hits] });
+  change(ctx, row, {
+    text: edit.text,
+    hits: [...edit.hits],
+    ...(edit.byBuilder === true ? { textSha256: BUILDER_EDITED } : {}),
+  });
 }
 
 export function setHeldBy(ctx: WriteContext, id: StakeholderSendId, heldBy: HeldBy | null): void {
@@ -525,9 +537,13 @@ function toOpen(db: DbReader, row: SendRow): OpenSendRow | null {
 export function sendSummary(
   db: DbReader,
   id: StakeholderSendId,
-): { inboxItemId: InboxItemId; text: string } {
+): { inboxItemId: InboxItemId; text: string; byBuilder: boolean } {
   const row = getRow(db, id);
-  return { inboxItemId: row.inboxItemId, text: row.text };
+  return {
+    inboxItemId: row.inboxItemId,
+    text: row.text,
+    byBuilder: row.textSha256 === BUILDER_EDITED,
+  };
 }
 
 /** Every thread a send used, the current one first and then the one it moved from. */
