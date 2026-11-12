@@ -1,5 +1,6 @@
 import { lstatSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { foldPathCase } from '../guard';
 import type { LeftOut } from './left-out';
 
 /** One of the builder's skill folders. */
@@ -50,7 +51,7 @@ function judgeEntry(path: string): Found {
 
 /**
  * The builder's skill folders under `~/.claude/skills` then `~/.agents/skills`, the first folder of a name
- * winning. Real paths are not judged here: the lane sandbox judges each folder's and `SKILL.md`'s.
+ * winning, names compared as the file system folds them. Real paths are not judged here: the lane sandbox judges each folder's and `SKILL.md`'s.
  */
 export function findBuilderSkills(home: string): { folders: SkillFolder[]; leftOut: LeftOut[] } {
   const folders: SkillFolder[] = [];
@@ -66,12 +67,13 @@ export function findBuilderSkills(home: string): { folders: SkillFolder[]; leftO
         leftOut.push({ what: shown, why: found.refused });
         continue;
       }
-      const first = firstFrom.get(name);
+      // Folded as the file system folds names: `Review` and `review` would be one link in the setup dir.
+      const first = firstFrom.get(foldPathCase(name));
       if (first !== undefined) {
         leftOut.push({ what: shown, why: `a skill named ${name} is already loaded from ${first}` });
         continue;
       }
-      firstFrom.set(name, shown);
+      firstFrom.set(foldPathCase(name), shown);
       folders.push({ name, path, skillFile: found.skillFile });
     }
   }

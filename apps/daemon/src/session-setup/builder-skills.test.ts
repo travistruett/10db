@@ -88,6 +88,33 @@ describe('findBuilderSkills', () => {
     });
   });
 
+  it.skipIf(process.platform !== 'darwin')(
+    'a name that differs only by case or Unicode form is the same skill, as APFS folds it',
+    () => {
+      const first = skill(join(home, '.claude/skills/Review'));
+      skill(join(home, '.agents/skills/review'));
+      // `é` composed under ~/.claude, decomposed under ~/.agents.
+      const cafe = skill(join(home, '.claude/skills/caf\u00e9'));
+      skill(join(home, '.agents/skills/cafe\u0301'));
+      expect(findBuilderSkills(home)).toEqual({
+        folders: [
+          { name: 'Review', path: first, skillFile: join(first, 'SKILL.md') },
+          { name: 'caf\u00e9', path: cafe, skillFile: join(cafe, 'SKILL.md') },
+        ],
+        leftOut: [
+          {
+            what: '~/.agents/skills/cafe\u0301',
+            why: 'a skill named cafe\u0301 is already loaded from ~/.claude/skills/caf\u00e9',
+          },
+          {
+            what: '~/.agents/skills/review',
+            why: 'a skill named review is already loaded from ~/.claude/skills/Review',
+          },
+        ],
+      });
+    },
+  );
+
   it('a dot entry is skipped and not listed', () => {
     mkdirSync(join(home, '.claude/skills/.git'), { recursive: true });
     writeFileSync(join(home, '.claude/skills/.DS_Store'), '');

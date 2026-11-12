@@ -68,6 +68,9 @@ function linkedSkill(name: string, target: string) {
   return { name, path: join(home, '.claude/skills', name), skillFile: join(target, 'SKILL.md') };
 }
 
+/** A folder outside the home, named as the setup names it. */
+const shownOutside = (name: string): string => join(outside, name);
+
 function input(overrides: Partial<SetupInput> = {}): SetupInput {
   return { skills: [], plugins: [], projectFiles: [], ...overrides };
 }
@@ -291,6 +294,42 @@ describe('keepSetup and createSetupDir', () => {
     expect(made.setup.loaded.plugins).toEqual(['p@m']);
     made.remove();
   });
+
+  it.skipIf(process.platform !== 'darwin')(
+    'leaves out a second skill or plugin whose name differs only by case, in the preview and the dir',
+    () => {
+      const upper = builderSkill('Review');
+      const lower = {
+        ...builderSkill('review', skillAt(join(outside, 'review'))),
+        path: join(outside, 'review'),
+      };
+      const plugin = (name: string) => {
+        const path = join(home, '.claude/plugins/cache/m', name, '1');
+        mkdirSync(join(path, '.claude-plugin'), { recursive: true });
+        writeFileSync(join(path, '.claude-plugin/plugin.json'), JSON.stringify({ name }));
+        return path;
+      };
+      const setup = input({
+        skills: [upper, lower],
+        plugins: [
+          { id: 'Foo@m1', path: plugin('Foo') },
+          { id: 'foo@m2', path: plugin('foo2') },
+        ],
+      });
+      const leftOut = [
+        { what: shownOutside('review'), why: 'a skill named Review is already loaded' },
+        { what: 'foo@m2', why: 'a plugin named Foo is already loaded' },
+      ];
+      const kept = keepSetup(setup, refuse, home);
+      expect(kept.keptSkills).toEqual([upper]);
+      expect(kept.keptPlugins.map((p) => p.id)).toEqual(['Foo@m1']);
+      expect(kept.leftOut).toEqual(leftOut);
+      const made = createSetupDir(filesRoot, setup, refuse, home);
+      expect(made.setup.loaded).toEqual({ skills: ['Review'], plugins: ['Foo@m1'] });
+      expect(made.setup.leftOut).toEqual(leftOut);
+      made.remove();
+    },
+  );
 
   it('remove() leaves nothing', () => {
     const made = createSetupDir(filesRoot, input({ skills: [builderSkill('s')] }), refuse, home);

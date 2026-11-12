@@ -166,6 +166,17 @@ function rootState(
 }
 
 /**
+ * Null when no kept skill or plugin has the name yet, as the file system folds it (each is one folder in
+ * the setup dir, so `Review` and `review` would collide), and takes it; else why the second is left out.
+ */
+function taken(names: Map<string, string>, name: string, kind: 'skill' | 'plugin'): string | null {
+  const first = names.get(foldPathCase(name));
+  if (first !== undefined) return `a ${kind} named ${first} is already loaded`;
+  names.set(foldPathCase(name), name);
+  return null;
+}
+
+/**
  * What of a session's setup the refusal keeps, and the folders to open for it. Reads the file system and
  * writes nothing; the Settings preview and `createSetupDir` share it. A kept skill or plugin holding a
  * folder that can't be listed is left out, and never fails the session.
@@ -176,6 +187,8 @@ export function keepSetup(
   home: string,
 ): KeptSetup {
   const leftOut: LeftOut[] = [];
+  const skillNames = new Map<string, string>();
+  const pluginNames = new Map<string, string>();
   const skills: { skill: Skill; folder: string; fileDir: string }[] = [];
   for (const skill of input.skills) {
     const what = shown(skill.path, home);
@@ -185,7 +198,7 @@ export function keepSetup(
       continue;
     }
     const fileDir = dirname(skill.skillFile);
-    const why = refuse(folder) ?? refuse(fileDir);
+    const why = refuse(folder) ?? refuse(fileDir) ?? taken(skillNames, skill.name, 'skill');
     if (why !== null) leftOut.push({ what, why });
     else skills.push({ skill, folder, fileDir });
   }
@@ -196,7 +209,7 @@ export function keepSetup(
       leftOut.push({ what: plugin.id, why: GONE });
       continue;
     }
-    const why = refuse(real);
+    const why = refuse(real) ?? taken(pluginNames, pluginName(plugin.id), 'plugin');
     if (why !== null) leftOut.push({ what: plugin.id, why });
     else plugins.push({ ...plugin, real });
   }
@@ -341,15 +354,9 @@ export function createSetupDir(
         skillRoots.push(join(project, 'skills'));
     }
     const leftOut = [...kept.leftOut];
-    const named = new Set<string>();
     const wrapped: string[] = [];
     for (const plugin of kept.keptPlugins) {
       const name = pluginName(plugin.id);
-      if (named.has(name)) {
-        leftOut.push({ what: plugin.id, why: `a plugin named ${name} is already loaded` });
-        continue;
-      }
-      named.add(name);
       const wrapper = join(dir, 'plugins', name);
       makeDir(wrapper);
       leftOut.push(...wrapPlugin(plugin.real, wrapper).leftOut);
