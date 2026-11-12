@@ -73,6 +73,7 @@ import {
   createTimerWatch,
   createTriage,
   draftOnOpen,
+  routedAway,
   type ReplyWatch,
   type StakeholderSends,
   type TimerWatch,
@@ -257,7 +258,8 @@ export async function createTestEngine(
     log: silentLogger,
     afterRouted: (id) => {
       const after = state.write((ctx) => draftOnOpen(ctx, getInboxItem(ctx.tx, id), draftOpts));
-      runner?.parkFor(id);
+      // Only a card that now goes to someone else parks its sessions; a builder card waits live.
+      if (routedAway(getInboxItem(state.db, id))) runner?.parkFor(id);
       after?.();
     },
   });

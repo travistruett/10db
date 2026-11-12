@@ -323,6 +323,43 @@ describe('a question the judge routes after the lane asked', () => {
   });
 });
 
+describe('a question triage keeps with the builder', () => {
+  it('leaves the session live, waiting as for any builder question', async () => {
+    engine = await createTestEngine(
+      oneAsk(askHuman('product', 'op-triage-builder1')),
+      {},
+      {},
+      { openRouter: { fetch: () => Promise.resolve(new Response('{}', { status: 500 })) } },
+    );
+    // Only a topic route: the question is left to triage, which can name nobody.
+    const mark = engine.store.write((ctx) =>
+      insertPerson(ctx, {
+        handle: 'mark',
+        name: 'Mark',
+        slack: { teamId: 'T1', userId: 'U1', sendMode: 'review', dailyLimit: 10 },
+      }),
+    ).value;
+    engine.store.write((ctx) =>
+      setRoutingRules(ctx, engine.project.id, {
+        rules: [{ category: null, area: null, topic: 'billing', personId: mark.id }],
+      }),
+    );
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    const card = await waitFor(openCard);
+    await waitFor(() => {
+      const now = listInbox(engine.store.db, {}).find((c) => c.id === card.id);
+      return now !== undefined && now.routedBy !== 'triage_pending' ? now : undefined;
+    });
+    expect(listInbox(engine.store.db, {}).find((c) => c.id === card.id)).toMatchObject({
+      routedBy: 'rule',
+      assignees: ['me'],
+    });
+    expect(ws(workstream.id).currentSessionId).not.toBeNull();
+    expect(ws(workstream.id).state).toBe('WAITING_HUMAN');
+  });
+});
+
 describe('a task cancelled while its question waits for triage', () => {
   it('cancels the card, and the judge answering later only leaves pending', async () => {
     let release: () => void = () => undefined;

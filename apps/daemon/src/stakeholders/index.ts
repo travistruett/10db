@@ -35,3 +35,4 @@ export { createReplyWatch, type ReplyWatch, type ReplyWatchDeps } from './reply-
 export { createSlackConnection, type SlackConnection } from './slack-connection';
 export { createTimerWatch, type TimerWatch } from './timer-watch';
 export { dueTimers, type DueTimer, type TimedSend } from './timers';
+export { routedAway } from './routed-away';
