@@ -1,5 +1,6 @@
 import {
   AreaDef,
+  areaRolesProblem,
   atMostOneCatchAll,
   DEFAULT_HAZARDS,
   ONE_CATCH_ALL,
@@ -7,6 +8,7 @@ import {
   WHOLE_REPOSITORY_GLOBS,
   type ProposedArea,
 } from '@10db/contracts';
+import { roleFields, type RoleChoice } from '../settings/area-role-fields';
 
 /** One area as the builder is editing it: the globs are the text of a box, one to a line. */
 export interface AreaDraft {
@@ -18,6 +20,9 @@ export interface AreaDraft {
   readonly reason: string;
   /** The project's catch-all: a file no other area holds falls in this one. At most one draft. */
   readonly catchAll: boolean;
+  readonly role: RoleChoice;
+  /** A page's route; kept while the role changes, sent only for a page. */
+  readonly route: string;
 }
 
 /** What setup offers when no proposal came: one area over the whole repository. */
@@ -41,6 +46,8 @@ export function draftsFromAreas(areas: readonly ProposedArea[]): AreaDraft[] {
     globs: area.globs.join('\n'),
     reason: area.reason,
     catchAll: area.catchAll === true,
+    role: area.role ?? '',
+    route: area.route ?? '',
   }));
 }
 
@@ -56,6 +63,7 @@ export function areasOf(drafts: readonly AreaDraft[]): AreaDef[] {
     name: d.name.trim(),
     globs: globLines(d.globs),
     ...(d.catchAll ? { catchAll: true } : {}),
+    ...roleFields(d.role, d.route),
   }));
 }
 
@@ -71,6 +79,13 @@ export const setName = (drafts: readonly AreaDraft[], key: number, name: string)
 export const setGlobs = (drafts: readonly AreaDraft[], key: number, globs: string): AreaDraft[] =>
   change(drafts, key, { globs });
 
+/** Changes the area's role, its route, or both. */
+export const setRole = (
+  drafts: readonly AreaDraft[],
+  key: number,
+  next: { readonly role?: RoleChoice; readonly route?: string },
+): AreaDraft[] => change(drafts, key, next);
+
 /** Makes the area the catch-all, which takes it from any other, or clears it; there is at most one. */
 export const setCatchAll = (
   drafts: readonly AreaDraft[],
@@ -84,20 +99,27 @@ export const setCatchAll = (
 export const removeDraft = (drafts: readonly AreaDraft[], key: number): AreaDraft[] =>
   drafts.filter((d) => d.key !== key);
 
-/** `from` goes into `into`: one area under `into`'s name and reason, holding both areas' globs. */
+/**
+ * `from` goes into `into`: one area under `into`'s name and reason, holding both areas' globs. Two
+ * pages make a page that no single route shows; areas of different roles make one with none.
+ */
 export function mergeDrafts(drafts: readonly AreaDraft[], from: number, into: number): AreaDraft[] {
   const source = drafts.find((d) => d.key === from);
   const target = drafts.find((d) => d.key === into);
   if (source === undefined || target === undefined || from === into) return [...drafts];
   const globs = [...new Set([...globLines(target.globs), ...globLines(source.globs)])].join('\n');
+  const role = target.role === source.role ? target.role : '';
   return removeDraft(
-    change(drafts, into, { globs, catchAll: target.catchAll || source.catchAll }),
+    change(drafts, into, { globs, catchAll: target.catchAll || source.catchAll, role, route: '' }),
     from,
   );
 }
 
 export function addDraft(drafts: readonly AreaDraft[]): AreaDraft[] {
-  return [...drafts, { key: freshKey(), name: '', globs: '', reason: '', catchAll: false }];
+  return [
+    ...drafts,
+    { key: freshKey(), name: '', globs: '', reason: '', catchAll: false, role: '', route: '' },
+  ];
 }
 
 export interface RowProblems {
@@ -149,8 +171,8 @@ export function draftProblems(drafts: readonly AreaDraft[]): DraftProblems {
     whole:
       drafts.length === 0
         ? 'Keep at least one area.'
-        : atMostOneCatchAll(drafts)
-          ? null
-          : ONE_CATCH_ALL,
+        : !atMostOneCatchAll(drafts)
+          ? ONE_CATCH_ALL
+          : areaRolesProblem(areasOf(drafts)),
   };
 }

@@ -228,6 +228,86 @@ describe('the areas and hazards editor', () => {
     });
   });
 
+  describe('the role and route of an area', () => {
+    const roled = projectDto({
+      areas: [
+        { name: 'people', globs: ['app/people/**'], role: 'page', route: '/people' },
+        { name: 'ui', globs: ['src/ui/**'], role: 'shared' },
+        { name: 'api', globs: ['src/api/**'] },
+      ],
+      hazards: [],
+    });
+    const role = (n: number): string => {
+      const el = screen.getByRole('combobox', { name: `Area ${String(n)} role` });
+      if (!(el instanceof HTMLSelectElement)) throw new Error('not a select');
+      return el.value;
+    };
+    const choose = (n: number, value: string) => {
+      fireEvent.change(screen.getByRole('combobox', { name: `Area ${String(n)} role` }), {
+        target: { value },
+      });
+    };
+    function serve(patched: unknown[]): void {
+      server.use(
+        http.get(daemonUrl('/projects'), () => HttpResponse.json([roled])),
+        http.patch(daemonUrl('/projects/:projectId'), async ({ request }) => {
+          patched.push(await request.json());
+          return HttpResponse.json(roled);
+        }),
+        ...baseHandlers(),
+      );
+    }
+
+    it('shows each role, and the route of a page only', async () => {
+      serve([]);
+      renderApp('/settings/areas');
+      await screen.findByRole('textbox', { name: 'Area 1 name' });
+      expect([1, 2, 3].map(role)).toEqual(['page', 'shared', '']);
+      expect(screen.getByRole('textbox', { name: 'Area 1 route' })).toHaveProperty(
+        'value',
+        '/people',
+      );
+      expect(screen.queryByRole('textbox', { name: 'Area 2 route' })).toBeNull();
+      expect(screen.queryByRole('textbox', { name: 'Area 3 route' })).toBeNull();
+    });
+
+    it('saves a changed role and route, and drops the route of an area that is no longer a page', async () => {
+      const patched: unknown[] = [];
+      serve(patched);
+      renderApp('/settings/areas');
+      await screen.findByRole('textbox', { name: 'Area 1 name' });
+      choose(3, 'page');
+      type('Area 3 route', '/api-docs');
+      choose(1, 'shared');
+      choose(2, '');
+      fireEvent.click(screen.getByRole('button', { name: 'Save areas and hazards' }));
+      await waitFor(() => {
+        expect(patched).toEqual([
+          {
+            areas: [
+              { name: 'people', globs: ['app/people/**'], role: 'shared' },
+              { name: 'ui', globs: ['src/ui/**'] },
+              { name: 'api', globs: ['src/api/**'], role: 'page', route: '/api-docs' },
+            ],
+            hazards: [],
+          },
+        ]);
+      });
+    });
+
+    it('refuses two pages that can share a file before sending them', async () => {
+      const patched: unknown[] = [];
+      serve(patched);
+      renderApp('/settings/areas');
+      await screen.findByRole('textbox', { name: 'Area 1 name' });
+      choose(2, 'page');
+      type('Area 2 paths', 'app/**');
+      fireEvent.click(screen.getByRole('button', { name: 'Save areas and hazards' }));
+      expect(await screen.findByText(/Pages "people" and "ui" can share a file/)).toBeTruthy();
+      expect(patched).toEqual([]);
+    });
+  });
+
   it('refuses a bad path pattern before sending it', async () => {
     const patched: unknown[] = [];
     server.use(

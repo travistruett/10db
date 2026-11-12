@@ -24,12 +24,15 @@ import {
 } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
 import type { KeyboardEvent, RefObject } from 'react';
+import { CodeSpans } from '../../shell/code-spans';
+import { ProjectLabel } from '../../shell/project-label';
 import { ExternalLink } from '../board/pull-request-link';
 import { BatchCardActions } from './batch-card-actions';
 import { CheckCard } from './check-card';
 import { isDismissable } from './inbox-rows';
 import { ReviewRejection, reviewRejection } from '../review/review-rejection';
 import { McpApprovalDetails, mcpReview } from './mcp-approval';
+import { PassCardExtras } from './pass-card-extras';
 import { SELECTED_CARD_ATTRIBUTE } from './use-inbox-keys';
 import { KIND_LABELS, optionLabel } from './permission-labels';
 import { usePrincipleOf } from './principle-card';
@@ -60,6 +63,8 @@ export interface InboxCardProps {
   readonly onSubmit: () => void;
   /** Dismisses the row's flags; only offered for a flag with no options. */
   readonly onDismiss: () => void;
+  /** Whether the Inbox's keys answer the card, so each option shows its digit and Send its Enter. */
+  readonly shortcuts?: boolean;
 }
 
 /** Card text is untrusted (agent and tool output): it is only ever rendered as text. */
@@ -74,7 +79,7 @@ export function CardBody({ item }: { readonly item: InboxItemDto }) {
   }
   return (
     <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
-      {item.body}
+      <CodeSpans text={item.body} />
     </Text>
   );
 }
@@ -119,6 +124,7 @@ export function InboxCard({
   onNoteFocus,
   onSubmit,
   onDismiss,
+  shortcuts = true,
 }: InboxCardProps) {
   const review = mcpReview(item);
   const rejection = reviewRejection(item);
@@ -130,6 +136,8 @@ export function InboxCard({
       {review ? 'MCP server' : KIND_LABELS[item.kind]}
     </Badge>
   );
+  // The Inbox lists every project, so each card says whose it is.
+  const where = <ProjectLabel projectId={item.projectId} />;
   const times =
     count > 1 ? (
       <Badge size="sm" variant="default" style={{ flexShrink: 0 }}>
@@ -155,6 +163,7 @@ export function InboxCard({
         <UnstyledButton onClick={onSelect} p="sm" style={{ flex: 1, minWidth: 0 }}>
           <Group gap="sm" wrap="nowrap">
             {kind}
+            {where}
             {times}
             <Text size="sm" lineClamp={1} title={item.title} style={{ minWidth: 0 }}>
               {item.title}
@@ -194,6 +203,7 @@ export function InboxCard({
         header={
           <Group gap="sm" wrap="nowrap">
             {kind}
+            {where}
             {times}
             <Text fw={600} style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
               {item.title}
@@ -221,6 +231,7 @@ export function InboxCard({
       <Stack gap="sm">
         <Group gap="sm" wrap="nowrap">
           {kind}
+          {where}
           {principle ? (
             <Badge size="sm" variant="outline" style={{ flexShrink: 0 }}>
               {PRINCIPLE_KIND_LABELS[principle.kind]}
@@ -258,6 +269,7 @@ export function InboxCard({
             Open Accounts in Settings
           </Anchor>
         ) : null}
+        <PassCardExtras item={item} />
         <BatchCardActions item={item} onDone={onDismiss} />
         {hasOptions ? (
           <Radio.Group value={choice} onChange={onChoose} aria-label="Answer">
@@ -266,7 +278,7 @@ export function InboxCard({
                 <Radio.Card key={option.label} value={option.label} p="sm">
                   <Group wrap="nowrap" align="flex-start">
                     <Radio.Indicator />
-                    {index < 4 ? <Kbd size="xs">{index + 1}</Kbd> : null}
+                    {shortcuts && index < 4 ? <Kbd size="xs">{index + 1}</Kbd> : null}
                     <div>
                       <Group gap="xs">
                         <Text size="sm" fw={500}>
@@ -316,9 +328,11 @@ export function InboxCard({
             loading={pending}
             onClick={onSubmit}
             rightSection={
-              <Kbd size="xs" aria-hidden>
-                ↵
-              </Kbd>
+              shortcuts ? (
+                <Kbd size="xs" aria-hidden>
+                  ↵
+                </Kbd>
+              ) : null
             }
           >
             {hasOptions ? 'Send answer' : count > 1 ? 'Dismiss All' : 'Dismiss'}

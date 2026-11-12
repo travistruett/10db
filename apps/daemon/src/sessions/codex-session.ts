@@ -31,6 +31,7 @@ import {
   RateLimitsReadResponse,
   ThreadResponse,
   TurnCompleted,
+  TurnStarted,
   TurnStartResponse,
 } from './codex-protocol';
 import {
@@ -48,6 +49,7 @@ import {
   type SessionEvent,
   type SessionHandle,
   type SessionSpec,
+  type ShapeImage,
 } from './types';
 
 export interface CodexSessionDeps extends CodexAdapterOptions {
@@ -108,6 +110,29 @@ function errorKind(info: unknown): string | null {
   if (typeof info === 'object' && info !== null) return Object.keys(info)[0] ?? null;
   return null;
 }
+
+/**
+ * A message on its way to Codex: its text, the pictures that go with it, and the client uuid it goes
+ * under, which the thread records on the user message a turn takes it in.
+ */
+interface Outgoing {
+  readonly text: string;
+  readonly images: readonly ShapeImage[];
+  readonly uuid: string | undefined;
+}
+
+/** The `clientUserMessageId` a message goes under, when it has one. */
+const clientIdOf = (message: Outgoing): { clientUserMessageId?: string } =>
+  message.uuid === undefined ? {} : { clientUserMessageId: message.uuid };
+
+/**
+ * The pictures as Codex's user input, after the text, in order: each a local image of its stored
+ * file, which Codex reads itself. Every lane picture is a stored file.
+ */
+const pictureInputs = (images: readonly ShapeImage[]): readonly Record<string, string>[] =>
+  images.flatMap((image) =>
+    image.path === undefined ? [] : [{ type: 'localImage', path: image.path }],
+  );
 
 /** The text of a message a session that has started sends; nothing was prompted before then. */
 const unlessStarted = (started: boolean): string => (started ? '' : ` ${NO_PROMPT}`);
@@ -191,6 +216,41 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
   const state = createTurnState();
   const graceMs = deps.stopGraceMs ?? STOP_GRACE_MS;
   let sends: Promise<void> = Promise.resolve();
+  /**
+   * Messages sent and not yet handed to Codex: 10db's own queue. Codex drops a steered message that
+   * an interrupted turn had not taken yet, so these are what an interrupt leaves still to run.
+   */
+  const waiting = new Set<Outgoing>();
+  /** The interrupt in flight, if any: no message is steered into the turn it stops. */
+  let interrupting: Promise<void> = Promise.resolve();
+  /** What each turn an interrupt waits on resolves when its `turn/completed` is read. */
+  const turnEnds = new Map<string, () => void>();
+  /**
+   * The client uuids handed to each turn and not yet taken, by turn id: what a turn that ends first
+   * dropped. A message started with waits under `starting` until its turn is named.
+   */
+  const handed = new Map<string, Set<string>>();
+  /** Every client uuid a turn of this session took. */
+  const taken = new Set<string>();
+  /** The client uuid of a `turn/start` in flight, until its turn is named. */
+  let starting: string | null = null;
+  /** The `turn/start` in flight, if any; an interrupt waits for the turn it starts. */
+  let startInFlight: Promise<void> | null = null;
+  /** The turns the handle's `interrupt` stopped: their caller pushes again what they dropped. */
+  const stoppedByHandle = new Set<string>();
+  /** Notes `uuid` as handed to the turn `turnId`, unless a turn already took it. */
+  const handTo = (turnId: string, uuid: string | undefined): void => {
+    if (uuid === undefined || taken.has(uuid)) return;
+    const uuids = handed.get(turnId) ?? new Set<string>();
+    uuids.add(uuid);
+    handed.set(turnId, uuids);
+  };
+  /** The uuids the ended turn was handed and did not take, unless the handle stopped it. */
+  const droppedBy = (turnId: string): string[] => {
+    const uuids = [...(handed.get(turnId) ?? [])].filter((uuid) => !taken.has(uuid));
+    handed.delete(turnId);
+    return stoppedByHandle.delete(turnId) ? [] : uuids;
+  };
   let guardSocket: GuardSocket | null = null;
   let stderrTail = '';
   /** What the process runs with beyond the spec's env; set once the home is known. */
@@ -438,20 +498,36 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
     return tail === '' ? '' : ` Codex printed: "${tail}"`;
   };
 
-  /** Begins a turn with `text`. The reply names the turn if its `turn/started` has not been read yet. */
-  const startTurn = async (thread: string, text: string): Promise<void> => {
+  /** Begins a turn with `message`. The reply names the turn if its `turn/started` has not been read yet. */
+  const startTurn = (thread: string, message: Outgoing): Promise<void> => {
+    starting = message.uuid ?? null;
+    const run = beginTurn(thread, message).finally(() => {
+      starting = null;
+      startInFlight = null;
+    });
+    startInFlight = run.catch(() => undefined);
+    return run;
+  };
+
+  const beginTurn = async (thread: string, message: Outgoing): Promise<void> => {
     const before = turnsCompleted;
     const reply = await ask(
       'turn/start',
       {
         threadId: thread,
-        input: [{ type: 'text', text, text_elements: [] }],
+        ...clientIdOf(message),
+        input: [
+          { type: 'text', text: message.text, text_elements: [] },
+          ...pictureInputs(message.images),
+        ],
         approvalPolicy: 'never',
         model: spec.model,
         effort: spec.effort,
       },
       TurnStartResponse,
     );
+    if (starting !== null) handTo(reply.turn.id, starting);
+    starting = null;
     if (state.turnId === null && turnsCompleted === before && reply.turn.status === 'inProgress')
       state.turnId = reply.turn.id;
   };
@@ -519,8 +595,22 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
         log.warn({ method: n.method }, 'codex sent a notification of a shape 10db does not read');
         return;
       }
+      if (n.method === 'turn/started') {
+        // The turn a `turn/start` in flight began: its message is handed to it.
+        const begun = TurnStarted.safeParse(n.params);
+        if (begun.success && starting !== null) {
+          handTo(begun.data.turn.id, starting);
+          starting = null;
+        }
+      }
+      let ended: string | null = null;
       if (n.method === 'turn/completed') {
         turnsCompleted += 1;
+        const completed = TurnCompleted.safeParse(n.params);
+        if (completed.success) {
+          ended = completed.data.turn.id;
+          turnEnds.get(ended)?.();
+        }
         const end = endOfTurn(n.params);
         if (end !== null) {
           void endOnTurn(end);
@@ -528,7 +618,13 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
         }
       }
       const mapped = mapCodexNotification(n, state);
-      if (started) for (const event of mapped) events.push(event);
+      for (const event of mapped) {
+        if (event.type === 'consumed') for (const uuid of event.uuids) taken.add(uuid);
+        if (event.type === 'turn_complete' && ended !== null) {
+          const dropped = droppedBy(ended);
+          if (started) events.push(dropped.length > 0 ? { ...event, dropped } : event);
+        } else if (started) events.push(event);
+      }
     } catch (error) {
       log.error(
         { method: n.method, errName: error instanceof Error ? error.name : 'unknown' },
@@ -537,29 +633,40 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
     }
   }
 
-  /** Steers the active turn, or starts one between turns. */
-  const deliver = async (text: string): Promise<void> => {
+  /** Steers the active turn, or starts one between turns; never the turn an interrupt is stopping. */
+  const deliver = async (message: Outgoing): Promise<void> => {
+    // An interrupt that starts while this one is awaited is waited on too: its receipt names the message.
+    for (let awaited = interrupting; ; awaited = interrupting) {
+      await awaited;
+      if (awaited === interrupting) break;
+    }
+    waiting.delete(message);
     if (done || closing || threadId === null) return;
     try {
-      if (state.turnId !== null) {
+      const steered = state.turnId;
+      if (steered !== null) {
+        // Handed before the call: a turn that ends as the steer is answered dropped it.
+        handTo(steered, message.uuid);
         try {
           await ask(
             'turn/steer',
             {
               threadId,
-              expectedTurnId: state.turnId,
-              input: [{ type: 'text', text }],
+              expectedTurnId: steered,
+              ...clientIdOf(message),
+              input: [{ type: 'text', text: message.text }, ...pictureInputs(message.images)],
             },
             Acknowledged,
           );
           return;
         } catch (error) {
           // The turn may have ended as the message was sent; then it is a turn of its own.
+          if (message.uuid !== undefined) handed.get(steered)?.delete(message.uuid);
           if (!(error instanceof CodexRpcError) || error.code === CLIENT_ERROR_CODE) throw error;
           log.warn({ method: 'turn/steer' }, 'codex refused to steer the turn');
         }
       }
-      await startTurn(threadId, text);
+      await startTurn(threadId, message);
     } catch (error) {
       if (error instanceof SessionOver) return;
       log.error(
@@ -586,6 +693,57 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
       timer.cancel();
       interrupt.catch(() => undefined);
     }
+  };
+
+  /**
+   * Interrupts the active turn and waits, up to `graceMs`, for Codex to report it ended, so a message
+   * sent after it starts a turn of its own. A turn Codex has not reported ended by then may still be
+   * running, and nothing may be steered into it: the session ends, and what it held goes to the next.
+   */
+  const stopTurn = async (thread: string, turnId: string): Promise<void> => {
+    const turn = { ended: false };
+    const ended = new Promise<void>((resolve) => {
+      turnEnds.set(turnId, () => {
+        turn.ended = true;
+        resolve();
+      });
+    });
+    let timer: { cancel(): void } = { cancel: () => undefined };
+    const grace = new Promise<void>((resolve) => {
+      timer = clock.setTimeout(resolve, graceMs);
+    });
+    try {
+      await Promise.race([
+        Promise.all([interruptTurn(thread, turnId), ended]),
+        grace,
+        over.catch(() => undefined),
+      ]);
+    } finally {
+      timer.cancel();
+      turnEnds.delete(turnId);
+    }
+    if (!turn.ended && !done) {
+      closing = true;
+      finish(
+        SessionEndReason.Error,
+        `Codex did not end the interrupted turn within ${String(graceMs / 1_000)} s, so the session was closed; its messages go to the next one.`,
+      );
+    }
+  };
+
+  /** The turn a `turn/start` in flight begins, waited for up to `graceMs`; null when none is named. */
+  const turnStarting = async (): Promise<string | null> => {
+    if (startInFlight === null) return state.turnId;
+    let timer: { cancel(): void } = { cancel: () => undefined };
+    const grace = new Promise<void>((resolve) => {
+      timer = clock.setTimeout(resolve, graceMs);
+    });
+    try {
+      await Promise.race([startInFlight, grace, over.catch(() => undefined)]);
+    } finally {
+      timer.cancel();
+    }
+    return state.turnId;
   };
 
   /** The guard hook's answer for one call; a throw here is a refusal, since the socket answers 500. */
@@ -692,7 +850,11 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
     started = true;
     events.push({ type: 'started', providerSessionId: thread.thread.id, pid: child.pid ?? null });
     try {
-      await startTurn(thread.thread.id, spec.prompt);
+      await startTurn(thread.thread.id, {
+        text: spec.prompt,
+        images: spec.images ?? [],
+        uuid: spec.promptUuid,
+      });
     } catch (error) {
       if (isModelRefusal(error))
         throw new StartRefused(SessionEndReason.ModelRefused, modelRefusal(spec.model));
@@ -729,9 +891,25 @@ export function startCodexSession(spec: SessionSpec, deps: CodexSessionDeps): Se
 
   return {
     events,
-    send: (text) => {
+    send: (text, images = [], uuid) => {
+      const message: Outgoing = { text, images, uuid };
+      waiting.add(message);
       // One at a time, so messages reach Codex in the order they were sent.
-      sends = sends.then(() => deliver(text));
+      sends = sends.then(() => deliver(message));
+    },
+    // The receipt names what 10db still holds: each runs once the interrupted turn has ended.
+    interrupt: async () => {
+      const stillQueued = [...waiting].flatMap((m) => (m.uuid === undefined ? [] : [m.uuid]));
+      // A message whose `turn/start` is in flight was handed over: the turn it starts is stopped.
+      const stopping = (async () => {
+        const turnId = await turnStarting();
+        if (done || threadId === null || turnId === null) return;
+        stoppedByHandle.add(turnId);
+        await stopTurn(threadId, turnId);
+      })();
+      interrupting = stopping;
+      await stopping;
+      return { stillQueued };
     },
     stop: async () => {
       if (done) return;

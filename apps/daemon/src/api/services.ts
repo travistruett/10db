@@ -62,6 +62,30 @@ import type {
   ModelProfileId,
   ModelProfilePatch,
   DecisionId,
+  GoalPassPagesDto,
+  WorkbenchSetupDto,
+  PassDto,
+  PassId,
+  PassOpenedDto,
+  PassAbandonedDto,
+  PassCloseAnswerDto,
+  PassCloseContinueDto,
+  PassClosePreviewDto,
+  PassCloseRequest,
+  PassJoinRequest,
+  PassOpenRequest,
+  PassPullRequestDto,
+  PassPullRequestPreviewDto,
+  PassRename,
+  PassSignOffDto,
+  PassStartDto,
+  PassTurnId,
+  PassTurnWithFilesDto,
+  TurnActivityDto,
+  PassViewDto,
+  TakeOutPreviewDto,
+  TakeOutRequest,
+  TakeOutResultDto,
   PersonaDto,
   PersonaId,
   PersonaInput,
@@ -101,7 +125,14 @@ import type {
   StartTaskInput,
   SystemCheckDto,
   TaskDto,
+  TaskFileId,
   TaskId,
+  TaskMessageDto,
+  TaskPictureKind,
+  TaskScreenId,
+  TaskScreensDto,
+  PicturesStatusDto,
+  TaskThreadDto,
   TaskInput,
   RunNextResult,
   TaskMove,
@@ -235,6 +266,101 @@ export interface ApiServices {
   /** Every batch of the project, newest first: a finished task's pull request can sit in an old batch. */
   listBatches(projectId: ProjectId): BatchDto[];
   /**
+   * Opens a Workbench pass on the project's folder and writes each page's first message: the one
+   * given, else the task's description when it has one. Refused (409) for whatever the open itself
+   * refuses. A pass runs on the project's own account, Claude or Codex.
+   */
+  openPass(projectId: ProjectId, input: PassOpenRequest): Promise<PassOpenedDto>;
+  /** The pass as the Workbench reads it: its pages and every turn's timing. */
+  passView(passId: PassId): PassViewDto;
+  /**
+   * Takes a page out of its pass (spec §5.4): its agent stopped, its work kept with the task, its files
+   * put back as they were without it, and the task back on the Board, its shared changes chosen Drop
+   * put back too. Refused (409) while the pass is not open or does not hold the task, and for a Drop
+   * of a change that is not the page's to drop or that the preview would not offer; answers
+   * `tookOut: false` when the page's files kept changing.
+   */
+  takeOutPage(passId: PassId, taskId: TaskId, input: TakeOutRequest): Promise<TakeOutResultDto>;
+  /**
+   * What taking the page out would ask (spec §7.2): each of its shared changes that has not landed,
+   * with why Drop is not offered for it, if it is not, and the pages that changed its files later.
+   */
+  takeOutPreview(passId: PassId, taskId: TaskId): Promise<TakeOutPreviewDto>;
+  /**
+   * Abandons the pass (spec §5.4, D23): every unsigned page taken out and put back, the pass and its
+   * batch `ABANDONED`, and the folder returned when nothing landed. A closing pass is taken over,
+   * its close stopped, until its close has moved the return branch. Refused (409) once the pass is
+   * none of open, closing below that step, or already abandoning.
+   */
+  abandonPass(passId: PassId): Promise<PassAbandonedDto>;
+  /** Every live pass as the Workbench reads it: open, closing, abandoning, or closed and not settled. */
+  livePasses(): PassViewDto[];
+  /** What Start Pass shows before a pass opens on the project; reads the folder with git. */
+  passStart(projectId: ProjectId): Promise<PassStartDto>;
+  /**
+   * Add Page: a task for each page named and the open tasks named join the open pass, each sent the
+   * builder's first message only when there is one. Refused (409) while the pass is not open or full,
+   * or for a task that can't join; (400) for a page it can't take.
+   */
+  addPassPages(passId: PassId, input: PassJoinRequest): Promise<PassViewDto>;
+  /** Names the pass anew; refused (409) once it is settled or abandoned. */
+  renamePass(passId: PassId, input: PassRename): PassDto;
+  /** Discard Saved Work: forgets the task's saved Workbench work and deletes its kept ref; 409 in a pass. */
+  discardKeptWork(taskId: TaskId): Promise<void>;
+  /**
+   * The Workbench setup: the project's areas rebuilt from its repository with a page per route, and
+   * the settings it suggests and the branch's unpushed commits. Reads only; 404 for a project there is none of.
+   */
+  workbenchSetup(projectId: ProjectId, signal?: AbortSignal): Promise<WorkbenchSetupDto>;
+  /** The page areas the goal's tasks committed in, read from git, for Work on This. */
+  goalPassPages(goalId: GoalId): Promise<GoalPassPagesDto>;
+  /** The task's turns, each with the files it changed against the turn before; reads git. */
+  taskTurns(taskId: TaskId): Promise<PassTurnWithFilesDto[]>;
+  /** A turn's log, oldest first (Show Log). */
+  turnActivity(turnId: PassTurnId): TurnActivityDto[];
+  /** Notes the builder opened the Ready page of this turn, the first time only; 409 for another task's turn. */
+  openedTurn(taskId: TaskId, turnId: PassTurnId): void;
+  /**
+   * Signs off a Ready page (spec §9.2) in the background: its session ends, then the shared changes
+   * it needs and its own files land, one commit each. Answers whether it lands now or waits for
+   * another page's turn that holds a shared change it needs. Refused (409) while the pass is not
+   * open or the page is not Ready.
+   */
+  signOffPage(passId: PassId, taskId: TaskId): PassSignOffDto;
+  /** Cancels the page's sign-off that waits for another page's turn. Refused (409) when none waits. */
+  cancelSignOff(passId: PassId, taskId: TaskId): void;
+  /**
+   * What Close Pass… shows (spec §5.4, D25): the unfinished pages, the files no page owns, commits
+   * 10db did not make, the summary, where the gate runs, and the lists' token. It stops nothing.
+   */
+  passClosePreview(passId: PassId): Promise<PassClosePreviewDto>;
+  /**
+   * Close Pass, confirmed: stops every agent of the pass, and closes in the background only when the
+   * lists are still the ones the token names; otherwise answers them again with what changed.
+   * Refused (409) while the pass is not open or Your folder is off its branch, and for choices the
+   * lists do not allow.
+   */
+  closePass(passId: PassId, input: PassCloseRequest): Promise<PassCloseAnswerDto>;
+  /**
+   * Continue Close: the close of a closing pass whose job stopped goes on from its recorded step.
+   * Refused (409) for a pass that is not closing.
+   */
+  continueClose(passId: PassId): PassCloseContinueDto;
+  /** Whether Open Pull Request is offered for the pass (spec §8.3), why not, and what it would do. */
+  passPullRequest(passId: PassId): Promise<PassPullRequestPreviewDto>;
+  /**
+   * Pushes the pass's branch and opens its draft pull request in the background, then gates and
+   * reviews what it pushed. Refused (409) when it is not offered: nothing signed off, no origin or gh,
+   * or the pass not open.
+   */
+  openPassPullRequest(passId: PassId): Promise<PassPullRequestDto>;
+  /**
+   * Send to Agent (D19): sends the text a notice offers as the builder's message to the task: a notice
+   * on its thread, or one in the header of the pass holding it, by id. Refused (409) for a notice that
+   * offers nothing to send, and as a message to the task is.
+   */
+  sendToAgent(taskId: TaskId, noticeId: string): Promise<TaskMessageDto>;
+  /**
    * The project's goals, each with its digest and count of new items since the builder last opened
    * it, and the Ungrouped group. Leaves every view mark as it was.
    */
@@ -308,6 +434,40 @@ export interface ApiServices {
     shapeId: ShapeId,
     file: { readonly name: string; readonly mediaType: string; readonly bytes: Uint8Array },
   ): ShapeFileDto;
+  /** A task's thread, oldest first; throws NotFoundError for an unknown task. */
+  taskThread(taskId: TaskId): TaskThreadDto;
+  /**
+   * Keeps the builder's message and its pasted pictures. Throws NotFoundError for an unknown task and
+   * InvalidError, naming what is refused, for an empty message or a file that is no PNG, JPEG or
+   * WebP by its bytes. A message to a page of a Workbench pass goes to its agent; `redo` stops the
+   * page's running turn first. Refused (409) while the pass is not open or the page is being taken out.
+   */
+  postTaskMessage(
+    taskId: TaskId,
+    input: {
+      readonly text: string;
+      readonly pictures: readonly { readonly name: string; readonly bytes: Uint8Array }[];
+    },
+    opts?: { readonly redo?: boolean },
+  ): Promise<TaskMessageDto>;
+  /**
+   * Stops the running turn of a page of an open Workbench pass, keeping its work and raising nothing;
+   * a page with no running turn is left as it is. Refused (409) for a task no open pass holds.
+   */
+  stopPage(taskId: TaskId): Promise<void>;
+  /** A pasted picture's bytes; throws NotFoundError for one that is not this task's. */
+  taskPicture(
+    taskId: TaskId,
+    fileId: TaskFileId,
+  ): { readonly bytes: Uint8Array<ArrayBuffer>; readonly mediaType: TaskPictureKind };
+  /** A task's pictures of the builder's app (Workbench spec §10), oldest first. */
+  taskScreens(taskId: TaskId): TaskScreensDto;
+  /** A picture's PNG; throws NotFoundError for a pruned or missing one. */
+  screenPicture(screenId: TaskScreenId): Uint8Array<ArrayBuffer>;
+  /** Settings › General: the browser for pictures and the project's last sign-in. */
+  picturesStatus(projectId: ProjectId): PicturesStatusDto;
+  /** Restart Preview: runs the project's preview command again, its restarts forgotten. */
+  restartPreview(projectId: ProjectId): Promise<void>;
   /** `start_shape`: a conversation from a terminal session, listed at once; starts no turn. */
   startShape(input: StartShapeInput): ShapeDto;
   /** Settings › Decisions: the Sizing hit rate and each Shape decision's shadow agreement. */

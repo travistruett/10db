@@ -172,6 +172,14 @@ describe('no program from the checkout runs in a daemon git call', () => {
     },
     { name: 'keptRefs', act: (git) => git.keptRefs(repo.path, 'refs/10db/starts/') },
     { name: 'survey', act: (git) => git.survey(repo.path, 50) },
+    {
+      name: 'surveyTexts',
+      act: (git) =>
+        git.surveyTexts(repo.path, ['README.md', '.gitattributes'], {
+          maxBytes: 1024,
+          maxTotalBytes: 4096,
+        }),
+    },
     { name: 'deleteKeptRef', act: (git) => git.deleteKeptRef(repo.path, 'refs/10db/starts/x') },
     {
       // After the commits, so main has its own: a merge commit, read-tree -m -u and update-ref.
@@ -1638,6 +1646,147 @@ describe('survey', () => {
     }
     await surveyed;
     expect(first).toBe('surveyed');
+  });
+
+  it('reads the texts HEAD holds, not the checkout, and leaves out what is no small text', async () => {
+    write('src/a.ts', "export const a = 'é';\n");
+    write('src/b.ts', 'import { a } from "./a";\n');
+    write('src/bin.dat', 'x\0y');
+    write('src/big.ts', 'x'.repeat(2000));
+    rawGit('add', 'src');
+    rawGit('commit', '-q', '-m', 'texts');
+    write('src/a.ts', 'edited in the checkout\n');
+    const read = await createGit().surveyTexts(
+      join(repo.path, 'src'),
+      ['src/a.ts', 'src/b.ts', 'src/bin.dat', 'src/big.ts', 'src/gone.ts'],
+      { maxBytes: 1000, maxTotalBytes: 100_000 },
+    );
+    expect(read.refused).toBeNull();
+    expect(Object.fromEntries(read.texts)).toEqual({
+      'src/a.ts': "export const a = 'é';\n",
+      'src/b.ts': 'import { a } from "./a";\n',
+    });
+  });
+
+  /** A blobless clone of the test repository whose ssh command and upload-pack are markers. */
+  function partialClone() {
+    write('src/a.ts', 'export const a = 1;\n');
+    rawGit('add', 'src');
+    rawGit('commit', '-q', '-m', 'a');
+    rawGit('config', 'uploadpack.allowFilter', 'true');
+    const clone = join(scratch.path, 'partial');
+    gitIn(
+      scratch.path,
+      'clone',
+      '-q',
+      '--filter=blob:none',
+      '--no-checkout',
+      `file://${repo.path}`,
+      clone,
+    );
+    for (const [key, value] of Object.entries(TEST_REPO_CONFIG)) gitIn(clone, 'config', key, value);
+    const ssh = marker('ssh');
+    const uploadPack = marker('upload-pack');
+    gitIn(clone, 'config', 'core.sshCommand', ssh.path);
+    gitIn(clone, 'config', 'remote.origin.uploadpack', uploadPack.path);
+    // A repository-level allow beats the daemon's `-c protocol.allow=never`.
+    gitIn(clone, 'config', 'protocol.file.allow', 'always');
+    return { clone, ssh, uploadPack };
+  }
+
+  /**
+   * A git that behaves as one before 2.45 (it drops GIT_NO_LAZY_FETCH) and whose config answers as
+   * if the clone were whole: the read goes ahead, so only the object reads' own guards stop a fetch.
+   */
+  function oldGitBlindToPartial() {
+    return gitWrapper(
+      'for a in "$@"; do [ "$a" = config ] && exit 1; done\nunset GIT_NO_LAZY_FETCH\nexec "$GIT" "$@"',
+    );
+  }
+
+  it('fetches nothing of a partial clone even past the config check, on a git before 2.45', async () => {
+    const { clone, ssh, uploadPack } = partialClone();
+    const wrapper = oldGitBlindToPartial();
+    try {
+      const git = createGit({ bin: join(wrapper.path.split(':')[0] ?? '', 'git') });
+      const read = await git.surveyTexts(clone, ['src/a.ts'], {
+        maxBytes: 1000,
+        maxTotalBytes: 1000,
+      });
+      expect(read.texts.size).toBe(0);
+      expect(ssh.ran()).toBe(false);
+      expect(uploadPack.ran()).toBe(false);
+    } finally {
+      wrapper.cleanup();
+    }
+  });
+
+  it('takes an empty extensions.partialClone for a partial clone', async () => {
+    const { clone, ssh, uploadPack } = partialClone();
+    gitIn(clone, 'config', 'extensions.partialClone', '');
+    gitIn(clone, 'config', '--unset', 'remote.origin.promisor');
+    const wrapper = gitWrapper('unset GIT_NO_LAZY_FETCH\nexec "$GIT" "$@"');
+    try {
+      const git = createGit({ bin: join(wrapper.path.split(':')[0] ?? '', 'git') });
+      const read = await git.surveyTexts(clone, ['src/a.ts'], {
+        maxBytes: 1000,
+        maxTotalBytes: 1000,
+      });
+      expect(read.refused).toBe('a partial clone: page code is not read');
+      expect(ssh.ran()).toBe(false);
+      expect(uploadPack.ran()).toBe(false);
+    } finally {
+      wrapper.cleanup();
+    }
+  });
+
+  it('reads nothing when it cannot read the config that says whether the clone is partial', async () => {
+    rawGit('config', 'remote.origin.promisor', 'maybe');
+    const read = await createGit().surveyTexts(repo.path, ['README.md'], {
+      maxBytes: 1000,
+      maxTotalBytes: 1000,
+    });
+    expect(read).toEqual({
+      texts: new Map(),
+      bytes: 0,
+      refused: "the repository's config could not be read: page code is not read",
+    });
+  });
+
+  it('fetches nothing of a partial clone, so no program its config names runs', async () => {
+    const { clone, ssh, uploadPack } = partialClone();
+    const read = await createGit().surveyTexts(clone, ['src/a.ts'], {
+      maxBytes: 1000,
+      maxTotalBytes: 1000,
+    });
+    expect(read.texts.size).toBe(0);
+    expect(ssh.ran()).toBe(false);
+    expect(uploadPack.ran()).toBe(false);
+  });
+
+  it('says it reads no page code of a partial clone', async () => {
+    const { clone } = partialClone();
+    const read = await createGit().surveyTexts(clone, ['src/a.ts'], {
+      maxBytes: 1000,
+      maxTotalBytes: 1000,
+    });
+    expect(read.refused).toBe('a partial clone: page code is not read');
+  });
+
+  it('reads nothing when the files wanted hold more than the budget together', async () => {
+    write('src/a.ts', 'a'.repeat(600));
+    write('src/b.ts', 'b'.repeat(600));
+    rawGit('add', 'src');
+    rawGit('commit', '-q', '-m', 'big');
+    const read = await createGit().surveyTexts(repo.path, ['src/a.ts', 'src/b.ts'], {
+      maxBytes: 1000,
+      maxTotalBytes: 1000,
+    });
+    expect(read).toEqual({
+      texts: new Map(),
+      bytes: 0,
+      refused: 'the source is over what one read may take: page code is not read',
+    });
   });
 
   it('surveys a checkout that holds a file named HEAD', async () => {

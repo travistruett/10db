@@ -6,11 +6,13 @@ import type {
   SDKMessage,
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
+import type { UUID } from 'node:crypto';
 import { MAX_STEP_SUMMARY, ModelMarkBasis } from '@10db/contracts';
 import type { GuardVerdict } from '../guard';
 import { SandboxedMcpServer } from '../sandbox';
 import { modelRefusalBasis, MODEL_NOT_FOUND_ERROR } from './account-check';
 import type {
+  InterruptReceipt,
   SessionEvent,
   SessionMcpServer,
   ShapeImage,
@@ -18,6 +20,7 @@ import type {
   ToolDecision,
   TurnResult,
 } from './types';
+import { claudeToolTarget } from './tool-target';
 
 export const SUMMARY_CHARS = 200;
 const BRIEF_CHARS = 80;
@@ -62,6 +65,21 @@ export function resetsAtToDate(value: number | undefined): Date | null {
 }
 
 /**
+ * The client uuids of the user messages a frame says its turn consumed, the evidence each was taken
+ * (Workbench spec §6.3). The turn's first assistant message stamps those its prompt brought; a message
+ * folded into the running turn between tool rounds is stamped on no later assistant message of a turn
+ * a typed prompt started, only on the turn's result, which lists every one. An older producer stamps
+ * only the one it is answering.
+ */
+function consumedBy(
+  msg: Pick<SDKAssistantMessage, 'user_message_uuid' | 'user_message_uuids'>,
+): readonly string[] {
+  return (
+    msg.user_message_uuids ?? (msg.user_message_uuid === undefined ? [] : [msg.user_message_uuid])
+  );
+}
+
+/**
  * Maps one SDK message to session events. Never emits `context` or `ended`; the adapter owns those.
  * `if` rather than `switch`: the SDK adds message types often, and every other type maps to nothing.
  */
@@ -97,9 +115,12 @@ export function mapSdkMessage(
           type: 'activity',
           kind: 'tool',
           summary: `${block.name} ${toolBrief(block.input)}`.slice(0, SUMMARY_CHARS),
+          tool: claudeToolTarget(block.name, block.input),
         });
       }
     }
+    const taken = consumedBy(msg);
+    if (taken.length > 0) events.push({ type: 'consumed', uuids: taken });
     if (msg.error === 'rate_limit')
       events.push({
         type: 'rate_limit',
@@ -120,7 +141,11 @@ export function mapSdkMessage(
           : 'success';
     // What the model wrote last: a review that never calls complete_step may have put its findings here.
     const text = msg.subtype === 'success' ? msg.result.trim().slice(0, TURN_TEXT_CHARS) : '';
+    // The result lists what the turn consumed, a message folded in between tool rounds among it,
+    // which no later assistant message stamps; it comes first, so the turn's end sees it taken.
+    const taken = consumedBy(msg);
     return [
+      ...(taken.length > 0 ? [{ type: 'consumed' as const, uuids: taken }] : []),
       {
         type: 'turn_complete',
         // Only a turn that didn't end normally says so; the others stay as they were.
@@ -155,6 +180,13 @@ export function mapSdkMessage(
     ];
   }
   return [];
+}
+
+/** What Claude Code's interrupt answered, as a session reports it: null when it gave no receipt. */
+export function interruptReceipt(
+  answer: { readonly still_queued?: readonly string[] } | undefined,
+): InterruptReceipt {
+  return answer?.still_queued === undefined ? null : { stillQueued: [...answer.still_queued] };
 }
 
 export function toPermissionResult(
@@ -206,10 +238,19 @@ export function toShapeHookOutput(verdict: ShapeVerdict): HookJSONOutput {
   };
 }
 
+const UUID_TEXT = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const isUuid = (text: string): text is UUID => UUID_TEXT.test(text);
+
+/**
+ * A user message for the session. `uuid` is the client uuid a turn that takes the message stamps in
+ * `user_message_uuids`; text that is no UUID is left off, as Claude Code would refuse it.
+ */
 export function userMessage(
   text: string,
   priority?: 'now' | 'next' | 'later',
   images: readonly ShapeImage[] = [],
+  uuid?: string,
 ): SDKUserMessage {
   return {
     type: 'user',
@@ -232,6 +273,7 @@ export function userMessage(
     },
     parent_tool_use_id: null,
     ...(priority ? { priority } : {}),
+    ...(uuid !== undefined && isUuid(uuid) ? { uuid } : {}),
   };
 }
 

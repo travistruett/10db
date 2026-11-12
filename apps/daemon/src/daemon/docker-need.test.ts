@@ -1,5 +1,10 @@
+import { execFileSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { callsDocker } from './docker-need';
+import { createTempRepoWithOrigin, isolatedGitEnv } from '../../test/fixtures';
+import { createGit } from '../git';
+import { callsDocker, gateCallsDocker } from './docker-need';
 
 /** A reader over an in-memory tree; a path not in it is absent. */
 const tree =
@@ -78,5 +83,61 @@ describe('callsDocker', () => {
   it('refuses to follow a path out of the repository', async () => {
     const files = { Makefile: 'gate:\n\t../outside.sh\n', '../outside.sh': 'docker ps\n' };
     expect(await callsDocker('make gate', tree(files))).toBe(false);
+  });
+});
+
+describe('gateCallsDocker', () => {
+  const env = isolatedGitEnv();
+  const gitIn = (dir: string, ...args: string[]) =>
+    execFileSync('git', ['-C', dir, ...args], { env, stdio: 'pipe' })
+      .toString()
+      .trim();
+  const commitMakefile = (dir: string, text: string, message: string) => {
+    writeFileSync(join(dir, 'Makefile'), text);
+    gitIn(dir, 'add', 'Makefile');
+    gitIn(dir, 'commit', '-q', '-m', message);
+  };
+
+  it("reads origin's remote-tracking branch, never a local branch or tag that shares its short name", async () => {
+    const pair = createTempRepoWithOrigin();
+    try {
+      const repo = pair.repo.path;
+      commitMakefile(repo, 'gate:\n\tpnpm test\n', 'the gate');
+      gitIn(repo, 'push', '-q', 'origin', 'main');
+      // A lane can make a local branch named like the remote-tracking one; git prefers it to the
+      // remote-tracking ref when the name is given short.
+      gitIn(repo, 'checkout', '-q', '-b', 'origin/main');
+      commitMakefile(repo, 'gate:\n\tdocker compose run --rm app pytest\n', 'a lane');
+      gitIn(repo, 'checkout', '-q', 'main');
+      const project = { repoPath: repo, baseBranch: 'main', gateCommand: 'make gate' };
+      expect(await gateCallsDocker(createGit(), project)).toBe(false);
+
+      gitIn(repo, 'tag', 'origin/main', 'origin/main');
+      gitIn(repo, 'branch', '-D', 'origin/main');
+      expect(await gateCallsDocker(createGit(), project)).toBe(false);
+    } finally {
+      pair.cleanup();
+    }
+  });
+
+  it('reads the Makefile origin holds, and nothing with no remote-tracking branch', async () => {
+    const pair = createTempRepoWithOrigin();
+    try {
+      const repo = pair.repo.path;
+      commitMakefile(repo, 'gate:\n\tdocker compose run --rm app pytest\n', 'the gate');
+      const project = { repoPath: repo, baseBranch: 'main', gateCommand: 'make gate' };
+      expect(await gateCallsDocker(createGit(), project)).toBe(false);
+      gitIn(repo, 'push', '-q', 'origin', 'main');
+      expect(await gateCallsDocker(createGit(), project)).toBe(true);
+      expect(await gateCallsDocker(createGit(), { ...project, baseBranch: 'none' })).toBe(false);
+      // No remote-tracking branch `lane`, but a local branch named like it in full.
+      gitIn(repo, 'branch', 'refs/remotes/origin/lane');
+      expect(await gateCallsDocker(createGit(), { ...project, baseBranch: 'lane' })).toBe(false);
+      // With no commit to read, the builder's own command still says it.
+      const direct = { ...project, baseBranch: 'lane', gateCommand: 'docker compose run --rm t' };
+      expect(await gateCallsDocker(createGit(), direct)).toBe(true);
+    } finally {
+      pair.cleanup();
+    }
   });
 });

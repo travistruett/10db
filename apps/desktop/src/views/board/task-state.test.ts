@@ -400,6 +400,14 @@ describe('taskState', () => {
     });
   });
 
+  it("sends a pass's page that waits on the builder to the UI Workbench, not the Inbox", () => {
+    const pass = batchDto({ passId: mintId('Pass') });
+    expect(taskState(workstreamDto({ state: 'WAITING_HUMAN' }), pass, null)).toEqual({
+      line: 'Waiting on you in the UI Workbench',
+      color: 'yellow',
+    });
+  });
+
   it('says Checking alone when the project has no gate command', () => {
     expect(taskState(workstreamDto({ state: 'VERIFYING' }), undefined, null)?.line).toBe(
       'Checking',

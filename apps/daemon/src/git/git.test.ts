@@ -358,6 +358,46 @@ describe('history queries', () => {
     expect(await git.filesChangedBetween(repo.path, base, sha)).toEqual(['b.txt', 'dir/a.txt']);
     expect(await git.filesChangedBetween(repo.path, sha, sha)).toEqual([]);
   });
+
+  it('counts the commits a tip has that a base lacks, those a merge brought in too', async () => {
+    const base = rawGit('rev-parse', 'HEAD');
+    rawGit('checkout', '-q', '-b', 'side');
+    rawGit('commit', '-q', '--allow-empty', '-m', 'on the side');
+    rawGit('checkout', '-q', 'main');
+    rawGit('commit', '-q', '--allow-empty', '-m', 'on main');
+    rawGit('merge', '-q', '--no-ff', '--no-edit', 'side');
+    const tip = rawGit('rev-parse', 'HEAD');
+    expect(await git.countCommits(repo.path, base, tip)).toBe(3);
+    expect(await git.countCommits(repo.path, tip, base)).toBe(0);
+  });
+
+  it("resolves origin's remote-tracking branch by its exact name, never a branch named like it", async () => {
+    const first = rawGit('rev-parse', 'HEAD');
+    // No remote ref, but local branches a lane could make, named like it in full and short.
+    rawGit('branch', 'refs/remotes/origin/main');
+    rawGit('branch', 'origin/main');
+    expect(await git.remoteTrackingCommit(repo.path, 'main')).toBeNull();
+    rawGit('update-ref', 'refs/remotes/origin/main', first);
+    rawGit('commit', '-q', '--allow-empty', '-m', 'later');
+    rawGit('update-ref', 'refs/heads/origin/main', 'HEAD');
+    expect(await git.remoteTrackingCommit(repo.path, 'main')).toBe(first);
+    // An annotated tag stored at the ref is peeled to its commit.
+    rawGit('tag', '-a', '-m', 'tagged', 'v1', first);
+    rawGit('update-ref', 'refs/remotes/origin/main', rawGit('rev-parse', 'v1'));
+    expect(await git.remoteTrackingCommit(repo.path, 'main')).toBe(first);
+  });
+
+  it("lists a commit's tracked files, not the checkout's, nor a link's target", async () => {
+    const first = rawGit('rev-parse', 'HEAD');
+    mkdirSync(join(repo.path, 'dir'));
+    write('dir/a.txt', 'a');
+    symlinkSync('dir', join(repo.path, 'link'));
+    rawGit('add', 'dir/a.txt', 'link');
+    rawGit('commit', '-q', '-m', 'files');
+    write('untracked.txt', 'u');
+    expect(await git.filesAt(repo.path, 'HEAD')).toEqual(['README.md', 'dir/a.txt', 'link']);
+    expect(await git.filesAt(repo.path, first)).toEqual(['README.md']);
+  });
 });
 
 describe('folderAt', () => {
@@ -1209,6 +1249,65 @@ describe('diffSince', () => {
       { path: 'a.txt', added: 2, removed: 0 },
       { path: 'blob.bin', added: null, removed: null },
     ]);
+  });
+
+  it.each([
+    {
+      name: 'only the paths named',
+      paths: { only: ['a.txt', 'b *.txt'] },
+      has: ['a.txt', 'b *.txt'],
+    },
+    { name: 'every path but those named', paths: { except: ['a.txt'] }, has: ['b *.txt', 'c.txt'] },
+    {
+      // Some 3 MB of names: more than one command line holds, on macOS and Linux alike.
+      name: 'only the paths named, of more than a command line holds',
+      paths: {
+        only: [
+          'a.txt',
+          ...Array.from({ length: 30_000 }, (_, n) => `gone/${'d'.repeat(90)}/${String(n)}.txt`),
+        ],
+      },
+      has: ['a.txt'],
+    },
+    {
+      name: 'every path but those named, of more than a command line holds',
+      paths: {
+        except: [
+          'a.txt',
+          ...Array.from({ length: 30_000 }, (_, n) => `gone/${'d'.repeat(90)}/${String(n)}.txt`),
+        ],
+      },
+      has: ['b *.txt', 'c.txt'],
+    },
+  ])('diffs $name, each path read as it is spelled', async ({ paths, has }) => {
+    const base = rawGit('rev-parse', 'HEAD');
+    write('a.txt', 'a\n');
+    // A name that reads as a glob: matched as spelled, never as a pattern.
+    write('b *.txt', 'b\n');
+    write('c.txt', 'c\n');
+    commitAll('three files');
+
+    const changes = await git.diffSince(repo.path, base, headOf(), 512 * 1024, paths);
+
+    expect(changes.files.map((f) => f.path).sort()).toEqual(has);
+    expect(changes.diff.match(/^diff --git /gm)).toHaveLength(has.length);
+  });
+
+  it('reads named files in the order it counts them, the text cut where the budget runs out', async () => {
+    const base = rawGit('rev-parse', 'HEAD');
+    // Enough files that their names are read in several turns.
+    const names = Array.from({ length: 450 }, (_, n) => `f-${String(n).padStart(3, '0')}.txt`);
+    for (const name of names) write(name, `${name}\n`);
+    commitAll('many files');
+
+    const whole = await git.diffSince(repo.path, base, headOf(), 512 * 1024);
+    const named = await git.diffSince(repo.path, base, headOf(), 512 * 1024, { only: names });
+    const cut = await git.diffSince(repo.path, base, headOf(), 20_000, { only: names });
+
+    expect(named).toEqual(whole);
+    expect(cut.truncated).toBe(true);
+    expect(cut.files).toEqual(whole.files);
+    expect(whole.diff.startsWith(cut.diff)).toBe(true);
   });
 
   it('is empty when nothing changed since the base', async () => {

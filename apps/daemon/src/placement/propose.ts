@@ -17,7 +17,12 @@ interface TaskTouches {
 
 type ProjectPlacement = Pick<ProjectDto, 'delivery' | 'workspaceMode'> & {
   readonly isolate: readonly string[];
+  /** A Workbench pass of the project still holds Your folder (W9). */
+  readonly passHoldsFolder?: boolean;
 };
+
+/** Why a task goes to a separate copy while a pass holds the project's folder. */
+export const PASS_HOLDS_FOLDER_REASON = 'Your folder is in a UI Workbench pass';
 
 /** The name a risk tag adds to the reason; a tag the rule ignores has none. */
 const RISK_TAG_TOUCHES: Partial<Record<RiskTag, string>> = {
@@ -35,6 +40,9 @@ const RISK_TAG_TOUCHES: Partial<Record<RiskTag, string>> = {
  * only the builder overrides it, later, from the task's placement control. Any other task takes the
  * placement the caller named, else the project's default, with no reason. A project with local delivery
  * has no separate copies, so its tasks are always shared.
+ *
+ * While a Workbench pass holds Your folder (W9), a task that would work there gets a separate copy
+ * and says why; in a local project it stays shared and waits for the pass instead.
  */
 export function proposePlacement(project: ProjectPlacement, task: TaskTouches): PlacementProposal {
   if (project.delivery !== Delivery.PullRequest)
@@ -48,5 +56,8 @@ export function proposePlacement(project: ProjectPlacement, task: TaskTouches): 
   }
   if (touches.size > 0)
     return { workspaceMode: WorkspaceMode.Worktree, reason: `touches ${[...touches].join(', ')}` };
-  return { workspaceMode: task.workspaceMode ?? project.workspaceMode, reason: null };
+  const asked = task.workspaceMode ?? project.workspaceMode;
+  if (asked === WorkspaceMode.Shared && project.passHoldsFolder === true)
+    return { workspaceMode: WorkspaceMode.Worktree, reason: PASS_HOLDS_FOLDER_REASON };
+  return { workspaceMode: asked, reason: null };
 }

@@ -403,6 +403,10 @@ describe('worktree mode contracts', () => {
       workspaceMode: 'shared',
       worktreeSeed: ['node_modules'],
       isolate: ['migrations', 'deps'],
+      appUrl: null,
+      devLoginCommand: null,
+      previewCommand: null,
+      screens: { viewports: [{ width: 1440, height: 900 }], themes: ['default'] },
       createdAt: '2026-10-21T12:00:00.000Z',
       updatedAt: '2026-10-21T12:00:00.000Z',
     };

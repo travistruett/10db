@@ -763,6 +763,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       case 'activity':
       case 'compacted':
       case 'background_tasks':
+      case 'consumed':
         break;
     }
   };

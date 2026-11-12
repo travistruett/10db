@@ -19,8 +19,10 @@ import { z } from 'zod';
 import {
   checkoutSwitchCommand,
   GitNetworkError,
+  shellWord,
   worktreeRemovalCommand,
   type CheckoutPlace,
+  type PassDirtRecord,
 } from '../git';
 import { GhError } from '../github';
 import type { GateResult } from '../verify';
@@ -456,7 +458,7 @@ export const worktreeCards = {
     const branch = batch.branch ?? '(not cut)';
     return {
       title: `Batch "${batch.title}" not retried: its worktree is on ${found ?? 'a detached HEAD'}, with uncommitted changes`,
-      body: `10db makes the worktree whole on ${branch} before a retry and won't throw away changes. Commit or discard these in ${path}, or run git switch ${branch} there, then answer Retry (Abandon batch gives the batch up):\n${listPaths(paths)}`,
+      body: `10db makes the worktree whole on ${branch} before a retry and won't throw away changes. Commit or discard these in ${path}, or run git switch ${shellWord(branch)} there, then answer Retry (Abandon batch gives the batch up):\n${listPaths(paths)}`,
       ...worktreeOffer({ kind: 'batch', batchId: batch.id }, { batchId: batch.id }),
     };
   },
@@ -629,27 +631,27 @@ export function wrongBranchCard(
       // The scheduler raises this every time the work waits; one open card per branch is enough.
       return {
         title: `Batch "${batch.title}" waits: ${where}`,
-        body: `Nothing in the batch starts until the checkout is back on its branch. Run git switch ${branch} in ${repoPath}, or abandon the batch in a task's drawer on the Board.`,
+        body: `Nothing in the batch starts until the checkout is back on its branch. Run git switch ${shellWord(branch)} in ${repoPath}, or abandon the batch in a task's drawer on the Board.`,
         foldKey: `batch-branch:${batch.id}:${on}`,
         detail,
       };
     case 'failed':
       return {
         title: `Batch "${batch.title}" failed: ${where}`,
-        body: `10db restarted with the checkout off the batch branch, so nothing in the batch runs. Run git switch ${branch} in ${repoPath}, then press Retry in a task's drawer on the Board; or abandon the batch there.`,
+        body: `10db restarted with the checkout off the batch branch, so nothing in the batch runs. Run git switch ${shellWord(branch)} in ${repoPath}, then press Retry in a task's drawer on the Board; or abandon the batch there.`,
         detail,
       };
     case 'not_shipped':
       return {
         title: `Batch "${batch.title}" not shipped: ${where}`,
-        body: `10db ships only from the batch branch, and pushed nothing. Run git switch ${branch} in ${repoPath}, then press Retry in a task's drawer on the Board.`,
+        body: `10db ships only from the batch branch, and pushed nothing. Run git switch ${shellWord(branch)} in ${repoPath}, then press Retry in a task's drawer on the Board.`,
         // Retry ship and Abandon, as every other ship failure offers.
         detail: answers(batch),
       };
     case 'not_joined':
       return {
         title: `Not added to batch "${batch.title}": ${where}`,
-        body: `Start the task again once the checkout is on ${branch} (git switch ${branch} in ${repoPath}).`,
+        body: `Start the task again once the checkout is on ${branch} (git switch ${shellWord(branch)} in ${repoPath}).`,
         detail,
       };
   }
@@ -1311,6 +1313,28 @@ export const branchCards = {
     body: `10db has no task for these local branches, so it can't tell whether they are yours and leaves them alone:\n${listPaths(branches)}\n\nDelete the ones you don't need with git branch -D <name>.`,
     foldKey: branchCardKey.withoutBatch,
     refresh: true,
+  }),
+};
+
+/** One per pass branch a stop left with no pass. */
+export const passCardKey = {
+  unopened: (branch: string): string => `pass-unopened:${branch}`,
+} as const;
+
+/** What 10db tells the builder about a Workbench pass's branches. */
+export const passCards = {
+  /**
+   * The daemon stopped opening a pass after it made the pass's branch and before the pass was
+   * written, and something has moved since, so start-up could not take it back.
+   */
+  unopened: (record: PassDirtRecord): Card => ({
+    title: `${record.branch} is left from a UI Workbench pass that did not open`,
+    body:
+      `10db stopped while opening a UI Workbench pass, after it made ${record.branch} at the commit ${record.returnBranch} was on and before the pass was recorded. ` +
+      `Something has changed there since, so 10db leaves it as it is. ` +
+      `If Your folder is on it, switch back with git switch ${shellWord(record.returnBranch)}; a commit made on ${record.branch} is only there, so merge it into ${record.returnBranch} first if you want it. ` +
+      `Then delete the branch with git branch -D ${record.branch}, and the pass's copy of your uncommitted files with git update-ref -d ${record.ref}.`,
+    foldKey: passCardKey.unopened(record.branch),
   }),
 };
 

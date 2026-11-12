@@ -17,12 +17,17 @@ import {
 import {
   activeClaims,
   copyHazardNames,
+  findOpenPass,
   getAppSetting,
   getBatch,
   getProject,
   getWorkstream,
   getWorkstreamRow,
   listInbox,
+  latestPassTurn,
+  listPassDirt,
+  listSharedChanges,
+  listPassTasks,
   listPermissionRules,
   listProjects,
   listWorkstreamCommitShas,
@@ -30,7 +35,7 @@ import {
   setAppSetting,
 } from '@10db/db';
 import type { Clock, Timer } from '../clock';
-import { checkoutOf } from '../delivery';
+import { checkoutOf, passDirtRef } from '../delivery';
 import type { EventBus, StateStore } from '../events';
 import {
   bookkeepingAt,
@@ -55,6 +60,7 @@ import {
   writeStamp,
 } from './allowed-writes';
 import { filesUnderBounded as filesUnder } from './dir-files';
+import { accountedAt, passWrites, type PassLane } from './pass-writes';
 import {
   bulkFoldKey,
   findForeignClaimWrites,
@@ -69,6 +75,11 @@ import {
 } from './strays';
 
 const WATCH_BATCH_MS = 500;
+/**
+ * How long past a pass turn's end, beyond the batch window, a write outside every claim may still be
+ * that turn's: erring toward naming the lane, since its shell's writes are not seen by the hook.
+ */
+const TURN_END_SLACK_MS = 5_000;
 const BULK_LISTED = 20;
 /** The app setting that holds the writes a permission card excused, so a restart keeps them. */
 const EXCUSED_WRITES_SETTING = 'watcher.excusedWrites';
@@ -83,6 +94,8 @@ interface ExcusedWrite {
 }
 /** The most excused writes kept; the oldest go first. */
 const MAX_EXCUSED_WRITES = 500;
+/** The most of 10db's own writes kept; the oldest go first. */
+const MAX_DAEMON_WRITES = 500;
 const WATCHED_STATES = [...LANE_STATES, WorkstreamState.WaitingHuman];
 /**
  * Whose claims excuse a write at a step's end: every unfinished workstream but one a human took over. A lane
@@ -128,6 +141,11 @@ export interface Watcher {
   stepEnd(workstreamId: WorkstreamId): Promise<string[]>;
   /** Processes pending changes now instead of at the next batch. */
   flush(): Promise<void>;
+  /**
+   * Notes the files 10db itself just wrote in the checkout `root` (a take-out putting a page back), as
+   * they are now: a batch or a step end that finds one unchanged since raises no card for it.
+   */
+  daemonWrote(root: string, paths: readonly string[]): Promise<void>;
   stop(): void;
 }
 
@@ -217,9 +235,16 @@ export function createWatcher(deps: {
     strays: readonly string[],
     candidates: readonly WorkstreamId[],
     owner: WorkstreamId | null,
+    /** The pass's lanes that were working when the write was seen, which the card names. */
+    working: readonly PassLane[] = [],
   ): void {
     if (strays.length === 0) return;
     const workstreamId = owner ?? (candidates.length === 1 ? (candidates[0] ?? null) : null);
+    const titles = working.map((lane) => lane.title);
+    const during =
+      titles.length === 0
+        ? ''
+        : `\nWritten while ${titles.join(' and ')} ${titles.length === 1 ? 'was' : 'were'} working`;
     // A write that can change what runs gets its own card, so a bulk card never buries it.
     const { sensitive, ordinary } = splitSensitive(strays, (rel) => rel);
     const single = (rel: string): void => {
@@ -227,7 +252,7 @@ export function createWatcher(deps: {
         projectId: project.id,
         workstreamId,
         title: STRAY_TITLE,
-        body: labelled(site, rel),
+        body: `${labelled(site, rel)}${during}`,
         detail: { path: rel, candidates: [...candidates] },
         foldKey: strayFoldKey(site.scope, rel),
       });
@@ -239,13 +264,97 @@ export function createWatcher(deps: {
         projectId: project.id,
         workstreamId,
         title: `${String(ordinary.length)} writes outside every claim`,
-        body: `${listed.map((rel) => labelled(site, rel)).join('\n')}\n…and ${String(ordinary.length - listed.length)} more`,
+        body: `${listed.map((rel) => labelled(site, rel)).join('\n')}\n…and ${String(ordinary.length - listed.length)} more${during}`,
         detail: { count: ordinary.length, paths: listed, candidates: [...candidates] },
         foldKey: bulkFoldKey(site.scope),
       });
       return;
     }
     ordinary.forEach(single);
+  }
+
+  /**
+   * The lanes of the project's pass, while one holds its tasks (open, closing or abandoning), when
+   * `batchId` is Your folder's (null): the pass works there alone. Null otherwise. A lane counts as
+   * working while it runs, when it is `ending` (its session's end is being read) with its turn still
+   * open, and when its last turn ended so recently that a write it made may have waited out the
+   * batch window since. A warm session that closes between turns made no write: its agent was not
+   * working.
+   */
+  function passLanes(
+    project: ProjectDto,
+    batchId: BatchId | null,
+    ending: WorkstreamId | null = null,
+  ): PassLane[] | null {
+    if (batchId !== null) return null;
+    const pass = findOpenPass(db, project.id);
+    if (!pass) return null;
+    const recent = new Date(deps.state.now()).getTime() - batchMs - TURN_END_SLACK_MS;
+    return listPassTasks(db, pass.id).flatMap((task) => {
+      if (task.workstreamId === null) return [];
+      const ws = getWorkstreamRow(db, task.workstreamId);
+      const latest = latestPassTurn(db, task.id);
+      const endedAt = latest?.endedAt ?? null;
+      return [
+        {
+          id: ws.id,
+          title: task.title,
+          working:
+            ws.state === WorkstreamState.Running ||
+            ws.state === WorkstreamState.HandingOff ||
+            (ws.id === ending && latest !== undefined && endedAt === null) ||
+            (endedAt !== null && new Date(endedAt).getTime() >= recent),
+          claims: activeClaims(db, ws.id).map((c) => ({ kind: c.kind, name: c.name })),
+        },
+      ];
+    });
+  }
+
+  /**
+   * `paths` without each that still holds what the project's pass accounts for in Your folder `root`
+   * (`accountedAt`): the folder's dirt from before the pass, and a shared change its turn kept and whose
+   * hold let the area go, are no write made in it. The content must be the one the database recorded,
+   * and the mode the one its commit holds. An entry counts as
+   * held only when its mode and content both match, so an executable bit or a link holding the same
+   * bytes is a write. A sensitive path is kept, as is every path when git can't read either side.
+   */
+  async function withoutAccounted(
+    project: ProjectDto,
+    root: string,
+    paths: readonly string[],
+    lanes: readonly PassLane[],
+  ): Promise<string[]> {
+    // With no lane working, `passWrites` cards no write outside every claim: nothing is worth a read.
+    if (!lanes.some((lane) => lane.working)) return [...paths];
+    const pass = findOpenPass(db, project.id);
+    if (!pass) return [...paths];
+    const accounted = accountedAt({
+      dirtRef: passDirtRef(pass.id),
+      dirt: listPassDirt(db, pass.id),
+      shared: listSharedChanges(db, pass.id),
+    });
+    const named = paths.filter((rel) => accounted.has(rel) && !isSensitivePath(rel));
+    if (named.length === 0) return [...paths];
+    const byCommit = new Map<string, string[]>();
+    for (const rel of named) {
+      const at = accounted.get(rel)?.at;
+      if (at !== undefined) byCommit.set(at, [...(byCommit.get(at) ?? []), rel]);
+    }
+    const same = new Set<string>();
+    try {
+      const onDisk = new Map((await deps.git.hashOnDisk(root, named)).map((f) => [f.path, f]));
+      for (const [at, group] of byCommit)
+        for (const kept of await deps.git.blobsAt(root, at, group)) {
+          const disk = onDisk.get(kept.path);
+          const want = accounted.get(kept.path);
+          if (disk === undefined || want === undefined) continue;
+          if (disk.blob === want.blob && disk.mode === kept.mode) same.add(kept.path);
+        }
+    } catch (error) {
+      deps.logger.warn({ root, err: String(error) }, 'could not read what the pass recorded');
+      return [...paths];
+    }
+    return paths.filter((rel) => !same.has(rel));
   }
 
   /**
@@ -363,6 +472,9 @@ export function createWatcher(deps: {
   // Kept in the database too, so a restarted daemon still excuses the write a card allowed before it: the
   // cards answered before it started count as used, which alone would card that write again at the step end.
   const excusedWrites = loadExcusedWrites();
+  /** Files 10db itself wrote, by checkout and path, with their stamp (`writeStamp`) just after. */
+  const daemonWrites = new Map<string, string>();
+  const daemonKey = (root: string, path: string): string => `${root}\0${path}`;
 
   function loadExcusedWrites(): Map<string, ExcusedWrite> {
     const stored = getAppSetting(db, EXCUSED_WRITES_SETTING);
@@ -391,6 +503,23 @@ export function createWatcher(deps: {
         ]),
       );
     });
+  }
+
+  /**
+   * `paths` without the files 10db itself wrote in `root` that nobody has written since; one written
+   * since is forgotten, so it is judged as any write.
+   */
+  async function withoutDaemonWrites(root: string, paths: readonly string[]): Promise<string[]> {
+    if (daemonWrites.size === 0) return [...paths];
+    const kept: string[] = [];
+    for (const rel of paths) {
+      const key = daemonKey(root, rel);
+      const stamp = daemonWrites.get(key);
+      if (stamp !== undefined && (await writeStamp(root, rel)) === stamp) continue;
+      daemonWrites.delete(key);
+      kept.push(rel);
+    }
+    return kept;
   }
 
   /** What names a lane's excused write to `path` in `root`. */
@@ -755,7 +884,10 @@ export function createWatcher(deps: {
     }
     // Before git's filter, which drops a file restored as it was: an excused deletion ends when it comes back.
     forgetRestored(entry.root, allPaths);
-    const paths = withoutBookkeeping(projectId, entry.root, allPaths);
+    const paths = await withoutDaemonWrites(
+      entry.root,
+      withoutBookkeeping(projectId, entry.root, allPaths),
+    );
     if (paths.length === 0) return;
     // Only what git still sees as changed now. This drops ignored files and directories. It also drops files
     // already committed through 10db's claim-checked commit, whose claims may have been released since the write.
@@ -787,9 +919,20 @@ export function createWatcher(deps: {
       if (bookkeeping.length > 0) logBookkeeping(projectId, entry.root, rel, bookkeeping);
       else if (isSensitivePath(rel)) hidden.push(rel);
     }
-    const outside = new Set([...strays, ...hidden]);
+    const lanes = passLanes(project, batchId);
+    const inPass =
+      lanes === null
+        ? null
+        : passWrites({
+            project,
+            lanes,
+            strays: await withoutAccounted(project, entry.root, strays, lanes),
+            foreign: reported.filter((rel) => !strays.includes(rel) && !hidden.includes(rel)),
+          });
+    const outside = new Set([...(inPass?.strays ?? strays), ...hidden]);
+    const raisedFor = inPass === null ? candidates : inPass.working.map((lane) => lane.id);
     // A write the builder allowed through its permission card needs no second card.
-    const allowed = await allowedWrites(projectId, entry.root, [...outside], candidates);
+    const allowed = await allowedWrites(projectId, entry.root, [...outside], raisedFor);
     // A directory the allowed write created holds only that write, so it is allowed with it. The files of
     // every such directory go through one allowedWrites call, so a batch makes at most two calls, whatever
     // the number of directories, and waits at most four budgets (STAMP_BUDGET_MS each) for its reads.
@@ -802,7 +945,7 @@ export function createWatcher(deps: {
       projectId,
       entry.root,
       [...new Set(directories.flatMap(({ files }) => files))],
-      candidates,
+      raisedFor,
     );
     for (const { rel, files } of directories)
       if (files.every((f) => fileAllowed.has(f))) allowed.add(rel);
@@ -810,14 +953,16 @@ export function createWatcher(deps: {
       project,
       site,
       [...outside].filter((rel) => !allowed.has(rel)),
-      candidates,
+      raisedFor,
       null,
+      inPass?.working,
     );
     raiseForeign(
       project,
       site,
       batchId,
-      reported.filter((rel) => !outside.has(rel)),
+      inPass?.foreign.filter((rel) => !outside.has(rel)) ??
+        reported.filter((rel) => !outside.has(rel)),
     );
   }
 
@@ -928,7 +1073,10 @@ export function createWatcher(deps: {
       const batchId = worktreeBatchOf(ws);
       // A file restored since its excused deletion is no longer in git's changes, so check every one here.
       forgetRestored(root);
-      const changed = withoutBookkeeping(ws.projectId, root, await deps.git.changedPaths(root));
+      const changed = await withoutDaemonWrites(
+        root,
+        withoutBookkeeping(ws.projectId, root, await deps.git.changedPaths(root)),
+      );
       const { strays, candidates } = straysIn(
         project,
         batchId,
@@ -936,8 +1084,21 @@ export function createWatcher(deps: {
         STEP_END_CLAIM_STATES,
         workstreamId,
       );
+      // The ending lane's own write outside every claim is carded: its shell may have made it.
+      const lanes = passLanes(project, batchId, workstreamId);
+      const inPass =
+        lanes === null
+          ? null
+          : passWrites({
+              project,
+              lanes,
+              strays: await withoutAccounted(project, root, strays, lanes),
+              foreign: [],
+            });
       // A write that can change what runs is flagged even inside the workstream's own claim.
-      const written = [...new Set([...strays, ...changed.filter(isSensitivePath)])];
+      const written = [
+        ...new Set([...(inPass?.strays ?? strays), ...changed.filter(isSensitivePath)]),
+      ];
       // Not a write its permission card allowed: the builder decided about that one already.
       const allowed = await allowedWrites(ws.projectId, root, written, [workstreamId]);
       // Nor a file still showing the write another running lane's card excused: a stamp that matches means
@@ -963,11 +1124,33 @@ export function createWatcher(deps: {
         }),
       );
       const flagged = undecided.filter((rel) => !stillOthers.has(rel));
-      raise(project, siteOf(project, batchId, root), flagged, candidates, workstreamId);
+      raise(
+        project,
+        siteOf(project, batchId, root),
+        flagged,
+        candidates,
+        workstreamId,
+        inPass?.working,
+      );
       return flagged;
     },
 
     flush,
+
+    async daemonWrote(root, paths) {
+      for (const rel of paths) {
+        const stamp = await writeStamp(root, rel);
+        const key = daemonKey(root, rel);
+        daemonWrites.delete(key);
+        if (stamp === null) continue;
+        daemonWrites.set(key, stamp);
+        while (daemonWrites.size > MAX_DAEMON_WRITES) {
+          const oldest = daemonWrites.keys().next();
+          if (oldest.done) break;
+          daemonWrites.delete(oldest.value);
+        }
+      }
+    },
 
     stop() {
       stopped = true;

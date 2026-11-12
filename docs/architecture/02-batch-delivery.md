@@ -46,6 +46,43 @@ CUTTING → OPEN → SHIPPING → SHIPPED | CLOSED | FAILED; FAILED → SHIPPING
 - **When the pull request merges or closes while a fix runs.** At the end of every watch round, each fix batch that is `OPEN` or `FAILED` whose root's pull request merged or closed is ended: `runner.cancel` for each unfinished member (which ends its session as a cancel from the Board does), then `shipper.abandon` for the batch, which retires its copy. A copy left with uncommitted work raises the usual kept-worktree card. A fix batch still `CUTTING` or `SHIPPING` is left to its own step (the ship reads the pull request first and ends `CLOSED`); one that could not be ended is tried again next round.
 - Abandon takes an `OPEN` or `FAILED` batch none of whose workstreams is running (in a lane, `TAKEN_OVER`, or `WAITING_HUMAN` with its session still live), cancels its unfinished members and retires its copy. The local branch is deleted if it never left its base, and one card says so ("Batch … abandoned: <branch> deleted"; `branchCards.abandonedBranchDeleted`); if it holds commits a card names it and their count and offers Delete Branch or Keep (`decisions/2026-10-30-finished-tasks-leave-no-local-branch.md`). The drawer, the card menu and the line above the board hold Abandon back while a run is live and name it, so the refusal never surprises the builder.
 
+## A Workbench pass's batch
+
+A pass (`docs/superpowers/specs/2026-11-09-10db-workbench-design.md` §5) has one batch of its own kind, with
+`batches.pass_id` set and no worktree (`decisions/2026-11-09-a-pass-has-a-batch-of-its-own-kind.md`). Built so
+far, with no route that opens a pass yet:
+
+- **Made by the pass, on any delivery.** `openPass` (`delivery/pass-open.ts`) runs in the project's queue and,
+  under the checkout's repo lock (`Git.openPassBranch`), makes the branch `10db/<slug>-<6 hex>` at the folder's
+  HEAD and points HEAD at it, writing no file, after recording every path that differs from that commit in
+  `pass_dirt` with its blob, its content held by an unsigned commit at `refs/10db/passes/<pass id>/dirt`. The
+  batch is inserted `OPEN` with `base_sha` at the start and `repo` from origin's pinned push URL, or null with no
+  origin, so the batch start's `400` in a `local` project never applies to it. Each task gets a `QUEUED`
+  workstream in the batch and claims its pages (and areas with no role) through `acquireClaims`; a page another
+  task holds leaves that task waiting with a notice naming the holder. Refused, with nothing written: a project
+  with no page area, a task naming none, two tasks holding one area or overlapping pages, more tasks than the
+  page cap, a parked, running or finished task or one a pass still holds, a second open pass, an unfinished
+  batch or a running lane in Your folder, a merge, cherry-pick, revert, rebase or `git am` in progress, a
+  detached HEAD, and a HEAD on a batch's branch or on a `10db/` branch no task names (an abandoned pass's
+  branch excepted). A start that slips in while git works, or such a HEAD, is refused by the pass's write, and
+  the branch and the dirt ref are taken back (`Git.undoPassBranch`). A nested repository is no part of the
+  dirt. A pass the daemon stopped opening before its write is taken back at start-up from its dirt commit's
+  trailers (`delivery/pass-recover.ts`) while nothing was built on it, else carded.
+- **Never shipped or abandoned by the built rules.** The ship trigger and startup's `checkOpenBatches` skip it,
+  Ship, Ship anyway, Ship without it and Abandon refuse it, and start-up's batch recovery leaves it to its
+  pass: only the pass's close ships it and only its own Abandon ends it. Each rule is keyed on `pass_id`,
+  never on the batch's state, so a pass batch that a failed close left `FAILED` is treated as an open one.
+- **Its tasks are the pass's** while it is `OPEN`, `CLOSING` or `ABANDONING` (`passHoldsTasks`): such a task
+  gets a run only in the pass's batch, so an ordinary start refuses it; a task of a closed, settled or abandoned
+  pass is ordinary again. The scheduler never launches a held task's workstream; the pass's own turns do.
+  A pass's lanes count for the pass (`LaneCounts.byPass`) and not for the project's `maxLanes`, and still for the
+  account and the daemon-wide cap (`scheduler/lane-room.ts`).
+- **Your folder is the pass's (W9).** While a pass of the project is neither `SETTLED` nor `ABANDONED`
+  (`passHoldingFolder`), a start sends a task set to Your folder to a separate copy with the reason "Your folder
+  is in a Workbench pass", refuses one the builder placed there, and never joins or cuts a shared batch; in a
+  `local` project the scheduler leaves a folder task queued with the notice "Waits for the Workbench pass to
+  close", written over no other notice and taken down once the run no longer waits for a pass.
+
 ## Switching the checkout back
 
 The cut records where it found the checkout (`return_branch`, null when HEAD was detached, and `return_sha`), read under the lock it switches in. Once the batch is `SHIPPED`, `CLOSED` or `ABANDONED`, the project's queue switches the checkout back (`delivery/checkout-return.ts`, `Git.switchBack`): to the branch at its current tip, or detached at the commit. It does so only while no workstream in the project's own checkout has work in hand (as Abandon counts it; a lane in a separate copy edits other files and does not hold it), HEAD still names the batch's branch, nothing is uncommitted (in the files or in the checkout's own index, which a daemon commit can leave behind when another git holds `index.lock`), the place still exists, no other worktree has the branch checked out or is rebasing or bisecting it, and nothing git doesn't track lies where the switch would write (`mergeIntoBranch`'s check). It uses `read-tree -m -u` as the cut did, and puts the batch's files back if HEAD can't then be moved. Otherwise the checkout stays where it is with one card per batch ("Your checkout stays on `<branch>`: …") saying why and, where git would accept it, the command to switch back; a checkout the builder moved off the branch raises no card, only a log line. The place is cleared once handled, so it is tried once (`decisions/2026-10-29-shared-checkout-switch-back.md`).

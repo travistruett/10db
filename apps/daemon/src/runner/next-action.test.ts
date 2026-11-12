@@ -1,10 +1,19 @@
-import { mintId, type EvidenceId, type HandoffDto, type NextAction } from '@10db/contracts';
+import {
+  mintId,
+  type EvidenceId,
+  type HandoffDto,
+  type NextAction,
+  type TaskMessageId,
+} from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { nextActionAfterCrash, nextActionOnAnotherAccount } from './index';
+import { keepingFeedback, withUndelivered } from './next-action';
 
 const handoff = { id: mintId('Handoff') } as HandoffDto;
 const inboxId = mintId('InboxItem');
 const evidenceId = mintId('Evidence');
+const messageId = mintId('TaskMessage');
+const laterId = mintId('TaskMessage');
 
 describe('nextActionAfterCrash', () => {
   it.each<[string, NextAction, string | null, HandoffDto | null, NextAction['kind']]>([
@@ -51,6 +60,24 @@ describe('nextActionAfterCrash with builder input', () => {
       { kind: 'answer', inboxId, providerSessionId: 'p1' },
     ],
     [
+      "keeps the builder's message, resuming the fresh session that crashed before taking it",
+      { kind: 'feedback', messageId, providerSessionId: null },
+      'p2',
+      { kind: 'feedback', messageId, providerSessionId: 'p2' },
+    ],
+    [
+      "keeps the builder's message for a fresh session when the crashed one reported no provider session",
+      { kind: 'feedback', messageId, providerSessionId: null },
+      null,
+      { kind: 'feedback', messageId, providerSessionId: null },
+    ],
+    [
+      "starts the builder's message afresh from the digest when its resumed session crashed",
+      { kind: 'feedback', messageId, providerSessionId: 'p1' },
+      'p1',
+      { kind: 'feedback', messageId, providerSessionId: null },
+    ],
+    [
       'keeps a fix with its gate evidence',
       { kind: 'fix', evidenceId },
       'p1',
@@ -73,6 +100,12 @@ describe('nextActionAfterCrash with builder input', () => {
       { kind: 'merge', base: 'origin/main', paths: ['src/api/a.ts'] },
       'p1',
       { kind: 'merge', base: 'origin/main', paths: ['src/api/a.ts'] },
+    ],
+    [
+      "keeps a Ready page of a pass on its item: the builder's next message starts its turn",
+      { kind: 'pass_review', inboxId },
+      'p1',
+      { kind: 'pass_review', inboxId },
     ],
   ])('%s', (_name, previous, providerSessionId, expected) => {
     expect(nextActionAfterCrash(previous, providerSessionId, handoff)).toEqual(expected);
@@ -123,6 +156,13 @@ describe('nextActionOnAnotherAccount', () => {
       evidenceId,
       { kind: 'answer', inboxId, providerSessionId: null },
     ],
+    [
+      "takes the builder's message to a fresh session, whose first message is the digest and it",
+      { kind: 'feedback', messageId, providerSessionId: 'p1' },
+      handoff,
+      evidenceId,
+      { kind: 'feedback', messageId, providerSessionId: null },
+    ],
     ['leaves a start alone', { kind: 'start' }, handoff, null, { kind: 'start' }],
     [
       'leaves uncommitted changes alone',
@@ -153,7 +193,104 @@ describe('nextActionOnAnotherAccount', () => {
       evidenceId,
       { kind: 'fix', evidenceId },
     ],
+    [
+      'leaves a Ready page of a pass alone',
+      { kind: 'pass_review', inboxId },
+      handoff,
+      null,
+      { kind: 'pass_review', inboxId },
+    ],
   ])('%s', (_name, previous, latest, failedGate, expected) => {
     expect(nextActionOnAnotherAccount(previous, latest, failedGate)).toEqual(expected);
+  });
+});
+
+describe('withUndelivered', () => {
+  it.each<[string, NextAction, TaskMessageId | null, NextAction, (string | null)?]>([
+    [
+      'leaves the action alone when every message was taken',
+      { kind: 'start' },
+      null,
+      { kind: 'start' },
+    ],
+    [
+      'resumes the session with the message it never took',
+      { kind: 'resume', providerSessionId: 'p1', reason: 'the session crashed' },
+      messageId,
+      { kind: 'feedback', messageId, providerSessionId: 'p1' },
+    ],
+    [
+      'starts fresh with the message when the session cannot be resumed',
+      { kind: 'start' },
+      messageId,
+      { kind: 'feedback', messageId, providerSessionId: null },
+    ],
+    [
+      'starts fresh from the handoff with the message the handed-off session never took',
+      { kind: 'continue_from_handoff', handoffId: handoff.id },
+      messageId,
+      { kind: 'feedback', messageId, providerSessionId: null },
+    ],
+    [
+      'keeps the message a feedback was started for, which an older one does not displace',
+      { kind: 'feedback', messageId: laterId, providerSessionId: 'p1' },
+      messageId,
+      { kind: 'feedback', messageId: laterId, providerSessionId: 'p1' },
+    ],
+    [
+      'keeps an answer, whose session is handed the message after it',
+      { kind: 'answer', inboxId, providerSessionId: 'p1' },
+      messageId,
+      { kind: 'answer', inboxId, providerSessionId: 'p1' },
+    ],
+    ['keeps verification', { kind: 'verify' }, messageId, { kind: 'verify' }],
+    ['keeps a fix', { kind: 'fix', evidenceId }, messageId, { kind: 'fix', evidenceId }],
+    [
+      'leaves a Ready page of a pass on its item when every message was taken',
+      { kind: 'pass_review', inboxId },
+      null,
+      { kind: 'pass_review', inboxId },
+      'p1',
+    ],
+    [
+      "turns a Ready page whose session ended with the builder's message untaken into that message, resuming the session",
+      { kind: 'pass_review', inboxId },
+      messageId,
+      { kind: 'feedback', messageId, providerSessionId: 'p1' },
+      'p1',
+    ],
+    [
+      'turns a Ready page with an untaken message and no session to resume into that message, fresh',
+      { kind: 'pass_review', inboxId },
+      messageId,
+      { kind: 'feedback', messageId, providerSessionId: null },
+    ],
+  ])('%s', (_name, next, undelivered, expected, ended) => {
+    expect(withUndelivered(next, undelivered, ended)).toEqual(expected);
+  });
+});
+
+describe('keepingFeedback', () => {
+  const resume: NextAction = {
+    kind: 'resume',
+    providerSessionId: 'p2',
+    reason: 'the usage limit reset',
+  };
+  it.each<[string, NextAction, NextAction, NextAction]>([
+    ['leaves an action without a message as the stop made it', { kind: 'start' }, resume, resume],
+    [
+      'keeps the message, resuming the session that stopped',
+      { kind: 'feedback', messageId, providerSessionId: null },
+      resume,
+      { kind: 'feedback', messageId, providerSessionId: 'p2' },
+    ],
+    [
+      'keeps the message and the session it would resume when the stopped one never started',
+      { kind: 'feedback', messageId, providerSessionId: 'p1' },
+      { kind: 'start' },
+      { kind: 'feedback', messageId, providerSessionId: 'p1' },
+    ],
+  ])('%s', (_name, previous, stopped, expected) => {
+    expect(keepingFeedback(previous, stopped)).toEqual(expected);
   });
 });

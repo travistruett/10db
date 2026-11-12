@@ -1,7 +1,13 @@
 import { matchesGlob } from 'node:path';
-import { PathPattern } from '@10db/contracts';
+import { areaRolesProblem, PathPattern } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { AreaCandidateKind, deriveAreaCandidates, mergeCoupledCandidates } from './area-candidates';
+import {
+  AreaCandidateKind,
+  deriveAreaCandidates,
+  fileRouteApps,
+  mergeCoupledCandidates,
+  treeGlobs,
+} from './area-candidates';
 
 const covered = (globs: readonly string[], file: string) =>
   globs.some((glob) => matchesGlob(file, glob));
@@ -22,6 +28,7 @@ function expectEachFileInOneCandidate(tracked: readonly string[], context = ''):
     candidates.reduce((sum, c) => sum + c.files, 0),
     context,
   ).toBe(tracked.length);
+  expect(areaRolesProblem(candidates.map((c) => ({ ...c, name: c.label }))), context).toBeNull();
 }
 
 /** xorshift32: the same layouts on every run, so a failure names a seed that shows it again. */
@@ -145,6 +152,145 @@ describe('deriveAreaCandidates', () => {
     expect(memos?.globs).toEqual(['frontend/app/(product)/app/memos/**']);
     for (const file of tracked)
       expect(candidates.filter((c) => covered(c.globs, file)).length, file).toBe(1);
+  });
+
+  describe('the role and route each candidate of a framework app is proposed with', () => {
+    const product = 'frontend/app/(product)/app';
+    const tracked = [
+      'frontend/package.json',
+      'frontend/app/layout.tsx',
+      'frontend/app/(marketing)/page.tsx',
+      'frontend/app/(marketing)/pricing/page.tsx',
+      ...files('frontend/lib', ['a.ts', 'b.ts', 'c.ts']),
+      `${product}/layout.tsx`,
+      `${product}/memos/page.tsx`,
+      `${product}/settings/page.tsx`,
+      `${product}/[orgId]/page.tsx`,
+      `${product}/_parts/panel.tsx`,
+      `${product}/@modal/page.tsx`,
+      `${product}/my page/page.tsx`,
+      `${product}/(.)photo/page.tsx`,
+      'frontend/app/login/page.tsx',
+      ...files('frontend/app/dashboard', ['page.tsx', 'chart.tsx', 'settings/page.tsx']),
+      'frontend/app/_components/nav.tsx',
+      'frontend/app/api/users/route.ts',
+      'frontend/app/(hooks)/stripe/route.ts',
+      `${product}/webhooks/route.ts`,
+      `${product}/(content)/layout.tsx`,
+      `${product}/(content)/resources/page.tsx`,
+      `${product}/(content)/compare/[slug]/page.tsx`,
+      `${product}/reports/[id]/page.tsx`,
+      'backend/pyproject.toml',
+      'backend/main.py',
+    ];
+    const candidates = deriveAreaCandidates(tracked);
+    it('gives every file to one candidate, and no two pages a file', () => {
+      expectEachFileInOneCandidate(tracked);
+    });
+    it.each([
+      [
+        'a screen is a page at its path, without its route groups',
+        `${product}/memos`,
+        'page',
+        '/app/memos',
+      ],
+      ['a dynamic screen is a page with no single route', `${product}/[orgId]`, 'page', undefined],
+      [
+        'a parallel route slot is a page with no single route',
+        `${product}/@modal`,
+        'page',
+        undefined,
+      ],
+      ['a private folder among the screens is shared', `${product}/_parts`, 'shared', undefined],
+      [
+        'a nested route group is passed through: its screens are pages at their paths',
+        `${product}/(content)/resources`,
+        'page',
+        '/app/resources',
+      ],
+      [
+        'a screen in a nested group with only a dynamic page below it is a page with no route',
+        `${product}/(content)/compare`,
+        'page',
+        undefined,
+      ],
+      [
+        'a screen with only a dynamic page below it is a page with no route',
+        `${product}/reports`,
+        'page',
+        undefined,
+      ],
+      ["a nested route group's own files are shared", `${product}/(content)`, 'shared', undefined],
+      [
+        'a screen whose path no route can be (a space) is a page with no route',
+        `${product}/my page`,
+        'page',
+        undefined,
+      ],
+      [
+        'an intercepting route is a page with no single route',
+        `${product}/(.)photo`,
+        'page',
+        undefined,
+      ],
+      [
+        'a plain route folder beside a route group is a page at its path',
+        'frontend/app/login',
+        'page',
+        '/login',
+      ],
+      [
+        'a plain route folder beside a route group is one page with the screens below it',
+        'frontend/app/dashboard',
+        'page',
+        '/dashboard',
+      ],
+      [
+        'a folder of route handlers beside a route group is no page and has no role',
+        'frontend/app/api',
+        undefined,
+        undefined,
+      ],
+      [
+        'a route group of route handlers alone is no page and has no role',
+        'frontend/app/(hooks)',
+        undefined,
+        undefined,
+      ],
+      [
+        'a folder of route handlers among the screens is no page and has no role',
+        `${product}/webhooks`,
+        undefined,
+        undefined,
+      ],
+      [
+        'a private folder beside a route group is shared',
+        'frontend/app/_components',
+        'shared',
+        undefined,
+      ],
+      [
+        'a route group of few screens is one page with no single route',
+        'frontend/app/(marketing)',
+        'page',
+        undefined,
+      ],
+      [
+        "a route group's own files (its layout) are shared",
+        'frontend/app/(product)',
+        'shared',
+        undefined,
+      ],
+      ["the app's own files (the root layout) are shared", 'frontend', 'shared', undefined],
+      ['a folder beside the routes is shared', 'frontend/lib', 'shared', undefined],
+      ['a package with no routes has no role', 'backend', undefined, undefined],
+      ['the top of the repository has no role', '.', undefined, undefined],
+    ])('%s', (_name, label, role, route) => {
+      const found = candidates.find((c) => c.label === label);
+      expect(found, label).toBeDefined();
+      expect(found?.role).toBe(role);
+      expect(found?.route).toBe(route);
+    });
   });
 
   it.each([
@@ -426,6 +572,26 @@ describe('mergeCoupledCandidates', () => {
     expect(merged.map((c) => c.label)).toContain('[orgId] + [teamId]');
   });
 
+  it('makes merged screens one page with no single route, and a page merged with shared code no role', () => {
+    const product = 'web/app/(product)';
+    const candidates = deriveAreaCandidates([
+      'web/package.json',
+      ...['memos', 'settings', 'people'].map((s) => `${product}/${s}/page.tsx`),
+      ...files('web/lib', ['a.ts', 'b.ts', 'c.ts']),
+    ]);
+    const together = (a: string, b: string) => Array.from({ length: 6 }, () => [a, b]);
+    const merged = mergeCoupledCandidates(candidates, [
+      ...together(`${product}/memos/page.tsx`, `${product}/settings/page.tsx`),
+      ...together(`${product}/people/page.tsx`, 'web/lib/a.ts'),
+    ]);
+    const pages = merged.find((c) => c.label === `${product}/memos + ${product}/settings`);
+    expect(pages?.role).toBe('page');
+    expect(pages).not.toHaveProperty('route');
+    const mixed = merged.find((c) => c.label.includes(`${product}/people`));
+    expect(mixed?.label).toContain('web/lib');
+    expect(mixed).not.toHaveProperty('role');
+  });
+
   it('never merges two units, however often they change together', () => {
     const candidates = deriveAreaCandidates(WORKSPACE);
     const commits = Array.from({ length: 20 }, () => [
@@ -450,5 +616,73 @@ describe('mergeCoupledCandidates', () => {
   it('leaves candidates alone when there is no history', () => {
     const candidates = deriveAreaCandidates(folders(['alpha', 'beta']));
     expect(mergeCoupledCandidates(candidates, [])).toEqual(candidates);
+  });
+});
+
+describe('treeGlobs', () => {
+  it.each([
+    {
+      name: 'a folder of plain files',
+      folder: 'src/a',
+      files: ['src/a/x.ts', 'src/a/b/y.ts'],
+      globs: ['src/a/**'],
+    },
+    {
+      name: 'a folder with a dotfile and a dot folder',
+      folder: 'src/a',
+      files: ['src/a/x.ts', 'src/a/.eslintrc', 'src/a/.storybook/main.ts'],
+      globs: ['src/a/**', 'src/a/**/.*', 'src/a/**/.*/**'],
+    },
+    {
+      name: 'a folder named with glob syntax',
+      folder: 'app/[id]',
+      files: ['app/[id]/page.tsx'],
+      globs: ['app/[[]id]/**'],
+    },
+    {
+      name: 'files outside the folder count for nothing',
+      folder: 'src/a',
+      files: ['src/ab/.x', 'src/a/y.ts'],
+      globs: ['src/a/**'],
+    },
+  ])('$name', ({ folder, files, globs }) => {
+    expect(treeGlobs(folder, files)).toEqual(globs);
+  });
+});
+
+describe('fileRouteApps', () => {
+  it('finds each framework app with route groups, its route folder and the folders its layouts sit in', () => {
+    const tracked = [
+      'package.json',
+      'web/package.json',
+      'web/app/layout.tsx',
+      'web/app/(app)/layout.tsx',
+      'web/app/(app)/a/page.tsx',
+      'web/app/(app)/b/page.tsx',
+      'web/app/(app)/c/page.tsx',
+      'web/app/(site)/about/page.tsx',
+      'api/package.json',
+      'api/src/index.ts',
+    ];
+    expect(fileRouteApps(tracked)).toEqual([
+      {
+        unit: 'web',
+        routes: 'web/app',
+        layoutFolders: ['web', 'web/app', 'web/app/(app)', 'web/app/(site)'],
+      },
+    ]);
+  });
+
+  it('finds the app at the top of a repository that is one package', () => {
+    const tracked = [
+      'package.json',
+      'src/app/layout.tsx',
+      'src/app/(shop)/cart/page.tsx',
+      'src/app/(shop)/list/page.tsx',
+      'src/app/(shop)/item/page.tsx',
+    ];
+    expect(fileRouteApps(tracked)).toEqual([
+      { unit: '', routes: 'src/app', layoutFolders: ['', 'src', 'src/app', 'src/app/(shop)'] },
+    ]);
   });
 });

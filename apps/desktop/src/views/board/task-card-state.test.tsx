@@ -73,9 +73,9 @@ describe('TaskCard state', () => {
     },
   );
 
-  it('keeps the plain border of a queued task', () => {
+  it("draws a queued task with no colored border: its edge is the card's own tone", () => {
     card({ workstream: workstreamDto({ state: 'QUEUED' }) });
-    expect(screen.getByTestId('task-card').style.borderColor).toBe('');
+    expect(screen.getByTestId('task-card').style.borderColor).toBe('var(--tendb-color-card)');
   });
 
   it('puts no fill, left stripe or animation on the card', () => {

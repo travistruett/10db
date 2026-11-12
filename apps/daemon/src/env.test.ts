@@ -53,6 +53,11 @@ describe('loadEnv', () => {
     ['port out of range', { TENDB_PORT: '70000' }, 'TENDB_PORT'],
     ['unknown log level', { TENDB_LOG_LEVEL: 'loud' }, 'TENDB_LOG_LEVEL'],
     ['a live Codex switch other than 0 or 1', { TENDB_LIVE_CODEX: 'yes' }, 'TENDB_LIVE_CODEX'],
+    [
+      'a live browser switch other than 0 or 1',
+      { TENDB_LIVE_BROWSER: 'yes' },
+      'TENDB_LIVE_BROWSER',
+    ],
   ])('rejects %s, naming the variable', (_name, source, variable) => {
     expect(() => loadEnv(source)).toThrow(EnvError);
     expect(() => loadEnv(source)).toThrow(variable);

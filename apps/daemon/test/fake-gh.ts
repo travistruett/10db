@@ -29,12 +29,17 @@ export type GhMethod =
   | 'jobHadNoRunner'
   | 'prCreate'
   | 'prAutoMerge'
-  | 'prMerge';
+  | 'prMerge'
+  | 'prReady'
+  | 'prEditBase'
+  | 'prEditBody';
 export interface PrCreateCall {
   readonly repo: string;
   readonly base: string;
   readonly head: string;
   readonly title: string;
+  /** Present only when the caller asked: a draft or not. */
+  readonly draft?: boolean;
 }
 
 /** gh at the Gh interface: an in-memory GitHub with one repository. */
@@ -74,6 +79,8 @@ export class FakeGh implements Gh {
     string,
     {
       pr: { url: string; state: PrState };
+      isDraft: boolean;
+      baseRef: string | null;
       headSha: string | null;
       mergeBlocked: MergeBlocked | null;
       blockedOnChecks: boolean;
@@ -122,7 +129,7 @@ export class FakeGh implements Gh {
   prView(input: { readonly repo: string; readonly ref: string }): Promise<PullRequest | null> {
     return this.call('prView', input, () => {
       const found = this.byRef.get(input.ref);
-      return found ? { ...found.pr } : null;
+      return found ? { ...found.pr, isDraft: found.isDraft, baseRef: found.baseRef } : null;
     });
   }
 
@@ -138,6 +145,8 @@ export class FakeGh implements Gh {
         return found
           ? {
               ...found.pr,
+              isDraft: found.isDraft,
+              baseRef: found.baseRef,
               headSha: found.headSha,
               mergeBlocked: found.mergeBlocked,
               blockedOnChecks: found.blockedOnChecks,
@@ -196,10 +205,43 @@ export class FakeGh implements Gh {
     readonly head: string;
     readonly title: string;
     readonly bodyFile: string;
+    readonly draft?: boolean;
   }): Promise<string> {
     return this.call('prCreate', input, () => {
-      const create = { repo: input.repo, base: input.base, head: input.head, title: input.title };
+      const create: PrCreateCall = {
+        repo: input.repo,
+        base: input.base,
+        head: input.head,
+        title: input.title,
+        ...(input.draft === undefined ? {} : { draft: input.draft }),
+      };
       return this.add(input.head, PrState.Open, readFileSync(input.bodyFile, 'utf8'), create);
+    });
+  }
+
+  prReady(input: { readonly repo: string; readonly url: string }): Promise<void> {
+    return this.call('prReady', input, () => {
+      this.found(input.url).isDraft = false;
+    });
+  }
+
+  prEditBase(input: {
+    readonly repo: string;
+    readonly url: string;
+    readonly base: string;
+  }): Promise<void> {
+    return this.call('prEditBase', input, () => {
+      this.found(input.url).baseRef = input.base;
+    });
+  }
+
+  prEditBody(input: {
+    readonly repo: string;
+    readonly url: string;
+    readonly bodyFile: string;
+  }): Promise<void> {
+    return this.call('prEditBody', input, () => {
+      this.found(input.url).body = readFileSync(input.bodyFile, 'utf8');
     });
   }
 
@@ -232,9 +274,16 @@ export class FakeGh implements Gh {
     });
   }
 
-  /** A PR that exists already, as if opened by an earlier run or by hand. */
-  openPr(branch: string, state: PrState = PrState.Open): string {
-    return this.add(branch, state, '', null);
+  /** A PR that exists already, as if opened by an earlier run or by hand; its base is unread unless named. */
+  openPr(branch: string, state: PrState = PrState.Open, base: string | null = null): string {
+    const url = this.add(branch, state, '', null);
+    this.found(url).baseRef = base;
+    return url;
+  }
+
+  /** Whether the PR is a draft from now on, as if someone changed it on GitHub. */
+  setDraft(url: string, draft: boolean): void {
+    this.found(url).isDraft = draft;
   }
 
   setState(url: string, state: PrState): void {
@@ -303,10 +352,18 @@ export class FakeGh implements Gh {
     return this.byRef.get(url)?.body ?? '';
   }
 
+  private found(url: string) {
+    const found = this.byRef.get(url);
+    if (!found) throw new Error(`no PR ${url}`);
+    return found;
+  }
+
   private add(branch: string, state: PrState, body: string, create: PrCreateCall | null): string {
     const url = `https://github.com/${this.repo}/pull/${String(this.next++)}`;
     const entry = {
       pr: { url, state },
+      isDraft: create?.draft ?? false,
+      baseRef: create?.base ?? null,
       headSha: null,
       mergeBlocked: null,
       blockedOnChecks: false,

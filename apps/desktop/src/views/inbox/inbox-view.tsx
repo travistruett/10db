@@ -1,18 +1,23 @@
-import {
-  InboxKind,
-  isParkChoice,
-  type DecisionRecording,
-  type InboxAnswer,
-  type InboxItemDto,
-} from '@10db/contracts';
+import { InboxKind, type DecisionRecording, type ProjectId } from '@10db/contracts';
 import { Alert, Group, SegmentedControl, Stack, Text, Title } from '@mantine/core';
 import { useQueryClient } from '@tanstack/react-query';
+import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useRef, useState } from 'react';
 import { DaemonRequestError } from '../../daemon/client';
-import { queryKeys, useAnswerInbox, useInbox, useSystemCheck } from '../../daemon/queries';
+import {
+  queryKeys,
+  useAnswerInbox,
+  useInbox,
+  useProjects,
+  useSystemCheck,
+} from '../../daemon/queries';
+import { ProjectFilter } from '../../shell/project-filter';
+import { inProject } from './in-project';
+import { cardAnswer, recommended } from './card-answer';
 import { InboxCard } from './inbox-card';
 import { inboxRows, isDismissable, type InboxRow } from './inbox-rows';
 import { InboxShortcuts } from './inbox-shortcuts';
+import { PassReadyRow, useOpenPassWorkbench } from './pass-ready-row';
 import { defaultRecording } from './record-decision';
 import { ResolvedInbox } from './resolved-inbox';
 import { SystemCardList } from './system-card-list';
@@ -21,11 +26,6 @@ import { useInboxKeys } from './use-inbox-keys';
 
 /** Flag cards have no options; the daemon accepts any choice and closes them. */
 export const DISMISS_CHOICE = 'dismissed';
-
-/** A recommendation preselects only when it names one of the options. */
-function recommended(item: InboxItemDto): string | null {
-  return item.options.some((o) => o.label === item.recommendation) ? item.recommendation : null;
-}
 
 /** What the builder has typed or picked on one row's card. */
 interface Draft {
@@ -45,9 +45,15 @@ export function InboxView() {
   const [tab, setTab] = useState<Tab>('open');
   const [helpOpen, setHelpOpen] = useState(false);
   const inbox = useInbox();
+  const projects = useProjects();
+  const { project } = useSearch({ from: '/inbox' });
+  const navigate = useNavigate({ from: '/inbox' });
+  // 10db's own cards are the app's, not a project's, so they show under every filter.
   const cards = systemCards(useSystemCheck().data);
   // The header is drawn here once, the same for both views, so switching moves nothing in it.
-  const openCount = inbox.isSuccess ? inboxRows(inbox.data).length + cards.length : null;
+  const openCount = inbox.isSuccess
+    ? inboxRows(inProject(inbox.data, project)).length + cards.length
+    : null;
   // Each view is its own component, so the open view's keys are only live while it is shown.
   return (
     <Stack>
@@ -66,41 +72,54 @@ export function InboxView() {
             ]}
           />
         </Group>
-        <InboxShortcuts
-          opened={helpOpen}
-          onOpen={() => {
-            setHelpOpen(true);
-          }}
-          onClose={() => {
-            setHelpOpen(false);
-          }}
-        />
+        <Group gap="sm">
+          <ProjectFilter
+            projects={projects.data ?? []}
+            value={project ?? null}
+            onChange={(next) => {
+              void navigate({ search: next === null ? {} : { project: next } });
+            }}
+          />
+          <InboxShortcuts
+            opened={helpOpen}
+            onOpen={() => {
+              setHelpOpen(true);
+            }}
+            onClose={() => {
+              setHelpOpen(false);
+            }}
+          />
+        </Group>
       </Group>
       {tab === 'open' ? (
         <OpenInbox
+          project={project}
           systemCards={cards}
           onHelp={() => {
             setHelpOpen(true);
           }}
         />
       ) : (
-        <ResolvedInbox />
+        <ResolvedInbox project={project} />
       )}
     </Stack>
   );
 }
 
 function OpenInbox({
+  project,
   systemCards: ownCards,
   onHelp,
 }: {
+  readonly project: ProjectId | undefined;
   readonly systemCards: readonly SystemCard[];
   readonly onHelp: () => void;
 }) {
   const inbox = useInbox();
   const answer = useAnswerInbox();
   const queryClient = useQueryClient();
-  const rows = inboxRows(inbox.data ?? []);
+  const openWorkbench = useOpenPassWorkbench();
+  const rows = inboxRows(inProject(inbox.data ?? [], project));
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   // A failed dismiss belongs to its row, which may not be the open one, so it never touches the draft.
@@ -176,6 +195,11 @@ function OpenInbox({
   };
 
   const submit = (): void => {
+    // A pass's Ready pages open the Workbench (spec §4.1, §4.6); each is signed off by its own button.
+    if (selectedRow?.passId != null && selected) {
+      openWorkbench(selected.projectId);
+      return;
+    }
     // A check card is answered by its own buttons, never by a key.
     if (!selectedRow || !selected || selected.kind === InboxKind.Check || answer.isPending) return;
     if (isDismissable(selected)) {
@@ -189,15 +213,7 @@ function OpenInbox({
       patch(key, { error: 'Choose an option first (1–5).' });
       return;
     }
-    const trimmed = note.trim();
-    const base: InboxAnswer =
-      trimmed === '' ? { choice: picked } : { choice: picked, note: trimmed };
-    // A question card always says how it is recorded, so the daemon never guesses from the category.
-    // Parking the task is 10db's control over the run, not an answer: nothing is recorded, so nothing is sent.
-    const body: InboxAnswer =
-      selected.kind === InboxKind.Question && !isParkChoice(picked)
-        ? { ...base, record: recording }
-        : base;
+    const body = cardAnswer(selected, picked, note, recording);
     answer.mutate(
       { id, answer: body },
       {
@@ -253,6 +269,17 @@ function OpenInbox({
           {rows.map((row) => {
             const open = row.key === selectedRow?.key;
             const failed = dismissFailure?.key === row.key ? dismissFailure.message : null;
+            if (row.passId !== null)
+              return (
+                <PassReadyRow
+                  key={row.key}
+                  items={row.items}
+                  selected={open}
+                  onSelect={() => {
+                    select(row);
+                  }}
+                />
+              );
             return (
               <InboxCard
                 key={row.key}

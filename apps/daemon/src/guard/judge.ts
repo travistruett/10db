@@ -3,7 +3,7 @@ import { homedir } from 'node:os';
 import { isAbsolute, join, sep } from 'node:path';
 import { ClaimKind, type AreaDef, type Delivery, type HazardDef } from '@10db/contracts';
 import { z } from 'zod';
-import { isOwnToolResult, pathRefusal, type ProtectedPath } from './account-rules';
+import { isOwnFile, isOwnToolResult, pathRefusal, type ProtectedPath } from './account-rules';
 import { commandForms, runCommandStarts, startsWithWords } from './command-forms';
 import { ghVerdict } from './gh-rules';
 import { executableTails, FEEDERS } from './wrapped-commands';
@@ -44,6 +44,13 @@ export interface GuardInput {
   readonly claims: readonly { readonly kind: ClaimKind; readonly name: string }[];
   /** A read-only step: file writes and writing shell commands are refused, claims or not. */
   readonly readOnly: boolean;
+  /**
+   * The lane is a Workbench pass's, and `pages` are the areas that are pages in it: every page area
+   * and each area with no role a task of the pass holds (`passPageAreas`). A file under one is that
+   * page's alone, so only the lane holding it may write it, whatever shared area or hazard it holds
+   * that also matches.
+   */
+  readonly inPass?: { readonly pages: readonly string[] };
   /** The project's delivery; absent means local. In pull-request projects only the daemon pushes. */
   readonly delivery?: Delivery;
   /** Paths the file tools may not touch: the data directory and the default account's sign-in. */
@@ -51,9 +58,14 @@ export interface GuardInput {
   /**
    * The session's own config directory and Claude Code session id. Claude Code saves a large tool
    * output under `<configDir>/projects/*\/<id>/tool-results/` and points the model at it, so Read and
-   * Grep may open that directory.
+   * Grep may open that directory. A lane's `filesDir` holds the pictures pasted into its task's
+   * thread, which Read may open (Workbench spec §13).
    */
-  readonly ownSession?: { readonly configDir: string; readonly providerSessionId: string | null };
+  readonly ownSession?: {
+    readonly configDir: string;
+    readonly providerSessionId: string | null;
+    readonly filesDir?: string;
+  };
   /** Present for a sandboxed lane: refuses reads and writes by the real path they name. */
   readonly fileAccess?: FileAccessJudge;
 }
@@ -120,8 +132,24 @@ function claimed(input: GuardInput, kind: ClaimKind, name: string): boolean {
   return input.claims.some((c) => c.kind === kind && c.name === name);
 }
 
+/** In a pass, the page a path belongs to that the lane does not hold, or null (spec §7.1, §7.3). */
+function unheldPage(input: GuardInput, areas: readonly string[]): string | null {
+  if (input.inPass === undefined) return null;
+  const passPages = input.inPass.pages;
+  const pages = areas.filter((name) => passPages.includes(name));
+  if (pages.length === 0 || pages.some((p) => claimed(input, ClaimKind.Area, p))) return null;
+  return pages[0] ?? null;
+}
+
 function judgeRelative(input: GuardInput, rel: string): GuardVerdict {
   const hit = classifyPath(rel, input.areas, input.hazards);
+  // Checked before a held hazard allows the path: holding a hazard or a shared area that also
+  // matches a page's file is not holding the page.
+  const page = unheldPage(input, hit.areas);
+  if (page !== null)
+    return deny(
+      `${rel} belongs to page "${page}", which this task does not hold in the pass. Leave it to the task that holds that page.`,
+    );
   const missingHazard = hit.hazards.find((h) => !claimed(input, ClaimKind.Hazard, h));
   if (missingHazard) {
     return deny(
@@ -666,9 +694,10 @@ export function judgeToolUse(input: GuardInput): GuardVerdict {
     const value = stringField(input.toolInput, field);
     if (value === null) continue;
     const own =
-      (input.toolName === 'Read' || input.toolName === 'Grep') &&
       input.ownSession !== undefined &&
-      isOwnToolResult(input.ownSession, value, from);
+      (((input.toolName === 'Read' || input.toolName === 'Grep') &&
+        isOwnToolResult(input.ownSession, value, from)) ||
+        (input.toolName === 'Read' && isOwnFile(input.ownSession.filesDir, value, from)));
     if (own) continue;
     const refusal = pathRefusal(value, field === 'pattern' ? base : from, input.protectedPaths, {
       contains: searches && (field === 'path' || field === 'pattern'),

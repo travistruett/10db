@@ -1,4 +1,5 @@
 import { matchesGlob, posix } from 'node:path';
+import { AreaRole, AreaRoute } from '@10db/contracts';
 import { isLooseGlob, literalGlob } from './literal-glob';
 
 /** What kind of place a candidate area is, which decides what may merge with it. */
@@ -14,6 +15,13 @@ export const AreaCandidateKind = {
 } as const;
 export type AreaCandidateKind = (typeof AreaCandidateKind)[keyof typeof AreaCandidateKind];
 
+/** What a candidate is to the app: a page and the path that shows it, or code pages share. */
+interface Roled {
+  readonly role?: AreaRole;
+  /** On a page: the path in the app that shows it. */
+  readonly route?: string;
+}
+
 /** The folders something holds: some with everything below them, some for their own files only. */
 interface Holder {
   /** Folders held with every file below them. */
@@ -23,7 +31,7 @@ interface Holder {
 }
 
 /** A place in the repository that could be an area, before anyone has named it. */
-export interface AreaCandidate extends Holder {
+export interface AreaCandidate extends Holder, Roled {
   readonly kind: AreaCandidateKind;
   /** The path that names the candidate (`.` for the top of the repository). */
   readonly label: string;
@@ -98,20 +106,59 @@ const holdsUnit = (dir: Dir): boolean =>
   [...dir.dirs.values()].some((d) => isManifestDir(d) || holdsUnit(d));
 const isRouteGroup = (name: string) => /^\(.+\)$/u.test(name);
 
+/** The file that makes a route folder a screen (Next's `page.tsx`); `route.ts` alone is an endpoint. */
+export const isPageFile = (path: string): boolean =>
+  /^page\.(?:tsx|jsx|ts|js|mdx|md)$/u.test(baseName(path));
+const holdsPage = (dir: Dir): boolean =>
+  dir.direct.some(isPageFile) || [...dir.dirs.values()].some(holdsPage);
+const pageAtPath = (dir: Dir): boolean =>
+  dir.direct.some(isPageFile) ||
+  [...dir.dirs].some(([name, child]) => isRouteGroup(name) && pageAtPath(child));
+
+/** The route groups inside a container of screens, nested ones too: they add nothing to a path. */
+const nestedGroups = (container: Dir): Dir[] =>
+  [...container.dirs].flatMap(([name, child]) =>
+    isRouteGroup(name) ? [child, ...nestedGroups(child)] : [],
+  );
+
 /** Where in the repository a draft candidate lives: whole folders and folders' own files. */
-interface Draft extends Holder {
+interface Draft extends Holder, Roled {
   readonly kind: AreaCandidateKind;
   readonly label: string;
   readonly trees: string[];
   readonly directs: string[];
 }
 
-const draftOf = (kind: AreaCandidateKind, label: string, tree: string): Draft => ({
-  kind,
-  label,
-  trees: [tree],
-  directs: [],
-});
+const draftOf = (
+  kind: AreaCandidateKind,
+  label: string,
+  tree: string,
+  roled: Roled = {},
+): Draft => ({ kind, label, trees: [tree], directs: [], ...roled });
+
+const SHARED: Roled = { role: AreaRole.Shared };
+
+/**
+ * A screen's role and route from its folders below the app's route folder. Route groups (`(shop)`)
+ * leave the path; a private folder (`_parts`) is no screen, so it is shared code. A folder with no page
+ * file below it (route handlers, `api/`) is neither a screen nor code the screens share, so it has no
+ * role. A dynamic name (`[id]`), a parallel route slot (`@modal`), an intercepting route (`(.)photo`) or
+ * a path no route can be (one with a space) is a page no single path shows.
+ */
+function screenRole(screen: Dir, below: readonly string[]): Roled {
+  if (below.some((name) => name.startsWith('_'))) return SHARED;
+  if (!holdsPage(screen)) return {};
+  // Only a page file at the screen's own path (or in a route group there) is shown at that path.
+  if (!pageAtPath(screen)) return { role: AreaRole.Page };
+  const names = below.filter((name) => !isRouteGroup(name));
+  const route = `/${names.join('/')}`;
+  if (
+    names.some((name) => name.startsWith('[') || name.startsWith('@') || name.startsWith('(')) ||
+    !AreaRoute.safeParse(route).success
+  )
+    return { role: AreaRole.Page };
+  return { role: AreaRole.Page, route };
+}
 
 /** The folders `steps` below `dir`, one for each step, or null when one step is missing. */
 function descend(dir: Dir, steps: readonly string[]): Dir[] | null {
@@ -160,8 +207,9 @@ function screensOf(group: Dir): { container: Dir; passed: Dir[] } | null {
 }
 
 /**
- * A framework app split by route group and screen. The app and each folder on the way to its routes
- * keep their own files, and their other folders stand beside the screens.
+ * A framework app split by route group and screen. A route folder beside the groups is a screen too,
+ * with every folder below it. The app and each folder on the way to its routes keep their own files,
+ * which are shared, and their other folders stand beside the screens.
  */
 function splitRoutes(unit: Dir, { routes, between }: RouteRoot): Draft[] {
   const drafts: Draft[] = [];
@@ -171,15 +219,27 @@ function splitRoutes(unit: Dir, { routes, between }: RouteRoot): Draft[] {
     label: unit.path,
     trees: [],
     directs: way.map((dir) => dir.path),
+    ...SHARED,
   };
+  const below = (dir: Dir) => dir.path.slice(routes.path.length + 1).split('/');
   for (const [name, child] of routes.dirs) {
     if (!isRouteGroup(name)) {
-      own.trees.push(child.path);
+      drafts.push(
+        draftOf(AreaCandidateKind.Route, child.path, child.path, screenRole(child, [name])),
+      );
       continue;
     }
     const screens = screensOf(child);
     if (screens === null) {
-      drafts.push(draftOf(AreaCandidateKind.Route, child.path, child.path));
+      // A group of few screens is one page, which no single path shows.
+      drafts.push(
+        draftOf(
+          AreaCandidateKind.Route,
+          child.path,
+          child.path,
+          holdsPage(child) ? { role: AreaRole.Page } : {},
+        ),
+      );
       continue;
     }
     const left: Draft = {
@@ -187,9 +247,31 @@ function splitRoutes(unit: Dir, { routes, between }: RouteRoot): Draft[] {
       label: child.path,
       trees: [],
       directs: [child.path, ...screens.passed.map((d) => d.path), screens.container.path],
+      ...SHARED,
     };
-    for (const screen of screens.container.dirs.values())
-      drafts.push(draftOf(AreaCandidateKind.Route, screen.path, screen.path));
+    // A route group among the screens is passed through: its own files are shared, and its folders
+    // are screens like their neighbours.
+    for (const container of [screens.container, ...nestedGroups(screens.container)]) {
+      if (container !== screens.container)
+        drafts.push({
+          kind: AreaCandidateKind.Route,
+          label: container.path,
+          trees: [],
+          directs: [container.path],
+          ...SHARED,
+        });
+      for (const [name, screen] of container.dirs) {
+        if (isRouteGroup(name)) continue;
+        drafts.push(
+          draftOf(
+            AreaCandidateKind.Route,
+            screen.path,
+            screen.path,
+            screenRole(screen, below(screen)),
+          ),
+        );
+      }
+    }
     drafts.push(left);
   }
   for (const [n, dir] of way.slice(0, -1).entries()) {
@@ -197,7 +279,7 @@ function splitRoutes(unit: Dir, { routes, between }: RouteRoot): Draft[] {
     for (const child of dir.dirs.values()) {
       if (child === next) continue;
       if (child.total >= MIN_FILES)
-        drafts.push(draftOf(AreaCandidateKind.Folder, child.path, child.path));
+        drafts.push(draftOf(AreaCandidateKind.Folder, child.path, child.path, SHARED));
       else own.trees.push(child.path);
     }
   }
@@ -339,6 +421,77 @@ const prefixed = (dir: string, glob: string) => (dir === '' ? glob : `${literalG
 
 const REST_LABEL = '.';
 
+/**
+ * The globs that hold `folder` whole, as an area candidate holding it is written: `<folder>/**`, and
+ * the dotfile and dot folder patterns its tracked `files` need.
+ */
+export function treeGlobs(folder: string, files: readonly string[]): string[] {
+  const globs = new Set([prefixed(folder, '**')]);
+  const prefix = folder === '' ? '' : `${folder}/`;
+  for (const file of files) {
+    if (!file.startsWith(prefix)) continue;
+    const at = globOf(file, { holder: null, folder, direct: false });
+    globs.add(prefixed(at.folder, at.pattern));
+  }
+  return [...globs];
+}
+
+/** A framework app with route groups: its unit, its route folder, and the folders whose own files are its layouts. */
+export interface FileRouteApp {
+  readonly unit: string;
+  readonly routes: string;
+  /** The unit, the folders down to its routes, the route folder and each route group's own folders. */
+  readonly layoutFolders: readonly string[];
+}
+
+function routeAppOf(unit: Dir): FileRouteApp | null {
+  const root = routeRootOf(unit);
+  if (root === null) return null;
+  const groups = [...root.routes.dirs]
+    .filter(([name]) => isRouteGroup(name))
+    .flatMap(([, group]) => {
+      const screens = screensOf(group);
+      return screens === null
+        ? [group.path]
+        : [
+            group.path,
+            ...screens.passed.map((d) => d.path),
+            screens.container.path,
+            ...nestedGroups(screens.container).map((d) => d.path),
+          ];
+    });
+  return {
+    unit: unit.path,
+    routes: root.routes.path,
+    layoutFolders: [
+      ...new Set([unit.path, ...root.between.map((d) => d.path), root.routes.path, ...groups]),
+    ],
+  };
+}
+
+/**
+ * The framework apps `deriveAreaCandidates` splits by route group and screen, found the way it finds
+ * them: each package or app, and the top of a repository that is one package.
+ */
+export function fileRouteApps(files: readonly string[]): FileRouteApp[] {
+  const root = buildTree(files);
+  const apps: FileRouteApp[] = [];
+  const walk = (dir: Dir): void => {
+    if (isManifestDir(dir)) {
+      const app = routeAppOf(dir);
+      if (app !== null) apps.push(app);
+      return;
+    }
+    if (holdsUnit(dir)) for (const child of dir.dirs.values()) walk(child);
+  };
+  if (holdsUnit(root) || !isManifestDir(root)) for (const child of root.dirs.values()) walk(child);
+  else {
+    const app = routeAppOf(root);
+    if (app !== null) apps.push(app);
+  }
+  return apps;
+}
+
 /** A draft's files: how many, and the patterns that take them in, by the folder they are held at. */
 interface Holding {
   files: number;
@@ -418,6 +571,7 @@ export function deriveAreaCandidates(files: readonly string[]): AreaCandidate[] 
       files: holding.files,
       trees: [...draft.trees],
       directs: [...draft.directs],
+      ...roledOf([draft]),
     });
   }
   return looseGlobs.size === 0
@@ -436,7 +590,8 @@ export function deriveAreaCandidates(files: readonly string[]): AreaCandidate[] 
 /** Stands in for a dot while a glob is matched, as the guard does, so `?` and `*` read a dot name like any other. */
 const DOT = '';
 
-const reaches = (file: string, glob: string) =>
+/** Whether `glob` matches `file` as an area glob is matched: a dot name read like any other. */
+export const globReaches = (file: string, glob: string): boolean =>
   matchesGlob(file.replaceAll('.', DOT), glob.replaceAll('.', DOT));
 
 /**
@@ -460,7 +615,7 @@ function mergeOverlapping(
     for (const file of files) {
       const j = candidateOf(file);
       if (j === undefined || find(j) === find(i)) continue;
-      if (globs.some((glob) => reaches(file, glob))) group.set(find(j), find(i));
+      if (globs.some((glob) => globReaches(file, glob))) group.set(find(j), find(i));
     }
   }
   return mergeGroups(candidates, find);
@@ -544,7 +699,19 @@ function mergeGroups(
         files: members.reduce((sum, m) => sum + m.files, 0),
         trees: members.flatMap((m) => m.trees),
         directs: members.flatMap((m) => m.directs),
+        ...roledOf(members),
       },
     ];
   });
+}
+
+/**
+ * The role and route of an area made of `members`: their role when they all have the same one, else
+ * none; a route only when one member is the whole area, since two screens are no single path.
+ */
+export function roledOf(members: readonly Roled[]): Roled {
+  const [first, ...others] = members;
+  if (first?.role === undefined || others.some((m) => m.role !== first.role)) return {};
+  if (others.length > 0 || first.route === undefined) return { role: first.role };
+  return { role: first.role, route: first.route };
 }

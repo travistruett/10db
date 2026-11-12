@@ -20,6 +20,7 @@ import {
 import { createChannel } from './channel';
 import type { QueryFn } from './claude-adapter';
 import {
+  interruptReceipt,
   mapSdkMessage,
   modelRefusalOf,
   toHookOutput,
@@ -497,20 +498,20 @@ export function startShapeSession(
 
   return {
     events,
-    send(text, images) {
+    send(text, images, uuid) {
       if (halted()) return;
       // Never ahead of the first message: one sent during the preflight waits for it.
       if (promptSent) {
-        input.push(userMessage(text, 'next', images));
+        input.push(userMessage(text, 'next', images, uuid));
         return;
       }
       void preflightOk.then((ok) => {
-        if (ok && !halted()) input.push(userMessage(text, 'next', images));
+        if (ok && !halted()) input.push(userMessage(text, 'next', images, uuid));
       });
     },
     async interrupt() {
-      if (halted()) return;
-      await settleWithin(clock, q.interrupt(), graceMs);
+      if (halted()) return null;
+      return interruptReceipt(await settleWithin(clock, q.interrupt(), graceMs));
     },
     async stop() {
       if (ended) return;

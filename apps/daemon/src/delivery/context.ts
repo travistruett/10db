@@ -8,6 +8,7 @@ import { flagCard, rewordCard, withdrawCard, type InboxService } from '../inbox'
 import type { Logger } from '../log';
 import type { Card } from './cards';
 import type { DeliveryJobs } from './jobs';
+import type { PutBackKeptWork } from './pass-open';
 import type { WorktreeDependencies } from './worktree-dependencies';
 import type { WorktreeGenerators } from './worktree-generated';
 
@@ -53,17 +54,22 @@ export interface DeliveryContext {
   networkEnv(): Readonly<Record<string, string>>;
   /** Asks the scheduler to look for work: a batch opened, grew or reopened. */
   onWorkQueued(): void;
+  /** Puts a taken-out task's saved Workbench work back in a checkout (the pass module's put-back). */
+  readonly putBack: PutBackKeptWork;
 }
 
-export function networkCall(ctx: DeliveryContext, signal: AbortSignal): NetworkCall {
+/** What a network call reads of the context: the login environment and the time limits. */
+type NetworkContext = Pick<DeliveryContext, 'networkEnv' | 'limits'>;
+
+export function networkCall(ctx: NetworkContext, signal: AbortSignal): NetworkCall {
   return { env: ctx.networkEnv(), timeoutMs: ctx.limits.networkTimeoutMs, signal };
 }
 
-export function pushCall(ctx: DeliveryContext, signal: AbortSignal): NetworkCall {
+export function pushCall(ctx: NetworkContext, signal: AbortSignal): NetworkCall {
   return { ...networkCall(ctx, signal), timeoutMs: ctx.limits.pushTimeoutMs };
 }
 
-export function ghCall(ctx: DeliveryContext, signal: AbortSignal): GhCall {
+export function ghCall(ctx: NetworkContext, signal: AbortSignal): GhCall {
   return networkCall(ctx, signal);
 }
 

@@ -12,6 +12,7 @@ import {
   mintId,
   NotFoundError,
   parseFindings,
+  passHoldsTasks,
   PullRequestState,
   TaskInput,
   TaskHasDependentsError,
@@ -28,6 +29,7 @@ import {
   type GoalId,
   type BoardColumnId,
   type CiStopped,
+  type PassId,
   WorkspaceMode,
   type ProjectDto,
   type ProjectId,
@@ -60,6 +62,11 @@ export interface BoardStatusInput {
     /** Why 10db stopped fixing its failing required checks; null or absent while it has not. */
     readonly ciStopped?: CiStopped | null;
   } | null;
+  /**
+   * The task is a page of a pass that still holds it: In progress, as the Workbench works on it,
+   * unless its run is paused by a usage limit or held.
+   */
+  readonly inPass?: boolean;
 }
 
 /**
@@ -75,6 +82,7 @@ export function deriveBoardStatus({
   workstreamState,
   batchState = null,
   pullRequest = null,
+  inPass = false,
 }: BoardStatusInput): BoardStatus {
   const column =
     batchState === BatchState.Shipped && pullRequest?.url
@@ -94,6 +102,15 @@ export function deriveBoardStatus({
     case TaskStatus.Open:
       // A run marked failed but shipped anyway is judged by its pull request like a finished one.
       if (workstreamState === WorkstreamState.Failed && shipped) return shipped;
+      // A page a pass holds is In progress, as the Workbench works on it: whether it waits on the
+      // builder (Ready or asking), failed its turn, has not been spoken to, or has no live run while
+      // the pass still holds it. A usage-limit pause and a hold stay Blocked, as for any run.
+      if (
+        inPass &&
+        workstreamState !== WorkstreamState.PausedLimit &&
+        workstreamState !== WorkstreamState.Held
+      )
+        return BoardStatus.InProgress;
       break;
   }
   if (
@@ -241,6 +258,34 @@ export function insertGoalTask(
     ...(placement ?? { workspaceMode: placementFor(project, undefined), reason: null }),
     proposalId: null,
     goalId,
+  });
+}
+
+/**
+ * Writes the task a Workbench pass makes for one of its pages (spec §4.2), in the caller's write: the
+ * page area alone, no brief and no acceptance criteria, in Your folder, and one of `goalId`'s tasks
+ * when one is named. It costs nothing until the builder speaks to it.
+ */
+export function insertPassPageTask(
+  ctx: WriteContext,
+  projectId: ProjectId,
+  input: { readonly title: string; readonly area: string; readonly goalId: GoalId | null },
+): TaskDto {
+  const project = getProject(ctx.tx, projectId);
+  refuseUnknownAreas(project, [input.area]);
+  return writeTask(ctx, projectId, {
+    title: Title.parse(input.title),
+    description: '',
+    acceptanceCriteria: [],
+    areas: [input.area],
+    dependsOn: [],
+    riskTags: [],
+    flowId: null,
+    landing: taskLandingFor(project),
+    workspaceMode: WorkspaceMode.Shared,
+    reason: null,
+    proposalId: null,
+    ...(input.goalId === null ? {} : { goalId: input.goalId }),
   });
 }
 
@@ -556,6 +601,17 @@ export function mergedDespiteFailure(db: DbReader, taskId: TaskId): boolean {
   );
 }
 
+/** Whether the pass a task names still holds it as a page (`passHoldsTasks`). */
+function passHolds(db: DbReader, passId: PassId | null): boolean {
+  if (passId === null) return false;
+  const pass = db
+    .select({ state: schema.passes.state })
+    .from(schema.passes)
+    .where(eq(schema.passes.id, passId))
+    .get();
+  return pass !== undefined && passHoldsTasks(pass.state);
+}
+
 function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto {
   const deps = db
     .select({ id: schema.taskDeps.dependsOnId })
@@ -603,10 +659,13 @@ function toTaskDto(db: DbReader, row: typeof schema.tasks.$inferSelect): TaskDto
       pullRequest: latest
         ? { url: latest.prUrl, state: latest.prState, ciStopped: latest.ciStopped }
         : null,
+      inPass: passHolds(db, row.passId),
     }),
     workstreamId: latest?.id ?? null,
     goalId: row.goalId,
     landingGroupId: row.landingGroupId,
+    passId: row.passId,
+    keptWork: row.keptWorkSha !== null,
     modelSetting: row.modelSetting,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -988,6 +1047,26 @@ export function patchTask(
 }
 
 /**
+ * Places a task where the placement rule proposes when it starts, with the rule's reason: a start
+ * while a Workbench pass holds Your folder sends a folder task to a separate copy. Refused as the
+ * builder's own placement change is, for a task that can no longer move.
+ */
+export function placeTaskByRule(ctx: WriteContext, id: TaskId, proposed: Placement): TaskDto {
+  checkPlacementCanChange(ctx.tx, getTask(ctx.tx, id));
+  ctx.tx
+    .update(schema.tasks)
+    .set({
+      workspaceMode: proposed.workspaceMode,
+      placementReason: proposed.reason,
+      updatedAt: ctx.now,
+    })
+    .where(eq(schema.tasks.id, id))
+    .run();
+  ctx.emit({ type: EventType.TaskChanged, entityType: 'task', entityId: id });
+  return getTask(ctx.tx, id);
+}
+
+/**
  * Sets where a task lands, started or not. `patchTask` refuses a task that has run, because its
  * batch's branch and pull request are already cut; the daemon calls this for a task whose landing
  * names a branch that no longer exists and that no open batch uses, which `patchTask` could never
@@ -1223,4 +1302,38 @@ export function moveTask(ctx: WriteContext, id: TaskId, move: TaskMove): TaskDto
     data: { boardOrder, boardColumnId: to },
   });
   return getTask(ctx.tx, id);
+}
+
+/** A task's saved Workbench work: its kept commit and the pass branch tip it was kept on. */
+export interface TaskKeptWork {
+  readonly keptSha: string;
+  readonly keptBaseSha: string;
+}
+
+/** The work a take-out saved for the task, or null when it has none. */
+export function getTaskKeptWork(db: DbReader, id: TaskId): TaskKeptWork | null {
+  const row = db
+    .select({ keptSha: schema.tasks.keptWorkSha, keptBaseSha: schema.tasks.keptBaseSha })
+    .from(schema.tasks)
+    .where(eq(schema.tasks.id, id))
+    .get();
+  if (!row) throw new NotFoundError('task', id);
+  return row.keptSha === null || row.keptBaseSha === null
+    ? null
+    : { keptSha: row.keptSha, keptBaseSha: row.keptBaseSha };
+}
+
+/** Records the work a take-out saved for the task, or clears it with null. */
+export function setTaskKeptWork(ctx: WriteContext, id: TaskId, kept: TaskKeptWork | null): void {
+  getTask(ctx.tx, id);
+  ctx.tx
+    .update(schema.tasks)
+    .set({
+      keptWorkSha: kept?.keptSha ?? null,
+      keptBaseSha: kept?.keptBaseSha ?? null,
+      updatedAt: ctx.now,
+    })
+    .where(eq(schema.tasks.id, id))
+    .run();
+  ctx.emit({ type: EventType.TaskChanged, entityType: 'task', entityId: id });
 }

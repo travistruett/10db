@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { contextEvent } from './context-event';
 import {
   ItemCompleted,
+  MODEL_ITEMS,
   RateLimitsUpdated,
   TokenUsageUpdated,
   TurnCompleted,
@@ -10,6 +11,7 @@ import {
   type RateLimitSnapshot,
 } from './codex-protocol';
 import type { SessionEvent } from './types';
+import { codexCommandTarget, codexPatchTarget } from './tool-target';
 
 export type RateLimitEvent = Extract<SessionEvent, { type: 'rate_limit' }>;
 
@@ -32,6 +34,11 @@ export interface CodexTurnState {
   baselineFixed: boolean;
   /** The last rate-limit window seen, which a hard limit takes its reset from. */
   lastLimit: RateLimitEvent | null;
+  /**
+   * The client uuids of the user messages the active turn recorded that no model item has followed
+   * yet: not taken until one does, or the turn completes.
+   */
+  recorded: string[];
 }
 
 interface TokenCounts {
@@ -48,6 +55,7 @@ export function createTurnState(): CodexTurnState {
     latest: { input: 0, cached: 0, output: 0 },
     baselineFixed: false,
     lastLimit: null,
+    recorded: [],
   };
 }
 
@@ -93,6 +101,20 @@ const McpItem = z.looseObject({
   tool: z.string(),
 });
 const MessageItem = z.looseObject({ type: z.literal('agentMessage'), text: z.string() });
+/**
+ * A user message the thread recorded in a turn, under the client uuid it was sent with
+ * (`clientUserMessageId`). It is taken once the model answers after it, as Claude Code's first
+ * assistant message stamps `user_message_uuids`: the evidence is consumption, not receipt.
+ */
+const UserMessageItem = z.looseObject({ type: z.literal('userMessage'), clientId: z.string() });
+
+/** The `consumed` event for what the turn recorded and the model has now answered, clearing it. */
+function takenNow(state: CodexTurnState): SessionEvent[] {
+  if (state.recorded.length === 0) return [];
+  const uuids = state.recorded;
+  state.recorded = [];
+  return [{ type: 'consumed', uuids }];
+}
 
 /** The activity an item stands for, or null for one 10db does not show. */
 function itemActivity(item: z.infer<typeof ItemCompleted>['item']): SessionEvent | null {
@@ -102,6 +124,7 @@ function itemActivity(item: z.infer<typeof ItemCompleted>['item']): SessionEvent
       type: 'activity',
       kind: 'tool',
       summary: command.data.command.slice(0, SUMMARY_CHARS),
+      tool: codexCommandTarget(command.data.command),
     };
   const patch = PatchItem.safeParse(item);
   if (patch.success)
@@ -109,6 +132,7 @@ function itemActivity(item: z.infer<typeof ItemCompleted>['item']): SessionEvent
       type: 'activity',
       kind: 'tool',
       summary: (patch.data.changes[0]?.path ?? 'apply_patch').slice(0, SUMMARY_CHARS),
+      tool: codexPatchTarget(patch.data.changes.map((c) => c.path)),
     };
   const mcp = McpItem.safeParse(item);
   if (mcp.success)
@@ -116,6 +140,7 @@ function itemActivity(item: z.infer<typeof ItemCompleted>['item']): SessionEvent
       type: 'activity',
       kind: 'tool',
       summary: `${mcp.data.server}.${mcp.data.tool}`.slice(0, SUMMARY_CHARS),
+      tool: { name: `${mcp.data.server}.${mcp.data.tool}`, target: null, written: [] },
     };
   const message = MessageItem.safeParse(item);
   if (message.success)
@@ -159,6 +184,7 @@ export function mapCodexNotification(
       state.turnId = parsed.data.turn.id;
       state.lastText = '';
       state.baselineFixed = true;
+      state.recorded = [];
       return [];
     }
     case 'turn/completed': {
@@ -166,10 +192,15 @@ export function mapCodexNotification(
       if (!parsed.success) return [];
       const text = state.lastText.trim().slice(0, MAX_STEP_SUMMARY);
       const cached = state.latest.cached - state.baseline.cached;
-      const result = parsed.data.turn.status === 'completed' ? {} : { result: 'error' as const };
+      const completed = parsed.data.turn.status === 'completed';
+      const result = completed ? {} : { result: 'error' as const };
+      // A turn that failed or was stopped before the model answered took none of what it recorded.
+      const taken = completed ? takenNow(state) : [];
+      state.recorded = [];
       state.turnId = null;
       state.lastText = '';
       return [
+        ...taken,
         {
           type: 'turn_complete',
           ...result,
@@ -189,8 +220,14 @@ export function mapCodexNotification(
       // Codex 0.154 reports a compaction only as this item, never as `thread/compacted`.
       if (parsed.data.item.type === 'contextCompaction')
         return [{ type: 'compacted', trigger: 'auto' }];
+      const recorded = UserMessageItem.safeParse(parsed.data.item);
+      if (recorded.success) {
+        state.recorded.push(recorded.data.clientId);
+        return [];
+      }
+      const taken = MODEL_ITEMS.has(parsed.data.item.type) ? takenNow(state) : [];
       const activity = itemActivity(parsed.data.item);
-      return activity === null ? [] : [activity];
+      return activity === null ? taken : [...taken, activity];
     }
     case 'thread/tokenUsage/updated': {
       const parsed = TokenUsageUpdated.safeParse(n.params);

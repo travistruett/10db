@@ -1,4 +1,4 @@
-import { GoalId, PrincipleId, ShapeId, TaskId } from '@10db/contracts';
+import { GoalId, PrincipleId, ProjectId, ShapeId, TaskId } from '@10db/contracts';
 import {
   createRootRoute,
   createRoute,
@@ -16,6 +16,8 @@ import { KnowledgeView } from './views/knowledge/knowledge-view';
 import { ShapeView } from './views/shape/shape-view';
 import { isSettingsSectionKey, SettingsSectionKey } from './views/settings/sections';
 import { SettingsView } from './views/settings/settings-view';
+import { workbenchSearch } from './views/workbench/workbench-search';
+import { WorkbenchView } from './views/workbench/workbench-view';
 
 function FactoryPage() {
   return (
@@ -45,6 +47,14 @@ function BoardPage() {
   return (
     <ViewBoundary name="Board">
       <BoardView />
+    </ViewBoundary>
+  );
+}
+
+function WorkbenchPage() {
+  return (
+    <ViewBoundary name="UI Workbench">
+      <WorkbenchView />
     </ViewBoundary>
   );
 }
@@ -86,13 +96,19 @@ const indexRoute = createRoute({
     throw redirect({ to: '/factory' });
   },
 });
+/** A global view's project filter: absent shows every project. */
+function projectFilter(search: Record<string, unknown>): { project?: ProjectId } {
+  const project = ProjectId.safeParse(search['project']);
+  return project.success ? { project: project.data } : {};
+}
+
 const factoryRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/factory',
   // `goal` opens that goal's row, so the Board's "Open in Factory" lands on the goal expanded.
-  validateSearch: (search: Record<string, unknown>): { goal?: GoalId } => {
+  validateSearch: (search: Record<string, unknown>): { goal?: GoalId; project?: ProjectId } => {
     const goal = GoalId.safeParse(search['goal']);
-    return goal.success ? { goal: goal.data } : {};
+    return { ...(goal.success ? { goal: goal.data } : {}), ...projectFilter(search) };
   },
   component: FactoryPage,
 });
@@ -115,7 +131,14 @@ const shapeRoute = createRoute({
 const inboxRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/inbox',
+  validateSearch: projectFilter,
   component: InboxPage,
+});
+const workbenchRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/workbench',
+  validateSearch: workbenchSearch,
+  component: WorkbenchPage,
 });
 const knowledgeRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -179,6 +202,7 @@ const routeTree = rootRoute.addChildren([
   newShapeRoute,
   shapeRoute,
   inboxRoute,
+  workbenchRoute,
   knowledgeRoute,
   tasksRoute,
   settingsIndexRoute,

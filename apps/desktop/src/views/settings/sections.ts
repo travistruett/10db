@@ -145,3 +145,11 @@ export function isSettingsSectionKey(value: string): value is SettingsSectionKey
 export function sectionByKey(key: SettingsSectionKey): SettingsSection {
   return SETTINGS_SECTIONS.find((s) => s.key === key) ?? GENERAL_SECTION;
 }
+
+/** Where the sidebar's app-wide Settings opens: the first global section with content. */
+export function firstGlobalSection(): SettingsSectionKey {
+  return (
+    SETTINGS_SECTIONS.find((s) => s.group === SettingsGroup.Global && s.built)?.key ??
+    SettingsSectionKey.General
+  );
+}

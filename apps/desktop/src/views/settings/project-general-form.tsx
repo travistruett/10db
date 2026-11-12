@@ -16,6 +16,7 @@ import {
 import { useDisclosure } from '@mantine/hooks';
 import { IconChevronDown, IconCircleCheck } from '@tabler/icons-react';
 import { useEffect, useRef, useState } from 'react';
+import { useDaemon } from '../../daemon/provider';
 import { usePatchProject } from '../../daemon/queries';
 import {
   checkGeneral,
@@ -24,6 +25,8 @@ import {
   type GeneralValues,
 } from './general-values';
 import { FlowSelect } from '../board/flow-select';
+import { PicturesStatus } from './pictures-status';
+import { ScreensMatrixField } from './screens-matrix-field';
 import { SettingRow, SettingsCard } from './setting-row';
 
 /** Keeps the fields the builder changed and moves the rest to the project's current values. */
@@ -72,6 +75,17 @@ function reseed(current: GeneralValues, seed: GeneralValues, next: GeneralValues
       ? next.worktreeSeed
       : current.worktreeSeed,
     isolate: sameList(current.isolate, seed.isolate) ? next.isolate : current.isolate,
+    appUrl: current.appUrl === seed.appUrl ? next.appUrl : current.appUrl,
+    devLoginCommand:
+      current.devLoginCommand === seed.devLoginCommand
+        ? next.devLoginCommand
+        : current.devLoginCommand,
+    previewCommand:
+      current.previewCommand === seed.previewCommand ? next.previewCommand : current.previewCommand,
+    screens:
+      JSON.stringify(current.screens) === JSON.stringify(seed.screens)
+        ? next.screens
+        : current.screens,
   };
 }
 
@@ -91,12 +105,23 @@ const sameList = (a: readonly string[], b: readonly string[]) =>
 
 const asNumber = (value: number | string): number | '' => (typeof value === 'number' ? value : '');
 
+/** The port of the daemon's address, which an app address may not name; null for one with none. */
+function daemonPortOf(url: string): number | null {
+  try {
+    const parsed = new URL(url);
+    return parsed.port === '' ? null : Number(parsed.port);
+  } catch {
+    return null;
+  }
+}
+
 /** Monospace for the typed value only; `ff` on an input would set its label in monospace too. */
 const MONO_INPUT = { input: { fontFamily: 'var(--mantine-font-family-monospace)' } };
 
 /** The project's editable fields (spec §10 Settings): saved as one patch of what changed. */
 export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }) {
   const patch = usePatchProject(project.id);
+  const { connection } = useDaemon();
   const [values, setValues] = useState<GeneralValues>(() => generalValues(project));
   // The values the untouched fields were last seeded from; a field still equal to its seed follows the project.
   const [seed, setSeed] = useState<GeneralValues>(() => generalValues(project));
@@ -124,7 +149,7 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
   };
 
   function save() {
-    const checked = checkGeneral(project, values);
+    const checked = checkGeneral(project, values, daemonPortOf(connection.url));
     if (!checked.ok) {
       setErrors(checked.errors);
       // A mistake in a field inside the collapsed card would otherwise stop Save with nothing to see.
@@ -214,6 +239,68 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
             }}
           />
         </SettingRow>
+        <SettingRow
+          label="App address"
+          description="Where your dev server answers, such as http://localhost:5173. The UI Workbench's Open Page opens a page's route here, and pictures of pages are taken here; an https server with a self-signed certificate gets no pictures."
+        >
+          <TextInput
+            aria-label="App address"
+            placeholder="http://localhost:5173"
+            styles={MONO_INPUT}
+            value={values.appUrl}
+            error={errors.appUrl}
+            onChange={(e) => {
+              set({ appUrl: e.currentTarget.value });
+            }}
+          />
+        </SettingRow>
+        <SettingRow
+          label="Preview command"
+          description="Optional. Starts your dev server at the app address while a UI Workbench pass is open, and stops it when the pass ends, so you never run it yourself. It runs under the gate's sandbox, which needs Allow loopback."
+        >
+          <TextInput
+            aria-label="Preview command"
+            placeholder="pnpm dev"
+            styles={MONO_INPUT}
+            value={values.previewCommand}
+            error={errors.previewCommand}
+            onChange={(e) => {
+              set({ previewCommand: e.currentTarget.value });
+            }}
+          />
+        </SettingRow>
+      </SettingsCard>
+
+      <SettingsCard title="Pictures of pages">
+        <SettingRow
+          label="Dev login command"
+          description="Optional. Prints an address on the app that signs a browser in, for pictures of pages that need a sign-in. It runs under the gate's sandbox."
+        >
+          <Textarea
+            aria-label="Dev login command"
+            autosize
+            minRows={1}
+            styles={MONO_INPUT}
+            value={values.devLoginCommand}
+            error={errors.devLoginCommand}
+            onChange={(e) => {
+              set({ devLoginCommand: e.currentTarget.value });
+            }}
+          />
+        </SettingRow>
+        <SettingRow
+          label="Screenshot matrix"
+          description="Each page is pictured in each viewport and theme: at most 4 pictures a route."
+        >
+          <ScreensMatrixField
+            value={values.screens}
+            error={errors.screens}
+            onChange={(screens) => {
+              set({ screens });
+            }}
+          />
+        </SettingRow>
+        <PicturesStatus projectId={project.id} />
       </SettingsCard>
 
       <SettingsCard title="When work is finished">

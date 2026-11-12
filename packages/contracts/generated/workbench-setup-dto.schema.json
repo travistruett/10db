@@ -1,0 +1,316 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "areas": {
+      "type": "object",
+      "properties": {
+        "proposed": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]*$"
+              },
+              "globs": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "catchAll": {
+                "type": "boolean"
+              },
+              "role": {
+                "type": "string",
+                "enum": [
+                  "page",
+                  "shared"
+                ]
+              },
+              "route": {
+                "type": "string",
+                "maxLength": 500,
+                "format": "starts_with",
+                "pattern": "^\\/.*"
+              }
+            },
+            "required": [
+              "name",
+              "globs"
+            ]
+          }
+        },
+        "kept": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "reason"
+            ]
+          }
+        },
+        "pages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]*$"
+              },
+              "route": {
+                "type": "string",
+                "maxLength": 500,
+                "format": "starts_with",
+                "pattern": "^\\/.*"
+              },
+              "folders": {
+                "minItems": 1,
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "was": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "pattern": "^[a-z][a-z0-9-]*$"
+                  },
+                  "globs": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "minLength": 1
+                    }
+                  },
+                  "catchAll": {
+                    "type": "boolean"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "page",
+                      "shared"
+                    ]
+                  },
+                  "route": {
+                    "type": "string",
+                    "maxLength": 500,
+                    "format": "starts_with",
+                    "pattern": "^\\/.*"
+                  }
+                },
+                "required": [
+                  "name",
+                  "globs"
+                ]
+              }
+            },
+            "required": [
+              "name",
+              "folders"
+            ]
+          }
+        },
+        "skipped": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "reason"
+            ]
+          }
+        }
+      },
+      "required": [
+        "proposed",
+        "kept",
+        "pages",
+        "skipped"
+      ]
+    },
+    "settings": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "field": {
+                "type": "string",
+                "const": "appUrl"
+              },
+              "value": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "note": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              }
+            },
+            "required": [
+              "field",
+              "value",
+              "source"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "field": {
+                "type": "string",
+                "const": "devLoginCommand"
+              },
+              "value": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000
+              },
+              "source": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "note": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              }
+            },
+            "required": [
+              "field",
+              "value",
+              "source"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "field": {
+                "type": "string",
+                "const": "changedCheckCommand"
+              },
+              "value": {
+                "type": "string",
+                "minLength": 1
+              },
+              "source": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "note": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              }
+            },
+            "required": [
+              "field",
+              "value",
+              "source"
+            ]
+          },
+          {
+            "type": "object",
+            "properties": {
+              "field": {
+                "type": "string",
+                "const": "sandboxDocker"
+              },
+              "value": {
+                "type": "boolean",
+                "const": true
+              },
+              "source": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "note": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              }
+            },
+            "required": [
+              "field",
+              "value",
+              "source"
+            ]
+          }
+        ]
+      }
+    },
+    "branch": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "branch": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$"
+            },
+            "ahead": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "command": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "branch",
+            "ahead",
+            "command"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "required": [
+    "areas",
+    "settings",
+    "branch"
+  ]
+}

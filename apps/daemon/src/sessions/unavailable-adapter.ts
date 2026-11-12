@@ -3,6 +3,7 @@ import {
   AccountLoginError,
   AccountProbeError,
   CompletionError,
+  ConversationUnreadError,
   type SessionAdapter,
   type SessionEvent,
 } from './types';
@@ -19,14 +20,20 @@ export function createUnavailableAdapter(message: string): SessionAdapter {
     probeAccount: () => Promise.reject(new AccountProbeError(message)),
     startLogin: () => Promise.reject(new AccountLoginError(message)),
     complete: () => Promise.reject(new CompletionError(message)),
+    readClientUuids: () => Promise.reject(new ConversationUnreadError(message)),
     start() {
-      return { events: ended(), send: () => undefined, stop: () => Promise.resolve() };
+      return {
+        events: ended(),
+        send: () => undefined,
+        interrupt: () => Promise.resolve(null),
+        stop: () => Promise.resolve(),
+      };
     },
     startShape() {
       return {
         events: ended(),
         send: () => undefined,
-        interrupt: () => Promise.resolve(),
+        interrupt: () => Promise.resolve(null),
         stop: () => Promise.resolve(),
       };
     },

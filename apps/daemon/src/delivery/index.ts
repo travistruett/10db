@@ -19,6 +19,31 @@ export { ensureWorktreeWhole } from './worktree-repair';
 export { DEFAULT_DELIVERY_LIMITS, type DeliveryContext, type DeliveryLimits } from './context';
 export { createDeliveryJobs, jobKey, JobQueue, type DeliveryJobs } from './jobs';
 export { createBatchStarter, type BatchStarter } from './start';
+export {
+  newPageTasks,
+  openPass,
+  passBranchName,
+  passDirtRef,
+  refusePassTask,
+  returnBranchProblem,
+  startPassTasks,
+  writePageTasks,
+  type NewPageTask,
+  passPlan,
+  type PassOpenDeps,
+  type PassOpened,
+  type PassOpenInput,
+  type PassPageWait,
+  type PutBackKeptWork,
+} from './pass-open';
+export {
+  createPassPullRequests,
+  PASS_GATE_NOTICE,
+  passGateKind,
+  type PassPullRequests,
+} from './pass-pr';
+export { createKeptWorkGate, subscribeKeptWorkLanding } from './kept-work-start';
+export { answerPassMoveCard, resumePassSettles, subscribePassSettles } from './pass-settle';
 export { createFailedRestarts } from './restart';
 export { stepCheck } from './local-check';
 export { fileFlakyTests, flakeNote, rerunFlaky, type FlakyTest } from './flaky-tests';
@@ -44,7 +69,13 @@ export {
 export { recoverBatches } from './recover';
 export { moveRetiredLandings } from './retired-landings';
 export { workstreamChanges } from './workstream-changes';
-export { allCheckouts, checkoutOf, claimScopeOf, projectAtCheckout } from './checkout';
+export {
+  allCheckouts,
+  checkoutOf,
+  claimScopeOf,
+  lanesInProjectCheckout,
+  projectAtCheckout,
+} from './checkout';
 export { createWorktreeDependencies } from './worktree-dependencies';
 export { createWorktreeGenerators } from './worktree-generated';
 export { readPnpmVersion, resolvePnpm } from './pnpm-binary';

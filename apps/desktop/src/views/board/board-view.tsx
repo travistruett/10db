@@ -68,6 +68,7 @@ import { CancelRunModal } from './cancel-run-modal';
 import { columnNameOf, TaskDrawer } from './task-drawer';
 import { useBoardActions } from './use-board-actions';
 import { useLinkedTask } from './use-linked-task';
+import { boardRun } from './pass-page';
 
 const NEW_TASK_FORM_ID = 'new-task-form';
 
@@ -192,13 +193,16 @@ function BoardColumns({
   const setOpenId = (id: TaskId | null) => {
     setChoice({ id });
   };
-  const openTask = layout.flatMap((c) => c.tasks).find((t) => t.id === openId);
-  const openWorkstream = openTask?.workstreamId
-    ? workstreamById.get(openTask.workstreamId)
-    : undefined;
-  const openBatch = openWorkstream?.batchId ? batchById.get(openWorkstream.batchId) : undefined;
   const batchOf = (ws: WorkstreamDto | undefined) =>
     ws?.batchId ? batchById.get(ws.batchId) : undefined;
+  const runOf = (task: TaskDto) => {
+    const ws = task.workstreamId ? workstreamById.get(task.workstreamId) : undefined;
+    return boardRun(task, ws, batchOf(ws));
+  };
+  const openTask = layout.flatMap((c) => c.tasks).find((t) => t.id === openId);
+  const { workstream: openWorkstream, batch: openBatch } = openTask
+    ? runOf(openTask)
+    : { workstream: undefined, batch: undefined };
   // A CI fix batch finds the root that holds the pull request's required checks among all of them.
   // The CI line names a fix by its task's title (CI-decides spec §5), so a fix batch carries that.
   const allBatches = withFixTaskTitles([...batchById.values()], workstreams);
@@ -214,8 +218,8 @@ function BoardColumns({
   const openPlace = openWorkstream ? places.get(openWorkstream.id) : undefined;
   // What the card says about a Start: asked and on its way, or refused and why.
   const noteOf = (task: TaskDto) => {
-    const ws = task.workstreamId ? workstreamById.get(task.workstreamId) : undefined;
-    return actions.note(task, canStart(task, ws?.state, shippedAnywayAndClosed(ws, batchOf(ws))));
+    const { workstream: ws, batch } = runOf(task);
+    return actions.note(task, canStart(task, ws?.state, shippedAnywayAndClosed(ws, batch)));
   };
   const drop = (taskId: TaskId, target: DropTarget) => {
     actions.apply(resolveDrop(layout, taskId, target, started), allTasks.get(taskId));
@@ -298,7 +302,12 @@ function BoardColumns({
                     variant="default"
                     size="xs"
                     fullWidth
-                    style={{ borderStyle: 'dashed' }}
+                    // An unfilled dashed slot, so it never reads as a card; hovered, it takes a card's tone.
+                    style={{
+                      borderStyle: 'dashed',
+                      '--button-bg': 'transparent',
+                      '--button-hover': 'var(--tendb-color-card)',
+                    }}
                     onClick={onAddTask}
                   >
                     Add Task
@@ -310,8 +319,7 @@ function BoardColumns({
             </BoardColumn>
           )}
           renderCard={(task) => {
-            const ws = task.workstreamId ? workstreamById.get(task.workstreamId) : undefined;
-            const batch = batchOf(ws);
+            const { workstream: ws, batch } = runOf(task);
             return (
               <TaskCard
                 task={task}
@@ -329,8 +337,7 @@ function BoardColumns({
           }}
           renderLink={(task) => (noteOf(task)?.inbox ? <InboxLink /> : null)}
           summary={(task) => {
-            const ws = task.workstreamId ? workstreamById.get(task.workstreamId) : undefined;
-            const batch = batchOf(ws);
+            const { workstream: ws, batch } = runOf(task);
             return cardSummary(
               task,
               cardWorkstream(task, ws, batch, allBatches),
@@ -346,17 +353,20 @@ function BoardColumns({
             );
           }}
           renderMenu={(task) => {
-            const ws = task.workstreamId ? workstreamById.get(task.workstreamId) : undefined;
-            const batch = batchOf(ws);
+            const { workstream: ws, batch } = runOf(task);
+            const passPage = batch?.passId != null;
+            // A pass's batch ships with its pass and is abandoned with it, never on its own.
             const canAbandon =
               batch !== undefined &&
+              batch.passId == null &&
               (batch.state === BatchState.Open || batch.state === BatchState.Failed);
             return (
               <TaskCardMenu
                 task={task}
                 latest={ws?.state}
                 shippedAnywayClosed={shippedAnywayAndClosed(ws, batch)}
-                hold={holdOption(task, ws)}
+                // A pass's page is held and stopped from the Workbench (Take Out), never from here.
+                hold={passPage ? null : holdOption(task, ws)}
                 onHold={() => {
                   actions.hold(task.id);
                 }}
@@ -378,7 +388,7 @@ function BoardColumns({
                       },
                     }
                   : {})}
-                {...(ws && canCancelRun(task, ws)
+                {...(ws && !passPage && canCancelRun(task, ws)
                   ? {
                       onCancelRun: () => {
                         setCancelling(ws);
@@ -461,6 +471,9 @@ function BoardColumns({
           onCancelRun={setCancelling}
           onOpenConversation={(shapeId) => {
             void navigate({ to: '/shape/$shapeId', params: { shapeId } });
+          }}
+          onOpenWorkbench={() => {
+            void navigate({ to: '/workbench' });
           }}
           onClose={() => {
             setOpenId(null);

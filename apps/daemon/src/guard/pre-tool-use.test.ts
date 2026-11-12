@@ -1,3 +1,4 @@
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { ClaimKind, DEFAULT_HAZARDS } from '@10db/contracts';
@@ -175,5 +176,60 @@ describe('judgePreToolUse', () => {
       judge('Write', { file_path: join(repo.path, 'db', 'migrations', '0001.sql'), content: '' })
         .decision,
     ).toBe('deny');
+  });
+
+  it("settles a Read of a picture pasted into the session's own task, and refuses another task's", () => {
+    const files = (task: string) => join(data.path, 'tasks', task, 'files');
+    for (const task of ['tsk_own', 'tsk_other']) {
+      mkdirSync(files(task), { recursive: true });
+      writeFileSync(join(files(task), 'shot.png'), 'png');
+    }
+    const read = (task: string) =>
+      judgePreToolUse({
+        toolName: 'Read',
+        toolInput: { file_path: join(files(task), 'shot.png') },
+        repoPath: repo.path,
+        areas: [{ name: 'repo', globs: ['**'] }],
+        hazards: DEFAULT_HAZARDS,
+        claims: AREA,
+        readOnly: false,
+        protectedPaths: protectedPaths({
+          dataDir: data.path,
+          home: homedir(),
+          loginConfigDir: null,
+        }),
+        ownSession: {
+          configDir: join(data.path, 'accounts', 'acc_1', 'claude'),
+          providerSessionId: null,
+          filesDir: files('tsk_own'),
+        },
+      });
+    expect(read('tsk_own')).toEqual({ decision: 'allow', settled: expect.any(String) as string });
+    expect(read('tsk_other').decision).toBe('deny');
+  });
+});
+
+describe('judgePreToolUse in a pass', () => {
+  it("denies a write to a page's file under a held shared area, naming the page", () => {
+    const verdict = judgePreToolUse({
+      toolName: 'Write',
+      toolInput: { file_path: 'src/settings/page.tsx', content: 'x' },
+      repoPath: repo.path,
+      areas: [
+        { name: 'settings', globs: ['src/settings/**'], role: 'page', route: '/settings' },
+        { name: 'src', globs: ['src/**'], role: 'shared' },
+      ],
+      hazards: DEFAULT_HAZARDS,
+      claims: [{ kind: ClaimKind.Area, name: 'src' }],
+      readOnly: false,
+      inPass: { pages: ['settings'] },
+      protectedPaths: protectedPaths({
+        dataDir: data.path,
+        home: homedir(),
+        loginConfigDir: login.path,
+      }),
+    });
+    expect(verdict.decision).toBe('deny');
+    if (verdict.decision === 'deny') expect(verdict.reason).toContain('page "settings"');
   });
 });

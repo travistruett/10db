@@ -1,6 +1,8 @@
 import type {
   AaModelDto,
+  AbandonStep,
   AccountId,
+  AppUrl,
   AccountSettings,
   AreaDef,
   BatchFailure,
@@ -47,6 +49,18 @@ import type {
   ModelSetting,
   ModelStatus,
   ModelTier,
+  CloseStep,
+  PassCloseRequest,
+  PassId,
+  PassNotice,
+  PassPreview,
+  PassPreviewMarkId,
+  PassState,
+  PassTurnCheck,
+  PassTurnEnding,
+  PassTurnId,
+  TakeOutStep,
+  TaskPageReportId,
   PatternId,
   PatternMatch,
   ModelProfileId,
@@ -78,7 +92,17 @@ import type {
   StepRole,
   SupportedAccountKind,
   TaskId,
+  TaskFileId,
+  TaskScreenId,
+  ScreenKind,
+  ScreenTheme,
+  ScreenViewport,
+  ScreensMatrix,
   TaskLanding,
+  TaskMessageAuthor,
+  TaskMessageId,
+  TaskMessageKind,
+  TaskPictureKind,
   TaskStatus,
   ToolAccess,
   ToolOpId,
@@ -248,6 +272,17 @@ export const projects = sqliteTable('projects', {
     .$type<string[]>()
     .notNull()
     .default(sql`'["migrations","deps"]'`),
+  /** Where the builder's dev server answers, a loopback origin; null when the project has not said. */
+  appUrl: text('app_url').$type<AppUrl>(),
+  /** Prints the address that signs the browser for pictures in; null when the app needs no sign-in. */
+  devLoginCommand: text('dev_login_command'),
+  /** Serves the app at its address while a pass is open; null when the builder runs it. */
+  previewCommand: text('preview_command'),
+  /** The viewports and themes a page's pictures are taken in. */
+  screens: text('screens', { mode: 'json' })
+    .$type<ScreensMatrix>()
+    .notNull()
+    .default(sql`'{"viewports":[{"width":1440,"height":900}],"themes":["default"]}'`),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -276,6 +311,8 @@ export const batches = sqliteTable(
     /** The GitHub `owner/name` from `gh repo view`, recorded at cut. */
     repo: text('repo'),
     prUrl: text('pr_url'),
+    /** Whether the pull request is a draft, as made or last read; null until then. A pass's opens as one. */
+    prDraft: integer('pr_draft', { mode: 'boolean' }),
     gateExitCode: integer('gate_exit_code'),
     gateLogPath: text('gate_log_path'),
     /** The shipping gate's process-group leader and its OS start time, so recovery can kill an orphaned gate. */
@@ -314,6 +351,10 @@ export const batches = sqliteTable(
     ciFixHead: text('ci_fix_head'),
     /** Why 10db stopped fixing the pull request's failing checks. */
     ciStopped: text('ci_stopped').$type<CiStopped>(),
+    /** The Workbench pass whose batch this is; null for any other batch. */
+    passId: text('pass_id')
+      .$type<PassId>()
+      .references((): AnySQLiteColumn => passes.id),
     /** What stands about the batch that its tasks show (a conflict with the base); no card is raised for it. */
     notices: text('notices', { mode: 'json' })
       .$type<Notice[]>()
@@ -331,6 +372,9 @@ export const batches = sqliteTable(
     uniqueIndex('batches_one_unfinished')
       .on(t.projectId)
       .where(sql`state IN ('CUTTING', 'OPEN', 'SHIPPING', 'FAILED') AND worktree_path IS NULL`),
+    uniqueIndex('batches_pass_idx')
+      .on(t.passId)
+      .where(sql`pass_id IS NOT NULL`),
   ],
 );
 
@@ -404,6 +448,14 @@ export const tasks = sqliteTable(
       .references((): AnySQLiteColumn => landingGroups.id),
     /** The builder's own model setting for the task; null is no override. */
     modelSetting: text('model_setting', { mode: 'json' }).$type<ModelSetting>(),
+    /** The Workbench pass the task is in; null for a task outside every pass. */
+    passId: text('pass_id')
+      .$type<PassId>()
+      .references((): AnySQLiteColumn => passes.id),
+    /** A task taken out of a pass: its saved work, at `refs/10db/kept/<task id>`; null with none. */
+    keptWorkSha: text('kept_work_sha'),
+    /** The pass branch tip that saved work was kept on; set with `kept_work_sha`. */
+    keptBaseSha: text('kept_base_sha'),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -1293,6 +1345,64 @@ export const shapeFiles = sqliteTable(
 );
 
 /**
+ * A task's thread (Workbench spec §4.3, §6.3): the builder's messages, the agent's replies and the
+ * notices, oldest first by id.
+ */
+export const taskMessages = sqliteTable(
+  'task_messages',
+  {
+    id: text('id').$type<TaskMessageId>().primaryKey(),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .notNull()
+      .references(() => tasks.id),
+    author: text('author').$type<TaskMessageAuthor>().notNull(),
+    kind: text('kind').$type<TaskMessageKind>().notNull(),
+    body: text('body').notNull(),
+    createdAt: createdAt(),
+    /** When it was handed to the session; that alone proves nothing reached a turn. */
+    pushedAt: text('pushed_at'),
+    /** When a turn took it in; a message pushed and not delivered is sent again. */
+    deliveredAt: text('delivered_at'),
+    /**
+     * Every client uuid a push of it went under, oldest first: after a restart, a conversation that
+     * holds one of them took the message (Workbench spec §12).
+     */
+    pushUuids: text('push_uuids', { mode: 'json' }).$type<string[]>().notNull().default([]),
+    /** The pass turn the message started, or the turn whose reply it is; null outside a pass's turns. */
+    turnId: text('turn_id')
+      .$type<PassTurnId>()
+      .references((): AnySQLiteColumn => passTurns.id),
+  },
+  (t) => [index('task_messages_task_idx').on(t.taskId, t.id)],
+);
+
+/** A picture the builder pasted into a task's thread, kept under the data directory by its hash. */
+export const taskFiles = sqliteTable(
+  'task_files',
+  {
+    id: text('id').$type<TaskFileId>().primaryKey(),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .notNull()
+      .references(() => tasks.id),
+    messageId: text('message_id')
+      .$type<TaskMessageId>()
+      .notNull()
+      .references(() => taskMessages.id),
+    name: text('name').notNull(),
+    mediaType: text('media_type').$type<TaskPictureKind>().notNull(),
+    size: integer('size').notNull(),
+    sha256: text('sha256').notNull(),
+    storedPath: text('stored_path').notNull(),
+    /** Whether the live session's history holds it as an image block, as `shape_files.inline_sent`. */
+    inlineSent: integer('inline_sent', { mode: 'boolean' }).notNull().default(false),
+    createdAt: createdAt(),
+  },
+  (t) => [index('task_files_task_idx').on(t.taskId, t.id)],
+);
+
+/**
  * What Convert made from a proposal: one created goal, task or decision per row. `key` is the
  * proposal's own key, or the task key inside a goal, so a later Convert resolves it to its task.
  */
@@ -1500,4 +1610,383 @@ export const shapeShadowAnswers = sqliteTable(
     createdAt: createdAt(),
   },
   (t) => [primaryKey({ columns: [t.messageId, t.decision] })],
+);
+
+/**
+ * A Workbench pass (spec §5, §11): the builder works through pages with the agents, live in Your
+ * folder, on a branch of its own made at the folder's HEAD. Its one batch carries the branch, the
+ * base commit and the pull request. One pass per project is open, closing or abandoning at a time.
+ */
+export const passes = sqliteTable(
+  'passes',
+  {
+    id: text('id').$type<PassId>().primaryKey(),
+    projectId: text('project_id')
+      .$type<ProjectId>()
+      .notNull()
+      .references(() => projects.id),
+    name: text('name').notNull(),
+    state: text('state').$type<PassState>().notNull(),
+    /** Written in the same write as the pass, once its batch row exists; null only inside that write. */
+    batchId: text('batch_id')
+      .$type<BatchId>()
+      .references((): AnySQLiteColumn => batches.id),
+    /** How many pages the pass holds, and so how many of its lanes run (W11). */
+    pageCap: integer('page_cap').notNull().default(4),
+    /** The branch HEAD named when the pass opened. */
+    returnBranch: text('return_branch').notNull(),
+    /** The commit HEAD was at when the pass opened; the pass's branch starts here. */
+    startSha: text('start_sha').notNull(),
+    /** The last step of its Abandon that finished; null while it is not abandoning. */
+    abandonStep: integer('abandon_step').$type<AbandonStep>(),
+    /** The highest shared-change number the pass's branch has landed, or passed over; 0 for none. */
+    sharedLanded: integer('shared_landed').notNull().default(0),
+    /** The last step of its close that finished; null while it is not closing. */
+    closeStep: integer('close_step').$type<CloseStep>(),
+    /** The lists the builder confirmed at Close Pass, so a restart runs the same close. */
+    closePlan: text('close_plan', { mode: 'json' }).$type<PassCloseRequest>(),
+    /** The closed, unsettled pass this one was opened on (D24); null for none. */
+    stackedOn: text('stacked_on')
+      .$type<PassId>()
+      .references((): AnySQLiteColumn => passes.id),
+    closedAt: text('closed_at'),
+    settledAt: text('settled_at'),
+    /** The tip the pass's one review last read (D21). */
+    reviewedSha: text('reviewed_sha'),
+    /** What the pass's header shows: failing checks, findings, a stack that did not merge. */
+    notices: text('notices', { mode: 'json' })
+      .$type<PassNotice[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    /** The process group of the changed-files check running after a turn, and its start time. */
+    checkPid: integer('check_pid'),
+    checkPidStart: text('check_pid_start'),
+    /** How the pass's last judged page load went (spec §8.2); null before any. */
+    preview: text('preview').$type<PassPreview>(),
+    openedAt: text('opened_at').notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index('passes_project_idx').on(t.projectId),
+    uniqueIndex('passes_one_open')
+      .on(t.projectId)
+      .where(sql`state IN ('OPEN', 'CLOSING', 'ABANDONING')`),
+  ],
+);
+
+/**
+ * The folder's dirt when a pass opened: each path that differed from its start, with the hash of its
+ * content on disk, or null for a file deleted from the folder. The content itself is held by an
+ * unsigned commit at `refs/10db/passes/<pass id>/dirt`. A record, written once.
+ */
+export const passDirt = sqliteTable(
+  'pass_dirt',
+  {
+    passId: text('pass_id')
+      .$type<PassId>()
+      .notNull()
+      .references(() => passes.id),
+    path: text('path').notNull(),
+    blob: text('blob'),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.passId, t.path] })],
+);
+
+/**
+ * One turn of a pass task (Workbench spec §6.2, §11): from the builder message that started it to the
+ * end of the agent's work on it. `ended_at` and `ending` are written together, and `settled_at` once
+ * the end has been carried through, so a restart between the two finishes the turn by its `ending`.
+ */
+export const passTurns = sqliteTable(
+  'pass_turns',
+  {
+    id: text('id').$type<PassTurnId>().primaryKey(),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .notNull()
+      .references(() => tasks.id),
+    workstreamId: text('workstream_id')
+      .$type<WorkstreamId>()
+      .notNull()
+      .references(() => workstreams.id),
+    sessionId: text('session_id')
+      .$type<SessionId>()
+      .references(() => sessions.id),
+    /** The task's turn number, from 1. */
+    seq: integer('seq').notNull(),
+    messageId: text('message_id')
+      .$type<TaskMessageId>()
+      .references((): AnySQLiteColumn => taskMessages.id),
+    startedAt: text('started_at').notNull(),
+    endedAt: text('ended_at'),
+    ending: text('ending').$type<PassTurnEnding>(),
+    settledAt: text('settled_at'),
+    /** The task's kept commit after the turn; may stay null while the task never changed a page file. */
+    keptSha: text('kept_sha'),
+    /** The pass branch tip the work was compared with; null until the turn's work is kept. */
+    keptBaseSha: text('kept_base_sha'),
+    /** The highest shared-change number granted in the pass when the turn ended; null with none. */
+    sharedSeq: integer('shared_seq'),
+    check: text('check').$type<PassTurnCheck>().notNull().default('none'),
+    readyAt: text('ready_at'),
+    openedAt: text('opened_at'),
+    answeredAt: text('answered_at'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex('pass_turns_task_seq').on(t.taskId, t.seq),
+    index('pass_turns_workstream_idx').on(t.workstreamId),
+    uniqueIndex('pass_turns_one_open')
+      .on(t.taskId)
+      .where(sql`ended_at IS NULL`),
+  ],
+);
+
+/**
+ * A take-out of a task from a pass (Workbench spec §5.4), one row per task and pass: the last step that
+ * finished, so a restart goes on from the next; the kept commit it made; the files the put-back left;
+ * and the shared changes chosen Drop.
+ */
+export const passTakeOuts = sqliteTable(
+  'pass_take_outs',
+  {
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .notNull()
+      .references(() => tasks.id),
+    passId: text('pass_id')
+      .$type<PassId>()
+      .notNull()
+      .references(() => passes.id),
+    step: integer('step').$type<TakeOutStep>().notNull(),
+    /** How many times steps 1 to 3 have run: three at most. */
+    tries: integer('tries').notNull().default(0),
+    keptSha: text('kept_sha'),
+    keptBaseSha: text('kept_base_sha'),
+    /** Files the put-back did not write, because they changed after they were checked. */
+    left: text('left', { mode: 'json' })
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    /** The shared-change numbers chosen Drop. */
+    drops: text('drops', { mode: 'json' })
+      .$type<number[]>()
+      .notNull()
+      .default(sql`'[]'`),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [primaryKey({ columns: [t.taskId, t.passId] })],
+);
+
+/**
+ * A pass task's hold on a shared area for one turn (Workbench spec §7.2, §11), one per shared grant:
+ * its number on the pass's chain, given in the grant's own write, and the commit at
+ * `refs/10db/passes/<pass id>/holds/<claim id>` that holds the content of the record. `closed_at` is
+ * written when the turn's end keeps it, with `empty` when it changed nothing.
+ */
+export const passHolds = sqliteTable(
+  'pass_holds',
+  {
+    claimId: text('claim_id')
+      .$type<ClaimId>()
+      .primaryKey()
+      .references(() => claims.id),
+    passId: text('pass_id')
+      .$type<PassId>()
+      .notNull()
+      .references(() => passes.id),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .notNull()
+      .references(() => tasks.id),
+    workstreamId: text('workstream_id')
+      .$type<WorkstreamId>()
+      .notNull()
+      .references(() => workstreams.id),
+    area: text('area').notNull(),
+    seq: integer('seq').notNull(),
+    recordSha: text('record_sha').notNull(),
+    grantedAt: text('granted_at').notNull(),
+    closedAt: text('closed_at'),
+    empty: integer('empty', { mode: 'boolean' }).notNull().default(false),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex('pass_holds_pass_seq').on(t.passId, t.seq)],
+);
+
+/**
+ * A hold's record, taken at its grant: each path of the area that differed from the chain's tip, with
+ * the hash of its content on disk, or null for a deleted file. A record, written once.
+ */
+export const passHoldPaths = sqliteTable(
+  'pass_hold_paths',
+  {
+    claimId: text('claim_id')
+      .$type<ClaimId>()
+      .notNull()
+      .references(() => passHolds.claimId),
+    path: text('path').notNull(),
+    blob: text('blob'),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.claimId, t.path] })],
+);
+
+/**
+ * One commit of a pass's shared chain (Workbench spec §7.2, §11), numbered as its hold: the paths it
+ * sets and their content, replaced while the hold is open. A drop is a row of its own (`drop_of`), and
+ * the change it puts back names it (`dropped_by`).
+ */
+export const passSharedChanges = sqliteTable(
+  'pass_shared_changes',
+  {
+    passId: text('pass_id')
+      .$type<PassId>()
+      .notNull()
+      .references(() => passes.id),
+    seq: integer('seq').notNull(),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .notNull()
+      .references(() => tasks.id),
+    sha: text('sha').notNull(),
+    paths: text('paths', { mode: 'json' }).$type<string[]>().notNull(),
+    blobs: text('blobs', { mode: 'json' }).$type<Record<string, string | null>>().notNull(),
+    dirtyKept: integer('dirty_kept', { mode: 'boolean' }).notNull().default(false),
+    landedSha: text('landed_sha'),
+    droppedBy: integer('dropped_by'),
+    dropOf: integer('drop_of'),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [primaryKey({ columns: [t.passId, t.seq] })],
+);
+
+/**
+ * A sign-off that waits for another page's hold to close (Workbench spec §9.2 step 0), one per task,
+ * so a restart finds it and lands at once, or waits again.
+ */
+export const passSignOffs = sqliteTable('pass_sign_offs', {
+  taskId: text('task_id')
+    .$type<TaskId>()
+    .primaryKey()
+    .references(() => tasks.id),
+  passId: text('pass_id')
+    .$type<PassId>()
+    .notNull()
+    .references(() => passes.id),
+  waitsFor: text('waits_for')
+    .$type<ClaimId>()
+    .notNull()
+    .references(() => passHolds.claimId),
+  askedAt: text('asked_at').notNull(),
+});
+
+/**
+ * A picture of the builder's app taken for a task (Workbench spec §10, §11): its file lies under the data
+ * directory by its hash, and a file no unpruned row names is deleted. A pruned row keeps its record.
+ */
+export const taskScreens = sqliteTable(
+  'task_screens',
+  {
+    id: text('id').$type<TaskScreenId>().primaryKey(),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .notNull()
+      .references(() => tasks.id),
+    turnId: text('turn_id')
+      .$type<PassTurnId>()
+      .references(() => passTurns.id),
+    kind: text('kind').$type<ScreenKind>().notNull(),
+    route: text('route').notNull(),
+    viewport: text('viewport', { mode: 'json' }).$type<ScreenViewport>().notNull(),
+    theme: text('theme').$type<ScreenTheme>().notNull(),
+    sha256: text('sha256').notNull(),
+    size: integer('size').notNull(),
+    width: integer('width').notNull(),
+    height: integer('height').notNull(),
+    storedPath: text('stored_path').notNull(),
+    /** The pass turn's kept commit, or the folder's HEAD, the picture was taken at. */
+    keptSha: text('kept_sha'),
+    createdAt: createdAt(),
+    prunedAt: text('pruned_at'),
+  },
+  (t) => [
+    index('task_screens_task_idx').on(t.taskId, t.createdAt),
+    index('task_screens_sha_idx').on(t.sha256),
+  ],
+);
+
+/**
+ * A page whose turn broke the pass's preview (Workbench spec §8.2, §11): the route it loaded, what the
+ * error overlay said, the turn that broke it, how many turns running it stayed broken, the Move card it
+ * raised and the thread notice that offers it to the agent. One open mark per pass and page; a turn of
+ * the page that loads cleanly mends it.
+ */
+export const passPreviewMarks = sqliteTable(
+  'pass_preview_marks',
+  {
+    id: text('id').$type<PassPreviewMarkId>().primaryKey(),
+    passId: text('pass_id')
+      .$type<PassId>()
+      .notNull()
+      .references(() => passes.id),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .notNull()
+      .references(() => tasks.id),
+    route: text('route').notNull(),
+    turnId: text('turn_id')
+      .$type<PassTurnId>()
+      .notNull()
+      .references(() => passTurns.id),
+    /** The error overlay's text; null when the document itself failed to load. */
+    overlay: text('overlay'),
+    brokenAt: text('broken_at').notNull(),
+    turns: integer('turns').notNull().default(1),
+    mendedAt: text('mended_at'),
+    cardId: text('card_id')
+      .$type<InboxItemId>()
+      .references(() => inboxItems.id),
+    noticeId: text('notice_id')
+      .$type<TaskMessageId>()
+      .references(() => taskMessages.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex('pass_preview_marks_one_open')
+      .on(t.passId, t.taskId)
+      .where(sql`mended_at IS NULL`),
+  ],
+);
+
+/**
+ * A route an agent named with `report_pages` (Workbench spec §10), kept for the pictures of its turn
+ * (a pass page) or its run (a task outside a pass). A record, written once.
+ */
+export const taskPageReports = sqliteTable(
+  'task_page_reports',
+  {
+    id: text('id').$type<TaskPageReportId>().primaryKey(),
+    taskId: text('task_id')
+      .$type<TaskId>()
+      .notNull()
+      .references(() => tasks.id),
+    workstreamId: text('workstream_id')
+      .$type<WorkstreamId>()
+      .notNull()
+      .references(() => workstreams.id),
+    turnId: text('turn_id')
+      .$type<PassTurnId>()
+      .references(() => passTurns.id),
+    route: text('route').notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index('task_page_reports_task_idx').on(t.taskId, t.workstreamId)],
 );

@@ -155,6 +155,35 @@
               "properties": {
                 "kind": {
                   "type": "string",
+                  "const": "feedback"
+                },
+                "messageId": {
+                  "type": "string",
+                  "pattern": "^tmg_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                },
+                "providerSessionId": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "kind",
+                "messageId",
+                "providerSessionId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
                   "const": "uncommitted"
                 },
                 "paths": {
@@ -233,6 +262,23 @@
                 "kind": {
                   "type": "string",
                   "const": "builder_review"
+                },
+                "inboxId": {
+                  "type": "string",
+                  "pattern": "^inb_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+                }
+              },
+              "required": [
+                "kind",
+                "inboxId"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "kind": {
+                  "type": "string",
+                  "const": "pass_review"
                 },
                 "inboxId": {
                   "type": "string",
@@ -1085,6 +1131,17 @@
                 "no_log",
                 "no_cut"
               ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "passId": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^pas_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
             },
             {
               "type": "null"

@@ -138,6 +138,7 @@ describe('see_screen on a started daemon', () => {
       ['POST', `/projects/${project.id}/tasks`, { title: 'x', acceptanceCriteria: ['y'] }],
       ['POST', `/tasks/${task.id}/hold`],
       ['POST', `/tasks/${task.id}/start`],
+      ['POST', `/projects/${project.id}/workbench-setup`],
       ['POST', '/inbox/inb_x/answer', { optionId: 'x' }],
       ['PUT', '/settings/lane-permissions', { autoMode: false }],
       ['PATCH', `/tasks/${task.id}`, { title: 'Renamed' }],

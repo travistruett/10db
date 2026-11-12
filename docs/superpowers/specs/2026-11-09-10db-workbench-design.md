@@ -57,8 +57,8 @@ why it comes before previews of separate copies (§17).
 **Non-goals:** an embedded view of the app (the builder's browser is the view); a capture button in the
 app under test (a later task: a dev-only overlay or extension that files a screenshot, URL and element to the
 page's task); previews of separate copies, live links and screenshots for copies (§17); showing pictures to the
-agent by itself; undoing one turn; Features as a kind of surface (§7 says how they fit later); Codex in a pass;
-passes that span projects; more than one open pass per project; a model review step per turn.
+agent by itself; undoing one turn; Features as a kind of surface (§7 says how they fit later); passes that span
+projects; more than one open pass per project; a model review step per turn.
 
 **Anti-goals:** a gate or a commit that the builder waits for before seeing a change; 10db starting, restarting
 or stopping the builder's dev server; a pull request that carries a page the builder has not signed off;
@@ -126,7 +126,7 @@ W1 to W13 are the builder's, in their words where quoted. W14 to W20 are default
 | W16 | Each turn runs the project's changed-files check, as advice. The full gate runs once, for the pull request. | §2's first fact. |
 | W17 | Pictures come from a browser the daemon owns, a pinned Chromium, signed in through a per-project dev login. | §10. |
 | W18 | An area is a page or shared, and a page may name its route. Features come later, as names over areas. | §7. |
-| W19 | A pass is Claude only. | No image handling was found in `apps/daemon/src/sessions/codex-session.ts`. |
+| W19 | A pass runs on the project's account, Claude or Codex, with the fallback and move-back rules every lane follows. | The builder bills a project to a ChatGPT plan on purpose. The first reading, "a pass is Claude only", rested on Codex taking no pictures and showing no turn took a message; the pinned Codex does both (`decisions/2026-11-11-a-pass-runs-on-the-projects-account-claude-or-codex.md`). |
 | W20 | Separate copies get previews later, declared in a committed `.10db/preview.json`; ampsio gets none until measured. | §17. |
 
 ## 4. The screen
@@ -166,8 +166,9 @@ state is the picker for the first way in, not a blank page with a button:
 If "What's bothering you?" is filled, every new page task starts at once with it as its first message. If it is
 empty, each new page waits for the builder's first message.
 
-A project with no page area shows, in place of the list, why a pass needs one and two actions: **Propose Page
-Areas** (the area proposer of §7.1) and a link to Settings › Areas and hazards.
+A project with no page area shows, in place of the list, the Workbench setup: its areas rebuilt with a page per
+route and the settings a pass wants, applied in one click
+(`decisions/2026-11-10-the-workbench-setup-rebuilds-the-areas-for-one-apply.md`).
 
 - A task with no brief costs nothing until spoken to: its session starts on the builder's first message. A
   task with a description starts working when the pass opens.
@@ -806,6 +807,15 @@ a turn never ends with work that nothing has kept, whether or not the agent call
     the id travels with the message, and the brief says a repeated id is one message.
   - The live Claude test (not in `make gate`) asserts the stamps for a message sent mid-turn and for one sent
     as a turn ends; it is run again at each Claude Code or SDK upgrade, as the Plan session's live test is.
+  - **On Codex** the row's uuid goes as `clientUserMessageId` on `turn/start` and `turn/steer`, and the thread
+    records it as the `clientId` of the user message item a turn takes the input in. That record comes as the
+    turn begins, before the model answers, so the message is delivered once a model item follows it in its
+    turn, or the turn completes. An interrupt's receipt is the messages the session has not handed to Codex
+    yet; Codex drops a steered message the interrupted turn had not taken, so every other one is pushed again.
+    A turn that fails, or that the guard interrupts, drops what it was handed and did not take: the message
+    goes back to 10db's queue and the turn fails, so Retry Turn or the next message sends it. A Codex lane can
+    open no stored picture by its path, so every push sends every picture as a local image Codex reads from
+    the stored file. `test/codex.live.test.ts` runs the real binary.
 - A picture is sent as an image block when it fits the account's limits, otherwise as a path the session
   reads; the budget is counted per thread as Plan counts it per conversation.
 
@@ -1198,7 +1208,7 @@ Every new GET is classified in `screens/render-access.ts`, as that module requir
 | with a page Open | nothing to do: it is `QUEUED`, skipped by the scheduler, and its claim is still held (§2) |
 | mid-turn | the session is resumed once, as after any crash (`apps/daemon/src/runner/next-action.ts:11-37`); `feedback` survives as `answer` does |
 | mid-turn, and the session cannot be resumed | a fresh session from the digest and the latest handoff, with the builder's message (§6.3); the same after a move to another account |
-| with a message pushed and not delivered | it is sent again to the resumed or fresh session; the page is not Ready until a turn after it ends |
+| with a message pushed and not delivered | it is sent again to the resumed or fresh session; the page is not Ready until a turn after it ends. A Codex thread is read back first: a message pushed under a client uuid the thread took (`task_messages.push_uuids`) is delivered and not sent again (exactly once); a thread that can't be read starts a fresh session that is sent the message again, and the thread says so (at least once, as for Claude) |
 | between a turn's end and its kept commit | the files are on disk; the kept commit is made at start-up for any turn with `ended_at` and no `kept_sha` |
 | during sign-off | each commit's operation id finds what already landed; the rest are made, in order; the approval is applied if it was not |
 | with a shared claim held for a turn | released with the turn's recovery; its changes are kept on the shared chain first if they differ from the record taken at the grant (`pass_holds` survives the restart) |
@@ -1443,7 +1453,7 @@ from the base. Decisions: whether the copy is started for a picture alone; what 
 copies. The thread of §6 serves a copy's task unchanged.
 
 **Later, any phase:** the capture button in the app under test; a tool that shows the agent its own page;
-undoing a turn from its kept commit; Features; Codex once its sessions take pictures.
+undoing a turn from its kept commit; Features.
 
 ## 18. Findings outside this design
 
@@ -1500,6 +1510,7 @@ One file each under `docs/architecture/decisions/`, in the pull request that bui
 | The builder's hand edits ride the owning task; unowned edits are listed at close; the watcher raises no foreign-claim or stray card for a page of an open pass | the watcher's stray and foreign-claim rules |
 | A ready page is a new `check` item each time, withdrawn by a message, folded per pass in the Inbox; Ready in a pass is `pass_review`, with a session still attached, and the built Approve and Send Back are refused for it | `decisions/2026-11-08-the-inbox-holds-what-needs-the-builder.md`; `decisions/2026-10-28-optional-gate.md` |
 | **D18:** the desktop's opener may open `http` on loopback hosts, and the window opens only the selected project's app address; Open Page opens once, then copies the link | the opener capability's own description (`apps/desktop/src-tauri/capabilities/default.json`) |
+| A pass runs on the project's account, Claude or Codex: a Codex turn is seen to take a message by its client uuid, pictures go as local images, an interrupt answers what 10db still holds, and a restart reads the thread back | `decisions/2026-11-11-a-pass-runs-on-the-projects-account-claude-or-codex.md` |
 | Task pictures come from a daemon-owned pinned Chromium, signed in by a dev login, and stay on the Mac | `decisions/2026-11-03-plan-sees-the-app-through-screenshots-not-a-browser.md`; `decisions/2026-11-08-10db-runs-pinned-copies-of-codex-and-claude-code.md` |
 
 ## 20. Calls to review

@@ -23,7 +23,14 @@ const login = tempDir('login claude');
 const CONFIG = join(data.path, 'accounts', 'acc_1', 'claude');
 const OWN_RESULTS = join(CONFIG, 'projects', '-repo', 'sess_own', 'tool-results');
 const OTHER_RESULTS = join(CONFIG, 'projects', '-repo', 'sess_other', 'tool-results');
+const OWN_FILES = join(data.path, 'tasks', 'tsk_own', 'files');
+const OTHER_FILES = join(data.path, 'tasks', 'tsk_other', 'files');
 beforeAll(() => {
+  mkdirSync(OWN_FILES, { recursive: true });
+  mkdirSync(OTHER_FILES, { recursive: true });
+  writeFileSync(join(OWN_FILES, 'shot.png'), 'png');
+  writeFileSync(join(OTHER_FILES, 'shot.png'), 'png');
+  symlinkSync(join(CONFIG, '.claude.json'), join(OWN_FILES, 'escape.png'));
   mkdirSync(OWN_RESULTS, { recursive: true });
   mkdirSync(OTHER_RESULTS, { recursive: true });
   writeFileSync(join(OWN_RESULTS, 'out.txt'), 'big');
@@ -77,7 +84,7 @@ function judge(
     claims,
     readOnly,
     protectedPaths: guarded(),
-    ownSession: { configDir: CONFIG, providerSessionId: 'sess_own' },
+    ownSession: { configDir: CONFIG, providerSessionId: 'sess_own', filesDir: OWN_FILES },
   });
 }
 const bash = (command: string, claims?: Claims) => judge('Bash', { command }, claims);
@@ -237,6 +244,109 @@ describe('file edits', () => {
     expect(
       judge('Edit', { file_path: 'package.json' }, [{ kind: 'area', name: 'deps' }]).decision,
     ).toBe('deny');
+  });
+
+  // Workbench spec §7.1, §7.3: in a pass a page's file is the page's, even when a shared area or a
+  // hazard the lane holds also matches it. An area with no role that a task of the pass holds is a page.
+  const PAGES = { pages: ['profile', 'settings'] };
+  it.each<{
+    name: string;
+    inPass?: { pages: readonly string[] };
+    claims: Claims;
+    path: string;
+    decision: 'allow' | 'deny';
+    reason?: string;
+  }>([
+    {
+      name: 'in a pass, a page file under a held shared area is denied, naming the page',
+      inPass: PAGES,
+      claims: [{ kind: 'area', name: 'src' }],
+      path: 'src/settings/page.tsx',
+      decision: 'deny',
+      reason: 'page "settings"',
+    },
+    {
+      name: 'in a pass, a page file under a held hazard is denied before the hazard allows it',
+      inPass: PAGES,
+      claims: [
+        { kind: 'area', name: 'src' },
+        { kind: 'hazard', name: 'deps' },
+      ],
+      path: 'src/settings/package.json',
+      decision: 'deny',
+      reason: 'page "settings"',
+    },
+    {
+      name: 'in a pass, a page file is allowed to the lane holding that page',
+      inPass: PAGES,
+      claims: [{ kind: 'area', name: 'settings' }],
+      path: 'src/settings/page.tsx',
+      decision: 'allow',
+    },
+    {
+      name: 'in a pass, a hazard under a held page still needs the hazard',
+      inPass: PAGES,
+      claims: [{ kind: 'area', name: 'settings' }],
+      path: 'src/settings/package.json',
+      decision: 'deny',
+      reason: 'hazard',
+    },
+    {
+      name: 'in a pass, a shared file is allowed under the held shared area',
+      inPass: PAGES,
+      claims: [{ kind: 'area', name: 'src' }],
+      path: 'src/lib/button.tsx',
+      decision: 'allow',
+    },
+    {
+      name: "in a pass, another task's area with no role under a held shared area is denied, naming it",
+      inPass: PAGES,
+      claims: [{ kind: 'area', name: 'src' }],
+      path: 'src/profile/card.tsx',
+      decision: 'deny',
+      reason: 'page "profile"',
+    },
+    {
+      name: "in a pass, the lane's own area with no role is allowed",
+      inPass: PAGES,
+      claims: [
+        { kind: 'area', name: 'settings' },
+        { kind: 'area', name: 'profile' },
+      ],
+      path: 'src/profile/card.tsx',
+      decision: 'allow',
+    },
+    {
+      name: 'in a pass, an area with no role no task of the pass holds is allowed under a held shared area',
+      inPass: { pages: ['settings'] },
+      claims: [{ kind: 'area', name: 'src' }],
+      path: 'src/profile/card.tsx',
+      decision: 'allow',
+    },
+    {
+      name: 'outside a pass, a page file under a held shared area is allowed as before',
+      claims: [{ kind: 'area', name: 'src' }],
+      path: 'src/settings/page.tsx',
+      decision: 'allow',
+    },
+  ])('$name', ({ inPass, claims, path, decision, reason }) => {
+    const verdict = judgeToolUse({
+      toolName: 'Edit',
+      toolInput: { file_path: path, old_string: 'a', new_string: 'b' },
+      repoPath: repo.path,
+      areas: [
+        { name: 'settings', globs: ['src/settings/**'], role: 'page', route: '/settings' },
+        { name: 'profile', globs: ['src/profile/**'] },
+        { name: 'src', globs: ['src/**'], role: 'shared' },
+      ],
+      hazards: DEFAULT_HAZARDS,
+      claims,
+      readOnly: false,
+      ...(inPass === undefined ? {} : { inPass }),
+      protectedPaths: guarded(),
+    });
+    expect(verdict.decision).toBe(decision);
+    if (reason && verdict.decision === 'deny') expect(verdict.reason).toContain(reason);
   });
 
   it.each<{ name: string; path: string; skip?: boolean }>([
@@ -2327,6 +2437,26 @@ describe('account isolation', () => {
       tool: 'Glob',
       input: () => ({ pattern: '../link-data/**', path: 'src' }),
     },
+    {
+      name: "Read of another task's pasted picture",
+      tool: 'Read',
+      input: () => ({ file_path: join(OTHER_FILES, 'shot.png') }),
+    },
+    {
+      name: "Read of another task's picture through .. from the task's own",
+      tool: 'Read',
+      input: () => ({ file_path: join(OWN_FILES, '..', '..', 'tsk_other', 'files', 'shot.png') }),
+    },
+    {
+      name: "Read of the task's pictures through a link out of them",
+      tool: 'Read',
+      input: () => ({ file_path: join(OWN_FILES, 'escape.png') }),
+    },
+    {
+      name: "Grep in the task's own pictures, which only Read opens",
+      tool: 'Grep',
+      input: () => ({ pattern: 'png', path: OWN_FILES }),
+    },
   ])('denies $name on a protected path in both step kinds', ({ tool, input }) => {
     for (const readOnly of [false, true]) {
       const verdict = judge(tool, input(), [{ kind: 'area', name: 'api' }], readOnly);
@@ -2345,6 +2475,11 @@ describe('account isolation', () => {
       name: "Grep in the session's own saved output",
       tool: 'Grep',
       input: () => ({ pattern: 'big', path: OWN_RESULTS }),
+    },
+    {
+      name: "Read of a picture pasted into the session's own task",
+      tool: 'Read',
+      input: () => ({ file_path: join(OWN_FILES, 'shot.png') }),
     },
     {
       name: 'Grep with a regex that looks like a path',

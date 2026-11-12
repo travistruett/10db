@@ -1,9 +1,11 @@
 import { mintId, PROTOCOL_VERSION } from '@10db/contracts';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, renderApp, server } from './test/daemon';
-import { inboxItemDto } from './test/fixtures';
+import { inboxItemDto, projectViewDto } from './test/fixtures';
+import { passKeys } from './daemon/pass-queries';
+import { pagesByStatus, passViewDto } from './test/pass-fixtures';
 
 const healthy = () =>
   http.get(daemonUrl('/health'), () =>
@@ -14,7 +16,73 @@ const healthy = () =>
     }),
   );
 
+/** The setup's matchMedia, which each width test puts back. */
+const setupMatchMedia = window.matchMedia.bind(window);
+
+/** A window `width` px wide: min- and max-width queries in px answer as a browser of that width would. */
+function windowWidth(width: number): void {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: (query: string): Omit<MediaQueryList, 'addListener' | 'removeListener'> => {
+      const bound = /\((min|max)-width:\s*([\d.]+)px\)/.exec(query);
+      const px = Number(bound?.[2]);
+      return {
+        matches:
+          bound === null
+            ? setupMatchMedia(query).matches
+            : bound[1] === 'min'
+              ? width >= px
+              : width <= px,
+        media: query,
+        onchange: null,
+        addEventListener: () => undefined,
+        removeEventListener: () => undefined,
+        dispatchEvent: () => false,
+      };
+    },
+  });
+}
+
+afterEach(() => {
+  Object.defineProperty(window, 'matchMedia', { writable: true, value: setupMatchMedia });
+});
+
 describe('App shell', () => {
+  it('orders the sidebar global views first, then the project and its views, then app-wide Settings', async () => {
+    server.use(...baseHandlers());
+    renderApp('/factory');
+    const nav = await screen.findByRole('navigation');
+    await screen.findByRole('button', { name: /Switch project/ });
+    // In document order: the sidebar's links and buttons, each by its accessible name.
+    const order = [...nav.querySelectorAll('a, button')].map((element) => {
+      const name = element.getAttribute('aria-label') ?? element.textContent.trim();
+      return name.endsWith('Switch project') ? 'switcher' : name;
+    });
+    expect(order).toEqual([
+      'Inbox',
+      'Factory',
+      'switcher',
+      'Board',
+      'Plan',
+      'UI Workbench',
+      'Knowledge',
+      'Project Settings',
+      'Settings',
+    ]);
+  });
+
+  it.each([
+    ['Project Settings', '/settings/general'],
+    ['Settings', '/settings/keep-awake'],
+  ])('opens %s at %s', async (link, path) => {
+    server.use(...baseHandlers());
+    const { router } = renderApp('/factory');
+    fireEvent.click(await screen.findByRole('link', { name: link }));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe(path);
+    });
+  });
+
   it('shows no daemon status in the header while connected', async () => {
     server.use(...baseHandlers());
     renderApp('/factory');
@@ -120,10 +188,83 @@ describe('App shell', () => {
     expect(await screen.findByRole('link', { name: /Inbox.*1 open card/ })).toBeTruthy();
   });
 
+  it("counts the selected project's pass pages that wait on the builder on the UI Workbench link", async () => {
+    const project = projectViewDto({ name: 'ampsio' });
+    const pages = pagesByStatus();
+    const live = passViewDto({
+      pass: { projectId: project.id },
+      pages: [pages.ready, pages.failed, pages.working, { ...pages.notStarted, signOff: 'done' }],
+    });
+    // Another project's pass is not counted.
+    const elsewhere = passViewDto({ pass: { projectId: mintId('Project') }, pages: [pages.ready] });
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/passes'), () => HttpResponse.json([elsewhere, live])),
+      ...baseHandlers(),
+    );
+    renderApp('/factory');
+    expect(await screen.findByRole('link', { name: /UI Workbench.*2 pages waiting/ })).toBeTruthy();
+  });
+
+  it('counts nothing on the UI Workbench link for a closed pass still to settle', async () => {
+    const project = projectViewDto({ name: 'ampsio' });
+    const pages = pagesByStatus();
+    const closed = passViewDto({
+      pass: { projectId: project.id, state: 'CLOSED' },
+      pages: [pages.ready, pages.failed],
+    });
+    server.use(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      http.get(daemonUrl('/passes'), () => HttpResponse.json([closed])),
+      ...baseHandlers(),
+    );
+    const { queryClient } = renderApp('/factory');
+    await waitFor(() => {
+      expect(queryClient.getQueryState(passKeys.live)?.status).toBe('success');
+    });
+    expect(screen.getByRole('link', { name: /UI Workbench/ }).textContent).toBe('UI Workbench');
+  });
+
   it('draws the color scheme toggle icon at the 20px size DESIGN.md sets', async () => {
     server.use(...baseHandlers());
     renderApp();
     const toggle = await screen.findByRole('button', { name: /^Switch to (dark|light) mode$/ });
     expect(toggle.querySelector('svg')?.getAttribute('width')).toBe('20');
+  });
+
+  it.each([
+    { width: 480, path: '/workbench', folded: true },
+    { width: 1280, path: '/workbench', folded: false },
+    // Under the shell's sm breakpoint every view folds, or the sidebar would cover it.
+    { width: 480, path: '/board', folded: true },
+    { width: 480, path: '/inbox', folded: true },
+    { width: 800, path: '/board', folded: false },
+    { width: 800, path: '/workbench', folded: true },
+  ])('at $width px on $path the sidebar folds: $folded', async ({ width, path, folded }) => {
+    windowWidth(width);
+    server.use(...baseHandlers());
+    renderApp(path);
+    const nav = await screen.findByRole('navigation', { hidden: true });
+    await waitFor(() => {
+      expect(nav.hasAttribute('inert')).toBe(folded);
+    });
+    const burger = screen.queryByRole('button', { name: 'Show navigation' });
+    expect(burger !== null).toBe(folded);
+    if (burger === null) return;
+    fireEvent.click(burger);
+    await waitFor(() => {
+      expect(nav.hasAttribute('inert')).toBe(false);
+    });
+    expect(screen.getByRole('button', { name: 'Hide navigation' })).toBeTruthy();
+  });
+
+  it('opens the UI Workbench from the sidebar, between Plan and Knowledge', async () => {
+    server.use(...baseHandlers());
+    const { router } = renderApp('/factory');
+    fireEvent.click(await screen.findByRole('link', { name: 'UI Workbench' }));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/workbench');
+    });
+    expect(await screen.findByRole('heading', { name: 'UI Workbench' })).toBeTruthy();
   });
 });

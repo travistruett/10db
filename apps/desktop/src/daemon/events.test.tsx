@@ -11,8 +11,12 @@ import { describe, expect, it } from 'vitest';
 import { baseHandlers, daemonUrl, eventStream, renderWithDaemon, server } from '../test/daemon';
 import { accountUsageDto, DEFAULT_ACCOUNT } from '../test/account-fixtures';
 import { daemonEvent } from '../test/fixtures';
+import { passActivityData, passViewDto, pagesByStatus } from '../test/pass-fixtures';
 import { useAccounts, useAccountUsage } from './account-queries';
-import { eventStreamUrl, INVALIDATIONS, useEventStream } from './events';
+import { EVENT_INVALIDATIONS, eventStreamUrl, INVALIDATIONS, useEventStream } from './events';
+import { screenKeys } from './screen-queries';
+import { passKeys, useTurnActivity } from './pass-queries';
+import { threadKeys } from './thread-queries';
 import { useBatches, useProjects } from './queries';
 
 function Stream({ onEvent }: { readonly onEvent?: (event: DaemonEvent) => void }) {
@@ -338,6 +342,167 @@ describe('useEventStream', () => {
     for (const entity of ['role_setting', 'pattern']) {
       expect(INVALIDATIONS[entity]).toEqual(expect.arrayContaining([['model-settings']]));
     }
+  });
+
+  it("refetches a pass on every pass event, and a task's thread and turns when a message joins it", () => {
+    // The stream's first open refetches everything, so the table is what can go wrong.
+    expect(INVALIDATIONS['pass']).toEqual(expect.arrayContaining([passKeys.all]));
+    // A message joining a page starts its turn, and a run pausing or resuming changes its page: the
+    // queue reads both from the live passes.
+    expect(EVENT_INVALIDATIONS['task.message_added']).toEqual(
+      expect.arrayContaining([threadKeys.all, passKeys.turnsAll, passKeys.live]),
+    );
+    expect(INVALIDATIONS['workstream']).toEqual(expect.arrayContaining([passKeys.live]));
+    // A tool call is written into the pass, never refetched: one arrives per call.
+    for (const key of [
+      ...(INVALIDATIONS['session'] ?? []),
+      ...(EVENT_INVALIDATIONS['session.activity'] ?? []),
+    ])
+      expect(key[0]).not.toBe(passKeys.all[0]);
+  });
+
+  it("refetches a task's pictures when one is kept", () => {
+    expect(EVENT_INVALIDATIONS['task.screen_added']).toEqual(
+      expect.arrayContaining([screenKeys.all]),
+    );
+  });
+
+  it("writes a pass lane's tool call into its page's turn, and leaves other lanes' pages alone", async () => {
+    const { working, ready } = pagesByStatus();
+    const view = passViewDto({ pages: [working, ready] });
+    const sockets: { send(data: string): void }[] = [];
+    server.use(
+      ...baseHandlers(),
+      eventStream.addEventListener('connection', ({ client }) => {
+        sockets.push(client);
+      }),
+    );
+    const seen: number[] = [];
+    const { queryClient } = renderWithDaemon(
+      <Stream
+        onEvent={(event) => {
+          seen.push(event.seq);
+        }}
+      />,
+    );
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+    queryClient.setQueryData(passKeys.live, [view]);
+    queryClient.setQueryData(passKeys.view(view.pass.id), view);
+    const workingRun = working.workstreamId ?? mintId('Workstream');
+    const turnId = working.turn?.id ?? mintId('PassTurn');
+    const at = '2026-11-09T12:29:30.000Z';
+    // A lane outside the pass, then one with no turn: neither touches the pass.
+    sockets[0]?.send(
+      JSON.stringify(
+        daemonEvent({
+          seq: 1,
+          type: 'session.activity',
+          entityType: 'session',
+          data: passActivityData(mintId('Workstream'), mintId('PassTurn')),
+          at,
+        }),
+      ),
+    );
+    sockets[0]?.send(
+      JSON.stringify(
+        daemonEvent({
+          seq: 2,
+          type: 'session.activity',
+          entityType: 'session',
+          data: { ...passActivityData(workingRun, turnId), turn: null },
+          at,
+        }),
+      ),
+    );
+    sockets[0]?.send(
+      JSON.stringify(
+        daemonEvent({
+          seq: 3,
+          type: 'session.activity',
+          entityType: 'session',
+          data: passActivityData(workingRun, turnId),
+          at,
+        }),
+      ),
+    );
+    await waitFor(() => {
+      expect(seen).toEqual([1, 2, 3]);
+    });
+    const activity = {
+      tool: 'Edit',
+      target: 'src/settings/form.tsx',
+      filesTouched: ['src/settings/page.tsx', 'src/settings/form.tsx'],
+      at,
+    };
+    const live = queryClient.getQueryData<(typeof view)[]>(passKeys.live);
+    expect(live?.[0]?.pages[0]?.turn?.activity).toEqual(activity);
+    expect(live?.[0]?.pages[1]).toEqual(ready);
+    expect(
+      queryClient.getQueryData<typeof view>(passKeys.view(view.pass.id))?.pages[0]?.turn?.activity,
+    ).toEqual(activity);
+  });
+
+  it("reads an open turn log again on that turn's activity, and no other turn's", async () => {
+    const turnId = mintId('PassTurn');
+    const asked: string[] = [];
+    const sockets: { send(data: string): void }[] = [];
+    server.use(
+      ...baseHandlers(),
+      http.get(daemonUrl('/pass-turns/:turnId/activity'), ({ params }) => {
+        asked.push(String(params['turnId']));
+        return HttpResponse.json([]);
+      }),
+      eventStream.addEventListener('connection', ({ client }) => {
+        sockets.push(client);
+      }),
+    );
+    const seen: number[] = [];
+    function OpenLog() {
+      useTurnActivity(turnId, true);
+      return null;
+    }
+    const { queryClient } = renderWithDaemon(
+      <>
+        <Stream
+          onEvent={(event) => {
+            seen.push(event.seq);
+          }}
+        />
+        <OpenLog />
+      </>,
+    );
+    await waitFor(() => {
+      expect(sockets).toHaveLength(1);
+    });
+    // The stream reads everything again as it opens; count from once that has settled.
+    await waitFor(() => {
+      expect(asked.length > 0 && queryClient.isFetching() === 0).toBe(true);
+    });
+    const before = asked.length;
+    const run = mintId('Workstream');
+    for (const [seq, turn] of [
+      [1, mintId('PassTurn')],
+      [2, turnId],
+    ] as const)
+      sockets[0]?.send(
+        JSON.stringify(
+          daemonEvent({
+            seq,
+            type: 'session.activity',
+            entityType: 'session',
+            data: passActivityData(run, turn),
+          }),
+        ),
+      );
+    await waitFor(() => {
+      expect(seen).toEqual([1, 2]);
+    });
+    await waitFor(() => {
+      expect(asked).toHaveLength(before + 1);
+    });
+    expect(new Set(asked)).toEqual(new Set([turnId]));
   });
 
   it('builds ws and wss stream URLs', () => {

@@ -1,44 +1,23 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { basename, extname, join } from 'node:path';
+import { extname, join } from 'node:path';
 import {
   InvalidError,
   isShapeImage,
-  ShapeFileKind,
   shapeFileKind,
   shapeFileRefusal,
+  type ShapeFileKind,
   type ShapeId,
 } from '@10db/contracts';
-import { isImageName, tooBigAlone, type PictureLimits } from '../screens';
+import {
+  isImageName,
+  refuseMislabelledBytes,
+  safeFileName,
+  tooBigAlone,
+  type PictureLimits,
+} from '../screens';
 import type { ShapeImage } from '../sessions';
 
 // Shape spec §5.4. What a dropped file must be to reach the session, and where the daemon keeps it.
-
-/** The magic bytes of each binary kind: Claude rejects a mislabelled image, which would end the turn. */
-const SIGNATURES: Readonly<Record<string, (bytes: Uint8Array) => boolean>> = {
-  [ShapeFileKind.Png]: (b) =>
-    [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((byte, i) => b[i] === byte),
-  [ShapeFileKind.Jpeg]: (b) => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
-  [ShapeFileKind.Webp]: (b) => ascii(b, 0, 4) === 'RIFF' && ascii(b, 8, 12) === 'WEBP',
-  [ShapeFileKind.Pdf]: (b) => ascii(b, 0, 5) === '%PDF-',
-};
-
-const ascii = (bytes: Uint8Array, from: number, to: number): string =>
-  String.fromCharCode(...bytes.slice(from, to));
-
-const LABEL: Readonly<Record<string, string>> = {
-  [ShapeFileKind.Png]: 'PNG',
-  [ShapeFileKind.Jpeg]: 'JPEG',
-  [ShapeFileKind.Webp]: 'WebP',
-  [ShapeFileKind.Pdf]: 'PDF',
-};
-
-/** A name with no directory in it and nothing a terminal would act on. */
-export function safeFileName(name: string): string {
-  const base = basename(name.replaceAll('\\', '/'))
-    .replace(/\p{Cc}/gu, '')
-    .trim();
-  return base === '' || base.startsWith('.') ? `file${extname(base)}` : base;
-}
 
 export interface CheckedFile {
   readonly name: string;
@@ -62,9 +41,7 @@ export function checkDroppedFile(file: {
   if (refusal !== null) throw new InvalidError(refusal);
   const kind = shapeFileKind(name);
   if (kind === null) throw new InvalidError(`${name} can't be added`);
-  const signed = SIGNATURES[kind];
-  if (signed !== undefined && !signed(file.bytes))
-    throw new InvalidError(`${name} isn't really a ${LABEL[kind] ?? 'file of that type'}`);
+  refuseMislabelledBytes(name, kind, file.bytes);
   return { name, mediaType: kind };
 }
 

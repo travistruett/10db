@@ -18,6 +18,8 @@ import {
   ProposalId,
   ProposalKind,
   QuestionCategory,
+  SHARED_ASK_REPLY_CHOICE,
+  SharedAskDetail,
   Urgency,
   type CardResolution,
   type InboxItemDto,
@@ -40,6 +42,7 @@ import {
   getProposalDto,
   getTask,
   getWorkstreamRow,
+  passHoldingTask,
   insertDecision,
   insertInboxItem,
   insertPermissionRule,
@@ -49,6 +52,7 @@ import {
   openItemsForWorkstream,
   resolveProposal,
   updateInboxItem,
+  type DbReader,
   type Json,
   type WriteContext,
 } from '@10db/db';
@@ -98,6 +102,8 @@ type AskInput = AskOwner & {
   readonly foldPerLane?: boolean;
   /** Claude Code's classifier handed the call to a person: the card folds only with other escalated asks. */
   readonly escalated?: boolean;
+  /** The card folds with the open card under this key alone, whatever it says. */
+  readonly foldKey?: string;
 };
 
 /** The detail key naming the Plan conversation whose session asked a card. */
@@ -219,6 +225,13 @@ function optionsForTargets(
   );
 }
 
+/** Whether a lane's run is of a task that a pass holds as a page. */
+function askedByPassPage(db: DbReader, workstreamId: WorkstreamId | null): boolean {
+  if (workstreamId === null) return false;
+  const task = getTask(db, getWorkstreamRow(db, workstreamId).taskId);
+  return passHoldingTask(db, task) !== undefined;
+}
+
 /** Identical open questions fold into one card; with `foldPerLane`, only one lane's. */
 function foldKeyFor(
   input: Pick<
@@ -258,9 +271,16 @@ function assertKnownChoice(item: InboxItemDto, answer: InboxAnswer): void {
   }
 }
 
-/** Whether the answer to a lane's question is the choice that parks the task. */
+/**
+ * Whether the answer to a lane's question is the choice that parks the task. A pass's shared-area
+ * question never parks its page: its asking call takes the choice as Keep It to This Page.
+ */
 function parksTask(item: InboxItemDto, answer: InboxAnswer): boolean {
-  return item.kind === InboxKind.Question && isParkChoice(answer.choice);
+  return (
+    item.kind === InboxKind.Question &&
+    isParkChoice(answer.choice) &&
+    !SharedAskDetail.safeParse(item.detail).success
+  );
 }
 
 interface Waiter {
@@ -540,10 +560,13 @@ export function createInboxService(deps: {
 
   const service: InboxService = {
     ask(raw) {
-      // Whatever the lane wrote, a question can be answered by parking the task.
+      // Whatever the lane wrote, a question can be answered by parking the task, except a pass
+      // page's: a page leaves its pass by Take Out, never by parking.
       const input =
-        raw.kind === 'question' ? { ...raw, options: withParkOption(raw.options) } : raw;
-      const foldKey = foldKeyFor(input);
+        raw.kind === 'question' && !askedByPassPage(deps.state.db, raw.workstreamId)
+          ? { ...raw, options: withParkOption(raw.options) }
+          : raw;
+      const foldKey = input.foldKey ?? foldKeyFor(input);
       // A conversation's card has no target: no workstream waits on it, and its session's waiter below
       // is how the answer reaches it.
       const target: InboxTarget | null =
@@ -614,6 +637,15 @@ export function createInboxService(deps: {
           throw new InboxAnswerRefused('Send Back needs a note saying what to change');
         }
       }
+      // A reply to a shared-area question is the builder's words to the agent: it needs some.
+      if (
+        current.kind === InboxKind.Question &&
+        current.state === InboxState.Open &&
+        answer.choice === SHARED_ASK_REPLY_CHOICE &&
+        SharedAskDetail.safeParse(current.detail).success &&
+        (answer.note ?? '').trim() === ''
+      )
+        throw new InboxAnswerRefused('Reply needs a note saying what to tell the agent');
       let afterCommit: (() => void) | undefined;
       const answered = deps.state.write((ctx) => {
         const item = getInboxItem(ctx.tx, id);

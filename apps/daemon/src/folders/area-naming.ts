@@ -1,6 +1,6 @@
 import { DEFAULT_HAZARDS, type ProposedArea } from '@10db/contracts';
 import { z } from 'zod';
-import { AreaCandidateKind, type AreaCandidate } from './area-candidates';
+import { AreaCandidateKind, roledOf, type AreaCandidate } from './area-candidates';
 
 const MAX_REASON = 300;
 const NAME = /^[a-z][a-z0-9-]*$/u;
@@ -39,6 +39,9 @@ export function namingPrompt(candidates: readonly AreaCandidate[]): string {
     'The kind=rest candidate holds every file no other area holds, so the area that takes it becomes',
     'the catch-all: tasks in it may change any file no other area holds, such as a new package.',
     'Merging it into a unit makes that unit the catch-all, so keep it on its own unless nothing else fits.',
+    '',
+    'Keep each kind=route candidate in an area of its own. It is a screen of an app, or a route group of',
+    'a few screens; the builder looks at a screen by its route, and two screens in one area have none.',
     '',
     `Name each area in lowercase words joined by hyphens (letters, digits and hyphens, starting with a letter). Do not use ${[...RESERVED].join(', ')}: they are taken.`,
     'Give each area a reason: one short line on what it holds.',
@@ -123,7 +126,13 @@ export function areasFromModel(
     const reason = oneLine(entry.reason);
     if (!NAME.test(name) || RESERVED.has(name) || names.has(name) || reason === '') return null;
     names.add(name);
-    areas.push({ name, reason, globs: union(members), ...catchAllOf(members) });
+    areas.push({
+      name,
+      reason,
+      globs: union(members),
+      ...catchAllOf(members),
+      ...roledOf(members),
+    });
   }
   return used.size === candidates.length ? areas : null;
 }
@@ -196,6 +205,7 @@ export function areasFromStructure(candidates: readonly AreaCandidate[]): Propos
       reason: reasonFor(candidate),
       globs: [...candidate.globs],
       ...catchAllOf([candidate]),
+      ...roledOf([candidate]),
     };
   });
 }
