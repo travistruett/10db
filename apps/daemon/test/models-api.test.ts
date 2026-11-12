@@ -1,8 +1,11 @@
 import {
+  AccountCreatedDto,
+  AccountDto,
   AccountModelDto,
   CatalogueAttempt,
   CatalogueSource,
   CatalogueStatusDto,
+  mintId,
   ModelRowDto,
   type Effort,
 } from '@10db/contracts';
@@ -79,6 +82,28 @@ describe('the model list over HTTP', () => {
       intelligence: null,
     });
     expect(rows[0]?.availableOn).toHaveLength(1);
+  });
+
+  it('prices the list on an account, one line per effort, and refuses a bad or archived account', async () => {
+    const { api } = await start([{ id: 'opus', resolvedId: 'claude-opus-5-5' }]);
+    const [account] = await api.get('/accounts', z.array(AccountDto));
+    if (!account) throw new Error('the daemon has no default account');
+    const rows = await api.get(`/models?account=${account.id}`, z.array(ModelRowDto));
+    expect(rows[0]?.efforts.map((e) => e.effort).sort()).toEqual(['high', 'low']);
+
+    await expect(api.get('/models?account=nope', z.array(ModelRowDto))).rejects.toThrow('-> 400');
+    await expect(
+      api.get(`/models?account=${mintId('Account')}`, z.array(ModelRowDto)),
+    ).rejects.toThrow('-> 404');
+
+    const { account: spare } = await api.post('/accounts', AccountCreatedDto, {
+      kind: 'codex_signin',
+      label: 'Spare',
+    });
+    await api.post(`/accounts/${spare.id}/archive`, z.unknown());
+    await expect(api.get(`/models?account=${spare.id}`, z.array(ModelRowDto))).rejects.toThrow(
+      '-> 404',
+    );
   });
 
   it('lists the maker’s models as available on an account whose list has not been read', async () => {

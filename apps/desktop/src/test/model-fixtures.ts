@@ -2,6 +2,7 @@ import type { ModelSettingsDto, PatternMatch } from '@10db/contracts';
 import {
   AccountModelDto,
   CatalogueStatusDto,
+  ModelEffortDto,
   ModelProfileDto,
   ModelRowDto,
   PatternDto,
@@ -25,9 +26,25 @@ export function modelRowDto(over: Partial<ModelRowDto> & { model: string }): Mod
     inputPrice: null,
     outputPrice: null,
     intelligence: null,
+    costPerTaskUsd: null,
     outputTokensPerSecond: null,
+    efforts: [],
     stepsRun: 0,
     firstSeenAt: AT,
+    ...over,
+  });
+}
+
+/** One effort of a model row, unmeasured unless a test says otherwise. */
+export function modelEffortDto(over: Partial<ModelEffortDto> = {}): ModelEffortDto {
+  return ModelEffortDto.parse({
+    profileId: mintId('ModelProfile'),
+    effort: 'high',
+    intelligence: null,
+    costPerTaskUsd: null,
+    outputTokensPerSecond: null,
+    stepsRun: 0,
+    firstPassSteps: 0,
     ...over,
   });
 }

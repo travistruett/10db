@@ -5,7 +5,7 @@ import type {
   ModelProfileDto,
   ModelRowDto,
 } from '@10db/contracts';
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { accountDto, DEFAULT_ACCOUNT } from '../../test/account-fixtures';
@@ -13,6 +13,7 @@ import { baseHandlers, daemonUrl, renderWithDaemon, server } from '../../test/da
 import {
   accountModelDto,
   catalogueStatusDto,
+  modelEffortDto,
   modelProfileDto,
   modelRowDto,
 } from '../../test/model-fixtures';
@@ -42,6 +43,23 @@ const STRONG = modelRowDto({
   inputPrice: 5,
   outputPrice: 25,
   intelligence: 60,
+  costPerTaskUsd: 2.5,
+  efforts: [
+    modelEffortDto({
+      effort: 'high',
+      intelligence: 60,
+      costPerTaskUsd: 2.5,
+      stepsRun: 8,
+      firstPassSteps: 6,
+    }),
+    modelEffortDto({
+      effort: 'low',
+      intelligence: 50,
+      costPerTaskUsd: 0.4,
+      stepsRun: 4,
+      firstPassSteps: 1,
+    }),
+  ],
   outputTokensPerSecond: 40,
   stepsRun: 12,
   firstSeenAt: '2026-11-05T10:00:00.000Z',
@@ -69,12 +87,21 @@ function serve(
     status?: CatalogueStatusDto;
     offers?: AccountModelDto[];
     profiles?: ModelProfileDto[];
+    /** The rows for a request that names an account; the account asked for is recorded in `asked`. */
+    forAccount?: (account: string) => ModelRowDto[];
+    asked?: (string | null)[];
   } = {},
 ) {
   server.use(
-    http.get(daemonUrl('/models'), () =>
-      HttpResponse.json(opts.rows ?? [FAST, STRONG, UNKNOWN, BLANK]),
-    ),
+    http.get(daemonUrl('/models'), ({ request }) => {
+      const account = new URL(request.url).searchParams.get('account');
+      opts.asked?.push(account);
+      return HttpResponse.json(
+        account !== null && opts.forAccount
+          ? opts.forAccount(account)
+          : (opts.rows ?? [FAST, STRONG, UNKNOWN, BLANK]),
+      );
+    }),
     http.get(daemonUrl('/models/status'), () =>
       HttpResponse.json(opts.status ?? catalogueStatusDto()),
     ),
@@ -99,6 +126,8 @@ const rowOf = (name: string) => {
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'], now: NOW });
+  // The Columns menu keeps its layout in the window's storage.
+  window.localStorage.clear();
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -114,7 +143,7 @@ describe('the Models page', () => {
     expect(row.getByText('alpha-max')).toBeTruthy();
     expect(row.getByText('Strongest')).toBeTruthy();
     expect(row.getByText('Claude plan, Work key')).toBeTruthy();
-    for (const cell of ['60', '40', '$5.00', '$25.00', '12']) {
+    for (const cell of ['60', '$2.50', '$5.00', '$25.00', '12']) {
       expect(row.getByText(cell)).toBeTruthy();
     }
   });
@@ -124,7 +153,7 @@ describe('the Models page', () => {
     renderWithDaemon(<ModelsSection />);
     await screen.findByRole('button', { name: 'Open Beta Plain' });
     const cells = within(rowOf('Beta Plain')).getAllByRole('cell');
-    // Intelligence, Speed, Input and Output.
+    // Intelligence, Cost per task, Input and Output.
     expect(cells.slice(3, 7).map((c) => c.textContent)).toEqual(['—', '—', '—', '—']);
   });
 
@@ -135,6 +164,56 @@ describe('the Models page', () => {
     expect(within(rowOf('Alpha Max')).getByText('New')).toBeTruthy();
     expect(within(rowOf('Alpha Fast')).queryByText('New')).toBeNull();
     expect(within(rowOf('house-model')).getByText('Unknown')).toBeTruthy();
+  });
+
+  it('hides Speed until the Columns menu shows it, and keeps it shown', async () => {
+    serve();
+    renderWithDaemon(<ModelsSection />);
+    await screen.findByRole('button', { name: 'Open Alpha Max' });
+    expect(screen.queryByRole('columnheader', { name: /Speed/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Columns' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Speed (tokens/s)' }));
+    expect(screen.getByRole('columnheader', { name: /Speed/ })).toBeTruthy();
+    expect(within(rowOf('Alpha Max')).getByText('40')).toBeTruthy();
+    cleanup();
+    renderWithDaemon(<ModelsSection />);
+    await screen.findByRole('button', { name: 'Open Alpha Max' });
+    expect(screen.getByRole('columnheader', { name: /Speed/ })).toBeTruthy();
+  });
+
+  it('expands a row to one line per effort without opening the drawer', async () => {
+    serve();
+    renderWithDaemon(<ModelsSection />);
+    await screen.findByRole('button', { name: 'Open Alpha Max' });
+    fireEvent.click(screen.getByRole('button', { name: 'Show efforts of Alpha Max' }));
+    const efforts = await screen.findByRole('table', { name: 'Efforts of Alpha Max' });
+    const high = within(efforts).getByRole('row', { name: /high/ });
+    expect(within(high).getByText('$2.50')).toBeTruthy();
+    expect(within(high).getByText('75%')).toBeTruthy();
+    const low = within(efforts).getByRole('row', { name: /low/ });
+    expect(within(low).getByText('$0.40')).toBeTruthy();
+    expect(within(low).getByText('25%')).toBeTruthy();
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('asks for the account picked in Available on and shows its cost', async () => {
+    const asked: (string | null)[] = [];
+    const dearer = modelRowDto({
+      ...STRONG,
+      costPerTaskUsd: 2.75,
+      efforts: [modelEffortDto({ effort: 'high', intelligence: 60, costPerTaskUsd: 2.75 })],
+    });
+    serve({ asked, forAccount: () => [dearer] });
+    renderWithDaemon(<ModelsSection />);
+    await screen.findByRole('button', { name: 'Open Alpha Max' });
+    expect(asked).toEqual([null]);
+    fireEvent.click(screen.getByRole('button', { name: 'Filter Available on' }));
+    fireEvent.click(await screen.findByRole('combobox', { name: 'Account' }));
+    fireEvent.click(await screen.findByRole('option', { name: 'Work key', hidden: true }));
+    await waitFor(() => {
+      expect(asked.at(-1)).toBe(KEYED.id);
+    });
+    expect(await within(rowOf('Alpha Max')).findByText('$2.75')).toBeTruthy();
   });
 
   it('filters by tier from the Tier column, one tier or several', async () => {

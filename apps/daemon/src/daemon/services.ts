@@ -4,12 +4,15 @@ import {
   ACTIVE_STATES,
   AreaRole,
   CatalogueAttempt,
+  type AccountDto,
+  type AccountId,
   type CatalogueStatusDto,
   type BatchId,
   ConflictError,
   Delivery,
   TaskStatus,
   InvalidError,
+  NotFoundError,
   isDaemonAddress,
   APP_URL_IS_DAEMON,
   type McpServerStatusDto,
@@ -61,6 +64,8 @@ import {
   latestWorkstreamOf,
   openGoalDigest,
   listAaModels,
+  getAccount,
+  type DbReader,
   listAccountModels,
   listAccounts,
   listBatches,
@@ -164,6 +169,13 @@ import type { ListenerReader } from './listening-ports';
 import type { AddressProbe } from './loopback-probe';
 import { suggestSettings } from './suggest-settings';
 import { checkoutConflictsWithRoot } from './worktree-root';
+
+/** An account that is still in use; an archived one is as good as unknown to a read that prices on it. */
+function liveAccount(db: DbReader, id: AccountId): AccountDto {
+  const account = getAccount(db, id);
+  if (account.archived) throw new NotFoundError('account', id);
+  return account;
+}
 
 /** The HTTP layer's view of the daemon: reads go to the database, writes go through the state store. */
 export function createServices(deps: {
@@ -678,12 +690,13 @@ export function createServices(deps: {
     benchmarkStatus: () => deps.benchmarks.status(),
     syncBenchmarks: () => deps.benchmarks.sync(),
     listAaModels: () => listAaModels(db),
-    listModels: () =>
+    listModels: (accountId) =>
       buildModelRows({
         profiles: listModelProfiles(db),
         offers: listAccountModels(db),
         accounts: listAccounts(db),
         catalogue: deps.catalogue.catalogue(),
+        ...(accountId === undefined ? {} : { account: liveAccount(db, accountId) }),
       }),
     listAccountOffers: () => listAccountModels(db),
     catalogueStatus,

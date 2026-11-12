@@ -6,6 +6,7 @@ import {
   ModelTier,
   type AccountId,
   type AccountModelDto,
+  type Effort,
   type SupportedAccountKind,
 } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
@@ -114,7 +115,12 @@ describe('buildModelRows', () => {
         outputPrice: 25,
         // The strongest scored effort's scores and speed, not an average or a mix of efforts.
         intelligence: 40,
+        costPerTaskUsd: null,
         outputTokensPerSecond: 60,
+        efforts: [
+          expect.objectContaining({ effort: 'high', intelligence: 40 }),
+          expect.objectContaining({ effort: 'low', intelligence: 30 }),
+        ],
         stepsRun: 5,
         firstSeenAt: '2026-11-01T10:00:00.000Z',
       },
@@ -177,6 +183,91 @@ describe('buildModelRows', () => {
       offers: [offer(subscription.id)],
     });
     expect(row?.outputTokensPerSecond).toBe(expected);
+  });
+
+  describe('efforts and cost per task', () => {
+    const priced = (effort: Effort, intelligence: number | null, cost: number | null) =>
+      profile({ effort, scores: scored(intelligence), costPerTaskUsd: cost });
+    const efforts = (rows: ReturnType<typeof buildModelRows>) =>
+      rows[0]?.efforts.map((e) => `${e.effort}:${String(e.costPerTaskUsd)}`);
+    const listed = (accountId: AccountId, over: Partial<AccountModelDto> = {}) =>
+      offer(accountId, { efforts: [], ...over });
+
+    it('lists the efforts strongest first and takes the row’s cost from the first', () => {
+      const rows = buildModelRows({
+        catalogue: CATALOGUE,
+        accounts: [subscription],
+        profiles: [
+          priced('low', 30, 0.5),
+          priced('max', null, null),
+          priced('high', 40, 2),
+          priced('medium', null, null),
+        ],
+        offers: [listed(subscription.id)],
+      });
+      expect(rows[0]).toMatchObject({ intelligence: 40, costPerTaskUsd: 2 });
+      // Unscored efforts go last, highest effort first.
+      expect(efforts(rows)).toEqual(['high:2', 'low:0.5', 'max:null', 'medium:null']);
+    });
+
+    it('ties on Intelligence by the cheaper cost, then the higher effort', () => {
+      const rows = buildModelRows({
+        catalogue: CATALOGUE,
+        accounts: [subscription],
+        profiles: [priced('high', 40, 3), priced('medium', 40, 1), priced('max', 40, 3)],
+        offers: [listed(subscription.id)],
+      });
+      expect(efforts(rows)).toEqual(['medium:1', 'max:3', 'high:3']);
+    });
+
+    it('scales every cost to an account that prices its own copy 10% above the maker', () => {
+      const rows = buildModelRows({
+        catalogue: CATALOGUE,
+        accounts: [bedrock],
+        profiles: [priced('low', 30, 1), priced('high', 40, 2)],
+        offers: [listed(bedrock.id, { outputPrice: 27.5 })],
+        account: bedrock,
+      });
+      expect(rows[0]?.costPerTaskUsd).toBeCloseTo(2.2, 10);
+      expect(rows[0]?.efforts.map((e) => e.costPerTaskUsd)).toEqual([
+        expect.closeTo(2.2, 10),
+        expect.closeTo(1.1, 10),
+      ]);
+    });
+
+    it('narrows a row to the efforts the account lists, and its Intelligence follows', () => {
+      const rows = buildModelRows({
+        catalogue: CATALOGUE,
+        accounts: [subscription],
+        profiles: [priced('low', 30, 0.5), priced('high', 40, 2)],
+        offers: [listed(subscription.id, { efforts: ['low'] })],
+        account: subscription,
+      });
+      expect(efforts(rows)).toEqual(['low:0.5']);
+      expect(rows[0]).toMatchObject({ intelligence: 30, costPerTaskUsd: 0.5 });
+    });
+
+    it('shows no efforts, and dashes, when the efforts an account lists match no profile', () => {
+      const rows = buildModelRows({
+        catalogue: CATALOGUE,
+        accounts: [subscription],
+        profiles: [priced('high', 40, 2)],
+        offers: [listed(subscription.id, { efforts: ['low'] })],
+        account: subscription,
+      });
+      expect(rows[0]).toMatchObject({ efforts: [], intelligence: null, costPerTaskUsd: null });
+    });
+
+    it('keeps the maker’s efforts and costs for a model the account does not offer', () => {
+      const rows = buildModelRows({
+        catalogue: CATALOGUE,
+        accounts: [subscription, bedrock],
+        profiles: [priced('low', 30, 1), priced('high', 40, 2)],
+        offers: [listed(subscription.id), listed(bedrock.id, { outputPrice: 27.5 })],
+        account: { ...subscription, id: mintId('Account') },
+      });
+      expect(efforts(rows)).toEqual(['high:2', 'low:1']);
+    });
   });
 
   describe('which models are listed, and with what status', () => {

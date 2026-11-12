@@ -1,12 +1,20 @@
 import type { ModelRowDto } from '@10db/contracts';
 import { Button, Group, Stack, Text } from '@mantine/core';
 import { IconRefresh } from '@tabler/icons-react';
+import { useDataTableColumns } from 'mantine-datatable';
 import { useState } from 'react';
 import { useAccounts } from '../../daemon/account-queries';
-import { useCatalogueStatus, useModels, useRefreshModels } from '../../daemon/model-queries';
+import {
+  useCatalogueStatus,
+  useModelOffers,
+  useModels,
+  useRefreshModels,
+} from '../../daemon/model-queries';
+import { columnChoices, ColumnsMenu, hiddenColumns, toggleColumn } from '../../shell/columns-menu';
 import { useNow } from '../../shell/relative';
 import { ModelDrawer } from './model-drawer';
-import { catalogueLine } from './model-format';
+import { ArtificialAnalysisCredit } from './artificial-analysis-credit';
+import { catalogueLine, costNote } from './model-format';
 import {
   filterModels,
   earliestFirstSeen,
@@ -16,18 +24,23 @@ import {
   type ModelFilter,
   type ModelSort,
 } from './model-order';
-import { ModelsTable } from './models-table';
+import { ModelsTable, TOGGLEABLE_COLUMNS } from './models-table';
 
 const NO_FILTER: ModelFilter = { query: '', tiers: [], accountId: null };
 
 /** Every model 10db can reach, with its tier, price and scores, and where the catalogue behind it came from. */
 export function ModelsSection() {
   const now = useNow();
-  const models = useModels();
+  const [filter, setFilter] = useState<ModelFilter>(NO_FILTER);
+  const models = useModels(filter.accountId);
+  const offers = useModelOffers();
+  const layout = useDataTableColumns<ModelRowDto>({
+    key: 'models-table',
+    columns: TOGGLEABLE_COLUMNS,
+  });
   const status = useCatalogueStatus();
   const accounts = useAccounts();
   const refresh = useRefreshModels();
-  const [filter, setFilter] = useState<ModelFilter>(NO_FILTER);
   const [sort, setSort] = useState<ModelSort>({
     column: ModelColumn.Tier,
     direction: SortDirection.Descending,
@@ -47,19 +60,30 @@ export function ModelsSection() {
   return (
     <Stack>
       <Group justify="space-between" align="flex-start" wrap="nowrap">
-        <Text size="xs" c="dimmed">
-          {status.data !== undefined
-            ? catalogueLine(status.data, now)
-            : status.isError
-              ? 'The catalogue status could not be read.'
-              : 'Reading the catalogue…'}
-        </Text>
+        <Stack gap={2}>
+          <Text size="xs" c="dimmed">
+            {status.data !== undefined
+              ? catalogueLine(status.data, now)
+              : status.isError
+                ? 'The catalogue status could not be read.'
+                : 'Reading the catalogue…'}
+          </Text>
+          <ArtificialAnalysisCredit />
+        </Stack>
         <Group gap="xs" wrap="nowrap">
           {refresh.isError ? (
             <Text size="xs" c="red" role="alert">
               {refresh.error.message}
             </Text>
           ) : null}
+          <ColumnsMenu
+            choices={columnChoices(TOGGLEABLE_COLUMNS, layout.columnsToggle)}
+            onToggle={(accessor) => {
+              layout.setColumnsToggle(
+                toggleColumn(TOGGLEABLE_COLUMNS, layout.columnsToggle, accessor),
+              );
+            }}
+          />
           <Button
             variant="default"
             size="xs"
@@ -89,6 +113,8 @@ export function ModelsSection() {
           onSort={setSort}
           now={now}
           earliest={earliest}
+          hidden={hiddenColumns(TOGGLEABLE_COLUMNS, layout.columnsToggle)}
+          costNote={costNote(filter.accountId, offers.data ?? [])}
           onOpen={(r) => {
             setSelected(r);
             setOpened(true);

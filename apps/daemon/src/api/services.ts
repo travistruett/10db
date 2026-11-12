@@ -620,8 +620,11 @@ export interface ApiServices {
   setGlobalModelSettings(input: ModelSettingsInput): ModelSettingsDto;
   /** As the global one for a project; a null setting hands the role back to the global setting. */
   setProjectModelSettings(projectId: ProjectId, input: ModelSettingsInput): ModelSettingsDto;
-  /** Every model any account can reach, one row each. */
-  listModels(): ModelRowDto[];
+  /**
+   * Every model any account can reach, one row each. With an account, a model it offers lists the efforts it
+   * offers, priced on it. Throws NotFoundError for an unknown or archived account.
+   */
+  listModels(accountId?: AccountId): ModelRowDto[];
   /** What each account offers, with its launch ID and its own price. */
   listAccountOffers(): AccountModelDto[];
   /** Where the model catalogue came from and when. */

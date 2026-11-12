@@ -37,6 +37,7 @@ import {
   InboxState,
   JudgeConfigPatch,
   JudgeKeyInput,
+  ModelsQuery,
   KeepAwakeInput,
   LanePermissionsDto,
   TrustOverrides,
@@ -1226,7 +1227,11 @@ export function createApp(deps: ApiDeps) {
     .get('/benchmarks/status', (c) => c.json(deps.services.benchmarkStatus()))
     .post('/benchmarks/sync', async (c) => c.json(await deps.services.syncBenchmarks()))
     .get('/benchmarks/models', (c) => c.json(deps.services.listAaModels()))
-    .get('/models', (c) => c.json(deps.services.listModels()))
+    .get(
+      '/models',
+      validator('query', (query) => ModelsQuery.parse(query)),
+      (c) => c.json(deps.services.listModels(c.req.valid('query').account)),
+    )
     .get('/models/offers', (c) => c.json(deps.services.listAccountOffers()))
     .get('/models/status', (c) => c.json(deps.services.catalogueStatus()))
     .post('/models/refresh', async (c) => c.json(await deps.services.refreshModels()))

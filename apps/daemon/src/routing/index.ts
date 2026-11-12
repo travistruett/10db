@@ -4,3 +4,4 @@ export { chooseModel, type ChooseInput } from './choose-model';
 export { NoProfileError } from './router';
 export { retryStep } from './retry-step';
 export { offeredModels, offeredProfiles } from './offered';
+export { costOnAccount } from './cost-on-account';

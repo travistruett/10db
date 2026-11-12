@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { AccountId, PatternId, ProjectId } from './ids';
+import { AccountId, ModelProfileId, PatternId, ProjectId } from './ids';
 import { Effort, RiskTag, StepRole } from './states';
 
 type ValueOf<T> = T[keyof T];
@@ -157,6 +157,23 @@ export const AccountModelDto = z.object({
 });
 export type AccountModelDto = z.infer<typeof AccountModelDto>;
 
+/** One effort of a model: what the row would show if this were the effort it stands on. */
+export const ModelEffortDto = z.object({
+  profileId: ModelProfileId,
+  effort: z.enum(Effort),
+  intelligence: z.number().nullable(),
+  /** At the maker's list price, or scaled to the account the list was asked for. */
+  costPerTaskUsd: z.number().min(0).nullable(),
+  outputTokensPerSecond: z.number().nullable(),
+  stepsRun: z.int().min(0),
+  firstPassSteps: z.int().min(0),
+});
+export type ModelEffortDto = z.infer<typeof ModelEffortDto>;
+
+/** Which account's price the model list is costed on; without one, the maker's. */
+export const ModelsQuery = z.strictObject({ account: AccountId.optional() });
+export type ModelsQuery = z.infer<typeof ModelsQuery>;
+
 /** One row of the model list: what the maker publishes, joined with where 10db can run it. */
 export const ModelRowDto = z.object({
   model: z.string().min(1),
@@ -173,7 +190,11 @@ export const ModelRowDto = z.object({
   /** The maker's list price, not what any one account pays. */
   outputPrice: z.number().min(0).nullable(),
   intelligence: z.number().nullable(),
+  /** The cost of the effort the Intelligence comes from, at the maker's price or the account's asked for. */
+  costPerTaskUsd: z.number().min(0).nullable(),
   outputTokensPerSecond: z.number().nullable(),
+  /** One per effort 10db can run, strongest first; the row's figures are the first one's. */
+  efforts: z.array(ModelEffortDto),
   /** Steps 10db has run on this model. */
   stepsRun: z.int().min(0),
   /** The earliest of its profiles; null for a model with no profile, which has nothing to date it by. */

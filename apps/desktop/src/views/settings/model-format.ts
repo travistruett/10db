@@ -1,4 +1,10 @@
-import { CatalogueAttempt, CatalogueSource, type CatalogueStatusDto } from '@10db/contracts';
+import {
+  CatalogueAttempt,
+  CatalogueSource,
+  type AccountId,
+  type AccountModelDto,
+  type CatalogueStatusDto,
+} from '@10db/contracts';
 import { fromNow } from '../../shell/relative';
 
 /** What a cell with no data shows: never a zero, which would read as a measurement. */
@@ -12,6 +18,25 @@ export function formatScore(value: number | null): string {
 /** Dollars per million tokens. */
 export function formatPrice(value: number | null): string {
   return value === null ? NO_DATA : `$${value.toFixed(2)}`;
+}
+
+/** Dollars for a task: cents, and under a cent a floor, since $0.00 would read as free. */
+export function formatCost(value: number | null): string {
+  if (value === null) return NO_DATA;
+  return value > 0 && value < 0.01 ? '<$0.01' : `$${value.toFixed(2)}`;
+}
+
+/**
+ * What a cost per task is at. Without an account it is the maker's API list price; an account that lists its own
+ * per-token price scales it, and one with none (a plan, a gateway without prices) keeps the maker's.
+ */
+export function costNote(accountId: AccountId | null, offers: readonly AccountModelDto[]): string {
+  const base = "At the maker's API list price";
+  if (accountId === null) return base;
+  const priced = offers.some((o) => o.accountId === accountId && o.outputPrice !== null);
+  return priced
+    ? `${base}, scaled to this account's own output price`
+    : `${base}; this account has no per-token price`;
 }
 
 /** The share of steps that passed first time; no steps, no rate. */

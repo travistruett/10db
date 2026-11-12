@@ -1,5 +1,11 @@
-import { AccountModelDto, CatalogueStatusDto, ModelProfileDto, ModelRowDto } from '@10db/contracts';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  AccountModelDto,
+  CatalogueStatusDto,
+  ModelProfileDto,
+  ModelRowDto,
+  type AccountId,
+} from '@10db/contracts';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import { readJson } from './client';
 import { useDaemon } from './provider';
@@ -17,12 +23,20 @@ const ModelRowList = z.array(ModelRowDto);
 const OfferList = z.array(AccountModelDto);
 const ProfileList = z.array(ModelProfileDto);
 
-/** One row per model any account can reach. */
-export function useModels() {
+/**
+ * One row per model any account can reach. With an account, a model it offers lists its efforts, costed on it;
+ * the previous rows stay up while another account's load.
+ */
+export function useModels(accountId: AccountId | null) {
   const { client } = useDaemon();
   return useQuery({
-    queryKey: modelKeys.list,
-    queryFn: async () => readJson(await client.models.$get(), ModelRowList),
+    queryKey: [...modelKeys.list, accountId],
+    queryFn: async () =>
+      readJson(
+        await client.models.$get({ query: accountId === null ? {} : { account: accountId } }),
+        ModelRowList,
+      ),
+    placeholderData: keepPreviousData,
   });
 }
 
