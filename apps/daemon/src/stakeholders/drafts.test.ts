@@ -308,6 +308,27 @@ describe('sweepDrafts', () => {
     expect(getInboxItem(store.db, failed.id).detail?.['draftFailed']).toBeUndefined();
   });
 
+  it('keeps a card the builder took by hand after a failed compose, across a restart', () => {
+    const w = world();
+    w.route([w.mark]);
+    const failed = w.insertAndDraft({}, failedCompose()).card;
+    expect(getInboxItem(store.db, failed.id).detail?.['draftFailed']).toBe(true);
+    store.write((ctx) =>
+      setInboxRecipients(ctx, failed.id, {
+        assignees: [],
+        routedBy: RoutedBy.Builder,
+        suggestion: null,
+      }),
+    );
+    expect(getInboxItem(store.db, failed.id).detail?.['draftFailed']).toBeUndefined();
+    expect(sweep()).toEqual([]);
+    expect(getInboxItem(store.db, failed.id)).toMatchObject({
+      assignees: ['me'],
+      routedBy: 'builder',
+    });
+    expect(sendForCard(store.db, failed.id)).toBeNull();
+  });
+
   it('does not reroute a card the rules sent to the builder on purpose', () => {
     const w = world();
     w.route([w.mark]);

@@ -50,6 +50,8 @@ export interface NewInboxItem {
   readonly pendingTriage?: boolean;
 }
 
+/** The detail key marking a card whose message could not be composed; any recipients set by hand clear it. */
+export const DRAFT_FAILED_KEY = 'draftFailed';
 /** The detail key holding why a tie went to the builder. */
 export const ROUTE_NOTE_KEY = 'routeNote';
 /** The detail key holding the topic the lane named. */
@@ -320,9 +322,17 @@ export function setInboxRecipients(
 ): InboxItemDto {
   const before = getInboxItem(ctx.tx, id);
   const assignees = input.assignees.length > 0 ? [...input.assignees] : [BUILDER_HANDLE];
+  // Whoever sets the recipients decides; a stale mark from a failed draft must not override them.
+  const marked = before.detail?.[DRAFT_FAILED_KEY] !== undefined;
+  const detail = marked
+    ? Object.fromEntries(
+        Object.entries(before.detail ?? {}).filter(([k]) => k !== DRAFT_FAILED_KEY),
+      )
+    : undefined;
   ctx.tx
     .update(schema.inboxItems)
     .set({
+      ...(detail === undefined ? {} : { detail: Object.keys(detail).length > 0 ? detail : null }),
       assignees,
       assignee: assignees[0] ?? BUILDER_HANDLE,
       routedBy: input.routedBy,

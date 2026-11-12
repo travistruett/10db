@@ -10,6 +10,7 @@ import {
 } from '@10db/contracts';
 import {
   BUILDER_HANDLE,
+  DRAFT_FAILED_KEY,
   closeSend,
   draftSends,
   dropDraft,
@@ -45,9 +46,6 @@ export interface DraftDeps {
   /** The composer, replaceable only so a failure to compose can be exercised. */
   readonly compose?: typeof composeSlackQuestion;
 }
-
-/** The detail key marking a card whose message could not be composed. */
-export const DRAFT_FAILED_KEY = 'draftFailed';
 
 const LIVE_SEND: readonly SendState[] = [SendState.Draft, SendState.Sending, SendState.Sent];
 
@@ -192,7 +190,13 @@ function isLive(ctx: WriteContext, id: InboxItemId): boolean {
  * again by the rules as they stand now, so the sweep drafts it for the people they name. The mark goes either way.
  */
 function retryable(ctx: WriteContext, card: InboxItemDto): InboxItemDto {
-  if (card.kind !== InboxKind.Question || card.detail?.[DRAFT_FAILED_KEY] !== true) return card;
+  if (
+    card.kind !== InboxKind.Question ||
+    card.detail?.[DRAFT_FAILED_KEY] !== true ||
+    !card.assignees.every((h) => h === BUILDER_HANDLE) ||
+    sendForCard(ctx.tx, card.id) !== null
+  )
+    return card;
   const rest = Object.fromEntries(
     Object.entries(card.detail).filter(([key]) => key !== DRAFT_FAILED_KEY),
   );
