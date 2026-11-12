@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 import { AgentTool, CODEX_VERIFIED_ON, ensureAgent } from '../src/environment';
 import { importClosure } from './codex-closure';
 import { sampleInstances } from './codex-samples';
-import { formatStamp, GENERATED_DIR, hashTree, readTree, STAMP_FILE } from './codex-stamp';
+import { formatStamp, GENERATED_DIR, hashTree, STAMP_FILE } from './codex-stamp';
 
 // Writes `src/sessions/codex-generated/` from the pinned Codex: the generated protocol types 10db
 // reads, and a STAMP the gate's drift step checks. Run on a Mac with the network:
@@ -112,27 +112,22 @@ try {
     (path) => readFileSync(join(generatedTs, path), 'utf8'),
     CODEX_SEED_TYPES.map((type) => `${type}.ts`),
   );
-  for (const folder of ['ts', 'schema', 'fixtures'])
-    rmSync(join(GENERATED_DIR, folder), { recursive: true, force: true });
-  const outTs = join(GENERATED_DIR, 'ts');
-  for (const path of kept) {
-    const target = join(outTs, path);
-    mkdirSync(dirname(target), { recursive: true });
-    writeFileSync(target, readFileSync(join(generatedTs, path)));
-  }
+  for (const path of kept) written.set(`ts/${path}`, readFileSync(join(generatedTs, path)));
 
+  // The folder holds only what is written here, so a stray file (a Finder .DS_Store) is never
+  // stamped, and the STAMP hashes exactly these files.
+  rmSync(GENERATED_DIR, { recursive: true, force: true });
   for (const [path, bytes] of written) {
     const target = join(GENERATED_DIR, path);
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(target, bytes);
   }
-
   writeFileSync(
     join(GENERATED_DIR, STAMP_FILE),
-    formatStamp({ version: CODEX_VERIFIED_ON, sha256: hashTree(readTree(GENERATED_DIR)) }),
+    formatStamp({ version: CODEX_VERIFIED_ON, sha256: hashTree(written) }),
   );
   console.log(
-    `Wrote ${String(kept.length + written.size)} generated files from Codex ${CODEX_VERIFIED_ON} to ${GENERATED_DIR}.`,
+    `Wrote ${String(written.size)} generated files from Codex ${CODEX_VERIFIED_ON} to ${GENERATED_DIR}.`,
   );
 } finally {
   rmSync(work, { recursive: true, force: true });

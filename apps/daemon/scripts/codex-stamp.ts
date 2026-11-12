@@ -47,12 +47,17 @@ export function parseStamp(text: string): Stamp {
   return { version, sha256 };
 }
 
-/** Every file under `dir` except its STAMP, keyed by its POSIX path relative to `dir`. */
+/**
+ * Every file under `dir` except its STAMP, keyed by its POSIX path relative to `dir`. Any entry that
+ * is neither a file nor a folder, such as a symlink, throws `StampError` naming it: the generator
+ * writes none, and the hash could not see what one points at.
+ */
 export function readTree(dir: string): Map<string, Buffer> {
   const files = new Map<string, Buffer>();
   for (const entry of readdirSync(dir, { recursive: true, withFileTypes: true })) {
-    if (!entry.isFile()) continue;
+    if (entry.isDirectory()) continue;
     const path = relative(dir, join(entry.parentPath, entry.name)).split(sep).join('/');
+    if (!entry.isFile()) throw new StampError(`${path} is not a file or a folder`);
     if (path === STAMP_FILE) continue;
     files.set(path, readFileSync(join(dir, path)));
   }
@@ -76,7 +81,14 @@ export function stampProblem(dir: string, pinned: string): string | null {
   }
   if (stamp.version !== pinned)
     return `${dir} was generated from Codex ${stamp.version} but the pin is ${pinned}: run \`${REGENERATE}\` on a Mac and commit the folder.`;
-  if (stamp.sha256 !== hashTree(readTree(dir)))
+  let tree: Map<string, Buffer>;
+  try {
+    tree = readTree(dir);
+  } catch (error) {
+    if (!(error instanceof StampError)) throw error;
+    return `${dir} holds ${error.message}: run \`${REGENERATE}\` on a Mac and commit the folder.`;
+  }
+  if (stamp.sha256 !== hashTree(tree))
     return `${dir} differs from what its ${STAMP_FILE} records (a file was edited, added or removed by hand): run \`${REGENERATE}\` on a Mac and commit the folder.`;
   return null;
 }

@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir, type TempDir } from '../test/fixtures';
@@ -83,10 +83,33 @@ describe('stampProblem', () => {
     );
   });
 
-  it('fails a folder with a file changed after stamping, naming the command', () => {
+  it.each([
+    [
+      'a file changed after stamping',
+      (root: string) => {
+        writeFileSync(join(root, 'ts/A.ts'), 'edited');
+      },
+      /differs.*pnpm --filter @10db\/daemon generate:codex/s,
+    ],
+    [
+      // Finder writes one on its own; the gate on another machine never has it.
+      'a stray file added after stamping',
+      (root: string) => {
+        writeFileSync(join(root, '.DS_Store'), 'x');
+      },
+      /differs.*pnpm --filter @10db\/daemon generate:codex/s,
+    ],
+    [
+      'a symlink, which git commits as a link',
+      (root: string) => {
+        symlinkSync('A.ts', join(root, 'ts/Link.ts'));
+      },
+      /ts\/Link\.ts.*pnpm --filter @10db\/daemon generate:codex/s,
+    ],
+  ])('fails a folder with %s, naming the command', (_name, change, want) => {
     stamped(dir.path, '0.167.0');
-    writeFileSync(join(dir.path, 'ts/A.ts'), 'edited');
-    expect(stampProblem(dir.path, '0.167.0')).toMatch(/pnpm --filter @10db\/daemon generate:codex/);
+    change(dir.path);
+    expect(stampProblem(dir.path, '0.167.0')).toMatch(want);
   });
 
   it('fails a folder with no STAMP, naming the command', () => {
