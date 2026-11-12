@@ -34,6 +34,8 @@ import {
   humanTouchDays,
   insertInboxItem,
   insertPermissionRule,
+  insertPerson,
+  setRoutingRules,
   insertProposal,
   insertSource,
   listDecisions,
@@ -414,6 +416,55 @@ describe('inbox questions', () => {
 
     // A waited 7 hours and B 9: the card's change of targets takes nothing from A's 7.
     expect(humanTouchDays(clocked.db, a.project.id, new Date(now))[0]?.waitingMinutes).toBe(960);
+  });
+});
+
+describe('routed questions fold by their recipients', () => {
+  function two(areas: [string, string] = ['api', 'api']) {
+    const a = seedWorkstream(base, { title: 'A', areas: [areas[0]] });
+    const b = seedWorkstream(base, { project: a.project, title: 'B', areas: [areas[1]] });
+    const person = (handle: string) =>
+      base.write((ctx) => insertPerson(ctx, { handle, name: handle })).value;
+    return { a, b, mark: person('mark'), dana: person('dana'), ana: person('ana') };
+  }
+  const routes = (
+    w: ReturnType<typeof two>,
+    rules: Parameters<typeof setRoutingRules>[2]['rules'],
+  ) => base.write((ctx) => setRoutingRules(ctx, w.a.project.id, { rules }));
+
+  it('makes two cards for the same question on tasks routed to different people', () => {
+    const w = two();
+    routes(w, [
+      { category: 'design', area: null, taskId: w.a.task.id, personId: w.mark.id },
+      { category: 'design', area: null, taskId: w.b.task.id, personId: w.dana.id },
+    ]);
+    const first = ask(w.a);
+    const second = ask(w.b);
+    expect(first.item.id).not.toBe(second.item.id);
+    expect(first.item.assignees).toEqual(['mark']);
+    expect(second.item.assignees).toEqual(['dana']);
+  });
+
+  it('folds the same question on tasks the same rules route alike', () => {
+    const w = two();
+    routes(w, [{ category: 'design', area: 'api', personId: w.mark.id }]);
+    expect(ask(w.a).item.id).toBe(ask(w.b).item.id);
+  });
+
+  it('folds a tie whichever order its routes were added in', () => {
+    const w = two();
+    routes(w, [
+      { category: 'design', area: 'api', personId: w.mark.id },
+      { category: 'design', area: 'api', personId: w.ana.id },
+    ]);
+    const first = ask(w.a);
+    expect(first.item.assignees).toEqual(['mark', 'ana']);
+    routes(w, [
+      { category: 'design', area: 'api', personId: w.ana.id },
+      { category: 'design', area: 'api', personId: w.mark.id },
+    ]);
+    // The first card is open under the other order; a fresh ask in the new order is the same set.
+    expect(ask(w.b).item.id).toBe(first.item.id);
   });
 });
 

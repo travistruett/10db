@@ -45,6 +45,8 @@ import {
   passHoldingTask,
   insertDecision,
   insertInboxItem,
+  assigneesFor,
+  targetTaskIds,
   insertPermissionRule,
   insertSource,
   insertTaskFromProposal,
@@ -104,6 +106,8 @@ type AskInput = AskOwner & {
   readonly escalated?: boolean;
   /** The card folds with the open card under this key alone, whatever it says. */
   readonly foldKey?: string;
+  /** The topic the lane named from the project's topics; a topic route can match it. */
+  readonly topic?: string;
 };
 
 /** The detail key naming the Plan conversation whose session asked a card. */
@@ -246,6 +250,7 @@ function foldKeyFor(
     | 'foldPerLane'
     | 'escalated'
   >,
+  recipients: readonly string[],
 ): string {
   const norm = (s: string): string => s.trim().replace(/\s+/g, ' ').toLowerCase();
   const parts = [
@@ -256,6 +261,8 @@ function foldKeyFor(
     ...(input.foldPerLane === true && input.workstreamId !== null ? [input.workstreamId] : []),
     // A call Claude Code handed to a person never shares a card with an ordinary ask.
     ...(input.escalated === true ? ['escalated'] : []),
+    // Who the rules give a question is part of what it is: one asked of Mark never answers Dana's.
+    ...(input.kind === InboxKind.Question ? [[...recipients].sort().join(',')] : []),
     input.kind,
     norm(input.title),
     norm(input.body),
@@ -566,7 +573,7 @@ export function createInboxService(deps: {
         raw.kind === 'question' && !askedByPassPage(deps.state.db, raw.workstreamId)
           ? { ...raw, options: withParkOption(raw.options) }
           : raw;
-      const foldKey = input.foldKey ?? foldKeyFor(input);
+      const passPage = askedByPassPage(deps.state.db, raw.workstreamId);
       // A conversation's card has no target: no workstream waits on it, and its session's waiter below
       // is how the answer reaches it.
       const target: InboxTarget | null =
@@ -578,6 +585,15 @@ export function createInboxService(deps: {
           ? input.detail
           : { ...input.detail, [SHAPE_CARD_KEY]: input.shapeId };
       const item = deps.state.write((ctx) => {
+        const routed = assigneesFor(ctx.tx, {
+          projectId: input.projectId,
+          kind: input.kind,
+          category: input.category,
+          topic: input.topic ?? null,
+          taskIds: targetTaskIds(ctx.tx, target === null ? [] : [target]),
+          passPage,
+        });
+        const foldKey = input.foldKey ?? foldKeyFor(input, routed.handles);
         const existing = findOpenByFoldKey(ctx.tx, input.projectId, foldKey);
         if (existing) {
           if (target === null) return existing;
@@ -602,6 +618,8 @@ export function createInboxService(deps: {
           detail,
           foldKey,
           targets: target === null ? [] : [target],
+          topic: input.topic ?? null,
+          passPage,
         });
       });
       const answer = new Promise<InboxAnswer>((resolve, reject) => {

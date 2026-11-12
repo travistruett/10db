@@ -22,7 +22,7 @@ import {
 import { and, asc, desc, eq, inArray, notInArray, sql, type SQL } from 'drizzle-orm';
 import * as schema from '../schema';
 import type { Json } from '../json';
-import { assigneeFor } from './routing-rules';
+import { assigneesFor } from './routing-rules';
 import { sendForCard } from './stakeholder-sends';
 import type { DbReader, WriteContext } from './store';
 import { BUILDER_HANDLE } from './team';
@@ -39,6 +39,10 @@ export interface NewInboxItem {
   readonly detail: Record<string, Json> | null;
   readonly foldKey: string | null;
   readonly targets: readonly InboxTarget[];
+  /** The topic the lane named, which a project's topic routes can match. */
+  readonly topic?: string | null;
+  /** The card is a Workbench pass page's question, which the builder answers. */
+  readonly passPage?: boolean;
 }
 
 const LIVE_STATES: InboxState[] = [InboxState.Open, InboxState.Answered, InboxState.Delivering];
@@ -69,38 +73,42 @@ function toDto(db: DbReader, row: typeof schema.inboxItems.$inferSelect): InboxI
   };
 }
 
-/** The areas the targeted workstreams' tasks claim, so a routing rule can narrow by area. */
-function targetAreas(db: DbReader, targets: readonly InboxTarget[]): string[] {
-  const areas = new Set<string>();
+/** The tasks the targeted workstreams run, so a routing rule can match by task, goal and area. */
+export function targetTaskIds(db: DbReader, targets: readonly InboxTarget[]): TaskId[] {
+  const ids = new Set<TaskId>();
   for (const target of targets) {
     const row = db
-      .select({ areas: schema.tasks.areas })
+      .select({ taskId: schema.workstreams.taskId })
       .from(schema.workstreams)
-      .innerJoin(schema.tasks, eq(schema.tasks.id, schema.workstreams.taskId))
       .where(eq(schema.workstreams.id, target.workstreamId))
       .get();
-    for (const area of row?.areas ?? []) areas.add(area);
+    if (row) ids.add(row.taskId);
   }
-  return [...areas];
+  return [...ids];
 }
 
-export function insertInboxItem(ctx: WriteContext, item: NewInboxItem): InboxItemDto {
-  const assignee = assigneeFor(
-    ctx.tx,
-    item.projectId,
-    item.category,
-    targetAreas(ctx.tx, item.targets),
-  );
+export function insertInboxItem(ctx: WriteContext, newItem: NewInboxItem): InboxItemDto {
+  const { topic, passPage, ...item } = newItem;
+  const routed = assigneesFor(ctx.tx, {
+    projectId: item.projectId,
+    kind: item.kind,
+    category: item.category,
+    topic: topic ?? null,
+    taskIds: targetTaskIds(ctx.tx, item.targets),
+    passPage: passPage ?? false,
+  });
   const recipients = {
-    assignee,
-    assignees: [assignee],
-    ruleAssignees: [assignee],
+    assignee: routed.handles[0] ?? BUILDER_HANDLE,
+    assignees: routed.handles,
+    ruleAssignees: routed.handles,
     routedBy: RoutedBy.Rule,
     routeSuggestion: null,
   };
   const row = {
     id: mintId('InboxItem'),
     ...item,
+    // A tie too big for a group DM is explained on the card.
+    detail: routed.note === null ? item.detail : { ...item.detail, routeNote: routed.note },
     options: [...item.options],
     targets: [...item.targets],
     state: InboxState.Open,

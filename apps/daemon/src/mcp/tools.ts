@@ -393,6 +393,7 @@ export function createToolHandlers(
         options: input.options,
         recommendation: input.recommendation ?? null,
         category: input.category,
+        ...(input.topic === undefined ? {} : { topic: input.topic }),
         urgency: input.urgency,
         detail: null,
         signal,
