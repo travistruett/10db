@@ -325,7 +325,11 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
             deps.home,
           );
         const setup = setupDir?.setup ?? EMPTY_SETUP;
-        const setupSecrets = setupDir?.secretFiles ?? [];
+        const setupSecrets = setup.secretFiles;
+        // What the profile opens of the setup: never a read that is, or lies in, a secret file.
+        const setupReads = setup.reads.filter(
+          (read) => !setupSecrets.some((secret) => isEqualOrUnder(read, secret)),
+        );
         const ownSetupDir = setup.reads[0];
         // Outside every lane-writable dir: it names the processes to stop after a daemon restart.
         // Named for this daemon, so a later one leaves it alone while this one runs, and held, so
@@ -403,7 +407,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           ],
           sandboxRoots,
           ownFiles: [envFile, ...(ownSetupDir === undefined ? [] : [ownSetupDir])],
-          setupReads: setup.reads,
+          setupReads,
           loopback: input.project.sandboxLoopback,
           dockerSockets: docker?.sockets ?? [],
           deniedEnvNames: deniedEnvNames({ ...input.env, ...env }, dockerNames),
@@ -415,7 +419,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
         // folder among it, is left to the guard and the file tools' judge, which refuse it.
         const pictures =
           input.taskFiles !== undefined && existsSync(input.taskFiles) ? input.taskFiles : null;
-        const openInside = [...(pictures === null ? [] : [pictures]), ...setup.reads];
+        const openInside = [...(pictures === null ? [] : [pictures]), ...setupReads];
         const deniedToFileTools = protectedList
           .filter((path) => !isEqualOrUnder(input.configDir, path))
           .flatMap((path) => {
@@ -466,7 +470,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           checkout: input.project.repoPath,
           home: deps.home,
           protectedReads: protectedList,
-          secretFiles,
+          secretFiles: [...secretFiles, ...setupSecrets],
           readList,
           systemDocRoots: SYSTEM_DOC_ROOTS,
           ...(input.taskFiles === undefined ? {} : { filesDir: input.taskFiles }),
@@ -478,7 +482,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
             own: tmpDir,
           },
           worktreeRoot: deps.worktreeRoot,
-          setupReads: setup.reads,
+          setupReads,
           get providerSessionId() {
             return providerSessionId;
           },

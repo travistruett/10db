@@ -1239,6 +1239,21 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       }
     });
 
+    it('keeps the file tools and the guard off a .env inside an opened skill folder', async () => {
+      const setup = setupInput();
+      const skill = join(home, '.claude/skills/s');
+      const secret = writeIn(skill, '.env', 'TOKEN=x');
+      const session = await sandbox().forSession(input({ setup }));
+      try {
+        expect(readAccess(secret, session.fileAccess).access).toBe('protected');
+        expect(readAccess(skill, session.fileAccess, true).access).toBe('contains-protected');
+        expect(readAccess(join(skill, 'SKILL.md'), session.fileAccess).access).toBe('allowed');
+        expect(session.setup.secretFiles).toEqual([secret]);
+      } finally {
+        session.dispose();
+      }
+    });
+
     it('removes the setup dir on dispose', async () => {
       const session = await sandbox().forSession(input({ setup: setupInput() }));
       const setupDir = session.setup.reads[0] ?? '';

@@ -289,7 +289,12 @@ function judgeRead(real: string, ctx: FileAccessContext, tree: boolean): ReadAcc
   if (isOwnToolResult(real, ctx)) return 'allowed';
   if (!tree && ctx.filesDir !== undefined && isUnderOwnFiles(real, ctx.filesDir)) return 'allowed';
   if ((ctx.secretFiles ?? []).some((file) => pathsEqual(real, file))) return 'protected';
-  if ((ctx.setupReads ?? []).some((read) => isEqualOrUnder(real, read))) return 'allowed';
+  if ((ctx.setupReads ?? []).some((read) => isEqualOrUnder(real, read))) {
+    // A search of an opened folder that holds a secret file would read it: search a narrower one.
+    if (tree && (ctx.secretFiles ?? []).some((file) => isEqualOrUnder(file, real)))
+      return 'contains-protected';
+    return 'allowed';
+  }
   const ownTemp = spellings(ctx.sandboxTemp.own).some((dir) => isEqualOrUnder(real, dir));
   const roots = [...ctx.protectedReads, ...(ownTemp ? [] : ctx.sandboxTemp.roots)].flatMap(
     spellings,

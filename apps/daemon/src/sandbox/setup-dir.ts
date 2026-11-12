@@ -33,6 +33,11 @@ export interface SessionSetup {
   readonly reads: readonly string[];
   readonly loaded: { readonly skills: readonly string[]; readonly plugins: readonly string[] };
   readonly leftOut: readonly LeftOut[];
+  /**
+   * The `.env*` files under the reads, and the real paths of `.env*` links: the profile, the file tools'
+   * rules and the file-access judge keep each closed inside an opened folder.
+   */
+  readonly secretFiles: readonly string[];
 }
 
 export const EMPTY_SETUP: SessionSetup = {
@@ -41,6 +46,7 @@ export const EMPTY_SETUP: SessionSetup = {
   reads: [],
   loaded: { skills: [], plugins: [] },
   leftOut: [],
+  secretFiles: [],
 };
 
 type Skill = SetupInput['skills'][number];
@@ -277,7 +283,7 @@ export function createSetupDir(
   input: SetupInput,
   refuse: (real: string) => string | null,
   home: string,
-): { setup: SessionSetup; secretFiles: readonly string[]; remove(): void } {
+): { setup: SessionSetup; remove(): void } {
   const kept = keepSetup(input, refuse, home);
   const dir = join(filesRoot, `10db-setup-${randomBytes(6).toString('hex')}`);
   mkdirSync(dir, { mode: 0o700 });
@@ -332,8 +338,8 @@ export function createSetupDir(
           plugins: wrapped,
         },
         leftOut,
+        secretFiles: kept.secretFiles,
       },
-      secretFiles: kept.secretFiles,
       remove,
     };
   } catch (error) {
