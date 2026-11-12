@@ -38,6 +38,7 @@ function input(overrides: Partial<LaneProfileInput> = {}): LaneProfileInput {
     denyWrites: [],
     sandboxRoots: [],
     ownFiles: [],
+    setupReads: [],
     loopback: false,
     deniedEnvNames: ['GH_TOKEN'],
     ...overrides,
@@ -341,6 +342,34 @@ describe('buildLaneProfile', () => {
       expect(allowWrite).not.toContain(spelled);
     },
   );
+
+  it('opens setup reads under a protected read, read-only', () => {
+    const skills = join(home, '.claude', 'skills');
+    const { allowRead, allowWrite, denyRead } = buildLaneProfile(
+      input({ setupReads: [skills] }),
+    ).filesystem;
+    expect(allowRead).toContain(skills);
+    expect(allowWrite).not.toContain(skills);
+    expect(denyRead).toContain(join(home, '.claude'));
+  });
+
+  it('keeps a secret file inside a setup read denied', () => {
+    const skill = join(home, '.claude', 'skills', 's');
+    const secret = join(skill, '.env');
+    const toolchainSecret = join(home, '.cargo', 'credentials.toml');
+    const sandboxRoot = join(root, 'files');
+    const { allowRead, denyRead } = buildLaneProfile(
+      input({
+        secretFiles: [secret],
+        sandboxRoots: [sandboxRoot],
+        setupReads: [skill, secret, toolchainSecret, join(sandboxRoot, 'x')],
+      }),
+    ).filesystem;
+    expect(allowRead).toContain(skill);
+    expect(denyRead).toContain(secret);
+    for (const closed of [secret, toolchainSecret, join(sandboxRoot, 'x')])
+      expect(allowRead).not.toContain(closed);
+  });
 
   it('drops a read-list entry that is a secret file', () => {
     const secret = join(checkout, '.env');

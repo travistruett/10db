@@ -195,6 +195,7 @@ function sandboxOne(
     ],
     sandboxRoots: input.sandboxRoots,
     ownFiles: [envFile],
+    setupReads: [],
     // Never, whatever the project's switch: on localhost listen other sandboxes' proxies, and
     // through them the hosts an approval withholds.
     loopback: false,

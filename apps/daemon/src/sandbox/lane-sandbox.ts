@@ -348,6 +348,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           ],
           sandboxRoots,
           ownFiles: [envFile],
+          setupReads: [],
           loopback: input.project.sandboxLoopback,
           dockerSockets: docker?.sockets ?? [],
           deniedEnvNames: deniedEnvNames({ ...input.env, ...env }, dockerNames),

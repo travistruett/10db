@@ -189,6 +189,12 @@ export interface LaneProfileInput {
   sandboxRoots: readonly string[];
   /** This sandbox's own files in a sandbox root that its commands read, such as its env file. */
   ownFiles: readonly string[];
+  /**
+   * The builder's skill and plugin folders a session's setup opens read-only, each judged by
+   * `setupReadRefusal` and collapsed. They open past the protected reads, never past a secret file, a
+   * toolchain secret or a sandbox root, and never for writing; a deny inside one still wins in srt.
+   */
+  setupReads: readonly string[];
   loopback: boolean;
   /**
    * Docker engine sockets the profile lets commands connect to, from `dockerAccess`; none unless the
@@ -329,6 +335,13 @@ export function buildLaneProfile(input: LaneProfileInput): LaneSandboxSettings {
   const readable = [...needed, ...input.readList]
     .filter(isAllowed)
     .filter((path) => !holdsSandboxRoot(path, input.sandboxRoots));
+  const secrets = [...input.secretFiles, ...input.toolchainSecrets];
+  const setupReads = input.setupReads.filter(
+    (path) =>
+      !secrets.some((secret) => isEqualOrUnder(path, secret)) &&
+      !inSandboxRoot(path) &&
+      !holdsSandboxRoot(path, input.sandboxRoots),
+  );
   const writable = [input.tmpDir, ...input.extraWrites].filter(isAllowed);
   refusePatterns(readable);
   // A listing of a dir that is, or lies under, a denied path opens nothing the deny keeps shut.
@@ -350,7 +363,7 @@ export function buildLaneProfile(input: LaneProfileInput): LaneSandboxSettings {
         ...input.secretFiles,
         ...input.toolchainSecrets,
       ],
-      allowRead: [...readable, ...listings],
+      allowRead: [...readable, ...listings, ...setupReads],
       allowWrite: writable,
       denyWrite: [...input.denyWrites],
     },

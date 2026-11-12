@@ -222,6 +222,7 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
           // srt reads the settings file before the sandbox starts; the command reads no file here.
           sandboxRoots: access.sandboxRoots,
           ownFiles: [],
+          setupReads: [],
           loopback: input.project.sandboxLoopback,
           dockerSockets: docker?.sockets ?? [],
           deniedEnvNames: [],
