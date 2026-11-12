@@ -35,7 +35,8 @@ preview instead.
 **Open Page hands 10db's own dev UI a read-only token.** 10db's dev UI is code a pass's agents may be editing,
 so it never gets the app's UI token. When a dev UI origin is opted in (`TENDB_DEV_UI_ORIGIN`,
 `decisions/2026-10-29-dev-ui-over-the-factory.md`), the daemon mints a second token at each start that only reads:
-any GET but the ones that write, run a command or hand out this token (`api/dev-ui-access.ts`); everything else
+only the GETs named as reads, deny by default (`api/dev-ui-access.ts`: a GET that writes, runs git, gh or another
+command, or hands out this token is refused, and a test fails on a GET that is named neither way); everything else
 answers 403. `/health` names the origin; `GET /dev-ui/connection` gives the token, over the app's own token only.
 When the page's origin is that origin, Open Page puts the daemon's address and the dev UI token in the URL's
 fragment, which the browser never sends to a server; the dev UI keeps them in the tab's session storage and removes
