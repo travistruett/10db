@@ -586,6 +586,52 @@ describe('connection and in-flight cells', () => {
   });
 });
 
+describe('a limit and a reservation decided together', () => {
+  it('lets only one of two cards routed to one person at once pass the daily limit', async () => {
+    const w = world();
+    const mark = w.person('mark', { dailyLimit: 2 });
+    await seasoned(w, mark);
+    store.db.$client.prepare('UPDATE person_contacts SET dm_channel_id = NULL').run();
+    const a = w.card('A?', 'a');
+    const b = w.card('B?', 'b');
+    await Promise.all([sends.afterDraft(a), sends.afterDraft(b)]);
+    const states = [send(a), send(b)].map((x) => [x.state, x.heldBy]);
+    expect(states.filter(([state]) => state === 'sent')).toHaveLength(1);
+    expect(states).toContainEqual(['draft', 'limit']);
+    expect(slack.posts).toHaveLength(1);
+  });
+
+  it('keeps an unheld draft in flight when the DM cannot be opened, and a good tick finishes it', async () => {
+    const w = world();
+    const mark = w.person('mark');
+    await seasoned(w, mark);
+    store.db.$client.prepare('UPDATE person_contacts SET dm_channel_id = NULL').run();
+    const id = w.card();
+    slack.failNext('conversations.open', 'unreachable');
+    await sends.afterDraft(id);
+    expect(send(id)).toMatchObject({ state: 'sending', heldBy: null });
+    await sends.recoverSending();
+    expect(send(id).state).toBe('sent');
+    expect(slack.posts).toHaveLength(1);
+  });
+
+  it('does not post a send a second time while this process still has its post in flight', async () => {
+    const w = world();
+    const mark = w.person('mark');
+    await seasoned(w, mark);
+    const id = w.card();
+    const release = slack.pause('chat.postMessage');
+    const first = sends.afterDraft(id);
+    for (let i = 0; i < 50 && send(id).state !== 'sending'; i += 1) await Promise.resolve();
+    expect(send(id).state).toBe('sending');
+    await sends.recoverSending();
+    release();
+    await first;
+    expect(slack.posts).toHaveLength(1);
+    expect(send(id).state).toBe('sent');
+  });
+});
+
 describe('Send without a token', () => {
   it('is a 409 that keeps the draft, even when the DM is already known', async () => {
     const w = world();

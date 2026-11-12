@@ -24,6 +24,24 @@ export class FakeSlack implements SlackClient {
   private messages = new Map<string, SlackMessage[]>();
   private reactionsOn = new Map<string, { name: string; users: string[] }[]>();
   private counter = 0;
+  private pauses = new Map<string, Promise<void>>();
+
+  /** The next call to `method` waits until the returned function is called. */
+  pause(method: string): () => void {
+    let release: () => void = () => undefined;
+    this.pauses.set(
+      method,
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+    );
+    return release;
+  }
+  private async paused(method: string): Promise<void> {
+    const wait = this.pauses.get(method);
+    this.pauses.delete(method);
+    if (wait) await wait;
+  }
 
   failNext(method: string, code: string): void {
     this.failing.set(method, [...(this.failing.get(method) ?? []), code]);
@@ -87,18 +105,20 @@ export class FakeSlack implements SlackClient {
     return Promise.resolve({ teamId: 'T1', teamName: 'Team', botUserId: FAKE_BOT_USER });
   };
   listMembers: SlackClient['listMembers'] = () => Promise.reject(new Error('unused'));
-  openDm(userId: string): Promise<string> {
+  async openDm(userId: string): Promise<string> {
     this.enter('conversations.open');
+    await this.paused('conversations.open');
     this.opened.push({ kind: 'dm', users: [userId] });
-    return Promise.resolve(`D-${userId}`);
+    return `D-${userId}`;
   }
   openGroup(userIds: readonly string[]): Promise<string> {
     this.enter('conversations.open');
     this.opened.push({ kind: 'group', users: [...userIds] });
     return Promise.resolve(`G-${userIds.join('-')}`);
   }
-  post(input: SlackPostInput): Promise<{ ts: string }> {
+  async post(input: SlackPostInput): Promise<{ ts: string }> {
     this.enter('chat.postMessage');
+    await this.paused('chat.postMessage');
     const ts = this.nextTs();
     this.posts.push({ ...input, ts });
     const list = this.messages.get(input.channel) ?? [];
@@ -116,7 +136,7 @@ export class FakeSlack implements SlackClient {
         : null,
     });
     this.messages.set(input.channel, list);
-    return Promise.resolve({ ts });
+    return { ts };
   }
   permalink = (channel: string, ts: string) => Promise.resolve(`https://slack/${channel}/${ts}`);
   replies(channel: string, threadTs: string, oldest: string): Promise<SlackMessage[]> {

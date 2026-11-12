@@ -32,12 +32,14 @@ import {
   sendingSends,
   sendSummary,
   sendThreadsOf,
+  setSendChannel,
   setDmChannel,
   setHeldBy,
   setInboxRecipients,
   setRoutingRules,
   targetTaskIds,
   updateDraft,
+  type DbReader,
   type WriteContext,
 } from '@10db/db';
 import type { Clock } from '../clock';
@@ -98,16 +100,14 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
 
   const nowIso = (): string => clock.now().toISOString();
 
-  function liveSend(cardId: InboxItemId): StakeholderSendDto | null {
-    const found = sendForCard(state.db, cardId);
+  function liveSend(cardId: InboxItemId, db: DbReader = state.db): StakeholderSendDto | null {
+    const found = sendForCard(db, cardId);
     return found && ['draft', 'sending', 'sent'].includes(found.state) ? found : null;
   }
 
   /** The recipients of a send as people, in the order the send names them. */
-  function recipientsOf(send: StakeholderSendDto): PersonDto[] {
-    return send.people.flatMap((p) =>
-      p.recipient && p.personId ? getPerson(state.db, p.personId) : [],
-    );
+  function recipientsOf(send: StakeholderSendDto, db: DbReader = state.db): PersonDto[] {
+    return send.people.flatMap((p) => (p.recipient && p.personId ? getPerson(db, p.personId) : []));
   }
 
   function toBuilder(ctx: WriteContext, cardId: InboxItemId): void {
@@ -118,38 +118,89 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
     });
   }
 
-  function threadFor(card: InboxItemDto, people: readonly PersonDto[]) {
-    const [taskId] = targetTaskIds(state.db, card.targets);
+  function threadFor(card: InboxItemDto, people: readonly PersonDto[], db: DbReader = state.db) {
+    const [taskId] = targetTaskIds(db, card.targets);
     return taskId === undefined
       ? null
       : latestThreadFor(
-          state.db,
+          db,
           people.map((p) => p.id),
           taskId,
         );
   }
 
+  /** Sends whose post this process is making now: a tick must not look for them or post them again. */
+  const inFlight = new Set<string>();
+
+  /**
+   * Decides what a fresh draft does and reserves it in one write: held for the builder, or `sending`, which
+   * counts toward the person's limit at once. Two cards decided together cannot both pass a limit, and a
+   * draft is never left unheld and unsent: if the post fails here, `recoverSending` finishes it.
+   */
   async function afterDraft(cardId: InboxItemId): Promise<void> {
     if (slack === null) return;
-    const card = getInboxItem(state.db, cardId);
-    const draft = liveSend(cardId);
-    if (draft?.state !== 'draft' || card.state !== InboxState.Open) return;
-    const people = recipientsOf(draft);
-    const since = new Date(clock.now().getTime() - DAY_MS).toISOString();
-    const held = holdFor({
-      hits: draft.hits,
-      thread: threadFor(card, people),
-      recipients: people.map((p) => ({
-        sendMode: p.slack?.sendMode ?? 'review',
-        dailyLimit: p.slack?.dailyLimit ?? null,
-        everSent: everSent(state.db, p.id),
-        newThreads: newThreadsSince(state.db, p.id, since),
-      })),
-    });
-    state.write((ctx) => {
+    const reserved = state.write((ctx) => {
+      const card = getInboxItem(ctx.tx, cardId);
+      const draft = liveSend(cardId, ctx.tx);
+      if (draft?.state !== 'draft' || card.state !== InboxState.Open) return null;
+      const people = recipientsOf(draft, ctx.tx);
+      const thread = threadFor(card, people, ctx.tx);
+      const since = new Date(clock.now().getTime() - DAY_MS).toISOString();
+      const held = holdFor({
+        hits: draft.hits,
+        thread,
+        recipients: people.map((p) => ({
+          sendMode: p.slack?.sendMode ?? 'review',
+          dailyLimit: p.slack?.dailyLimit ?? null,
+          everSent: everSent(ctx.tx, p.id),
+          newThreads: newThreadsSince(ctx.tx, p.id, since),
+        })),
+      });
       setHeldBy(ctx, draft.id, held);
+      if (held !== null) return null;
+      markSending(ctx, draft.id, {
+        textSha256: sha256(draft.text),
+        threadTs: thread?.threadTs ?? null,
+        channelId: thread?.channelId ?? null,
+        startedAt: nowIso(),
+      });
+      return draft.id;
     });
-    if (held === null) await post(cardId);
+    if (reserved !== null) await continueSending(reserved);
+  }
+
+  /** Opens the conversation of a reserved send if it has none, then posts it. */
+  async function continueSending(sendId: StakeholderSendDto['id']): Promise<void> {
+    const client = slack;
+    if (client === null || inFlight.has(sendId)) return;
+    inFlight.add(sendId);
+    try {
+      const row = sendingSends(state.db).find((x) => x.id === sendId);
+      if (!row) return;
+      const { inboxItemId, text } = sendSummary(state.db, sendId);
+      let channelId = row.channelId;
+      if (channelId === null) {
+        const found = sendForCard(state.db, inboxItemId);
+        try {
+          const opened = await channelFor(client, found ? recipientsOf(found) : [], null);
+          state.write((ctx) => {
+            setSendChannel(ctx, sendId, opened);
+          });
+          channelId = opened;
+        } catch (error) {
+          const code = slackCode(error);
+          if (TRANSPORT.test(code) || code === 'no_token') {
+            log.warn({ sendId, code }, 'a drafted question waits for Slack; it is tried again');
+            return;
+          }
+          fail(sendId, inboxItemId, code);
+          return;
+        }
+      }
+      await postMessage(client, sendId, inboxItemId, channelId, row.threadTs, text);
+    } finally {
+      inFlight.delete(sendId);
+    }
   }
 
   /** Opens the conversation the question goes to; a follow-up uses the thread's own. */
@@ -218,7 +269,12 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
         startedAt: nowIso(),
       });
     });
-    await postMessage(client, draft.id, cardId, channelId, thread?.threadTs ?? null, draft.text);
+    inFlight.add(draft.id);
+    try {
+      await postMessage(client, draft.id, cardId, channelId, thread?.threadTs ?? null, draft.text);
+    } finally {
+      inFlight.delete(draft.id);
+    }
   }
 
   async function postMessage(
@@ -458,8 +514,13 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
       const client = slack;
       if (client === null) return;
       for (const pending of sendingSends(state.db)) {
-        if (pending.channelId === null) continue;
+        if (inFlight.has(pending.id)) continue;
+        if (pending.channelId === null) {
+          await continueSending(pending.id);
+          continue;
+        }
         const send = sendSummary(state.db, pending.id);
+        inFlight.add(pending.id);
         try {
           const messages =
             pending.threadTs === null
@@ -491,6 +552,8 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
           }
         } catch (error) {
           log.warn({ err: error, sendId: pending.id }, 'a send in flight could not be checked yet');
+        } finally {
+          inFlight.delete(pending.id);
         }
       }
     },

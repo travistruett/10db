@@ -230,6 +230,12 @@ export function markSending(
   });
 }
 
+/** The conversation a send in flight is posting to, once it is opened. */
+export function setSendChannel(ctx: WriteContext, id: StakeholderSendId, channelId: string): void {
+  const row = guarded(ctx, id, 'take a channel', [SendState.Sending]);
+  change(ctx, row, { channelId });
+}
+
 export function markSent(
   ctx: WriteContext,
   id: StakeholderSendId,
@@ -632,9 +638,13 @@ export function newThreadsSince(db: DbReader, personId: PersonId, since: string)
       and(
         eq(schema.stakeholderSendPeople.personId, personId),
         eq(schema.stakeholderSends.newThread, true),
-        isNotNull(schema.stakeholderSends.sentAt),
-        gte(schema.stakeholderSends.sentAt, since),
+        // A send counts from the moment it is reserved, so two cards decided at once cannot both pass.
+        ne(schema.stakeholderSends.state, SendState.Draft),
         ne(schema.stakeholderSends.state, SendState.Failed),
+        gte(
+          sql`coalesce(${schema.stakeholderSends.sentAt}, ${schema.stakeholderSends.startedAt})`,
+          since,
+        ),
       ),
     )
     .get();
