@@ -29,11 +29,11 @@ import {
   toShapeHookOutput,
   userMessage,
 } from './claude-mapping';
+import { claudeQueryOptions } from './claude-query-options';
 import { contextEvent } from './context-event';
 import { currentToolNames } from './mcp-tool-names';
 import { TENDB_MCP_SERVER } from './project-mcp';
 import { settleWithin } from './settle-within';
-import { setupPromptText } from './setup-prompt';
 import {
   SessionEndReason,
   type SessionEvent,
@@ -82,9 +82,18 @@ function shapeOptions(
   listedTools: () => Promise<readonly string[]>,
 ): Options {
   const { spawn } = deps;
-  const { sandbox } = spec;
-  const plugins = spec.setup?.plugins ?? [];
-  const setupAppend = setupPromptText(spec.instructions, plugins);
+  const { sandboxEnv, ...profileOptions } = claudeQueryOptions(
+    {
+      kind: 'explore',
+      systemPrompt: spec.systemPrompt,
+      tools: spec.tools,
+      allowedTools: spec.allowedTools,
+      disallowedTools: spec.disallowedTools,
+      agents: spec.agents,
+      setup: { instructions: spec.instructions ?? null, plugins: spec.setup?.plugins ?? [] },
+    },
+    spec.sandbox,
+  );
   // `canUseTool` hears nothing of where a call runs; the hook does, by the same tool use id.
   const hookCwds = new Map<string, string>();
   return {
@@ -92,48 +101,10 @@ function shapeOptions(
     model: spec.model,
     effort: spec.effort,
     ...(spec.resumeProviderSessionId ? { resume: spec.resumeProviderSessionId } : {}),
-    // Default mode: Claude Code forces it while the scrub is on, and it keeps the processes outside
-    // the sandbox free of the session's variables. The updater switch comes last, so neither env moves
-    // the pinned copy.
-    env:
-      sandbox === null
-        ? { ...spec.env, ...AUTOUPDATE_OFF }
-        : { ...spec.env, ...sandbox.env, CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1', ...AUTOUPDATE_OFF },
+    // The updater switch comes last, so neither env moves the pinned copy.
+    env: { ...spec.env, ...sandboxEnv, ...AUTOUPDATE_OFF },
     pathToClaudeCodeExecutable: deps.claudePath,
-    // Never the project's, the user's or a local settings file; never the harness (its skills and
-    // personas are for lanes), only the setup's plugin dirs. MCP servers arrive over the control
-    // channel, not the command line.
-    settingSources: [],
-    strictMcpConfig: true,
-    settings:
-      sandbox === null
-        ? { autoCompactEnabled: true }
-        : { autoCompactEnabled: true, permissions: { ask: [...sandbox.askRules] } },
-    ...(sandbox === null ? {} : { sandbox: sandbox.settings }),
-    systemPrompt: {
-      type: 'preset',
-      preset: 'claude_code',
-      append: setupAppend === null ? spec.systemPrompt : `${spec.systemPrompt}\n\n${setupAppend}`,
-    },
-    ...(plugins.length === 0
-      ? {}
-      : { plugins: plugins.map((path) => ({ type: 'local' as const, path })) }),
-    tools: [...spec.tools],
-    allowedTools: [...spec.allowedTools],
-    disallowedTools: [...spec.disallowedTools, ...(sandbox?.disallowedTools ?? [])],
-    // An agent with no model of its own runs on the session's; a call may still name one.
-    agents: Object.fromEntries(
-      Object.entries(spec.agents).map(([name, agent]) => [
-        name,
-        {
-          description: agent.description,
-          prompt: agent.prompt,
-          tools: [...agent.tools],
-          model: agent.model ?? 'inherit',
-        },
-      ]),
-    ),
-    permissionMode: 'default',
+    ...profileOptions,
     canUseTool: async (toolName, input, options) => {
       if (!(await gate.verified) || gate.refused())
         return { behavior: 'deny', message: UNVERIFIED, interrupt: true };

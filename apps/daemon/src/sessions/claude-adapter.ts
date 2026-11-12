@@ -40,12 +40,12 @@ import {
 } from './claude-mapping';
 import { AUTOUPDATE_OFF } from '../environment';
 import { contextEvent } from './context-event';
+import { claudeQueryOptions } from './claude-query-options';
 import { startShapeSession } from './claude-shape';
 import { currentToolNames } from './mcp-tool-names';
 import { TENDB_MCP_SERVER } from './project-mcp';
 import { projectSettingsBillingProblem } from './project-settings';
 import { settleWithin } from './settle-within';
-import { setupPromptText } from './setup-prompt';
 import { claudeAuthStatus, type SignInCheck, type SignInState } from './sign-in-check';
 import {
   AccountProbeError,
@@ -130,11 +130,6 @@ export interface ClaudeAdapterOptions {
  */
 const LANE_PERMISSION_MODE: LanePermissionMode = 'auto';
 
-/**
- * Claude Code forces `default` mode while `CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` is `1`, so a session in
- * auto mode sets it to `0`. The lane profile already denies every non-allowlisted name to Bash by
- * name, and the processes outside the sandbox hold no lane-writable code.
- */
 function laneMode(
   spec: SessionSpec,
   deps: Pick<QueryDeps, 'lanePermissionMode'>,
@@ -272,29 +267,21 @@ function settingsRecheckHooks(deps: QueryDeps): NonNullable<Options['hooks']> {
   };
 }
 
-/**
- * The inline settings of a sandboxed session. Claude Code reads `autoMode` only from user, managed
- * or inline settings, never the repository's, so a repository cannot loosen the classifier's rules.
- * The SDK's `settings` type has no `autoMode`; the object comes from `autoModeRules`, which validates it.
- */
-function sandboxedSettings(
-  sandbox: NonNullable<SessionSpec['sandbox']>,
-): NonNullable<Options['settings']> {
-  return {
-    autoCompactEnabled: true,
-    permissions: { ask: [...sandbox.askRules] },
-    autoMode: sandbox.autoMode,
-  };
-}
-
 /** How many calls' hook directories are kept for `canUseTool`: a call the hook allowed never reaches it. */
 const HOOK_CWDS_KEPT = 256;
 
 export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
+  const { sandboxEnv, ...profileOptions } = claudeQueryOptions(
+    {
+      kind: 'lane',
+      allowedTools: spec.allowedTools,
+      permissionMode: laneMode(spec, deps),
+      pluginDir: deps.pluginDir,
+      setup: { instructions: spec.instructions ?? null, plugins: spec.setup?.plugins ?? [] },
+    },
+    spec.sandbox ?? null,
+  );
   const sandbox = spec.sandbox ?? null;
-  const setupPlugins = spec.setup?.plugins ?? [];
-  // A lane's base prompt is the SDK's empty custom prompt; the setup adds to it, never the preset.
-  const setupPrompt = setupPromptText(spec.instructions, setupPlugins);
   // The PreToolUse hook is the only place Claude Code says where a call runs (its `cwd`, which an
   // earlier Bash call's `cd` moves); `canUseTool` for the same call gets it by the tool use id, so the
   // permission broker reads a relative path from the same directory the guard does.
@@ -304,37 +291,9 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
     model: spec.model,
     effort: spec.effort,
     ...(spec.resumeProviderSessionId ? { resume: spec.resumeProviderSessionId } : {}),
-    env: sandbox
-      ? {
-          ...spec.env,
-          ...sandbox.env,
-          CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: laneMode(spec, deps) === 'auto' ? '0' : '1',
-          ...AUTOUPDATE_OFF,
-        }
-      : { ...spec.env, ...AUTOUPDATE_OFF },
+    env: { ...spec.env, ...sandboxEnv, ...AUTOUPDATE_OFF },
     pathToClaudeCodeExecutable: deps.claudePath,
-    // Never 'user' or 'local': user hooks and plugins stay out (spec §3), and settings.local.json can switch billing.
-    // A sandboxed session loads no settings file at all, so the repo can't loosen its sandbox or its permissions.
-    settingSources: sandbox ? [] : ['project'],
-    // Claude Code reads no MCP config itself. No `mcpServers` here either: the SDK would put them on claude's
-    // command line, readable by any local account. They arrive over the control channel (setMcpServers).
-    strictMcpConfig: true,
-    // Set explicitly: the builder's own autoCompactEnabled: false (global ~/.claude.json) reaches the session despite
-    // settingSources. Compaction stays on as the emergency fallback.
-    settings: sandbox ? sandboxedSettings(sandbox) : { autoCompactEnabled: true },
-    ...(sandbox
-      ? { sandbox: sandbox.settings, disallowedTools: [...sandbox.disallowedTools] }
-      : {}),
-    ...(setupPrompt === null ? {} : { systemPrompt: { type: 'custom', prompt: setupPrompt } }),
-    // The harness first, then the setup's: never a plugin's install path (`sandbox/setup-dir.ts`).
-    plugins: [
-      { type: 'local', path: deps.pluginDir },
-      ...setupPlugins.map((path) => ({ type: 'local' as const, path })),
-    ],
-    allowedTools: [...spec.allowedTools],
-    // In default mode what no allow rule covers reaches canUseTool. Only a sandboxed lane may run in
-    // auto mode, whose classifier approves calls itself; an unsandboxed session never does.
-    permissionMode: sandbox ? laneMode(spec, deps) : 'default',
+    ...profileOptions,
     canUseTool: async (toolName, input, options) => {
       if (!(await deps.billingVerified) || deps.isRefused())
         return { behavior: 'deny', message: BILLING_UNVERIFIED, interrupt: true };
