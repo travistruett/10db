@@ -50,6 +50,11 @@ describe('checkGeneral', () => {
       },
     },
     {
+      name: 'a preview command, trimmed',
+      change: { previewCommand: '  pnpm dev:preview \n' },
+      expected: { ok: true, patch: { previewCommand: 'pnpm dev:preview' } },
+    },
+    {
       name: 'a dev login command, trimmed',
       change: { devLoginCommand: '  uv run manage.py dev_login \n' },
       expected: { ok: true, patch: { devLoginCommand: 'uv run manage.py dev_login' } },

@@ -80,6 +80,8 @@ function reseed(current: GeneralValues, seed: GeneralValues, next: GeneralValues
       current.devLoginCommand === seed.devLoginCommand
         ? next.devLoginCommand
         : current.devLoginCommand,
+    previewCommand:
+      current.previewCommand === seed.previewCommand ? next.previewCommand : current.previewCommand,
     screens:
       JSON.stringify(current.screens) === JSON.stringify(seed.screens)
         ? next.screens
@@ -249,6 +251,21 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
             error={errors.appUrl}
             onChange={(e) => {
               set({ appUrl: e.currentTarget.value });
+            }}
+          />
+        </SettingRow>
+        <SettingRow
+          label="Preview command"
+          description="Optional. Starts your dev server at the app address while a UI Workbench pass is open, and stops it when the pass ends, so you never run it yourself. It runs under the gate's sandbox, which needs Allow loopback."
+        >
+          <TextInput
+            aria-label="Preview command"
+            placeholder="pnpm dev"
+            styles={MONO_INPUT}
+            value={values.previewCommand}
+            error={errors.previewCommand}
+            onChange={(e) => {
+              set({ previewCommand: e.currentTarget.value });
             }}
           />
         </SettingRow>

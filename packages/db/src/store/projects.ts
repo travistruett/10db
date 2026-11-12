@@ -85,6 +85,7 @@ export function insertProject(ctx: WriteContext, input: ProjectInput): ProjectDt
     moveBackAutomatic: false,
     appUrl: null,
     devLoginCommand: null,
+    previewCommand: null,
     screens: SCREENS_MATRIX_DEFAULT,
     provider: Provider.Claude,
     createdAt: ctx.now,

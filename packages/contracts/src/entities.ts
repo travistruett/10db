@@ -663,8 +663,8 @@ export function isDaemonAddress(appUrl: AppUrl, daemonPort: number): boolean {
   return port === daemonPort;
 }
 
-/** The dev login command as the builder types it; a blank one is no command. */
-const DevLoginCommand = z
+/** A command the builder types for the project, such as its dev login; a blank one is no command. */
+const ProjectCommand = z
   .string()
   .max(2000)
   .transform((c) => (c.trim() === '' ? null : c));
@@ -726,6 +726,11 @@ export const ProjectDto = z.object({
   appUrl: AppUrl.nullable(),
   /** Prints a URL or path on the app's address that signs a browser in; null when the app needs none. */
   devLoginCommand: z.string().nullable(),
+  /**
+   * Serves the app at its address while a UI Workbench pass is open, run by 10db under the gate's
+   * sandbox in the project's folder; null when the builder runs the dev server.
+   */
+  previewCommand: z.string().nullable(),
   /** The viewports and themes each page's pictures are taken in. */
   screens: ScreensMatrix,
   createdAt: Timestamp,
@@ -773,7 +778,9 @@ export const ProjectPatch = z
     /** Where Open Page goes; null forgets it. */
     appUrl: AppUrl.nullable(),
     /** Run under the gate's sandbox before pictures; blank or null forgets it. */
-    devLoginCommand: DevLoginCommand.nullable(),
+    devLoginCommand: ProjectCommand.nullable(),
+    /** Run under the gate's sandbox while a pass is open; blank or null forgets it. */
+    previewCommand: ProjectCommand.nullable(),
     screens: ScreensMatrix,
   })
   .partial()

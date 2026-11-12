@@ -80,6 +80,13 @@ const rows: readonly Row[] = [
     sent: { appUrl: 'http://localhost:5173' },
   },
   {
+    name: 'Preview command',
+    label: 'Preview command',
+    line: "Optional. Starts your dev server at the app address while a UI Workbench pass is open, and stops it when the pass ends, so you never run it yourself. It runs under the gate's sandbox, which needs Allow loopback.",
+    change: () => type('Preview command', 'pnpm dev:preview'),
+    sent: { previewCommand: 'pnpm dev:preview' },
+  },
+  {
     name: 'Dev login command',
     label: 'Dev login command',
     line: "Optional. Prints an address on the app that signs a browser in, for pictures of pages that need a sign-in. It runs under the gate's sandbox.",

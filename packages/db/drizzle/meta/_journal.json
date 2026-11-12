@@ -428,6 +428,13 @@
       "when": 1794425036050,
       "tag": "0060_flaky_namora",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "6",
+      "when": 1794456635639,
+      "tag": "0061_flashy_cloak",
+      "breakpoints": true
     }
   ]
 }

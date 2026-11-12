@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as schema from '../schema';
 import {
   createTestStore,
+  getProject,
   getTaskScreenRow,
   hashNamed,
   hasTaskScreen,
@@ -29,6 +30,7 @@ import {
   insertTaskScreen,
   insertWorkstream,
   listTaskScreens,
+  patchProject,
   seedProject,
   type NewTaskScreen,
   type Store,
@@ -255,6 +257,14 @@ describe("a project's picture settings", () => {
   it('starts with the default matrix and no dev login', () => {
     expect(project.screens).toEqual(SCREENS_MATRIX_DEFAULT);
     expect(project.devLoginCommand).toBeNull();
+    expect(project.previewCommand).toBeNull();
+  });
+
+  it('keeps a preview command and forgets a blank one', () => {
+    store.write((ctx) => patchProject(ctx, project.id, { previewCommand: 'pnpm dev:preview' }));
+    expect(getProject(store.db, project.id).previewCommand).toBe('pnpm dev:preview');
+    store.write((ctx) => patchProject(ctx, project.id, { previewCommand: '  ' }));
+    expect(getProject(store.db, project.id).previewCommand).toBeNull();
   });
 });
 

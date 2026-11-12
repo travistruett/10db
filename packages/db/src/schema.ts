@@ -276,6 +276,8 @@ export const projects = sqliteTable('projects', {
   appUrl: text('app_url').$type<AppUrl>(),
   /** Prints the address that signs the browser for pictures in; null when the app needs no sign-in. */
   devLoginCommand: text('dev_login_command'),
+  /** Serves the app at its address while a pass is open; null when the builder runs it. */
+  previewCommand: text('preview_command'),
   /** The viewports and themes a page's pictures are taken in. */
   screens: text('screens', { mode: 'json' })
     .$type<ScreensMatrix>()

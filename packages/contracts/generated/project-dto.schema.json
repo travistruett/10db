@@ -273,6 +273,12 @@
         "null"
       ]
     },
+    "previewCommand": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "screens": {
       "type": "object",
       "properties": {
@@ -366,6 +372,7 @@
     "isolate",
     "appUrl",
     "devLoginCommand",
+    "previewCommand",
     "screens",
     "createdAt",
     "updatedAt"
