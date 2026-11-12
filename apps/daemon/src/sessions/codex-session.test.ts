@@ -345,6 +345,17 @@ describe('the start checks', () => {
     expect(server.killed()).toBe(true);
   });
 
+  // The table checks the reason only; this checks the message names the provider.
+  it('refuses a session whose home is signed in on GCP, naming the provider', async () => {
+    const { handle, server } = startWith({
+      'account/read': { account: { type: 'gcp' }, requiresOpenaiAuth: false },
+    });
+    const ended = (await collect(handle)).at(-1);
+    expect(ended).toMatchObject({ type: 'ended', reason: 'account_refused' });
+    expect(ended?.type === 'ended' ? ended.message : '').toContain('apiProvider gcp');
+    expect(methods(server)).not.toContain('turn/start');
+  });
+
   it('gives an identity mismatch as the refusal, naming no email', async () => {
     const { handle } = startWith({
       'account/read': {

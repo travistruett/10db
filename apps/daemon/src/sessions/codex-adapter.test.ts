@@ -154,6 +154,19 @@ describe('probeAccount', () => {
     expect(server.sent().map((m) => m.method)).not.toContain('account/rateLimits/read');
   });
 
+  it('reports a home signed in on GCP as a provider the ChatGPT check refuses', async () => {
+    const server = fakeAppServer({
+      ...SIGNED_IN,
+      'account/read': { account: { type: 'gcp' }, requiresOpenaiAuth: false },
+    });
+    const seen = await adapterOn(server).probeAccount(probe);
+    expect(seen.apiProvider).toBe('gcp');
+    expect(checkAccount(expectation(null), seen)).toMatchObject({
+      problem: AccountProblem.WrongCredentials,
+    });
+    expect(server.sent().map((m) => m.method)).not.toContain('account/rateLimits/read');
+  });
+
   it('rejects with AccountProbeError when the app-server does not answer in time, and closes it', async () => {
     const clock = new ManualClock();
     const server = fakeAppServer({ ...SIGNED_IN, initialize: () => new Promise(() => undefined) });

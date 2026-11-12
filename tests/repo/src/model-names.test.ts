@@ -42,8 +42,14 @@ function namesIn(file: string): Set<string> {
   );
 }
 
+/** Codex's protocol as its pinned release generates it: its own text, which 10db never edits. */
+const GENERATED_CODE = 'apps/daemon/src/sessions/codex-generated/';
+
 const sources = globSync(SOURCE, { cwd: repoRoot })
-  .filter((file) => !TEST_CODE.test(file) && !file.includes('node_modules'))
+  .filter(
+    (file) =>
+      !TEST_CODE.test(file) && !file.startsWith(GENERATED_CODE) && !file.includes('node_modules'),
+  )
   .sort();
 
 describe('model names in source', () => {

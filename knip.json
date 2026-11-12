@@ -19,7 +19,7 @@
       "ignore": ["fixtures/**"]
     }
   },
-  "ignore": ["spikes/**"],
+  "ignore": ["spikes/**", "apps/daemon/src/sessions/codex-generated/**"],
   "ignoreBinaries": ["codex", "make", "mkfifo", "rustc"],
   "ignoreExportsUsedInFile": true,
   "lefthook": {

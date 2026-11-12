@@ -1,0 +1,6886 @@
+[
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": null
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": null,
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "on-request",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "never",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": {
+        "granular": {
+          "mcp_elicitations": false,
+          "rules": false,
+          "sandbox_approval": false
+        }
+      },
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": null,
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "auto_review",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "guardian_subagent",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": null,
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": null,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "deny",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": null,
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "deny",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": null,
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "deny",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": null,
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "deny"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": null
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": null,
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": null
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": null,
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": null,
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "deny",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": null,
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": null
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": null,
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": null,
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "deny",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": null
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": null
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": null
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": null,
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": null,
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": null,
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": [
+        "x"
+      ],
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": null,
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "api",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": null,
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": null,
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": null,
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": null,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "body_after_prefix",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": null,
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": null,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": null,
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": null,
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "concise",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "detailed",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "none",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": null,
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "medium",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "high",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": null,
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": null,
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "workspace-write",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "danger-full-access",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": null,
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": null,
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": null,
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": null,
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "medium",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "high",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": null,
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": null,
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": null,
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": null,
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": null
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": null
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": null
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": null,
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "cached"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "indexed"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "live"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": null
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "domain": "x",
+          "key": "x",
+          "type": "mdm"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "system"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "id": "x",
+          "name": "x",
+          "type": "enterpriseManaged"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "user",
+          "profile": "x"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "user",
+          "profile": null
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "dotCodexFolder": "x",
+          "type": "project"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "type": "sessionFlags"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "legacyManagedConfigTomlFromFile"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "type": "legacyManagedConfigTomlFromMdm"
+        },
+        "version": "x",
+        "disabledReason": "x"
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": [
+      {
+        "config": null,
+        "name": {
+          "file": "x",
+          "type": "packagedDefaults"
+        },
+        "version": "x",
+        "disabledReason": null
+      }
+    ]
+  },
+  {
+    "config": {
+      "analytics": {
+        "enabled": false
+      },
+      "approval_policy": "untrusted",
+      "approvals_reviewer": "user",
+      "browser_use": {
+        "allow_history_access": false,
+        "default_origin_policy": {
+          "access": "allow",
+          "downloads": "allow",
+          "full_cdp_access": "allow",
+          "uploads": "allow"
+        },
+        "origins": {}
+      },
+      "compact_prompt": "x",
+      "computer_use": {
+        "default_app_access": "allow",
+        "macos": {
+          "bundle_ids": {}
+        },
+        "windows": {
+          "aumids": {},
+          "exes": [
+            {
+              "access": "allow",
+              "product_name": "x",
+              "publisher_name": "x",
+              "binary_name": "x"
+            }
+          ]
+        }
+      },
+      "desktop": {},
+      "developer_instructions": "x",
+      "forced_chatgpt_workspace_id": "x",
+      "forced_login_method": "chatgpt",
+      "instructions": "x",
+      "model": "x",
+      "model_auto_compact_token_limit": 0,
+      "model_auto_compact_token_limit_scope": "total",
+      "model_context_window": 0,
+      "model_provider": "x",
+      "model_reasoning_effort": "x",
+      "model_reasoning_summary": "auto",
+      "model_verbosity": "low",
+      "review_model": "x",
+      "sandbox_mode": "read-only",
+      "sandbox_workspace_write": {},
+      "service_tier": "x",
+      "tools": {
+        "web_search": {
+          "allowed_domains": [
+            "x"
+          ],
+          "context_size": "low",
+          "location": {
+            "city": "x",
+            "country": "x",
+            "region": "x",
+            "timezone": "x"
+          }
+        }
+      },
+      "web_search": "disabled"
+    },
+    "origins": {},
+    "layers": null
+  }
+]
