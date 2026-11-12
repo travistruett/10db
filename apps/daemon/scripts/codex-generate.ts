@@ -1,10 +1,11 @@
 import { execFile } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { AgentTool, CODEX_VERIFIED_ON, ensureAgent } from '../src/environment';
 import { importClosure } from './codex-closure';
+import { sampleInstances } from './codex-samples';
 import { formatStamp, GENERATED_DIR, hashTree, readTree, STAMP_FILE } from './codex-stamp';
 
 // Writes `src/sessions/codex-generated/` from the pinned Codex: the generated protocol types 10db
@@ -35,6 +36,36 @@ const CODEX_SEED_TYPES = [
   'v2/TurnInterruptResponse',
 ] as const;
 
+/**
+ * The generated JSON schema of each type a runtime schema in `codex-protocol.ts` reads. Each is
+ * copied to `schema/<Type>.json` and sampled into `fixtures/<Type>.json`, which
+ * `codex-protocol.test.ts` reads.
+ */
+const RUNTIME_SCHEMAS = [
+  'v1/InitializeResponse',
+  'v2/GetAccountResponse',
+  'v2/GetAccountRateLimitsResponse',
+  'v2/AccountRateLimitsUpdatedNotification',
+  'v2/ModelListResponse',
+  'v2/ConfigReadResponse',
+  'v2/HooksListResponse',
+  'v2/ThreadStartResponse',
+  'v2/ThreadResumeResponse',
+  'v2/TurnStartResponse',
+  'v2/TurnStartedNotification',
+  'v2/TurnCompletedNotification',
+  'v2/ThreadTokenUsageUpdatedNotification',
+  'v2/ItemCompletedNotification',
+  'v2/ThreadTurnsListResponse',
+] as const;
+
+/** The pre-commit hygiene check refuses a file over 1 MB. */
+const MAX_FILE_BYTES = 1024 * 1024;
+
+class GeneratedFileTooLargeError extends Error {
+  override readonly name = 'GeneratedFileTooLargeError';
+}
+
 const run = promisify(execFile);
 
 if (process.platform !== 'darwin') {
@@ -58,16 +89,42 @@ try {
     env,
   });
 
+  // Every file is built before any is written, so a refusal leaves the folder as it was.
+  const written = new Map<string, Buffer>();
+  for (const type of RUNTIME_SCHEMAS) {
+    const name = `${basename(type)}.json`;
+    const schema = readFileSync(join(work, 'schema', `${type}.json`));
+    written.set(`schema/${name}`, schema);
+    // Codex's own output, read as JSON; sampleInstances parses each node it walks.
+    const document: unknown = JSON.parse(schema.toString('utf8'));
+    const fixtures = `${JSON.stringify(sampleInstances(document), null, 2)}\n`;
+    written.set(`fixtures/${name}`, Buffer.from(fixtures));
+  }
+  const tooLarge = [...written]
+    .filter(([, bytes]) => bytes.length > MAX_FILE_BYTES)
+    .map(([path, bytes]) => `${path} (${String(bytes.length)} bytes)`);
+  if (tooLarge.length > 0)
+    throw new GeneratedFileTooLargeError(
+      `Over the 1 MB a commit allows, so nothing was written: ${tooLarge.join(', ')}`,
+    );
+
   const kept = importClosure(
     (path) => readFileSync(join(generatedTs, path), 'utf8'),
     CODEX_SEED_TYPES.map((type) => `${type}.ts`),
   );
+  for (const folder of ['ts', 'schema', 'fixtures'])
+    rmSync(join(GENERATED_DIR, folder), { recursive: true, force: true });
   const outTs = join(GENERATED_DIR, 'ts');
-  rmSync(outTs, { recursive: true, force: true });
   for (const path of kept) {
     const target = join(outTs, path);
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(target, readFileSync(join(generatedTs, path)));
+  }
+
+  for (const [path, bytes] of written) {
+    const target = join(GENERATED_DIR, path);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(target, bytes);
   }
 
   writeFileSync(
@@ -75,7 +132,7 @@ try {
     formatStamp({ version: CODEX_VERIFIED_ON, sha256: hashTree(readTree(GENERATED_DIR)) }),
   );
   console.log(
-    `Wrote ${String(kept.length)} generated files from Codex ${CODEX_VERIFIED_ON} to ${GENERATED_DIR}.`,
+    `Wrote ${String(kept.length + written.size)} generated files from Codex ${CODEX_VERIFIED_ON} to ${GENERATED_DIR}.`,
   );
 } finally {
   rmSync(work, { recursive: true, force: true });

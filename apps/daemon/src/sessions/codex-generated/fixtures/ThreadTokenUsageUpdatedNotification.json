@@ -1,0 +1,44 @@
+[
+  {
+    "threadId": "x",
+    "tokenUsage": {
+      "last": {
+        "cachedInputTokens": 0,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningOutputTokens": 0,
+        "totalTokens": 0
+      },
+      "total": {
+        "cachedInputTokens": 0,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningOutputTokens": 0,
+        "totalTokens": 0
+      },
+      "modelContextWindow": 0
+    },
+    "turnId": "x"
+  },
+  {
+    "threadId": "x",
+    "tokenUsage": {
+      "last": {
+        "cachedInputTokens": 0,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningOutputTokens": 0,
+        "totalTokens": 0
+      },
+      "total": {
+        "cachedInputTokens": 0,
+        "inputTokens": 0,
+        "outputTokens": 0,
+        "reasoningOutputTokens": 0,
+        "totalTokens": 0
+      },
+      "modelContextWindow": null
+    },
+    "turnId": "x"
+  }
+]
