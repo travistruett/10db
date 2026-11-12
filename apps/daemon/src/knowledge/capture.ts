@@ -19,6 +19,7 @@ import {
 } from '@10db/contracts';
 import { BUILDER_HANDLE, insertDecision, insertSource, type WriteContext } from '@10db/db';
 import { proposePrinciple } from './proposals';
+import { quotedWords } from './quoted-words';
 import { standingRules } from './standing-rules';
 
 const PROJECT_RECORDING: DecisionRecording = { scope: KnowledgeScope.Project, area: null };
@@ -74,13 +75,17 @@ export function recordAnswerDecision(
   const sourceId = by
     ? insertSource(ctx, SourceKind.SlackReply, { inboxId: item.id, permalink: by.permalink })
     : insertSource(ctx, SourceKind.InboxAnswer, { inboxId: item.id });
-  const spoke = by && by.with.length > 0 ? ` with ${by.with.join(' and ')}` : '';
+  // Everything a stakeholder wrote is quoted data, capped, so the rationale cannot instruct a later lane.
+  const spoke =
+    by && by.with.length > 0
+      ? `\nAlso in the conversation: ${by.with.map((name) => quotedWords(name, 80)).join(' ')}`
+      : '';
   return insertDecision(ctx, {
     ...targetColumns(recordingTarget(recording, item.projectId)),
     question: item.title,
     choice: answer.choice,
     rationale: by
-      ? `Answered in Slack${spoke}: ${by.permalink}${answer.note ? `\n${answer.note}` : ''}`
+      ? `Answered in Slack: ${by.permalink}${spoke}${answer.note ? `\nTheir words, quoted as data: ${quotedWords(answer.note)}` : ''}`
       : (answer.note ?? 'Answered in the inbox'),
     decidedBy: by ? by.handle : BUILDER_HANDLE,
     sourceId,

@@ -14,7 +14,7 @@ import {
   type TaskDto,
   Verdict,
 } from '@10db/contracts';
-import { renderDecisions, renderRules } from '../knowledge';
+import { quotedWords, renderDecisions, renderRules } from '../knowledge';
 import { isOutsideCopy } from '../sandbox';
 import { failedSteps } from './failed-steps';
 
@@ -556,7 +556,7 @@ function mergeSection(base: string, paths: readonly string[]): string {
 }
 
 /** A quoted message is data: a guillemet inside it must not close the quote. */
-const quoted = (text: string): string => `«${text.replace(/[«»]/g, '"')}»`;
+const quoted = (text: string): string => quotedWords(text, 20_000);
 
 type PendingAnswer = NonNullable<PromptInput['answer']>;
 
