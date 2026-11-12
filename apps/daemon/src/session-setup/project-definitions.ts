@@ -23,6 +23,12 @@ export const PROJECT_DEFINITIONS_MAX_FILES = 500;
 const PAST_THE_CAP = 'past the 4 MiB or 500 files 10db copies';
 const SECRETS_FILE = 'a secrets file is never copied';
 
+/**
+ * A skill's Codex config, which the pinned Codex reads from a skill root to install and start the
+ * tools and MCP servers it names: a lane-written one would run outside every sandbox.
+ */
+const CODEX_SKILL_CONFIG = 'agents/openai.yaml';
+
 /** A `.env*` name in any case: stricter than the file system's fold, so `.ENV` is never copied anywhere. */
 const isSecretName = (name: string): boolean => name.toLowerCase().startsWith('.env');
 
@@ -116,6 +122,13 @@ function readSkill(checkout: string, name: string, budget: Budget): Read {
       if (entry.isDirectory()) {
         const failed = walk(path);
         if (failed) return failed;
+        continue;
+      }
+      if (path.toLowerCase() === CODEX_SKILL_CONFIG) {
+        notes.push({
+          what: `${root}/${path}`,
+          why: 'Codex reads it to install and run what it names',
+        });
         continue;
       }
       let read;

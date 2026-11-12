@@ -26,7 +26,6 @@ const LAYOUT_KEYS = ['commands', 'agents', 'skills'] as const;
 const HOOKS_LEFT_OUT = "plugin hooks don't run in 10db sessions yet";
 
 const Manifest = z.looseObject({
-  name: z.string().min(1).optional(),
   version: z.string().optional(),
   description: z.string().optional(),
 });
@@ -68,7 +67,8 @@ export function wrapPlugin(
   const raw = readJson(join(installPath, '.claude-plugin', 'plugin.json'));
   const parsed = Manifest.safeParse(raw ?? {});
   const manifest = parsed.success ? parsed.data : {};
-  const name = manifest.name ?? basename(into);
+  // The wrapper's folder is the plugin id's name; a manifest naming another (`yours`) never takes it.
+  const name = basename(into);
   const moved = LAYOUT_KEYS.filter((key) => key in manifest);
   if (moved.length > 0)
     leftOut.push({

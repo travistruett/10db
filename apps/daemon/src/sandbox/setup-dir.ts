@@ -63,6 +63,16 @@ export interface KeptPlugin {
   readonly rewrites: readonly Rewrite[];
 }
 
+/** How a session's setup is judged, from the project's access (`lane-sandbox.ts` builds it). */
+export interface SetupJudge {
+  /** Null when a real path may open read-only to the session, else why not (`setupReadRefusal`). */
+  refuse(real: string): string | null;
+  /** Whether closing a real path would close what the session needs (`holdsSessionGround`). */
+  holdsSessionGround(real: string): boolean;
+  /** Whether a project copy's checkout file, by its path under the checkout, is a checkout secret. */
+  isCheckoutSecret(source: string): boolean;
+}
+
 export interface KeptSetup {
   readonly keptSkills: Skill[];
   /** Each kept skill's re-emitted `SKILL.md`, by name, when it held a key 10db strips. */
@@ -78,8 +88,17 @@ export interface KeptSetup {
 }
 
 const SECRET_FILE_PREFIX = foldPathCase('.env');
-const UNWALKED_DIRECTORIES: ReadonlySet<string> = new Set(['node_modules', '.git']);
+const GIT_DIR = '.git';
+const UNWALKED_DIRECTORIES: ReadonlySet<string> = new Set(['node_modules', GIT_DIR]);
 const GONE = 'its folder is gone; Claude Code may have updated it';
+/**
+ * The plugin names 10db's own setup takes, compared in lower case: a plugin named so would load its skills
+ * under the namespace of the builder's skills, the project's or 10db's harness.
+ */
+const RESERVED_NAMES: ReadonlySet<string> = new Set(['yours', 'project', '10db-harness']);
+const RESERVED = "its name is one 10db's own setup uses";
+const NEEDED_GROUND =
+  'a .env link in it leads to a folder the session needs, which 10db would have to close';
 const TOO_MANY = 'it holds more files than 10db reads to strip hooks and pre-approved tools';
 const UNNAMEABLE =
   "a path in it holds a character the sandbox profile can't take ([ ] * ? { } \\ or a line break)";
@@ -132,9 +151,9 @@ function linkTargetsIn(folder: string): string[] {
 }
 
 /**
- * Every `.env*` file or folder under `root` (and the real path of a `.env*` link, and of every link
- * inside a `.env*` folder), not entering links, `.env*` folders, `node_modules` or `.git`; or the
- * first folder that can't be listed, since it could hide one.
+ * Every `.env*` file or folder and every `.git` under `root` (and the real path of a `.env*` link, and of
+ * every link inside a `.env*` folder), not entering links, `.env*` folders, `node_modules` or `.git`; or
+ * the first folder that can't be listed, since it could hide one.
  */
 function walkSecrets(root: string): { secrets: string[] } | { unlistable: string } {
   const secrets: string[] = [];
@@ -155,6 +174,9 @@ function walkSecrets(root: string): { secrets: string[] } | { unlistable: string
         const real = entry.isSymbolicLink() ? realOrNull(path) : null;
         if (real !== null) secrets.push(real);
         if (entry.isDirectory()) secrets.push(...linkTargetsIn(path));
+      } else if (foldPathCase(entry.name) === GIT_DIR && !entry.isSymbolicLink()) {
+        // A skill cloned into the folder keeps its remote's URL, which can carry a token, in `.git`.
+        secrets.push(path);
       } else if (entry.isDirectory() && !UNWALKED_DIRECTORIES.has(entry.name)) {
         pending.push(path);
       }
@@ -171,16 +193,21 @@ function walkSecrets(root: string): { secrets: string[] } | { unlistable: string
  */
 function firstBlocked(
   reads: readonly string[],
+  judge: SetupJudge,
 ): { secretFiles: string[] } | { at: string; why: (where: string) => string } {
   const secretFiles: string[] = [];
+  const blame = (secret: string, read: string): string =>
+    isEqualOrUnder(secret, read) ? secret : read;
   for (const read of reads) {
     if (!isSandboxPath(read)) return { at: read, why: () => UNNAMEABLE };
     const walked = walkSecrets(read);
     if ('unlistable' in walked)
       return { at: walked.unlistable, why: (where) => `a folder in it can't be listed: ${where}` };
     const odd = walked.secrets.find((secret) => !isSandboxPath(secret));
-    if (odd !== undefined)
-      return { at: isEqualOrUnder(odd, read) ? odd : read, why: () => UNNAMEABLE };
+    if (odd !== undefined) return { at: blame(odd, read), why: () => UNNAMEABLE };
+    // A secret that is or holds the home, a checkout or a sandbox root can't be closed.
+    const wide = walked.secrets.find((secret) => judge.holdsSessionGround(secret));
+    if (wide !== undefined) return { at: blame(wide, read), why: () => NEEDED_GROUND };
     secretFiles.push(...walked.secrets);
   }
   return { secretFiles: [...new Set(secretFiles)].sort() };
@@ -223,16 +250,12 @@ function taken(names: Map<string, string>, name: string, kind: 'skill' | 'plugin
  * writes nothing; the Settings preview and `createSetupDir` share it. A kept skill or plugin holding a
  * folder that can't be listed is left out, and never fails the session.
  */
-export function keepSetup(
-  input: SetupInput,
-  refuse: (real: string) => string | null,
-  home: string,
-  isCheckoutSecret: (source: string) => boolean,
-): KeptSetup {
+export function keepSetup(input: SetupInput, judge: SetupJudge, home: string): KeptSetup {
+  const refuse = (real: string): string | null => judge.refuse(real);
   const leftOut: LeftOut[] = [];
   // A copy is read before the sandbox lists the checkout's secrets: a `.env` link may lead to a skill's file.
   const keptProjectFiles = input.projectFiles.filter((file) => {
-    if (!isCheckoutSecret(file.source)) return true;
+    if (!judge.isCheckoutSecret(file.source)) return true;
     leftOut.push({ what: file.source, why: 'a secrets file is never copied' });
     return false;
   });
@@ -274,7 +297,10 @@ export function keepSetup(
       leftOut.push({ what: plugin.id, why: GONE });
       continue;
     }
-    const why = refuse(real) ?? taken(pluginNames, pluginName(plugin.id), 'plugin');
+    const why =
+      refuse(real) ??
+      (RESERVED_NAMES.has(pluginName(plugin.id).toLowerCase()) ? RESERVED : null) ??
+      taken(pluginNames, pluginName(plugin.id), 'plugin');
     if (why !== null) {
       leftOut.push({ what: plugin.id, why });
       continue;
@@ -314,7 +340,7 @@ export function keepSetup(
         [folder, fileDir].filter((path) => !whole.some((root) => isEqualOrUnder(path, root.real))),
       ),
     ]);
-    const blocked = firstBlocked(reads);
+    const blocked = firstBlocked(reads, judge);
     if (!('at' in blocked))
       return {
         keptSkills: skills.map(({ skill }) => skill),
@@ -400,11 +426,10 @@ function writeProject(project: string, files: SetupInput['projectFiles']): void 
 export function createSetupDir(
   filesRoot: string,
   input: SetupInput,
-  refuse: (real: string) => string | null,
+  judge: SetupJudge,
   home: string,
-  isCheckoutSecret: (source: string) => boolean,
 ): { setup: SessionSetup; remove(): void } {
-  const kept = keepSetup(input, refuse, home, isCheckoutSecret);
+  const kept = keepSetup(input, judge, home);
   const dir = join(filesRoot, `10db-setup-${randomBytes(6).toString('hex')}`);
   mkdirSync(dir, { mode: 0o700 });
   const remove = (): void => {

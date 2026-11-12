@@ -115,7 +115,7 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
     // leaves the session's files alone.
     const roots = openSandboxRoots({}, homedir());
     if (roots.refusal !== null) throw roots.refusal;
-    const claim = claimSandboxRoots([roots.temp, roots.codexLanes, roots.files]);
+    const claim = claimSandboxRoots({ temps: [roots.temp, roots.codexLanes], files: roots.files });
     const prepare = createShapePreparer({
       state,
       inbox,

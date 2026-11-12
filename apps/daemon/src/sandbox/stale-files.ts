@@ -97,7 +97,11 @@ function ownedKind(path: string, uid: number): 'dir' | 'file' | 'other' | null {
 }
 
 /** Where a sweep looks: a sandbox root it claims, or a system temp dir it only sweeps. */
-type SweptRoot = 'sandbox' | 'system';
+/**
+ * A root a sweep reads: a lane temp root (lanes write it), the files root (no lane writes it, and it alone
+ * holds setup dirs), or a system temp dir.
+ */
+type SweptRoot = 'temp' | 'files' | 'system';
 
 /**
  * The kind a stale entry called `name` has in a root of `where`, by 10db's exact names there alone;
@@ -106,9 +110,11 @@ type SweptRoot = 'sandbox' | 'system';
  */
 function staleKind(name: string, where: SweptRoot): 'dir' | 'setup' | 'file' | null {
   switch (where) {
-    case 'sandbox':
+    case 'temp':
+    case 'files':
       if (isLaneTempDirName(name)) return 'dir';
-      if (SETUP_DIR.test(name)) return 'setup';
+      // A lane could make a folder of that name in its own temp root: only the files root's is 10db's.
+      if (where === 'files' && SETUP_DIR.test(name)) return 'setup';
       return SEALED_FILE.test(name) ? 'file' : null;
     case 'system':
       if (isSystemTempDirName(name)) return 'dir';
@@ -150,7 +156,11 @@ function markedBy(
  * names are touched, by their own kind: a link is never followed or removed. Its process ledgers
  * stay for `reapLaneProcessLedgers`, which stops what they name.
  */
-export function claimSandboxTempRoot(root: string, pid: number = process.pid): TempRootClaim {
+export function claimSandboxTempRoot(
+  root: string,
+  pid: number = process.pid,
+  where: 'temp' | 'files' = 'temp',
+): TempRootClaim {
   const uid = process.getuid?.();
   let removed = 0;
   let failed = 0;
@@ -160,7 +170,7 @@ export function claimSandboxTempRoot(root: string, pid: number = process.pid): T
     const stale =
       sharedWith === null
         ? [...namesIn(root)].flatMap((name) => {
-            const kind = staleKind(name, 'sandbox');
+            const kind = staleKind(name, where);
             const path = join(root, name);
             const owned = ownedKind(path, uid);
             return kind !== null && (owned === kind || (kind === 'setup' && owned === 'dir'))
@@ -198,12 +208,15 @@ export function claimSandboxTempRoot(root: string, pid: number = process.pid): T
   };
 }
 
-/** Claims each of `roots` (see `claimSandboxTempRoot`); `release` removes every mark. */
+/** Claims each lane temp root and the files root (see `claimSandboxTempRoot`); `release` removes every mark. */
 export function claimSandboxRoots(
-  roots: readonly string[],
+  roots: { readonly temps: readonly string[]; readonly files: string },
   pid: number = process.pid,
 ): TempRootClaim {
-  const claims = roots.map((root) => claimSandboxTempRoot(root, pid));
+  const claims = [
+    ...roots.temps.map((root) => claimSandboxTempRoot(root, pid, 'temp')),
+    claimSandboxTempRoot(roots.files, pid, 'files'),
+  ];
   return {
     removed: claims.reduce((sum, claim) => sum + claim.removed, 0),
     failed: claims.reduce((sum, claim) => sum + claim.failed, 0),

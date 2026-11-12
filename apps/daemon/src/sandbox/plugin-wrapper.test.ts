@@ -120,6 +120,14 @@ describe('wrapPlugin', () => {
     expect(readdirSync(into).sort()).toEqual(['.claude-plugin', 'agents', 'commands', 'skills']);
   });
 
+  it('names the wrapper by its folder, the plugin id’s name, whatever the manifest says', () => {
+    write(join(plugin, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'yours' }));
+    wrapPlugin(plugin, into, []);
+    expect(JSON.parse(readFileSync(join(into, '.claude-plugin/plugin.json'), 'utf8'))).toEqual({
+      name: 'p',
+    });
+  });
+
   it('leaves out .mcp.json and the manifest’s mcpServers', () => {
     const { leftOut } = wrapPlugin(plugin, into, []);
     expect(existsSync(join(into, '.mcp.json'))).toBe(false);

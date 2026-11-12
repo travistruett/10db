@@ -173,7 +173,8 @@ without it):
     and names what was loaded and left out; the left-out list ends the prompt and goes to the log.
   - **Plugin dirs.** A lane gets the setup dir's `yours` (links to the kept builder skill folders), `project`
     (the project's definitions, copied with their frontmatter re-emitted from an allowlist per kind and every
-    `` !`…` `` line dropped) and one wrapper per kept installed plugin, after 10db's own harness. A plugin never
+    `` !`…` `` line dropped, and without a `.env*` file or folder in any case, a checkout secret or a skill's
+    `agents/openai.yaml`, which Codex reads to install and run what it names) and one wrapper per kept installed plugin, after 10db's own harness. A plugin never
     loads by its install path.
   - **Plugin hooks don't run in 10db sessions.** The wrapper carries no `hooks/` and no `hooks` key (fallback F2).
     The live check showed why (research, L3b): a plugin's `PreToolUse` answer can rewrite a call's input after
@@ -294,19 +295,26 @@ Under the lane sandbox (**built**), the design column holds for a lane's Bash:
   `/private/tmp` itself; a ChatGPT lane can read and write it (§4.13).
 - **Setup reads** (`sandbox/setup-reads.ts`, `setup-dir.ts`). What comes along (§4.3) opens read-only, never
   for writing, past the protected reads but never past a secret file, a toolchain secret or a sandbox root:
-  - `~/.claude/skills` and `~/.agents/skills` open whole when no real directory directly in them is refused (a
-    refused link doesn't count: the kernel judges a link by its real path, which stays closed); otherwise each
-    kept folder opens alone. Each kept plugin's real install path opens, and so do link targets outside those
-    roots. `collapseReads` drops every read under another, so 200 skills under one root add one entry.
+  - `~/.claude/skills` and `~/.agents/skills` open whole when a kept skill's real folder lies in them and no real
+    directory directly in them is refused (a refused link doesn't count: the kernel judges a link by its real
+    path, which stays closed); otherwise each kept folder opens alone, and with no kept skill in it a root stays
+    closed. Each kept plugin's real install path opens, and so do link targets outside those roots.
+    `collapseReads` drops every read under another, so 200 skills under one root add one entry. Under
+    `~/.claude/plugins` only an installed version's folder (`cache/<marketplace>/<plugin>/<version>`) or one
+    inside it opens; the plugin list and the marketplaces' clones stay closed.
   - `setupReadRefusal` refuses `/`, the home and its ancestors; a path under the home but under none of the
     setup roots that is `~/x` itself, under `~/Library` or under any dot folder of the home (`~/.ssh`, `~/.aws`,
     `~/.config/gh`, `~/.10db`); one under a protected read and under none of the roots; one that is, or holds, a
     protected read, a secret file or a sandbox root; and one that is, holds or lies under ground a lane writes
     (every checkout, the worktree root, the lane temp roots). The skill's folder and its `SKILL.md`'s folder are
     both judged.
-  - Inside each opened read, every `.env*` file and folder, the real path of a `.env*` link, and the real path of
-    every link inside a `.env*` folder are denied as secrets, to the kernel, Claude Code's rules and the judge. A
-    folder in a kept skill or plugin that can't be listed leaves that skill or plugin out, never the session.
+  - Inside each opened read, every `.env*` file and folder, every `.git` (a cloned skill's remote URL can hold a
+    token), the real path of a `.env*` link, and the real path of every link inside a `.env*` folder are denied
+    as secrets, to the kernel, Claude Code's rules and the judge. A folder in a kept skill or plugin that can't be
+    listed, a path the profile can't name (a glob character, `\` or a line break), or a `.env*` link that leads
+    to the home, a checkout or a sandbox root, which a deny would close to the session, leaves that skill or
+    plugin out, never the session. A plugin named `yours`, `project` or `10db-harness` is left out, and a
+    wrapper takes the name in the plugin's id, never its manifest's.
   - A session's setup dir (`10db-setup-<hex>` in the files root, which no lane writes) is its own: made `0o700`,
     removed with its sandbox, and swept once its daemon is gone. The gate's and the repo MCP servers' profiles
     get no setup reads.
@@ -933,6 +941,13 @@ guard task tests each one.
   builder's skills and plugins outside the sandbox, as the builder installed them.
 - **Skills 10db refuses to open.** A skill kept directly in the home (`~/x`), under a dot folder of it or in a
   project's folder is left out, and Settings › Trust › Comes along says why.
+- **A builder's link opens where it leads.** A skill link the builder made to a folder outside the home (a
+  volume, `/Volumes/...`, or a shared folder) opens that folder read-only to the session, whole, as any other
+  passing link target does; 10db judges only that it holds nothing protected and no ground a lane writes.
+- **What a setup opens is judged as it starts, and so are the denies beside it.** A setup dir, a cloned
+  skill's `.git` and a `.env*` inside an opened folder are listed when the session starts. With a setup open,
+  the data directory's `Read(...)` deny in Claude Code's rules is the snapshot `besideTheWays` takes then; an
+  entry made in it later is refused by the guard and the file-access judge behind that rule, not by the rule.
 - **Plugin hooks are left out.** A builder's plugin comes along without its hooks (§4.3), so a plugin that needs
   one runs without it, until 10db can order or judge their answers. The same holds for the hooks and
   pre-approved tools in a builder's or a plugin's skill, command or agent: a skill that relies on them runs with

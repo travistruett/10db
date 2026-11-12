@@ -50,6 +50,7 @@ describe('setupReadRefusal', () => {
       'a plugin install path under ~/.claude/plugins/cache',
       join(home, '.claude/plugins/cache/m/p/1'),
     ],
+    ['a folder inside a plugin install path', join(home, '.claude/plugins/cache/m/p/1/skills')],
     [
       'a folder two levels down in the home, holding nothing protected',
       join(home, 'Projects/skills/x'),
@@ -79,6 +80,10 @@ describe('setupReadRefusal', () => {
     ['a lane temp root', laneTemp],
     ['a folder holding a sandbox root', '/private/var/folders/x/T'],
     ['a checkout’s .env file', join(checkout, '.env')],
+    ['~/.claude/plugins itself', join(home, '.claude/plugins')],
+    ['a marketplace’s clone', join(home, '.claude/plugins/marketplaces/m')],
+    ['a plugin’s cache folder above its versions', join(home, '.claude/plugins/cache/m/p')],
+    ['a plugin folder outside the cache', join(home, '.claude/plugins/repos/m/p/1')],
   ])('refuses %s', (_name, path) => {
     expect(setupReadRefusal(path, ctx)).toMatch(/^it /);
   });

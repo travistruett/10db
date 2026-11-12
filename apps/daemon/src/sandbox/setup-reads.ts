@@ -27,6 +27,32 @@ const underAny = (path: string, roots: readonly string[]): boolean =>
   roots.some((root) => isEqualOrUnder(path, root));
 
 /**
+ * Whether `real` lies in a setup root: a skills root, or under `~/.claude/plugins` an installed
+ * version's folder, `cache/<marketplace>/<plugin>/<version>`, or deeper. The rest of the plugins folder
+ * (its list, its marketplaces' clones) is Claude Code's own.
+ */
+function inSetupRoots(real: string, home: string): boolean {
+  const [skills, plugins, agentSkills] = setupReadRoots(home);
+  if (underAny(real, [skills ?? '', agentSkills ?? ''])) return true;
+  if (plugins === undefined || !isEqualOrUnder(real, plugins)) return false;
+  const parts = relative(foldPathCase(plugins), foldPathCase(real)).split(sep);
+  return parts[0] === 'cache' && parts.length >= 4;
+}
+
+/**
+ * Whether closing `real` would close what a session needs: the home or a folder holding it (`/`), or a
+ * folder that is or holds ground a lane writes or a sandbox root. A `.env*` link that leads to one
+ * can't be denied, so its skill or plugin is left out instead.
+ */
+export function holdsSessionGround(real: string, ctx: SetupReadContext): boolean {
+  return (
+    isEqualOrUnder(ctx.home, real) ||
+    holdsAny(real, ctx.laneWritable) ||
+    holdsAny(real, ctx.sandboxRoots)
+  );
+}
+
+/**
  * Whether a skill's or plugin's real path may open read-only to a lane: null when it may, else why not.
  * Under the home only a folder two or more levels down opens, and never one under `~/Library` or a hidden
  * folder of the home, so a credential folder (`~/.ssh`, `~/.aws`, `~/.config/gh`) is refused by where it
@@ -35,8 +61,7 @@ const underAny = (path: string, roots: readonly string[]): boolean =>
  */
 export function setupReadRefusal(real: string, ctx: SetupReadContext): string | null {
   if (isEqualOrUnder(ctx.home, real)) return 'it is your home folder or holds it';
-  const roots = setupReadRoots(ctx.home);
-  const inRoots = underAny(real, roots);
+  const inRoots = inSetupRoots(real, ctx.home);
   if (isEqualOrUnder(real, ctx.home) && !inRoots) {
     const parts = relative(foldPathCase(ctx.home), foldPathCase(real)).split(sep);
     const top = parts[0] ?? '';

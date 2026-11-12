@@ -134,6 +134,23 @@ describe('readProjectDefinitions', () => {
     ]);
   });
 
+  it('does not copy a skill’s agents/openai.yaml, which Codex reads to install and run servers', () => {
+    write('.claude/skills/s/SKILL.md', SKILL);
+    write('.claude/skills/s/agents/openai.yaml', 'dependencies:\n  tools: []\n');
+    write('.claude/skills/s/agents/notes.md', 'notes');
+    const { files, leftOut } = readProjectDefinitions(checkout);
+    expect(files.map((f) => f.relative).sort()).toEqual([
+      'skills/s/SKILL.md',
+      'skills/s/agents/notes.md',
+    ]);
+    expect(leftOut).toEqual([
+      {
+        what: '.claude/skills/s/agents/openai.yaml',
+        why: 'Codex reads it to install and run what it names',
+      },
+    ]);
+  });
+
   it('leaves out a definition whose frontmatter is refused', () => {
     write('.claude/agents/a.md', '---\nname: &n a\ndescription: *n\n---\nYou\n');
     write('.claude/skills/s/SKILL.md', '---\nname: s\n...\nhooks: x\n---\nBody\n');

@@ -35,9 +35,15 @@ import {
 } from './lane-processes';
 import { cachedProcessTable, systemOpenPaths, systemProcessTable } from './process-table';
 import { isEqualOrUnder } from './protected-reads';
-import { createSetupDir, EMPTY_SETUP, keepSetup, type SessionSetup } from './setup-dir';
+import {
+  createSetupDir,
+  EMPTY_SETUP,
+  keepSetup,
+  type SessionSetup,
+  type SetupJudge,
+} from './setup-dir';
 import type { SetupInput } from './setup-input';
-import { setupReadRefusal } from './setup-reads';
+import { holdsSessionGround, setupReadRefusal } from './setup-reads';
 import { allowlisted, type SandboxRuntime } from './srt-launch';
 import { autoModeRules, type AutoModeSettings } from './auto-mode-rules';
 import {
@@ -271,21 +277,8 @@ function secretReadRules(path: string): string[] {
   return folder ? [rule, `Read(${ruleScope(path)}/**)`] : [rule];
 }
 
-/** Whether a project copy's checkout file, by its path under the checkout, is one of the checkout's secrets. */
-function checkoutSecret(access: ProjectAccess): (source: string) => boolean {
-  const secrets = access.checkoutSecrets.map(foldPathCase);
-  return (source) => {
-    const path = foldPathCase(join(access.checkout, source));
-    return secrets.some((secret) => isEqualOrUnder(path, secret));
-  };
-}
-
-/** The refusal a session's setup reads are judged by, from the project's access. */
-function setupRefusal(
-  home: string,
-  access: ProjectAccess,
-  worktreeRoot: string,
-): (real: string) => string | null {
+/** How a session's setup is judged, from the project's access. */
+function setupJudge(home: string, access: ProjectAccess, worktreeRoot: string): SetupJudge {
   const ctx = {
     home: realPathOr(home),
     protectedReads: access.protectedReads,
@@ -293,7 +286,16 @@ function setupRefusal(
     sandboxRoots: access.sandboxRoots,
     laneWritable: [...access.writableRoots, worktreeRoot, realPathOr(worktreeRoot)],
   };
-  return (real) => setupReadRefusal(real, ctx);
+  const secrets = access.checkoutSecrets.map(foldPathCase);
+  return {
+    refuse: (real) => setupReadRefusal(real, ctx),
+    holdsSessionGround: (real) => holdsSessionGround(real, ctx),
+    // A copy is read before the sandbox lists the checkout's secrets: a `.env` link may lead to one.
+    isCheckoutSecret: (source) => {
+      const path = foldPathCase(join(access.checkout, source));
+      return secrets.some((secret) => isEqualOrUnder(path, secret));
+    },
+  };
 }
 
 /** Builds each lane session's sandbox: one profile, one temp dir and one file-tool context. */
@@ -344,9 +346,8 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           setupDir = createSetupDir(
             filesRoot,
             input.setup,
-            setupRefusal(deps.home, { ...access, sandboxRoots }, deps.worktreeRoot),
+            setupJudge(deps.home, { ...access, sandboxRoots }, deps.worktreeRoot),
             deps.home,
-            checkoutSecret(access),
           );
         const setup = setupDir?.setup ?? EMPTY_SETUP;
         const setupSecrets = setup.secretFiles;
@@ -594,9 +595,8 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
       );
       const kept = keepSetup(
         setupInput,
-        setupRefusal(deps.home, access, deps.worktreeRoot),
+        setupJudge(deps.home, access, deps.worktreeRoot),
         deps.home,
-        checkoutSecret(access),
       );
       return {
         loaded: {

@@ -74,7 +74,7 @@ function claimRootsWhileRunning(): void {
   let claim: ReturnType<typeof claimSandboxRoots> | null = null;
   beforeAll(() => {
     const roots = sandboxRoots();
-    claim = claimSandboxRoots([roots.temp, roots.codexLanes, roots.files]);
+    claim = claimSandboxRoots({ temps: [roots.temp, roots.codexLanes], files: roots.files });
   });
   afterAll(() => {
     claim?.release();

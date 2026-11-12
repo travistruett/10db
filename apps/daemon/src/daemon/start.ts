@@ -779,7 +779,10 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   // is neither swept nor claimed.
   const claimedRoots =
     sandboxRoots?.refusal === null
-      ? claimSandboxRoots([sandboxRoots.temp, sandboxRoots.codexLanes, sandboxRoots.files])
+      ? claimSandboxRoots({
+          temps: [sandboxRoots.temp, sandboxRoots.codexLanes],
+          files: sandboxRoots.files,
+        })
       : null;
   // Off the event loop and never waited on by a start: `tmutil` can be slow, and a root it could
   // not exclude costs backup space, not a lane. `stop()` ends what still runs.

@@ -47,7 +47,7 @@ const git = createGit({ bin: await resolveGit(), checkouts: () => [checkout] });
 const roots = openSandboxRoots({}, homedir());
 if (roots.refusal !== null) throw roots.refusal;
 // Marked as a running daemon's for the run, so a daemon that starts meanwhile leaves its temp dir.
-const claim = claimSandboxRoots([roots.temp, roots.codexLanes, roots.files]);
+const claim = claimSandboxRoots({ temps: [roots.temp, roots.codexLanes], files: roots.files });
 const gate = createGateRunner({
   sandbox: createGateSandbox({
     home: homedir(),

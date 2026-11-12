@@ -522,7 +522,7 @@ async function openWorldIn(root: string, opened: (() => Promise<void>)[]): Promi
   const roots = openSandboxRoots({}, homedir());
   if (roots.refusal !== null) throw roots.refusal;
   // Marked as a running daemon's, so a test daemon that starts meanwhile leaves the lanes' files alone.
-  const claim = claimSandboxRoots([roots.temp, roots.codexLanes, roots.files]);
+  const claim = claimSandboxRoots({ temps: [roots.temp, roots.codexLanes], files: roots.files });
   opened.push(() => {
     claim.release();
     return Promise.resolve();
