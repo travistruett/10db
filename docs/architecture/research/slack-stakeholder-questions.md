@@ -662,7 +662,7 @@ the App-level tokens section"), the token-rotation guide and the distribution gu
 text for the approval request and the `/invite` path for a bot in a Slack Connect channel are
 UNKNOWN; check them against the live UI when writing the in-app guide.
 
-## 11. Group DMs and reactions (added for the builder's calls of 2026-11-12, unverified)
+## 11. Group DMs and reactions (added for the builder's calls of 2026-11-12, checked the same day)
 
 The builder decided that a stakeholder can bring a colleague into a question, that a tie asks everyone matched
 together, and that a recipient approves the "Sounds like B" line with a ✅ (spec S13, S14, §8.4–§8.6). The slice-1
@@ -683,13 +683,28 @@ What this relies on, all from Slack's method pages and **unverified until the bu
   https://docs.slack.dev/reference/methods/reactions.add
 - `reactions.get` with `channel` and `timestamp`, with `reactions:read`, lists a message's reactions with the
   ids of the users who added each. https://docs.slack.dev/reference/methods/reactions.get
-- UNKNOWN: whether `conversations.replies` itself carries a `reactions` array on each message. If it does, the
-  reply watch reads the ✅ from the replies it already fetches; if not, it calls `reactions.get` on the open
-  proposal once per tick.
+- Checked: `conversations.replies` carries a `reactions` array on each message, with the users who added each.
+  The reply watch reads the ✅ from the replies it already fetches; `reactions.get` isn't needed per tick.
 - UNKNOWN: what Slack does when a member mentions, in a one-to-one bot DM, someone who isn't in it. 10db reads
   the `<@U…>` in the message text either way; the check doesn't cover the mention itself, which the live
   acceptance does.
 
 ### The builder's check results
 
-(Paste the JSON of each step of `docs/slack-app.md` section 3 here, with tokens and ids redacted.)
+Run on 2026-11-12 in the builder's own workspace, with the app installed from the manifest by a member (no admin
+approval was needed), and the bot token read from the Keychain item 10db will use (service `10db`, account
+`slack-bot`). Ids are left out.
+
+| Step | Call                                             | Result                                                                                                                                                                              |
+| ---- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1    | `auth.test`                                      | `ok`, the workspace and the bot user                                                                                                                                                |
+| 3    | `conversations.open` with one member             | `ok`; the DM already existed (`already_open: true`) once the builder had opened the app                                                                                             |
+| 4–5  | `chat.postMessage`, then `conversations.replies` | `ok`; the thread reply came back with the member's `user` and the question's `thread_ts`                                                                                            |
+| 6    | `conversations.history` from the question's `ts` | `ok`; top-level messages came back with no `thread_ts`. The builder also typed a letter at the top level by mistake, which is the case §8.3's top-level rule handles                |
+| 8    | `conversations.open` with two members            | `ok`; a group DM whose id starts `C`                                                                                                                                                |
+| 9–10 | `chat.postMessage`, then `conversations.replies` | `ok`; the builder's thread reply came back with their `user`. The second member was unavailable, so a second participant's reply is still unverified; the live acceptance covers it |
+| 11   | ✅ on the bot's message, then `reactions.get`    | `ok`; `white_check_mark` with the builder's id. The same array was already on the parent in step 10's `conversations.replies`                                                       |
+| 7    | `users.list`                                     | `ok`; every member had `real_name` and `email`, and none had a `title` set, so the People picker can't rely on titles                                                               |
+
+Not run: `reactions.add` (the `reactions:write` scope was added to the manifest after the app was installed;
+the build reinstalls the app when it reaches Task 8f).
