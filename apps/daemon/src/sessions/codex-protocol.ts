@@ -94,6 +94,9 @@ export const HooksListResponse = z.looseObject({
   ),
 });
 
+/** `skills/extraRoots/set` answers an empty object (0.167.0's `SkillsExtraRootsSetResponse`). */
+export const SkillsExtraRootsResponse = z.looseObject({});
+
 export const ThreadResponse = z.looseObject({
   thread: z.looseObject({ id: z.string() }),
   model: z.string(),

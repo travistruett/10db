@@ -41,6 +41,7 @@ import {
   createLaneSandbox,
   type LaneSandbox,
   type LaneSessionInput,
+  type SetupInput,
 } from '../src/sandbox';
 import {
   createCodexAdapter,
@@ -592,6 +593,8 @@ function laneInput(
     readonly claude?: boolean;
     /** The task's pictures folder, as the runner names it for a lane of a task with pictures. */
     readonly taskFiles?: string;
+    /** What comes along into the session, as the runner plans it. */
+    readonly setup?: SetupInput;
   } = {},
 ): LaneSessionInput {
   return {
@@ -611,6 +614,7 @@ function laneInput(
     checkouts: [world.checkout, world.other],
     mcpServers: {},
     ...(opts.taskFiles === undefined ? {} : { taskFiles: opts.taskFiles }),
+    ...(opts.setup === undefined ? {} : { setup: opts.setup }),
     ...(opts.claude === true ? {} : { tempRoot: world.roots.codexLanes, provider: Provider.Codex }),
   };
 }
@@ -628,6 +632,8 @@ async function runSession(
     readonly promptUuid?: string;
     readonly images?: readonly ShapeImage[];
     readonly taskFiles?: string;
+    readonly setup?: SetupInput;
+    readonly instructions?: string;
   } = {},
 ): Promise<SessionRun> {
   const launch = launcher.session(world.account, MODEL, []);
@@ -647,6 +653,7 @@ async function runOnLane(
     readonly sessionId?: SessionId;
     readonly promptUuid?: string;
     readonly images?: readonly ShapeImage[];
+    readonly instructions?: string;
   },
   launch: ReturnType<Launcher['session']>,
   laneSession: Awaited<ReturnType<LaneSandbox['forSession']>>,
@@ -668,6 +675,8 @@ async function runOnLane(
     projectMcpServers: {},
     allowedTools: [],
     sandbox: laneSession.spec,
+    ...(opts.instructions === undefined ? {} : { instructions: opts.instructions }),
+    setup: { plugins: laneSession.setup.pluginDirs, skillRoots: laneSession.setup.skillRoots },
     mcp: { url: world.mcp.url, token: world.mcpToken, toolTimeoutMs: 60_000 },
     preToolUse: (req) => {
       const call = { toolName: req.toolName, input: JSON.stringify(req.input) };
@@ -1100,6 +1109,74 @@ describe.skipIf(!live)(
       expect(outputs[0]).toContain('node=0');
       expect(outputs[0]).toContain('?? untracked.txt');
       expect(outputs[0]).toContain('git=0');
+    });
+
+    /**
+     * Builder skill folders `~/<temp>/<name>`, two levels into the home (a skill directly in it, or
+     * in ~/.10db where the world lives, is refused), each with a SKILL.md naming it.
+     */
+    const builderSkills = (names: readonly string[]): { input: SetupInput; dir: string } => {
+      const dir = realpathSync(mkdtempSync(join(homedir(), '10db-live-skills-')));
+      const skills = names.map((name) => {
+        const path = join(dir, name);
+        mkdirSync(path);
+        writeFileSync(
+          join(path, 'SKILL.md'),
+          `---\nname: ${name}\ndescription: The ${name} skill, for the live check.\n---\n\n${name} body\n`,
+        );
+        return { name, path, skillFile: join(path, 'SKILL.md') };
+      });
+      return { input: { skills, plugins: [], projectFiles: [] }, dir };
+    };
+
+    it('lists a builder skill linked into yours/skills and reads its SKILL.md, and still cannot read auth.json', async () => {
+      const { input, dir } = builderSkills(['tendb-live-skill']);
+      try {
+        const auth = join(world.codexHome, 'auth.json');
+        const token = plant(auth);
+        const session = await runSession(
+          world,
+          [
+            run(`cat '${join(dir, 'tendb-live-skill', 'SKILL.md')}'; echo skill=$?`),
+            run(`cat '${auth}'; echo auth=$?`),
+            { say: 'done' },
+          ],
+          { setup: input, instructions: 'LIVE-INSTRUCTIONS-MARK: use pnpm.' },
+        );
+        const outputs = expectTurn(session);
+        expect(outputs[0]).toContain('tendb-live-skill body');
+        expect(outputs[0]).toContain('skill=0');
+        expect(outputs[1]).toMatch(/auth=1/);
+        expect(outputs.join('\n')).not.toContain(token);
+        // Codex listed the skill through the root of links, and the instructions reached the model.
+        const developer = (session.request?.developerTexts ?? []).join('\n');
+        expect(developer).toContain('tendb-live-skill');
+        expect(developer).toContain('LIVE-INSTRUCTIONS-MARK');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('runs node and git with about 200 skills in the setup', async () => {
+      const { input, dir } = builderSkills(
+        Array.from({ length: 200 }, (_, i) => `tendb-live-${String(i).padStart(3, '0')}`),
+      );
+      try {
+        writeFileSync(join(world.checkout, 'untracked.txt'), 'new\n');
+        const outputs = expectTurn(
+          await runSession(
+            world,
+            [run('node -v; echo node=$?; git status --short; echo git=$?'), { say: 'done' }],
+            { setup: input },
+          ),
+        );
+        expect(outputs[0]).toMatch(/v\d+\.\d+\.\d+/);
+        expect(outputs[0]).toContain('node=0');
+        expect(outputs[0]).toContain('?? untracked.txt');
+        expect(outputs[0]).toContain('git=0');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
     });
 
     it('takes a builder message with a picture under its client uuid, and reads the thread back once it closed', async () => {

@@ -14,6 +14,8 @@ export type FakeStep = { readonly js: string } | { readonly say: string };
 export interface FakeRequest {
   /** The text of every user message in the input, the whole thread's. */
   readonly userTexts: readonly string[];
+  /** The request's `instructions` and the text of every developer message in its input. */
+  readonly developerTexts: readonly string[];
   /** How many pictures the user messages of the input carry, the whole thread's. */
   readonly images: number;
   /** The text each `exec` call returned since the script's prompt, in order. */
@@ -71,6 +73,7 @@ const Tool: z.ZodType<Tool> = z.lazy(() =>
   }),
 );
 const ResponsesBody = z.looseObject({
+  instructions: z.string().optional(),
   input: z.array(InputItem).default([]),
   tools: z.array(Tool).default([]),
 });
@@ -102,6 +105,9 @@ function textOf(content: z.infer<typeof Content> | undefined): string {
 
 const isUserMessage = (item: InputItem): boolean =>
   (item.type === undefined || item.type === 'message') && item.role === 'user';
+
+const isDeveloperMessage = (item: InputItem): boolean =>
+  (item.type === undefined || item.type === 'message') && item.role === 'developer';
 
 const isCallOutput = (item: InputItem): boolean => item.type?.endsWith('_call_output') === true;
 
@@ -196,6 +202,12 @@ export async function startFakeResponses(): Promise<FakeResponses> {
     if (marker !== null) {
       latest.set(marker, {
         userTexts: items.filter(isUserMessage).map((item) => textOf(item.content)),
+        developerTexts: [
+          ...(parsed.success && parsed.data.instructions !== undefined
+            ? [parsed.data.instructions]
+            : []),
+          ...items.filter(isDeveloperMessage).map((item) => textOf(item.content)),
+        ],
         images: items.filter(isUserMessage).reduce((sum, item) => sum + imagesOf(item.content), 0),
         outputs,
         tools: offered.map(({ name }) => name).sort(),
