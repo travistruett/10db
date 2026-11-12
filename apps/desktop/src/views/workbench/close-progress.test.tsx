@@ -23,7 +23,7 @@ describe('closeProgressLine', () => {
       name: 'closing, no step yet',
       state: PassState.Closing,
       step: null,
-      line: 'Finishing the pass…',
+      line: 'Finishing…',
     },
     {
       name: 'confirmed',
@@ -59,7 +59,7 @@ describe('closeProgressLine', () => {
       name: 'fast-forwarded',
       state: PassState.Closing,
       step: CloseStep.FastForwarded,
-      line: 'Finishing the pass…',
+      line: 'Finishing…',
     },
     {
       name: 'folder-only, landed: no gate in a copy, so take-outs next',
@@ -96,7 +96,7 @@ describe('closeProgressLine', () => {
       facts: { ...PR, stopped: true },
       line: null,
     },
-    { name: 'abandoning', state: PassState.Abandoning, step: null, line: 'Abandoning the pass…' },
+    { name: 'abandoning', state: PassState.Abandoning, step: null, line: 'Abandoning…' },
     { name: 'closed', state: PassState.Closed, step: CloseStep.Closed, line: null },
   ])('$name', ({ state, step, facts = PR, line }) => {
     expect(closeProgressLine(state, step, facts)).toBe(line);

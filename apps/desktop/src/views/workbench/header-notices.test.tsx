@@ -308,6 +308,6 @@ describe('HeaderNotices', () => {
   it('draws nothing while the pass has no notice', () => {
     record();
     renderWithDaemon(<HeaderNotices view={passViewDto()} inbox={[]} />);
-    expect(screen.queryByRole('list', { name: 'Pass notices' })).toBeNull();
+    expect(screen.queryByRole('list', { name: 'Notices' })).toBeNull();
   });
 });

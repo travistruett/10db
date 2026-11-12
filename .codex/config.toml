@@ -14,7 +14,7 @@ network_access = true
 # Public Mantine documentation; no credentials. Match the UI's Mantine release.
 [mcp_servers.mantine]
 command = "npx"
-args = ["-y", "@mantine/mcp-server@9.7.2"]
+args = ["-y", "@mantine/mcp-server@9.8.0"]
 
 # Artificial Analysis model benchmarks, read-only. Sign in once with OAuth (`codex mcp login
 # artificial-analysis`); no key is stored here. Its data stays out of the repo (AA's terms).

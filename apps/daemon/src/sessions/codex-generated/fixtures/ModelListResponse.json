@@ -1,0 +1,653 @@
+[
+  {
+    "data": [
+      {
+        "defaultReasoningEffort": "x",
+        "description": "x",
+        "displayName": "x",
+        "hidden": false,
+        "id": "x",
+        "isDefault": false,
+        "model": "x",
+        "supportedReasoningEfforts": [
+          {
+            "description": "x",
+            "reasoningEffort": "x"
+          }
+        ],
+        "availabilityNux": {
+          "message": "x"
+        },
+        "availableAccessPrograms": {
+          "cyber": [
+            "standard"
+          ]
+        },
+        "defaultServiceTier": "x",
+        "modelSpecialty": "x",
+        "multiAgentVersion": "disabled",
+        "upgrade": "x",
+        "upgradeInfo": {
+          "model": "x",
+          "migrationMarkdown": "x",
+          "modelLink": "x",
+          "retirementAt": 0,
+          "upgradeCopy": "x"
+        }
+      }
+    ],
+    "nextCursor": "x"
+  },
+  {
+    "data": [
+      {
+        "defaultReasoningEffort": "x",
+        "description": "x",
+        "displayName": "x",
+        "hidden": false,
+        "id": "x",
+        "isDefault": false,
+        "model": "x",
+        "supportedReasoningEfforts": [
+          {
+            "description": "x",
+            "reasoningEffort": "x"
+          }
+        ],
+        "availabilityNux": null,
+        "availableAccessPrograms": {
+          "cyber": [
+            "standard"
+          ]
+        },
+        "defaultServiceTier": "x",
+        "modelSpecialty": "x",
+        "multiAgentVersion": "disabled",
+        "upgrade": "x",
+        "upgradeInfo": {
+          "model": "x",
+          "migrationMarkdown": "x",
+          "modelLink": "x",
+          "retirementAt": 0,
+          "upgradeCopy": "x"
+        }
+      }
+    ],
+    "nextCursor": "x"
+  },
+  {
+    "data": [
+      {
+        "defaultReasoningEffort": "x",
+        "description": "x",
+        "displayName": "x",
+        "hidden": false,
+        "id": "x",
+        "isDefault": false,
+        "model": "x",
+        "supportedReasoningEfforts": [
+          {
+            "description": "x",
+            "reasoningEffort": "x"
+          }
+        ],
+        "availabilityNux": {
+          "message": "x"
+        },
+        "availableAccessPrograms": {
+          "cyber": [
+            "daybreakBlue"
+          ]
+        },
+        "defaultServiceTier": "x",
+        "modelSpecialty": "x",
+        "multiAgentVersion": "disabled",
+        "upgrade": "x",
+        "upgradeInfo": {
+          "model": "x",
+          "migrationMarkdown": "x",
+          "modelLink": "x",
+          "retirementAt": 0,
+          "upgradeCopy": "x"
+        }
+      }
+    ],
+    "nextCursor": "x"
+  },
+  {
+    "data": [
+      {
+        "defaultReasoningEffort": "x",
+        "description": "x",
+        "displayName": "x",
+        "hidden": false,
+        "id": "x",
+        "isDefault": false,
+        "model": "x",
+        "supportedReasoningEfforts": [
+          {
+            "description": "x",
+            "reasoningEffort": "x"
+          }
+        ],
+        "availabilityNux": {
+          "message": "x"
+        },
+        "availableAccessPrograms": {
+          "cyber": [
+            "daybreakRed"
+          ]
+        },
+        "defaultServiceTier": "x",
+        "modelSpecialty": "x",
+        "multiAgentVersion": "disabled",
+        "upgrade": "x",
+        "upgradeInfo": {
+          "model": "x",
+          "migrationMarkdown": "x",
+          "modelLink": "x",
+          "retirementAt": 0,
+          "upgradeCopy": "x"
+        }
+      }
+    ],
+    "nextCursor": "x"
+  },
+  {
+    "data": [
+      {
+        "defaultReasoningEffort": "x",
+        "description": "x",
+        "displayName": "x",
+        "hidden": false,
+        "id": "x",
+        "isDefault": false,
+        "model": "x",
+        "supportedReasoningEfforts": [
+          {
+            "description": "x",
+            "reasoningEffort": "x"
+          }
+        ],
+        "availabilityNux": {
+          "message": "x"
+        },
+        "availableAccessPrograms": null,
+        "defaultServiceTier": "x",
+        "modelSpecialty": "x",
+        "multiAgentVersion": "disabled",
+        "upgrade": "x",
+        "upgradeInfo": {
+          "model": "x",
+          "migrationMarkdown": "x",
+          "modelLink": "x",
+          "retirementAt": 0,
+          "upgradeCopy": "x"
+        }
+      }
+    ],
+    "nextCursor": "x"
+  },
+  {
+    "data": [
+      {
+        "defaultReasoningEffort": "x",
+        "description": "x",
+        "displayName": "x",
+        "hidden": false,
+        "id": "x",
+        "isDefault": false,
+        "model": "x",
+        "supportedReasoningEfforts": [
+          {
+            "description": "x",
+            "reasoningEffort": "x"
+          }
+        ],
+        "availabilityNux": {
+          "message": "x"
+        },
+        "availableAccessPrograms": {
+          "cyber": [
+            "standard"
+          ]
+        },
+        "defaultServiceTier": null,
+        "modelSpecialty": "x",
+        "multiAgentVersion": "disabled",
+        "upgrade": "x",
+        "upgradeInfo": {
+          "model": "x",
+          "migrationMarkdown": "x",
+          "modelLink": "x",
+          "retirementAt": 0,
+          "upgradeCopy": "x"
+        }
+      }
+    ],
+    "nextCursor": "x"
+  },
+  {
+    "data": [
+      {
+        "defaultReasoningEffort": "x",
+        "description": "x",
+        "displayName": "x",
+        "hidden": false,
+        "id": "x",
+        "isDefault": false,
+        "model": "x",
+        "supportedReasoningEfforts": [
+          {
+            "description": "x",
+            "reasoningEffort": "x"
+          }
+        ],
+        "availabilityNux": {
+          "message": "x"
+        },
+        "availableAccessPrograms": {
+          "cyber": [
+            "standard"
+          ]
+        },
+        "defaultServiceTier": "x",
+        "modelSpecialty": null,
+        "multiAgentVersion": "disabled",
+        "upgrade": "x",
+        "upgradeInfo": {
+          "model": "x",
+          "migrationMarkdown": "x",
+          "modelLink": "x",
+          "retirementAt": 0,
+          "upgradeCopy": "x"
+        }
+      }
+    ],
+    "nextCursor": "x"
+  },
+  {
+    "data": [
+      {
+        "defaultReasoningEffort": "x",
+        "description": "x",
+        "displayName": "x",
+        "hidden": false,
+        "id": "x",
+        "isDefault": false,
+        "model": "x",
+        "supportedReasoningEfforts": [
+          {
+            "description": "x",
+            "reasoningEffort": "x"
+          }
+        ],
+        "availabilityNux": {
+          "message": "x"
+        },
+        "availableAccessPrograms": {
+          "cyber": [
+            "standard"
+          ]
+        },
+        "defaultServiceTier": "x",
+        "modelSpecialty": "x",
+        "multiAgentVersion": "v1",
+        "upgrade": "x",
+        "upgradeInfo": {
+          "model": "x",
+          "migrationMarkdown": "x",
+          "modelLink": "x",
+          "retirementAt": 0,
+          "upgradeCopy": "x"
+        }
+      }
+    ],
+    "nextCursor": "x"
+  },
+  {
+    "data": [
+      {
+        "defaultReasoningEffort": "x",
+        "description": "x",
+        "displayName": "x",
+        "hidden": false,
+        "id": "x",
+        "isDefault": false,
+        "model": "x",
+        "supportedReasoningEfforts": [
+          {
+            "description": "x",
+            "reasoningEffort": "x"
+          }
+        ],
+        "availabilityNux": {
+          "message": "x"
+        },
+        "availableAccessPrograms": {
+          "cyber": [
+            "standard"
+          ]
+        },
+        "defaultServiceTier": "x",
+        "modelSpecialty": "x",
+        "multiAgentVersion": "v2",
+        "upgrade": "x",
+        "upgradeInfo": {
+          "model": "x",
+          "migrationMarkdown": "x",
+          "modelLink": "x",
+          "retirementAt": 0,
+          "upgradeCopy": "x"
+        }
+      }
+    ],
+    "nextCursor": "x"
+  },
+  {
+    "data": [
+      {
+        "defaultReasoningEffort": "x",
+        "description": "x",
+        "displayName": "x",
+        "hidden": false,
+        "id": "x",
+        "isDefault": false,
+        "model": "x",
+        "supportedReasoningEfforts": [
+          {
+            "description": "x",
+            "reasoningEffort": "x"
+          }
+        ],
+        "availabilityNux": {
+          "message": "x"
+        },
+        "availableAccessPrograms": {
+          "cyber": [
+            "standard"
+          ]
+        },
+        "defaultServiceTier": "x",
+        "modelSpecialty": "x",
+        "multiAgentVersion": null,
+        "upgrade": "x",
+        "upgradeInfo": {
+          "model": "x",
+          "migrationMarkdown": "x",
+          "modelLink": "x",
+          "retirementAt": 0,
+          "upgradeCopy": "x"
+        }
+      }
+    ],
+    "nextCursor": "x"
+  },
+  {
+    "data": [
+      {
+        "defaultReasoningEffort": "x",
+        "description": "x",
+        "displayName": "x",
+        "hidden": false,
+        "id": "x",
+        "isDefault": false,
+        "model": "x",
+        "supportedReasoningEfforts": [
+          {
+            "description": "x",
+            "reasoningEffort": "x"
+          }
+        ],
+        "availabilityNux": {
+          "message": "x"
+        },
+        "availableAccessPrograms": {
+          "cyber": [
+            "standard"
+          ]
+        },
+        "defaultServiceTier": "x",
+        "modelSpecialty": "x",
+        "multiAgentVersion": "disabled",
+        "upgrade": null,
+        "upgradeInfo": {
+          "model": "x",
+          "migrationMarkdown": "x",
+          "modelLink": "x",
+          "retirementAt": 0,
+          "upgradeCopy": "x"
+        }
+      }
+    ],
+    "nextCursor": "x"
+  },
+  {
+    "data": [
+      {
+        "defaultReasoningEffort": "x",
+        "description": "x",
+        "displayName": "x",
+        "hidden": false,
+        "id": "x",
+        "isDefault": false,
+        "model": "x",
+        "supportedReasoningEfforts": [
+          {
+            "description": "x",
+            "reasoningEffort": "x"
+          }
+        ],
+        "availabilityNux": {
+          "message": "x"
+        },
+        "availableAccessPrograms": {
+          "cyber": [
+            "standard"
+          ]
+        },
+        "defaultServiceTier": "x",
+        "modelSpecialty": "x",
+        "multiAgentVersion": "disabled",
+        "upgrade": "x",
+        "upgradeInfo": {
+          "model": "x",
+          "migrationMarkdown": null,
+          "modelLink": "x",
+          "retirementAt": 0,
+          "upgradeCopy": "x"
+        }
+      }
+    ],
+    "nextCursor": "x"
+  },
+  {
+    "data": [
+      {
+        "defaultReasoningEffort": "x",
+        "description": "x",
+        "displayName": "x",
+        "hidden": false,
+        "id": "x",
+        "isDefault": false,
+        "model": "x",
+        "supportedReasoningEfforts": [
+          {
+            "description": "x",
+            "reasoningEffort": "x"
+          }
+        ],
+        "availabilityNux": {
+          "message": "x"
+        },
+        "availableAccessPrograms": {
+          "cyber": [
+            "standard"
+          ]
+        },
+        "defaultServiceTier": "x",
+        "modelSpecialty": "x",
+        "multiAgentVersion": "disabled",
+        "upgrade": "x",
+        "upgradeInfo": {
+          "model": "x",
+          "migrationMarkdown": "x",
+          "modelLink": null,
+          "retirementAt": 0,
+          "upgradeCopy": "x"
+        }
+      }
+    ],
+    "nextCursor": "x"
+  },
+  {
+    "data": [
+      {
+        "defaultReasoningEffort": "x",
+        "description": "x",
+        "displayName": "x",
+        "hidden": false,
+        "id": "x",
+        "isDefault": false,
+        "model": "x",
+        "supportedReasoningEfforts": [
+          {
+            "description": "x",
+            "reasoningEffort": "x"
+          }
+        ],
+        "availabilityNux": {
+          "message": "x"
+        },
+        "availableAccessPrograms": {
+          "cyber": [
+            "standard"
+          ]
+        },
+        "defaultServiceTier": "x",
+        "modelSpecialty": "x",
+        "multiAgentVersion": "disabled",
+        "upgrade": "x",
+        "upgradeInfo": {
+          "model": "x",
+          "migrationMarkdown": "x",
+          "modelLink": "x",
+          "retirementAt": null,
+          "upgradeCopy": "x"
+        }
+      }
+    ],
+    "nextCursor": "x"
+  },
+  {
+    "data": [
+      {
+        "defaultReasoningEffort": "x",
+        "description": "x",
+        "displayName": "x",
+        "hidden": false,
+        "id": "x",
+        "isDefault": false,
+        "model": "x",
+        "supportedReasoningEfforts": [
+          {
+            "description": "x",
+            "reasoningEffort": "x"
+          }
+        ],
+        "availabilityNux": {
+          "message": "x"
+        },
+        "availableAccessPrograms": {
+          "cyber": [
+            "standard"
+          ]
+        },
+        "defaultServiceTier": "x",
+        "modelSpecialty": "x",
+        "multiAgentVersion": "disabled",
+        "upgrade": "x",
+        "upgradeInfo": {
+          "model": "x",
+          "migrationMarkdown": "x",
+          "modelLink": "x",
+          "retirementAt": 0,
+          "upgradeCopy": null
+        }
+      }
+    ],
+    "nextCursor": "x"
+  },
+  {
+    "data": [
+      {
+        "defaultReasoningEffort": "x",
+        "description": "x",
+        "displayName": "x",
+        "hidden": false,
+        "id": "x",
+        "isDefault": false,
+        "model": "x",
+        "supportedReasoningEfforts": [
+          {
+            "description": "x",
+            "reasoningEffort": "x"
+          }
+        ],
+        "availabilityNux": {
+          "message": "x"
+        },
+        "availableAccessPrograms": {
+          "cyber": [
+            "standard"
+          ]
+        },
+        "defaultServiceTier": "x",
+        "modelSpecialty": "x",
+        "multiAgentVersion": "disabled",
+        "upgrade": "x",
+        "upgradeInfo": null
+      }
+    ],
+    "nextCursor": "x"
+  },
+  {
+    "data": [
+      {
+        "defaultReasoningEffort": "x",
+        "description": "x",
+        "displayName": "x",
+        "hidden": false,
+        "id": "x",
+        "isDefault": false,
+        "model": "x",
+        "supportedReasoningEfforts": [
+          {
+            "description": "x",
+            "reasoningEffort": "x"
+          }
+        ],
+        "availabilityNux": {
+          "message": "x"
+        },
+        "availableAccessPrograms": {
+          "cyber": [
+            "standard"
+          ]
+        },
+        "defaultServiceTier": "x",
+        "modelSpecialty": "x",
+        "multiAgentVersion": "disabled",
+        "upgrade": "x",
+        "upgradeInfo": {
+          "model": "x",
+          "migrationMarkdown": "x",
+          "modelLink": "x",
+          "retirementAt": 0,
+          "upgradeCopy": "x"
+        }
+      }
+    ],
+    "nextCursor": null
+  }
+]

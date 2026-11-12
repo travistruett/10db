@@ -233,14 +233,7 @@ export function HeaderNotices({ view, inbox }: HeaderNoticesProps) {
   if (view.notices.length === 0) return null;
   const state = view.pass.state;
   return (
-    <Stack
-      component="ul"
-      gap={4}
-      m={0}
-      p={0}
-      aria-label="Pass notices"
-      style={{ listStyle: 'none' }}
-    >
+    <Stack component="ul" gap={4} m={0} p={0} aria-label="Notices" style={{ listStyle: 'none' }}>
       {view.notices.map((notice) => (
         <NoticeRow
           key={notice.id}

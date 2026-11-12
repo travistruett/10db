@@ -1,0 +1,4706 @@
+[
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "command": "x",
+            "handlerType": "command"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "postModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "command": "x",
+            "handlerType": "command"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preToolUse",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "command": "x",
+            "handlerType": "command"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "permissionRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "command": "x",
+            "handlerType": "command"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "postToolUse",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "command": "x",
+            "handlerType": "command"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preCompact",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "command": "x",
+            "handlerType": "command"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "postCompact",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "command": "x",
+            "handlerType": "command"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "sessionStart",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "command": "x",
+            "handlerType": "command"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "sessionEnd",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "command": "x",
+            "handlerType": "command"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "userPromptSubmit",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "command": "x",
+            "handlerType": "command"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "subagentStart",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "command": "x",
+            "handlerType": "command"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "subagentStop",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "command": "x",
+            "handlerType": "command"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "stop",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "command": "x",
+            "handlerType": "command"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "interrupt",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "command": "x",
+            "handlerType": "command"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "user",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "command": "x",
+            "handlerType": "command"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "project",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "command": "x",
+            "handlerType": "command"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "mdm",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "command": "x",
+            "handlerType": "command"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "sessionFlags",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "command": "x",
+            "handlerType": "command"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "plugin",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "command": "x",
+            "handlerType": "command"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "cloudRequirements",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "command": "x",
+            "handlerType": "command"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "cloudManagedConfig",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "command": "x",
+            "handlerType": "command"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "legacyManagedConfigFile",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "command": "x",
+            "handlerType": "command"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "legacyManagedConfigMdm",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "command": "x",
+            "handlerType": "command"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "unknown",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "command": "x",
+            "handlerType": "command"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "untrusted",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "command": "x",
+            "handlerType": "command"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "trusted",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "command": "x",
+            "handlerType": "command"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "modified",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "command": "x",
+            "handlerType": "command"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": null,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "command": "x",
+            "handlerType": "command"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": null,
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "command": "x",
+            "handlerType": "command"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": null,
+            "pluginId": "x",
+            "statusMessage": "x",
+            "command": "x",
+            "handlerType": "command"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": null,
+            "statusMessage": "x",
+            "command": "x",
+            "handlerType": "command"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": null,
+            "command": "x",
+            "handlerType": "command"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "mcpTool",
+            "server": "x",
+            "tool": "x"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "postModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "mcpTool",
+            "server": "x",
+            "tool": "x"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preToolUse",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "mcpTool",
+            "server": "x",
+            "tool": "x"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "permissionRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "mcpTool",
+            "server": "x",
+            "tool": "x"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "postToolUse",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "mcpTool",
+            "server": "x",
+            "tool": "x"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preCompact",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "mcpTool",
+            "server": "x",
+            "tool": "x"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "postCompact",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "mcpTool",
+            "server": "x",
+            "tool": "x"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "sessionStart",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "mcpTool",
+            "server": "x",
+            "tool": "x"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "sessionEnd",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "mcpTool",
+            "server": "x",
+            "tool": "x"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "userPromptSubmit",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "mcpTool",
+            "server": "x",
+            "tool": "x"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "subagentStart",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "mcpTool",
+            "server": "x",
+            "tool": "x"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "subagentStop",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "mcpTool",
+            "server": "x",
+            "tool": "x"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "stop",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "mcpTool",
+            "server": "x",
+            "tool": "x"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "interrupt",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "mcpTool",
+            "server": "x",
+            "tool": "x"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "user",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "mcpTool",
+            "server": "x",
+            "tool": "x"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "project",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "mcpTool",
+            "server": "x",
+            "tool": "x"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "mdm",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "mcpTool",
+            "server": "x",
+            "tool": "x"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "sessionFlags",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "mcpTool",
+            "server": "x",
+            "tool": "x"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "plugin",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "mcpTool",
+            "server": "x",
+            "tool": "x"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "cloudRequirements",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "mcpTool",
+            "server": "x",
+            "tool": "x"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "cloudManagedConfig",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "mcpTool",
+            "server": "x",
+            "tool": "x"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "legacyManagedConfigFile",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "mcpTool",
+            "server": "x",
+            "tool": "x"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "legacyManagedConfigMdm",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "mcpTool",
+            "server": "x",
+            "tool": "x"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "unknown",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "mcpTool",
+            "server": "x",
+            "tool": "x"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "untrusted",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "mcpTool",
+            "server": "x",
+            "tool": "x"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "trusted",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "mcpTool",
+            "server": "x",
+            "tool": "x"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "modified",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "mcpTool",
+            "server": "x",
+            "tool": "x"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": null,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "mcpTool",
+            "server": "x",
+            "tool": "x"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": null,
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "mcpTool",
+            "server": "x",
+            "tool": "x"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": null,
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "mcpTool",
+            "server": "x",
+            "tool": "x"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": null,
+            "statusMessage": "x",
+            "handlerType": "mcpTool",
+            "server": "x",
+            "tool": "x"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": null,
+            "handlerType": "mcpTool",
+            "server": "x",
+            "tool": "x"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "prompt"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "postModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "prompt"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preToolUse",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "prompt"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "permissionRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "prompt"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "postToolUse",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "prompt"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preCompact",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "prompt"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "postCompact",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "prompt"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "sessionStart",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "prompt"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "sessionEnd",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "prompt"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "userPromptSubmit",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "prompt"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "subagentStart",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "prompt"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "subagentStop",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "prompt"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "stop",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "prompt"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "interrupt",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "prompt"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "user",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "prompt"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "project",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "prompt"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "mdm",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "prompt"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "sessionFlags",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "prompt"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "plugin",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "prompt"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "cloudRequirements",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "prompt"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "cloudManagedConfig",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "prompt"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "legacyManagedConfigFile",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "prompt"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "legacyManagedConfigMdm",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "prompt"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "unknown",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "prompt"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "untrusted",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "prompt"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "trusted",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "prompt"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "modified",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "prompt"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": null,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "prompt"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": null,
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "prompt"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": null,
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "prompt"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": null,
+            "statusMessage": "x",
+            "handlerType": "prompt"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": null,
+            "handlerType": "prompt"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "agent"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "postModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "agent"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preToolUse",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "agent"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "permissionRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "agent"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "postToolUse",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "agent"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preCompact",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "agent"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "postCompact",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "agent"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "sessionStart",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "agent"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "sessionEnd",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "agent"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "userPromptSubmit",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "agent"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "subagentStart",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "agent"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "subagentStop",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "agent"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "stop",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "agent"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "interrupt",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "agent"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "user",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "agent"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "project",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "agent"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "mdm",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "agent"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "sessionFlags",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "agent"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "plugin",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "agent"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "cloudRequirements",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "agent"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "cloudManagedConfig",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "agent"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "legacyManagedConfigFile",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "agent"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "legacyManagedConfigMdm",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "agent"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "unknown",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "agent"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "untrusted",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "agent"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "trusted",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "agent"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "modified",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "agent"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": null,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "agent"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": null,
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "agent"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": null,
+            "pluginId": "x",
+            "statusMessage": "x",
+            "handlerType": "agent"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": null,
+            "statusMessage": "x",
+            "handlerType": "agent"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  },
+  {
+    "data": [
+      {
+        "cwd": "x",
+        "errors": [
+          {
+            "message": "x",
+            "path": "x"
+          }
+        ],
+        "hooks": [
+          {
+            "currentHash": "x",
+            "displayOrder": 0,
+            "enabled": false,
+            "eventName": "preModelRequest",
+            "isManaged": false,
+            "key": "x",
+            "source": "system",
+            "sourcePath": "x",
+            "timeoutSec": 0,
+            "trustStatus": "managed",
+            "additionalContextLimit": 0,
+            "environmentId": "x",
+            "matcher": "x",
+            "pluginId": "x",
+            "statusMessage": null,
+            "handlerType": "agent"
+          }
+        ],
+        "warnings": [
+          "x"
+        ]
+      }
+    ]
+  }
+]
