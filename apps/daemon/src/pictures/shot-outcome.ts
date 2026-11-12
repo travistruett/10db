@@ -11,6 +11,8 @@ export interface PageLoad {
   readonly status: number | null;
   /** The text of a dev server's error overlay over the page; null when none is up. */
   readonly overlayText: string | null;
+  /** Nothing answered at the app's address: the connection was refused, reset or garbled. */
+  readonly unanswered: boolean;
 }
 
 export interface Outcome {
@@ -35,7 +37,7 @@ function origin(raw: string): string {
 }
 
 /**
- * How a load went. In order: no page (an error, a timeout, nothing loaded) is `failed`; a page off the
+ * How a load went. In order: nothing answering at the app's address is `no_answer`; no page (an error, a timeout, nothing loaded) is `failed`; a page off the
  * app's origin is `failed` ("left the app's address"), never `elsewhere`, so a redirect to another port
  * neither counts as the app nor asks for a sign-in; another path of the app is `elsewhere`; an overlay
  * is `overlay`, even on a document that answered 500, since a dev server's build error answers so and
@@ -46,6 +48,7 @@ export function shotOutcome(appUrl: string, route: string, load: PageLoad): Outc
   if (asked === null) {
     return { outcome: ShotOutcome.Failed, reason: `${route} is not a route on ${appUrl}` };
   }
+  if (load.unanswered) return { outcome: ShotOutcome.NoAnswer, reason: load.error };
   if (load.error !== null) return { outcome: ShotOutcome.Failed, reason: load.error };
   if (load.landedUrl === null) {
     return { outcome: ShotOutcome.Failed, reason: 'the page never loaded' };

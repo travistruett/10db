@@ -262,6 +262,27 @@ describe('a page that breaks the preview', () => {
   });
 });
 
+describe('a preview with nothing answering at the app address', () => {
+  it('blames no page, says so once in the header, and clears it once the app answers', async () => {
+    captures = 2;
+    await world();
+    await turnLoads(w.settings, 'no_answer');
+    expect(page(w.settings).preview).toBeNull();
+    expect(previewNotices(w.settings)).toEqual([]);
+    expect(passView(w.h.store.db, w.opened.pass.id).preview).toBe('clean');
+    const [said] = headerNotice();
+    expect(said).toMatchObject({ sendable: false });
+    expect(said?.text).toContain(`Nothing answers at ${APP}`);
+    await turnLoads(w.people, 'no_answer');
+    await turnLoads(w.people, 'no_answer');
+    expect(headerNotice()).toEqual([said]);
+    expect(page(w.people).preview).toBeNull();
+    expect(moveCards()).toEqual([]);
+    await turnLoads(w.people, 'clean');
+    expect(headerNotice()).toEqual([]);
+  });
+});
+
 describe('routeLoad', () => {
   const shot = (outcome: ShotOutcome, cameraFailed = false) => ({
     outcome,
@@ -284,6 +305,16 @@ describe('routeLoad', () => {
       outcome: 'clean',
     },
     { name: 'nothing loaded', shots: [], outcome: null },
+    {
+      name: 'nothing answering beside a clean load: the app went away',
+      shots: [shot('clean'), shot('no_answer')],
+      outcome: 'no_answer',
+    },
+    {
+      name: 'nothing answering beside an overlay: the app is down, not broken',
+      shots: [shot('overlay'), shot('no_answer')],
+      outcome: 'no_answer',
+    },
   ])('$name', ({ shots, outcome }) => {
     expect(routeLoad('/settings', shots)?.outcome ?? null).toBe(outcome);
   });

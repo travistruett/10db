@@ -5,6 +5,7 @@ import {
   PassPreview,
   PassState,
   TASK_MESSAGE_MAX_CHARS,
+  type PassDto,
   type PassId,
   type PassTurnId,
   type TaskId,
@@ -51,6 +52,8 @@ const PREVIEW_NOTICE = 'The preview of';
 
 /** The id of the header's one notice that the preview is broken with no turn named. */
 const UNNAMED_NOTICE_ID = 'preview';
+/** The id of the header's one notice that nothing answers at the app's address. */
+const NO_ANSWER_NOTICE_ID = 'preview-no-answer';
 
 const MINUTE_MS = 60_000;
 
@@ -68,13 +71,15 @@ export interface RouteLoad {
 export type RouteShot = Omit<RouteLoad, 'route'> & { readonly cameraFailed: boolean };
 
 /**
- * The route's loads as one: broken when any shot was (the first broken shot's words), else clean when
+ * The route's loads as one: `no_answer` when any shot found nothing answering, else broken when any shot was (the first broken shot's words), else clean when
  * any shot was, else elsewhere. A shot the browser itself failed is left out; null when none is left.
  */
 export function routeLoad(route: string, all: readonly RouteShot[]): RouteLoad | null {
   const shots = all
     .filter((s) => !s.cameraFailed)
     .map((s) => ({ outcome: s.outcome, overlayText: s.overlayText, reason: s.reason }));
+  const down = shots.find((s) => s.outcome === ShotOutcome.NoAnswer);
+  if (down) return { route, ...down };
   const broken = shots.find(
     (s) => s.outcome === ShotOutcome.Overlay || s.outcome === ShotOutcome.Failed,
   );
@@ -134,6 +139,30 @@ function openMark(ctx: WriteContext, input: JudgedLoad & { readonly turnId: Pass
 }
 
 /**
+ * Keeps the header's one notice that nothing answers at the app's address: up while loads find
+ * nothing there, gone at the first load that answers. True when nothing answered, so the load judges
+ * nobody.
+ */
+function noAnswerNotice(ctx: WriteContext, pass: PassDto, down: boolean): boolean {
+  const up = getPassProgress(ctx.tx, pass.id).notices.some((n) => n.id === NO_ANSWER_NOTICE_ID);
+  if (!down) {
+    if (up) clearPassNotice(ctx, pass.id, NO_ANSWER_NOTICE_ID);
+    return false;
+  }
+  if (up) return true;
+  const appUrl = getProject(ctx.tx, pass.projectId).appUrl ?? "the app's address";
+  setPassNotice(ctx, pass.id, {
+    id: NO_ANSWER_NOTICE_ID,
+    kind: PassNoticeKind.Preview,
+    text: `Nothing answers at ${appUrl}: its dev server isn't running, so no page is blamed and no picture is kept until it answers.`,
+    sendable: false,
+    cardId: null,
+    at: ctx.now,
+  });
+  return true;
+}
+
+/**
  * Judges one load of a pass page's route and writes what it means: the pass's preview, the page's
  * mark, the Move card and the header's notice. A pass no longer open, or a task it no longer holds,
  * is left alone.
@@ -144,6 +173,7 @@ export function judgePreview(deps: PreviewMarksDeps, input: JudgedLoad): void {
     if (pass?.state !== PassState.Open) return;
     const task = getTask(ctx.tx, input.taskId);
     if (passHoldingTask(ctx.tx, task)?.id !== pass.id) return;
+    if (noAnswerNotice(ctx, pass, input.load.outcome === ShotOutcome.NoAnswer)) return;
     const held = (taskId: TaskId) =>
       passHoldingTask(ctx.tx, getTask(ctx.tx, taskId))?.id === pass.id;
     const marks = listOpenPreviewMarks(ctx.tx, pass.id).filter((m) => held(m.taskId));

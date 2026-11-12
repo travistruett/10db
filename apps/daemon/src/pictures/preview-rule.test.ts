@@ -119,6 +119,24 @@ describe('previewStep', () => {
       step: { preview: Broken, mark: 'none', offerMove: false, unnamed: 'keep' },
     },
     {
+      name: 'a turn that finds nothing answering blames nobody and leaves the preview as it was',
+      state: state(),
+      load: turn(ShotOutcome.NoAnswer),
+      step: nothing(Clean),
+    },
+    {
+      name: "nothing answering doesn't count as the marked page's next broken turn",
+      state: state({ preview: Broken, mark: { turns: 1 } }),
+      load: turn(ShotOutcome.NoAnswer),
+      step: nothing(Broken),
+    },
+    {
+      name: 'a before that finds nothing answering sets no preview',
+      state: state({ preview: null }),
+      load: { kind: ScreenKind.Before, outcome: ShotOutcome.NoAnswer, halfWritten: false },
+      step: nothing(null),
+    },
+    {
       name: 'a broken before sets the preview and blames nobody',
       state: state({ preview: null }),
       load: { kind: ScreenKind.Before, outcome: ShotOutcome.Overlay, halfWritten: false },

@@ -13,14 +13,16 @@ export type BrowserStatus =
 
 /**
  * How a load went: the page as asked (`clean`), the page under a dev server's error overlay
- * (`overlay`), no page (`failed`, a landing off the app's origin included), or another page of the app
- * (`elsewhere`, such as a sign-in page).
+ * (`overlay`), no page (`failed`, a landing off the app's origin included), another page of the app
+ * (`elsewhere`, such as a sign-in page), or nothing answering at the app's address at all
+ * (`no_answer`: its dev server is not running).
  */
 export const ShotOutcome = {
   Clean: 'clean',
   Overlay: 'overlay',
   Failed: 'failed',
   Elsewhere: 'elsewhere',
+  NoAnswer: 'no_answer',
 } as const;
 export type ShotOutcome = (typeof ShotOutcome)[keyof typeof ShotOutcome];
 

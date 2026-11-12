@@ -80,7 +80,9 @@ export class FakeCamera implements PageCamera {
         ? 'the page did not settle within 60 s'
         : outcome === 'failed'
           ? 'HTTP 500'
-          : null,
+          : outcome === 'no_answer'
+            ? 'the app did not answer'
+            : null,
       cameraFailed,
     };
   }

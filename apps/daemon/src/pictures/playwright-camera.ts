@@ -98,11 +98,23 @@ async function load(page: Page, url: string): Promise<PageLoad> {
   try {
     const response = await page.goto(url, { waitUntil: 'load', timeout: LOAD_TIMEOUT_MS });
     if (unanswered(response)) {
-      return { error: APP_DID_NOT_ANSWER, landedUrl: null, status: null, overlayText: null };
+      return {
+        error: APP_DID_NOT_ANSWER,
+        landedUrl: null,
+        status: null,
+        overlayText: null,
+        unanswered: true,
+      };
     }
     status = response?.status() ?? null;
   } catch (error) {
-    return { error: loadFailure(error), landedUrl: null, status: null, overlayText: null };
+    return {
+      error: loadFailure(error),
+      landedUrl: null,
+      status: null,
+      overlayText: null,
+      unanswered: false,
+    };
   }
   await page.waitForLoadState('networkidle', { timeout: SETTLE_TIMEOUT_MS }).catch(() => undefined);
   await page
@@ -111,7 +123,13 @@ async function load(page: Page, url: string): Promise<PageLoad> {
       timeout: SETTLE_TIMEOUT_MS,
     })
     .catch(() => undefined);
-  return { error: null, landedUrl: page.url(), status, overlayText: await overlayOn(page) };
+  return {
+    error: null,
+    landedUrl: page.url(),
+    status,
+    overlayText: await overlayOn(page),
+    unanswered: false,
+  };
 }
 
 /** What one shot or sign-in runs with. */

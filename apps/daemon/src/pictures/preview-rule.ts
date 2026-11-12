@@ -55,7 +55,13 @@ function cleanStep(state: PreviewState, mark: MarkStep, marksLeft: boolean): Pre
 
 /** What one load of a task's page route does to the pass's preview, the task's mark and the header. */
 export function previewStep(state: PreviewState, load: PreviewLoad): PreviewStep {
-  if (load.halfWritten || load.outcome === ShotOutcome.Elsewhere) return keep(state.preview);
+  // Nothing answering means the app's dev server is not running: no page broke it.
+  if (
+    load.halfWritten ||
+    load.outcome === ShotOutcome.Elsewhere ||
+    load.outcome === ShotOutcome.NoAnswer
+  )
+    return keep(state.preview);
   const broken = load.outcome === ShotOutcome.Overlay || load.outcome === ShotOutcome.Failed;
   if (load.kind !== ScreenKind.Turn) {
     if (broken) return keep(PassPreview.Broken);

@@ -7,6 +7,7 @@ const loaded = (over: Partial<PageLoad> = {}): PageLoad => ({
   landedUrl: 'http://localhost:3000/people',
   status: 200,
   overlayText: null,
+  unanswered: false,
   ...over,
 });
 
@@ -31,6 +32,12 @@ describe('shotOutcome', () => {
       '/people',
       loaded({ error: 'net::ERR_CONNECTION_REFUSED', landedUrl: null, status: null }),
       { outcome: 'failed', reason: 'net::ERR_CONNECTION_REFUSED' },
+    ],
+    [
+      'nothing answering at the app address: the app is not running, not broken',
+      '/people',
+      loaded({ error: 'the app did not answer', landedUrl: null, status: null, unanswered: true }),
+      { outcome: 'no_answer', reason: 'the app did not answer' },
     ],
     [
       'a timeout',
