@@ -2,6 +2,7 @@ import type { PersonDto } from '@10db/contracts';
 import { Alert, Button, Group, Loader, Stack, Table, Text } from '@mantine/core';
 import { useState } from 'react';
 import { usePeople, useRemovePerson } from '../../../daemon/people';
+import { PersonAnswers } from './person-answers';
 import { PersonModal } from './person-modal';
 import { SlackConnection } from './slack-connection';
 import { StakeholderTimers } from './stakeholder-timers';
@@ -46,6 +47,7 @@ export function PeopleSection() {
               <Table.Th>Name</Table.Th>
               <Table.Th>Slack</Table.Th>
               <Table.Th>Sends</Table.Th>
+              <Table.Th>Answers</Table.Th>
               <Table.Th />
             </Table.Tr>
           </Table.Thead>
@@ -61,6 +63,9 @@ export function PeopleSection() {
                       : `@${person.handle}`}
                 </Table.Td>
                 <Table.Td>{sends(person)}</Table.Td>
+                <Table.Td>
+                  <PersonAnswers person={person} />
+                </Table.Td>
                 <Table.Td>
                   <Group gap="xs" justify="flex-end">
                     <Button

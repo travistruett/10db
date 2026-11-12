@@ -1,4 +1,10 @@
-import { EventType, InboxItemId, LANE_STATES, WorkstreamState } from '@10db/contracts';
+import {
+  EventType,
+  InboxItemId,
+  LANE_STATES,
+  WorkstreamState,
+  type InboxItemDto,
+} from '@10db/contracts';
 import { useComputedColorScheme } from '@mantine/core';
 import { CancelledError, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from '@tanstack/react-router';
@@ -6,7 +12,13 @@ import { useEffect, useRef } from 'react';
 import { useEventStream } from '../daemon/events';
 import { livePassesOptions } from '../daemon/pass-queries';
 import { useDaemon } from '../daemon/provider';
-import { inboxQueryOptions, useKeepAwake, useWorkstreams } from '../daemon/queries';
+import {
+  inboxQueryOptions,
+  queryKeys,
+  useInbox,
+  useKeepAwake,
+  useWorkstreams,
+} from '../daemon/queries';
 import { useSelectedProject } from '../shell/selected-project';
 import { useOpenInboxCount } from '../views/inbox/inbox-count';
 import {
@@ -15,8 +27,20 @@ import {
   readyPageOf,
   type PassPageTarget,
 } from './notify-pass';
-import { shouldNotifyOpened, triagedToBuilder } from './notify-card';
-import { bringWindowForward, isTauri, notifyNewCard, setWindowTheme, updateTray } from './tauri';
+import {
+  answeredNotice,
+  disagreementNotices,
+  shouldNotifyOpened,
+  triagedToBuilder,
+} from './notify-card';
+import {
+  bringWindowForward,
+  isTauri,
+  notifyNewCard,
+  notifyText,
+  setWindowTheme,
+  updateTray,
+} from './tauri';
 
 /** How often a card's read is asked again when an event's refetch of the Inbox cancels it. */
 const INBOX_READ_ATTEMPTS = 3;
@@ -101,8 +125,30 @@ export function useDesktopSync(): void {
     );
   }
 
+  // A card whose recipients disagreed is the builder's again; the first refetch that shows it says so.
+  const openBefore = useRef<readonly InboxItemDto[]>([]);
+  const inboxItems = useInbox().data;
+  useEffect(() => {
+    if (inboxItems === undefined) return;
+    for (const notice of disagreementNotices(openBefore.current, inboxItems))
+      notifyText(notice.title, notice.body).catch((error: unknown) => {
+        console.warn('10db: could not notify about a disagreement', error);
+      });
+    openBefore.current = inboxItems;
+  }, [inboxItems]);
+
   useEventStream((event) => {
     if (!isTauri()) return;
+    if (event.type === EventType.StakeholderSendChanged) {
+      // The refetch this event started has not replaced the Open cards yet, so the card is still there.
+      const notice = answeredNotice(event.data, queryClient.getQueryData(queryKeys.inbox) ?? []);
+      if (notice) {
+        notifyText(notice.title, notice.body).catch((error: unknown) => {
+          console.warn('10db: could not notify about an answer', error);
+        });
+      }
+      return;
+    }
     // A card placed with the builder after triage is as new to them as one that opened there.
     const triaged = event.type === EventType.InboxTriaged && triagedToBuilder(event.data);
     if (event.type !== EventType.InboxOpened && !triaged) return;

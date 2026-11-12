@@ -17,7 +17,7 @@ import {
   type SendInput,
   type TaskId,
 } from '@10db/contracts';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { z } from 'zod';
 import { readJson } from './client';
 import { useDaemon } from './provider';
@@ -159,6 +159,21 @@ export function useSetRoutingRules(projectId: ProjectId) {
         queryClient.invalidateQueries({ queryKey: ROUTING_RULES_KEY }),
         queryClient.invalidateQueries({ queryKey: QUESTION_ROUTES_KEY }),
       ]),
+  });
+}
+
+/** The routing rules of several projects at once, sharing the cache of `useRoutingRules`. */
+export function useRoutingRulesOfProjects(projectIds: readonly ProjectId[]) {
+  const { client } = useDaemon();
+  return useQueries({
+    queries: projectIds.map((projectId) => ({
+      queryKey: [...ROUTING_RULES_KEY, projectId],
+      queryFn: async () =>
+        readJson(
+          await client.projects[':projectId']['routing-rules'].$get({ param: { projectId } }),
+          RuleList,
+        ),
+    })),
   });
 }
 

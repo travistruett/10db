@@ -41,7 +41,9 @@ function slackAnswer(item: InboxItemDto, people: readonly PersonDto[]): string[]
   else if (readAs === 'own_words') lines.push('In their own words');
   else if (readAs === 'approved') {
     const others = answer.with ?? [];
-    lines.push(`Approved ${letter}${others.length > 0 ? ` · with ${others.join(', ')}` : ''}`);
+    // Handles are stored; the line names the people.
+    const names = others.map((handle) => people.find((p) => p.handle === handle)?.name ?? handle);
+    lines.push(`Approved ${letter}${names.length > 0 ? ` · with ${names.join(', ')}` : ''}`);
   }
   if (answer.words !== undefined) lines.push(answer.words);
   return lines;

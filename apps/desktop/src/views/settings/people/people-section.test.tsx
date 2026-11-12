@@ -1,4 +1,4 @@
-import { PersonInput, type PersonDto } from '@10db/contracts';
+import { mintId, PersonInput, type PersonDto } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -21,6 +21,7 @@ interface Options {
   readonly connection?: Record<string, unknown>;
   readonly tokenRefusal?: string;
   readonly removeRefusal?: string;
+  readonly rules?: unknown[];
 }
 
 function serve(options: Options = {}) {
@@ -30,6 +31,9 @@ function serve(options: Options = {}) {
   let connection = slackConnection(options.connection);
   server.use(
     http.get(daemonUrl('/people'), () => HttpResponse.json(people)),
+    http.get(daemonUrl('/projects/:projectId/routing-rules'), () =>
+      HttpResponse.json(options.rules ?? []),
+    ),
     http.get(daemonUrl('/slack'), () => HttpResponse.json(connection)),
     http.get(daemonUrl('/slack/members'), () =>
       HttpResponse.json([
@@ -243,6 +247,37 @@ describe('Settings › People: the list', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Remove Priya Shah' }));
     expect(await screen.findByText(/reroute them first/)).toBeTruthy();
     expect(screen.getByText('Priya Shah')).toBeTruthy();
+  });
+});
+
+describe('Settings › People: Answers', () => {
+  it('lists the routes a person answers as links to Who Answers, and the builder as everything else', async () => {
+    const mark = personDto({ name: 'Mark Ellis', handle: 'mark' });
+    const rule = (category: string, goal: boolean) => ({
+      id: mintId('RoutingRule'),
+      projectId: mintId('Project'),
+      category,
+      topic: null,
+      goalId: goal ? mintId('Goal') : null,
+      taskId: null,
+      area: null,
+      personId: mark.id,
+      createdAt: '2026-10-13T12:00:00.000Z',
+      updatedAt: '2026-10-13T12:00:00.000Z',
+    });
+    serve({
+      people: [BUILDER_PERSON, mark, personDto({ name: 'Priya Shah' })],
+      rules: [rule('product', true), rule('design', false)],
+    });
+    const link = await screen.findByRole('link', { name: /Demo · product \(a goal\), design/ });
+    expect(link.getAttribute('href')).toBe('/settings/routing-rules');
+    expect(
+      within(screen.getByRole('row', { name: /Travis/ })).getByText('everything else'),
+    ).toBeTruthy();
+    // Sends and Answers are both empty for her.
+    expect(within(screen.getByRole('row', { name: /Priya Shah/ })).getAllByText('—')).toHaveLength(
+      2,
+    );
   });
 });
 

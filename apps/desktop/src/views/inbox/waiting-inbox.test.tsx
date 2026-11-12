@@ -49,7 +49,14 @@ function serve(
   const calls: { path: string; body?: unknown }[] = [];
   server.use(
     http.get(daemonUrl('/inbox'), () => HttpResponse.json(items)),
-    http.get(daemonUrl('/people'), () => HttpResponse.json([BUILDER_PERSON, mark, ana])),
+    http.get(daemonUrl('/people'), () =>
+      HttpResponse.json([
+        BUILDER_PERSON,
+        mark,
+        ana,
+        personDto({ name: 'Priya Shah', handle: 'priya' }),
+      ]),
+    ),
     http.get(daemonUrl('/slack'), () => HttpResponse.json(slackConnection(connection))),
     http.post(daemonUrl('/inbox/:id/take-back'), ({ params }) => {
       calls.push({ path: `take-back:${String(params['id'])}` });
@@ -249,7 +256,7 @@ describe('Resolved cards answered in Slack', () => {
       'an approval with others',
       { readAs: 'approved' },
       { with: ['priya'] },
-      ['Approved B · with priya'],
+      ['Approved B · with Priya Shah'],
     ],
   ])('%s', async (_name, send, answer, texts) => {
     const item = answered(send, answer);

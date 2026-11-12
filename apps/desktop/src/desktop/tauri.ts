@@ -162,3 +162,10 @@ export async function notifyNewCard(item: InboxItemDto): Promise<void> {
     body: item.title,
   });
 }
+
+/** A macOS notification with the given words, only while the window isn't focused. */
+export async function notifyText(title: string, body: string): Promise<void> {
+  if (!isTauri() || document.hasFocus()) return;
+  if (!(await canNotify())) return;
+  sendNotification({ title, body });
+}
