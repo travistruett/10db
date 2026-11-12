@@ -39,7 +39,7 @@ call 2). Runs alone: the roadmap runs M4a, M4b and M4c one at a time.
   once. Never edit a generated file, never regenerate or delete a migration. Each task below generates its
   migration once, from a schema the task's test already pins.
 - A column a rebuild must copy is added by `ALTER TABLE` in an earlier migration than the rebuild (the 0027/0028
-  rule): `sessions.conversation_id` comes in 0065, and `sessions` is rebuilt in 0067.
+  rule): `sessions.conversation_id` comes in 0066, and `sessions` is rebuilt in 0068.
 - `migrateDatabase` switches `foreign_keys` off around the migrations and runs `foreign_key_check` after
   (`packages/db/src/database.ts:101-127`); a dangling reference throws `MigrationIntegrityError`. Every seed in a
   migration test is written with `foreign_keys = ON`, so a violation after migrating is the migration's.
@@ -105,10 +105,10 @@ Each is marked **(call)** where it is used.
     one write, and removing the files a failed write left. The pass's refusals and the Ready-turn mark stay in
     `thread/` until M4c moves the routes.
 14. **The module order gains `conversation` only.** `chat` joins the line in M5a, when the module exists.
-15. **Generated migration names:** `0065_conversation_tables`, `0066_conversation_copy` (custom),
-    `0067_session_conversation`, `0068_shadow_answer_items`, `0069_pass_turn_items`, `0070_drop_old_transcripts`.
-    These follow the stakeholder questions build, which takes 0062–0064 and merges first (its plan's "Building
-    beside Sessions"). If that build merges after M4a instead, it renumbers, and these go back to 0062–0067
+15. **Generated migration names:** `0066_conversation_tables`, `0067_conversation_copy` (custom),
+    `0068_session_conversation`, `0069_shadow_answer_items`, `0070_pass_turn_items`, `0071_drop_old_transcripts`.
+    These follow the stakeholder questions build, which takes 0063–0065 and merges first (its plan's "Building
+    beside Sessions"). If that build merges after M4a instead, it renumbers, and these go back to 0063–0068
     seeded from 0061.
 16. **`AgentSessionCore.conversationId` is `ConversationId | null`.** Plan's explore spec always names its
     conversation; a lane names its task's, or null while the task has no thread. The explore profile keeps
@@ -137,8 +137,8 @@ Each is marked **(call)** where it is used.
 | `packages/contracts/src/ids.ts` | ID kinds read several prefixes; the four new kinds |
 | `packages/contracts/src/conversation.ts` (new) | owner kinds, profiles, states, item authors and kinds, item bodies |
 | `packages/db/src/schema.ts` | the four tables, `sessions.conversation_id`, the rebuilt references |
-| `packages/db/drizzle/0065…0070` (generated, one custom) | the migrations |
-| `packages/db/src/migrations-conversations.test.ts` (new) | the seeded-0064 migration test |
+| `packages/db/drizzle/0066…0071` (generated, one custom) | the migrations |
+| `packages/db/src/migrations-conversations.test.ts` (new) | the seeded-0065 migration test |
 | `packages/db/src/store/conversations.ts` (new) | conversation rows: insert, read by id or owner, patch |
 | `packages/db/src/store/conversation-items.ts` (new) | items: insert with `seq`, list, delivery marks, push-uuid lookup |
 | `packages/db/src/store/conversation-files.ts` (new) | files: insert, list, marks |
@@ -229,7 +229,7 @@ git add packages/contracts/src/ids.ts packages/contracts/src/conversation.ts pac
 
 **Files:**
 - Modify: `packages/db/src/schema.ts` (new tables after `taskFiles`, `:1381`; `sessions`, `:605-658`)
-- Create: `packages/db/drizzle/0065_conversation_tables.sql` and its snapshot (generated)
+- Create: `packages/db/drizzle/0066_conversation_tables.sql` and its snapshot (generated)
 - Test: `packages/db/src/schema.test.ts` (new `describe('the conversation tables')`)
 
 **Interfaces:**
@@ -314,19 +314,19 @@ export const conversationFiles = sqliteTable('conversation_files', {
 - [ ] **Step 5: Commit.**
 
 ```bash
-git add packages/db/src/schema.ts packages/db/src/schema.test.ts packages/db/drizzle/0065_conversation_tables.sql packages/db/drizzle/meta/0065_snapshot.json packages/db/drizzle/meta/_journal.json && git commit -m 'feat(db): the conversation, item, file and chat tables' -m 'Value: protects=seq is unique per conversation and one conversation per owner; fails_when=either unique index is lost; why_new=no table held a conversation before; no_claim=nothing is copied or written yet'
+git add packages/db/src/schema.ts packages/db/src/schema.test.ts packages/db/drizzle/0066_conversation_tables.sql packages/db/drizzle/meta/0066_snapshot.json packages/db/drizzle/meta/_journal.json && git commit -m 'feat(db): the conversation, item, file and chat tables' -m 'Value: protects=seq is unique per conversation and one conversation per owner; fails_when=either unique index is lost; why_new=no table held a conversation before; no_claim=nothing is copied or written yet'
 ```
 
 ---
 
-### Task 3: The data copy, tested from a seeded 0064 database
+### Task 3: The data copy, tested from a seeded 0065 database
 
 **Files:**
-- Create: `packages/db/drizzle/0066_conversation_copy.sql` (`--custom`, written by hand once) and its snapshot
+- Create: `packages/db/drizzle/0067_conversation_copy.sql` (`--custom`, written by hand once) and its snapshot
 - Create: `packages/db/src/store/transcript-kinds.ts`, `transcript-kinds.test.ts`
 - Create: `packages/db/src/migrations-conversations.test.ts`
 - Create: `docs/architecture/decisions/<today>-one-conversation-store-keeps-ids-and-orders-by-seq.md`
-- Modify: `packages/db/AGENTS.md` (a bullet after the migration 0064 one)
+- Modify: `packages/db/AGENTS.md` (a bullet after the migration 0065 one)
 
 **Interfaces:**
 - Consumes: Task 2's tables; `migrateDatabase`, `openDatabase`, `DB_MIGRATIONS_DIR` (`packages/db/src/index.ts`);
@@ -344,7 +344,7 @@ git add packages/db/src/schema.ts packages/db/src/schema.test.ts packages/db/dri
   - `planLinePreview(line: string): string`: the first 100 code points (call 4)
 
 - [ ] **Step 1: Make the empty custom migration.** `pnpm --filter @10db/db exec drizzle-kit generate --custom --name conversation_copy`.
-  It writes an empty `0066_conversation_copy.sql` and a snapshot equal to 0065's. Neither is committed until Step 7,
+  It writes an empty `0067_conversation_copy.sql` and a snapshot equal to 0066's. Neither is committed until Step 7,
   so the SQL can change until the test and the maps agree with it.
 
 - [ ] **Step 2: Write the failing tests.** `transcript-kinds.test.ts`: one row per `ShapeMessageKind` ×
@@ -352,7 +352,7 @@ git add packages/db/src/schema.ts packages/db/src/schema.test.ts packages/db/dri
   of `m`; one row per `TaskMessageKind` × `TaskMessageAuthor` for the task pair; `planLinePreview` of 150 emoji
   answers 100 of them and parses as `other.inputPreview`.
 
-  `migrations-conversations.test.ts` copies the shipped migrations cut before `0065_conversation_tables`
+  `migrations-conversations.test.ts` copies the shipped migrations cut before `0066_conversation_tables`
   (`migrationsBefore`), migrates a temp-dir database to there, seeds it with `foreign_keys = ON`, then runs
   `migrateDatabase(db)` to the head. Seed, with minted ids, minting the rows of different owners alternately so
   their ids interleave (a copy that partitions or joins on the wrong column then mixes them):
@@ -490,7 +490,7 @@ WHERE `workstream_id` IS NOT NULL;
 - [ ] **Step 4b: Write `transcript-kinds.ts`** with the signatures above, so both tests can pass together.
 
 - [ ] **Step 5: Run them and watch them pass.** Same command. Expected: PASS. A row that disagrees between the SQL
-  and `shapeItemOf` or `taskItemOf` is fixed now, before 0066 is committed and frozen. Then
+  and `shapeItemOf` or `taskItemOf` is fixed now, before 0067 is committed and frozen. Then
   `pnpm --filter @10db/db exec vitest run` and `make check-changed`.
 
 - [ ] **Step 6: Write the decision record.** `docs/architecture/decisions/<today>-one-conversation-store-keeps-ids-and-orders-by-seq.md`:
@@ -504,7 +504,7 @@ WHERE `workstream_id` IS NOT NULL;
 
 - Plan's transcripts and files (`shape_messages`, `shape_files`) and the tasks' threads (`task_messages`,
   `task_files`) move into `conversations`, `conversation_items` and `conversation_files`, by one forward `--custom`
-  migration (0066) between generated ones. The old tables are dropped (0070).
+  migration (0067) between generated ones. The old tables are dropped (0071).
 - Every row keeps its id. `ConversationItemId` reads `cvi_`, `shm_` and `tmg_`; `ConversationFileId` reads `cvf_`,
   `sfl_` and `tfl_` (`packages/contracts/src/ids.ts`); only `cvi_` and `cvf_` are minted. A migrated conversation's
   id is `cnv_` and its owner's UUID.
@@ -532,13 +532,13 @@ WHERE `workstream_id` IS NOT NULL;
   builder message as one waiting to be sent.
 ```
 
-  Add to `packages/db/AGENTS.md` one bullet: "Conversations, migrations 0065 (generated), 0066 (`--custom`,
-  never regenerated), 0067–0070 (generated): …" naming the tables, the copy's rules and the decision file.
+  Add to `packages/db/AGENTS.md` one bullet: "Conversations, migrations 0066 (generated), 0067 (`--custom`,
+  never regenerated), 0068–0071 (generated): …" naming the tables, the copy's rules and the decision file.
 
 - [ ] **Step 7: Commit.**
 
 ```bash
-git add packages/db/drizzle/0066_conversation_copy.sql packages/db/drizzle/meta/0066_snapshot.json packages/db/drizzle/meta/_journal.json packages/db/src/migrations-conversations.test.ts packages/db/src/store/transcript-kinds.ts packages/db/src/store/transcript-kinds.test.ts packages/db/src/store/index.ts packages/db/AGENTS.md docs/architecture/decisions/<today>-one-conversation-store-keeps-ids-and-orders-by-seq.md && git commit -m 'feat(db): copy Plan transcripts and task threads into conversations, keeping ids' -m 'Value: protects=every Plan and thread row reaches its own conversation with its id, delivery fields and order, the SQL and the code map each kind alike, and every reference still resolves; fails_when=the copy drops, reorders, renumbers or mixes rows across owners, or a reference dangles; why_new=no test migrated a transcript; no_claim=the services do not read the new tables yet'
+git add packages/db/drizzle/0067_conversation_copy.sql packages/db/drizzle/meta/0067_snapshot.json packages/db/drizzle/meta/_journal.json packages/db/src/migrations-conversations.test.ts packages/db/src/store/transcript-kinds.ts packages/db/src/store/transcript-kinds.test.ts packages/db/src/store/index.ts packages/db/AGENTS.md docs/architecture/decisions/<today>-one-conversation-store-keeps-ids-and-orders-by-seq.md && git commit -m 'feat(db): copy Plan transcripts and task threads into conversations, keeping ids' -m 'Value: protects=every Plan and thread row reaches its own conversation with its id, delivery fields and order, the SQL and the code map each kind alike, and every reference still resolves; fails_when=the copy drops, reorders, renumbers or mixes rows across owners, or a reference dangles; why_new=no test migrated a transcript; no_claim=the services do not read the new tables yet'
 ```
 
 ---
@@ -630,7 +630,7 @@ export function listUntoldFiles(db: DbReader, conversationId: ConversationId): C
 **Files:**
 - Modify: `packages/db/src/schema.ts` (`shapes` `:1227-1250` drops `sdkSessionId`, `model`; `sessions` drops `shapeId`,
   its index, and `sessions_one_owner`, gains `check('sessions_has_owner', …)` **(call 9)**)
-- Create: `packages/db/drizzle/0067_session_conversation.sql` (generated)
+- Create: `packages/db/drizzle/0068_session_conversation.sql` (generated)
 - Modify: `packages/db/src/store/shapes.ts` (`insertShape :35-62`, `getShape :64-68`, `shapeTokens :76-86`,
   `listShapes :89-96`), `shape-state.ts` (`patchShape :47-61`, `getShapeSdkSessionId :64-73`), `sessions.ts`
   (`SessionOwner :30-32`, `projectOwner :51-73`, `insertSession :75-115`), `usage.ts:41-55`
@@ -681,7 +681,7 @@ export function listUntoldFiles(db: DbReader, conversationId: ConversationId): C
   Expected: FAIL on the session owner and on `shape_id` still present.
 
 - [ ] **Step 3: Change the schema and generate.** `pnpm --filter @10db/db generate --name session_conversation`. Read
-  the SQL: a `__new_sessions` rebuild that copies `conversation_id` (added in 0065) and no `shape_id`, under the new
+  the SQL: a `__new_sessions` rebuild that copies `conversation_id` (added in 0066) and no `shape_id`, under the new
   CHECK; `shapes` loses two columns. Then the repositories and the three daemon call sites. In
   `database.test.ts:539-626`, migrate through `0028_session_owner` instead of to the head, since that test checks
   0028's CHECK and `shape_id`; say so in the commit body.
@@ -700,7 +700,7 @@ export function listUntoldFiles(db: DbReader, conversationId: ConversationId): C
 **Files:**
 - Modify: `packages/db/src/store/shape-state.ts` (`:77-153` transcript, `:220-323` files), `shape-shadow.ts`
 - Modify: `packages/db/src/schema.ts` (`shapeShadowAnswers.messageId` → `conversationItems.id`, `:1594-1615`)
-- Create: `packages/db/drizzle/0068_shadow_answer_items.sql` (generated)
+- Create: `packages/db/drizzle/0069_shadow_answer_items.sql` (generated)
 - Modify: `apps/daemon/src/shape/service.ts:1015-1024` (the never-spoke start lists the builder messages before the
   turn's by position in the `seq`-ordered transcript, not `m.id < turn.messageId`)
 - Modify: `packages/contracts/src/ids.ts` (drop the `ShapeMessage` and `ShapeFile` kinds; `ShapeMessageId` and
@@ -763,7 +763,7 @@ export function listUntoldFiles(db: DbReader, conversationId: ConversationId): C
 - Modify: `packages/db/src/store/task-thread.ts` (every function, `:25-453`), `pass-turns.ts:116-125`,
   `pass-previews.ts:166-170`, `sessions.ts` (a lane session takes its task's conversation)
 - Modify: `packages/db/src/schema.ts` (`passTurns.messageId` and `passPreviewMarks.noticeId` → `conversationItems.id`)
-- Create: `packages/db/drizzle/0069_pass_turn_items.sql` (generated)
+- Create: `packages/db/drizzle/0070_pass_turn_items.sql` (generated)
 - Modify: `packages/contracts/src/ids.ts` (drop `TaskMessage`, `TaskFile`; `TaskMessageId` and `TaskFileId` become
   aliases **(call 10)**)
 - Modify: `apps/daemon/src/runner/lane-messages.ts:186-191` (`idOfUuid` → `findTaskMessageByUuid`), and the
@@ -841,7 +841,7 @@ export function listUntoldFiles(db: DbReader, conversationId: ConversationId): C
 
 **Files:**
 - Modify: `packages/db/src/schema.ts` (remove `shapeMessages`, `shapeFiles`, `taskMessages`, `taskFiles`)
-- Create: `packages/db/drizzle/0070_drop_old_transcripts.sql` (generated)
+- Create: `packages/db/drizzle/0071_drop_old_transcripts.sql` (generated)
 - Modify: `packages/db/src/database.test.ts:930-982` (migrate through `0044_shape_files_inline_sent_backfill`, the
   migration it tests, since `shape_files` is gone at the head)
 - Modify: `packages/db/AGENTS.md` (the conversation bullet: the drop; mark the Shape and Task-thread bullets'
@@ -993,7 +993,7 @@ export function removeKeptFiles(paths: readonly string[]): void;
 
 ### Task 12: Run it, review it, open the pull request
 
-- [ ] **Step 1: Make a 0064 data directory on `main`, for free.** In the main checkout, on `main`, run
+- [ ] **Step 1: Make a 0065 data directory on `main`, for free.** In the main checkout, on `main`, run
   `pnpm --filter @10db/desktop e2e`. Its fake agent (`TENDB_FAKE_SCRIPTS`, `apps/desktop/e2e/script-book.json`)
   leaves Plan conversations (`shape.spec.ts`) and a pass with page threads (`workbench.spec.ts`) in the folder it
   prints as `e2e data: <path>`, and the next e2e run deletes it. Copy it before anything else runs:
@@ -1033,8 +1033,8 @@ export function removeKeptFiles(paths: readonly string[]): void;
 | A1 (blocking) `m.id <` comparisons at `thread/session-text.ts:64` and `shape/service.ts:1022` | Global Constraints (no id-order comparison, with a grep); Review Focus 2; Task 6 (Plan's never-spoke start, a `resume.test.ts` row); Task 7 (`buildThreadDigest`, a `session-text.test.ts` row; the grep at Step 4) |
 | A2 (high) tests called unmodified that break | Global Constraints (which three change, and how); Task 7 Files (the trigger on `conversation_items`, the `reply` helper through `insertItem`, `cvi_`, every rename by file:line) and Step 4; Tasks 10 and 11 wording |
 | A3 (medium) seed can't catch a wrong join or partition | Task 3 seed: project `P2` on `B`, `S3` and `T3` interleaving by id with `S1` and `T1`, `T3`'s latest session on `B`; assertions per conversation |
-| A4 (medium) `substr` counts code points, zod counts UTF-16 units | Call 4 (100 code points in SQL and TypeScript, `planLinePreview`); the 0066 SQL; Task 3 emoji seed row and `transcript-kinds.test.ts` row; Task 6 round-trip row |
-| A5 (medium) the SQL-vs-map check ran after 0066 froze | Task 3 creates `transcript-kinds.ts` and checks every copied row against it before Step 7 commits 0066; Task 6 consumes it |
+| A4 (medium) `substr` counts code points, zod counts UTF-16 units | Call 4 (100 code points in SQL and TypeScript, `planLinePreview`); the 0067 SQL; Task 3 emoji seed row and `transcript-kinds.test.ts` row; Task 6 round-trip row |
+| A5 (medium) the SQL-vs-map check ran after 0067 froze | Task 3 creates `transcript-kinds.ts` and checks every copied row against it before Step 7 commits 0067; Task 6 consumes it |
 | A6 (medium) `migrateDatabase` commits before `foreign_key_check` | Task 12 Step 3: migrate an online copy of the builder's database and compare per-table counts |
 | A7 (low) the cap is 32 KB and needs an owner | Call 8 (32 KB, new items only); owned by M4b Task 8 |
 | A8 (low) byte-identical one-prefix regexes | Task 1 Steps 3 and 4 (`generated/` must not change) |
