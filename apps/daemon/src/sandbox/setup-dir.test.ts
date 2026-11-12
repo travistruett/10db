@@ -212,6 +212,18 @@ describe('keepSetup and createSetupDir', () => {
     expect(kept.secretFiles).toEqual([join(home, '.claude/skills/s/.env')]);
   });
 
+  it('lists a .env directory under a read as one secret and does not walk into it', () => {
+    const s = builderSkill('s');
+    const secret = join(home, '.claude/skills/s/.env.d');
+    mkdirSync(join(secret, 'locked'), { recursive: true });
+    writeFileSync(join(secret, 'prod'), 'TOKEN=x');
+    chmodSync(join(secret, 'locked'), 0o000);
+    unlistable.push(join(secret, 'locked'));
+    const kept = keepSetup(input({ skills: [s] }), refuse, home);
+    expect(kept.keptSkills).toEqual([s]);
+    expect(kept.secretFiles).toEqual([secret]);
+  });
+
   it('writes the project’s copies under project/', () => {
     const made = createSetupDir(
       filesRoot,

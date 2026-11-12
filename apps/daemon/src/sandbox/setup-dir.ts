@@ -34,8 +34,9 @@ export interface SessionSetup {
   readonly loaded: { readonly skills: readonly string[]; readonly plugins: readonly string[] };
   readonly leftOut: readonly LeftOut[];
   /**
-   * The `.env*` files under the reads, and the real paths of `.env*` links: the profile, the file tools'
-   * rules and the file-access judge keep each closed inside an opened folder.
+   * The `.env*` files and folders under the reads, and the real paths of `.env*` links: the profile, the
+   * file tools' rules and the file-access judge keep each closed, a folder with its tree, inside an opened
+   * folder.
    */
   readonly secretFiles: readonly string[];
 }
@@ -63,7 +64,7 @@ export interface KeptSetup {
   readonly keptPlugins: KeptPlugin[];
   /** The folders to open, collapsed. */
   readonly reads: string[];
-  /** The `.env*` files under the reads, and the real paths of `.env*` links: denied inside them. */
+  /** The `.env*` files and folders under the reads, and the real paths of `.env*` links: denied inside them. */
   readonly secretFiles: string[];
   readonly leftOut: LeftOut[];
 }
@@ -86,8 +87,9 @@ function shown(path: string, home: string): string {
 }
 
 /**
- * Every `.env*` file under `root` (and the real path of a `.env*` link), not entering links,
- * `node_modules` or `.git`; or the first folder that can't be listed, since it could hide one.
+ * Every `.env*` file or folder under `root` (and the real path of a `.env*` link), not entering links,
+ * `.env*` folders, `node_modules` or `.git`; or the first folder that can't be listed, since it could
+ * hide one.
  */
 function walkSecrets(root: string): { secrets: string[] } | { unlistable: string } {
   const secrets: string[] = [];
@@ -102,12 +104,13 @@ function walkSecrets(root: string): { secrets: string[] } | { unlistable: string
     }
     for (const entry of entries) {
       const path = join(dir, entry.name);
-      if (entry.isDirectory()) {
-        if (!UNWALKED_DIRECTORIES.has(entry.name)) pending.push(path);
-      } else if (foldPathCase(entry.name).startsWith(SECRET_FILE_PREFIX)) {
+      // A `.env*` folder is a secret as a whole: it is denied, not walked.
+      if (foldPathCase(entry.name).startsWith(SECRET_FILE_PREFIX)) {
         secrets.push(path);
         const real = entry.isSymbolicLink() ? realOrNull(path) : null;
         if (real !== null) secrets.push(real);
+      } else if (entry.isDirectory() && !UNWALKED_DIRECTORIES.has(entry.name)) {
+        pending.push(path);
       }
     }
   }
