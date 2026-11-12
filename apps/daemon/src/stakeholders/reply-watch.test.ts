@@ -695,6 +695,22 @@ describe('the reminder', () => {
   });
 });
 
+describe('a thread with several questions', () => {
+  it('never answers an open question from a reply to a later one that was answered', async () => {
+    const s = scene();
+    const task = s.asker();
+    const first = await s.send([s.mark], { asker: task, title: 'First?' });
+    const second = await s.send([s.mark], { asker: task, title: 'Second?' });
+    expect(second.threadTs).toBe(first.threadTs);
+    slack.say(first.channel, 'UMARK', 'B', first.threadTs);
+    await ticks(2);
+    expect(card(second.cardId).answer).toMatchObject({ choice: 'No', via: 'slack' });
+    await ticks(5);
+    expect(card(first.cardId).state).toBe('OPEN');
+    expect(openSends(store.db).map((o) => o.id)).toEqual([first.sendId]);
+  });
+});
+
 describe('bringing someone in', () => {
   const group = (...users: string[]) => `G-${users.join('-')}`;
 

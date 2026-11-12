@@ -29,6 +29,7 @@ import {
   setHeldBy,
   setLastRead,
   setProposal,
+  threadStarts,
   updateDraft,
 } from './stakeholder-sends';
 import type { Store } from './store';
@@ -360,6 +361,39 @@ describe('sends', () => {
       approvalSeenAt: null,
       loneReplyPendingSince: null,
     });
+  });
+
+  it('lists where every send begins in a thread, answered or moved ones included', () => {
+    const w = world();
+    const a = draft(w.card('a'), [w.mark.id]);
+    sent(a.id);
+    const b = draft(w.card('b'), [w.mark.id]);
+    store.write((ctx) => {
+      markSending(ctx, b.id, { textSha256: 'x', threadTs: '100.1', startedAt: T0 });
+      markSent(ctx, b.id, {
+        channelId: 'D1',
+        threadTs: '100.1',
+        messageTs: '150.1',
+        permalink: null,
+        at: T0,
+      });
+      markAnswered(ctx, b.id, {
+        reply: { text: 'A', userId: 'U1', ts: '160.1' },
+        readAs: 'option',
+        answeredBy: w.mark.id,
+        replyVia: 'thread',
+      });
+      moveSend(ctx, a.id, {
+        channelId: 'G1',
+        threadTs: '300.1',
+        messageTs: '300.1',
+        permalink: null,
+        added: [],
+      });
+    });
+    expect(threadStarts(store.db, 'D1', '100.1').sort()).toEqual(['100.1', '150.1']);
+    expect(threadStarts(store.db, 'G1', '300.1')).toEqual(['300.1']);
+    expect(threadStarts(store.db, 'D1', 'other')).toEqual([]);
   });
 
   it('forgets the proposal, the approval and the pending reply when a send moves', () => {

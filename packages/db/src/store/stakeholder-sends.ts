@@ -541,6 +541,33 @@ export function sendThreadsOf(
   return threads;
 }
 
+/**
+ * Where each send's own part of a thread begins, whatever state it is in: the `ts` of its question in that
+ * thread, or of the question it left behind when it moved. A question already answered still ends the part
+ * before it, so a reply to it is never read as an answer to an earlier one.
+ */
+export function threadStarts(db: DbReader, channelId: string, threadTs: string): string[] {
+  return db
+    .select({
+      messageTs: schema.stakeholderSends.messageTs,
+      channelId: schema.stakeholderSends.channelId,
+      threadTs: schema.stakeholderSends.threadTs,
+      movedFrom: schema.stakeholderSends.movedFrom,
+    })
+    .from(schema.stakeholderSends)
+    .where(
+      sql`(${schema.stakeholderSends.channelId} = ${channelId} AND ${schema.stakeholderSends.threadTs} = ${threadTs})
+        OR (json_extract(${schema.stakeholderSends.movedFrom}, '$.channelId') = ${channelId}
+          AND json_extract(${schema.stakeholderSends.movedFrom}, '$.threadTs') = ${threadTs})`,
+    )
+    .all()
+    .flatMap((row) => {
+      if (row.channelId === channelId && row.threadTs === threadTs && row.messageTs !== null)
+        return [row.messageTs];
+      return row.movedFrom ? [row.movedFrom.messageTs] : [];
+    });
+}
+
 /** Every send waiting for an answer, oldest first. */
 export function openSends(db: DbReader): OpenSendRow[] {
   return db

@@ -13,6 +13,7 @@ import {
   markApprovalSeen,
   markLoneReplyPending,
   setProposal,
+  threadStarts,
   markReminded,
   openSends,
   sendForCard,
@@ -103,19 +104,6 @@ function dedupe(messages: readonly SlackMessage[]): SlackMessage[] {
 /** The first `ts` of a conversation: the question's own, or where it started before it moved. */
 const floorOf = (open: OpenSendRow): string => open.movedFrom?.messageTs ?? open.messageTs;
 
-/**
- * Where each open send's own part of a thread begins, in `channel` and `thread`: its question there, or the
- * question it left behind when it moved. A send's part ends where the next one begins.
- */
-function startsIn(opens: readonly OpenSendRow[], channel: string, thread: string): string[] {
-  return opens.flatMap((o) => {
-    if (o.channelId === channel && o.threadTs === thread) return [o.messageTs];
-    if (o.movedFrom?.channelId === channel && o.movedFrom.threadTs === thread)
-      return [o.movedFrom.messageTs];
-    return [];
-  });
-}
-
 const firstAfter = (starts: readonly string[], ts: string): string | undefined =>
   starts.filter((t) => compareTs(t, ts) > 0).sort(compareTs)[0];
 
@@ -191,7 +179,7 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
           compareTs(m.ts, from) > 0 && (until === undefined || compareTs(m.ts, until) < 0);
         const inCurrent = within(
           open.messageTs,
-          firstAfter(startsIn(opens, open.channelId, open.threadTs), open.messageTs),
+          firstAfter(threadStarts(state.db, open.channelId, open.threadTs), open.messageTs),
         );
         const thread = threadMessages.get(open.threadTs) ?? [];
         const old = open.movedFrom
@@ -205,7 +193,7 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
           ? within(
               open.movedFrom.messageTs,
               firstAfter(
-                startsIn(opens, open.movedFrom.channelId, open.movedFrom.threadTs),
+                threadStarts(state.db, open.movedFrom.channelId, open.movedFrom.threadTs),
                 open.movedFrom.messageTs,
               ),
             )
