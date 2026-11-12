@@ -40,8 +40,5 @@
   current proposals and pins.
 - Images are read from disk at turn time, so a 20 MB image is base64 in memory for that turn.
 - A mislabelled image is refused by its magic bytes, because Claude rejects it and that would end the turn.
-
-## Not done
-
-- macOS dictation in the Tauri window's Shape input is not checked by a person; only the input's structure is
-  tested (a native textarea, no contenteditable, no blocking attributes).
+- macOS dictation into the Tauri window's Shape input is checked by hand (it works on macOS 27.2); a test pins
+  only the input's structure (a native textarea, no contenteditable, no blocking attributes).
