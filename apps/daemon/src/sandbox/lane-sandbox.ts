@@ -1,7 +1,9 @@
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync, realpathSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { Provider, type PermissionRuleDto, type ProjectDto } from '@10db/contracts';
 import type { Clock } from '../clock';
-import { besideTheWay } from './beside-the-way';
+import { foldPathCase } from '../guard';
+import { besideTheWays } from './beside-the-way';
 import { prepareCommandEnv, withoutTempDirPaths } from './command-env';
 import { dockerAccess, dockerEnvNames } from './docker-access';
 import { deniedEnvNames } from './env-allowlist';
@@ -15,7 +17,12 @@ import {
   type StdioMcpServer,
 } from './mcp-sandbox';
 import { buildLaneProfile, readListOverSandboxRoots, type LaneSandboxSettings } from './profile';
-import { laneRootsOf, projectAccess, type ProjectAccessDeps } from './project-access';
+import {
+  laneRootsOf,
+  projectAccess,
+  type ProjectAccess,
+  type ProjectAccessDeps,
+} from './project-access';
 import {
   createLaneProcessWatch,
   createLedgerSweep,
@@ -28,6 +35,15 @@ import {
 } from './lane-processes';
 import { cachedProcessTable, systemOpenPaths, systemProcessTable } from './process-table';
 import { isEqualOrUnder } from './protected-reads';
+import {
+  createSetupDir,
+  EMPTY_SETUP,
+  keepSetup,
+  type SessionSetup,
+  type SetupJudge,
+} from './setup-dir';
+import type { SetupInput } from './setup-input';
+import { holdsSessionGround, setupReadRefusal } from './setup-reads';
 import { allowlisted, type SandboxRuntime } from './srt-launch';
 import { autoModeRules, type AutoModeSettings } from './auto-mode-rules';
 import {
@@ -85,6 +101,8 @@ export interface LaneSession {
   readonly mcpServers: Readonly<Record<string, SandboxedMcpServer>>;
   /** Approved stdio servers left out because their sandbox couldn't be built. */
   readonly mcpFailures: readonly McpSandboxFailure[];
+  /** What the session's setup brought along, as the sandbox kept it; empty without a setup. */
+  readonly setup: SessionSetup;
   setProviderSession(id: string): void;
   /**
    * Starts watching the processes under the session's own process, the lane's commands among them.
@@ -142,10 +160,27 @@ export interface LaneSessionInput {
    * directory holds them (Workbench spec §13). Its commands read none. Plan has no task, so none.
    */
   readonly taskFiles?: string;
+  /**
+   * The builder's skills and plugins and the project's cleaned definitions to bring along. Each real
+   * path is judged before it opens read-only to the session; none is given to the gate or a repo server.
+   */
+  readonly setup?: SetupInput;
+}
+
+/** What a session's setup would load and leave out, judged as a session judges it; nothing is written. */
+export interface SetupJudgement {
+  readonly loaded: SessionSetup['loaded'];
+  readonly leftOut: SessionSetup['leftOut'];
 }
 
 export interface LaneSandbox {
   forSession(input: LaneSessionInput): Promise<LaneSession>;
+  /** The Settings preview of a project's setup: `keepSetup` against the project's access. */
+  judgeSetup(
+    project: LaneSessionInput['project'],
+    input: SetupInput,
+    checkouts?: readonly string[],
+  ): Promise<SetupJudgement>;
 }
 
 /** The daemon's logger, as far as the sandbox tells it what it could not do. */
@@ -230,6 +265,39 @@ function tempDirLimit(provider: Provider): number | null {
 /** Claude Code's spelling of an absolute path in a permission rule: `//` stands for the root. */
 const ruleScope = (path: string): string => `/${path}`;
 
+/** The file tools' rules that keep a secret closed: a file by its path, a folder with its tree. */
+function secretReadRules(path: string): string[] {
+  let folder = false;
+  try {
+    folder = statSync(path).isDirectory();
+  } catch {
+    // Gone or unreadable now: its own path is still denied.
+  }
+  const rule = `Read(${ruleScope(path)})`;
+  return folder ? [rule, `Read(${ruleScope(path)}/**)`] : [rule];
+}
+
+/** How a session's setup is judged, from the project's access. */
+function setupJudge(home: string, access: ProjectAccess, worktreeRoot: string): SetupJudge {
+  const ctx = {
+    home: realPathOr(home),
+    protectedReads: access.protectedReads,
+    secretFiles: [...access.checkoutSecrets, ...access.toolchain.secretFiles],
+    sandboxRoots: access.sandboxRoots,
+    laneWritable: [...access.writableRoots, worktreeRoot, realPathOr(worktreeRoot)],
+  };
+  const secrets = access.checkoutSecrets.map(foldPathCase);
+  return {
+    refuse: (real) => setupReadRefusal(real, ctx),
+    holdsSessionGround: (real) => holdsSessionGround(real, ctx),
+    // A copy is read before the sandbox lists the checkout's secrets: a `.env` link may lead to one.
+    isCheckoutSecret: (source) => {
+      const path = foldPathCase(join(access.checkout, source));
+      return secrets.some((secret) => isEqualOrUnder(path, secret));
+    },
+  };
+}
+
 /** Builds each lane session's sandbox: one profile, one temp dir and one file-tool context. */
 export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
   const tmpRoot = deps.tmpRoot ?? laneTempRoot();
@@ -271,7 +339,23 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
       let envFile: string | null = null;
       let ledger: string | null = null;
       let mcp: McpSandboxes | null = null;
+      let setupDir: ReturnType<typeof createSetupDir> | null = null;
       try {
+        // Lane-writable ground, a protected read, a secret or a sandbox root never opens.
+        if (input.setup !== undefined)
+          setupDir = createSetupDir(
+            filesRoot,
+            input.setup,
+            setupJudge(deps.home, { ...access, sandboxRoots }, deps.worktreeRoot),
+            deps.home,
+          );
+        const setup = setupDir?.setup ?? EMPTY_SETUP;
+        const setupSecrets = setup.secretFiles;
+        // What the profile opens of the setup: never a read that is, or lies in, a secret file.
+        const setupReads = setup.reads.filter(
+          (read) => !setupSecrets.some((secret) => isEqualOrUnder(read, secret)),
+        );
+        const ownSetupDir = setup.reads[0];
         // Outside every lane-writable dir: it names the processes to stop after a daemon restart.
         // Named for this daemon, so a later one leaves it alone while this one runs, and held, so
         // this one's sweep does too until the session is gone.
@@ -327,6 +411,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           home: deps.home,
           protectedReads: protectedList,
           secretFiles: access.checkoutSecrets,
+          setupSecrets,
           toolchainSecrets: toolchain.secretFiles,
           toolchainReads: toolchain.reads,
           toolchainListings: toolchain.listings,
@@ -347,25 +432,26 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
             ...access.pinnedTools,
           ],
           sandboxRoots,
-          ownFiles: [envFile],
+          ownFiles: [envFile, ...(ownSetupDir === undefined ? [] : [ownSetupDir])],
+          setupReads,
           loopback: input.project.sandboxLoopback,
           dockerSockets: docker?.sockets ?? [],
           deniedEnvNames: deniedEnvNames({ ...input.env, ...env }, dockerNames),
         });
         // The config dir and its ancestors stay readable to the file tools, which open the
         // session's own saved tool results there; the guard, the broker and the kernel hold them.
-        // A task with pictures keeps the way down to them open, and Claude Code denies everything
-        // beside it that is there now; what is made later, another task's folder among it, is left
-        // to the guard and the file tools' judge, which refuse it.
+        // A task with pictures, and the setup's reads, keep the way down to them open, and Claude
+        // Code denies everything beside it that is there now; what is made later, another task's
+        // folder among it, is left to the guard and the file tools' judge, which refuse it.
         const pictures =
           input.taskFiles !== undefined && existsSync(input.taskFiles) ? input.taskFiles : null;
+        const openInside = [...(pictures === null ? [] : [pictures]), ...setupReads];
         const deniedToFileTools = protectedList
           .filter((path) => !isEqualOrUnder(input.configDir, path))
-          .flatMap((path) =>
-            pictures !== null && isEqualOrUnder(pictures, path)
-              ? besideTheWay(path, pictures)
-              : [path],
-          );
+          .flatMap((path) => {
+            const open = openInside.filter((target) => isEqualOrUnder(target, path));
+            return open.length === 0 ? [path] : besideTheWays(path, open);
+          });
         mcp = sandboxMcpServers({
           access,
           home: deps.home,
@@ -391,7 +477,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
               `Read(${ruleScope(path)})`,
               `Read(${ruleScope(path)}/**)`,
             ]),
-            ...secretFiles.map((path) => `Read(${ruleScope(path)})`),
+            ...[...secretFiles, ...setupSecrets].flatMap(secretReadRules),
           ],
           askRules: [
             ...claudeProtected.files.flatMap((path) => [
@@ -410,7 +496,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           checkout: input.project.repoPath,
           home: deps.home,
           protectedReads: protectedList,
-          secretFiles,
+          secretFiles: [...secretFiles, ...setupSecrets],
           readList,
           systemDocRoots: SYSTEM_DOC_ROOTS,
           ...(input.taskFiles === undefined ? {} : { filesDir: input.taskFiles }),
@@ -422,6 +508,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
             own: tmpDir,
           },
           worktreeRoot: deps.worktreeRoot,
+          setupReads,
           get providerSessionId() {
             return providerSessionId;
           },
@@ -429,6 +516,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
         const ownEnvFile = envFile;
         const ownLedger = ledger;
         const ownMcp = mcp;
+        const ownSetup = setupDir;
         let disposed = false;
         return {
           spec,
@@ -437,6 +525,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
           commandEnv,
           mcpServers: ownMcp.servers,
           mcpFailures: ownMcp.failures,
+          setup,
           setProviderSession(id) {
             providerSessionId = id;
           },
@@ -451,6 +540,9 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
               },
               () => {
                 removeLaneFiles(ownEnvFile, tmpDir, roots);
+              },
+              () => {
+                ownSetup?.remove();
               },
               () => {
                 // Processes it could not stop stay named: the sweep tries them again while the
@@ -477,6 +569,9 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
             () => {
               removeLaneFiles(envFile, tmpDir, roots);
             },
+            () => {
+              setupDir?.remove();
+            },
             ...(ledger === null
               ? []
               : [
@@ -492,6 +587,25 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
         }
         throw error;
       }
+    },
+    async judgeSetup(project, setupInput, checkouts = [project.repoPath]) {
+      const laneRoots = laneRootsOf({ ...deps, tmpRoot });
+      const access = await projectAccess(
+        { ...deps, tmpRoot, laneWritableRoots: laneRoots },
+        { project, env: {}, rules: [], configDirs: [], checkouts },
+      );
+      const kept = keepSetup(
+        setupInput,
+        setupJudge(deps.home, access, deps.worktreeRoot),
+        deps.home,
+      );
+      return {
+        loaded: {
+          skills: kept.keptSkills.map((skill) => skill.name),
+          plugins: kept.keptPlugins.map((plugin) => plugin.id),
+        },
+        leftOut: kept.leftOut,
+      };
     },
   };
 }

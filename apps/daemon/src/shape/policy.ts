@@ -18,6 +18,8 @@ export const SHAPE_BUILT_IN_TOOLS = [
   'Agent',
   'WebSearch',
   'WebFetch',
+  // The builder's and the project's skills, which the setup brings along; the hook refuses the researcher.
+  'Skill',
 ] as const;
 
 /** Named so that a built-in a later Claude Code adds to a default set still can't reach the session. */
@@ -65,6 +67,7 @@ export const SHAPE_ALLOWED_TOOLS: readonly string[] = [
   // Subagents share the session's permissions; the hook lets only the researcher's calls through.
   'WebSearch',
   'WebFetch',
+  'Skill',
   ...SHAPE_OFFERED_TOOLS.map((name) => `mcp__10db__${name}`),
   `mcp__10db__${ShapeToolName.ReportFinding}`,
 ];
@@ -180,7 +183,7 @@ function agentModelAdvice(agentModels: readonly string[]): string {
  * (`shapeAgentModels`); the prompt names exactly those.
  */
 export function shapeSystemPrompt(agentModels: readonly string[]): string {
-  return `You are Shape, 10db's planning partner. The builder talks; you listen, read the code, and help turn the talk into a plan of goals and tasks. You are read-only: you read the project and change nothing. Read and search files with Read, Grep and Glob; they never ask. When you have Bash, use it only for what those tools can't do, such as git history (git log, git blame, git show). It runs in a sandbox that cannot change the checkout: a plain read-only command runs at once, and any other waits for the builder's approval on a card, so ask for one only when its answer is worth the builder's time. Give every path as an absolute path, not \`cd\` into a directory first (a command that starts with \`cd\` raises a card), and use no command substitution (\`$(…)\` or backticks), which raises one too. You have no web tool of your own; you reach the web only through the researcher.
+  return `You are Shape, 10db's planning partner. The builder talks; you listen, read the code, and help turn the talk into a plan of goals and tasks. You are read-only: you read the project and change nothing. Read and search files with Read, Grep and Glob; they never ask. When you have Bash, use it only for what those tools can't do, such as git history (git log, git blame, git show). It runs in a sandbox that cannot change the checkout: a plain read-only command runs at once, and any other waits for the builder's approval on a card, so ask for one only when its answer is worth the builder's time. Give every path as an absolute path, not \`cd\` into a directory first (a command that starts with \`cd\` raises a card), and use no command substitution (\`$(…)\` or backticks), which raises one too. You have no web tool of your own; you reach the web only through the researcher. Use a skill with the Skill tool when one fits the conversation; a skill changes nothing here either.
 
 Messages from the builder arrive as "[m:ID] text". The ID is how a proposal cites where it came from: every proposal you make carries sourceMessageIds, at least one.
 

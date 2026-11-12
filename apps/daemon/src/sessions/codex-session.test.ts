@@ -877,6 +877,69 @@ describe('the thread and the first turn', () => {
     });
   });
 
+  it('passes the instructions as developer instructions on start and on resume', async () => {
+    for (const resumeProviderSessionId of [null, 'thr-old']) {
+      const { handle, server } = startWith(
+        {},
+        { instructions: '# AGENTS.md\nUse pnpm.', resumeProviderSessionId },
+      );
+      await firstEvent(handle);
+      const method = resumeProviderSessionId === null ? 'thread/start' : 'thread/resume';
+      expect(sentParams(server, method)).toMatchObject({
+        developerInstructions: '# AGENTS.md\nUse pnpm.',
+      });
+      await handle.stop();
+    }
+  });
+
+  it('sets the session’s skill roots before the thread starts', async () => {
+    const roots = ['/s/yours/skills', '/s/project/skills'];
+    const { handle, server } = startWith(
+      { 'skills/extraRoots/set': {} },
+      { setup: { plugins: [], skillRoots: roots } },
+    );
+    await firstEvent(handle);
+    await vi.waitFor(() => {
+      expect(methods(server)).toContain('turn/start');
+    });
+    expect(methods(server).slice(-4)).toEqual([
+      'hooks/list',
+      'skills/extraRoots/set',
+      'thread/start',
+      'turn/start',
+    ]);
+    expect(sentParams(server, 'skills/extraRoots/set')).toEqual({ extraRoots: roots });
+    expect(sentParams(server, 'thread/start')).toMatchObject({
+      config: { skills: { include_instructions: true } },
+    });
+  });
+
+  it('sets no roots and no skill instructions when the session has none', async () => {
+    for (const setup of [undefined, { plugins: [], skillRoots: [] }]) {
+      const { handle, server } = startWith({}, setup === undefined ? {} : { setup });
+      await firstEvent(handle);
+      expect(methods(server)).not.toContain('skills/extraRoots/set');
+      expect(sentParams(server, 'thread/start')).not.toHaveProperty('config.skills');
+      expect(sentParams(server, 'thread/start')).not.toHaveProperty('developerInstructions');
+      await handle.stop();
+    }
+  });
+
+  it('refuses the start when Codex refuses the roots, and sends no prompt', async () => {
+    const { handle, server } = startWith(
+      { 'skills/extraRoots/set': { error: { code: -32000, message: 'bad root' } } },
+      { setup: { plugins: [], skillRoots: ['/s/yours/skills'] } },
+    );
+    const events = await collect(handle);
+    expect(events.at(-1)).toMatchObject({
+      type: 'ended',
+      reason: 'sandbox_refused',
+      message: expect.stringContaining("Codex refused the session's skill folders.") as string,
+    });
+    expect(methods(server)).not.toContain('thread/start');
+    expect(methods(server)).not.toContain('turn/start');
+  });
+
   it('ends with error when resume fails, naming the thread', async () => {
     const { handle, server } = startWith(
       { 'thread/resume': { error: { code: -32000, message: 'no such thread' } } },

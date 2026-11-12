@@ -53,6 +53,10 @@ import type {
   KeepAwakeMode,
   KeepAwakeStatus,
   LanePermissionsDto,
+  ProjectTrustDto,
+  TrustOverrides,
+  TrustSettingsDto,
+  TrustSwitches,
   McpServerStatusDto,
   ModelProfileDto,
   ModelSettingsInput,
@@ -520,6 +524,12 @@ export interface ApiServices {
   /** Whether lanes decide routine permissions with Claude Code's auto mode; read when each session starts. */
   lanePermissions(): LanePermissionsDto;
   setLanePermissions(autoMode: boolean): LanePermissionsDto;
+  /** Settings › Trust: the app-wide switches and the builder's installed plugins; read when each session starts. */
+  trustSettings(): TrustSettingsDto;
+  setTrustSwitches(switches: TrustSwitches): TrustSettingsDto;
+  /** A project's Trust: its overrides, the switches its sessions use, and what would come along; throws NotFoundError. */
+  projectTrust(projectId: ProjectId): Promise<ProjectTrustDto>;
+  setProjectTrust(projectId: ProjectId, overrides: TrustOverrides): Promise<ProjectTrustDto>;
   /** The newest event seq (0 when there are none). */
   eventsHead(): number;
   /** Each server in the project's `.mcp.json` and its verdict; raises an approval card for each one with none. */

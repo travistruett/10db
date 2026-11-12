@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "switches": {
+      "type": "object",
+      "properties": {
+        "web": {
+          "type": "boolean"
+        },
+        "projectInstructions": {
+          "type": "boolean"
+        },
+        "yourInstructions": {
+          "type": "boolean"
+        },
+        "yourSkills": {
+          "type": "boolean"
+        },
+        "yourPlugins": {
+          "type": "boolean"
+        },
+        "projectSkills": {
+          "type": "boolean"
+        },
+        "plugins": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1
+          },
+          "additionalProperties": {
+            "type": "boolean"
+          }
+        }
+      },
+      "required": [
+        "web",
+        "projectInstructions",
+        "yourInstructions",
+        "yourSkills",
+        "yourPlugins",
+        "projectSkills",
+        "plugins"
+      ],
+      "additionalProperties": false
+    },
+    "plugins": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "enabledInClaude": {
+            "type": "boolean"
+          },
+          "on": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "version",
+          "enabledInClaude",
+          "on"
+        ]
+      }
+    }
+  },
+  "required": [
+    "switches",
+    "plugins"
+  ]
+}

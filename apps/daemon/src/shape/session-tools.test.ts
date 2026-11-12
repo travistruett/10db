@@ -1,7 +1,10 @@
 import { ShapeMessageKind } from '@10db/contracts';
 import { getSession, insertInboxItem, listShapeMessages } from '@10db/db';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { autoModeRules, type LaneSandboxSpec } from '../sandbox';
+import { autoModeRules, EMPTY_SETUP, type LaneSandboxSpec } from '../sandbox';
 import type { SessionEvent, ToolRequest } from '../sessions';
 import { must } from './conversation-fixture';
 import type { ShapePrepareInput, ShapePrepared } from './service';
@@ -46,7 +49,10 @@ const tick = async (): Promise<void> => {
   await new Promise<void>((resolve) => setImmediate(resolve));
 };
 
-function preparing(credentialsExpireAt: string | null = null) {
+function preparing(
+  credentialsExpireAt: string | null = null,
+  setup: Pick<ShapePrepared, 'instructions' | 'setup'> = { instructions: null, setup: EMPTY_SETUP },
+) {
   const seen: ShapePrepareInput[] = [];
   const asked: ToolRequest[] = [];
   const tracked: number[] = [];
@@ -69,6 +75,7 @@ function preparing(credentialsExpireAt: string | null = null) {
       },
       note: 'Note from 10db: billing is waiting for your approval.',
       credentialsExpireAt,
+      ...setup,
       canUseTool: (req) => {
         asked.push(req);
         return Promise.resolve({ behavior: 'deny', message: 'the builder said no' });
@@ -113,6 +120,44 @@ describe('a conversation’s prepared session', () => {
     });
     expect(decision).toEqual({ behavior: 'deny', message: 'the builder said no' });
     expect(p.asked.map((r) => r.toolName)).toEqual(['Bash']);
+  });
+
+  it('starts with the instructions and the builder’s skills, and reads the skill folder', async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), '10db-plan-setup-')));
+    try {
+      const skill = join(dir, 'skills', 's');
+      mkdirSync(skill, { recursive: true });
+      writeFileSync(join(skill, 'SKILL.md'), '---\nname: s\n---\n');
+      writeFileSync(join(skill, '.env'), 'TOKEN=x');
+      const p = preparing(null, {
+        instructions: '# AGENTS.md\nUse pnpm.',
+        setup: {
+          ...EMPTY_SETUP,
+          pluginDirs: [join(dir, 'setup', 'yours')],
+          skillRoots: [join(dir, 'setup', 'yours', 'skills')],
+          reads: [join(dir, 'setup'), join(dir, 'skills')],
+          secretFiles: [join(skill, '.env')],
+        },
+      });
+      f = createServiceFixture({ prepare: p.prepare });
+      f.service.send(f.c.shape.id, 'Which skill fits?');
+      await tick();
+      const { spec } = must(f.adapter.shapeSessions[0], 'a session');
+      expect(spec.instructions).toBe('# AGENTS.md\nUse pnpm.');
+      expect(spec.setup).toEqual({
+        plugins: [join(dir, 'setup', 'yours')],
+        skillRoots: [join(dir, 'setup', 'yours', 'skills')],
+      });
+      expect(spec.tools).toContain('Skill');
+      expect(spec.allowedTools).toContain('Skill');
+      const read = (file: string) =>
+        spec.preToolUse({ toolName: 'Read', input: { file_path: file } }).decision;
+      expect(read(join(skill, 'SKILL.md'))).toBe('allow');
+      expect(read(join(skill, '.env'))).toBe('deny');
+      expect(read(join(dir, 'beside.md'))).toBe('deny');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('shows each command and project tool call, who made it, and a card it waits on', async () => {

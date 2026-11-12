@@ -1022,9 +1022,9 @@ A vertical slice: services, a route, two sections. It is run against the real ba
     next session.`
   - `providers`: `Claude and Codex sessions both get every approved server. Tool filters from config.toml apply in
     Codex sessions only. Servers that sign in with OAuth, and claude.ai connectors, are not here yet.`
-  - **"Your plugins"** (T2's row) changes in the same commit. Its `providers` becomes: `Claude: skills, agents,
-    commands and hooks. Their hooks start in the plugin's own folder. Their MCP servers are listed under Your MCP
-    servers. Codex: skills, and the plugins' MCP servers.` Use F2's wording for hooks if T2 ran F2.
+  - **"Your plugins"** (T2's row) changes in the same commit. T2 ran F2, so its `providers` becomes: `Claude:
+    skills, agents and commands; plugin hooks don't run in 10db sessions yet. Their MCP servers are listed under
+    Your MCP servers. Codex: skills, and the plugins' MCP servers.`
 - **`YourMcpServers`** shows `mcpNotice` above the list when set, then each server: its name, the source label, and
   `Runs <command args>` or `Connects to <url>`. Then:
   - `Sets <NAME, NAME>` with names only, and `shownEnv` as `NAME=value`;

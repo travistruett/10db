@@ -70,7 +70,7 @@ import type { Clock, Timer } from '../clock';
 import type { AccountExpectation } from '../environment';
 import type { StateStore } from '../events';
 import { principlesBrief } from '../knowledge';
-import { expandHome, type LaneSandboxSpec } from '../sandbox';
+import { expandHome, type LaneSandboxSpec, type SessionSetup } from '../sandbox';
 import { stringField } from '../guard';
 import type { WaitObserver } from '../inbox';
 import type { Logger } from '../log';
@@ -209,6 +209,10 @@ export interface ShapePrepared {
   readonly note: string | null;
   /** When the first AWS credentials a server was given expire (ISO), or null: the session moves on before. */
   readonly credentialsExpireAt: string | null;
+  /** The project's and the builder's instructions, read when the session was prepared; null when none. */
+  readonly instructions: string | null;
+  /** What the sandbox kept of the session's setup (Settings › Trust); empty with no sandbox. */
+  readonly setup: SessionSetup;
   /** The lanes' permission broker, for this conversation. */
   canUseTool(req: ToolRequest): Promise<ToolDecision>;
   /** Watches what runs under the session's Claude Code process, so its commands end with it. */
@@ -1119,7 +1123,17 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       throw isClosed() ? new ShapeClosedError() : new ShapeStoppedError();
     }
     const commands = ready?.commands;
-    const access: ShapeAccess = commands === undefined ? fileAccess : { ...fileAccess, commands };
+    // The setup's folders are read as the sandbox opened them, and a `.env*` inside them stays closed.
+    const setup = ready?.setup ?? null;
+    const withSetup: ShapeAccess =
+      setup === null || setup.reads.length === 0
+        ? fileAccess
+        : {
+            ...fileAccess,
+            setupReads: setup.reads,
+            secretFiles: [...(fileAccess.secretFiles ?? []), ...setup.secretFiles],
+          };
+    const access: ShapeAccess = commands === undefined ? withSetup : { ...withSetup, commands };
     const toolset = shapeToolset(commands !== undefined);
     // What was left out (servers, the sandbox), named so the session doesn't hunt for it.
     const skipped = ready?.note ?? null;
@@ -1128,6 +1142,10 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       shapeId,
       cwd: launch.cwd,
       systemPrompt: shapeSystemPrompt(launch.agentModels),
+      instructions: ready?.instructions ?? null,
+      ...(setup === null
+        ? {}
+        : { setup: { plugins: setup.pluginDirs, skillRoots: setup.skillRoots } }),
       prompt: skipped === null ? prompt : `${skipped}\n\n${prompt}`,
       ...(images.length === 0 ? {} : { images }),
       model: launch.model,

@@ -22,8 +22,14 @@ const MIGRATIONS: Claims = [...AREA, { kind: ClaimKind.Hazard, name: 'migrations
 const DEPS: Claims = [...AREA, { kind: ClaimKind.Hazard, name: 'deps' }];
 const EVERY_HAZARD_COMMAND: Claims = [...MIGRATIONS, { kind: ClaimKind.Hazard, name: 'deps' }];
 
-function judge(toolName: string, toolInput: unknown, claims: Claims = AREA) {
+function judge(
+  toolName: string,
+  toolInput: unknown,
+  claims: Claims = AREA,
+  extra: Partial<Parameters<typeof judgePreToolUse>[0]> = {},
+) {
   return judgePreToolUse({
+    ...extra,
     toolName,
     toolInput,
     repoPath: repo.path,
@@ -162,6 +168,20 @@ describe('judgePreToolUse', () => {
     ],
   ])('%s: %s', (_name, toolName, input, claims, decision) => {
     expect(judge(toolName, input, claims).decision).toBe(decision);
+  });
+
+  // Where Claude Code's auto mode judges the web, the call goes to its classifier, not a card.
+  it.each<[string, string, unknown, 'allow' | 'ask']>([
+    ['WebSearch, judged', 'WebSearch', { query: 'drizzle-kit generate custom' }, 'allow'],
+    [
+      'WebFetch, judged',
+      'WebFetch',
+      { url: 'https://example.net/', prompt: 'What is on the page?' },
+      'allow',
+    ],
+    ['mcp__repo__x, judged', 'mcp__repo__x', {}, 'ask'],
+  ])('%s', (_name, toolName, input, decision) => {
+    expect(judge(toolName, input, AREA, { webJudged: true }).decision).toBe(decision);
   });
 
   it('names what it could not read when it asks about a command', () => {

@@ -4,6 +4,7 @@ export { patchPaths } from './codex-guard';
 export { spawnAppServer, type CodexChild } from './codex-rpc';
 export { guardSocketPath } from './codex-session';
 export { codexLoginStatus } from './codex-sign-in-check';
+export { nativeJudge } from './native-judge';
 export { createRoutedAdapter } from './routed-adapter';
 export {
   FAKE_ACCOUNT_EMAIL,
@@ -25,6 +26,7 @@ export type {
   AccountLogin,
   ConversationReadSpec,
   InterruptReceipt,
+  LanePermissionMode,
   SessionAdapter,
   SessionEvent,
   ShapeAgentDefinition,
@@ -52,3 +54,10 @@ export {
 } from './project-mcp';
 export { createUnavailableAdapter } from './unavailable-adapter';
 export { createPinnedAdapter, type AdapterSource } from './pinned-adapter';
+export {
+  readRepoConfigFile,
+  readRepoFileBytes,
+  RepoConfigFileError,
+  REPO_CONFIG_MAX_BYTES,
+  type RepoFileBytes,
+} from './repo-config-file';

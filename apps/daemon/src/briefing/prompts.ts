@@ -85,6 +85,15 @@ export interface PromptInput {
    * session with no conversation to resume starts from (null for one that resumes it).
    */
   readonly feedback?: { readonly message: string; readonly digest: string | null };
+  /**
+   * The repository's and the builder's instructions came in the system prompt, so a sandboxed session is
+   * told they are there instead of to read them.
+   */
+  readonly instructionsLoaded?: boolean;
+  /** What the session's setup brought along and left out, as one rule line, beside the instructions line. */
+  readonly setupLine?: string | null;
+  /** Claude Code's auto mode judges the lane's WebSearch and WebFetch, so they wait on no card. */
+  readonly webJudged?: boolean;
 }
 
 /** An Inbox card the builder answered, as a reviewer is shown it. */
@@ -233,15 +242,26 @@ const BACKGROUND_COMMANDS_READ_ONLY =
 const TEMP_FILES_RULE =
   'Make temp files with `mktemp "$TMPDIR/x.XXXXXX"`; a bare `mktemp` fails in the sandbox.';
 
-const AUTO_MODE_RULE =
-  "Claude Code's auto mode refuses three things without saying which rule applied: running the full gate (10db runs it after your turn), generating CPU load on the builder's Mac, and reading or writing outside this lane's worktree. Don't retry a refused call another way. A dependency change, a loop with no end in the background, WebFetch, WebSearch and repo MCP tools wait on a card from the builder.";
+const AUTO_MODE_REFUSES =
+  "Claude Code's auto mode refuses three things without saying which rule applied: running the full gate (10db runs it after your turn), generating CPU load on the builder's Mac, and reading or writing outside this lane's worktree. Don't retry a refused call another way.";
+
+const AUTO_MODE_RULE = `${AUTO_MODE_REFUSES} A dependency change, a loop with no end in the background, WebFetch, WebSearch and repo MCP tools wait on a card from the builder.`;
+
+/** The auto-mode line where auto mode judges the web (`PromptInput.webJudged`). */
+const AUTO_MODE_WEB_RULE = `${AUTO_MODE_REFUSES} A dependency change, a loop with no end in the background and repo MCP tools wait on a card from the builder. WebSearch and WebFetch go to auto mode's judge, which refuses a fetch that would send the project's code or secrets out; if auto mode isn't running for your model, they wait on a card.`;
 
 const CLAUDE_HOSTS_RULE =
   "A command that reaches a network host outside the project's allowed domains is refused, with no prompt. If you need one, ask the builder with AskUserQuestion.";
 
+const READ_INSTRUCTIONS_RULE =
+  "Read the repository's agent instructions first: `AGENTS.md`, or `CLAUDE.md` where the repo uses it.";
+
+const INSTRUCTIONS_LOADED_RULE =
+  "The repository's agent instructions (AGENTS.md, CLAUDE.md, .claude/rules) and the builder's own are in your system prompt.";
+
 /** Beside the commands line in a sandboxed session. */
 const SANDBOX_RULES = [
-  "Read the repository's agent instructions first: `AGENTS.md`, or `CLAUDE.md` where the repo uses it.",
+  READ_INSTRUCTIONS_RULE,
   TEMP_FILES_RULE,
   "A command that fails with `Operation not permitted` hit the sandbox: say which path in your handoff, and don't retry it another way.",
   AUTO_MODE_RULE,
@@ -340,14 +360,36 @@ function readOnlyRules(role: StepRole): string[] {
   ];
 }
 
+/** What the session's setup changes of the sandbox's lines. */
+interface SetupLines {
+  readonly instructionsLoaded: boolean;
+  readonly setupLine: string | null;
+  readonly webJudged: boolean;
+}
+
+/** The sandbox's lines with the instructions line as the setup has it, and the setup line after it. */
+function withSetupLines(lines: readonly string[], setup: SetupLines): string[] {
+  return lines.flatMap((line) => {
+    if (line === AUTO_MODE_RULE) return [setup.webJudged ? AUTO_MODE_WEB_RULE : line];
+    if (line !== READ_INSTRUCTIONS_RULE) return [line];
+    return [
+      setup.instructionsLoaded ? INSTRUCTIONS_LOADED_RULE : line,
+      ...(setup.setupLine ? [setup.setupLine] : []),
+    ];
+  });
+}
+
 /** The sandbox's lines as the agent the session runs under needs them. */
-function sandboxRulesFor(provider: Provider): readonly string[] {
+function sandboxRulesFor(provider: Provider, setup: SetupLines): readonly string[] {
   switch (provider) {
     case Provider.Claude:
-      return SANDBOX_RULES;
+      return withSetupLines(SANDBOX_RULES, setup);
     case Provider.Codex:
-      return SANDBOX_RULES.filter((line) => line !== AUTO_MODE_RULE).map((line) =>
-        line === CLAUDE_HOSTS_RULE ? CODEX_HOSTS_RULE : line,
+      return withSetupLines(
+        SANDBOX_RULES.filter((line) => line !== AUTO_MODE_RULE).map((line) =>
+          line === CLAUDE_HOSTS_RULE ? CODEX_HOSTS_RULE : line,
+        ),
+        setup,
       );
   }
 }
@@ -367,8 +409,9 @@ function withSandboxRules(
   rules: readonly string[],
   sandboxed: boolean,
   provider: Provider,
+  setup: SetupLines,
 ): string[] {
-  const sandbox = sandboxed ? sandboxRulesFor(provider) : [];
+  const sandbox = sandboxed ? sandboxRulesFor(provider, setup) : [];
   return rules.flatMap((rule) => {
     const own = ruleFor(provider, rule);
     if (rule === PLAIN_COMMANDS) return [own, ...sandbox];
@@ -655,6 +698,11 @@ export function buildSessionPrompt(input: PromptInput): string {
             ],
         input.sandboxed === true,
         input.provider,
+        {
+          instructionsLoaded: input.instructionsLoaded === true,
+          setupLine: input.setupLine ?? null,
+          webJudged: input.webJudged === true,
+        },
       ),
     ),
     '',

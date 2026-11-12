@@ -33,6 +33,7 @@ import { contextEvent } from './context-event';
 import { currentToolNames } from './mcp-tool-names';
 import { TENDB_MCP_SERVER } from './project-mcp';
 import { settleWithin } from './settle-within';
+import { setupPromptText } from './setup-prompt';
 import {
   SessionEndReason,
   type SessionEvent,
@@ -82,6 +83,8 @@ function shapeOptions(
 ): Options {
   const { spawn } = deps;
   const { sandbox } = spec;
+  const plugins = spec.setup?.plugins ?? [];
+  const setupAppend = setupPromptText(spec.instructions, plugins);
   // `canUseTool` hears nothing of where a call runs; the hook does, by the same tool use id.
   const hookCwds = new Map<string, string>();
   return {
@@ -97,8 +100,9 @@ function shapeOptions(
         ? { ...spec.env, ...AUTOUPDATE_OFF }
         : { ...spec.env, ...sandbox.env, CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1', ...AUTOUPDATE_OFF },
     pathToClaudeCodeExecutable: deps.claudePath,
-    // Never the project's, the user's or a local settings file; never a plugin (the harness's skills
-    // and personas are for lanes). MCP servers arrive over the control channel, not the command line.
+    // Never the project's, the user's or a local settings file; never the harness (its skills and
+    // personas are for lanes), only the setup's plugin dirs. MCP servers arrive over the control
+    // channel, not the command line.
     settingSources: [],
     strictMcpConfig: true,
     settings:
@@ -106,7 +110,14 @@ function shapeOptions(
         ? { autoCompactEnabled: true }
         : { autoCompactEnabled: true, permissions: { ask: [...sandbox.askRules] } },
     ...(sandbox === null ? {} : { sandbox: sandbox.settings }),
-    systemPrompt: { type: 'preset', preset: 'claude_code', append: spec.systemPrompt },
+    systemPrompt: {
+      type: 'preset',
+      preset: 'claude_code',
+      append: setupAppend === null ? spec.systemPrompt : `${spec.systemPrompt}\n\n${setupAppend}`,
+    },
+    ...(plugins.length === 0
+      ? {}
+      : { plugins: plugins.map((path) => ({ type: 'local' as const, path })) }),
     tools: [...spec.tools],
     allowedTools: [...spec.allowedTools],
     disallowedTools: [...spec.disallowedTools, ...(sandbox?.disallowedTools ?? [])],

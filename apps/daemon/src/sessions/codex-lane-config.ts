@@ -44,7 +44,11 @@ export function codexThreadConfig(spec: SessionSpec): Record<string, unknown> {
   if (sandbox === undefined || sandbox === null) {
     throw new CodexLaneConfigError('a Codex session needs the lane sandbox');
   }
+  // With the setup's skill roots listed, Codex tells the model of its skills; every other thread keeps
+  // the account template's `false` (`codex-home.ts`).
+  const skills = (spec.setup?.skillRoots ?? []).length > 0;
   return {
+    ...(skills ? { skills: { include_instructions: true } } : {}),
     permissions: lanePermissions(sandbox),
     shell_environment_policy: { inherit: 'none', set: { ...sandbox.shellEnv } },
     mcp_servers: {

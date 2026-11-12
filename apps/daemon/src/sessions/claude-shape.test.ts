@@ -12,6 +12,7 @@ import { autoModeRules, type LaneSandboxSpec } from '../sandbox';
 import { createChannel } from './channel';
 import { startShapeSession } from './claude-shape';
 import { assistantMessage, initMessage, resultMessage, textBlock } from './claude-test-support';
+import { SKILL_NAMES_LINE } from './setup-prompt';
 import type { QueryFn } from './claude-adapter';
 import type {
   SessionEvent,
@@ -204,6 +205,36 @@ describe('a Shape session’s SDK options', () => {
         model: 'inherit',
       },
     });
+  });
+
+  it('appends the instructions after Shape’s own prompt, on the preset', async () => {
+    const { query, run } = fakeQuery();
+    const handle = startShapeSession(
+      spec({
+        instructions: '# AGENTS.md\nUse pnpm.',
+        setup: { plugins: ['/s/yours'], skillRoots: [] },
+      }),
+      deps(query),
+    );
+    await collect(handle, (e) => e.some((x) => x.type === 'turn_complete'));
+    expect(run.options?.systemPrompt).toEqual({
+      type: 'preset',
+      preset: 'claude_code',
+      append: `You are Shape.\n\n# AGENTS.md\nUse pnpm.\n\n${SKILL_NAMES_LINE}`,
+    });
+  });
+
+  it('passes the setup’s plugin dirs and no harness', async () => {
+    const { query, run } = fakeQuery();
+    const handle = startShapeSession(
+      spec({ setup: { plugins: ['/s/yours', '/s/plugins/p'], skillRoots: [] } }),
+      deps(query),
+    );
+    await collect(handle, (e) => e.some((x) => x.type === 'turn_complete'));
+    expect(run.options?.plugins).toEqual([
+      { type: 'local', path: '/s/yours' },
+      { type: 'local', path: '/s/plugins/p' },
+    ]);
   });
 
   it('runs its commands in the read-only sandbox it is given, with the scrub on', async () => {

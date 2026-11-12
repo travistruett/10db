@@ -204,7 +204,7 @@ and the `rules` floor. Its other refusals stop applying where a judge runs:
 | The project's instructions: `AGENTS.md`, `CLAUDE.md`, `.claude/rules/*.md` from the checkout | Appended to `systemPrompt` for every surface, since `settingSources: []` loads none | In `developerInstructions` (L4) | Project instructions (on) |
 | The builder's own `~/.claude/CLAUDE.md` | Appended after the project's | Same text in `developerInstructions` | Your instructions (on) |
 | The builder's skills (`~/.claude/skills`, `~/.agents/skills`) | A plugin dir 10db generates that links the skill folders, passed in `plugins` | `skills/extraRoots/set` for the same folders (L4) | Your skills (on) |
-| The builder's installed plugins (gstack, superpowers and the rest), with their skills, agents, commands and hooks | Each plugin's path in `plugins`, from Claude Code's installed-plugins list (L3) | Their skills via `skills/extraRoots/set`; Codex has no plugin format | Your plugins (on), each listed and switchable |
+| The builder's installed plugins (gstack, superpowers and the rest), with their skills, agents and commands; their hooks stay out (L3b) | A wrapper per plugin in `plugins`, from Claude Code's installed-plugins list (L3), carrying no hooks and no MCP servers | Their skills via `skills/extraRoots/set`; Codex has no plugin format | Your plugins (on), each listed and switchable |
 | The project's `.claude/skills`, `commands`, `agents` | A generated plugin dir over them | `skills/extraRoots/set` | on |
 | The project's `.claude/settings.json` hooks | Load only after the builder approves their hash, as `.mcp.json` servers do (built) | n/a | n/a (approval) |
 | The builder's MCP servers (`~/.claude.json`, `~/.codex/config.toml`) | Listed in Settings › Trust and passed to the session as Claude Code would run them; calls judged | `mcp_servers` entries | Your MCP servers (on), each switchable |
@@ -227,9 +227,12 @@ their calls are judged like any other call. Many need the network, OAuth or the 
 break, and the builder installed them. Servers a repository declares (`.mcp.json`) stay as built: approved by
 hash and run under `srt`, since an agent can write that file.
 
-**Hooks run.** Plugin hooks and approved project hooks run in the agent's own process, outside the kernel
-sandbox, as they do in Claude Code. The builder installed or approved them; that is the trust the decision
-extends. A hook an agent wrote never runs without approval (§2).
+**Approved project hooks run; plugin hooks don't yet.** Approved project hooks run in the agent's own process,
+outside the kernel sandbox, as they do in Claude Code. The builder approved them; that is the trust the decision
+extends. A hook an agent wrote never runs without approval (§2). Plugin hooks stay out of 10db sessions (live
+check L3b): a plugin's `PreToolUse` answer can rewrite a call after 10db's guard judged it, and its allow skips
+10db's broker, so a call 10db never judged or carded could run. They come along once 10db can order or judge
+them, a follow-up.
 
 **Not loaded:** the builder's `~/.claude/settings.json` (it can change billing, permissions and the sandbox),
 their permission allowlists and output styles.
@@ -373,7 +376,8 @@ Results are in `docs/architecture/research/2026-11-12-trust-line-research.md`.
 2. **Plan writes no code** (§8): its role, not a security line.
 3. **`.env` reads off by default**, with a switch (§9). The builder named reading secrets as a limit; this keeps
    them closed until a project says otherwise.
-4. **Hooks from the builder's plugins run** outside the kernel sandbox, as in Claude Code (§6).
+4. **Hooks from the builder's plugins don't run in 10db sessions yet** (§6, L3b): their answers can run a call the
+   guard never judged and skip the broker.
 5. **The builder's `~/.claude/settings.json` doesn't load** (§6): it can change billing and the sandbox.
 6. **New network hosts are judged**, not carded, and kept per session unless the builder keeps them (§5).
 7. **The `rules` floor** applies when no judge is available, and says so (§4).

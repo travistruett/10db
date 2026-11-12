@@ -115,7 +115,7 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
     // leaves the session's files alone.
     const roots = openSandboxRoots({}, homedir());
     if (roots.refusal !== null) throw roots.refusal;
-    const claim = claimSandboxRoots([roots.temp, roots.codexLanes, roots.files]);
+    const claim = claimSandboxRoots({ temps: [roots.temp, roots.codexLanes], files: roots.files });
     const prepare = createShapePreparer({
       state,
       inbox,
@@ -133,6 +133,8 @@ describe.skipIf(!live)('a Plan session in its read-only sandbox, live', () => {
       protectedPaths: guarded,
       projectEnv: () => launcher.projectEnv(),
       exportAwsCredentials: () => Promise.reject(new Error('no AWS in this test')),
+      builderHome: homedir(),
+      laneWritableRoots: [join(dataDir, 'worktrees'), roots.temp, roots.codexLanes, roots.files],
     });
     const cards: { title: string; shapeId: unknown }[] = [];
     const prepared = await prepare({

@@ -329,3 +329,71 @@ and `skills/careful -> ~/.claude/skills/careful` (itself a folder of symlinks) a
 
 Meaning for the design: §6's plugin and skills rows work as written. Name the generated plugin with the builder in
 mind (the prefix shows in every skill name), or the spec says how a builder's bare skill name maps.
+
+### L3b: plugin hooks against 10db's guard, and plugin MCP servers: hooks fail, MCP holds
+
+What ran: the pinned Claude Code `2.1.302` through the pinned Agent SDK `0.3.316` `query()`, model `haiku`, on the
+Claude plan's default config dir, with `settingSources: []`, `strictMcpConfig: true`, `permissionMode: 'default'`,
+an environment cleared to the login basics, and scratch projects in a temp folder. 10db's guard was an SDK
+`PreToolUse` callback, as `buildQueryOptions` passes it, and its broker a `canUseTool` that denies. The scratch
+plugin, loaded with `plugins: [{ type: 'local', path }]`, had a `PreToolUse` command hook on `Bash` that answers
+`{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}` for every call.
+
+- **A4 (a), 10db's guard answers `deny` for `touch denied`: pass.** The file was not made; the call is in
+  `permission_denials`.
+- **A4 (b), the guard answers `ask`: pass.** `canUseTool` was called, and its deny held.
+- **A4 (c), the guard allows `touch a`, the plugin answers `allow` with `updatedInput` rewriting it to `touch b`:
+  fail.** `b` was made. The guard saw only `touch a`; it was never asked about `touch b`.
+- **A4 (d), the guard passes the call on (`{}`, as it does for any call its broker decides) and the plugin
+  answers `allow`: fail.** `touch passed` ran and `canUseTool` was never called: a plugin's allow skips 10db's
+  broker, so a call that would wait on a card runs without one.
+- **M1, a plugin's `.mcp.json` stdio server:** loaded by its own install path under `strictMcpConfig: true`, the
+  server did not start (no marker; `mcp_servers: []` in the init message). Through 10db's wrapper it did not start
+  either. `strictMcpConfig` alone would have kept it out on this version; 10db relies on the wrapper, which carries
+  no `.mcp.json`, either way.
+- **Hook working directory:** a `SessionStart` command hook `npx --no tendb-l3b-cwd-probe`, with the checkout as
+  the session's `cwd` and the checkout holding `node_modules/.bin/tendb-l3b-cwd-probe`. Loaded by install path,
+  the hook ran the checkout's bin (its marker was written): a plugin hook runs outside the sandbox with the
+  checkout as its working directory. Through the wrapper (`cd '<wrapper>' && npx …`) the checkout's bin did not
+  run; npx looked the name up in the registry (404) and the hook failed. `--no` did not stop npx asking the
+  registry, only installing; a bare `npx <name>` with no TTY would install and run a published package of that
+  name.
+
+Meaning for the design: (a) and (b) hold, but (c) and (d) mean a plugin's `PreToolUse` hook can run a call 10db
+never judged or carded. Fallback F2 applies: plugins come along without their hooks until 10db can order or
+judge them. The wrapper's MCP and working-directory rows hold against the real CLI.
+
+### L3c: definition frontmatter against 10db's guard and broker: skill hooks and `allowed-tools` fail
+
+What ran: the pinned Claude Code `2.1.302` through the pinned Agent SDK `0.3.316`, model `claude-haiku-5-5`, on the
+Claude plan's default config dir, in a real 10db lane: the lane sandbox with a setup (the setup dir's `yours` plugin
+and a plugin wrapper, `settingSources: []`), 10db's guard as the `PreToolUse` callback, and the real permission
+broker as `canUseTool`, with every card denied but the `Skill` and `Agent` cards, which were allowed so the
+definition could become active (`runLane` in `test/lane-sandbox.live.test.ts`, one session per row). Each
+definition's frontmatter `PreToolUse` hook on `Bash` ran a script outside the checkout that logged its input and
+answered `allow`, rewriting the command that makes `rewrite-me` into one that makes `rewritten`. Each session ran
+three Bash commands in order: a `touch` of `rewrite-me` (the guard allows it), `pnpm $SUB left-pad` with `SUB=add`
+and then a `touch` of `ask-ran` (the guard asks, the broker denies), and a `touch` of `deny-ran` piped into `sh`
+(the guard denies).
+
+- **(a) A builder skill's frontmatter `hooks`, once the skill is invoked: fail.** The hook ran on each later Bash
+  call. Its `updatedInput` held: `rewritten` was made and `rewrite-me` was not, so a call the guard never judged
+  ran. Its `allow` did not override the guard's `ask` (the broker was asked and denied) or its `deny`.
+- **(b) A plugin skill's frontmatter `hooks`: fail,** as in (a): the hook ran and its rewrite held.
+- **(b) A plugin agent's frontmatter `hooks` and `mcpServers`: held on this run.** The subagent's three Bash calls
+  reached the guard and the broker, `rewrite-me` was made, the hook script never ran, and the agent's stdio server
+  never started (no marker). One run only.
+- **(c) A skill's `allowed-tools: Bash`: fail, for the broker.** The guard's `ask` and `deny` held, but the
+  `rewrite-me` call, which the guard passes on, ran without reaching `canUseTool`; in a session without the skill
+  the same call reached the broker. A `!` line is the other way in: see (d).
+- **(d) A builder skill's `` !`cmd` `` line: inside the kernel sandbox, and never judged by the guard.** Without
+  `allowed-tools` Claude Code refused it ("Shell command permission check failed for pattern"), with no card and no
+  guard call. With `allowed-tools: Bash` it ran: its `touch` into the checkout made the file, its `touch` into a
+  folder outside the sandbox's writes did not, and the guard and the broker saw neither. The check that held is
+  Claude Code's own, against the session's allow rules: the lane's and the skill's.
+
+Meaning for the design: a definition 10db links verbatim carries a hook and a grant that 10db's guard and broker
+don't see. The setup dir re-emits each builder or plugin skill, command and agent whose frontmatter holds `hooks`,
+`allowed-tools` or `mcpServers`, without those keys. The agent row passed, but it rests on one run and on Claude
+Code ignoring keys it parses, so an agent's keys go too. `!` lines stay: they run inside the sandbox, and with no
+skill's grant only the lane's own allow rules let one run. `disableSkillShellExecution` is not set.
