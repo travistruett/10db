@@ -682,7 +682,11 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     state,
     judge,
     log: logger.child({ component: 'triage' }),
-    afterRouted: () => undefined,
+    // A card routed away from the builder parks the sessions waiting on it, so the stakeholder's words
+    // are answered through the card and never reach a live ask_human call.
+    afterRouted: (id) => {
+      runner?.parkFor(id);
+    },
   });
   const inbox = createInboxService({
     state,

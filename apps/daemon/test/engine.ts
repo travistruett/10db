@@ -74,6 +74,7 @@ import {
   applyCheckAnswer,
   RunnerNotStartedError,
   createLiveSessions,
+  type LiveSessions,
   createRunner,
   DEFAULT_RUNNER_LIMITS,
   type Runner,
@@ -92,6 +93,8 @@ export interface TestEngine {
   /** Every event the engine's writes push, as the daemon's listeners get them. */
   readonly bus: EventBus;
   readonly inbox: InboxService;
+  /** The running sessions' wait observers and signals, as the MCP side reads them. */
+  readonly live: LiveSessions;
   readonly runner: Runner;
   readonly adapter: FakeAdapter;
   readonly clock: ManualClock;
@@ -219,7 +222,9 @@ export async function createTestEngine(
     state,
     judge: triageJudge,
     log: silentLogger,
-    afterRouted: () => undefined,
+    afterRouted: (id) => {
+      runner?.parkFor(id);
+    },
   });
   const inbox = createInboxService({
     state,
@@ -416,6 +421,7 @@ export async function createTestEngine(
     state,
     bus,
     inbox,
+    live,
     runner: created,
     adapter,
     clock,
