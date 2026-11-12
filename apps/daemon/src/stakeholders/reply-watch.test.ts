@@ -736,6 +736,31 @@ describe('the reminder', () => {
   });
 });
 
+describe('a Slack error that is not about one conversation', () => {
+  it.each(['fatal_error', 'internal_error', 'service_unavailable', 'request_timeout', 'bad_reply'])(
+    'leaves the send open on %s, counts it like an unreachable Slack, and reads on the next tick',
+    async (code) => {
+      const s = scene();
+      const sent = await s.send([s.mark]);
+      slack.say(sent.channel, 'UMARK', 'A', sent.threadTs);
+      slack.failNext('conversations.replies', code);
+      await ticks(1);
+      expect(send(sent.cardId)?.state).toBe('sent');
+      expect(card(sent.cardId).assignees).toEqual(['mark']);
+      await ticks(2);
+      expect(card(sent.cardId).answer).toMatchObject({ choice: 'Yes', via: 'slack' });
+    },
+  );
+
+  it('makes the connection unreachable after three such ticks in a row', async () => {
+    const s = scene();
+    await s.send([s.mark]);
+    slack.failAlways('conversations.replies', 'fatal_error');
+    await ticks(3);
+    expect(connection.get().state).toBe('unreachable');
+  });
+});
+
 describe('a conversation Slack no longer has', () => {
   it('fails that send alone and keeps reading the others', async () => {
     const s = scene();

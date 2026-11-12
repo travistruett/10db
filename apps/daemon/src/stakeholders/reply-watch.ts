@@ -65,7 +65,14 @@ export const REPLY_INTERVAL_MS = 60_000;
 const UNREACHABLE_AFTER = 3;
 /** A tick this many intervals after the last means the Mac slept: it looks again at once. */
 const SLEPT_AFTER_INTERVALS = 3;
-const TRANSPORT = /^(?:unreachable|timeout|http_5\d\d)$/;
+/** Slack's words for a thread, message or channel that no longer exists or can no longer be read. */
+const GONE: ReadonlySet<string> = new Set([
+  'thread_not_found',
+  'message_not_found',
+  'channel_not_found',
+  'is_archived',
+  'not_in_channel',
+]);
 
 export interface ReplyWatchDeps {
   readonly state: StateStore;
@@ -454,17 +461,6 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
     });
   }
 
-  /** Whether a failure is about the whole connection, not about one conversation. */
-  function isGlobal(error: unknown): boolean {
-    return (
-      !(error instanceof SlackError) ||
-      slackRefusedToken(error) ||
-      error.code === 'no_token' ||
-      error.code === 'ratelimited' ||
-      TRANSPORT.test(error.code)
-    );
-  }
-
   /**
    * Runs a Slack read for some sends. A conversation Slack no longer has (a deleted thread, an archived
    * channel) fails those sends alone and answers null; anything about the connection is thrown to the tick.
@@ -476,7 +472,8 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
     try {
       return await read();
     } catch (error) {
-      if (isGlobal(error) || !(error instanceof SlackError)) throw error;
+      // Only an error that says the conversation is gone fails a send; anything else is the tick's.
+      if (!(error instanceof SlackError) || !GONE.has(error.code)) throw error;
       const { code } = error;
       log.warn({ code, sends: affected.map((o) => o.id) }, 'a conversation could not be read');
       state.write((ctx) => {
@@ -524,11 +521,11 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
       paused = true;
     } else if (error.code === 'ratelimited') {
       notBefore = clock.now().getTime() + (error.retryAfterSeconds ?? 30) * 1000;
-    } else if (TRANSPORT.test(error.code)) {
+    } else {
+      // A timeout, a 5xx, a malformed reply or any error Slack gives that is not about one conversation:
+      // the tick failed, and enough in a row make Slack unreachable.
       failures += 1;
       if (failures >= UNREACHABLE_AFTER) connection.set('unreachable', { error: error.code });
-    } else {
-      log.warn({ err: error }, 'a conversation could not be read');
     }
   }
 
