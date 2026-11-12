@@ -1,6 +1,7 @@
 import {
   AgentCopyState,
   type AgentCopy,
+  type SlackConnectionDto,
   type SystemCheckDto,
   type ToolName,
 } from '@10db/contracts';
@@ -11,6 +12,7 @@ export const SystemCardKind = {
   RefusedCopy: 'refused-copy',
   LoginShell: 'login-shell',
   BenchmarkKey: 'benchmark-key',
+  SlackRefused: 'slack-refused',
 } as const;
 export type SystemCardKind = (typeof SystemCardKind)[keyof typeof SystemCardKind];
 
@@ -35,17 +37,23 @@ export type SystemCard =
       readonly kind: typeof SystemCardKind.BenchmarkKey;
       readonly key: string;
       readonly message: string;
-    };
+    }
+  | { readonly kind: typeof SystemCardKind.SlackRefused; readonly key: string };
 
 /**
  * The Inbox's 10db cards: only what the builder has to act on. A copy being downloaded clears by itself and
  * is told in the header; a newer release or a version that differs has nothing to do and is told in Settings ›
  * Updates; a sync failure that a later sync clears is a note in Factory.
  */
-export function systemCards(check: SystemCheckDto | undefined): SystemCard[] {
-  if (!check) return [];
+export function systemCards(
+  check: SystemCheckDto | undefined,
+  slack?: SlackConnectionDto,
+): SystemCard[] {
+  const refused: SystemCard[] =
+    slack?.state === 'refused' ? [{ kind: SystemCardKind.SlackRefused, key: 'slack-refused' }] : [];
+  if (!check) return refused;
   const agents = check.agents ?? [];
-  const cards: SystemCard[] = [];
+  const cards: SystemCard[] = [...refused];
   for (const tool of check.tools) {
     // Claude Code and Codex are 10db's own pinned copies: an install of the builder's own is never run.
     if (tool.required && tool.path === null && !agents.some((agent) => agent.tool === tool.name))

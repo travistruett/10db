@@ -1,10 +1,15 @@
-import { InboxKind, type DecisionRecording, type ProjectId } from '@10db/contracts';
-import { Alert, Group, SegmentedControl, Stack, Text, Title } from '@mantine/core';
+import {
+  InboxKind,
+  type DecisionRecording,
+  type InboxItemDto,
+  type ProjectId,
+} from '@10db/contracts';
+import { Alert, Badge, Group, SegmentedControl, Stack, Text, Title } from '@mantine/core';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { useRef, useState } from 'react';
 import { DaemonRequestError } from '../../daemon/client';
-import { usePeople } from '../../daemon/people';
+import { usePeople, useSlackConnection } from '../../daemon/people';
 import {
   queryKeys,
   useAnswerInbox,
@@ -16,12 +21,14 @@ import { ProjectFilter } from '../../shell/project-filter';
 import { inProject } from './in-project';
 import { cardAnswer, recommended } from './card-answer';
 import { InboxCard } from './inbox-card';
-import { inboxRows, isDismissable, type InboxRow } from './inbox-rows';
+import { inboxRows, isDismissable, openCount, splitInbox, type InboxRow } from './inbox-rows';
 import { InboxShortcuts } from './inbox-shortcuts';
 import { PassReadyRow, useOpenPassWorkbench } from './pass-ready-row';
 import { defaultRecording } from './record-decision';
 import { ResolvedInbox } from './resolved-inbox';
 import { SystemCardList } from './system-card-list';
+import { WaitingInbox } from './waiting-inbox';
+import { CountBadge } from '../../shell/count-badge';
 import { systemCards, type SystemCard } from './system-cards';
 import { stakeholderMode, StakeholderMode } from './route-line';
 import { useInboxKeys } from './use-inbox-keys';
@@ -40,7 +47,7 @@ interface Draft {
   readonly error: string | null;
 }
 
-type Tab = 'open' | 'resolved';
+type Tab = 'open' | 'waiting' | 'resolved';
 
 /** The Inbox: the cards that wait on the builder, and a view of the ones already closed. */
 export function InboxView() {
@@ -51,11 +58,14 @@ export function InboxView() {
   const { project } = useSearch({ from: '/inbox' });
   const navigate = useNavigate({ from: '/inbox' });
   // 10db's own cards are the app's, not a project's, so they show under every filter.
-  const cards = systemCards(useSystemCheck().data);
-  // The header is drawn here once, the same for both views, so switching moves nothing in it.
-  const openCount = inbox.isSuccess
-    ? inboxRows(inProject(inbox.data, project)).length + cards.length
-    : null;
+  const connection = useSlackConnection();
+  const cards = systemCards(useSystemCheck().data, connection.data);
+  const { open: openItems, waiting: waitingItems } = splitInbox(
+    inProject(inbox.data ?? [], project),
+    connection.data?.state,
+  );
+  // The header is drawn here once, the same for every view, so switching moves nothing in it.
+  const openTotal = inbox.isSuccess ? openCount(openItems) + cards.length : null;
   // Each view is its own component, so the open view's keys are only live while it is shown.
   return (
     <Stack>
@@ -66,10 +76,32 @@ export function InboxView() {
             aria-label="Inbox view"
             value={tab}
             onChange={(value) => {
-              setTab(value === 'resolved' ? 'resolved' : 'open');
+              setTab(value === 'resolved' ? 'resolved' : value === 'waiting' ? 'waiting' : 'open');
             }}
             data={[
-              { value: 'open', label: openCount === null ? 'Open' : `Open ${String(openCount)}` },
+              {
+                value: 'open',
+                label: (
+                  <Group gap={6} wrap="nowrap">
+                    Open
+                    {openTotal === null ? null : <CountBadge count={openTotal} />}
+                  </Group>
+                ),
+              },
+              {
+                value: 'waiting',
+                label: (
+                  <Group gap={6} wrap="nowrap">
+                    Waiting
+                    {/* Nothing in it needs the builder, so its count is neutral. */}
+                    {waitingItems.length === 0 ? null : (
+                      <Badge size="sm" variant="default" circle={waitingItems.length < 10}>
+                        {waitingItems.length}
+                      </Badge>
+                    )}
+                  </Group>
+                ),
+              },
               { value: 'resolved', label: 'Resolved' },
             ]}
           />
@@ -93,26 +125,28 @@ export function InboxView() {
           />
         </Group>
       </Group>
+      {tab === 'waiting' ? <WaitingInbox items={waitingItems} /> : null}
       {tab === 'open' ? (
         <OpenInbox
+          items={openItems}
           project={project}
           systemCards={cards}
           onHelp={() => {
             setHelpOpen(true);
           }}
         />
-      ) : (
-        <ResolvedInbox project={project} />
-      )}
+      ) : null}
+      {tab === 'resolved' ? <ResolvedInbox project={project} /> : null}
     </Stack>
   );
 }
 
 function OpenInbox({
-  project,
+  items,
   systemCards: ownCards,
   onHelp,
 }: {
+  readonly items: readonly InboxItemDto[];
   readonly project: ProjectId | undefined;
   readonly systemCards: readonly SystemCard[];
   readonly onHelp: () => void;
@@ -121,7 +155,7 @@ function OpenInbox({
   const answer = useAnswerInbox();
   const queryClient = useQueryClient();
   const openWorkbench = useOpenPassWorkbench();
-  const rows = inboxRows(inProject(inbox.data ?? [], project));
+  const rows = inboxRows(items);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   // A failed dismiss belongs to its row, which may not be the open one, so it never touches the draft.

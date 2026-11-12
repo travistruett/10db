@@ -1,4 +1,12 @@
-import { InboxKind, PassCheckDetail, type InboxItemDto, type PassId } from '@10db/contracts';
+import {
+  InboxKind,
+  PassCheckDetail,
+  RoutedBy,
+  SendState,
+  type InboxItemDto,
+  type PassId,
+  type SlackConnectionDto,
+} from '@10db/contracts';
 
 /** One row of the inbox: a card, identical flags shown together, or a pass's Ready pages. */
 export interface InboxRow {
@@ -15,6 +23,36 @@ export interface InboxRow {
 /** What the sidebar and the menu bar count: the rows the inbox shows, not the cards folded into them. */
 export function inboxRowCount(items: readonly InboxItemDto[]): number {
   return inboxRows(items).length;
+}
+
+/**
+ * Whether a question is out with someone and needs nothing from the builder: sent and not returned, while
+ * Slack is connected. With Slack off, unreachable, refused or without a token nobody can read a reply, so
+ * the card is the builder's to answer or take back.
+ */
+export function isWaiting(
+  item: InboxItemDto,
+  connection: SlackConnectionDto['state'] | undefined,
+): boolean {
+  return (
+    connection === 'connected' &&
+    item.send?.state === SendState.Sent &&
+    item.send.returnedAt === null
+  );
+}
+
+/** The open cards divided into what needs the builder and what waits on someone else. */
+export function splitInbox(
+  items: readonly InboxItemDto[],
+  connection: SlackConnectionDto['state'] | undefined,
+): { readonly open: InboxItemDto[]; readonly waiting: InboxItemDto[] } {
+  const waiting = items.filter((item) => isWaiting(item, connection));
+  return { open: items.filter((item) => !waiting.includes(item)), waiting };
+}
+
+/** Open's count: its rows, leaving out a card triage has not placed yet, which may still go to someone else. */
+export function openCount(open: readonly InboxItemDto[]): number {
+  return inboxRows(open.filter((item) => item.routedBy !== RoutedBy.TriagePending)).length;
 }
 
 /** A flag with no options closes on any answer, so it can be dismissed without opening it. */

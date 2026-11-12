@@ -47,6 +47,7 @@ import {
   CopyForPeople,
   RouteLineRow,
   SendInsteadLink,
+  SentNotice,
 } from './stakeholder-extras';
 import { joinNames, StakeholderMode, stakeholderMode } from './route-line';
 
@@ -313,6 +314,7 @@ export function InboxCard({
           </Anchor>
         ) : null}
         <RouteLineRow item={item} people={people} mode={mode} />
+        <SentNotice item={item} />
         {mode === StakeholderMode.Copy ? <ComposedMessage item={item} people={people} /> : null}
         {answeringMyself && item.send !== null ? (
           <SendInsteadLink

@@ -86,13 +86,6 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     built: false,
   },
   {
-    key: SettingsSectionKey.People,
-    group: SettingsGroup.Global,
-    label: 'People',
-    planned: null,
-    built: true,
-  },
-  {
     key: SettingsSectionKey.KeepAwake,
     group: SettingsGroup.Global,
     label: 'Keep-awake',
@@ -117,6 +110,13 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     key: SettingsSectionKey.Accounts,
     group: SettingsGroup.Global,
     label: 'Accounts',
+    planned: null,
+    built: true,
+  },
+  {
+    key: SettingsSectionKey.People,
+    group: SettingsGroup.Global,
+    label: 'People',
     planned: null,
     built: true,
   },

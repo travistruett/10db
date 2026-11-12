@@ -2,7 +2,8 @@ import type { InboxItemDto, PassCheckDetail, PassId } from '@10db/contracts';
 import { mintId, PASS_RETRY_TURN_CHOICE, PASS_SIGN_OFF_CHOICE } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { inboxItemDto } from '../../test/fixtures';
-import { inboxRows } from './inbox-rows';
+import { sendDto } from '../../test/people-fixtures';
+import { inboxRows, openCount, splitInbox } from './inbox-rows';
 
 const project = mintId('Project');
 const flag = (title: string, body: string, overrides: Partial<InboxItemDto> = {}): InboxItemDto =>
@@ -134,5 +135,50 @@ describe('inboxRows', () => {
     expect(both?.key).toBe(later?.key);
     expect(both?.passId).toBe(pass);
     expect(inboxRows([question])[0]?.passId).toBeNull();
+  });
+});
+
+describe('splitInbox: what needs the builder and what waits on someone', () => {
+  const sent = (over: Record<string, unknown> = {}) =>
+    inboxItemDto({ assignees: ['mark'], send: sendDto({ state: 'sent', heldBy: null, ...over }) });
+
+  it.each([
+    ['a sent card', sent(), 'connected', 'waiting'],
+    ['a draft', inboxItemDto({ send: sendDto({ state: 'draft' }) }), 'connected', 'open'],
+    [
+      'a failed send',
+      inboxItemDto({ send: sendDto({ state: 'failed', error: 'x' }) }),
+      'connected',
+      'open',
+    ],
+    ['a card with no send', inboxItemDto(), 'connected', 'open'],
+    [
+      'a send the timer returned',
+      sent({ returnedAt: '2026-10-13T20:00:00.000Z', returnedReason: 'timer' }),
+      'connected',
+      'open',
+    ],
+    [
+      'a send whose recipients disagree',
+      sent({ returnedAt: '2026-10-13T20:00:00.000Z', returnedReason: 'disagreed' }),
+      'connected',
+      'open',
+    ],
+    ['a sent card while Slack is refused', sent(), 'refused', 'open'],
+    ['a sent card while the token is gone', sent(), 'none', 'open'],
+    ['a sent card while Slack is off', sent(), 'off', 'open'],
+    ['a sent card while Slack is unreachable', sent(), 'unreachable', 'open'],
+    ['a sent card before the connection is known', sent(), undefined, 'open'],
+  ] as const)('%s is in %s', (_name, item, connection, where) => {
+    const split = splitInbox([item], connection);
+    expect(split.waiting.length === 1 ? 'waiting' : 'open').toBe(where);
+  });
+
+  it('counts Open without a card still being triaged, and shows it in the list', () => {
+    const pending = inboxItemDto({ routedBy: 'triage_pending' });
+    const plain = inboxItemDto();
+    const split = splitInbox([pending, plain], 'connected');
+    expect(split.open).toHaveLength(2);
+    expect(openCount(split.open)).toBe(1);
   });
 });

@@ -1,9 +1,15 @@
-import type { InboxItemDto, PersonDto } from '@10db/contracts';
-import { Anchor, Button, Group, Loader, Paper, Text } from '@mantine/core';
+import { SendState, type InboxItemDto, type PersonDto } from '@10db/contracts';
+import { Alert, Anchor, Button, Group, Loader, Paper, Stack, Text } from '@mantine/core';
 import { useState } from 'react';
-import { useCompose } from '../../daemon/people';
+import {
+  useCompose,
+  useKeepWaiting,
+  useSlackConnection,
+  useStakeholderTimers,
+  useTakeBack,
+} from '../../daemon/people';
 import { AskSomeone } from './ask-someone';
-import { recipientsOf, routeLine, StakeholderMode } from './route-line';
+import { joinNames, recipientsOf, routeLine, StakeholderMode } from './route-line';
 
 /** The route line of a card that is not showing a draft: why this person, and Change. */
 export function RouteLineRow({
@@ -124,5 +130,84 @@ export function SendInsteadLink({
     <Anchor component="button" type="button" size="sm" onClick={onClick}>
       {`Send to ${names} instead`}
     </Anchor>
+  );
+}
+
+const OUTAGE_NOTICES: Readonly<Record<string, string>> = {
+  refused:
+    "Slack refused 10db's token, so replies can't be read. Reconnect it in Settings › People, or answer this yourself.",
+  none: "Slack's token was removed, so replies can't be read. Add it again in Settings › People, or answer this yourself.",
+  off: 'Slack is off on this daemon, so replies can’t be read here. Answer this yourself or take it back.',
+  unreachable:
+    "Slack can't be reached right now. Replies are read again when it is; you can answer this yourself meanwhile.",
+};
+
+/**
+ * Why a question that was sent is back with the builder: nobody answered in time, the recipients
+ * disagree, or Slack can't be read. Answer Myself is the card's own options below.
+ */
+export function SentNotice({ item }: { readonly item: InboxItemDto }) {
+  const connection = useSlackConnection();
+  const timers = useStakeholderTimers();
+  const keepWaiting = useKeepWaiting();
+  const takeBack = useTakeBack();
+  const send = item.send;
+  if (send?.state !== SendState.Sent) return null;
+  const names = send.people.filter((p) => p.recipient).map((p) => p.name);
+  const quote = (
+    <Stack gap={2}>
+      {send.conversation.map((message) => (
+        <Text key={message.ts} size="sm" style={{ whiteSpace: 'pre-wrap' }}>
+          {`${message.name}: ${message.text}`}
+        </Text>
+      ))}
+    </Stack>
+  );
+  if (send.returnedAt !== null) {
+    const title =
+      send.returnedReason === 'disagreed'
+        ? `${joinNames(names)} disagree`
+        : `${joinNames(names)} hasn't answered in ${String(timers.data?.returnAfterHours ?? 8)} hours`;
+    return (
+      <Alert color="yellow" variant="light" title={title}>
+        <Stack gap="sm">
+          {quote}
+          <Group gap="xs">
+            <Button
+              size="xs"
+              variant="default"
+              loading={keepWaiting.isPending}
+              onClick={() => {
+                keepWaiting.mutate(item.id);
+              }}
+            >
+              Keep Waiting
+            </Button>
+            <Button
+              size="xs"
+              variant="default"
+              loading={takeBack.isPending}
+              onClick={() => {
+                takeBack.mutate(item.id);
+              }}
+            >
+              Take Back
+            </Button>
+          </Group>
+          {keepWaiting.isError || takeBack.isError ? (
+            <Text size="xs" c="red">
+              {keepWaiting.error?.message ?? takeBack.error?.message}
+            </Text>
+          ) : null}
+        </Stack>
+      </Alert>
+    );
+  }
+  const state = connection.data?.state;
+  const notice = state === undefined ? undefined : OUTAGE_NOTICES[state];
+  return notice === undefined ? null : (
+    <Alert color="yellow" variant="light">
+      {notice}
+    </Alert>
   );
 }

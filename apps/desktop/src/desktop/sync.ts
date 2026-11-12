@@ -15,6 +15,7 @@ import {
   readyPageOf,
   type PassPageTarget,
 } from './notify-pass';
+import { shouldNotifyOpened, triagedToBuilder } from './notify-card';
 import { bringWindowForward, isTauri, notifyNewCard, setWindowTheme, updateTray } from './tauri';
 
 /** How often a card's read is asked again when an event's refetch of the Inbox cancels it. */
@@ -88,7 +89,7 @@ export function useDesktopSync(): void {
     if (!item) return;
     const ready = readyPageOf(item);
     if (ready === null) {
-      await notifyNewCard(item);
+      if (shouldNotifyOpened(item)) await notifyNewCard(item);
       return;
     }
     // Without the passes the notification names the item, not the page: it is never dropped for them.
@@ -101,7 +102,10 @@ export function useDesktopSync(): void {
   }
 
   useEventStream((event) => {
-    if (event.type !== EventType.InboxOpened || !isTauri()) return;
+    if (!isTauri()) return;
+    // A card placed with the builder after triage is as new to them as one that opened there.
+    const triaged = event.type === EventType.InboxTriaged && triagedToBuilder(event.data);
+    if (event.type !== EventType.InboxOpened && !triaged) return;
     notifyOpened(event.entityId).catch((error: unknown) => {
       console.warn('10db: could not notify about a new card', error);
     });
