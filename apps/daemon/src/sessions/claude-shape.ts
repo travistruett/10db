@@ -18,7 +18,7 @@ import {
   seenFrom,
 } from './account-check';
 import { createChannel } from './channel';
-import type { QueryFn } from './claude-adapter';
+import type { QueryFn } from './claude-session';
 import {
   interruptReceipt,
   mapSdkMessage,

@@ -19,14 +19,14 @@ import { captureLogs } from '../../test/log-capture';
 import { sandboxedMcpServer } from '../../test/sandboxed-mcp';
 import { ManualClock, systemClock, type Clock } from '../clock';
 import { createLogger, silentLogger } from '../log';
+import { createClaudeAdapter } from './claude-adapter';
 import {
   buildMcpServers,
   buildQueryOptions,
   CLAUDE_MCP_SERVER,
-  createClaudeAdapter,
   UNSANDBOXED_REFUSAL,
   type QueryFn,
-} from './claude-adapter';
+} from './claude-session';
 import {
   assistantMessage,
   initMessage,
