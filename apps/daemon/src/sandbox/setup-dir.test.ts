@@ -212,7 +212,7 @@ describe('keepSetup and createSetupDir', () => {
     expect(kept.secretFiles).toEqual([join(home, '.claude/skills/s/.env')]);
   });
 
-  it('lists a .env directory under a read as one secret and does not walk into it', () => {
+  it('lists a .env directory under a read as one secret, and a folder in it that can’t be listed keeps the skill', () => {
     const s = builderSkill('s');
     const secret = join(home, '.claude/skills/s/.env.d');
     mkdirSync(join(secret, 'locked'), { recursive: true });
@@ -222,6 +222,23 @@ describe('keepSetup and createSetupDir', () => {
     const kept = keepSetup(input({ skills: [s] }), refuse, home);
     expect(kept.keptSkills).toEqual([s]);
     expect(kept.secretFiles).toEqual([secret]);
+  });
+
+  it('names the target of every link inside a .env directory as a secret, entering no linked folder', () => {
+    const s = builderSkill('s');
+    const secret = join(home, '.claude/skills/s/.env');
+    mkdirSync(join(secret, 'deep'), { recursive: true });
+    const key = join(home, '.claude/skills/s/prod.key');
+    writeFileSync(key, 'KEY');
+    const pem = join(outside, 'k.pem');
+    writeFileSync(pem, 'PEM');
+    symlinkSync(key, join(secret, 'creds'));
+    symlinkSync(pem, join(secret, 'deep', 'k'));
+    // A folder link back to the .env folder: a walk that entered it would never end.
+    symlinkSync(secret, join(secret, 'deep', 'loop'));
+    const kept = keepSetup(input({ skills: [s] }), refuse, home);
+    expect(kept.keptSkills).toEqual([s]);
+    expect(kept.secretFiles).toEqual([secret, pem, key].sort());
   });
 
   it('writes the project’s copies under project/', () => {

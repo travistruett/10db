@@ -87,9 +87,35 @@ function shown(path: string, home: string): string {
 }
 
 /**
- * Every `.env*` file or folder under `root` (and the real path of a `.env*` link), not entering links,
- * `.env*` folders, `node_modules` or `.git`; or the first folder that can't be listed, since it could
- * hide one.
+ * The real path of every link inside a `.env*` folder, at any depth: what it leads to is a secret too,
+ * though the folder itself is denied whole. Never enters a link, so a folder link can't loop it, and
+ * skips a folder it can't list, which the folder's own deny already closes.
+ */
+function linkTargetsIn(folder: string): string[] {
+  const targets: string[] = [];
+  const pending = [folder];
+  for (let dir = pending.pop(); dir !== undefined; dir = pending.pop()) {
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const path = join(dir, entry.name);
+      if (entry.isSymbolicLink()) {
+        const real = realOrNull(path);
+        if (real !== null) targets.push(real);
+      } else if (entry.isDirectory()) pending.push(path);
+    }
+  }
+  return targets;
+}
+
+/**
+ * Every `.env*` file or folder under `root` (and the real path of a `.env*` link, and of every link
+ * inside a `.env*` folder), not entering links, `.env*` folders, `node_modules` or `.git`; or the
+ * first folder that can't be listed, since it could hide one.
  */
 function walkSecrets(root: string): { secrets: string[] } | { unlistable: string } {
   const secrets: string[] = [];
@@ -109,6 +135,7 @@ function walkSecrets(root: string): { secrets: string[] } | { unlistable: string
         secrets.push(path);
         const real = entry.isSymbolicLink() ? realOrNull(path) : null;
         if (real !== null) secrets.push(real);
+        if (entry.isDirectory()) secrets.push(...linkTargetsIn(path));
       } else if (entry.isDirectory() && !UNWALKED_DIRECTORIES.has(entry.name)) {
         pending.push(path);
       }
