@@ -13,6 +13,7 @@ import {
 } from 'node:fs';
 import { dirname, isAbsolute, join, normalize, relative, sep } from 'node:path';
 import { foldPathCase } from '../guard';
+import { wrapPlugin } from './plugin-wrapper';
 import { isEqualOrUnder } from './protected-reads';
 import type { SetupInput } from './setup-input';
 import { collapseReads, setupReadRoots } from './setup-reads';
@@ -226,6 +227,14 @@ export function keepSetup(
   }
 }
 
+/** A plugin's name from its id, `name@marketplace`; its wrapper's folder and its skills' prefix. */
+function pluginName(id: string): string {
+  const at = id.lastIndexOf('@');
+  const name = at > 0 ? id.slice(0, at) : id;
+  // A name is one folder: anything else is not a name Claude Code would give.
+  return /^[\w.-]+$/.test(name) && name !== '.' && name !== '..' ? name : 'plugin';
+}
+
 function makeDir(path: string): void {
   mkdirSync(path, { recursive: true, mode: 0o700 });
   chmodSync(path, 0o700);
@@ -294,7 +303,21 @@ export function createSetupDir(
       if (input.projectFiles.some((f) => f.relative.startsWith(`skills${sep}`)))
         skillRoots.push(join(project, 'skills'));
     }
+    const leftOut = [...kept.leftOut];
+    const named = new Set<string>();
+    const wrapped: string[] = [];
     for (const plugin of kept.keptPlugins) {
+      const name = pluginName(plugin.id);
+      if (named.has(name)) {
+        leftOut.push({ what: plugin.id, why: `a plugin named ${name} is already loaded` });
+        continue;
+      }
+      named.add(name);
+      const wrapper = join(dir, 'plugins', name);
+      makeDir(wrapper);
+      leftOut.push(...wrapPlugin(plugin.real, wrapper).leftOut);
+      pluginDirs.push(wrapper);
+      wrapped.push(plugin.id);
       const skills = join(plugin.real, 'skills');
       if (existsSync(skills) && lstatSync(skills).isDirectory()) skillRoots.push(skills);
     }
@@ -305,9 +328,9 @@ export function createSetupDir(
         reads: [dir, ...kept.reads],
         loaded: {
           skills: kept.keptSkills.map((skill) => skill.name),
-          plugins: kept.keptPlugins.map((plugin) => plugin.id),
+          plugins: wrapped,
         },
-        leftOut: kept.leftOut,
+        leftOut,
       },
       remove,
     };

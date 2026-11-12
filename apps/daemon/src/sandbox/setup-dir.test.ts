@@ -242,6 +242,27 @@ describe('keepSetup and createSetupDir', () => {
     made.remove();
   });
 
+  it('wraps each kept plugin and never passes its install path', () => {
+    const plugin = join(home, '.claude/plugins/cache/m/p/1');
+    mkdirSync(join(plugin, '.claude-plugin'), { recursive: true });
+    writeFileSync(join(plugin, '.claude-plugin/plugin.json'), JSON.stringify({ name: 'p' }));
+    skillAt(join(plugin, 'skills/x'));
+    writeFileSync(join(plugin, '.mcp.json'), '{}');
+    const made = createSetupDir(
+      filesRoot,
+      input({ plugins: [{ id: 'p@m', path: plugin }] }),
+      refuse,
+      home,
+    );
+    const wrapper = made.setup.pluginDirs[0] ?? '';
+    expect(made.setup.pluginDirs).toEqual([join(made.setup.reads[0] ?? '', 'plugins/p')]);
+    expect(readlinkSync(join(wrapper, 'skills'))).toBe(join(plugin, 'skills'));
+    expect(existsSync(join(wrapper, '.mcp.json'))).toBe(false);
+    expect(made.setup.skillRoots).toEqual([join(plugin, 'skills')]);
+    expect(made.setup.loaded.plugins).toEqual(['p@m']);
+    made.remove();
+  });
+
   it('remove() leaves nothing', () => {
     const made = createSetupDir(filesRoot, input({ skills: [builderSkill('s')] }), refuse, home);
     const dir = join(made.setup.pluginDirs[0] ?? '', '..');
