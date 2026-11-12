@@ -586,7 +586,7 @@ export function BoardView() {
                   >
                     {/* The count shares the label's baseline; as a right section it centers on a different box. */}
                     <Group justify="space-between" align="baseline" wrap="nowrap" gap="md">
-                      <span>Start Ready Tasks…</span>
+                      <span>Start Ready Tasks</span>
                       <Text span size="xs" c="dimmed">
                         {readyCount === 0 ? 'Nothing in Ready' : `${String(readyCount)} ready`}
                       </Text>
@@ -601,7 +601,7 @@ export function BoardView() {
                       });
                     }}
                   >
-                    Add Column…
+                    Add Column
                   </Menu.Item>
                 </>
               }

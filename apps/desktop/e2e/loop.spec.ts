@@ -396,7 +396,7 @@ test('records, edits, retires and withdraws knowledge, and a reload loses nothin
   await chooseAction(
     page,
     principles.getByRole('button', { name: 'Actions for "Never sleep in tests"' }),
-    'Edit…',
+    'Edit',
   );
   const editPrinciple = page.getByRole('dialog', { name: 'Edit Principle' });
   await editPrinciple.getByLabel('Statement').fill('Tests never sleep');
@@ -439,7 +439,7 @@ test('records, edits, retires and withdraws knowledge, and a reload loses nothin
   await chooseAction(
     page,
     principles.getByRole('button', { name: 'Actions for "Never sleep in tests"' }),
-    'Remove…',
+    'Remove',
   );
   const older = page.getByRole('dialog', { name: 'Remove Principle' });
   await expect(older.getByText(/has a newer version/)).toBeVisible();
@@ -452,7 +452,7 @@ test('records, edits, retires and withdraws knowledge, and a reload loses nothin
   await chooseAction(
     page,
     principles.getByRole('button', { name: 'Actions for "Tests never sleep"' }),
-    'Remove…',
+    'Remove',
   );
   const retire = page.getByRole('dialog', { name: 'Remove Principle' });
   await retire.getByRole('radio', { name: 'It no longer applies' }).check();
@@ -478,7 +478,7 @@ test('records, edits, retires and withdraws knowledge, and a reload loses nothin
   await chooseAction(
     page,
     decisions.getByRole('button', { name: 'Actions for "Which greeting style?"' }),
-    'Edit…',
+    'Edit',
   );
   const edit = page.getByRole('dialog', { name: 'Edit Decision' });
   await edit.getByLabel('Choice').fill('Hello');
@@ -490,7 +490,7 @@ test('records, edits, retires and withdraws knowledge, and a reload loses nothin
   await chooseAction(
     page,
     decisions.getByRole('button', { name: 'Actions for "Which greeting style?"' }),
-    'Remove…',
+    'Remove',
   );
   const withdraw = page.getByRole('dialog', { name: 'Remove Decision' });
   await expect(

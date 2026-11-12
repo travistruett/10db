@@ -244,7 +244,9 @@ composer, so the two never share a bar:
 **A queue row** follows Factory's list, not the Board's cards (design review D13): a status dot, the page's name
 (weight 500 when it waits on the builder) and one short state line; no border, hairline dividers between rows,
 the selected row on the `bg_1` fill. The dot uses DESIGN.md's status colors: yellow when the page waits on the
-builder (ready, a question), blue working, orange paused, red failed, green signed off, gray not started.
+builder (ready, a question, or not spoken to yet: "Your turn", "Stopped · your turn"), blue working, orange
+paused, red failed, green signed off. A page not spoken to yet is not counted on the sidebar, so a new pass's
+pages don't all count at once.
 Working, not-started and signed-off rows take `dim_0` text. Order and the yellow dot carry "needs you"; nothing
 pulses.
 

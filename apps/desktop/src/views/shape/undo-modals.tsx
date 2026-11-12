@@ -145,7 +145,7 @@ function WithdrawReasonModal({
   );
 }
 
-/** Withdraw Decision…: the decision leaves searches and context packs; the builder says why. */
+/** Withdraw Decision: the decision leaves searches and context packs; the builder says why. */
 export function WithdrawDecisionModal({
   shapeId,
   target,
@@ -172,7 +172,7 @@ export function WithdrawDecisionModal({
   );
 }
 
-/** Withdraw Principle…: the principle leaves searches and context packs; the builder says why. */
+/** Withdraw Principle: the principle leaves searches and context packs; the builder says why. */
 export function WithdrawPrincipleModal({
   shapeId,
   target,

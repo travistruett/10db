@@ -346,10 +346,10 @@ export interface ShapeService {
    * InvalidError for a goal no conversation made and ConflictError once a task has started.
    */
   removeDraftGoal(goalId: GoalId): void;
-  /** Withdraw Decision…: a decision the conversation wrote, with the builder's reason. */
+  /** Withdraw Decision: a decision the conversation wrote, with the builder's reason. */
   withdrawDecision(shapeId: ShapeId, decisionId: DecisionId, reason: string): void;
   /**
-   * Withdraw Principle…: a principle the conversation wrote, with the builder's reason; the same
+   * Withdraw Principle: a principle the conversation wrote, with the builder's reason; the same
    * withdrawal the knowledge routes make. Throws ConflictError once a later principle replaced it.
    */
   withdrawPrinciple(shapeId: ShapeId, principleId: PrincipleId, reason: string): void;

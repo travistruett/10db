@@ -13,7 +13,8 @@ import { passTurnFailureLine } from '../board/task-state';
 
 // Workbench spec §4.3: a page's state in the queue, as one dot, one short line and whether it waits on
 // the builder. The colors are DESIGN.md's: yellow waits on the builder, blue works, orange is paused,
-// red failed or broke the preview, green signed off, gray not started.
+// red failed or broke the preview, green signed off. A page not spoken to yet waits on the builder's
+// first message, so it is yellow too, but it is not counted: a new pass's pages would all count at once.
 
 /** Where a page is, as the queue orders and draws it. */
 export const PageStatus = {
@@ -55,7 +56,7 @@ export const PAGE_LOOK: Readonly<
   [PageStatus.Waiting]: { color: 'blue', needsYou: false },
   [PageStatus.Paused]: { color: 'orange', needsYou: false },
   [PageStatus.Working]: { color: 'blue', needsYou: false },
-  [PageStatus.NotStarted]: { color: 'gray', needsYou: false },
+  [PageStatus.NotStarted]: { color: 'yellow', needsYou: false },
   [PageStatus.SignedOff]: { color: 'green', needsYou: false },
 };
 
@@ -156,7 +157,7 @@ function unsignedState(
     return state(PageStatus.Ready, waited === 0 ? 'Ready' : `Ready · ${String(waited)} min`);
   }
   if (working(page)) return state(PageStatus.Working, workingLine(page, clock, pass));
-  return state(PageStatus.NotStarted, page.turn === null ? 'Not started' : 'Stopped');
+  return state(PageStatus.NotStarted, page.turn === null ? 'Your turn' : 'Stopped · your turn');
 }
 
 /**

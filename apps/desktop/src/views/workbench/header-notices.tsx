@@ -132,7 +132,7 @@ function NoticeRow(props: NoticeRowProps) {
           </Text>
         )}
         {closing && notice.kind === PassNoticeKind.Close ? (
-          // The close's notice says it stopped; Close Pass… is not offered mid-close, so it goes on here.
+          // The close's notice says it stopped; Close Pass is not offered mid-close, so it goes on here.
           <Button
             variant="default"
             size="xs"

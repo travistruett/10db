@@ -97,7 +97,7 @@ for (const scheme of ['dark', 'light'] as const) {
     await expectAccessible(page, `a row open, ${scheme}`);
 
     // Convert says nothing starts, and writes the ticked rows to the Board's Backlog.
-    await page.getByRole('button', { name: 'Convert…' }).focus();
+    await page.getByRole('button', { name: 'Convert' }).focus();
     await page.keyboard.press('Enter');
     const dialog = page.getByRole('dialog', { name: 'Convert' });
     await expect(dialog.getByText('Nothing starts. Tasks wait on the Board.')).toBeVisible();

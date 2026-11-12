@@ -213,7 +213,7 @@ describe('WorkbenchView', () => {
     expect(asked[0]?.body).toMatchObject(sent.body);
   });
 
-  it("Abandon Pass… abandons the project's open pass after its confirm", async () => {
+  it("Abandon Pass abandons the project's open pass after its confirm", async () => {
     const live = passViewDto({
       pass: passDto({ projectId: project.id }),
       pages: [pagesByStatus().ready],
@@ -234,7 +234,7 @@ describe('WorkbenchView', () => {
     );
     open('/workbench', { live: [live] });
     fireEvent.click(await screen.findByRole('button', { name: 'More pass actions' }));
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Abandon Pass…', hidden: true }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Abandon Pass', hidden: true }));
     const dialog = await screen.findByRole('dialog', { name: 'Abandon Pass' });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Abandon Pass' }));
     await waitFor(() => {
@@ -242,7 +242,7 @@ describe('WorkbenchView', () => {
     });
   });
 
-  it("Close Pass… reads the open pass's close lists and stops nothing", async () => {
+  it("Close Pass reads the open pass's close lists and stops nothing", async () => {
     const live = passViewDto({
       pass: passDto({ projectId: project.id }),
       pages: [pagesByStatus().ready],
@@ -270,7 +270,7 @@ describe('WorkbenchView', () => {
     );
     open('/workbench', { live: [live] });
     fireEvent.click(await screen.findByRole('button', { name: 'More pass actions' }));
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Close Pass…', hidden: true }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Close Pass', hidden: true }));
     const dialog = await screen.findByRole('dialog', { name: 'Close Pass' });
     expect(await within(dialog).findByText('Lands 1 page on main.')).toBeTruthy();
     expect(asked).toEqual([live.pass.id]);

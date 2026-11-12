@@ -19,7 +19,7 @@ import {
 } from './close-choices';
 import { SharedChoices } from './shared-choices';
 
-// Workbench spec §5.4, D25: Close Pass… settles every loose end with a safe default before anything
+// Workbench spec §5.4, D25: Close Pass settles every loose end with a safe default before anything
 // lands. Opening it stops nothing; on Close Pass the daemon stops the agents and works the lists out
 // again, and closes only if they are what the modal showed, else the modal shows them again.
 
@@ -185,7 +185,7 @@ export interface ClosePassModalProps {
 }
 
 /**
- * Close Pass…'s form modal: the lists `GET /passes/:passId/close` gives, each with its safe default,
+ * Close Pass's form modal: the lists `GET /passes/:passId/close` gives, each with its safe default,
  * the gate's consequence and the summary above the footer, and Cancel and Close Pass.
  */
 export function ClosePassModal({ view, onClose }: ClosePassModalProps) {

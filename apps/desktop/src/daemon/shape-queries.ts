@@ -342,7 +342,7 @@ export function useUploadShapeFile() {
   });
 }
 
-/** Withdraw Principle…: a tombstone with the builder's reason; the principle leaves searches and context. */
+/** Withdraw Principle: a tombstone with the builder's reason; the principle leaves searches and context. */
 export function useWithdrawPrinciple(shapeId: ShapeId) {
   const { client } = useDaemon();
   const queryClient = useQueryClient();
@@ -360,7 +360,7 @@ export function useWithdrawPrinciple(shapeId: ShapeId) {
   });
 }
 
-/** Withdraw Decision…: a tombstone with the builder's reason; the decision leaves searches and context. */
+/** Withdraw Decision: a tombstone with the builder's reason; the decision leaves searches and context. */
 export function useWithdrawDecision(shapeId: ShapeId) {
   const { client } = useDaemon();
   const queryClient = useQueryClient();

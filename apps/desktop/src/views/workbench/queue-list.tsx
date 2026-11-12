@@ -9,7 +9,7 @@ export interface QueueListProps {
   /** The page the thread shows. */
   readonly current: TaskId | null;
   readonly onSelect: (taskId: TaskId) => void;
-  /** Take Out… on a row's menu; null when pages can't be taken out now. */
+  /** Take Out on a row's menu; null when pages can't be taken out now. */
   readonly onTakeOut: ((taskId: TaskId) => void) | null;
 }
 

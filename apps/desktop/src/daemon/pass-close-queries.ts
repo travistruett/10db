@@ -44,12 +44,12 @@ function useRefetchPasses() {
     );
 }
 
-/** What Take Out… asks about first: the page's shared changes that have not landed. */
+/** What Take Out asks about first: the page's shared changes that have not landed. */
 export function useTakeOutPreview({ passId, taskId }: PassPage) {
   const { client } = useDaemon();
   return useQuery({
     // Not under `passKeys.all`: the take-out it leads to refetches the passes, and a page gone from the
-    // pass has nothing to preview. Kept nowhere once the confirm closes, so each Take Out… reads it
+    // pass has nothing to preview. Kept nowhere once the confirm closes, so each Take Out reads it
     // afresh and never offers a Drop from an earlier read.
     queryKey: ['take-out-preview', passId, taskId],
     staleTime: 0,
@@ -184,14 +184,14 @@ export function useOpenPullRequest() {
 }
 
 /**
- * What Close Pass… shows: the lists a close settles, read once per opening. It stops nothing (D25).
+ * What Close Pass shows: the lists a close settles, read once per opening. It stops nothing (D25).
  * Not under `passKeys.all`: the close it leads to refetches the passes, and a closing pass has no lists.
  */
 export function useClosePreview(passId: PassId) {
   const { client } = useDaemon();
   return useQuery({
     queryKey: ['close-preview', passId],
-    // Kept nowhere once the modal closes: each Close Pass… shows the lists as they are now.
+    // Kept nowhere once the modal closes: each Close Pass shows the lists as they are now.
     staleTime: 0,
     gcTime: 0,
     queryFn: async () =>

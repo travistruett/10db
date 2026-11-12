@@ -50,7 +50,7 @@ export interface PassHeaderProps {
   readonly pullRequest?: ReactNode;
   /** Why Open Pull Request is disabled, a line of its own under the header's row. */
   readonly pullRequestReason?: ReactNode;
-  /** Without it there is no Close Pass…. */
+  /** Without it there is no Close Pass. */
   readonly onClose?: () => void;
   readonly onRename: () => void;
   readonly onAbandon: () => void;
@@ -71,7 +71,7 @@ function askingSince(view: PassViewDto, inbox: readonly InboxItemDto[]): string[
 
 /**
  * One line with the project, the pass and its counts; Add Page, Open Pull Request once a page is
- * signed off, and a menu with Close Pass…, Rename and Abandon Pass…; the timing hint, dimmed, when it
+ * signed off, and a menu with Close Pass, Rename and Abandon Pass; the timing hint, dimmed, when it
  * has something to say. While the pass closes its page actions wait and Abandon stays.
  */
 export function PassHeader(props: PassHeaderProps) {
@@ -121,14 +121,14 @@ export function PassHeader(props: PassHeaderProps) {
             <Menu.Dropdown>
               {onClose ? (
                 <Menu.Item disabled={!open} onClick={onClose}>
-                  Close Pass…
+                  Close Pass
                 </Menu.Item>
               ) : null}
               <Menu.Item disabled={!open} onClick={onRename}>
                 Rename
               </Menu.Item>
               <Menu.Item color="red" disabled={!abandonable} onClick={onAbandon}>
-                Abandon Pass…
+                Abandon Pass
               </Menu.Item>
             </Menu.Dropdown>
           </Menu>

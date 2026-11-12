@@ -28,7 +28,7 @@ import { sharedNeeded } from './shared-chain';
 import { sharedUnlanded } from './shared-drop';
 import { foreignCommits, unfinishedPages, unownedFiles } from './unowned';
 
-// Workbench spec §5.4 (D25): what Close Pass… shows, built without stopping anything, and the check
+// Workbench spec §5.4 (D25): what Close Pass shows, built without stopping anything, and the check
 // that a confirmed close is on the lists it was shown.
 
 /** Where a close runs its gate: a scratch worktree before any take-out, the folder after, or none. */

@@ -9,7 +9,7 @@ import {
 } from '@10db/contracts';
 import { sharedChoicesOf } from './shared-choices';
 
-// Workbench spec §5.4: what Close Pass… sends for the lists it showed. Every loose end has a safe
+// Workbench spec §5.4: what Close Pass sends for the lists it showed. Every loose end has a safe
 // default: an unfinished page is taken out, a file no page owns is left out, a shared change is kept.
 
 /** What the builder chose in the close modal; anything not chosen takes its default. */

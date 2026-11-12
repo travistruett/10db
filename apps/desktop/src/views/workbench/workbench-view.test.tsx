@@ -166,7 +166,7 @@ describe('WorkbenchScreen', () => {
 
   it.each([
     { item: 'Rename', dialog: 'Rename Pass' },
-    { item: 'Abandon Pass…', dialog: 'Abandon Pass' },
+    { item: 'Abandon Pass', dialog: 'Abandon Pass' },
   ])('opens $dialog from the pass menu', async ({ item, dialog }) => {
     await draw({ live: passViewDto({ pages: [pagesByStatus().ready] }) });
     fireEvent.click(await screen.findByRole('button', { name: 'More pass actions' }));

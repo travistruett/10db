@@ -108,7 +108,7 @@ describe('Remove Draft Goal in the goal’s detail', () => {
     const daemon = serve({ [draft.goal.id]: shapeId });
     const { region } = await openInFactory(draft);
 
-    fireEvent.click(await within(region).findByRole('button', { name: 'Remove Draft Goal…' }));
+    fireEvent.click(await within(region).findByRole('button', { name: 'Remove Draft Goal' }));
     const dialog = await screen.findByRole('dialog', { name: 'Remove Draft Goal' });
     expect(dialog.textContent).toContain('Remove the draft goal “Greet the visitor”?');
     expect(dialog.textContent).toContain('the goal returns to Proposed');
@@ -132,7 +132,7 @@ describe('Remove Draft Goal in the goal’s detail', () => {
     const daemon = serve({});
     const { queryClient, region } = await openInFactory(draft);
     await lookupAnswered(daemon, queryClient, draft);
-    expect(within(region).queryByRole('button', { name: 'Remove Draft Goal…' })).toBeNull();
+    expect(within(region).queryByRole('button', { name: 'Remove Draft Goal' })).toBeNull();
     expect(within(region).queryByText(/Remove Draft Goal needs/)).toBeNull();
   });
 
@@ -146,7 +146,7 @@ describe('Remove Draft Goal in the goal’s detail', () => {
         'Remove Draft Goal needs every task unstarted; a task of this goal has started.',
       );
       expect(why).toBeTruthy();
-      expect(within(region).queryByRole('button', { name: 'Remove Draft Goal…' })).toBeNull();
+      expect(within(region).queryByRole('button', { name: 'Remove Draft Goal' })).toBeNull();
     },
   );
 
@@ -158,7 +158,7 @@ describe('Remove Draft Goal in the goal’s detail', () => {
       const { queryClient, region } = await openInFactory(goal);
       await lookupAnswered(daemon, queryClient, goal);
       await within(region).findByRole('button', { name: 'Open conversation' });
-      expect(within(region).queryByRole('button', { name: 'Remove Draft Goal…' })).toBeNull();
+      expect(within(region).queryByRole('button', { name: 'Remove Draft Goal' })).toBeNull();
       expect(within(region).queryByText(/Remove Draft Goal needs/)).toBeNull();
     },
   );
@@ -171,7 +171,7 @@ describe('Remove Draft Goal in the Board’s goal menu', () => {
     const line = await screen.findByTestId('goal-line');
     await screen.findByRole('button', { name: 'Write the greeting' });
     fireEvent.click(await within(line).findByRole('button', { name: 'More goal actions' }));
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Remove Draft Goal…' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Remove Draft Goal' }));
     const dialog = await screen.findByRole('dialog', { name: 'Remove Draft Goal' });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Remove Draft Goal' }));
     await waitFor(() => {

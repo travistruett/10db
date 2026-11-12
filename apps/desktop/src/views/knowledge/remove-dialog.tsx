@@ -206,7 +206,7 @@ function RemoveReason({
 }
 
 /**
- * Remove…: the record leaves briefings and search and stays under Past with the reason. Asked of an
+ * Remove: the record leaves briefings and search and stays under Past with the reason. Asked of an
  * older version, it says which record to remove instead and offers it.
  */
 export function RemoveDialog({

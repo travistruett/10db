@@ -142,7 +142,7 @@ export function ProposedPane({
       const { decisionId } = row.converted;
       return [
         {
-          label: 'Withdraw Decision…',
+          label: 'Withdraw Decision',
           onSelect: () => {
             setDecisionToWithdraw({ decisionId, title: row.body.choice });
           },
@@ -157,7 +157,7 @@ export function ProposedPane({
       const { principleId } = row.converted;
       return [
         {
-          label: 'Withdraw Principle…',
+          label: 'Withdraw Principle',
           onSelect: () => {
             setPrincipleToWithdraw({ principleId, title: row.body.statement });
           },
@@ -200,7 +200,7 @@ export function ProposedPane({
                 setConverting(true);
               }}
             >
-              Convert…
+              Convert
             </Button>
           </Group>
         </Group>

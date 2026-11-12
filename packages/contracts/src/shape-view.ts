@@ -42,7 +42,7 @@ export const ShapeConvertedDto = z.object({
   principleId: PrincipleId.nullable().optional(),
   /** The question Convert stored; absent for every other kind. */
   questionId: ShapeQuestionId.nullable().optional(),
-  /** The converted decision or principle was withdrawn (Withdraw Decision…, Withdraw Principle…); absent for every other kind. */
+  /** The converted decision or principle was withdrawn (Withdraw Decision, Withdraw Principle); absent for every other kind. */
   withdrawn: z.boolean().optional(),
   /** The converted decision or principle was replaced by a later one that still stands; absent for every other kind. */
   superseded: z.boolean().optional(),
@@ -272,6 +272,6 @@ export type ShapeResumeInput = z.infer<typeof ShapeResumeInput>;
 export const ShapeOfDto = z.object({ shapeId: ShapeId.nullable() });
 export type ShapeOfDto = z.infer<typeof ShapeOfDto>;
 
-/** Withdraw Decision…: the builder's reason is required. */
+/** Withdraw Decision: the builder's reason is required. */
 export const ShapeWithdrawInput = z.object({ reason: z.string().min(1).max(2000) });
 export type ShapeWithdrawInput = z.infer<typeof ShapeWithdrawInput>;

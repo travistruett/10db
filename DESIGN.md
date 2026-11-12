@@ -80,7 +80,7 @@ favors legibility and calm over decoration.
   the task.
 - **Goal line:** the Board has no goal strips and no goal drawer; a goal's detail lives in Factory. Choosing a
   goal in the header's Goal select shows one compact line beside it: the status dot, "Idle · 4 in review ·
-  1 ready", **Start Ready…** and **Open in Factory ›**. With All goals selected nothing shows. A goal is never a
+  1 ready", **Start Ready** and **Open in Factory ›**. With All goals selected nothing shows. A goal is never a
   card in a column: cards are tasks, and the columns stay about tasks. Each of a goal's task cards carries the
   goal's title as a small dimmed label, except while the Goal select shows that goal.
 - **Goal status:** a goal says its status once, in a dot and one plain line, and the first match wins:
@@ -95,14 +95,14 @@ favors legibility and calm over decoration.
   the Board's In review column: a task whose pull request is open is in review, never done. Green is only
   for work that has merged: a goal with open pull requests is Shipping, in blue, never green. A goal's
   Decisions are those its own tasks recorded, not every decision in the project.
-- **Factory is one list per project, not cards:** every project's goals show, each project under its mark and name with its own Plan Work…, narrowed by Factory's Project filter (`?project=`); Human touch shows once one project is chosen. Acting in a project's group makes it the selected project first, so its links open there. Within a project, goals are rows of one list separated by hairline dividers, and the open
+- **Factory is one list per project, not cards:** every project's goals show, each project under its mark and name with its own Plan Work, narrowed by Factory's Project filter (`?project=`); Human touch shows once one project is chosen. Acting in a project's group makes it the selected project first, so its links open there. Within a project, goals are rows of one list separated by hairline dividers, and the open
   goal's area takes the `bg_1` fill. Rows take no borders and no shadows; cards stay the Board's draggable
   things. Each row is a button (`aria-expanded`) over a `role="region"`: title, status dot and one line, collapsed
   until opened, one open at a time. Order: failed, waiting on you, waiting on someone, paused, running,
   shipping, idle, not started, the Not in a goal row, then done goals under one collapsed "Done (n)". News is plain text ("· 3 new since 3h ago"):
   no badge and no color.
 - **An open goal has four zones, ordered by what the builder acts on:** a bar split by state with its counts
-  ("0 merged · 4 in review · 1 ready · 3 not started"; green only for merged) and Start Ready Tasks…; a
+  ("0 merged · 4 in review · 1 ready · 3 not started"; green only for merged) and Start Ready Tasks; a
   Needs you block, drawn only when an Inbox card waits on a goal task or a run failed (a failure is said in
   `failureLine`'s words with its Retry); one Tasks list; then two collapsed lines, "Since you last looked (3h)"
   and "About this goal", and one dimmed `xs` footer line with the team and the cost. There are no label/value
@@ -127,7 +127,9 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
   refused key. A condition that clears on its own, such as a rate-limited sync, is a dimmed
   `xs` line with an icon in the header of the view it affects.
 - **Copy:** Title Case for buttons, menu items and the names of things, such as flows and columns
-  ("Create Task", "Start Ready Tasks…", "Quick"); sentence case for labels, descriptions and messages.
+  ("Create Task", "Start Ready Tasks", "Quick"); sentence case for labels, descriptions and messages.
+  A button or menu item never ends in "…", even when it opens a dialog; "…" is for work in progress
+  ("Closing the pass…") and placeholders.
   Say what happened and what to do next.
 - **Buttons:** one filled primary per group. A standalone secondary action is `variant="default"`
   (bordered, neutral); `subtle` only inside dense rows and menus; never `outline` beside a filled

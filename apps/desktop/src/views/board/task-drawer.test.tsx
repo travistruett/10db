@@ -779,7 +779,7 @@ describe('TaskDrawer', () => {
       const task = taskDto({ keptWork: true });
       open({ task });
       const d = await dialog();
-      fireEvent.click(within(d).getByRole('button', { name: 'Discard Saved Work…' }));
+      fireEvent.click(within(d).getByRole('button', { name: 'Discard Saved Work' }));
       const confirm = await screen.findByRole('dialog', { name: 'Discard Saved Work' });
       expect(within(confirm).getByText(/can't be undone/)).toBeTruthy();
       fireEvent.click(within(confirm).getByRole('button', { name: 'Discard Saved Work' }));

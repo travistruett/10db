@@ -792,7 +792,7 @@ describe('the Milestone 1 loop over HTTP, as the desktop sends it', () => {
     expect((await send('POST', `/tasks/${home.taskId}/stop`)).status).toBe(204);
     expect(typeof (await page('home')).turn?.endedAt).toBe('string');
 
-    // Take Out… reads the page's shared changes first; it has none, and keeps every one.
+    // Take Out reads the page's shared changes first; it has none, and keeps every one.
     expect(
       await api().get(`/passes/${passId}/tasks/${home.taskId}/take-out`, TakeOutPreviewDto),
     ).toEqual({ shared: [] });
@@ -803,7 +803,7 @@ describe('the Milestone 1 loop over HTTP, as the desktop sends it', () => {
     expect(TakeOutResultDto.parse(takeOut.body).tookOut).toBe(true);
     expect((await live())[0]?.pages.map((p) => p.area)).toEqual(['billing']);
 
-    // Close Pass… reads its lists, which stop nothing, and closes on them as confirmed.
+    // Close Pass reads its lists, which stop nothing, and closes on them as confirmed.
     const preview = await api().get(`/passes/${passId}/close`, PassClosePreviewDto);
     expect([preview.unfinished, preview.foreignCommits]).toEqual([[], []]);
     const closing = await send('POST', `/passes/${passId}/close`, {

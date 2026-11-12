@@ -1255,7 +1255,7 @@ describe('Plan: the nav item', () => {
     const nav = await screen.findByRole('navigation');
     await screen.findByRole('textbox', { name: 'Message' });
     expect(within(nav).queryByText(/No conversations yet/)).toBeNull();
-    expect(within(nav).queryByRole('link', { name: 'Plan Work…' })).toBeNull();
+    expect(within(nav).queryByRole('link', { name: 'Plan Work' })).toBeNull();
   });
 });
 
@@ -1387,7 +1387,7 @@ describe('Shape: Convert', () => {
     const view = proposed([], { round: 0 });
     serve(...conversations(view));
     open(view);
-    const button = await screen.findByRole('button', { name: 'Convert…' });
+    const button = await screen.findByRole('button', { name: 'Convert' });
     await waitFor(() => {
       expect(disabled(button)).toBe(true);
     });
@@ -1404,7 +1404,7 @@ describe('Shape: Convert', () => {
       }),
     );
     open(view);
-    const button = await screen.findByRole('button', { name: 'Convert…' });
+    const button = await screen.findByRole('button', { name: 'Convert' });
     await waitFor(() => {
       expect(disabled(button)).toBe(false);
     });
@@ -1444,7 +1444,7 @@ describe('Shape: Convert', () => {
       ),
     );
     open(view);
-    const button = await screen.findByRole('button', { name: 'Convert…' });
+    const button = await screen.findByRole('button', { name: 'Convert' });
     await waitFor(() => {
       expect(disabled(button)).toBe(false);
     });
@@ -1474,7 +1474,7 @@ describe('Shape: Convert', () => {
     };
     serve(...conversations(running));
     open(running);
-    const button = await screen.findByRole('button', { name: 'Convert…' });
+    const button = await screen.findByRole('button', { name: 'Convert' });
     await waitFor(() => {
       expect(disabled(button)).toBe(false);
     });
@@ -1594,7 +1594,7 @@ describe('Shape: converted rows and their undo', () => {
     fireEvent.click(
       await screen.findByRole('button', { name: 'Actions for Never mock the database' }),
     );
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Withdraw Principle…' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Withdraw Principle' }));
     const dialog = await screen.findByRole('dialog', { name: 'Withdraw Principle' });
     const submit = within(dialog).getByRole('button', { name: 'Withdraw Principle' });
     expect(disabled(submit)).toBe(true);
@@ -1610,7 +1610,7 @@ describe('Shape: converted rows and their undo', () => {
   // The menu opens a frame after the click, so wait for it; Why? is always in it. `hidden` because
   // jsdom gives the target no size, so the popover then hides itself as detached (display: none)
   // and a plain role query would find no item at all, whatever the menu holds.
-  const expectNoWithdrawalOffered = async (title: string, action = 'Withdraw Principle…') => {
+  const expectNoWithdrawalOffered = async (title: string, action = 'Withdraw Principle') => {
     fireEvent.click(screen.getByRole('button', { name: `Actions for ${title}` }));
     const items = await screen.findAllByRole('menuitem', { hidden: true });
     const labels = items.map((item) => item.textContent);
@@ -1675,7 +1675,7 @@ describe('Shape: converted rows and their undo', () => {
     open(view);
     expect(await screen.findByText('Converted · replaced by a later decision')).toBeTruthy();
     expect(screen.queryByText('Converted · in Knowledge')).toBeNull();
-    await expectNoWithdrawalOffered('Use BullMQ', 'Withdraw Decision…');
+    await expectNoWithdrawalOffered('Use BullMQ', 'Withdraw Decision');
   });
 
   it('says a converted principle was retired and offers no withdrawal for it', async () => {
@@ -1720,7 +1720,7 @@ describe('Shape: converted rows and their undo', () => {
     fireEvent.click(
       await screen.findByRole('button', { name: 'Actions for The chat replaces Adopt' }),
     );
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Withdraw Decision…' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Withdraw Decision' }));
     const dialog = await screen.findByRole('dialog', { name: 'Withdraw Decision' });
     const submit = within(dialog).getByRole('button', { name: 'Withdraw Decision' });
     expect(disabled(submit)).toBe(true);

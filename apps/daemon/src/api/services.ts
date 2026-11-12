@@ -330,7 +330,7 @@ export interface ApiServices {
   /** Cancels the page's sign-off that waits for another page's turn. Refused (409) when none waits. */
   cancelSignOff(passId: PassId, taskId: TaskId): void;
   /**
-   * What Close Pass… shows (spec §5.4, D25): the unfinished pages, the files no page owns, commits
+   * What Close Pass shows (spec §5.4, D25): the unfinished pages, the files no page owns, commits
    * 10db did not make, the summary, where the gate runs, and the lists' token. It stops nothing.
    */
   passClosePreview(passId: PassId): Promise<PassClosePreviewDto>;
@@ -411,9 +411,9 @@ export interface ApiServices {
   /** The conversation that made a goal or a task, for its drawer's Open conversation; none for work filed by hand. */
   getGoalShape(goalId: GoalId): ShapeOfDto;
   getTaskShape(taskId: TaskId): ShapeOfDto;
-  /** Withdraw Decision…: a decision the conversation wrote; throws ConflictError unless it is the head of its chain. */
+  /** Withdraw Decision: a decision the conversation wrote; throws ConflictError unless it is the head of its chain. */
   withdrawShapeDecision(shapeId: ShapeId, decisionId: DecisionId, reason: string): void;
-  /** Withdraw Principle…: a principle the conversation wrote; throws ConflictError once a later principle replaced it. */
+  /** Withdraw Principle: a principle the conversation wrote; throws ConflictError once a later principle replaced it. */
   withdrawShapePrinciple(shapeId: ShapeId, principleId: PrincipleId, reason: string): void;
   /**
    * The builder's actions on a proposal row: edit sets fields and pins them, unpin lets a field (or the

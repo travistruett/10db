@@ -76,13 +76,13 @@ describe('PassHeader', () => {
     expect(screen.queryByRole('button', { name: 'Open Pull Request' })).toBeNull();
     expect(screen.queryByText('ampsio has no origin')).toBeNull();
     fireEvent.click(menu());
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Close Pass…', hidden: true }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Close Pass', hidden: true }));
     expect(props.onClose).toHaveBeenCalledTimes(1);
     fireEvent.click(menu());
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Rename', hidden: true }));
     expect(props.onRename).toHaveBeenCalledTimes(1);
     fireEvent.click(menu());
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Abandon Pass…', hidden: true }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Abandon Pass', hidden: true }));
     expect(props.onAbandon).toHaveBeenCalledTimes(1);
   });
 
@@ -122,9 +122,9 @@ describe('PassHeader', () => {
     ).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Add Page' })).toHaveProperty('disabled', true);
     fireEvent.click(menu());
-    const close = await screen.findByRole('menuitem', { name: 'Close Pass…', hidden: true });
+    const close = await screen.findByRole('menuitem', { name: 'Close Pass', hidden: true });
     expect(close.hasAttribute('disabled')).toBe(true);
-    const abandon = await screen.findByRole('menuitem', { name: 'Abandon Pass…', hidden: true });
+    const abandon = await screen.findByRole('menuitem', { name: 'Abandon Pass', hidden: true });
     expect(abandon.hasAttribute('disabled')).toBe(false);
     fireEvent.click(abandon);
     expect(props.onAbandon).toHaveBeenCalledTimes(1);
@@ -183,7 +183,7 @@ describe('PassHeader', () => {
     const { ready } = pagesByStatus();
     const props = draw(passViewDto({ pass: { state: 'ABANDONING' }, pages: [ready] }));
     fireEvent.click(menu());
-    const abandon = await screen.findByRole('menuitem', { name: 'Abandon Pass…', hidden: true });
+    const abandon = await screen.findByRole('menuitem', { name: 'Abandon Pass', hidden: true });
     expect(abandon.hasAttribute('disabled')).toBe(false);
     fireEvent.click(abandon);
     expect(props.onAbandon).toHaveBeenCalledTimes(1);

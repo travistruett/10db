@@ -20,7 +20,7 @@ function stillChangingLine(area: string, files: readonly string[]): string {
 }
 
 /**
- * Take Out…'s confirm (Workbench spec §5.4, §7.2): the page leaves the pass, its work kept with its
+ * Take Out's confirm (Workbench spec §5.4, §7.2): the page leaves the pass, its work kept with its
  * task, and its files go back to how they were before the pass. Its shared changes that have not
  * landed are read first; each is kept, or dropped where Drop is offered.
  */
