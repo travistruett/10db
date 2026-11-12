@@ -206,9 +206,11 @@ import {
   type LaneSession,
 } from '../sandbox';
 import {
+  nativeJudge,
   SessionEndReason,
   skippedServersNote,
   splitProjectMcp,
+  type LanePermissionMode,
   type SessionAdapter,
   type SessionHandle,
   type TurnResult,
@@ -2033,10 +2035,11 @@ export function createRunner(opts: RunnerOptions): Runner {
     // Where Claude Code keeps this account's sessions, and with them each one's saved tool results.
     const configDir = sessionConfigDir(account.kind, launch.env, homedir());
     // Read when each session starts: a switch flipped or a skill added meanwhile applies from the next one.
+    const switches = trustSwitchesFor(db, project.id);
     const setupPlan = planSessionSetup({
       home: opts.builderHome,
       checkout,
-      switches: trustSwitchesFor(db, project.id),
+      switches,
       laneWritable: [...allCheckouts(db), opts.worktreeRoot, ...opts.laneWritableRoots],
     });
     let laneSession: LaneSession | null = null;
@@ -2080,6 +2083,20 @@ export function createRunner(opts: RunnerOptions): Runner {
     if (setupLeftOut.length > 0)
       opts.logger.info({ workstreamId: id, leftOut: setupLeftOut }, 'session setup left out');
     const setupNote = leftOutNote(setupLeftOut);
+    // Only a sandboxed lane runs in auto mode, read from the app-wide setting as each session starts.
+    const lanePermissionMode: LanePermissionMode | null =
+      laneSession === null
+        ? null
+        : laneAutoMode(db, (stored) => {
+              opts.logger.warn(
+                { stored },
+                'the lane auto mode setting is not a boolean; using default mode',
+              );
+            })
+          ? 'auto'
+          : 'default';
+    // Where auto mode judges the web, WebSearch and WebFetch go to its classifier instead of a card.
+    const webJudged = switches.web && nativeJudge(account.kind, lanePermissionMode);
     if (laneSession) opts.laneTempDirs?.set(id, laneSession.tmpDir);
     const dispose = (): void => {
       opts.laneTempDirs?.delete(id);
@@ -2152,6 +2169,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       pictures: project.appUrl !== null && takesPictures(project, task),
       sandboxed: Boolean(opts.laneSandbox),
       instructionsLoaded: setupPlan.instructions.text !== null,
+      webJudged,
       setupLine:
         laneSession === null
           ? null
@@ -2384,18 +2402,7 @@ export function createRunner(opts: RunnerOptions): Runner {
               },
             }
           : {}),
-        ...(laneSession
-          ? {
-              lanePermissionMode: laneAutoMode(db, (stored) => {
-                opts.logger.warn(
-                  { stored },
-                  'the lane auto mode setting is not a boolean; using default mode',
-                );
-              })
-                ? 'auto'
-                : 'default',
-            }
-          : {}),
+        ...(lanePermissionMode === null ? {} : { lanePermissionMode }),
         allowedTools: allowedToolsFor(
           project,
           step.tools,
@@ -2422,6 +2429,7 @@ export function createRunner(opts: RunnerOptions): Runner {
               filesDir: taskFilesDir(opts.dataDir, task.id),
             },
             ...(fileAccess ? { fileAccess } : {}),
+            webJudged,
           }),
         canUseTool: createPermissionBroker(
           { state: opts.state, inbox: opts.inbox, git: opts.git, logger: opts.logger },

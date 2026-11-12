@@ -1032,6 +1032,27 @@ describe('buildSessionPrompt for flow steps', () => {
     ).not.toContain('Loaded for you');
   });
 
+  it.each([
+    [
+      'judged by auto mode',
+      true,
+      "A dependency change, a loop with no end in the background and repo MCP tools wait on a card from the builder. WebSearch and WebFetch go to auto mode's judge, which refuses a fetch that would send the project's code or secrets out; if auto mode isn't running for your model, they wait on a card.",
+    ],
+    [
+      'carded',
+      false,
+      'A dependency change, a loop with no end in the background, WebFetch, WebSearch and repo MCP tools wait on a card from the builder.',
+    ],
+  ])('tells a sandboxed Claude lane where the web goes when it is %s', (_name, webJudged, said) => {
+    const prompt = buildSessionPrompt({
+      ...base,
+      action: { kind: 'start' },
+      sandboxed: true,
+      webJudged,
+    });
+    expect(prompt).toContain(said);
+  });
+
   it('gives the temp-file line only to a step that can make one', () => {
     const start = { ...base, action: { kind: 'start' as const }, sandboxed: true };
     expect(buildSessionPrompt(start)).toContain(`- ${TEMP_FILES_LINE}`);

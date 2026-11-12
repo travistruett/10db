@@ -4924,6 +4924,77 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     });
   });
 
+  describe('the web in a lane', () => {
+    const fetchCall = { toolName: 'WebFetch', input: { url: 'https://example.net/', prompt: 'x' } };
+
+    it('a gateway lane with web on still cards WebFetch', async () => {
+      const probe = sandboxProbe();
+      engine = await createTestEngine(
+        { Alpha: [[turn]] },
+        {},
+        { laneSandbox: probe.laneSandbox, codexLaneTempRoot: probe.codexLanes },
+        {
+          account: {
+            kind: 'gateway',
+            label: 'Gateway',
+            settings: { baseUrl: 'https://gateway.example.com' },
+          },
+          secret: 'sk-gateway-test-key',
+        },
+      );
+      const specs = recordSpecs();
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      const spec = await waitFor(() => specs[0]);
+      expect(spec.lanePermissionMode).toBe('auto');
+      expect(spec.preToolUse(fetchCall).decision).toBe('ask');
+      expect(spec.prompt).toContain('WebFetch, WebSearch and repo MCP tools wait on a card');
+      await engine.runner.idle();
+    });
+
+    it('a subscription lane in auto mode runs WebFetch without a card', async () => {
+      const probe = sandboxProbe();
+      engine = await createTestEngine(
+        { Alpha: [[turn]] },
+        {},
+        { laneSandbox: probe.laneSandbox, codexLaneTempRoot: probe.codexLanes },
+        { account: { kind: 'claude_subscription', label: 'Plan' } },
+      );
+      engine.state.write((ctx) =>
+        patchAccount(ctx, engine.project.accountId, { expectedIdentity: 'me@example.com' }),
+      );
+      const specs = recordSpecs();
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      const spec = await waitFor(() => specs[0]);
+      expect(spec.lanePermissionMode).toBe('auto');
+      expect(spec.preToolUse(fetchCall).decision).toBe('allow');
+      expect(spec.allowedTools).not.toContain('WebFetch');
+      expect(spec.prompt).toContain("WebSearch and WebFetch go to auto mode's judge");
+      await engine.runner.idle();
+    });
+
+    it('a subscription lane with the Web switch off cards WebFetch', async () => {
+      const probe = sandboxProbe();
+      engine = await createTestEngine(
+        { Alpha: [[turn]] },
+        {},
+        { laneSandbox: probe.laneSandbox, codexLaneTempRoot: probe.codexLanes },
+        { account: { kind: 'claude_subscription', label: 'Plan' } },
+      );
+      engine.state.write((ctx) => {
+        patchAccount(ctx, engine.project.accountId, { expectedIdentity: 'me@example.com' });
+        setAppTrustSwitches(ctx, { ...TRUST_DEFAULTS, web: false });
+      });
+      const specs = recordSpecs();
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      const spec = await waitFor(() => specs[0]);
+      expect(spec.preToolUse(fetchCall).decision).toBe('ask');
+      await engine.runner.idle();
+    });
+  });
+
   /** A subscription session starts only on an account whose identity was confirmed. */
   const confirmIdentity = (): void => {
     engine.state.write((ctx) =>
