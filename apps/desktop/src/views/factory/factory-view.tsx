@@ -123,9 +123,9 @@ function ProjectGoals({
               {project.name}
             </Title>
           </Group>
-          {/* Plan Work… opens a new conversation in this project (Shape spec §4). */}
+          {/* Plan Work opens a new conversation in this project (Shape spec §4). */}
           <Button component={Link} to="/shape" variant="default" size="xs">
-            Plan Work…
+            Plan Work
           </Button>
         </Group>
         <ProjectPassLine projectId={project.id} />
@@ -137,8 +137,8 @@ function ProjectGoals({
         {goals.isLoading ? <Loader size="sm" aria-label="Loading goals" /> : null}
         {goals.isSuccess && goals.data.goals.length === 0 ? (
           <Text size="sm" c="dimmed">
-            Goals are outcomes 10db pursues across many tasks. Plan Work… to start one, or ask
-            Claude Code to with the 10db-task skill.
+            Goals are outcomes 10db pursues across many tasks. Plan Work to start one, or ask Claude
+            Code to with the 10db-task skill.
           </Text>
         ) : null}
         {goals.isSuccess ? (

@@ -21,7 +21,7 @@ import {
   type Store,
 } from './index';
 
-// Shape spec §11 (Withdraw Decision…), to M3's plan (docs/superpowers/plans/2026-10-22-10db-11-m3-knowledge.md
+// Shape spec §11 (Withdraw Decision), to M3's plan (docs/superpowers/plans/2026-10-22-10db-11-m3-knowledge.md
 // K1, K3): a withdrawn tombstone with a required reason, and only the head of a supersede chain withdrawn.
 
 let store: Store;

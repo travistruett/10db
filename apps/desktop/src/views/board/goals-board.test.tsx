@@ -152,7 +152,7 @@ describe('the Board with goals', () => {
       renderApp('/board');
       await screen.findByRole('button', { name: 'Fix a typo' });
       expect(screen.queryByTestId('goal-line')).toBeNull();
-      expect(screen.queryByRole('button', { name: 'Start Ready…' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Start Ready' })).toBeNull();
       expect(screen.queryByRole('button', { name: /^Open in Factory/ })).toBeNull();
     });
 
@@ -165,7 +165,7 @@ describe('the Board with goals', () => {
       // Running, one task in review (the digest) and two in Ready (the board's tasks).
       expect(line.textContent).toContain('Running · 1 in review · 2 ready');
       expect(within(line).getByTestId('goal-dot').getAttribute('data-color')).toBe('blue');
-      expect(within(line).getByRole('button', { name: 'Start Ready…' })).toBeTruthy();
+      expect(within(line).getByRole('button', { name: 'Start Ready' })).toBeTruthy();
       expect(within(line).getByRole('button', { name: /^Open in Factory/ })).toBeTruthy();
 
       await chooseGoal('All goals');
@@ -182,7 +182,7 @@ describe('the Board with goals', () => {
       expect(line.textContent).not.toContain('in review');
     });
 
-    it('starts only that goal’s ready tasks from Start Ready…', async () => {
+    it('starts only that goal’s ready tasks from Start Ready', async () => {
       const asked: (string | null)[] = [];
       serve(
         http.get(daemonUrl('/projects/:projectId/candidates'), ({ request }) => {
@@ -199,14 +199,14 @@ describe('the Board with goals', () => {
       );
       renderApp(`/board?goal=${greetings.goal.id}`);
       const line = await screen.findByTestId('goal-line');
-      fireEvent.click(within(line).getByRole('button', { name: 'Start Ready…' }));
+      fireEvent.click(within(line).getByRole('button', { name: 'Start Ready' }));
       const sheet = await screen.findByRole('dialog', { name: 'Start a batch' });
       expect(await within(sheet).findByRole('checkbox', { name: 'Say hello' })).toBeTruthy();
       expect(within(sheet).getByText(/Greet the visitor/)).toBeTruthy();
       expect(asked).toEqual([greetings.goal.id]);
     });
 
-    it('disables Start Ready… when none of the goal’s tasks is ready', async () => {
+    it('disables Start Ready when none of the goal’s tasks is ready', async () => {
       serve(
         http.get(daemonUrl('/projects/:projectId/tasks'), () =>
           HttpResponse.json(
@@ -223,7 +223,7 @@ describe('the Board with goals', () => {
       renderApp(`/board?goal=${greetings.goal.id}`);
       const line = await screen.findByTestId('goal-line');
       expect(line.textContent).not.toContain('ready');
-      expect(within(line).getByRole('button', { name: 'Start Ready…' })).toHaveProperty(
+      expect(within(line).getByRole('button', { name: 'Start Ready' })).toHaveProperty(
         'disabled',
         true,
       );

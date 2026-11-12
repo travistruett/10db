@@ -6,7 +6,7 @@ import { createPassCloses, type CloseShip } from './close';
 import { closePreview, type CloseListDeps } from './close-lists';
 import { grantSharedHold, keepHold, keepTurnWork } from './index';
 
-// Workbench spec §5.4 (D25), W10, §18: Close Pass… lists the unfinished pages, the files no page
+// Workbench spec §5.4 (D25), W10, §18: Close Pass lists the unfinished pages, the files no page
 // owns, and the commits 10db did not make, stopping nothing, under a token that a stopped turn
 // changes only when it changed the lists.
 

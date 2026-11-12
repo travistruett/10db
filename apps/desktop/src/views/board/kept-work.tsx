@@ -6,7 +6,7 @@ import { FormModal } from '../../shell/form-modal';
 
 /**
  * The task drawer's word on work the task kept from a Workbench pass (Workbench spec §5.4), which its
- * next start puts back, and Discard Saved Work… to drop it after a confirm.
+ * next start puts back, and Discard Saved Work to drop it after a confirm.
  */
 export function KeptWork({ taskId }: { readonly taskId: TaskId }) {
   const [confirming, setConfirming] = useState(false);
@@ -27,7 +27,7 @@ export function KeptWork({ taskId }: { readonly taskId: TaskId }) {
           setConfirming(true);
         }}
       >
-        Discard Saved Work…
+        Discard Saved Work
       </Button>
       <FormModal
         opened={confirming}

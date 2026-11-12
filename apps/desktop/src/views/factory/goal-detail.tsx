@@ -97,7 +97,7 @@ export function GoalDetail({ project, summary, opened }: GoalDetailProps) {
               setStarting(true);
             }}
           >
-            Start Ready Tasks…
+            Start Ready Tasks
           </Button>
         </Group>
       </Group>
@@ -126,7 +126,7 @@ export function GoalDetail({ project, summary, opened }: GoalDetailProps) {
             style={{ alignSelf: 'flex-start' }}
             onClick={removal.open}
           >
-            Remove Draft Goal…
+            Remove Draft Goal
           </Button>
         ) : null}
         {removal.offer === 'started' ? (

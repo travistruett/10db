@@ -4,7 +4,7 @@ import { IconChevronRight, IconDots, IconTrash } from '@tabler/icons-react';
 import { useRemoveDraftGoalAction } from '../shape/remove-draft-goal';
 import { GOAL_STATUS_LOOK } from './goal-status';
 
-/** The goal's open tasks sitting in Ready: what Start Ready… would propose. */
+/** The goal's open tasks sitting in Ready: what Start Ready would propose. */
 export function readyCountOf(goalId: GoalSummaryDto['goal']['id'], tasks: readonly TaskDto[]) {
   return tasks.filter(
     (t) =>
@@ -58,7 +58,7 @@ export function GoalLine({ summary, ready, onStartReady, onOpenFactory }: GoalLi
         {goalLineText(summary, ready)}
       </Text>
       <Button variant="default" size="compact-sm" disabled={ready === 0} onClick={onStartReady}>
-        Start Ready…
+        Start Ready
       </Button>
       <Button
         variant="subtle"
@@ -82,7 +82,7 @@ export function GoalLine({ summary, ready, onStartReady, onOpenFactory }: GoalLi
                 leftSection={<IconTrash size={16} stroke={1.5} />}
                 onClick={removal.open}
               >
-                Remove Draft Goal…
+                Remove Draft Goal
               </Menu.Item>
             </Menu.Dropdown>
           </Menu>

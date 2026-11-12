@@ -50,7 +50,7 @@ function closingLine(
 }
 
 /**
- * Abandon Pass…'s confirm (Workbench spec §5.4): names every page that goes back to how it was before
+ * Abandon Pass's confirm (Workbench spec §5.4): names every page that goes back to how it was before
  * the pass, its task keeping the work, and every signed-off page, which stays. From a close, it says
  * the close stops, and refuses once the close is landing.
  */

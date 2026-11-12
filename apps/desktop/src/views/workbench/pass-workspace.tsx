@@ -35,7 +35,7 @@ export function PassWorkspace({ view, inbox, project, selected, onSelect }: Pass
   const wide = layout === WorkbenchLayout.Wide;
   // Each page's unsent draft, kept while another page is shown.
   const [drafts, setDrafts] = useState<ReadonlyMap<TaskId, Draft>>(new Map());
-  // The page whose Take Out… confirm is open.
+  // The page whose Take Out confirm is open.
   const [takingOut, setTakingOut] = useState<TaskId | null>(null);
   const takingOutPage = view.pages.find((page) => page.taskId === takingOut) ?? null;
 

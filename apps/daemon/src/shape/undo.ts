@@ -55,7 +55,7 @@ export function removeDraftGoalOf(ctx: WriteContext, shapeId: ShapeId, goalId: G
 }
 
 /**
- * Withdraw Decision…: a decision this conversation wrote becomes a tombstone with the builder's
+ * Withdraw Decision: a decision this conversation wrote becomes a tombstone with the builder's
  * reason, and leaves searches and context packs. Only the head of a supersede chain can be withdrawn.
  */
 export function withdrawConvertedDecision(
@@ -70,7 +70,7 @@ export function withdrawConvertedDecision(
 }
 
 /**
- * Withdraw Principle…: a principle this conversation wrote becomes a tombstone with the builder's
+ * Withdraw Principle: a principle this conversation wrote becomes a tombstone with the builder's
  * reason, as the knowledge routes withdraw one, and leaves searches and context packs. A principle
  * a later one replaced cannot be withdrawn (409).
  */

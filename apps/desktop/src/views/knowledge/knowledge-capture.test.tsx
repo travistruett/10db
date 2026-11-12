@@ -301,7 +301,7 @@ describe('replacing', () => {
     {
       name: 'an accepted proposal',
       route: 'accept-dry-run',
-      open: 'Accept…',
+      open: 'Accept',
       dialog: 'Accept Proposal',
       save: 'Accept',
     },
@@ -314,7 +314,7 @@ describe('replacing', () => {
         { [route]: () => ({ status: 200, json: { ...noRestore, replaces: current } }) },
       );
       renderApp('/knowledge');
-      if (open === 'Accept…') await chooseShelf(/^Pending/);
+      if (open === 'Accept') await chooseShelf(/^Pending/);
       fireEvent.click(await screen.findByRole('button', { name: open }));
       const dialog = await screen.findByRole('dialog', { name: dialogName });
       fireEvent.change(within(dialog).getByLabelText('Statement'), {
@@ -337,7 +337,7 @@ describe('editing', () => {
     const decision = decisionItem({ scope: 'area', area: 'api', projectId: project.id });
     const { posted } = serve({ decisions: [decision] });
     await openDecisions();
-    await openRowMenu('Actions for "Which queue library?"', 'Edit…');
+    await openRowMenu('Actions for "Which queue library?"', 'Edit');
     const dialog = await screen.findByRole('dialog', { name: 'Edit Decision' });
     expect(within(dialog).getByLabelText<HTMLInputElement>('Question').value).toBe(
       'Which queue library?',
@@ -366,7 +366,7 @@ describe('editing', () => {
     const principle = principleItem({ projectId: project.id });
     const { posted } = serve({ principles: [principle] });
     renderApp('/knowledge');
-    await openRowMenu('Actions for "Never sleep in tests"', 'Edit…');
+    await openRowMenu('Actions for "Never sleep in tests"', 'Edit');
     const dialog = await screen.findByRole('dialog', { name: 'Edit Principle' });
     fireEvent.change(within(dialog).getByLabelText('Statement'), {
       target: { value: 'Tests never sleep' },
@@ -396,7 +396,7 @@ describe('editing', () => {
       { 'principle-supersede': refusal(409, message) },
     );
     renderApp('/knowledge');
-    await openRowMenu('Actions for "Never sleep in tests"', 'Edit…');
+    await openRowMenu('Actions for "Never sleep in tests"', 'Edit');
     const dialog = await screen.findByRole('dialog', { name: 'Edit Principle' });
     fireEvent.change(within(dialog).getByLabelText('Statement'), {
       target: { value: 'Prefer small PRs' },
@@ -408,7 +408,7 @@ describe('editing', () => {
   it('takes a row’s menu out of the page the moment an item is chosen, so the next menu is the only one', async () => {
     serve({ principles: [principleItem({ projectId: project.id })] });
     renderApp('/knowledge');
-    await openRowMenu('Actions for "Never sleep in tests"', 'Edit…');
+    await openRowMenu('Actions for "Never sleep in tests"', 'Edit');
     await screen.findByRole('dialog', { name: 'Edit Principle' });
     // `hidden` counts a menu that is only fading out: a closing menu must not linger beside the next one.
     expect(screen.queryAllByRole('menu', { hidden: true })).toHaveLength(0);
@@ -424,8 +424,8 @@ describe('editing', () => {
     renderApp('/knowledge');
     await chooseShelf('Past');
     fireEvent.click(await screen.findByRole('button', { name: 'Actions for "Old rule"' }));
-    expect(await screen.findByRole('menuitem', { name: 'Remove…' })).toBeTruthy();
-    expect(screen.queryByRole('menuitem', { name: 'Edit…' })).toBeNull();
+    expect(await screen.findByRole('menuitem', { name: 'Remove' })).toBeTruthy();
+    expect(screen.queryByRole('menuitem', { name: 'Edit' })).toBeNull();
   });
 });
 
@@ -434,7 +434,7 @@ describe('retiring and withdrawing', () => {
     const decision = decisionItem({ projectId: project.id });
     const { posted } = serve({ decisions: [decision] });
     await openDecisions();
-    await openRowMenu('Actions for "Which queue library?"', 'Remove…');
+    await openRowMenu('Actions for "Which queue library?"', 'Remove');
     const dialog = await screen.findByRole('dialog', { name: 'Remove Decision' });
     expect(
       within(dialog).getByText(
@@ -469,7 +469,7 @@ describe('retiring and withdrawing', () => {
       { 'decision-withdraw-dry-run': restoring(older) },
     );
     await openDecisions();
-    await openRowMenu('Actions for "Which queue?"', 'Remove…');
+    await openRowMenu('Actions for "Which queue?"', 'Remove');
     const dialog = await screen.findByRole('dialog', { name: 'Remove Decision' });
     expect(
       await within(dialog).findByText(
@@ -486,7 +486,7 @@ describe('retiring and withdrawing', () => {
     const principle = principleItem({ projectId: project.id, supersedesId: older.id });
     serve({ principles: [principle] }, { 'principle-withdraw-dry-run': restoring(older) });
     renderApp('/knowledge');
-    await openRowMenu('Actions for "Never sleep in tests"', 'Remove…');
+    await openRowMenu('Actions for "Never sleep in tests"', 'Remove');
     const dialog = await screen.findByRole('dialog', { name: 'Remove Principle' });
     fireEvent.click(within(dialog).getByRole('radio', { name: 'It was recorded by mistake' }));
     expect(
@@ -498,7 +498,7 @@ describe('retiring and withdrawing', () => {
     const decision = decisionItem({ projectId: project.id });
     const { dryRuns } = serve({ decisions: [decision] });
     await openDecisions();
-    await openRowMenu('Actions for "Which queue library?"', 'Remove…');
+    await openRowMenu('Actions for "Which queue library?"', 'Remove');
     const dialog = await screen.findByRole('dialog', { name: 'Remove Decision' });
     await dryRunAnswered(dialog);
     expect(dryRuns).toHaveLength(1);
@@ -523,7 +523,7 @@ describe('retiring and withdrawing', () => {
       }),
     );
     await openDecisions();
-    await openRowMenu('Actions for "Which queue library?"', 'Remove…');
+    await openRowMenu('Actions for "Which queue library?"', 'Remove');
     const dialog = await screen.findByRole('dialog', { name: 'Remove Decision' });
     fireEvent.change(within(dialog).getByLabelText('Reason'), { target: { value: 'Oops' } });
     const button = within(dialog).getByRole('button', { name: 'Remove' });
@@ -555,7 +555,7 @@ describe('retiring and withdrawing', () => {
       }),
     );
     await openDecisions();
-    await openRowMenu('Actions for "Which queue library?"', 'Remove…');
+    await openRowMenu('Actions for "Which queue library?"', 'Remove');
     const dialog = await screen.findByRole('dialog', { name: 'Remove Decision' });
     const checking = /Checking whether an older version would become current again/;
     expect(within(dialog).getByText(checking)).toBeTruthy();
@@ -572,7 +572,7 @@ describe('retiring and withdrawing', () => {
       { 'decision-withdraw-dry-run': refusal(409, message) },
     );
     await openDecisions();
-    await openRowMenu('Actions for "Which queue library?"', 'Remove…');
+    await openRowMenu('Actions for "Which queue library?"', 'Remove');
     const dialog = await screen.findByRole('dialog', { name: 'Remove Decision' });
     await dryRunAnswered(dialog);
     // The real withdrawal meets the same check, so a refusal is not reported as a failed check.
@@ -588,7 +588,7 @@ describe('retiring and withdrawing', () => {
     const decision = decisionItem({ projectId: project.id });
     serve({ decisions: [decision] }, { 'decision-withdraw-dry-run': refusal(400, 'Say why.') });
     await openDecisions();
-    await openRowMenu('Actions for "Which queue library?"', 'Remove…');
+    await openRowMenu('Actions for "Which queue library?"', 'Remove');
     const dialog = await screen.findByRole('dialog', { name: 'Remove Decision' });
     await dryRunAnswered(dialog);
     expect(within(dialog).queryByText(COULD_NOT_CHECK)).toBeNull();
@@ -603,7 +603,7 @@ describe('retiring and withdrawing', () => {
       },
     );
     await openDecisions();
-    await openRowMenu('Actions for "Which queue library?"', 'Remove…');
+    await openRowMenu('Actions for "Which queue library?"', 'Remove');
     const dialog = await screen.findByRole('dialog', { name: 'Remove Decision' });
     expect(await within(dialog).findByText(COULD_NOT_CHECK)).toBeTruthy();
     await dryRunAnswered(dialog);
@@ -621,7 +621,7 @@ describe('retiring and withdrawing', () => {
       { 'decision-withdraw-dry-run': () => ({ status: 200, json: { nonsense: true } }) },
     );
     await openDecisions();
-    await openRowMenu('Actions for "Which queue library?"', 'Remove…');
+    await openRowMenu('Actions for "Which queue library?"', 'Remove');
     const dialog = await screen.findByRole('dialog', { name: 'Remove Decision' });
     expect(await within(dialog).findByText(COULD_NOT_CHECK)).toBeTruthy();
     await dryRunAnswered(dialog);
@@ -638,7 +638,7 @@ describe('retiring and withdrawing', () => {
       }),
     );
     await openDecisions();
-    await openRowMenu('Actions for "Which queue library?"', 'Remove…');
+    await openRowMenu('Actions for "Which queue library?"', 'Remove');
     const dialog = await screen.findByRole('dialog', { name: 'Remove Decision' });
     expect(await within(dialog).findByText(COULD_NOT_CHECK)).toBeTruthy();
     await dryRunAnswered(dialog);
@@ -648,7 +648,7 @@ describe('retiring and withdrawing', () => {
     const principle = principleItem({ projectId: project.id });
     const { posted } = serve({ principles: [principle] });
     renderApp('/knowledge');
-    await openRowMenu('Actions for "Never sleep in tests"', 'Remove…');
+    await openRowMenu('Actions for "Never sleep in tests"', 'Remove');
     const dialog = await screen.findByRole('dialog', { name: 'Remove Principle' });
     // Nothing is sent until the builder says why.
     expect(within(dialog).getByRole('button', { name: 'Remove' })).toHaveProperty('disabled', true);
@@ -670,7 +670,7 @@ describe('retiring and withdrawing', () => {
     const principle = principleItem({ projectId: project.id });
     const { posted } = serve({ principles: [principle] });
     renderApp('/knowledge');
-    await openRowMenu('Actions for "Never sleep in tests"', 'Remove…');
+    await openRowMenu('Actions for "Never sleep in tests"', 'Remove');
     const dialog = await screen.findByRole('dialog', { name: 'Remove Principle' });
     fireEvent.click(within(dialog).getByRole('radio', { name: 'It was recorded by mistake' }));
     await dryRunAnswered(dialog);
@@ -690,7 +690,7 @@ describe('retiring and withdrawing', () => {
       { 'decision-withdraw': refusal(409, message) },
     );
     await openDecisions();
-    await openRowMenu('Actions for "Which queue library?"', 'Remove…');
+    await openRowMenu('Actions for "Which queue library?"', 'Remove');
     const dialog = await screen.findByRole('dialog', { name: 'Remove Decision' });
     await dryRunAnswered(dialog);
     fireEvent.change(within(dialog).getByLabelText('Reason'), { target: { value: 'Oops' } });
@@ -732,7 +732,7 @@ describe('retiring and withdrawing', () => {
     );
     await openDecisions();
     await chooseShelf('Past');
-    await openRowMenu('Actions for "Which queue?"', 'Remove…');
+    await openRowMenu('Actions for "Which queue?"', 'Remove');
     const dialog = await screen.findByRole('dialog', { name: 'Remove Decision' });
     expect(await within(dialog).findByText(/has a newer version/)).toBeTruthy();
     expect(await within(dialog).findByText('Which queue? → pg-boss')).toBeTruthy();
@@ -781,7 +781,7 @@ describe('retiring and withdrawing', () => {
     );
     await openDecisions();
     await chooseShelf('Past');
-    await openRowMenu('Actions for "Which queue?"', 'Remove…');
+    await openRowMenu('Actions for "Which queue?"', 'Remove');
     const dialog = await screen.findByRole('dialog', { name: 'Remove Decision' });
     expect(await within(dialog).findByText(/has a newer version/)).toBeTruthy();
     expect(
@@ -808,7 +808,7 @@ describe('proposals', () => {
       expect(inboxReads.count).toBeGreaterThan(0);
     });
     const before = inboxReads.count;
-    fireEvent.click(await screen.findByRole('button', { name: 'Accept…' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Accept' }));
     const dialog = await screen.findByRole('dialog', { name: 'Accept Proposal' });
     expect(within(dialog).getByLabelText<HTMLTextAreaElement>('Statement').value).toBe(
       'Never sleep in tests',
@@ -839,7 +839,7 @@ describe('proposals', () => {
     const { posted } = serve({ proposals: [proposalDto({ projectId: project.id })] });
     renderApp('/knowledge');
     await chooseShelf(/^Pending/);
-    fireEvent.click(await screen.findByRole('button', { name: 'Reject…' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Reject' }));
     const dialog = await screen.findByRole('dialog', { name: 'Reject Proposal' });
     fireEvent.change(within(dialog).getByLabelText('Note (optional)'), {
       target: { value: 'Too strict' },
@@ -850,7 +850,7 @@ describe('proposals', () => {
     });
     expect(posted[0]?.body).toEqual({ note: 'Too strict' });
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Reject…' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Reject' }));
     const again = await screen.findByRole('dialog', { name: 'Reject Proposal' });
     fireEvent.click(within(again).getByRole('button', { name: 'Reject' }));
     await waitFor(() => {
@@ -869,7 +869,7 @@ describe('proposals', () => {
     );
     renderApp('/knowledge');
     await chooseShelf(/^Pending/);
-    fireEvent.click(await screen.findByRole('button', { name: 'Accept…' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Accept' }));
     const dialog = await screen.findByRole('dialog', { name: 'Accept Proposal' });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Accept' }));
     expect(await within(dialog).findByText('Proposal prp_x is already accepted')).toBeTruthy();
@@ -882,6 +882,6 @@ describe('proposals', () => {
     renderApp('/knowledge');
     await chooseShelf(/^Pending/);
     expect(await screen.findByText('No proposals wait for you.')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Accept…' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
   });
 });

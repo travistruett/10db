@@ -236,7 +236,7 @@ describe('useProjectSetup', () => {
     const served = serve();
     renderWithDaemon(<Harness onCreated={() => undefined} />);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Choose Folder…' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose Folder' }));
     await screen.findByRole('textbox', { name: 'Name' });
 
     expect(served.inspected).toEqual(['/Users/me/widgets']);
@@ -258,19 +258,19 @@ describe('useProjectSetup', () => {
     const asked = panel(null);
     const served = serve();
     renderWithDaemon(<Harness onCreated={() => undefined} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Choose Folder…' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose Folder' }));
     await waitFor(() => {
       expect(asked).toHaveLength(1);
     });
     expect(served.inspected).toEqual([]);
-    expect(screen.getByRole('button', { name: 'Choose Folder…' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Choose Folder' })).toBeTruthy();
   });
 
   it('a subfolder shows the repository root and says it is the top folder', async () => {
     panel('/Users/me/widgets/packages/ui');
     serve();
     renderWithDaemon(<Harness onCreated={() => undefined} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Choose Folder…' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose Folder' }));
     await screen.findByRole('textbox', { name: 'Name' });
     expect(screen.getByText('/Users/me/widgets')).toBeTruthy();
     expect(screen.getByText("The repository's top folder.")).toBeTruthy();

@@ -24,7 +24,7 @@ export function RowMenu({ area, onTakeOut }: RowMenuProps) {
         </ActionIcon>
       </Menu.Target>
       <Menu.Dropdown>
-        <Menu.Item onClick={onTakeOut}>Take Out…</Menu.Item>
+        <Menu.Item onClick={onTakeOut}>Take Out</Menu.Item>
       </Menu.Dropdown>
     </Menu>
   );

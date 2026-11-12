@@ -103,17 +103,17 @@ describe('FactoryView goal list', () => {
 
     expect(
       await screen.findByText(
-        'Goals are outcomes 10db pursues across many tasks. Plan Work… to start one, or ask Claude Code to with the 10db-task skill.',
+        'Goals are outcomes 10db pursues across many tasks. Plan Work to start one, or ask Claude Code to with the 10db-task skill.',
       ),
     ).toBeTruthy();
     expect(screen.queryByRole('button', { name: /Not in a goal/ })).toBeNull();
   });
 
-  it('has Plan Work… as its primary, which opens a new conversation, and no Adopt a Plan…', async () => {
+  it('has Plan Work as its primary, which opens a new conversation, and no Adopt a Plan…', async () => {
     serve(goals(goalListDto()));
     const { router } = renderApp('/factory');
 
-    const shape = await screen.findByRole('link', { name: 'Plan Work…' });
+    const shape = await screen.findByRole('link', { name: 'Plan Work' });
     expect(screen.queryByText('Adopt a Plan…')).toBeNull();
     fireEvent.click(shape);
     await waitFor(() => {
@@ -672,7 +672,7 @@ describe('FactoryView goal detail', () => {
     expect(within(region).getByText('Bad rows are reported')).toBeTruthy();
   });
 
-  it('opens the batch sheet for the goal from Start Ready Tasks…', async () => {
+  it('opens the batch sheet for the goal from Start Ready Tasks', async () => {
     const { a, wsA } = fixtures();
     const ready = taskDto({ goalId: a.id, boardStatus: 'ready' });
     const summaryA = goalSummaryDto({ ...a, taskIds: [wsA.taskId, ready.id] }, { status: 'idle' });
@@ -694,7 +694,7 @@ describe('FactoryView goal detail', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /^Real areas/ }));
     const region = await screen.findByRole('region', { name: 'Real areas' });
-    const start = await within(region).findByRole('button', { name: 'Start Ready Tasks…' });
+    const start = await within(region).findByRole('button', { name: 'Start Ready Tasks' });
     await waitFor(() => {
       expect(start.hasAttribute('disabled')).toBe(false);
     });
@@ -705,7 +705,7 @@ describe('FactoryView goal detail', () => {
     });
   });
 
-  it('counts a ready task whose run was cancelled as ready, and enables Start Ready Tasks…', async () => {
+  it('counts a ready task whose run was cancelled as ready, and enables Start Ready Tasks', async () => {
     const { a } = fixtures();
     const task = taskDto({ goalId: a.id, title: 'Tried once', boardStatus: 'ready' });
     const cancelled = workstreamDto({
@@ -727,20 +727,20 @@ describe('FactoryView goal detail', () => {
     const row = (await within(region).findByText('Tried once')).closest('[role="listitem"]');
     if (!(row instanceof HTMLElement)) throw new Error('Tried once is not in a list row');
     expect(within(row).getByText(/^Ready/)).toBeTruthy();
-    const start = await within(region).findByRole('button', { name: 'Start Ready Tasks…' });
+    const start = await within(region).findByRole('button', { name: 'Start Ready Tasks' });
     await waitFor(() => {
       expect(start.hasAttribute('disabled')).toBe(false);
     });
   });
 
-  it('disables Start Ready Tasks… when no task of the goal is ready', async () => {
+  it('disables Start Ready Tasks when no task of the goal is ready', async () => {
     const { summaryA, wsA } = fixtures();
     serve(goals(goalListDto(summaryA)), workstreams(wsA), digests([], summaryA.digest));
     renderApp('/factory');
 
     fireEvent.click(await screen.findByRole('button', { name: /^Real areas/ }));
     const region = await screen.findByRole('region', { name: 'Real areas' });
-    const start = await within(region).findByRole('button', { name: 'Start Ready Tasks…' });
+    const start = await within(region).findByRole('button', { name: 'Start Ready Tasks' });
     expect(start.hasAttribute('disabled')).toBe(true);
   });
 
@@ -1727,7 +1727,7 @@ describe('FactoryView ways into the UI Workbench', () => {
     ]);
     fireEvent.click(await screen.findByRole('button', { name: /^Settings polish/ }));
     const region = await screen.findByRole('region', { name: 'Settings polish' });
-    await within(region).findByRole('button', { name: 'Start Ready Tasks…' });
+    await within(region).findByRole('button', { name: 'Start Ready Tasks' });
     await waitFor(() => {
       expect(queryClient.getQueryState(passKeys.live)?.status).toBe('success');
     });
@@ -1779,12 +1779,12 @@ describe('FactoryView across projects', () => {
     expect(await screen.findByRole('heading', { name: 'Human touch' })).toBeTruthy();
   });
 
-  it('makes a project the selected one when the builder acts in its group, so Plan Work… plans there', async () => {
+  it('makes a project the selected one when the builder acts in its group, so Plan Work plans there', async () => {
     twoProjects();
     const { router } = renderApp('/factory');
     await screen.findByRole('button', { name: 'Project: alpha. Switch project' });
     const betaGroup = await screen.findByRole('group', { name: 'beta' });
-    fireEvent.click(within(betaGroup).getByRole('link', { name: 'Plan Work…' }));
+    fireEvent.click(within(betaGroup).getByRole('link', { name: 'Plan Work' }));
     await waitFor(() => {
       expect(router.state.location.pathname).toBe('/shape');
     });
