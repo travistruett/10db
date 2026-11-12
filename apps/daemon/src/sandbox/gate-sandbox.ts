@@ -223,6 +223,7 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
           sandboxRoots: access.sandboxRoots,
           ownFiles: [],
           setupReads: [],
+          setupSecrets: [],
           loopback: input.project.sandboxLoopback,
           dockerSockets: docker?.sockets ?? [],
           deniedEnvNames: [],

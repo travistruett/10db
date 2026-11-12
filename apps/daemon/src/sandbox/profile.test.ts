@@ -39,6 +39,7 @@ function input(overrides: Partial<LaneProfileInput> = {}): LaneProfileInput {
     sandboxRoots: [],
     ownFiles: [],
     setupReads: [],
+    setupSecrets: [],
     loopback: false,
     deniedEnvNames: ['GH_TOKEN'],
     ...overrides,
@@ -369,6 +370,28 @@ describe('buildLaneProfile', () => {
     expect(denyRead).toContain(secret);
     for (const closed of [secret, toolchainSecret, join(sandboxRoot, 'x')])
       expect(allowRead).not.toContain(closed);
+  });
+
+  it('denies a .env folder inside a setup read under /tmp, not refusing the session', () => {
+    // Spelled /tmp, not resolved: the system reads compare as written, and Linux's temp dir is /tmp.
+    const skill = mkdtempSync('/tmp/sbx-setup-');
+    try {
+      const secret = join(skill, '.env');
+      mkdirSync(secret);
+      const { allowRead, denyRead } = buildLaneProfile(
+        input({ setupReads: [skill], setupSecrets: [secret] }),
+      ).filesystem;
+      expect(denyRead).toContain(secret);
+      expect(allowRead).toContain(skill);
+    } finally {
+      rmSync(skill, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a setup secret that holds what every lane command needs', () => {
+    expect(() => buildLaneProfile(input({ setupSecrets: [checkout] }))).toThrow(
+      /holds .* that every lane command needs/,
+    );
   });
 
   it('drops a read-list entry that is a secret file', () => {
