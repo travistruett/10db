@@ -39,6 +39,8 @@ import {
   JudgeKeyInput,
   KeepAwakeInput,
   LanePermissionsDto,
+  TrustOverrides,
+  TrustSwitches,
   ModelProfileId,
   NetworkHostInput,
   Month,
@@ -364,6 +366,20 @@ export function createApp(deps: ApiDeps) {
       (c) =>
         c.json(
           deps.services.setShapeJev(ProjectId.parse(c.req.param('projectId')), c.req.valid('json')),
+        ),
+    )
+    .get('/projects/:projectId/trust', async (c) =>
+      c.json(await deps.services.projectTrust(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .put(
+      '/projects/:projectId/trust',
+      validator('json', (value): TrustOverrides => TrustOverrides.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.setProjectTrust(
+            ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('json'),
+          ),
         ),
     )
     .get('/projects/:projectId/one-way-paths', (c) =>
@@ -1404,6 +1420,12 @@ export function createApp(deps: ApiDeps) {
       '/settings/keep-awake',
       validator('json', (value): z.infer<typeof KeepAwakeInput> => KeepAwakeInput.parse(value)),
       (c) => c.json(deps.services.setKeepAwake(c.req.valid('json').mode)),
+    )
+    .get('/settings/trust', (c) => c.json(deps.services.trustSettings()))
+    .put(
+      '/settings/trust',
+      validator('json', (value): TrustSwitches => TrustSwitches.parse(value)),
+      (c) => c.json(deps.services.setTrustSwitches(c.req.valid('json'))),
     )
     .get('/settings/lane-permissions', (c) => c.json(deps.services.lanePermissions()))
     .put(
