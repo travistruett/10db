@@ -427,6 +427,26 @@ describe('judgeShapeCall', () => {
     },
   );
 
+  it('a Plan session reads a setup read and nothing beside it', () => {
+    const claude = join(access.home, '.claude');
+    mkdirSync(join(claude, 'skills', 's'), { recursive: true });
+    writeFileSync(join(claude, 'skills', 's', 'SKILL.md'), 'skill');
+    writeFileSync(join(claude, 'settings.json'), '{}');
+    const withSetup: ShapeAccess = {
+      ...access,
+      protectedReads: [...access.protectedReads, claude],
+      setupReads: [join(claude, 'skills')],
+    };
+    const read = (file: string) =>
+      judgeShapeCall(call('Read', { file_path: file }), withSetup).decision;
+    expect(read(join(claude, 'skills', 's', 'SKILL.md'))).toBe('allow');
+    expect(read(join(claude, 'settings.json'))).toBe('deny');
+    expect(
+      judgeShapeCall(call('Grep', { pattern: 'x', path: join(claude, 'skills') }), withSetup)
+        .decision,
+    ).toBe('allow');
+  });
+
   it('never answers ask, so nothing reaches the broker or raises a card', () => {
     for (const [, make] of [...REFUSED, ...ALLOWED])
       expect(judgeShapeCall(make(), access).decision).not.toBe('ask');

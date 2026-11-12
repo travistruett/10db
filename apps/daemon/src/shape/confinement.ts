@@ -69,6 +69,8 @@ export interface ShapeAccess {
     readonly protectedPaths: readonly ProtectedPath[];
     readonly fileAccess: FileAccessJudge;
   };
+  /** The folders the session's setup opened read-only, as its sandbox kept them; none without one. */
+  readonly setupReads?: readonly string[];
   /** The Agent tool aliases the project's account takes, which an agent may be launched on; empty when it takes none; every alias when absent. */
   readonly agentModels?: readonly string[];
 }
@@ -190,6 +192,7 @@ function fileAccessContext(access: ShapeAccess): FileAccessContext {
     configDir: join(NOWHERE, 'no-claude-config'),
     providerSessionId: null,
     sandboxTemp: { roots: access.sandboxRoots, own: join(NOWHERE, 'no-own-temp-dir') },
+    ...(access.setupReads === undefined ? {} : { setupReads: access.setupReads }),
   };
 }
 

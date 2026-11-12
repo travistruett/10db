@@ -1,7 +1,7 @@
 import { existsSync, realpathSync } from 'node:fs';
 import { Provider, type PermissionRuleDto, type ProjectDto } from '@10db/contracts';
 import type { Clock } from '../clock';
-import { besideTheWay } from './beside-the-way';
+import { besideTheWays } from './beside-the-way';
 import { prepareCommandEnv, withoutTempDirPaths } from './command-env';
 import { dockerAccess, dockerEnvNames } from './docker-access';
 import { deniedEnvNames } from './env-allowlist';
@@ -410,18 +410,18 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
         });
         // The config dir and its ancestors stay readable to the file tools, which open the
         // session's own saved tool results there; the guard, the broker and the kernel hold them.
-        // A task with pictures keeps the way down to them open, and Claude Code denies everything
-        // beside it that is there now; what is made later, another task's folder among it, is left
-        // to the guard and the file tools' judge, which refuse it.
+        // A task with pictures, and the setup's reads, keep the way down to them open, and Claude
+        // Code denies everything beside it that is there now; what is made later, another task's
+        // folder among it, is left to the guard and the file tools' judge, which refuse it.
         const pictures =
           input.taskFiles !== undefined && existsSync(input.taskFiles) ? input.taskFiles : null;
+        const openInside = [...(pictures === null ? [] : [pictures]), ...setup.reads];
         const deniedToFileTools = protectedList
           .filter((path) => !isEqualOrUnder(input.configDir, path))
-          .flatMap((path) =>
-            pictures !== null && isEqualOrUnder(pictures, path)
-              ? besideTheWay(path, pictures)
-              : [path],
-          );
+          .flatMap((path) => {
+            const open = openInside.filter((target) => isEqualOrUnder(target, path));
+            return open.length === 0 ? [path] : besideTheWays(path, open);
+          });
         mcp = sandboxMcpServers({
           access,
           home: deps.home,
@@ -478,6 +478,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
             own: tmpDir,
           },
           worktreeRoot: deps.worktreeRoot,
+          setupReads: setup.reads,
           get providerSessionId() {
             return providerSessionId;
           },

@@ -1217,6 +1217,28 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       expect(readdirSync(filesRoot).filter((name) => name.startsWith('10db-setup-'))).toEqual([]);
     });
 
+    it('keeps the file tools off ~/.claude but for the setup reads', async () => {
+      const setup = setupInput();
+      writeIn(join(home, '.claude'), 'settings.json', '{}');
+      // Another account's config dir, so ~/.claude is a protected read the file tools are kept off.
+      const session = await sandbox().forSession(
+        input({ setup, configDir: join(home, 'accounts', 'a') }),
+      );
+      try {
+        const claude = join(home, '.claude');
+        const rules = session.spec.disallowedTools;
+        expect(rules).toContain(`Read(/${join(claude, 'settings.json')})`);
+        expect(rules).not.toContain(`Read(/${claude})`);
+        expect(rules).not.toContain(`Read(/${claude}/**)`);
+        expect(rules.some((rule) => rule.startsWith(`Read(/${join(claude, 'skills')}`))).toBe(
+          false,
+        );
+        expect(session.fileAccess.setupReads).toEqual(session.setup.reads);
+      } finally {
+        session.dispose();
+      }
+    });
+
     it('removes the setup dir on dispose', async () => {
       const session = await sandbox().forSession(input({ setup: setupInput() }));
       const setupDir = session.setup.reads[0] ?? '';

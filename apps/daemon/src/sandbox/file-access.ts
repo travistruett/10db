@@ -39,6 +39,11 @@ export interface FileAccessContext {
    * never right (a lane builds paths from its own copy), so it is refused, not asked about.
    */
   readonly worktreeRoot?: string;
+  /**
+   * The folders a session's setup opened read-only (`LaneSession.setup.reads`), real paths each judged
+   * by `setupReadRefusal`, which never opens one that holds a protected path.
+   */
+  readonly setupReads?: readonly string[];
 }
 
 /**
@@ -284,6 +289,7 @@ function judgeRead(real: string, ctx: FileAccessContext, tree: boolean): ReadAcc
   if (isOwnToolResult(real, ctx)) return 'allowed';
   if (!tree && ctx.filesDir !== undefined && isUnderOwnFiles(real, ctx.filesDir)) return 'allowed';
   if ((ctx.secretFiles ?? []).some((file) => pathsEqual(real, file))) return 'protected';
+  if ((ctx.setupReads ?? []).some((read) => isEqualOrUnder(real, read))) return 'allowed';
   const ownTemp = spellings(ctx.sandboxTemp.own).some((dir) => isEqualOrUnder(real, dir));
   const roots = [...ctx.protectedReads, ...(ownTemp ? [] : ctx.sandboxTemp.roots)].flatMap(
     spellings,
