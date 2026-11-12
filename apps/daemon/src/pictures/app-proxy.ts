@@ -7,19 +7,20 @@ import {
 import { connect, type Socket } from 'node:net';
 import type { Duplex } from 'node:stream';
 import { addressForLog } from './load-failure';
-import { proxyAllows } from './origin-guard';
+import { proxyAllows, type CameraReach } from './origin-guard';
 
 /**
  * The HTTP proxy Chromium sends every request through, loopback included (`launchOptions`), so the
  * origin guard holds below Playwright: a redirect's next hop, which Playwright's routing never sees,
  * reaches it too. It forwards only what `proxyAllows` lets through for the one app being shot, and
  * answers anything else 403 without forwarding it. It grants nothing new: it reaches only the app,
- * which a process that can reach its own loopback port can reach directly.
+ * which a process that can reach its own loopback port can reach directly, and, while the app is 10db's
+ * own dev UI, reads of the daemon, which answer only to the read-only dev UI token the page is handed.
  */
 export interface AppProxy {
   readonly port: number;
-  /** The app whose origin passes until the next call; null lets nothing pass. */
-  allow(appUrl: string | null): void;
+  /** What passes until the next call; null lets nothing pass. */
+  allow(reach: CameraReach | null): void;
   close(): Promise<void>;
 }
 
@@ -50,7 +51,7 @@ function refuse(socket: Duplex): void {
 
 /** Starts the proxy on `127.0.0.1` at a port the system picks; it lets nothing pass until `allow`. */
 export async function startAppProxy(options: AppProxyOptions = {}): Promise<AppProxy> {
-  let allowed: string | null = null;
+  let allowed: CameraReach | null = null;
   const tunnels = new Set<Duplex>();
   /** Requests forwarded to the app whose answer the browser may still be reading. */
   const forwards = new Set<ClientRequest>();
@@ -181,8 +182,8 @@ export async function startAppProxy(options: AppProxyOptions = {}): Promise<AppP
 
   return {
     port: address.port,
-    allow(appUrl) {
-      allowed = appUrl;
+    allow(reach) {
+      allowed = reach;
     },
     close: () =>
       new Promise<void>((resolve) => {

@@ -46,10 +46,11 @@ async function rawApp(
 function viaProxy(
   proxyPort: number,
   target: string,
+  method = 'GET',
 ): Promise<{ status: number; body: string; noAnswer: boolean }> {
   return new Promise((resolve, reject) => {
     const req = request(
-      { host: '127.0.0.1', port: proxyPort, method: 'GET', path: target, agent: false },
+      { host: '127.0.0.1', port: proxyPort, method, path: target, agent: false },
       (res) => {
         let body = '';
         res.setEncoding('utf8');
@@ -196,7 +197,7 @@ describe('the app proxy', () => {
         tunnels.push(target);
       },
     });
-    proxy.allow(`http://127.0.0.1:${String(app.port)}`);
+    proxy.allow({ app: `http://127.0.0.1:${String(app.port)}`, daemon: null });
   });
   afterEach(async () => {
     await proxy.close();
@@ -239,6 +240,22 @@ describe('the app proxy', () => {
     expect(other.hits).toEqual([]);
   });
 
+  it('lets reads of the daemon through while 10db shoots its own dev UI, and nothing that writes', async () => {
+    const appUrl = `http://127.0.0.1:${String(app.port)}`;
+    const daemonUrl = `http://127.0.0.1:${String(other.port)}`;
+    proxy.allow({ app: appUrl, daemon: daemonUrl });
+    expect(await viaProxy(proxy.port, `${daemonUrl}/projects`)).toEqual({
+      status: 200,
+      body: 'daemon /projects',
+      noAnswer: false,
+    });
+    expect((await viaProxy(proxy.port, `${daemonUrl}/passes`, 'POST')).status).toBe(403);
+    expect((await tunnel(proxy.port, `127.0.0.1:${String(other.port)}`)).status).toBe(403);
+    proxy.allow({ app: appUrl, daemon: null });
+    expect((await viaProxy(proxy.port, `${daemonUrl}/projects`)).status).toBe(403);
+    expect(other.hits).toEqual(['GET /projects']);
+  });
+
   it('lets nothing through while no app is allowed', async () => {
     proxy.allow(null);
     const got = await viaProxy(proxy.port, `http://127.0.0.1:${String(app.port)}/`);
@@ -259,9 +276,9 @@ describe('the app proxy', () => {
   ])('never throws on %s, and keeps serving', async (_name, answer, status) => {
     const bad = await rawApp(answer);
     try {
-      proxy.allow(bad.url);
+      proxy.allow({ app: bad.url, daemon: null });
       expect((await viaProxy(proxy.port, `${bad.url}/x`)).status).toBe(status);
-      proxy.allow(`http://127.0.0.1:${String(app.port)}`);
+      proxy.allow({ app: `http://127.0.0.1:${String(app.port)}`, daemon: null });
       expect(
         (await viaProxy(proxy.port, `http://127.0.0.1:${String(app.port)}/after`)).status,
       ).toBe(200);
@@ -284,7 +301,7 @@ describe('the app proxy', () => {
   ] as const)('never leaves the browser waiting on %s', async (_name, answer, after) => {
     const bad = await rawApp(answer, after);
     try {
-      proxy.allow(bad.url);
+      proxy.allow({ app: bad.url, daemon: null });
       expect(await settles(proxy.port, `${bad.url}/x`)).not.toBe('hung');
     } finally {
       bad.server.close();
@@ -294,7 +311,7 @@ describe('the app proxy', () => {
   it('stops the app’s stream when the browser drops it', async () => {
     const stream = await streamingApp();
     try {
-      proxy.allow(stream.url);
+      proxy.allow({ app: stream.url, daemon: null });
       const open = await firstBytes(proxy.port, `${stream.url}/events`);
       open.drop();
       await waitForAsync(() => Promise.resolve(stream.closed() === 1 ? true : undefined), 5_000);
@@ -307,7 +324,7 @@ describe('the app proxy', () => {
   it('stops the app’s streams when it closes', async () => {
     const stream = await streamingApp();
     try {
-      proxy.allow(stream.url);
+      proxy.allow({ app: stream.url, daemon: null });
       await firstBytes(proxy.port, `${stream.url}/events`);
       await proxy.close();
       await waitForAsync(() => Promise.resolve(stream.closed() === 1 ? true : undefined), 5_000);
@@ -325,11 +342,11 @@ describe('the app proxy', () => {
         resolve();
       });
     });
-    proxy.allow(gone);
+    proxy.allow({ app: gone, daemon: null });
     expect(await viaProxy(proxy.port, `${gone}/x`)).toMatchObject({ status: 502, noAnswer: true });
     const own = await rawApp('HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n');
     try {
-      proxy.allow(own.url);
+      proxy.allow({ app: own.url, daemon: null });
       expect(await viaProxy(proxy.port, `${own.url}/x`)).toMatchObject({
         status: 502,
         noAnswer: false,

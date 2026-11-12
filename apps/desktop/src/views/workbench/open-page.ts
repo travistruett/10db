@@ -1,7 +1,6 @@
-import { DevUiConnectionDto, type PassId, type TaskId } from '@10db/contracts';
+import { DevUiConnectionDto, handOffTo, type PassId, type TaskId } from '@10db/contracts';
 import { useState } from 'react';
 import { readJson } from '../../daemon/client';
-import { handOffTo } from '../../daemon/dev-ui-handoff';
 import { useDaemon, useDaemonStatus } from '../../daemon/provider';
 import { appPageUrl, openAppPage } from '../../desktop/tauri';
 

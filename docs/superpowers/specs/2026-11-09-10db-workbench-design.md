@@ -1137,8 +1137,9 @@ The desktop's e2e suite keeps WebKit; this is a second, separate use of Playwrig
 
 **Signing in.** The daemon runs the dev login command under the gate's sandbox, opens the printed address in a
 fresh browser context, and keeps the context's storage state for the project. It runs the command again when a
-capture lands somewhere other than the route asked for. A project with no login needs no command (10db's own
-UI, served by `pnpm dev:factory`, takes its token from the dev server).
+capture lands somewhere other than the route asked for. A project with no login needs no command. 10db's own
+UI needs none either: each shot of it is handed the daemon's address and the read-only dev UI token, as Open Page
+hands them, and may read the daemon (`decisions/2026-11-12-the-pictures-browser-reads-the-daemon-for-10dbs-own-ui.md`).
 
 **Which pages.** Every page area the task has changed files in, by its `route`. In addition, routes the agent
 names with a new lane tool, `report_pages { routes }`: needed for a route with a parameter (`/people/42`) and
@@ -1236,7 +1237,8 @@ A warm session that dies with the daemon is not restarted: its task is Ready, an
 - **A builder message is the builder's word**, typed in the app, carried over the UI token. It is not a
   permission: a tool call the message asks for is still judged by the guard and the broker.
 - **The browser** loads only the project's app address, which must be a loopback host. A navigation or request
-  to any other origin is refused. Routes the agent names are paths on that address, loaded with GET. The page
+  to any other origin is refused, except one: when the app is 10db's own dev UI, a shot may make reads (GET,
+  HEAD, OPTIONS) of the daemon's exact origin over the read-only dev UI token (`decisions/2026-11-12-the-pictures-browser-reads-the-daemon-for-10dbs-own-ui.md`). Routes the agent names are paths on that address, loaded with GET. The page
   is the project's own code, run with the session the builder's dev login gives: it can do in the dev backend
   what the builder's own browser can, and nothing on the Mac.
 - **The storage state is a credential** for the dev app. It lives in the data directory, mode 0600, outside
