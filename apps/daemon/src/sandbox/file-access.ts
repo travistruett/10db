@@ -15,7 +15,10 @@ export interface FileAccessContext {
   readonly checkout: string;
   readonly home: string;
   readonly protectedReads: readonly string[];
-  /** The checkout's secret files by exact real path; unlike protected reads, a search over their directory is not refused. */
+  /**
+   * The secret files by real path, and everything under one that is a directory; unlike protected reads,
+   * a search over their directory is not refused.
+   */
   readonly secretFiles?: readonly string[];
   readonly readList: readonly string[];
   /** The system documentation this context reads without asking: `SYSTEM_DOC_ROOTS` for a lane. */
@@ -288,7 +291,8 @@ const READ_STRICTNESS: Record<ReadAccess, number> = {
 function judgeRead(real: string, ctx: FileAccessContext, tree: boolean): ReadAccess {
   if (isOwnToolResult(real, ctx)) return 'allowed';
   if (!tree && ctx.filesDir !== undefined && isUnderOwnFiles(real, ctx.filesDir)) return 'allowed';
-  if ((ctx.secretFiles ?? []).some((file) => pathsEqual(real, file))) return 'protected';
+  // A secret may be a directory (a `.env` folder, or a `.env` link's target): its whole tree is closed.
+  if ((ctx.secretFiles ?? []).some((file) => isEqualOrUnder(real, file))) return 'protected';
   if ((ctx.setupReads ?? []).some((read) => isEqualOrUnder(real, read))) {
     // A search of an opened folder that holds a secret file would read it: search a narrower one.
     if (tree && (ctx.secretFiles ?? []).some((file) => isEqualOrUnder(file, real)))

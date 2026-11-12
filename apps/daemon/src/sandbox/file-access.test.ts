@@ -147,6 +147,32 @@ describe('readAccess', () => {
       expected: 'contains-protected',
     },
     {
+      name: 'a file inside a secret directory in a setup read is protected',
+      setup: () => {
+        mkdirSync(join(configDir, 'skills', 's', '.env'), { recursive: true });
+        writeFileSync(join(configDir, 'skills', 's', '.env', 'prod'), 'TOKEN=x');
+      },
+      path: () => join(configDir, 'skills', 's', '.env', 'prod'),
+      context: () => ({
+        setupReads: [join(configDir, 'skills')],
+        secretFiles: [join(configDir, 'skills', 's', '.env')],
+      }),
+      expected: 'protected',
+    },
+    {
+      name: 'a search of a folder inside a secret directory in a setup read is protected',
+      setup: () => {
+        mkdirSync(join(configDir, 'skills', 's', '.env', 'keys'), { recursive: true });
+      },
+      path: () => join(configDir, 'skills', 's', '.env', 'keys'),
+      context: () => ({
+        setupReads: [join(configDir, 'skills')],
+        secretFiles: [join(configDir, 'skills', 's', '.env')],
+      }),
+      tree: true,
+      expected: 'protected',
+    },
+    {
       name: 'a file beside a setup read in ~/.claude is protected',
       setup: () => {
         mkdirSync(join(configDir, 'skills'), { recursive: true });
