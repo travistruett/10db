@@ -8,7 +8,7 @@ import {
   BRAINSTORM_REFUSED_ON_CHATGPT,
   EventType,
   InvalidError,
-  InboxState,
+  InboxItemId,
   PROTOCOL_VERSION,
   Provider,
   RoutedBy,
@@ -29,7 +29,7 @@ import {
   countBatchesInFlight,
   countWaitingOnCard,
   isLaneWaitingOnCard,
-  listInbox,
+  getInboxItem,
   createStore,
   DB_MIGRATIONS_DIR,
   deleteAppSetting,
@@ -79,7 +79,8 @@ import {
 } from '../catalogue';
 import { createJudge, JUDGE_LOG_RETENTION_MS, type JudgeService } from '../judge';
 import { createJudgeServices } from './judge-services';
-import { createTriage } from '../stakeholders';
+import { createStakeholderSends, createTriage, draftOnOpen, sweepDrafts } from '../stakeholders';
+import { createSlackClient, type SlackClient } from '../slack';
 import {
   backupDatabase,
   hasPendingMigrations,
@@ -135,6 +136,7 @@ import {
   exportAwsCredentials,
   REQUIRED_TOOLS,
   OPENROUTER_KEY_ACCOUNT,
+  SLACK_BOT_ACCOUNT,
   unavailableKeychain,
   type AgentTools,
   type Keychain,
@@ -280,6 +282,9 @@ import {
 } from './sandbox-roots';
 import { assertWorktreeRootAllowed, DEFAULT_WORKTREE_BASE, worktreeRootFor } from './worktree-root';
 
+/** How long one Slack call may take before it counts as unreachable. */
+const SLACK_TIMEOUT_MS = 15_000;
+
 export interface DaemonOptions {
   readonly dataDir: string;
   readonly port: number;
@@ -355,6 +360,11 @@ export interface DaemonOptions {
   readonly catalogueSync?: boolean;
   /** The file holding the catalogue the release embeds, read when nothing is stored; absent or missing means none. */
   readonly catalogueSnapshot?: string;
+  /**
+   * Talk to Slack with the bot token in the Keychain. Off unless given, so a test never reaches the
+   * network; the entry point turns it on unless `TENDB_SLACK=off`.
+   */
+  readonly slack?: boolean;
   /** `TENDB_JUDGE=off`: the OpenRouter key is never read and no decision calls OpenRouter. */
   readonly judgeOff?: boolean;
   /** What listens on this Mac, for the Workbench setup's app address; `lsof` unless given. */
@@ -677,26 +687,55 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     },
     log: logger,
   });
+  // Slack is reached only when the entry point turned it on, and only with the bot token in the Keychain.
+  const slackClient: SlackClient | null =
+    opts.slack === true
+      ? createSlackClient({
+          fetch: opts.fetch ?? fetch,
+          token: () => judgeKeychain.readAsync(SLACK_BOT_ACCOUNT),
+          clock,
+          timeoutMs: SLACK_TIMEOUT_MS,
+        })
+      : null;
+  const sends = createStakeholderSends({
+    state,
+    slack: slackClient,
+    clock,
+    log: logger.child({ component: 'stakeholder-sends' }),
+    parkFor: (id) => {
+      runner?.parkFor(id);
+    },
+  });
+  const draftOpts = {
+    afterDraft: (id: InboxItemId): void => {
+      sends.afterDraft(id).catch((error: unknown) => {
+        logger.warn({ err: error, cardId: id }, 'a drafted question could not be sent');
+      });
+    },
+    log: logger.child({ component: 'drafts' }),
+  };
   // A question no explicit route claimed is routed by the judge right after its card commits.
   const triage = createTriage({
     state,
     judge,
     log: logger.child({ component: 'triage' }),
-    // A card routed away from the builder parks the sessions waiting on it, so the stakeholder's words
-    // are answered through the card and never reach a live ask_human call.
+    // A card routed away from the builder is drafted, and the sessions waiting on it park, so the
+    // stakeholder's words are answered through the card and never reach a live ask_human call.
     afterRouted: (id) => {
+      const after = state.write((ctx) => draftOnOpen(ctx, getInboxItem(ctx.tx, id), draftOpts));
       runner?.parkFor(id);
+      after?.();
     },
   });
   const inbox = createInboxService({
     state,
     judgeOff: opts.judgeOff === true,
-    onQuestionOpened: (_ctx, item) =>
+    onQuestionOpened: (ctx, item) =>
       item.routedBy === RoutedBy.TriagePending
         ? () => {
             void triage.run(item.id);
           }
-        : null,
+        : draftOnOpen(ctx, item, draftOpts),
     onParkedAnswer: (target, item) => {
       runner?.deliverParkedAnswer(target, item);
     },
@@ -1470,10 +1509,18 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     logger,
     cleanShutdown,
   });
-  // A card a crash left waiting for triage is routed now; the judge or the lane's tags settle it.
-  for (const card of listInbox(state.db, { states: [InboxState.Open] })) {
-    if (card.routedBy === RoutedBy.TriagePending) void triage.run(card.id);
-  }
+  // A card a crash left waiting for triage takes the lane's rule, a routed card without its message gets
+  // one, and a send that was mid-post is looked for in Slack.
+  for (const after of state.write((ctx) => sweepDrafts(ctx, draftOpts))) after();
+  void sends.recoverSending();
+  bus.subscribe((event) => {
+    if (event.type !== EventType.InboxChanged) return;
+    const id = InboxItemId.safeParse(event.entityId);
+    if (!id.success) return;
+    sends.onCardChanged(getInboxItem(state.db, id.data)).catch((error: unknown) => {
+      logger.warn({ err: error, cardId: id.data }, 'could not settle the send of a changed card');
+    });
+  });
   // A pass's take-outs and Abandon stop its lanes through the runner, and tell the watcher which
   // files their put-back wrote.
   const stopLane: StopPassLane = (id) => createdRunner.stopPassLane(id);

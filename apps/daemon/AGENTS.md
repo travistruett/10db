@@ -310,6 +310,12 @@ The fake adapter (`sessions/fake-adapter.ts`) is the test boundary for Claude Co
   and every outcome leaves pending in one `setInboxRecipients` write (`judge`, `builder` or `rule`) before
   `afterRouted`, which parks the card's sessions through `Runner.parkFor`. A card no longer pending is left as it
   is. The start sweep settles a card a crash left pending.
+- A routed question is drafted in the transaction that routes it (`drafts.ts`, `draftOnOpen`; a recipient with no
+  Slack contact makes the card the builder's), and `sends.ts` sends it: `afterDraft` sends at once only when
+  `holdFor` finds no reason (scan, first send, limit, review, in that order), `send` rescans and refuses a hold,
+  and the post carries `tendb_send` metadata so `recoverSending` finds a post a crash left in flight instead of
+  posting twice. `onCardChanged`, subscribed to `inbox.changed`, closes the send and says why in every thread it
+  used (`closing-lines.ts`). With Slack off (`TENDB_SLACK=off`, no token) every draft stays as it is.
 - A question card routed to anyone but the builder parks its session at once (`onWaitStart` reads the card again),
   even with another wait open, so a stakeholder's words never reach a live `ask_human` call.
 

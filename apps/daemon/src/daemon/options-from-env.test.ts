@@ -68,6 +68,7 @@ describe('daemonOptionsFromEnv', () => {
       port: 0,
       logLevel: 'warn',
       sandbox: {},
+      slack: true,
       uiToken: token,
       devUiOrigin: 'http://localhost:51234',
       catalogueSync: true,
@@ -124,5 +125,6 @@ describe('slackOnFromEnv', () => {
     ['unset, the installed app', {}, true],
   ])('is %s -> %s for TENDB_SLACK', (_name, source, on) => {
     expect(slackOnFromEnv(loadEnv(source))).toBe(on);
+    expect(daemonOptionsFromEnv(loadEnv(source)).slack).toBe(on);
   });
 });

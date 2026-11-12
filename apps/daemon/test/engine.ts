@@ -2,7 +2,7 @@ import type { AddressInfo } from 'node:net';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { serve } from '@hono/node-server';
-import { mintId, RoutedBy } from '@10db/contracts';
+import { InboxItemId, mintId, RoutedBy } from '@10db/contracts';
 import type {
   AccountId,
   BatchId,
@@ -24,6 +24,7 @@ import {
   createTestStore,
   findFlowByName,
   getProject,
+  getInboxItem,
   getTask,
   getWorkstreamRow,
   insertTask,
@@ -65,7 +66,13 @@ import { createDeliveryJobs } from '../src/delivery';
 import { createGit } from '../src/git';
 import { startSignOff } from '../src/pass';
 import { createJudge, type Judge } from '../src/judge';
-import { createTriage } from '../src/stakeholders';
+import {
+  createStakeholderSends,
+  createTriage,
+  draftOnOpen,
+  type StakeholderSends,
+} from '../src/stakeholders';
+import type { SlackClient } from '../src/slack';
 import { createInboxService, createParkAnswers, type InboxService } from '../src/inbox';
 import { silentLogger } from '../src/log';
 import { protectedPaths } from '../src/guard';
@@ -95,6 +102,8 @@ export interface TestEngine {
   readonly inbox: InboxService;
   /** The running sessions' wait observers and signals, as the MCP side reads them. */
   readonly live: LiveSessions;
+  /** The stakeholder sends, over the fake Slack the engine was given (none: every draft stays). */
+  readonly sends: StakeholderSends;
   readonly runner: Runner;
   readonly adapter: FakeAdapter;
   readonly clock: ManualClock;
@@ -175,6 +184,8 @@ export async function createTestEngine(
      * the daemon does. Without it the judge is off and the lane's tags decide at insert.
      */
     readonly openRouter?: { readonly fetch: typeof fetch; readonly key?: string };
+    /** A fake Slack: with it routed questions are drafted and sent through it, as the daemon does. */
+    readonly slack?: SlackClient;
   } = {},
 ): Promise<TestEngine> {
   const repo = createTempRepo();
@@ -218,23 +229,45 @@ export async function createTestEngine(
         logger: silentLogger,
       })
     : offJudge;
+  const sends = createStakeholderSends({
+    state,
+    slack: setup.slack ?? null,
+    clock,
+    log: silentLogger,
+    parkFor: (id) => {
+      runner?.parkFor(id);
+    },
+  });
+  const draftOpts = {
+    afterDraft: (id: InboxItemId): void => {
+      sends.afterDraft(id).catch(() => undefined);
+    },
+    log: silentLogger,
+  };
   const triage = createTriage({
     state,
     judge: triageJudge,
     log: silentLogger,
     afterRouted: (id) => {
+      const after = state.write((ctx) => draftOnOpen(ctx, getInboxItem(ctx.tx, id), draftOpts));
       runner?.parkFor(id);
+      after?.();
     },
+  });
+  bus.subscribe((event) => {
+    if (event.type !== 'inbox.changed') return;
+    const id = InboxItemId.safeParse(event.entityId);
+    if (id.success) sends.onCardChanged(getInboxItem(state.db, id.data)).catch(() => undefined);
   });
   const inbox = createInboxService({
     state,
     judgeOff: triageJudge.off,
-    onQuestionOpened: (_ctx, item) =>
+    onQuestionOpened: (ctx, item) =>
       item.routedBy === RoutedBy.TriagePending
         ? () => {
             void triage.run(item.id);
           }
-        : null,
+        : draftOnOpen(ctx, item, draftOpts),
     onParkedAnswer: (target, item) => {
       runner?.deliverParkedAnswer(target, item);
     },
@@ -422,6 +455,7 @@ export async function createTestEngine(
     bus,
     inbox,
     live,
+    sends,
     runner: created,
     adapter,
     clock,

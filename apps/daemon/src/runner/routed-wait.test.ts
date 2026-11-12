@@ -57,10 +57,15 @@ const askUser: FakeStep = {
 
 /** Mark and Ana, with an area route for `category` on the `api` area that the engine's tasks claim. */
 function routeTo(category: string, handles: ('mark' | 'ana')[], areaScoped = true) {
-  const people = {
-    mark: engine.store.write((ctx) => insertPerson(ctx, { handle: 'mark', name: 'Mark' })).value,
-    ana: engine.store.write((ctx) => insertPerson(ctx, { handle: 'ana', name: 'Ana' })).value,
-  };
+  const person = (handle: string, name: string, userId: string) =>
+    engine.store.write((ctx) =>
+      insertPerson(ctx, {
+        handle,
+        name,
+        slack: { teamId: 'T1', userId, sendMode: 'review', dailyLimit: 10 },
+      }),
+    ).value;
+  const people = { mark: person('mark', 'Mark', 'U1'), ana: person('ana', 'Ana', 'U2') };
   engine.store.write((ctx) =>
     setRoutingRules(ctx, engine.project.id, {
       rules: handles.map((h) => ({

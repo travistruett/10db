@@ -69,7 +69,11 @@ describe('a question no rule claimed, through the running wiring', () => {
     );
     engine = live;
     const sarah = live.store.write((ctx) =>
-      insertPerson(ctx, { handle: 'sarah', name: 'Sarah' }),
+      insertPerson(ctx, {
+        handle: 'sarah',
+        name: 'Sarah',
+        slack: { teamId: 'T1', userId: 'U9', sendMode: 'review', dailyLimit: 10 },
+      }),
     ).value;
     live.store.write((ctx) =>
       setRoutingRules(ctx, live.project.id, {
