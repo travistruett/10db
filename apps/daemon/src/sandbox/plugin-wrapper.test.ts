@@ -2,6 +2,7 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   readlinkSync,
   realpathSync,
@@ -80,6 +81,40 @@ describe('wrapPlugin', () => {
     });
     for (const entry of ['skills', 'agents', 'commands'])
       expect(readlinkSync(join(into, entry))).toBe(join(plugin, entry));
+  });
+
+  // APFS folds case and Unicode normalization, so Claude Code's read of hooks/hooks.json or .mcp.json
+  // would reach an entry spelled another way.
+  it.each<[string, () => void, string]>([
+    [
+      'a Hooks folder holding hooks.json',
+      () => {
+        rmSync(join(plugin, 'hooks'), { recursive: true });
+        write(join(plugin, 'Hooks/hooks.json'), hooksJson('npx thing'));
+      },
+      'hooks/hooks.json',
+    ],
+    [
+      'a .MCP.json',
+      () => {
+        rmSync(join(plugin, '.mcp.json'));
+        write(join(plugin, '.MCP.json'), '{"mcpServers":{"s":{"command":"evil"}}}');
+      },
+      '.mcp.json',
+    ],
+    [
+      'an entry spelled in NFD',
+      () => {
+        // Written decomposed, looked up composed: APFS finds one by the other.
+        write(join(plugin, 'e\u0301tc/run.sh'), '#!/bin/sh\n', 0o755);
+      },
+      '\u00e9tc',
+    ],
+  ])('carries nothing of %s into the wrapper', (_name, arrange, unwanted) => {
+    arrange();
+    wrapPlugin(plugin, into);
+    expect(existsSync(join(into, unwanted))).toBe(false);
+    expect(readdirSync(into).sort()).toEqual(['.claude-plugin', 'agents', 'commands', 'skills']);
   });
 
   it('leaves out .mcp.json and the manifest’s mcpServers', () => {

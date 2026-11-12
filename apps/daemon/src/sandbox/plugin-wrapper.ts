@@ -8,6 +8,7 @@ import {
 } from 'node:fs';
 import { basename, join } from 'node:path';
 import { z } from 'zod';
+import { foldPathCase } from '../guard';
 
 interface LeftOut {
   readonly what: string;
@@ -15,17 +16,11 @@ interface LeftOut {
 }
 
 /**
- * Top-level entries a wrapper never links. The manifest is re-emitted; `.mcp.json` and `.lsp.json` start
- * servers in Claude Code's process, outside the sandbox; a plugin's `settings.json` can change the
- * session's main agent; and `hooks/` holds hooks, which stay out.
+ * The only top-level entries a wrapper links, by their folded names. A list of what to leave out would
+ * miss `Hooks/` or `.MCP.json`, which APFS opens for `hooks/` and `.mcp.json`; an MCP or LSP server, a
+ * hook or a `settings.json` never comes along.
  */
-const NOT_LINKED: ReadonlySet<string> = new Set([
-  '.claude-plugin',
-  '.mcp.json',
-  '.lsp.json',
-  'settings.json',
-  'hooks',
-]);
+const CARRIED = ['skills', 'agents', 'commands'] as const;
 
 /** Manifest keys that move a part of the plugin; the wrapper lays out only the default folders. */
 const LAYOUT_KEYS = ['commands', 'agents', 'skills'] as const;
@@ -52,7 +47,7 @@ function readJson(path: string): unknown {
 
 /**
  * Writes a wrapper for one installed plugin at `into`: the plugin's name, version and description, and a
- * link to its skills, agents, commands and other parts, but never its MCP or LSP servers or its hooks.
+ * link to its skills, agents and commands, and nothing else: never its MCP or LSP servers or its hooks.
  */
 export function wrapPlugin(installPath: string, into: string): { leftOut: LeftOut[] } {
   const leftOut: LeftOut[] = [];
@@ -78,9 +73,13 @@ export function wrapPlugin(installPath: string, into: string): { leftOut: LeftOu
     }),
     { mode: 0o600 },
   );
+  const linked = new Set<string>();
   for (const entry of readdirSync(installPath)) {
-    if (NOT_LINKED.has(entry)) continue;
-    symlinkSync(join(installPath, entry), join(into, entry));
+    // Folded as the file system folds names: `Skills` is `skills`, under the wrapper's own spelling.
+    const name = CARRIED.find((carried) => carried === foldPathCase(entry));
+    if (name === undefined || linked.has(name)) continue;
+    linked.add(name);
+    symlinkSync(join(installPath, entry), join(into, name));
   }
   return { leftOut };
 }
