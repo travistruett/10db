@@ -63,7 +63,7 @@ import {
   type Json,
 } from '@10db/db';
 import type { z } from 'zod';
-import { buildContextPack } from '../briefing';
+import { buildContextPack, quoteSlackAnswer } from '../briefing';
 import {
   checkoutOf,
   MIGRATIONS_HAZARD,
@@ -354,7 +354,10 @@ export function createToolHandlers(
   }
 
   return {
-    get_context: () => Promise.resolve(buildContextPack(db, getWorkstream(db, workstreamId))),
+    get_context: () => {
+      const pack = buildContextPack(db, getWorkstream(db, workstreamId));
+      return Promise.resolve({ ...pack, pendingAnswer: quoteSlackAnswer(pack.pendingAnswer) });
+    },
 
     find_knowledge: ({ query, limit, kind }) => {
       const projectId = context().project.id;

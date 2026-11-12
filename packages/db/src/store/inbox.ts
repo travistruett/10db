@@ -25,7 +25,7 @@ import type { Json } from '../json';
 import { assigneesFor } from './routing-rules';
 import { sendForCard } from './stakeholder-sends';
 import type { DbReader, WriteContext } from './store';
-import { BUILDER_HANDLE } from './team';
+import { BUILDER_HANDLE, findPersonByHandle } from './team';
 
 export interface NewInboxItem {
   readonly projectId: ProjectId;
@@ -387,6 +387,9 @@ export interface AnsweredCard {
   readonly question: string;
   readonly choice: string;
   readonly note: string | null;
+  /** Who answered, when it was a stakeholder in Slack: their name. */
+  readonly answeredBy: string | null;
+  readonly via: 'inbox' | 'slack';
 }
 
 /**
@@ -418,6 +421,11 @@ export function answeredCardsForTask(db: DbReader, taskId: TaskId): AnsweredCard
               question: row.title,
               choice: row.answer.choice,
               note: row.answer.note ?? null,
+              answeredBy:
+                row.answer.answeredBy === undefined
+                  ? null
+                  : (findPersonByHandle(db, row.answer.answeredBy)?.name ?? row.answer.answeredBy),
+              via: row.answer.via ?? 'inbox',
             },
           ]
         : [],
