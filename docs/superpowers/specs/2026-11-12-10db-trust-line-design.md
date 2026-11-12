@@ -125,7 +125,7 @@ the model, and a model change that drops auto mode (`setModel` to an unsupported
 | --- | --- | --- |
 | Claude on a plan, the API, Bedrock or Vertex, on a model auto mode supports | `native`: auto mode | `permissionMode: 'auto'` and inline `settings.autoMode`: `"$defaults"` first in every list, then the policy's environment and coordination lines. Built today for lanes (`sandbox/auto-mode-rules.ts`); this extends it to every surface. |
 | Claude on a gateway account, an unsupported model, or with auto mode disabled by an admin | `tendb` | The PreToolUse hook (built) sends each call to 10db's judge. |
-| Codex | `native`: Auto-review, if live check L1 passes | `approval_policy: on-request`, `approvals_reviewer: auto_review`, and `[auto_review].policy` written as Markdown into the account's `CODEX_HOME`. The file is shared by every session on the account, so it holds only what is the same for all of them: the four limits and the live systems of every project on the account **(call)**. Coordination lines stay in the PreToolUse hook (built). |
+| Codex | `native`: Auto-review, if live check L1 passes | `approval_policy: on-request` and `approvalsReviewer: auto_review`, with the policy passed per thread in `thread/start`'s `config.auto_review.policy` (L1). Each session's policy holds the four limits, its project's live systems and its grants **(call)**. Coordination lines stay in the PreToolUse hook (built). |
 | Codex, if L1 fails | `tendb` | `approvalPolicy: never` (built) and the hook (built) sends each call to 10db's judge. |
 | An ACP agent (later spec) | `tendb` | Its permission requests go to 10db's judge. |
 
@@ -196,7 +196,7 @@ Auto-review counts toward Codex usage. 10db's judge costs about $0.0002 a call t
   - **10db's judge:** a card, as above.
 - A card answer is Allow once, Always in this project, or Deny. **Always in this project** stores a grant keyed on
   the limit and its target in prose ("deploys to staging with vercel"), in the project's grants. Each judge gets
-  the project's grants as allow lines: auto mode's `allow`, Auto-review's policy file, and 10db's judge's prompt
+  the project's grants as allow lines: auto mode's `allow`, Auto-review's policy, and 10db's judge's prompt
   **(call)**.
 - Anything else runs without a card.
 
@@ -204,13 +204,13 @@ Auto-review counts toward Codex usage. 10db's judge costs about $0.0002 a call t
 
 | Setup | Claude | Codex | Switch (default) |
 | --- | --- | --- | --- |
-| The project's instructions: `AGENTS.md`, `CLAUDE.md`, `.claude/rules/*.md` from the checkout | Appended to `systemPrompt` for every surface, since `settingSources: []` loads none | Loaded natively from the checkout if live check L4 shows it does under `untrusted`; else in `developerInstructions` | Project instructions (on) |
+| The project's instructions: `AGENTS.md`, `CLAUDE.md`, `.claude/rules/*.md` from the checkout | Appended to `systemPrompt` for every surface, since `settingSources: []` loads none | In `developerInstructions` (L4) | Project instructions (on) |
 | The builder's own `~/.claude/CLAUDE.md` | Appended after the project's | Same text in `developerInstructions` | Your instructions (on) |
-| The builder's skills (`~/.claude/skills`, `~/.agents/skills`) | A plugin dir 10db generates that links the skill folders, passed in `plugins` | `skills.config` entries for the same folders (L4) | Your skills (on) |
-| The builder's installed plugins (gstack, superpowers and the rest), with their skills, agents, commands and hooks | Each plugin's path in `plugins`, from Claude Code's installed-plugins list (L3) | Their skills via `skills.config`; Codex has no plugin format | Your plugins (on), each listed and switchable |
-| The project's `.claude/skills`, `commands`, `agents` | A generated plugin dir over them | `skills.config` | on |
+| The builder's skills (`~/.claude/skills`, `~/.agents/skills`) | A plugin dir 10db generates that links the skill folders, passed in `plugins` | `skills/extraRoots/set` for the same folders (L4) | Your skills (on) |
+| The builder's installed plugins (gstack, superpowers and the rest), with their skills, agents, commands and hooks | Each plugin's path in `plugins`, from Claude Code's installed-plugins list (L3) | Their skills via `skills/extraRoots/set`; Codex has no plugin format | Your plugins (on), each listed and switchable |
+| The project's `.claude/skills`, `commands`, `agents` | A generated plugin dir over them | `skills/extraRoots/set` | on |
 | The project's `.claude/settings.json` hooks | Load only after the builder approves their hash, as `.mcp.json` servers do (built) | n/a | n/a (approval) |
-| The builder's MCP servers (`~/.claude.json`, `~/.codex/config.toml`) | Listed in Settings › Tools and passed to the session as Claude Code would run them; calls judged | `mcp_servers` entries | Your MCP servers (on), each switchable |
+| The builder's MCP servers (`~/.claude.json`, `~/.codex/config.toml`) | Listed in Settings › Trust and passed to the session as Claude Code would run them; calls judged | `mcp_servers` entries | Your MCP servers (on), each switchable |
 | The project's MCP servers | As built, but one approval covers the server; calls are judged, not carded | As built | n/a |
 | Web | `WebSearch` and `WebFetch` allowed without a card; Plan's researcher remains as an option | `tools.web_search` on | Web (on) |
 
@@ -284,10 +284,10 @@ A judged call's verdict shows in the transcript as a dim line when it denies, an
 | Judge | auto mode | 10db's judge | Auto-review (L1), else 10db's judge |
 | Unattended skip | auto mode's own; 10db records it | 10db's judge | Auto-review's denial, or 10db's judge |
 | Web | `WebSearch`, `WebFetch` | same | `web_search` |
-| Skills | plugins dir | plugins dir | `skills.config` (L4) |
+| Skills | plugins dir | plugins dir | `skills/extraRoots/set` (L4) |
 | Plugins | yes | yes | skills only; says so |
 | MCP | yes | yes | yes |
-| Instructions | `systemPrompt` | `systemPrompt` | native or `developerInstructions` (L4) |
+| Instructions | `systemPrompt` | `systemPrompt` | `developerInstructions` (L4) |
 | Without an OpenRouter key | unaffected | `rules` floor, says so | unaffected if L1 passes; else the `rules` floor, says so |
 
 ## 11. Security review
@@ -306,11 +306,11 @@ Each is its own pull request. T1 is this document set. M1 of the Sessions roadma
 | # | What | Needs |
 | --- | --- | --- |
 | T1 | The belief, the decision, the research, this design (docs) | — |
-| T2 | **Setup comes along:** instructions in `systemPrompt`, skills and plugins dirs, opened sandbox reads, web on everywhere, Plan's own web. Codex `web_search` and `skills.config`. | L3, L4 |
+| T2 | **Setup comes along:** instructions in `systemPrompt`, skills and plugins dirs, opened sandbox reads, web on everywhere, Plan's own web. Codex `web_search` and `skills/extraRoots/set`. | L3, L4 |
 | T3 | **The policy and auto mode everywhere:** `TrustPolicy`, `capabilities.judge`, auto mode for Plan and passes, the guard slimmed to coordination plus the floor | T2 |
 | T4 | **Unattended never waits:** skip messages, `skipped_actions`, the Inbox item, network hosts to the judge, `request_host` | T3 |
 | T5 | **10db's judge and Codex:** `crossesLimit`, Auto-review or the hook judge on Codex, gateway accounts | T3, L1 |
-| T6 | **Your MCP servers** in Settings, approved once, sandboxed | T2 |
+| T6 | **Your MCP servers** in Settings, approved once, run as Claude Code runs them, with calls judged | T2 |
 
 T2 is the one the builder feels first and is the smallest.
 
@@ -347,17 +347,21 @@ The Sessions spec and its plans are revised on top of this before M2b's capabili
 
 Each is free or costs one turn.
 
-1. **L1:** Codex app-server with `approval_policy: on-request` and `approvals_reviewer: auto_review`.
+Results are in `docs/architecture/research/2026-11-12-trust-line-research.md`.
+
+1. **L1 (pass):** Codex app-server with `approval_policy: on-request` and `approvals_reviewer: auto_review`. The
+   policy can be passed per thread (`thread/start` `config.auto_review.policy` and `approvalsReviewer`).
    - It judges a command without a client answer.
-   - A custom policy file is read.
+   - A custom policy is read.
    - Check what the model sees on a denial.
    - Check whether the builder's go-ahead in the thread changes the next verdict.
-2. **L2:** auto mode in a headless SDK session on a Claude plan, on Bedrock and on a gateway account. Check what
+2. **L2 (pass on a plan and Bedrock; gateway not run):** auto mode in a headless SDK session on a Claude plan, on Bedrock and on a gateway account. Check what
    the model sees on a block, and that the run continues.
-3. **L3:** `plugins` loads an installed plugin (superpowers) and a generated skills dir with `settingSources: []`.
+3. **L3 (pass):** `plugins` loads an installed plugin (superpowers) and a generated skills dir with `settingSources: []`.
    Check that its hooks run, and where Claude Code lists installed plugins.
-4. **L4:** Codex reads `SKILL.md` folders named in `skills.config`, including a Claude skills folder, and loads
-   the checkout's `AGENTS.md` when the project is pinned `untrusted`.
+4. **L4 (partial):** Codex reads `SKILL.md` folders, including a Claude skills folder, and loads the checkout's
+   `AGENTS.md` when the project is pinned `untrusted`. Skills load through `skills/extraRoots/set`, not
+   `skills.config`; instructions go in `developerInstructions`.
 
 ## 15. Calls to review
 
@@ -370,7 +374,8 @@ Each is free or costs one turn.
 6. **New network hosts are judged**, not carded, and kept per session unless the builder keeps them (§5).
 7. **The `rules` floor** applies when no judge is available, and says so (§4).
 8. **The judge is per live session**, inside M2b's `AgentCapabilities` (§4).
-9. **Codex's policy file is per account**, holding only the limits and the account's projects' live systems (§4).
+9. **Codex's Auto-review policy is per session**, passed at `thread/start`, with the limits, the project's live
+   systems and its grants (§4).
 10. **Attended limits follow Claude Code:** soft denies the builder's go-ahead clears, and a card only where a
     call is escalated (§5).
 11. **Run these now** is an unattended follow-up task, matched by intent (§5).

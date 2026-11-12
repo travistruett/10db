@@ -1,18 +1,20 @@
-# Sessions M5a: Sessions Explore on Claude: Implementation Plan
+# Sessions M5a: Sessions on Claude: Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or
 > superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Sessions is a global screen with tabs in the title bar. Each tab is a Chat with an agent in one project:
-it reads the project, changes nothing, can file tasks on the Board through its own scoped tools, and mirrors the
-Inbox when it needs the builder.
+**Goal:** Sessions is a global screen with tabs in the title bar. Each tab is a Chat with an agent in one project.
+It is attended (trust line §5): it reads the project, runs commands and searches the web with the builder's setup,
+uses every builder tool through its own server, asks only at a limit, and mirrors the Inbox when it needs the
+builder. Its writes in Your folder come in M6, with the folder hold.
 
 **Architecture:**
 
 - **Daemon.** A `chat/` module owns `chats` and `chat_tasks`. It plugs into M4b's explore engine through
-  `ExploreOwnerHooks`, with the explore profile, no web tools and no settings.
-- **Scoped tools.** A chat session's token on 10db's own `/mcp` server lists only the chat tools. That is a policy
-  table over every builder tool plus `set_title`.
+  `ExploreOwnerHooks`, with the explore profile as the attended profile: the attended `TrustPolicy` (T3), the
+  builder's setup and the web (T2), and the judge `capabilities.judge` names (T3, T5).
+- **The chat's tools.** A chat session's token on 10db's own `/mcp` server lists every builder tool plus
+  `set_title`. A policy table says which go in the session's `allowedTools` and which reach the judge.
 - **Routes.** Chats get their routes. `GET /conversations/:id/files?q=` serves `@` mentions from `git ls-files` of
   the checkout the daemon resolves from the conversation; the client never sends a path.
 - **Desktop.** `views/sessions/` holds the screen, built on the kit (M3, M4b):
@@ -34,26 +36,44 @@ Inbox when it needs the builder.
 - Tauri 2 (the notification plugin)
 - Vitest, Testing Library and MSW, Playwright (WebKit) with axe
 
-**Spec:** `docs/superpowers/specs/2026-11-11-10db-sessions-design.md` (v3):
+**Spec:** `docs/superpowers/specs/2026-11-11-10db-sessions-design.md` (v4):
 
-- S1, S2, S11, S13, S14
-- §6.6 (the scoped builder server), §6.7 (the archive row), §7.1, §7.2
+- S1, S2, S11, S13, S14, S19
+- §5.3 (`judge`), §6.6 (the chat's builder server, judged denials), §6.7 (the archive row), §7.1, §7.2
 - §8, §10 (the chat routes, `GET /conversations/:id/files`), §11 (builder tools, file mentions)
 - §12 (M5a), §13, §14 (the M5a record)
+
+The trust line, `docs/superpowers/specs/2026-11-12-10db-trust-line-design.md`: §5 (attended), §6 (what comes
+along), §8 (Chat), §13.
 
 And `docs/superpowers/specs/2026-11-11-10db-sessions-ui.md` throughout, except:
 
 - Do It (§8)
+- a chat's writes in Your folder, and the folder hold (design spec §7.3)
 - Changes (§9)
 - Open in Terminal (§10)
 - Spotlight (§5.8's ⌘K)
 
 Those are M6, M7 and M8.
 
-## Starting point: M4b has merged
+## Starting point: M4b, T4, T5 and M4c have merged
 
-Task 0 confirms each name below. Where M4b chose another name, use M4b's and say so in the PR. Where a piece is
-missing, the task that first needs it adds it, as that task says.
+The roadmap's order is M4b → T4 → T5 → M4c → M5a. Task 0 confirms each name below. Where M4b or a trust line
+milestone chose another name, use that one and say so in the PR. Where a piece is missing, the task that first needs
+it adds it, as that task says.
+
+- **From the trust line** (`docs/superpowers/specs/2026-11-12-10db-trust-line-design.md` §12). Their plans are
+  `docs/superpowers/plans/2026-11-12-10db-trust-t2-setup-comes-along.md`, `…-t3-policy-and-auto-mode.md` and
+  `…-t5-tendb-judge-and-codex.md`; find the names there, and Task 0 confirms them:
+  - **T2:** the setup builder that appends the project's instructions and the builder's `CLAUDE.md` to
+    `systemPrompt`, and passes the skills and plugin dirs in `plugins`, behind the Settings › Trust switches; web
+    on where a native judge exists.
+  - **T3:** `TrustPolicy` (`packages/contracts`) and the daemon's `trust/` module, which builds the policy for an
+    attended surface and renders its `autoMode` settings; the guard slimmed to the coordination rules and the
+    `rules` floor; `capabilities.judge` with the model, which Plan already uses on the engine (M4b).
+  - **T5:** 10db's judge (`crossesLimit` in `judge/`) and the hook that sends each call to it, for a session whose
+    judge is `tendb`; the `rules` floor when no judge is available.
+  - **T4** changes only unattended work. A chat is attended, so it reads nothing from T4.
 
 - **From M4a** (`docs/superpowers/plans/2026-11-12-10db-sessions-m4a-stores.md`):
   - `ConversationId` (`cnv`), `ConversationItemId`, `ConversationFileId` and **`ChatId` (`cht`)** in
@@ -94,6 +114,8 @@ missing, the task that first needs it adds it, as that task says.
   - **Not from M4b:** the kit's `Composer`, `PermissionRequest` and `Announcer` are M5a's (M4b call 15). Plan keeps
     its own composer and `waiting-permissions.tsx`. Task 9 builds them.
 - **From M1 to M3:** Plan's `ModelPicker` (`views/shape/model-picker.tsx:37`, props `{ view: ShapeViewDto }`).
+- **From M2c and T3:** `ToolCallView.deniedBy` with `builder`, `10db` and `judge`, and `limit` on a judged denial
+  (design spec §5.2).
 - **From M2a and M2c:** one scripted `FakeAdapter` serving both profiles. Its explore sessions emit `commands`,
   `message` and `tool_call`. The book is keyed by `Task: <title>` (`sessions/fake-adapter.ts:358-359`).
 - **Built today:**
@@ -116,8 +138,8 @@ missing, the task that first needs it adds it, as that task says.
     `packages/contracts/AGENTS.md`
   - `.claude/rules/code-style.md` and `.claude/rules/testing.md`
   - `DESIGN.md`
-- **Where to work:** `../10db-worktrees/sessions-m5a` on branch `feat/sessions-m5a`, from `origin/main` after M4b
-  merged.
+- **Where to work:** `../10db-worktrees/sessions-m5a` on branch `feat/sessions-m5a`, from `origin/main` after M4c
+  merged (roadmap order).
 - **Commits:**
   - Name every path, with a single-quoted `-m`.
   - Conventional Commits, ending `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
@@ -125,7 +147,7 @@ missing, the task that first needs it adds it, as that task says.
 - **Migrations are forward-only** (`v0.1.0` is tagged, `packages/db/AGENTS.md:15-17`). Make them with
   `pnpm --filter @10db/db generate`, and never edit a generated one.
 - **Size each task to its risk:**
-  - Permissions and the scoped server (Task 5) and archive through the engine (Task 4) take small red-first
+  - Permissions and the chat's builder server (Task 5) and archive through the engine (Task 4) take small red-first
     steps, one commit per behaviour.
   - Each UI task is one vertical slice. It is run against the real daemon (`pnpm dev`, click-through) before it is
     reviewed.
@@ -140,12 +162,24 @@ missing, the task that first needs it adds it, as that task says.
   - Status colors are DESIGN.md's: blue working, yellow needs you, orange paused, red error.
   - Nothing pulses.
   - Every color is a Selenized token.
-- **Explore never writes.** A chat's session is the explore profile:
-  - Plan's read-only sandbox and command rules
-  - `settingSources: []`
-  - no web tools and no subagents
-  - 10db's `/mcp` with the chat tools, plus the project's approved MCP servers
+- **A chat is attended** (trust line §5, design spec §7.1). Its session is the explore profile as the attended
+  profile:
+  - Plan's sandbox, so the checkout stays read-only in M5a. A chat's writes in Your folder come in M6, with the
+    folder hold (design spec §7.3).
+  - the attended `.env` rule with that sandbox (design spec §7.1): `.env*` files readable to the kernel, a read is a
+    limit the judge asks about, and the project switch makes it free. T4 builds the rule and the switch, and extends
+    it to Plan's sandbox, which the chat reuses.
+  - commands judged, not carded: auto mode with the attended policy's `autoMode` where `capabilities.judge` is
+    `native`; the hook judge (T5) where it is `tendb`; the `rules` floor where neither is available, said in the
+    session bar
+  - `settingSources: []`, with T2's setup: the instructions appended, the skills and plugin dirs
+  - the web: `WebSearch` and `WebFetch`
+  - subagents: Claude Code's own (`Task`, `Agent`) and the agents of the builder's plugins, but none of Plan's
+    `agents`
+  - 10db's `/mcp` with every builder tool, plus the project's approved MCP servers. The builder's own MCP servers
+    come with T6, after M5a.
 - **Out of scope:**
+  - A chat's writes in Your folder, and the folder hold (M6)
   - Do It and its sheet (M6)
   - Changes (M6)
   - Open in Terminal and Hand Back (M7)
@@ -160,19 +194,21 @@ missing, the task that first needs it adds it, as that task says.
 
 Each is marked **(call)** where it is made.
 
-1. **The chat's builder tools ride on 10db's own `/mcp` server.** A chat session's token lists only the chat tools
+1. **The chat's builder tools ride on 10db's own `/mcp` server.** A chat session's token lists the chat tools
    (`mcp/server.ts`, a third branch beside the lane and shape tools). The UI's `/builder/mcp` stays unreachable
-   from a session. That is the "scoped server, per-session token" of spec §6.6, built on the token mechanism that
+   from a session. That is the "builder server, per-session token" of spec §6.6, built on the token mechanism that
    exists.
-2. **The chat tool table:**
-   - **No card:** `create_task`, `edit_task` (only on tasks this chat made), `set_title` (new), `search_knowledge`,
-     `list_tasks` and `list_flows`.
-   - **A card:** `start_task`, as a `question` card "Start {task} now?" with Start Now and Not Now.
-   - **Absent:** every other builder tool.
+2. **The chat tool table** (spec §6.6). Every builder tool is listed on a chat's token, plus `set_title`.
+   `ChatToolPolicy = { Runs: 'runs', Asks: 'asks' } as const`. Every name goes in the session's `allowedTools`;
+   the tool's own handler decides what asks, since a judge can't know which tasks the chat made (spec §6.6):
+   - **`runs`:** every builder tool but the four below, and `set_title`. `start_task` starts the task with no card:
+     starting a task touches no limit. `edit_task` works on any task, with Undo (call 25).
+   - **`asks`:** `remove_task` runs on a task this chat made (`chatMadeTask`), and on any other task raises a
+     permission card owned by `{ conversationId }`: removing work the chat didn't make is limit 1. The answers are
+     Allow once, Always in this project (T5's grants) and Deny (trust line §5). `retire_knowledge`,
+     `withdraw_knowledge` and `supersede_knowledge` raise the same card every time.
 
-   Spec §6.6 places `list_tasks` and `list_flows` with the knowledge reads (no card). It leaves out
-   `list_projects`, `list_inbox`, `list_proposals`, `save_principle` and `supersede_knowledge`; this plan makes them
-   absent. `write_brief` arrives with Do It in M6.
+   `write_brief` and the git tools arrive with M6, which adds `Judged` for `push_branch` and `merge_pull_request`.
 3. **`chat_tasks (chat_id, task_id, created_at)` records the tasks a chat made.** It is what `edit_task`'s scope,
    Recent's "2 tasks filed" and Undo read. It is a table, not a column on `tasks`.
 4. **A fresh tab lives in the client until its first `@` or its first send, whichever comes first** (the
@@ -212,8 +248,8 @@ Each is marked **(call)** where it is made.
     Ready, in your terminal, in review, signed off and done come with M6 and M7, each as a new row in Task 13's
     table. So does **Close Finished Tabs**, which closes only Done and In review tabs: in M5a it would close nothing,
     so its menu item comes with M6.
-16. **A chat runs no subagents** and gets no `agents`. The spec gives Plan's agents to Plan only, and the web
-    belongs to a researcher.
+16. **A chat gets subagents:** Claude Code's own (`Task`, `Agent`) and the agents of the builder's plugins (T2).
+    It gets none of Plan's `agents`, which are Plan's role (spec §17 call 16).
 17. **The fake runs book scripts for explore sessions too.** A book key `Chat: <first line>` matches a chat
     session whose first prompt line is exactly that text.
 18. **`set_title` is cut at a word to 28 characters by the daemon** (`cutTitle`), whatever the agent sends; the
@@ -230,7 +266,9 @@ Each is marked **(call)** where it is made.
 22. **A double-click on the strip's empty space zooms the window** through `data-tauri-drag-region`'s own handling
     in Tauri 2. If the live check finds it doesn't, Task 13 calls `getCurrentWindow().toggleMaximize()` on
     `dblclick` of the empty space, with the `core:window:allow-toggle-maximize` permission and a repo-test row.
-23. **Chats need a Claude account until M5b, which follows directly.** On a project whose account is a ChatGPT
+23. **Chats need a Claude account until M5b, which follows directly, and the two ship in the same release.**
+    Sessions has no flag to hide it behind, so no release is cut between M5a's merge and M5b's (roadmap); a builder
+    on a ChatGPT plan never meets the line below in a release. On a project whose account is a ChatGPT
     plan, `models()` is empty and `launch` throws `BRAINSTORM_REFUSED_ON_CHATGPT`
     (`packages/contracts/src/accounts.ts:44`, `daemon/start.ts:1226`), which would loop resends and leave a red ring
     worded with a retired product name. So `ChatModelsDto.unavailable` carries the daemon's words, decided from the
@@ -249,9 +287,9 @@ Each is marked **(call)** where it is made.
 
 ## Review Focus
 
-1. **A chat's agent calls a builder tool outside its table.** `edit_task` on a task the builder or another chat
-   made is refused in words with no card, and `remove_task` or `run_next` is unknown to the server. Tests in
-   Task 5.
+1. **A chat's agent removes work it didn't make.** `remove_task`'s handler sees the task isn't in `chat_tasks` and
+   asks with a card, on every judge; on the chat's own task it runs. `edit_task` on a task the builder made
+   applies, with Undo. Tests in Task 5.
 2. **A path with spaces, Unicode, or regex characters in `@`** (`docs/a b.md`, `src/[id].tsx`, `é.ts`). It lists,
    matches and inserts as typed, because `git ls-files -z` and the ranker treat the query as text. Tests in Task 6.
 3. **⌘W with a draft in the composer, then ⌘⇧T.** The draft comes back with the tab. Test in Task 15.
@@ -266,7 +304,7 @@ Each is marked **(call)** where it is made.
 
 No commit.
 
-- [ ] **Step 1: Find each M4b name.**
+- [ ] **Step 1: Find each M4b and trust line name.**
 
 Run:
 
@@ -275,6 +313,8 @@ git grep -n "ExploreOwnerHooks\|conversation.delta\|ConversationOwnerKind\|conve
 git grep -n "createExploreEngine\|modelChanged\|planItemEntries\|useConversationLive" -- apps packages | head -20
 git grep -ln "export function WorkingLine\|export function Composer\|export function PermissionRequest\|export function Announcer" apps/desktop/src/conversation
 git grep -n "escapeIsTaken" apps/desktop/src | head
+git grep -n "TrustPolicy\|crossesLimit\|judge:" -- apps/daemon/src/trust apps/daemon/src/judge apps/daemon/src/sessions packages/contracts/src | head -30
+git grep -n "deniedBy" -- packages/contracts/src | head
 ```
 
 Expected: every name in "Starting point" is found; `WorkingLine` is in the kit and the other three are not.
@@ -330,8 +370,7 @@ Expected: every name in "Starting point" is found; `WorkingLine` is in the kit a
   - `AgentCommandDto = { name: string; description: string; argumentHint: string | null }`, unless M2c or M4b
     already exports one.
   - **The chat tools:**
-    - `ChatToolName`: `create_task`, `edit_task`, `start_task`, `set_title`, `search_knowledge`, `list_tasks` and
-      `list_flows` (call 2).
+    - `ChatToolName`: every `BuilderToolName` (`builder-mcp-tools.ts:28-47`) plus `set_title` (call 2).
     - `ChatToolInputs`: the builder tools' inputs with the project removed, plus `set_title: { title: 1..80 chars }`
       (the daemon cuts it to 28, call 18).
     - `CHAT_TITLE_MAX = 28` and `cutTitle(title: string, max = CHAT_TITLE_MAX): string`: cut at the last word
@@ -341,7 +380,7 @@ Expected: every name in "Starting point" is found; `WorkingLine` is in the kit a
       - `{ kind: 'task_edit', taskId, title, previous: Partial<TaskPatch> }` (`edit_task`, call 25): `previous`
         holds the old value of each field the edit changed
       - `{ kind: 'title', title, previousTitle: string }` (`set_title`)
-      - `{ kind: 'start', taskId, started: boolean }` (`start_task`)
+      - `{ kind: 'start', taskId, started: true }` (`start_task`, which runs with no card)
 - **Every message carries:** `ConversationDto.commands: AgentCommandDto[] | null`, and the message input's
   `mentions: string[]`, defaulting to `[]`, each a relative path of at most 1,024 characters.
 
@@ -494,11 +533,18 @@ Expected: PASS.
 - **Produces:**
   - `chatHooks(deps): ExploreOwnerHooks`, M4b's interface:
     - `spec(conv, start)` returns an `ExploreLaunch` whose spec is the explore profile:
-      - `systemPrompt: CHAT_SYSTEM_PROMPT`
-      - Plan's read tools and command rules
-      - `disallowedTools` including `WebSearch` and `WebFetch`
-      - `agents: {}` (call 16)
-      - `mcp`: 10db's `/mcp` with the session's token, plus the project's approved servers
+      - `systemPrompt: CHAT_SYSTEM_PROMPT`, with T2's instructions appended
+      - Plan's sandbox, read tools and commands; no `Edit` or `Write` until M6
+      - `WebSearch`, `WebFetch`, `Task` and `Agent` in `tools`, none of them in `disallowedTools` (call 16)
+      - `agents: {}`: none of Plan's (call 16)
+      - T2's `plugins`, and `settingSources: []`
+      - the policy: T3's attended `TrustPolicy` for the chat. Where `capabilities.judge` is `native`,
+        `permissionMode: 'auto'` with its `autoMode` settings; where it is `tendb` or `rules`, `default` mode with
+        the hook judge (T5)
+      - `allowedTools`: the `runs` names of call 2, as `mcp__10db__<name>`
+      - `mcp`: 10db's `/mcp` with the session's token and `toolTimeoutMs` the lane's, `(project.humanWaitMinutes +
+        5) * 60_000` (`runner/runner.ts`), so an `asks` card can wait on the builder (spec §6.6); plus the project's
+        approved servers
       - the chat's account and model
     - `digest`: Plan's digest rule
     - `outgoing(conv, item, session)`: the message's text (mentions already in it as `@path`) and its pictures
@@ -506,10 +552,11 @@ Expected: PASS.
     - `onTurnEnded`: `touchChat` (call 6)
     - `freshAtContextPct: 70`
   - `CHAT_SYSTEM_PROMPT`. It says:
-    - the agent reads the project and changes nothing
+    - the agent reads the project, runs commands and searches the web
+    - it doesn't edit files yet (M6 changes this line, when a chat writes in Your folder); when the builder wants a
+      change made, it offers to file a task
     - it calls `set_title` once after its first reply, with a title of at most 8 words
     - it files tasks with `create_task` only when the builder asks
-    - `start_task` asks the builder
     - repeated message ids are one message (spec §6.2)
   - `ChatService`:
     - `create(input: ChatCreateInput): ChatDto`. It creates a conversation with owner `chat`, profile `explore`,
@@ -541,12 +588,15 @@ Expected: PASS.
 - [ ] **Step 1: Write the failing `hooks.test.ts` table** (pure). For a chat on a project with one approved MCP
   server:
   - `profile.kind` is `explore`.
-  - `disallowedTools` includes `WebSearch` and `WebFetch`.
-  - `Task` and `Agent` are absent from `tools` and `allowedTools`, and listed in `disallowedTools` (no subagents,
-    call 16).
+  - `WebSearch` and `WebFetch` are in `tools`, and not in `disallowedTools`.
+  - `Task` and `Agent` are in `tools`, and not in `disallowedTools` (call 16).
+  - `Edit` and `Write` are not in `tools` (writes come in M6).
   - `agents` is empty.
   - The MCP servers are exactly 10db's own plus the approved one.
-  - `settingSources` is `[]`.
+  - `settingSources` is `[]`, and `plugins` holds T2's setup dirs.
+  - `allowedTools` holds every chat tool name (call 2).
+  - One row per judge value: `native` → `permissionMode: 'auto'` and the attended policy's `autoMode`; `tendb` →
+    `default` and the hook judge; `rules` → `default` and the `rules` floor.
   - The model is the chat's pick, or the plan role's when null.
 
 - [ ] **Step 2: Write the failing `service.test.ts`** on a real SQLite file:
@@ -582,7 +632,7 @@ Expected: FAIL.
   `pnpm --filter @10db/daemon exec tsc --noEmit` and the daemon's ESLint.
 
 - [ ] **Step 6: Commit** in two commits, each with its value card:
-  - `feat(daemon): a chat is an explore conversation with no web tools, no settings and no subagents`
+  - `feat(daemon): a chat is an attended conversation with the builder's setup and the web`
   - `feat(daemon): routes to create, list, rename, move and pick a model for a chat`
 
 ---
@@ -643,7 +693,7 @@ Expected: PASS.
 
 ---
 
-### Task 5: The scoped chat tools on `/mcp`
+### Task 5: The chat's builder tools on `/mcp`
 
 Permissions: exhaustive, red-first, on the real rung.
 
@@ -661,45 +711,46 @@ Permissions: exhaustive, red-first, on the real rung.
 **Interfaces:**
 
 - **Produces:**
-  - `ChatToolPolicy = { NoCard: 'no_card', Card: 'card', Absent: 'absent' } as const`.
+  - `ChatToolPolicy = { Runs: 'runs', Asks: 'asks' } as const`.
   - `CHAT_TOOL_POLICY: Readonly<Record<BuilderToolName | 'set_title', ChatToolPolicy>>`, by call 2.
   - `chatToolsFor({ sessionId, conversationId, chatId, projectId }): Record<ChatToolName, (args: unknown) => Promise<unknown>>`.
     Each tool parses its args with `ChatToolInputs[name]` and returns a `ChatToolResult` as JSON text:
     - **`create_task`:** creates the task in the chat's project, then calls `recordChatTask`. The result is
       `{ kind: 'task', …, column: 'Ready' }`, or the column the task lands in.
-    - **`edit_task`:** when `chatMadeTask` is false, it returns the MCP error "This chat can only edit the tasks it
-      created." and raises no card. Otherwise it reads the task, applies the edit through the builder tool's
-      handler, and returns `{ kind: 'task_edit', taskId, title, previous }`, where `previous` holds the old value of
-      each field the edit changed, in `TaskPatch`'s shape (call 25).
-    - **`start_task`:** on a task this chat made, it asks the Inbox `question` "Start {title} now?", with the
-      options Start Now and Not Now, owned by `{ conversationId }`. It waits for the answer. Start Now starts the
-      task through the service the builder's `start_task` uses. The result says whether it started. On a task the
-      chat didn't make, it gives the same refusal as `edit_task`.
+    - **`edit_task`:** on any task of the chat's project. It reads the task, applies the edit through the builder
+      tool's handler, and returns `{ kind: 'task_edit', taskId, title, previous }`, where `previous` holds the old
+      value of each field the edit changed, in `TaskPatch`'s shape (call 25).
+    - **`start_task`:** starts the task through the service the builder's `start_task` uses, with no card, and
+      returns `{ kind: 'start', taskId, started: true }`.
     - **`set_title`:** calls `setChatTitle(cutTitle(title), 'agent')` (call 18). The result carries
       `previousTitle`. When a builder title stands, it is a no-op that says so. Its description: "Name this session
       in at most 28 characters, in sentence case, with no trailing period. Call it once, after your first reply."
-    - **`search_knowledge`, `list_tasks` and `list_flows`:** the builder tools' handlers
-      (`builder/tools.ts:79`), scoped to the chat's project.
-  - In `mcp/server.ts`: a session whose conversation's owner kind is `chat` gets `chatTools(...)`, and nothing
-    else.
+    - **`remove_task`:** runs when `chatMadeTask` is true. Otherwise it raises the permission card of call 2 and
+      waits; Allow removes the task, Deny returns "The builder kept this task." Always in this project stores T5's
+      grant.
+    - **`retire_knowledge`, `withdraw_knowledge`, `supersede_knowledge`:** the same card, every time.
+    - **Every other builder tool:** the builder tool's handler (`builder/tools.ts:79`), held to the chat's
+      project.
+  - In `mcp/server.ts`: a session whose conversation's owner kind is `chat` gets `chatTools(...)`, and no lane or
+    shape tool.
 
 - [ ] **Step 1: Write the failing pure table** `tool-policy.test.ts`. One row per name in `BuilderToolName`
   (`builder-mcp-tools.ts:28-47`) plus `set_title`, with the policy of call 2. Two rows check that the table and
   `ChatToolName` agree:
-  - every `no_card` or `card` name is in `ChatToolName`
-  - no `absent` name is
+  - every name in `BuilderToolName` plus `set_title` is in `ChatToolName`, and nothing else is
+  - the `asks` names are exactly `remove_task`, `retire_knowledge`, `withdraw_knowledge` and
+    `supersede_knowledge`, and every name is in the session's `allowedTools`
 
 - [ ] **Step 2: Write the failing behaviour tests** in `tools.test.ts`. They run through the real `/mcp` handler,
   with a chat session row and its minted token, on a real SQLite file. One test per row, run red one at a time:
-  - `tools/list` returns exactly the seven chat tools.
-  - Calling `remove_task`, `run_next`, `move_task` or `save_decision` is an unknown-tool error.
+  - `tools/list` returns every builder tool plus `set_title`.
   - `create_task` writes the task in the chat's project, even when the args name another project, and records it
     in `chat_tasks`. Read the task back through `list_tasks`.
-  - `edit_task` on a task the builder made is refused in words, and no Inbox item is created (Review Focus 1).
-  - `start_task` raises one open `question` item whose `detail.conversationId` is the chat's:
-    - Answering Start Now starts the task.
-    - Not Now leaves it parked.
-    - Each result says so.
+  - `edit_task` on a task the builder made applies, and returns `previous` for Undo (Review Focus 1).
+  - `start_task` starts the task, creates no Inbox item, and its result says `started: true`.
+  - `remove_task` on a task the builder made raises one permission card owned by `{ conversationId }`, and the
+    task stays until the card is answered Allow once; Deny keeps it (Review Focus 1). `remove_task` on the chat's
+    own task removes it with no card. `retire_knowledge` raises the card.
   - `set_title` renames an `agent`-titled chat and leaves a `builder`-titled one; a 50-character title is stored cut
     at a word within 28.
   - `edit_task` on the chat's own task returns `task_edit` with `previous` holding exactly the changed fields'
@@ -710,6 +761,8 @@ Permissions: exhaustive, red-first, on the real rung.
     on its first run, since the check exists; show it red by briefly letting a session token through the builder
     route's token check (accept a token `getLiveSessionByTokenHash` resolves), watch the row fail, then put the
     check back.
+  - Stop while a `remove_task` card waits withdraws the card, and the call returns denied ("The builder stopped
+    the turn."). Archive does the same.
   - After the chat is archived (Task 4), its session's token is refused on `/mcp`. This row also passes on its first
     run once Task 4's `retire` ends the session row; show it red by briefly skipping that end in `retire` (the warm
     handle closes but the row stays live), watch the row fail, then restore it.
@@ -722,12 +775,14 @@ Expected: PASS.
 
 - [ ] **Step 4: Commit** in three commits:
   - the policy table
-  - the server branch with list and absent
+  - the server branch, listing every tool
   - each tool's behaviour
 
   Each carries its value card. For the server branch:
-  - protects: a chat's agent reaches only its scoped tools, by its own token
-  - fails_when: an absent tool is listed or callable, or a token reaches another owner's tools
+  - protects: a chat's agent reaches every builder tool by its own token, and removing or retiring work it didn't
+    make asks the builder
+  - fails_when: a tool is missing, a removal of the builder's work runs without a card, or a token reaches another
+    owner's tools
   - why_new: chats are new; the builder server is UI-token only
   - no_claim: the tool rows in the UI
 
@@ -1042,17 +1097,17 @@ This task is a vertical slice.
     - With no open chat and no fresh tab, it opens a fresh tab (UI spec §12, "No tabs").
     - It renders the selected tab: a fresh one with `FreshTab`, or a chat with Task 11's view.
   - **`FreshTab`.** The empty state of UI spec §6.2, in the upper third:
-    - **The intro line:** "A chat reads {project} and changes nothing. When you're ready, Do It starts the work."
-      **(call)** In M5a the line ends after "changes nothing.", because Do It comes in M6. M6 restores the second
-      sentence.
+    - **The intro line:** "A chat reads {project}, runs commands and searches the web. When you're ready, Do It
+      starts the work." **(call)** In M5a the line ends after "searches the web.", because Do It comes in M6. M6
+      restores the second sentence.
     - **The Project control:** a `Select` with search "Find a project". Changing it calls
       `useSelectedProject().select` (`shell/selected-project.ts:25`). It is fixed once the chat exists (call 4).
     - **The model control:** "{capabilities.label} · {model} ⌄", the kit's `ModelPicker` over `useChatModels`.
     - **On a ChatGPT-plan project** (`ChatModelsDto.unavailable`, call 23): a dimmed `xs` line with the `info` icon
       reading `unavailable`, no model control, and the composer disabled with `unavailable` as its reason. Recent
       and Start from still show.
-    - **The account line:** "Uses {project}'s account. Reads the code and runs read-only commands; changes
-      nothing."
+    - **The account line:** "Uses {project}'s account. Reads the code, runs commands and searches the web. Asks
+      before anything that crosses a limit."
     - **The kit's `Composer`**, with the placeholder "Ask about {project}…" and the hint "⌘↩ sends · @ files" (a
       fresh tab has no commands yet).
     - **Start from** (`useSessionStarts`): `subtle xs` buttons, each with its source's Tabler icon by `kind`:
@@ -1148,7 +1203,11 @@ This task is a vertical slice.
   - `chatEntries(entries: readonly ConversationEntry[]): readonly ConversationEntry[]`, over Task 9's
     `itemEntries`. It turns an `mcp` tool call on 10db's server whose tool is a chat tool, and whose `resultTail`
     parses as `ChatToolResult` (the validated boundary), into a `custom` entry that renders `TaskRow`.
-  - **`TaskRow`.** A task, task-edit or title row (UI spec §7.3, task rows). It is not expandable.
+  - **A judged denial.** A `tool` entry with `deniedBy: 'judge'` is a dim row, "Held back: this would {limit}"
+    (UI spec §7.3, §14), with **Allow This** when `soft` (the kit's, M3 call 8). M5a passes the kit's `onAllow`, which posts "Go ahead: {the call's title}" as the builder's message through
+    `POST /conversations/:id/messages` (trust line §5).
+  - **`TaskRow`.** A task, task-edit, start or title row (UI spec §7.3, task rows). It is not expandable.
+    - A start: the title, "Started", and **Open on Board**. No Undo.
     - A task: a gray dot, the title, "Added to {column}", **Open on Board** (to `/board?task=<id>`) and **Undo**.
       Undo calls `POST /tasks/:id/remove`, then shows the row as removed. The daemon's refusal is said in place,
       for example a started task.
@@ -1160,7 +1219,8 @@ This task is a vertical slice.
   - **`SessionBar`**, a 44 px row:
     - **At the left:** the title (weight 600; a double-click or Rename edits it in place; Enter saves through
       `usePatchChat`), and under it the dimmed `xs` kind line from `kindLine(chat, project)`: "Chat · reads
-      {project}, changes nothing".
+      {project}". A chat writes nothing until M6, which brings the UI spec's "Chat · Your folder · on `{branch}`"
+      and "Your folder is in use" lines. Under the bar, the kit's `JudgeLine` (M4b call 36) shows the UI spec's dimmed line when `capabilities.judge` is `rules` (UI spec §11, §14; trust line §10).
     - **At the right:**
       - the model control: "{label} · {model} ⌄", disabled with "Change the model between turns" while a turn
         runs; plain text when `modelSwitch` is `none`
@@ -1196,6 +1256,7 @@ This task is a vertical slice.
   - a non-chat `mcp` call stays a tool row
   - `set_title` becomes a title row
   - an `edit_task` call with a `task_edit` result becomes a task-edit row, never a create row
+  - a `start_task` call with a `start` result becomes a start row
 
 - [ ] **Step 2: Write the failing rendered tests** in `chat-tab.test.tsx`. Fixtures serve a chat, its
   conversation and items, through MSW:
@@ -1209,6 +1270,8 @@ This task is a vertical slice.
   - With `costUsd: 0.42` the meter's tooltip reads "$0.42 so far"; with null it has no cost.
   - A waiting card (an Inbox item with `detail.conversationId`) shows above the composer with "Also in your
     Inbox." Sending its answer posts `/inbox/:id/answer`.
+  - A call with `deniedBy: 'judge'` and `limit` shows the limit and **Allow This**; pressing it posts "Go ahead:
+    {title}" to the message route.
   - With the project missing from `/projects`, the removed line shows and there is no composer.
   - **Capabilities:** with an empty capability set (`modelSwitch: 'none'`, no `images`, no `slashCommands`,
     no `costUsd`), the model is plain text, Attach is hidden, and the tooltip has no cost.
@@ -1227,7 +1290,8 @@ Expected: PASS.
 
 - [ ] **Step 5: Commit.** Value card:
   - protects: a chat's tab draws its conversation, its builder-tool rows with Undo, and every state M5a reaches
-  - fails_when: a task row loses Undo, a removed project crashes the tab, or a provider name is hard-coded
+  - fails_when: a task row loses Undo, a judged denial loses Allow This, a removed project crashes the tab, or a
+    provider name is hard-coded
   - why_new: new screen
   - no_claim: live streaming correctness (M4b's reducer tests)
 
@@ -1398,7 +1462,8 @@ Expected: PASS.
 
 - [ ] **Step 4: Click through against the real daemon** with six chats:
   - drag a tab to reorder, and reload: the order holds
-  - the needs-you ring shows on a tab whose agent called `start_task`
+  - the needs-you ring shows on a tab whose agent's call the judge asks about (a `remove_task` on a task the
+    builder made)
   - a working tab's dot is static blue
   - in `dev:shell`, a tab click doesn't drag the window, and a double-click on the empty strip zooms it (call 22)
   - at 1080 px with five tabs, each title stays readable
@@ -1631,7 +1696,7 @@ Run: `pnpm --filter @10db/desktop exec vitest run src/views/sessions src/views/i
 Expected: PASS.
 
 - [ ] **Step 4: Click through against the real daemon and in `dev:shell`:**
-  - a `start_task` card rings the tab and shows in the Inbox
+  - a card the judge raised (a `remove_task` on a task the builder made) rings the tab and shows in the Inbox
   - answering in the Inbox clears the ring
   - with the window behind another app, a reply raises "{title} replied", and a click opens the tab
 
@@ -1732,8 +1797,9 @@ Expected: PASS.
   5. `mcp set_title { title: "Login fails after sleep" }`
   6. `await_message` "File the work we agreed on"
   7. `mcp create_task { title: "Retry login once on a 401" }`
-  8. `mcp start_task` on it, which blocks until answered
-  9. `turn_complete`
+  8. `mcp start_task` on it, which starts it with no card
+  9. `mcp remove_task` on a task the builder made, so the tool asks and waits on a card
+  10. `turn_complete`
 - **The spec,** in name order. It runs after `see-screen.spec.ts` and before `shape.spec.ts`, with one worker:
   1. `createProject(request, 'sessions', [{ name: 'repo', globs: ['**'] }], { 'src/login.ts': …, 'docs/a b.md': … })`
      (`e2e/shape-project.ts:52`), then `claudeIsInstalled(page)`. Seed `tendb.project`, and the scheme dark, as
@@ -1745,15 +1811,15 @@ Expected: PASS.
   4. The reply shows its heading and code block, inside an article headed "Claude Code". A read row and a command
      row show.
   5. The link opens the browser confirm "Open example.com in your browser?". Cancel it.
-  6. Press File as Tasks. The task row "Retry login once on a 401 · Added to Ready" shows. The card "Start Retry
-     login once on a 401 now?" sits above the composer:
+  6. Press File as Tasks. The task row "Retry login once on a 401 · Added to Ready" shows, then its start row.
+     The judge's card for removing the builder's task sits above the composer:
      - the tab has its ring, and ⌘J from the second tab selects it
      - the sidebar reads 1
      - the Inbox lists it with Open Session
 
      Scan: a waiting card at 1280 and 480, dark and light.
-  7. Answer Not Now in the tab. The ring and the badge clear, and the turn ends.
-  8. Undo the task row. `GET /projects/:id/tasks` no longer lists it as open.
+  7. Answer Deny in the tab. The ring and the badge clear, the builder's task stays, and the turn ends.
+  8. Open the started task on the Board from its row.
   9. Type `/`. The menu lists `/compact`. Press Esc.
   10. Open All Tabs and scan the open menu (1280, dark and light); close it. Press ⌘T for a second tab, then ⌘1. Press ⌘W on the second, then ⌘⇧T: it is back. Close it again.
   11. Reload. The tab is restored from `GET /chats?open=1`.
@@ -1782,8 +1848,8 @@ Run: `pnpm --filter @10db/desktop e2e shape.spec.ts workbench.spec.ts`
 Expected: PASS.
 
 - [ ] **Step 4: Commit.** Value card:
-  - protects: a chat end to end on the real daemon: mention, reply, task row, card in tab and Inbox, keys, reload,
-    archive, at two widths and both schemes
+  - protects: a chat end to end on the real daemon: mention, reply, task and start rows, a judge's card in tab and
+    Inbox, keys, reload, archive, at two widths and both schemes
   - fails_when: any of those steps breaks, or axe finds a violation
   - why_new: Sessions had no e2e
   - no_claim: the Tauri window (checked by hand)
@@ -1794,7 +1860,7 @@ Expected: PASS.
 
 **Files:**
 
-- Create: `docs/architecture/decisions/./2026-11-12-sessions-is-a-top-level-screen-and-a-chats-tools-are-scoped.md`
+- Create: `docs/architecture/decisions/./2026-11-12-sessions-is-a-top-level-screen-and-a-chat-is-attended.md`
   (use the commit's own date)
 - Modify:
   - `apps/desktop/AGENTS.md`: a Sessions bullet
@@ -1803,9 +1869,11 @@ Expected: PASS.
 
 - [ ] **Step 1: Write the decision record.** It records:
   - S1: Sessions is a global screen, third in the sidebar, with tabs in the title bar across projects.
-  - S2: a chat is Explore and writes nothing.
+  - S2 and S19: a chat is attended (trust line §5). It reads, runs commands and searches the web with the
+    builder's setup, and asks only at a limit. Its writes in Your folder come in M6, with the folder hold.
   - S13: "needs you" is the Inbox, read through `detail.conversationId`, never a second queue.
-  - S14: a chat's tools are scoped. Calls 1 and 2 give the table and the server.
+  - S14: every builder tool is on a chat's token; removing or retiring the builder's work asks with a card, decided
+    by the tool. Calls 1 and 2 give the table and the server.
   - A fresh tab becomes a chat at its first `@` or first send, and its project is fixed from then (call 4).
   - Until M5b, a ChatGPT-plan project's Sessions says chats come with the next update (call 23).
   - An archived chat comes back through All Tabs' closed rows until M8's ⌘K (call 26).
@@ -1860,7 +1928,7 @@ Expected: `GATE PASS`.
 - [ ] **Step 4: Commit, push and open the PR.**
 
 ```bash
-git add docs/architecture/decisions/./2026-11-12-sessions-is-a-top-level-screen-and-a-chats-tools-are-scoped.md apps/desktop/AGENTS.md apps/daemon/AGENTS.md DESIGN.md && git commit -m 'docs: Sessions is a top-level screen, and a chat’s builder tools are scoped
+git add docs/architecture/decisions/./2026-11-12-sessions-is-a-top-level-screen-and-a-chat-is-attended.md apps/desktop/AGENTS.md apps/daemon/AGENTS.md DESIGN.md && git commit -m 'docs: Sessions is a top-level screen, and a chat is attended with every builder tool judged
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>'
 git push -u origin feat/sessions-m5a
@@ -1895,7 +1963,7 @@ Before review, the PR must have run:
 | M5a-14 | An archived chat stays reopenable | Call 26; Task 3's `/unarchive`; Task 15's closed stack and its rows; Task 19's decision |
 | M5a-15 | Accessibility and layout | Task 13's `tabpanel` and compact row; Task 17 Step 3b; Task 18's axe on the fresh tab at 480 and light and on the open All Tabs menu; Task 16's badge at 0; the slot at 88 px (Task 10, Task 19) |
 | M5a-16 | The ⌘W fallback's hide | Task 14 Step 5: `core:window:allow-hide` and repo-test rows |
-| M5a-17 | No `Task` or `Agent` in a chat | Task 3's hooks table |
+| M5a-17 | No `Task` or `Agent` in a chat | Task 3's hooks table. Reversed by the trust line: a chat gets subagents (call 16) |
 
 **Round 2 (final).**
 

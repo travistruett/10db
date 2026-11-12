@@ -23,11 +23,16 @@ parameter"). `claude-adapter.ts` keeps only the `SessionAdapter` surface: `creat
 
 - Root `AGENTS.md`, `apps/daemon/AGENTS.md`, `.claude/rules/code-style.md`, `.claude/rules/testing.md`.
 - Branch `feat/sessions-m2a` in its own worktree:
-  `git worktree add ../10db-worktrees/sessions-m2a -b feat/sessions-m2a origin/main`. M1 should have merged first
-  (the roadmap's order), but nothing here depends on it. Tasks in order. One commit per task.
+  `git worktree add ../10db-worktrees/sessions-m2a -b feat/sessions-m2a origin/main`. M1 and the trust line's T2
+  merge first (the roadmap's order). Tasks in order. One commit per task.
+- **T2 has changed both loops.** T2 (`2026-11-12-10db-trust-t2-setup-comes-along.md`) puts the builder's setup on
+  every session: the instructions appended to the system prompt and the skills and plugin dirs in `plugins` (trust
+  line §6). This plan cites c4da899's lines and values; read each from `main` after T2. Where T2 changed an option,
+  the table and the rows take `main`'s value, and line numbers move. Plan gets auto mode later, in M4b (trust line
+  §12), so the explore profile still runs in `default` mode here.
 - Commits are Conventional Commits, name every path, single-quoted `-m`, and end with
   `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. Never `--no-verify`.
-- **No behaviour change.** For each profile, these stay exactly as on `main` (c4da899):
+- **No behaviour change.** For each profile, these stay exactly as on `main` after T2:
   - every event, in order
   - every `ended` reason and message
   - every SDK option key and value, including keys that are absent
@@ -45,7 +50,8 @@ parameter"). `claude-adapter.ts` keeps only the `SessionAdapter` surface: `creat
 - **Existing tests stay green and unmodified, except their import lines.** No `it` body, helper or fixture in an
   existing test file changes. New `it`s may be added in a new `describe`.
 - An SDK option the profile doesn't set is left out, never set to `undefined`: the explore tests assert
-  `not.toHaveProperty('plugins')` and `not.toHaveProperty('sandbox')` (`claude-shape.test.ts:197-198`).
+  `not.toHaveProperty('sandbox')` (`claude-shape.test.ts:197-198`), and `not.toHaveProperty('plugins')` unless T2
+  gave Plan the setup dirs, in which case they assert T2's dirs.
 - **Not here.** §5.4 also names `includePartialMessages: true`, commands from `supportedCommands()`, and a model pick
   applied through `setModel`. Each of them changes behaviour, so each lands with its milestone: M2c for the first two,
   and the explore engine (M4b) for the third. The fake's new events wait for M2c.
@@ -228,9 +234,12 @@ export function claudeQueryOptions(
     `sandbox`; `disallowedTools` the sandbox's; the profile's `permissionMode`; scrub `'0'` in auto, else `'1'`.
   - Lane, unsandboxed: `settingSources: ['project']`; `settings` `{ autoCompactEnabled: true }`; `permissionMode:
     'default'`; no `sandbox` or `disallowedTools`.
-  - Lane, either way: `plugins: [{ type: 'local', path: pluginDir }]`.
-  - Explore: always `settingSources: []`, `permissionMode: 'default'`, `systemPrompt`, `tools` and `agents` (each
-    `model ?? 'inherit'`), and no `plugins`.
+  - Lane, either way: `plugins: [{ type: 'local', path: pluginDir }]`, then T2's setup dirs.
+  - Explore: always `settingSources: []`, `permissionMode: 'default'`, `systemPrompt` (with T2's appended
+    instructions), `tools` and `agents` (each `model ?? 'inherit'`). Its `plugins` are T2's setup dirs, and never
+    the lane's harness dir.
+  - T2's setup reaches each profile however T2 passes it (a field on each profile, or a second argument). Add it to
+    each row's `want` as `main` builds it.
   - Explore, sandboxed: `settings` with `permissions.ask` but no `autoMode`; scrub `'1'`; `disallowedTools` are the
     profile's then the sandbox's.
   - Both: `strictMcpConfig: true`.
@@ -283,11 +292,11 @@ it.each([
 ])('$name', ({ profile, sandbox: s, want }) => expect(claudeQueryOptions(profile, s)).toEqual(want));
 
 it.each([['unsandboxed', null], ['sandboxed', sandbox]])(
-  'never gives the explore profile project settings, auto mode or the plugin dir (%s)', (_n, s) => {
+  'never gives the explore profile project settings, auto mode or the harness plugin dir (%s)', (_n, s) => {
     const options = claudeQueryOptions(explore, s);
     expect(options.settingSources).toEqual([]);
     expect(options.permissionMode).toBe('default');
-    expect(options).not.toHaveProperty('plugins');
+    expect(options.plugins ?? []).not.toContainEqual({ type: 'local', path: '/harness' });
     expect(options).not.toHaveProperty('settings.autoMode');
   });
 it('leaves sandbox and disallowedTools out of an unsandboxed lane', () => {
@@ -316,7 +325,7 @@ Expected: FAIL, the module doesn't exist.
 git add apps/daemon/src/sessions/claude-query-options.ts apps/daemon/src/sessions/claude-query-options.test.ts apps/daemon/src/sessions/claude-adapter.ts apps/daemon/src/sessions/claude-shape.ts && git commit -m 'refactor(daemon): one claude options builder over profile and sandbox
 
 Value: protects=what each profile and sandbox loads: settings sources, the plugin dir, the permission mode, the sandbox and the scrub;
-fails_when=the explore profile gains project settings, auto mode or the plugin dir, or a lane loses its sandbox or mode;
+fails_when=the explore profile gains project settings, auto mode or the harness plugin dir, or a profile loses its sandbox, mode or setup;
 why_new=buildQueryOptions and the shape option tests each pin one profile through its own builder, never both through one;
 no_claim=the hooks and canUseTool wiring (the existing tests)
 
