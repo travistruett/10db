@@ -721,6 +721,32 @@ describe('the reminder', () => {
   });
 });
 
+describe('a conversation Slack no longer has', () => {
+  it('fails that send alone and keeps reading the others', async () => {
+    const s = scene();
+    const lost = await s.send([s.mark], { title: 'Lost?' });
+    const kept = await s.send([s.ana], { title: 'Kept?' });
+    slack.say(kept.channel, 'UANA', 'A', kept.threadTs);
+    slack.failNext('conversations.replies', 'thread_not_found');
+    await ticks(3);
+    expect(send(lost.cardId)).toMatchObject({ state: 'failed', error: 'thread_not_found' });
+    expect(card(lost.cardId)).toMatchObject({ state: 'OPEN', assignees: ['me'] });
+    expect(card(kept.cardId).answer).toMatchObject({ choice: 'Yes', answeredBy: 'ana' });
+    expect(connection.get().state).toBe('connected');
+  });
+
+  it('fails every send in a channel Slack no longer has', async () => {
+    const s = scene();
+    const lost = await s.send([s.mark], { title: 'Lost?' });
+    const kept = await s.send([s.ana], { title: 'Kept?' });
+    slack.say(kept.channel, 'UANA', 'B', kept.threadTs);
+    slack.failNext('conversations.history', 'channel_not_found');
+    await ticks(3);
+    expect(send(lost.cardId)?.state).toBe('failed');
+    expect(card(kept.cardId).answer).toMatchObject({ choice: 'No' });
+  });
+});
+
 describe('a thread with several questions', () => {
   it('never answers an open question from a reply to a later one that was answered', async () => {
     const s = scene();

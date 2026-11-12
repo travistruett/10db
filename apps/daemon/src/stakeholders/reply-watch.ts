@@ -2,6 +2,7 @@ import {
   ConflictError,
   InboxState,
   JudgeDecision,
+  RoutedBy,
   type InboxItemId,
   type PersonId,
 } from '@10db/contracts';
@@ -10,7 +11,10 @@ import {
   getJudgeConfig,
   getStakeholderTimers,
   markAnswered,
+  BUILDER_HANDLE,
+  failSend,
   markApprovalSeen,
+  setInboxRecipients,
   markLoneReplyPending,
   setProposal,
   threadStarts,
@@ -157,12 +161,18 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
         .sort((a, b) => compareTs(a.messageTs, b.messageTs));
       const oldest = here.map((o) => o.lastReadTs).sort(compareTs)[0] ?? '0';
       const threadMessages = new Map<string, SlackMessage[]>();
+      const lost = new Set<string>();
       for (const threadTs of new Set(here.map((o) => o.threadTs))) {
         const inThread = here.filter((o) => o.threadTs === threadTs);
         const from = inThread.map((o) => o.lastReadTs).sort(compareTs)[0] ?? oldest;
-        threadMessages.set(threadTs, await client.replies(channel, threadTs, from));
+        const read = await guard(inThread, () => client.replies(channel, threadTs, from));
+        if (read === null) for (const o of inThread) lost.add(o.id);
+        else threadMessages.set(threadTs, read);
       }
-      const top = await client.history(channel, oldest);
+      const live = here.filter((o) => !lost.has(o.id));
+      if (live.length === 0) continue;
+      const top = await guard(live, () => client.history(channel, oldest));
+      if (top === null) continue;
       const assigned = await matchReply(
         {
           judge: deps.judge,
@@ -172,10 +182,10 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
           titleOf: (o) => questionLabel(state.db, o),
           floor: () => getJudgeConfig(state.db).decisions[JudgeDecision.ReplyMatch].floor,
         },
-        { channel, bot, opens: here, messages: top },
+        { channel, bot, opens: live, messages: top },
       );
       saveMatchState(state, matched);
-      for (const open of here) {
+      for (const open of live) {
         // Only what was said after this send's own question, and before the next question in that thread.
         const within = (from: string, until: string | undefined) => (m: SlackMessage) =>
           compareTs(m.ts, from) > 0 && (until === undefined || compareTs(m.ts, until) < 0);
@@ -184,13 +194,17 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
           firstAfter(threadStarts(state.db, open.channelId, open.threadTs), open.messageTs),
         );
         const thread = threadMessages.get(open.threadTs) ?? [];
-        const old = open.movedFrom
-          ? await client.replies(
-              open.movedFrom.channelId,
-              open.movedFrom.threadTs,
-              open.movedFrom.lastReadTs ?? open.movedFrom.threadTs,
+        const movedFrom = open.movedFrom;
+        const old = movedFrom
+          ? await guard([open], () =>
+              client.replies(
+                movedFrom.channelId,
+                movedFrom.threadTs,
+                movedFrom.lastReadTs ?? movedFrom.threadTs,
+              ),
             )
           : [];
+        if (old === null) continue;
         const inOld = open.movedFrom
           ? within(
               open.movedFrom.messageTs,
@@ -438,6 +452,45 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
     });
   }
 
+  /** Whether a failure is about the whole connection, not about one conversation. */
+  function isGlobal(error: unknown): boolean {
+    return (
+      !(error instanceof SlackError) ||
+      slackRefusedToken(error) ||
+      error.code === 'no_token' ||
+      error.code === 'ratelimited' ||
+      TRANSPORT.test(error.code)
+    );
+  }
+
+  /**
+   * Runs a Slack read for some sends. A conversation Slack no longer has (a deleted thread, an archived
+   * channel) fails those sends alone and answers null; anything about the connection is thrown to the tick.
+   */
+  async function guard<T>(
+    affected: readonly OpenSendRow[],
+    read: () => Promise<T>,
+  ): Promise<T | null> {
+    try {
+      return await read();
+    } catch (error) {
+      if (isGlobal(error) || !(error instanceof SlackError)) throw error;
+      const { code } = error;
+      log.warn({ code, sends: affected.map((o) => o.id) }, 'a conversation could not be read');
+      state.write((ctx) => {
+        for (const o of affected) {
+          failSend(ctx, o.id, code);
+          setInboxRecipients(ctx, o.inboxItemId, {
+            assignees: [BUILDER_HANDLE],
+            routedBy: RoutedBy.Builder,
+            suggestion: null,
+          });
+        }
+      });
+      return null;
+    }
+  }
+
   async function once(client: SlackClient): Promise<void> {
     try {
       const bot = await identity(client);
@@ -445,8 +498,9 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
       const opens = openSends(state.db);
       for (const r of await reading(client, opens, bot)) {
         const stillOpen = getInboxItem(state.db, r.open.inboxItemId).state === InboxState.Open;
-        if (stillOpen) await process(client, r, bot);
-        if (openSends(state.db).some((o) => o.id === r.open.id)) await remind(client, r);
+        if (stillOpen) await guard([r.open], () => process(client, r, bot));
+        if (openSends(state.db).some((o) => o.id === r.open.id))
+          await guard([r.open], () => remind(client, r));
       }
       failures = 0;
       if (connection.get().state !== 'connected') connection.set('connected');
