@@ -71,7 +71,7 @@ describe('WorkbenchView', () => {
   it("with no pass open, is the picker over the project's pages, and Start Pass opens one there", async () => {
     const { opened } = open('/workbench');
     await pick('settings');
-    fireEvent.click(screen.getByRole('button', { name: 'Start Pass' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     await waitFor(() => {
       expect(opened).toHaveLength(1);
     });
@@ -83,7 +83,7 @@ describe('WorkbenchView', () => {
     const task = taskDto({ projectId: project.id, title: 'People list', areas: ['people'] });
     const { opened } = open(`/workbench?tasks=${JSON.stringify([task.id])}`, {}, { tasks: [task] });
     expect(within(await picked()).getByText('People list')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Start Pass' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     await waitFor(() => {
       expect(opened[0]?.body).toMatchObject({ taskIds: [task.id], pages: [] });
     });
@@ -97,7 +97,7 @@ describe('WorkbenchView', () => {
     await waitFor(async () => {
       expect(within(await picked()).getByText('people')).toBeTruthy();
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Start Pass' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     await waitFor(() => {
       expect(opened[0]?.body).toMatchObject({ pages: ['people'], goalId: goal });
     });
@@ -109,7 +109,7 @@ describe('WorkbenchView', () => {
     const other = passViewDto({ pass: { name: 'Their pass' }, pages: [pagesByStatus().ready] });
     const { router } = open(`/workbench?task=${working.taskId}`, { live: [other, live] });
     expect(await screen.findByText('ampsio · Settings pass · 1 ready · 1 working')).toBeTruthy();
-    const queue = screen.getByRole('list', { name: 'Pages in this pass' });
+    const queue = screen.getByRole('list', { name: 'Open pages' });
     expect(
       within(queue)
         .getByRole('button', { name: /^Billing/ })
@@ -137,7 +137,7 @@ describe('WorkbenchView', () => {
         ],
       },
     );
-    expect(await screen.findByRole('button', { name: 'More pass actions' })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: 'More actions' })).toBeTruthy();
     expect(asked).toBe(0);
   });
 
@@ -166,9 +166,9 @@ describe('WorkbenchView', () => {
     {
       action: 'Rename',
       act: async () => {
-        fireEvent.click(screen.getByRole('button', { name: 'More pass actions' }));
+        fireEvent.click(screen.getByRole('button', { name: 'More actions' }));
         fireEvent.click(await screen.findByRole('menuitem', { name: 'Rename', hidden: true }));
-        const dialog = await screen.findByRole('dialog', { name: 'Rename Pass' });
+        const dialog = await screen.findByRole('dialog', { name: 'Rename' });
         fireEvent.change(within(dialog).getByLabelText('Name'), {
           target: { value: 'Density pass' },
         });
@@ -233,7 +233,7 @@ describe('WorkbenchView', () => {
       }),
     );
     open('/workbench', { live: [live] });
-    fireEvent.click(await screen.findByRole('button', { name: 'More pass actions' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'More actions' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Abandon', hidden: true }));
     const dialog = await screen.findByRole('dialog', { name: 'Abandon' });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Abandon' }));
@@ -269,7 +269,7 @@ describe('WorkbenchView', () => {
       }),
     );
     open('/workbench', { live: [live] });
-    fireEvent.click(await screen.findByRole('button', { name: 'More pass actions' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'More actions' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Finish', hidden: true }));
     const dialog = await screen.findByRole('dialog', { name: 'Finish' });
     expect(await within(dialog).findByText('Lands 1 page on main.')).toBeTruthy();

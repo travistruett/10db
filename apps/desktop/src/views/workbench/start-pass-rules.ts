@@ -90,11 +90,11 @@ export function blockedReason(
   inPass: readonly string[] = [],
 ): string | null {
   if (inPass.length + ticks.pages.length + ticks.tasks.length >= PASS_PAGE_CAP_MAX)
-    return `A pass holds at most ${String(PASS_PAGE_CAP_MAX)} pages`;
+    return `At most ${String(PASS_PAGE_CAP_MAX)} pages can be open at once`;
   const area = (name: string) => areas.find((a) => a.name === name);
   const holders: { readonly pages: readonly string[]; readonly holds: (page: string) => string }[] =
     [
-      ...inPass.map((page) => ({ pages: [page], holds: () => `${page} is in the pass` })),
+      ...inPass.map((page) => ({ pages: [page], holds: () => `${page} is already open` })),
       ...ticks.pages.map((page) => ({ pages: [page], holds: () => `${page} is ticked` })),
       ...ticks.tasks.map((task) => ({
         pages: task.pages,
@@ -117,7 +117,7 @@ export function blockedReason(
 /** How many pages a pass's name lists before "n more" stands for the rest. */
 const NAMED_PAGES = 3;
 
-/** "Settings pass", "Settings and People pass", "Settings, People and 2 more pass". */
+/** "Settings", "Settings and People", "Settings, People and 2 more". */
 export function passName(pages: readonly string[]): string {
   const listed =
     pages.length <= NAMED_PAGES
@@ -125,7 +125,7 @@ export function passName(pages: readonly string[]): string {
       : [...pages.slice(0, NAMED_PAGES - 1), `${String(pages.length - NAMED_PAGES + 1)} more`];
   const last = listed.at(-1) ?? '';
   const head = listed.slice(0, -1);
-  return `${head.length === 0 ? last : `${head.join(', ')} and ${last}`} pass`;
+  return head.length === 0 ? last : `${head.join(', ')} and ${last}`;
 }
 
 /** The pass holds the default number of pages, or every ticked one when more are. */

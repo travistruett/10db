@@ -45,7 +45,7 @@ function closingLine(
 ): { readonly line: string; readonly refused: boolean } | null {
   if (view.pass.state !== PassState.Closing) return null;
   return view.closeStep !== null && view.closeStep >= CloseStep.FastForwarded
-    ? { line: 'The pass is landing: it can no longer be abandoned.', refused: true }
+    ? { line: 'It is landing now, so it can no longer be abandoned.', refused: true }
     : { line: 'Finishing stops where it is; what has landed stays.', refused: false };
 }
 
@@ -97,7 +97,7 @@ export function AbandonModal({ view, inbox, now, onClose, abandon }: AbandonModa
         {reverts.length > 0 ? (
           <PageList
             name="Pages that go back"
-            says="These go back to how they were before the pass; each task keeps its work for its next start:"
+            says="These leave your folder. Their changes wait on their Board tasks, which put them back when they next start:"
             pages={reverts}
           />
         ) : null}

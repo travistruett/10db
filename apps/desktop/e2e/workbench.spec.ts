@@ -73,7 +73,7 @@ function record(): void {
     const region = document.querySelector('[aria-label="UI Workbench announcements"]');
     const said = region?.textContent ?? '';
     if (said !== '' && recorded.announced.at(-1) !== said) recorded.announced.push(said);
-    for (const row of document.querySelectorAll('[aria-label="Pages in this pass"] li')) {
+    for (const row of document.querySelectorAll('[aria-label="Open pages"] li')) {
       const line = row.textContent;
       if (!recorded.rowLines.includes(line)) recorded.rowLines.push(line);
     }
@@ -88,14 +88,14 @@ async function recorded(page: Page): Promise<Recorded> {
 /** The queue's row for a page. */
 function row(page: Page, area: string): Locator {
   return page
-    .getByRole('list', { name: 'Pages in this pass' })
+    .getByRole('list', { name: 'Open pages' })
     .getByRole('listitem')
     .filter({ has: page.getByRole('button', { name: new RegExp(`^${area}`) }) });
 }
 
 async function queueOrder(page: Page): Promise<string[]> {
   return page
-    .getByRole('list', { name: 'Pages in this pass' })
+    .getByRole('list', { name: 'Open pages' })
     .getByRole('listitem')
     .evaluateAll((items) =>
       items.map((item) => item.querySelector('button span:not([data-testid])')?.textContent ?? ''),
@@ -114,7 +114,7 @@ async function headerFits(page: Page, width: number) {
     (el) => el.scrollWidth > el.clientWidth + 1 || el.scrollHeight > el.clientHeight + 1,
   );
   expect(clipped, `the header's line is cut at ${String(width)}`).toBe(false);
-  const menu = await page.getByRole('button', { name: 'More pass actions' }).boundingBox();
+  const menu = await page.getByRole('button', { name: 'More actions', exact: true }).boundingBox();
   expect(menu, `the ⋯ menu is drawn at ${String(width)}`).not.toBeNull();
   if (menu !== null)
     expect(menu.x + menu.width, `the ⋯ menu is on screen at ${String(width)}`).toBeLessThanOrEqual(
@@ -183,7 +183,7 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
   await page.getByRole('option', { name: /^people/ }).click();
   await pages.press('Escape');
   await page.getByRole('textbox', { name: "What's bothering you?" }).fill('these feel cramped');
-  await page.getByRole('button', { name: 'Start Pass' }).click();
+  await page.getByRole('button', { name: 'Start' }).click();
 
   // People asks, so it rises to the top of the queue; it is answered on the page.
   await expect(row(page, 'people')).toContainText('Asks a question');
@@ -270,13 +270,13 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
 
   // Abandon ends the pass: its confirm names the page that goes back and the one that stays. Later
   // specs read Factory across projects, so nothing of this pass is left running.
-  await page.getByRole('button', { name: 'More pass actions' }).click();
+  await page.getByRole('button', { name: 'More actions', exact: true }).click();
   await page.getByRole('menuitem', { name: 'Abandon' }).click();
   const abandon = page.getByRole('dialog', { name: 'Abandon' });
   await expect(abandon.getByRole('list', { name: 'Pages that go back' })).toHaveText('people');
   await expect(abandon.getByRole('list', { name: 'Pages that stay' })).toHaveText('settings');
   await abandon.getByRole('button', { name: 'Abandon' }).click();
-  await expect(page.getByRole('button', { name: /^Start Pass/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Start', exact: true })).toBeVisible();
   await expect
     .poll(async () => {
       const live = await request.get(`${daemonUrl}/passes?live=true`, { headers: auth });

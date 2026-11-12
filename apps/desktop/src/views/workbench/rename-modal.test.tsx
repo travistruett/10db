@@ -12,7 +12,7 @@ function draw(rename = vi.fn<(body: PassRename) => Promise<void>>(() => Promise.
   return { rename, onClose };
 }
 
-const dialog = () => screen.findByRole('dialog', { name: 'Rename Pass' });
+const dialog = () => screen.findByRole('dialog', { name: 'Rename' });
 
 describe('RenameModal', () => {
   it('renames the pass, trimmed, and closes', async () => {
@@ -33,7 +33,7 @@ describe('RenameModal', () => {
     const d = await dialog();
     fireEvent.change(within(d).getByLabelText('Name'), { target: { value: ' ' } });
     fireEvent.click(within(d).getByRole('button', { name: 'Rename' }));
-    expect(await within(d).findByText('Name the pass')).toBeTruthy();
+    expect(await within(d).findByText('Enter a name')).toBeTruthy();
     expect(rename).not.toHaveBeenCalled();
   });
 

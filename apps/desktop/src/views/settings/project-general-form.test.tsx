@@ -82,7 +82,7 @@ const rows: readonly Row[] = [
   {
     name: 'Preview command',
     label: 'Preview command',
-    line: "Optional. Starts your dev server at the app address while a UI Workbench pass is open, and stops it when the pass ends, so you never run it yourself. It runs under the gate's sandbox, which needs Allow loopback.",
+    line: "Optional. Starts your dev server at the app address while pages are open in the UI Workbench, and stops it once they are finished or abandoned, so you never run it yourself. It runs under the gate's sandbox, which needs Allow loopback.",
     change: () => type('Preview command', 'pnpm dev:preview'),
     sent: { previewCommand: 'pnpm dev:preview' },
   },
@@ -96,7 +96,7 @@ const rows: readonly Row[] = [
   {
     name: 'Pictures in pull requests',
     label: 'Pictures in pull requests',
-    line: "A pass's pull request shows each signed-off page before and after. The pictures are pushed to a 10db-pictures branch on GitHub, so anyone who can see the repository can see them, data on the page included.",
+    line: 'A UI Workbench pull request shows each signed-off page before and after. The pictures are pushed to a 10db-pictures branch on GitHub, so anyone who can see the repository can see them, data on the page included.',
     change: () =>
       fireEvent.click(screen.getByRole('switch', { name: 'Pictures in pull requests' })),
     sent: { prPictures: true },

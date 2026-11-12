@@ -131,7 +131,7 @@ describe('blockedReason', () => {
       name: 'a page the pass holds',
       row: { pages: ['settings'] },
       inPass: ['settings'],
-      reason: 'settings is in the pass',
+      reason: 'settings is already open',
     },
     {
       name: 'a page that can share a file with one the pass holds',
@@ -144,7 +144,7 @@ describe('blockedReason', () => {
       name: 'any page once the pass and the ticks fill it',
       row: { pages: ['people'] },
       inPass: ['a', 'b', 'c', 'd', 'e'],
-      reason: `A pass holds at most ${String(PASS_PAGE_CAP_MAX)} pages`,
+      reason: `At most ${String(PASS_PAGE_CAP_MAX)} pages can be open at once`,
     },
   ])('beside an open pass, $name', ({ row, inPass, reason }) => {
     const ticks: PickTicks = { pages: inPass.length === 5 ? ['f'] : [], tasks: [] };
@@ -157,17 +157,17 @@ describe('blockedReason', () => {
       tasks: [],
     };
     expect(blockedReason({ pages: ['people'] }, full, areas)).toBe(
-      `A pass holds at most ${String(PASS_PAGE_CAP_MAX)} pages`,
+      `At most ${String(PASS_PAGE_CAP_MAX)} pages can be open at once`,
     );
   });
 });
 
 describe('passName', () => {
   it.each([
-    [['settings'], 'settings pass'],
-    [['settings', 'people'], 'settings and people pass'],
-    [['settings', 'people', 'billing'], 'settings, people and billing pass'],
-    [['settings', 'people', 'billing', 'home'], 'settings, people and 2 more pass'],
+    [['settings'], 'settings'],
+    [['settings', 'people'], 'settings and people'],
+    [['settings', 'people', 'billing'], 'settings, people and billing'],
+    [['settings', 'people', 'billing', 'home'], 'settings, people and 2 more'],
   ])('%j is %s', (pages, name) => {
     expect(passName(pages)).toBe(name);
   });
@@ -192,7 +192,7 @@ describe('openRequest', () => {
       tasks: [{ taskId, title: 'Tighten it', pages: ['people'] }],
     };
     expect(openRequest(ticks, '  these feel cramped ', null)).toEqual({
-      name: 'settings and people pass',
+      name: 'settings and people',
       pages: ['settings'],
       taskIds: [taskId],
       pageCap: 4,
@@ -200,7 +200,7 @@ describe('openRequest', () => {
     });
     const goalId = mintId('Goal');
     expect(openRequest({ pages: ['settings'], tasks: [] }, ' ', goalId)).toEqual({
-      name: 'settings pass',
+      name: 'settings',
       pages: ['settings'],
       taskIds: [],
       pageCap: 4,

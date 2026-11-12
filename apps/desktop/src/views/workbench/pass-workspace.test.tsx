@@ -57,7 +57,7 @@ async function renderWorkspace(selected: (pages: Pages) => TaskId | null = () =>
       onSelect={onSelect}
     />,
   );
-  await screen.findByRole('list', { name: 'Pages in this pass' });
+  await screen.findByRole('list', { name: 'Open pages' });
   return { pages, onSelect };
 }
 
@@ -65,7 +65,7 @@ type Pages = ReturnType<typeof pagesByStatus>;
 
 /** The queue's page rows, without each row's menu. */
 function queueRows() {
-  return within(screen.getByRole('list', { name: 'Pages in this pass' }))
+  return within(screen.getByRole('list', { name: 'Open pages' }))
     .getAllByRole('button')
     .filter((button) => !button.hasAttribute('aria-haspopup'));
 }
@@ -105,7 +105,7 @@ describe('PassWorkspace queue', () => {
         onSelect={vi.fn()}
       />,
     );
-    await screen.findByRole('list', { name: 'Pages in this pass' });
+    await screen.findByRole('list', { name: 'Open pages' });
     expect(
       queueRows()
         .map((row) => row.textContent)
@@ -634,7 +634,7 @@ describe('PassWorkspace window focus', () => {
     'puts the cursor in the composer as the window gains focus: $name',
     async ({ first, shown }) => {
       drawSelecting(first);
-      await screen.findByRole('list', { name: 'Pages in this pass' });
+      await screen.findByRole('list', { name: 'Open pages' });
       // The builder had moved through the queue with J before leaving for the browser.
       queueRows()[0]?.focus();
       fireEvent.focus(window);
@@ -733,7 +733,7 @@ describe('PassWorkspace Take Out', () => {
         onSelect={vi.fn()}
       />,
     );
-    await screen.findByRole('list', { name: 'Pages in this pass' });
+    await screen.findByRole('list', { name: 'Open pages' });
     await takeOut('Billing');
     await waitFor(() => {
       expect(sent).toEqual([
@@ -766,7 +766,7 @@ describe('PassWorkspace Take Out', () => {
         onSelect={vi.fn()}
       />,
     );
-    await screen.findByRole('list', { name: 'Pages in this pass' });
+    await screen.findByRole('list', { name: 'Open pages' });
     const dialog = await openTakeOut('Billing');
     const change = (path: string) => within(dialog).findByRole('group', { name: path });
     const button = await change('src/shared/button.tsx');
@@ -828,7 +828,7 @@ describe('PassWorkspace Take Out', () => {
       />
     );
     const { rerender, queryClient } = renderWithDaemon(draw(Object.values(pages)));
-    await screen.findByRole('list', { name: 'Pages in this pass' });
+    await screen.findByRole('list', { name: 'Open pages' });
     await takeOut('Billing');
     await waitFor(() => {
       expect(sent).toHaveLength(1);

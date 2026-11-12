@@ -20,7 +20,7 @@ function gateLine(gate: PassPullRequestGate): string {
     case PassPullRequestGate.Scratch:
       return 'The gate runs on the pushed commit in a separate copy, so you can keep working.';
     case PassPullRequestGate.FolderAtClose:
-      return 'The gate runs in your folder when the pass finishes.';
+      return 'The gate runs in your folder when you finish.';
     case PassPullRequestGate.None:
       return 'No gate runs for it.';
   }
@@ -31,7 +31,7 @@ function aheadLine(branch: string, preview: PassPullRequestPreviewDto): string |
   const ahead = preview.aheadOfBase;
   if (ahead === null || ahead === 0) return null;
   const commits = ahead === 1 ? '1 commit' : `${String(ahead)} commits`;
-  return `${branch} has ${commits} origin/${preview.base} lacks from before the pass; the pull request lists them too.`;
+  return `${branch} has ${commits} origin/${preview.base} lacks from before you started; the pull request lists them too.`;
 }
 
 interface ConfirmProps {

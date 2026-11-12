@@ -21,7 +21,7 @@ export function QueueList({ rows, current, onSelect, onTakeOut }: QueueListProps
   return (
     <Box
       component="ul"
-      aria-label="Pages in this pass"
+      aria-label="Open pages"
       m={0}
       p={0}
       style={{ listStyle: 'none' }}

@@ -63,7 +63,7 @@ function draw(view: PassViewDto, overrides: Partial<PassHeaderProps> = {}) {
   return props;
 }
 
-const menu = () => screen.getByRole('button', { name: 'More pass actions' });
+const menu = () => screen.getByRole('button', { name: 'More actions' });
 
 describe('PassHeader', () => {
   it("says the project, the pass and its counts, with the pass's own actions", async () => {

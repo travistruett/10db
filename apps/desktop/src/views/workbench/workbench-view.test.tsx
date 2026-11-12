@@ -88,7 +88,7 @@ describe('WorkbenchScreen', () => {
       await screen.findByRole('heading', { name: 'Set up ampsio for the UI Workbench' }),
     ).toBeTruthy();
     expect(await screen.findByRole('checkbox', { name: /settings/ })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /^Start Pass/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Start/ })).toBeNull();
   });
 
   it('offers Set Up above the picker while suggestions are left, and Back to Pages returns', async () => {
@@ -119,7 +119,7 @@ describe('WorkbenchScreen', () => {
     await draw({ live: passViewDto({ pass: { state: 'CLOSED' }, rest: { notices: [notice] } }) });
     expect(await screen.findByText('Settings pass finished with no pull request.')).toBeTruthy();
     expect(await findPagesInput()).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'More pass actions' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'More actions' })).toBeNull();
     // Its notices stay in sight, and it holds no page to send one to.
     expect(screen.getByText(notice.text)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Send to Agent' })).toBeNull();
@@ -141,7 +141,7 @@ describe('WorkbenchScreen', () => {
       },
     });
     await pickOption(await findPagesInput(), /^settings/);
-    fireEvent.click(screen.getByRole('button', { name: 'Start Pass' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Start' }));
     expect(await screen.findByText('A lane is running in the folder')).toBeTruthy();
     expect(start).toHaveBeenCalledWith(expect.objectContaining({ pages: ['settings'] }));
   });
@@ -165,11 +165,11 @@ describe('WorkbenchScreen', () => {
   });
 
   it.each([
-    { item: 'Rename', dialog: 'Rename Pass' },
+    { item: 'Rename', dialog: 'Rename' },
     { item: 'Abandon', dialog: 'Abandon' },
   ])('opens $dialog from the pass menu', async ({ item, dialog }) => {
     await draw({ live: passViewDto({ pages: [pagesByStatus().ready] }) });
-    fireEvent.click(await screen.findByRole('button', { name: 'More pass actions' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'More actions' }));
     fireEvent.click(await screen.findByRole('menuitem', { name: item, hidden: true }));
     expect(await screen.findByRole('dialog', { name: dialog })).toBeTruthy();
   });
@@ -200,9 +200,9 @@ describe('WorkbenchScreen', () => {
       );
     }
     await renderWithDaemonAndRouter(<Settling {...screenProps().props} />);
-    await screen.findByRole('button', { name: 'More pass actions' });
+    await screen.findByRole('button', { name: 'More actions' });
     fireEvent.click(screen.getByRole('button', { name: 'Settle' }));
-    expect(await screen.findByRole('button', { name: /^Start Pass/ })).toBeTruthy();
+    expect(await screen.findByRole('button', { name: /^Start/ })).toBeTruthy();
     expect(screen.queryByText('Settings pass finished; its work is on main.') !== null).toBe(said);
   });
 });

@@ -79,7 +79,7 @@ describe('AddPageModal', () => {
     await pickOption(pagesIn(dialog), /^reports/);
     const forms = optionIn(await openOptions(pagesIn(dialog)), /^forms/);
     expect(forms.hasAttribute('data-combobox-disabled')).toBe(true);
-    expect(forms.textContent).toContain('A pass holds at most 6 pages');
+    expect(forms.textContent).toContain('At most 6 pages can be open at once');
   });
 
   it("says the daemon's refusal beside Add Pages and stays open", async () => {

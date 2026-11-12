@@ -74,7 +74,7 @@ function search(text: string) {
   pagesInput().focus();
   fireEvent.change(pagesInput(), { target: { value: text } });
 }
-const startButton = () => screen.getByRole('button', { name: /^Start Pass/ });
+const startButton = () => screen.getByRole('button', { name: /^Start/ });
 const picked = () => pillsOf(pagesInput());
 
 describe('StartPass', () => {
@@ -101,12 +101,12 @@ describe('StartPass', () => {
     fireEvent.change(screen.getByLabelText("What's bothering you?"), {
       target: { value: 'these feel cramped' },
     });
-    expect(startButton().textContent).toBe('Start Pass');
+    expect(startButton().textContent).toBe('Start');
     fireEvent.click(startButton());
     expect(onStart).toHaveBeenCalledTimes(1);
     const sent = PassOpenRequest.parse(onStart.mock.calls[0]?.[0]);
     expect(sent).toEqual({
-      name: 'settings and people pass',
+      name: 'settings and people',
       pages: ['settings'],
       taskIds: [peopleTask.id],
       pageCap: 4,

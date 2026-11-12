@@ -261,7 +261,7 @@ function ProjectWorkbench({ project }: { readonly project: ProjectViewDto }) {
   const passId = (): PassViewDto['pass']['id'] => {
     const view = live.data;
     if (view === null || view === undefined)
-      throw new NoPassOpenError(`${project.name} has no pass open`);
+      throw new NoPassOpenError(`${project.name} has no pages open`);
     return view.pass.id;
   };
   // With no page of the pass in the address, the queue's first page is shown; it goes into the address
