@@ -49,6 +49,8 @@ export const DEV_UI_READS: readonly string[] = [
   '/models/status',
   '/settings/keep-awake',
   '/settings/lane-permissions',
+  '/settings/trust',
+  '/projects/:projectId/trust',
   '/settings/self-update',
   '/decisions/:id/provenance',
   '/principles/:id/provenance',
