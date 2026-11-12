@@ -53,6 +53,7 @@ import type { SlackConnection } from './slack-connection';
 import { blocksOf } from './slack-text';
 import { dueTimers } from './timers';
 import { matchReply, type MatchState } from './reply-match';
+import { loadMatchState, saveMatchState } from './reply-match-store';
 
 /** How often open conversations are read. */
 export const REPLY_INTERVAL_MS = 60_000;
@@ -133,7 +134,7 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
   let botUserId: string | null = null;
   /** The newest counted message each send's last tick read: a message no newer than it means quiet. */
   const quiet = new Map<string, string>();
-  const matched: MatchState = { assigned: new Map(), asked: new Map() };
+  const matched: MatchState = loadMatchState(state);
 
   async function identity(client: SlackClient): Promise<string> {
     if (botUserId !== null) return botUserId;
@@ -173,6 +174,7 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
         },
         { channel, bot, opens: here, messages: top },
       );
+      saveMatchState(state, matched);
       for (const open of here) {
         // Only what was said after this send's own question, and before the next question in that thread.
         const within = (from: string, until: string | undefined) => (m: SlackMessage) =>

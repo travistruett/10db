@@ -523,6 +523,32 @@ describe('replies typed at the top of the DM', () => {
     expect(ask).toContain('2) A question you were sent: https://slack/');
   });
 
+  it('remembers across a restart which question a top-level reply was used for', async () => {
+    const s = scene();
+    const first = await s.send([s.mark], { title: 'First?' });
+    const second = await s.send([s.mark], { title: 'Second?' });
+    judgeReply = answeredWith('1');
+    slack.say(first.channel, 'UMARK', 'A');
+    await ticks(3);
+    expect(card(first.cardId).answer).toMatchObject({ choice: 'Yes' });
+    watch = buildWatch();
+    await ticks(4);
+    expect(card(second.cardId).state).toBe('OPEN');
+  });
+
+  it('does not ask which one it is for again after a restart', async () => {
+    const s = scene();
+    const first = await s.send([s.mark], { title: 'First?' });
+    await s.send([s.mark], { title: 'Second?' });
+    slack.say(first.channel, 'UMARK', 'B');
+    await ticks(3);
+    const asks = () => slack.posts.filter((p) => p.text.startsWith('Which one is this for?'));
+    expect(asks()).toHaveLength(1);
+    watch = buildWatch();
+    await ticks(3);
+    expect(asks()).toHaveLength(1);
+  });
+
   it('falls back to asking when the judge is below its floor', async () => {
     const s = scene();
     await s.send([s.mark], { title: 'First?' });
