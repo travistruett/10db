@@ -34,6 +34,9 @@ export function RightsizingChart({
   const last = ticks.at(-1);
   return (
     <ScatterChart
+      // Recharts keeps the legend's items from before, and Mantine's legend reads the series by index, so a changed
+      // set of tiers needs a fresh chart.
+      key={result.series.map((s) => s.name).join('|')}
       h={420}
       withLegend
       data={result.series.map((s) => ({
