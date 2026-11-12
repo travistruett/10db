@@ -45,6 +45,7 @@ import { currentToolNames } from './mcp-tool-names';
 import { TENDB_MCP_SERVER } from './project-mcp';
 import { projectSettingsBillingProblem } from './project-settings';
 import { settleWithin } from './settle-within';
+import { setupPromptText } from './setup-prompt';
 import { claudeAuthStatus, type SignInCheck, type SignInState } from './sign-in-check';
 import {
   AccountProbeError,
@@ -291,6 +292,9 @@ const HOOK_CWDS_KEPT = 256;
 
 export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
   const sandbox = spec.sandbox ?? null;
+  const setupPlugins = spec.setup?.plugins ?? [];
+  // A lane's base prompt is the SDK's empty custom prompt; the setup adds to it, never the preset.
+  const setupPrompt = setupPromptText(spec.instructions, setupPlugins);
   // The PreToolUse hook is the only place Claude Code says where a call runs (its `cwd`, which an
   // earlier Bash call's `cd` moves); `canUseTool` for the same call gets it by the tool use id, so the
   // permission broker reads a relative path from the same directory the guard does.
@@ -321,7 +325,12 @@ export function buildQueryOptions(spec: SessionSpec, deps: QueryDeps): Options {
     ...(sandbox
       ? { sandbox: sandbox.settings, disallowedTools: [...sandbox.disallowedTools] }
       : {}),
-    plugins: [{ type: 'local', path: deps.pluginDir }],
+    ...(setupPrompt === null ? {} : { systemPrompt: { type: 'custom', prompt: setupPrompt } }),
+    // The harness first, then the setup's: never a plugin's install path (`sandbox/setup-dir.ts`).
+    plugins: [
+      { type: 'local', path: deps.pluginDir },
+      ...setupPlugins.map((path) => ({ type: 'local' as const, path })),
+    ],
     allowedTools: [...spec.allowedTools],
     // In default mode what no allow rule covers reaches canUseTool. Only a sandboxed lane may run in
     // auto mode, whose classifier approves calls itself; an unsandboxed session never does.
