@@ -360,8 +360,9 @@ plugin, loaded with `plugins: [{ type: 'local', path }]`, had a `PreToolUse` com
   name.
 
 Meaning for the design: (a) and (b) hold, but (c) and (d) mean a plugin's `PreToolUse` hook can run a call 10db
-never judged or carded. Fallback F2 applies: plugins come along without their hooks until 10db can order or
-judge them. The wrapper's MCP and working-directory rows hold against the real CLI.
+never judged or carded. Fallback F2 applied first; the builder then chose Claude Code parity for what they
+installed, so plugin hooks come along, each started in its wrapper's folder (L3c's note). The wrapper's MCP and
+working-directory rows hold against the real CLI.
 
 ### L3c: definition frontmatter against 10db's guard and broker: skill hooks and `allowed-tools` fail
 
@@ -397,3 +398,9 @@ don't see. The setup dir re-emits each builder or plugin skill, command and agen
 `allowed-tools` or `mcpServers`, without those keys. The agent row passed, but it rests on one run and on Claude
 Code ignoring keys it parses, so an agent's keys go too. `!` lines stay: they run inside the sandbox, and with no
 skill's grant only the lane's own allow rules let one run. `disableSkillShellExecution` is not set.
+
+The builder then chose parity (Settings and sessions should feel like Claude Code): what the builder installed,
+their own skills and their plugins, keeps its `hooks` and `allowed-tools`, and plugin hooks come back through the
+wrapper. Accepted: the guard doesn't judge a builder hook's rewrite again; `allowed-tools` skips only the card,
+never a guard deny; the agent's own commands and a skill's `!` lines stay in the kernel sandbox. An agent's
+`mcpServers` stays out until T6. What a lane can write keeps its allowlist.

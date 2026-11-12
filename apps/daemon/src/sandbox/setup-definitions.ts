@@ -11,19 +11,17 @@ import { foldPathCase } from '../guard';
 import { readFrontmatter, writeFrontmatter } from './frontmatter';
 
 /**
- * Frontmatter keys of a builder's or a plugin's skill, command or agent that Claude Code acts on outside
- * 10db's guard and broker: a `hooks` hook runs once the skill is invoked and its rewrite of a call holds,
- * and `allowed-tools` lets a call skip the broker and a `!` line run unjudged (research L3c). An agent's
- * `mcpServers` would start a server 10db never launched. Compared with case, `-` and `_` folded away.
+ * Frontmatter keys of a builder's or a plugin's skill, command or agent that 10db leaves out: an agent's
+ * `mcpServers` would start a server 10db never launched, until Your MCP servers (T6) runs them. Every
+ * other key, `hooks` and `allowed-tools` included, comes along as Claude Code reads it: the builder
+ * installed these. Compared with case, `-` and `_` folded away.
  */
 const STRIPPED: ReadonlyMap<string, string> = new Map([
-  ['hooks', 'hooks left out'],
-  ['allowedtools', 'pre-approved tools left out'],
-  ['mcpservers', 'MCP servers left out'],
+  ['mcpservers', 'MCP servers arrive with Your MCP servers (T6)'],
 ]);
 
 /** What a frontmatter 10db can't read might hide, in its raw text: a stripped key's name or an escape. */
-const MIGHT_HOLD_STRIPPED = /hooks|allowed[-_\s]*tools|mcp[-_\s]*servers|\\/i;
+const MIGHT_HOLD_STRIPPED = /mcp[-_\s]*servers|\\/i;
 
 /** Past this, a definition file is not read and is left out. */
 const DEFINITION_MAX_BYTES = 256 * 1024;
@@ -54,17 +52,17 @@ function rawBlock(text: string): string {
 /** A key another YAML reader may follow to merge in keys 10db never sees as its own. */
 const MERGE_KEY = '<<';
 
-const unreadable = (why: string): string => `${why}, and it may hold hooks or pre-approved tools`;
+const unreadable = (why: string): string => `${why}, and it may hold MCP servers`;
 
 /** Why what Claude Code would read of `text` may still hold a stripped key, or null when it holds none. */
 function strippedLeft(text: string): string | null {
   const split = readFrontmatter(text);
   if ('refused' in split)
     return MIGHT_HOLD_STRIPPED.test(rawBlock(text)) ? unreadable(split.refused) : null;
-  if (split.pairs.some(([key]) => key === MERGE_KEY))
+  if (split.pairs.some(([key]) => key === MERGE_KEY) && MIGHT_HOLD_STRIPPED.test(rawBlock(text)))
     return "its frontmatter merges in keys 10db can't see";
   return split.pairs.some(([key]) => STRIPPED.has(normalized(key)))
-    ? 'what Claude Code would read of it still holds hooks or pre-approved tools'
+    ? 'what Claude Code would read of it still holds MCP servers'
     : null;
 }
 
@@ -72,7 +70,7 @@ function strippedLeft(text: string): string | null {
  * A definition with its stripped keys removed and every other key kept, the body as written; null when
  * it holds none. What it would then be is read again as Claude Code reads it, so a body that opens a
  * second block, once the first is gone, is refused; so is frontmatter 10db can't read whose text could
- * spell a stripped key, and a merge key.
+ * spell a stripped key, and a merge key in a block that could.
  */
 export function withoutStrippedKeys(text: string): Stripped {
   const split = readFrontmatter(text);
@@ -80,7 +78,7 @@ export function withoutStrippedKeys(text: string): Stripped {
     const why = strippedLeft(text);
     return why === null ? null : { refused: why };
   }
-  if (split.pairs.some(([key]) => key === MERGE_KEY))
+  if (split.pairs.some(([key]) => key === MERGE_KEY) && MIGHT_HOLD_STRIPPED.test(rawBlock(text)))
     return { refused: "its frontmatter merges in keys 10db can't see" };
   const notes = [...new Set(split.pairs.flatMap(([key]) => STRIPPED.get(normalized(key)) ?? []))];
   if (notes.length === 0) return null;

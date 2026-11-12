@@ -68,14 +68,15 @@ The fake adapter (`sessions/fake-adapter.ts`) is the test boundary for Claude Co
   `PATH` entry or tool variable that names one, a lockfile). Remove a capability rather than check for its
   misuse. Never deny individual secrets inside an otherwise open tree: open only what is needed. Its one
   exception is what the builder installed: Claude Code reads the builder's skills and plugins (Settings ›
-  Trust) outside the sandbox, and each skill or plugin whose real path a lane could write is left out. Plugin
-  hooks do not run in 10db sessions (live check L3b: a plugin's `PreToolUse` answer runs a rewritten call the
-  guard never judged, and its allow skips the broker); bringing them back is a follow-up.
+  Trust) outside the sandbox, and each skill or plugin whose real path a lane could write is left out. Their
+  hooks and `allowed-tools` run as in Claude Code (live checks L3b and L3c: the guard doesn't judge a hook's
+  rewrite again, and `allowed-tools` skips the card, never a guard deny); a plugin hook starts in its wrapper's
+  folder.
 - `sandbox/` opens a session's setup read-only (`setup-reads.ts`: `setupReadRefusal` judges each real path,
   `collapseReads` keeps the profile small; `setup-dir.ts`: `keepSetup` and `createSetupDir`, one
   `10db-setup-<hex>` dir per session in the files root, removed with its sandbox and swept by `stale-files.ts`;
-  `plugin-wrapper.ts`: a wrapper per plugin linking only `skills`, `agents` and `commands` by folded name, never
-  hooks or MCP servers). Every `.env*` file and folder in an opened read, and what a link in a `.env*` folder
+  `plugin-wrapper.ts`: a wrapper per plugin linking `skills`, `agents` and `commands` by folded name and
+  re-emitting `hooks/hooks.json` with each command started in the wrapper, never MCP or LSP servers). Every `.env*` file and folder in an opened read, and what a link in a `.env*` folder
   leads to, is denied to the kernel, Claude Code's rules and the file-access judge. Only the lane profile gets
   setup reads, never a gate's or a repo MCP server's. `test/setup-reads.seatbelt.test.ts` holds it against the
   kernel.

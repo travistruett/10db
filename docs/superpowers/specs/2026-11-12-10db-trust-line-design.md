@@ -227,12 +227,12 @@ their calls are judged like any other call. Many need the network, OAuth or the 
 break, and the builder installed them. Servers a repository declares (`.mcp.json`) stay as built: approved by
 hash and run under `srt`, since an agent can write that file.
 
-**Approved project hooks run; plugin hooks don't yet.** Approved project hooks run in the agent's own process,
-outside the kernel sandbox, as they do in Claude Code. The builder approved them; that is the trust the decision
-extends. A hook an agent wrote never runs without approval (§2). Plugin hooks stay out of 10db sessions (live
-check L3b): a plugin's `PreToolUse` answer can rewrite a call after 10db's guard judged it, and its allow skips
-10db's broker, so a call 10db never judged or carded could run. They come along once 10db can order or judge
-them, a follow-up.
+**Hooks run.** Plugin hooks, the hooks and `allowed-tools` in the builder's and plugins' skills, commands and
+agents, and approved project hooks run as they do in Claude Code. The builder installed or approved them; that is
+the trust the decision extends. A plugin hook starts in its wrapper's folder, not the checkout. The live checks
+(research, L3b and L3c) showed a hook's rewrite of a call is not judged again by 10db's guard and a skill's
+`allowed-tools` skips the card for a call the guard passes on; the builder accepted both for what they installed.
+A hook an agent wrote never runs without approval (§2).
 
 **Not loaded:** the builder's `~/.claude/settings.json` (it can change billing, permissions and the sandbox),
 their permission allowlists and output styles.

@@ -99,7 +99,7 @@ const RESERVED_NAMES: ReadonlySet<string> = new Set(['yours', 'project', '10db-h
 const RESERVED = "its name is one 10db's own setup uses";
 const NEEDED_GROUND =
   'a .env link in it leads to a folder the session needs, which 10db would have to close';
-const TOO_MANY = 'it holds more files than 10db reads to strip hooks and pre-approved tools';
+const TOO_MANY = 'it holds more files than 10db reads to leave out MCP servers';
 const UNNAMEABLE =
   "a path in it holds a character the sandbox profile can't take ([ ] * ? { } \\ or a line break)";
 

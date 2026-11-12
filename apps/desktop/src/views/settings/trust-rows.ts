@@ -40,7 +40,7 @@ const ROWS: Readonly<Record<TrustSwitchKey, Omit<TrustRow, 'key'>>> = {
     label: 'Your plugins',
     description: `The plugins Claude Code has installed for you, each switchable below. ${NEXT}`,
     providers:
-      "Claude: skills, agents and commands; plugin hooks don't run in 10db sessions yet, and their MCP servers wait for 10db's support for your MCP servers. Codex: skills only.",
+      "Claude: skills, agents, commands and hooks, as Claude Code runs them; their MCP servers wait for 10db's support for your MCP servers. Codex: skills only.",
   },
   projectSkills: {
     label: 'Project skills, commands and agents',
