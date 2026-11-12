@@ -139,6 +139,7 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
   /** The newest counted message each send's last tick read: a message no newer than it means quiet. */
   const quiet = new Map<string, string>();
   const matched: MatchState = loadMatchState(state);
+  const handledMentions = new Set<string>();
 
   async function identity(client: SlackClient): Promise<string> {
     if (botUserId !== null) return botUserId;
@@ -226,7 +227,7 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
     return out;
   }
 
-  const judged = new Map<string, boolean>();
+  const judged = new Map<string, boolean | null>();
 
   const agreeDeps = (client: SlackClient): AgreeDeps => ({
     client,
@@ -295,6 +296,7 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
           client,
           state,
           log,
+          handled: handledMentions,
           closingFor: (id) => deps.sends.closingTextFor(id as InboxItemId),
         },
         { open, messages: r.messages, thread: r.thread, bot },

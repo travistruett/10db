@@ -23,6 +23,9 @@ export interface MatchDeps {
   readonly floor: () => number;
 }
 
+/** How much of the unassigned messages the judge is sent. */
+const JUDGED_MESSAGES = 50;
+const JUDGED_TEXT = 1000;
 const CONSUMED = 'consumed';
 const NUMBER = /^\s*\(?(\d{1,2})[.)]?\s*$/;
 const UNCLEAR = 'unclear';
@@ -125,7 +128,8 @@ async function judged(
     const answer = await deps.judge.choose({
       decision: JudgeDecision.ReplyMatch,
       state: JSON.stringify({
-        reply: messages.map((m) => m.text),
+        // The newest words only, each cut: a long run of messages must not become an unbounded request.
+        reply: messages.slice(-JUDGED_MESSAGES).map((m) => m.text.slice(0, JUDGED_TEXT)),
         questions: options.map((o, i) => ({ n: i + 1, title: deps.titleOf(o) })),
       }),
       question: 'Which of these open questions is the reply answering?',

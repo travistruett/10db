@@ -420,6 +420,28 @@ describe('sends', () => {
     });
   });
 
+  it('forgets the which-way line and what was settled when a send moves', () => {
+    const w = world();
+    const s = draft(w.card('q'), [w.mark.id]);
+    sent(s.id);
+    store.write((ctx) => {
+      markSettled(ctx, s.id, '120.1');
+      markAskedWhichWay(ctx, s.id, { at: T0, ts: '121.1', throughTs: '122.1' });
+      moveSend(ctx, s.id, {
+        channelId: 'G1',
+        threadTs: '200.1',
+        messageTs: '200.1',
+        permalink: null,
+        added: [],
+      });
+    });
+    expect(openSends(store.db)[0]).toMatchObject({
+      askedWhichWayAt: null,
+      askedWhichWayTs: null,
+      settledThroughTs: null,
+    });
+  });
+
   it('does not count a person who was brought in for the limit or for having been sent to', () => {
     const w = world();
     const s = draft(w.card('q'), [w.mark.id]);

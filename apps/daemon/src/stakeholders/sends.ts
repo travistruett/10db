@@ -231,6 +231,15 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
       const row = sendingSends(state.db).find((x) => x.id === sendId);
       if (!row) return;
       const { inboxItemId, text } = sendSummary(state.db, sendId);
+      const card = getInboxItem(state.db, inboxItemId);
+      if (card.state !== InboxState.Open) {
+        // The card closed before anything was posted: there is nothing to open and nothing to say.
+        const reason = closeReasonOf(card, true) ?? 'cancelled';
+        state.write((ctx) => {
+          closeSend(ctx, sendId, reason);
+        });
+        return;
+      }
       let channelId = row.channelId;
       if (channelId === null) {
         const found = sendForCard(state.db, inboxItemId);

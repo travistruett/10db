@@ -643,6 +643,25 @@ describe('a limit and a reservation decided together', () => {
   });
 });
 
+describe('a reserved send whose card closed before its conversation was opened', () => {
+  it('is closed without opening anything or posting', async () => {
+    const w = world();
+    const mark = w.person('mark');
+    await seasoned(w, mark);
+    store.db.$client.prepare('UPDATE person_contacts SET dm_channel_id = NULL').run();
+    const id = w.card();
+    slack.failNext('conversations.open', 'unreachable');
+    await sends.afterDraft(id);
+    expect(send(id).state).toBe('sending');
+    store.write((ctx) => updateInboxItem(ctx, id, { state: InboxState.Cancelled }));
+    slack.calls.length = 0;
+    await sends.recoverSending();
+    expect(send(id).state).toBe('closed');
+    expect(slack.calls).toEqual([]);
+    expect(slack.posts).toEqual([]);
+  });
+});
+
 describe('a send found after a crash', () => {
   async function inFlight(card?: (w: ReturnType<typeof world>) => void) {
     const w = world();

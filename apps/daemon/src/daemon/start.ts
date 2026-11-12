@@ -1529,7 +1529,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   for (const after of state.write((ctx) => sweepDrafts(ctx, draftOpts))) after();
   const slackConnection = createSlackConnection({
     state,
-    initial: slackClient === null ? 'off' : 'connected',
+    initial: slackClient === null ? 'off' : 'none',
   });
   const replyWatch = createReplyWatch({
     state,

@@ -24,7 +24,7 @@ import type { StateStore } from '../events';
 import type { InboxService } from '../inbox';
 import type { Judge } from '../judge';
 import type { Logger } from '../log';
-import { SlackError, type SlackClient, type SlackMessage } from '../slack';
+import { compareTs, SlackError, type SlackClient, type SlackMessage } from '../slack';
 import { findLine, postLine } from './bot-lines';
 import { stakeholderOptions } from './compose';
 import type { CountedMessage } from './conversation';
@@ -69,16 +69,18 @@ const recipientIds = (open: OpenSendRow): string[] =>
 export async function judgeApprovals(
   deps: AgreeDeps,
   c: Conversation,
-  cache: Map<string, boolean>,
+  cache: Map<string, boolean | null>,
 ): Promise<Map<string, boolean>> {
   const { open } = c;
   const proposal = open.proposal;
-  if (proposal === null || deps.judge.off) return cache;
+  const answers = (): Map<string, boolean> =>
+    new Map([...cache].flatMap(([ts, read]) => (read === null ? [] : [[ts, read] as const])));
+  if (proposal === null || deps.judge.off) return answers();
   const label = optionLabel(c.card, proposal.choice);
   const recipients = recipientIds(open);
   for (const m of c.counted.slice(-JUDGED_MESSAGES)) {
     if (!recipients.includes(m.userId) || cache.has(m.ts)) continue;
-    if (proposal.ts !== null && m.ts <= proposal.ts && m.ts.length === proposal.ts.length) continue;
+    if (proposal.ts !== null && compareTs(m.ts, proposal.ts) <= 0) continue;
     try {
       const answer = await deps.judge.choose({
         decision: JudgeDecision.ApprovalRead,
@@ -94,13 +96,18 @@ export async function judgeApprovals(
         },
       });
       const floor = getJudgeConfig(deps.state.db).decisions[JudgeDecision.ApprovalRead].floor;
-      if (answer.kind === 'answered' && answer.confidence >= floor)
-        cache.set(m.ts, answer.choice === APPROVES);
+      // A reading below the floor is remembered too, so the same message is not put to the judge every tick.
+      cache.set(
+        m.ts,
+        answer.kind === 'answered' && answer.confidence >= floor
+          ? answer.choice === APPROVES
+          : null,
+      );
     } catch (error) {
       deps.log.warn({ err: error }, 'a reply could not be read for approval');
     }
   }
-  return cache;
+  return answers();
 }
 
 function optionLabel(card: InboxItemDto, letter: string): string {

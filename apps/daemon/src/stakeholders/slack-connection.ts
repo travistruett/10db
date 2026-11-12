@@ -26,7 +26,7 @@ export function createSlackConnection(deps: {
   readonly initial?: ConnectionState;
 }): SlackConnection {
   let current: SlackConnectionDto = {
-    state: deps.initial ?? 'connected',
+    state: deps.initial ?? 'none',
     teamId: null,
     teamName: null,
     botUserId: null,

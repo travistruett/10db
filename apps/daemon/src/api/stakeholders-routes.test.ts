@@ -51,7 +51,7 @@ beforeEach(() => {
   tokenReply = { ok: true, team_id: 'T1', team: 'Team', user_id: 'UBOT' };
   inbox = createInboxService({ state, onParkedAnswer: () => undefined });
   const sends = createStakeholderSends({ state, slack, clock, log: silentLogger });
-  const connection = createSlackConnection({ state });
+  const connection = createSlackConnection({ state, initial: 'connected' });
   const stakeholders = createStakeholderApiServices({
     state,
     keychain,

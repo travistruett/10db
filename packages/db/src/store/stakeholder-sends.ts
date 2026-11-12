@@ -363,6 +363,9 @@ export function moveSend(
     approvalSeenAt: null,
     approvalBy: null,
     loneReplyPendingSince: null,
+    askedWhichWayAt: null,
+    askedWhichWayTs: null,
+    settledThroughTs: null,
   });
 }
 

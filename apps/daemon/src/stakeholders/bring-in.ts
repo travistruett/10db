@@ -15,6 +15,8 @@ export interface BringInDeps {
   readonly client: SlackClient;
   readonly state: StateStore;
   readonly log: Logger;
+  /** Mentions already answered with a refusal or a full line, by send and message, so no tick tries them again. */
+  readonly handled: Set<string>;
   /** The closing line a card settled during a move is owed in the new conversation, or null. */
   readonly closingFor: (cardId: string) => string | null;
 }
@@ -48,6 +50,8 @@ export async function bringIn(
   });
   const mention = counted.find((m) => mentionsToAdd([toSlack(m)], participants, bot).length > 0);
   if (!mention) return false;
+  const mentionKey = `${open.id}/${mention.ts}`;
+  if (deps.handled.has(mentionKey)) return false;
   const newIds = mentionsToAdd(counted.map(toSlack), participants, bot);
   const names = new Map<string, string>();
   for (const id of newIds) names.set(id, await client.userInfo(id).catch(() => id));
@@ -58,6 +62,7 @@ export async function bringIn(
   if (participants.length + newIds.length > GROUP_MAX) {
     if (!findLine(input.thread, open.id, 'full', { key: mention.ts }))
       await postLine(client, { ...inCurrent, text: fullLine(), line: 'full', key: mention.ts });
+    deps.handled.add(mentionKey);
     return false;
   }
 
@@ -76,6 +81,7 @@ export async function bringIn(
           key: id,
         });
     }
+    deps.handled.add(mentionKey);
     return false;
   }
 

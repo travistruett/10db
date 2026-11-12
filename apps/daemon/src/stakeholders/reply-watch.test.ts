@@ -549,6 +549,21 @@ describe('replies typed at the top of the DM', () => {
     expect(asks()).toHaveLength(1);
   });
 
+  it('bounds what the matching judge is sent', async () => {
+    const s = scene();
+    const first = await s.send([s.mark], { title: 'First?' });
+    await s.send([s.mark], { title: 'Second?' });
+    for (let i = 0; i < 120; i += 1) slack.say(first.channel, 'UMARK', `x${'y'.repeat(5000)}`);
+    await ticks(2);
+    const asked = JSON.parse(
+      judgeAnswers.find((r) => r.decision === 'reply_match')?.state ?? '{}',
+    ) as {
+      reply: string[];
+    };
+    expect(asked.reply.length).toBeLessThanOrEqual(50);
+    expect(Math.max(...asked.reply.map((t) => t.length))).toBeLessThanOrEqual(1000);
+  });
+
   it('falls back to asking when the judge is below its floor', async () => {
     const s = scene();
     await s.send([s.mark], { title: 'First?' });
@@ -763,6 +778,30 @@ describe('a thread with several questions', () => {
   });
 });
 
+describe('a reply the judge reads for approval', () => {
+  it('asks once per message, however many ticks, when the judge is unsure', async () => {
+    const s = scene();
+    const sent = await s.send([s.mark]);
+    store.write((ctx) => {
+      moveSend(ctx, sent.sendId as never, {
+        channelId: sent.channel,
+        threadTs: sent.threadTs,
+        messageTs: sent.threadTs,
+        permalink: null,
+        added: [{ userId: 'UPRIYA', personId: null, name: 'Priya', recipient: false }],
+      });
+    });
+    judgeReply = (req) =>
+      req.decision === 'thread_answer' ? answeredWith('B')() : answeredWith('approves', 0.5)();
+    slack.say(sent.channel, 'UPRIYA', 'B is the only option', sent.threadTs);
+    await ticks(2);
+    slack.say(sent.channel, 'UMARK', 'ok', sent.threadTs);
+    await ticks(3);
+    expect(card(sent.cardId).state).toBe('RESOLVED');
+    expect(judgeAnswers.filter((r) => r.decision === 'approval_read')).toHaveLength(1);
+  });
+});
+
 describe('bringing someone in', () => {
   const group = (...users: string[]) => `G-${users.join('-')}`;
 
@@ -909,6 +948,16 @@ describe('bringing someone in', () => {
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatchObject({ channel: sent.channel, threadTs: sent.threadTs });
     expect(slack.opened.filter((o) => o.kind === 'group')).toEqual([]);
+  });
+
+  it('does not try a refused mention again on every tick', async () => {
+    await mentioned();
+    slack.failAlways('conversations.open', 'user_not_found');
+    await ticks(1);
+    const opens = () => slack.calls.filter((c) => c === 'conversations.open').length;
+    const after = opens();
+    await ticks(4);
+    expect(opens()).toBe(after);
   });
 
   it('finds the repost by its metadata after a restart between the repost and the move, and does not repost', async () => {
