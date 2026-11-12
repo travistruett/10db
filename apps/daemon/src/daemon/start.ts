@@ -186,6 +186,7 @@ import {
   type PageCamera,
   type Pictures,
 } from '../pictures';
+import { startPreview, type Preview } from '../preview';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
 import { chooseModel, offeredModels, PLAN_NEED } from '../routing';
 import { createScreenBroker, createScreens, renderMayRead } from '../screens';
@@ -640,6 +641,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   let answerGitCard: ((item: InboxItemDto, answer: InboxAnswer) => void) | null = null;
   // Started once recovery is through; a launch before then waits for no before picture.
   let pictures: Pictures | null = null;
+  let preview: Preview | null = null;
   // The API's port, once it listens: an app address may not name it, and no picture is taken before.
   let listenPort: number | null = null;
   const listening = Promise.withResolvers<number>();
@@ -1545,7 +1547,27 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       : () => {
           void browserHost?.prepare();
         };
+  // The project's dev server, while a pass is open and its preview command is set: run under the
+  // gate's sandbox, as the dev login is, its processes in a ledger as the browser's are.
+  preview = startPreview({
+    state,
+    bus,
+    gate: gateRunner,
+    dataDir: opts.dataDir,
+    sessionEnv: () => launcher.projectEnv(),
+    rules: (project) => listPermissionRules(state.db, project.id, null),
+    checkouts: () => allCheckouts(state.db),
+    logger: logger.child({ component: 'preview' }),
+    ledgers:
+      ledgerSweep && sandboxRoots
+        ? { sweep: ledgerSweep, root: sandboxRoots.files, processes: laneProcesses }
+        : null,
+  });
+  const previewNow = preview;
   pictures = startPictures({
+    onNoAnswer: (projectId) => {
+      void previewNow.ensure(projectId);
+    },
     state,
     bus,
     camera: pictureCamera,
@@ -1669,6 +1691,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     }),
     shape: createShapeServices({ shape, state, clock }),
     pictures,
+    preview: previewNow,
     daemonPort: () => listenPort,
     thread: createThreadService({
       state,
@@ -2007,6 +2030,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       // A pass's gate and review on its pushed tip run outside the delivery jobs, as its turn checks do.
       // A capture in flight is dropped; its browser closes with it.
       await pictures?.stop();
+      // The dev server 10db started ends with it; a builder's own is never 10db's to stop.
+      await preview?.stop();
       picturePruning.stop();
       await pictureCamera.close();
       unsubscribeTurnChecks();

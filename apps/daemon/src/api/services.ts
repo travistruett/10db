@@ -466,6 +466,8 @@ export interface ApiServices {
   screenPicture(screenId: TaskScreenId): Uint8Array<ArrayBuffer>;
   /** Settings › General: the browser for pictures and the project's last sign-in. */
   picturesStatus(projectId: ProjectId): PicturesStatusDto;
+  /** Restart Preview: runs the project's preview command again, its restarts forgotten. */
+  restartPreview(projectId: ProjectId): Promise<void>;
   /** `start_shape`: a conversation from a terminal session, listed at once; starts no turn. */
   startShape(input: StartShapeInput): ShapeDto;
   /** Settings › Decisions: the Sizing hit rate and each Shape decision's shadow agreement. */

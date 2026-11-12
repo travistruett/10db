@@ -160,6 +160,7 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     taskScreens: track('taskScreens'),
     screenPicture: track('screenPicture'),
     picturesStatus: track('picturesStatus'),
+    restartPreview: track('restartPreview'),
     startShape: track('startShape'),
     shapeMeasures: track('shapeMeasures'),
     getShapeJev: track('getShapeJev'),

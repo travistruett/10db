@@ -151,6 +151,7 @@ import {
 import { findRegistryHosts } from '../registries';
 import { proposeCandidates, resolveStepPlan, startTaskWithPlan } from '../team';
 import type { Pictures } from '../pictures';
+import type { Preview } from '../preview';
 import type { ThreadService } from '../thread';
 import type { JudgeApiServices } from './judge-services';
 import type { KnowledgeApiServices } from './knowledge-services';
@@ -187,6 +188,8 @@ export function createServices(deps: {
   readonly knowledge: KnowledgeApiServices;
   readonly thread: ThreadService;
   readonly pictures: Pictures;
+  /** The dev server 10db runs for a project while a pass is open. */
+  readonly preview: Preview;
   /** The port the API listens on; null until it does. */
   readonly daemonPort: () => number | null;
   readonly starter: BatchStarter;
@@ -660,6 +663,10 @@ export function createServices(deps: {
     taskScreens: (taskId) => deps.pictures.screens(taskId),
     screenPicture: (screenId) => deps.pictures.screenFile(screenId),
     picturesStatus: (projectId) => deps.pictures.status(projectId),
+    restartPreview: async (projectId) => {
+      getProject(db, projectId);
+      await deps.preview.restart(projectId);
+    },
     benchmarkStatus: () => deps.benchmarks.status(),
     syncBenchmarks: () => deps.benchmarks.sync(),
     listAaModels: () => listAaModels(db),

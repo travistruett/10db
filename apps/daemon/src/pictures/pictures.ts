@@ -101,6 +101,8 @@ export interface PicturesDeps {
   readonly dataDir: string;
   readonly clock: Clock;
   readonly logger: Logger;
+  /** Told when a load found nothing answering at a project 10db runs the preview of. */
+  readonly onNoAnswer?: (projectId: ProjectId) => void;
 }
 
 export interface Pictures {
@@ -479,7 +481,11 @@ export function startPictures(deps: PicturesDeps): Pictures {
     const load = judged === null ? null : routeLoad(judged, loads);
     if (request.passId !== null && load !== null)
       judgePreview(
-        { state: deps.state, logger: log },
+        {
+          state: deps.state,
+          logger: log,
+          ...(deps.onNoAnswer ? { onNoAnswer: deps.onNoAnswer } : {}),
+        },
         {
           passId: request.passId,
           taskId: task.id,

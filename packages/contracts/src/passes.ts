@@ -348,6 +348,10 @@ export const PassNoticeKind = {
   TurnCheck: 'turn_check',
   /** The preview is broken and no turn of the pass is named for it (spec §8.2). */
   Preview: 'preview',
+  /** 10db is starting the project's preview command and the app does not answer yet. */
+  PreviewStarting: 'preview_starting',
+  /** The project's preview command stopped, or could not start; Restart Preview runs it again. */
+  PreviewStopped: 'preview_stopped',
 } as const;
 export type PassNoticeKind = (typeof PassNoticeKind)[keyof typeof PassNoticeKind];
 

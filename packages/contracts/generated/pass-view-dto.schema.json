@@ -862,7 +862,9 @@
               "review_failed",
               "close",
               "turn_check",
-              "preview"
+              "preview",
+              "preview_starting",
+              "preview_stopped"
             ]
           },
           "text": {

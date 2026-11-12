@@ -7,6 +7,7 @@ import {
   TASK_MESSAGE_MAX_CHARS,
   type PassDto,
   type PassId,
+  type ProjectId,
   type PassTurnId,
   type TaskId,
 } from '@10db/contracts';
@@ -107,6 +108,8 @@ function previewOffer(load: RouteLoad, seq: number): string {
 export interface PreviewMarksDeps {
   readonly state: StateStore;
   readonly logger: Logger;
+  /** Told when a load found nothing answering at a project with a preview command, to start it. */
+  readonly onNoAnswer?: (projectId: ProjectId) => void;
 }
 
 /** The load the rule judges: a page's route after a turn, at its before or at its after. */
@@ -168,12 +171,20 @@ function noAnswerNotice(ctx: WriteContext, pass: PassDto, down: boolean): boolea
  * is left alone.
  */
 export function judgePreview(deps: PreviewMarksDeps, input: JudgedLoad): void {
+  // Set inside the write, read after it: an object, since a closure's assignment isn't narrowed.
+  const wants: { preview: ProjectId | null } = { preview: null };
   deps.state.write((ctx) => {
     const pass = findPass(ctx.tx, input.passId);
     if (pass?.state !== PassState.Open) return;
     const task = getTask(ctx.tx, input.taskId);
     if (passHoldingTask(ctx.tx, task)?.id !== pass.id) return;
-    if (noAnswerNotice(ctx, pass, input.load.outcome === ShotOutcome.NoAnswer)) return;
+    const down = input.load.outcome === ShotOutcome.NoAnswer;
+    // 10db runs this project's dev server itself: it is started, and the header says so instead.
+    if (down && getProject(ctx.tx, pass.projectId).previewCommand !== null) {
+      wants.preview = pass.projectId;
+      return;
+    }
+    if (noAnswerNotice(ctx, pass, down)) return;
     const held = (taskId: TaskId) =>
       passHoldingTask(ctx.tx, getTask(ctx.tx, taskId))?.id === pass.id;
     const marks = listOpenPreviewMarks(ctx.tx, pass.id).filter((m) => held(m.taskId));
@@ -266,4 +277,5 @@ export function judgePreview(deps: PreviewMarksDeps, input: JudgedLoad): void {
         'a turn broke the preview',
       );
   });
+  if (wants.preview !== null) deps.onNoAnswer?.(wants.preview);
 }

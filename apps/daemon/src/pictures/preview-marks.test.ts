@@ -46,6 +46,8 @@ let logs: LogCapture;
 let pictures: Pictures | null = null;
 let clock: ManualClock;
 let sha = 0;
+/** The projects whose preview a load that found nothing answering asked to start. */
+const asked: string[] = [];
 
 afterEach(async () => {
   await pictures?.stop();
@@ -58,10 +60,12 @@ afterEach(async () => {
 async function world(
   befores: (ShotOutcome | 'camera_failed')[] = [],
   project: Partial<ProjectInput> = {},
+  previewCommand: string | null = null,
 ): Promise<void> {
   dir = tempDir('preview');
   w = await openPassWorld({ project });
-  w.h.state.write((ctx) => patchProject(ctx, w.h.project.id, { appUrl: APP }));
+  w.h.state.write((ctx) => patchProject(ctx, w.h.project.id, { appUrl: APP, previewCommand }));
+  asked.length = 0;
   cam = new FakeCamera();
   cam.outcomes = [...befores];
   clock = new ManualClock(new Date('2026-11-10T12:00:00.000Z'));
@@ -84,6 +88,9 @@ async function world(
     dataDir: dir.path,
     clock,
     logger: logs.logger,
+    onNoAnswer: (projectId) => {
+      asked.push(projectId);
+    },
   });
   await ended(2);
 }
@@ -280,6 +287,15 @@ describe('a preview with nothing answering at the app address', () => {
     expect(moveCards()).toEqual([]);
     await turnLoads(w.people, 'clean');
     expect(headerNotice()).toEqual([]);
+  });
+
+  it('with a preview command, asks 10db to start the preview instead of saying nothing answers', async () => {
+    captures = 2;
+    await world([], {}, 'pnpm dev');
+    await turnLoads(w.settings, 'no_answer');
+    expect(asked).toEqual([w.h.project.id]);
+    expect(headerNotice()).toEqual([]);
+    expect(page(w.settings).preview).toBeNull();
   });
 });
 

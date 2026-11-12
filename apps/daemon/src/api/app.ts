@@ -1237,6 +1237,10 @@ export function createApp(deps: ApiDeps) {
     .get('/projects/:projectId/pictures', (c) =>
       c.json(deps.services.picturesStatus(ProjectId.parse(c.req.param('projectId')))),
     )
+    .post('/projects/:projectId/preview/restart', async (c) => {
+      await deps.services.restartPreview(ProjectId.parse(c.req.param('projectId')));
+      return c.body(null, 204);
+    })
     .get('/tasks/:taskId/step-plan', (c) =>
       c.json(deps.services.stepPlan(TaskId.parse(c.req.param('taskId')))),
     )
