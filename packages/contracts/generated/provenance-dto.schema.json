@@ -40,7 +40,8 @@
         "inbox_answer",
         "agent",
         "daemon",
-        "builder"
+        "builder",
+        "slack_reply"
       ]
     },
     "sourceRef": {

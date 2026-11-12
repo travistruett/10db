@@ -80,6 +80,10 @@ export function buildContextPack(
           question: answered.title,
           answer: answered.answer.choice,
           note: answered.answer.note ?? null,
+          answeredBy: answered.answer.answeredBy ?? null,
+          via: answered.answer.via ?? 'inbox',
+          words: answered.answer.words ?? null,
+          conversation: [],
         }
       : null,
     knowledge: {

@@ -44,6 +44,11 @@
         ]
       }
     },
+    "topic": {
+      "description": "One of the project's topics from your briefing, when the question is about one",
+      "type": "string",
+      "maxLength": 120
+    },
     "recommendation": {
       "type": "string"
     },

@@ -2,9 +2,9 @@ import {
   EventType,
   InvalidError,
   mintId,
+  QuestionCategory,
   RoutingRulesInput,
   type ProjectId,
-  type QuestionCategory,
   type RoutingRuleDto,
 } from '@10db/contracts';
 import { asc, eq, inArray } from 'drizzle-orm';
@@ -19,7 +19,8 @@ export function listRoutingRules(db: DbReader, projectId: ProjectId): RoutingRul
     .from(schema.routingRules)
     .where(eq(schema.routingRules.projectId, projectId))
     .orderBy(asc(schema.routingRules.category), asc(schema.routingRules.area))
-    .all();
+    .all()
+    .map((row) => ({ ...row, topic: null, goalId: null, taskId: null }));
 }
 
 /** Replaces the project's rule list; an area must be one of the project's areas. */
@@ -30,9 +31,12 @@ export function setRoutingRules(
 ): RoutingRuleDto[] {
   const { rules } = RoutingRulesInput.parse(input);
   const areas = new Set(getProject(ctx.tx, projectId).areas.map((a) => a.name));
-  for (const rule of rules)
+  for (const rule of rules) {
+    if (rule.category === null || rule.goalId !== null || rule.taskId !== null)
+      throw new InvalidError('Routes by topic, goal or task are not stored yet');
     if (rule.area !== null && !areas.has(rule.area))
       throw new InvalidError(`The project has no area "${rule.area}"`);
+  }
   const personIds = [...new Set(rules.map((r) => r.personId))];
   if (personIds.length > 0) {
     const found = new Set(
@@ -54,7 +58,10 @@ export function setRoutingRules(
         rules.map((r) => ({
           id: mintId('RoutingRule'),
           projectId,
-          ...r,
+          // Narrowed above: topic, goal and task rules are refused until they are stored.
+          category: r.category ?? QuestionCategory.Other,
+          area: r.area,
+          personId: r.personId,
           createdAt: ctx.now,
           updatedAt: ctx.now,
         })),

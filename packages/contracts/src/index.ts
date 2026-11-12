@@ -52,6 +52,7 @@ export * from './shape-preview';
 export * from './shape-review';
 export * from './shape-screens';
 export * from './shape-view';
+export * from './slack';
 export * from './states';
 export * from './steps';
 export * from './system';

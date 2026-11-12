@@ -104,6 +104,10 @@ export function serveJudge(initial: {
             shape_ready: merged(JudgeDecision.ShapeReady),
             shape_record: merged(JudgeDecision.ShapeRecord),
             shape_elsewhere: merged(JudgeDecision.ShapeElsewhere),
+            question_route: merged(JudgeDecision.QuestionRoute),
+            thread_answer: merged(JudgeDecision.ThreadAnswer),
+            reply_match: merged(JudgeDecision.ReplyMatch),
+            approval_read: merged(JudgeDecision.ApprovalRead),
           },
         },
       };

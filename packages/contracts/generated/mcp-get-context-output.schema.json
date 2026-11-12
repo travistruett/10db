@@ -298,6 +298,47 @@
                 "string",
                 "null"
               ]
+            },
+            "answeredBy": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "via": {
+              "default": "inbox",
+              "type": "string",
+              "enum": [
+                "inbox",
+                "slack"
+              ]
+            },
+            "words": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "conversation": {
+              "default": [],
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "text": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "text"
+                ]
+              }
             }
           },
           "required": [

@@ -58,6 +58,10 @@ const SHAPE_QUESTION: Readonly<Record<ShapeJudgeDecision, string>> = {
 const DECISION_LABEL: Readonly<Record<JudgeDecision, string>> = {
   [JudgeDecision.ReviewSize]: REVIEW_LABEL,
   ...SHAPE_LABEL,
+  [JudgeDecision.QuestionRoute]: 'Who a question goes to',
+  [JudgeDecision.ThreadAnswer]: 'Which option a conversation chose',
+  [JudgeDecision.ReplyMatch]: 'Which question a reply answers',
+  [JudgeDecision.ApprovalRead]: 'Whether a reply approves',
 };
 
 /** What 10db did, in the builder's words, for the outcomes that do not depend on the answer. */

@@ -104,6 +104,33 @@ export const DECISION_CATEGORIES: readonly QuestionCategory[] = [
   QuestionCategory.Engineering,
 ];
 
+/** Whether a drafted question waits for the builder's Send, or goes out by itself. */
+export const SendMode = { Review: 'review', Auto: 'auto' } as const;
+export type SendMode = ValueOf<typeof SendMode>;
+
+/** Where a person can be reached. Slack is the only channel so far. */
+export const ContactKind = { Slack: 'slack' } as const;
+export type ContactKind = ValueOf<typeof ContactKind>;
+
+export const SendState = {
+  Draft: 'draft',
+  Sending: 'sending',
+  Sent: 'sent',
+  Answered: 'answered',
+  Closed: 'closed',
+  Failed: 'failed',
+} as const;
+export type SendState = ValueOf<typeof SendState>;
+
+/** Who chose a question card's recipients. */
+export const RoutedBy = {
+  Rule: 'rule',
+  TriagePending: 'triage_pending',
+  Judge: 'judge',
+  Builder: 'builder',
+} as const;
+export type RoutedBy = ValueOf<typeof RoutedBy>;
+
 export const ProposalKind = {
   NewTask: 'new_task',
   ChangeTask: 'change_task',
@@ -173,6 +200,8 @@ export const SourceKind = {
   Agent: 'agent',
   Daemon: 'daemon',
   Builder: 'builder',
+  /** An answer a stakeholder gave in a Slack conversation. */
+  SlackReply: 'slack_reply',
 } as const;
 export type SourceKind = ValueOf<typeof SourceKind>;
 

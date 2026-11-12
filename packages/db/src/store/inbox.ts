@@ -16,6 +16,7 @@ import {
   type TaskId,
   type Urgency,
   type WorkstreamId,
+  RoutedBy,
 } from '@10db/contracts';
 import { and, asc, desc, eq, inArray, notInArray, sql, type SQL } from 'drizzle-orm';
 import * as schema from '../schema';
@@ -53,6 +54,10 @@ function toDto(row: typeof schema.inboxItems.$inferSelect): InboxItemDto {
     category: row.category,
     urgency: row.urgency,
     assignee: row.assignee,
+    assignees: [row.assignee],
+    routedBy: RoutedBy.Rule,
+    routeSuggestion: null,
+    send: null,
     detail: row.detail,
     answer: row.answer,
     targets: row.targets,

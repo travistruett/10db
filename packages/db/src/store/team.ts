@@ -97,21 +97,27 @@ export function insertPerson(
   };
   ctx.tx.insert(schema.people).values(row).run();
   ctx.emit({ type: EventType.PersonSaved, entityType: 'person', entityId: row.id });
-  return row;
+  return { ...row, slack: null };
 }
 
 export function getPerson(db: DbReader, id: PersonId): PersonDto {
   const row = db.select().from(schema.people).where(eq(schema.people.id, id)).get();
   if (!row) throw new NotFoundError('person', id);
-  return row;
+  return { ...row, slack: null };
 }
 
 export function findPersonByHandle(db: DbReader, handle: string): PersonDto | undefined {
-  return db.select().from(schema.people).where(eq(schema.people.handle, handle)).get();
+  const row = db.select().from(schema.people).where(eq(schema.people.handle, handle)).get();
+  return row && { ...row, slack: null };
 }
 
 export function listPeople(db: DbReader): PersonDto[] {
-  return db.select().from(schema.people).orderBy(asc(schema.people.handle)).all();
+  return db
+    .select()
+    .from(schema.people)
+    .orderBy(asc(schema.people.handle))
+    .all()
+    .map((row) => ({ ...row, slack: null }));
 }
 
 export function getTeam(db: DbReader, projectId: ProjectId): TeamDto {

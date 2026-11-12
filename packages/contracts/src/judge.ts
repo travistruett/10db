@@ -11,6 +11,14 @@ export const JudgeDecision = {
   ShapeRecord: 'shape_record',
   /** Shape: is this a question only someone else can answer? */
   ShapeElsewhere: 'shape_elsewhere',
+  /** Stakeholder questions: which of the project's category and topic routes a question belongs to. */
+  QuestionRoute: 'question_route',
+  /** Stakeholder questions: which option a conversation landed on. */
+  ThreadAnswer: 'thread_answer',
+  /** Stakeholder questions: which open question a top-level reply answers. */
+  ReplyMatch: 'reply_match',
+  /** Stakeholder questions: whether a reply approves the open proposal. */
+  ApprovalRead: 'approval_read',
 } as const;
 export type JudgeDecision = (typeof JudgeDecision)[keyof typeof JudgeDecision];
 
@@ -44,7 +52,7 @@ const DEFAULT_DECISION: JudgeDecisionConfig = {
   floor: 0.8,
 };
 
-/** Shape's decisions came later: a config stored before them reads with their defaults. */
+/** Later decisions: a config stored before them reads with their defaults. */
 const shapeDecision = (): z.ZodDefault<typeof JudgeDecisionConfig> =>
   JudgeDecisionConfig.default({ ...DEFAULT_DECISION });
 
@@ -55,6 +63,10 @@ export const JudgeConfig = z.object({
     [JudgeDecision.ShapeReady]: shapeDecision(),
     [JudgeDecision.ShapeRecord]: shapeDecision(),
     [JudgeDecision.ShapeElsewhere]: shapeDecision(),
+    [JudgeDecision.QuestionRoute]: shapeDecision(),
+    [JudgeDecision.ThreadAnswer]: shapeDecision(),
+    [JudgeDecision.ReplyMatch]: shapeDecision(),
+    [JudgeDecision.ApprovalRead]: shapeDecision(),
   }),
 });
 export type JudgeConfig = z.infer<typeof JudgeConfig>;
@@ -66,6 +78,10 @@ export const DEFAULT_JUDGE_CONFIG: JudgeConfig = {
     [JudgeDecision.ShapeReady]: { ...DEFAULT_DECISION },
     [JudgeDecision.ShapeRecord]: { ...DEFAULT_DECISION },
     [JudgeDecision.ShapeElsewhere]: { ...DEFAULT_DECISION },
+    [JudgeDecision.QuestionRoute]: { ...DEFAULT_DECISION },
+    [JudgeDecision.ThreadAnswer]: { ...DEFAULT_DECISION },
+    [JudgeDecision.ReplyMatch]: { ...DEFAULT_DECISION },
+    [JudgeDecision.ApprovalRead]: { ...DEFAULT_DECISION },
   },
 };
 
@@ -90,6 +106,10 @@ export const JudgeConfigPatch = z
         [JudgeDecision.ShapeReady]: JudgeDecisionConfigPatch,
         [JudgeDecision.ShapeRecord]: JudgeDecisionConfigPatch,
         [JudgeDecision.ShapeElsewhere]: JudgeDecisionConfigPatch,
+        [JudgeDecision.QuestionRoute]: JudgeDecisionConfigPatch,
+        [JudgeDecision.ThreadAnswer]: JudgeDecisionConfigPatch,
+        [JudgeDecision.ReplyMatch]: JudgeDecisionConfigPatch,
+        [JudgeDecision.ApprovalRead]: JudgeDecisionConfigPatch,
       })
       .partial()
       .strict(),

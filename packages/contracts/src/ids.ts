@@ -31,6 +31,8 @@ const ID_SCHEMAS = {
   Flow: idSchema('flw', 'FlowId'),
   Person: idSchema('psn', 'PersonId'),
   RoutingRule: idSchema('rtr', 'RoutingRuleId'),
+  PersonContact: idSchema('pcn', 'PersonContactId'),
+  StakeholderSend: idSchema('snd', 'StakeholderSendId'),
   ModelProfile: idSchema('mpf', 'ModelProfileId'),
   Principle: idSchema('pri', 'PrincipleId'),
   Batch: idSchema('bat', 'BatchId'),
@@ -77,6 +79,8 @@ const ID_PREFIX = {
   Flow: 'flw',
   Person: 'psn',
   RoutingRule: 'rtr',
+  PersonContact: 'pcn',
+  StakeholderSend: 'snd',
   ModelProfile: 'mpf',
   Principle: 'pri',
   Batch: 'bat',
@@ -163,6 +167,10 @@ export const PersonId = ID_SCHEMAS.Person;
 export type PersonId = IdOf<'Person'>;
 export const RoutingRuleId = ID_SCHEMAS.RoutingRule;
 export type RoutingRuleId = IdOf<'RoutingRule'>;
+export const PersonContactId = ID_SCHEMAS.PersonContact;
+export type PersonContactId = IdOf<'PersonContact'>;
+export const StakeholderSendId = ID_SCHEMAS.StakeholderSend;
+export type StakeholderSendId = IdOf<'StakeholderSend'>;
 export const ModelProfileId = ID_SCHEMAS.ModelProfile;
 export type ModelProfileId = IdOf<'ModelProfile'>;
 export const PrincipleId = ID_SCHEMAS.Principle;
