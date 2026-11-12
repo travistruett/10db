@@ -33,8 +33,8 @@ describe('pageStatus', () => {
       name: 'a page never spoken to',
       page: pages.notStarted,
       status: PageStatus.NotStarted,
-      color: 'gray',
-      line: 'Not started',
+      color: 'yellow',
+      line: 'Your turn',
       needsYou: false,
     },
     {
@@ -173,8 +173,8 @@ describe('pageStatus', () => {
         turn: pageTurn({ startedMinutesAgo: 5, endedAt: minutesBeforeNow(2) }),
       }),
       status: PageStatus.NotStarted,
-      color: 'gray',
-      line: 'Stopped',
+      color: 'yellow',
+      line: 'Stopped · your turn',
       needsYou: false,
     },
     {

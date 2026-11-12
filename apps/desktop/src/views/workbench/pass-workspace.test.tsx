@@ -79,7 +79,7 @@ describe('PassWorkspace queue', () => {
       'SettingsReady · 3 min',
       'BillingWorking · 4 min · median 5',
       `TeamPaused: usage limit, resumes ${clockTime(pages.paused.pausedUntil ?? '')}`,
-      'HomeNot started',
+      'HomeYour turn',
     ]);
   });
 
@@ -701,7 +701,7 @@ describe('PassWorkspace Take Out', () => {
 
   async function openTakeOut(area: string) {
     fireEvent.click(screen.getByRole('button', { name: `More actions for ${area}` }));
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Take Out…', hidden: true }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Take Out', hidden: true }));
     return screen.findByRole('dialog', { name: `Take Out ${area}` });
   }
 
@@ -847,7 +847,7 @@ describe('PassWorkspace Take Out', () => {
     expect(screen.queryByRole('dialog', { name: 'Take Out Billing' })).toBeNull();
   });
 
-  it('reads the shared changes afresh on each Take Out…, and again after a refused take-out', async () => {
+  it('reads the shared changes afresh on each Take Out, and again after a refused take-out', async () => {
     const button = (refusal: string | null) => [
       { seq: 1, paths: ['src/shared/button.tsx'], dropRefusal: refusal, laterPages: [] },
     ];
