@@ -23,8 +23,10 @@ export interface ModelSort {
 }
 
 export interface ModelFilter {
-  /** Null keeps every tier, models with no tier included. */
-  readonly tier: ModelTier | null;
+  /** Words the name or model ID holds, in any case; blank keeps every model. */
+  readonly query: string;
+  /** The tiers kept; none keeps every tier, models with no tier included. */
+  readonly tiers: readonly ModelTier[];
   /** Null keeps models of every account. */
   readonly accountId: AccountId | null;
 }
@@ -85,9 +87,13 @@ export function sortModels(rows: readonly ModelRowDto[], sort: ModelSort): Model
 }
 
 export function filterModels(rows: readonly ModelRowDto[], filter: ModelFilter): ModelRowDto[] {
+  const query = filter.query.trim().toLowerCase();
   return rows.filter(
     (row) =>
-      (filter.tier === null || row.tier === filter.tier) &&
+      (query === '' ||
+        row.name.toLowerCase().includes(query) ||
+        row.model.toLowerCase().includes(query)) &&
+      (filter.tiers.length === 0 || (row.tier !== null && filter.tiers.includes(row.tier))) &&
       (filter.accountId === null || row.availableOn.includes(filter.accountId)),
   );
 }

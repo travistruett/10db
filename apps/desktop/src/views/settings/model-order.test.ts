@@ -81,13 +81,57 @@ describe('sorting the model list', () => {
 
 describe('filtering the model list', () => {
   it.each([
-    { name: 'no filter keeps all', tier: null, account: null, expected: 5 },
-    { name: 'a tier keeps only that tier', tier: ModelTier.Fast, account: null, expected: 1 },
-    { name: 'an account keeps what it offers', tier: null, account: A, expected: 2 },
-    { name: 'both narrow together', tier: ModelTier.Balanced, account: B, expected: 1 },
-    { name: 'a tier nothing has is empty', tier: ModelTier.Strongest, account: A, expected: 0 },
-  ])('$name', ({ tier, account, expected }) => {
-    expect(filterModels(rows, { tier, accountId: account })).toHaveLength(expected);
+    { name: 'no filter keeps all', query: '', tiers: [], account: null, expected: 5 },
+    {
+      name: 'a tier keeps only that tier',
+      query: '',
+      tiers: [ModelTier.Fast],
+      account: null,
+      expected: 1,
+    },
+    {
+      name: 'several tiers keep each',
+      query: '',
+      tiers: [ModelTier.Fast, ModelTier.Strongest],
+      account: null,
+      expected: 2,
+    },
+    { name: 'an account keeps what it offers', query: '', tiers: [], account: A, expected: 2 },
+    {
+      name: 'both narrow together',
+      query: '',
+      tiers: [ModelTier.Balanced],
+      account: B,
+      expected: 1,
+    },
+    {
+      name: 'a tier nothing has is empty',
+      query: '',
+      tiers: [ModelTier.Strongest],
+      account: A,
+      expected: 0,
+    },
+    { name: 'a search matches the model ID', query: 'm-to', tiers: [], account: null, expected: 1 },
+    {
+      name: 'a search ignores case and spaces around it',
+      query: ' M-LOW ',
+      tiers: [],
+      account: null,
+      expected: 1,
+    },
+    { name: 'a blank search keeps all', query: '   ', tiers: [], account: null, expected: 5 },
+  ])('$name', ({ query, tiers, account, expected }) => {
+    expect(filterModels(rows, { query, tiers, accountId: account })).toHaveLength(expected);
+  });
+
+  it('matches a search on the name too', () => {
+    const named = [
+      modelRowDto({ model: 'x-1', name: 'Zephyr Large' }),
+      modelRowDto({ model: 'x-2' }),
+    ];
+    expect(
+      filterModels(named, { query: 'zephyr', tiers: [], accountId: null }).map((r) => r.model),
+    ).toEqual(['x-1']);
   });
 });
 
