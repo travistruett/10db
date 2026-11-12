@@ -586,9 +586,18 @@ describe('conversationState: several recipients', () => {
       expect(noProposal({ messages, quietSince: at(30), now: minutes(2) }).kind).toBe('settled');
     });
 
-    it('a recipient who never named a letter and only chatted does not take back anyone', () => {
-      const messages = [msg(10, MARK, 'B'), msg(20, ANA, 'good question')];
-      expect(noProposal({ messages, quietSince: at(20) })).toEqual({
+    it("another recipient's words after a letter keep it from being picked, however they read", () => {
+      const messages = [msg(10, MARK, 'B'), msg(20, ANA, 'not sure, what does B cost us?')];
+      expect(noProposal({ messages, quietSince: at(20), now: minutes(2) }).kind).toBe('settled');
+      const chatter = [msg(10, MARK, 'B'), msg(20, ANA, 'good question')];
+      expect(noProposal({ messages: chatter, quietSince: at(20), now: tick(30) }).kind).not.toBe(
+        'picked',
+      );
+    });
+
+    it("another recipient's words before the letter do not stop it", () => {
+      const messages = [msg(5, ANA, 'thinking out loud'), msg(10, MARK, 'B')];
+      expect(noProposal({ messages, quietSince: at(10) })).toEqual({
         kind: 'picked',
         by: MARK,
         choice: 'B',

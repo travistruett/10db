@@ -274,6 +274,19 @@ function recipientPicks(
   }
   const letters = new Set(latest.map((l) => l.letter));
   if (letters.size > 1) return { kind: 'disagreed' };
+  // A pick needs a tick with nothing newer from another recipient: words after the first letter, whatever
+  // they say, leave the conversation to the settle rules.
+  const firstLetter = earliest(latest);
+  if (
+    firstLetter !== undefined &&
+    reading.counted.some(
+      (m) =>
+        recipients.includes(m.userId) &&
+        compareTs(m.ts, firstLetter.ts) > 0 &&
+        letterOf(m.text, reading.optionCount) === null,
+    )
+  )
+    return null;
   if (reading.input.afterDisagreement === true && latest.length < recipients.length) return null;
   const newest = recent.at(-1);
   const first = earliest(latest);
