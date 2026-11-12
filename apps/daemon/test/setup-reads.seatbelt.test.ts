@@ -167,6 +167,20 @@ describe.skipIf(!SEATBELT)('the setup reads under the sandbox (Seatbelt)', () =>
     }
   }, 120_000);
 
+  it('no skills kept opens no root', async () => {
+    const s = skill(join(home, '.claude/skills/s'));
+    const t = skill(join(home, '.agents/skills/t'));
+    const session = await forSession({ skills: [], plugins: [], projectFiles: [] });
+    try {
+      expect(probe(session, `cat '${s}/SKILL.md'`)).toBe('denied');
+      expect(probe(session, `cat '${t}/SKILL.md'`)).toBe('denied');
+    } finally {
+      session.dispose();
+      rmSync(join(home, '.claude/skills'), { recursive: true, force: true });
+      rmSync(join(home, '.agents'), { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it('about 200 skills keep the profile small and every command runs', async () => {
     const skills = Array.from({ length: 200 }, (_, i) => {
       const dir = skill(join(home, `.claude/skills/s${String(i).padStart(3, '0')}`));

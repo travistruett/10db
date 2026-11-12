@@ -104,7 +104,17 @@ describe('keepSetup and createSetupDir', () => {
         why: 'it lies under ~/Library or a hidden folder of your home',
       },
     ]);
-    expect(kept.reads).toEqual([join(home, '.claude/skills')]);
+    expect(kept.reads).toEqual([]);
+  });
+
+  it('no skills kept opens no root', () => {
+    builderSkill('s');
+    skillAt(join(home, '.agents/skills/t'));
+    expect(keepSetup(input(), refuse, home).reads).toEqual([]);
+    const s = builderSkill('s');
+    expect(keepSetup(input({ skills: [s] }), refuse, home).reads).toEqual([
+      join(home, '.claude/skills'),
+    ]);
   });
 
   it('leaves out a skill whose SKILL.md leads into a checkout', () => {
@@ -135,7 +145,8 @@ describe('keepSetup and createSetupDir', () => {
     };
     const kept = keepSetup(input({ skills: [s] }), refuse, home);
     expect(kept.keptSkills).toEqual([s]);
-    expect(kept.reads).toEqual([join(home, '.claude/skills'), a, join(outside, 'b')]);
+    // ~/.claude/skills holds only the link, so it stays closed: the kernel judges the real path.
+    expect(kept.reads).toEqual([a, join(outside, 'b')]);
   });
 
   it('leaves out a plugin whose folder is gone', () => {

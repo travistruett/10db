@@ -221,13 +221,20 @@ export function keepSetup(
     });
   // A folder that can't be listed leaves its skill or plugin out, and opens its root folder by folder.
   for (;;) {
+    // A root opens whole only for a kept skill in it: with none, nothing in it is the session's to read.
+    const whole = roots.filter(
+      (root) =>
+        root.whole &&
+        skills.some(
+          ({ folder, fileDir }) =>
+            isEqualOrUnder(folder, root.real) || isEqualOrUnder(fileDir, root.real),
+        ),
+    );
     const reads = collapseReads([
-      ...roots.flatMap((root) => (root.whole ? [root.real] : [])),
+      ...whole.map((root) => root.real),
       ...plugins.map((plugin) => plugin.real),
       ...skills.flatMap(({ folder, fileDir }) =>
-        [folder, fileDir].filter(
-          (path) => !roots.some((root) => root.whole && isEqualOrUnder(path, root.real)),
-        ),
+        [folder, fileDir].filter((path) => !whole.some((root) => isEqualOrUnder(path, root.real))),
       ),
     ]);
     let blocked: string | null = null;
