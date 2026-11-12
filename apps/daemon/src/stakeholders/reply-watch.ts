@@ -9,6 +9,7 @@ import {
   openSends,
   sendForCard,
   setLastRead,
+  type DbReader,
   type OpenSendRow,
 } from '@10db/db';
 import type { Clock, Timer } from '../clock';
@@ -25,7 +26,9 @@ import {
 } from '../slack';
 import { stakeholderOptions } from './compose';
 import { conversationState, newMessages, type CountedMessage } from './conversation';
+import { escapeMrkdwn } from './escape';
 import { reminderLine } from './lines';
+import { scanOutbound } from './outbound-scan';
 import { readReply } from './read-reply';
 import type { StakeholderSends } from './sends';
 import type { SlackConnection } from './slack-connection';
@@ -68,6 +71,19 @@ interface Reading {
   readonly open: OpenSendRow;
   readonly messages: SlackMessage[];
   readonly topLevel: ReadonlySet<string>;
+}
+
+/**
+ * How a sent question is named in a line posted to Slack: its title, escaped and cut, or a link to the message
+ * when the outbound scan holds the title (a URL, a secret). The line goes to a person, so it follows the
+ * rules every outbound text follows.
+ */
+function questionLabel(db: DbReader, open: OpenSendRow): string {
+  const { title } = getInboxItem(db, open.inboxItemId);
+  const held = scanOutbound(title).some((hit) => hit.severity === 'hold');
+  const link = sendForCard(db, open.inboxItemId)?.permalink;
+  if (held) return link ? `A question you were sent: ${link}` : 'A question you were sent';
+  return escapeMrkdwn(title).slice(0, 120);
 }
 
 export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
@@ -118,7 +134,7 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
           slack: client,
           log,
           state: matched,
-          titleOf: (o) => getInboxItem(state.db, o.inboxItemId).title,
+          titleOf: (o) => questionLabel(state.db, o),
           floor: () => getJudgeConfig(state.db).decisions[JudgeDecision.ReplyMatch].floor,
         },
         { channel, bot, opens: here, messages: top },

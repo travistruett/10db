@@ -124,7 +124,7 @@ interface Scene {
   /** A routed question to `to`, sent now; answers the options Yes and No. */
   send(
     to?: PersonDto[],
-    over?: { title?: string; asker?: ReturnType<typeof seedWorkstream> },
+    over?: { title?: string; text?: string; asker?: ReturnType<typeof seedWorkstream> },
   ): Promise<Sent>;
   asker(): ReturnType<typeof seedWorkstream>;
 }
@@ -189,7 +189,7 @@ function scene(): Scene {
           log: silentLogger,
         });
       });
-      await sends.send(item.id, {});
+      await sends.send(item.id, over.text === undefined ? {} : { text: over.text });
       const posted = sendForCard(store.db, item.id);
       const row = openSends(store.db).find((s) => s.inboxItemId === item.id);
       if (!posted || !row) throw new Error('not sent');
@@ -504,6 +504,22 @@ describe('replies typed at the top of the DM', () => {
     await ticks(3);
     expect(card(second.cardId).answer).toMatchObject({ choice: 'No', via: 'slack' });
     expect(card(first.cardId).state).toBe('OPEN');
+  });
+
+  it('lists the questions with their text escaped, and a link instead of a title the scan holds', async () => {
+    const s = scene();
+    const first = await s.send([s.mark], { title: 'Ping <!channel> about <@U123> now?' });
+    await s.send([s.mark], {
+      title: 'See https://evil.test/secret?token=1',
+      text: 'A question about the link',
+    });
+    slack.say(first.channel, 'U-mark', 'B');
+    await ticks(2);
+    const ask = slack.posts.find((p) => p.text.startsWith('Which one is this for?'))?.text ?? '';
+    expect(ask).not.toContain('<!channel>');
+    expect(ask).not.toContain('<@U123>');
+    expect(ask).not.toContain('evil.test');
+    expect(ask).toContain('2) A question you were sent: https://slack/');
   });
 
   it('falls back to asking when the judge is below its floor', async () => {
