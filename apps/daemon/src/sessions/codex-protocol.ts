@@ -18,6 +18,7 @@ const Account = z.discriminatedUnion('type', [
   }),
   z.looseObject({ type: z.literal('apiKey') }),
   z.looseObject({ type: z.literal('amazonBedrock') }),
+  z.looseObject({ type: z.literal('gcp') }),
 ]);
 
 export const AccountReadResponse = z.looseObject({
