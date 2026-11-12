@@ -5,6 +5,7 @@ export const SettingsSectionKey = {
   NetworkHosts: 'network-hosts',
   Billing: 'billing',
   Team: 'team',
+  People: 'people',
   RoutingRules: 'routing-rules',
   KeepAwake: 'keep-awake',
   Updates: 'updates',
@@ -79,10 +80,9 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   {
     key: SettingsSectionKey.RoutingRules,
     group: SettingsGroup.Project,
-    label: 'Routing rules',
-    planned:
-      'Who answers each question category, optionally per area. The team editor plan fills it.',
-    built: false,
+    label: 'Who Answers',
+    planned: null,
+    built: true,
   },
   {
     key: SettingsSectionKey.KeepAwake,
@@ -109,6 +109,13 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     key: SettingsSectionKey.Accounts,
     group: SettingsGroup.Global,
     label: 'Accounts',
+    planned: null,
+    built: true,
+  },
+  {
+    key: SettingsSectionKey.People,
+    group: SettingsGroup.Global,
+    label: 'People',
     planned: null,
     built: true,
   },

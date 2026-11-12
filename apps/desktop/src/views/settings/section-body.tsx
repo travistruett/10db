@@ -6,8 +6,10 @@ import { BoardColumnsSection } from './board-columns-section';
 import { DecisionsSection } from './decisions-section';
 import { KeepAwakeSection } from './keep-awake-section';
 import { LanePermissionsSection } from './lane-permissions-section';
+import { PeopleSection } from './people/people-section';
 import { PatternsSection } from './patterns-section';
-import { PlannedRemainder, PlannedSection } from './planned-section';
+import { PlannedRemainder } from './planned-section';
+import { WhoAnswersSection } from './who-answers-section';
 import { ModelsSection } from './models-section';
 import { NetworkHostsSection } from './network-hosts-section';
 import { OneWayPathsSetting } from './one-way-paths-setting';
@@ -76,6 +78,13 @@ export function SectionBody({
         <>
           {heading}
           {project ? <ProjectBilling key={project.id} project={project} /> : <NoProject />}
+        </>
+      );
+    case SettingsSectionKey.People:
+      return (
+        <>
+          {heading}
+          <PeopleSection />
         </>
       );
     case SettingsSectionKey.KeepAwake:
@@ -149,7 +158,7 @@ export function SectionBody({
       return (
         <>
           {heading}
-          <PlannedSection section={section} />
+          {project ? <WhoAnswersSection key={project.id} project={project} /> : <NoProject />}
         </>
       );
   }

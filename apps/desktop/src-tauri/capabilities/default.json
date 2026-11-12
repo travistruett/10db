@@ -17,7 +17,9 @@
       "allow": [
         { "url": "https://github.com/*" },
         { "url": "https://auth.openai.com/*" },
-        { "url": "https://artificialanalysis.ai/*" }
+        { "url": "https://artificialanalysis.ai/*" },
+        { "url": "https://api.slack.com/*" },
+        { "url": "https://*.slack.com/*" }
       ]
     }
   ]

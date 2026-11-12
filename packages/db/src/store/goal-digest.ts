@@ -16,6 +16,7 @@ import {
   type DigestNext,
   type DigestTeamMember,
   type DigestWaitingOn,
+  type DigestWaitingOnSomeone,
   type DigestWorkingNow,
   type GoalDigestDto,
   type GoalId,
@@ -32,6 +33,7 @@ import * as schema from '../schema';
 import { getGoal, lastGoalView, markGoalViewed } from './goals';
 import { getProject } from './projects';
 import type { DbReader, WriteContext } from './store';
+import { sentCards } from './waiting-on';
 import { dependenciesDone, mergedDespiteFailure, startedRun } from './tasks';
 import { findPersonByHandle, BUILDER_HANDLE } from './team';
 
@@ -145,7 +147,39 @@ function hasOpenPullRequest(run: Run | undefined): boolean {
   );
 }
 
+/** The task a card's run belongs to, if the card names a run of these facts. */
+function taskOfCard(
+  card: { targets: readonly { workstreamId: WorkstreamId }[] },
+  facts: Facts,
+): TaskId | undefined {
+  return card.targets
+    .map((t) => facts.taskOfWorkstream.get(t.workstreamId))
+    .find((id) => id !== undefined);
+}
+
+/** Questions out with other people: not the builder's to answer, so not in Needs you. */
+function sentRows(db: DbReader, projectId: ProjectId, facts: Facts): DigestWaitingOnSomeone[] {
+  return sentCards(db, projectId).flatMap((card) => {
+    const taskId = taskOfCard(
+      { targets: card.workstreamIds.map((workstreamId) => ({ workstreamId })) },
+      facts,
+    );
+    return taskId === undefined
+      ? []
+      : [
+          {
+            inboxItemId: card.inboxItemId,
+            taskId,
+            title: card.title,
+            names: [...card.names],
+            at: card.since,
+          },
+        ];
+  });
+}
+
 function openCards(db: DbReader, projectId: ProjectId, facts: Facts): DigestWaitingOn[] {
+  const sent = new Set(sentCards(db, projectId).map((c) => c.inboxItemId));
   const cards = db
     .select()
     .from(schema.inboxItems)
@@ -156,9 +190,8 @@ function openCards(db: DbReader, projectId: ProjectId, facts: Facts): DigestWait
     .all();
   const rows: DigestWaitingOn[] = [];
   for (const card of cards) {
-    const taskId = card.targets
-      .map((t) => facts.taskOfWorkstream.get(t.workstreamId))
-      .find((id) => id !== undefined);
+    if (sent.has(card.id)) continue;
+    const taskId = taskOfCard(card, facts);
     if (taskId === undefined) continue;
     const assignee = findPersonByHandle(db, card.assignee);
     rows.push({
@@ -383,11 +416,15 @@ function digestWithoutUngrouped(db: DbReader, goalId: GoalId, since: string | nu
   const waitingOn = openCards(db, goal.projectId, facts).filter((c) =>
     tasks.some((t) => t.id === c.taskId),
   );
+  const waitingOnSomeone = sentRows(db, goal.projectId, facts).filter((c) =>
+    tasks.some((t) => t.id === c.taskId),
+  );
   const open = tasks.filter((t) => t.status === TaskStatus.Open);
 
   let status: GoalStatusValue;
   if (open.some((t) => isFailed(facts.latest.get(t.id)))) status = GoalStatus.Failed;
   else if (waitingOn.length > 0) status = GoalStatus.WaitingOnYou;
+  else if (waitingOnSomeone.length > 0) status = GoalStatus.WaitingOnSomeone;
   else if (open.some((t) => isRunning(facts.latest.get(t.id)))) status = GoalStatus.Running;
   else if (open.some((t) => isQueued(facts.latest.get(t.id)))) status = GoalStatus.Queued;
   else if (tasks.length > 0 && open.length === 0) {
@@ -416,6 +453,7 @@ function digestWithoutUngrouped(db: DbReader, goalId: GoalId, since: string | nu
     workingNow: workingNowOf(tasks, facts),
     team: teamOf(tasks, facts),
     waitingOn: partition(waitingOn, since),
+    waitingOnSomeone,
     next: nextOf(db, tasks, facts),
     deviations: partition(deviationsOf(db, facts), since),
     decisions: partition(decisionsOf(db, facts), since),

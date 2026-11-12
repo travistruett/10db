@@ -20,6 +20,7 @@ describe('settings sections', () => {
       'updates',
       'lane-permissions',
       'accounts',
+      'people',
       'decisions',
       'models',
       'personas-and-flows',
@@ -47,7 +48,8 @@ describe('settings sections', () => {
     { key: 'updates', planned: false },
     { key: 'lane-permissions', planned: false },
     { key: 'team', planned: true },
-    { key: 'routing-rules', planned: true },
+    { key: 'routing-rules', planned: false },
+    { key: 'people', planned: false },
     { key: 'accounts', planned: false },
     { key: 'decisions', planned: false },
     { key: 'models', planned: false },
@@ -56,8 +58,8 @@ describe('settings sections', () => {
     expect(SETTINGS_SECTIONS.find((s) => s.key === key)?.planned !== null).toBe(planned);
   });
 
-  it('lists every section but Routing rules as built, even Team and Personas and flows, whose editors are still to come', () => {
-    expect(SETTINGS_SECTIONS.filter((s) => !s.built).map((s) => s.key)).toEqual(['routing-rules']);
+  it('lists every section as built, even Team and Personas and flows, whose editors are still to come', () => {
+    expect(SETTINGS_SECTIONS.filter((s) => !s.built).map((s) => s.key)).toEqual([]);
   });
 
   it.each([

@@ -1,5 +1,6 @@
 import { AgentCopyState, SystemCheckDto, ToolName, type AgentCopy } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
+import { slackConnection } from '../../test/people-fixtures';
 import { fetchingAgents, systemCards, SystemCardKind } from './system-cards';
 
 const agent = (over: Partial<AgentCopy>): AgentCopy => ({
@@ -105,6 +106,19 @@ describe('systemCards', () => {
 
   it('has no cards before the check has loaded', () => {
     expect(systemCards(undefined)).toEqual([]);
+  });
+
+  it.each([
+    ['refused', [SystemCardKind.SlackRefused]],
+    ['connected', []],
+    ['none', []],
+    ['off', []],
+    ['unreachable', []],
+  ] as const)('a Slack connection that is %s gives %j', (state, kinds) => {
+    const slack = slackConnection({ state });
+    expect(systemCards(check({}), slack).map((card) => card.kind)).toEqual(kinds);
+    // The card does not wait for the system check to load.
+    expect(systemCards(undefined, slack).map((card) => card.kind)).toEqual(kinds);
   });
 });
 

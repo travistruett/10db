@@ -192,8 +192,8 @@ export function TaskCard({
     : taskState(workstream, batch, gateCommand, place, batches, task);
   // The border takes the state's DESIGN.md color whatever the line says, thicker when it is the builder's
   // turn: no fill, no stripe, no animation. Queued keeps the plain border.
-  const colored = state !== null && state.color !== 'gray';
-  const waiting = state?.color === 'yellow';
+  const colored = state !== null && state.color !== 'gray' && state.plainBorder !== true;
+  const waiting = colored && state.color === 'yellow';
   const line = state !== null && LINE_COLORS.has(state.color) ? state : null;
   const indicators = indicatorsOf(task, peers, batch, batches, batchTaskCount, goalTitle);
   return (
