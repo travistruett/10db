@@ -23,6 +23,7 @@ import {
   listInbox,
   listPeople,
   listPendingTriage,
+  openSends,
   sendForCard,
   setInboxRecipients,
   targetTaskIds,
@@ -247,14 +248,24 @@ export function sweepDrafts(
       .sort();
     if (wanted.join(',') !== have.join(',')) dropDraft(ctx, draft.id);
   }
+  // A question the builder settled while the daemon was down: its send closes (the line is not posted).
+  for (const open of openSends(ctx.tx)) {
+    const card = getInboxItem(ctx.tx, open.inboxItemId);
+    if (card.state === InboxState.Open) continue;
+    closeSend(
+      ctx,
+      open.id,
+      card.state === InboxState.Answered ||
+        card.state === InboxState.Delivering ||
+        card.state === InboxState.Resolved
+        ? 'builder'
+        : 'cancelled',
+    );
+  }
   const after: (() => void)[] = [];
   for (const listed of listInbox(ctx.tx, { states: [InboxState.Open] })) {
-    const card = retryable(ctx, listed);
-    const done = draftFor(ctx, card, {
-      ...draftContext(ctx.tx, card),
-      afterDraft: opts.afterDraft,
-      log: opts.log,
-    });
+    // One card that cannot be read must not stop the rest being drafted.
+    const done = draftOnOpen(ctx, retryable(ctx, listed), opts);
     if (done) after.push(done);
   }
   return after;

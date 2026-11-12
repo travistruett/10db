@@ -342,6 +342,17 @@ describe('afterDraft', () => {
 });
 
 describe('send', () => {
+  it('escapes an edited text so a ping typed by mistake does not reach the workspace', async () => {
+    const w = world();
+    w.route([w.person('mark')]);
+    const id = w.card();
+    await sends.afterDraft(id);
+    await sends.send(id, { text: 'Hey <!channel> what about <@U123>?' });
+    expect(slack.posts[0]?.text).not.toContain('<!channel>');
+    expect(slack.posts[0]?.text).not.toContain('<@U123>');
+    expect(slack.posts[0]?.text).toContain('&lt;');
+  });
+
   it('posts an edited text and stores its hash', async () => {
     const w = world();
     w.route([w.person('mark')]);
@@ -632,6 +643,55 @@ describe('a limit and a reservation decided together', () => {
   });
 });
 
+describe('a send found after a crash', () => {
+  async function inFlight(card?: (w: ReturnType<typeof world>) => void) {
+    const w = world();
+    w.route([w.person('mark', { sendMode: 'review' })]);
+    const id = w.card();
+    await sends.afterDraft(id);
+    slack.failNext('chat.postMessage', 'unreachable');
+    await sends.send(id, {});
+    expect(send(id).state).toBe('sending');
+    card?.(w);
+    return id;
+  }
+
+  it('closes a send whose card closed meanwhile without posting the question', async () => {
+    const id = await inFlight();
+    store.write((ctx) => updateInboxItem(ctx, id, { state: InboxState.Cancelled }));
+    await sends.recoverSending();
+    expect(send(id).state).toBe('closed');
+    expect(slack.posts).toEqual([]);
+  });
+
+  it('dates a send it finds by the time of its message, not the time it was found', async () => {
+    const id = await inFlight();
+    const posted = Date.parse('2026-10-13T12:00:30.000Z') / 1000;
+    slack.found = [
+      {
+        ts: `${String(posted)}.000100`,
+        threadTs: null,
+        user: 'UBOT',
+        botId: 'B1',
+        subtype: null,
+        text: 'q',
+        edited: false,
+        reactions: [],
+        metadata: { eventType: 'tendb_send', eventPayload: { sendId: send(id).id } },
+      },
+    ];
+    clock.advance(5 * 3600_000);
+    await sends.recoverSending();
+    const row = store.db.$client
+      .prepare('SELECT sent_at AS sentAt, wait_started_at AS waitStartedAt FROM stakeholder_sends')
+      .get() as { sentAt: string; waitStartedAt: string };
+    expect(row).toEqual({
+      sentAt: '2026-10-13T12:00:30.000Z',
+      waitStartedAt: '2026-10-13T12:00:30.000Z',
+    });
+  });
+});
+
 describe('Send on a card whose send failed', () => {
   it('drafts again for the same people and sends, handing the card back to them', async () => {
     const w = world();
@@ -888,7 +948,7 @@ describe('onCardChanged: the closing lines', () => {
     expect(said()).toEqual([]);
   });
 
-  it('gives a card closed while its question was in flight the line right after the question', async () => {
+  it('gives a card closed while its question was in flight, and found posted, the line after it', async () => {
     const w = world();
     w.route([w.person('mark', { sendMode: 'review' })]);
     const id = w.card();
@@ -898,9 +958,22 @@ describe('onCardChanged: the closing lines', () => {
     expect(send(id).state).toBe('sending');
     await settle(id, { state: InboxState.Answered, answer: { choice: 'Yes' } });
     expect(slack.posts).toEqual([]);
+    // The post had landed although its answer was lost.
+    slack.found = [
+      {
+        ts: '5000.000100',
+        threadTs: null,
+        user: 'UBOT',
+        botId: 'B1',
+        subtype: null,
+        text: 'q',
+        edited: false,
+        reactions: [],
+        metadata: { eventType: 'tendb_send', eventPayload: { sendId: send(id).id } },
+      },
+    ];
     await sends.recoverSending();
-    expect(said()[0]).toContain('has a question for you');
-    expect(said()[1]).toBe('Travis answered this one: A. Thanks!');
+    expect(said()).toEqual(['Travis answered this one: A. Thanks!']);
     expect(send(id).state).toBe('closed');
   });
 

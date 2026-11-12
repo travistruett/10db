@@ -5,6 +5,8 @@ import {
   getInboxItem,
   insertInboxItem,
   insertPerson,
+  markSending,
+  markSent,
   sendForCard,
   setInboxRecipients,
   setRoutingRules,
@@ -381,6 +383,32 @@ describe('sweepDrafts', () => {
       state: 'ANSWERED',
     });
     expect(sendForCard(store.db, card.id)).toBeNull();
+  });
+
+  it('closes a sent question whose card closed while the daemon was down', () => {
+    const w = world();
+    w.route([w.mark]);
+    const { card } = w.insertAndDraft();
+    store.write((ctx) => {
+      const draft = sendForCard(ctx.tx, card.id);
+      if (!draft) return;
+      markSending(ctx, draft.id, {
+        textSha256: 'x',
+        threadTs: null,
+        channelId: 'D1',
+        startedAt: '2026-11-12T10:00:00.000Z',
+      });
+      markSent(ctx, draft.id, {
+        channelId: 'D1',
+        threadTs: '1.1',
+        messageTs: '1.1',
+        permalink: null,
+        at: '2026-11-12T10:00:00.000Z',
+      });
+      updateInboxItem(ctx, card.id, { state: InboxState.Answered, answer: { choice: 'Yes' } });
+    });
+    sweep();
+    expect(sendForCard(store.db, card.id)?.state).toBe('closed');
   });
 
   it('closes the draft of a card that is no longer open', () => {

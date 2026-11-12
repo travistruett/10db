@@ -47,11 +47,12 @@ import {
 import type { Clock } from '../clock';
 import type { StateStore } from '../events';
 import type { Logger } from '../log';
-import { SlackError, type SlackClient, type SlackMessage } from '../slack';
+import { SlackError, tsMillis, type SlackClient, type SlackMessage } from '../slack';
 import { closingLine, type ClosingReason } from './closing-lines';
 import { draftContext, draftFor } from './drafts';
 import { OPTION_LETTERS } from './letters';
 import { scanOutbound } from './outbound-scan';
+import { neutralizeAngles } from './escape';
 import { blocksOf } from './slack-text';
 import { holdFor } from './send-holds';
 
@@ -134,11 +135,6 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
   /** Sends whose post this process is making now: a tick must not look for them or post them again. */
   const inFlight = new Set<string>();
 
-  /**
-   * Decides what a fresh draft does and reserves it in one write: held for the builder, or `sending`, which
-   * counts toward the person's limit at once. Two cards decided together cannot both pass a limit, and a
-   * draft is never left unheld and unsent: if the post fails here, `recoverSending` finishes it.
-   */
   function builderUnnamed(card: InboxItemDto, db: DbReader = state.db): boolean {
     return draftContext(db, card).builderName === SEED_BUILDER_NAME;
   }
@@ -170,6 +166,11 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
     return again;
   }
 
+  /**
+   * Decides what a fresh draft does and reserves it in one write: held for the builder, or `sending`, which
+   * counts toward the person's limit at once. Two cards decided together cannot both pass a limit, and a
+   * draft is never left unheld and unsent: if the post fails here, `recoverSending` finishes it.
+   */
   async function afterDraft(cardId: InboxItemId): Promise<void> {
     if (slack === null) return;
     const reserved = state.write((ctx) => {
@@ -286,14 +287,16 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
       const code = slackCode(error);
       if (TRANSPORT.test(code) || code === 'no_token')
         throw new ConflictError(`Slack could not be reached (${code}); the draft is kept`);
+      // Refused before it began: starting and failing the send are one write.
       state.write((ctx) => {
         markSending(ctx, draft.id, {
           textSha256: sha256(draft.text),
           threadTs: thread?.threadTs ?? null,
           startedAt: nowIso(),
         });
+        failSend(ctx, draft.id, code);
+        toBuilder(ctx, cardId);
       });
-      fail(draft.id, cardId, code);
       return;
     }
     state.write((ctx) => {
@@ -351,10 +354,11 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
     channelId: string,
     threadTs: string,
     messageTs: string,
+    at: string = nowIso(),
   ): Promise<void> {
     const permalink = await client.permalink(channelId, messageTs).catch(() => null);
     state.write((ctx) => {
-      markSent(ctx, sendId, { channelId, threadTs, messageTs, permalink, at: nowIso() });
+      markSent(ctx, sendId, { channelId, threadTs, messageTs, permalink, at });
     });
     const card = getInboxItem(state.db, cardId);
     const reason = closeReasonOf(card, true);
@@ -455,7 +459,7 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
       if (draft.heldBy === 'limit' && input.overrideLimit !== true)
         throw new ConflictError("This person is at today's limit; use Send Anyway");
       if (input.text !== undefined) {
-        const text = input.text;
+        const text = neutralizeAngles(input.text);
         state.write((ctx) => {
           updateDraft(ctx, draft.id, { text, hits });
         });
@@ -569,6 +573,7 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
                 );
           const found = messages.find((m) => namesSend(m, pending.id));
           if (found) {
+            // The send dates from the message itself, not from when a restart found it.
             await landed(
               client,
               pending.id,
@@ -576,7 +581,15 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
               pending.channelId,
               pending.threadTs ?? found.ts,
               found.ts,
+              new Date(tsMillis(found.ts)).toISOString(),
             );
+          } else if (getInboxItem(state.db, send.inboxItemId).state !== InboxState.Open) {
+            // The card closed while the post was in flight and nothing landed: there is nothing to post.
+            const card = getInboxItem(state.db, send.inboxItemId);
+            const reason = closeReasonOf(card, true) ?? 'cancelled';
+            state.write((ctx) => {
+              closeSend(ctx, pending.id, reason);
+            });
           } else {
             await postMessage(
               client,
