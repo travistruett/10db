@@ -24,6 +24,11 @@ export function aaKeyReaderFromEnv(env: DaemonEnv, read: () => string | null): (
   return env.TENDB_BENCHMARKS === 'off' ? () => null : read;
 }
 
+/** Whether this daemon may talk to Slack: the installed app's does, a throwaway daemon sets `TENDB_SLACK=off`. */
+export function slackOnFromEnv(env: DaemonEnv): boolean {
+  return env.TENDB_SLACK !== 'off';
+}
+
 /** The catalogue file to read when none is stored: the one the environment names, else the release's own. */
 export function catalogueSnapshotFromEnv(env: DaemonEnv, bundled: string): string {
   return env.TENDB_CATALOGUE_SNAPSHOT ?? bundled;

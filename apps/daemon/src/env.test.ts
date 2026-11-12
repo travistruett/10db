@@ -201,6 +201,24 @@ describe('loadEnv', () => {
     expect(() => loadEnv({ TENDB_JUDGE: value })).not.toThrow(`: ${value}`);
   });
 
+  it.each([
+    ['on', 'on'],
+    ['off', 'off'],
+    ['absent', undefined],
+    ['empty, which means unset', undefined],
+  ])('reads TENDB_SLACK when it is %s', (name, expected) => {
+    const source = name === 'absent' ? {} : { TENDB_SLACK: name.startsWith('empty') ? '' : name };
+    expect(loadEnv(source).TENDB_SLACK).toBe(expected);
+  });
+
+  it.each([
+    ['uppercase', 'OFF'],
+    ['a boolean word', 'false'],
+  ])('rejects TENDB_SLACK as %s, naming the variable and not the value', (_name, value) => {
+    expect(() => loadEnv({ TENDB_SLACK: value })).toThrow('TENDB_SLACK');
+    expect(() => loadEnv({ TENDB_SLACK: value })).not.toThrow(`: ${value}`);
+  });
+
   it('never puts a value in the error message', () => {
     const secretLooking = 'sk-ant-api03-DO-NOT-LEAK';
     try {
