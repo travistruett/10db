@@ -386,6 +386,23 @@ describe('the Models page', () => {
     expect(await screen.findByRole('button', { name: 'Open Alpha Max' })).toBeTruthy();
   });
 
+  it('leaves the Chart for the Table when Show every account is chosen after a failed read', async () => {
+    serve();
+    server.use(
+      http.get(daemonUrl('/models'), ({ request }) =>
+        new URL(request.url).searchParams.has('account')
+          ? HttpResponse.json({ error: 'boom' }, { status: 500 })
+          : HttpResponse.json([FAST, STRONG, UNKNOWN, BLANK]),
+      ),
+    );
+    renderWithDaemon(<ModelsSection />);
+    await screen.findByRole('button', { name: 'Open Alpha Max' });
+    fireEvent.click(screen.getByRole('radio', { name: 'Chart' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Show every account' }));
+    expect(await screen.findByRole('button', { name: 'Open Alpha Max' })).toBeTruthy();
+    expect(screen.getByRole('radio', { name: 'Table' }).hasAttribute('checked')).toBe(true);
+  });
+
   it('filters by tier from the Tier column, one tier or several', async () => {
     serve();
     renderWithDaemon(<ModelsSection />);

@@ -130,6 +130,8 @@ export function ModelsSection() {
             variant="default"
             size="xs"
             onClick={() => {
+              // The chart would take the default account again, so the Table is where every account shows.
+              setView(View.Table);
               setFilter({ ...filter, accountId: null });
             }}
           >

@@ -329,6 +329,14 @@ cards).
       lands on an undrawn point; why_new=new rule; no_claim=recharts renders it.
     - Section: protects=table and chart views over the real queries; fails_when=account, columns or expansion
       wiring breaks; why_new=new views; no_claim=pixels (the click-through covers them).
+    - Failed read for one account: protects=the toolbar and a way back survive a failed `/models?account=`, in the
+      Table and in the Chart; fails_when=the section blanks, or Show every account leaves the Chart on the
+      failing account; why_new=the section tests covered only a loaded list; no_claim=the daemon's error text.
+    - Chart waits for accounts: protects=the chart takes the default account once accounts load, and says so
+      meanwhile; fails_when=it says "Add an account" before they load or never prices; why_new=new wiring;
+      no_claim=an account vanishing while the chart is open.
+    - `costNote`: protects=the cost header says what the figure is for each kind of account; fails_when=a metered
+      account with no read list claims "no per-token price"; why_new=new wording rule; no_claim=the prices.
 
 ## How it is built
 
