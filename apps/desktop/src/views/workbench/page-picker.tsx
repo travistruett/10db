@@ -1,5 +1,6 @@
 import type { AreaDef, PassStartPageDto, TaskId } from '@10db/contracts';
 import {
+  Box,
   Group,
   MultiSelect,
   Pill,
@@ -10,7 +11,7 @@ import {
   type ComboboxParsedItem,
   type OptionsFilter,
 } from '@mantine/core';
-import { IconSubtask } from '@tabler/icons-react';
+import { IconCheck, IconSubtask } from '@tabler/icons-react';
 import { shortAgo } from '../factory/short-ago';
 import { blockedReason, type JoinableTask, type PickTicks } from './start-pass-rules';
 
@@ -73,30 +74,47 @@ function filterBy(choices: ReadonlyMap<string, Choice>): OptionsFilter {
   };
 }
 
-function OptionBody({ choice }: { readonly choice: Choice }) {
+/**
+ * One option: name, route and last change, with what holds it under them. A picked one is checked
+ * on the right, as DESIGN.md has every multi-select do; drawing the option replaces Mantine's own.
+ */
+function OptionBody({ choice, checked }: { readonly choice: Choice; readonly checked: boolean }) {
   return (
-    <Stack gap={0} style={{ flex: 1, minWidth: 0 }}>
-      <Group justify="space-between" gap="sm" wrap="nowrap">
-        <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
-          <Text size="sm" truncate>
-            {choice.name}
-          </Text>
-          {choice.kind === 'page' ? (
-            <Text size="xs" c="dimmed" ff="monospace">
-              {choice.route ?? 'No route'}
+    <Group gap="xs" wrap="nowrap" align="flex-start" style={{ flex: 1, minWidth: 0 }}>
+      <Stack gap={0} style={{ flex: 1, minWidth: 0 }}>
+        <Group justify="space-between" gap="sm" wrap="nowrap">
+          <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
+            <Text size="sm" truncate>
+              {choice.name}
             </Text>
-          ) : null}
+            {choice.kind === 'page' ? (
+              <Text size="xs" c="dimmed" ff="monospace">
+                {choice.route ?? 'No route'}
+              </Text>
+            ) : null}
+          </Group>
+          <Text size="xs" c="dimmed" style={{ flexShrink: 0 }}>
+            {choice.aside}
+          </Text>
         </Group>
-        <Text size="xs" c="dimmed" style={{ flexShrink: 0 }}>
-          {choice.aside}
-        </Text>
-      </Group>
-      {choice.notes.map((note) => (
-        <Text key={note} size="xs" c="dimmed">
-          {note}
-        </Text>
-      ))}
-    </Stack>
+        {choice.notes.map((note) => (
+          <Text key={note} size="xs" c="dimmed">
+            {note}
+          </Text>
+        ))}
+      </Stack>
+      {checked ? (
+        <IconCheck
+          size={16}
+          stroke={1.5}
+          aria-label="Picked"
+          style={{ flex: 'none', marginTop: 2 }}
+        />
+      ) : (
+        // Keeps the options' right edges in line whether or not they are picked.
+        <Box w={16} style={{ flex: 'none' }} />
+      )}
+    </Group>
   );
 }
 
@@ -199,9 +217,9 @@ export function PagePicker(props: PagePickerProps) {
       filter={filterBy(choices)}
       nothingFoundMessage="No page matches."
       maxDropdownHeight={360}
-      renderOption={({ option }) => {
+      renderOption={({ option, checked }) => {
         const choice = choices.get(option.value);
-        return choice ? <OptionBody choice={choice} /> : option.label;
+        return choice ? <OptionBody choice={choice} checked={checked === true} /> : option.label;
       }}
       renderPill={({ option, onRemove }) => (
         <PickedPill

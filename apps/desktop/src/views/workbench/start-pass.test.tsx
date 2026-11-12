@@ -114,6 +114,14 @@ describe('StartPass', () => {
     });
   });
 
+  it('marks a picked option with a check on the right, as every multi-select does', async () => {
+    await draw();
+    await pick(/^settings/);
+    const list = await openOptions(pagesInput());
+    expect(within(optionIn(list, /^settings/)).queryByLabelText('Picked')).not.toBeNull();
+    expect(within(optionIn(list, /^people/)).queryByLabelText('Picked')).toBeNull();
+  });
+
   it('disables a page another picked row holds or can share a file with, saying why', async () => {
     await draw();
     await pick(/^settings/);

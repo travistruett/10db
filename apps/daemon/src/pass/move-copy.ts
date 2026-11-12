@@ -67,8 +67,8 @@ export function slowPageLine(name: string): string {
 /** What the agent is told when its ask for hazard `name` waits for the builder's move. */
 export function moveToCopyInstruction(name: string, notNow = false): string {
   return notNow
-    ? `The ${name} hazard runs in a separate copy, not in the UI Workbench pass's folder, and the builder chose Not Now: this task stays in the pass without it. Don't change any file of the ${name} hazard: finish what you can without it, end your turn and say what is left.`
-    : `The ${name} hazard runs in a separate copy, not in the UI Workbench pass's folder, and the builder is asked whether to move this task to one. Don't change any file of the ${name} hazard: finish what you can without it, end your turn and say what is left.`;
+    ? `The ${name} hazard runs in a separate copy, not in the Workbench pass's folder, and the builder chose Not Now: this task stays in the pass without it. Don't change any file of the ${name} hazard: finish what you can without it, end your turn and say what is left.`
+    : `The ${name} hazard runs in a separate copy, not in the Workbench pass's folder, and the builder is asked whether to move this task to one. Don't change any file of the ${name} hazard: finish what you can without it, end your turn and say what is left.`;
 }
 
 /**

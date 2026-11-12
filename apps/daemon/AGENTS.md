@@ -149,20 +149,29 @@ The fake adapter (`sessions/fake-adapter.ts`) is the test boundary for Claude Co
   (`storage-state.ts`). The state is forgotten when the app address or the dev login command changes. A capture signs in when no state is kept, and once again when a page lands elsewhere; a
   page still elsewhere says so once on the task's thread (`ELSEWHERE_NOTICE`) and on the status line. A route still elsewhere after a fresh sign-in is not signed in for again for that task, and a dev login stopped with its capture leaves the last sign-in as it was. No picture is taken before the API listens (`PicturesDeps.daemonPort`), nor of an app address on its port, checked again before each sign-in and shot. A refused fetch of the browser is tried again on the next ask after ten minutes, or when a pass opens. Start-up holds back the afters of a pass it finds closing or being abandoned, and removes dev login logs a stopped daemon left. Each
   capture logs its route, outcome, milliseconds and bytes. `GET /tasks/:taskId/screens`, `GET
+/screens/:screenId` (a PNG, private and immutable; 404 once pruned) and `GET /projects/:projectId/pictures`
+  are refused to screens. `DaemonOptions.pictures` is `{ kind: 'pinned' }` from the entry point; tests give a
+  camera (`test/fake-camera.ts`); absent, the daemon takes no pictures and fetches nothing. No picture is
+  uploaded or sent to a model.
 - `preview/` (`decisions/2026-11-11-10db-runs-the-preview-while-a-pass-is-open.md`): `startPreview` runs a project's
   `previewCommand` while it has a live pass, through the unslotted gate runner (the gate's sandbox; no project id, so
   `autoDocker` never turns Docker on for it) with no timeout and an abort that kills its group; its tree goes in a
-  process ledger (`preview-ledger.ts`), as the pictures browser's does. It starts nothing when something answers at
-  the app address already (`probe.ts`) or the project lacks Allow loopback (then a `preview_stopped` notice says so),
-  restarts an exit while wanted at most 3 times in 10 minutes (`restart-budget.ts`), and keeps one header notice,
-  `preview-server`: `preview_starting` until the app answers, `preview_stopped` with the output's tail once it gave
-  up. It follows `pass.opened`, `pass.changed` and `project.changed`; at start it clears its stale notices and looks
-  at every live pass. A picture that finds nothing answering at a project with a preview command calls
-  `onNoAnswer` (its `ensure`) instead of raising the "Nothing answers" notice. `POST /projects/:id/preview/restart`
-  is Restart Preview. Shutdown stops it after the pictures.
-  /screens/:screenId`(a PNG, private and immutable; 404 once pruned) and`GET /projects/:projectId/pictures`are refused to screens.`DaemonOptions.pictures`is`{ kind: 'pinned' }` from the entry point; tests give a
-camera (`test/fake-camera.ts`); absent, the daemon takes no pictures and fetches nothing. No picture is
-  uploaded or sent to a model.
+  process ledger (`preview-ledger.ts`), as the pictures browser's does, and a stop that waits past `stopWithinMs` for
+  the command to exit ends that tree instead. It starts nothing when something answers at the app address already
+  (`probe.ts`; any response, an https server with a certificate of its own included) or the project lacks Allow
+  loopback (then a `preview_stopped` notice says so), restarts an exit while wanted at most 3 times in 10 minutes
+  (`restart-budget.ts`), and keeps one header notice, `preview-server`: `preview_starting` until the app answers
+  (looked at until it does, the deadline only changing the words), `preview_stopped` with the output's tail once it
+  gave up, cleared once the builder's own server answers. A notice is cleared on the pass it was written on, so an
+  ended pass keeps none. It follows `pass.opened`, `pass.changed` and `project.changed`; at start it clears the
+  notice on every live pass and looks at each. A picture that finds nothing answering at a project with a preview
+  command calls `onNoAnswer` (`lost`: starts the preview when none runs, says a running one that answered no longer
+  does) instead of raising the "Nothing answers" notice. `POST /projects/:id/preview/restart` is Restart Preview.
+  Shutdown stops it after the pictures.
+- 10db's own dev UI (same decision): with `TENDB_DEV_UI_ORIGIN` set, `/health` names the origin and the API takes a
+  second, read-only token (`runtime-files/dev-ui-token.ts`: `<data dir>/dev-ui-token`, 0600, kept across restarts),
+  allowed only the GETs `screens/dev-ui-access.ts` names as reads (deny by default; `api/render-reads.test.ts` fails
+  on a GET named neither way). `GET /dev-ui/connection` hands it out over the app's own token only, for Open Page.
 - The broken preview (Workbench spec §8.2, §8.4,
   `decisions/2026-11-10-a-broken-preview-is-read-from-the-page-load-that-takes-the-picture.md`): each capture of
   a pass page judges the load of its page route (`pageRoute`, its viewports and themes as one, `routeLoad`) by
