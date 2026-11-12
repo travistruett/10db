@@ -22,6 +22,7 @@ import {
   listInbox,
   listPeople,
   listPendingTriage,
+  ruleAssigneesOf,
   sendForCard,
   setInboxRecipients,
   targetTaskIds,
@@ -101,15 +102,17 @@ export function draftFor(
   if (sendForCard(ctx.tx, card.id) !== null && isLive(ctx, card.id)) return null;
   const recipients = recipientsOf(ctx.tx, card);
   if (recipients?.length === 0) return null;
-  const toBuilder = (): null => {
+  // A card the builder is left with: for want of a contact, it stays his; for want of a draft that a later
+  // start can make, it keeps `rule`, so the sweep can tell it from one he took back on purpose.
+  const toBuilder = (routedBy: RoutedBy): null => {
     setInboxRecipients(ctx, card.id, {
       assignees: [BUILDER_HANDLE],
-      routedBy: RoutedBy.Builder,
+      routedBy,
       suggestion: null,
     });
     return null;
   };
-  if (recipients === null) return toBuilder();
+  if (recipients === null) return toBuilder(RoutedBy.Builder);
   let message: { text: string; hits: OutboundHit[] };
   try {
     const { text } = (deps.compose ?? composeSlackQuestion)({
@@ -122,7 +125,7 @@ export function draftFor(
     message = { text, hits: hitsFor(card, text) };
   } catch (error) {
     deps.log.warn({ err: error, cardId: card.id }, 'could not draft a routed question');
-    return toBuilder();
+    return toBuilder(RoutedBy.Rule);
   }
   insertDraft(ctx, {
     inboxItemId: card.id,
@@ -157,6 +160,27 @@ export function draftOnOpen(
 function isLive(ctx: WriteContext, id: InboxItemId): boolean {
   const send = sendForCard(ctx.tx, id);
   return send !== null && LIVE_SEND.includes(send.state);
+}
+
+/**
+ * A question left with the builder only because its draft could not be made (routed by rule, to the builder
+ * alone, with no send) goes back to the people the rules gave it, so the sweep drafts it again.
+ */
+function retryable(ctx: WriteContext, card: InboxItemDto): InboxItemDto {
+  if (
+    card.kind !== InboxKind.Question ||
+    card.routedBy !== RoutedBy.Rule ||
+    !card.assignees.every((h) => h === BUILDER_HANDLE) ||
+    sendForCard(ctx.tx, card.id) !== null
+  )
+    return card;
+  const wanted = ruleAssigneesOf(ctx.tx, card.id);
+  if (wanted.every((h) => h === BUILDER_HANDLE)) return card;
+  return setInboxRecipients(ctx, card.id, {
+    assignees: wanted,
+    routedBy: RoutedBy.Rule,
+    suggestion: null,
+  });
 }
 
 /**
@@ -195,7 +219,8 @@ export function sweepDrafts(
     if (wanted.join(',') !== have.join(',')) dropDraft(ctx, draft.id);
   }
   const after: (() => void)[] = [];
-  for (const card of listInbox(ctx.tx, { states: [InboxState.Open] })) {
+  for (const listed of listInbox(ctx.tx, { states: [InboxState.Open] })) {
+    const card = retryable(ctx, listed);
     const done = draftFor(ctx, card, {
       ...draftContext(ctx.tx, card),
       afterDraft: opts.afterDraft,

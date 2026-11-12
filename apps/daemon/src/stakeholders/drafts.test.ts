@@ -1,5 +1,6 @@
 import { InboxState, RoutedBy, type PersonDto } from '@10db/contracts';
 import {
+  closeSend,
   createTestStore,
   getInboxItem,
   insertInboxItem,
@@ -136,7 +137,7 @@ describe('draftFor', () => {
     expect(getInboxItem(store.db, card.id)).toMatchObject({
       state: 'OPEN',
       assignees: ['me'],
-      routedBy: 'builder',
+      routedBy: 'rule',
     });
   });
 
@@ -245,6 +246,42 @@ describe('sweepDrafts', () => {
     const second = sendForCard(store.db, card.id);
     expect(second?.id).not.toBe(first?.id);
     expect(second?.people.map((p) => p.userId)).toEqual(['U-ana']);
+  });
+
+  it('retries a card whose compose failed, but not one the builder took back on purpose', () => {
+    const w = world();
+    w.route([w.mark]);
+    const failed = w.insertAndDraft(
+      {},
+      deps({
+        compose: () => {
+          throw new Error('boom');
+        },
+      }),
+    ).card;
+    expect(sendForCard(store.db, failed.id)).toBeNull();
+    const kept = w.insertAndDraft().card;
+    store.write((ctx) => {
+      const send = sendForCard(ctx.tx, kept.id);
+      if (send) closeSend(ctx, send.id, 'taken_back');
+      setInboxRecipients(ctx, kept.id, {
+        assignees: [],
+        routedBy: RoutedBy.Builder,
+        suggestion: null,
+      });
+    });
+    const after = sweep();
+    expect(getInboxItem(store.db, failed.id)).toMatchObject({
+      assignees: ['mark'],
+      routedBy: 'rule',
+    });
+    expect(sendForCard(store.db, failed.id)?.state).toBe('draft');
+    expect(after).toHaveLength(1);
+    expect(getInboxItem(store.db, kept.id)).toMatchObject({
+      assignees: ['me'],
+      routedBy: 'builder',
+    });
+    expect(sendForCard(store.db, kept.id)?.state).toBe('closed');
   });
 
   it('keeps a draft whose recipients still match', () => {
