@@ -7,6 +7,9 @@ night to match v3 of the design spec.
 - The design spec adopts several of these calls (its §17, item 12). Where this file and the design spec differ,
   the design spec wins.
 - Revised after one round of independent design review. §21 says where each finding went.
+- Revised again with v4 of the design spec, on top of the trust line
+  (`2026-11-12-10db-trust-line-design.md` §13): a Chat writes in Your folder, its calls are judged, and the
+  builder's setup and the web come along. §22 says where each change went.
 
 **Companion of:** `2026-11-11-10db-sessions-design.md`. The design spec holds the engine, the adapters, the data,
 the states and the rules. This file says how the screen looks, reads and behaves.
@@ -25,10 +28,11 @@ strip, in Selenized light and dark, with the decisions written beside each frame
 
 Sessions is a global screen whose **tabs live in the window's title bar**, in the 48 px header that is empty today.
 Each tab is one conversation with an agent in one project. Every session starts as a **Chat**, which reads the
-project and changes nothing. **Do It…** starts a **Task** that takes the Chat's place in the strip, and the Chat
-becomes read-only. A
-Task in **Your folder** is a pass of one and lands as a pass does. A Task in a **Separate copy** is an ordinary
-Board task and lands by the project's delivery. A tab says three things at a glance: whose project (its tile), what
+project, runs commands, searches the web and changes **Your folder**, as Claude Code does in a terminal. It holds
+the folder while a turn runs, and it can commit, branch and open a pull request. At a limit it asks first. For
+bigger work, **Do It…** hands the work to a **Task**. A Task in a **Separate copy** is an ordinary Board task that
+takes the Chat's place in the strip, and the Chat becomes read-only. Optionally, a Task in **Your folder** is a pass
+of one, which opens beside the Chat and lands as a pass does. A tab says three things at a glance: whose project (its tile), what
 it is (its title, and a folder or branch glyph when it writes), and whether it needs the builder (a dot, a ring
 or a small icon, never color alone). Inside a tab the conversation reads as a
 story: the builder's messages on a raised panel, the agent's replies as rendered markdown, and its tool calls as
@@ -67,12 +71,13 @@ The builder reads these words and no others.
 | Word | Means | Never |
 | --- | --- | --- |
 | **Sessions** | The screen, and each tab on it ("a session"). In the code a tab is a `chat` (design spec, Words). | "Threads", "Agents" |
-| **Chat** | A session that reads the project and changes nothing (Explore). Every session starts as one. | "Explore mode" |
-| **Task** | Work a Chat started with Do It (Hands-on). It is a pass of one in Your folder, or an ordinary Board task in a Separate copy. | "Hands-on", "work mode" |
-| **Do It** | Starts a Task from a Chat. | "Promote", "Convert" (Plan's word) |
-| **Your folder** / **Separate copy** | Where a Task works. These are the Board's words. | "worktree", "checkout" |
+| **Chat** | A conversation with an agent in a project. It reads, runs commands and searches the web, and it changes Your folder, holding it while a turn runs. It can commit, branch and open a pull request, through its git tools. Every session starts as one. | "Explore mode" |
+| **Task** | Work a Chat hands off with Do It (Hands-on): an ordinary Board task in a Separate copy, or, optionally, a pass of one in Your folder. | "Hands-on", "work mode" |
+| **Do It** | Hands a Chat's work to a Task. | "Promote", "Convert" (Plan's word) |
+| **Your folder** / **Separate copy** | Where a Chat or a Task works. These are the Board's words. | "worktree", "checkout" |
 | **Sign Off**, **Close Pass**, **Abandon Pass** | How a Task in Your folder lands, word for word as a UI Workbench pass does. | "Merge", "Ship" |
-| **Read-only** | A Chat that handed its work to a Task (the `sealed` state). | "Sealed", "locked" |
+| **Read-only** | A Chat that handed its work to a Task in a Separate copy (the `sealed` state). | "Sealed", "locked" |
+| **Allow This** | The builder's go-ahead for a call the judge held back at a limit (trust line §5). | "Override", "Bypass" |
 | **Open in Terminal** / **Hand Back** | Moving a session to the builder's terminal and back. | "Takeover", "Detach" |
 
 ## 3. Where it sits
@@ -146,7 +151,9 @@ kind line never competes with the buttons for width. It shows:
 
 - the full title (weight 600; click to rename)
 - under it, a dimmed `xs` line saying what the session is:
-  - "Chat · reads 10db, changes nothing"
+  - "Chat · Your folder · on `main`"
+  - "Chat · reads only: Your folder is in use by the pass ‘Settings pass’" (another writer holds the folder; the
+    turn still runs and changes nothing, design spec §7.3)
   - "Chat · read-only: its work moved to a task"
   - "Chat · in your terminal since 12:04"
   - "Task · Your folder · lands on `main`"
@@ -188,7 +195,8 @@ Left to right:
 
 1. **Project tile**, 16 px: the project's two-letter mark (`ProjectTile`).
 2. **Kind glyph, on a Task only**, 12 px, dimmed: Tabler `folder` for Your folder, `git-branch` for a Separate
-   copy. A Chat has none. Whether a tab can write is a trust fact, so it shows on the face **(call)**.
+   copy. A Chat has none: every Chat works in Your folder, and its session bar says so. Where a Task writes is a
+   trust fact, so it shows on the face **(call)**.
 3. **Title**, truncated with an ellipsis.
 4. **State** at the right: an 8 px dot, or a glyph, or nothing (§5.3).
 5. **Close ×**, 14 px. On hover and on the selected tab it takes the state mark's place, so it adds no width. The
@@ -216,7 +224,7 @@ base. Each row names the design spec state it reads (§6.7 there) or the task's.
 
 | State | When | On the tab | Spoken |
 | --- | --- | --- | --- |
-| **Needs you** | An open Inbox card came from this session: a permission, a question, or "Start <task> now?" (`waiting_card`). | yellow dot, **and a 1 px yellow ring around the pill**; title `fg_1` | "needs you: permission to run a command" |
+| **Needs you** | An open Inbox card came from this session: a permission or a question (`waiting_card`). | yellow dot, **and a 1 px yellow ring around the pill**; title `fg_1` | "needs you: permission to run a command" |
 | **Ready** | A Task in Your folder ended a turn, and its `check` card waits, as a Workbench page's does. | yellow dot and ring | "ready: look at the changes" |
 | **Stopped by an error** | `ended_error`, or a Task's run or turn failed. It needs the builder, as a failed Workbench page does (`page-status.ts`). | Tabler `alert-triangle`, 12 px, red, **and a 1 px red ring** | "needs you: stopped by an error" |
 | **Paused** | `paused_account`: a usage limit or a cap. | Tabler `player-pause`, 12 px, orange | "paused: usage limit, resumes 3:40" |
@@ -246,6 +254,10 @@ base. Each row names the design spec state it reads (§6.7 there) or the task's.
 - **In review is a glyph, not a color (call).** Blue on a tab means an agent is working.
 - **A read-only Chat** has no tab: its Task took its place (§8.2). **Archived** sessions never sit in the strip
   (§5.6).
+- **Your folder in use is not a tab state.** While another writer holds the folder, a Chat's kind line says so,
+  dimmed (§4), and its tab looks as its state says. No new color.
+- **A call held back at a limit is not a tab state.** In an attended session it is a dim row with Allow This
+  (§7.3). Only an escalated call raises a card, and that card is Needs you.
 
 ### 5.4 Titles
 
@@ -259,8 +271,8 @@ base. Each row names the design spec state it reads (§6.7 there) or the task's.
 
 ### 5.5 Many tabs
 
-- **Order** is the builder's. A new tab opens to the right of the current one, and a Task opened by Do It takes
-  its Chat's place. Drag to reorder (dnd-kit, as the Board uses). Reordering by keyboard comes later.
+- **Order** is the builder's. A new tab opens to the right of the current one. A Task in a Separate copy takes its
+  Chat's place, and a pass of one opens to the Chat's right. Drag to reorder (dnd-kit, as the Board uses). Reordering by keyboard comes later.
 - **Overflow:** tabs shrink to 96 px, the selected one last. Past that the strip scrolls sideways and fades at the hidden edge, as the
   Board's sides do (`use-hidden-edges.ts`, `edge-fade.tsx`).
 - **All Tabs** (`chevron-down`) sits right of `+`. It opens a menu of every open tab (tile, title and state) and the
@@ -280,8 +292,9 @@ base. Each row names the design spec state it reads (§6.7 there) or the task's.
 | Action | What happens | Undo |
 | --- | --- | --- |
 | **Close** (× or ⌘W) | The tab leaves the strip. Nothing stops: a running turn finishes and keeps its reply, and a Task keeps working on the Board. No confirmation, because nothing is lost **(call)**. | ⌘⇧T reopens the last closed tab; All Tabs lists the last five; ⌘K finds any. |
-| **Archive** (a Chat's menu) | Closes the tab, hides it from Recent and removes its folder on disk (design spec §7.1). It is refused while the Chat's Task is unfinished: "Finish or abandon its task first." Archiving a session that is in your terminal asks "End takeover and archive?" | Opening it from ⌘K unarchives it. |
-| **Do It** | The Chat becomes read-only and its tab closes; the Task takes its place (§8.2). | The Task's "From chat" link, ⌘⇧T and ⌘K open the read-only Chat again. |
+| **Archive** (a Chat's menu) | Closes the tab, hides it from Recent and removes its folder on disk (design spec §7.1). It is refused while a Task the Chat started is unfinished: "Finish or abandon its task first." Archiving a session that is in your terminal asks "End takeover and archive?" | Opening it from ⌘K unarchives it. |
+| **Do It, a Separate copy** | The Chat becomes read-only and its tab closes; the Task takes its place (§8.2). | The Task's "From chat" link, ⌘⇧T and ⌘K open the read-only Chat again. |
+| **Do It, Your folder** | The pass opens in a new tab beside the Chat. The Chat stays open (§8.2). | — |
 | **A Task** | Has no Archive. It ends as a task ends: by landing, or by Abandon Pass… (Your folder) or Abandon on the Board (a Separate copy). | As the Workbench and the Board do. |
 
 After a close, focus moves to the tab on the right, or to the left one when the closed tab was last.
@@ -345,18 +358,19 @@ fastest start is ⌘T, type, ⌘↩.
 - **The agent is not a choice.** It is the project's account's harness, shown as `capabilities.label` beside the
   model ("Claude Code · opus"). A different agent means a different project account, which is not offered (design
   spec §6.4).
-- Under the controls, one dimmed `xs` line: "Uses ampsio's account. Reads the code and runs read-only commands;
-  changes nothing."
+- Under the controls, one dimmed `xs` line: "Uses ampsio's account. Reads the code, runs commands and searches the
+  web. Asks before anything that crosses a limit."
 
 ### 6.2 The empty state of a fresh tab
 
 The empty state is the start of the work, not a blank page with a button.
 
 ```
-                 A chat reads ampsio and changes nothing. When you're ready, Do It starts the work.
+                 A chat works in ampsio's folder. For bigger work, Do It hands it to a task.
 
                  [AM ampsio ⌄]   Claude Code · opus ⌄
-                 Uses ampsio's account. Reads the code and runs read-only commands; changes nothing.
+                 Uses ampsio's account. Reads the code, runs commands and searches the web.
+                 Asks before anything that crosses a limit.
                  ┌──────────────────────────────────────────────────────────┐
                  │ Ask about ampsio…                                        │
                  │ 📎                                                 Send  │
@@ -448,8 +462,13 @@ An agent's turn is mostly tool calls. They are **one-line rows** that open on de
   - `running`: a blue 8 px dot in the icon's place
   - `done`: the kind's icon, dimmed
   - `failed`: the icon in red, and the meta in red
-  - `denied`: dimmed, with "You denied this" when an Inbox card answered it, or "10db stopped this" when the guard
-    did
+  - `denied`, by `deniedBy` (design spec §5.2):
+    - `builder`: dimmed, "You denied this"
+    - `10db`: dimmed, "10db stopped this: {reason}", when the guard refused it (a coordination rule, such as "Your
+      folder is in use by {holder}", or the `rules` floor)
+    - `judge`: dimmed, "Held back: this would {limit}", or "Held back at a limit" when the judge named none. In an attended session (a Chat, Plan, a pass) the row has
+      **Allow This**, which sends the builder's go-ahead as their own message, so the judge lets the call through
+      on the agent's retry (trust line §5). The row says "You allowed this" once pressed.
 - **The row is a button** with `aria-expanded`. Its name says the whole row: "Ran pnpm vitest run src/api, failed,
   exit 1, 9 seconds".
 - **Full output and patches** come from disk when a row opens (`GET /conversations/:id/items/:itemId/full`).
@@ -464,7 +483,7 @@ An agent's turn is mostly tool calls. They are **one-line rows** that open on de
 | `mcp` | `plug` "{server} · {tool}" and `argumentsPreview` on one line | `argumentsPreview` and `resultTail`, or `error` in red |
 | the chat's builder tools | a **task row** (below) | not expandable |
 | `subagent` | `hierarchy` "Subagent: {promptPreview}" · "{n} calls · 1 min", with `model` when set | its rows nested; its final text at the end. While it runs, its latest call is a live line. |
-| `web` | `world` "Searched the web for ‘{query}’" or "Fetched {host}" | grouped like reads when consecutive. A Chat has no web tools (design spec §7.1); this shows in Plan's researcher and in Tasks. |
+| `web` | `world` "Searched the web for ‘{query}’" or "Fetched {host}" | grouped like reads when consecutive. It shows in every session: the web is on (design spec §7.1). |
 | `other` | `tool` "Used {name}" and `inputPreview` | `inputPreview` |
 
 **Diffs, per hunk** (design spec S12, §8). Each hunk is one Mantine `Diff` of its `before` and `after`, with
@@ -487,15 +506,27 @@ counts up. Reply text, an edit or a command ends the group. A group of one is a 
 each file with its counts. Only the last edit of the group keeps its peek, so a turn that touches many files stays a
 few lines long. Reply text, a read or a command ends the group.
 
-**Task rows: the chat's builder tools** (design spec S14, §6.6).
+**Task rows: the chat's builder tools** (design spec S14, §6.6). Every builder tool is present, and none raises a
+card unless the judge holds it back.
 
-- `create_task`, `edit_task` (only on tasks this chat created), `set_title` and `write_brief` run without a card.
-  Each shows as a row with **Undo**:
+- `create_task`, `edit_task`, `set_title` and `write_brief` run. Each shows as a row with **Undo**:
   - a task: a gray dot, its title, "Added to Ready", Open on Board, Undo
+  - an edit: its title, "Changed {fields}", Open on Board, Undo
   - a title: "Renamed this session to ‘…’", Undo
-- Undo removes an unstarted task, through the existing route.
-- `start_task` raises a card (§7.7): "Start Spike: OpenCode permission requests now?"
-- The other builder tools are absent from a chat, so the UI has no row for them.
+- Undo removes an unstarted task through the existing route, puts back an edit's old values, or restores the title.
+- `start_task`, `run_next`, `move_task`, `start_shape`, `save_decision` and `save_principle` run. Each row links what
+  it started or changed: "Started {task}" with Open on Board.
+- `remove_task` runs on a task this Chat made. On any other task, and for `retire_knowledge`, `withdraw_knowledge`
+  and `supersede_knowledge` every time, the tool asks with a card (§7.7): removing or retiring work the Chat didn't
+  make is a limit (design spec §6.6).
+- **Git** goes through the Chat's git tools (design spec §7.3): `make_branch`, `switch_branch`, `pull`,
+  `commit_changes`, `push_branch`, `open_pull_request` and `merge_pull_request`. Each is a row: "Made branch
+  `{branch}`", "Switched to `{branch}`", "Pulled {n} commits", "Committed `{sha}` · {n} files", "Pushed
+  `{branch}`", "Opened pull request #{n}" with Open Pull Request, "Merged #{n}". A push is judged, and a merge is a
+  limit, so either can be held back with Allow This. Any git write in the Chat's shell shows as "10db stopped this:
+  use the git tools (make_branch, switch_branch, pull, commit_changes, push_branch, open_pull_request,
+  merge_pull_request)". The project's own git hooks don't run on these commits and pushes (design spec §7.3).
+- Reads and lists (knowledge search, `list_tasks`, `list_flows` and the rest) are plain `mcp` rows.
 
 **Before M9** (design spec §6.9, M4c). A Task's thread goes through the shared stores, so its replies stream and
 render as markdown. Its tool rows show the calls the runner stores as `tool_call` items. Where it stores none, the
@@ -542,10 +573,14 @@ dimmed. Opened, it shows the summary in `dim_0` text, with a 2 px `bg_2` rule at
 while it streams (call):** the working line already says "Thinking…", and reasoning that unfolds and refolds would
 make the column jump.
 
-### 7.7 Cards: permissions, questions, and starting a task
+### 7.7 Cards: permissions and questions
 
 They are the Inbox's own cards, answered in place: the same objects the Inbox shows (design spec S13), drawn by
 `InboxCard` through `PageAsk`.
+
+**What raises a card** (trust line §5): a call the judge escalates, a call 10db's judge asks about, and the agent's
+own question. Nothing else does: a call that crosses no limit runs, and one auto mode holds back is a dim row with
+Allow This (§7.3).
 
 - **Where:** pinned between the working line and the composer, outside the windowed list, at most half the pane's
   height, scrolling inside (Plan's `WaitingPermissions`). They never scroll away, and they sit next to where the
@@ -558,18 +593,18 @@ They are the Inbox's own cards, answered in place: the same objects the Inbox sh
   - "Note for the agent (optional)"
   - **Send Answer**, the card's filled primary
   - one dimmed `xs` line at its foot: "Also in your Inbox."
-- **A session's permission options:** "Allow once", **"Allow for this session"** (the workstream choice, read for a
-  conversation), "Always allow in this project", "Deny". `PERMISSION_LABELS` gains the session reading.
+- **A session's permission options** are the trust line's three (§5 there): "Allow once", "Always in this project"
+  and "Deny". Always in this project stores a grant keyed on the limit and its target in prose ("deploys to staging
+  with vercel"), which every judge on the project then gets as an allow line. The trust line's T5 builds the grants
+  store and this option, and gives the grants to every judge (design spec §6.6).
 - **A question** shows its options with their descriptions, and a free answer goes in the note. A multi-select
   question shows checkboxes.
-- **"Start <task> now?"** is the card `start_task` raises (design spec §6.6). Its options are **Start Now** and
-  **Not Now**. Starting runs the task on the Board with its own lane; it never turns this chat into a Task.
 - **Focus never jumps (call).** ⇧Tab from the composer reaches the card, which sits just above it in the DOM.
   Inside the card, 1–5 pick an option and ⌘↩ sends, as in the Inbox. **Esc inside a card** (its note, an option)
   never stops the turn: `escapeIsTaken` counts focus inside a waiting card as taken, as it counts an open menu. The announcer says "Codex asks to run a
   command. Answer it above the message box."
 - **History:** once answered, the transcript gets one dimmed row where the call was: "You allowed this once", "You
-  answered: Retry once, then sign out".
+  allowed this in the project", "You answered: Retry once, then sign out".
 - **The composer stays open** while a card waits. What the builder types goes in with the turn, as §7.8 says.
 
 ### 7.8 Messages while a turn runs, and after a restart
@@ -611,15 +646,17 @@ the Workbench already does it, both native adapters carry receipts, and a double
   `GET /projects/:id/files` (`git ls-files`), fuzzy, showing 8 of the daemon's 50, with an 80 ms debounce.
   - A suggestion shows the `file` icon, the name in `fg_1` with the match underlined, and the folder in dimmed mono.
   - Enter or Tab picks one. The send key never fires while the list is open.
-  - A picked file becomes a mono chip and reaches the agent as a path. The explore judge decides each read (design
-    spec §11).
+  - A picked file becomes a mono chip and reaches the agent as a path. The session's judge decides each read
+    (design spec §11).
 - **`/` commands** (capability `slashCommands`; the `commands` event). Typed at the start of the input, a menu
   lists what the session's agent reports:
   - Claude: `supportedCommands()`
   - Codex: the mapped list, `/compact`, `/review` and `/model`
 
   Each row is `/name` in mono, its description dimmed, and its `argumentHint`. Picking one inserts it, and ⌘↩ sends.
-  An unknown `/x` goes as text. A chat loads no settings, so no skills appear (design spec §7.1).
+  An unknown `/x` goes as text. The builder's setup comes along (design spec §7.1, trust line §6), so the list
+  holds the builder's skills and plugins' commands and the project's own `.claude/skills` and `commands`, as Claude
+  Code lists them. Codex lists the skills in the roots `skills/extraRoots/set` names.
 - **10db's own actions are never slash commands (call).** Do It, File as Tasks, Open in Terminal and New Session are
   buttons and ⌘K, so typing `/` never starts work by surprise.
 
@@ -651,6 +688,9 @@ stops · / commands · @ files"; it is hidden under 640 px.
 
 ## 8. Do It: from a Chat to a Task
 
+A Chat does small work itself, in Your folder (§0). Do It is for work that wants its own copy, a brief and the
+project's delivery, or the pass's ceremony.
+
 ### 8.1 The modal
 
 **Do It…** sits in the session bar as a `SplitButton`, whose menu holds **File as Tasks**. ⌘⇧↩ opens it too. It
@@ -664,15 +704,15 @@ opens a centred form modal (DESIGN.md "Modals"), 560 px wide:
 │ ┌──────────────────────────────────────────────────────────┐ │
 │ │ When the laptop wakes, the first API call returns 401…   │ │
 │ └──────────────────────────────────────────────────────────┘ │
-│ Where   [ Your folder | Separate copy ]                      │
-│         A pass of one on its own branch from main. Sign Off  │
-│         lands each turn's work; Close Pass… opens one pull   │
-│         request, and main fast-forwards to it when it        │
-│         merges. Your folder is held until then.              │
+│ Where   [ Separate copy | Your folder, as a pass ]           │
+│         An ordinary task in its own copy, on a new branch.   │
+│         It lands by ampsio's delivery: the gate, a review,   │
+│         and a pull request.                                  │
 │         7 files already changed in your folder:              │
 │           M src/api/client.ts            M src/api/refresh.ts │
 │           ? docs/notes.md   … Show 4 More                    │
-│         These will be part of this task's work.              │
+│         These stay in your folder. The task starts without   │
+│         them.                                                │
 │                                                              │
 │ The task takes this chat's place. The chat becomes read-only.│
 │                                              Cancel  [Do It] │
@@ -680,28 +720,36 @@ opens a centred form modal (DESIGN.md "Modals"), 560 px wide:
 ```
 
 - **The brief** is written by the chat's agent when the modal opens (design spec §7.3; the call is adopted). A short
-  explore turn calls `write_brief`, and the brief streams into the field under "Writing the brief…". Typing in the
+  turn calls `write_brief`, and the brief streams into the field under "Writing the brief…". Typing in the
   field stops it. If the agent is unavailable or takes more than 60 seconds, the brief is the chat's digest plus the
   builder's last message, and a dimmed line says so.
-- **Where** is the Board's `PlacementChoice`, in the Board's words, defaulting to what the Board would propose, with
-  the reason. Each choice's line says where it works and **how it lands, before it starts**:
-  - **Your folder:** "A pass of one on its own branch from `main`. Sign Off lands each turn's work; Close Pass…
-    opens one pull request, and `main` fast-forwards to it when it merges. Your folder is held until then." On a
-    `local` project the last sentence reads "`main` fast-forwards to it when the pass closes."
+- **Where** is the Board's `PlacementChoice`, in the Board's words, with **Separate copy** picked by default
+  **(call)**. Your folder, as a pass, is the option for work that wants the pass's ceremony. Each choice's line says
+  where it works and **how it lands, before it starts**:
   - **Separate copy:** "An ordinary task in its own copy, on a new branch. It lands by ampsio's delivery: the gate,
     a review, and a pull request."
-  - **Uncommitted files** (Your folder only; design spec §7.4). The sheet **lists them**: "7 files already changed
-    in your folder:", then each path in mono with its git status letter, then "These will be part of this task's
-    work." The list shows five paths and folds the rest behind **Show 4 More**. The builder can cancel and commit
-    them first; nothing from before joins unseen.
+  - **Your folder, as a pass:** "A pass of one on its own branch from `main`. Sign Off lands each turn's work; Close
+    Pass… opens one pull request, and `main` fast-forwards to it when it merges. Your folder is held until then." On
+    a `local` project the last sentence reads "`main` fast-forwards to it when the pass closes."
+  - **Uncommitted files** (design spec §7.4). The sheet **lists them**: "7 files already changed in your folder:",
+    then each path in mono with its git status letter, then what happens to them, by place:
+    - Separate copy: "These stay in your folder. The task starts without them."
+    - Your folder: "These will be part of this task's work."
+
+    The list shows five paths and folds the rest behind **Show 4 More**. The builder can cancel and commit them
+    first; nothing from before joins or stays behind unseen.
   - **Refused** (Your folder): the choice stays in the list, disabled, with its reason and a link (DESIGN.md), and
-    Separate copy is picked instead:
+    Separate copy stays picked:
     - "Your folder is in use by the UI Workbench pass ‘Settings pass’." with Open UI Workbench
     - "A merge is in progress in your folder.", and the same for a rebase or a bisect
     - any other reason the folder refuses a pass today, in the daemon's words
 - **The agent and model** are the chat's, shown as one dimmed line. The account cannot change (design spec §6.4).
 - **A running turn** stops when the task starts, and keeps what it streamed. The modal says so above the buttons:
   "The turn that's running stops first."
+- **The footer line** says what happens to this Chat, by place:
+  - Separate copy: "The task takes this chat's place. The chat becomes read-only."
+  - Your folder: "The pass opens in its own tab. This chat stays open, and changes nothing while the pass holds
+    your folder."
 - **Do It** is the filled primary, and ⌘↩ in the modal presses it. It is enabled once the brief has text, so it
   can be pressed while the brief still streams.
 - **A refusal at submit** (the folder changed since the modal opened) shows beside the button, in red, in the
@@ -709,15 +757,15 @@ opens a centred form modal (DESIGN.md "Modals"), 560 px wide:
 - **While the Chat is in your terminal,** Do It… is disabled, with the tooltip "Hand back first" (design spec
   §6.7).
 
-### 8.2 The Task takes the Chat's place
+### 8.2 Where the Task opens
 
-Adopted in design spec §7.3, from the design review.
+**A Separate copy takes the Chat's place.** Adopted in design spec §7.3, from the design review.
 
 - **The Task takes the Chat's place in the strip** and takes focus. Its transcript opens with a dimmed link row,
   "From chat: Login fails after sleep", and then the brief as the builder's first message.
 - **The Chat becomes read-only** (`sealed`), and its tab closes. The strip doesn't fill twice as fast.
 - **The read-only Chat stays reachable** from the Task's "From chat" link, ⌘⇧T and ⌘K. Opened, it shows:
-  - its transcript, with one row at its end: "Started a task: Retry login on a 401 · Your folder · Open"
+  - its transcript, with one row at its end: "Started a task: Retry login on a 401 · Separate copy · Open"
   - in the composer's place, one line on `bg_0` with a 1 px `bg_2` border: "This chat handed its work to **Retry
     login on a 401**. It's read-only now.", with **Open Task** and **New Chat From This**
   - a session bar without Open in Terminal or Do It…; its `⋯` menu keeps Rename and Archive, and Archive is refused
@@ -728,16 +776,26 @@ Adopted in design spec §7.3, from the design review.
 - **Why the Chat doesn't stay as a tab:** the Task is a different agent session with its own memory, place and end,
   and the builder can keep talking through New Chat From This.
 
+**A pass of one opens beside the Chat** (design spec S15). The Chat is not sealed.
+
+- The pass opens in a new tab to the Chat's right and takes focus. Its transcript opens with the "From chat" link
+  row and the brief, as above.
+- The Chat keeps its tab and its composer. Its transcript gets one row: "Started a pass: Retry login on a 401 · Your
+  folder · Open".
+- While the pass holds the folder, the Chat's kind line reads "Chat · reads only: Your folder is in use by the pass
+  ‘Retry login on a 401’". Its turns still run and answer, and change nothing (design spec §7.3).
+- When the pass closes or is abandoned, the Chat writes in Your folder again.
+
 ### 8.3 File as Tasks
 
 The split button's menu item is a prompt shortcut (design spec §7.2). It sends a fixed message, visible in the
 transcript as the builder's turn: "File the work we agreed on as tasks on the Board." The agent calls `create_task`
-on the chat's scoped server, and each call renders as a task row with Open on Board and Undo (§7.3). The chat stays
+on the chat's builder server, and each call renders as a task row with Open on Board and Undo (§7.3). The chat stays
 a Chat.
 
 ### 8.4 What the builder sees of a Task
 
-| | Your folder (a pass of one, design spec S15) | Separate copy (a Board task, design spec S16) |
+| | Your folder (a pass of one, optional, design spec S15) | Separate copy (a Board task, design spec S16) |
 | --- | --- | --- |
 | Tab glyph | `folder` | `git-branch` |
 | Session bar | "Task · Your folder · lands on `main`" | "Task · Separate copy · `10db/retry-401`" |
@@ -748,6 +806,7 @@ a Chat.
 | Failed | a red ring and the alert icon; Retry Turn under the failure line, in `failureLine`'s words | a red ring and the alert icon; the failure line, with **Open on Board**, where Retry lives |
 | Changes | the Changes panel (§9) | the Changes panel (§9) |
 | Its other home | the UI Workbench lists it with the other passes, and its one page reads "Whole project" (design spec §7.3) | the Board: In progress, with "Open Session" in its drawer |
+| Its Chat | stays open beside it, and changes nothing while the pass holds the folder | read-only, reached from "From chat" |
 | In your terminal | the banner adds "Your folder stays held." | the banner adds "Its claims stay held." |
 
 ### 8.5 Landing
@@ -785,7 +844,8 @@ a Chat.
 
 ## 9. The Changes panel (a Task only)
 
-- **When it shows:** never on a Chat. On a Task, **Changes** in the session bar reads "Changes +41 −6" once anything
+- **When it shows:** never on a Chat. A Chat's edits show as edit rows with their diffs (§7.3), and Your folder's
+  uncommitted work is git's, as in a terminal. On a Task, **Changes** in the session bar reads "Changes +41 −6" once anything
   has changed, and ⌘⇧D toggles it. It **opens by itself once,** the first time a turn ends with changes, and only
   when the window is at least 1100 px wide **(call)**. After that the builder's choice holds for the tab.
 - **What it reads:**
@@ -834,7 +894,8 @@ It opens a **popover anchored to the button**, not a modal:
 
 > **Open in Terminal**
 > Continues this session in Terminal with Claude Code's own resume, in ~/Projects/ampsio. It runs outside 10db's
-> sandbox, without your settings or plugins. 10db won't touch this session until you hand it back.
+> sandbox, with this session's instructions, plugins and MCP servers, and without your settings file. 10db won't
+> touch this session until you hand it back.
 > **[Open in Terminal]** Cancel
 
 - **It warns every time (call),** in one short popover. The sandbox is why 10db exists, and Enter confirms, so the
@@ -843,8 +904,12 @@ It opens a **popover anchored to the button**, not a modal:
   - no agent session yet: "Send a message first"
   - a turn running: "Stop first"
   - starting, waiting on a card, or stopping: "Wait for the turn to settle"
-- **A Task** adds a line: "Your folder stays held." or "Its claims stay held." When the agent changed project setting
-  files, it also says "These project files changed and won't be loaded: `.claude/settings.json`."
+  - a Chat while another writer holds Your folder: "Your folder is in use by {holder}"
+- **A Chat** adds a line: "Your folder is held until you hand back." Its turns in the terminal can write, so the
+  Chat takes the hold for the whole takeover (design spec §7.5).
+- **A Task** adds a line: "Your folder stays held." or "Its claims stay held."
+- When the agent changed project setting files, it also says "These project files changed and won't be loaded:
+  `.claude/settings.json`." A project hook loads only when the builder approved its hash.
 - **The terminal app** is a setting, Settings › General: "Open sessions in Terminal / iTerm". Terminal is the
   default (design spec §7.5).
 
@@ -907,6 +972,7 @@ and `conversation/` forbids comparing a harness id.
 | `modelSwitch: 'next_turn'` | the model picker, between turns | `'none'`: the model as plain text |
 | `takeover` | Open in Terminal | hidden |
 | `costUsd` | the session's cost in the context meter's tooltip | no cost |
+| `judge` | `native` and `tendb`: nothing beyond the rows and cards of §7.3 and §7.7 | `rules`: one dimmed `xs` line under the session bar, with the `info` icon: "Judged by 10db's rules. Add an OpenRouter key in Settings › Decisions for 10db's judge." (trust line §4, §10) |
 
 **Plan on Codex** (`subagents: false`, design spec S8). Plan's header shows one dimmed `xs` line with the `info`
 icon, the DESIGN.md form for a condition that affects a view:
@@ -928,6 +994,7 @@ icon, the DESIGN.md form for a condition that affects a view:
 | modelSwitch | next_turn | next_turn | decided in the ACP spec |
 | takeover | yes | yes | decided in the ACP spec |
 | costUsd | metered kinds only | no | decided in the ACP spec |
+| judge | `native` (auto mode), or `tendb` on a gateway or an unsupported model | `tendb` (10db's judge, after T5) | `tendb` |
 
 The mockups' frame (c) shows the inject composer with its read receipt, beside an inset of the queue composer.
 
@@ -948,6 +1015,9 @@ The mockups' frame (c) shows the inject composer with its read receipt, beside a
 | **An error ended the session** (`ended_error`) | The red alert icon and a red ring on the tab; it counts as needs-you. The transcript ends with one line: "The session stopped: Claude Code exited with code 1. Send a message to start it again." with **Show Details**. |
 | **A turn the model refused** | A dimmed notice: "{label} declined to continue this turn." |
 | **Read-only Chat** (`sealed`) | §8.2: no tab of its own; opened from "From chat", ⌘⇧T or ⌘K, it shows the line with Open Task and New Chat From This, and no composer. |
+| **Your folder in use** | Another holder has the folder: a pass, another Chat's turn, a Chat in your terminal, or a task running in Your folder. {holder} names it: "the pass ‘Settings pass’", "the chat ‘Retry login’ in your terminal", "the task ‘Bump vite’". The kind line, dimmed: "Chat · reads only: Your folder is in use by {holder}". The Chat's turns run and change nothing; an edit shows as "10db stopped this: Your folder is in use by {holder}". No new color, and no tab state. |
+| **A call held back at a limit** | A dimmed row, "Held back: this would {limit}", with **Allow This** (§7.3). An escalated call is a card instead (§7.7). |
+| **Judged by 10db's rules** (`judge: 'rules'`) | The dimmed `info` line under the session bar (§11). |
 | **A model change** | The divider "Now on {label} · {model}" where the next turn starts (§7.1). |
 | **A Your-folder check failed** | A notice above the turn's footer: "Check failed: 2 errors in `client.ts`", with **Send to Agent**. The tab stays Ready. |
 | **In your terminal** (`taken_over`) | §10.2: the banner over a composer that holds messages. |
@@ -1019,12 +1089,12 @@ Buttons, menu items and names are Title Case; everything else is sentence case (
 | New tab button (tooltip) | New Session ⌘T |
 | Overflow button | All Tabs |
 | Tab menu | Rename · Open in Terminal · Archive · Close Tab · Close Other Tabs · Close Finished Tabs |
-| Fresh tab line | A chat reads {project} and changes nothing. When you're ready, Do It starts the work. |
-| Fresh tab account line | Uses {project}'s account. Reads the code and runs read-only commands; changes nothing. |
+| Fresh tab line | A chat works in {project}'s folder. For bigger work, Do It hands it to a task. |
+| Fresh tab account line | Uses {project}'s account. Reads the code, runs commands and searches the web. Asks before anything that crosses a limit. |
 | Section labels | Start from · Recent |
 | Keys | ⌘J goes to the next tab that needs you |
 | Find link | Find a Session ⌘K |
-| Session bar lines | Chat · reads {project}, changes nothing · Chat · read-only: its work moved to a task · Chat · in your terminal since {time} · Task · Your folder · lands on `{branch}` · Task · Separate copy · `{branch}` |
+| Session bar lines | Chat · Your folder · on `{branch}` · Chat · reads only: Your folder is in use by {holder} · Chat · read-only: its work moved to a task · Chat · in your terminal since {time} · Task · Your folder · lands on `{branch}` · Task · Separate copy · `{branch}` |
 | Placeholders | Ask about {project}… · Reply… · Add to this turn… · Queue for the next turn… · Reply, or paste a screenshot… · Held until you hand back… |
 | Hint line | ⌘↩ sends · Esc stops · / commands · @ files · ⌘↩ adds to this turn · ⌘↩ holds it |
 | Composer buttons | Attach · Send · Stop · Stop and Redo · Sign Off |
@@ -1035,16 +1105,17 @@ Buttons, menu items and names are Title Case; everything else is sentence case (
 | Working line | Working · {t} · Working · {t} · {verb} `{target}` · Thinking… · Writing… · Waking up the session… · Waiting for your answer · Waiting for {agent} {release} to download · Paused: usage limit, resumes {time} |
 | Task working line | {n} files changed so far · Show Log |
 | Plan row | Plan · {done} of {n} done · Now: {step} |
-| Tool rows | Read {n} files, searched {m} times · Reading `{path}` · Edited `{path}` · Edited {n} files · Created `{path}` · Deleted `{path}` · Moved `{a}` to `{b}` · Subagent: {preview} · Searched the web for ‘{q}’ · Fetched {host} · Used {name} · 10db stopped this · You denied this · Thought for {t} · Made a plan · {n} steps |
+| Tool rows | Read {n} files, searched {m} times · Reading `{path}` · Edited `{path}` · Edited {n} files · Created `{path}` · Deleted `{path}` · Moved `{a}` to `{b}` · Subagent: {preview} · Searched the web for ‘{q}’ · Fetched {host} · Used {name} · 10db stopped this: {reason} · You denied this · Held back: this would {limit} · Allow This · You allowed this · Thought for {t} · Made a plan · {n} steps |
 | Row actions | Show Full Diff · Open in Changes · Show All Output · Open Full Patch · Open on Board · Undo |
 | Output and diff limits | Showing the last 4 KB of {size} · Cut at 1,500 changed lines |
-| Task rows | Added to {column} · Renamed this session to ‘{title}’ |
-| Cards | Send Answer · Note for the agent (optional) · Also in your Inbox. · Allow once · Allow for this session · Always allow in this project · Deny · Start {task} now? · Start Now · Not Now |
-| Answered rows | You allowed this once · You allowed this for the session · You denied this · You answered: {choice} |
+| Task rows | Added to {column} · Changed {fields} · Renamed this session to ‘{title}’ · Started {task} |
+| Cards | Send Answer · Note for the agent (optional) · Also in your Inbox. · Allow once · Always in this project · Deny |
+| Answered rows | You allowed this once · You allowed this in the project · You denied this · You answered: {choice} |
+| Judge line | Judged by 10db's rules. Add an OpenRouter key in Settings › Decisions for 10db's judge. |
 | Links in markdown | Open {host} in your browser? · Open · Cancel |
-| Do It | Do It… · Do It · File as Tasks · Title · Brief · Where · Writing the brief… · The turn that's running stops first. · The task takes this chat's place. The chat becomes read-only. · Cancel · Hand back first · {n} files already changed in your folder: · These will be part of this task's work. · Show {n} More · A merge is in progress in your folder. · A rebase is in progress in your folder. · A bisect is in progress in your folder. |
+| Do It | Do It… · Do It · File as Tasks · Title · Brief · Where · Writing the brief… · The turn that's running stops first. · The task takes this chat's place. The chat becomes read-only. · The pass opens in its own tab. This chat stays open, and changes nothing while the pass holds your folder. · Cancel · Hand back first · {n} files already changed in your folder: · These will be part of this task's work. · These stay in your folder. The task starts without them. · Show {n} More · A merge is in progress in your folder. · A rebase is in progress in your folder. · A bisect is in progress in your folder. |
 | Do It place lines | §8.1 |
-| Links between tabs | From chat: {title} · Started a task: {title} · {place} · Open |
+| Links between tabs | From chat: {title} · Started a task: {title} · {place} · Started a pass: {title} · Your folder · Open |
 | Read-only Chat | This chat handed its work to {task}. It's read-only now. · Open Task · New Chat From This · Finish or abandon its task first. |
 | File as Tasks message | File the work we agreed on as tasks on the Board. |
 | Check notice | Check passed · {checks} · {t} · Check failed: {n} errors in `{file}` · Send to Agent |
@@ -1052,8 +1123,8 @@ Buttons, menu items and names are Title Case; everything else is sentence case (
 | Your folder landing | Signed off · landed as `{sha}` · {n} files · Close Pass… · Abandon Pass… · Running the gate in your folder… · Pushing… · Closing the pass… · Closed · pull request #{n} opened. `{branch}` fast-forwards to it when it merges. · Done · `{branch}` is at `{sha}`. |
 | Separate copy landing | Finished · in review: pull request #{n} · Open on Board · Open Pull Request · Done · merged as `{sha}`. · Messages reach this task while it runs. |
 | Changes | Changes · {n} files · against `{base}` at `{sha}` · All Turns · Last Turn · No changes yet. |
-| Terminal popover | Open in Terminal · Continues this session in {app} with {label}'s own resume, in {path}. It runs outside 10db's sandbox, without your settings or plugins. 10db won't touch this session until you hand it back. · Your folder stays held. · Its claims stay held. · Cancel |
-| Terminal refusals | Send a message first · Stop first · Wait for the turn to settle |
+| Terminal popover | Open in Terminal · Continues this session in {app} with {label}'s own resume, in {path}. It runs outside 10db's sandbox, with this session's instructions, plugins and MCP servers, and without your settings file. 10db won't touch this session until you hand it back. · Your folder is held until you hand back. · Your folder stays held. · Its claims stay held. · Cancel |
+| Terminal refusals | Send a message first · Stop first · Wait for the turn to settle · Your folder is in use by {holder} |
 | Takeover banner | In your terminal · This runs outside 10db's sandbox. 10db won't touch this session until you hand it back. · Hand Back · Copy Command |
 | Hand Back confirm | Is {label} closed in your terminal? · Hand Back · Cancel |
 | Hand Back notice | Turns from your terminal are in the agent's memory; they aren't shown here. |
@@ -1077,7 +1148,6 @@ Buttons, menu items and names are Title Case; everything else is sentence case (
 | A Task in a Separate copy that stays warm between turns | M9 (design spec §6.9). |
 | Agent modes, such as Claude's plan mode, and an effort control | Not in `AgentCapabilities`; a later field each. |
 | Folders in `@`, and a file's content sent with a mention | `git ls-files` lists files, and a mention is a path (design spec §11). |
-| Project skills in `/` | Chats load no settings (design spec §7.1, §15). |
 | Tab groups and pinned tabs | Order and the project tile are enough at 2 to 10 projects. |
 | Threaded review comments on diff lines | Quoting a line into the message covers the loop. |
 | A file path that opens the builder's editor | It needs an opener capability and an editor setting. |
@@ -1135,7 +1205,7 @@ The mockups were rendered with macOS Quick Look (no browser, no network) and che
 | 4 AI slop | 7 | 9 | Rows, not cards; no bubbles; one bold move. Left: nothing found. |
 | 5 Design system | 8 | 9 | Every color is a Selenized value, the diff included. Left: the Selenized Shiki theme must be built. |
 | 6 Responsive and a11y | 4 | 9 | §13. Left: the 420 px switcher needs a real-window check. |
-| 7 Unresolved decisions | — | 38 calls, 0 deferred | §19. Round 1 of the independent review is in §21. |
+| 7 Unresolved decisions | — | 41 calls, 0 deferred | §19. Round 1 of the independent review is in §21. |
 
 **Litmus checks, all passed:**
 
@@ -1153,8 +1223,8 @@ The mockups were rendered with macOS Quick Look (no browser, no network) and che
 | --- | --- | --- | --- |
 | 1 | ⌘T from the Board | "a fresh terminal tab" | ⌘T anywhere, with the selected project as the default |
 | 2 | Types "why does login fail after sleep", ⌘↩ | heard at once | the first line titles the tab; the working line names what it reads |
-| 3 | Watches it read and run a command | trust: it only looks | the "changes nothing" line; quiet read rows |
-| 4 | Agrees the fix, presses Do It… | in control | a brief written for them; where and how it lands, and which files come along, said before it starts |
+| 3 | Watches it read, run a command and search the web | trust: it asks only at a limit | quiet rows; Allow This only where a call would cross a limit |
+| 4 | Agrees the fix. A small one, the chat just makes; for this one, presses Do It… | in control | a brief written for them; where and how it lands, and which files come along or stay, said before it starts |
 | 5 | Goes to the browser while the Task works | free | the yellow ring and the notification when ready |
 | 6 | Opens the tab and reads Changes | oriented in seconds | Changes opens by itself once; the check line |
 | 7 | Quotes a line, "use the existing helper", ⌘↩ | precise | the line quote |
@@ -1170,7 +1240,7 @@ T5's research covered Claude desktop's Code tab, Zed, Cursor, VS Code and Supers
 | Queue mid-turn; a double Enter sends at once (Zed, Cursor) | Inject by default; queue only with `steer: 'queue'` | The Workbench already injects, with receipts. |
 | ⌘N for a new session (Claude desktop) | ⌘T | iTerm and Safari use it; ⌘N is a new window on macOS. |
 | An embedded terminal pane (Claude desktop) | Open in Terminal | One writer, the builder's own terminal, no PTY to maintain. |
-| A mode chosen at creation, such as local or worktree | Every session starts as a Chat; Do It chooses the place | One writing path (design spec S2). |
+| A mode chosen at creation, such as local or worktree | Every session starts as a Chat; Do It chooses the place | A Chat writes in Your folder itself (design spec S2); Do It is for bigger work, so no toggle is asked up front. |
 | Archive warns on a dirty worktree (Claude desktop) | A Task has no Archive; it ends as a task ends | A Task is a pass or a Board task, each with its own end. |
 | Inline line comments sent to the agent (Claude, Superset) | Quote a line into the message | The same loop, with no review threads. |
 | Colored diff backgrounds | Colored text on `bg_1` | Selenized exactly forbids mixed tints. |
@@ -1188,7 +1258,7 @@ Each call was made overnight, and each takes one line to overturn. "Adopted" mea
 4. The tabs live in the title bar, starting just after the traffic lights (adopted; §5.1).
 5. A tab takes its title's width up to 220 px; the selected one shrinks last; the × takes the state mark's place;
    `set_title` asks for 28 characters at most (§5.2, §5.4).
-6. A Task tab shows a folder or branch glyph; a Chat shows none (§5.2).
+6. A Task tab shows a folder or branch glyph; a Chat shows none, since every Chat works in Your folder (§5.2).
 7. The agent and model are not on the tab's face (§5.2).
 8. A tab's state is never color alone: a dot for Working, a dot and ring for Needs you and Ready, an icon for the
    rest; an error gets a red ring and counts as needs-you, as in the UI Workbench (§5.3).
@@ -1231,8 +1301,8 @@ Each call was made overnight, and each takes one line to overturn. "Adopted" mea
 
 33. The chat's agent writes the Do It brief, with the digest as the fallback; Do It is enabled once the brief has
     text (adopted: §7.3; §8.1).
-34. The Task takes the Chat's place in the strip, and the read-only Chat offers New Chat From This (adopted from the
-    design review: §7.3).
+34. A Task in a Separate copy takes the Chat's place in the strip, and the read-only Chat offers New Chat From This
+    (adopted from the design review: §7.3). A pass of one opens beside the Chat, which stays open (§8.2).
 35. Changes opens by itself once, at 1100 px and wider (§9).
 36. Clicking a diff line quotes it into the message, with no review threads (§9).
 
@@ -1240,6 +1310,12 @@ Each call was made overnight, and each takes one line to overturn. "Adopted" mea
 
 37. Open in Terminal warns every time, in a popover; the takeover banner is neutral, not orange (§10).
 38. Sessions folds the sidebar under 900 px, as the UI Workbench does (§13.2).
+
+**The trust line**
+
+39. Do It picks Separate copy by default; Your folder, as a pass, is the option (§8.1).
+40. A call held back at a limit is a dim row with Allow This, not a card and not a tab state (§7.3, §5.3).
+41. "Your folder in use" is a dimmed kind line, not a tab state or a color (§4, §12).
 
 ## 20. Live checks, open points, and DESIGN.md for M5a
 
@@ -1313,3 +1389,20 @@ the condensed list.
 | 27 | Done covered a signed-off pass that isn't closed, so Close Finished Tabs could hide a pass that still holds the folder | §5.3: the new **Signed off** state, a dimmed check, spoken "signed off: close the pass to land it"; green Done only for merged work or a closed pass on a `local` project; why this differs from the Workbench. §5.5: Close Finished Tabs skips any open pass. §8.5: Close Pass… becomes the session bar's filled primary. Frame a's legend and the states strip |
 | Nit 1 | The Esc rule in §5.8 left out waiting cards | §5.8: "a menu, modal, select or waiting card" |
 | Nit 2 | Frame e's footer ran into Cancel | Mockups: the modal footer has a gap and wraps |
+
+## 22. The trust line's changes
+
+Design spec v4 (§19 there) applies the trust line's §13. Here:
+
+| Change | Where |
+| --- | --- |
+| A Chat writes in Your folder, holding it while a turn runs, and commits, branches and opens a pull request through its git tools | §0, §2, §4, §5.2, §6.1, §6.2, §7.3, §8 intro, §14 |
+| Another writer holds the folder: the Chat reads only | §4, §5.3, §8.2, §10.1, §12, §14 |
+| Do It: Separate copy by default, sealing the Chat; Your folder, as a pass, optional and not sealing | §5.5, §5.6, §8.1, §8.2, §8.4, §14, §19 call 39 |
+| Uncommitted files stay in Your folder for a Separate copy | §8.1, §14 |
+| Every builder tool present; removing or retiring the builder's work asks; `start_task` raises no card | §7.3, §7.7, §5.3, §14 |
+| Cards only for escalations and 10db's judge; Allow once, Always in this project, Deny | §7.7, §14 |
+| A judged denial is a dim row with Allow This | §2, §7.3, §12, §14, §19 call 40 |
+| The web in every session | §6.1, §7.3 (`web` row) |
+| The builder's setup: skills and commands in `/`; the terminal carries the session's setup | §7.9, §10.1, §14, §15 |
+| `capabilities.judge`, and the `rules` line | §11, §12, §14 |

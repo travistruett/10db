@@ -4,8 +4,8 @@
 > superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** One adapter seam. `AgentAdapter.open(spec)` replaces `start` and `startShape`, every adapter reports
-`AgentCapabilities`, and `providerOf` becomes a lookup table, so a later agent is one more adapter and one more row.
-The builder sees no change.
+`AgentCapabilities`, `judge` included, and `providerOf` becomes a lookup table, so a later agent is one more adapter
+and one more row. The builder sees no change.
 
 **Architecture:** `SessionAdapter` is renamed `AgentAdapter`. `SessionSpec` and `ShapeSessionSpec` merge into
 `AgentSessionSpec`: a shared core plus a `profile` union (`lane` or `explore`). Each adapter dispatches on
@@ -15,11 +15,13 @@ reader of a capability is the runner's read-back, which stops branching on the p
 
 **Tech Stack:** TypeScript, zod 4.6.7, Vitest, ESLint flat config.
 
-**Spec:** `docs/superpowers/specs/2026-11-11-10db-sessions-design.md` (v3): §3 S5 and S6, §5.1 (the seam),
-§5.3 (capabilities), §12 (M2b), §13 (pure rung: the capability tables and the invariant), §14 (the M2b record).
-Research: `docs/architecture/research/2026-11-11-sessions-research.md` T1 §3 and §4.
+**Spec:** `docs/superpowers/specs/2026-11-11-10db-sessions-design.md` (v4): §3 S5 and S6, §5.1 (the seam),
+§5.3 (capabilities, `judge` included), §12 (M2b), §13 (pure rung: the capability tables and the invariant), §14 (the
+M2b record). Trust line: `docs/superpowers/specs/2026-11-12-10db-trust-line-design.md` §4 (judges) and §12 (T3
+follows this milestone and reads `judge`). Research: `docs/architecture/research/2026-11-11-sessions-research.md` T1
+§3 and §4.
 
-## Starting point: M2a has merged
+## Starting point: T2 and M2a have merged
 
 M2a (`2026-11-12-10db-sessions-m2a-claude-core.md`) leaves these. Task 2, Step 1 checks them.
 
@@ -46,6 +48,8 @@ M2a (`2026-11-12-10db-sessions-m2a-claude-core.md`) leaves these. Task 2, Step 1
   - `fake-plan-script.ts` holds `scriptedShapeBehaviour`.
   - `fake-adapter.ts` keeps the class, its records and a thin `start` and `startShape`.
 - **What M2a hands to M2b:** the fake's "one open handle" assertion, keyed by provider session id (Task 3).
+- **T2** (`2026-11-12-10db-trust-t2-setup-comes-along.md`) put the builder's setup on both profiles' launch options.
+  M2b moves those options with the rest of the spec and changes none of them.
 
 ## Global Constraints
 
@@ -82,7 +86,11 @@ Each is marked **(call)** where it is made.
 5. **The `Shape*` type names stay** (`ShapeImage`, `ShapeToolRequest`, `ShapeVerdict`, `ShapeAgentDefinition`).
    Renaming them would touch Plan's code for no behaviour. The core uses them as they are.
 6. **`takeoverCommand` is added in M7**, with the takeover it builds (§7.5).
-7. **Capabilities take `Pick<AccountExpectation, 'kind'>`.** Each call site passes the expectation it already has.
+7. **Capabilities take `Pick<AccountExpectation, 'kind'>` and the session's model.** The seam is
+   `capabilities(account: Pick<AccountExpectation, 'kind'>, model: string | null): AgentCapabilities`, since
+   `judge` depends on the model (spec §5.3). Each call site passes the expectation it already has and the model it
+   opens with, or null. M2b's tables read the kind only; T3 makes `judge` read the model without changing the
+   seam. A stub that ignores the model (`(a) => capabilitiesOf(a.kind)`) still fits the type.
 8. **The pinned and unavailable adapters take the harness's capabilities function.** A copy that is still
    downloading still reports what its agent can do.
 9. **ESLint enforces S5 in the desktop.** `providerOf` and `Provider` can't be imported under `apps/desktop/src`.
@@ -94,6 +102,14 @@ Each is marked **(call)** where it is made.
     the fake runs under: the resume id, or the one it mints. A handle counts as open until its `ended` is emitted. A
     refused start never opens. An existing test that trips it is a finding, not a test to loosen: it would be two
     writers on one agent session.
+13. **`judge` is reported by account kind, with what judges a call today** (trust line §4, §12):
+    - `native` on `claude_subscription`, `anthropic_api_key` and `bedrock`, where auto mode runs.
+    - `rules` on `gateway` and `codex_signin`. The trust line gives them `tendb` once 10db's judge exists (T5), and
+      Codex `native` if live check L1 passes. Until then the guard's rules are what judges them.
+    - `tendb` is in the type now, so T3 and T5 change values, not the contract.
+    - The model half (a model auto mode doesn't support moves a session to `tendb`) is T3's, with the policy that
+      knows the models. The seam already takes the model (call 7); M2b's tables ignore it. Nothing reads `judge` in
+      M2b.
 
 ## Review Focus
 
@@ -130,10 +146,11 @@ Each is marked **(call)** where it is made.
   - `SteerMode = { Inject: 'inject', Queue: 'queue' } as const`
   - `ModelSwitch = { NextTurn: 'next_turn', None: 'none' } as const`
   - `ImageFormat = { Png: 'png', Jpeg: 'jpeg', Webp: 'webp' } as const`
+  - `JudgeKind = { Native: 'native', Tendb: 'tendb', Rules: 'rules' } as const` (trust line §4)
   - `AgentCapabilitiesDto`, a `z.object` with exactly §5.3's fields:
     - `harness: z.enum(Provider)`, `label: z.string().min(1)`, `steer: z.enum(SteerMode)`
     - `receipts`, `readBack`, `slashCommands`, `plan`, `reasoning`, `subagents`, `takeover`, `costUsd`: booleans
-    - `images: z.array(z.enum(ImageFormat))`, `modelSwitch: z.enum(ModelSwitch)`
+    - `images: z.array(z.enum(ImageFormat))`, `modelSwitch: z.enum(ModelSwitch)`, `judge: z.enum(JudgeKind)`
 - Produces, in `apps/daemon/src/sessions/capabilities.ts`:
   - `export type AgentCapabilities = AgentCapabilitiesDto` (re-exported from `sessions/types.ts` in Task 2)
   - `claudeCapabilities(kind: SupportedAccountKind): AgentCapabilities`
@@ -153,11 +170,11 @@ const CLAUDE = {
 const CODEX = { ...CLAUDE, harness: 'codex', label: 'Codex', readBack: true, subagents: false, costUsd: false };
 
 it.each([
-  ['claude_subscription', { ...CLAUDE, costUsd: false }],
-  ['anthropic_api_key', { ...CLAUDE, costUsd: true }],
-  ['bedrock', { ...CLAUDE, costUsd: true }],
-  ['gateway', { ...CLAUDE, costUsd: true }],
-  ['codex_signin', CODEX],
+  ['claude_subscription', { ...CLAUDE, costUsd: false, judge: 'native' }],
+  ['anthropic_api_key', { ...CLAUDE, costUsd: true, judge: 'native' }],
+  ['bedrock', { ...CLAUDE, costUsd: true, judge: 'native' }],
+  ['gateway', { ...CLAUDE, costUsd: true, judge: 'rules' }],
+  ['codex_signin', { ...CODEX, judge: 'rules' }],
 ] as const)('%s runs on an agent that can do what spec §5.3 says', (kind, expected) => {
   expect(capabilitiesOf(kind)).toEqual(expected);
   expect(AgentCapabilitiesDto.parse(capabilitiesOf(kind))).toEqual(expected);
@@ -180,7 +197,8 @@ Run: `pnpm --filter @10db/daemon exec vitest run src/sessions/capabilities.test.
 Expected: FAIL, because `./capabilities` does not exist.
 
 - [ ] **Step 3: Implement** the contracts file and `capabilities.ts` with the values above. `costUsd` is
-  `isMetered(kind)` for Claude and `false` for Codex. Export the DTO and the three `as const` objects from the
+  `isMetered(kind)` for Claude and `false` for Codex. `judge` is call 13's: `rules` for `gateway` and for Codex,
+  `native` for the other Claude kinds. Export the DTO and the three `as const` objects from the
   contracts index. Register `'agent-capabilities-dto': AgentCapabilitiesDto` (call 10), then run
   `pnpm --filter @10db/contracts generate`.
 
@@ -190,14 +208,15 @@ Run: `pnpm --filter @10db/daemon exec vitest run src/sessions/capabilities.test.
 Expected: PASS.
 
 Then set `receipts: false` in `codexCapabilities` and run again. Expected: FAIL on every `codex on …` row of the
-invariant, and on the `codex_signin` table row. Revert the change. Run once more: PASS.
+invariant, and on the `codex_signin` table row. Revert the change. Run once more: PASS. Then give `gateway` the
+`native` judge and run again. Expected: FAIL on the `gateway` row only. Revert it.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add packages/contracts/src/agent-capabilities.ts packages/contracts/src/index.ts packages/contracts/src/json-schema.ts packages/contracts/generated/agent-capabilities-dto.schema.json apps/daemon/src/sessions/capabilities.ts apps/daemon/src/sessions/capabilities.test.ts apps/daemon/src/sessions/index.ts && git commit -m 'feat(daemon): each agent reports what it can do, and inject requires receipts
 
-Value: protects=the per-provider capability table of spec 5.3 and the rule that an adapter that injects reports receipts; fails_when=a capability flips (Codex loses readBack, a Claude kind gains costUsd wrongly) or an adapter injects without receipts; why_new=no capability exists yet; no_claim=that an adapter behaves as its table says (its own tests cover that)
+Value: protects=the per-provider capability table of spec 5.3, the judge each account kind has today, and the rule that an adapter that injects reports receipts; fails_when=a capability flips (Codex loses readBack, a Claude kind gains costUsd wrongly, a gateway claims auto mode) or an adapter injects without receipts; why_new=no capability exists yet; no_claim=that an adapter behaves as its table says (its own tests cover that), or the judge per model (T3)
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>'
 ```
@@ -287,7 +306,7 @@ export type LaneSessionSpec = AgentSessionSpec & { readonly profile: LaneProfile
 export type ExploreSessionSpec = AgentSessionSpec & { readonly profile: ExploreProfile };
 
 export interface AgentAdapter {
-  capabilities(account: Pick<AccountExpectation, 'kind'>): AgentCapabilities;
+  capabilities(account: Pick<AccountExpectation, 'kind'>, model: string | null): AgentCapabilities; // call 7
   open(spec: AgentSessionSpec): SessionHandle;
   complete(spec: CompletionSpec): Promise<string>;
   probeAccount(probe: AccountProbeSpec): Promise<SeenAccount>;
@@ -521,11 +540,14 @@ Then prove that row reads the capability. Set `readBack: true` in `claudeCapabil
 
 - Every agent is an `AgentAdapter` (`apps/daemon/src/sessions/types.ts`). `open(spec)` starts every session of
   every kind; `start` and `startShape` are gone. `AgentSessionSpec` is a core shared by every session plus a
-  `profile`: `lane` (a task's session: workstream, sequence, allowed tools, permission mode) or `explore` (a
-  read-only conversation: system prompt, tool lists, agents). Each adapter switches on the profile.
+  `profile`: `lane` (a task's session: workstream, sequence, allowed tools, permission mode) or `explore` (the
+  engine's attended conversation, a chat or Plan: system prompt, tool lists, agents). Each adapter switches on the
+  profile.
 - Each adapter reports `AgentCapabilities` (`AgentCapabilitiesDto` in `@10db/contracts`): harness, label,
   steer (`inject` or `queue`), receipts, read-back, picture formats, slash commands, plan, reasoning, subagents,
-  model switching, takeover and dollar cost. The tables are in `sessions/capabilities.ts`, per spec §5.3 of
+  model switching, takeover, dollar cost, and `judge`: who judges a call against the trust line's policy
+  (`native`, `tendb` or `rules`, `docs/superpowers/specs/2026-11-12-10db-trust-line-design.md` §4). M2b reports
+  today's judge by account kind; the trust line's T3 adds the model, and T5 adds 10db's judge. The tables are in `sessions/capabilities.ts`, per spec §5.3 of
   `docs/superpowers/specs/2026-11-11-10db-sessions-design.md`.
 - A capability says what the agent can do, not what 10db has wired yet. Takeover is built with Open in Terminal,
   model switching between turns with the explore engine, and Codex's slash commands with streaming. Nothing reads

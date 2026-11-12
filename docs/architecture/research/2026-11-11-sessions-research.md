@@ -1213,3 +1213,85 @@ Coverage is partial. The docs pages I could fetch were thin for most products; a
 8. Queue mid-turn messages; double-Enter sends now; Esc stops.
 9. Shortcuts: Cmd+N new, Cmd+W close, Ctrl+Tab and Cmd+Shift+[ ] switch, Cmd+Shift+D diff, Ctrl+` terminal, Open in editor/terminal from any path.
 10. Concurrency: no product states a cap (UNKNOWN); set a soft cap in settings and show the running count.
+
+## Live checks (2026-11-12)
+
+Run on the builder's Mac with 10db's pinned binaries (`~/Library/Application Support/10db/tools/`: Claude Code
+`2.1.302`, Codex `0.167.0`) and the accounts in 10db's database, read only. Spec: Sessions §16. Checks 4 and 5
+(Tauri tabs, streamdown) were not part of this run. The trust line's L1 to L4 are in
+`2026-11-12-trust-line-research.md`, "Live checks".
+
+### S1: `claude --resume <id>` on a Plan session: pass, after onboarding
+
+What ran: the newest Plan session in 10db's database (a `shapes` session on the Bedrock account,
+`provider_session_id` from `sessions`), opened in a pseudo-terminal from its cwd with the account's
+`CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_USE_BEDROCK=1`, `AWS_REGION`, its Keychain bearer token and `claude --resume <id>
+--setting-sources '' --strict-mcp-config --model <its launch id>`. No turn was sent.
+
+- **In the account's own config dir, it stops at first-run onboarding.** The screen was Claude Code's
+  "Let's get started" theme picker: the dir's `.claude.json` has no `hasCompletedOnboarding` (and no
+  `projects` trust entries), because 10db has only ever run headless sessions in it. Nothing was answered, and the
+  transcript file was unchanged.
+- **Past onboarding, it resumes.** With a scratch config dir holding a copy of the transcript at the same
+  `projects/<cwd slug>/<id>.jsonl` path and `{"hasCompletedOnboarding": true, "theme": "dark", "projects":
+{"<cwd>": {"hasTrustDialogAccepted": true}}}`, the same command opened the session: the conversation's last
+  messages rendered above an empty prompt, mode "auto mode on", no error. The copy was deleted afterwards.
+- **The pinned binary updated the builder's own install.** The interactive run wrote `.last-update-result.json`
+  (`version_from: "2.1.302"`, `version_to: "2.1.322"`) and re-linked `~/.local/bin/claude` to the builder's
+  `2.1.322` (already their version, so nothing changed for them). The pinned copy stayed `2.1.302`. 10db's
+  `AUTOUPDATE_OFF` (`environment/pinned-tools.ts`) was not set in this run.
+
+Meaning for the design: Takeover (§7.5) works on the pinned binary with the account's directory, the flags and
+the id. Before it opens Terminal on an account dir, 10db must mark onboarding done in that dir's `.claude.json`
+(and trust the cwd), or the builder lands in Claude Code's first-run screens; and the command must carry
+`DISABLE_AUTOUPDATER=1`.
+
+### S2: `codex resume <id>` on an app-server thread: pass, after one dialog
+
+What ran: a thread started over `codex app-server` (L1's) in the ChatGPT-plan account's `CODEX_HOME`, then
+`CODEX_HOME=<account dir> codex resume <thread id> -c check_for_update_on_startup=false` in a pseudo-terminal from
+the thread's cwd.
+
+- **Folder not in `config.toml`:** "Trust this folder? ... Your trust decision will be saved. 1. Trust and
+  continue". A `-c projects."<cwd>".trust_level="untrusted"` override did not stop it.
+- **Folder pinned `untrusted` in `config.toml`** (as `sessions/codex-home.ts` writes it): "Config, hooks, and
+  exec policies from untrusted folders stay disabled. ... Opening will not change saved trust. 1. Open
+  restricted". After Enter, the thread opened with its full history (both user messages, the Auto-review
+  rejection, the command and its output) above an empty prompt.
+- **What it writes:** the TUI created `config.toml` in the account home with `[tui]
+screen_reader_detection_done = true`, and opening appended a `thread_settings_applied` event to the rollout.
+  The account's `config.toml` was deleted afterwards, as it had not existed before; the rollout was left.
+
+Meaning for the design: Hand-off to the terminal works on app-server threads. The builder sees one "Open
+restricted" choice first; 10db's terminal text should say so. The TUI writes to the account's `config.toml`;
+`codex-home.ts` keeps only `projects` and `hooks.state` when it rewrites the file, so a `[tui]` table is dropped
+on the next session start, which is harmless.
+
+### S3: a read-only Codex thread refuses a write, and the hook runs: pass
+
+What ran: `codex app-server` on the account's `CODEX_HOME` with a temporary `config.toml` in 10db's shape: the
+cwd pinned `untrusted` and one `PreToolUse` command hook (a scratch script that logs its input and exits 0),
+trusted by writing the `currentHash` that `hooks/list` reported into `hooks.state` (as `checkGuardHook` does).
+`thread/start` with `sandbox: "read-only"`, `approvalPolicy: "never"`; the turn asked for `echo hi > note.txt`.
+
+- `hooks/list` reported the hook `trustStatus: "untrusted"` until the hash was recorded, then it ran.
+- **The hook ran first:** `hook/started` and `hook/completed` notifications, and the script received
+  `{hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: {command: "echo hi > note.txt"},
+permission_mode: "bypassPermissions", cwd}`. `approvalPolicy: never` reaches the hook as `bypassPermissions`.
+- **The sandbox refused the write:** "zsh:1: operation not permitted: note.txt"; no file was created; the model
+  reported the error and stopped. No request reached the client.
+- The temporary `config.toml` was deleted afterwards.
+
+Meaning for the design: a read-only thread for Plan keeps 10db's hook in front of every call and the kernel
+sandbox behind it. The hook sees the write before the sandbox refuses it, so 10db's guard can ask (card) or deny
+there; if it allows, the sandbox still refuses.
+
+### S6: the OpenCode handshake: not run
+
+OpenCode is not installed on this Mac (`opencode` not on `PATH`, no `~/.opencode`). The ACP spec's handshake
+remains as written in T3 §3.
+
+### Left in the account homes
+
+The Codex threads these checks started (L1, S3) remain in the ChatGPT-plan account's `CODEX_HOME/sessions`,
+with the runtime files Codex creates there on first use. Nothing was written to 10db's database or settings.

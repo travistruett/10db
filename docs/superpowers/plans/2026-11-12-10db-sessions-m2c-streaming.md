@@ -35,7 +35,10 @@ new events are only logged: no UI reads them until M3 and M4b.
 - §11 (Write cards' reads)
 - §12 (M2c), §13 (pure, pipeline and live rows), §14 (the M2c record)
 
-## Starting point: M1, M2a and M2b have merged
+## Starting point: M1, M2a, M2b and the trust line's T3 have merged
+
+- **T3** (`2026-11-12-10db-trust-t3-policy-and-auto-mode.md`): the limits, named in `trust/limits.ts` and exported
+  from `@10db/contracts`, and auto mode on lanes and passes. Call 23 reads them. Find the names in T3's plan.
 
 - **M2b** (`2026-11-12-10db-sessions-m2b-adapter-seam.md`):
   - `AgentAdapter.open(spec: AgentSessionSpec)`
@@ -156,6 +159,16 @@ Each is marked **(call)** where it is made.
       join, once the hook input is shown to name the call.
 22. **jsdiff is bounded** by `maxEditLength: 10_000` and `timeout: 100` ms. Past either bound, the card shows the
     whole new text as added, `truncated`.
+23. **`deniedBy` gains `judge`, and the view gains `limit` and `soft`** (spec §5.2, trust line §5). A call the
+    session's judge denied is `judge`.
+    - **Soft:** a denial by one of the policy's soft-deny lines. Each line T3 writes names its limit (trust line
+      §3), so the denial's reason maps to a `LimitName` by that name, through a pure table in
+      `sessions/judge-denial.ts`. `soft: true`; the builder's go-ahead clears it, so the row offers Allow This.
+    - **Hard:** one of auto mode's `$defaults` hard denies, or a reason that names no limit. `soft: false`,
+      `limit: null`. No Allow This, so a go-ahead never loops.
+    - The event that carries an auto-mode denial is the one T3's plan records. Task 7's row is written from it once
+      T3 has merged; if T3 records none, `deniedBy` stays `10db` for these calls and a follow-up task joins them.
+    - 10db's own judge (T5) sets all three later. Codex leaves them null, as in call 21.
 
 ## Review Focus
 
@@ -190,7 +203,7 @@ Each is marked **(call)** where it is made.
     - `ToolCallStatus = { Running: 'running', Done: 'done', Failed: 'failed', Denied: 'denied' } as const`
     - `ToolCallKind = { Command, Edit, Read, Search, Mcp, Subagent, Web, Other }` (values `'command'` … `'other'`)
     - `EditChange = { Add: 'add', Delete: 'delete', Update: 'update', Move: 'move' } as const`
-    - `DeniedBy = { Builder: 'builder', TenDb: '10db' } as const`
+    - `DeniedBy = { Builder: 'builder', TenDb: '10db', Judge: 'judge' } as const` (call 23)
     - `OUTPUT_TAIL_CHARS = 4_096` and `PREVIEW_CHARS = 200` (call 3)
   - **`ToolCallHunk`:** `z.object({ oldStart, oldLines, newStart, newLines })`, each `z.int().nonnegative()`, plus
     `before: z.string()` and `after: z.string()`.
@@ -203,9 +216,12 @@ Each is marked **(call)** where it is made.
     - `durationMs: z.int().nonnegative().nullable()`
     - `parentId: z.string().min(1).nullable()`
     - `refusal: z.string().nullable()`: 10db's reason, when the guard or the broker denied the call
-    - `deniedBy: z.enum(DeniedBy).nullable()`: `builder` only when the builder answered Deny on a card, `10db` for
-      every other denial. It is set only when `status` is `denied`, and null when the agent gives no way to tell
-      (call 21).
+    - `deniedBy: z.enum(DeniedBy).nullable()`: `builder` only when the builder answered Deny on a card, `judge`
+      when the session's judge stopped it at a limit, `10db` for every other denial (the guard's coordination rules
+      and the `rules` floor). It is set only when `status` is `denied`, and null when the agent gives no way to
+      tell (calls 21, 23).
+    - `limit`: T3's limit name, nullable; set only with `deniedBy: 'judge'` (call 23)
+    - `soft: z.boolean().nullable()`: set only with `deniedBy: 'judge'`; whether the builder's go-ahead clears it
   - **The variants:**
 
 | `kind` | fields |
@@ -227,6 +243,7 @@ Each is marked **(call)** where it is made.
   - a `startedAt` that isn't ISO
   - `durationMs: -1`
   - `deniedBy: 'agent'`
+  - a `limit` with `deniedBy: '10db'`
 
 - [ ] **Step 2: Run it and watch it fail**
 
@@ -527,7 +544,8 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>'
 - Produces:
   - **The input and result shapes:**
     - `interface ClaudeToolUse { readonly id: string; readonly name: string; readonly input: unknown; readonly parentId: string | null }`
-    - `interface ClaudeDenial { readonly by: DeniedBy; readonly reason: string }`
+    - `interface ClaudeDenial { readonly by: DeniedBy; readonly reason: string; readonly limit: LimitName | null; readonly soft: boolean | null }`
+      (`LimitName` is T3's; `limit` and `soft` are set only when `by` is `judge`, call 23)
     - `interface ClaudeToolResult { readonly isError: boolean; readonly denial: ClaudeDenial | null; readonly content: unknown }`.
       Its `content` is a string, or an array of blocks of which only `{ type: 'text', text }` is read.
   - **`claudeToolCall(use, ctx: { readonly startedAt: Date; readonly before: (path: string) => BeforeText }): ToolCallView`.**
@@ -855,6 +873,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>'
       `denied`, `refusal: 'M'`, `deniedBy: 'builder'`.
     - **A broker refusal.** `canUseTool` answers a 10db refusal (`by: '10db'`). The call is `denied` with
       `deniedBy: '10db'`.
+    - **An auto-mode soft deny** (call 23), in the shape T3's plan records for it, whose reason names the "sends
+      data out" line. The call is `denied`, `deniedBy: 'judge'`, `limit` that limit, `soft: true`.
+    - **A `$defaults` hard deny.** The call is `denied`, `deniedBy: 'judge'`, `limit: null`, `soft: false`.
+    - **`judge-denial.test.ts`** (pure): one row per limit line T3 writes, plus a reason naming none (hard).
   - **`inbox/permission-broker.test.ts`:**
     - **A protected-path read** gives a decision with `by: '10db'`.
     - **A card answered Deny** gives `by: 'builder'`.

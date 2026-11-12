@@ -5,7 +5,8 @@
 
 **Goal:** One engine owns the live session of every explore conversation by the §6.7 state table, streams agent
 text and tool calls to the UI as live frames with offsets, keeps what an early end streamed, queues durably with
-"Send now" after a restart, and runs Plan; Plan streams, shows tool cards and keeps its queue.
+"Send now" after a restart, and runs Plan; Plan streams, shows tool cards and keeps its queue. Plan's own session
+runs in auto mode under the trust line's attended policy, with the web (trust line §8, §12).
 
 **Architecture:** A pure reducer (`conversation/explore-state.ts`) turns (state, event, facts) into the next state
 and a list of effects; the engine (`conversation/explore-engine.ts`) applies the effects, one at a time per
@@ -22,10 +23,18 @@ Playwright (WebKit).
 and the 32 KB body cap, §6.3–§6.8, §5.2 (full output on disk, `ToolCallView.refusal`), §10 (DTOs, the conversation
 routes, the events), §8 (state words), §13 (the reducer, the delta reducer, the WebSocket test, the restart rows),
 §14 (the M4b record). The coordinator's additions: M4b writes full output and patches to disk, closes reasoning
-items, and adds `SessionHandle.setModel`.
+items, and adds `SessionHandle.setModel`. Trust line (`docs/superpowers/specs/2026-11-12-10db-trust-line-design.md`)
+§5 (attended), §8 (Plan's row) and §12 ("Plan gets it in Sessions M4b"): Task 16b.
 
 **Needs:** M4a (stores, ids, the delivery library, `AgentSessionCore.conversationId`) and M3 (the kit) merged; so
-M2a–M2c too. Consumed from them:
+M2a–M2c, and the trust line's T2 and T3, too. Consumed from them:
+
+- T2 (`2026-11-12-10db-trust-t2-setup-comes-along.md`): the builder's setup on Plan's session (instructions,
+  skills and plugin dirs), and the Settings › Trust switches, Web among them.
+- T3 (`2026-11-12-10db-trust-t3-policy-and-auto-mode.md`): `TrustPolicy` and the `trust/` module that builds it
+  for a surface, attended or not; the auto-mode settings it renders (`"$defaults"` first, then the policy's
+  lines, the limits as `soft_deny`); `capabilities.judge` with the model; the guard slimmed to coordination and the
+  `rules` floor; auto mode for lanes and passes. Task 16b uses them for Plan. Find the names in T3's plan.
 
 - M2b: `AgentAdapter` (`open`, `capabilities`, `readClientUuids`), `ExploreSessionSpec`, `AgentCapabilitiesDto`
   (`steer`, `receipts`, `readBack`, `modelSwitch`), and the fake's `FakeSessionClashError`, which already refuses two
@@ -66,8 +75,9 @@ M2a–M2c too. Consumed from them:
 - No label names a provider except one that shows `capabilities.label`. The UI never imports `providerOf`
   (M2b's lint rule).
 - These stay unmodified and green: `runner/pass-lane.test.ts`, `test/crash-recovery.test.ts`,
-  `shape/confinement.test.ts`, `sessions/codex-guard.test.ts`, `sessions/codex-session.test.ts`,
-  `apps/desktop/e2e/workbench.spec.ts`. `apps/desktop/e2e/shape.spec.ts` stays green; Task 18 lists the lines that
+  `sessions/codex-guard.test.ts`, `sessions/codex-session.test.ts`, `apps/desktop/e2e/workbench.spec.ts`.
+  `shape/confinement.test.ts` stays green through Task 16; Task 16b changes only the rows the trust line retires,
+  and names each. `apps/desktop/e2e/shape.spec.ts` stays green; Task 18 lists the lines that
   change.
 - Plan on a ChatGPT account stays refused (M5b lifts it).
 - Code style as in M4a's plan: `as const` objects, no `enum`, no parameter properties, no `any`, `!` or unvalidated
@@ -185,6 +195,23 @@ Each is marked **(call)** where it is used.
     the union `{ text } | { kind: 'model_change', label, model }`, which M5a's Task 1 then finds in place.
 33. **`ConversationDto.costUsd` is filled here:** the sum of the conversation's sessions' `cost_usd`, null unless
     `capabilities.costUsd`. M5a reads it.
+34. **Plan's session gets auto mode here, after it moves onto the engine** (trust line §12), so its session code is
+    rewritten once. Where `capabilities.judge` is `native`, Plan runs in `permissionMode: 'auto'` with T3's attended
+    policy rendered as `settings.autoMode`. On `tendb` and `rules` it keeps `default` mode and today's hook rules:
+    no adapter reports `tendb` until T5, which then sends Plan's calls to 10db's judge (roadmap T5 row). The switch
+    over `judge` is exhaustive, with a `tendb` branch now. Plan still has no edit tools: that is its role, not a
+    security line (trust line §8). Its sandbox stays read-only. Its `.env` behaviour stays as
+    today: M4b lands before T4, which builds the attended and unattended `.env` split and its switch and extends
+    them to Plan (spec §7.1).
+36. **Plan says how it is judged.** On `rules` only (T5 revisits `tendb`), the kit's `JudgeLine` shows the UI spec's
+    dimmed line, "Judged by 10db's rules. Add an OpenRouter key in Settings › Decisions for 10db's judge." It lives in
+    `apps/desktop/src/conversation/`, so Sessions reuses it in M5a.
+37. **Plan's list passes the kit's `onAllow`** (M3 call 8), which posts "Go ahead: {title}" as the builder's message,
+    so a soft deny in Plan offers Allow This.
+35. **Plan's own session has the web** where its judge is `native`: `WebSearch` and `WebFetch` run there, judged,
+    with no card, and its researcher stays as an option. The researcher's question limit and URL rules go (trust
+    line §8). A command the read-only line doesn't pass is judged, not carded. Commands may run in the background,
+    under the lanes' process tracking, and stop when the session ends.
 
 ## Review Focus
 
@@ -1012,6 +1039,67 @@ Plan's `FRESH_START_LINE` is Plan's `outgoing`, in Task 16.
 
 ---
 
+### Task 16b: Plan in auto mode, with the web (trust line §8, §12)
+
+Small red-first steps, one commit per behaviour. Calls 34 and 35.
+
+**Files:**
+- Modify: `apps/daemon/src/shape/explore-owner.ts` (`spec` reads `capabilities.judge` and T3's attended policy),
+  `apps/daemon/src/sessions/claude-query-options.ts` and its test (the explore profile's auto-mode rows),
+  `apps/daemon/src/shape/policy.ts` and `policy.test.ts` (the main session's tools), `apps/daemon/src/shape/confinement.ts`
+  and `confinement.test.ts` (the rows the trust line retires), `apps/daemon/src/shape/research.test.ts` (the
+  question limit and URL rows)
+- Modify: `docs/architecture/decisions/<today>-one-explore-engine-runs-sessions-and-plan.md` (Task 16's record
+  gains the bullets below)
+
+**Interfaces:**
+- Consumes: T3's `TrustPolicy` for an attended surface, its auto-mode settings and `capabilities.judge`; T2's setup.
+- Produces: Plan's `spec` on a `native` judge: `permissionMode: 'auto'`, `settings.autoMode` from the policy,
+  `WebSearch` and `WebFetch` in the session's own tools, `Bash` with background jobs allowed. On `rules`: today's
+  spec, unchanged. Edit, Write and NotebookEdit stay disallowed on both.
+
+- [ ] **Step 1: Write the failing options rows** in `claude-query-options.test.ts` (pure). M2a's row "never gives
+  the explore profile project settings, auto mode or the harness plugin dir" splits:
+  - explore with a `native` judge: `permissionMode: 'auto'` and `settings.autoMode` equal to T3's rendering of the
+    attended policy, with `"$defaults"` first in each list
+  - explore with a `rules` judge, and with a `tendb` one: `default` mode and no `settings.autoMode`, as today
+  - both: `settingSources: []`, and never the harness plugin dir
+- [ ] **Step 2: Write the failing Plan rows** in `shape/policy.test.ts` and `confinement.test.ts` (pure tables), on
+  a `native` judge:
+  - a `WebFetch` and a `WebSearch` from the main session are allowed, with no card
+  - a command the read-only line doesn't pass is allowed to the judge, not answered `ask`
+  - a background command (`run_in_background`, `&`, `nohup`) is allowed
+  - an `Edit` or `Write` is still refused, and the refusal says Plan writes no code
+  - the researcher's question, query and URL limits no longer refuse
+  - on a `rules` judge and on a `tendb` one, every row keeps today's answer
+  - Plan's sandbox keeps today's `.env` rule on every judge (call 34); T4 changes it
+
+  Name each retired row of `confinement.test.ts` in the commit, and the trust line rule that retires it.
+- [ ] **Step 3: Run them and watch them fail.**
+  `pnpm --filter @10db/daemon exec vitest run src/sessions/claude-query-options.test.ts src/shape/policy.test.ts src/shape/confinement.test.ts`.
+  Expected: FAIL, because the explore profile has no auto-mode branch and Plan's rules refuse the web and ask about
+  commands.
+- [ ] **Step 4: Implement.** `explore-owner.ts`'s `spec` asks the adapter's capabilities for the conversation's
+  account and model and passes the judge to the profile. `claudeQueryOptions` renders auto mode for an explore
+  profile on a `native` judge. `confinement.ts` drops the web, command-card and research-limit rules when the
+  session's judge is `native`, and keeps the coordination rules, the read-only file rules and the `rules` floor.
+  Background commands register with the lanes' process tracking, keyed by the conversation's session, and stop when
+  it closes.
+- [ ] **Step 5: Run Plan's suites and one pipeline row.**
+  `pnpm --filter @10db/daemon exec vitest run src/shape src/conversation src/sessions` and `make check-changed`.
+  Add one row to `research.test.ts`, through the service fixture on the fake: a Plan turn on a `native` account
+  calls `WebFetch` from its own session and stores a `web` call, not denied.
+- [ ] **Step 6: Extend the decision record:**
+  - Plan's session runs in auto mode under the trust line's attended policy where its judge is `native`, and keeps
+    today's rules where it is `rules`.
+  - Plan's own session searches and fetches the web; its researcher is an option. Commands are judged, not carded,
+    and may run in the background under the lanes' process tracking.
+  - Plan writes no code. That is its role, and its sandbox stays read-only.
+- [ ] **Step 7: Commit** (`feat(daemon): plan runs in auto mode with the web, where its judge is native`), with the
+  value card: `Value: protects=Plan's own session searches the web and runs commands without a card on an auto-mode account, keeps today's rules elsewhere, and never edits; fails_when=Plan's web or commands still card on a native judge, a rules account loses a refusal, or Plan gains an edit tool; why_new=the options table and confinement rows pinned Plan's read-only, default-mode session; no_claim=auto mode's own verdicts (live check L2) or Codex (M5b)`.
+
+---
+
 ### Task 17: The conversation routes
 
 **Files:**
@@ -1052,6 +1140,10 @@ A vertical slice through the real daemon (`renderWithDaemon`), then e2e.
   `useConversationLive`, `useSendConversationMessage`, `useStopConversation`, `useRedoConversation`,
   `useSendNow`, `useToolCallFull`)
 - Create: `apps/desktop/src/conversation/working-line.tsx`, `working-line.test.tsx` (call 15)
+- Create: `apps/desktop/src/conversation/judge-line.tsx`, `judge-line.test.tsx` (call 36): one render row per judge
+  value; only `rules` shows the line (T5 revisits `tendb`)
+- Modify: Plan's transcript passes `onAllow` to `ConversationList` (call 37), with a render row: a soft `judge` row's
+  Allow This posts the go-ahead once; a hard one shows no button
 - Modify: `apps/desktop/src/conversation/conversation-list.tsx` (M3's): one prop, `busy?: boolean` (call 15). Plan
   passes M3's `agentLabel` from `conversation.capabilities.label`
 - Modify: `apps/desktop/src/views/shape/plan-entries.ts` (M3's): `planEntries(messages)` becomes
