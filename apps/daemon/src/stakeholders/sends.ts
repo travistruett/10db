@@ -23,6 +23,7 @@ import {
   failSend,
   getInboxItem,
   getPerson,
+  insertDraft,
   keepWaiting,
   latestThreadFor,
   listRoutingRules,
@@ -140,6 +141,33 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
    */
   function builderUnnamed(card: InboxItemDto, db: DbReader = state.db): boolean {
     return draftContext(db, card).builderName === SEED_BUILDER_NAME;
+  }
+
+  /**
+   * Send on a card whose send failed: the same message is drafted again for the same people, the card goes
+   * back to them, and their sessions park. Anything else without a live draft stays a conflict.
+   */
+  function redraftFailed(card: InboxItemDto): StakeholderSendDto | null {
+    const failed = sendForCard(state.db, card.id);
+    if (failed?.state !== 'failed' || card.state !== InboxState.Open) return null;
+    const again = state.write((ctx) => {
+      const people = failed.people.flatMap((p) =>
+        p.recipient && p.personId ? [getPerson(ctx.tx, p.personId)] : [],
+      );
+      setInboxRecipients(ctx, card.id, {
+        assignees: people.map((p) => p.handle),
+        routedBy: RoutedBy.Builder,
+        suggestion: null,
+      });
+      return insertDraft(ctx, {
+        inboxItemId: card.id,
+        recipients: people.map((p) => p.id),
+        text: failed.text,
+        hits: failed.hits,
+      });
+    });
+    deps.parkFor?.(card.id);
+    return again;
   }
 
   async function afterDraft(cardId: InboxItemId): Promise<void> {
@@ -410,7 +438,7 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
     async send(cardId, input) {
       if (slack === null) throw new ConflictError('Slack is not connected');
       const card = getInboxItem(state.db, cardId);
-      const draft = liveSend(cardId);
+      const draft = liveSend(cardId) ?? redraftFailed(card);
       if (card.state !== InboxState.Open || draft?.state !== 'draft')
         throw new ConflictError('There is no draft to send');
       if (builderUnnamed(card))

@@ -632,6 +632,35 @@ describe('a limit and a reservation decided together', () => {
   });
 });
 
+describe('Send on a card whose send failed', () => {
+  it('drafts again for the same people and sends, handing the card back to them', async () => {
+    const w = world();
+    w.route([w.person('mark')]);
+    const id = w.card();
+    await sends.afterDraft(id);
+    slack.failNext('chat.postMessage', 'channel_not_found');
+    await sends.send(id, {});
+    expect(send(id).state).toBe('failed');
+    expect(getInboxItem(store.db, id).assignees).toEqual(['me']);
+    const first = send(id).id;
+    await sends.send(id, {});
+    expect(send(id)).toMatchObject({ state: 'sent' });
+    expect(send(id).id).not.toBe(first);
+    expect(send(id).people.map((p) => p.userId)).toEqual(['U-mark']);
+    expect(getInboxItem(store.db, id).assignees).toEqual(['mark']);
+    expect(parked).toEqual([id]);
+    expect(slack.posts).toHaveLength(1);
+  });
+
+  it('still refuses a card that was closed or answered', async () => {
+    const w = world();
+    w.route([w.person('mark')]);
+    const id = w.card();
+    await sends.takeBack(id);
+    await expect(sends.send(id, {})).rejects.toBeInstanceOf(ConflictError);
+  });
+});
+
 describe('a builder who has not set his name', () => {
   const seedName = () => {
     store.db.$client.prepare("UPDATE people SET name = 'You' WHERE is_builder = 1").run();
