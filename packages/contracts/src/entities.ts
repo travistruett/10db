@@ -1253,6 +1253,11 @@ export const InboxItemDto = z
       .object({ personIds: z.array(PersonId), confidence: z.number() })
       .nullable()
       .default(null),
+    /**
+     * Handles of people this question was meant for who are not on Slack: the card stays the builder's, and
+     * Copy for <name> offers them the message. Empty once the card is routed to Slack people or answered.
+     */
+    copyFor: z.array(z.string()).default([]),
     send: StakeholderSendDto.nullable().default(null),
     detail: z.record(z.string(), z.json()).nullable(),
     answer: RecordedAnswer.nullable(),

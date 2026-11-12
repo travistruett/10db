@@ -52,12 +52,20 @@ export interface NewInboxItem {
 
 /** The detail key marking a card whose message could not be composed; any recipients set by hand clear it. */
 export const DRAFT_FAILED_KEY = 'draftFailed';
+/** The detail key naming who an open question was meant for when they are not on Slack. */
+export const COPY_FOR_KEY = 'copyFor';
 /** The detail key holding why a tie went to the builder. */
 export const ROUTE_NOTE_KEY = 'routeNote';
 /** The detail key holding the topic the lane named. */
 export const ASKED_TOPIC_KEY = 'askedTopic';
 
 const LIVE_STATES: InboxState[] = [InboxState.Open, InboxState.Answered, InboxState.Delivering];
+
+function copyForOf(row: typeof schema.inboxItems.$inferSelect): string[] {
+  const named = row.detail?.[COPY_FOR_KEY];
+  if (row.state !== InboxState.Open || !Array.isArray(named)) return [];
+  return named.filter((h): h is string => typeof h === 'string');
+}
 
 /** Every column except `foldKey` and `ruleAssignees`, which stay internal to routing and folding. */
 function toDto(db: DbReader, row: typeof schema.inboxItems.$inferSelect): InboxItemDto {
@@ -76,6 +84,7 @@ function toDto(db: DbReader, row: typeof schema.inboxItems.$inferSelect): InboxI
     assignees: row.assignees.length > 0 ? row.assignees : [row.assignee],
     routedBy: row.routedBy,
     routeSuggestion: row.routeSuggestion,
+    copyFor: copyForOf(row),
     send: sendForCard(db, row.id),
     detail: row.detail,
     answer: row.answer,

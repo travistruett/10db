@@ -1,4 +1,4 @@
-import { SlackConnectionDto, type PersonDto } from '@10db/contracts';
+import { SlackConnectionDto, type InboxItemDto, type PersonDto } from '@10db/contracts';
 import {
   createTestStore,
   getInboxItem,
@@ -319,6 +319,38 @@ describe('the inbox routes', () => {
       { category: 'product', taskId: w.ws.task.id, personId: ana.id },
     ]);
     expect(sendForCard(store.db, w.card)?.people.map((p) => p.userId)).toEqual(['U-ana']);
+  });
+
+  it('records who a question was for when that person has no Slack, keeps it across a re-read, and clears it for a Slack person', async () => {
+    const w = drafted();
+    const dana = store.write((ctx) => insertPerson(ctx, { handle: 'dana', name: 'Dana' })).value;
+    const res = await request(`/inbox/${w.card}/ask`, {
+      method: 'POST',
+      body: { personIds: [dana.id], always: null },
+    });
+    expect(res.status).toBe(200);
+    const asked = (await res.json()) as InboxItemDto;
+    expect(asked).toMatchObject({ assignees: ['me'], copyFor: ['dana'] });
+    expect(sendForCard(store.db, w.card)).toBeNull();
+    expect(getInboxItem(store.db, w.card).copyFor).toEqual(['dana']);
+    const again = await request(`/inbox/${w.card}/ask`, {
+      method: 'POST',
+      body: { personIds: [w.mark.id], always: null },
+    });
+    expect(((await again.json()) as InboxItemDto).copyFor).toEqual([]);
+    expect(getInboxItem(store.db, w.card).copyFor).toEqual([]);
+  });
+
+  it('gives a card nobody asked about no copyFor, and drops it once the card is answered', async () => {
+    const w = drafted();
+    const dana = store.write((ctx) => insertPerson(ctx, { handle: 'dana', name: 'Dana' })).value;
+    expect(getInboxItem(store.db, w.card).copyFor).toEqual([]);
+    await request(`/inbox/${w.card}/ask`, {
+      method: 'POST',
+      body: { personIds: [dana.id], always: null },
+    });
+    await request(`/inbox/${w.card}/answer`, { method: 'POST', body: { choice: 'Yes' } });
+    expect(getInboxItem(store.db, w.card).copyFor).toEqual([]);
   });
 
   it('takes a sent question back, and refuses keep-waiting unless it came back', async () => {

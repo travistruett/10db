@@ -10,6 +10,7 @@ import {
 } from '@10db/contracts';
 import {
   BUILDER_HANDLE,
+  COPY_FOR_KEY,
   DRAFT_FAILED_KEY,
   closeSend,
   draftSends,
@@ -136,7 +137,13 @@ export function draftFor(
       updateInboxItem(ctx, card.id, { detail: { ...card.detail, [DRAFT_FAILED_KEY]: true } });
     return null;
   };
-  if (recipients === null) return toBuilder(false);
+  if (recipients === null) {
+    toBuilder(false);
+    // Kept on the card, so the message can be copied for them and the choice survives a reload.
+    const wanted = card.assignees.filter((h) => h !== BUILDER_HANDLE);
+    updateInboxItem(ctx, card.id, { detail: { ...card.detail, [COPY_FOR_KEY]: wanted } });
+    return null;
+  }
   let message: { text: string; hits: OutboundHit[] };
   try {
     const { text } = (deps.compose ?? composeSlackQuestion)({
@@ -150,6 +157,12 @@ export function draftFor(
   } catch (error) {
     deps.log.warn({ err: error, cardId: card.id }, 'could not draft a routed question');
     return toBuilder(true);
+  }
+  if (card.detail?.[COPY_FOR_KEY] !== undefined) {
+    const rest = Object.fromEntries(
+      Object.entries(card.detail).filter(([key]) => key !== COPY_FOR_KEY),
+    );
+    updateInboxItem(ctx, card.id, { detail: Object.keys(rest).length > 0 ? rest : null });
   }
   insertDraft(ctx, {
     inboxItemId: card.id,

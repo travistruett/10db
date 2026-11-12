@@ -130,6 +130,13 @@
         }
       ]
     },
+    "copyFor": {
+      "default": [],
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "send": {
       "default": null,
       "anyOf": [
