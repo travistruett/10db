@@ -1566,7 +1566,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const previewNow = preview;
   pictures = startPictures({
     onNoAnswer: (projectId) => {
-      void previewNow.ensure(projectId);
+      void previewNow.lost(projectId);
     },
     state,
     bus,

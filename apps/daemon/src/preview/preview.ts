@@ -5,6 +5,7 @@ import {
   ProjectId,
   type DaemonEvent,
   type PassDto,
+  type PassId,
   type PermissionRuleDto,
   type ProjectDto,
 } from '@10db/contracts';
@@ -42,12 +43,15 @@ export interface PreviewTiming {
   readonly answerWithinMs: number;
   /** How often a starting preview's address is looked at. */
   readonly probeEveryMs: number;
+  /** How long a stopped preview's command may take to exit before its tree is ended without it. */
+  readonly stopWithinMs: number;
 }
 
 const DEFAULT_TIMING: PreviewTiming = {
   restartAfterMs: 2_000,
   answerWithinMs: 120_000,
   probeEveryMs: 1_000,
+  stopWithinMs: 10_000,
 };
 
 export interface PreviewDeps {
@@ -72,6 +76,11 @@ export interface PreviewDeps {
 export interface Preview {
   /** Starts or stops the project's preview to match its pass and settings. */
   ensure(projectId: ProjectId): Promise<void>;
+  /**
+   * A picture found nothing answering at the app address: starts the preview when none runs, and
+   * says so, with Restart Preview, when one runs that answered before and answers no more.
+   */
+  lost(projectId: ProjectId): Promise<void>;
   /** Restart Preview: forgets the exits that stopped it and starts it again. */
   restart(projectId: ProjectId): Promise<void>;
   /** Stops every preview and follows nothing more. */
@@ -80,9 +89,13 @@ export interface Preview {
 
 interface Run {
   readonly command: string;
+  readonly appUrl: string;
   readonly abort: AbortController;
   /** Settles once the command exited and its ledger let go. */
   readonly done: Promise<void>;
+  readonly ledger: PreviewLedger | null;
+  /** Whether the app has answered since this run started. */
+  readonly seen: { answered: boolean };
 }
 
 const tailOf = (output: string): string => output.trim().split('\n').slice(-TAIL_LINES).join('\n');
@@ -96,6 +109,8 @@ export function startPreview(deps: PreviewDeps): Preview {
   const exits = new Map<ProjectId, number[]>();
   /** The command that used up its restarts: it stays stopped until Restart or a new command. */
   const gaveUp = new Map<ProjectId, string>();
+  /** The pass each project's notice was last written on, so it is cleared there once that pass ends. */
+  const noticedOn = new Map<ProjectId, PassId>();
   /** Each project's reconciles run one at a time. */
   const queues = new Map<ProjectId, Promise<void>>();
   const timers = new Set<ReturnType<typeof setTimeout>>();
@@ -104,6 +119,7 @@ export function startPreview(deps: PreviewDeps): Preview {
   const stopped = (): boolean => life.stopping;
 
   function notice(pass: PassDto, kind: PassNoticeKind, text: string): void {
+    noticedOn.set(pass.projectId, pass.id);
     const current = getPassProgress(db, pass.id).notices.find((n) => n.id === NOTICE_ID);
     if (current?.kind === kind && current.text === text) return;
     deps.state.write((ctx) => {
@@ -118,11 +134,16 @@ export function startPreview(deps: PreviewDeps): Preview {
     });
   }
 
+  /** Takes the notice off the pass it is on, open or not: an ended pass's header keeps none either. */
+  function clearOn(passId: PassId): void {
+    if (!getPassProgress(db, passId).notices.some((n) => n.id === NOTICE_ID)) return;
+    deps.state.write((ctx) => clearPassNotice(ctx, passId, NOTICE_ID));
+  }
+
   function clearNotice(projectId: ProjectId): void {
-    const pass = findOpenPass(db, projectId);
-    if (pass === undefined) return;
-    if (!getPassProgress(db, pass.id).notices.some((n) => n.id === NOTICE_ID)) return;
-    deps.state.write((ctx) => clearPassNotice(ctx, pass.id, NOTICE_ID));
+    const passId = noticedOn.get(projectId) ?? findOpenPass(db, projectId)?.id;
+    noticedOn.delete(projectId);
+    if (passId !== undefined) clearOn(passId);
   }
 
   function later(fn: () => void, ms: number): void {
@@ -147,7 +168,24 @@ export function startPreview(deps: PreviewDeps): Preview {
     if (run === undefined) return;
     runs.delete(projectId);
     run.abort.abort();
-    await run.done;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const exited = await Promise.race([
+      run.done.then(() => true),
+      new Promise<boolean>((resolve) => {
+        // A real timer on purpose: it bounds a real child process.
+        timer = setTimeout(() => {
+          resolve(false);
+        }, timing.stopWithinMs);
+      }),
+    ]);
+    clearTimeout(timer);
+    if (!exited) {
+      // A descendant in a group of its own can hold the command's output open, so its exit never
+      // comes: the ledger ends the whole tree it saw instead, and nothing waits on it any longer.
+      await run.ledger?.end();
+      log.warn({ projectId }, 'the preview did not exit in time; its processes were ended');
+      return;
+    }
     log.info({ projectId }, 'the preview was stopped');
   }
 
@@ -158,6 +196,7 @@ export function startPreview(deps: PreviewDeps): Preview {
       void answers(appUrl).then((up) => {
         if (runs.get(projectId) !== run || run.abort.signal.aborted) return;
         if (up) {
+          run.seen.answered = true;
           clearNotice(projectId);
           log.info({ projectId }, 'the preview answers');
           return;
@@ -170,8 +209,8 @@ export function startPreview(deps: PreviewDeps): Preview {
               PassNoticeKind.PreviewStarting,
               `The preview is running, but nothing answers at ${appUrl} yet: check that \`${run.command}\` serves that address.`,
             );
-          return;
         }
+        // Still looked at after the deadline: a slow first build answers late, and the notice goes then.
         watchAnswer(projectId, appUrl, run, startedAt);
       });
     }, timing.probeEveryMs);
@@ -219,7 +258,7 @@ export function startPreview(deps: PreviewDeps): Preview {
     const done = new Promise<void>((resolve) => {
       settle = resolve;
     });
-    const run: Run = { command, abort, done };
+    const run: Run = { command, appUrl, abort, done, ledger: held, seen: { answered: false } };
     runs.set(project.id, run);
     log.info({ projectId: project.id }, 'the preview started');
     const finish = async (result: GateResult | null): Promise<void> => {
@@ -274,7 +313,11 @@ export function startPreview(deps: PreviewDeps): Preview {
     if (run?.command === command) return;
     if (run) await end(projectId);
     if (gaveUp.has(projectId)) {
-      if (gaveUp.get(projectId) === command) return;
+      if (gaveUp.get(projectId) === command) {
+        // The builder's own dev server answering makes the stopped notice moot.
+        if (await answers(appUrl)) clearNotice(projectId);
+        return;
+      }
       gaveUp.delete(projectId);
       exits.delete(projectId);
     }
@@ -325,12 +368,29 @@ export function startPreview(deps: PreviewDeps): Preview {
 
   // What a stopped daemon said about its previews is stale: each is looked at afresh.
   for (const pass of listLivePasses(db)) {
-    clearNotice(pass.projectId);
+    clearOn(pass.id);
     void ensure(pass.projectId);
   }
 
   return {
     ensure,
+    lost(projectId) {
+      return enqueue(projectId, async () => {
+        const run = runs.get(projectId);
+        if (run === undefined) {
+          await reconcile(projectId);
+          return;
+        }
+        if (!run.seen.answered || (await answers(run.appUrl))) return;
+        const pass = findOpenPass(db, projectId);
+        if (pass === undefined || runs.get(projectId) !== run) return;
+        notice(
+          pass,
+          PassNoticeKind.PreviewStopped,
+          `The preview runs, but it doesn't answer at ${run.appUrl} any more: Restart Preview starts it again.`,
+        );
+      });
+    },
     async restart(projectId) {
       await enqueue(projectId, async () => {
         gaveUp.delete(projectId);
