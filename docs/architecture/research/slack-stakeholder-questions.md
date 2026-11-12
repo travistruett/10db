@@ -666,17 +666,21 @@ UNKNOWN; check them against the live UI when writing the in-app guide.
 
 The builder decided that a stakeholder can bring a colleague into a question, that a tie asks everyone matched
 together, and that a recipient approves the "Sounds like B" line with a ✅ (spec S13, S14, §8.4–§8.6). The slice-1
-app therefore adds `mpim:write`, `mpim:history`, `reactions:read` and the `message.mpim` event to the DM-only
+app therefore adds `mpim:write`, `mpim:history`, `reactions:read`, `reactions:write` and the `message.mpim` event to the DM-only
 manifest above (`docs/slack-app.md` holds the current one).
 
 What this relies on, all from Slack's method pages and **unverified until the builder pastes the results of
 `docs/slack-app.md` section 3, steps 8–11, below**:
 
 - `conversations.open` with `users` holding two to eight comma-separated member ids opens (or reopens) a group
-  DM that includes the bot, and needs `mpim:write`. Its id starts `G` or `C`.
+  DM that includes the bot, and needs `mpim:write`. The builder's first run returned an id starting `C`; 10db
+  assumes no prefix.
   https://docs.slack.dev/reference/methods/conversations.open
 - `conversations.replies` on a group DM thread, with `mpim:history`, returns every participant's thread reply
   with its own `user`, as it does in a DM.
+- `reactions.add` with `channel`, `timestamp` and `name`, with `reactions:write`, adds the bot's own reaction;
+  10db seeds the ✅ on its proposal so the recipient only clicks it, and ignores the bot's id when reading it.
+  https://docs.slack.dev/reference/methods/reactions.add
 - `reactions.get` with `channel` and `timestamp`, with `reactions:read`, lists a message's reactions with the
   ids of the users who added each. https://docs.slack.dev/reference/methods/reactions.get
 - UNKNOWN: whether `conversations.replies` itself carries a `reactions` array on each message. If it does, the

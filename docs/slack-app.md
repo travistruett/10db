@@ -16,7 +16,7 @@ Slack's API from your Mac.
   (see "A stakeholder outside your workspace" below).
 - Permission to install apps there. By default any member can install an internal app. If your workspace
   requires approval, Slack sends a request to an admin when you press Install; the scopes they approve are the
-  eight below.
+  nine below.
 - For the group DM check, a colleague willing to reply "test" in Slack (or a second account of your own).
 
 ## 1. Make the app (5 minutes)
@@ -49,6 +49,7 @@ oauth_config:
       - mpim:write
       - mpim:history
       - reactions:read
+      - reactions:write
       - users:read
       - users:read.email
 settings:
@@ -72,14 +73,16 @@ What each part is for:
 | `im:history`                                           | read their reply in that DM                                                                                                                                                                                                                 |
 | `mpim:write`, `mpim:history`                           | open a group DM when your stakeholder mentions a colleague, or when two people answer the same kind of question, and read the replies there                                                                                                 |
 | `reactions:read`                                       | read the ✅ your stakeholder puts on "Sounds like B… ✅ to approve"                                                                                                                                                                         |
+| `reactions:write`                                      | add the ✅ to that line itself, so your stakeholder clicks the ✅ already there instead of searching for the emoji                                                                                                                          |
 | `users:read`, `users:read.email`                       | pick your stakeholder from the workspace's members, searching by name, title or email, and name a colleague they bring in                                                                                                                   |
 | `messages_tab_enabled`, not read-only                  | lets your stakeholder type a reply to the bot                                                                                                                                                                                               |
 | `message.im`, `message.mpim` and `socket_mode_enabled` | Slack wants an event subscription for the Messages tab to accept replies, and Socket Mode is how a laptop receives one with no public URL. A later 10db uses it to pick up replies within seconds; the first one reads replies from history |
 | `token_rotation_enabled: false`                        | a rotating token expires every 12 hours, so a Mac asleep overnight would wake with a dead one. Rotation can't be turned off once on                                                                                                         |
 | `interactivity: false`                                 | no buttons yet. A button pressed while your Mac is asleep fails with an error in Slack; a typed reply never does                                                                                                                            |
 
-Later 10db releases add `files:write` (screenshots) and buttons. Adding a scope means reinstalling the app,
-one click on the same page.
+Later 10db releases add `files:write` (screenshots) and buttons. Adding a scope after you installed the app,
+including one this guide added since you made it (such as `reactions:write`), means reinstalling it: one click on
+the same page (**Install App › Reinstall to Workspace**).
 
 4. Optional: under **Basic Information › Display Information**, upload an icon so your stakeholder
    recognises the bot.
@@ -135,7 +138,7 @@ curl -s "https://slack.com/api/conversations.history?channel=$DM&oldest=$TS" \
 curl -s "https://slack.com/api/users.list?limit=20" -H "Authorization: Bearer $SLACK_BOT_TOKEN"
 
 # 8. Open a group DM with you and a colleague (their member id from their profile, ⋯, Copy member ID).
-#    Keep its channel id: it starts with G or C.
+#    Keep its channel id, whatever letter it starts with (C… in the check so far).
 PEER=U0987654321
 curl -s https://slack.com/api/conversations.open -H "Authorization: Bearer $SLACK_BOT_TOKEN" \
   -H 'Content-Type: application/json; charset=utf-8' -d "{\"users\":\"$ME,$PEER\"}"
@@ -163,7 +166,7 @@ unset SLACK_BOT_TOKEN
 
 Each call answers JSON with `"ok": true`. Step 5 lists the question and your thread reply, each with `user`, `ts`
 and `thread_ts`; step 6 lists your top-level message; step 7 lists members with their names and titles. Step 8
-answers a channel id starting `G` or `C`; step 10 lists the question and both replies, each with its own `user`;
+answers a channel id (it started `C` when this was first run; nothing depends on the letter); step 10 lists the question and both replies, each with its own `user`;
 step 11's `reactions.get` lists `white_check_mark` with your user id. Write down whether step 11's
 `conversations.replies` shows a `reactions` array on the bot's message: if it does, 10db reads the ✅ from the
 replies it already fetches, and if not, it asks `reactions.get` for it. If step 3 or 8 says `channel_not_found`

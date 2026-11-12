@@ -224,7 +224,10 @@ chose it:
 
 1. Only `question` cards are routed. The card's targets resolve to their tasks; a card with no task (a Shape
    conversation's or the builder's own session's question) goes to the builder, as does one whose tasks resolve
-   to different people.
+   to different people. A question from a Workbench pass's page (`askedByPassPage`,
+   `apps/daemon/src/inbox/service.ts`) also goes to the builder, whatever the routes say: the builder is working
+   through that pass live. This is the design's call, not the builder's, and is easy to reverse (one rule in
+   `assigneesFor`); the recommendation is to keep it until a pass page needs a stakeholder.
 2. **Explicit routes, by rule.** For each task: a task route for the category; then a route on the task's goal
    (area, then category); then the project's area route. The first match is final, and triage never overrides
    it.
@@ -234,10 +237,14 @@ chose it:
    any other.
 5. **A tie names everyone (S14).** Each tier collects every person with a matching route at that scope, not just
    one. Several people at the winning tier are all the card's recipients: `assignees` on the card holds their
-   handles, sorted, and `assignee` keeps the first so today's readers still work. A tie never spans scopes: a goal
-   route for Mark beats a project route for Ana outright.
+   handles in routing order (the order their routes were added), and `assignee` keeps the first so today's
+   readers still work. Names are listed in that order everywhere ("Mark and Ana"). A tie never spans scopes: a
+   goal route for Mark beats a project route for Ana outright. A tie of more than eight people (a group DM's
+   limit) goes to the builder instead, with the note "9 people answer product questions here, more than a Slack
+   group DM holds. Use Ask Someone… to pick."
+
 6. **Folding follows the rules' people.** Identical open asks fold into one card today. The recipients the rules
-   give a new ask (`rule_assignees`, stored on the card) are part of the fold key. A question routed to Mark never
+   give a new ask (`rule_assignees`, stored on the card, compared as a set) are part of the fold key. A question routed to Mark never
    folds into one routed to Dana, and one reply never answers two people's tasks. A card triaged to Sarah still
    folds an identical later ask, because both have the same rule recipients.
 
@@ -248,10 +255,20 @@ A goal route beats a project route, even the project's area route: Who Answers s
 **Designed.** `stakeholders/triage.ts` runs right after the card's insert commits, so the judge's network call
 never runs inside a transaction.
 
+- **When the judge can't run, nothing waits.** With `TENDB_JUDGE=off`, the judge's master switch off or
+  `question_route` switched off (all read inside the insert's transaction), the fallback below is applied at
+  insert and the card is never pending.
 - **While it runs** (at most the judge's 4 s), the card is the builder's, marked `routedBy: 'triage_pending'`.
   The Inbox shows it in Open with "Finding who answers…", leaves it out of every count and sends no
   notification for it. The lane's `ask_human` waits as for any builder card, and is parked (`Runner.parkFor`,
-  §8.1) if the card is routed away.
+  §8.1) if the card is routed away. Triage never routes synchronously inside the ask: its first step is the
+  judge's call, after `onWaitStart` has run.
+- **Every outcome leaves pending in one write** (`routedBy` becomes `judge`, `rule` or `builder`, with the
+  recipients and any suggestion), and `run` catches every error and applies the fallback, so no card stays
+  pending. A card left pending by a crash is settled by the start sweep (§7.5) when it is still open.
+- **A card triage leaves with the builder is announced then.** The insert's `inbox.opened` is not notified
+  while the card is pending; settling with the builder emits `inbox.triaged` (`toBuilder: true`), which the
+  desktop notifies like a new card.
 - **The question** (`question_route`, a choice): the state is the card's title, body and options, the lane's
   category and topic, and the task's and goal's titles. The judge chooses a route, not a person, so a tie
   survives triage: one option per category that has project routes (`category:product`), one per topic route
@@ -267,14 +284,15 @@ never runs inside a transaction.
   `routedBy: 'rule'`.
 - **Every call is logged** in `judge_calls` and shown in Settings › Decisions beside the other decisions, with
   its own switch, model (`typesafe/jev-1.13`) and floor (0.8). It sends the question to OpenRouter as the review
-  decision sends task text; the judge's key and `TENDB_JUDGE=off` govern both.
+  decision sends task text; the judge's key and `TENDB_JUDGE=off` govern both. The logged question carries the
+  options with their criteria as text, so the log shows what the judge was offered without a new column.
 - **The judge's criteria.** The judge sends option names with no description today. `JudgeRequest` gains an
   optional `criteria` (a description per option): a System One model gets them as its choice's `criteria`, and
   a chat model gets them in its prompt.
 - **The lane's topic.** `ask_human` gains an optional `topic`. The briefing (§7.1) lists the project's topics,
   and an unknown topic is ignored, never refused.
 
-**Per provider.** Triage reads the card, not the session, so it is the same for a Claude plan, Bedrock or an API
+**Per provider.** Triage and ties read the card, not the session, so it is the same for a Claude plan, Bedrock or an API
 key, and a ChatGPT/Codex plan. With no OpenRouter key, the lane's tags decide on every provider. Codex lanes tag
 through `ask_human` like Claude's; Claude Code's `AskUserQuestion` has no category or topic, so its card is
 `other`, which triage still reads by its text.
@@ -334,8 +352,13 @@ The spec says "retry and notify" but not how long the account stays active meanw
 *B.* Cut access at once until payment succeeds
 *C.* Keep access for the whole billing period
 
-Reply in this thread with A, B or C, or in your own words. The work on this waits for your answer.
+The work on this waits for your answer.
+↳ Reply in this thread with a letter or your own words.
 ```
+
+- **The last line.** Every question message, in a DM, a group DM or a tie's group DM, ends with "↳ Reply in
+  this thread with a letter or your own words." A reply in the thread is the path 10db is built around; a reply
+  at the top of the DM still works (§8.2).
 
 - **Escaping.** Every field from the card is escaped for `mrkdwn` (`&`, `<`, `>`), every text object is sent
   `verbatim: true` and the post sets `unfurl_links: false` and `unfurl_media: false`. Agent text cannot ping
@@ -369,8 +392,11 @@ primary reads **Send to Mark and Ana**.
 
 The first send to anyone is always reviewed, whatever their mode. The limit counts new threads in the last 24
 hours: 10 a day by default, set per person in Settings › People, or turned off there **(call)**. The card past
-it says "Mark has had 10 new questions today" and offers Send Anyway. Only a new question that opens a new
-thread counts. Nothing inside an open conversation ever does: Mark's replies, follow-up questions in the same
+it says "Mark has had 10 new questions today" and offers **Send Anyway**, which sends past the limit once. A
+draft records why it waits (`heldBy`: `review`, `first_send`, `limit` or `scan`), and the card's copy follows
+it: "Mark has had 10 new questions today" with Send Anyway for `limit`, "First message to Mark: check it before
+it goes" for `first_send`, the scan's alert with Send disabled for `scan`, and the plain preview for `review`.
+Only a new question that opens a new thread counts, and only once it is sent: a failed send doesn't count. Nothing inside an open conversation ever does: Mark's replies, follow-up questions in the same
 thread, the move to a group DM, the discussion there, the "Sounds like B" line, the "which way" line and the
 closing lines.
 
@@ -390,7 +416,8 @@ on the card parks at that moment, so a stakeholder's words only ever reach a lan
 ### 7.5 What a send records
 
 `stakeholder_sends`: card, state, the text sent, its SHA-256, channel id, `thread_ts`, the message's own `ts`,
-permalink, sent at, last read `ts` (starting at the message's own), reminded at, the open proposal (its choice,
+permalink, sent at, when the current wait started (`waitStartedAt`: set when it is sent, and again by Keep
+Waiting), last read `ts` (starting at the message's own), reminded at, the open proposal (its choice,
 confidence and `ts`), the reply's `ts`, user and text, how it was read, who answered, answered at, returned at
 and why (`timer` or `disagreed`), closed at, error. `stakeholder_send_people` holds one row per participant: the
 send, the 10db person (null for someone brought in who isn't in People), the Slack user id and name, and whether
@@ -417,9 +444,21 @@ thread, message `ts`, permalink and cursor in one write (`moveSend`), and the DM
 
 ### 8.1 Waiting
 
-**Designed.** A card routed to someone else parks its session at once (S7): `onWaitStart` uses a wait of zero
-for it. The workstream is `WAITING_HUMAN` with `nextAction: answer`, as a parked card is today. Claims stay
-held, as they do for any parked card.
+**Designed.** A card routed to someone else parks its session at once (S7). The rule that keeps a
+stakeholder's words from ever reaching a live `ask_human` unquoted has four parts:
+
+- `onWaitStart` re-reads the card's current recipients rather than trusting the item it was handed, and a routed
+  card parks at once, even when another wait is already open: every wait of the session aborts, and the session
+  parks on its oldest open card. Each card's answer then arrives through `onParkedAnswer`.
+- `Runner.parkFor(cardId)` parks every session waiting on the card, including the sessions whose identical asks
+  folded into it.
+- `InboxService.answerAs` never resolves a live waiter: it takes the card's waiters out first and has their
+  sessions parked, then delivers through `onParkedAnswer`, so the words reach the lane only in the quoted
+  resume (§8.3).
+- With the judge unable to run, routing is decided at insert (§6.3), so the card is routed before `onWaitStart`.
+
+The workstream is `WAITING_HUMAN` with `nextAction: answer`, as a parked card is today. Claims stay held, as
+they do for any parked card.
 
 - The task's card on the Board has no colored border, like a queued card (the yellow border stays "waiting on
   you"), and writes
@@ -438,7 +477,14 @@ held, as they do for any parked card.
 - **The timers** are global settings in Settings › People: "Remind after" (default 4 hours, or off) and "Back to
   you after" (default 8 hours). They are measured in wall-clock time from the send (or the last Keep Waiting),
   read from the injected clock, and checked on every tick and on wake. One that came due while the Mac slept
-  fires on wake, once; when both came due, the reminder is skipped and the card returns.
+  fires on wake, once; when both came due, the reminder is skipped and the card returns. Due-ness is worked out
+  again inside the write that marks it, from the send's own `waitStartedAt`, `remindedAt` and `returnedAt`, so a
+  second tick never fires it twice.
+- **The return needs no Slack.** Its check runs on its own clock, on every tick and also while the reply watch is
+  stopped (Slack off, no token, refused or unreachable), so a disconnected Slack never keeps a card from coming
+  back. A reminder needs Slack: one that comes due while Slack isn't connected is posted on reconnect if the send
+  hasn't returned by then. A return that comes due while a lone reply is already waiting for its quiet tick waits
+  that one tick, so the reply answers the card instead.
 
 ### 8.2 Reading replies
 
@@ -464,11 +510,19 @@ stopped on shutdown.
   have exactly one; with several, it becomes one builder card ("Mark replied outside a thread") listing the open
   questions, to attach it to one (or dismiss it). The watch reads the DM's history (`conversations.history`) from
   the contact's own cursor, which advances as it reads, so the same message never raises a second card. The same
-  quiet rule applies there as in a thread.
+  quiet rule applies there as in a thread. The first time a person replies at the top of the DM, 10db posts one
+  line in the question's thread: "Got it. Next time, replying in this thread keeps your answers with the right
+  question." A flag on the person's contact (`topLevelNudgedAt`) means it is never posted to them again; a reply
+  in a thread never gets it.
+- **Where a reply came from** is stored on the send's answer (`replyVia: 'thread' | 'top_level'`). Slice 1 shows
+  it nowhere; it is there so the builder can see how people really reply before changing this rule (§14).
 - **A refused token** stops the watch and shows a 10db card ("Slack refused 10db's token. Reconnect it in
   Settings › People."). Sends stay `sent`; their cards show in Open with that notice so the builder can answer
   them; on reconnect the watch reads on from each send's cursor, so a reply written during the outage still
   answers its card.
+- **Any connection but `connected` counts as an outage for Open:** `off`, `none` (the token was removed),
+  `refused` and `unreachable` (three ticks in a row failed with `unreachable`, `timeout` or an HTTP 5xx; the next
+  good tick clears it). In each, the sent cards show in Open with the notice for that state.
 
 ### 8.3 The answer
 
@@ -483,7 +537,7 @@ recipients.
   ("B" then "wait, C" must never be recorded as B). Anything else is their own words too. A reply longer than 4,000 characters (the
   note's limit) is cut there, and the full text stays on the send.
 - `InboxService.answerAs(cardId, answer, personId, source)` answers as that person, in one write with the send's
-  `answered` state and its read cursor. The HTTP route keeps answering as the builder. It refuses "Park the
+  `answered` state and its read cursor, and delivers only through `onParkedAnswer` (§8.1). The HTTP route keeps answering as the builder. It refuses "Park the
   task", and it is the one path that accepts an answer in someone's own words (today's answer refuses a choice
   that isn't one of the card's options).
 - **What is recorded:** an option pick is recorded as a decision with `decidedBy: <their handle>` and a
@@ -510,6 +564,8 @@ recipients.
 - **The builder takes it back** (Take Back, or parks the task): "Never mind this one, Travis has it. Thanks!"
 - **The card is cancelled** (its run is cancelled, or its cause is gone): "This one is no longer needed.
   Thanks!" A question still being posted when its card closes gets the closing line right after it.
+- **Where a closing line goes:** every thread the send used, the group DM's and the one it moved from, read from
+  the send again after each post.
 - **A reply after the send closed** (slice 2): a builder card, "Mark replied after this was settled", showing
   his words, with Send to the Task (a correction injected into the task's next step and a decision that
   supersedes the first) and Dismiss.
@@ -523,7 +579,9 @@ recipients.
   users, scope `mpim:write`), and posts the question there again with a line in front: "Mark brought in Priya.
   Here's the question:". The reposted text is the text already sent (no second review, no new thread for the
   daily limit). The DM's thread gets "Moved to a group DM with Priya." and stays read as `moved_from`, so a
-  reply written there still counts.
+  reply written there still counts. The repost carries the send's `tendb_send` metadata; before reposting after a
+  crash, 10db searches the group DM's history since the mention for it, so the question is never posted there
+  twice.
 - **More people later:** a mention in the group DM opens a new group DM with everyone so far, the same way.
   Slack's limit is eight people besides the bot; a mention past it gets "This conversation is full; 10db can't
   add anyone else."
@@ -539,18 +597,21 @@ recipients.
 conversation settles (§8.2), and then (written for one recipient, Mark; §8.6 says what changes with several):
 
 1. **The judge reads where it landed.** `thread_answer` is a choice over the card's lettered options plus
-   `no_clear_answer`. Its state is the question, the options and every participant message since the
-   question, each with its author's name. A letter typed by anyone is evidence, not the answer.
+   `no_clear_answer`, each option's label sent as its criterion. Its state is the question, the options and
+   every participant message since the question, each with its author's name. A letter typed by anyone is
+   evidence, not the answer.
 2. **At or above the floor**, 10db posts a fixed line in the thread: "Sounds like **B**: Cut access at once
    until payment succeeds (Priya). @Mark, ✅ to approve or reply to change." The names in parentheses are the
    participants whose messages favoured that option, as the judge's state shows them; with none named, the
-   parentheses are left out. The mention of Mark is 10db's own, built from his stored id. The proposal is stored
-   on the send with its `ts`.
+   parentheses are left out. The mention of Mark is 10db's own, built from his stored id. Right after posting it,
+   the bot adds the ✅ reaction to its own line (`reactions.add`), so Mark clicks the ✅ that's already there
+   instead of searching for the emoji. The proposal is stored on the send with its `ts`.
 3. **Below the floor, `no_clear_answer`, or no judge answer** (off, no key, timeout, error): "@Mark, which way
    should this go? Reply with A, B or C, or in your own words." Mark's next reply is read as §8.3 reads a lone
    reply.
 4. **Mark approves** with a ✅ (`white_check_mark`, `heavy_check_mark` or `+1`) on the proposal, read from the
-   message's `reactions` in `conversations.replies`, or with a reply whose whole text is "yes", "approve",
+   message's `reactions`: Mark's user id must be in that reaction's `users`, and the bot's own id there (from the
+   pre-seeded ✅) is ignored. Or he approves with a reply whose whole text is "yes", "approve",
    "approved", "ok" or "👍" (any case, trailing punctuation ignored). The card is answered as Mark: that option,
    `readAs: 'approved'`, and the decision is recorded with `decidedBy: mark`, the others named in it ("with
    Priya") and the thread as its source.
@@ -558,6 +619,13 @@ conversation settles (§8.2), and then (written for one recipient, Mark; §8.6 s
    replies:** the proposal is withdrawn (the send forgets it) and the conversation settles again. A ✅ from
    anyone but Mark approves nothing.
 6. **Nobody approves:** the reminder and the return (§8.1) apply as to any send.
+
+**Nothing is posted twice.** The send stores what the conversation has already been answered with:
+`settledThroughTs` (the newest message the last settle covered), `askedWhichWayAt` with the line's `ts`, the
+proposal with its `ts`, and `approvalSeenAt` with who approved. A quiet conversation after a proposal or a
+"which way" line posts nothing more until someone writes again. An approval is confirmed on the tick after the
+one that saw it, and only if the ✅ is still there and no other recipient has written since; a ✅ removed in
+between approves nothing.
 
 The resumed prompt quotes the whole conversation, one line per message with its author, each as data:
 
@@ -585,12 +653,15 @@ An own-words reply from Mark after a "which way" line gets the same quote of the
 - **The approval line tags every recipient:** "Sounds like **B** (Priya). @Mark @Ana, ✅ to approve or reply to
   change." The "which way" line does too. The first ✅ (or "yes") from any recipient, with nothing newer from the
   other recipients by the next tick, records the decision as that recipient's, crediting the others who spoke.
+  Two ✅ seen in the same tick credit the recipient who comes first in routing order.
 - **Disagreement goes to the builder.** Recipients naming different letters, or one approving while another
   replies with anything that isn't an approval before the next tick, mark the send returned (`returnedReason:
   'disagreed'`) and put the card in the builder's Open Inbox: "Mark and Ana disagree", the conversation quoted
   under the question, with Answer Myself, Keep Waiting and Take Back. The thread stays watched: a later pick
   that every recipient approves still answers it. The builder's answer gets the closing line in the thread.
 - **The resumed prompt** names who decided and quotes the conversation as §8.5 shows.
+- **Per provider:** ties, bringing someone in and agreeing an answer all run on the card and the send, after the
+  lane has asked, so they behave the same for a Claude plan, Bedrock or an API key, and a ChatGPT/Codex plan.
 
 ### 8.7 What a reply can't do
 
@@ -615,11 +686,12 @@ The builder makes a Slack app from a manifest in the workspace where Mark is: si
 distributed, token rotation off. The full click-by-click guide is `docs/slack-app.md`.
 
 - **Bot scopes:** `chat:write` (post), `im:write` (open the DM), `im:history` (read replies in it),
-  `mpim:write` and `mpim:history` (open a group DM and read it, §8.4 and §8.6), `reactions:read` (read the ✅ on
-  the proposal, §8.5), `users:read` and `users:read.email` (pick the person, and name someone brought in).
+  `mpim:write` and `mpim:history` (open a group DM and read it, §8.4 and §8.6), `reactions:write` (add the ✅
+  to the proposal, §8.5) and `reactions:read` (read who clicked it), `users:read` and `users:read.email` (pick the person, and name someone brought in).
   `files:write` is added in slice 4, for screenshots. The ✅ is read from the proposal message's `reactions` in
   `conversations.replies` when Slack includes them there, and with `reactions.get` on the proposal's `ts` when it
-  doesn't; the builder's check settles which, and a typed "yes" works either way.
+  doesn't; the builder's check settles which, and a typed "yes" works either way. Channel ids are used as Slack
+  returns them: the builder's check returned a group DM id starting `C`, so nothing assumes a `D` or `G` prefix.
 - **Events and Socket Mode:** the manifest turns on Socket Mode and subscribes `message.im` and
   `message.mpim`, with the Messages
   tab on and writable, so Mark can type to the bot. v1 doesn't connect the socket and reads history instead
@@ -713,7 +785,7 @@ A routed card in review mode opens on what Mark will get. Today's answer control
 │ │ A. Keep access for 7 days, retry on days 1, 3 and 7, then downgrade (recommended)        │ │
 │ │ B. Cut access at once until payment succeeds                                             │ │
 │ │ C. Keep access for the whole billing period                                              │ │
-│ │ Reply in this thread with A, B or C, or in your own words.                               │ │
+│ │ ↳ Reply in this thread with a letter or your own words.                                  │ │
 │ └──────────────────────────────────────────────────────────────────────────────────────────┘ │
 │ Product question on the goal Renewals → Mark · Change                                         │
 │ The task is parked until someone answers. Other work keeps running.                          │
@@ -839,7 +911,9 @@ leaves Open for a third tab between Open and Resolved.
   and can't answer any other kind; links and files are not fetched.
 - **To the judge:** the question's text and its routes' descriptions go to OpenRouter for triage, and the
   conversation's messages for `thread_answer`, under the same key, switch and `TENDB_JUDGE=off` as every judge
-  decision. Each call is logged in `judge_calls`.
+  decision. Each call is logged in `judge_calls`, whose `state` keeps the question's text, the routes'
+  descriptions and the conversation's messages for 30 days (`JUDGE_LOG_RETENTION_MS`), and whose question keeps
+  the options and their criteria.
 - **Tokens:** the Keychain only, never in a log, an error or the database; no token rotation, so nothing
   expires while the laptop sleeps, and revoking is uninstalling the app.
 - **Slack's terms:** Slack forbids training models on Slack data. Putting a reply in a session's prompt is not
@@ -889,6 +963,10 @@ leaves Open for a third tab between Open and Resolved.
 8. **Park at once** (S7), **Review each with the first message always reviewed** (S6) and the scan's holds
    (§7.3): as designed.
 
+**Made by the design, for the builder to reverse if wanted:** a question from a Workbench pass's page always
+goes to the builder, since the builder is working through the pass live (§6.2). The recommendation is to keep it
+until a pass page needs a stakeholder; reversing it is one rule in `assigneesFor`.
+
 **The defaults**, all changeable in Settings:
 
 | Setting                         | Default                                      | Where                     |
@@ -903,3 +981,6 @@ leaves Open for a third tab between Open and Resolved.
 | Triage and reading a conversation | on, `typesafe/jev-1.13`, floor 0.8         | Settings › Decisions      |
 | Links, secrets, code blocks     | held for review; a path only warns           | fixed                     |
 | Closing lines                   | §8.3's wording                               | fixed                     |
+
+**Before changing how top-level replies are read,** look at `replyVia` on recent sends: it records whether each
+answer came in a thread or at the top of the DM.
