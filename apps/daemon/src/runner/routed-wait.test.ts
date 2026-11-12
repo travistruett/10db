@@ -317,3 +317,56 @@ describe('a question the judge routes after the lane asked', () => {
     });
   });
 });
+
+describe('a task cancelled while its question waits for triage', () => {
+  it('cancels the card, and the judge answering later only leaves pending', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    engine = await createTestEngine(
+      oneAsk(askHuman('product', 'op-cancel-triage1')),
+      {},
+      {},
+      {
+        openRouter: {
+          fetch: async () => {
+            await gate;
+            return new Response(
+              JSON.stringify({
+                model: 'typesafe/jev-1.13',
+                answers: {
+                  decision: {
+                    type: 'choice',
+                    choice: 'category:product',
+                    confidence: 0.9,
+                    probabilities: { 'category:product': 0.95, nobody: 0.05 },
+                  },
+                },
+                usage: { cost: 0 },
+              }),
+              { status: 200, headers: { 'content-type': 'application/json' } },
+            );
+          },
+        },
+      },
+    );
+    routeTo('product', ['mark'], false);
+    const { workstream } = engine.addTask('Alpha');
+    engine.launch(workstream.id);
+    const card = await waitFor(openCard);
+    expect(card.routedBy).toBe('triage_pending');
+
+    await engine.runner.cancel(workstream.id);
+    const cancelled = listInbox(engine.store.db, {}).find((c) => c.id === card.id);
+    expect(cancelled?.state).toBe('CANCELLED');
+
+    release();
+    await waitFor(() => {
+      const now = listInbox(engine.store.db, {}).find((c) => c.id === card.id);
+      return now?.routedBy === 'triage_pending' ? undefined : now;
+    });
+    const after = listInbox(engine.store.db, {}).find((c) => c.id === card.id);
+    expect(after).toMatchObject({ state: 'CANCELLED', routedBy: 'builder', assignees: ['me'] });
+  });
+});
