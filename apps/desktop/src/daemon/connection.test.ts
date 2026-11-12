@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { resolveConnection } from './connection';
-import { handOffTo } from './dev-ui-handoff';
+import { handOffTo } from '@10db/contracts';
 
 // Decision 2026-11-11-10db-runs-the-preview-while-a-pass-is-open: a dev UI tab opened by Open Page
 // takes the daemon's connection from its fragment, keeps it for the tab and drops it from the address.

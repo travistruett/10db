@@ -10,7 +10,7 @@ import { act, cleanup, fireEvent, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { http, HttpResponse } from 'msw';
 import { PROTOCOL_VERSION } from '@10db/contracts';
-import { takenHandOff } from '../../daemon/dev-ui-handoff';
+import { takenHandOff } from '@10db/contracts';
 import {
   baseHandlers,
   daemonUrl,

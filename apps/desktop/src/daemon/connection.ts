@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { z } from 'zod';
 import { isTauri } from '../desktop/tauri';
-import { takenHandOff } from './dev-ui-handoff';
+import { DEV_UI_HANDOFF_KEY, takenHandOff } from '@10db/contracts';
 
 export interface DaemonConnection {
   readonly url: string;
@@ -42,7 +42,9 @@ function takeHandOff(): DaemonConnection | null {
 /** The connection an earlier load of this tab was handed; null when none was. */
 function keptHandOff(): DaemonConnection | null {
   try {
-    return takenHandOff(`#tendb=${encodeURIComponent(sessionStorage.getItem(HANDED_KEY) ?? '')}`);
+    return takenHandOff(
+      `#${DEV_UI_HANDOFF_KEY}=${encodeURIComponent(sessionStorage.getItem(HANDED_KEY) ?? '')}`,
+    );
   } catch {
     return null;
   }
