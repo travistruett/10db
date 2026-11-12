@@ -347,7 +347,22 @@ describe('API', () => {
       protocolVersion: PROTOCOL_VERSION,
       startedAt: startedAt.toISOString(),
       commit: null,
+      devUiOrigin: null,
     });
+  });
+
+  it("names on /health the dev UI origin the builder opted in, for Open Page's hand-off", async () => {
+    const res = await createApp({
+      startedAt,
+      allowedOrigins: ['http://localhost:1420'],
+      devUiOrigin: 'http://localhost:1420',
+      token: TOKEN,
+      services: stubServices(),
+      upgradeWebSocket: noUpgrade,
+      onUnexpectedError: () => undefined,
+      mcp: () => Promise.resolve(new Response('mcp')),
+    }).request('/health');
+    expect(HealthResponse.parse(await res.json()).devUiOrigin).toBe('http://localhost:1420');
   });
 
   it('requires the UI token everywhere else', async () => {

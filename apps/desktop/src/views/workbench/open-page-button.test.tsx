@@ -8,7 +8,16 @@ import {
 } from '@tanstack/react-router';
 import { act, cleanup, fireEvent, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { baseHandlers, renderWithDaemon, server } from '../../test/daemon';
+import { http, HttpResponse } from 'msw';
+import { PROTOCOL_VERSION } from '@10db/contracts';
+import { takenHandOff } from '../../daemon/dev-ui-handoff';
+import {
+  baseHandlers,
+  daemonUrl,
+  renderWithDaemon,
+  server,
+  TEST_CONNECTION,
+} from '../../test/daemon';
 import { useOpenPage, type OpenPageTarget } from './open-page';
 import { OpenPageButton } from './open-page-button';
 
@@ -114,6 +123,27 @@ describe('OpenPageButton', () => {
       '/settings/general',
     );
     expect(screen.getByRole('button', { name: 'Open Page' })).toBeTruthy();
+  });
+
+  it("hands 10db's own dev UI the daemon's connection, and copies its link without it", async () => {
+    server.use(
+      http.get(daemonUrl('/health'), () =>
+        HttpResponse.json({
+          status: 'ok',
+          protocolVersion: PROTOCOL_VERSION,
+          startedAt: '2026-10-13T12:00:00.000Z',
+          devUiOrigin: 'http://localhost:1420',
+        }),
+      ),
+    );
+    inTauri();
+    await renderButton(target({ appUrl: 'http://localhost:1420', route: '/factory' }));
+    await click('Open Page');
+    const [url] = opened;
+    expect(url?.startsWith('http://localhost:1420/factory#tendb=')).toBe(true);
+    expect(takenHandOff(new URL(url ?? '').hash)).toEqual(TEST_CONNECTION);
+    await click('Copy Link');
+    expect(writeText).toHaveBeenCalledWith('http://localhost:1420/factory');
   });
 
   it('in a plain browser opens a tab', async () => {

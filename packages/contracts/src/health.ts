@@ -8,5 +8,10 @@ export const HealthResponse = z.object({
   startedAt: z.iso.datetime(),
   /** The commit this app was built from; null for a source run (dev, tests) and for an older daemon. */
   commit: CommitSha.nullable().default(null),
+  /**
+   * The browser origin the builder opted in as 10db's own dev UI (`TENDB_DEV_UI_ORIGIN`); Open Page
+   * hands a page there the daemon's connection. Null when none is, and for an older daemon.
+   */
+  devUiOrigin: z.string().nullable().default(null),
 });
 export type HealthResponse = z.infer<typeof HealthResponse>;

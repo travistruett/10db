@@ -63,9 +63,14 @@ export function appPageUrl(appUrl: string, route: string): string {
  * Refuses (rejects with `AppPageRefusedError`) unless `appUrl` is a loopback `http(s)` origin and
  * `route` stays on it.
  */
-export function openAppPage(appUrl: string, route: string): Promise<void> {
+export function openAppPage(
+  appUrl: string,
+  route: string,
+  /** What the checked address becomes before it opens, such as a dev UI's handed connection. */
+  finish: (url: string) => string = (url) => url,
+): Promise<void> {
   try {
-    const url = appPageUrl(appUrl, route);
+    const url = finish(appPageUrl(appUrl, route));
     if (isTauri()) return invoke('open_app_page', { url });
     const opened = window.open(url, '_blank');
     if (opened === null) return Promise.reject(new Error('the browser blocked the page'));

@@ -9,6 +9,11 @@ The UI never touches the database; it talks to the daemon over loopback HTTP and
   `VITE_DAEMON_URL`/`VITE_DAEMON_TOKEN` in the browser); it also polls `/health` and owns the connecting,
   reconnecting and version-mismatch states. Use `useDaemon()` and the hooks in `src/daemon/queries.ts`.
 - One event stream (`useEventStream`) invalidates queries by entity type (`INVALIDATIONS`). Don't poll lists.
+- `pnpm dev:preview` serves the UI with no token for 10db to run as 10db's own preview command, under the gate's
+  sandbox; Open Page hands a tab at the daemon's dev UI origin (`/health`'s `devUiOrigin`) the daemon's connection in
+  the URL's fragment (`daemon/dev-ui-handoff.ts`), which `resolveConnection` keeps in the tab's session storage and
+  drops from the address. A copied link never carries it
+  (`decisions/2026-11-11-10db-runs-the-preview-while-a-pass-is-open.md`).
 - `pnpm dev` (`scripts/dev.sh`) shares one random token, kept in `.dev/ui-token`, between the daemon and Vite.
 - `pnpm dev` and `pnpm dev:factory` serve the UI from Vite, which has no CSP of its own; `vite.config.ts` sends the
   window's `img-src` (read from `src-tauri/tauri.conf.json` by `window-csp.ts`, so the two cannot drift), so an image

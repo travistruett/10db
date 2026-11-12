@@ -24,7 +24,13 @@ const DEFAULT_INTERVALS: DaemonIntervals = {
 
 export type DaemonStatus =
   | { readonly kind: 'connecting'; readonly lastError: string | null }
-  | { readonly kind: 'connected'; readonly startedAt: string; readonly commit: string | null }
+  | {
+      readonly kind: 'connected';
+      readonly startedAt: string;
+      readonly commit: string | null;
+      /** The browser origin the daemon trusts as 10db's own dev UI; null when none. */
+      readonly devUiOrigin: string | null;
+    }
   | { readonly kind: 'reconnecting'; readonly since: number }
   | { readonly kind: 'mismatch'; readonly daemonVersion: number };
 
@@ -108,7 +114,12 @@ export function DaemonProvider({
         setValue(active);
         setStatus(
           health.protocolVersion === PROTOCOL_VERSION
-            ? { kind: 'connected', startedAt: health.startedAt, commit: health.commit }
+            ? {
+                kind: 'connected',
+                startedAt: health.startedAt,
+                commit: health.commit,
+                devUiOrigin: health.devUiOrigin,
+              }
             : { kind: 'mismatch', daemonVersion: health.protocolVersion },
         );
       } catch (error) {

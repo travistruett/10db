@@ -135,6 +135,8 @@ export interface ApiDeps {
   readonly taskRemoval?: TaskRemovalServices;
   /** The commit the app was built from, for `/health`; null or absent for a run from source. */
   readonly commit?: string | null;
+  /** The browser origin opted in as 10db's own dev UI, for `/health`; absent when none is. */
+  readonly devUiOrigin?: string | null;
   /** The self-update setting; its routes answer 501 without it. */
   readonly selfUpdate?: SelfUpdateServices;
   readonly upgradeWebSocket: UpgradeWebSocket;
@@ -283,6 +285,7 @@ export function createApp(deps: ApiDeps) {
           protocolVersion: PROTOCOL_VERSION,
           startedAt: deps.startedAt.toISOString(),
           commit: deps.commit ?? null,
+          devUiOrigin: deps.devUiOrigin ?? null,
         }),
       ),
     )

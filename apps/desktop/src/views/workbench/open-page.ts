@@ -1,5 +1,7 @@
 import type { PassId, TaskId } from '@10db/contracts';
 import { useState } from 'react';
+import { handOffTo } from '../../daemon/dev-ui-handoff';
+import { useDaemon, useDaemonStatus } from '../../daemon/provider';
 import { appPageUrl, openAppPage } from '../../desktop/tauri';
 
 // Workbench spec §4.3, design review D18: Open Page's first click for a page in a pass opens the page
@@ -66,6 +68,9 @@ export function useOpenPage(target: OpenPageTarget): OpenPageControl {
   const [refused, setRefused] = useState<{ readonly key: string; readonly reason: string } | null>(
     null,
   );
+  const { connection } = useDaemon();
+  const status = useDaemonStatus();
+  const devUiOrigin = status.kind === 'connected' ? status.devUiOrigin : null;
   const key = `${target.passId}/${target.taskId}`;
   const opened = openedHere.has(key) || readOpened(target.passId).includes(target.taskId);
   const attempt = async (step: (address: Address) => Promise<void>): Promise<void> => {
@@ -81,7 +86,10 @@ export function useOpenPage(target: OpenPageTarget): OpenPageControl {
   const act = () =>
     attempt(async (address) => {
       if (opened) return copy(address);
-      await openAppPage(address.appUrl, address.route);
+      // 10db's own dev UI gets the daemon's connection in the fragment; a copied link never does.
+      await openAppPage(address.appUrl, address.route, (url) =>
+        handOffTo(url, devUiOrigin, connection),
+      );
       rememberOpened(target.passId, target.taskId);
       setOpenedHere((held) => new Set(held).add(key));
     });

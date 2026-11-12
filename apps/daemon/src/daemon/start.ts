@@ -1893,6 +1893,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   };
   const app = createApp({
     commit: build?.commit ?? null,
+    devUiOrigin: opts.devUiOrigin ?? null,
     selfUpdate: selfUpdateServices,
     startedAt,
     allowedOrigins: [
