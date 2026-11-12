@@ -75,3 +75,4 @@ export {
   type LaneSessionInput,
 } from './lane-sandbox';
 export { singleQuoted } from './posix-quote';
+export type { SetupInput } from './setup-input';

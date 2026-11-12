@@ -14,3 +14,4 @@ export {
   readProjectDefinitions,
   type DefinitionFile,
 } from './project-definitions';
+export { planSessionSetup, type SessionSetupPlan } from './plan';
