@@ -632,6 +632,33 @@ describe('a limit and a reservation decided together', () => {
   });
 });
 
+describe('a builder who has not set his name', () => {
+  const seedName = () => {
+    store.db.$client.prepare("UPDATE people SET name = 'You' WHERE is_builder = 1").run();
+  };
+
+  it('refuses Send with a 409 that says where to set it, and keeps the draft', async () => {
+    const w = world();
+    w.route([w.person('mark', { sendMode: 'review' })]);
+    const id = w.card();
+    seedName();
+    await expect(sends.send(id, {})).rejects.toThrow(/Set your name in Settings › People/);
+    await expect(sends.send(id, {})).rejects.toBeInstanceOf(ConflictError);
+    expect(send(id).state).toBe('draft');
+    expect(slack.posts).toEqual([]);
+  });
+
+  it('holds an automatic send for review instead of posting "You\'s 10db build"', async () => {
+    const w = world();
+    const mark = w.person('mark');
+    await seasoned(w, mark);
+    const id = w.card();
+    seedName();
+    await sends.afterDraft(id);
+    expect(send(id)).toMatchObject({ state: 'draft', heldBy: 'review' });
+  });
+});
+
 describe('Send without a token', () => {
   it('is a 409 that keeps the draft, even when the DM is already known', async () => {
     const w = world();

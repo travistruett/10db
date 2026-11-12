@@ -25,6 +25,8 @@ import {
   findFlowByName,
   getProject,
   getInboxItem,
+  listPeople,
+  updatePerson,
   getTask,
   getWorkstreamRow,
   insertTask,
@@ -554,4 +556,12 @@ export async function createTestEngine(
     },
   };
   return engine;
+}
+
+/** Gives the seeded builder a name, as Settings › People does before a question can be sent. */
+export function nameBuilder(engine: TestEngine, name = 'Travis'): void {
+  engine.store.write((ctx) => {
+    const builder = listPeople(ctx.tx).find((p) => p.isBuilder);
+    if (builder) updatePerson(ctx, builder.id, { handle: builder.handle, name, slack: null });
+  });
 }

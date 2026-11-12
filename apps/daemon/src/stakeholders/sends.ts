@@ -16,6 +16,7 @@ import {
 } from '@10db/contracts';
 import {
   BUILDER_HANDLE,
+  SEED_BUILDER_NAME,
   closeSend,
   dropDraft,
   everSent,
@@ -137,6 +138,10 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
    * counts toward the person's limit at once. Two cards decided together cannot both pass a limit, and a
    * draft is never left unheld and unsent: if the post fails here, `recoverSending` finishes it.
    */
+  function builderUnnamed(card: InboxItemDto, db: DbReader = state.db): boolean {
+    return draftContext(db, card).builderName === SEED_BUILDER_NAME;
+  }
+
   async function afterDraft(cardId: InboxItemId): Promise<void> {
     if (slack === null) return;
     const reserved = state.write((ctx) => {
@@ -156,8 +161,10 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
           newThreads: newThreadsSince(ctx.tx, p.id, since),
         })),
       });
-      setHeldBy(ctx, draft.id, held);
-      if (held !== null) return null;
+      // A message from a builder who is still called "You" would read "You's build": he reviews it.
+      const reason = held ?? (builderUnnamed(card, ctx.tx) ? 'review' : null);
+      setHeldBy(ctx, draft.id, reason);
+      if (reason !== null) return null;
       markSending(ctx, draft.id, {
         textSha256: sha256(draft.text),
         threadTs: thread?.threadTs ?? null,
@@ -406,6 +413,8 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
       const draft = liveSend(cardId);
       if (card.state !== InboxState.Open || draft?.state !== 'draft')
         throw new ConflictError('There is no draft to send');
+      if (builderUnnamed(card))
+        throw new ConflictError('Set your name in Settings › People before you send a question');
       const hits: OutboundHit[] =
         input.text === undefined
           ? mergeHits(draft.hits, scanOutbound(draft.text))

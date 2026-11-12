@@ -1,5 +1,6 @@
 import { PersonaInput } from '@10db/contracts';
 import {
+  SEED_BUILDER_NAME,
   BUILDER_HANDLE,
   findFlowByName,
   findPersonByHandle,
@@ -25,7 +26,7 @@ export function seedTeam(state: StateStore, personas: readonly HarnessPersona[])
       if (!findPersonaByKey(ctx.tx, persona.key)) insertPersona(ctx, PersonaInput.parse(persona));
     for (const flow of DEFAULT_FLOWS) if (!findFlowByName(ctx.tx, flow.name)) insertFlow(ctx, flow);
     if (!findPersonByHandle(ctx.tx, BUILDER_HANDLE))
-      insertPerson(ctx, { handle: BUILDER_HANDLE, name: 'You', isBuilder: true });
+      insertPerson(ctx, { handle: BUILDER_HANDLE, name: SEED_BUILDER_NAME, isBuilder: true });
     seedPatterns(ctx);
   });
 }

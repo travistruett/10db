@@ -24,6 +24,9 @@ import type { DbReader, WriteContext } from './store';
 /** The person running this app: every card nobody else owns goes to them (spec §7). */
 export const BUILDER_HANDLE = 'me';
 
+/** The name the builder has until he sets his own in Settings › People. */
+export const SEED_BUILDER_NAME = 'You';
+
 type PersonaRow = typeof schema.personas.$inferSelect;
 const personaDto = (row: PersonaRow): PersonaDto => ({ ...row, modelPin: row.modelPin ?? null });
 

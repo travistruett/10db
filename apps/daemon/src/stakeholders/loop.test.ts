@@ -1,6 +1,6 @@
 import { getWorkstream, insertPerson, listDecisions, listInbox, setRoutingRules } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createTestEngine, type TestEngine } from '../../test/engine';
+import { createTestEngine, nameBuilder, type TestEngine } from '../../test/engine';
 import { FakeSlack } from '../../test/fake-slack';
 import { waitFor } from '../../test/fixtures';
 import type { FakeScriptBook } from '../sessions';
@@ -34,6 +34,7 @@ async function world() {
   // No OpenRouter: the judge is off, so a project route decides at insert.
   const live = await createTestEngine(book, {}, {}, { slack });
   engine = live;
+  nameBuilder(live);
   const mark = live.store.write((ctx) =>
     insertPerson(ctx, {
       handle: 'mark',

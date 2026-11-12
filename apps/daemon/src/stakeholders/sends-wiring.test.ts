@@ -1,6 +1,6 @@
 import { getWorkstream, insertPerson, listInbox, sendForCard, setRoutingRules } from '@10db/db';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createTestEngine, type TestEngine } from '../../test/engine';
+import { createTestEngine, nameBuilder, type TestEngine } from '../../test/engine';
 import { FakeSlack } from '../../test/fake-slack';
 import { waitFor } from '../../test/fixtures';
 import type { FakeScriptBook } from '../sessions';
@@ -36,6 +36,7 @@ async function asked() {
   const slack = new FakeSlack();
   const live = await createTestEngine(book, {}, {}, { slack });
   engine = live;
+  nameBuilder(live);
   const mark = live.store.write((ctx) =>
     insertPerson(ctx, {
       handle: 'mark',
@@ -75,7 +76,7 @@ describe('a routed question, drafted and sent through the running wiring', () =>
     expect(slack.posts).toHaveLength(1);
     live.inbox.answer(card.id, { choice: 'No' });
     await waitFor(() => (slack.posts.length === 2 ? true : undefined));
-    expect(slack.posts[1]?.text).toBe('You answered this one: B. Thanks!');
+    expect(slack.posts[1]?.text).toBe('Travis answered this one: B. Thanks!');
     expect(slack.posts[1]?.threadTs).toBe(slack.posts[0]?.ts);
     expect(sendForCard(live.store.db, card.id)?.state).toBe('closed');
   });
