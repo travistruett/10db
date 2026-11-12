@@ -8,6 +8,7 @@ import { expectAccessible } from './expect-accessible';
 import { E2E_DATA, E2E_REPO, E2E_TOKEN } from './paths';
 
 const auth = { Authorization: `Bearer ${E2E_TOKEN}` };
+const WAITING_TASK = 'Settle the retry window';
 const QUESTION = 'How long should a customer keep access?';
 const Projects = z.array(z.object({ id: z.string() }));
 
@@ -52,6 +53,21 @@ function seedQuestion(project: string): void {
           { label: 'The whole billing period', description: '' },
         ],
       }),
+    ],
+    { cwd: resolve(import.meta.dirname, '../../daemon'), stdio: 'inherit' },
+  );
+}
+
+/** Writes a task whose run waits on a question already sent to Mark; nothing reaches Slack. */
+function seedWaiting(project: string): void {
+  execFileSync(
+    'pnpm',
+    [
+      'exec',
+      'tsx',
+      'scripts/seed-waiting-question.ts',
+      resolve(E2E_DATA, '10db.sqlite'),
+      JSON.stringify({ projectId: project, taskTitle: WAITING_TASK, area: 'greeting' }),
     ],
     { cwd: resolve(import.meta.dirname, '../../daemon'), stdio: 'inherit' },
   );
@@ -112,4 +128,30 @@ test('routes a question to someone outside Slack from its card, and the table sh
   await expect(row).toContainText('Project');
   await expect(row).toContainText('Product');
   await expectAccessible(page, 'who answers, dark');
+});
+
+test('the Board says a task waits on Mark in Slack, without a yellow border', async ({
+  page,
+  request,
+}) => {
+  seedWaiting(await projectId(request));
+  await claudeIsInstalled(page);
+  await page.goto('/board');
+  const card = page.getByTestId('task-card').filter({ hasText: WAITING_TASK });
+  await expect(card).toContainText('Waiting on Mark Ellis in Slack · 3h');
+  // The builder is not asked for anything, so the card keeps its plain border.
+  await expect(card).not.toHaveAttribute('data-state-color', 'yellow');
+  await expect(card.getByTestId('state-dot')).toHaveAttribute('data-color', 'yellow');
+  await expectAccessible(page, 'board, waiting on someone, dark');
+
+  // The run is a seeded one with no session behind it; cancel it so later specs see no stray lane.
+  const runs = z
+    .array(z.object({ id: z.string(), taskTitle: z.string() }))
+    .parse(await (await request.get(`${daemonUrl}/workstreams`, { headers: auth })).json());
+  const run = runs.find((w) => w.taskTitle === WAITING_TASK);
+  expect(run).toBeDefined();
+  const cancelled = await request.post(`${daemonUrl}/workstreams/${run?.id ?? ''}/cancel`, {
+    headers: auth,
+  });
+  expect(cancelled.ok()).toBe(true);
 });
