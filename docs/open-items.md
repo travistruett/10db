@@ -141,3 +141,12 @@
 - [ ] Sandbox: Playwright's WebKit can't run in a sandboxed gate (its XPC services start outside the sandbox), so 10db's e2e runs only in CI and an unsandboxed `make gate`. Measure Chromium under srt before any project relies on browser tests in its gate.
 - [ ] Sandbox: a project's sandbox additions in Settings (read paths, hosts, `.env*` exceptions such as `.env.example`), for lanes and the gate alike (D9, R3).
 - [ ] Sandbox: each gate run downloads and rebuilds its cargo crates (its `CARGO_HOME` goes with its temp dir). A cache shared between runs needs a fetch that runs inside a sandbox, never outside one.
+- [ ] Stakeholder questions slices 2–4 (`docs/superpowers/specs/2026-11-11-10db-stakeholder-questions-design.md` §12). Before each, read a week of real sends: how often a preview was edited, how many replies were in a person's own words, and how often triage, `thread_answer`, `reply_match` and `approval_read` fell below the floor.
+- [ ] Stakeholder questions: someone outside the builder's Slack workspace (spec §9.3).
+- [ ] Stakeholder questions: guess the builder's Slack member in "Which one is you?" (git `user.email` against members' emails, or the Mac's full name) and pre-select it.
+- [ ] Stakeholder questions: the builder's own Inbox cards go to Slack and are answered there, using the member picked in "Which one is you?".
+- [ ] Stakeholder questions: keep every thread a send moved from, not only the last; after a second move a reply left in the original DM is not read (state table ruling 35).
+- [ ] Stakeholder questions: the route line's scope words ("on the goal Renewals") and the judge's confidence need a field on the card.
+- [ ] Stakeholder questions: a Slack answer's always/never sentences become principle proposals, as the builder's answers do (spec §8.3).
+- [ ] Stakeholder questions: a lost closing line is not posted again after a crash (state table ruling 24).
+- [ ] Stakeholder questions: `sweepDrafts` guards each card, so one bad card can't stop the daemon's start; an edited draft keeps a code-block hold found in the card's raw text; an overridden triage call is logged as overridden, not acted.

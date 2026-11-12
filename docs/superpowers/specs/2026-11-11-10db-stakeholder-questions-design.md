@@ -1,6 +1,9 @@
 # 10db stakeholder questions: a question goes to the person who can answer it, in Slack, and the answer resumes the work
 
-**Status:** designed on 2026-11-11 overnight, not built. Written from the builder's request (quoted in §1), a map
+**Status:** slice 1 built (`decisions/2026-11-12-stakeholder-questions-run-on-the-inbox-card.md`); slices 2–4
+(§12) designed. The send lifecycle as built is
+`docs/superpowers/plans/2026-11-11-10db-stakeholder-questions-state-table.md`, and §15 lists what the build
+changed. Designed on 2026-11-11 overnight. Written from the builder's request (quoted in §1), a map
 of the code on `main` at 13d24b6, a Slack API research pass (sources in §9) and an independent design memo
 (Fable), then revised for two rounds of two reviews: a product review (Fable) and an engineering review against
 the code (Opus). The builder made the open calls on 2026-11-12; §14 records them, and a **(call)** mark points
@@ -353,12 +356,12 @@ The spec says "retry and notify" but not how long the account stays active meanw
 *C.* Keep access for the whole billing period
 
 The work on this waits for your answer.
-↳ Reply in this thread with a letter or your own words.
+Reply with A, B, C, or your own words.
 ```
 
-- **The last line.** Every question message, in a DM, a group DM or a tie's group DM, ends with "↳ Reply in
-  this thread with a letter or your own words." A reply in the thread is the path 10db is built around; a reply
-  at the top of the DM still works (§8.2).
+- **The last line.** Every question message, in a DM, a group DM or a tie's group DM, ends with "Reply with A,
+  B, C, or your own words." It doesn't ask for the thread: a reply in the thread and one at the top of the DM
+  count the same (§8.2).
 
 - **Escaping.** Every field from the card is escaped for `mrkdwn` (`&`, `<`, `>`), every text object is sent
   `verbatim: true` and the post sets `unfurl_links: false` and `unfurl_media: false`. Agent text cannot ping
@@ -434,11 +437,12 @@ thread, message `ts`, permalink and cursor in one write (`moveSend`), and the DM
 | `closed`   | the builder answered or took it back, or the card was cancelled  |
 | `failed`   | Slack refused (`channel_not_found`, …); the card returns to the builder with Slack's error |
 
-- One card has at most one send. A card whose route changes before it is sent drops its draft.
+- One card has at most one live send (`draft`, `sending` or `sent`). After a Take Back or a failure, Ask
+  Someone or Send makes a new one. A card whose route changes before it is sent drops its draft.
 - The draft is written in the same transaction as the card, so a crash never leaves a routed card without one.
-- A daemon that starts with a send still `sending` looks in the DM's history for the bot's message with the
-  same text hash since the send began: found, it is `sent` with that `ts`; not found, it is posted again. A
-  question is never posted twice, and never lost.
+- A send still `sending`, at start or on the next good tick, is looked for in its conversation by the
+  `tendb_send` metadata every bot line carries: found, it is `sent` with that `ts`; not found, it is posted
+  again. A question is never posted twice, and never lost.
 
 ## 8. Waiting and the answer
 
@@ -506,14 +510,12 @@ stopped on shutdown.
 - **Anyone else replied, or there are several recipients: complete when the conversation settles** (§8.5): a
   tick after a message names an option letter with nothing newer since, or 30 minutes with no new message
   **(call)**.
-- **A reply typed outside the thread,** at the top of the DM, answers the person's only open send when they
-  have exactly one; with several, it becomes one builder card ("Mark replied outside a thread") listing the open
-  questions, to attach it to one (or dismiss it). The watch reads the DM's history (`conversations.history`) from
-  the contact's own cursor, which advances as it reads, so the same message never raises a second card. The same
-  quiet rule applies there as in a thread. The first time a person replies at the top of the DM, 10db posts one
-  line in the question's thread: "Got it. Next time, replying in this thread keeps your answers with the right
-  question." A flag on the person's contact (`topLevelNudgedAt`) means it is never posted to them again; a reply
-  in a thread never gets it.
+- **A reply typed outside the thread,** at the top of the DM or group DM, joins the conversation of the
+  person's open send there, in `ts` order, and the same rules apply as in a thread. With several open sends,
+  the judge's `reply_match` (a choice over the person's open questions plus `unclear`, floor 0.8) picks one;
+  below the floor or with no key, 10db posts "Which one is this for? 1) … 2) …" listing each question by the
+  text it sent, and a reply with a number assigns it. What each message was assigned to is stored, so a
+  restart never assigns it again or asks twice. 10db never asks anyone to use the thread.
 - **Where a reply came from** is stored on the send's answer (`replyVia: 'thread' | 'top_level'`). Slice 1 shows
   it nowhere; it is there so the builder can see how people really reply before changing this rule (§14).
 - **A refused token** stops the watch and shows a 10db card ("Slack refused 10db's token. Reconnect it in
@@ -611,13 +613,16 @@ conversation settles (§8.2), and then (written for one recipient, Mark; §8.6 s
    reply.
 4. **Mark approves** with a ✅ (`white_check_mark`, `heavy_check_mark` or `+1`) on the proposal, read from the
    message's `reactions`: Mark's user id must be in that reaction's `users`, and the bot's own id there (from the
-   pre-seeded ✅) is ignored. Or he approves with a reply whose whole text is "yes", "approve",
-   "approved", "ok" or "👍" (any case, trailing punctuation ignored). The card is answered as Mark: that option,
+   pre-seeded ✅) is ignored. Or he approves with a reply the judge's `approval_read` (does this reply approve
+   the proposal?, floor 0.8) reads as approval, so "Yes sir" approves. With no key, a loose list stands in:
+   yes, yep, yeah, sure, ok, okay, approve(d), sounds good, go ahead, do it, 👍 or ✅, any case, with
+   punctuation and trailing words such as "sir" or "thanks" ignored. The card is answered as Mark: that option,
    `readAs: 'approved'`, and the decision is recorded with `decidedBy: mark`, the others named in it ("with
    Priya") and the thread as its source.
 5. **Mark replies a letter** instead: that is his pick (§8.3). **Mark replies anything else, or someone else
-   replies:** the proposal is withdrawn (the send forgets it) and the conversation settles again. A ✅ from
-   anyone but Mark approves nothing.
+   replies before he approves:** the proposal is withdrawn (the send forgets it) and the conversation settles
+   again. Once Mark has approved, a participant who isn't a recipient can't undo it (Priya can't veto Mark).
+   A ✅ from anyone but Mark approves nothing.
 6. **Nobody approves:** the reminder and the return (§8.1) apply as to any send.
 
 **Nothing is posted twice.** The send stores what the conversation has already been answered with:
@@ -650,7 +655,9 @@ An own-words reply from Mark after a "which way" line gets the same quote of the
 - **Anyone's reply counts**, recipients and anyone they bring in (§8.4).
 - **A recipient's letter is their pick** once a tick passes with nothing newer from another recipient, unless
   another recipient has already named a different letter: the first pick records the decision as that
-  recipient's.
+  recipient's. Anything another recipient writes after the letter, a question included, leaves the
+  conversation to the judge's settle. Another recipient's approval, or the same letter, while one has approved
+  keeps the approval.
 - **The approval line tags every recipient:** "Sounds like **B** (Priya). @Mark @Ana, ✅ to approve or reply to
   change." The "which way" line does too. The first ✅ (or "yes") from any recipient, with nothing newer from the
   other recipients by the next tick, records the decision as that recipient's, crediting the others who spoke.
@@ -756,7 +763,10 @@ task drawer, the Board card, Factory's goal). Sketches below; the visual mockups
 
 - **Not connected:** the Slack line becomes a three-step guide in place: 1. **Copy Manifest** and **Open Slack
   Apps ↗**; 2. install the app (with the approval note); 3. paste the Bot User OAuth Token, **Connect**. A
-  refused token says why beside Connect.
+  refused token says why beside Connect. Once connected, a fourth step, **Which one is you?**, picks the
+  builder's own member from the same Select and saves it on the builder's row with its name: every message
+  carries that name, so nothing is sent until it is picked. The builder's row can change the pick and has no
+  Remove.
 - **Add Person** is a modal: a searchable Select of the workspace's members (avatar, name, title, email), or
   "Someone not in Slack" with just a name. Then the send mode (a `SegmentedControl`: Review Each · Send Without
   Asking) and "New questions a day" (a `NumberInput`, default 10, with an Off switch), described under the
@@ -855,7 +865,7 @@ leaves Open for a third tab between Open and Resolved.
 - The tab's count is a `CountBadge` in the neutral (gray) tone, since nothing in it needs the builder; Open's
   stays as it is. The sidebar's Inbox badge counts Open only.
 - An answered card moves to **Resolved** at once, which shows "Answered by Mark in Slack · 2h after asking", how
-  the reply was read ("Read as B", "In his own words", or "Approved B · with Priya"), the words and ↗.
+  the reply was read ("Read as B", "In their own words", or "Approved B · with Priya"), the words and ↗.
 - A question back after 8 hours, or one whose recipients disagree, leaves Waiting for Open (§8.1, §8.6).
 - This splits the Inbox's promise "every card waits on the builder" (DESIGN.md, and
   `decisions/2026-11-08-the-inbox-holds-what-needs-the-builder.md`): Open keeps it, Waiting is what the builder
@@ -985,3 +995,20 @@ until a pass page needs a stakeholder; reversing it is one rule in `assigneesFor
 
 **Before changing how top-level replies are read,** look at `replyVia` on recent sends: it records whether each
 answer came in a thread or at the top of the DM.
+
+## 15. What the build changed
+
+Slice 1 was built against this spec and the state table
+(`docs/superpowers/plans/2026-11-11-10db-stakeholder-questions-state-table.md`, whose rulings 1–35 each name a
+test row). The sections above now say what was built; the changes, in short:
+
+- **Replies count wherever people type** (§7.2, §8.2): no thread instruction, no top-level nudge and no
+  "replied outside a thread" card; `reply_match` or "Which one is this for?" chooses among several open sends.
+- **Approval is read by the judge** (§8.5): `approval_read`, with a loose word list as the no-key fallback.
+- **Recovery is by metadata** (§7.5): every bot line carries `tendb_send` metadata, and a send left `sending`
+  is looked for on the next good tick as well as at start.
+- **One live send per card** (§7.5): a new send after a Take Back or a failure.
+- **A non-recipient can't undo an approval** (§8.5), and a recipient's question after another's letter leaves
+  the conversation to the settle (§8.6).
+- **The builder picks their own Slack member** (§10.1), which gives every message its name.
+- **Migrations** 0063–0065 and protocol 8 (`0062` was taken first by another change).

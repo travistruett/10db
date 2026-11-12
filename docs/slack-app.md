@@ -1,7 +1,7 @@
 # Setting up Slack for stakeholder questions
 
-**Status:** designed, not built (`docs/superpowers/specs/2026-11-11-10db-stakeholder-questions-design.md`).
-Every step in Slack can be done now: the app made here is the one 10db will use. The research behind each
+**Status:** built (`docs/superpowers/specs/2026-11-11-10db-stakeholder-questions-design.md`). Settings ›
+People in 10db walks you through these steps and copies the manifest for you. The research behind each
 choice, with sources, is `docs/architecture/research/slack-stakeholder-questions.md`.
 
 10db asks a stakeholder in Slack through a small Slack app that you make in your own workspace from a
@@ -85,7 +85,8 @@ including one this guide added since you made it (such as `reactions:write`), me
 the same page (**Install App › Reinstall to Workspace**).
 
 4. Optional: under **Basic Information › Display Information**, upload an icon so your stakeholder
-   recognises the bot.
+   recognises the bot: [`slack-app-icon.png`](slack-app-icon.png) (1024 × 1024), with the background color
+   `#1F262A`.
 
 ## 2. Install it
 
