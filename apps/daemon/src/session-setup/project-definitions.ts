@@ -124,7 +124,8 @@ function readSkill(checkout: string, name: string, budget: Budget): Read {
         if (failed) return failed;
         continue;
       }
-      if (path.toLowerCase() === CODEX_SKILL_CONFIG) {
+      // At any depth: a nested folder holding a SKILL.md may be found as a skill of its own.
+      if (`/${path.toLowerCase()}`.endsWith(`/${CODEX_SKILL_CONFIG}`)) {
         notes.push({
           what: `${root}/${path}`,
           why: 'Codex reads it to install and run what it names',
@@ -139,11 +140,13 @@ function readSkill(checkout: string, name: string, budget: Budget): Read {
       }
       if (read === null) continue;
       let content = read.bytes;
-      if (path === 'SKILL.md') {
+      // Every SKILL.md, a nested one too, in any case: an agent may load a nested folder as a skill.
+      if (entry.name.toLowerCase() === 'skill.md') {
         const cleaned = cleanDefinition(DefinitionKind.Skill, content.toString('utf8'));
-        if ('refused' in cleaned) return cleaned;
+        if ('refused' in cleaned)
+          return path === 'SKILL.md' ? cleaned : { refused: `${path}: ${cleaned.refused}` };
         content = Buffer.from(cleaned.text, 'utf8');
-        notes.push(...removedNote(`${root}/SKILL.md`, cleaned.dropped));
+        notes.push(...removedNote(`${root}/${path}`, cleaned.dropped));
       }
       if (!take(local, content.length)) return { overCap: true };
       files.push({

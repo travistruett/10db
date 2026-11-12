@@ -151,6 +151,27 @@ describe('readProjectDefinitions', () => {
     ]);
   });
 
+  it('drops an agents/openai.yaml at any depth, in any case, and cleans a nested SKILL.md', () => {
+    write('.claude/skills/s/SKILL.md', SKILL);
+    write('.claude/skills/s/sub/SKILL.md', '---\nname: sub\nhooks: {}\n---\nRun !`id`\n');
+    write('.claude/skills/s/sub/Agents/OpenAI.yaml', 'dependencies:\n  tools: []\n');
+    const { files, leftOut } = readProjectDefinitions(checkout);
+    expect(byPath(files)).toEqual({
+      'skills/s/SKILL.md': SKILL,
+      'skills/s/sub/SKILL.md': '---\nname: sub\n---\n',
+    });
+    expect(leftOut).toEqual([
+      {
+        what: '.claude/skills/s/sub/Agents/OpenAI.yaml',
+        why: 'Codex reads it to install and run what it names',
+      },
+      {
+        what: '.claude/skills/s/sub/SKILL.md',
+        why: 'hooks, 1 shell line removed: a lane can write this file',
+      },
+    ]);
+  });
+
   it('leaves out a definition whose frontmatter is refused', () => {
     write('.claude/agents/a.md', '---\nname: &n a\ndescription: *n\n---\nYou\n');
     write('.claude/skills/s/SKILL.md', '---\nname: s\n...\nhooks: x\n---\nBody\n');
