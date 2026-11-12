@@ -174,6 +174,24 @@ describe('claimSandboxTempRoot', () => {
     expect(existsSync(join(root, `10db-daemon-${String(process.pid)}`))).toBe(false);
   });
 
+  it.each([
+    ['a dead daemon’s is swept', 'dead'],
+    ['a live daemon’s is kept', 'live'],
+  ] as const)('a 10db-setup dir: %s', async (_name, daemon) => {
+    const setup = join(root, '10db-setup-0123456789ab');
+    mkdirSync(join(setup, 'yours/skills'), { recursive: true });
+    symlinkSync(outside, join(setup, 'yours/skills/s'));
+    const owner = daemon === 'dead' ? await deadPid() : liveProcess();
+    writeFileSync(join(root, `10db-daemon-${String(owner)}`), '', { mode: 0o400 });
+    const claim = claimSandboxTempRoot(root, process.pid);
+    try {
+      expect(existsSync(setup)).toBe(daemon === 'live');
+      expect(readdirSync(outside)).toEqual(['keep.txt']);
+    } finally {
+      claim.release();
+    }
+  });
+
   it("leaves a dead daemon's process ledgers for the sweep that stops their processes", () => {
     // `reapLaneProcessLedgers` reads them next, then removes them; the claim must not.
     writeFileSync(join(root, '10db-proc-4321-0123456789ab.json'), '{"version":1,"members":[]}');

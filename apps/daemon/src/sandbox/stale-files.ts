@@ -17,6 +17,8 @@ import {
 const SEALED_FILE = /^10db-(?:env|gate|mcp)-[0-9a-f]{12}\.(?:json|sh|cjs|log)$/;
 /** What `createProcessLedger` makes, and the next content a ledger is given beside it. */
 const LEDGER_FILE = /^10db-proc-[1-9][0-9]*-[0-9a-f]{12}\.json(?:\.[0-9a-f]{12}\.tmp)?$/;
+/** A session's setup dir (`createSetupDir`), in the files root. */
+const SETUP_DIR = /^10db-setup-[0-9a-f]{12}$/;
 /** A running daemon's mark in a sandbox root, named by its pid. */
 const DAEMON_MARK = /^10db-daemon-([1-9][0-9]*)$/;
 /** A 10db daemon's entry on its command line: a bundle's `daemon.mjs`, or `src/main.ts` from source. */
@@ -102,10 +104,11 @@ type SweptRoot = 'sandbox' | 'system';
  * null for any other name. A system temp dir holds no ledger but one a lane wrote, so only its sweep
  * removes them; a sandbox root's are left for the reap that stops what they name.
  */
-function staleKind(name: string, where: SweptRoot): 'dir' | 'file' | null {
+function staleKind(name: string, where: SweptRoot): 'dir' | 'setup' | 'file' | null {
   switch (where) {
     case 'sandbox':
       if (isLaneTempDirName(name)) return 'dir';
+      if (SETUP_DIR.test(name)) return 'setup';
       return SEALED_FILE.test(name) ? 'file' : null;
     case 'system':
       if (isSystemTempDirName(name)) return 'dir';
@@ -159,12 +162,17 @@ export function claimSandboxTempRoot(root: string, pid: number = process.pid): T
         ? [...namesIn(root)].flatMap((name) => {
             const kind = staleKind(name, 'sandbox');
             const path = join(root, name);
-            return kind !== null && ownedKind(path, uid) === kind ? [{ path, kind }] : [];
+            const owned = ownedKind(path, uid);
+            return kind !== null && (owned === kind || (kind === 'setup' && owned === 'dir'))
+              ? [{ path, kind }]
+              : [];
           })
         : [];
     for (const entry of stale) {
       try {
         if (entry.kind === 'dir') removeLaneTempDir(entry.path, root);
+        // No lane writes a setup dir, and removing it never follows the links it holds.
+        else if (entry.kind === 'setup') rmSync(entry.path, { recursive: true, force: true });
         else rmSync(entry.path, { force: true });
         removed += 1;
       } catch {
