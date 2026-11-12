@@ -16,6 +16,7 @@ describe('settings sections', () => {
       'billing',
       'team',
       'routing-rules',
+      'people',
       'keep-awake',
       'updates',
       'lane-permissions',

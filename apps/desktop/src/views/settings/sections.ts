@@ -5,6 +5,7 @@ export const SettingsSectionKey = {
   NetworkHosts: 'network-hosts',
   Billing: 'billing',
   Team: 'team',
+  People: 'people',
   RoutingRules: 'routing-rules',
   KeepAwake: 'keep-awake',
   Updates: 'updates',
@@ -83,6 +84,13 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     planned:
       'Who answers each question category, optionally per area. The team editor plan fills it.',
     built: false,
+  },
+  {
+    key: SettingsSectionKey.People,
+    group: SettingsGroup.Global,
+    label: 'People',
+    planned: null,
+    built: true,
   },
   {
     key: SettingsSectionKey.KeepAwake,

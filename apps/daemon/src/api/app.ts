@@ -1130,16 +1130,21 @@ export function createApp(deps: ApiDeps) {
     .post('/inbox/:id/keep-waiting', (c) =>
       c.json(deps.services.keepWaiting(InboxItemId.parse(c.req.param('id')))),
     )
-    .get('/inbox/:id/compose', (c) =>
-      c.json(
-        deps.services.composeFor(
-          InboxItemId.parse(c.req.param('id')),
-          (c.req.query('personIds') ?? '')
-            .split(',')
-            .filter((id) => id !== '')
-            .map((id) => PersonId.parse(id)),
+    .get(
+      '/inbox/:id/compose',
+      validator('query', (query): { personIds?: string } => ({
+        ...(typeof query['personIds'] === 'string' ? { personIds: query['personIds'] } : {}),
+      })),
+      (c) =>
+        c.json(
+          deps.services.composeFor(
+            InboxItemId.parse(c.req.param('id')),
+            (c.req.valid('query').personIds ?? '')
+              .split(',')
+              .filter((id) => id !== '')
+              .map((id) => PersonId.parse(id)),
+          ),
         ),
-      ),
     )
     .post(
       '/flows',

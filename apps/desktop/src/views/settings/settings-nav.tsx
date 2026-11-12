@@ -14,6 +14,7 @@ import {
   IconNetwork,
   IconRoute,
   IconSettings,
+  IconUserPlus,
   IconUsers,
 } from '@tabler/icons-react';
 import { Link, useRouterState } from '@tanstack/react-router';
@@ -33,6 +34,7 @@ const SECTION_ICON: Readonly<Record<SettingsSectionKey, typeof IconSettings>> = 
   [SettingsSectionKey.Billing]: IconCoin,
   [SettingsSectionKey.Team]: IconUsers,
   [SettingsSectionKey.RoutingRules]: IconRoute,
+  [SettingsSectionKey.People]: IconUserPlus,
   [SettingsSectionKey.KeepAwake]: IconCoffee,
   [SettingsSectionKey.Updates]: IconDownload,
   [SettingsSectionKey.LanePermissions]: IconShieldCheck,
