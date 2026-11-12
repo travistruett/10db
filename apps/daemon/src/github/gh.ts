@@ -131,6 +131,11 @@ export interface Gh {
   authStatus(call: GhCall): Promise<void>;
   /** The signed-in login, or null when gh is signed out. Throws on anything else (no network, a timeout). */
   authLogin(call: GhCall): Promise<string | null>;
+  /**
+   * The signed-in account's no-reply commit address, `<id>+<login>@users.noreply.github.com`, which a
+   * push GitHub's email privacy guards accepts. Throws a GhError when it can't be read.
+   */
+  noreplyEmail(call: GhCall): Promise<string>;
   prView(
     input: { readonly repo: string; readonly ref: string },
     call: GhCall,
@@ -643,6 +648,9 @@ function actionsId(kind: string, id: string, args: readonly string[]): void {
     );
 }
 
+/** GitHub's no-reply commit address: the account's number and its login. */
+const NoreplyEmail = z.string().regex(/^\d+\+[A-Za-z0-9-]+@users\.noreply\.github\.com$/);
+
 /** A login is one word of letters, digits, hyphens and underscores; gh prints `null` for none. */
 const GithubLogin = z
   .string()
@@ -701,6 +709,15 @@ export function createGh(exec: GhExec): Gh {
       if (!login.success)
         throw new GhError(GhFailure.Failed, "gh api user printed a login 10db can't read");
       return login.data;
+    },
+    async noreplyEmail(call) {
+      const args = ['api', 'user', '--jq', '"\\(.id)+\\(.login)@users.noreply.github.com"'];
+      const out = await exec(args, call);
+      if (out.exitCode !== 0) throw failure(args, out);
+      const email = NoreplyEmail.safeParse(out.stdout.trim());
+      if (!email.success)
+        throw new GhError(GhFailure.Failed, "gh api user printed an account 10db can't read");
+      return email.data;
     },
     async prView({ repo, ref }, call) {
       const args = ['pr', 'view', ref, '-R', repo, '--json', 'url,state,isDraft,baseRefName'];

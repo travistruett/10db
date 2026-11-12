@@ -49,6 +49,7 @@ export function projectDto(overrides: Partial<ProjectDto> = {}): ProjectDto {
     prTitlePrefix: null,
     allowedCommands: [],
     sandboxLoopback: false,
+    prPictures: false,
     sandboxDocker: false,
     sandboxDockerOptOut: false,
     workspaceMode: 'shared',

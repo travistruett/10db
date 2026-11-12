@@ -559,6 +559,11 @@ export const ProjectInput = z
      * `<type>(<scope>): <subject>` from the batch's tasks and the paths it changed.
      */
     prTitlePrefix: PrTitlePrefix.nullable().default(null),
+    /**
+     * A pass's pull request shows each signed-off page's before and after pictures, pushed to a
+     * `10db-pictures/<pass>` branch of origin. Off by default: a picture can show the app's own data.
+     */
+    prPictures: z.boolean().default(false),
     /** The account that pays; absent means the default account. */
     accountId: AccountId.optional(),
     /**
@@ -706,6 +711,7 @@ export const ProjectDto = z.object({
   landing: z.enum(ProjectLanding),
   landingBranch: z.string().nullable(),
   prTitlePrefix: z.string().nullable(),
+  prPictures: z.boolean(),
   allowedCommands: z.array(z.string()),
   sandboxLoopback: z.boolean(),
   sandboxDocker: z.boolean(),
@@ -759,6 +765,7 @@ export const ProjectPatch = z
     /** The branch new tasks land in when `landing` is `branch`; a `landing` that is not `branch` forgets it. */
     landingBranch: BranchName.nullable(),
     prTitlePrefix: PrTitlePrefix.nullable(),
+    prPictures: z.boolean(),
     /** Replaces the project's areas; one that a running task holds can't be removed or renamed. */
     areas: z.array(AreaDef.extend({ globs: z.array(PathPattern).min(1) })).min(1),
     /** Replaces the project's hazards, commands included. */

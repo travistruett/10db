@@ -1163,9 +1163,9 @@ route, the viewport, the theme, the kind, the hash, the size and the path (§11)
 SQLite, as Plan's files are not. A file is deleted when no row names its hash. A turn whose picture has the
 same hash as the one before it stores no new file.
 
-**Where they show.** On the thread, each turn; in the task's drawer, before beside after. They are not
-uploaded to the pull request and are not sent to the model: they can show the builder's own data
-**(call)**.
+**Where they show.** On the thread, each turn; in the task's drawer, before beside after. They are not sent
+to the model, and they go to the pull request only when the project turns on Pictures in pull requests
+(`decisions/2026-11-12-a-pass-pull-request-can-show-before-and-after-pictures.md`): they can show the builder's own data **(call)**.
 
 **Size and time**, to be measured in the first pass: a 1440 × 900 PNG of an app screen is expected to be a few
 hundred kilobytes, so a task that keeps before and after of two routes keeps about four pictures, and a
@@ -1544,7 +1544,7 @@ Made here without the builder. Each has the alternative that was turned down.
    that, only the builder's own word says so; the scenario that tests it is S3, not a P scenario.
 10. **The sign-off commit's message** (§9.2): the task's title and the turns' first lines. A project with a
     commit convention may need the subject shaped to it; the pull request's title is what a squash keeps.
-11. **Pictures are neither uploaded to the pull request nor sent to the model** (§10).
+11. **Pictures are not sent to the model, and go to the pull request only when the project opts in** (§10).
 12. **The app address, the dev login and the matrix are project settings** (§10), as the gate command is.
     Phase 3 may move them into `.10db/preview.json`.
 13. **A fifth and sixth page run inside the account's lane limit** (§5.2); the limit is not raised by a pass.
