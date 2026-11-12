@@ -80,10 +80,9 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   {
     key: SettingsSectionKey.RoutingRules,
     group: SettingsGroup.Project,
-    label: 'Routing rules',
-    planned:
-      'Who answers each question category, optionally per area. The team editor plan fills it.',
-    built: false,
+    label: 'Who Answers',
+    planned: null,
+    built: true,
   },
   {
     key: SettingsSectionKey.KeepAwake,

@@ -62,8 +62,9 @@ const CATEGORY_WORDS: Readonly<Record<QuestionCategory, string>> = {
   [QuestionCategory.Other]: 'Other',
 };
 
-export function categoryWord(category: QuestionCategory): string {
-  return CATEGORY_WORDS[category];
+export function categoryWord(category: string): string {
+  const found = Object.values(QuestionCategory).find((c) => c === category);
+  return found === undefined ? category : CATEGORY_WORDS[found];
 }
 
 /** Why this person: the kind of question, who it goes to, and who chose them when it was not a rule. */

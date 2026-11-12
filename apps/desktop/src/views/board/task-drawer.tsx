@@ -77,6 +77,7 @@ import { PlacementChoice } from './placement-choice';
 import { ExternalLink, PullRequestLink } from './pull-request-link';
 import { ordinal, runNextNote } from './queue-place';
 import { canRunNext } from './run-next';
+import { QuestionRoutesLine } from './question-routes-line';
 import { RISK_LABEL } from './risk-labels';
 import { canCancelRun } from './task-cancel';
 import { holdOption, isHeld, type HoldOption } from './task-hold';
@@ -389,6 +390,7 @@ export function TaskDrawer({
                   ) : null}
                 </Stack>
               ) : null}
+              <QuestionRoutesLine task={task} />
               {waitsOn.length > 0 ? (
                 <Stack gap={4} data-testid="waits-on">
                   <SectionLabel>Waits on</SectionLabel>
