@@ -1041,6 +1041,14 @@ export const WorkstreamDto = z.object({
   /** What the run is waiting for or held by besides the builder, such as another task's hazard claim. */
   notice: Notice.nullable().default(null),
   /**
+   * Who the task's question is out with, and since when: set only while its card has a sent send that has
+   * not come back, so the line never contradicts the Inbox's Open tab. The builder's own wait is not this.
+   */
+  waitingOn: z
+    .object({ names: z.array(z.string()), since: Timestamp })
+    .nullable()
+    .default(null),
+  /**
    * Whether a note told this run's session that its commits were reverted by Ship without it (a Retry
    * or a start that joined the batch wrote it), and that revert still stands: false once Ship without
    * it finds none on the branch. The notice slot can't say so: a joined run holds none, and a wait can
