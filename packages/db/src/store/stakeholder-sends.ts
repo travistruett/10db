@@ -41,6 +41,7 @@ export interface OpenSendRow {
   readonly waitStartedAt: string;
   readonly remindedAt: string | null;
   readonly returnedAt: string | null;
+  readonly returnedReason: 'timer' | 'disagreed' | null;
   readonly proposal: { choice: string; confidence: number; ts: string | null } | null;
   readonly settledThroughTs: string | null;
   readonly askedWhichWayAt: string | null;
@@ -347,6 +348,11 @@ export function moveSend(
     messageTs: input.messageTs,
     permalink: input.permalink,
     lastReadTs: input.messageTs,
+    // What the old conversation had reached does not carry to the new one: it settles again there.
+    proposal: null,
+    approvalSeenAt: null,
+    approvalBy: null,
+    loneReplyPendingSince: null,
   });
 }
 
@@ -491,6 +497,7 @@ function toOpen(db: DbReader, row: SendRow): OpenSendRow | null {
     waitStartedAt,
     remindedAt: row.remindedAt,
     returnedAt: row.returnedAt,
+    returnedReason: row.returnedReason,
     proposal: row.proposal,
     settledThroughTs: row.settledThroughTs,
     askedWhichWayAt: row.askedWhichWayAt,
@@ -637,6 +644,7 @@ export function newThreadsSince(db: DbReader, personId: PersonId, since: string)
     .where(
       and(
         eq(schema.stakeholderSendPeople.personId, personId),
+        eq(schema.stakeholderSendPeople.recipient, true),
         eq(schema.stakeholderSends.newThread, true),
         // A send counts from the moment it is reserved, so two cards decided at once cannot both pass.
         ne(schema.stakeholderSends.state, SendState.Draft),
@@ -663,6 +671,7 @@ export function everSent(db: DbReader, personId: PersonId): boolean {
     .where(
       and(
         eq(schema.stakeholderSendPeople.personId, personId),
+        eq(schema.stakeholderSendPeople.recipient, true),
         isNotNull(schema.stakeholderSends.sentAt),
       ),
     )

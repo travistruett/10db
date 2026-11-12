@@ -362,6 +362,56 @@ describe('sends', () => {
     });
   });
 
+  it('forgets the proposal, the approval and the pending reply when a send moves', () => {
+    const w = world();
+    const s = draft(w.card('q'), [w.mark.id]);
+    sent(s.id);
+    store.write((ctx) => {
+      setProposal(ctx, s.id, { choice: 'B', confidence: 0.9, ts: '110.1' });
+      markApprovalSeen(ctx, s.id, { at: '111.1', by: w.mark.id });
+      markLoneReplyPending(ctx, s.id, T0);
+      moveSend(ctx, s.id, {
+        channelId: 'G1',
+        threadTs: '200.1',
+        messageTs: '200.1',
+        permalink: null,
+        added: [],
+      });
+    });
+    expect(openSends(store.db)[0]).toMatchObject({
+      proposal: null,
+      approvalSeenAt: null,
+      approvalBy: null,
+      loneReplyPendingSince: null,
+    });
+  });
+
+  it('does not count a person who was brought in for the limit or for having been sent to', () => {
+    const w = world();
+    const s = draft(w.card('q'), [w.mark.id]);
+    sent(s.id, T0);
+    store.write((ctx) => {
+      moveSend(ctx, s.id, {
+        channelId: 'G1',
+        threadTs: '200.1',
+        messageTs: '200.1',
+        permalink: null,
+        added: [
+          {
+            userId: w.ana.slack?.userId ?? 'U2',
+            personId: w.ana.id,
+            name: 'Ana',
+            recipient: false,
+          },
+        ],
+      });
+    });
+    const since = '2026-11-11T10:00:00.000Z';
+    expect(newThreadsSince(store.db, w.ana.id, since)).toBe(0);
+    expect(everSent(store.db, w.ana.id)).toBe(false);
+    expect(newThreadsSince(store.db, w.mark.id, since)).toBe(1);
+  });
+
   it('keeps the old thread when a send moves, and finds it by either', () => {
     const w = world();
     const s = draft(w.card('q'), [w.mark.id, w.ana.id]);
