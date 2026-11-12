@@ -41,6 +41,52 @@ describe('areasFromStructure names', () => {
   });
 });
 
+describe('the role and route of a proposed area', () => {
+  const screen = (label: string, route: string): AreaCandidate => ({
+    ...candidate(AreaCandidateKind.Route, label),
+    role: 'page',
+    route,
+  });
+  const lib = { ...candidate(AreaCandidateKind.Folder, 'lib'), role: 'shared' } as const;
+  const candidates = [screen('people', '/people'), screen('settings', '/settings'), lib, rest()];
+
+  it("is the candidate's own when the areas are named from their paths", () => {
+    const areas = areasFromStructure(candidates);
+    expect(areas.map((a) => [a.role, a.route])).toEqual([
+      ['page', '/people'],
+      ['page', '/settings'],
+      ['shared', undefined],
+      [undefined, undefined],
+    ]);
+    expect(areas[3]).not.toHaveProperty('role');
+  });
+
+  it('follows the candidates a model put in each area', () => {
+    const answer = JSON.stringify({
+      areas: [
+        { name: 'people', reason: 'People.', candidates: [1] },
+        { name: 'screens', reason: 'Two screens.', candidates: [2, 3] },
+        { name: 'root', reason: 'The rest.', candidates: [4] },
+      ],
+    });
+    const areas = areasFromModel(answer, [
+      screen('people', '/people'),
+      screen('settings', '/settings'),
+      screen('memos', '/memos'),
+      rest(),
+    ]);
+    expect(areas?.map((a) => [a.name, a.role, a.route])).toEqual([
+      ['people', 'page', '/people'],
+      ['screens', 'page', undefined],
+      ['root', undefined, undefined],
+    ]);
+  });
+
+  it('asks the model to keep each screen on its own, so it stays a page with its route', () => {
+    expect(namingPrompt(candidates)).toMatch(/kind=route[^\n]*own/u);
+  });
+});
+
 describe('an area reason', () => {
   const CONTROL = /\p{Cc}/u;
 

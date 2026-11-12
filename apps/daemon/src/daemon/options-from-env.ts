@@ -13,6 +13,7 @@ export type EnvDaemonOptions = Pick<
   | 'limits'
   | 'judgeOff'
   | 'catalogueSync'
+  | 'pictures'
 >;
 
 /**
@@ -44,5 +45,6 @@ export function daemonOptionsFromEnv(env: DaemonEnv): EnvDaemonOptions {
     ...(env.TENDB_DEV_UI_ORIGIN ? { devUiOrigin: env.TENDB_DEV_UI_ORIGIN } : {}),
     ...(env.TENDB_JUDGE === 'off' ? { judgeOff: true } : {}),
     catalogueSync: env.TENDB_CATALOGUE !== 'off',
+    pictures: { kind: 'pinned' },
   };
 }

@@ -14,6 +14,8 @@ export type FakeStep = { readonly js: string } | { readonly say: string };
 export interface FakeRequest {
   /** The text of every user message in the input, the whole thread's. */
   readonly userTexts: readonly string[];
+  /** How many pictures the user messages of the input carry, the whole thread's. */
+  readonly images: number;
   /** The text each `exec` call returned since the script's prompt, in order. */
   readonly outputs: readonly string[];
   /**
@@ -42,6 +44,12 @@ const Content = z.union([
   z.string(),
   z.array(z.looseObject({ type: z.string().optional(), text: z.string().optional() })),
 ]);
+
+/** The pictures in a message's content: its `input_image` parts. */
+function imagesOf(content: z.infer<typeof Content> | undefined): number {
+  if (content === undefined || typeof content === 'string') return 0;
+  return content.filter((part) => part.type === 'input_image').length;
+}
 const InputItem = z.looseObject({
   type: z.string().optional(),
   role: z.string().optional(),
@@ -188,6 +196,7 @@ export async function startFakeResponses(): Promise<FakeResponses> {
     if (marker !== null) {
       latest.set(marker, {
         userTexts: items.filter(isUserMessage).map((item) => textOf(item.content)),
+        images: items.filter(isUserMessage).reduce((sum, item) => sum + imagesOf(item.content), 0),
         outputs,
         tools: offered.map(({ name }) => name).sort(),
         execTools: execToolsOf(offered.map(({ tool }) => tool)).sort(),

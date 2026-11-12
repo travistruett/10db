@@ -27,6 +27,13 @@
           "type": "null"
         }
       ]
+    },
+    "devUiOrigin": {
+      "default": null,
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [

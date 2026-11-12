@@ -39,6 +39,7 @@ export default defineConfig({
         TENDB_PARENT_STDIN: '',
         TENDB_SQLITE_BINDING: '',
         TENDB_CLAUDE_PATH: '',
+        TENDB_LIVE_BROWSER: '',
         TENDB_LIVE_CLAUDE: '',
         TENDB_LIVE_CODEX: '',
         // Each gate starts a daemon with a fresh data dir; it must not spend the shared AA quota.

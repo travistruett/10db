@@ -1,3 +1,4 @@
+import { createDeliveryJobs } from '../delivery';
 import { execFileSync } from 'node:child_process';
 import {
   cpSync,
@@ -1481,6 +1482,9 @@ describe('runner', () => {
           session: () => {
             throw new Error('The launch could not be built.');
           },
+          probe: () => {
+            throw new Error('The launch could not be built.');
+          },
         },
       },
     );
@@ -2168,6 +2172,45 @@ describe('runner', () => {
       await engine.runner.cancel(workstream.id);
       expect(ws(workstream.id).state).toBe('CANCELLED');
       expect(listSessions(engine.store.db, workstream.id)).toEqual([]);
+    });
+  });
+
+  describe('while a first launch waits for its before picture', () => {
+    it('starts no session until the wait ends, and then on the account the project moved to', async () => {
+      const wait = Promise.withResolvers<undefined>();
+      const asked: string[] = [];
+      engine = await createTestEngine(
+        { Alpha: [[turn], [turn]] },
+        {},
+        {
+          awaitBeforePicture: (task) => {
+            asked.push(task.id);
+            return wait.promise;
+          },
+        },
+      );
+      const { task, workstream } = engine.addTask('Alpha');
+      const first = engine.project.accountId;
+      engine.launch(workstream.id);
+      await waitFor(() => asked.length > 0);
+      expect(asked).toEqual([task.id]);
+      expect(listSessions(engine.store.db, workstream.id)).toEqual([]);
+      const other = seedAccount(engine.store, {
+        kind: 'claude_subscription',
+        label: 'Second plan',
+      });
+      engine.state.write((ctx) => {
+        patchAccount(ctx, other.id, { expectedIdentity: 'second@example.com' });
+        patchProject(ctx, engine.project.id, { accountId: other.id });
+      });
+      wait.resolve(undefined);
+      await engine.runner.idle();
+      if (engine.adapter.prompts.length === 0) {
+        engine.launch(workstream.id);
+        await engine.runner.idle();
+      }
+      expect(engine.adapter.prompts.map((p) => p.accountId)).not.toContain(first);
+      expect(engine.adapter.prompts[0]?.accountId).toBe(other.id);
     });
   });
 
@@ -5230,6 +5273,7 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     vi.spyOn(engine.adapter, 'start').mockImplementation(() => ({
       events: refused(),
       send: () => undefined,
+      interrupt: () => Promise.resolve(null),
       stop: () => Promise.resolve(),
     }));
     const { workstream } = engine.addTask('Alpha');
@@ -6078,6 +6122,8 @@ describe('without a gate command', () => {
       inbox: engine.inbox,
       git: createGit(),
       processes: systemProcesses,
+      jobs: createDeliveryJobs(silentLogger),
+      clock: engine.clock,
       maxRecoveryAttempts: 3,
       logger: silentLogger,
     });

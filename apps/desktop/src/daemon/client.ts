@@ -15,12 +15,17 @@ const readOnlyFetch: typeof fetch = (input, init) => {
     : Promise.reject(new Error(`A screen is drawn read-only: ${method} was not sent`));
 };
 
-/** The typed Hono client for one daemon connection; every call carries the token it was given. */
-export function createDaemonClient(conn: DaemonConnection) {
-  return hc<AppType>(conn.url, {
+/** What every typed client of one connection sends: its token, and only reads for a screen's frame. */
+function clientOptions(conn: DaemonConnection) {
+  return {
     headers: { Authorization: `Bearer ${conn.token}` },
     ...(conn.readOnly === true ? { fetch: readOnlyFetch } : {}),
-  });
+  };
+}
+
+/** The typed Hono client for one daemon connection; every call carries the token it was given. */
+export function createDaemonClient(conn: DaemonConnection) {
+  return hc<AppType>(conn.url, clientOptions(conn));
 }
 
 export type DaemonClient = ReturnType<typeof createDaemonClient>;

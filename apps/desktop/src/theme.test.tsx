@@ -73,7 +73,7 @@ describe('theme palette (Selenized, exactly)', () => {
   const colorVariables = (scheme: Scheme) =>
     Object.keys(table(scheme)).filter(
       (name) =>
-        /^--mantine-(primary-)?color-/.test(name) &&
+        /^--(mantine-(primary-)?|tendb-)color-/.test(name) &&
         name !== '--mantine-color-scheme' &&
         !isShade(name),
     );
@@ -110,6 +110,14 @@ describe('theme palette (Selenized, exactly)', () => {
     ['dark dimmed text', Scheme.Dark, '--mantine-color-dimmed', SelenizedDark.dim0],
     ['dark control', Scheme.Dark, '--mantine-color-default', SelenizedDark.bg1],
     ['dark border', Scheme.Dark, '--mantine-color-default-border', SelenizedDark.bg2],
+    ['light board column', Scheme.Light, '--tendb-color-column', SelenizedLight.bg1],
+    ['light column header', Scheme.Light, '--tendb-color-column-header', SelenizedLight.bg2],
+    ['light column border', Scheme.Light, '--tendb-color-column-border', SelenizedLight.bg1],
+    ['light board card', Scheme.Light, '--tendb-color-card', SelenizedLight.bg0],
+    ['dark board column', Scheme.Dark, '--tendb-color-column', SelenizedDark.bg0],
+    ['dark column header', Scheme.Dark, '--tendb-color-column-header', SelenizedDark.bg1],
+    ['dark column border', Scheme.Dark, '--tendb-color-column-border', SelenizedDark.bg1],
+    ['dark board card', Scheme.Dark, '--tendb-color-card', SelenizedDark.bg1],
   ])('paints the %s with its Selenized value', (_case, scheme, name, expected) => {
     expect(cssVar(scheme, name)).toBe(expected);
   });

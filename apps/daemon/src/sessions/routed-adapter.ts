@@ -18,5 +18,6 @@ export function createRoutedAdapter(adapters: {
     startShape: (spec) => by(spec.account).startShape(spec),
     probeAccount: (probe) => by(probe).probeAccount(probe),
     startLogin: (login) => by(login).startLogin(login),
+    readClientUuids: (spec) => by(spec.account).readClientUuids(spec),
   };
 }

@@ -36,8 +36,8 @@ export {
   type GhLoginProbe,
   type ResolvedTools,
 } from './system-check';
-export { AgentTool, CODEX_VERIFIED_ON } from './agent-pins';
-export { pinnedToolsRoot } from './pinned-install';
+export { AgentTool, CODEX_VERIFIED_ON, type PinnedRelease } from './agent-pins';
+export { downloadFile, ensurePinned, extractZipWithTar, pinnedToolsRoot } from './pinned-install';
 export {
   AUTOUPDATE_OFF,
   AgentState,

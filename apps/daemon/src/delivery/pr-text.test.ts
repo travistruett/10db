@@ -5,6 +5,7 @@ import { mintId } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
 import { prBody, prSubject, prTitle, titlePrefix } from './index';
 import { parsePrScopes, scopeOf } from './pr-scopes';
+import { passPrBody, type PassPrCheck } from './pr-text';
 
 const REPO_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 
@@ -434,5 +435,78 @@ describe('prBody', () => {
     });
     expect(body).not.toContain('Exited');
     expect(body).toContain(`/commit/${SHA}/checks`);
+  });
+});
+
+describe('passPrBody', () => {
+  const SHA = 'abcdef1234567890abcdef1234567890abcdef12';
+  const body = (check: PassPrCheck, pages: string[] = ['Settings page', 'People page']) =>
+    passPrBody({
+      pass: { id: 'pas_1', name: 'Polish pages' },
+      pages,
+      check,
+      ci: { repo: 'acme/widgets', sha: SHA },
+      template: null,
+    });
+
+  it.each<{ name: string; check: PassPrCheck; says: string[]; not?: string[] }>([
+    {
+      name: 'no gate command',
+      check: { kind: 'none' },
+      says: ['No gate command: each page was signed off by the builder'],
+    },
+    {
+      name: 'a gate only the folder can run, before the close',
+      check: { kind: 'folder_at_close', command: 'make gate' },
+      says: [
+        'Gate not run: pages are still open in the folder.',
+        '`make gate` tests the folder and its running stack, not the pushed commit alone',
+      ],
+    },
+    {
+      name: 'a scratch gate still running',
+      check: { kind: 'scratch', command: 'make gate', sha: SHA, state: 'running' },
+      says: ['Gate running in a scratch worktree of the pushed commit abcdef1'],
+    },
+    {
+      name: 'a scratch gate this daemon has no result of',
+      check: { kind: 'scratch', command: 'make gate', sha: SHA, state: 'unknown' },
+      says: [
+        'Gate result unknown in a scratch worktree of the pushed commit abcdef1: no gate of it has finished since 10db last started. `make gate`',
+      ],
+      // True at Open Pull Request and at the close alike: it names no step that runs it again.
+      not: ['Gate running', 'Open Pull Request', 'runs it again'],
+    },
+    {
+      name: 'a scratch gate that failed',
+      check: { kind: 'scratch', command: 'make gate', sha: SHA, state: 'failed' },
+      says: ['Gate failed in a scratch worktree of the pushed commit abcdef1: `make gate`'],
+    },
+    {
+      name: "the close's gate in the folder, with edits left out",
+      check: { kind: 'folder', command: 'make gate', passed: true, dirty: ['notes.md'] },
+      says: ['Gate passed in the folder at close', '- notes.md'],
+      not: ['not run'],
+    },
+  ])('says how it was checked: $name', ({ check, says, not = [] }) => {
+    const text = body(check);
+    for (const line of says) expect(text).toContain(line);
+    for (const line of not) expect(text).not.toContain(line);
+    expect(text).toContain('- Settings page\n- People page');
+    expect(text).toContain(`https://github.com/acme/widgets/commit/${SHA}/checks`);
+    expect(text).toContain('Opened by 10db, UI Workbench pass pas_1');
+    expect(text).not.toContain('The review read');
+  });
+
+  it('says when the review read only part of the diff', () => {
+    const text = passPrBody({
+      pass: { id: 'pas_1', name: 'Polish pages' },
+      pages: ['Settings page'],
+      check: { kind: 'none' },
+      ci: { repo: 'acme/widgets', sha: SHA },
+      template: null,
+      reviewCut: true,
+    });
+    expect(text).toContain('The review read only the first part of the diff');
   });
 });

@@ -25,6 +25,8 @@ import {
   type AccountLoginOutcome,
   type AccountProbeSpec,
   type CompletionSpec,
+  type ConversationReadSpec,
+  type InterruptReceipt,
   type SessionAdapter,
   type SessionEvent,
   type SessionHandle,
@@ -34,6 +36,7 @@ import {
   type ToolDecision,
 } from './types';
 import { createFakeShapeSession, refusedShapeSession, type FakeShapeBehaviour } from './fake-shape';
+import { claudeToolTarget } from './tool-target';
 
 const Json: z.ZodType = z.json();
 
@@ -96,11 +99,23 @@ export const FakeStep = z.discriminatedUnion('do', [
   z.object({ do: z.literal('tool'), toolName: z.string(), input: z.record(z.string(), Json) }),
   z.object({ do: z.literal('mcp'), tool: z.string(), args: z.record(z.string(), Json) }),
   z.object({ do: z.literal('await_message'), contains: z.string() }),
+  /** Waits until the test calls `signal` with this name, so a test can place the next step exactly. */
+  z.object({ do: z.literal('await_signal'), name: z.string() }),
+  /**
+   * A turn takes in every message the session holds that it has not taken yet, the prompt's first:
+   * their client uuids come as `consumed`, as an assistant message stamps `user_message_uuids`.
+   */
+  z.object({ do: z.literal('consume') }),
   z.object({
     do: z.literal('turn_complete'),
     result: z.enum(['success', 'max_turns', 'error']).optional(),
     /** What the model wrote in the turn's last message. */
     text: z.string().optional(),
+    /**
+     * The turn ends without taking what it holds, and drops it, as a Codex turn that fails or that
+     * the guard interrupts does: their client uuids come as the completion's `dropped`.
+     */
+    drops: z.boolean().optional(),
   }),
   z.object({
     do: z.literal('rate_limit'),
@@ -131,6 +146,9 @@ export const FakeStep = z.discriminatedUnion('do', [
 ]);
 export type FakeStep = z.infer<typeof FakeStep>;
 
+/** The steps that do a turn's work: one of them running means a turn is. */
+const TURN_STEPS: ReadonlySet<FakeStep['do']> = new Set(['consume', 'tool', 'mcp', 'activity']);
+
 /** Task title → one step list per session, indexed by the session's sequence within its workstream. */
 export const FakeScriptBook = z.record(z.string(), z.array(z.array(FakeStep)));
 export type FakeScriptBook = z.infer<typeof FakeScriptBook>;
@@ -152,16 +170,51 @@ export interface FakeObservation {
 /** Stands in for Claude Code at the adapter boundary; scripts drive every event. */
 export class FakeAdapter implements SessionAdapter {
   readonly observations: FakeObservation[] = [];
-  /** Every message the runner sent a session, in order. */
-  readonly sent: { sessionId: SessionId; text: string }[] = [];
+  /** Every message the runner sent a session, in order, with how many images and the uuid it carried. */
+  readonly sent: { sessionId: SessionId; text: string; images: number; uuid: string | null }[] = [];
   readonly prompts: {
     sessionId: SessionId;
     sequence: number;
     title: string;
     prompt: string;
+    /** The prompt's client uuid, and how many images went with it. */
+    promptUuid: string | null;
+    images: number;
     resume: string | null;
     accountId: AccountId;
   }[] = [];
+  /** Every lane session's interrupt, in order, with what it answered. */
+  readonly interrupts: { sessionId: SessionId; receipt: InterruptReceipt }[] = [];
+  /**
+   * The client uuids each conversation has been sent, by provider session id. Claude Code runs no
+   * turn for a user message under a uuid its transcript already holds, a resumed one's included: it
+   * acknowledges it and drops it, as the live test saw. So does the fake.
+   */
+  private readonly transcripts = new Map<string, Set<string>>();
+  /** The client uuids each conversation's turns took, by provider session id, as a Codex thread keeps them. */
+  private readonly taken = new Map<string, string[]>();
+  /** Every conversation read back, in order. */
+  readonly reads: ConversationReadSpec[] = [];
+  /**
+   * What reading a conversation back answers: by default the client uuids its turns took here, as a
+   * Codex thread keeps them. A test sets it to stand for a thread a daemon that died left behind, or
+   * one that can't be read.
+   */
+  readBack: (spec: ConversationReadSpec) => Promise<readonly string[]> = (spec) =>
+    Promise.resolve([...(this.taken.get(spec.providerSessionId) ?? [])]);
+  /**
+   * What a lane session's interrupt answers, from the uuids of the messages no turn has taken yet: by
+   * default all of them as still queued, as a Claude Code that advertises `interrupt_receipt_v1` does;
+   * null stands for one that answers nothing.
+   */
+  /**
+   * Whether a lane session's interrupt ends the session after its receipt, as a Codex session does
+   * when Codex never reports the interrupted turn ended.
+   */
+  interruptEndsSession = false;
+  interruptReceipt: (untaken: readonly string[]) => InterruptReceipt = (untaken) => ({
+    stillQueued: [...untaken],
+  });
 
   /** What a session reports for its account, over what it expects; tests set it to stage a mismatch. */
   seen: (spec: SessionSpec) => Partial<SeenAccount> & { readonly model?: string } = () => ({});
@@ -187,14 +240,30 @@ export class FakeAdapter implements SessionAdapter {
     Promise.reject(new CompletionError('The fake adapter has no model to ask.'));
 
   private readonly book: FakeScriptBook;
+  /** The names `signal` was called with, and the sessions waiting for one. */
+  private readonly signalled = new Set<string>();
+  private signalWaiters: (() => void)[] = [];
 
   constructor(book: FakeScriptBook) {
     this.book = book;
   }
 
+  /** Lets every session waiting at `await_signal` for `name` go on, and any that reaches it later. */
+  signal(name: string): void {
+    this.signalled.add(name);
+    const waiters = this.signalWaiters;
+    this.signalWaiters = [];
+    for (const wake of waiters) wake();
+  }
+
   complete(ask: CompletionSpec): Promise<string> {
     this.completions.push(ask);
     return this.answer(ask);
+  }
+
+  readClientUuids(spec: ConversationReadSpec): Promise<readonly string[]> {
+    this.reads.push(spec);
+    return this.readBack(spec);
   }
 
   probeAccount(probe: AccountProbeSpec): Promise<SeenAccount> {
@@ -237,6 +306,8 @@ export class FakeAdapter implements SessionAdapter {
    * take seconds to close after it is asked to.
    */
   shapeStopGate: Promise<void> | null = null;
+  /** The same for a lane session: its stop waits for it before the session ends. */
+  laneStopGate: Promise<void> | null = null;
 
   startShape(spec: ShapeSessionSpec): ShapeSessionHandle {
     const refusal = checkAccount(spec.account, expectedSeen(spec.account));
@@ -277,7 +348,12 @@ export class FakeAdapter implements SessionAdapter {
         refusal,
       });
       refused.end();
-      return { events: refused, send: () => undefined, stop: () => Promise.resolve() };
+      return {
+        events: refused,
+        send: () => undefined,
+        interrupt: () => Promise.resolve(null),
+        stop: () => Promise.resolve(),
+      };
     }
     const title = Object.keys(this.book).find((t) => spec.prompt.includes(`Task: ${t}\n`)) ?? '';
     const steps = this.book[title]?.[spec.sequence - 1];
@@ -286,6 +362,8 @@ export class FakeAdapter implements SessionAdapter {
       sequence: spec.sequence,
       title,
       prompt: spec.prompt,
+      promptUuid: spec.promptUuid ?? null,
+      images: spec.images?.length ?? 0,
       resume: spec.resumeProviderSessionId,
       accountId: spec.account.accountId,
     });
@@ -293,6 +371,44 @@ export class FakeAdapter implements SessionAdapter {
     const channel = createChannel<SessionEvent>();
     const abort = new AbortController();
     const messages: string[] = [];
+    const providerSessionId = spec.resumeProviderSessionId ?? `fake-${spec.sessionId}`;
+    const transcript = this.transcripts.get(providerSessionId) ?? new Set<string>();
+    this.transcripts.set(providerSessionId, transcript);
+    const takenHere = this.taken.get(providerSessionId) ?? [];
+    this.taken.set(providerSessionId, takenHere);
+    /** The client uuids of the messages the session holds that no turn has taken yet, the prompt's first. */
+    const untaken: string[] = [];
+    /** What the running turn has taken, which its result lists again. */
+    let takenThisTurn: string[] = [];
+    /** A turn is running: a step of it ran and its result has not come. */
+    let inTurn = false;
+    /** The running turn's result, as Claude Code reports it: what it took, then its completion. */
+    const completeTurn = (
+      result: 'success' | 'max_turns' | 'error' | undefined,
+      text?: string,
+      dropped: readonly string[] = [],
+    ) => {
+      if (takenThisTurn.length > 0) channel.push({ type: 'consumed', uuids: takenThisTurn });
+      takenThisTurn = [];
+      inTurn = false;
+      channel.push({
+        type: 'turn_complete',
+        ...(result ? { result } : {}),
+        ...(text ? { text } : {}),
+        ...(dropped.length > 0 ? { dropped } : {}),
+        inputTokens: 1000,
+        outputTokens: 200,
+        cachedTokens: 0,
+        costUsd: 0.01,
+      });
+    };
+    /** Takes in a message unless its uuid is one the conversation already holds. */
+    const receive = (uuid: string | undefined): void => {
+      if (uuid === undefined || transcript.has(uuid)) return;
+      transcript.add(uuid);
+      untaken.push(uuid);
+    };
+    receive(spec.promptUuid);
     let messageWaiter: (() => void) | null = null;
     let ended = false;
     let mcp: Client | null = null;
@@ -395,6 +511,7 @@ export class FakeAdapter implements SessionAdapter {
     };
 
     const runStep = async (step: FakeStep, index: number): Promise<'continue' | 'halt'> => {
+      if (TURN_STEPS.has(step.do)) inTurn = true;
       switch (step.do) {
         case 'context':
           channel.push({
@@ -409,7 +526,12 @@ export class FakeAdapter implements SessionAdapter {
           return 'continue';
         case 'tool': {
           const input = step.input;
-          channel.push({ type: 'activity', kind: 'tool', summary: step.toolName });
+          channel.push({
+            type: 'activity',
+            kind: 'tool',
+            summary: step.toolName,
+            tool: claudeToolTarget(step.toolName, input),
+          });
           const verdict = guardVerdict(step.toolName, input);
           if (verdict.decision === 'deny') {
             observe(index, 'denied_by_guard', { reason: verdict.reason });
@@ -459,6 +581,20 @@ export class FakeAdapter implements SessionAdapter {
           });
           return 'continue';
         }
+        case 'await_signal': {
+          while (!this.signalled.has(step.name)) {
+            const woke = await Promise.race([
+              new Promise<'signal'>((r) => {
+                this.signalWaiters.push(() => {
+                  r('signal');
+                });
+              }),
+              untilStopped,
+            ]);
+            if (woke === 'stopped') return 'halt';
+          }
+          return 'continue';
+        }
         case 'await_message': {
           for (;;) {
             if (messages.some((m) => m.includes(step.contains))) return 'continue';
@@ -473,16 +609,16 @@ export class FakeAdapter implements SessionAdapter {
             if (woke === 'stopped') return 'halt';
           }
         }
+        case 'consume': {
+          const uuids = untaken.splice(0);
+          takenThisTurn = [...takenThisTurn, ...uuids];
+          takenHere.push(...uuids);
+          if (uuids.length > 0) channel.push({ type: 'consumed', uuids });
+          return 'continue';
+        }
         case 'turn_complete':
-          channel.push({
-            type: 'turn_complete',
-            ...(step.result ? { result: step.result } : {}),
-            ...(step.text ? { text: step.text } : {}),
-            inputTokens: 1000,
-            outputTokens: 200,
-            cachedTokens: 0,
-            costUsd: 0.01,
-          });
+          // The turn's result lists every message the turn took, as Claude Code's does.
+          completeTurn(step.result, step.text, step.drops === true ? untaken.splice(0) : []);
           return 'continue';
         case 'rate_limit':
           channel.push({
@@ -545,7 +681,7 @@ export class FakeAdapter implements SessionAdapter {
     void (async () => {
       channel.push({
         type: 'started',
-        providerSessionId: spec.resumeProviderSessionId ?? `fake-${spec.sessionId}`,
+        providerSessionId,
         pid: null,
       });
       // The real CLI reports its session before any tool call; let the consumer see `started` first.
@@ -578,15 +714,35 @@ export class FakeAdapter implements SessionAdapter {
       }
     })();
 
+    const interrupts = this.interrupts;
+    const endsOnInterrupt = (): boolean => this.interruptEndsSession;
+    const stopGate = (): Promise<void> | null => this.laneStopGate;
+    const receiptFor = (untakenNow: readonly string[]): InterruptReceipt =>
+      this.interruptReceipt(untakenNow);
     return {
       events: channel,
-      send(text) {
-        sent.push({ sessionId: spec.sessionId, text });
+      send(text, images = [], uuid) {
+        sent.push({ sessionId: spec.sessionId, text, images: images.length, uuid: uuid ?? null });
         messages.push(text);
+        receive(uuid);
         messageWaiter?.();
         messageWaiter = null;
       },
+      interrupt() {
+        // What no turn has taken yet stays queued and runs next, as far as the receipt says. The
+        // running turn ends with an error result, as Claude Code's interrupted turn does.
+        const receipt = receiptFor(untaken);
+        interrupts.push({ sessionId: spec.sessionId, receipt });
+        if (endsOnInterrupt()) {
+          end(SessionEndReason.Error, 'Codex did not end the interrupted turn in time.');
+          return Promise.resolve(receipt);
+        }
+        if (inTurn) completeTurn('error');
+        return Promise.resolve(receipt);
+      },
       async stop() {
+        const gate = stopGate();
+        if (gate !== null) await gate;
         abort.abort();
         end('stopped', null);
         await done;

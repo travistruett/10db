@@ -235,6 +235,16 @@ export function pathRefusal(
 }
 
 /**
+ * Whether `value` names a file in the session's own files directory on every reading: the pictures
+ * pasted into its task's thread, which the data directory holds (Workbench spec §13).
+ */
+export function isOwnFile(filesDir: string | undefined, value: string, baseDir: string): boolean {
+  return (
+    filesDir !== undefined && isWithinOnEveryReading(filesDir, written(expandTilde(value), baseDir))
+  );
+}
+
+/**
  * Whether a session's own saved tool output is what `value` names, on every reading (Claude Code
  * points the model at it).
  */

@@ -12,6 +12,7 @@ import type { GuardVerdict } from '../guard';
 import type { LaneSandboxSpec, SandboxedMcpServer } from '../sandbox';
 import type { SeenAccount } from './account-check';
 import type { RemoteMcpServer } from './project-mcp';
+import type { ToolTarget } from './tool-target';
 
 export interface ToolRequest {
   readonly toolName: string;
@@ -51,6 +52,14 @@ export interface SessionSpec {
   readonly sequence: number;
   readonly cwd: string;
   readonly prompt: string;
+  /**
+   * The client uuid the prompt carries, when it holds a builder message: the turn that takes it lists
+   * it (Claude Code's `user_message_uuids`, the `clientId` of Codex's user message item), the evidence
+   * it was consumed (Workbench spec §6.3).
+   */
+  readonly promptUuid?: string;
+  /** Pictures that go with the prompt as image blocks. */
+  readonly images?: readonly ShapeImage[];
   readonly model: string;
   readonly effort: Effort;
   readonly resumeProviderSessionId: string | null;
@@ -189,7 +198,14 @@ export type TurnResult = 'success' | 'max_turns' | 'error';
 
 export type SessionEvent =
   | { readonly type: 'started'; readonly providerSessionId: string; readonly pid: number | null }
-  | { readonly type: 'activity'; readonly kind: 'text' | 'tool'; readonly summary: string }
+  | { readonly type: 'activity'; readonly kind: 'text'; readonly summary: string }
+  | {
+      readonly type: 'activity';
+      readonly kind: 'tool';
+      readonly summary: string;
+      /** What the call aims at and the files it writes. */
+      readonly tool: ToolTarget;
+    }
   | {
       readonly type: 'context';
       readonly percentage: number;
@@ -202,6 +218,12 @@ export type SessionEvent =
       readonly result?: TurnResult;
       /** What the model wrote in the turn's last message, when it wrote any (capped by the adapter). */
       readonly text?: string;
+      /**
+       * The client uuids of the messages the turn was handed and ended without taking, which the agent
+       * dropped and will never run (Codex). Absent when there are none, or when the turn ended for the
+       * handle's own `interrupt`, whose caller pushes again what its receipt does not name.
+       */
+      readonly dropped?: readonly string[];
       readonly inputTokens: number;
       readonly outputTokens: number;
       readonly cachedTokens: number;
@@ -217,6 +239,15 @@ export type SessionEvent =
       readonly limitType: string | null;
     }
   | { readonly type: 'compacted'; readonly trigger: 'manual' | 'auto' }
+  | {
+      /**
+       * The client uuids of the user messages the running turn has taken in so far, as an assistant
+       * message stamps them (Claude Code) or a user message item records one (Codex): the evidence a
+       * message was consumed, not only received.
+       */
+      readonly type: 'consumed';
+      readonly uuids: readonly string[];
+    }
   | {
       /**
        * The commands the session started in the background that are still running, replacing the
@@ -237,28 +268,41 @@ export type SessionEvent =
       readonly refusalBasis?: ModelMarkBasis;
     };
 
+/**
+ * What an interrupt reports: the uuids of the messages still queued, which will run unless cancelled,
+ * or null when the agent gives no receipt (a Claude Code without `interrupt_receipt_v1`). Codex's
+ * queue is 10db's own: the messages its session has not yet handed over.
+ */
+export type InterruptReceipt = { readonly stillQueued: readonly string[] } | null;
+
 export interface SessionHandle {
   /** Ends with exactly one `ended` event. */
   readonly events: AsyncIterable<SessionEvent>;
-  /** Queues a user message; the agent sees it at its next opportunity. */
-  send(text: string): void;
+  /**
+   * Queues a user message; the agent sees it at its next opportunity. `images` go with it as content
+   * blocks, and `uuid` is the client uuid a turn that takes it lists in `consumed`.
+   */
+  send(text: string, images?: readonly ShapeImage[], uuid?: string): void;
+  /** Interrupts the turn that is running; the session stays open for the next message. */
+  interrupt(): Promise<InterruptReceipt>;
   /** Ends the session cleanly; resolves once `ended` has been emitted. */
   stop(): Promise<void>;
 }
 
-/** A dropped image as Claude sees it: an image content block, base64 (Shape spec §5.4). */
+/** A picture as Claude sees it: an image content block, base64 (Shape spec §5.4). */
 export interface ShapeImage {
   readonly mediaType: 'image/png' | 'image/jpeg' | 'image/webp';
   /** Base64 of the file's bytes. */
   readonly data: string;
+  /**
+   * The stored file the bytes were read from, when there is one: Codex takes a picture as a local
+   * image it reads itself, and Claude Code takes the bytes.
+   */
+  readonly path?: string;
 }
 
-export interface ShapeSessionHandle extends SessionHandle {
-  /** Queues a message, with the images dropped since the last one as content blocks. */
-  send(text: string, images?: readonly ShapeImage[]): void;
-  /** Interrupts the turn that is running; the session stays open for the next message. */
-  interrupt(): Promise<void>;
-}
+/** A Plan conversation's session, which takes the same messages and interrupts a lane's does. */
+export type ShapeSessionHandle = SessionHandle;
 
 export interface AccountProbeSpec {
   /** The account's kind, which picks the agent that reports who it is. */
@@ -311,6 +355,33 @@ export interface CompletionSpec {
   readonly account: AccountExpectation;
   /** Aborting it ends the question at once: Claude Code is stopped and the call rejects. */
   readonly signal?: AbortSignal;
+  /** How long the answer may take before it is given up on; 2 minutes unless given. */
+  readonly timeoutMs?: number;
+  /** How hard the model thinks, as a step's effort; the model's own default unless given. */
+  readonly effort?: Effort;
+}
+
+/** A conversation to read back, on the account and in the checkout it ran in. */
+export interface ConversationReadSpec {
+  readonly account: AccountExpectation;
+  readonly env: Readonly<Record<string, string>>;
+  readonly cwd: string;
+  /** The conversation, as the agent names it: a Codex thread's id. */
+  readonly providerSessionId: string;
+  /** The client uuids looked for: those of the messages pushed and never seen taken. */
+  readonly wanted: readonly string[];
+  /** When the oldest of those messages was written (ISO): a turn that ended before holds none. */
+  readonly since: string;
+  /** Ends the read at once, as a stop of the lane does. */
+  readonly signal?: AbortSignal;
+}
+
+/**
+ * A conversation could not be read back, so what it holds is not known. The message names the
+ * conversation and how the read failed, never what the agent printed.
+ */
+export class ConversationUnreadError extends Error {
+  override readonly name = 'ConversationUnreadError';
 }
 
 /** The model gave no answer: it was refused, it failed, or it did not answer in time. */
@@ -326,6 +397,13 @@ export interface SessionAdapter {
   startShape(spec: ShapeSessionSpec): ShapeSessionHandle;
   /** Starts the account's agent with no prompt only to read who it is. */
   probeAccount(probe: AccountProbeSpec): Promise<SeenAccount>;
+  /**
+   * Which of the `wanted` client uuids the conversation's turns took, read back without running a
+   * turn: how a message pushed and never seen taken is told taken or not before the conversation is
+   * resumed (Workbench spec §12). Rejects with a `ConversationUnreadError` when it can't tell for
+   * every one, or is stopped; an agent with no such read always does.
+   */
+  readClientUuids(spec: ConversationReadSpec): Promise<readonly string[]>;
   /**
    * Starts the account's browser sign-in with its own agent; rejects with an `AccountLoginError` when it
    * cannot start. Only a kind that signs in with a login has one.

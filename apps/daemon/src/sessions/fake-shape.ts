@@ -190,7 +190,7 @@ export function refusedShapeSession(message: string): ShapeSessionHandle {
   return {
     events,
     send: () => undefined,
-    interrupt: () => Promise.resolve(),
+    interrupt: () => Promise.resolve(null),
     stop: () => Promise.resolve(),
   };
 }
@@ -295,7 +295,7 @@ export function createFakeShapeSession(
     },
     interrupt() {
       current?.abort();
-      return Promise.resolve();
+      return Promise.resolve(null);
     },
     stop() {
       current?.abort();

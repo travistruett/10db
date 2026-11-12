@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
@@ -11,11 +11,15 @@ import { initialize, spawnStdioRpc } from './stdio-rpc';
 
 const daemonRoot = resolve(import.meta.dirname, '..');
 /** The srt version the daemon pins, from its own manifest. */
-const SRT_VERSION = z
-  .object({ dependencies: z.object({ '@anthropic-ai/sandbox-runtime': z.string() }) })
-  .parse(JSON.parse(readFileSync(join(daemonRoot, 'package.json'), 'utf8'))).dependencies[
-  '@anthropic-ai/sandbox-runtime'
-];
+const PINNED = z
+  .object({
+    dependencies: z.object({
+      '@anthropic-ai/sandbox-runtime': z.string(),
+      'playwright-core': z.string(),
+    }),
+  })
+  .parse(JSON.parse(readFileSync(join(daemonRoot, 'package.json'), 'utf8'))).dependencies;
+const SRT_VERSION = PINNED['@anthropic-ai/sandbox-runtime'];
 
 /** A worktree root outside every temp dir; the test cuts no worktree, so it is never created. */
 const BUNDLE_WORKTREE_ROOT = '/var/empty/10db-bundle-test-worktrees';
@@ -239,6 +243,44 @@ describe('the bundled daemon', () => {
       jar,
     );
     expect(readFileSync(join(work.path, 'dist', jar))).toEqual(readFileSync(packaged));
+  });
+
+  it('carries the pinned playwright-core beside the bundle: bundled, it cannot find its own files', () => {
+    const copied = z
+      .object({ version: z.string() })
+      .parse(
+        JSON.parse(
+          readFileSync(
+            join(work.path, 'dist', 'node_modules', 'playwright-core', 'package.json'),
+            'utf8',
+          ),
+        ),
+      );
+    expect(copied.version).toBe(PINNED['playwright-core']);
+  });
+
+  it('loads the playwright-core it carries, from a directory with no node_modules above it', () => {
+    // Tauri ships the build's directory whole, so the copy sits beside daemon.mjs as it does here.
+    const appDir = join(work.path, 'playwright-app');
+    cpSync(join(work.path, 'dist'), appDir, { recursive: true });
+    writeFileSync(
+      join(appDir, 'probe.mjs'),
+      [
+        "const url = import.meta.resolve('playwright-core');",
+        "const playwright = await import('playwright-core');",
+        'console.log(JSON.stringify({ url, launch: typeof playwright.chromium.launch }));',
+      ].join('\n'),
+    );
+    const out = execFileSync(process.execPath, [join(appDir, 'probe.mjs')], {
+      cwd: work.path,
+      encoding: 'utf8',
+      env: { PATH: process.env['PATH'] ?? '/usr/bin:/bin', HOME: work.path },
+    });
+    const probe = z.object({ url: z.string(), launch: z.string() }).parse(JSON.parse(out));
+    expect(probe.launch).toBe('function');
+    expect(
+      probe.url.startsWith(`file://${realpathSync(appDir)}/node_modules/playwright-core/`),
+    ).toBe(true);
   });
 
   it('ships the harness plugin beside the bundle', () => {

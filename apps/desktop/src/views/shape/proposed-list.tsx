@@ -2,6 +2,7 @@ import type { ShapeProposalDto, ShapeTaskSizeDto } from '@10db/contracts';
 import { Box, Text, UnstyledButton } from '@mantine/core';
 import { IconChevronDown, IconChevronRight } from '@tabler/icons-react';
 import { useState } from 'react';
+import { CountBadge } from '../../shell/count-badge';
 import { kindLabel } from './proposal-text';
 import { ProposalRow, type RowAction, type RowHandlers } from './proposal-row';
 import type { RowReview } from './review-lines';
@@ -33,7 +34,7 @@ export interface ProposedListProps {
   readonly groups: ProposedGroups;
   /** Each proposed task's derived size, and its actual once converted and finished (§8). */
   readonly sizes: readonly ShapeTaskSizeDto[];
-  /** The row's menu items: Remove Draft Goal on a converted goal, Withdraw Decision… on a decision. */
+  /** The row's menu items: Remove Draft Goal on a converted goal, Withdraw Decision on a decision. */
   readonly actionsFor: (row: ShapeProposalDto) => readonly RowAction[];
   /** The ceremony, findings and rehearsal questions of a pending goal or task, or undefined for any other row. */
   readonly reviewOf?: (row: ShapeProposalDto) => RowReview | undefined;
@@ -92,7 +93,7 @@ export function ProposedList({ groups, sizes, actionsFor, reviewOf, handlers }: 
                 ) : (
                   <IconChevronRight size={14} stroke={1.5} aria-hidden="true" />
                 )}{' '}
-                Earlier ({groups.earlier.length})
+                Earlier <CountBadge count={groups.earlier.length} />
               </Text>
             </UnstyledButton>
           </Box>

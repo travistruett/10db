@@ -11,8 +11,11 @@ import { HAZARD_ASSESSMENT_KEY } from './hazard-queries';
 import { modelKeys } from './model-queries';
 import { modelSettingKeys } from './model-settings-queries';
 import { NETWORK_HOSTS_KEY } from './network-host-queries';
+import { passKeys, writePassActivity } from './pass-queries';
 import { queryKeys } from './queries';
 import { shapeKeys } from './shape-queries';
+import { screenKeys } from './screen-queries';
+import { threadKeys } from './thread-queries';
 
 export const STREAM_RETRY_BASE_MS = 500;
 export const STREAM_RETRY_MAX_MS = 10_000;
@@ -46,12 +49,16 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
   proposal: KNOWLEDGE,
   // A conversation's transcript, proposals, round and turn all change under this one event.
   shape: [shapeKeys.all],
+  // A pass opening, a turn starting or ending, a page Ready or signed off, a close step: each changes
+  // the pass and its pages' turns.
+  pass: [passKeys.all],
   board_column: [['board-columns'], CANDIDATES],
   network_hosts: [NETWORK_HOSTS_KEY],
   // A batch's state shows on the board's strip and in its list; cancelling an abandoned batch's work moves tasks.
   batch: [queryKeys.projects, ['batches'], ...WORK, CANDIDATES],
-  // Lanes changing can switch keep-awake on or off.
-  workstream: [...WORK, queryKeys.keepAwake, CANDIDATES, humanTouchKeys.all],
+  // Lanes changing can switch keep-awake on or off. A pass page's state is its run's, paused or resumed
+  // by a usage limit with no pass event.
+  workstream: [...WORK, queryKeys.keepAwake, CANDIDATES, humanTouchKeys.all, passKeys.live],
   // A session's span says which tasks ran that day.
   session: [...WORK, humanTouchKeys.all],
   claim: [...WORK, CANDIDATES],
@@ -80,6 +87,11 @@ export const INVALIDATIONS: Readonly<Record<string, readonly QueryKey[]>> = {
 export const EVENT_INVALIDATIONS: Readonly<Partial<Record<EventType, readonly QueryKey[]>>> = {
   // A session's tokens and dollars are recorded when it ends, not on its per-tool-call events.
   'session.ended': [accountKeys.usage],
+  // A builder message, an agent's reply or a notice joined a task's thread; a reply ends a turn, and a
+  // message to a page makes it working before its turn starts.
+  'task.message_added': [threadKeys.all, passKeys.turnsAll, passKeys.live],
+  // A picture of a task's page was kept: its thread and its drawer show it.
+  'task.screen_added': [screenKeys.all],
 };
 
 export function eventStreamUrl(conn: DaemonConnection, after: number): string {
@@ -136,6 +148,8 @@ export function useEventStream(onEvent?: (event: DaemonEvent) => void): void {
         if (ended.success)
           queryClient.setQueryData(accountLoginKey(ended.data.accountId), ended.data);
       }
+      // One arrives per tool call: a pass lane's is written into its page, never refetched.
+      if (event.type === EventType.SessionActivity) writePassActivity(queryClient, event);
       listener.current?.(event);
     }
 

@@ -2,6 +2,7 @@ import { isAbsolute, posix, resolve, sep } from 'node:path';
 import { ClaimKind, type HazardDef } from '@10db/contracts';
 import { z } from 'zod';
 import { ENDLESS_FILES, runsInBackground, startsEndlessBackgroundLoop } from './background-loops';
+import { isOwnFile } from './account-rules';
 import { hazardHit } from './hazards';
 import { judgeToolUse, stringField, type GuardInput, type GuardVerdict } from './judge';
 import { realPathOf } from './paths';
@@ -169,6 +170,17 @@ function brokerAsk(input: GuardInput, onlyReads: boolean): string | null {
 const READS_ONLY =
   'Every part of this command only reads (decisions/2026-11-03-a-lane-runs-read-only-commands-without-a-card.md).';
 
+const OWN_PICTURE =
+  "A picture pasted into this task's thread is the session's to read (Workbench spec §13).";
+
+/** Whether the call is a Read of a picture pasted into the session's own task. */
+function readsOwnPicture(input: GuardInput): boolean {
+  if (input.toolName !== 'Read' || input.ownSession?.filesDir === undefined) return false;
+  const file = stringField(input.toolInput, 'file_path');
+  const from = input.cwd !== undefined && isAbsolute(input.cwd) ? input.cwd : input.repoPath;
+  return file !== null && isOwnFile(input.ownSession.filesDir, file, from);
+}
+
 /** A word longer than this is not split into the paths it may hold; the call keeps today's judgement. */
 const MAX_OPTION_WORD = 256;
 
@@ -283,5 +295,7 @@ export function judgePreToolUse(input: GuardInput): GuardVerdict {
   const reads = onlyReads(input);
   const reason = brokerAsk(input, reads);
   if (reason !== null) return { decision: 'ask', reason };
+  // The judge opened it, and the data directory holds it: no allow rule or classifier reaches it.
+  if (readsOwnPicture(input)) return { decision: 'allow', settled: OWN_PICTURE };
   return reads ? { decision: 'allow', settled: READS_ONLY } : verdict;
 }

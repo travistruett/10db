@@ -100,6 +100,8 @@ export function createBuilderTools(
           name: area.name,
           globs: area.globs,
           ...(area.catchAll === true ? { catchAll: true } : {}),
+          ...(area.role === undefined ? {} : { role: area.role }),
+          ...(area.route === undefined ? {} : { route: area.route }),
         })),
         hazards: project.hazards.map((hazard) => ({ name: hazard.name, globs: hazard.globs })),
         isolate: project.isolate,

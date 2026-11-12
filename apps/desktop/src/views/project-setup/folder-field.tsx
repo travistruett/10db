@@ -120,7 +120,7 @@ function ChosenFolder({
     <Stack gap="xs">
       {state.kind === 'idle' ? (
         <Group>
-          <Button onClick={choose}>Choose Folder…</Button>
+          <Button onClick={choose}>Choose Folder</Button>
           <Anchor component="button" type="button" size="sm" onClick={onType}>
             or type a path
           </Anchor>

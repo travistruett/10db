@@ -59,7 +59,7 @@ const open = (view: ShapeViewDto): void => {
 };
 
 async function openConvert(): Promise<HTMLElement> {
-  const button = await screen.findByRole('button', { name: 'Convert…' });
+  const button = await screen.findByRole('button', { name: 'Convert' });
   await waitFor(() => {
     expect((button as HTMLButtonElement).disabled).toBe(false);
   });

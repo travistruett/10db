@@ -4,6 +4,7 @@ import {
   InboxState,
   InvalidError,
   isTerminal,
+  SharedAskDetail,
   WorkstreamId,
   WorkstreamState,
   type ClaimKind,
@@ -14,16 +15,20 @@ import {
 } from '@10db/contracts';
 import {
   acquireClaims,
+  claimHolder,
   clearWorkstreamNotices,
   copyHazardNames,
   findOpenByFoldKey,
   getProject,
   getTask,
   getWorkstream,
+  getHold,
   getInboxItem,
   getWorkstreamRow,
   listInbox,
+  listSignOffWaits,
   setWorkstreamNotice,
+  type AcquireResult,
   type ClaimRow,
   type DbReader,
 } from '@10db/db';
@@ -56,6 +61,86 @@ export type ClaimResult =
       readonly parked: boolean;
     };
 
+/**
+ * How a pass lane's shared area is granted (Workbench spec §7.2): after the builder's answer when one
+ * is asked, and then, once the claim is free, by a grant that records the hold with the claim.
+ */
+export interface SharedGrant {
+  /**
+   * Raises the builder's question when the area needs one, or answers null. Its answer is null to go
+   * on to the claim, else the refusal the call answers; it rejects when the session stops waiting.
+   */
+  ask(): { readonly inboxId: InboxItemId; readonly answer: Promise<ClaimResult | null> } | null;
+  /**
+   * Grants the free claim with its hold in one write; a task that took it first is the conflict, and
+   * null means the lane's turn has ended, so nothing was granted.
+   */
+  grant(): Promise<AcquireResult | null>;
+  /**
+   * Whether the turn the wait began in is still open: an area is held only for a turn, so a wait
+   * ends with that turn, even when the next has opened.
+   */
+  turnOpen(): boolean;
+}
+
+/** What a shared wait answers once the lane's turn has ended without the area. */
+function turnEndedRefusal(a: Asking, inboxId: InboxItemId | null): ClaimResult {
+  return {
+    granted: false,
+    heldBy: null,
+    inboxId,
+    yielded: false,
+    parked: false,
+    instruction: `Your turn ended before shared ${a.kind} ${a.name} was granted, so you did not get it. If you still need it in a later turn, call request_claim with a new opId then.`,
+  };
+}
+
+/**
+ * The builder's answer to a shared question, or the turn's end: looked at every `pollMs`, so a
+ * question the turn's end withdrew ends the wait. Rejects when the session stops waiting.
+ */
+async function answerOrTurnEnd(
+  a: Asking & { readonly shared: SharedGrant },
+  asked: { readonly inboxId: InboxItemId; readonly answer: Promise<ClaimResult | null> },
+): Promise<ClaimResult | null> {
+  const answered = asked.answer.then(
+    (result) => ({ result }),
+    (error: unknown) => ({ error }),
+  );
+  for (;;) {
+    const next = await Promise.race([answered, sleep(a.pollMs, a.signal).then(() => null)]);
+    if (next !== null) {
+      if ('error' in next) throw next.error;
+      return next.result;
+    }
+    if (a.signal.aborted) throw new InvalidError('aborted');
+    if (!a.shared.turnOpen()) {
+      if (cardOpen(a, asked.inboxId)) a.inbox.withdraw(asked.inboxId);
+      return turnEndedRefusal(a, asked.inboxId);
+    }
+    // A question closed with no answer (withdrawn, or cancelled with the run) is never answered.
+    if (!cardOpen(a, asked.inboxId)) {
+      if (getInboxItem(a.state.db, asked.inboxId).answer === null)
+        return withdrawnRefusal(a, asked.inboxId);
+      const given = await answered;
+      if ('error' in given) throw given.error;
+      return given.result;
+    }
+  }
+}
+
+/** What a shared wait answers when its question closed with no answer. */
+function withdrawnRefusal(a: Asking, inboxId: InboxItemId): ClaimResult {
+  return {
+    granted: false,
+    heldBy: null,
+    inboxId,
+    yielded: false,
+    parked: false,
+    instruction: `The builder's question about shared ${a.kind} ${a.name} was closed without an answer, so you did not get it. If you still need it, call request_claim with a new opId.`,
+  };
+}
+
 /** Claims the builder made a task give up to end a claim deadlock, until its agent is told. */
 export interface Yielded {
   readonly claims: readonly { readonly kind: ClaimKind; readonly name: string }[];
@@ -73,6 +158,8 @@ export interface Asking {
   /** Aborts when the session stops, which ends the wait. */
   readonly signal: AbortSignal;
   readonly pollMs: number;
+  /** A pass lane's shared area: asked about first, then granted with its hold. */
+  readonly shared?: SharedGrant;
 }
 
 /** Where a wait in progress stands: who holds the claim now. */
@@ -83,12 +170,16 @@ export interface WaitState {
   heldBy: WorkstreamId | null;
   /** The open deadlock card this wait waits on for the builder's answer, if any. */
   inboxId: InboxItemId | null;
+  /** The open question about a shared area this wait waits on before it asks for the claim, if any. */
+  askId: InboxItemId | null;
 }
 
 /** A wait in progress and how it ends. */
 export interface LiveWait {
   readonly state: WaitState;
   readonly done: Promise<ClaimResult>;
+  /** A shared wait whose turn has ended takes no new call: it is ending, with nothing. */
+  readonly stale: () => boolean;
 }
 
 const DEADLOCK_CARD = 'claim-deadlock';
@@ -131,21 +222,25 @@ export class ClaimWaits {
   join(a: Asking): LiveWait {
     const key = `${a.workstreamId}:${a.kind}:${a.name}`;
     const existing = this.#live.get(key);
-    if (existing) return existing;
+    if (existing && !existing.stale()) return existing;
     const state: WaitState = {
       workstreamId: a.workstreamId,
       kind: a.kind,
       name: a.name,
       heldBy: null,
       inboxId: null,
+      askId: null,
     };
+    const shared = a.shared;
+    const stale = (): boolean => shared !== undefined && !shared.turnOpen();
     const done = claimOrWait(a, state, this).finally(() => {
-      this.#live.delete(key);
+      // A wait that took a stale one's place is not this one's to remove.
+      if (this.#live.get(key) === entry) this.#live.delete(key);
       if (![...this.#live.values()].some((w) => w.state.workstreamId === a.workstreamId))
         this.#cancelled.delete(a.workstreamId);
     });
     done.catch(() => undefined);
-    const entry = { state, done };
+    const entry: LiveWait = { state, done, stale };
     this.#live.set(key, entry);
     return entry;
   }
@@ -292,12 +387,16 @@ export function forgetEndedYields(bus: EventBus, waits: ClaimWaits): () => void 
 /**
  * Clears the waits a stopped daemon left showing on its tasks. Their waits ended with it, and a notice
  * that outlived its wait would name a holder nobody waits for. Also closes the wait cards an earlier
- * build raised, which a task's card shows instead now.
+ * build raised, which a task's card shows instead now, and each pass's shared-area question, whose
+ * asking call ended with the daemon: the agent asks again.
  */
 export function withdrawStaleClaimWaits(state: StateStore, inbox: InboxService): void {
   state.write((ctx) => clearWorkstreamNotices(ctx));
   for (const item of listInbox(state.db, { states: [InboxState.Open] }))
-    if (item.kind === InboxKind.Flag && (isWaitCard(item) || isDeadlockCard(item)))
+    if (
+      (item.kind === InboxKind.Flag && (isWaitCard(item) || isDeadlockCard(item))) ||
+      (item.kind === InboxKind.Question && SharedAskDetail.safeParse(item.detail).success)
+    )
       inbox.withdraw(item.id);
 }
 
@@ -314,8 +413,26 @@ const isDeadlockCard = (item: InboxItemDto): boolean =>
 const taskTitleOf = (db: DbReader, workstreamId: WorkstreamId): string =>
   getTask(db, getWorkstream(db, workstreamId).taskId).title;
 
+/**
+ * A shared grant's look, in one read: the conflict with a task holding the claim, the claim itself
+ * when this task holds it already, or null while it is free and the grant decides.
+ */
+function heldNow(a: Asking): AcquireResult | null {
+  const db = a.state.db;
+  const areaScope = claimScopeOf(db, getWorkstreamRow(db, a.workstreamId));
+  const holder = claimHolder(db, {
+    projectId: a.projectId,
+    request: { kind: a.kind, name: a.name },
+    copyHazards: copyHazardNames(getProject(db, a.projectId)),
+    ...(areaScope ? { areaScope } : {}),
+  });
+  if (holder === null) return null;
+  if (holder === a.workstreamId) return tryAcquire(a);
+  return { ok: false, conflict: { kind: a.kind, name: a.name, heldBy: holder } };
+}
+
 /** One try, in one write: the claim shares the workstream's lease, which the scheduler's heartbeat renews. */
-function tryAcquire(a: Asking) {
+function tryAcquire(a: Asking): AcquireResult {
   return a.state.write((ctx) => {
     const row = getWorkstreamRow(ctx.tx, a.workstreamId);
     const areaScope = claimScopeOf(ctx.tx, row);
@@ -432,6 +549,29 @@ function parkedRefusal(a: Asking, heldBy: WorkstreamId): ClaimResult {
   };
 }
 
+/**
+ * The refusal when a sign-off waits for this lane's turn to end (Workbench spec §9.2 step 0) and the
+ * claim is held by the page being signed off: neither could move, so the lane is answered at once
+ * and its turn can end. Null when no such sign-off waits.
+ */
+function signingOffRefusal(a: Asking, holder: WorkstreamId): ClaimResult | null {
+  const db = a.state.db;
+  for (const wait of listSignOffWaits(db)) {
+    if (getHold(db, wait.waitsFor).workstreamId !== a.workstreamId) continue;
+    const signing = getTask(db, wait.taskId);
+    if (signing.workstreamId !== holder) continue;
+    return {
+      granted: false,
+      heldBy: holder,
+      inboxId: null,
+      yielded: false,
+      parked: false,
+      instruction: `${signing.title} is being signed off; do without ${a.kind} ${a.name} or ask again after your turn.`,
+    };
+  }
+  return null;
+}
+
 /** Whether the task reached a terminal state: it takes no part in a deadlock any more. */
 const taskEnded =
   (db: DbReader) =>
@@ -475,6 +615,12 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
  * them. Starting to wait on a holder, or on a new one, tells `waits`, so the scheduler can give that
  * holder a lane. Runs synchronously up to its first wait, so `wait` names the holder and card by the
  * time `ClaimWaits.join` returns.
+ *
+ * A pass lane's shared area (`Asking.shared`) asks the builder first when it needs to, and the open
+ * question, named on `wait`, holds the wait until it is answered. It then looks at the claim in the
+ * same synchronous way and waits on a holder as above; only a free claim goes to the grant, which
+ * records the hold before it takes the claim, so it answers asynchronously. An area is held only for
+ * a turn: once the lane's turn has ended the wait withdraws its question and ends with nothing.
  */
 async function claimOrWait(a: Asking, wait: WaitState, waits: ClaimWaits): Promise<ClaimResult> {
   const noticeKey = waitNoticeKey(a);
@@ -491,6 +637,22 @@ async function claimOrWait(a: Asking, wait: WaitState, waits: ClaimWaits): Promi
     });
   };
   try {
+    const shared = a.shared;
+    const asked = shared && heldNow(a)?.ok !== true ? shared.ask() : null;
+    if (shared && asked) {
+      wait.askId = asked.inboxId;
+      let refused: ClaimResult | null;
+      try {
+        refused = await answerOrTurnEnd({ ...a, shared }, asked);
+      } catch {
+        throw new InvalidError(
+          'This session stopped waiting for the builder’s answer and did not get the claim. End your turn.',
+        );
+      } finally {
+        wait.askId = null;
+      }
+      if (refused) return refused;
+    }
     for (;;) {
       if (waits.isCancelled(a.workstreamId))
         throw new InvalidError('The builder cancelled this task. End your turn.');
@@ -500,12 +662,21 @@ async function claimOrWait(a: Asking, wait: WaitState, waits: ClaimWaits): Promi
         );
       const given = waits.pendingYield(a.workstreamId);
       if (given) return yieldRefusal(given, a);
-      const outcome = tryAcquire(a);
+      // A shared area is held for a turn: a wait outlived by its turn takes nothing.
+      if (shared && !shared.turnOpen()) return turnEndedRefusal(a, null);
+      const outcome = shared === undefined ? tryAcquire(a) : (heldNow(a) ?? (await shared.grant()));
+      if (outcome === null) return turnEndedRefusal(a, null);
       if (outcome.ok) {
         withdrawDeadlock(a);
         return grantedFrom(a, outcome.claims);
       }
       const holder = outcome.conflict.heldBy;
+      // A page whose sign-off waits for this turn frees nothing until the turn ends: no wait on it.
+      const signing = signingOffRefusal(a, holder);
+      if (signing) {
+        withdrawDeadlock(a);
+        return signing;
+      }
       // A holder the update drain parked frees nothing until the update has installed, and the update
       // waits for this session to end: refuse instead of waiting, and the session ends by itself.
       if (waits.holderParked(holder)) return parkedRefusal(a, holder);

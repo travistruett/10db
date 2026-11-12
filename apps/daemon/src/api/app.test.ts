@@ -5,6 +5,7 @@ import {
   GoalListDto,
   HazardAssessmentDto,
   HazardLookAgainResult,
+  DevUiConnectionDto,
   HealthResponse,
   HumanTouchDto,
   InvalidError,
@@ -18,6 +19,7 @@ import {
 } from '@10db/contracts';
 import { defineWebSocketHelper } from 'hono/ws';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { devUiMayRead } from '../screens';
 import { createApp, MAX_BODY_BYTES } from './app';
 import type { ApiServices } from './services';
 import { CODEX_VERIFIED_ON } from '../environment';
@@ -108,6 +110,29 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     stepPlan: track('stepPlan'),
     startBatch: track('startBatch'),
     listBatches: track('listBatches'),
+    openPass: track('openPass'),
+    passView: track('passView'),
+    takeOutPage: track('takeOutPage'),
+    takeOutPreview: track('takeOutPreview'),
+    abandonPass: track('abandonPass'),
+    livePasses: track('livePasses'),
+    passStart: track('passStart'),
+    addPassPages: track('addPassPages'),
+    renamePass: track('renamePass'),
+    discardKeptWork: track('discardKeptWork'),
+    workbenchSetup: track('workbenchSetup'),
+    goalPassPages: track('goalPassPages'),
+    taskTurns: track('taskTurns'),
+    turnActivity: track('turnActivity'),
+    openedTurn: track('openedTurn'),
+    passClosePreview: track('passClosePreview'),
+    closePass: track('closePass'),
+    continueClose: track('continueClose'),
+    signOffPage: track('signOffPage'),
+    cancelSignOff: track('cancelSignOff'),
+    passPullRequest: track('passPullRequest'),
+    openPassPullRequest: track('openPassPullRequest'),
+    sendToAgent: track('sendToAgent'),
     listGoals: track('listGoals'),
     humanTouch: track('humanTouch'),
     openGoalDigest: track('openGoalDigest'),
@@ -130,6 +155,14 @@ function stubServices(overrides: Partial<ApiServices> = {}): ApiServices {
     restoreShapeProposal: track('restoreShapeProposal'),
     dropShapeProposal: track('dropShapeProposal'),
     addShapeFile: track('addShapeFile'),
+    taskThread: track('taskThread'),
+    postTaskMessage: track('postTaskMessage'),
+    stopPage: track('stopPage'),
+    taskPicture: track('taskPicture'),
+    taskScreens: track('taskScreens'),
+    screenPicture: track('screenPicture'),
+    picturesStatus: track('picturesStatus'),
+    restartPreview: track('restartPreview'),
     startShape: track('startShape'),
     shapeMeasures: track('shapeMeasures'),
     getShapeJev: track('getShapeJev'),
@@ -316,6 +349,63 @@ describe('API', () => {
       protocolVersion: PROTOCOL_VERSION,
       startedAt: startedAt.toISOString(),
       commit: null,
+      devUiOrigin: null,
+    });
+  });
+
+  it("names on /health the dev UI origin the builder opted in, for Open Page's hand-off", async () => {
+    const res = await createApp({
+      startedAt,
+      allowedOrigins: ['http://localhost:1420'],
+      devUiOrigin: 'http://localhost:1420',
+      token: TOKEN,
+      services: stubServices(),
+      upgradeWebSocket: noUpgrade,
+      onUnexpectedError: () => undefined,
+      mcp: () => Promise.resolve(new Response('mcp')),
+    }).request('/health');
+    expect(HealthResponse.parse(await res.json()).devUiOrigin).toBe('http://localhost:1420');
+  });
+
+  describe("the dev UI's read-only token", () => {
+    const DEV_TOKEN = 'dev-ui-token-for-tests';
+    const devApp = (devUiToken: string | null) =>
+      createApp({
+        startedAt,
+        allowedOrigins: ['http://localhost:1420'],
+        devUiOrigin: devUiToken === null ? null : 'http://localhost:1420',
+        devUi: devUiToken === null ? null : { token: devUiToken, mayRead: devUiMayRead },
+        token: TOKEN,
+        services: stubServices(),
+        upgradeWebSocket: noUpgrade,
+        onUnexpectedError: () => undefined,
+        mcp: () => Promise.resolve(new Response('mcp')),
+      });
+    const as = (token: string, method = 'GET') => ({
+      method,
+      headers: { Authorization: `Bearer ${token}` },
+    });
+
+    it.each([
+      { name: 'a read of what a page shows', path: '/projects', method: 'GET', status: 200 },
+      { name: 'any write', path: '/projects', method: 'POST', status: 403 },
+      {
+        name: "a read that moves a goal's mark",
+        path: `/goals/${mintId('Goal')}/digest`,
+        method: 'GET',
+        status: 403,
+      },
+      { name: 'a read that runs a command', path: '/system', method: 'GET', status: 403 },
+      { name: 'its own connection', path: '/dev-ui/connection', method: 'GET', status: 403 },
+    ])('$name: $status', async ({ path, method, status }) => {
+      expect((await devApp(DEV_TOKEN).request(path, as(DEV_TOKEN, method))).status).toBe(status);
+    });
+
+    it('is handed to the app over its full token only, and exists only with a dev UI origin', async () => {
+      const res = await devApp(DEV_TOKEN).request('/dev-ui/connection', auth);
+      expect(DevUiConnectionDto.parse(await res.json())).toEqual({ token: DEV_TOKEN });
+      expect((await devApp(null).request('/dev-ui/connection', auth)).status).toBe(404);
+      expect((await devApp(null).request('/projects', as(DEV_TOKEN))).status).toBe(401);
     });
   });
 
@@ -502,6 +592,63 @@ describe('API', () => {
     });
     expect(res.status).toBe(409);
     expect(await res.text()).toContain('Fix login');
+  });
+
+  it("passes a project's app address to the patch, and refuses one that is not on this Mac", async () => {
+    const sent: unknown[] = [];
+    const services = stubServices({
+      // The route's contract is what is under test: the service records the patch and refuses it.
+      patchProject: (_id, patch) => {
+        sent.push(patch);
+        throw new ConflictError('recorded');
+      },
+    });
+    const patch = (appUrl: string | null) =>
+      app(services).request(`/projects/${mintId('Project')}`, {
+        method: 'PATCH',
+        ...json,
+        body: JSON.stringify({ appUrl }),
+      });
+    expect((await patch('http://localhost:5173')).status).toBe(409);
+    expect((await patch(null)).status).toBe(409);
+    const refused = await patch('http://example.com');
+    expect(refused.status).toBe(400);
+    expect(await refused.text()).toContain('An app address is an http origin on this Mac');
+    expect(sent).toEqual([{ appUrl: 'http://localhost:5173' }, { appUrl: null }]);
+  });
+
+  it("passes a project's picture settings to the patch: a blank dev login is none, and a matrix over the cap is refused", async () => {
+    const sent: unknown[] = [];
+    const services = stubServices({
+      // The route's contract is what is under test: the service records the patch and refuses it.
+      patchProject: (_id, patch) => {
+        sent.push(patch);
+        throw new ConflictError('recorded');
+      },
+    });
+    const patch = (body: unknown) =>
+      app(services).request(`/projects/${mintId('Project')}`, {
+        method: 'PATCH',
+        ...json,
+        body: JSON.stringify(body),
+      });
+    expect((await patch({ devLoginCommand: '  \n ' })).status).toBe(409);
+    expect((await patch({ devLoginCommand: 'uv run manage.py dev_login' })).status).toBe(409);
+    const viewport = (width: number) => ({ width, height: 900 });
+    const over = await patch({
+      screens: {
+        viewports: [viewport(1440), viewport(768), viewport(390)],
+        themes: ['light', 'dark'],
+      },
+    });
+    expect(over.status).toBe(400);
+    const refusal = await over.text();
+    expect(refusal).toContain('screens');
+    expect(refusal).toContain('at most 4 pictures');
+    expect(sent).toEqual([
+      { devLoginCommand: null },
+      { devLoginCommand: 'uv run manage.py dev_login' },
+    ]);
   });
 
   it('answers 500 for an unexpected error and reports that error to the hook', async () => {
@@ -776,6 +923,83 @@ describe('team, routing and benchmark routes', () => {
       service: 'patchTask',
     },
     {
+      name: 'GET /passes/:id/tasks/:id/take-out',
+      method: 'GET',
+      path: `/passes/${mintId('Pass')}/tasks/${taskId}/take-out`,
+      body: undefined,
+      service: 'takeOutPreview',
+    },
+    {
+      name: 'POST /passes/:id/tasks/:id/take-out',
+      method: 'POST',
+      path: `/passes/${mintId('Pass')}/tasks/${taskId}/take-out`,
+      body: { shared: [{ seq: 0, choice: 'keep' }] },
+      service: 'takeOutPage',
+    },
+    {
+      name: 'POST /passes/:id/abandon',
+      method: 'POST',
+      path: `/passes/${mintId('Pass')}/abandon`,
+      body: undefined,
+      service: 'abandonPass',
+    },
+    {
+      name: 'GET /passes/:id/close',
+      method: 'GET',
+      path: `/passes/${mintId('Pass')}/close`,
+      body: undefined,
+      service: 'passClosePreview',
+    },
+    {
+      name: 'POST /passes/:id/close',
+      method: 'POST',
+      path: `/passes/${mintId('Pass')}/close`,
+      body: { token: 't', pages: [], files: [], shared: [] },
+      service: 'closePass',
+    },
+    {
+      name: 'POST /passes/:id/close/continue',
+      method: 'POST',
+      path: `/passes/${mintId('Pass')}/close/continue`,
+      body: undefined,
+      service: 'continueClose',
+    },
+    {
+      name: 'POST /passes/:id/tasks/:id/sign-off',
+      method: 'POST',
+      path: `/passes/${mintId('Pass')}/tasks/${taskId}/sign-off`,
+      body: {},
+      service: 'signOffPage',
+    },
+    {
+      name: 'DELETE /passes/:id/tasks/:id/sign-off',
+      method: 'DELETE',
+      path: `/passes/${mintId('Pass')}/tasks/${taskId}/sign-off`,
+      body: undefined,
+      service: 'cancelSignOff',
+    },
+    {
+      name: 'GET /passes/:id/pull-request',
+      method: 'GET',
+      path: `/passes/${mintId('Pass')}/pull-request`,
+      body: undefined,
+      service: 'passPullRequest',
+    },
+    {
+      name: 'POST /passes/:id/pull-request',
+      method: 'POST',
+      path: `/passes/${mintId('Pass')}/pull-request`,
+      body: undefined,
+      service: 'openPassPullRequest',
+    },
+    {
+      name: 'POST /tasks/:id/thread/:id/send-to-agent',
+      method: 'POST',
+      path: `/tasks/${taskId}/thread/checks/send-to-agent`,
+      body: undefined,
+      service: 'sendToAgent',
+    },
+    {
       name: 'GET /tasks/:id/step-plan',
       method: 'GET',
       path: `/tasks/${taskId}/step-plan`,
@@ -873,6 +1097,27 @@ describe('team, routing and benchmark routes', () => {
       method: 'PATCH',
       path: `/projects/${projectId}`,
       body: { allowedCommands: ['node'] },
+    },
+    {
+      name: 'two page areas that can share a file',
+      method: 'PATCH',
+      path: `/projects/${projectId}`,
+      body: {
+        areas: [
+          { name: 'people', globs: ['app/people/**'], role: 'page', route: '/people' },
+          { name: 'pages', globs: ['app/**/page.tsx'], role: 'page' },
+        ],
+      },
+    },
+    {
+      name: 'a route on an area that is not a page',
+      method: 'POST',
+      path: '/projects',
+      body: {
+        name: 'demo',
+        repoPath: '/tmp/demo',
+        areas: [{ name: 'ui', globs: ['ui/**'], role: 'shared', route: '/' }],
+      },
     },
     {
       name: 'a PATCH /projects/:id seed name with a slash',

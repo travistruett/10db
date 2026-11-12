@@ -39,6 +39,18 @@ describe('what a render token may do', () => {
       expect(renderMayRead('GET', path), path).toBe(false);
   });
 
+  it('never reads a UI Workbench pass, its turns or its preview, which no screen draws', () => {
+    for (const path of [
+      '/passes',
+      '/passes/pas_1',
+      '/pass-turns/ptn_1/activity',
+      '/tasks/tsk_1/turns',
+      '/projects/prj_1/pass-start',
+      '/goals/gol_1/pass-pages',
+    ])
+      expect(renderMayRead('GET', path), path).toBe(false);
+  });
+
   it('writes nothing: every other method is refused, on a path it may read', () => {
     for (const method of ['POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS', 'ALL'])
       expect(renderMayRead(method, '/projects'), method).toBe(false);

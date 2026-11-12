@@ -11,8 +11,8 @@ const Created = z.looseObject({ id: z.string() });
 /** The UI token's header, for the daemon's own routes. */
 export const auth = { Authorization: `Bearer ${E2E_TOKEN}` };
 
-/** A disposable repository for the project; git config comes from nowhere but this repo. */
-function createRepository(repo: string): void {
+/** A disposable repository for the project, with `files` committed; git config comes from nowhere but this repo. */
+function createRepository(repo: string, files: Readonly<Record<string, string>>): void {
   mkdirSync(repo, { recursive: true });
   const globalConfig = join(E2E_DIR, 'shape-gitconfig');
   writeFileSync(globalConfig, '');
@@ -30,22 +30,40 @@ function createRepository(repo: string): void {
   git('config', 'user.email', 'e2e@10db.invalid');
   git('config', 'user.name', '10db e2e');
   git('config', 'commit.gpgsign', 'false');
-  writeFileSync(join(repo, 'README.md'), '# shape e2e\n');
-  git('add', 'README.md');
+  const all = { 'README.md': '# shape e2e\n', ...files };
+  for (const [path, text] of Object.entries(all)) {
+    mkdirSync(join(repo, path, '..'), { recursive: true });
+    writeFileSync(join(repo, path), text);
+  }
+  git('add', ...Object.keys(all));
   git('commit', '-m', 'Initial commit');
 }
 
+/** An area as `POST /projects` takes it. */
+interface Area {
+  readonly name: string;
+  readonly globs: readonly string[];
+  readonly catchAll?: boolean;
+  readonly role?: 'page' | 'shared';
+  readonly route?: string;
+}
+
 /** A project on its own repository, so one spec's tasks never meet another's. */
-export async function createProject(request: APIRequestContext, name: string): Promise<string> {
+export async function createProject(
+  request: APIRequestContext,
+  name: string,
+  areas: readonly Area[] = [{ name: 'repo', globs: ['**'] }],
+  files: Readonly<Record<string, string>> = {},
+): Promise<string> {
   const repo = join(E2E_DIR, `${name}-repo`);
-  createRepository(repo);
+  createRepository(repo, files);
   const created = await request.post(`${daemonUrl}/projects`, {
     headers: auth,
     data: {
       name,
       repoPath: repo,
       gateCommand: 'true',
-      areas: [{ name: 'repo', globs: ['**'] }],
+      areas,
       handoffPct: 40,
       nudgePct: 50,
       delivery: 'local',

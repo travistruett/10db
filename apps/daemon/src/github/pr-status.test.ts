@@ -175,6 +175,8 @@ describe('Gh.prStatus', () => {
         state: 'OPEN',
         headRefOid: HEAD,
         mergeable: 'CONFLICTING',
+        isDraft: false,
+        baseRefName: 'main',
         statusCheckRollup: [
           {
             __typename: 'CheckRun',
@@ -196,6 +198,8 @@ describe('Gh.prStatus', () => {
       mergeBlocked: null,
       blockedOnChecks: false,
       mergeable: 'CONFLICTING',
+      isDraft: false,
+      baseRef: 'main',
       checks: 'failing',
       failingChecks: [{ name: 'build', url: 'https://github.com/acme/widgets/actions/runs/1' }],
     });
@@ -206,7 +210,7 @@ describe('Gh.prStatus', () => {
       '-R',
       'acme/widgets',
       '--json',
-      'url,state,statusCheckRollup,headRefOid,mergeStateStatus,mergeable,reviewDecision',
+      'url,state,statusCheckRollup,headRefOid,mergeStateStatus,mergeable,reviewDecision,isDraft,baseRefName',
     ]);
   });
 
@@ -420,6 +424,9 @@ describe('Gh.prStatus', () => {
         mergeBlocked: null,
         blockedOnChecks: false,
         mergeable: 'UNKNOWN',
+        // gh gave no draft flag or base: each reads as unknown, never as a value.
+        isDraft: null,
+        baseRef: null,
         checks,
         failingChecks: failing,
       });

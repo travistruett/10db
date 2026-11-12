@@ -27,5 +27,6 @@ export function createPinnedAdapter(
     startShape: (spec) => current().startShape(spec),
     probeAccount: (probe) => current().probeAccount(probe),
     startLogin: (login) => current().startLogin(login),
+    readClientUuids: (spec) => current().readClientUuids(spec),
   };
 }

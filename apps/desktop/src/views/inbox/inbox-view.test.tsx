@@ -1,4 +1,13 @@
-import { mintId, PARK_TASK_OPTION, type InboxItemDto, type ProvenanceDto } from '@10db/contracts';
+import {
+  mintId,
+  PARK_TASK_OPTION,
+  PASS_SIGN_OFF_CHOICE,
+  SHARED_ASK_ALLOW_CHOICE,
+  SHARED_ASK_KEEP_CHOICE,
+  SHARED_ASK_REPLY_CHOICE,
+  type InboxItemDto,
+  type ProvenanceDto,
+} from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse, type RequestHandler, type WebSocketHandler } from 'msw';
 import { describe, expect, it } from 'vitest';
@@ -758,7 +767,7 @@ describe('InboxView', () => {
         'Move between cards',
         'Choose an option',
         'Write a note',
-        'Send the answer, or dismiss a flag',
+        'Send the answer, dismiss a flag, or open the UI Workbench',
         'Send from the note',
         'Show these shortcuts',
       ])
@@ -923,6 +932,154 @@ describe('InboxView', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
       expect(await screen.findByText('Nothing needs you right now.')).toBeTruthy();
     });
+  });
+});
+
+// Workbench spec §6.1: a pass's Ready pages are one row, which offers neither Approve nor Send Back.
+describe("a UI Workbench pass's Ready pages", () => {
+  const pass = mintId('Pass');
+  const ready = (title: string): InboxItemDto =>
+    inboxItemDto({
+      kind: 'check',
+      title,
+      body: '',
+      options: [{ label: PASS_SIGN_OFF_CHOICE, description: '' }],
+      projectId: project,
+      detail: {
+        passId: pass,
+        taskId: mintId('Task'),
+        workstreamId: mintId('Workstream'),
+        turnId: mintId('PassTurn'),
+        keptSha: 'a'.repeat(40),
+        keptBaseSha: 'b'.repeat(40),
+        turnFiles: [],
+        pageFiles: [],
+      },
+    });
+
+  it('show as one row naming each page, with no Approve or Send Back; Enter opens the UI Workbench', async () => {
+    const { answers } = inbox([ready('Ready: Settings'), ready('Ready: People')]);
+    const { router } = renderApp('/inbox');
+    expect(await screen.findByText('UI Workbench: 2 pages ready')).toBeTruthy();
+    expect(screen.getByRole('radio', { name: 'Open 1' })).toBeTruthy();
+    const card = selectedCard();
+    expect(within(card).getByText('Ready: Settings')).toBeTruthy();
+    expect(within(card).getByText('Ready: People')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Approve/ })).toBeNull();
+    expect(screen.queryByRole('button', { name: /Send Back/ })).toBeNull();
+    key('Enter');
+    expect(answers).toEqual([]);
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/workbench');
+    });
+  });
+});
+
+describe("a UI Workbench pass's shared-area question", () => {
+  it('offers Allow, Keep It to This Page and a reply, and sends the reply with its note', async () => {
+    const asked = inboxItemDto({
+      kind: 'question',
+      category: 'other',
+      title: 'People wants to change shared code in src',
+      body: 'Settings changed `src/button.ts` there 12 minutes ago.',
+      options: [
+        { label: SHARED_ASK_ALLOW_CHOICE, description: 'This change is for every page' },
+        { label: SHARED_ASK_KEEP_CHOICE, description: 'The agent keeps it inside its page' },
+        { label: SHARED_ASK_REPLY_CHOICE, description: 'Your note goes to the agent instead' },
+        PARK_TASK_OPTION,
+      ],
+      projectId: project,
+    });
+    const { answers } = inbox([asked]);
+    renderApp('/inbox');
+    expect(await screen.findByText('People wants to change shared code in src')).toBeTruthy();
+    for (const label of [SHARED_ASK_ALLOW_CHOICE, SHARED_ASK_KEEP_CHOICE, SHARED_ASK_REPLY_CHOICE])
+      expect(screen.getByRole('radio', { name: new RegExp(label) })).toBeTruthy();
+
+    key('3');
+    key('n');
+    const note = screen.getByLabelText('Note for the agent (optional)');
+    fireEvent.change(note, { target: { value: 'Use the page button' } });
+    fireEvent.keyDown(note, { key: 'Enter', metaKey: true });
+
+    await waitFor(() => {
+      expect(answers).toEqual([
+        {
+          id: asked.id,
+          body: { choice: SHARED_ASK_REPLY_CHOICE, note: 'Use the page button', record: null },
+        },
+      ]);
+    });
+  });
+});
+
+describe("a UI Workbench pass's cards", () => {
+  const passId = mintId('Pass');
+  const prUrl = 'https://github.com/acme/widgets/pull/7';
+  const mergeCommand = 'git switch main && git merge 10db/pass-settings';
+  const passFlag = (title: string, detail: NonNullable<InboxItemDto['detail']>): InboxItemDto =>
+    inboxItemDto({
+      kind: 'flag',
+      title,
+      body: 'What the pass did.',
+      options: [],
+      detail,
+      projectId: project,
+    });
+
+  it.each([
+    {
+      name: 'a branch it could not move offers the command that merges it, to copy',
+      card: passFlag('Your folder stays on 10db/pass-settings', {
+        kind: 'pass_branch_moved',
+        passId,
+        returnBranch: 'main',
+        passBranch: '10db/pass-settings',
+        reason: 'moved',
+        mergeCommand,
+      }),
+      command: mergeCommand,
+      pullRequest: null,
+    },
+    {
+      name: 'a follow-on links the pull request its later sign-offs went to',
+      card: passFlag('UI Workbench pass "Settings" closed when its pull request merged', {
+        kind: 'pass_follow_on',
+        passId,
+        followOnPassId: null,
+        prUrl,
+        carried: [],
+      }),
+      command: null,
+      pullRequest: prUrl,
+    },
+    {
+      name: 'a follow-on with no pull request links none',
+      card: passFlag('UI Workbench pass "Settings" closed when its pull request merged', {
+        kind: 'pass_follow_on',
+        passId,
+        followOnPassId: mintId('Pass'),
+        prUrl: null,
+        carried: [mintId('Task')],
+      }),
+      command: null,
+      pullRequest: null,
+    },
+  ])('$name', async ({ card, command, pullRequest }) => {
+    inbox([card]);
+    renderApp('/inbox');
+    fireEvent.click(await screen.findByText(card.title));
+    const shown = selectedCard();
+    await within(shown).findByText('What the pass did.');
+    const copy = within(shown).queryByRole('button', { name: 'Copy command' });
+    if (command === null) expect(copy).toBeNull();
+    else {
+      expect(within(shown).getByText(command)).toBeTruthy();
+      expect(copy).toBeTruthy();
+    }
+    const link = within(shown).queryByRole('link', { name: 'Pull request' });
+    if (pullRequest === null) expect(link).toBeNull();
+    else expect(link?.getAttribute('href')).toBe(pullRequest);
   });
 });
 
@@ -1492,5 +1649,40 @@ describe('a resolved answer that proposed a principle', () => {
     fireEvent.click(await screen.findByRole('radio', { name: 'Resolved' }));
     const [row] = await screen.findAllByTestId('resolved-card');
     expect(row?.textContent).not.toContain('principle');
+  });
+});
+
+describe('Inbox across projects', () => {
+  const alpha = projectViewDto({ name: 'alpha' });
+  const beta = projectViewDto({ name: 'beta' });
+  const cards = [
+    inboxItemDto({ projectId: alpha.id, title: 'Alpha question?' }),
+    inboxItemDto({ projectId: beta.id, title: 'Beta question?' }),
+  ];
+
+  function twoProjects(): void {
+    inbox(cards);
+    server.use(http.get(daemonUrl('/projects'), () => HttpResponse.json([alpha, beta])));
+  }
+
+  it('shows every project’s cards, each naming its project', async () => {
+    twoProjects();
+    renderApp('/inbox');
+    // A card's header row holds its kind, its project and its title.
+    const header = async (title: string) => (await screen.findByText(title)).parentElement;
+    expect((await header('Alpha question?'))?.textContent).toContain('alpha');
+    expect((await header('Beta question?'))?.textContent).toContain('beta');
+    expect(screen.getByRole('radio', { name: 'Open 2' })).toBeTruthy();
+  });
+
+  it('narrows the cards and the Open count by its own project filter', async () => {
+    twoProjects();
+    renderApp(`/inbox?project=${beta.id}`);
+    expect(await screen.findByText('Beta question?')).toBeTruthy();
+    expect(screen.queryByText('Alpha question?')).toBeNull();
+    expect(screen.getByRole('radio', { name: 'Open 1' })).toBeTruthy();
+    expect(screen.getByRole('combobox', { name: 'Project' })).toBe(
+      screen.getByDisplayValue('beta'),
+    );
   });
 });

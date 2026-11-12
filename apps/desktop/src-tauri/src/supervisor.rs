@@ -29,13 +29,14 @@ const STOP_TIMEOUT: Duration = Duration::from_secs(30);
 const POLL_INTERVAL: Duration = Duration::from_millis(200);
 const SIDECAR_LOG: &str = "sidecar.log";
 /// Development and test settings of the daemon; a value in the shell's own environment must not
-/// reach the packaged daemon (a fixed UI token, scripted sessions, a live-Claude or live-Codex test
+/// reach the packaged daemon (a fixed UI token, scripted sessions, a live-Claude, live-Codex or live-browser test
 /// run, an addon path that only fits another layout). `TENDB_DEV_UI_ORIGIN` is not among them: it
 /// is how the builder opts a loopback dev UI in to the installed app's daemon, which still asks for
 /// its token.
-const DEV_ONLY_VARS: [&str; 5] = [
+const DEV_ONLY_VARS: [&str; 6] = [
     "TENDB_DEV_UI_TOKEN",
     "TENDB_FAKE_SCRIPTS",
+    "TENDB_LIVE_BROWSER",
     "TENDB_LIVE_CLAUDE",
     "TENDB_LIVE_CODEX",
     "TENDB_SQLITE_BINDING",
@@ -356,6 +357,7 @@ mod tests {
         for name in [
             "TENDB_DEV_UI_TOKEN",
             "TENDB_FAKE_SCRIPTS",
+            "TENDB_LIVE_BROWSER",
             "TENDB_LIVE_CLAUDE",
             "TENDB_LIVE_CODEX",
             "TENDB_SQLITE_BINDING",

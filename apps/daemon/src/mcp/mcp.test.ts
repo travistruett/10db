@@ -508,7 +508,7 @@ describe('MCP tools in a worktree batch', () => {
 });
 
 describe('MCP tools', () => {
-  it('lists exactly the thirteen tools', async () => {
+  it('lists exactly the fourteen tools', async () => {
     const s = await seedSession();
     const { tools } = await s.client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
@@ -523,6 +523,7 @@ describe('MCP tools', () => {
       'record_decision',
       'record_evidence',
       'report_deviation',
+      'report_pages',
       'request_claim',
       'write_handoff',
     ]);

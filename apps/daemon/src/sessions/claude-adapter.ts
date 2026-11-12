@@ -30,6 +30,7 @@ import { createChannel } from './channel';
 import { startClaudeLogin, type LoginSpawn } from './claude-connect';
 import { seenModelsFrom } from './claude-model-list';
 import {
+  interruptReceipt,
   mapSdkMessage,
   modelRefusalOf,
   toHookOutput,
@@ -48,6 +49,7 @@ import { claudeAuthStatus, type SignInCheck, type SignInState } from './sign-in-
 import {
   AccountProbeError,
   CompletionError,
+  ConversationUnreadError,
   SessionEndReason,
   type AccountProbeSpec,
   type CompletionSpec,
@@ -56,6 +58,7 @@ import {
   type SessionEvent,
   type SessionHandle,
   type SessionSpec,
+  type ShapeImage,
 } from './types';
 
 export const CLAUDE_MCP_SERVER = TENDB_MCP_SERVER;
@@ -146,7 +149,12 @@ function refusedSession(message: string): SessionHandle {
   const events = createChannel<SessionEvent>();
   events.push({ type: 'ended', reason: 'error', message });
   events.end();
-  return { events, send: () => undefined, stop: () => Promise.resolve() };
+  return {
+    events,
+    send: () => undefined,
+    interrupt: () => Promise.resolve(null),
+    stop: () => Promise.resolve(),
+  };
 }
 
 interface QueryDeps {
@@ -383,6 +391,13 @@ function failedServersNote(names: readonly string[]): string {
   );
 }
 
+/** A message sent before the prompt went in, held until it can follow the prompt. */
+interface HeldMessage {
+  readonly text: string;
+  readonly images: readonly ShapeImage[];
+  readonly uuid: string | undefined;
+}
+
 /** Where one start of Claude Code stands among the starts a session may make. */
 interface StartAttempt {
   /** What each earlier start printed on stderr; one entry per earlier start that got no account. */
@@ -395,7 +410,7 @@ interface StartAttempt {
    * This start got no account and is closed without an `ended` event, so the session starts again:
    * what it printed, and the messages sent to it that never reached claude.
    */
-  readonly unanswered: (printed: string, unsent: readonly string[]) => void;
+  readonly unanswered: (printed: string, unsent: readonly HeldMessage[]) => void;
 }
 
 function startSession(
@@ -464,7 +479,7 @@ function startSession(
   /** Closed without an `ended` event: the session starts claude again. */
   let closedForRetry = false;
   /** Messages sent before the prompt, which wait for the preflight and are lost if it fails. */
-  const unsent: string[] = [];
+  const unsent: HeldMessage[] = [];
 
   const emit = (event: SessionEvent): void => {
     if (!ended) events.push(event);
@@ -508,7 +523,12 @@ function startSession(
     log.error({ reason: message }, 'claude session refused');
     events.push({ type: 'ended', reason: SessionEndReason.BillingRefused, message });
     events.end();
-    return { events, send: () => undefined, stop: () => Promise.resolve() };
+    return {
+      events,
+      send: () => undefined,
+      interrupt: () => Promise.resolve(null),
+      stop: () => Promise.resolve(),
+    };
   }
 
   // The prompt is not pushed yet: it goes in only after the billing preflight passes.
@@ -671,6 +691,9 @@ function startSession(
         repoLeftOut.length > 0
           ? `${spec.prompt}\n\n${failedServersNote(repoLeftOut)}`
           : spec.prompt,
+        undefined,
+        spec.images ?? [],
+        spec.promptUuid,
       ),
     );
     promptSent = true;
@@ -865,17 +888,21 @@ function startSession(
 
   return {
     events,
-    send(text) {
+    send(text, images = [], uuid) {
       if (halted()) return;
       // Never ahead of the prompt: a message sent during the preflight waits for it, and is dropped if it fails.
       if (promptSent) {
-        input.push(userMessage(text, 'next'));
+        input.push(userMessage(text, 'next', images, uuid));
         return;
       }
-      unsent.push(text);
+      unsent.push({ text, images, uuid });
       void preflightOk.then((ok) => {
-        if (ok && !halted()) input.push(userMessage(text, 'next'));
+        if (ok && !halted()) input.push(userMessage(text, 'next', images, uuid));
       });
+    },
+    async interrupt() {
+      if (halted() || !promptSent) return null;
+      return interruptReceipt(await settleWithin(clock, q.interrupt(), graceMs));
     },
     async stop() {
       if (ended) return;
@@ -913,11 +940,11 @@ function startWithRetry(
   /** What each start that got no account printed. */
   const printed: string[] = [];
   /** Set by a start that closed for another; its unsent messages grow while the next one is made. */
-  let pending: { readonly unsent: string[] } | null = null;
+  let pending: { readonly unsent: HeldMessage[] } | null = null;
   let stopRequested = false;
   let current: SessionHandle | null = null;
   // Read through a function: TypeScript would otherwise keep the narrowing from the assignments.
-  const closedStart = (): { readonly unsent: string[] } | null => pending;
+  const closedStart = (): { readonly unsent: HeldMessage[] } | null => pending;
   const stopAsked = (): boolean => stopRequested;
   const clock = opts.clock ?? systemClock;
   /** Wakes the pause between two starts early; a stop does. */
@@ -931,7 +958,7 @@ function startWithRetry(
       };
     });
   const settled = (async () => {
-    let carried: readonly string[] = [];
+    let carried: readonly HeldMessage[] = [];
     for (let number = 1; number <= START_ATTEMPTS; number += 1) {
       pending = null;
       const handle = startSession(spec, opts, runQuery, {
@@ -944,7 +971,7 @@ function startWithRetry(
         },
       });
       current = handle;
-      for (const text of carried) handle.send(text);
+      for (const held of carried) handle.send(held.text, held.images, held.uuid);
       for await (const event of handle.events) events.push(event);
       const closed = closedStart();
       if (!closed) break;
@@ -964,11 +991,13 @@ function startWithRetry(
   })();
   return {
     events,
-    send(text) {
+    send(text, images = [], uuid) {
       const waiting = closedStart();
-      if (waiting) waiting.unsent.push(text);
-      else current?.send(text);
+      if (waiting) waiting.unsent.push({ text, images, uuid });
+      else current?.send(text, images, uuid);
     },
+    // Between two starts no turn runs, so there is nothing to interrupt.
+    interrupt: () => (closedStart() || !current ? Promise.resolve(null) : current.interrupt()),
     async stop() {
       stopRequested = true;
       wake();
@@ -1029,7 +1058,7 @@ async function probeAccount(
   }
 }
 
-/** How long a one-shot question may take before it is given up on. */
+/** How long a one-shot question may take before it is given up on, unless it says otherwise. */
 const COMPLETION_MS = 120_000;
 
 /**
@@ -1051,6 +1080,7 @@ async function complete(
       cwd: ask.cwd,
       env: { ...ask.env, ...AUTOUPDATE_OFF },
       model: ask.model,
+      ...(ask.effort === undefined ? {} : { effort: ask.effort }),
       pathToClaudeCodeExecutable: opts.claudePath,
       settingSources: [],
       strictMcpConfig: true,
@@ -1067,7 +1097,7 @@ async function complete(
   const timeout = new Promise<never>((_, reject) => {
     timer = clock.setTimeout(() => {
       reject(new CompletionError('The model did not answer in time.'));
-    }, COMPLETION_MS);
+    }, ask.timeoutMs ?? COMPLETION_MS);
   });
   // A caller that gives up ends the question now, not when the model would have answered.
   let withdrawn: () => void = () => undefined;
@@ -1148,5 +1178,12 @@ export function createClaudeAdapter(opts: ClaudeAdapterOptions): SessionAdapter 
         ...(opts.clock === undefined ? {} : { clock: opts.clock }),
       }),
     complete: (ask) => complete(ask, opts, runQuery),
+    // A message pushed before a restart is pushed again to a resumed Claude Code session.
+    readClientUuids: (spec) =>
+      Promise.reject(
+        new ConversationUnreadError(
+          `10db does not read back Claude Code conversation ${spec.providerSessionId}`,
+        ),
+      ),
   };
 }

@@ -2,18 +2,33 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   ACTIVE_STATES,
+  AreaRole,
   CatalogueAttempt,
   type CatalogueStatusDto,
   type BatchId,
+  ConflictError,
   Delivery,
+  TaskStatus,
   InvalidError,
+  isDaemonAddress,
+  APP_URL_IS_DAEMON,
   type McpServerStatusDto,
   ProjectInput,
+  PassState,
+  SharedChoiceKind,
   ProjectLanding,
   type ProjectDto,
   type ProjectPatch,
   WorkstreamState,
   type SystemCheckDto,
+  type PassAbandonedDto,
+  type PassSignOffDto,
+  type PassId,
+  type PassJoinRequest,
+  type TakeOutResultDto,
+  type TaskId,
+  TaskMessageId,
+  TaskMessageKind,
   type TaskLanding,
   type WorkstreamId,
 } from '@10db/contracts';
@@ -28,11 +43,14 @@ import {
   getProject,
   getSmallProposalLimit,
   setSmallProposalLimit,
+  getPass,
+  getPassProgress,
   getTask,
   getTeam,
   getWorkstream,
   holdTask,
   insertBoardColumn,
+  insertBuilderMessage,
   insertFlow,
   insertPerson,
   insertPersona,
@@ -58,19 +76,27 @@ import {
   listProjectViews,
   listRoutingRules,
   listTasks,
+  listTaskThread,
   listWorkstreams,
   moveTask,
+  listPassTasks,
+  openPassTurn,
+  passHoldingTask,
   patchBoardColumn,
   patchFlow,
   patchModelProfile,
   patchPersona,
   patchProject,
   patchTask,
+  renamePass,
   resumeTask,
   runNext,
   setRoutingRules,
   setTeam,
+  takeOffer,
   undoHazardAddition,
+  offeredText,
+  offerToAgent,
 } from '@10db/db';
 import { MoveCause, type AccountMoves, type AccountService } from '../accounts';
 import type { Clock } from '../clock';
@@ -82,15 +108,33 @@ import {
   createFailedRestarts,
   workstreamChanges,
   type BatchStarter,
+  type PassOpened,
+  type PassOpenInput,
+  type PassPullRequests,
   type Shipper,
 } from '../delivery';
 import { markGhRequired, withAgentStatus, type AgentTools } from '../environment';
 import type { EventBus, StateStore } from '../events';
-import { inspectFolder, proposeAreas, type AreaNamer } from '../folders';
+import { inspectFolder, proposeAreas, proposeSetupAreas, type AreaNamer } from '../folders';
 import { adoptGoal } from '../goals';
-import type { Git } from '../git';
+import { GitError, type Git } from '../git';
 import { hazardAssessmentDto, type HazardAssessor } from '../hazards';
 import { earlierMcpApproval, requestMcpApproval, type InboxService } from '../inbox';
+import {
+  createTurnFiles,
+  goalPassPages,
+  livePassViews,
+  openTurn,
+  passStartPreview,
+  passView,
+  sharedUnlanded,
+  TakeOutWithin,
+  taskTurns,
+  turnLog,
+  type PassCloses,
+  type PassJoined,
+  type TakeOutInput,
+} from '../pass';
 import type { KeepAwake } from '../keep-awake';
 import type { Runner } from '../runner';
 import type { Scheduler } from '../scheduler';
@@ -106,10 +150,17 @@ import {
 } from '../permissions';
 import { findRegistryHosts } from '../registries';
 import { proposeCandidates, resolveStepPlan, startTaskWithPlan } from '../team';
+import type { Pictures } from '../pictures';
+import type { Preview } from '../preview';
+import type { ThreadService } from '../thread';
 import type { JudgeApiServices } from './judge-services';
 import type { KnowledgeApiServices } from './knowledge-services';
 import { createModelSettingsServices } from './model-settings-services';
 import type { ShapeApiServices } from './shape-services';
+import { gateCallsDocker } from './docker-need';
+import type { ListenerReader } from './listening-ports';
+import type { AddressProbe } from './loopback-probe';
+import { suggestSettings } from './suggest-settings';
 import { checkoutConflictsWithRoot } from './worktree-root';
 
 /** The HTTP layer's view of the daemon: reads go to the database, writes go through the state store. */
@@ -135,7 +186,31 @@ export function createServices(deps: {
   readonly judge: JudgeApiServices;
   readonly shape: ShapeApiServices;
   readonly knowledge: KnowledgeApiServices;
+  readonly thread: ThreadService;
+  readonly pictures: Pictures;
+  /** The dev server 10db runs for a project while a pass is open. */
+  readonly preview: Preview;
+  /** The port the API listens on; null until it does. */
+  readonly daemonPort: () => number | null;
   readonly starter: BatchStarter;
+  /** Opens a pass in the project's delivery queue (`openPass` with its lease and put-back). */
+  readonly openPass: (input: PassOpenInput) => Promise<PassOpened>;
+  /** Takes a task out of its pass in the project's delivery queue, stopping its lane through the runner. */
+  readonly takeOut: (input: TakeOutInput) => Promise<TakeOutResultDto>;
+  /** Abandons a pass in the project's delivery queue, stopping its lanes through the runner. */
+  readonly abandonPass: (passId: PassId) => Promise<PassAbandonedDto>;
+  /** Adds pages to an open pass in the project's delivery queue (`joinPass` with its lease and put-back). */
+  readonly joinPass: (passId: PassId, input: PassJoinRequest) => Promise<PassJoined>;
+  /** Discards a task's saved Workbench work in its project's delivery queue. */
+  readonly discardKeptWork: (taskId: TaskId) => Promise<void>;
+  /** A pass's pull request: its preview, and Open Pull Request. */
+  readonly passPullRequests: Pick<PassPullRequests, 'preview' | 'open'>;
+  /** A pass's close: its lists and its confirm, which queues the close in the delivery queue. */
+  readonly closes: Pick<PassCloses, 'preview' | 'close' | 'continueClose'>;
+  /** Signs off a Ready page in the project's delivery queue, stopping its lane through the runner. */
+  readonly signOff: (passId: PassId, taskId: TaskId) => PassSignOffDto;
+  /** Cancels a page's waiting sign-off. */
+  readonly cancelSignOff: (passId: PassId, taskId: TaskId) => void;
   readonly shipper: Shipper;
   readonly accounts: AccountService;
   readonly moves: Pick<AccountMoves, 'move'>;
@@ -149,6 +224,10 @@ export function createServices(deps: {
   readonly protectedRoots: readonly string[];
   /** Names and merges proposed areas; null leaves them named from their paths. */
   readonly areaNamer: AreaNamer | null;
+  /** What listens on this Mac, for the Workbench setup's app address. */
+  readonly listeners: ListenerReader;
+  /** Whether something answers at a loopback address, for the Workbench setup's app address. */
+  readonly probe: AddressProbe;
   /** Works out each project's hazards from its repository. */
   readonly hazards: Pick<HazardAssessor, 'assess'>;
   /** Records a new project's checkout as the daemon trusts it (lane sandbox spec D13). */
@@ -160,6 +239,8 @@ export function createServices(deps: {
     ...deps.catalogue.status(),
     ...(deps.catalogueOn ? {} : { lastAttempt: CatalogueAttempt.Off }),
   });
+  // A turn's files are read once per pair of kept commits, which never change.
+  const turnFiles = createTurnFiles(deps.git);
   // The tool check and gh's login are probed on the first request and on a recheck, never otherwise.
   let lastCheck: Promise<SystemCheckDto> | null = null;
 
@@ -301,6 +382,173 @@ export function createServices(deps: {
     startBatch: (projectId, input) => deps.starter.startBatch(projectId, input),
     // The store lists oldest first; the API answers newest first.
     listBatches: (projectId) => listBatches(db, { projectId }).reverse(),
+    async openPass(projectId, input) {
+      let opened: PassOpened;
+      try {
+        opened = await deps.openPass({
+          projectId,
+          name: input.name,
+          taskIds: input.taskIds,
+          ...(input.pageCap === undefined ? {} : { pageCap: input.pageCap }),
+          ...(input.pages === undefined ? {} : { pages: input.pages }),
+          ...(input.goalId === undefined ? {} : { goalId: input.goalId }),
+        });
+      } catch (error) {
+        if (error instanceof GitError)
+          throw new ConflictError(`Your folder could not be opened for a pass: ${error.message}`);
+        throw error;
+      }
+      // Each page's first turn starts from a message: the builder's, else the task's description. A
+      // page the open made a task for has none, so it waits for the builder's first word.
+      deps.state.write((ctx) => {
+        for (const task of listPassTasks(ctx.tx, opened.pass.id)) {
+          const body = input.firstMessage ?? task.description;
+          if (body.trim() !== '') insertBuilderMessage(ctx, task.id, { body, files: [] });
+        }
+      });
+      deps.scheduler.requestTick();
+      return { ...opened, dirt: [...opened.dirt], waiting: [...opened.waiting] };
+    },
+    passView: (passId) => passView(db, passId),
+    async takeOutPage(passId, taskId, input) {
+      const pass = getPass(db, passId);
+      const task = getTask(db, taskId);
+      if (pass.state !== PassState.Open)
+        throw new ConflictError(
+          `Pass "${pass.name}" is ${pass.state.toLowerCase()}: a page is taken out only while it is open`,
+        );
+      if (passHoldingTask(db, task)?.id !== passId)
+        throw new ConflictError(`${task.title} is not a page of pass "${pass.name}"`);
+      // A Drop is taken only for a change of the page the preview offers it for.
+      const offered = new Map(
+        (await sharedUnlanded(deps, { passId, taskId })).map((c) => [c.seq, c.dropRefusal]),
+      );
+      for (const choice of input.shared) {
+        if (choice.choice !== SharedChoiceKind.Drop) continue;
+        if (!offered.has(choice.seq))
+          throw new ConflictError(
+            `Shared change ${String(choice.seq)} is not one of ${task.title}'s that has not landed`,
+          );
+        const refused = offered.get(choice.seq);
+        if (refused)
+          throw new ConflictError(
+            `Shared change ${String(choice.seq)} cannot be dropped: ${refused}`,
+          );
+      }
+      return deps.takeOut({ taskId, within: TakeOutWithin.Alone, shared: input.shared });
+    },
+    async takeOutPreview(passId, taskId) {
+      const pass = getPass(db, passId);
+      const task = getTask(db, taskId);
+      if (passHoldingTask(db, task)?.id !== passId)
+        throw new ConflictError(`${task.title} is not a page of pass "${pass.name}"`);
+      return { shared: await sharedUnlanded(deps, { passId, taskId }) };
+    },
+    abandonPass(passId) {
+      const pass = getPass(db, passId);
+      const states: readonly PassState[] = [
+        PassState.Open,
+        PassState.Closing,
+        PassState.Abandoning,
+      ];
+      if (!states.includes(pass.state))
+        throw new ConflictError(
+          `Pass "${pass.name}" is ${pass.state.toLowerCase()}: only an open or closing pass is abandoned`,
+        );
+      return deps.abandonPass(passId);
+    },
+    livePasses: () => livePassViews(db),
+    passStart: (projectId) =>
+      passStartPreview(
+        { db, git: deps.git, gateCallsDocker: (project) => gateCallsDocker(deps.git, project) },
+        projectId,
+      ),
+    async addPassPages(passId, input) {
+      await deps.joinPass(passId, input);
+      deps.scheduler.requestTick();
+      return passView(db, passId);
+    },
+    renamePass: (passId, input) => deps.state.write((ctx) => renamePass(ctx, passId, input.name)),
+    discardKeptWork: (taskId) => deps.discardKeptWork(taskId),
+    goalPassPages: (goalId) => goalPassPages({ db, git: deps.git }, goalId),
+    taskTurns: (taskId) => taskTurns({ db, git: deps.git, files: turnFiles }, taskId),
+    turnActivity: (turnId) => turnLog(db, turnId),
+    openedTurn: (taskId, turnId) => {
+      openTurn(deps.state, taskId, turnId);
+    },
+    workbenchSetup: async (projectId, signal) => {
+      const project = getProject(db, projectId);
+      const open = listTasks(db, projectId).filter((t) => t.status === TaskStatus.Open);
+      const areas = await proposeSetupAreas({ git: deps.git }, project, open, signal);
+      const pages = areas.proposed.filter((a) => a.role === AreaRole.Page).map((a) => a.globs);
+      const suggested = await suggestSettings(
+        {
+          git: deps.git,
+          listeners: deps.listeners,
+          probe: deps.probe,
+          asker: deps.areaNamer,
+          daemonPort: deps.daemonPort,
+        },
+        project,
+        pages,
+        signal,
+      );
+      return { areas, ...suggested };
+    },
+    passClosePreview: (passId) => deps.closes.preview(passId),
+    closePass: (passId, input) => deps.closes.close(passId, input),
+    continueClose: (passId) => deps.closes.continueClose(passId),
+    signOffPage: (passId, taskId) => deps.signOff(passId, taskId),
+    cancelSignOff: (passId, taskId) => {
+      deps.cancelSignOff(passId, taskId);
+    },
+    passPullRequest: (passId) => deps.passPullRequests.preview(passId),
+    openPassPullRequest: (passId) => deps.passPullRequests.open(passId),
+    async sendToAgent(taskId, noticeId) {
+      const task = getTask(db, taskId);
+      const message = TaskMessageId.safeParse(noticeId);
+      const onThread =
+        message.success &&
+        listTaskThread(db, taskId).some(
+          (m) => m.id === message.data && m.kind === TaskMessageKind.Notice,
+        )
+          ? offeredText(db, message.data)
+          : null;
+      const pass = passHoldingTask(db, task);
+      const inHeader =
+        pass === undefined
+          ? null
+          : (getPassProgress(db, pass.id).notices.find((n) => n.id === noticeId && n.sendable)
+              ?.text ?? null);
+      const text = onThread ?? inHeader;
+      if (text === null) throw new ConflictError('That notice offers nothing to send to the agent');
+      // A thread notice is sent once: its offer is taken as it is sent, and put back if the send fails.
+      const offered = message.success && onThread !== null ? message.data : null;
+      if (offered !== null && deps.state.write((ctx) => takeOffer(ctx, offered)) === null)
+        throw new ConflictError('That notice was sent to the agent already');
+      try {
+        return await deps.thread.postTaskMessage(taskId, { text, pictures: [] });
+      } catch (error) {
+        if (offered !== null)
+          deps.state.write((ctx) => {
+            offerToAgent(ctx, offered, text);
+          });
+        throw error;
+      }
+    },
+    async stopPage(taskId) {
+      const task = getTask(db, taskId);
+      const pass = passHoldingTask(db, task);
+      if (pass?.state !== PassState.Open)
+        throw new ConflictError(`${task.title} is not a page of an open UI Workbench pass`);
+      if (task.workstreamId === null) return;
+      // A turn running, or a lane starting one: a page waiting for the builder is left as it is.
+      const working =
+        openPassTurn(db, taskId) !== undefined ||
+        (deps.runner.isRunning(task.workstreamId) &&
+          getWorkstream(db, task.workstreamId).state !== WorkstreamState.WaitingHuman);
+      if (working) await deps.runner.stopPassLane(task.workstreamId);
+    },
     listGoals: (projectId) => listGoalSummaries(db, projectId),
     humanTouch: (projectId) => {
       getProject(db, projectId);
@@ -411,6 +659,14 @@ export function createServices(deps: {
     ...createModelSettingsServices(deps.state),
     ...deps.shape,
     ...deps.knowledge,
+    ...deps.thread,
+    taskScreens: (taskId) => deps.pictures.screens(taskId),
+    screenPicture: (screenId) => deps.pictures.screenFile(screenId),
+    picturesStatus: (projectId) => deps.pictures.status(projectId),
+    restartPreview: async (projectId) => {
+      getProject(db, projectId);
+      await deps.preview.restart(projectId);
+    },
     benchmarkStatus: () => deps.benchmarks.status(),
     syncBenchmarks: () => deps.benchmarks.sync(),
     listAaModels: () => listAaModels(db),
@@ -429,6 +685,10 @@ export function createServices(deps: {
       return catalogueStatus();
     },
     async patchProject(id, patch) {
+      // A page loaded at 10db's own port would reach its API with the dev session.
+      const port = deps.daemonPort();
+      if (patch.appUrl != null && port !== null && isDaemonAddress(patch.appUrl, port))
+        throw new InvalidError(APP_URL_IS_DAEMON);
       await refuseMissingDefaultBranch(getProject(db, id), patch);
       return patch.accountId === undefined
         ? deps.state.write((ctx) => patchProject(ctx, id, patch))

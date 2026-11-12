@@ -1,4 +1,24 @@
 export { gateCandidates, GateSource, type FolderFiles } from './gate-candidates';
 export { modelJson, oneLine } from './area-naming';
 export { inspectFolder } from './inspect';
-export { proposeAreas, type AreaNamer } from './propose-areas';
+export { NAMING_MS, proposeAreas, type AreaNamer } from './propose-areas';
+export { proposeSetupAreas } from './workbench-setup';
+export { askWithin } from './ask-within';
+export {
+  appAddressCandidates,
+  appAddressFiles,
+  chooseAppAddress,
+  probedCandidates,
+  type Listener,
+} from './detect-app-address';
+export { CHANGED_CHECK_NOTE, changedCheckFor, uiUnitOf } from './detect-changed-check';
+export { shellWord } from './shell-word';
+export {
+  devLoginAnswer,
+  devLoginEvidence,
+  devLoginPrompt,
+  devLoginScriptFiles,
+  devLoginWords,
+  findDevLogins,
+  type DevLogin,
+} from './detect-dev-login';

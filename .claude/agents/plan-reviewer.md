@@ -14,5 +14,7 @@ exists, write `model: unknown`.
 Check: every spec requirement in scope maps to a task; interfaces named in one task match their
 use in later tasks; each task's tests can fail and would catch the defect they target; no step is
 a placeholder; the order of tasks builds working software at each step; risks the spec names have
-an owner. Report findings ranked by the damage they would do if executed as written, each with the
+an owner; each feature says how it behaves on every account kind 10db supports (Claude plan, Claude
+through Bedrock or an API key, ChatGPT/Codex plan), and none refuses a provider outright (`AGENTS.md`,
+Provider parity). Report findings ranked by the damage they would do if executed as written, each with the
 section and a concrete consequence.

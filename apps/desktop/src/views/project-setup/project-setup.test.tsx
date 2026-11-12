@@ -236,7 +236,7 @@ describe('useProjectSetup', () => {
     const served = serve();
     renderWithDaemon(<Harness onCreated={() => undefined} />);
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Choose Folder…' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose Folder' }));
     await screen.findByRole('textbox', { name: 'Name' });
 
     expect(served.inspected).toEqual(['/Users/me/widgets']);
@@ -258,19 +258,19 @@ describe('useProjectSetup', () => {
     const asked = panel(null);
     const served = serve();
     renderWithDaemon(<Harness onCreated={() => undefined} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Choose Folder…' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose Folder' }));
     await waitFor(() => {
       expect(asked).toHaveLength(1);
     });
     expect(served.inspected).toEqual([]);
-    expect(screen.getByRole('button', { name: 'Choose Folder…' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Choose Folder' })).toBeTruthy();
   });
 
   it('a subfolder shows the repository root and says it is the top folder', async () => {
     panel('/Users/me/widgets/packages/ui');
     serve();
     renderWithDaemon(<Harness onCreated={() => undefined} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Choose Folder…' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Choose Folder' }));
     await screen.findByRole('textbox', { name: 'Name' });
     expect(screen.getByText('/Users/me/widgets')).toBeTruthy();
     expect(screen.getByText("The repository's top folder.")).toBeTruthy();
@@ -527,7 +527,9 @@ describe('useProjectSetup', () => {
       const base = field('Base branch');
       expect(base.value).toBe('develop');
       fireEvent.click(base);
-      const options = await screen.findAllByRole('option', HIDDEN);
+      // The branch picker's own list: each area's role select has options too.
+      const list = await screen.findByRole('listbox', HIDDEN);
+      const options = within(list).getAllByRole('option', HIDDEN);
       expect(options.map((o) => o.textContent)).toEqual(['main', 'develop', 'wip']);
     });
 
@@ -840,6 +842,45 @@ describe('the areas in the new project', () => {
       expect(catchAll(1).checked).toBe(false);
       const areas = ((await createAndRead(served)) as { areas: object[] }).areas;
       expect(areas).toEqual([{ name: 'repo', globs: [...WHOLE_REPOSITORY_GLOBS] }]);
+    });
+  });
+
+  it("shows the role and route the proposal gave each area, and creates the project with the builder's", async () => {
+    const roled: AreaProposalResult = {
+      ok: true,
+      proposal: {
+        namedBy: 'structure',
+        areas: [
+          {
+            name: 'people',
+            globs: ['app/people/**'],
+            reason: 'A screen.',
+            role: 'page',
+            route: '/people',
+          },
+          { name: 'lib', globs: ['lib/**'], reason: 'Shared code.', role: 'shared' },
+          { name: 'root', globs: ['*', '.*'], reason: 'Files at the top.' },
+        ],
+      },
+    };
+    const served = serve({ proposal: roled });
+    await openInspected();
+    const role = (n: number): HTMLSelectElement => {
+      const el = screen.getByRole('combobox', { name: `Area ${String(n)} role` });
+      if (!(el instanceof HTMLSelectElement)) throw new Error('not a select');
+      return el;
+    };
+    expect([1, 2, 3].map((n) => role(n).value)).toEqual(['page', 'shared', '']);
+    fireEvent.change(screen.getByRole('textbox', { name: 'Area 1 route' }), {
+      target: { value: '/team' },
+    });
+    fireEvent.change(role(3), { target: { value: 'shared' } });
+    expect(await createAndRead(served)).toMatchObject({
+      areas: [
+        { name: 'people', role: 'page', route: '/team' },
+        { name: 'lib', role: 'shared' },
+        { name: 'root', role: 'shared' },
+      ],
     });
   });
 

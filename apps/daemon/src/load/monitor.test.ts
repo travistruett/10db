@@ -1,11 +1,14 @@
-import { InboxState, WorkstreamState } from '@10db/contracts';
+import { InboxState, mintId, WorkstreamState } from '@10db/contracts';
 import {
   createTestStore,
+  insertPass,
+  insertTask,
   listInbox,
   markSessionStarted,
   insertSession,
   patchWorkstream,
   seedProject,
+  setPassCheckPid,
   transitionWorkstream,
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -152,6 +155,39 @@ describe('the overload card', () => {
     load = 20 * CORES;
     await sampleFor(5 * MINUTE);
     expect(openCards()[0]?.body).toContain('the gate for task "Gated"');
+  });
+
+  it("names a pass's turn check by the process group recorded for it", async () => {
+    runningLane('Fix login', 900);
+    const project = seedProject(base, {
+      delivery: 'local',
+      areas: [{ name: 'settings', globs: ['src/settings/**'], role: 'page', route: '/settings' }],
+    });
+    state.write((ctx) => {
+      const task = insertTask(ctx, project.id, {
+        title: 'Settings',
+        acceptanceCriteria: ['x'],
+        areas: ['settings'],
+      });
+      const { pass } = insertPass(ctx, {
+        id: mintId('Pass'),
+        projectId: project.id,
+        name: 'Polish',
+        pageCap: 4,
+        returnBranch: 'main',
+        startSha: 'a'.repeat(40),
+        branch: '10db/polish-abc123',
+        baseBranch: 'main',
+        repo: null,
+        taskIds: [task.id],
+        dirt: [],
+      });
+      setPassCheckPid(ctx, pass.id, { pid: 4000, start: 'x' });
+    });
+    rows = [{ pid: 4002, ppid: 1, pgid: 4000, cpu: 95, command: 'tsc --noEmit' }];
+    load = 20 * CORES;
+    await sampleFor(5 * MINUTE);
+    expect(openCards()[0]?.body).toContain('the UI Workbench check of pass "Polish"');
   });
 
   it('says a process that is not 10db’s is not', async () => {

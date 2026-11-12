@@ -82,6 +82,7 @@ export function cardSummary(
     task.areas.length > 0 ? `Areas: ${task.areas.join(', ')}.` : null,
     criteria > 0 ? `${String(criteria)} ${criteria === 1 ? 'criterion' : 'criteria'}.` : null,
     placement ? `Runs in ${placement}.` : null,
+    batch?.passId != null ? 'A page of a UI Workbench pass.' : null,
     sharedWith > 1
       ? `Shares its branch with ${String(sharedWith - 1)} other ${sharedWith === 2 ? 'task' : 'tasks'}.`
       : null,
@@ -134,6 +135,14 @@ function indicatorsOf(
           label: shortGoalTitle(goalTitle),
           color: 'gray',
           tooltip: goalTitle,
+        }
+      : null,
+    batch?.passId != null
+      ? {
+          kind: 'workbench',
+          label: 'UI Workbench',
+          color: 'gray',
+          tooltip: 'A page of a UI Workbench pass, worked on in the UI Workbench',
         }
       : null,
     sharedWith > 1
@@ -192,6 +201,8 @@ export function TaskCard({
       withBorder
       radius="md"
       p="sm"
+      shadow="xs"
+      bg="var(--tendb-color-card)"
       data-testid="task-card"
       {...(colored ? { 'data-state-color': state.color } : {})}
       style={
@@ -200,7 +211,8 @@ export function TaskCard({
               borderColor: `var(--mantine-color-${state.color}-filled)`,
               borderWidth: waiting ? 2 : 1,
             }
-          : { borderWidth: 1 }
+          : // A queued card's border is its own fill: the tone lifts it off the column, not a line.
+            { borderColor: 'var(--tendb-color-card)', borderWidth: 1 }
       }
     >
       <Stack gap="xs">

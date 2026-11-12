@@ -24,6 +24,26 @@ A local macOS control plane that runs Claude Code sessions as a software factory
 ## Rules
 
 - Code style: `.claude/rules/code-style.md`. Testing: `.claude/rules/testing.md`. Both bind Codex too.
+- **Provider parity.** Every feature works on every kind of account 10db supports: a Claude plan,
+  Claude through Bedrock or an API key, and a ChatGPT/Codex plan. A project's account is the
+  builder's billing line, so 10db never asks the builder to move a project to another provider to
+  use a feature. Where a provider can't do something yet, the feature still runs there and says what
+  it lacks, and a follow-up task closes the gap. Specs and plans state how each feature behaves per
+  provider; plan review checks it.
+- **Trust the developer, contain the agent.** 10db is a developer tool for people building their own
+  projects. The kernel sandbox is the security, and inside it agents work freely
+  (`docs/architecture/decisions/2026-11-12-10db-trusts-the-developer-and-contains-the-agent.md`):
+  - Hard limits are about consequences: destroying data, sending data out, reading secrets, and
+    writing to anything live. Everything else runs.
+  - A judge decides what touches a limit (Claude's auto mode, Codex's Auto-review, or 10db's judge),
+    not a rulebook. Rules stay only for the sandbox's integrity and for coordinating 10db's own
+    writers.
+  - A task that stops to wait on the builder is a bug. Unattended work skips what crosses a limit,
+    finishes the rest, and leaves one Inbox item.
+  - The builder's setup comes along by default: skills, plugins, MCP servers, the project's
+    instructions and the web. The builder turns things off, not on.
+  - When in doubt, do what Claude Code does. A restriction Claude Code doesn't have needs a reason
+    tied to a hard limit or to 10db's own coordination. Specs say which; plan review checks it.
 - Import workspace packages by name through their entry point only. Packages never import apps.
 - Pin every dependency exactly, latest stable when added. A held-back pin gets a decision saying
   why.

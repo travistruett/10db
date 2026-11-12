@@ -7,6 +7,8 @@ import {
   type GoalListDto,
   type GoalSummaryDto,
   type HumanTouchDayDto,
+  type PassViewDto,
+  type ProjectViewDto,
   type TaskDto,
   type WorkstreamDto,
 } from '@10db/contracts';
@@ -25,6 +27,13 @@ import {
   goalSummaryDto,
   ungroupedDto,
 } from '../../test/goal-fixtures';
+import {
+  goalPassPagesDto,
+  pagesByStatus,
+  passHandlers,
+  passViewDto,
+} from '../../test/pass-fixtures';
+import { passKeys } from '../../daemon/pass-queries';
 import { failureLine } from '../board/task-state';
 
 function serve(...overrides: (RequestHandler | WebSocketHandler)[]): void {
@@ -94,17 +103,17 @@ describe('FactoryView goal list', () => {
 
     expect(
       await screen.findByText(
-        'Goals are outcomes 10db pursues across many tasks. Plan Work… to start one, or ask Claude Code to with the 10db-task skill.',
+        'Goals are outcomes 10db pursues across many tasks. Plan Work to start one, or ask Claude Code to with the 10db-task skill.',
       ),
     ).toBeTruthy();
     expect(screen.queryByRole('button', { name: /Not in a goal/ })).toBeNull();
   });
 
-  it('has Plan Work… as its primary, which opens a new conversation, and no Adopt a Plan…', async () => {
+  it('has Plan Work as its primary, which opens a new conversation, and no Adopt a Plan…', async () => {
     serve(goals(goalListDto()));
     const { router } = renderApp('/factory');
 
-    const shape = await screen.findByRole('link', { name: 'Plan Work…' });
+    const shape = await screen.findByRole('link', { name: 'Plan Work' });
     expect(screen.queryByText('Adopt a Plan…')).toBeNull();
     fireEvent.click(shape);
     await waitFor(() => {
@@ -307,7 +316,7 @@ describe('FactoryView goal list', () => {
     expect(screen.queryAllByRole('region')).toEqual([]);
     // Done goals sit behind one collapsed line and show once it opens.
     expect(screen.queryByRole('button', { name: /^Finished/ })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Done (1)' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Done/ }));
     expect(rowOf('Finished').getAttribute('aria-expanded')).toBe('false');
   });
 
@@ -663,7 +672,7 @@ describe('FactoryView goal detail', () => {
     expect(within(region).getByText('Bad rows are reported')).toBeTruthy();
   });
 
-  it('opens the batch sheet for the goal from Start Ready Tasks…', async () => {
+  it('opens the batch sheet for the goal from Start Ready Tasks', async () => {
     const { a, wsA } = fixtures();
     const ready = taskDto({ goalId: a.id, boardStatus: 'ready' });
     const summaryA = goalSummaryDto({ ...a, taskIds: [wsA.taskId, ready.id] }, { status: 'idle' });
@@ -685,7 +694,7 @@ describe('FactoryView goal detail', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /^Real areas/ }));
     const region = await screen.findByRole('region', { name: 'Real areas' });
-    const start = await within(region).findByRole('button', { name: 'Start Ready Tasks…' });
+    const start = await within(region).findByRole('button', { name: 'Start Ready Tasks' });
     await waitFor(() => {
       expect(start.hasAttribute('disabled')).toBe(false);
     });
@@ -696,7 +705,7 @@ describe('FactoryView goal detail', () => {
     });
   });
 
-  it('counts a ready task whose run was cancelled as ready, and enables Start Ready Tasks…', async () => {
+  it('counts a ready task whose run was cancelled as ready, and enables Start Ready Tasks', async () => {
     const { a } = fixtures();
     const task = taskDto({ goalId: a.id, title: 'Tried once', boardStatus: 'ready' });
     const cancelled = workstreamDto({
@@ -718,20 +727,20 @@ describe('FactoryView goal detail', () => {
     const row = (await within(region).findByText('Tried once')).closest('[role="listitem"]');
     if (!(row instanceof HTMLElement)) throw new Error('Tried once is not in a list row');
     expect(within(row).getByText(/^Ready/)).toBeTruthy();
-    const start = await within(region).findByRole('button', { name: 'Start Ready Tasks…' });
+    const start = await within(region).findByRole('button', { name: 'Start Ready Tasks' });
     await waitFor(() => {
       expect(start.hasAttribute('disabled')).toBe(false);
     });
   });
 
-  it('disables Start Ready Tasks… when no task of the goal is ready', async () => {
+  it('disables Start Ready Tasks when no task of the goal is ready', async () => {
     const { summaryA, wsA } = fixtures();
     serve(goals(goalListDto(summaryA)), workstreams(wsA), digests([], summaryA.digest));
     renderApp('/factory');
 
     fireEvent.click(await screen.findByRole('button', { name: /^Real areas/ }));
     const region = await screen.findByRole('region', { name: 'Real areas' });
-    const start = await within(region).findByRole('button', { name: 'Start Ready Tasks…' });
+    const start = await within(region).findByRole('button', { name: 'Start Ready Tasks' });
     expect(start.hasAttribute('disabled')).toBe(true);
   });
 
@@ -1639,5 +1648,148 @@ describe('FactoryView human-touch panel', () => {
     renderApp('/factory');
 
     expect(await screen.findByText("Couldn't load how often a person was needed")).toBeTruthy();
+  });
+});
+
+describe('FactoryView ways into the UI Workbench', () => {
+  it("names a project's live pass and what waits in it, and opens the UI Workbench in that project", async () => {
+    const alpha = projectViewDto({ name: 'alpha' });
+    const beta = projectViewDto({ name: 'beta' });
+    const { ready, failed, working } = pagesByStatus();
+    const live = passViewDto({ pass: { projectId: beta.id }, pages: [ready, failed, working] });
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([alpha, beta])),
+      http.get(daemonUrl('/passes'), () => HttpResponse.json([live])),
+      goals(goalListDto()),
+    );
+    const { router } = renderApp('/factory');
+    const betaGroup = await screen.findByRole('group', { name: 'beta' });
+    const line = await within(betaGroup).findByRole('button', {
+      name: 'Settings pass · 2 waiting',
+    });
+    // A project with no pass has no line.
+    const alphaGroup = screen.getByRole('group', { name: 'alpha' });
+    expect(within(alphaGroup).queryByRole('button', { name: /pass/ })).toBeNull();
+    fireEvent.click(line);
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/workbench');
+    });
+    expect(
+      await screen.findByRole('button', { name: 'Project: beta. Switch project' }),
+    ).toBeTruthy();
+  });
+
+  /** A goal whose one UI task is done, whose commits name a page; `live` is what GET /passes answers. */
+  function goalReadyForAPass(live: (project: ProjectViewDto) => PassViewDto[] = () => []) {
+    const project = projectViewDto({
+      areas: [{ name: 'settings', globs: ['src/settings/**'], role: 'page', route: '/settings' }],
+    });
+    const summary = goal('Settings polish', 'running');
+    const done = taskDto({
+      projectId: project.id,
+      goalId: summary.goal.id,
+      areas: ['settings'],
+      boardStatus: 'done',
+      status: 'done',
+    });
+    const linked = { ...summary, goal: { ...summary.goal, taskIds: [done.id] } };
+    const asked: string[] = [];
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([project])),
+      goals(goalListDto(linked)),
+      tasksOf(done),
+      digests([], linked.digest),
+      http.get(daemonUrl('/goals/:goalId/pass-pages'), ({ params }) => {
+        asked.push(String(params['goalId']));
+        return HttpResponse.json(goalPassPagesDto({ pages: ['settings'], fromTasks: [done.id] }));
+      }),
+      ...passHandlers({ live: live(project) }),
+    );
+    return { linked, asked, ...renderApp('/factory') };
+  }
+
+  it('offers Work on This on a goal whose UI work is nearly done, opening the UI Workbench on the goal', async () => {
+    const { router, linked, asked } = goalReadyForAPass();
+    fireEvent.click(await screen.findByRole('button', { name: /^Settings polish/ }));
+    const region = await screen.findByRole('region', { name: 'Settings polish' });
+    fireEvent.click(await within(region).findByRole('link', { name: 'Work on This' }));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/workbench');
+    });
+    expect(router.state.location.search).toEqual({ goal: linked.goal.id });
+    // The Workbench reads the goal's pages again as it opens; only this goal's are asked for.
+    expect(new Set(asked)).toEqual(new Set([linked.goal.id]));
+  });
+
+  it("offers no Work on This while the project's pass holds pages, and reads no goal pages", async () => {
+    const { queryClient, asked } = goalReadyForAPass((project) => [
+      passViewDto({ pass: { projectId: project.id }, pages: [pagesByStatus().working] }),
+    ]);
+    fireEvent.click(await screen.findByRole('button', { name: /^Settings polish/ }));
+    const region = await screen.findByRole('region', { name: 'Settings polish' });
+    await within(region).findByRole('button', { name: 'Start Ready Tasks' });
+    await waitFor(() => {
+      expect(queryClient.getQueryState(passKeys.live)?.status).toBe('success');
+    });
+    expect(within(region).queryByRole('link', { name: 'Work on This' })).toBeNull();
+    expect(asked).toEqual([]);
+  });
+});
+
+describe('FactoryView across projects', () => {
+  const alpha = projectViewDto({ name: 'alpha' });
+  const beta = projectViewDto({ name: 'beta' });
+
+  /** Two projects, each answering GET /goals with one goal of its own. */
+  function twoProjects(): void {
+    serve(
+      http.get(daemonUrl('/projects'), () => HttpResponse.json([alpha, beta])),
+      http.get(daemonUrl('/projects/:projectId/goals'), ({ params }) =>
+        HttpResponse.json(
+          goalListDto(
+            goal(params['projectId'] === beta.id ? 'Beta goal' : 'Alpha goal', 'running'),
+          ),
+        ),
+      ),
+    );
+  }
+
+  it('lists every project’s goals under its name, whichever project is selected', async () => {
+    twoProjects();
+    renderApp('/factory');
+    const alphaGroup = await screen.findByRole('group', { name: 'alpha' });
+    const betaGroup = await screen.findByRole('group', { name: 'beta' });
+    expect(await within(alphaGroup).findByRole('button', { name: /^Alpha goal/ })).toBeTruthy();
+    expect(await within(betaGroup).findByRole('button', { name: /^Beta goal/ })).toBeTruthy();
+    // Human touch is one project's; with every project shown it says to choose one.
+    expect(
+      screen.getByText('Choose a project to see how often a person was needed in it.'),
+    ).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: 'Human touch' })).toBeNull();
+  });
+
+  it('narrows to one project by its own filter, which shows what it is set to', async () => {
+    twoProjects();
+    renderApp(`/factory?project=${beta.id}`);
+    expect(await screen.findByRole('group', { name: 'beta' })).toBeTruthy();
+    expect(screen.queryByRole('group', { name: 'alpha' })).toBeNull();
+    expect(screen.getByRole('combobox', { name: 'Project' })).toBe(
+      screen.getByDisplayValue('beta'),
+    );
+    expect(await screen.findByRole('heading', { name: 'Human touch' })).toBeTruthy();
+  });
+
+  it('makes a project the selected one when the builder acts in its group, so Plan Work plans there', async () => {
+    twoProjects();
+    const { router } = renderApp('/factory');
+    await screen.findByRole('button', { name: 'Project: alpha. Switch project' });
+    const betaGroup = await screen.findByRole('group', { name: 'beta' });
+    fireEvent.click(within(betaGroup).getByRole('link', { name: 'Plan Work' }));
+    await waitFor(() => {
+      expect(router.state.location.pathname).toBe('/shape');
+    });
+    expect(
+      await screen.findByRole('button', { name: 'Project: beta. Switch project' }),
+    ).toBeTruthy();
   });
 });

@@ -13,6 +13,7 @@ import {
 } from '@mantine/core';
 import { useState } from 'react';
 import { usePatchProject } from '../../daemon/queries';
+import { AreaRoleFields, roleFields, type RoleChoice } from './area-role-fields';
 import { HazardAdditions } from './hazard-additions';
 import { describePathPattern } from './path-pattern';
 
@@ -23,6 +24,9 @@ interface PathsDraft {
 interface AreaDraft extends PathsDraft {
   /** The project's catch-all: a file no other area holds falls in it. At most one area. */
   readonly catchAll: boolean;
+  readonly role: RoleChoice;
+  /** A page's route; kept while the role changes, sent only for a page. */
+  readonly route: string;
 }
 interface HazardDraft extends PathsDraft {
   readonly perCopy: boolean;
@@ -40,6 +44,8 @@ const areaDrafts = (project: ProjectDto): AreaDraft[] =>
     name: a.name,
     paths: a.globs.join('\n'),
     catchAll: a.catchAll === true,
+    role: a.role ?? '',
+    route: a.route ?? '',
   }));
 const hazardDrafts = (project: ProjectDto): HazardDraft[] =>
   project.hazards.map((h) => ({
@@ -59,6 +65,7 @@ function toPatch(
       name: a.name.trim(),
       globs: lines(a.paths),
       ...(a.catchAll ? { catchAll: true } : {}),
+      ...roleFields(a.role, a.route),
     })),
     hazards: hazards.map((h) => ({
       name: h.name.trim(),
@@ -72,7 +79,7 @@ function toPatch(
   const [list, index, field] = issue?.path ?? [];
   const where =
     typeof index === 'number' && (list === 'areas' || list === 'hazards')
-      ? `${list === 'areas' ? 'Area' : 'Hazard'} ${String(index + 1)}${field === 'globs' ? ' paths' : field === 'name' ? ' name' : ''}`
+      ? `${list === 'areas' ? 'Area' : 'Hazard'} ${String(index + 1)}${field === 'globs' ? ' paths' : field === 'name' ? ' name' : field === 'route' ? ' route' : ''}`
       : 'Areas and hazards';
   return { error: `${where}: ${issue?.message ?? 'is not valid'}` };
 }
@@ -203,6 +210,14 @@ export function ProjectAreas({ project }: { readonly project: ProjectDto }) {
                 setCatchAll(index, e.currentTarget.checked);
               }}
             />
+            <AreaRoleFields
+              index={index + 1}
+              role={area.role}
+              route={area.route}
+              onChange={(next) => {
+                setArea(index, next);
+              }}
+            />
             <PathExamples paths={area.paths} />
           </Stack>
         ))}
@@ -210,7 +225,10 @@ export function ProjectAreas({ project }: { readonly project: ProjectDto }) {
           <Button
             variant="light"
             onClick={() => {
-              setAreas((all) => [...all, { name: '', paths: '', catchAll: false }]);
+              setAreas((all) => [
+                ...all,
+                { name: '', paths: '', catchAll: false, role: '', route: '' },
+              ]);
             }}
           >
             Add area

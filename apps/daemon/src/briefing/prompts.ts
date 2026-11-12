@@ -70,6 +70,21 @@ export interface PromptInput {
   readonly renumbered?: string | null;
   /** What the batch's notice says of migrations a merge of its base lost, while any are missing. */
   readonly uncarried?: string | null;
+  /**
+   * The session works on one page of a Workbench pass: a turn ends at the change on screen, and the
+   * builder writes again, so the step's rules for ending, committing and the gate do not apply.
+   */
+  readonly inPass?: boolean;
+  /**
+   * 10db takes pictures of the task's pages for the builder (Workbench spec §10): a pass page, or a
+   * task in Your folder naming a routed page, on a project with an app address.
+   */
+  readonly pictures?: boolean;
+  /**
+   * For a `feedback` action: the builder's message as the session reads it, and the thread's digest a
+   * session with no conversation to resume starts from (null for one that resumes it).
+   */
+  readonly feedback?: { readonly message: string; readonly digest: string | null };
 }
 
 /** An Inbox card the builder answered, as a reviewer is shown it. */
@@ -284,6 +299,29 @@ const RULES = [
   HAND_OFF_RULE,
 ];
 
+/**
+ * A pass lane's rules (Workbench spec §6.2). Its turns run in the builder's own folder while the
+ * builder's dev server shows each change: 10db keeps the page's work when a turn ends, and the
+ * builder answers each turn with another message, so nothing here ends a step.
+ */
+const PASS_RULES = [
+  'Work inside your page: edit only files inside your claims. Shared code needs the request_claim tool first. When another task holds the claim, the call waits until it frees; if it answers waiting: true, call it again with the same opId. Do not edit those files without it.',
+  "Never run git commit, add, checkout, reset, stash or push, and never switch the folder's branch: 10db keeps your page's work when your turn ends.",
+  'To add or change a dependency, edit the package.json with an exact version (no ^, ~ or range), then call install_dependencies: 10db resolves it, writes pnpm-lock.yaml and installs. Never run pnpm add or pnpm install yourself.',
+  'When a decision is not yours to make, ask with ask_human (or your question tool). Record routine engineering decisions with record_decision.',
+  PLAIN_COMMANDS,
+  'Run each command in the foreground and wait for its result: a command moved to the background will not wake you. One still running when you end your turn goes on until the session ends.',
+  EDIT_RULE,
+  "Do not run the gate, and do not start, stop or restart a dev server: the builder's own dev server shows each change as you write it. Run a check of your own only for what you changed.",
+  'Stop when the change is on screen: end your turn and say in two lines what you changed. The builder looks at the page and writes to you again.',
+  "The builder's messages each carry an id, and 10db may send one again: the same id is the same message, so act on it once.",
+  HAND_OFF_RULE,
+];
+
+/** Told to a session whose pages 10db pictures for the builder (Workbench spec §10 "Which pages"). */
+const PICTURES_RULE =
+  "10db takes pictures of your task's pages for the builder, by their routes. When a page you changed has no route of its own here (a route with a parameter, or a change only in shared code), name it with report_pages: a page area's route with its parameter filled in, such as /people/42 for /people/[id]. Any other path is refused; at most four routes a turn.";
+
 function readOnlyRules(role: StepRole): string[] {
   return [
     'This step is read-only: 10db refuses file edits, commits and any shell command that writes. Report what should change; the implement step changes it.',
@@ -405,6 +443,7 @@ export function briefedFromHandoff(
     case 'continue_from_handoff':
       return true;
     case 'answer':
+    case 'feedback':
       return action.providerSessionId === null;
     case 'fix':
       return evidence !== null && handoff.createdAt > evidence.createdAt;
@@ -415,6 +454,7 @@ export function briefedFromHandoff(
     case 'verify':
     case 'revise':
     case 'builder_review':
+    case 'pass_review':
       return false;
   }
 }
@@ -482,6 +522,19 @@ function actionSection(input: PromptInput): string {
         answer,
       ].join('\n\n');
     }
+    case 'feedback': {
+      const message = input.feedback?.message ?? "The builder wrote in the task's thread.";
+      if (input.action.providerSessionId !== null) return message;
+      // No conversation to resume: a fresh session starts from the handoff, then the thread's digest,
+      // then the builder's message (Workbench spec §6.3).
+      const brief =
+        input.handoff && briefedFromHandoff(input.action, input.handoff, input.evidence)
+          ? fromHandoff(input.handoff)
+          : 'The previous session left no handoff, so inspect git status first.';
+      return [brief, ...(input.feedback?.digest ? [input.feedback.digest] : []), message].join(
+        '\n\n',
+      );
+    }
     case 'fix': {
       const gate = input.evidence
         ? gateFailure(input.evidence, input.step.tools)
@@ -499,6 +552,8 @@ function actionSection(input: PromptInput): string {
       return 'Verify the work against the acceptance criteria, commit anything outstanding, and end your turn.';
     case 'builder_review':
       return 'The builder is checking the work; there is nothing to do until they answer.';
+    case 'pass_review':
+      return 'The builder is looking at the page; there is nothing to do until they write.';
     case 'revise': {
       const by = input.revisedBy
         ? `The ${input.revisedBy.role} step (${input.revisedBy.personaName})`
@@ -592,7 +647,12 @@ export function buildSessionPrompt(input: PromptInput): string {
     'Rules:',
     bullets(
       withSandboxRules(
-        input.step.tools === ToolAccess.ReadOnly ? readOnlyRules(input.step.role) : RULES,
+        input.step.tools === ToolAccess.ReadOnly
+          ? readOnlyRules(input.step.role)
+          : [
+              ...(input.inPass === true ? PASS_RULES : RULES),
+              ...(input.pictures === true ? [PICTURES_RULE] : []),
+            ],
         input.sandboxed === true,
         input.provider,
       ),
@@ -631,5 +691,40 @@ export function compactionReinjection(
     ...(pack.handoff ? ['', 'Latest handoff:', renderHandoff(pack.handoff)] : []),
     ...(denials.length > 0 ? ['', ...renderDenials(denials)] : []),
     ...(answered ? renderAnsweredCards(answered.role, answered.answeredCards) : []),
+  ].join('\n');
+}
+
+/**
+ * The one review of a Workbench pass's pull request (spec §8.3, D21): the diff as text, read once
+ * with no tool. Its findings come back as numbered notes, the format `parseFindings` reads, so each
+ * can be matched to the page whose file it names.
+ */
+export function passReviewPrompt(input: {
+  readonly passName: string;
+  /** The pages signed off, by title. */
+  readonly pages: readonly string[];
+  readonly diff: string;
+  /** True when the diff was longer than 10db sends and was cut. */
+  readonly truncated: boolean;
+  /** True when the diff starts after the tip an earlier review read: only what changed since. */
+  readonly sinceLastReview: boolean;
+}): string {
+  return [
+    `You are reviewing the pull request of a Workbench pass, "${input.passName}": pages the builder worked through with agents and signed off by eye.`,
+    `Pages: ${input.pages.length > 0 ? input.pages.join('; ') : '(none named)'}.`,
+    input.sinceLastReview
+      ? 'This diff is only what changed since the last review of this pull request.'
+      : 'This diff is the whole pull request.',
+    ...(input.truncated
+      ? [
+          'The diff was too long and is cut: review what is here, and say that the rest was not read.',
+        ]
+      : []),
+    '',
+    'List each real problem as a numbered note, one per line: `1. <SEVERITY> <path>:<line> <what is wrong and why>`, SEVERITY one of BLOCKING, MAJOR, MINOR. Name the file exactly as the diff does. Write nothing but the notes; with no problem, answer `No findings.`',
+    '',
+    '```diff',
+    input.diff,
+    '```',
   ].join('\n');
 }

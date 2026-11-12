@@ -1,4 +1,10 @@
-import { GoalStatus, type GoalId, type GoalListDto, type GoalSummaryDto } from '@10db/contracts';
+import {
+  GoalStatus,
+  type GoalId,
+  type GoalListDto,
+  type GoalSummaryDto,
+  type ProjectViewDto,
+} from '@10db/contracts';
 import { Box } from '@mantine/core';
 import { useEffect, useRef, useState } from 'react';
 import { useOpenGoal } from '../../daemon/goal-queries';
@@ -26,9 +32,11 @@ function newsOf(summary: GoalSummaryDto, now: number): string | undefined {
  * behind one collapsed line. Every row starts collapsed and one is open at a time.
  */
 export function GoalList({
+  project,
   list,
   linkedGoalId,
 }: {
+  readonly project: ProjectViewDto;
   readonly list: GoalListDto;
   /** A link's goal (the Board's "Open in Factory"): its row starts open, with the Done group open if it is in it. */
   readonly linkedGoalId?: GoalId | undefined;
@@ -77,6 +85,7 @@ export function GoalList({
         }}
       >
         <GoalDetail
+          project={project}
           summary={summary}
           opened={{
             data: open.data?.goalId === id ? open.data : undefined,
@@ -105,13 +114,16 @@ export function GoalList({
             setOpenKey(openKey === UNGROUPED ? null : UNGROUPED);
           }}
         >
-          <UngroupedDetail workstreamIds={ungrouped.workstreams.map((w) => w.workstreamId)} />
+          <UngroupedDetail
+            project={project}
+            workstreamIds={ungrouped.workstreams.map((w) => w.workstreamId)}
+          />
         </GoalRow>
       ) : null}
       {done.length > 0 ? (
         <GoalRow
-          title={`Done (${String(done.length)})`}
-          line=""
+          title="Done"
+          line={done.length === 1 ? '1 goal' : `${String(done.length)} goals`}
           expanded={doneShown}
           onToggle={() => {
             setDoneShown(!doneShown);

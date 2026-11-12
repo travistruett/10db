@@ -38,7 +38,7 @@ type Open = (typeof Open)[keyof typeof Open];
 /**
  * The row's “⋯” menu; the record's own words name it, since a list holds many. It leaves the page the
  * moment it closes: a menu that fades out stays mounted for a moment, and the next one opens beside it,
- * so two Remove… items can be in the page at once.
+ * so two Remove items can be in the page at once.
  */
 function RowMenu({ label, children }: { readonly label: string; readonly children: ReactNode }) {
   return (
@@ -133,7 +133,7 @@ export function NewPrincipleButton({ project }: { readonly project: ProjectViewD
 }
 
 /**
- * A decision row's menu. Edit writes a successor and moves this one to Past; Remove… is offered on
+ * A decision row's menu. Edit writes a successor and moves this one to Past; Remove is offered on
  * an older version too, where its dialog says which record to remove instead.
  */
 export function DecisionActions({
@@ -160,7 +160,7 @@ export function DecisionActions({
               setOpen(Open.Edit);
             }}
           >
-            Edit…
+            Edit
           </Menu.Item>
         ) : null}
         <Menu.Item
@@ -169,7 +169,7 @@ export function DecisionActions({
             setOpen(Open.Remove);
           }}
         >
-          Remove…
+          Remove
         </Menu.Item>
       </RowMenu>
       {open === Open.Edit ? (
@@ -212,7 +212,7 @@ export function DecisionActions({
   );
 }
 
-/** A principle row's menu: Edit… (a successor that keeps the key) and Remove…, which asks why. */
+/** A principle row's menu: Edit (a successor that keeps the key) and Remove, which asks why. */
 export function PrincipleActions({
   project,
   principle,
@@ -238,7 +238,7 @@ export function PrincipleActions({
                 setOpen(Open.Edit);
               }}
             >
-              Edit…
+              Edit
             </Menu.Item>
           </>
         ) : null}
@@ -248,7 +248,7 @@ export function PrincipleActions({
             setOpen(Open.Remove);
           }}
         >
-          Remove…
+          Remove
         </Menu.Item>
       </RowMenu>
       {open === Open.Edit ? (
@@ -292,7 +292,7 @@ export function PrincipleActions({
 }
 
 /**
- * Accept… and Reject… on a pending principle proposal; either closes its Inbox card. Any other
+ * Accept and Reject on a pending principle proposal; either closes its Inbox card. Any other
  * proposal is answered in the Inbox.
  */
 export function ProposalActions({
@@ -321,7 +321,7 @@ export function ProposalActions({
           setOpen(Open.Accept);
         }}
       >
-        Accept…
+        Accept
       </Button>
       <Button
         size="xs"
@@ -330,7 +330,7 @@ export function ProposalActions({
           setOpen(Open.Reject);
         }}
       >
-        Reject…
+        Reject
       </Button>
       {open === Open.Accept ? (
         <PrincipleDialog

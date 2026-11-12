@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "opId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._:-]{8,100}$",
+      "description": "A unique ID for this call. Reuse it only when retrying the same call."
+    },
+    "routes": {
+      "minItems": 1,
+      "maxItems": 4,
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512
+      },
+      "description": "Paths on the app, such as /people/42 or /people?tab=all: each loaded for this turn's pictures."
+    }
+  },
+  "required": [
+    "opId",
+    "routes"
+  ]
+}

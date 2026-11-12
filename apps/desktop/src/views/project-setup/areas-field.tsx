@@ -20,8 +20,10 @@ import {
   setCatchAll,
   setGlobs,
   setName,
+  setRole,
   type AreaDraft,
 } from './area-drafts';
+import { AreaRoleFields } from '../settings/area-role-fields';
 import { MONO_INPUT } from './folder-field';
 
 export interface AreasFieldProps {
@@ -153,6 +155,14 @@ export function AreasField({ drafts, note, onChange }: AreasFieldProps) {
                 checked={draft.catchAll}
                 onChange={(e) => {
                   onChange(setCatchAll(drafts, draft.key, e.currentTarget.checked));
+                }}
+              />
+              <AreaRoleFields
+                index={index + 1}
+                role={draft.role}
+                route={draft.route}
+                onChange={(next) => {
+                  onChange(setRole(drafts, draft.key, next));
                 }}
               />
               {draft.reason === '' ? null : (
