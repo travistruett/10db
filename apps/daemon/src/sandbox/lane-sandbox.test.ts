@@ -1132,7 +1132,14 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       return {
         skills: [{ name: 's', path: skill, skillFile: join(skill, 'SKILL.md') }],
         plugins: [{ id: 'p@m', path: plugin }],
-        projectFiles: [{ relative: 'commands/c.md', content: Buffer.from('c'), mode: 0o600 }],
+        projectFiles: [
+          {
+            relative: 'commands/c.md',
+            source: '.claude/commands/c.md',
+            content: Buffer.from('c'),
+            mode: 0o600,
+          },
+        ],
       };
     }
 
@@ -1157,6 +1164,29 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
         );
         expect(allowWrite.some((path) => isEqualOrUnder(path, home))).toBe(false);
         expect(session.setup.loaded).toEqual({ skills: ['s'], plugins: ['p@m'] });
+      } finally {
+        session.dispose();
+      }
+    });
+
+    it('leaves out a project copy whose checkout file a .env link leads to', async () => {
+      const key = writeIn(checkout, '.claude/skills/p/key.txt', 'KEY');
+      symlinkSync(key, join(checkout, '.env'));
+      const copy = (name: string) => ({
+        relative: `skills/p/${name}`,
+        source: `.claude/skills/p/${name}`,
+        content: Buffer.from('x'),
+        mode: 0o600,
+      });
+      const setup = { skills: [], plugins: [], projectFiles: [copy('SKILL.md'), copy('key.txt')] };
+      const session = await sandbox().forSession(input({ setup }));
+      try {
+        const project = session.setup.pluginDirs[0] ?? '';
+        expect(existsSync(join(project, 'skills/p/SKILL.md'))).toBe(true);
+        expect(existsSync(join(project, 'skills/p/key.txt'))).toBe(false);
+        expect(session.setup.leftOut).toEqual([
+          { what: '.claude/skills/p/key.txt', why: 'a secrets file is never copied' },
+        ]);
       } finally {
         session.dispose();
       }

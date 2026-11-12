@@ -12,7 +12,10 @@ export interface SetupInput {
   }[];
   readonly plugins: readonly { readonly id: string; readonly path: string }[];
   readonly projectFiles: readonly {
+    /** Under the `project` plugin's root. */
     readonly relative: string;
+    /** Where it was read, under the checkout. */
+    readonly source: string;
     readonly content: Buffer;
     readonly mode: number;
   }[];

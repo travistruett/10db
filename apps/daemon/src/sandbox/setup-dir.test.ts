@@ -25,6 +25,7 @@ let filesRoot: string;
 let ctx: SetupReadContext;
 
 const refuse = (real: string): string | null => setupReadRefusal(real, ctx);
+const noSecrets = (): boolean => false;
 
 beforeEach(() => {
   root = tempDir('setup-dir');
@@ -78,7 +79,7 @@ function input(overrides: Partial<SetupInput> = {}): SetupInput {
 describe('keepSetup and createSetupDir', () => {
   it('links each kept skill under yours/skills and writes the manifest', () => {
     const s = builderSkill('s');
-    const made = createSetupDir(filesRoot, input({ skills: [s] }), refuse, home);
+    const made = createSetupDir(filesRoot, input({ skills: [s] }), refuse, home, noSecrets);
     const yours = made.setup.pluginDirs[0] ?? '';
     expect(yours).toMatch(/\/10db-setup-[0-9a-f]{12}\/yours$/);
     expect(readlinkSync(join(yours, 'skills/s'))).toBe(join(home, '.claude/skills/s'));
@@ -96,7 +97,7 @@ describe('keepSetup and createSetupDir', () => {
     mkdirSync(join(home, '.ssh'));
     writeFileSync(join(home, '.ssh/SKILL.md'), 'x');
     const ssh = linkedSkill('ssh', join(home, '.ssh'));
-    const kept = keepSetup(input({ skills: [ssh] }), refuse, home);
+    const kept = keepSetup(input({ skills: [ssh] }), refuse, home, noSecrets);
     expect(kept.keptSkills).toEqual([]);
     expect(kept.leftOut).toEqual([
       {
@@ -110,9 +111,9 @@ describe('keepSetup and createSetupDir', () => {
   it('no skills kept opens no root', () => {
     builderSkill('s');
     skillAt(join(home, '.agents/skills/t'));
-    expect(keepSetup(input(), refuse, home).reads).toEqual([]);
+    expect(keepSetup(input(), refuse, home, noSecrets).reads).toEqual([]);
     const s = builderSkill('s');
-    expect(keepSetup(input({ skills: [s] }), refuse, home).reads).toEqual([
+    expect(keepSetup(input({ skills: [s] }), refuse, home, noSecrets).reads).toEqual([
       join(home, '.claude/skills'),
     ]);
   });
@@ -123,7 +124,7 @@ describe('keepSetup and createSetupDir', () => {
     mkdirSync(dir, { recursive: true });
     symlinkSync(join(checkout, 'SKILL.md'), join(dir, 'SKILL.md'));
     const s = { name: 's', path: dir, skillFile: join(checkout, 'SKILL.md') };
-    const kept = keepSetup(input({ skills: [s] }), refuse, home);
+    const kept = keepSetup(input({ skills: [s] }), refuse, home, noSecrets);
     expect(kept.keptSkills).toEqual([]);
     expect(kept.leftOut).toEqual([
       { what: '~/.claude/skills/s', why: 'it lies in, or holds, a folder a lane can write' },
@@ -143,7 +144,7 @@ describe('keepSetup and createSetupDir', () => {
       path: join(home, '.claude/skills/a'),
       skillFile: join(outside, 'b/SKILL.md'),
     };
-    const kept = keepSetup(input({ skills: [s] }), refuse, home);
+    const kept = keepSetup(input({ skills: [s] }), refuse, home, noSecrets);
     expect(kept.keptSkills).toEqual([s]);
     // ~/.claude/skills holds only the link, so it stays closed: the kernel judges the real path.
     expect(kept.reads).toEqual([a, join(outside, 'b')]);
@@ -154,6 +155,7 @@ describe('keepSetup and createSetupDir', () => {
       input({ plugins: [{ id: 'p@m', path: join(home, '.claude/plugins/cache/m/p/1') }] }),
       refuse,
       home,
+      noSecrets,
     );
     expect(kept.keptPlugins).toEqual([]);
     expect(kept.leftOut).toEqual([
@@ -170,6 +172,7 @@ describe('keepSetup and createSetupDir', () => {
       input({ skills: [s, t], plugins: [{ id: 'p@m', path: plugin }] }),
       refuse,
       home,
+      noSecrets,
     );
     expect(kept.reads).toEqual([plugin, join(home, '.claude/skills')]);
   });
@@ -179,7 +182,7 @@ describe('keepSetup and createSetupDir', () => {
     mkdirSync(join(home, '.ssh'));
     writeFileSync(join(home, '.ssh/SKILL.md'), 'x');
     const ssh = linkedSkill('ssh', join(home, '.ssh'));
-    const kept = keepSetup(input({ skills: [...skills, ssh] }), refuse, home);
+    const kept = keepSetup(input({ skills: [...skills, ssh] }), refuse, home, noSecrets);
     expect(kept.keptSkills).toHaveLength(200);
     expect(kept.reads).toEqual([join(home, '.claude/skills')]);
   });
@@ -188,7 +191,7 @@ describe('keepSetup and createSetupDir', () => {
     const s = builderSkill('s');
     const bad = builderSkill('bad');
     ctx = { ...ctx, laneWritable: [...ctx.laneWritable, join(home, '.claude/skills/bad')] };
-    const kept = keepSetup(input({ skills: [s, bad] }), refuse, home);
+    const kept = keepSetup(input({ skills: [s, bad] }), refuse, home, noSecrets);
     expect(kept.keptSkills).toEqual([s]);
     expect(kept.reads).toEqual([join(home, '.claude/skills/s')]);
   });
@@ -200,7 +203,7 @@ describe('keepSetup and createSetupDir', () => {
     mkdirSync(locked);
     chmodSync(locked, 0o000);
     unlistable.push(locked);
-    const kept = keepSetup(input({ skills: [s, t] }), refuse, home);
+    const kept = keepSetup(input({ skills: [s, t] }), refuse, home, noSecrets);
     expect(kept.keptSkills).toEqual([s]);
     expect(kept.leftOut).toEqual([
       { what: '~/.claude/skills/t', why: "a folder in it can't be listed: locked" },
@@ -215,14 +218,14 @@ describe('keepSetup and createSetupDir', () => {
     mkdirSync(dir);
     symlinkSync(join(outside, 'x/inner/SKILL.md'), join(dir, 'SKILL.md'));
     const y = { name: 'y', path: dir, skillFile: join(outside, 'x/inner/SKILL.md') };
-    const kept = keepSetup(input({ skills: [x, y] }), refuse, home);
+    const kept = keepSetup(input({ skills: [x, y] }), refuse, home, noSecrets);
     expect(kept.reads).toEqual([join(home, '.claude/skills'), join(outside, 'x')]);
   });
 
   it('lists the .env files under every read as secrets to deny', () => {
     const s = builderSkill('s');
     writeFileSync(join(home, '.claude/skills/s/.env'), 'TOKEN=x');
-    const kept = keepSetup(input({ skills: [s] }), refuse, home);
+    const kept = keepSetup(input({ skills: [s] }), refuse, home, noSecrets);
     expect(kept.secretFiles).toEqual([join(home, '.claude/skills/s/.env')]);
   });
 
@@ -233,7 +236,7 @@ describe('keepSetup and createSetupDir', () => {
     writeFileSync(join(secret, 'prod'), 'TOKEN=x');
     chmodSync(join(secret, 'locked'), 0o000);
     unlistable.push(join(secret, 'locked'));
-    const kept = keepSetup(input({ skills: [s] }), refuse, home);
+    const kept = keepSetup(input({ skills: [s] }), refuse, home, noSecrets);
     expect(kept.keptSkills).toEqual([s]);
     expect(kept.secretFiles).toEqual([secret]);
   });
@@ -250,7 +253,7 @@ describe('keepSetup and createSetupDir', () => {
     symlinkSync(pem, join(secret, 'deep', 'k'));
     // A folder link back to the .env folder: a walk that entered it would never end.
     symlinkSync(secret, join(secret, 'deep', 'loop'));
-    const kept = keepSetup(input({ skills: [s] }), refuse, home);
+    const kept = keepSetup(input({ skills: [s] }), refuse, home, noSecrets);
     expect(kept.keptSkills).toEqual([s]);
     expect(kept.secretFiles).toEqual([secret, pem, key].sort());
   });
@@ -262,15 +265,27 @@ describe('keepSetup and createSetupDir', () => {
         projectFiles: [
           {
             relative: 'skills/p/SKILL.md',
+            source: '.claude/skills/p/SKILL.md',
             content: Buffer.from('---\nname: p\n---\n'),
             mode: 0o600,
           },
-          { relative: 'skills/p/run.sh', content: Buffer.from('#!/bin/sh\n'), mode: 0o700 },
-          { relative: 'commands/c.md', content: Buffer.from('c'), mode: 0o600 },
+          {
+            relative: 'skills/p/run.sh',
+            source: '.claude/skills/p/run.sh',
+            content: Buffer.from('#!/bin/sh\n'),
+            mode: 0o700,
+          },
+          {
+            relative: 'commands/c.md',
+            source: '.claude/commands/c.md',
+            content: Buffer.from('c'),
+            mode: 0o600,
+          },
         ],
       }),
       refuse,
       home,
+      noSecrets,
     );
     const project = made.setup.pluginDirs[0] ?? '';
     expect(project).toMatch(/\/project$/);
@@ -285,6 +300,20 @@ describe('keepSetup and createSetupDir', () => {
     made.remove();
   });
 
+  it('leaves out a project file the checkout holds as a secret', () => {
+    const files = [
+      { relative: 'skills/p/SKILL.md', source: '.claude/skills/p/SKILL.md' },
+      { relative: 'skills/p/key.txt', source: '.claude/skills/p/key.txt' },
+    ].map((file) => ({ ...file, content: Buffer.from('x'), mode: 0o600 }));
+    // The checkout's `.env` is a link to the skill's key.txt, so key.txt is a checkout secret.
+    const isSecret = (source: string): boolean => source === '.claude/skills/p/key.txt';
+    const kept = keepSetup(input({ projectFiles: files }), refuse, home, isSecret);
+    expect(kept.keptProjectFiles.map((file) => file.relative)).toEqual(['skills/p/SKILL.md']);
+    expect(kept.leftOut).toEqual([
+      { what: '.claude/skills/p/key.txt', why: 'a secrets file is never copied' },
+    ]);
+  });
+
   it('wraps each kept plugin and never passes its install path', () => {
     const plugin = join(home, '.claude/plugins/cache/m/p/1');
     mkdirSync(join(plugin, '.claude-plugin'), { recursive: true });
@@ -296,6 +325,7 @@ describe('keepSetup and createSetupDir', () => {
       input({ plugins: [{ id: 'p@m', path: plugin }] }),
       refuse,
       home,
+      noSecrets,
     );
     const wrapper = made.setup.pluginDirs[0] ?? '';
     expect(made.setup.pluginDirs).toEqual([join(made.setup.reads[0] ?? '', 'plugins/p')]);
@@ -331,11 +361,11 @@ describe('keepSetup and createSetupDir', () => {
         { what: shownOutside('review'), why: 'a skill named Review is already loaded' },
         { what: 'foo@m2', why: 'a plugin named Foo is already loaded' },
       ];
-      const kept = keepSetup(setup, refuse, home);
+      const kept = keepSetup(setup, refuse, home, noSecrets);
       expect(kept.keptSkills).toEqual([upper]);
       expect(kept.keptPlugins.map((p) => p.id)).toEqual(['Foo@m1']);
       expect(kept.leftOut).toEqual(leftOut);
-      const made = createSetupDir(filesRoot, setup, refuse, home);
+      const made = createSetupDir(filesRoot, setup, refuse, home, noSecrets);
       expect(made.setup.loaded).toEqual({ skills: ['Review'], plugins: ['Foo@m1'] });
       expect(made.setup.leftOut).toEqual(leftOut);
       made.remove();
@@ -343,7 +373,13 @@ describe('keepSetup and createSetupDir', () => {
   );
 
   it('remove() leaves nothing', () => {
-    const made = createSetupDir(filesRoot, input({ skills: [builderSkill('s')] }), refuse, home);
+    const made = createSetupDir(
+      filesRoot,
+      input({ skills: [builderSkill('s')] }),
+      refuse,
+      home,
+      noSecrets,
+    );
     const dir = join(made.setup.pluginDirs[0] ?? '', '..');
     expect(made.setup.reads[0]).toBe(dir);
     made.remove();

@@ -119,13 +119,18 @@ describe('readProjectDefinitions', () => {
     ]);
   });
 
-  it('does not copy a .env file inside a skill folder, and lists it', () => {
+  it('does not copy a .env file or folder inside a skill folder, in any case, and lists it', () => {
     write('.claude/skills/s/SKILL.md', SKILL);
     write('.claude/skills/s/.env.local', 'TOKEN=x');
+    write('.claude/skills/s/conf/.Env.prod', 'TOKEN=y');
+    write('.claude/skills/s/.ENV.d/prod', 'TOKEN=z');
     const { files, leftOut } = readProjectDefinitions(checkout);
     expect(files.map((f) => f.relative)).toEqual(['skills/s/SKILL.md']);
+    expect(files[0]?.source).toBe('.claude/skills/s/SKILL.md');
     expect(leftOut).toEqual([
+      { what: '.claude/skills/s/.ENV.d', why: 'a secrets file is never copied' },
       { what: '.claude/skills/s/.env.local', why: 'a secrets file is never copied' },
+      { what: '.claude/skills/s/conf/.Env.prod', why: 'a secrets file is never copied' },
     ]);
   });
 

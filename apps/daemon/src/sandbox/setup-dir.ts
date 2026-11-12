@@ -62,6 +62,8 @@ export interface KeptPlugin {
 export interface KeptSetup {
   readonly keptSkills: Skill[];
   readonly keptPlugins: KeptPlugin[];
+  /** The project's copies but those whose checkout file is a secret. */
+  readonly keptProjectFiles: SetupInput['projectFiles'];
   /** The folders to open, collapsed. */
   readonly reads: string[];
   /** The `.env*` files and folders under the reads, and the real paths of `.env*` links: denied inside them. */
@@ -185,8 +187,15 @@ export function keepSetup(
   input: SetupInput,
   refuse: (real: string) => string | null,
   home: string,
+  isCheckoutSecret: (source: string) => boolean,
 ): KeptSetup {
   const leftOut: LeftOut[] = [];
+  // A copy is read before the sandbox lists the checkout's secrets: a `.env` link may lead to a skill's file.
+  const keptProjectFiles = input.projectFiles.filter((file) => {
+    if (!isCheckoutSecret(file.source)) return true;
+    leftOut.push({ what: file.source, why: 'a secrets file is never copied' });
+    return false;
+  });
   const skillNames = new Map<string, string>();
   const pluginNames = new Map<string, string>();
   const skills: { skill: Skill; folder: string; fileDir: string }[] = [];
@@ -251,6 +260,7 @@ export function keepSetup(
       return {
         keptSkills: skills.map(({ skill }) => skill),
         keptPlugins: plugins,
+        keptProjectFiles,
         reads,
         secretFiles: [...new Set(secretFiles)].sort(),
         leftOut,
@@ -333,8 +343,9 @@ export function createSetupDir(
   input: SetupInput,
   refuse: (real: string) => string | null,
   home: string,
+  isCheckoutSecret: (source: string) => boolean,
 ): { setup: SessionSetup; remove(): void } {
-  const kept = keepSetup(input, refuse, home);
+  const kept = keepSetup(input, refuse, home, isCheckoutSecret);
   const dir = join(filesRoot, `10db-setup-${randomBytes(6).toString('hex')}`);
   mkdirSync(dir, { mode: 0o700 });
   const remove = (): void => {
@@ -353,11 +364,11 @@ export function createSetupDir(
       pluginDirs.push(yours);
       skillRoots.push(join(yours, 'skills'));
     }
-    if (input.projectFiles.length > 0) {
+    if (kept.keptProjectFiles.length > 0) {
       const project = join(dir, 'project');
-      writeProject(project, input.projectFiles);
+      writeProject(project, kept.keptProjectFiles);
       pluginDirs.push(project);
-      if (input.projectFiles.some((f) => f.relative.startsWith(`skills${sep}`)))
+      if (kept.keptProjectFiles.some((f) => f.relative.startsWith(`skills${sep}`)))
         skillRoots.push(join(project, 'skills'));
     }
     const leftOut = [...kept.leftOut];

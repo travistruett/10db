@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { loadedLine } from './loaded-line';
 
-const file = (relative: string) => ({ relative, content: Buffer.from('x'), mode: 0o600 });
+const file = (relative: string) => ({
+  relative,
+  source: `.claude/${relative}`,
+  content: Buffer.from('x'),
+  mode: 0o600,
+});
 
 describe('loadedLine', () => {
   it.each<[string, Parameters<typeof loadedLine>[0], string | null]>([

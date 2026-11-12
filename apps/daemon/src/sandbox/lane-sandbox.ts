@@ -1,6 +1,8 @@
 import { existsSync, realpathSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import { Provider, type PermissionRuleDto, type ProjectDto } from '@10db/contracts';
 import type { Clock } from '../clock';
+import { foldPathCase } from '../guard';
 import { besideTheWays } from './beside-the-way';
 import { prepareCommandEnv, withoutTempDirPaths } from './command-env';
 import { dockerAccess, dockerEnvNames } from './docker-access';
@@ -269,6 +271,15 @@ function secretReadRules(path: string): string[] {
   return folder ? [rule, `Read(${ruleScope(path)}/**)`] : [rule];
 }
 
+/** Whether a project copy's checkout file, by its path under the checkout, is one of the checkout's secrets. */
+function checkoutSecret(access: ProjectAccess): (source: string) => boolean {
+  const secrets = access.checkoutSecrets.map(foldPathCase);
+  return (source) => {
+    const path = foldPathCase(join(access.checkout, source));
+    return secrets.some((secret) => isEqualOrUnder(path, secret));
+  };
+}
+
 /** The refusal a session's setup reads are judged by, from the project's access. */
 function setupRefusal(
   home: string,
@@ -335,6 +346,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
             input.setup,
             setupRefusal(deps.home, { ...access, sandboxRoots }, deps.worktreeRoot),
             deps.home,
+            checkoutSecret(access),
           );
         const setup = setupDir?.setup ?? EMPTY_SETUP;
         const setupSecrets = setup.secretFiles;
@@ -584,6 +596,7 @@ export function createLaneSandbox(deps: LaneSandboxDeps): LaneSandbox {
         setupInput,
         setupRefusal(deps.home, access, deps.worktreeRoot),
         deps.home,
+        checkoutSecret(access),
       );
       return {
         loaded: {

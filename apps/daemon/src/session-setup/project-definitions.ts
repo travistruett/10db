@@ -9,6 +9,8 @@ import type { LeftOut } from './left-out';
 export interface DefinitionFile {
   /** Under the plugin root: `skills/<name>/<path>`, `commands/<name>.md` or `agents/<name>.md`. */
   readonly relative: string;
+  /** Where it was read, under the checkout: `.claude/skills/<name>/<path>` and so on. */
+  readonly source: string;
   readonly content: Buffer;
   /** The checkout file's mode, masked with `0o700`. */
   readonly mode: number;
@@ -20,6 +22,9 @@ export const PROJECT_DEFINITIONS_MAX_FILES = 500;
 
 const PAST_THE_CAP = 'past the 4 MiB or 500 files 10db copies';
 const SECRETS_FILE = 'a secrets file is never copied';
+
+/** A `.env*` name in any case: stricter than the file system's fold, so `.ENV` is never copied anywhere. */
+const isSecretName = (name: string): boolean => name.toLowerCase().startsWith('.env');
 
 /** What the copy may still take. */
 interface Budget {
@@ -83,7 +88,7 @@ function readDefinitionFile(
   const content = Buffer.from(cleaned.text, 'utf8');
   if (!take(budget, content.length)) return { overCap: true };
   return {
-    files: [{ relative, content, mode: read.mode & 0o700 }],
+    files: [{ relative, source, content, mode: read.mode & 0o700 }],
     notes: removedNote(source, cleaned.dropped),
   };
 }
@@ -103,13 +108,14 @@ function readSkill(checkout: string, name: string, budget: Budget): Read {
     }
     for (const entry of entries) {
       const path = inSkill === '' ? entry.name : `${inSkill}/${entry.name}`;
+      // A `.env*` folder is a secret as a whole, as the lane sandbox treats one.
+      if (isSecretName(entry.name)) {
+        notes.push({ what: `${root}/${path}`, why: SECRETS_FILE });
+        continue;
+      }
       if (entry.isDirectory()) {
         const failed = walk(path);
         if (failed) return failed;
-        continue;
-      }
-      if (entry.name.startsWith('.env')) {
-        notes.push({ what: `${root}/${path}`, why: SECRETS_FILE });
         continue;
       }
       let read;
@@ -127,7 +133,12 @@ function readSkill(checkout: string, name: string, budget: Budget): Read {
         notes.push(...removedNote(`${root}/SKILL.md`, cleaned.dropped));
       }
       if (!take(local, content.length)) return { overCap: true };
-      files.push({ relative: `skills/${name}/${path}`, content, mode: read.mode & 0o700 });
+      files.push({
+        relative: `skills/${name}/${path}`,
+        source: `${root}/${path}`,
+        content,
+        mode: read.mode & 0o700,
+      });
     }
     return null;
   };
@@ -196,7 +207,7 @@ function pendingDefinitions(checkout: string, leftOut: LeftOut[]): Pending[] {
 
 /**
  * The project's `.claude/skills/<name>/**`, `.claude/commands/*.md` and `.claude/agents/*.md`, copied with
- * lane-written power removed: no link is followed, no `.env*` file is copied, each definition keeps only the
+ * lane-written power removed: no link is followed, no `.env*` file or folder is copied, each definition keeps only the
  * frontmatter its kind allows and no shell line, and past either cap the remaining definitions are left out
  * whole, unread.
  */
