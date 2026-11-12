@@ -4894,6 +4894,25 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
       expect(second.spec.prompt).not.toContain('of your skills');
     });
 
+    it("a project definition the frontmatter reader can't take starts the session and frees the account's start", async () => {
+      const probe = sandboxProbe();
+      engine = await setupEngine(probe, { Alpha: [[turn]] });
+      commitToRepo({
+        '.claude/skills/x/SKILL.md': '---\nname: x\nconstructor: y\n---\nBody\n',
+      });
+      const seen = recordSetups();
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+
+      // A leaked start slot would leave this acquire pending forever.
+      (await engine.startGate.acquire(engine.project.accountId))();
+      expect(ws(workstream.id).state).toBe('DONE');
+      expect(seen[0]?.spec.prompt).toContain(
+        '- .claude/skills/x/SKILL.md: constructor removed: a lane can write this file',
+      );
+    });
+
     it('a skill link into a checkout is left out and named in the prompt and the log', async () => {
       const probe = sandboxProbe();
       const logs = captureLogs();

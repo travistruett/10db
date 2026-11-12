@@ -138,6 +138,27 @@ const rows: Row[] = [
     { refused: 'its frontmatter has no end' },
   ],
   [
+    'drops keys Object.prototype holds, as unknown keys',
+    DefinitionKind.Skill,
+    '---\nname: s\nconstructor: x\ntoString: y\nhasOwnProperty: z\n---\nBody\n',
+    {
+      text: '---\nname: s\n---\nBody\n',
+      dropped: ['constructor', 'toString', 'hasOwnProperty'],
+    },
+  ],
+  [
+    'drops a __proto__ key',
+    DefinitionKind.Command,
+    '---\ndescription: c\n__proto__: x\n---\nRun\n',
+    { text: '---\ndescription: c\n---\nRun\n', dropped: ['__proto__'] },
+  ],
+  [
+    'refuses frontmatter nested deeper than 10db reads',
+    DefinitionKind.Skill,
+    `---\nname: s\nx: ${'['.repeat(20_000)}${']'.repeat(20_000)}\n---\nBody\n`,
+    { refused: 'its frontmatter is not YAML 10db reads' },
+  ],
+  [
     'a file with no frontmatter is kept, shell lines dropped',
     DefinitionKind.Agent,
     'Plain\n!`whoami`\n',

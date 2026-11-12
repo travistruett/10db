@@ -2027,14 +2027,8 @@ export function createRunner(opts: RunnerOptions): Runner {
       ? (resumed?.briefed ?? false)
       : briefedFromHandoff(action, contextPack.handoff, evidence);
     const inheritedBaselinePct = resumed?.briefingBaselinePct ?? null;
-    // A subscription's sessions start one at a time until the OAuth refresh race is ruled out.
-    const releaseStart =
-      account.kind === AccountKind.ClaudeSubscription
-        ? await opts.startGate.acquire(account.id)
-        : () => undefined;
-    // Where Claude Code keeps this account's sessions, and with them each one's saved tool results.
-    const configDir = sessionConfigDir(account.kind, launch.env, homedir());
     // Read when each session starts: a switch flipped or a skill added meanwhile applies from the next one.
+    // Read before the start slot is taken, so nothing it throws can hold the slot.
     const switches = trustSwitchesFor(db, project.id);
     const setupPlan = planSessionSetup({
       home: opts.builderHome,
@@ -2042,6 +2036,13 @@ export function createRunner(opts: RunnerOptions): Runner {
       switches,
       laneWritable: [...allCheckouts(db), opts.worktreeRoot, ...opts.laneWritableRoots],
     });
+    // A subscription's sessions start one at a time until the OAuth refresh race is ruled out.
+    const releaseStart =
+      account.kind === AccountKind.ClaudeSubscription
+        ? await opts.startGate.acquire(account.id)
+        : () => undefined;
+    // Where Claude Code keeps this account's sessions, and with them each one's saved tool results.
+    const configDir = sessionConfigDir(account.kind, launch.env, homedir());
     let laneSession: LaneSession | null = null;
     if (opts.laneSandbox) {
       try {

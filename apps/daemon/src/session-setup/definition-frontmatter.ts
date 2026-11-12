@@ -77,11 +77,22 @@ function holdsAlias(doc: Document): boolean {
   return seen.alias;
 }
 
-/** The block's allowed keys in their written order, or why the block is refused. */
-function keptKeys(
-  kind: DefinitionKind,
-  block: string,
-): { kept: Record<string, unknown>; dropped: string[] } | { refused: string } {
+type Kept = { kept: Record<string, unknown>; dropped: string[] } | { refused: string };
+
+/**
+ * The block's allowed keys in their written order, or why the block is refused. A key is looked up among
+ * the kind's own keys only, so `constructor` or `__proto__` is an unknown key like any other, and any
+ * throw from reading lane-written YAML (a stack exhausted by nesting) refuses the block.
+ */
+function keptKeys(kind: DefinitionKind, block: string): Kept {
+  try {
+    return readKeys(kind, block);
+  } catch {
+    return { refused: 'its frontmatter is not YAML 10db reads' };
+  }
+}
+
+function readKeys(kind: DefinitionKind, block: string): Kept {
   const docs = parseAllDocuments(block, { uniqueKeys: true });
   if (!Array.isArray(docs)) return { kept: {}, dropped: [] };
   if (docs.length > 1) return { refused: 'its frontmatter holds more than one document' };
@@ -91,7 +102,7 @@ function keptKeys(
   if (holdsAlias(doc)) return { refused: 'its frontmatter uses an alias' };
   if (doc.contents === null) return { kept: {}, dropped: [] };
   if (!isMap(doc.contents)) return { refused: 'its frontmatter is not a table' };
-  const allowed: Record<string, z.ZodType> = FRONTMATTER_ALLOWED[kind];
+  const allowed = new Map<string, z.ZodType>(Object.entries(FRONTMATTER_ALLOWED[kind]));
   const values = z.record(z.string(), z.unknown()).safeParse(doc.toJS({ maxAliasCount: 0 }));
   if (!values.success) return { refused: 'its frontmatter is not a table' };
   const kept: Record<string, unknown> = {};
@@ -101,7 +112,7 @@ function keptKeys(
     if (isAlias(key) || !isScalar(key) || typeof key.value !== 'string')
       return { refused: 'its frontmatter has a key that is not text' };
     const name = key.value;
-    const schema = allowed[name];
+    const schema = allowed.get(name);
     if (schema === undefined) {
       dropped.push(name);
       continue;
