@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { resolveConnection } from './connection';
 import { handOffTo } from './dev-ui-handoff';
 
@@ -8,6 +8,7 @@ import { handOffTo } from './dev-ui-handoff';
 const HANDED = { url: 'http://127.0.0.1:4317', token: 'handed-token' };
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   sessionStorage.clear();
   window.history.replaceState(null, '', '/');
 });
@@ -24,5 +25,17 @@ describe('resolveConnection in a dev UI tab', () => {
     expect(window.location.pathname + window.location.search).toBe('/factory?x=1');
     // A reload has no fragment: the tab still has its connection.
     expect(await resolveConnection()).toEqual(HANDED);
+  });
+
+  it("leaves a dev server's own token first over a hand-off the tab kept from before", async () => {
+    window.history.replaceState(
+      null,
+      '',
+      handOffTo(`${window.location.origin}/factory`, window.location.origin, HANDED),
+    );
+    await resolveConnection();
+    vi.stubEnv('VITE_DAEMON_URL', 'http://127.0.0.1:4999');
+    vi.stubEnv('VITE_DAEMON_TOKEN', 'own-token');
+    expect(await resolveConnection()).toEqual({ url: 'http://127.0.0.1:4999', token: 'own-token' });
   });
 });

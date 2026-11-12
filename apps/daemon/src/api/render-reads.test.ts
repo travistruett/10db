@@ -1,7 +1,12 @@
-import { DEV_UI_READS, DEV_UI_REFUSED_READS, devUiMayRead } from './dev-ui-access';
 import { defineWebSocketHelper } from 'hono/ws';
 import { describe, expect, it } from 'vitest';
-import { RENDER_READS, RENDER_REFUSED_READS } from '../screens';
+import {
+  DEV_UI_READS,
+  DEV_UI_REFUSED_READS,
+  devUiMayRead,
+  RENDER_READS,
+  RENDER_REFUSED_READS,
+} from '../screens';
 import { createApp } from './app';
 import type { ApiServices } from './services';
 

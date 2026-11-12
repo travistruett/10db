@@ -28,5 +28,6 @@ export {
   unmeasuredRead,
   type ReadKind,
 } from './inline-budget';
+export { DEV_UI_READS, DEV_UI_REFUSED_READS, devUiMayRead } from './dev-ui-access';
 export { RENDER_READS, RENDER_REFUSED_READS, renderMayRead } from './render-access';
 export { createScreens, type ScreenService } from './screens';

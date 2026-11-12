@@ -189,7 +189,7 @@ import {
 import { startPreview, type Preview } from '../preview';
 import { recoverOnStartup, systemProcesses, type ProcessTerminator } from '../recovery';
 import { chooseModel, offeredModels, PLAN_NEED } from '../routing';
-import { createScreenBroker, createScreens, renderMayRead } from '../screens';
+import { createScreenBroker, createScreens, devUiMayRead, renderMayRead } from '../screens';
 import { createShapeJev, createShapeService, shapeAgentModels } from '../shape';
 import { createKnowledgeServices } from './knowledge-services';
 import { createShapeServices } from './shape-services';
@@ -259,7 +259,7 @@ import {
   refusedTrustCheckouts,
 } from './git-refusal';
 import { acquireInstanceLock } from './instance-lock';
-import { removeRuntimeFiles, writeRuntimeFiles } from '../runtime-files';
+import { devUiToken, removeRuntimeFiles, writeRuntimeFiles } from '../runtime-files';
 import { createAreaNamer } from './area-namer';
 import { systemListeners, type ListenerReader } from './listening-ports';
 import { loopbackProbe, type AddressProbe } from './loopback-probe';
@@ -1894,8 +1894,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
   const app = createApp({
     commit: build?.commit ?? null,
     devUiOrigin: opts.devUiOrigin ?? null,
-    // Minted afresh at each start, only when a dev UI is opted in; it reads and nothing else.
-    devUiToken: opts.devUiOrigin ? randomBytes(32).toString('base64url') : null,
+    // Only when a dev UI is opted in; it reads and nothing else, and outlives a restart.
+    devUi: opts.devUiOrigin ? { token: devUiToken(opts.dataDir), mayRead: devUiMayRead } : null,
     selfUpdate: selfUpdateServices,
     startedAt,
     allowedOrigins: [

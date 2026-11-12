@@ -1,9 +1,9 @@
-import { RENDER_READS } from '../screens';
+import { RENDER_READS } from './render-access';
 
 // Decision 2026-11-11-10db-runs-the-preview-while-a-pass-is-open: 10db's own dev UI is code a pass's
 // agents may be editing, so the token Open Page hands it reads and nothing else. It is deny by
 // default: a GET is allowed only when named below, every GET the daemon serves is named allowed or
-// refused (`render-reads.test.ts` fails on one that is in neither), and every other method is refused.
+// refused (`api/render-reads.test.ts` fails on one that is in neither), and every other method is refused.
 // What writes or acts is done in the 10db app, over its own token.
 
 /** The reads a screen may make, and the further database reads the dev UI's other views draw. */

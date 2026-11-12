@@ -109,7 +109,6 @@ import type { UpgradeWebSocket } from 'hono/ws';
 import { z } from 'zod';
 import type { ApiServices } from './services';
 import type { SelfUpdateServices, TaskRemovalServices } from './services';
-import { devUiMayRead } from './dev-ui-access';
 import { streamEvents } from './stream';
 
 /** What the screen routes need from the screens module: the broker's window side and the kept pictures. */
@@ -139,8 +138,14 @@ export interface ApiDeps {
   readonly commit?: string | null;
   /** The browser origin opted in as 10db's own dev UI, for `/health`; absent when none is. */
   readonly devUiOrigin?: string | null;
-  /** The dev UI's read-only token (`devUiMayRead`); absent when no dev UI origin is opted in. */
-  readonly devUiToken?: string | null;
+  /**
+   * 10db's own dev UI: its read-only token and what that token may reach (`devUiMayRead`); absent
+   * when no dev UI origin is opted in.
+   */
+  readonly devUi?: {
+    readonly token: string;
+    mayRead(method: string, path: string): boolean;
+  } | null;
   /** The self-update setting; its routes answer 501 without it. */
   readonly selfUpdate?: SelfUpdateServices;
   readonly upgradeWebSocket: UpgradeWebSocket;
@@ -257,8 +262,8 @@ export function createApp(deps: ApiDeps) {
           : (/^Bearer (.+)$/.exec(c.req.header('authorization') ?? '')?.[1] ?? '');
       if (sameToken(presented, deps.token)) return next();
       // The dev UI's token: the page is code a pass's agents may be editing, so it only reads.
-      if (presented !== '' && deps.devUiToken && sameToken(presented, deps.devUiToken))
-        return devUiMayRead(c.req.method, c.req.path)
+      if (presented !== '' && deps.devUi && sameToken(presented, deps.devUi.token))
+        return deps.devUi.mayRead(c.req.method, c.req.path)
           ? next()
           : c.json(
               { error: 'forbidden', message: 'The dev UI reads only: act in the 10db app' },
@@ -1250,8 +1255,8 @@ export function createApp(deps: ApiDeps) {
       }),
     )
     .get('/dev-ui/connection', (c) =>
-      deps.devUiToken
-        ? c.json(DevUiConnectionDto.parse({ token: deps.devUiToken }))
+      deps.devUi
+        ? c.json(DevUiConnectionDto.parse({ token: deps.devUi.token }))
         : c.json({ error: 'not_found', message: 'No dev UI origin is opted in' }, 404),
     )
     .get('/projects/:projectId/pictures', (c) =>

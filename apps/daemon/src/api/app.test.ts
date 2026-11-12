@@ -19,6 +19,7 @@ import {
 } from '@10db/contracts';
 import { defineWebSocketHelper } from 'hono/ws';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { devUiMayRead } from '../screens';
 import { createApp, MAX_BODY_BYTES } from './app';
 import type { ApiServices } from './services';
 import { CODEX_VERIFIED_ON } from '../environment';
@@ -373,7 +374,7 @@ describe('API', () => {
         startedAt,
         allowedOrigins: ['http://localhost:1420'],
         devUiOrigin: devUiToken === null ? null : 'http://localhost:1420',
-        devUiToken,
+        devUi: devUiToken === null ? null : { token: devUiToken, mayRead: devUiMayRead },
         token: TOKEN,
         services: stubServices(),
         upgradeWebSocket: noUpgrade,

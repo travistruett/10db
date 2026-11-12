@@ -20,24 +20,27 @@ const DEV_DAEMON_URL = 'http://127.0.0.1:4317';
 const HANDED_KEY = 'tendb.connection';
 
 /**
- * The connection Open Page handed this tab: taken from the fragment, kept in the tab's session
- * storage and removed from the address bar; on a reload, the kept one. Null when there is none.
+ * The connection Open Page hands in this load's fragment: kept in the tab's session storage, for
+ * its reloads, and removed from the address bar. Null when the fragment carries none.
  */
-function handedConnection(): DaemonConnection | null {
+function takeHandOff(): DaemonConnection | null {
   const handed = takenHandOff(window.location.hash);
-  if (handed !== null) {
-    try {
-      sessionStorage.setItem(HANDED_KEY, JSON.stringify(handed));
-    } catch {
-      // Held for this load only.
-    }
-    window.history.replaceState(
-      window.history.state,
-      '',
-      window.location.pathname + window.location.search,
-    );
-    return handed;
+  if (handed === null) return null;
+  try {
+    sessionStorage.setItem(HANDED_KEY, JSON.stringify(handed));
+  } catch {
+    // Held for this load only.
   }
+  window.history.replaceState(
+    window.history.state,
+    '',
+    window.location.pathname + window.location.search,
+  );
+  return handed;
+}
+
+/** The connection an earlier load of this tab was handed; null when none was. */
+function keptHandOff(): DaemonConnection | null {
   try {
     return takenHandOff(`#tendb=${encodeURIComponent(sessionStorage.getItem(HANDED_KEY) ?? '')}`);
   } catch {
@@ -51,15 +54,16 @@ function handedConnection(): DaemonConnection | null {
  */
 export const resolveConnection: ConnectionResolver = async () => {
   if (isTauri()) return DaemonConnectionSchema.parse(await invoke('daemon_connection'));
-  if (import.meta.env.DEV) {
-    const handed = handedConnection();
-    if (handed !== null) return handed;
-  }
-  // Only a dev build reads the token, so one in the build environment never lands in dist/.
-  const token = import.meta.env.DEV ? import.meta.env.VITE_DAEMON_TOKEN : undefined;
-  if (!token)
-    throw new Error(
-      "Open this page from the UI Workbench's Open Page in 10db, or set VITE_DAEMON_TOKEN to the daemon UI token (TENDB_DEV_UI_TOKEN)",
-    );
-  return { url: import.meta.env.VITE_DAEMON_URL ?? DEV_DAEMON_URL, token };
+  // Only a dev build reads a token here, so one in the build environment never lands in dist/.
+  if (!import.meta.env.DEV) throw new Error('A browser build has no daemon connection');
+  // A fresh hand-off first, then the dev server's own token, then what this tab was handed before.
+  const handed = takeHandOff();
+  if (handed !== null) return handed;
+  const token = import.meta.env.VITE_DAEMON_TOKEN;
+  if (token) return { url: import.meta.env.VITE_DAEMON_URL ?? DEV_DAEMON_URL, token };
+  const kept = keptHandOff();
+  if (kept !== null) return kept;
+  throw new Error(
+    "Open this page from the UI Workbench's Open Page in 10db, or set VITE_DAEMON_TOKEN to the daemon UI token (TENDB_DEV_UI_TOKEN)",
+  );
 };
