@@ -78,7 +78,7 @@ function gateOf(where: CloseGateWhere): PassCloseGate {
     where,
     consequence:
       where === 'folder'
-        ? 'The gate runs in Your folder after the pages set to Take Out are taken out: if it fails, the pass reopens with those pages already out, their work kept with their tasks.'
+        ? 'The gate runs in Your folder after the pages set to Remove are removed: if it fails, the pass reopens with those pages already out, their work kept with their tasks.'
         : null,
   };
 }
@@ -229,7 +229,7 @@ export function checkCloseRequest(
     const blocked = closing.cannotSignOff.get(page.taskId);
     if (page.choice === PassClosePageChoice.SignOff && blocked !== undefined)
       throw new ConflictError(
-        `${pages.get(page.taskId)?.title ?? page.taskId} cannot be signed off now: ${blocked}; set it to Take Out`,
+        `${pages.get(page.taskId)?.title ?? page.taskId} cannot be signed off now: ${blocked}; set it to Remove`,
       );
   }
   const signing = new Set([
@@ -262,7 +262,7 @@ export function checkCloseRequest(
     if (choice.choice !== SharedChoiceKind.Drop) continue;
     if (!offered.has(choice.seq))
       throw new ConflictError(
-        `Shared change ${String(choice.seq)} is not one of a page set to Take Out that has not landed`,
+        `Shared change ${String(choice.seq)} is not one of a page set to Remove that has not landed`,
       );
     const refused = offered.get(choice.seq);
     if (refused)

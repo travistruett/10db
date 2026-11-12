@@ -38,7 +38,7 @@ describe('ClosedPassLine', () => {
     serve(() => HttpResponse.json({}));
     renderWithDaemon(<ClosedPassLine view={closed} inbox={[]} />);
     expect(
-      await screen.findByText('Settings pass closed; it settles once its pull request merges.'),
+      await screen.findByText('Settings pass finished; it settles once its pull request merges.'),
     ).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Pull request' })).toHaveProperty('href', PR);
     expect(screen.queryByRole('button', { name: /^Move/ })).toBeNull();
@@ -95,52 +95,52 @@ describe('closedPassWords', () => {
       name: 'its pull request open',
       pullRequest: pr('open'),
       card: null,
-      words: 'Settings pass closed; it settles once its pull request merges.',
+      words: 'Settings pass finished; it settles once its pull request merges.',
     },
     {
       name: 'its pull request not read yet',
       pullRequest: pr(null),
       card: move('closed'),
-      words: 'Settings pass closed; it settles once its pull request merges.',
+      words: 'Settings pass finished; it settles once its pull request merges.',
     },
     {
       name: 'no pull request',
       pullRequest: null,
       card: null,
-      words: 'Settings pass closed with no pull request.',
+      words: 'Settings pass finished with no pull request.',
     },
     {
       name: 'closed unmerged, by its card',
       pullRequest: pr('open'),
       card: move('closed_unmerged'),
-      words: 'Settings pass closed; its pull request closed without merging.',
+      words: 'Settings pass finished; its pull request closed without merging.',
     },
     {
       name: 'closed unmerged, read before a card',
       pullRequest: pr('closed'),
       card: null,
-      words: 'Settings pass closed; its pull request closed without merging.',
+      words: 'Settings pass finished; its pull request closed without merging.',
     },
     {
       name: 'merged after other work reached the base',
       pullRequest: pr('merged'),
       card: move('drift'),
       words:
-        'Settings pass closed; its pull request merged, but other work reached main first, so the folder waits to move.',
+        'Settings pass finished; its pull request merged, but other work reached main first, so the folder waits to move.',
     },
     {
       name: 'a CI fix pushed to it',
       pullRequest: pr('open'),
       card: move('ci_fix'),
       words:
-        'Settings pass closed; a fix was pushed to its pull request, so the folder waits to move.',
+        'Settings pass finished; a fix was pushed to its pull request, so the folder waits to move.',
     },
     {
       name: 'merged, realigning by itself',
       pullRequest: pr('merged'),
       card: null,
       words:
-        'Settings pass closed; its pull request merged, and the folder moves to the base next.',
+        'Settings pass finished; its pull request merged, and the folder moves to the base next.',
     },
   ])('$name', ({ pullRequest, card, words }) => {
     expect(closedPassWords({ ...closed, pullRequest }, card)).toBe(words);

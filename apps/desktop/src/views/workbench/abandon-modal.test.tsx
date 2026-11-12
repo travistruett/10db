@@ -22,7 +22,7 @@ function draw(
   return { abandon, onClose };
 }
 
-const dialog = () => screen.findByRole('dialog', { name: 'Abandon Pass' });
+const dialog = () => screen.findByRole('dialog', { name: 'Abandon' });
 
 describe('AbandonModal', () => {
   it('names every page that goes back to how it was, then abandons', async () => {
@@ -35,7 +35,7 @@ describe('AbandonModal', () => {
         .map((item) => item.textContent),
     ).toEqual(['Home', 'Billing', 'Settings']);
     expect(within(d).queryByRole('list', { name: 'Pages that stay' })).toBeNull();
-    fireEvent.click(within(d).getByRole('button', { name: 'Abandon Pass' }));
+    fireEvent.click(within(d).getByRole('button', { name: 'Abandon' }));
     await waitFor(() => {
       expect(onClose).toHaveBeenCalled();
     });
@@ -45,7 +45,7 @@ describe('AbandonModal', () => {
   it("says the daemon's refusal beside Abandon Pass and stays open", async () => {
     const { onClose } = draw(vi.fn(() => Promise.reject(new Error('The pass has settled'))));
     const d = await dialog();
-    fireEvent.click(within(d).getByRole('button', { name: 'Abandon Pass' }));
+    fireEvent.click(within(d).getByRole('button', { name: 'Abandon' }));
     expect(await within(d).findByText('The pass has settled')).toBeTruthy();
     expect(onClose).not.toHaveBeenCalled();
   });
@@ -71,12 +71,12 @@ describe('AbandonModal', () => {
       expect(
         within(within(d).getByRole('list', { name: 'Pages that go back' })).getByText('Billing'),
       ).toBeTruthy();
-      const button = within(d).getByRole('button', { name: 'Abandon Pass' });
+      const button = within(d).getByRole('button', { name: 'Abandon' });
       expect(button).toHaveProperty('disabled', !offered);
       expect(
         within(d).queryByText(
           offered
-            ? 'Its close stops where it is; what has landed stays.'
+            ? 'Finishing stops where it is; what has landed stays.'
             : 'The pass is landing: it can no longer be abandoned.',
         ),
       ).toBeTruthy();

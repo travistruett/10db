@@ -1,5 +1,6 @@
 import { ActionIcon, Menu } from '@mantine/core';
 import { IconDots } from '@tabler/icons-react';
+import { MenuAction } from './menu-action';
 
 export interface RowMenuProps {
   /** The page's name, which names the menu for assistive tech. */
@@ -24,7 +25,11 @@ export function RowMenu({ area, onTakeOut }: RowMenuProps) {
         </ActionIcon>
       </Menu.Target>
       <Menu.Dropdown>
-        <Menu.Item onClick={onTakeOut}>Take Out</Menu.Item>
+        <MenuAction
+          label="Remove"
+          byline="Take this page out of the pass. Its files go back; its work is saved."
+          onClick={onTakeOut}
+        />
       </Menu.Dropdown>
     </Menu>
   );

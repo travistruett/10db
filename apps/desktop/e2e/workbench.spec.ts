@@ -271,11 +271,11 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
   // Abandon ends the pass: its confirm names the page that goes back and the one that stays. Later
   // specs read Factory across projects, so nothing of this pass is left running.
   await page.getByRole('button', { name: 'More pass actions' }).click();
-  await page.getByRole('menuitem', { name: 'Abandon Pass' }).click();
-  const abandon = page.getByRole('dialog', { name: 'Abandon Pass' });
+  await page.getByRole('menuitem', { name: 'Abandon' }).click();
+  const abandon = page.getByRole('dialog', { name: 'Abandon' });
   await expect(abandon.getByRole('list', { name: 'Pages that go back' })).toHaveText('people');
   await expect(abandon.getByRole('list', { name: 'Pages that stay' })).toHaveText('settings');
-  await abandon.getByRole('button', { name: 'Abandon Pass' }).click();
+  await abandon.getByRole('button', { name: 'Abandon' }).click();
   await expect(page.getByRole('button', { name: /^Start Pass/ })).toBeVisible();
   await expect
     .poll(async () => {

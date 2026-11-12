@@ -117,7 +117,7 @@ describe('WorkbenchScreen', () => {
   it('with a closed pass waiting to settle, says so in one line above the picker', async () => {
     const notice = passNotice();
     await draw({ live: passViewDto({ pass: { state: 'CLOSED' }, rest: { notices: [notice] } }) });
-    expect(await screen.findByText('Settings pass closed with no pull request.')).toBeTruthy();
+    expect(await screen.findByText('Settings pass finished with no pull request.')).toBeTruthy();
     expect(await findPagesInput()).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'More pass actions' })).toBeNull();
     // Its notices stay in sight, and it holds no page to send one to.
@@ -166,7 +166,7 @@ describe('WorkbenchScreen', () => {
 
   it.each([
     { item: 'Rename', dialog: 'Rename Pass' },
-    { item: 'Abandon Pass', dialog: 'Abandon Pass' },
+    { item: 'Abandon', dialog: 'Abandon' },
   ])('opens $dialog from the pass menu', async ({ item, dialog }) => {
     await draw({ live: passViewDto({ pages: [pagesByStatus().ready] }) });
     fireEvent.click(await screen.findByRole('button', { name: 'More pass actions' }));
@@ -203,6 +203,6 @@ describe('WorkbenchScreen', () => {
     await screen.findByRole('button', { name: 'More pass actions' });
     fireEvent.click(screen.getByRole('button', { name: 'Settle' }));
     expect(await screen.findByRole('button', { name: /^Start Pass/ })).toBeTruthy();
-    expect(screen.queryByText('Settings pass closed; its work is on main.') !== null).toBe(said);
+    expect(screen.queryByText('Settings pass finished; its work is on main.') !== null).toBe(said);
   });
 });
