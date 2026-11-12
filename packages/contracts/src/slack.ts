@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SECRET_CHARACTERS } from './accounts';
 import { GoalId, InboxItemId, PersonId, StakeholderSendId, TaskId } from './ids';
 import { QuestionCategory, SendState } from './states';
 import { PersonDto } from './team';
@@ -106,3 +107,18 @@ export const QuestionRouteDto = z.object({
   from: z.enum(['task', 'goal', 'area', 'project', 'topic']),
 });
 export type QuestionRouteDto = z.infer<typeof QuestionRouteDto>;
+
+/** `PUT /slack/token`. The token is checked with Slack before it is saved, and goes to the Keychain only. */
+export const SlackTokenInput = z.strictObject({
+  token: z
+    .string()
+    .trim()
+    .min(1)
+    .max(512)
+    .regex(SECRET_CHARACTERS, 'printable ASCII with no spaces, double quotes or backslashes'),
+});
+export type SlackTokenInput = z.infer<typeof SlackTokenInput>;
+
+/** `GET /inbox/:id/compose`: the message a question would be for these people, and what the scan holds. */
+export const ComposePreviewDto = z.object({ text: z.string(), hits: z.array(OutboundHit) });
+export type ComposePreviewDto = z.infer<typeof ComposePreviewDto>;

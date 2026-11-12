@@ -38,6 +38,10 @@ export const DEV_UI_READS: readonly string[] = [
   '/accounts/:accountId/usage',
   '/personas',
   '/people',
+  '/slack',
+  '/stakeholders/timers',
+  '/tasks/:taskId/question-routes',
+  '/inbox/:id/compose',
   '/model-profiles',
   '/model-settings',
   '/judge',
@@ -69,6 +73,7 @@ export const DEV_UI_REFUSED_READS: Readonly<Record<string, string>> = {
   '/passes/:passId/close': "A pass's close lists are read with git.",
   '/passes/:passId/pull-request': "Reading a pass's pull request runs gh.",
   '/dev-ui/connection': "The dev UI's own token is for the 10db app's Open Page.",
+  '/slack/members': "The workspace's people are read from Slack, which the dev UI never reaches.",
   '/health': 'Open to every caller; it needs no token.',
 };
 

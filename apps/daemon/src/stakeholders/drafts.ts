@@ -86,6 +86,26 @@ export function draftContext(
 }
 
 /**
+ * The message a question would be for these people, with what the scan holds, without writing anything:
+ * Ask Someone… previews it for a person who is not on Slack too (Copy for them, spec §5).
+ */
+export function previewDraft(
+  db: DbReader,
+  card: InboxItemDto,
+  people: readonly PersonDto[],
+): { text: string; hits: OutboundHit[] } {
+  const context = draftContext(db, card);
+  const { text } = composeSlackQuestion({
+    card,
+    projectName: context.projectName,
+    goalTitle: context.goalTitle,
+    builderName: context.builderName,
+    recipientNames: people.map((p) => p.name),
+  });
+  return { text, hits: hitsFor(card, text) };
+}
+
+/**
  * Writes a routed question's message as a draft, in the transaction that routed the card. A card for the
  * builder, a card waiting for triage, a card that already has a live send and any card but an open question
  * get none. A recipient with no Slack contact makes the card the builder's. A failure to compose or scan

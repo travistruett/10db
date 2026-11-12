@@ -4,6 +4,7 @@ import {
   ToolAccess,
   type ClaimKind,
   type ContextPack,
+  type QuestionRouteDto,
   type EvidenceDto,
   type HandoffDto,
   type NextAction,
@@ -57,6 +58,8 @@ export interface PromptInput {
   readonly evidence: EvidenceDto | null;
   readonly recovery: { readonly reason: string; readonly lastOp: string | null } | null;
   readonly contextPack: ContextPack;
+  /** Who answers this task's questions, from the project's routes; absent or empty tells the lane nothing. */
+  readonly questionRoutes?: readonly QuestionRouteDto[];
   readonly step: StepBrief;
   readonly priorResults: readonly PriorResult[];
   /** A read-only step sent back sees the result it gave before. */
@@ -419,6 +422,56 @@ export function renderHandoff(h: HandoffDto): string {
  * decisions for the task, each with its id and scope; what the budget left out is counted per shelf.
  * The bootstrap prompt and the post-compaction re-injection both use it, so they read the same.
  */
+/** "A, B and C". */
+function listed(items: readonly string[]): string {
+  const last = items.at(-1);
+  if (last === undefined) return '';
+  return items.length === 1 ? last : `${items.slice(0, -1).join(', ')} and ${last}`;
+}
+
+/**
+ * The section that tells the lane who reads its questions (spec §7.1), so it writes them for a reader who has
+ * not seen the code. Nothing when every question goes to the builder.
+ */
+function renderQuestionRoutes(routes: readonly QuestionRouteDto[]): string[] {
+  const named = routes.filter((r) => r.people.length > 0);
+  const byPeople = new Map<string, { names: string; categories: string[] }>();
+  for (const route of named) {
+    if (route.category === null) continue;
+    const names = listed(route.people.map((p) => p.name));
+    const group = byPeople.get(names) ?? { names, categories: [] };
+    group.categories.push(route.category);
+    byPeople.set(names, group);
+  }
+  if (byPeople.size === 0) return [];
+  const who = [...byPeople.values()];
+  const goes = who.map((g) => `${listed(g.categories)} go to ${g.names}`).join('; ');
+  const topics = new Map<string, string[]>();
+  for (const route of named) {
+    if (route.topic === null) continue;
+    const names = listed(route.people.map((p) => p.name));
+    topics.set(names, [...(topics.get(names) ?? []), route.topic]);
+  }
+  const topicLine =
+    topics.size === 0
+      ? []
+      : [
+          `When a question is about one of these topics, set \`topic\` to it: ${[...topics]
+            .map(([names, list]) => `${list.join(', ')} (${names})`)
+            .join('; ')}.`,
+        ];
+  return [
+    '',
+    [
+      `Questions about this task: ${goes}, who read them in Slack and may take hours to answer.`,
+      'Write those for someone who has not seen the code: say what it is about in one sentence, give 2 to 4 options in plain words, recommend one, and say what happens if each is picked.',
+      'Every other category goes to the builder.',
+      ...topicLine,
+      'Use `find_knowledge` first; a question already decided is not asked again.',
+    ].join(' '),
+  ];
+}
+
 function renderKnowledge(pack: ContextPack): string {
   const k = pack.knowledge;
   const omitted =
@@ -707,6 +760,7 @@ export function buildSessionPrompt(input: PromptInput): string {
     '',
     'Context pack:',
     renderKnowledge(input.contextPack),
+    ...renderQuestionRoutes(input.questionRoutes ?? []),
     ...(input.denials && input.denials.length > 0 ? ['', ...renderDenials(input.denials)] : []),
     ...renderAnsweredCards(input.step.role, input.answeredCards),
     ...(input.renumbered ? ['', input.renumbered] : []),

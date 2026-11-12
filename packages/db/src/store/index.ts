@@ -35,6 +35,7 @@ export * from './passes';
 export * from './pass-previews';
 export * from './permission-rules';
 export * from './projects';
+export * from './question-routes';
 export * from './routing-rules';
 export * from './sessions';
 export * from './shape-state';

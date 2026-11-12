@@ -42,6 +42,8 @@ import type {
   GoalListDto,
   HumanTouchDto,
   InboxAnswer,
+  AskSomeoneInput,
+  ComposePreviewDto,
   InboxItemDto,
   InboxItemId,
   InboxState,
@@ -127,6 +129,14 @@ import type {
   TaskDto,
   TaskFileId,
   TaskId,
+  PersonId,
+  QuestionRouteDto,
+  SendInput,
+  SlackConnectionDto,
+  SlackMemberDto,
+  SlackTokenInput,
+  StakeholderSendDto,
+  StakeholderTimersDto,
   TaskMessageDto,
   TaskPictureKind,
   TaskScreenId,
@@ -566,6 +576,26 @@ export interface ApiServices {
   patchPersona(id: PersonaId, patch: PersonaPatch): PersonaDto;
   listPeople(): PersonDto[];
   createPerson(input: PersonInput): PersonDto;
+  updatePerson(id: PersonId, input: PersonInput): PersonDto;
+  /** Removes a person; the builder, a goal's owner, a person on a criterion and a routed person stay. */
+  removePerson(id: PersonId): void;
+  /** The Slack connection as the reply watch last found it. */
+  slackStatus(): SlackConnectionDto;
+  /** Checks the token with Slack, then keeps it in the Keychain; a refused token is stored nowhere. */
+  setSlackToken(input: SlackTokenInput): Promise<SlackConnectionDto>;
+  removeSlackToken(): Promise<SlackConnectionDto>;
+  /** The workspace's people, optionally filtered; read from Slack at most every ten minutes. */
+  listSlackMembers(query: string): Promise<SlackMemberDto[]>;
+  getStakeholderTimers(): StakeholderTimersDto;
+  setStakeholderTimers(input: StakeholderTimersDto): StakeholderTimersDto;
+  /** Who a task's questions go to, by scope. */
+  questionRoutes(taskId: TaskId): QuestionRouteDto[];
+  /** Sends a drafted question to its people (Send, and Send Anyway with `overrideLimit`). */
+  sendInbox(id: InboxItemId, input: SendInput): Promise<StakeholderSendDto>;
+  askSomeone(id: InboxItemId, input: AskSomeoneInput): InboxItemDto;
+  takeBack(id: InboxItemId): Promise<InboxItemDto>;
+  keepWaiting(id: InboxItemId): InboxItemDto;
+  composeFor(id: InboxItemId, personIds: PersonId[]): ComposePreviewDto;
   createFlow(input: FlowInput): FlowDto;
   patchFlow(id: FlowId, patch: FlowPatch): FlowDto;
   listModelProfiles(): ModelProfileDto[];

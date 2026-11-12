@@ -186,10 +186,12 @@ import {
 } from './shape-review';
 import {
   AskSomeoneInput,
+  ComposePreviewDto,
   QuestionRouteDto,
   SendInput,
   SlackConnectionDto,
   SlackMemberDto,
+  SlackTokenInput,
   StakeholderSendDto,
 } from './slack';
 import { StepPlanDto } from './steps';
@@ -342,6 +344,8 @@ export const CONTRACT_SCHEMAS: Record<string, z.ZodType> = {
   'question-route-dto': QuestionRouteDto,
   'slack-connection-dto': SlackConnectionDto,
   'slack-member-dto': SlackMemberDto,
+  'slack-token-input': SlackTokenInput,
+  'compose-preview-dto': ComposePreviewDto,
   'step-plan-dto': StepPlanDto,
   'team-dto': TeamDto,
   'team-input': TeamInput,

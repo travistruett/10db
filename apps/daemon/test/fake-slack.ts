@@ -86,7 +86,7 @@ export class FakeSlack implements SlackClient {
     this.enter('auth.test');
     return Promise.resolve({ teamId: 'T1', teamName: 'Team', botUserId: FAKE_BOT_USER });
   };
-  listMembers = () => Promise.reject(new Error('unused'));
+  listMembers: SlackClient['listMembers'] = () => Promise.reject(new Error('unused'));
   openDm(userId: string): Promise<string> {
     this.enter('conversations.open');
     this.opened.push({ kind: 'dm', users: [userId] });

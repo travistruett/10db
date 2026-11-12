@@ -79,6 +79,7 @@ import {
 } from '../catalogue';
 import { createJudge, JUDGE_LOG_RETENTION_MS, type JudgeService } from '../judge';
 import { createJudgeServices } from './judge-services';
+import { createStakeholderApiServices } from './stakeholder-services';
 import {
   createReplyWatch,
   createSlackConnection,
@@ -1793,6 +1794,16 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       keychain: judgeKeychain,
       judge,
       off: opts.judgeOff === true,
+    }),
+    stakeholders: createStakeholderApiServices({
+      state,
+      keychain: judgeKeychain,
+      slack: slackClient,
+      sends,
+      connection: slackConnection,
+      clock,
+      fetch: opts.fetch ?? fetch,
+      reconnect: () => replyWatch.reconnect(),
     }),
     shape: createShapeServices({ shape, state, clock }),
     pictures,

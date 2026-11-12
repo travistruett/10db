@@ -104,6 +104,7 @@ import {
   openPassTurn,
   passPageAreas,
   patchWorkstream,
+  questionRoutesForTask,
   recordJudgeOutcome,
   recordProfileOutcome,
   releaseClaim,
@@ -2172,6 +2173,7 @@ export function createRunner(opts: RunnerOptions): Runner {
       handoff: contextPack.handoff,
       answer: permission?.prompt ?? contextPack.pendingAnswer,
       contextPack,
+      questionRoutes: questionRoutesForTask(db, row.taskId),
       step: {
         index: row.stepIndex,
         count: Math.max(row.steps.length, 1),

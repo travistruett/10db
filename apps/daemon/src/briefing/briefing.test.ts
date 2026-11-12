@@ -145,6 +145,66 @@ const base = {
   contextPack: emptyPack,
 };
 
+describe('telling the lane who answers its questions', () => {
+  const at = '2026-11-12T10:00:00.000Z';
+  const person = (handle: string, name: string) => ({
+    id: mintId('Person'),
+    handle,
+    name,
+    isBuilder: false,
+    slack: null,
+    createdAt: at,
+    updatedAt: at,
+  });
+  const mark = person('mark', 'Mark');
+  const ana = person('ana', 'Ana');
+  const sarah = person('sarah', 'Sarah');
+  const route = (
+    category: 'product' | 'design' | 'business' | null,
+    people: (typeof mark)[],
+    over: { topic?: string } = {},
+  ) => ({
+    category,
+    topic: over.topic ?? null,
+    people,
+    from: category === null ? ('topic' as const) : ('project' as const),
+  });
+  const prompt = (questionRoutes: ReturnType<typeof route>[]) =>
+    buildSessionPrompt({ ...base, action: { kind: 'start' }, questionRoutes });
+
+  it('says which categories go to Mark, how to write for him, and who gets the rest', () => {
+    const text = prompt([route('product', [mark]), route('design', [mark])]);
+    expect(text).toContain('Questions about this task: product and design go to Mark');
+    expect(text).toContain('read them in Slack and may take hours to answer');
+    expect(text).toContain('Write those for someone who has not seen the code');
+    expect(text).toContain('Every other category goes to the builder.');
+    expect(text).toContain('Use `find_knowledge` first');
+    expect(text).not.toContain('`topic`');
+  });
+
+  it('names both people of a tie, and groups categories by who gets them', () => {
+    const text = prompt([route('product', [mark, ana]), route('business', [sarah])]);
+    expect(text).toContain('product go to Mark and Ana');
+    expect(text).toContain('business go to Sarah');
+  });
+
+  it("lists the project's topics for ask_human, grouped by who answers them", () => {
+    const text = prompt([
+      route('product', [mark]),
+      route(null, [sarah], { topic: 'billing' }),
+      route(null, [sarah], { topic: 'pricing' }),
+    ]);
+    expect(text).toContain('set `topic` to it: billing, pricing (Sarah)');
+  });
+
+  it('writes nothing for a task nobody else answers for', () => {
+    expect(prompt([])).not.toContain('Questions about this task');
+    expect(buildSessionPrompt({ ...base, action: { kind: 'start' } })).not.toContain(
+      'Questions about this task',
+    );
+  });
+});
+
 describe('the prompt that resumes a question answered in Slack', () => {
   const inboxId = mintId('InboxItem');
   const resumed = (answer: NonNullable<Parameters<typeof buildSessionPrompt>[0]['answer']>) =>

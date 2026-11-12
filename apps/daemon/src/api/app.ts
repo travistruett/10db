@@ -43,6 +43,11 @@ import {
   NetworkHostInput,
   Month,
   ModelProfilePatch,
+  AskSomeoneInput,
+  PersonId,
+  SendInput,
+  SlackTokenInput,
+  StakeholderTimersDto,
   PersonaId,
   PersonaInput,
   PersonaPatch,
@@ -1073,6 +1078,68 @@ export function createApp(deps: ApiDeps) {
       '/people',
       validator('json', (value): PersonInput => PersonInput.parse(value)),
       (c) => c.json(deps.services.createPerson(c.req.valid('json')), 201),
+    )
+    .put(
+      '/people/:personId',
+      validator('json', (value): PersonInput => PersonInput.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.updatePerson(PersonId.parse(c.req.param('personId')), c.req.valid('json')),
+        ),
+    )
+    .delete('/people/:personId', (c) => {
+      deps.services.removePerson(PersonId.parse(c.req.param('personId')));
+      return c.json({});
+    })
+    .get('/slack', (c) => c.json(deps.services.slackStatus()))
+    .put(
+      '/slack/token',
+      validator('json', (value): SlackTokenInput => SlackTokenInput.parse(value)),
+      async (c) => c.json(await deps.services.setSlackToken(c.req.valid('json'))),
+    )
+    .delete('/slack/token', async (c) => c.json(await deps.services.removeSlackToken()))
+    .get('/slack/members', async (c) =>
+      c.json(await deps.services.listSlackMembers(c.req.query('query') ?? '')),
+    )
+    .get('/stakeholders/timers', (c) => c.json(deps.services.getStakeholderTimers()))
+    .put(
+      '/stakeholders/timers',
+      validator('json', (value): StakeholderTimersDto => StakeholderTimersDto.parse(value)),
+      (c) => c.json(deps.services.setStakeholderTimers(c.req.valid('json'))),
+    )
+    .get('/tasks/:taskId/question-routes', (c) =>
+      c.json(deps.services.questionRoutes(TaskId.parse(c.req.param('taskId')))),
+    )
+    .post(
+      '/inbox/:id/send',
+      validator('json', (value): SendInput => SendInput.parse(value)),
+      async (c) =>
+        c.json(
+          await deps.services.sendInbox(InboxItemId.parse(c.req.param('id')), c.req.valid('json')),
+        ),
+    )
+    .post(
+      '/inbox/:id/ask',
+      validator('json', (value): AskSomeoneInput => AskSomeoneInput.parse(value)),
+      (c) =>
+        c.json(deps.services.askSomeone(InboxItemId.parse(c.req.param('id')), c.req.valid('json'))),
+    )
+    .post('/inbox/:id/take-back', async (c) =>
+      c.json(await deps.services.takeBack(InboxItemId.parse(c.req.param('id')))),
+    )
+    .post('/inbox/:id/keep-waiting', (c) =>
+      c.json(deps.services.keepWaiting(InboxItemId.parse(c.req.param('id')))),
+    )
+    .get('/inbox/:id/compose', (c) =>
+      c.json(
+        deps.services.composeFor(
+          InboxItemId.parse(c.req.param('id')),
+          (c.req.query('personIds') ?? '')
+            .split(',')
+            .filter((id) => id !== '')
+            .map((id) => PersonId.parse(id)),
+        ),
+      ),
     )
     .post(
       '/flows',
