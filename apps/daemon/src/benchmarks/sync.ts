@@ -90,7 +90,7 @@ function measurement(model: AaModelDto) {
       agentic: e['artificial_analysis_agentic_index'] ?? null,
     },
     costPerTaskUsd: model.costPerTaskUsd,
-    outputTokensPerSecond: model.performance['median_output_tokens_per_second'] ?? null,
+    outputTokensPerSecond: model.performance['mean_output_tokens_per_second'] ?? null,
     indexVersion: model.indexVersion,
     measuredAt: model.fetchedAt,
   };

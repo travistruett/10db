@@ -35,7 +35,13 @@ const entry = (slug: string, score: number) => ({
     cost_per_task: { total_cost: score / 100 },
   },
   pricing: { price_1m_input_tokens: 1, price_1m_output_tokens: 2 },
-  performance: { median_output_tokens_per_second: 50 },
+  // Both shapes AA serves until the old fields go null: speed is read from `performance_v3` only.
+  performance: { median_output_tokens_per_second: 70 },
+  performance_v3: {
+    mean_output_tokens_per_second: 50,
+    mean_time_to_first_token_seconds: 1,
+    mean_time_to_first_answer_token_seconds: 2,
+  },
 });
 const page = (data: object[], hasMore: boolean, pageNo = 1, version = '9.9') => ({
   tier: 'free',
@@ -246,6 +252,38 @@ describe('benchmark sync', () => {
     expect(status.outcome).toBe('failed');
     expect(status.models).toBe(0);
   });
+
+  it.each([
+    {
+      name: 'the old fields gone null',
+      performance: {
+        median_output_tokens_per_second: null,
+        median_time_to_first_token_seconds: null,
+      },
+      performance_v3: { mean_output_tokens_per_second: 40, mean_time_to_first_token_seconds: 1 },
+      speed: 40,
+    },
+    {
+      name: 'no v3 measurement in the window',
+      performance: { median_output_tokens_per_second: 70 },
+      performance_v3: null,
+      speed: null,
+    },
+    {
+      name: 'no v3 object at all',
+      performance: { median_output_tokens_per_second: 70 },
+      performance_v3: undefined,
+      speed: null,
+    },
+  ])(
+    'reads the speed from performance_v3 with $name',
+    async ({ performance, performance_v3, speed }) => {
+      const listed = { ...entry('claude-opus-5-5-high', 50), performance, performance_v3 };
+      const status = await sync(fakeFetch({ status: 200, body: page([listed], false) })).sync();
+      expect(status.outcome).toBe('ok');
+      expect(opusHigh()?.outputTokensPerSecond).toBe(speed);
+    },
+  );
 
   it('reports a listed profile AA gives no cost as unmeasured', async () => {
     const unpriced = {

@@ -15,6 +15,7 @@ export const AaModelDto = z.object({
   evaluations: z.record(z.string(), z.number().nullable()),
   costPerTaskUsd: z.number().nullable(),
   pricing: z.record(z.string(), z.number().nullable()),
+  /** AA's `performance_v3` means by their API name, e.g. `mean_output_tokens_per_second`. */
   performance: z.record(z.string(), z.number().nullable()),
   fetchedAt: z.iso.datetime(),
 });
