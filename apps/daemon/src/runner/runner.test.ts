@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readlinkSync,
   realpathSync,
   rmSync,
   symlinkSync,
@@ -24,6 +25,7 @@ import {
   PARKED_NOTICE_KEY,
   REVERT_COMMIT_LINE,
   ToolAccess,
+  TRUST_DEFAULTS,
   AccountCardChoice,
   MCP_APPROVAL_DETAIL,
   rejectionsSentBack,
@@ -103,7 +105,12 @@ import type {
   MigrationsBase,
   MigrationsBaseTake,
 } from '../delivery';
-import { allowedToolsFor, listNetworkHosts, setLaneAutoMode } from '../permissions';
+import {
+  allowedToolsFor,
+  listNetworkHosts,
+  setAppTrustSwitches,
+  setLaneAutoMode,
+} from '../permissions';
 import {
   createLaneSandbox,
   EMPTY_SETUP,
@@ -4777,6 +4784,144 @@ describe.skipIf(SANDBOXED)('lane sandbox', () => {
     expect(readdirSync(probe.tmpRoot)).toEqual([]);
     expect(readdirSync(probe.filesRoot)).toEqual([]);
     expect(ws(workstream.id).state).toBe('DONE');
+  });
+
+  describe('the setup a session starts with', () => {
+    /** The engine on the probe's sandbox, reading the probe's home as the builder's. */
+    const setupEngine = async (
+      probe: SandboxProbe,
+      book: FakeScriptBook,
+      logger = silentLogger,
+    ): Promise<TestEngine> =>
+      createTestEngine(
+        book,
+        {},
+        {
+          laneSandbox: probe.laneSandbox,
+          codexLaneTempRoot: probe.codexLanes,
+          builderHome: probe.home,
+          laneWritableRoots: [probe.tmpRoot, probe.codexLanes],
+          logger,
+        },
+      );
+    const builderSkill = (home: string, name: string): string => {
+      const dir = join(home, '.claude/skills', name);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, 'SKILL.md'), `---\nname: ${name}\ndescription: a skill\n---\n`);
+      return dir;
+    };
+    /** Commits files into the engine's repository, so the lane's copy holds them and nothing is left over. */
+    const commitToRepo = (files: Record<string, string>): void => {
+      for (const [path, text] of Object.entries(files)) {
+        mkdirSync(dirname(join(engine.repoPath, path)), { recursive: true });
+        writeFileSync(join(engine.repoPath, path), text);
+      }
+      const repoGit = (...args: string[]) =>
+        execFileSync('git', ['-C', engine.repoPath, ...args], {
+          env: isolatedGitEnv(),
+          stdio: 'pipe',
+        });
+      repoGit('add', '--', ...Object.keys(files));
+      repoGit('commit', '-q', '-m', 'setup');
+    };
+    /** Each spec as it started, with where its `yours` plugin's skill links led while it ran. */
+    const recordSetups = (): { spec: SessionSpec; links: Record<string, string> }[] => {
+      const seen: { spec: SessionSpec; links: Record<string, string> }[] = [];
+      engine.adapter.seen = (spec) => {
+        const yours = spec.setup?.plugins.find((dir) => dir.endsWith('/yours'));
+        const skills = yours === undefined ? [] : readdirSync(join(yours, 'skills'));
+        seen.push({
+          spec,
+          links: Object.fromEntries(
+            skills.map((name) => [name, readlinkSync(join(yours ?? '', 'skills', name))]),
+          ),
+        });
+        return {};
+      };
+      return seen;
+    };
+
+    it("starts a lane with the project's instructions, the builder's skills and the setup reads in its profile", async () => {
+      const probe = sandboxProbe();
+      engine = await setupEngine(probe, { Alpha: [[turn]] });
+      commitToRepo({ 'AGENTS.md': '# Rules\n\nUse pnpm.\n' });
+      const skill = builderSkill(probe.home, 's');
+      const seen = recordSetups();
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+
+      const [first] = seen;
+      expect(first?.spec.instructions).toContain('Use pnpm.');
+      expect(first?.spec.setup?.plugins[0]).toMatch(/\/yours$/);
+      expect(first?.links).toEqual({ s: skill });
+      expect(probe.sessions[0]?.spec.settings.filesystem.allowRead).toContain(
+        join(probe.home, '.claude/skills'),
+      );
+      expect(first?.spec.prompt).toContain(
+        "- The repository's agent instructions (AGENTS.md, CLAUDE.md, .claude/rules) and the builder's own are in your system prompt.",
+      );
+      expect(first?.spec.prompt).toContain('- Loaded for you: 1 of your skills.');
+      // The session ended, so its setup dir is gone with its sandbox.
+      expect(readdirSync(probe.filesRoot)).toEqual([]);
+    });
+
+    it('a switch flipped while a session runs applies from the next one', async () => {
+      const probe = sandboxProbe();
+      engine = await setupEngine(probe, {
+        Alpha: [[{ do: 'await_signal', name: 'go' }, turn]],
+        Beta: [[turn]],
+      });
+      builderSkill(probe.home, 's');
+      const seen = recordSetups();
+      const alpha = engine.addTask('Alpha', ['api']).workstream;
+      engine.launch(alpha.id);
+      const first = await waitFor(() => seen[0]);
+      engine.state.write((ctx) => {
+        setAppTrustSwitches(ctx, { ...TRUST_DEFAULTS, yourSkills: false });
+      });
+      const beta = engine.addTask('Beta', ['ui']).workstream;
+      engine.launch(beta.id);
+      const second = await waitFor(() => seen[1]);
+      // The running session still reads the skill it started with.
+      const yours = first.spec.setup?.plugins.find((dir) => dir.endsWith('/yours')) ?? '';
+      expect(readlinkSync(join(yours, 'skills/s'))).toBe(first.links['s']);
+      engine.adapter.signal('go');
+      await engine.runner.idle();
+
+      expect(first.links).toHaveProperty('s');
+      expect(second.spec.setup?.plugins.some((dir) => dir.endsWith('/yours'))).toBe(false);
+      expect(second.spec.prompt).not.toContain('of your skills');
+    });
+
+    it('a skill link into a checkout is left out and named in the prompt and the log', async () => {
+      const probe = sandboxProbe();
+      const logs = captureLogs();
+      engine = await setupEngine(probe, { Alpha: [[turn]] }, logs.logger);
+      commitToRepo({
+        'lane-skill/SKILL.md': '---\nname: lane\ndescription: written by a lane\n---\n',
+      });
+      mkdirSync(join(probe.home, '.claude/skills'), { recursive: true });
+      symlinkSync(join(engine.repoPath, 'lane-skill'), join(probe.home, '.claude/skills/lane'));
+      const seen = recordSetups();
+      const { workstream } = engine.addTask('Alpha');
+      engine.launch(workstream.id);
+      await engine.runner.idle();
+
+      const prompt = seen[0]?.spec.prompt ?? '';
+      expect(seen[0]?.links).toEqual({});
+      expect(prompt).toContain('Left out: ~/.claude/skills/lane, see the note at the end.');
+      expect(prompt).toContain(
+        '- ~/.claude/skills/lane: it lies in, or holds, a folder a lane can write',
+      );
+      const logged = logs.lines().find((line) => line['msg'] === 'session setup left out');
+      expect(logged).toMatchObject({
+        workstreamId: workstream.id,
+        leftOut: [
+          { what: '~/.claude/skills/lane', why: 'it lies in, or holds, a folder a lane can write' },
+        ],
+      });
+    });
   });
 
   /** A subscription session starts only on an account whose identity was confirmed. */

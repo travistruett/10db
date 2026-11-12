@@ -157,6 +157,8 @@ export async function createTestEngine(
       | 'judge'
       | 'git'
       | 'worktreeRoot'
+      | 'builderHome'
+      | 'laneWritableRoots'
       | 'codexLaneTempRoot'
       | 'awaitBeforePicture'
     >
@@ -338,6 +340,9 @@ export async function createTestEngine(
     dataDir: data.path,
     worktreeRoot: join(data.path, 'worktrees'),
     codexLaneTempRoot: join(data.path, 'lanes'),
+    // Never the developer's own home: a test's builder has no instructions, skills or plugins.
+    builderHome: join(data.path, 'home'),
+    laneWritableRoots: [join(data.path, 'lanes')],
     live,
     limits: { ...DEFAULT_RUNNER_LIMITS, gateTimeoutMs: 20_000 },
     mcpUrl: () => mcpUrl,

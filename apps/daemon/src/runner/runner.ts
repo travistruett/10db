@@ -193,7 +193,8 @@ import {
   reopenSignedOffPage,
   type PassWorkDeps,
 } from '../pass';
-import { allowedToolsFor, laneAutoMode, storableRule } from '../permissions';
+import { allowedToolsFor, laneAutoMode, storableRule, trustSwitchesFor } from '../permissions';
+import { leftOutNote, loadedLine, planSessionSetup } from '../session-setup';
 import { takeFoundHostsReading } from '../registries';
 import { retryStep } from '../routing';
 import { resolveStep } from './resolve-step';
@@ -365,6 +366,10 @@ export interface RunnerOptions {
   readonly codexLaneTempRoot: string;
   /** Where the daemon makes lane copies: no prompt repeats a denied read of it outside the lane's copy. */
   readonly worktreeRoot: string;
+  /** The builder's home, whose instructions, skills and plugins come along into each session (Settings › Trust). */
+  readonly builderHome: string;
+  /** The roots lanes write outside their checkouts (their temp roots): no setup comes along from them. */
+  readonly laneWritableRoots: readonly string[];
   /**
    * While this holds (the Mac is overloaded, or an update drains the factory) no session or task gate
    * starts: each waits here, before anything is built or launched and before a gate takes its batch's
@@ -2027,10 +2032,18 @@ export function createRunner(opts: RunnerOptions): Runner {
         : () => undefined;
     // Where Claude Code keeps this account's sessions, and with them each one's saved tool results.
     const configDir = sessionConfigDir(account.kind, launch.env, homedir());
+    // Read when each session starts: a switch flipped or a skill added meanwhile applies from the next one.
+    const setupPlan = planSessionSetup({
+      home: opts.builderHome,
+      checkout,
+      switches: trustSwitchesFor(db, project.id),
+      laneWritable: [...allCheckouts(db), opts.worktreeRoot, ...opts.laneWritableRoots],
+    });
     let laneSession: LaneSession | null = null;
     if (opts.laneSandbox) {
       try {
         laneSession = await opts.laneSandbox.forSession({
+          setup: setupPlan.input,
           project: projectAtCheckout(project, checkout),
           env: launch.env,
           rules: listPermissionRules(db, project.id, id),
@@ -2063,6 +2076,10 @@ export function createRunner(opts: RunnerOptions): Runner {
       { ...projectMcp, failures: [...projectMcp.failures, ...sandboxFailures] },
       opts.laneSandbox ? [] : Object.keys(mcpServers.stdio),
     );
+    const setupLeftOut = [...setupPlan.leftOut, ...(laneSession?.setup.leftOut ?? [])];
+    if (setupLeftOut.length > 0)
+      opts.logger.info({ workstreamId: id, leftOut: setupLeftOut }, 'session setup left out');
+    const setupNote = leftOutNote(setupLeftOut);
     if (laneSession) opts.laneTempDirs?.set(id, laneSession.tmpDir);
     const dispose = (): void => {
       opts.laneTempDirs?.delete(id);
@@ -2134,6 +2151,16 @@ export function createRunner(opts: RunnerOptions): Runner {
       inPass: pass !== null,
       pictures: project.appUrl !== null && takesPictures(project, task),
       sandboxed: Boolean(opts.laneSandbox),
+      instructionsLoaded: setupPlan.instructions.text !== null,
+      setupLine:
+        laneSession === null
+          ? null
+          : loadedLine({
+              skills: laneSession.setup.loaded.skills,
+              plugins: laneSession.setup.loaded.plugins,
+              projectFiles: setupPlan.input.projectFiles,
+              leftOut: setupLeftOut,
+            }),
       denials: denialsToTell(),
       answeredCards: answeredCardsForTask(db, row.taskId),
       renumbered: noticeBody(MIGRATIONS_RENUMBERED_NOTICE_KEY),
@@ -2339,7 +2366,7 @@ export function createRunner(opts: RunnerOptions): Runner {
         workstreamId: id,
         sequence: session.sequence,
         cwd: checkout,
-        prompt: mcpNote ? `${prompt}\n\n${mcpNote}` : prompt,
+        prompt: [prompt, mcpNote, setupNote].filter(Boolean).join('\n\n'),
         ...(fed === null ? {} : { promptUuid: fed.uuid, images: fed.images }),
         model: launch.model,
         effort: launchStep.effort,
@@ -2348,6 +2375,15 @@ export function createRunner(opts: RunnerOptions): Runner {
         account: launch.expect,
         projectMcpServers: { ...mcpServers.remote, ...laneSession?.mcpServers },
         sandbox: laneSession?.spec ?? null,
+        instructions: setupPlan.instructions.text,
+        ...(laneSession
+          ? {
+              setup: {
+                plugins: laneSession.setup.pluginDirs,
+                skillRoots: laneSession.setup.skillRoots,
+              },
+            }
+          : {}),
         ...(laneSession
           ? {
               lanePermissionMode: laneAutoMode(db, (stored) => {

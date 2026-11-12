@@ -85,6 +85,13 @@ export interface PromptInput {
    * session with no conversation to resume starts from (null for one that resumes it).
    */
   readonly feedback?: { readonly message: string; readonly digest: string | null };
+  /**
+   * The repository's and the builder's instructions came in the system prompt, so a sandboxed session is
+   * told they are there instead of to read them.
+   */
+  readonly instructionsLoaded?: boolean;
+  /** What the session's setup brought along and left out, as one rule line, beside the instructions line. */
+  readonly setupLine?: string | null;
 }
 
 /** An Inbox card the builder answered, as a reviewer is shown it. */
@@ -239,9 +246,15 @@ const AUTO_MODE_RULE =
 const CLAUDE_HOSTS_RULE =
   "A command that reaches a network host outside the project's allowed domains is refused, with no prompt. If you need one, ask the builder with AskUserQuestion.";
 
+const READ_INSTRUCTIONS_RULE =
+  "Read the repository's agent instructions first: `AGENTS.md`, or `CLAUDE.md` where the repo uses it.";
+
+const INSTRUCTIONS_LOADED_RULE =
+  "The repository's agent instructions (AGENTS.md, CLAUDE.md, .claude/rules) and the builder's own are in your system prompt.";
+
 /** Beside the commands line in a sandboxed session. */
 const SANDBOX_RULES = [
-  "Read the repository's agent instructions first: `AGENTS.md`, or `CLAUDE.md` where the repo uses it.",
+  READ_INSTRUCTIONS_RULE,
   TEMP_FILES_RULE,
   "A command that fails with `Operation not permitted` hit the sandbox: say which path in your handoff, and don't retry it another way.",
   AUTO_MODE_RULE,
@@ -340,14 +353,35 @@ function readOnlyRules(role: StepRole): string[] {
   ];
 }
 
+/** What the session's setup changes of the sandbox's lines. */
+interface SetupLines {
+  readonly instructionsLoaded: boolean;
+  readonly setupLine: string | null;
+}
+
+/** The sandbox's lines with the instructions line as the setup has it, and the setup line after it. */
+function withSetupLines(lines: readonly string[], setup: SetupLines): string[] {
+  return lines.flatMap((line) =>
+    line === READ_INSTRUCTIONS_RULE
+      ? [
+          setup.instructionsLoaded ? INSTRUCTIONS_LOADED_RULE : line,
+          ...(setup.setupLine ? [setup.setupLine] : []),
+        ]
+      : [line],
+  );
+}
+
 /** The sandbox's lines as the agent the session runs under needs them. */
-function sandboxRulesFor(provider: Provider): readonly string[] {
+function sandboxRulesFor(provider: Provider, setup: SetupLines): readonly string[] {
   switch (provider) {
     case Provider.Claude:
-      return SANDBOX_RULES;
+      return withSetupLines(SANDBOX_RULES, setup);
     case Provider.Codex:
-      return SANDBOX_RULES.filter((line) => line !== AUTO_MODE_RULE).map((line) =>
-        line === CLAUDE_HOSTS_RULE ? CODEX_HOSTS_RULE : line,
+      return withSetupLines(
+        SANDBOX_RULES.filter((line) => line !== AUTO_MODE_RULE).map((line) =>
+          line === CLAUDE_HOSTS_RULE ? CODEX_HOSTS_RULE : line,
+        ),
+        setup,
       );
   }
 }
@@ -367,8 +401,9 @@ function withSandboxRules(
   rules: readonly string[],
   sandboxed: boolean,
   provider: Provider,
+  setup: SetupLines,
 ): string[] {
-  const sandbox = sandboxed ? sandboxRulesFor(provider) : [];
+  const sandbox = sandboxed ? sandboxRulesFor(provider, setup) : [];
   return rules.flatMap((rule) => {
     const own = ruleFor(provider, rule);
     if (rule === PLAIN_COMMANDS) return [own, ...sandbox];
@@ -655,6 +690,10 @@ export function buildSessionPrompt(input: PromptInput): string {
             ],
         input.sandboxed === true,
         input.provider,
+        {
+          instructionsLoaded: input.instructionsLoaded === true,
+          setupLine: input.setupLine ?? null,
+        },
       ),
     ),
     '',

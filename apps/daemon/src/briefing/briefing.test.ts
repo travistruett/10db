@@ -994,6 +994,44 @@ describe('buildSessionPrompt for flow steps', () => {
     for (const line of SANDBOX_LINES) expect(prompt).toContain(`- ${line}`);
   });
 
+  const INSTRUCTIONS_LOADED_LINE =
+    "The repository's agent instructions (AGENTS.md, CLAUDE.md, .claude/rules) and the builder's own are in your system prompt.";
+
+  it.each([
+    ['loaded', true, INSTRUCTIONS_LOADED_LINE, SANDBOX_LINES[0] ?? ''],
+    ['not loaded', false, SANDBOX_LINES[0] ?? '', INSTRUCTIONS_LOADED_LINE],
+  ])(
+    'tells a sandboxed session where the agent instructions are when they are %s',
+    (_name, instructionsLoaded, said, unsaid) => {
+      for (const step of [implementStep, reviewStep]) {
+        const prompt = buildSessionPrompt({
+          ...base,
+          step,
+          action: { kind: 'start' },
+          sandboxed: true,
+          instructionsLoaded,
+        });
+        expect(prompt).toContain(`- ${said}`);
+        expect(prompt).not.toContain(unsaid);
+      }
+    },
+  );
+
+  it('gives a sandboxed session the setup line after the instructions line', () => {
+    const setupLine = 'Loaded for you: 2 of your skills. Left out: ~/x, see the note at the end.';
+    const prompt = buildSessionPrompt({
+      ...base,
+      action: { kind: 'start' },
+      sandboxed: true,
+      instructionsLoaded: true,
+      setupLine,
+    });
+    expect(prompt).toContain(`- ${INSTRUCTIONS_LOADED_LINE}\n- ${setupLine}\n`);
+    expect(
+      buildSessionPrompt({ ...base, action: { kind: 'start' }, sandboxed: true }),
+    ).not.toContain('Loaded for you');
+  });
+
   it('gives the temp-file line only to a step that can make one', () => {
     const start = { ...base, action: { kind: 'start' as const }, sandboxed: true };
     expect(buildSessionPrompt(start)).toContain(`- ${TEMP_FILES_LINE}`);

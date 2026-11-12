@@ -1330,6 +1330,8 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     laneSandbox,
     codexLaneTempRoot: (sandboxRoots ?? namedSandboxRoots({}, homedir())).codexLanes,
     worktreeRoot,
+    builderHome: homedir(),
+    laneWritableRoots: allSandboxRoots,
     hold: startHold,
     laneTempDirs,
     state,
