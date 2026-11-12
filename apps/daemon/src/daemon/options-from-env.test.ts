@@ -4,6 +4,7 @@ import {
   aaKeyReaderFromEnv,
   catalogueSnapshotFromEnv,
   daemonOptionsFromEnv,
+  slackOnFromEnv,
 } from './options-from-env';
 
 describe('daemonOptionsFromEnv', () => {
@@ -113,5 +114,15 @@ describe('judgeOff', () => {
     ['unset', {}, false],
   ])('is %s -> %s for TENDB_JUDGE', (_name, source, off) => {
     expect(daemonOptionsFromEnv(loadEnv(source)).judgeOff ?? false).toBe(off);
+  });
+});
+
+describe('slackOnFromEnv', () => {
+  it.each([
+    ['off', { TENDB_SLACK: 'off' }, false],
+    ['on', { TENDB_SLACK: 'on' }, true],
+    ['unset, the installed app', {}, true],
+  ])('is %s -> %s for TENDB_SLACK', (_name, source, on) => {
+    expect(slackOnFromEnv(loadEnv(source))).toBe(on);
   });
 });

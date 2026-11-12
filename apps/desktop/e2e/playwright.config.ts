@@ -50,6 +50,8 @@ export default defineConfig({
         TENDB_CATALOGUE_SNAPSHOT: resolve(DESKTOP_DIR, '../daemon/test/fixtures/catalogue.json'),
         // No decision may call OpenRouter from a throwaway daemon.
         TENDB_JUDGE: 'off',
+        // No question may reach a real person from a throwaway daemon.
+        TENDB_SLACK: 'off',
         TENDB_DATA_DIR: E2E_DATA,
         TENDB_PORT: String(ports.daemon),
         TENDB_FAKE_SCRIPTS: book,

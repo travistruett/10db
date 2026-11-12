@@ -29,6 +29,15 @@ serves agents over MCP, and runs Claude Code sessions and, for a `codex_signin` 
   `daemonOptionsFromEnv`; every decision then keeps today's rule). Only the installed app's daemon asks models;
   the e2e web server, the live acceptance daemon and `scripts/dev.sh` set it, and
   `tests/repo/src/benchmarks-off.test.ts` checks they do. A new launcher of a throwaway daemon sets it too.
+- `TENDB_SLACK=off` keeps a daemon from reading the Slack bot token (Keychain service `10db`, account
+  `slack-bot`, `SLACK_BOT_ACCOUNT`) and from calling Slack (`slackOnFromEnv`; `DaemonOptions.slack` is off unless
+  given, so an in-process harness never reaches Slack). Only the installed app's daemon messages people; the e2e
+  web server, the live acceptance daemon, `scripts/dev.sh` and every daemon test that spawns the entry set it, and
+  `tests/repo/src/benchmarks-off.test.ts` checks they do. A new launcher of a throwaway daemon sets it too.
+- `slack/` is the only module that calls Slack: `createSlackClient` takes an injected `fetch`, token reader and
+  `Clock`, reads parse with zod, and a `SlackError` names the method and a code, never the token. Reads are GETs and
+  writes JSON POSTs. `stakeholders/` holds the pure texts and rules around it (compose, escape, scan, read a reply,
+  read a conversation); neither module ever sees the token outside `slack/client.ts`.
 - `src/api/` is typechecked by the desktop app too (it imports `AppType`). Code there must not import
   `node:*` modules or `@10db/db`; receive services through the `ApiServices` interface (passed in `ApiDeps`).
 - The package entry (`src/index.ts`) exports types only.
@@ -55,8 +64,8 @@ serves agents over MCP, and runs Claude Code sessions and, for a `codex_signin` 
 `src/<module>/` directories are flat; each exports its public surface from `index.ts`, and other
 modules import only that (ESLint enforces it). Dependencies point one way:
 
-`clock`, `log`, `events`, `judge`, `guard`, `permissions`, `sandbox`, `git`, `github`, `verify`, `routing`, `picker`, `folders`, `placement`, `knowledge` → `sessions`, `inbox`, `briefing`, `team` →
-`delivery`, `accounts` → `pass` → `pictures` → `mcp` → `screens` → `thread`, `shape` → `runner` → `watcher`, `scheduler`, `recovery`, `backups`, `benchmarks`, `self-update` → `daemon` (composition root) → `main.ts`.
+`clock`, `log`, `events`, `judge`, `slack`, `guard`, `permissions`, `sandbox`, `git`, `github`, `verify`, `routing`, `picker`, `folders`, `placement`, `knowledge` → `sessions`, `inbox`, `briefing`, `team` →
+`delivery`, `stakeholders`, `accounts` → `pass` → `pictures` → `mcp` → `screens` → `thread`, `shape` → `runner` → `watcher`, `scheduler`, `recovery`, `backups`, `benchmarks`, `self-update` → `daemon` (composition root) → `main.ts`.
 `api` depends only on `@10db/contracts` and its own `ApiServices` interface; the composition root
 implements it and hands it to `createApp` in `ApiDeps`.
 

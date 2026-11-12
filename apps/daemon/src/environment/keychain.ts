@@ -12,6 +12,8 @@ export const KEYCHAIN_SERVICE = '10db';
 export const AA_KEY_ACCOUNT = 'artificial-analysis-api-key';
 /** The Keychain account of the builder's OpenRouter key. */
 export const OPENROUTER_KEY_ACCOUNT = 'openrouter-api-key';
+/** The Keychain account of the Slack app's bot token. */
+export const SLACK_BOT_ACCOUNT = 'slack-bot';
 const KEYCHAIN_TIMEOUT_MS = 5_000;
 /** `security` exits with this status when the Keychain has no such item. */
 const ITEM_NOT_FOUND = 44;
