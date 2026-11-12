@@ -169,18 +169,21 @@ test('opens a pass on two pages, answers one in place, sends a picture to the ot
   await scan(page, 480, 'dark', 'setup');
   await scan(page, 1280, 'dark', 'setup');
   await billing.uncheck();
-  await page.getByRole('button', { name: 'Apply (2)' }).click();
+  await page.getByRole('button', { name: 'Apply' }).click();
 
-  // The picker, narrow and dark.
+  // The picker, narrow and dark, with its options open.
+  const pages = page.getByLabel('Pages', { exact: true }).and(page.locator('input'));
   await page.setViewportSize({ width: 480, height: 900 });
-  await expect(page.getByRole('checkbox', { name: 'settings' })).toBeVisible();
+  await pages.click();
+  await expect(page.getByRole('option', { name: /^settings/ })).toBeVisible();
   await scan(page, 480, 'dark', 'picker');
 
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.getByRole('checkbox', { name: 'settings' }).check();
-  await page.getByRole('checkbox', { name: 'people' }).check();
+  await page.getByRole('option', { name: /^settings/ }).click();
+  await page.getByRole('option', { name: /^people/ }).click();
+  await pages.press('Escape');
   await page.getByRole('textbox', { name: "What's bothering you?" }).fill('these feel cramped');
-  await page.getByRole('button', { name: 'Start Pass (2)' }).click();
+  await page.getByRole('button', { name: 'Start Pass' }).click();
 
   // People asks, so it rises to the top of the queue; it is answered on the page.
   await expect(row(page, 'people')).toContainText('Asks a question');

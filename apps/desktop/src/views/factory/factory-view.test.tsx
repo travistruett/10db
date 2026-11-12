@@ -316,7 +316,7 @@ describe('FactoryView goal list', () => {
     expect(screen.queryAllByRole('region')).toEqual([]);
     // Done goals sit behind one collapsed line and show once it opens.
     expect(screen.queryByRole('button', { name: /^Finished/ })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Done (1)' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Done/ }));
     expect(rowOf('Finished').getAttribute('aria-expanded')).toBe('false');
   });
 

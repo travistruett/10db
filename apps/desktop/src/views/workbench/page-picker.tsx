@@ -1,6 +1,16 @@
 import type { AreaDef, PassStartPageDto, TaskId } from '@10db/contracts';
-import { Checkbox, Stack, Text, TextInput } from '@mantine/core';
-import { useId, useState, type ReactNode } from 'react';
+import {
+  Group,
+  MultiSelect,
+  Pill,
+  Stack,
+  Text,
+  type ComboboxItem,
+  type ComboboxItemGroup,
+  type ComboboxParsedItem,
+  type OptionsFilter,
+} from '@mantine/core';
+import { IconSubtask } from '@tabler/icons-react';
 import { shortAgo } from '../factory/short-ago';
 import { blockedReason, type JoinableTask, type PickTicks } from './start-pass-rules';
 
@@ -16,22 +26,27 @@ export interface PagePickerProps {
   readonly inPass?: readonly string[];
 }
 
-/** "/settings · changed 1d ago", with what holds the page when something does. */
-function pageLine(page: PassStartPageDto, now: number): string {
-  const route = page.route ?? 'No route';
-  const changed =
-    page.lastChangedAt === null ? 'no changes yet' : `changed ${shortAgo(page.lastChangedAt, now)}`;
-  return `${route} · ${changed}`;
+/** What one option says beyond its name, and the text a search matches. */
+interface Choice {
+  readonly name: string;
+  readonly route: string | null;
+  readonly kind: 'page' | 'task';
+  /** Right of the name: when the page last changed, or the pages a task works on. */
+  readonly aside: string;
+  /** Under the name: what holds the page, or why it can't join what is picked. */
+  readonly notes: readonly string[];
+  readonly haystack: string;
 }
 
-const matches = (filter: string, ...texts: readonly (string | null)[]) =>
-  filter === '' || texts.some((text) => text?.toLowerCase().includes(filter) === true);
+const PAGE = 'page:';
+const pageValue = (area: string) => `${PAGE}${area}`;
+const taskValue = (taskId: TaskId) => `task:${taskId}`;
 
 function without<T>(list: readonly T[], drop: (item: T) => boolean): T[] {
   return list.filter((item) => !drop(item));
 }
 
-/** One ticked row's neighbours: the ticks with that row taken out, so it is never blocked by itself. */
+/** The picked rows with one row taken out, so a row is never blocked by itself. */
 function othersOf(ticks: PickTicks, row: { page?: string; taskId?: TaskId }): PickTicks {
   return {
     pages: without(ticks.pages, (page) => page === row.page),
@@ -39,127 +54,162 @@ function othersOf(ticks: PickTicks, row: { page?: string; taskId?: TaskId }): Pi
   };
 }
 
-interface PickRowProps {
-  readonly label: string;
-  readonly line: string;
-  readonly note: string | null;
-  readonly checked: boolean;
-  readonly blocked: string | null;
-  readonly onChange: (checked: boolean) => void;
+const changedLine = (page: PassStartPageDto, now: number) =>
+  page.lastChangedAt === null ? 'no changes yet' : `changed ${shortAgo(page.lastChangedAt, now)}`;
+
+/** Keeps the options whose name, route or pages hold the search, inside their groups. */
+function filterBy(choices: ReadonlyMap<string, Choice>): OptionsFilter {
+  return ({ options, search }) => {
+    const wanted = search.trim().toLowerCase();
+    if (wanted === '') return options;
+    const hit = (item: ComboboxItem) => choices.get(item.value)?.haystack.includes(wanted) === true;
+    return options.flatMap((option): ComboboxParsedItem[] => {
+      if ('group' in option) {
+        const items = option.items.filter(hit);
+        return items.length === 0 ? [] : [{ group: option.group, items }];
+      }
+      return hit(option) ? [option] : [];
+    });
+  };
 }
 
-function PickRow({ label, line, note, checked, blocked, onChange }: PickRowProps) {
+function OptionBody({ choice }: { readonly choice: Choice }) {
   return (
-    <Checkbox
-      label={label}
-      checked={checked}
-      disabled={!checked && blocked !== null}
-      onChange={(event) => {
-        onChange(event.currentTarget.checked);
-      }}
-      description={
-        <Stack gap={0} component="span">
-          <Text span size="xs" c="dimmed">
-            {line}
+    <Stack gap={0} style={{ flex: 1, minWidth: 0 }}>
+      <Group justify="space-between" gap="sm" wrap="nowrap">
+        <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
+          <Text size="sm" truncate>
+            {choice.name}
           </Text>
-          {note === null ? null : (
-            <Text span size="xs" c="dimmed">
-              {note}
+          {choice.kind === 'page' ? (
+            <Text size="xs" c="dimmed" ff="monospace">
+              {choice.route ?? 'No route'}
             </Text>
-          )}
-          {checked || blocked === null ? null : (
-            <Text span size="xs" c="dimmed">
-              {blocked}
-            </Text>
-          )}
-        </Stack>
-      }
-    />
+          ) : null}
+        </Group>
+        <Text size="xs" c="dimmed" style={{ flexShrink: 0 }}>
+          {choice.aside}
+        </Text>
+      </Group>
+      {choice.notes.map((note) => (
+        <Text key={note} size="xs" c="dimmed">
+          {note}
+        </Text>
+      ))}
+    </Stack>
   );
 }
 
-function Section({ title, children }: { readonly title: string; readonly children: ReactNode }) {
-  const id = useId();
+function PickedPill({
+  choice,
+  fallback,
+  onRemove,
+}: {
+  readonly choice: Choice | undefined;
+  readonly fallback: string;
+  readonly onRemove: (() => void) | undefined;
+}) {
+  const name = choice?.name ?? fallback;
   return (
-    <Stack gap="xs" role="group" aria-labelledby={id}>
-      <Text id={id} size="sm" fw={600}>
-        {title}
-      </Text>
-      {children}
-    </Stack>
+    <Pill
+      withRemoveButton
+      {...(onRemove ? { onRemove } : {})}
+      removeButtonProps={{ 'aria-label': `Remove ${name}` }}
+    >
+      <Group gap={6} wrap="nowrap" component="span">
+        {choice?.kind === 'task' ? <IconSubtask size={14} stroke={1.5} aria-hidden /> : null}
+        <span>{name}</span>
+        {choice?.route == null ? null : (
+          <Text span size="xs" c="dimmed" ff="monospace">
+            {choice.route}
+          </Text>
+        )}
+      </Group>
+    </Pill>
   );
 }
 
 /**
- * The picker's rows (Workbench spec §4.2): every page area with its route and last change, then the
- * open Board tasks that could join. A row that would hold a file a ticked row holds is disabled and
- * says why.
+ * The pages and open UI tasks a pass can start with (Workbench spec §4.2), as one search whose pills
+ * are what is picked. Each option shows its route and last change; one that would hold a file a
+ * picked row holds is disabled and says why.
  */
 export function PagePicker(props: PagePickerProps) {
   const { pages, tasks, areas, ticks, onTicks, now, inPass = [] } = props;
-  const [filter, setFilter] = useState('');
-  const wanted = filter.trim().toLowerCase();
-  const shownPages = pages.filter(
-    (page) =>
-      !inPass.includes(page.area) &&
-      (ticks.pages.includes(page.area) || matches(wanted, page.area, page.route)),
-  );
-  const ticked = (taskId: TaskId) => ticks.tasks.some((task) => task.taskId === taskId);
-  const shownTasks = tasks.filter(
-    (task) => ticked(task.taskId) || matches(wanted, task.title, ...task.pages),
-  );
+  const choices = new Map<string, Choice>();
+  const pageItems: ComboboxItem[] = pages
+    .filter((page) => !inPass.includes(page.area))
+    .map((page) => {
+      const value = pageValue(page.area);
+      const blocked = ticks.pages.includes(page.area)
+        ? null
+        : blockedReason({ pages: [page.area] }, ticks, areas, inPass);
+      choices.set(value, {
+        name: page.area,
+        route: page.route,
+        kind: 'page',
+        aside: changedLine(page, now),
+        notes: [
+          ...(page.heldBy === null ? [] : [`Waits for ${page.heldBy.title}`]),
+          ...(blocked === null ? [] : [blocked]),
+        ],
+        haystack: [page.area, page.route ?? ''].join(' ').toLowerCase(),
+      });
+      return { value, label: page.area, disabled: blocked !== null };
+    });
+  const taskItems: ComboboxItem[] = tasks.map((task) => {
+    const value = taskValue(task.taskId);
+    const blocked = ticks.tasks.some((t) => t.taskId === task.taskId)
+      ? null
+      : blockedReason(task, othersOf(ticks, { taskId: task.taskId }), areas, inPass);
+    choices.set(value, {
+      name: task.title,
+      route: null,
+      kind: 'task',
+      aside: task.pages.join(', '),
+      notes: blocked === null ? [] : [blocked],
+      haystack: [task.title, ...task.pages].join(' ').toLowerCase(),
+    });
+    return { value, label: task.title, disabled: blocked !== null };
+  });
+  const data: (ComboboxItem | ComboboxItemGroup<ComboboxItem>)[] =
+    taskItems.length === 0
+      ? pageItems
+      : [
+          { group: 'Pages', items: pageItems },
+          { group: 'Open UI tasks', items: taskItems },
+        ];
+  const value = [
+    ...ticks.pages.map(pageValue),
+    ...ticks.tasks.map((task) => taskValue(task.taskId)),
+  ];
   return (
-    <Stack gap="md">
-      <TextInput
-        aria-label="Filter pages and tasks"
-        placeholder="Filter"
-        value={filter}
-        onChange={(event) => {
-          setFilter(event.currentTarget.value);
-        }}
-      />
-      <Section title="Pages">
-        {shownPages.map((page) => {
-          const checked = ticks.pages.includes(page.area);
-          return (
-            <PickRow
-              key={page.area}
-              label={page.area}
-              line={pageLine(page, now)}
-              note={page.heldBy === null ? null : `Waits for ${page.heldBy.title}`}
-              checked={checked}
-              blocked={blockedReason({ pages: [page.area] }, ticks, areas, inPass)}
-              onChange={(on) => {
-                const others = othersOf(ticks, { page: page.area });
-                onTicks(on ? { ...others, pages: [...others.pages, page.area] } : others);
-              }}
-            />
-          );
-        })}
-        {shownPages.length === 0 ? (
-          <Text size="sm" c="dimmed">
-            No page matches.
-          </Text>
-        ) : null}
-      </Section>
-      {tasks.length === 0 ? null : (
-        <Section title="Open UI tasks">
-          {shownTasks.map((task) => (
-            <PickRow
-              key={task.taskId}
-              label={task.title}
-              line={task.pages.join(', ')}
-              note={null}
-              checked={ticked(task.taskId)}
-              blocked={blockedReason(task, ticks, areas, inPass)}
-              onChange={(on) => {
-                const others = othersOf(ticks, { taskId: task.taskId });
-                onTicks(on ? { ...others, tasks: [...others.tasks, task] } : others);
-              }}
-            />
-          ))}
-        </Section>
+    <MultiSelect
+      label="Pages"
+      placeholder={tasks.length === 0 ? 'Search pages' : 'Search pages and open UI tasks'}
+      data={data}
+      value={value}
+      onChange={(next) => {
+        onTicks({
+          pages: next.flatMap((v) => (v.startsWith(PAGE) ? [v.slice(PAGE.length)] : [])),
+          tasks: tasks.filter((task) => next.includes(taskValue(task.taskId))),
+        });
+      }}
+      searchable
+      filter={filterBy(choices)}
+      nothingFoundMessage="No page matches."
+      maxDropdownHeight={360}
+      renderOption={({ option }) => {
+        const choice = choices.get(option.value);
+        return choice ? <OptionBody choice={choice} /> : option.label;
+      }}
+      renderPill={({ option, onRemove }) => (
+        <PickedPill
+          choice={choices.get(String(option.value))}
+          fallback={option.label}
+          onRemove={onRemove}
+        />
       )}
-    </Stack>
+    />
   );
 }

@@ -1,6 +1,7 @@
 import { PassJoinRequest, type AreaDef, type PassStartDto } from '@10db/contracts';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import { openOptions, optionIn, pickOption } from '../../test/combobox';
 import { baseHandlers, renderWithDaemonAndRouter, server } from '../../test/daemon';
 import { projectViewDto } from '../../test/fixtures';
 import { PASS_NOW, passPageDto, passStartDto, passViewDto } from '../../test/pass-fixtures';
@@ -49,16 +50,20 @@ async function draw(
   return { add, onClose, dialog: await screen.findByRole('dialog', { name: 'Add Page' }) };
 }
 
+const pagesIn = (dialog: HTMLElement) =>
+  within(dialog).getByLabelText('Pages', { selector: 'input' });
+
 describe('AddPageModal', () => {
   it('adds the ticked pages the pass lacks, with their first message', async () => {
     const { add, onClose, dialog } = await draw(1);
-    expect(within(dialog).queryByRole('checkbox', { name: /^settings/ })).toBeNull();
-    fireEvent.click(within(dialog).getByRole('checkbox', { name: /^people/ }));
+    const list = await openOptions(pagesIn(dialog));
+    expect(within(list).queryByRole('option', { name: /^settings/, hidden: true })).toBeNull();
+    fireEvent.click(optionIn(list, /^people/));
     expect(within(dialog).getByText(/people: 2 files already changed/)).toBeTruthy();
     fireEvent.change(within(dialog).getByLabelText('First message'), {
       target: { value: 'the list is cramped' },
     });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Add Pages (1)' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add Pages' }));
     await waitFor(() => {
       expect(onClose).toHaveBeenCalled();
     });
@@ -71,12 +76,10 @@ describe('AddPageModal', () => {
 
   it('refuses a seventh page', async () => {
     const { dialog } = await draw(5);
-    fireEvent.click(within(dialog).getByRole('checkbox', { name: /^reports/ }));
-    expect(within(dialog).getByRole('checkbox', { name: /^forms/ })).toHaveProperty(
-      'disabled',
-      true,
-    );
-    expect(within(dialog).getAllByText('A pass holds at most 6 pages').length).toBeGreaterThan(0);
+    await pickOption(pagesIn(dialog), /^reports/);
+    const forms = optionIn(await openOptions(pagesIn(dialog)), /^forms/);
+    expect(forms.hasAttribute('data-combobox-disabled')).toBe(true);
+    expect(forms.textContent).toContain('A pass holds at most 6 pages');
   });
 
   it("says the daemon's refusal beside Add Pages and stays open", async () => {
@@ -84,8 +87,8 @@ describe('AddPageModal', () => {
       Promise.reject(new Error('people is held by "Fix the list"')),
     );
     const { onClose, dialog } = await draw(1, add);
-    fireEvent.click(within(dialog).getByRole('checkbox', { name: /^people/ }));
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Add Pages (1)' }));
+    await pickOption(pagesIn(dialog), /^people/);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add Pages' }));
     expect(await within(dialog).findByText('people is held by "Fix the list"')).toBeTruthy();
     expect(onClose).not.toHaveBeenCalled();
   });

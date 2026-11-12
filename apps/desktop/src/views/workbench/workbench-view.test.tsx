@@ -1,5 +1,6 @@
 import type { AreaDef, PassViewDto, TaskId } from '@10db/contracts';
-import { fireEvent, screen } from '@testing-library/react';
+import { fireEvent, screen, within } from '@testing-library/react';
+import { findPagesInput, pickOption, pillsOf } from '../../test/combobox';
 import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { baseHandlers, renderWithDaemonAndRouter, server } from '../../test/daemon';
@@ -90,10 +91,10 @@ describe('WorkbenchScreen', () => {
     expect(screen.queryByRole('button', { name: /^Start Pass/ })).toBeNull();
   });
 
-  it('offers Set Up (n) above the picker while suggestions are left, and Back to Pages returns', async () => {
+  it('offers Set Up above the picker while suggestions are left, and Back to Pages returns', async () => {
     server.use(...passHandlers());
     await draw({ setupCount: 2 });
-    fireEvent.click(await screen.findByRole('button', { name: 'Set Up (2)' }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Set Up/ }));
     expect(
       await screen.findByRole('heading', { name: 'Set up ampsio for the Workbench' }),
     ).toBeTruthy();
@@ -110,14 +111,14 @@ describe('WorkbenchScreen', () => {
   it('is the picker while no pass is open', async () => {
     await draw();
     expect(await screen.findByText('Work through pages with the agents, live.')).toBeTruthy();
-    expect(screen.getByRole('checkbox', { name: /^settings/ })).toBeTruthy();
+    expect(await findPagesInput()).toBeTruthy();
   });
 
   it('with a closed pass waiting to settle, says so in one line above the picker', async () => {
     const notice = passNotice();
     await draw({ live: passViewDto({ pass: { state: 'CLOSED' }, rest: { notices: [notice] } }) });
     expect(await screen.findByText('Settings pass closed with no pull request.')).toBeTruthy();
-    expect(screen.getByRole('checkbox', { name: /^settings/ })).toBeTruthy();
+    expect(await findPagesInput()).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'More pass actions' })).toBeNull();
     // Its notices stay in sight, and it holds no page to send one to.
     expect(screen.getByText(notice.text)).toBeTruthy();
@@ -139,18 +140,15 @@ describe('WorkbenchScreen', () => {
         abandon: () => Promise.resolve(),
       },
     });
-    fireEvent.click(await screen.findByRole('checkbox', { name: /^settings/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Start Pass (1)' }));
+    await pickOption(await findPagesInput(), /^settings/);
+    fireEvent.click(screen.getByRole('button', { name: 'Start Pass' }));
     expect(await screen.findByText('A lane is running in the folder')).toBeTruthy();
     expect(start).toHaveBeenCalledWith(expect.objectContaining({ pages: ['settings'] }));
   });
 
   it("ticks the Board's tasks and the goal's pages a link names", async () => {
     await draw({ goalPages: ['settings'] });
-    expect(await screen.findByRole('checkbox', { name: /^settings/ })).toHaveProperty(
-      'checked',
-      true,
-    );
+    expect(within(pillsOf(await findPagesInput())).getByText('settings')).toBeTruthy();
   });
 
   it('with a pass open, draws its header over its workspace, handing it the selection', async () => {

@@ -15,6 +15,7 @@ import {
 import { IconPlus } from '@tabler/icons-react';
 import { useRef, useState } from 'react';
 import { useAccounts, useAccountUsage } from '../../../daemon/account-queries';
+import { CountBadge } from '../../../shell/count-badge';
 import { ACCOUNT_KIND_LABEL } from '../account-kind-label';
 import { AccountDrawer } from './account-drawer';
 import { AccountPause } from './account-pause';
@@ -114,7 +115,12 @@ function ArchivedList({ accounts }: { readonly accounts: readonly AccountDto[] }
   return (
     <Accordion variant="contained">
       <Accordion.Item value="archived">
-        <Accordion.Control>Archived ({accounts.length})</Accordion.Control>
+        <Accordion.Control>
+          <Group gap="xs">
+            Archived
+            <CountBadge count={accounts.length} />
+          </Group>
+        </Accordion.Control>
         <Accordion.Panel>
           <Stack gap="xs">
             {accounts.map((a) => (

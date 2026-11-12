@@ -1,6 +1,6 @@
 import { SettingField, type SettingSuggestion } from '@10db/contracts';
 import { describe, expect, it } from 'vitest';
-import { settingDrafts, settingsPatch, tickedSettings, type SettingDraft } from './setting-drafts';
+import { settingDrafts, settingsPatch, type SettingDraft } from './setting-drafts';
 
 const SUGGESTED: SettingSuggestion[] = [
   { field: SettingField.AppUrl, value: 'http://localhost:8800', source: 'from compose' },
@@ -39,7 +39,6 @@ describe('settingsPatch', () => {
         changedCheckCommand: 'pnpm lint',
         sandboxDocker: true,
       },
-      count: 4,
     },
     {
       name: 'an edited value, trimmed',
@@ -47,7 +46,6 @@ describe('settingsPatch', () => {
         value: ' http://localhost:3000 ',
       }),
       patch: { appUrl: 'http://localhost:3000' },
-      count: 1,
     },
     {
       name: 'an unticked row is left out, Docker included (no opt-out)',
@@ -57,7 +55,6 @@ describe('settingsPatch', () => {
         { ticked: false },
       ),
       patch: { appUrl: 'http://localhost:8800', changedCheckCommand: 'pnpm lint' },
-      count: 2,
     },
     {
       name: 'a ticked row emptied is left out',
@@ -65,10 +62,8 @@ describe('settingsPatch', () => {
         value: '  ',
       }),
       patch: {},
-      count: 0,
     },
-  ])('$name', ({ drafts, patch, count }) => {
+  ])('$name', ({ drafts, patch }) => {
     expect(settingsPatch(drafts)).toEqual(patch);
-    expect(tickedSettings(drafts)).toBe(count);
   });
 });

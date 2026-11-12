@@ -26,7 +26,7 @@ export function suggestionCount(setup: WorkbenchSetupDto): number {
 }
 
 /**
- * What the picker's Set Up (n) counts once the project has pages: the settings only. New page rows
+ * What the picker's Set Up badge counts once the project has pages: the settings only. New page rows
  * still show in the setup, but a page the builder left out is not asked for again, and the branch
  * note is not counted: Apply can't clear it, so it would keep the link up.
  */

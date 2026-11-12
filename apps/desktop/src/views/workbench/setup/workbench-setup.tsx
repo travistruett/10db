@@ -14,7 +14,7 @@ import { usePatchProject } from '../../../daemon/queries';
 import { SettingsSectionKey } from '../../settings/sections';
 import { AreasSection } from './areas-section';
 import { BranchRow } from './branch-row';
-import { settingDrafts, settingsPatch, tickedSettings, type SettingDraft } from './setting-drafts';
+import { settingDrafts, settingsPatch, type SettingDraft } from './setting-drafts';
 import { SettingRows, type SettingChange } from './setting-rows';
 import { areasChanged, areasSummary, setupPatch } from './setup-rules';
 
@@ -135,8 +135,6 @@ export function WorkbenchSetup({ project, onBack, onApplied }: WorkbenchSetupPro
       )
     : null;
   const body = setupPatch(setup, project.areas, unticked, settingsPatch(drafts), areasOn);
-  const pagesTicked = setup.areas.pages.length - unticked.length;
-  const count = (areasOn ? Math.max(pagesTicked, 1) : 0) + tickedSettings(drafts);
   const toggle = <T,>(list: readonly T[], item: T, ticked: boolean): readonly T[] =>
     ticked ? list.filter((x) => x !== item) : [...list, item];
   return (
@@ -206,7 +204,7 @@ export function WorkbenchSetup({ project, onBack, onApplied }: WorkbenchSetupPro
               });
             }}
           >
-            {`Apply (${String(count)})`}
+            Apply
           </Button>
         </Group>
       </Stack>

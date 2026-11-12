@@ -132,6 +132,15 @@ size="xs"` with a Tabler `sparkles` icon and an × to dismiss, at most two at on
 - **Buttons:** one filled primary per group. A standalone secondary action is `variant="default"`
   (bordered, neutral); `subtle` only inside dense rows and menus; never `outline` beside a filled
   primary, where its colored border competes with it.
+- **Counts:** a label never carries its count in parentheses ("Start Pass (2)", "Archived (3)"). A count
+  of what is already on screen, such as the pills just picked, is left out. A count of what is hidden or
+  waiting is a `CountBadge` (`apps/desktop/src/shell/count-badge.tsx`) in the control's `rightSection`, or
+  beside the label in a control that has none; a row with a line of its own says it in words there ("4
+  goals"). See `docs/architecture/decisions/2026-11-11-a-label-never-carries-its-count.md`.
+- **Picking several from a list that can grow** is one searchable `MultiSelect`: each option shows what tells
+  it apart (a route, when it last changed), an option that can't be picked stays in the list, disabled, with
+  the reason under it, and the pills show what is picked. Never a column of checkboxes under a separate
+  filter box.
 - **Checks** mark the chosen row on the right, in `Select`, `MultiSelect`, `Combobox` and `Menu` alike.
 - **Forms:** textareas autosize and start small (one or two rows). The actions sit `xl` below the last
   field. A field's error goes on the field; a submit's error goes beside its submit button, never

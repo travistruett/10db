@@ -2,6 +2,7 @@ import type { ShapeProposalDto, ShapeTaskSizeDto } from '@10db/contracts';
 import { Box, Text, UnstyledButton } from '@mantine/core';
 import { IconChevronDown, IconChevronRight } from '@tabler/icons-react';
 import { useState } from 'react';
+import { CountBadge } from '../../shell/count-badge';
 import { kindLabel } from './proposal-text';
 import { ProposalRow, type RowAction, type RowHandlers } from './proposal-row';
 import type { RowReview } from './review-lines';
@@ -92,7 +93,7 @@ export function ProposedList({ groups, sizes, actionsFor, reviewOf, handlers }: 
                 ) : (
                   <IconChevronRight size={14} stroke={1.5} aria-hidden="true" />
                 )}{' '}
-                Earlier ({groups.earlier.length})
+                Earlier <CountBadge count={groups.earlier.length} />
               </Text>
             </UnstyledButton>
           </Box>

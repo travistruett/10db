@@ -7,6 +7,7 @@ import {
 import { Button, Checkbox, Code, Collapse, Stack, Text, Title } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { useId } from 'react';
+import { CountBadge } from '../../../shell/count-badge';
 import { areasSummary } from './setup-rules';
 
 export interface AreasSectionProps {
@@ -75,8 +76,9 @@ export function AreasSection({ project, areas, result, unticked, onTick }: Areas
           aria-expanded={othersOpen}
           aria-controls={othersId}
           onClick={others.toggle}
+          rightSection={othersOpen ? null : <CountBadge count={rest.length} />}
         >
-          {othersOpen ? 'Hide Other Areas' : `Show Other Areas (${String(rest.length)})`}
+          {othersOpen ? 'Hide Other Areas' : 'Show Other Areas'}
         </Button>
         <Collapse expanded={othersOpen} id={othersId}>
           <Stack gap={4} pt="xs">

@@ -28,11 +28,6 @@ function applied(drafts: readonly SettingDraft[]): SettingDraft[] {
   );
 }
 
-/** How many settings Apply sends. */
-export function tickedSettings(drafts: readonly SettingDraft[]): number {
-  return applied(drafts).length;
-}
-
 /**
  * The fields of the project patch Apply sends for the ticked settings. An unticked Allow Docker sends
  * nothing, so it records no opt-out.

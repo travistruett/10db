@@ -7,7 +7,7 @@ import {
 import { Anchor, Group, Stack, Text } from '@mantine/core';
 import { Link } from '@tanstack/react-router';
 import { SettingsSectionKey } from '../settings/sections';
-import { sharedOverlaps, tickedPages, type PickTicks } from './start-pass-rules';
+import { tickedPages, type PickTicks } from './start-pass-rules';
 
 export interface StartLinesProps {
   readonly ticks: PickTicks;
@@ -49,7 +49,7 @@ function Line({ children }: { readonly children: React.ReactNode }) {
 /**
  * What Start Pass says above its button (Workbench spec §4.2), each line only when it has something:
  * the changed files each ticked page takes in, the changed files that stay, what the project lacks
- * (none blocks the pass) and the ticked pages a shared area also matches.
+ * (none blocks the pass).
  */
 export function StartLines({ ticks, start, project }: StartLinesProps) {
   const pages = tickedPages(ticks);
@@ -57,15 +57,8 @@ export function StartLines({ ticks, start, project }: StartLinesProps) {
     const page = start.pages.find((p) => p.area === name);
     return page && page.uncommitted > 0 ? [page] : [];
   });
-  const overlaps = sharedOverlaps(pages, project.areas);
   const lacks = start.lacks.map((lack) => lackLine(lack, project));
-  if (
-    dirty.length === 0 &&
-    start.otherUncommitted === 0 &&
-    lacks.length === 0 &&
-    overlaps.length === 0
-  )
-    return null;
+  if (dirty.length === 0 && start.otherUncommitted === 0 && lacks.length === 0) return null;
   return (
     <Stack gap={4}>
       {dirty.map((page) => (
@@ -80,11 +73,6 @@ export function StartLines({ ticks, start, project }: StartLinesProps) {
             : `${String(start.otherUncommitted)} other changed files stay as they are.`}
         </Line>
       ) : null}
-      {overlaps.map(({ page, shared }) => (
-        <Line key={`${page}:${shared}`}>
-          {`Files under ${page} count as ${page}', not as shared ${shared}.`}
-        </Line>
-      ))}
       {lacks.map((lack) => (
         <Group key={lack.text} gap="xs" wrap="nowrap">
           <Line>{lack.text}</Line>

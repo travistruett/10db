@@ -6,8 +6,9 @@ import type {
   TaskDto,
   TaskId,
 } from '@10db/contracts';
-import { Anchor, Button, Group, Stack, Text, Textarea } from '@mantine/core';
+import { Button, Group, Stack, Text, Textarea } from '@mantine/core';
 import { useState } from 'react';
+import { CountBadge } from '../../shell/count-badge';
 import { PagePicker } from './page-picker';
 import { StartLines } from './start-lines';
 import { joinableTasks, openRequest, type PickTicks } from './start-pass-rules';
@@ -46,13 +47,18 @@ export function StartPass(props: StartPassProps) {
   const count = ticks.pages.length + ticks.tasks.length;
   const refusal = error ?? start.refusal?.message ?? null;
   return (
-    <Stack gap="lg" maw={640}>
+    <Stack gap="lg">
       <Group justify="space-between" gap="sm">
         <Text>Work through pages with the agents, live.</Text>
         {setUp == null ? null : (
-          <Anchor component="button" type="button" size="sm" onClick={setUp.onOpen}>
-            {`Set Up (${String(setUp.count)})`}
-          </Anchor>
+          <Button
+            variant="default"
+            size="xs"
+            rightSection={<CountBadge count={setUp.count} />}
+            onClick={setUp.onOpen}
+          >
+            Set Up
+          </Button>
         )}
       </Group>
       <PagePicker
@@ -74,13 +80,15 @@ export function StartPass(props: StartPassProps) {
           setBothering(event.currentTarget.value);
         }}
       />
-      <StartLines ticks={ticks} start={start} project={project} />
-      <Group justify="flex-end" gap="sm" wrap="nowrap" mt="xl" data-start-bar>
-        {refusal === null ? null : (
-          <Text size="sm" c="red" role="alert">
-            {refusal}
-          </Text>
-        )}
+      <Group justify="space-between" align="flex-end" gap="lg" wrap="nowrap" mt="xl" data-start-bar>
+        <Stack gap={4} style={{ flex: 1, minWidth: 0 }}>
+          <StartLines ticks={ticks} start={start} project={project} />
+          {refusal === null ? null : (
+            <Text size="sm" c="red" role="alert">
+              {refusal}
+            </Text>
+          )}
+        </Stack>
         <Button
           // The daemon would refuse to open now, for the reason beside the button.
           disabled={count === 0 || start.refusal !== null}
@@ -89,7 +97,7 @@ export function StartPass(props: StartPassProps) {
             onStart(openRequest(ticks, bothering, goalId));
           }}
         >
-          {`Start Pass (${String(count)})`}
+          Start Pass
         </Button>
       </Group>
     </Stack>

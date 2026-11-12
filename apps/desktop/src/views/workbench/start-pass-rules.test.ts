@@ -14,7 +14,6 @@ import {
   openRequest,
   pageCap,
   passName,
-  sharedOverlaps,
   type PickTicks,
 } from './start-pass-rules';
 
@@ -207,25 +206,6 @@ describe('openRequest', () => {
       pageCap: 4,
       goalId,
     });
-  });
-});
-
-describe('sharedOverlaps', () => {
-  it('names each ticked page that a shared area can also match, once per pair', () => {
-    expect(sharedOverlaps(['settings', 'people', 'forms'], areas)).toEqual([
-      { page: 'settings', shared: 'src' },
-      { page: 'people', shared: 'src' },
-      { page: 'forms', shared: 'src' },
-    ]);
-    expect(sharedOverlaps([], areas)).toEqual([]);
-  });
-
-  it('leaves out a page no shared area reaches', () => {
-    const apart: AreaDef[] = [
-      { name: 'settings', globs: ['app/settings/**'], role: 'page' },
-      { name: 'src', globs: ['src/**'], role: 'shared' },
-    ];
-    expect(sharedOverlaps(['settings'], apart)).toEqual([]);
   });
 });
 

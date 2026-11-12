@@ -71,7 +71,7 @@ export function AddPageModal({
               });
             }}
           >
-            {`Add Pages (${String(count)})`}
+            Add Pages
           </Button>
         </>
       }

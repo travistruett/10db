@@ -66,7 +66,7 @@ describe('WorkbenchSetup', () => {
     );
     expect(screen.getByText('kept: 146 open tasks name it')).toBeTruthy();
     expect(screen.getByText('review: no route shows it')).toBeTruthy();
-    const show = screen.getByRole('button', { name: 'Show Other Areas (2)' });
+    const show = screen.getByRole('button', { name: /^Show Other Areas/ });
     expect(show.getAttribute('aria-expanded')).toBe('false');
     fireEvent.click(show);
     expect(
@@ -78,7 +78,7 @@ describe('WorkbenchSetup', () => {
     const patches = serve(SETUP);
     await renderWithDaemonAndRouter(<WorkbenchSetup project={PROJECT} />);
     fireEvent.click(await screen.findByRole('checkbox', { name: 'Make inbox a page at /inbox' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Apply (1)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
     await waitFor(() => {
       expect(patches).toEqual([{ areas: SETUP.areas.proposed.filter((a) => a.name !== 'inbox') }]);
     });
@@ -87,7 +87,7 @@ describe('WorkbenchSetup', () => {
   it('says the words of a refused Apply above the button', async () => {
     serve(SETUP, 'An area or hazard name is used twice');
     await renderWithDaemonAndRouter(<WorkbenchSetup project={PROJECT} />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Apply (2)' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Apply' }));
     expect(await screen.findByRole('alert')).toHaveProperty(
       'textContent',
       'An area or hazard name is used twice',
@@ -110,7 +110,7 @@ describe('WorkbenchSetup', () => {
     expect(await screen.findByText('from tauri.conf.json')).toBeTruthy();
     expect(screen.getByText('git push origin build')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Copy command' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Apply (3)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
     await waitFor(() => {
       expect(patches).toEqual([{ areas: SETUP.areas.proposed, appUrl: 'http://localhost:1420' }]);
     });
@@ -131,7 +131,7 @@ describe('WorkbenchSetup', () => {
     const rebuild = await screen.findByRole('checkbox', { name: /^Rebuild areas: 2 new pages/ });
     expect(rebuild).toHaveProperty('checked', false);
     expect(screen.queryByRole('checkbox', { name: 'Make board a page at /board' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Apply (1)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
     await waitFor(() => {
       expect(patches).toEqual([{ appUrl: 'http://localhost:1420' }]);
     });
@@ -148,7 +148,7 @@ describe('WorkbenchSetup', () => {
     await renderWithDaemonAndRouter(<WorkbenchSetup project={PROJECT} />);
     expect(await screen.findByText('from x')).toBeTruthy();
     expect(screen.queryByRole('heading', { name: 'Areas' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Apply (1)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
     await waitFor(() => {
       expect(patches).toEqual([{ appUrl: 'http://localhost:1420' }]);
     });
@@ -175,7 +175,7 @@ describe('WorkbenchSetup', () => {
     expect(screen.getByText(warning)).toBeTruthy();
     fireEvent.click(screen.getByRole('checkbox', { name: 'Allow Docker' }));
     expect(screen.queryByText(warning)).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Apply (3)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply' }));
     await waitFor(() => {
       expect(patches).toEqual([{ areas: SETUP.areas.proposed, appUrl: 'http://localhost:3000' }]);
     });

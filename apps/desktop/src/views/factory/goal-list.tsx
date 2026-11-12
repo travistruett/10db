@@ -122,8 +122,8 @@ export function GoalList({
       ) : null}
       {done.length > 0 ? (
         <GoalRow
-          title={`Done (${String(done.length)})`}
-          line=""
+          title="Done"
+          line={done.length === 1 ? '1 goal' : `${String(done.length)} goals`}
           expanded={doneShown}
           onToggle={() => {
             setDoneShown(!doneShown);

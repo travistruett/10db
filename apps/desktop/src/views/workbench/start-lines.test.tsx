@@ -27,7 +27,6 @@ const none: PickTicks = { pages: [], tasks: [] };
 
 const DIRT = "settings: 3 files already changed in your folder will be part of this page's work.";
 const OTHER = '12 other changed files stay as they are.';
-const SHARED = "Files under settings count as settings', not as shared src.";
 const DOCKER = 'Docker is off: the gate needs it.';
 const AHEAD = 'build has 4 commits origin/main lacks: the pull request will carry them.';
 const NO_APP = 'No app address: Open Page has nowhere to go.';
@@ -36,7 +35,7 @@ const UNCHECKED = 'No changed-files check: turns run unchecked.';
 describe('StartLines', () => {
   it.each<{ name: string; ticks: PickTicks; start: Partial<PassStartDto>; lines: string[] }>([
     { name: 'nothing to say', ticks: people, start: {}, lines: [] },
-    { name: "a ticked page's changed files", ticks: settings, start: {}, lines: [DIRT, SHARED] },
+    { name: "a ticked page's changed files", ticks: settings, start: {}, lines: [DIRT] },
     {
       name: 'the changed files elsewhere',
       ticks: none,
@@ -60,7 +59,7 @@ describe('StartLines', () => {
     await renderWithRouter(
       <StartLines ticks={ticks} start={{ ...quiet, ...start }} project={project} />,
     );
-    const said = [DIRT, OTHER, SHARED, DOCKER, AHEAD, NO_APP, UNCHECKED].filter(
+    const said = [DIRT, OTHER, DOCKER, AHEAD, NO_APP, UNCHECKED].filter(
       (line) => screen.queryByText(line) !== null,
     );
     expect(said).toEqual(lines);

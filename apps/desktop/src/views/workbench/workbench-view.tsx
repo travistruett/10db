@@ -250,7 +250,7 @@ function ProjectWorkbench({ project }: { readonly project: ProjectViewDto }) {
   const goalPages = useGoalPassPages(search.goal ?? null).data?.pages ?? [];
   const now = useNow(CLOCK_TICK_MS);
   const opening = useOpenPass(project.id);
-  // Set Up (n) shows only above the picker, so the setup is read only while no pass is open.
+  // Set Up shows only above the picker, so the setup is read only while no pass is open.
   const noPassOpen =
     live.data === null || (live.data !== undefined && !passHoldsTasks(live.data.pass.state));
   const setup = useWorkbenchSetup(project.id, hasPages && noPassOpen);
