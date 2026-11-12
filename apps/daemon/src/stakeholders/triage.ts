@@ -68,7 +68,7 @@ const askedTopic = (card: InboxItemDto): string | null => {
 };
 
 /** What the lane's own tags give: the topic route's people, else the category's, else the builder. */
-function fallbackHandles(db: DbReader, card: InboxItemDto): string[] {
+export function fallbackHandles(db: DbReader, card: InboxItemDto): string[] {
   return assigneesFor(db, {
     projectId: card.projectId,
     kind: card.kind,

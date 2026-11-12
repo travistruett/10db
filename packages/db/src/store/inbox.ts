@@ -4,7 +4,7 @@ import {
   mintId,
   NotFoundError,
   PARK_TASK_CHOICE,
-  type InboxAnswer,
+  type RecordedAnswer,
   type InboxItemDto,
   type InboxItemId,
   type InboxKind,
@@ -188,6 +188,17 @@ export function listInbox(
   return rows.map((row) => toDto(db, row));
 }
 
+/** Every card still marked as waiting for triage, in any state: the start sweep settles them. */
+export function listPendingTriage(db: DbReader): InboxItemDto[] {
+  return db
+    .select()
+    .from(schema.inboxItems)
+    .where(eq(schema.inboxItems.routedBy, RoutedBy.TriagePending))
+    .orderBy(asc(schema.inboxItems.createdAt), asc(schema.inboxItems.id))
+    .all()
+    .map((row) => toDto(db, row));
+}
+
 export function findOpenByFoldKey(
   db: DbReader,
   projectId: ProjectId,
@@ -260,7 +271,7 @@ export function updateInboxItem(
     readonly title?: string;
     readonly body?: string;
     /** Null clears the answer, as an item opened again has none. */
-    readonly answer?: InboxAnswer | null;
+    readonly answer?: RecordedAnswer | null;
     readonly targets?: readonly InboxTarget[];
     readonly options?: readonly InboxOption[];
     /** Null clears the detail. */

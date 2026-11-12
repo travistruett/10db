@@ -212,6 +212,8 @@ export function markSending(
   input: {
     readonly textSha256: string;
     readonly threadTs: string | null;
+    /** The conversation the post goes to, kept so a crash can look for it there. */
+    readonly channelId?: string | null;
     readonly startedAt: string;
   },
 ): void {
@@ -220,6 +222,7 @@ export function markSending(
     state: SendState.Sending,
     textSha256: input.textSha256,
     threadTs: input.threadTs,
+    channelId: input.channelId ?? null,
     startedAt: input.startedAt,
     newThread: input.threadTs === null,
     reviewed: row.heldBy !== null,
@@ -478,6 +481,29 @@ function toOpen(db: DbReader, row: SendRow): OpenSendRow | null {
   };
 }
 
+/** The card a send belongs to and the text it posts, for the post that recovery repeats. */
+export function sendSummary(
+  db: DbReader,
+  id: StakeholderSendId,
+): { inboxItemId: InboxItemId; text: string } {
+  const row = getRow(db, id);
+  return { inboxItemId: row.inboxItemId, text: row.text };
+}
+
+/** Every thread a send used, the current one first and then the one it moved from. */
+export function sendThreadsOf(
+  db: DbReader,
+  id: StakeholderSendId,
+): { channelId: string; threadTs: string }[] {
+  const row = getRow(db, id);
+  const threads: { channelId: string; threadTs: string }[] = [];
+  if (row.channelId !== null && row.threadTs !== null)
+    threads.push({ channelId: row.channelId, threadTs: row.threadTs });
+  if (row.movedFrom)
+    threads.push({ channelId: row.movedFrom.channelId, threadTs: row.movedFrom.threadTs });
+  return threads;
+}
+
 /** Every send waiting for an answer, oldest first. */
 export function openSends(db: DbReader): OpenSendRow[] {
   return db
@@ -498,17 +524,31 @@ export function sendsInThread(db: DbReader, channelId: string, threadTs: string)
   );
 }
 
+/** Every draft, with the card it belongs to, for the start sweep. */
+export function draftSends(db: DbReader): { id: StakeholderSendId; inboxItemId: InboxItemId }[] {
+  return db
+    .select({ id: schema.stakeholderSends.id, inboxItemId: schema.stakeholderSends.inboxItemId })
+    .from(schema.stakeholderSends)
+    .where(eq(schema.stakeholderSends.state, SendState.Draft))
+    .all();
+}
+
 /** Sends whose post was started and not finished, for the recovery pass. */
-export function sendingSends(
-  db: DbReader,
-): { id: StakeholderSendId; threadTs: string | null; startedAt: string }[] {
+export function sendingSends(db: DbReader): {
+  id: StakeholderSendId;
+  channelId: string | null;
+  threadTs: string | null;
+  startedAt: string;
+}[] {
   return db
     .select()
     .from(schema.stakeholderSends)
     .where(eq(schema.stakeholderSends.state, SendState.Sending))
     .all()
     .flatMap((r) =>
-      r.startedAt === null ? [] : [{ id: r.id, threadTs: r.threadTs, startedAt: r.startedAt }],
+      r.startedAt === null
+        ? []
+        : [{ id: r.id, channelId: r.channelId, threadTs: r.threadTs, startedAt: r.startedAt }],
     );
 }
 

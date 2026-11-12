@@ -20,3 +20,4 @@ export {
 export { OUTBOUND_PATTERNS, scanOutbound } from './outbound-scan';
 export { readReply } from './read-reply';
 export { createTriage, type Triage, type TriageDeps } from './triage';
+export { draftContext, draftFor, draftOnOpen, sweepDrafts, type DraftDeps } from './drafts';

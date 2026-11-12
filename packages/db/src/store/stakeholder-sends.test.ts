@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { insertInboxItem } from './inbox';
 import {
   closeSend,
+  draftSends,
   dropDraft,
   everSent,
   failSend,
@@ -23,6 +24,7 @@ import {
   openSends,
   sendForCard,
   sendingSends,
+  sendThreadsOf,
   sendsInThread,
   setHeldBy,
   setProposal,
@@ -285,13 +287,28 @@ describe('sends', () => {
     expect(sendingSends(store.db)).toEqual([]);
   });
 
+  it('lists only drafts for the sweep', () => {
+    const w = world();
+    const a = draft(w.card('a'), [w.mark.id]);
+    const b = draft(w.card('b'), [w.mark.id]);
+    sent(b.id);
+    expect(draftSends(store.db)).toEqual([{ id: a.id, inboxItemId: a.inboxItemId }]);
+  });
+
   it('lists a send that is mid-sending with its thread and start', () => {
     const w = world();
     const s = draft(w.card('q'), [w.mark.id]);
     store.write((ctx) => {
-      markSending(ctx, s.id, { textSha256: 'a', threadTs: '9.9', startedAt: T0 });
+      markSending(ctx, s.id, {
+        textSha256: 'a',
+        threadTs: '9.9',
+        channelId: 'D9',
+        startedAt: T0,
+      });
     });
-    expect(sendingSends(store.db)).toMatchObject([{ id: s.id, threadTs: '9.9', startedAt: T0 }]);
+    expect(sendingSends(store.db)).toMatchObject([
+      { id: s.id, threadTs: '9.9', channelId: 'D9', startedAt: T0 },
+    ]);
   });
 
   it('round-trips a draft edit, a hold and the settle, which-way, approval and lone marks', () => {
@@ -372,6 +389,10 @@ describe('sends', () => {
     expect(sendsInThread(store.db, 'D1', '100.1').map((x) => x.id)).toEqual([s.id]);
     expect(sendsInThread(store.db, 'G1', '200.1').map((x) => x.id)).toEqual([s.id]);
     expect(sendsInThread(store.db, 'D1', 'other')).toEqual([]);
+    expect(sendThreadsOf(store.db, s.id)).toEqual([
+      { channelId: 'G1', threadTs: '200.1' },
+      { channelId: 'D1', threadTs: '100.1' },
+    ]);
   });
 
   it('keepWaiting clears the reminder and the return and restarts the wait', () => {

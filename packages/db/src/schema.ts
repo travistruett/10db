@@ -33,7 +33,7 @@ import type {
   HandoffId,
   HandoffInput,
   HazardDef,
-  InboxAnswer,
+  RecordedAnswer,
   InboxItemId,
   InboxKind,
   InboxOption,
@@ -745,7 +745,7 @@ export const inboxItems = sqliteTable(
       confidence: number;
     }>(),
     detail: text('detail', { mode: 'json' }).$type<Record<string, Json>>(),
-    answer: text('answer', { mode: 'json' }).$type<InboxAnswer>(),
+    answer: text('answer', { mode: 'json' }).$type<RecordedAnswer>(),
     foldKey: text('fold_key'),
     targets: text('targets', { mode: 'json' }).$type<InboxTarget[]>().notNull(),
     createdAt: createdAt(),
