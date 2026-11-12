@@ -1,4 +1,4 @@
-import type { AppUrl, ScreenTheme, ScreenViewport } from '@10db/contracts';
+import type { AppUrl, DevUiHandOff, ScreenTheme, ScreenViewport } from '@10db/contracts';
 import type { StorageState } from './storage-state';
 
 // Workbench spec docs/superpowers/specs/2026-11-09-10db-workbench-design.md §10, §13: the seam between
@@ -51,6 +51,11 @@ export interface ShootInput {
   readonly viewport: ScreenViewport;
   readonly theme: ScreenTheme;
   readonly storageState: StorageState | null;
+  /**
+   * The daemon's address and the read-only dev UI token, handed to the page in its fragment and let
+   * through to the daemon for reads, when the app is 10db's own dev UI; null for every other app.
+   */
+  readonly devUi: DevUiHandOff | null;
   readonly signal: AbortSignal;
 }
 

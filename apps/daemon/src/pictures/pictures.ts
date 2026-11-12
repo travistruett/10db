@@ -103,6 +103,12 @@ export interface PicturesDeps {
   readonly logger: Logger;
   /** Told when a load found nothing answering at a project 10db runs the preview of. */
   readonly onNoAnswer?: (projectId: ProjectId) => void;
+  /**
+   * 10db's own dev UI: the browser origin the daemon trusts as it, and its read-only token. A shot of
+   * an app at that origin is handed the token and may read the daemon, since the dev UI draws nothing
+   * without it; null when the daemon trusts no dev UI.
+   */
+  readonly devUi: { readonly origin: string; readonly token: string } | null;
 }
 
 export interface Pictures {
@@ -410,10 +416,14 @@ export function startPictures(deps: PicturesDeps): Pictures {
     const shots: Omit<ScreenToKeep, 'keptSha'>[] = [];
     const judged = pageRoute(project, task);
     const loads: RouteShot[] = [];
+    const devUi =
+      deps.devUi !== null && URL.parse(appUrl)?.origin === deps.devUi.origin
+        ? { url: `http://127.0.0.1:${String(port)}`, token: deps.devUi.token }
+        : null;
     for (const target of targets) {
       const shoot = (state: StorageState | null): Promise<Shot> =>
         shootableAddress(project.id, port) === appUrl
-          ? deps.camera.shoot({ appUrl, ...target, storageState: state, signal })
+          ? deps.camera.shoot({ appUrl, ...target, storageState: state, devUi, signal })
           : Promise.reject(new Error("The app address changed or names 10db's own port"));
       const startedAt = deps.clock.now().getTime();
       let shot = await shoot(storageState);

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -5,6 +6,7 @@ import {
   PassGateState,
   PassNoticeKind,
   type PassId,
+  type ScreenKind,
   type ProjectInput,
   type TaskDto,
 } from '@10db/contracts';
@@ -24,6 +26,7 @@ import {
   getPassProgress,
   getPassPullRequest,
   getTask,
+  insertTaskScreen,
 } from '@10db/db';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDeliveryHarness, type DeliveryHarness } from '../../test/delivery-harness';
@@ -119,6 +122,28 @@ function signOff(task: TaskDto, path: string, content: string): string {
   if (run === null) throw new Error('the task has no run');
   h.settle(run, 'DONE');
   return sha;
+}
+
+/** A picture of the page's route, its file written as the pictures service writes one. */
+function picture(task: TaskDto, kind: ScreenKind, route: string, content: string): void {
+  const storedPath = join(h.dataDir, `${task.id}-${kind}.png`);
+  writeFileSync(storedPath, content);
+  h.state.write((w) =>
+    insertTaskScreen(w, {
+      taskId: task.id,
+      turnId: null,
+      kind,
+      route,
+      viewport: { width: 1440, height: 900 },
+      theme: 'default',
+      sha256: createHash('sha256').update(content).digest('hex'),
+      size: content.length,
+      width: 1440,
+      height: 900,
+      storedPath,
+      keptSha: null,
+    }),
+  );
 }
 
 const gateState = (passId: PassId) => getPassChecks(h.store.db, passId).gate.state;
@@ -222,6 +247,44 @@ describe('Open Pull Request', () => {
     expect(h.git$('branch', '--list', scratchBranchName(passId))).toBe('');
     expect(h.git$('rev-parse', '--abbrev-ref', 'HEAD')).toBe(branch);
     expect(h.git$('status', '--porcelain')).toBe('M src/people/page.tsx');
+  });
+
+  it.each([
+    {
+      name: 'shows the signed-off pages’ before and after, from a pictures branch, with the setting on',
+      on: true,
+    },
+    { name: 'pushes no pictures and shows none with the setting off', on: false },
+  ])('$name', async ({ on }) => {
+    setup({ prPictures: on });
+    const { passId, settings, people } = await openedPass();
+    picture(settings, 'before', '/settings', 'settings before');
+    picture(settings, 'after', '/settings', 'settings after');
+    // People is not signed off, so its picture stays out.
+    picture(people, 'before', '/people', 'people before');
+    signOff(settings, 'src/settings/page.tsx', 'signed off\n');
+    await prs.open(passId);
+    await h.jobs.idle();
+    const body = h.gh.body(getPassPullRequest(h.store.db, passId)?.url ?? '');
+    if (!on) {
+      expect(h.origin$('branch', '--list', '10db-pictures/*')).toBe('');
+      expect(body).not.toContain('## Pictures');
+      return;
+    }
+    const pictures = h.origin$('rev-parse', `refs/heads/10db-pictures/${passId}`);
+    expect(h.origin$('ls-tree', '--name-only', pictures)).toBe(
+      '1-settings-after.png\n1-settings-before.png',
+    );
+    expect(h.origin$('cat-file', 'blob', `${pictures}:1-settings-after.png`)).toBe(
+      'settings after',
+    );
+    expect(h.origin$('show', '-s', '--format=%ae', pictures)).toBe(
+      '583231+octocat@users.noreply.github.com',
+    );
+    expect(body).toContain('## Pictures');
+    expect(body).toContain(
+      `![Before](https://github.com/acme/widgets/blob/${pictures}/1-settings-before.png?raw=true)`,
+    );
   });
 
   it('pushes to the pull request it already has, rewriting its body rather than opening another', async () => {

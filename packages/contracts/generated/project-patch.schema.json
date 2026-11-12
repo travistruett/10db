@@ -126,6 +126,9 @@
         }
       ]
     },
+    "prPictures": {
+      "type": "boolean"
+    },
     "areas": {
       "minItems": 1,
       "type": "array",

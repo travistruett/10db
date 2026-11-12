@@ -1,0 +1,1363 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sessions UI mockups</title>
+<style>
+/* Every color is a Selenized value (apps/desktop/src/selenized.ts): dark paints the dark scheme, light the light one. */
+:root, :root[data-theme="dark"] {
+  --bg0:#103c48; --bg1:#184956; --bg2:#2d5b69; --dim:#72898f; --fg0:#adbcbc; --fg1:#cad8d9;
+  --red:#fa5750; --green:#75b938; --yellow:#dbb32d; --blue:#4695f7; --magenta:#f275be; --cyan:#41c7b9; --orange:#ed8649; --violet:#af88eb;
+  --blue-b:#58a3ff;
+  --input:var(--bg1); --seg-on:var(--bg2); --board:var(--bg1); --track:var(--bg2);
+  --shade:0 22px 44px -18px rgba(0,0,0,.55);
+}
+:root[data-theme="light"] {
+  --bg0:#fbf3db; --bg1:#ece3cc; --bg2:#d5cdb6; --dim:#909995; --fg0:#53676d; --fg1:#3a4d53;
+  --red:#d2212d; --green:#489100; --yellow:#ad8900; --blue:#0072d4; --magenta:#ca4898; --cyan:#009c8f; --orange:#c25d1e; --violet:#8762c6;
+  --blue-b:#006dce;
+  --input:var(--bg0); --seg-on:var(--bg0); --board:var(--bg1); --track:var(--bg2);
+  --shade:0 22px 44px -20px rgba(58,77,83,.45);
+}
+* { box-sizing:border-box; }
+html, body { margin:0; }
+body { background:var(--board); color:var(--fg0); font:14px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing:antialiased; }
+::selection { background:var(--bg2); color:var(--fg1); }
+code, .mono { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; }
+svg.i { width:16px; height:16px; stroke:currentColor; fill:none; stroke-width:1.5; stroke-linecap:round; stroke-linejoin:round; flex:none; }
+svg.i.s12 { width:12px; height:12px; } svg.i.s14 { width:14px; height:14px; } svg.i.s18 { width:18px; height:18px; } svg.i.s20 { width:20px; height:20px; }
+
+/* ---------- The review page ---------- */
+.page { max-width:1480px; margin:0 auto; padding:40px 24px 96px; }
+.top { display:flex; justify-content:space-between; align-items:flex-start; gap:24px; flex-wrap:wrap; margin-bottom:28px; }
+.top h1 { margin:0 0 6px; font-size:26px; line-height:1.2; color:var(--fg1); font-weight:650; letter-spacing:-.01em; }
+.top p { margin:0; max-width:760px; color:var(--fg0); }
+.top .who { color:var(--dim); font-size:13px; margin-top:8px; }
+.toggle { display:inline-flex; background:var(--bg0); border:1px solid var(--bg2); border-radius:8px; padding:3px; gap:2px; }
+.toggle button { font:inherit; font-size:13px; font-weight:600; color:var(--fg0); background:transparent; border:0; border-radius:6px; padding:5px 12px; cursor:pointer; }
+.toggle button[aria-pressed="true"] { background:var(--bg1); color:var(--fg1); }
+.toggle button:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
+.index { display:flex; flex-wrap:wrap; gap:6px 18px; font-size:13px; margin:0 0 40px; padding:12px 0; border-top:1px solid var(--bg2); border-bottom:1px solid var(--bg2); }
+.index a { color:var(--fg0); text-decoration:none; }
+.index a:hover { color:var(--fg1); text-decoration:underline; text-underline-offset:3px; }
+section.shot { margin:0 0 72px; scroll-margin-top:24px; }
+section.shot > h2 { font-size:18px; color:var(--fg1); margin:0 0 4px; font-weight:650; }
+section.shot > .lede { margin:0 0 18px; color:var(--fg0); max-width:900px; }
+.pair { display:flex; gap:32px; align-items:flex-start; flex-wrap:wrap; }
+.stage { flex:0 1 auto; max-width:100%; overflow-x:auto; padding:2px 2px 24px; }
+.notes { flex:1 1 280px; max-width:340px; font-size:13.5px; line-height:1.55; }
+.notes p { margin:0 0 12px; }
+.notes b { color:var(--fg1); font-weight:600; }
+.notes .cite { color:var(--dim); font-size:12px; }
+.frame { width:fit-content; border:1px solid var(--bg2); border-radius:12px; overflow:hidden; box-shadow:var(--shade); background:var(--bg0); }
+.cap { font-size:12px; color:var(--dim); margin:8px 2px 0; }
+
+/* ---------- The app: shell ---------- */
+.win { display:grid; grid-template-rows:48px minmax(0,1fr); background:var(--bg0); color:var(--fg0); width:1080px; }
+.hdr { display:flex; align-items:center; border-bottom:1px solid var(--bg2); min-width:0; }
+.lights { width:84px; flex:none; display:flex; gap:8px; padding-left:16px; align-items:center; }
+.lights i { width:12px; height:12px; border-radius:50%; display:block; }
+.lights i:nth-child(1) { background:var(--red); } .lights i:nth-child(2) { background:var(--yellow); } .lights i:nth-child(3) { background:var(--green); }
+.strip { flex:1; min-width:0; display:flex; align-items:center; gap:4px; padding-left:4px; overflow:hidden; position:relative; }
+.hstat { flex:none; display:flex; gap:12px; align-items:center; padding:0 14px 0 8px; color:var(--dim); }
+.body { display:grid; grid-template-columns:200px minmax(0,1fr); min-height:0; }
+.nav { background:var(--bg1); border-right:1px solid var(--bg2); padding:10px; display:flex; flex-direction:column; gap:2px; min-height:0; }
+.nl { display:flex; align-items:center; gap:10px; height:34px; padding:0 10px; border-radius:8px; font-size:14px; color:var(--fg0); }
+.nl span { flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.nl.on { background:var(--bg2); color:var(--fg1); font-weight:600; }
+.nl svg { color:var(--fg0); }
+.plabel { font-size:12px; font-weight:600; color:var(--dim); padding:18px 10px 4px; }
+.switch { display:flex; align-items:center; gap:8px; height:32px; padding:0 8px; margin-bottom:8px; border-radius:8px; background:var(--bg0); border:1px solid var(--bg2); font-size:14px; font-weight:600; color:var(--fg1); }
+.switch span:nth-child(2) { flex:1; }
+.switch svg { color:var(--dim); width:12px; height:12px; }
+.grow { flex:1; }
+.mk { width:12px; flex:none; display:inline-flex; justify-content:center; color:var(--dim); }
+.cb { display:inline-flex; align-items:center; justify-content:center; min-width:18px; height:18px; padding:0 5px; border-radius:9px; background:var(--blue); color:var(--bg0); font-size:11px; font-weight:700; line-height:1; font-family:inherit; }
+.main { display:flex; flex-direction:column; min-width:0; min-height:0; }
+
+/* ---------- Tabs ---------- */
+.tab { height:30px; display:flex; align-items:center; gap:5px; padding:0 9px 0 7px; border-radius:8px; flex:0 1 auto; max-width:220px; min-width:96px; font-size:13px; color:var(--fg0); position:relative; }
+.tab.sel { flex-shrink:0; }
+.tab .sm { width:12px; height:12px; flex:none; }
+.sm.r { color:var(--red); } .sm.o { color:var(--orange); } .sm.g { color:var(--green); } .sm.d { color:var(--dim); }
+.tab.ring.redring, .redring { box-shadow:inset 0 0 0 1px var(--red); }
+.tab .t { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.tab .k { color:var(--dim); }
+.tab.sel { background:var(--bg1); color:var(--fg1); font-weight:600; }
+.tab.ring { box-shadow:inset 0 0 0 1px var(--yellow); }
+.tab.unread .t { color:var(--fg1); font-weight:600; }
+.tab.away .t { color:var(--dim); }
+.tab .x { color:var(--dim); width:14px; height:14px; }
+.tab.icononly { flex:0 0 auto; min-width:0; padding:0 7px; }
+.tile { width:16px; height:16px; border-radius:4px; background:var(--blue); color:var(--bg0); font-size:8px; font-weight:700; line-height:16px; text-align:center; flex:none; letter-spacing:0; }
+.tile.l { width:24px; height:24px; font-size:10px; line-height:24px; }
+.dot { width:8px; height:8px; border-radius:50%; flex:none; display:inline-block; }
+.dot.b { background:var(--blue); } .dot.y { background:var(--yellow); } .dot.o { background:var(--orange); } .dot.r { background:var(--red); } .dot.g { background:var(--green); } .dot.n { background:var(--dim); }
+.ib { width:28px; height:28px; display:inline-flex; align-items:center; justify-content:center; border-radius:8px; color:var(--fg0); flex:none; position:relative; }
+.ib.on { background:var(--bg1); color:var(--fg1); }
+.ib .pip { position:absolute; top:5px; right:5px; width:6px; height:6px; border-radius:50%; background:var(--yellow); }
+
+/* ---------- Session bar ---------- */
+.sbar { height:44px; flex:none; display:flex; align-items:center; gap:10px; padding:0 12px 0 20px; border-bottom:1px solid var(--bg1); min-width:0; }
+.sbar .title { flex:none; font-size:14px; font-weight:600; color:var(--fg1); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:300px; }
+.sbar .who { display:flex; flex-direction:column; justify-content:center; min-width:0; flex:0 1 auto; line-height:1.3; }
+.sbar .who .title { flex:none; max-width:none; }
+.sbar .kind { display:flex; align-items:center; gap:5px; font-size:12px; color:var(--dim); white-space:nowrap; min-width:0; overflow:hidden; }
+.sbar .kind code { font-size:11.5px; color:var(--fg0); }
+.sbar .sp { flex:1; }
+.sbar .right { display:flex; align-items:center; gap:4px; flex:none; }
+.agent { display:inline-flex; align-items:center; gap:4px; height:26px; padding:0 6px; border-radius:8px; font-size:12px; color:var(--fg0); white-space:nowrap; }
+.agent:hover { background:var(--bg1); }
+.agent.off { color:var(--dim); }
+.meter { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--dim); margin:0 4px; }
+.meter i { width:40px; height:4px; border-radius:2px; background:var(--track); display:block; position:relative; overflow:hidden; }
+.meter i b { position:absolute; inset:0 auto 0 0; background:var(--blue); border-radius:2px; }
+
+/* ---------- Buttons and controls ---------- */
+.btn { display:inline-flex; align-items:center; gap:6px; height:30px; padding:0 14px; border-radius:8px; font-size:14px; font-weight:600; background:var(--bg1); border:1px solid var(--bg2); color:var(--fg0); white-space:nowrap; flex:none; }
+.btn.xs { height:26px; padding:0 10px; font-size:12px; }
+.btn.f { background:var(--blue); border-color:var(--blue); color:var(--bg0); }
+.btn.sub { background:transparent; border-color:transparent; color:var(--blue); }
+.btn.dis { color:var(--dim); }
+.split { display:inline-flex; }
+.split .btn:first-child { border-top-right-radius:0; border-bottom-right-radius:0; }
+.split .btn:last-child { border-top-left-radius:0; border-bottom-left-radius:0; border-left:0; padding:0 6px; }
+.seg { display:inline-flex; background:var(--bg1); border-radius:8px; padding:3px; gap:2px; }
+.seg span { font-size:12px; font-weight:500; padding:3px 10px; border-radius:6px; color:var(--fg0); white-space:nowrap; }
+.seg span.on { background:var(--seg-on); color:var(--fg1); font-weight:600; }
+.seg span.no { color:var(--dim); }
+.sel-in { display:inline-flex; align-items:center; gap:6px; height:30px; padding:0 8px 0 10px; border-radius:8px; background:var(--input); border:1px solid var(--bg2); font-size:13px; color:var(--fg0); white-space:nowrap; }
+.sel-in svg { color:var(--dim); }
+.kbd { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:11px; padding:1px 5px; border-radius:4px; border:1px solid var(--bg2); border-bottom-width:2px; color:var(--fg0); background:var(--bg1); }
+
+/* ---------- Conversation ---------- */
+.pane { flex:1; display:flex; min-height:0; min-width:0; }
+.conv { flex:1; display:flex; flex-direction:column; min-width:0; min-height:0; }
+.scroll { flex:1; min-height:0; overflow:hidden; display:flex; flex-direction:column; justify-content:flex-end; padding:0 24px; position:relative; }
+.scroll.from-top { justify-content:flex-start; }
+.col { width:100%; max-width:720px; margin:0 auto; }
+.foot { flex:none; padding:0 24px 14px; }
+.you { background:var(--bg1); border-radius:8px; padding:10px 12px; margin:20px 0 6px; color:var(--fg1); }
+.you p { margin:0; } .you p + p { margin-top:6px; }
+.you .rcpt { margin-top:6px; font-size:12px; color:var(--dim); }
+.reply { color:var(--fg0); }
+.reply p { margin:10px 0; }
+.reply h3 { font-size:15px; color:var(--fg1); margin:18px 0 6px; font-weight:600; }
+.reply ol, .reply ul { margin:8px 0; padding-left:22px; } .reply li { margin:4px 0; }
+.reply strong { color:var(--fg1); font-weight:600; }
+.reply code, .you code, .notice code, .work code, .row code { font-size:12.5px; }
+.reply :not(pre) > code, .you code { background:var(--bg0); border:1px solid var(--bg2); padding:0 4px; border-radius:4px; color:var(--fg0); }
+.you code { background:var(--bg2); border-color:var(--bg2); }
+.md-table { width:100%; border-collapse:collapse; font-size:13px; margin:10px 0; }
+.md-table th { text-align:left; font-weight:600; color:var(--fg1); padding:6px 10px; border-bottom:1px solid var(--bg2); }
+.md-table td { padding:6px 10px; border-bottom:1px solid var(--bg1); vertical-align:top; }
+.md-table th:first-child, .md-table td:first-child { padding-left:0; color:var(--dim); }
+.code { background:var(--bg0); border:1px solid var(--bg2); border-radius:8px; margin:10px 0; overflow:hidden; }
+.code .ch { display:flex; justify-content:space-between; align-items:center; padding:5px 10px 0 12px; font-size:11.5px; color:var(--dim); }
+.code pre { margin:0; padding:6px 12px 10px; font:12.5px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; color:var(--fg0); white-space:pre; overflow:hidden; }
+.tk-k { color:var(--violet); } .tk-s { color:var(--cyan); } .tk-f { color:var(--blue); } .tk-c { color:var(--dim); } .tk-n { color:var(--magenta); } .tk-t { color:var(--yellow); }
+.fade-top::before { content:""; position:absolute; left:0; right:0; top:0; height:36px; background:linear-gradient(var(--bg0), transparent); z-index:1; pointer-events:none; }
+
+/* Tool rows */
+.row { display:flex; align-items:center; gap:8px; height:28px; padding:0 8px; margin:0 -8px; border-radius:6px; font-size:13px; color:var(--fg0); white-space:nowrap; min-width:0; }
+.row .ic { color:var(--dim); }
+.row .tg { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.row code { color:var(--fg0); }
+.row .meta { margin-left:auto; font-size:12px; color:var(--dim); font-variant-numeric:tabular-nums; flex:none; }
+.row .meta.bad { color:var(--red); }
+.row .ch { color:var(--dim); width:14px; height:14px; }
+.row.hot { background:var(--bg1); }
+.row.fail .ic { color:var(--red); }
+.row.task .dot { margin:0 4px; }
+.row.task a { color:var(--blue); font-size:12px; text-decoration:none; margin-left:10px; }
+.rows { margin:6px 0; }
+.sub { margin:0 0 6px 7px; border-left:1px solid var(--bg2); padding-left:16px; font-size:12.5px; }
+.sub .l { height:24px; display:flex; align-items:center; gap:8px; color:var(--fg0); white-space:nowrap; }
+.sub .l .ic { color:var(--dim); width:14px; height:14px; }
+.sub .l .meta { margin-left:auto; color:var(--dim); font-size:12px; }
+.peek { margin:2px 0 8px 24px; border:1px solid var(--bg2); border-radius:6px; overflow:hidden; font:12px/1.65 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.peek .l, .diff .l { display:flex; white-space:pre; }
+.ln { width:34px; text-align:right; padding-right:8px; color:var(--dim); flex:none; user-select:none; }
+.sg { width:14px; flex:none; }
+.add { background:var(--bg1); color:var(--green); }
+.del { background:var(--bg1); color:var(--red); }
+.w { background:var(--bg2); border-radius:2px; }
+.peek .more { padding:3px 10px 4px 48px; font-family:-apple-system, BlinkMacSystemFont, sans-serif; font-size:12px; color:var(--blue); border-top:1px solid var(--bg1); }
+.out { margin:2px 0 8px 24px; background:var(--bg0); border:1px solid var(--bg2); border-radius:6px; padding:8px 12px; font:12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; color:var(--fg0); white-space:pre; overflow:hidden; }
+.out .e { color:var(--red); }
+.notice { display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--dim); margin:8px 0; white-space:nowrap; }
+.notice.ok svg { color:var(--green); }
+.notice a, .link { color:var(--blue); text-decoration:none; }
+.divider { display:flex; align-items:center; gap:10px; margin:22px 0 12px; font-size:12px; color:var(--dim); white-space:nowrap; }
+.divider::before, .divider::after { content:""; flex:1; height:1px; background:var(--bg2); }
+.turnfoot { font-size:12px; color:var(--dim); margin:4px 0 2px; }
+.streamtail { color:var(--fg0); }
+
+/* Working line, plan row, composer */
+.plan { display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--fg0); padding:6px 10px; border-radius:8px; border:1px solid var(--bg2); margin:6px 0 2px; white-space:nowrap; }
+.plan .ic { color:var(--dim); } .plan .meta { color:var(--dim); }
+.work { display:flex; align-items:baseline; gap:8px; font-size:14px; padding:8px 0 2px; white-space:nowrap; }
+.work .dot { position:relative; top:-1px; }
+.work .t { color:var(--fg0); overflow:hidden; text-overflow:ellipsis; }
+.work2 { padding:0 0 8px 16px; font-size:12px; color:var(--dim); }
+.work2 a { color:var(--blue); text-decoration:none; }
+.composer { border:1px solid var(--bg2); background:var(--input); border-radius:8px; }
+.composer.focus { border-color:var(--blue); }
+.composer .ta { padding:10px 12px 2px; min-height:46px; font-size:14px; color:var(--fg1); }
+.composer .ta .ph { color:var(--dim); }
+.composer .ta .caret { display:inline-block; width:1px; height:17px; background:var(--fg1); vertical-align:-3px; margin-left:1px; }
+.composer .bar { display:flex; align-items:center; gap:6px; padding:4px 6px 6px; }
+.composer .bar .sp { flex:1; }
+.composer .bar .ib { color:var(--dim); }
+.hint { font-size:12px; color:var(--dim); margin-top:6px; display:flex; gap:14px; flex-wrap:wrap; }
+.chip { display:inline-flex; align-items:center; gap:4px; font:12px ui-monospace, SFMono-Regular, Menlo, monospace; color:var(--blue); background:var(--bg1); padding:0 6px; border-radius:4px; }
+.qchip { display:flex; align-items:center; gap:10px; background:var(--bg1); border-radius:8px; padding:7px 10px; font-size:13px; margin-bottom:6px; }
+.qchip .lab { font-size:11px; font-weight:700; color:var(--dim); }
+.qchip .tx { flex:1; color:var(--fg1); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.qchip .act { color:var(--blue); font-size:12px; }
+
+/* Inbox cards, answered in place */
+.card { border:1px solid var(--bg2); border-radius:8px; padding:12px; background:var(--bg0); margin:6px 0 8px; }
+.badge { display:inline-flex; align-items:center; height:18px; padding:0 7px; border-radius:9px; font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.3px; background:var(--bg1); color:var(--yellow); flex:none; }
+.card .h { display:flex; align-items:center; gap:10px; }
+.card .h b { color:var(--fg1); font-size:14px; }
+.card .h .who { margin-left:auto; font-size:12px; color:var(--dim); }
+.cblock { margin:10px 0; background:var(--bg0); border:1px solid var(--bg2); border-radius:6px; padding:8px 10px; font:12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace; color:var(--fg1); white-space:pre-wrap; word-break:break-all; }
+.card .cbody { margin:8px 0; font-size:14px; }
+.radio { display:flex; gap:10px; align-items:flex-start; padding:3px 0; font-size:14px; }
+.radio i { width:16px; height:16px; border-radius:50%; border:1px solid var(--bg2); background:var(--input); flex:none; margin-top:3px; position:relative; }
+.radio.on i { background:var(--blue); border-color:var(--blue); }
+.radio.on i::after { content:""; position:absolute; inset:4px; border-radius:50%; background:var(--bg0); }
+.radio .d { display:block; font-size:12px; color:var(--dim); }
+.check { width:16px; height:16px; border-radius:4px; border:1px solid var(--bg2); background:var(--input); flex:none; margin-top:3px; display:inline-flex; align-items:center; justify-content:center; }
+.field-l { font-size:12px; font-weight:500; color:var(--fg0); margin:10px 0 4px; }
+.tin { border:1px solid var(--bg2); background:var(--input); border-radius:8px; padding:5px 10px; font-size:13px; color:var(--dim); min-height:30px; }
+.card .f { display:flex; align-items:center; justify-content:space-between; margin-top:10px; }
+.card .f .s { font-size:12px; color:var(--dim); }
+
+/* Menus and popovers */
+.pop { background:var(--bg0); border:1px solid var(--bg2); border-radius:8px; box-shadow:0 12px 28px -12px rgba(0,0,0,.5); padding:4px; }
+.pop .gl { font-size:12px; font-weight:600; color:var(--dim); padding:6px 10px 3px; }
+.mi { display:flex; align-items:center; gap:10px; padding:6px 10px; border-radius:6px; font-size:13px; color:var(--fg0); white-space:nowrap; }
+.mi.on { background:var(--bg1); }
+.mi .nm { color:var(--fg1); }
+.mi .ds { color:var(--dim); font-size:12px; overflow:hidden; text-overflow:ellipsis; }
+.mi .r { margin-left:auto; color:var(--dim); font-size:12px; }
+.mi u { text-decoration:none; color:var(--fg1); border-bottom:1px solid var(--blue); }
+.sep { height:1px; background:var(--bg2); margin:4px 2px; }
+
+/* Modal */
+.scrim { position:absolute; inset:0; background:var(--bg0); opacity:.72; }
+.modal { position:absolute; left:50%; top:62px; transform:translateX(-50%); width:560px; background:var(--bg0); border:1px solid var(--bg2); border-radius:8px; box-shadow:0 24px 60px -20px rgba(0,0,0,.6); }
+.modal .mh { display:flex; justify-content:space-between; align-items:center; padding:14px 18px 6px; font-size:16px; font-weight:600; color:var(--fg1); }
+.modal .mb { padding:4px 18px 8px; }
+.modal .mf { display:flex; justify-content:space-between; align-items:center; gap:16px; padding:12px 18px 16px; }
+.modal .mf > span:first-child { flex:1; min-width:0; }
+.ta2 { border:1px solid var(--bg2); background:var(--input); border-radius:8px; padding:8px 10px; font-size:13px; color:var(--fg1); line-height:1.55; }
+.ta2 p { margin:0 0 6px; } .ta2 p:last-child { margin:0; }
+.paths { margin-top:8px; border:1px solid var(--bg2); border-radius:8px; padding:6px 10px; font-size:12.5px; }
+.paths .pl { display:flex; gap:10px; font-family:ui-monospace, SFMono-Regular, Menlo, monospace; line-height:1.7; }
+.paths .pl b { color:var(--dim); font-weight:600; width:10px; }
+.err { color:var(--red); font-size:12.5px; }
+.line { font-size:12px; color:var(--dim); margin-top:6px; }
+
+/* Changes panel */
+.changes { width:46%; flex:none; border-left:1px solid var(--bg2); display:flex; flex-direction:column; min-height:0; background:var(--bg0); }
+.chh { padding:10px 14px 8px; border-bottom:1px solid var(--bg1); }
+.chh .a { display:flex; align-items:center; gap:10px; }
+.chh .a b { color:var(--fg1); font-size:14px; }
+.chh .a .n { font-size:12px; color:var(--dim); }
+.chh .b { display:flex; align-items:center; justify-content:space-between; margin-top:6px; font-size:12px; color:var(--dim); }
+.files { padding:6px 8px; border-bottom:1px solid var(--bg1); }
+.fl { display:flex; align-items:center; gap:10px; height:26px; padding:0 6px; border-radius:6px; font-size:12.5px; }
+.fl.on { background:var(--bg1); }
+.fl .st { font:600 11px ui-monospace, SFMono-Regular, Menlo, monospace; color:var(--dim); width:10px; }
+.fl .p { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; color:var(--fg0); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; direction:rtl; text-align:left; }
+.fl .c { font:12px ui-monospace, SFMono-Regular, Menlo, monospace; white-space:nowrap; }
+.plus { color:var(--green); } .minus { color:var(--red); }
+.diffs { flex:1; overflow:hidden; min-height:0; }
+.dfh { display:flex; align-items:center; gap:8px; padding:7px 14px; font:12px ui-monospace, SFMono-Regular, Menlo, monospace; color:var(--fg1); background:var(--bg0); border-bottom:1px solid var(--bg1); }
+.dfh .c { margin-left:auto; }
+.diff { font:12px/1.7 ui-monospace, SFMono-Regular, Menlo, monospace; padding:4px 0 10px; }
+.diff .hunk { color:var(--dim); padding:2px 0 2px 48px; }
+.diff .l .ln:hover { color:var(--blue); }
+
+/* Takeover */
+.takeover { background:var(--bg0); border:1px solid var(--bg2); border-radius:8px; padding:14px 16px; display:flex; gap:12px; margin-bottom:8px; }
+.takeover .tic { color:var(--fg0); margin-top:2px; }
+.takeover b { color:var(--fg1); font-size:14px; }
+.takeover p { margin:4px 0; font-size:13.5px; }
+.takeover .acts { display:flex; gap:8px; align-items:center; margin-top:10px; }
+
+/* Narrow */
+.win.narrow { width:470px; }
+.win.narrow .lights { width:auto; padding-right:6px; }
+.win.narrow .body { grid-template-columns:minmax(0,1fr); }
+.win.narrow .sbar { padding:0 8px 0 14px; gap:8px; }
+.win.narrow .scroll, .win.narrow .foot { padding-left:14px; padding-right:14px; }
+.switcher { display:flex; align-items:center; gap:7px; height:30px; padding:0 8px; border-radius:8px; background:var(--bg1); font-size:13px; font-weight:600; color:var(--fg1); min-width:0; flex:1; max-width:240px; }
+.switcher .t { flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+/* States strip */
+.states { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:16px; }
+.state { border:1px solid var(--bg2); border-radius:10px; background:var(--bg0); padding:12px 14px 14px; min-width:0; }
+.state h4 { margin:0 0 8px; font-size:12px; font-weight:600; color:var(--dim); }
+.alert { border-radius:8px; padding:10px 12px; background:var(--bg1); display:flex; gap:10px; }
+.alert .ai { color:var(--red); margin-top:2px; }
+.alert b { color:var(--red); font-size:13.5px; display:block; }
+.alert p { margin:2px 0 8px; font-size:13px; }
+.banner { border:1px solid var(--bg2); background:var(--bg1); border-radius:8px; padding:6px 10px; font-size:13px; display:flex; gap:8px; align-items:center; }
+.legend { display:flex; flex-wrap:wrap; gap:14px 18px; margin-top:18px; max-width:1080px; }
+.legend .it { display:flex; flex-direction:column; gap:6px; width:216px; }
+.legend .it .tab { flex:none; width:auto; max-width:216px; align-self:flex-start; background:var(--bg0); }
+.legend .it .tab.sel { background:var(--bg1); }
+.legend .it span.c { font-size:12px; color:var(--dim); }
+.legend .it span.c b { color:var(--fg0); font-weight:600; }
+.ro { display:flex; align-items:center; gap:10px; background:var(--bg0); border:1px solid var(--bg2); border-radius:8px; padding:12px 14px; font-size:13.5px; }
+.ro svg { color:var(--dim); }
+.ro .tx { flex:1; }
+.ro b { color:var(--fg1); font-weight:600; }
+.undo { color:var(--blue); font-size:12px; margin-left:10px; }
+
+@media (max-width: 760px) {
+  .page { padding:24px 16px 64px; }
+  .states { grid-template-columns:minmax(0,1fr); }
+  .notes { max-width:none; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition:none !important; } }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-inbox" viewBox="0 0 24 24"><path d="M4 6a2 2 0 0 1 2 -2h12a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2z"/><path d="M4 13h3l3 3h4l3 -3h3"/></symbol>
+  <symbol id="i-factory" viewBox="0 0 24 24"><path d="M3 21h18"/><path d="M5 21v-12l5 4v-4l5 4h4"/><path d="M19 21v-8l-1.436 -9.574a.5 .5 0 0 0 -.495 -.426h-1.145a.5 .5 0 0 0 -.494 .418l-1.43 8.582"/><path d="M9 17h1"/><path d="M14 17h1"/></symbol>
+  <symbol id="i-messages" viewBox="0 0 24 24"><path d="M21 14l-3 -3h-7a1 1 0 0 1 -1 -1v-6a1 1 0 0 1 1 -1h9a1 1 0 0 1 1 1v10"/><path d="M14 15v2a1 1 0 0 1 -1 1h-7l-3 3v-10a1 1 0 0 1 1 -1h2"/></symbol>
+  <symbol id="i-kanban" viewBox="0 0 24 24"><path d="M4 4l6 0"/><path d="M14 4l6 0"/><path d="M4 10a2 2 0 0 1 2 -2h2a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-2a2 2 0 0 1 -2 -2z"/><path d="M14 10a2 2 0 0 1 2 -2h2a2 2 0 0 1 2 2v2a2 2 0 0 1 -2 2h-2a2 2 0 0 1 -2 -2z"/></symbol>
+  <symbol id="i-route" viewBox="0 0 24 24"><path d="M3 19a2 2 0 1 0 4 0a2 2 0 0 0 -4 0"/><path d="M19 7a2 2 0 1 0 0 -4a2 2 0 0 0 0 4z"/><path d="M11 19h5.5a3.5 3.5 0 0 0 0 -7h-8a3.5 3.5 0 0 1 0 -7h4.5"/></symbol>
+  <symbol id="i-tools" viewBox="0 0 24 24"><path d="M3 21h4l13 -13a1.5 1.5 0 0 0 -4 -4l-13 13v4"/><path d="M14.5 5.5l4 4"/><path d="M12 8l-5 -5l-4 4l5 5"/><path d="M7 8l-1.5 1.5"/><path d="M16 12l5 5l-4 4l-5 -5"/><path d="M16 17l-1.5 1.5"/></symbol>
+  <symbol id="i-bulb" viewBox="0 0 24 24"><path d="M3 12h1m8 -9v1m8 8h1m-15.4 -6.4l.7 .7m12.1 -.7l-.7 .7"/><path d="M9 16a5 5 0 1 1 6 0a3.5 3.5 0 0 0 -1 3a2 2 0 0 1 -4 0a3.5 3.5 0 0 0 -1 -3"/><path d="M9.7 17l4.6 0"/></symbol>
+  <symbol id="i-adjust" viewBox="0 0 24 24"><path d="M4 10a2 2 0 1 0 4 0a2 2 0 0 0 -4 0"/><path d="M6 4v4"/><path d="M6 12v8"/><path d="M10 16a2 2 0 1 0 4 0a2 2 0 0 0 -4 0"/><path d="M12 4v10"/><path d="M12 18v2"/><path d="M16 7a2 2 0 1 0 4 0a2 2 0 0 0 -4 0"/><path d="M18 4v1"/><path d="M18 9v11"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M10.325 4.317c.426 -1.756 2.924 -1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543 -.94 3.31 .826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756 .426 1.756 2.924 0 3.35a1.724 1.724 0 0 0 -1.066 2.573c.94 1.543 -.826 3.31 -2.37 2.37a1.724 1.724 0 0 0 -2.572 1.065c-.426 1.756 -2.924 1.756 -3.35 0a1.724 1.724 0 0 0 -2.573 -1.066c-1.543 .94 -3.31 -.826 -2.37 -2.37a1.724 1.724 0 0 0 -1.065 -2.572c-1.756 -.426 -1.756 -2.924 0 -3.35a1.724 1.724 0 0 0 1.066 -2.573c-.94 -1.543 .826 -3.31 2.37 -2.37c1 .608 2.296 .07 2.572 -1.065z"/><path d="M9 12a3 3 0 1 0 6 0a3 3 0 0 0 -6 0"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5l0 14"/><path d="M5 12l14 0"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6l-12 12"/><path d="M6 6l12 12"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="M6 9l6 6l6 -6"/></symbol>
+  <symbol id="i-chevr" viewBox="0 0 24 24"><path d="M9 6l6 6l-6 6"/></symbol>
+  <symbol id="i-selector" viewBox="0 0 24 24"><path d="M8 9l4 -4l4 4"/><path d="M16 15l-4 4l-4 -4"/></symbol>
+  <symbol id="i-term" viewBox="0 0 24 24"><path d="M8 9l3 3l-3 3"/><path d="M13 15l3 0"/><path d="M3 6a2 2 0 0 1 2 -2h14a2 2 0 0 1 2 2v12a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2z"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21h-10a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2h7l5 5v11a2 2 0 0 1 -2 2z"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><path d="M3 10a7 7 0 1 0 14 0a7 7 0 1 0 -14 0"/><path d="M21 21l-6 -6"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M4 20h4l10.5 -10.5a2.828 2.828 0 1 0 -4 -4l-10.5 10.5v4"/><path d="M13.5 6.5l4 4"/></symbol>
+  <symbol id="i-plug" viewBox="0 0 24 24"><path d="M9.785 6l8.215 8.215l-2.054 2.054a5.81 5.81 0 1 1 -8.215 -8.215l2.054 -2.054z"/><path d="M4 20l3.5 -3.5"/><path d="M15 4l-3.5 3.5"/><path d="M20 9l-3.5 3.5"/></symbol>
+  <symbol id="i-branch" viewBox="0 0 24 24"><path d="M5 18a2 2 0 1 0 4 0a2 2 0 1 0 -4 0"/><path d="M5 6a2 2 0 1 0 4 0a2 2 0 1 0 -4 0"/><path d="M15 6a2 2 0 1 0 4 0a2 2 0 1 0 -4 0"/><path d="M7 8l0 8"/><path d="M9 18h6a2 2 0 0 0 2 -2v-5"/><path d="M14 14l3 -3l3 3"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M5 4h4l3 3h7a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-11a2 2 0 0 1 2 -2"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><path d="M7 9.667a2.667 2.667 0 0 1 2.667 -2.667h8.666a2.667 2.667 0 0 1 2.667 2.667v8.666a2.667 2.667 0 0 1 -2.667 2.667h-8.666a2.667 2.667 0 0 1 -2.667 -2.667z"/><path d="M4.012 16.737a2.005 2.005 0 0 1 -1.012 -1.737v-10c0 -1.1 .9 -2 2 -2h10c.75 0 1.158 .385 1.5 1"/></symbol>
+  <symbol id="i-clip" viewBox="0 0 24 24"><path d="M15 7l-6.5 6.5a1.5 1.5 0 0 0 3 3l6.5 -6.5a3 3 0 0 0 -6 -6l-6.5 6.5a4.5 4.5 0 0 0 9 9l6.5 -6.5"/></symbol>
+  <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M16 18a2 2 0 0 1 2 2a2 2 0 0 1 2 -2a2 2 0 0 1 -2 -2a2 2 0 0 1 -2 2zm0 -12a2 2 0 0 1 2 2a2 2 0 0 1 2 -2a2 2 0 0 1 -2 -2a2 2 0 0 1 -2 2zm-7 12a6 6 0 0 1 6 -6a6 6 0 0 1 -6 -6a6 6 0 0 1 -6 6a6 6 0 0 1 6 6z"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12l5 5l10 -10"/></symbol>
+  <symbol id="i-ccheck" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0"/><path d="M9 12l2 2l4 -4"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 9v4"/><path d="M10.363 3.591l-8.106 13.534a1.914 1.914 0 0 0 1.636 2.871h16.214a1.914 1.914 0 0 0 1.636 -2.87l-8.106 -13.536a1.914 1.914 0 0 0 -3.274 0z"/><path d="M12 16h.01"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3a12 12 0 0 0 8.5 3a12 12 0 0 1 -8.5 15a12 12 0 0 1 -8.5 -15a12 12 0 0 0 8.5 -3"/></symbol>
+  <symbol id="i-shieldoff" viewBox="0 0 24 24"><path d="M17.67 17.667a12 12 0 0 1 -5.67 3.333a12 12 0 0 1 -8.5 -15c.794 .036 1.583 -.006 2.357 -.124m3.128 -.926a11.997 11.997 0 0 0 3.015 -1.95a12 12 0 0 0 8.5 3a12 12 0 0 1 -1.116 9.376"/><path d="M3 3l18 18"/></symbol>
+  <symbol id="i-brain" viewBox="0 0 24 24"><path d="M15.5 13a3.5 3.5 0 0 0 -3.5 3.5v1a3.5 3.5 0 0 0 7 0v-1.8"/><path d="M8.5 13a3.5 3.5 0 0 1 3.5 3.5v1a3.5 3.5 0 0 1 -7 0v-1.8"/><path d="M17.5 16a3.5 3.5 0 0 0 0 -7h-.5"/><path d="M19 9.3v-2.8a3.5 3.5 0 0 0 -7 0"/><path d="M6.5 16a3.5 3.5 0 0 1 0 -7h.5"/><path d="M5 9.3v-2.8a3.5 3.5 0 0 1 7 0v10"/></symbol>
+  <symbol id="i-world" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0"/><path d="M3.6 9h16.8"/><path d="M3.6 15h16.8"/><path d="M11.5 3a17 17 0 0 0 0 18"/><path d="M12.5 3a17 17 0 0 1 0 18"/></symbol>
+  <symbol id="i-tree" viewBox="0 0 24 24"><path d="M10 5a2 2 0 1 0 4 0a2 2 0 1 0 -4 0"/><path d="M3 19a2 2 0 1 0 4 0a2 2 0 1 0 -4 0"/><path d="M17 19a2 2 0 1 0 4 0a2 2 0 1 0 -4 0"/><path d="M6.5 17.5l5.5 -4.5l5.5 4.5"/><path d="M12 7l0 6"/></symbol>
+  <symbol id="i-pr" viewBox="0 0 24 24"><path d="M4 18a2 2 0 1 0 4 0a2 2 0 1 0 -4 0"/><path d="M4 6a2 2 0 1 0 4 0a2 2 0 1 0 -4 0"/><path d="M16 18a2 2 0 1 0 4 0a2 2 0 1 0 -4 0"/><path d="M6 8l0 8"/><path d="M11 6h5a2 2 0 0 1 2 2v8"/><path d="M14 9l-3 -3l3 -3"/></symbol>
+  <symbol id="i-dots" viewBox="0 0 24 24"><path d="M4 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"/><path d="M11 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"/><path d="M18 12a1 1 0 1 0 2 0a1 1 0 1 0 -2 0"/></symbol>
+  <symbol id="i-listcheck" viewBox="0 0 24 24"><path d="M3.5 5.5l1.5 1.5l2.5 -2.5"/><path d="M3.5 11.5l1.5 1.5l2.5 -2.5"/><path d="M3.5 17.5l1.5 1.5l2.5 -2.5"/><path d="M11 6l9 0"/><path d="M11 12l9 0"/><path d="M11 18l9 0"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z"/></symbol>
+  <symbol id="i-coffee" viewBox="0 0 24 24"><path d="M3 14c.83 .642 2.077 1.017 3.5 1c1.423 .017 2.67 -.358 3.5 -1c.83 -.642 2.077 -1.017 3.5 -1c1.423 -.017 2.67 .358 3.5 1"/><path d="M8 3a2.4 2.4 0 0 0 -1 2a2.4 2.4 0 0 0 1 2"/><path d="M12 3a2.4 2.4 0 0 0 -1 2a2.4 2.4 0 0 0 1 2"/><path d="M3 10h14v5a6 6 0 0 1 -6 6h-2a6 6 0 0 1 -6 -6v-5z"/><path d="M16.746 16.726a3 3 0 1 0 .252 -5.555"/></symbol>
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M9 14l-4 -4l4 -4"/><path d="M5 10h11a4 4 0 1 1 0 8h-1"/></symbol>
+  <symbol id="i-ext" viewBox="0 0 24 24"><path d="M12 6h-6a2 2 0 0 0 -2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-6"/><path d="M11 13l9 -9"/><path d="M15 4h5v5"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2"/><path d="M7 11l5 5l5 -5"/><path d="M12 4l0 12"/></symbol>
+  <symbol id="i-plugx" viewBox="0 0 24 24"><path d="M13.55 17.733a5.806 5.806 0 0 1 -7.356 -4.052a5.81 5.81 0 0 1 1.537 -5.627l2.054 -2.054l7.165 7.165"/><path d="M4 20l3.5 -3.5"/><path d="M15 4l-3.5 3.5"/><path d="M20 9l-3.5 3.5"/><path d="M16 16l4 4"/><path d="M20 16l-4 4"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 5l0 14"/><path d="M18 13l-6 6"/><path d="M6 13l6 6"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M10 12a2 2 0 1 0 4 0a2 2 0 0 0 -4 0"/><path d="M21 12c-2.4 4 -5.4 6 -9 6c-3.6 0 -6.6 -2 -9 -6c2.4 -4 5.4 -6 9 -6c3.6 0 6.6 2 9 6"/></symbol>
+  <symbol id="i-menu" viewBox="0 0 24 24"><path d="M4 6l16 0"/><path d="M4 12l16 0"/><path d="M4 18l16 0"/></symbol>
+  <symbol id="i-tool" viewBox="0 0 24 24"><path d="M7 10h3v-3l-3.5 -3.5a6 6 0 0 1 8 8l6 6a2 2 0 0 1 -3 3l-6 -6a6 6 0 0 1 -8 -8l3.5 3.5"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0"/><path d="M12 7v5l3 3"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0"/><path d="M12 9h.01"/><path d="M11 12h1v4h1"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><path d="M5 13a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v6a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2v-6z"/><path d="M11 16a1 1 0 1 0 2 0a1 1 0 0 0 -2 0"/><path d="M8 11v-4a4 4 0 1 1 8 0v4"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M6 6a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v12a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1z"/><path d="M14 6a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v12a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1z"/></symbol>
+  <symbol id="i-alertc" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0"/><path d="M12 8v4"/><path d="M12 16h.01"/></symbol>
+  <symbol id="i-commit" viewBox="0 0 24 24"><path d="M9 12a3 3 0 1 0 6 0a3 3 0 1 0 -6 0"/><path d="M12 3l0 6"/><path d="M12 15l0 6"/></symbol>
+</svg>
+
+<div class="page">
+  <div class="top">
+    <div>
+      <h1>Sessions, in ten screens</h1>
+      <p>Mockups for <code>2026-11-11-10db-sessions-ui.md</code>, the companion of the Sessions design spec (v3). Every color is a Selenized value, dark and light. The shell, nav, type and controls are the app's own; what is new is written in the notes beside each screen. Content is invented but plausible.</p>
+      <p class="who">Designed on 2026-11-11 from the checkout at c4da899. Not built.</p>
+    </div>
+    <div class="toggle" role="group" aria-label="Color scheme">
+      <button type="button" data-t="dark" aria-pressed="true">Dark</button>
+      <button type="button" data-t="light" aria-pressed="false">Light</button>
+    </div>
+  </div>
+  <nav class="index" aria-label="Screens">
+    <a href="#a">a. Tab strip</a><a href="#b">b. A fresh tab</a><a href="#c">c. Mid-turn</a><a href="#d">d. Permission and question</a><a href="#e">e. Do It</a><a href="#f">f. Changes</a><a href="#g">g. In your terminal</a><a href="#h">h. / and @</a><a href="#i">i. Narrow window</a><a href="#j">j. Other states</a>
+  </nav>
+
+  <!-- ============ a. Tab strip ============ -->
+  <section class="shot" id="a">
+    <h2>a. The tab strip, five tabs in mixed states</h2>
+    <p class="lede">Tabs live in the title bar. A chat about OpenCode is open, idle, after the builder asked it to file two tasks.</p>
+    <div class="pair">
+      <div class="stage"><div class="frame" inert>
+        <div class="win" style="height:640px">
+          <header class="hdr">
+            <div class="lights"><i></i><i></i><i></i></div>
+            <div class="strip">
+              <div class="tab"><span class="tile">10</span><span class="t">CI gate timeout</span><span class="dot b"></span></div>
+              <div class="tab ring"><span class="tile">10</span><span class="t">Codex permissions</span><span class="dot y"></span></div>
+              <div class="tab sel"><span class="tile">10</span><span class="t">ACP or gateway?</span><svg class="i x"><use href="#i-x"/></svg></div>
+              <div class="tab away"><span class="tile">AM</span><span class="t">Invoice export</span><svg class="i s12 k"><use href="#i-term"/></svg></div>
+              <div class="tab unread"><span class="tile">HB</span><span class="t">Gemini routing</span></div>
+              <span class="ib"><svg class="i"><use href="#i-plus"/></svg></span>
+              <span class="ib"><svg class="i"><use href="#i-chev"/></svg></span>
+            </div>
+            <div class="hstat"><svg class="i s18"><use href="#i-coffee"/></svg><svg class="i s18"><use href="#i-moon"/></svg></div>
+          </header>
+          <div class="body">
+            <nav class="nav">
+              <div class="nl"><svg class="i"><use href="#i-inbox"/></svg><span>Inbox</span><b class="cb">3</b></div>
+              <div class="nl"><svg class="i"><use href="#i-factory"/></svg><span>Factory</span></div>
+              <div class="nl on"><svg class="i"><use href="#i-messages"/></svg><span>Sessions</span><b class="cb">1</b></div>
+              <div class="plabel">Project</div>
+              <div class="switch"><span class="tile">10</span><span>10db</span><svg class="i"><use href="#i-selector"/></svg></div>
+              <div class="nl"><svg class="i"><use href="#i-kanban"/></svg><span>Board</span></div>
+              <div class="nl"><svg class="i"><use href="#i-route"/></svg><span>Plan</span></div>
+              <div class="nl"><svg class="i"><use href="#i-tools"/></svg><span>UI Workbench</span></div>
+              <div class="nl"><svg class="i"><use href="#i-bulb"/></svg><span>Knowledge</span></div>
+              <div class="nl"><svg class="i"><use href="#i-adjust"/></svg><span>Project Settings</span></div>
+              <div class="grow"></div>
+              <div class="nl"><svg class="i"><use href="#i-settings"/></svg><span>Settings</span></div>
+            </nav>
+            <main class="main">
+              <div class="sbar">
+                <span class="who"><span class="title">ACP or gateway?</span><span class="kind"><svg class="i s12"><use href="#i-eye"/></svg>Chat · reads 10db, changes nothing</span></span>
+                <span class="sp"></span>
+                <span class="right">
+                  <span class="agent">Claude Code · opus <svg class="i s12"><use href="#i-chev"/></svg></span>
+                  <span class="meter" title="23% of the context used"><i><b style="width:23%"></b></i>23%</span>
+                  <span class="split"><span class="btn xs">Do It…</span><span class="btn xs"><svg class="i s12"><use href="#i-chev"/></svg></span></span>
+                  <span class="ib"><svg class="i"><use href="#i-term"/></svg></span>
+                  <span class="ib"><svg class="i"><use href="#i-dots"/></svg></span>
+                </span>
+              </div>
+              <div class="pane"><div class="conv">
+                <div class="scroll fade-top"><div class="col">
+                  <div class="you"><p>For Gemini, compare running OpenCode over ACP with pointing Claude Code at OpenRouter. Which is less work for 10db?</p></div>
+                  <div class="rows">
+                    <div class="row"><svg class="i ic"><use href="#i-search"/></svg><span class="tg">Read 9 files, searched 4 times</span><span class="meta">12 s</span><svg class="i ch"><use href="#i-chevr"/></svg></div>
+                    <div class="row"><svg class="i ic"><use href="#i-file"/></svg><span class="tg">Read <code>docs/architecture/research/2026-11-11-sessions-research.md</code></span><span class="meta">1 s</span><svg class="i ch"><use href="#i-chevr"/></svg></div>
+                  </div>
+                  <div class="reply">
+                    <p><strong>OpenCode over ACP is less work,</strong> mostly because it already speaks ACP and has its own allow, ask and deny rules.</p>
+                    <table class="md-table">
+                      <tr><th></th><th>OpenCode over ACP</th><th>Claude Code on a gateway</th></tr>
+                      <tr><td>New code</td><td>one <code>AcpSessionAdapter</code></td><td>none; the gateway kind exists</td></tr>
+                      <tr><td>Permissions</td><td>ACP permission requests</td><td>10db's guard, unchanged</td></tr>
+                      <tr><td>Tools with Gemini</td><td>native to OpenCode</td><td>untested through OpenRouter</td></tr>
+                      <tr><td>Steering</td><td>not in ACP v1</td><td>yes</td></tr>
+                    </table>
+                    <p>Two things to check before choosing:</p>
+                    <ol><li>Whether OpenCode's permission requests carry the command and path the guard needs.</li><li>How well Gemini drives Claude Code's tools through OpenRouter's Anthropic endpoint.</li></ol>
+                  </div>
+                  <div class="you"><p>File the work we agreed on as tasks on the Board.</p></div>
+                  <div class="rows">
+                    <div class="row task"><span class="dot n"></span><span class="tg">Spike: OpenCode's permission requests carry command and path</span><span class="meta">Added to Ready</span><a>Open on Board</a><a>Undo</a></div>
+                    <div class="row task"><span class="dot n"></span><span class="tg">Spike: Gemini on Claude Code through OpenRouter</span><span class="meta">Added to Ready</span><a>Open on Board</a><a>Undo</a></div>
+                  </div>
+                  <div class="reply"><p>Filed both in Ready. Neither starts until you start it: asking me to start one raises a card first.</p></div>
+                </div></div>
+                <div class="foot"><div class="col">
+                  <div class="composer"><div class="ta"><span class="ph">Reply…</span></div><div class="bar"><span class="ib"><svg class="i s18"><use href="#i-clip"/></svg></span><span class="sp"></span><span class="btn dis">Send</span></div></div>
+                  <div class="hint"><span>⌘↩ sends · / commands · @ files</span></div>
+                </div></div>
+              </div></div>
+            </main>
+          </div>
+        </div>
+      </div>
+      <div class="legend" aria-label="Every tab state">
+        <div class="it"><div class="tab"><span class="tile">10</span><span class="t">CI gate timeout</span><span class="dot b"></span></div><span class="c"><b>Working.</b> The one bare dot; static, nothing spins.</span></div>
+        <div class="it"><div class="tab ring"><span class="tile">10</span><span class="t">Codex permissions</span><span class="dot y"></span></div><span class="c"><b>Needs you.</b> An Inbox card waits: dot and ring.</span></div>
+        <div class="it"><div class="tab ring"><span class="tile">AM</span><svg class="i s12 k"><use href="#i-folder"/></svg><span class="t">Retry login on a 401</span><span class="dot y"></span></div><span class="c"><b>Ready.</b> A Your-folder turn ended; its check card waits.</span></div>
+        <div class="it"><div class="tab redring"><span class="tile">AM</span><span class="t">Export over 10k rows</span><svg class="i sm r"><use href="#i-alert"/></svg></div><span class="c"><b>Stopped by an error.</b> Needs you, as a failed Workbench page does: icon and red ring.</span></div>
+        <div class="it"><div class="tab"><span class="tile">HB</span><span class="t">Gemini routing</span><svg class="i sm o"><use href="#i-pause"/></svg></div><span class="c"><b>Paused.</b> Usage limit; resumes on its own.</span></div>
+        <div class="it"><div class="tab away"><span class="tile">AM</span><span class="t">Invoice export</span><svg class="i sm d"><use href="#i-term"/></svg></div><span class="c"><b>In your terminal.</b> Glyph, dimmed title.</span></div>
+        <div class="it"><div class="tab"><span class="tile">AM</span><svg class="i s12 k"><use href="#i-branch"/></svg><span class="t">Export over 10k rows</span><svg class="i sm d"><use href="#i-pr"/></svg></div><span class="c"><b>In review.</b> Its pull request is open: a finished Separate copy, or a closed pass.</span></div>
+        <div class="it"><div class="tab"><span class="tile">AM</span><svg class="i s12 k"><use href="#i-folder"/></svg><span class="t">Retry login on a 401</span><svg class="i sm d"><use href="#i-check"/></svg></div><span class="c"><b>Signed off.</b> Every turn signed off, the pass not closed: nothing landed, the folder held. Dimmed, never green.</span></div>
+        <div class="it"><div class="tab"><span class="tile">AM</span><svg class="i s12 k"><use href="#i-folder"/></svg><span class="t">Settings page spacing</span><svg class="i sm g"><use href="#i-check"/></svg></div><span class="c"><b>Done.</b> Landed: merged, or a closed pass on a <code>local</code> project. Green only here.</span></div>
+        <div class="it"><div class="tab unread"><span class="tile">10</span><span class="t">ACP or gateway?</span></div><span class="c"><b>New reply.</b> Weight, not color, and no card.</span></div>
+        <div class="it"><div class="tab"><span class="tile">10</span><span class="t">Release notes draft</span></div><span class="c"><b>Idle.</b> Nothing to show.</span></div>
+        <div class="it"><div class="tab sel ring"><span class="tile">10</span><span class="t">Codex permissions</span><svg class="i x"><use href="#i-x"/></svg></div><span class="c"><b>Selected.</b> The × takes the mark's place, so it adds no width; the ring stays.</span></div>
+      </div>
+      </div>
+      <div class="notes">
+        <p><b>Tabs in the title bar.</b> The 48 px header is empty on every view today; on Sessions it carries the tabs, so the conversation keeps the full height. The strip starts just after the traffic lights, so five titles read at 1080 px. Its empty space still drags the window, and a double-click there zooms it.</p>
+        <p><b>Every title reads.</b> A tab takes its title's width up to 220 px; the selected one shrinks last; the × takes the state mark's place. <code>set_title</code> asks for 28 characters at most.</p>
+        <p><b>A tab says three things.</b> Whose project (the tile), what it is (the title, plus a folder or branch glyph when it can write), and whether it needs you (one dot). The agent and model live in the session bar and the tooltip.</p>
+        <p><b>Never color alone.</b> A bare dot is Working. Needs you and Ready add a 1 px ring, as a Board card waiting on you gets a yellow border; an error gets the alert icon and a red ring, and counts as needs-you. Paused, In review and Done are icons. "Needs you" is read from the Inbox, so the tab and the Inbox can never disagree.</p>
+        <p><b>Selected is the sidebar's pill.</b> The same <code>bg_1</code> fill and weight 600 as an active nav link. No outline.</p>
+        <p><b>Global, with a project tile per tab.</b> Sessions sits under Inbox and Factory because a tab that needs you must never hide behind the project switcher. Selecting a tab makes its project the selected one, so Board and Plan open where you are talking.</p>
+        <p><b>File as Tasks</b> is a visible message to the agent. Its <code>create_task</code> calls run without a card and render as task rows with Open on Board and Undo; <code>start_task</code> would raise a card instead.</p>
+        <p><b>No web tools in a chat,</b> so this chat read the research file rather than searching.</p>
+        <p class="cite">UI spec §3, §5.1 to §5.5, §7.3</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ b. Fresh tab ============ -->
+  <section class="shot" id="b">
+    <h2>b. A fresh tab</h2>
+    <p class="lede">⌘T from any view. Every session starts as a Chat. The empty state is the start of the work: two controls with defaults, the composer, rule-based starts and this project's recent sessions.</p>
+    <div class="pair">
+      <div class="stage"><div class="frame" inert>
+        <div class="win" style="height:770px">
+          <header class="hdr">
+            <div class="lights"><i></i><i></i><i></i></div>
+            <div class="strip">
+              <div class="tab"><span class="tile">10</span><span class="t">CI gate timeout</span><span class="dot b"></span></div>
+              <div class="tab ring"><span class="tile">10</span><span class="t">Codex permissions</span><span class="dot y"></span></div>
+              <div class="tab"><span class="tile">10</span><span class="t">ACP or gateway?</span></div>
+              <div class="tab sel"><span class="tile">AM</span><span class="t">New session</span><svg class="i x"><use href="#i-x"/></svg></div>
+              <span class="ib"><svg class="i"><use href="#i-plus"/></svg></span>
+              <span class="ib"><svg class="i"><use href="#i-chev"/></svg></span>
+            </div>
+            <div class="hstat"><svg class="i s18"><use href="#i-coffee"/></svg><svg class="i s18"><use href="#i-moon"/></svg></div>
+          </header>
+          <div class="body">
+            <nav class="nav">
+              <div class="nl"><svg class="i"><use href="#i-inbox"/></svg><span>Inbox</span><b class="cb">3</b></div>
+              <div class="nl"><svg class="i"><use href="#i-factory"/></svg><span>Factory</span></div>
+              <div class="nl on"><svg class="i"><use href="#i-messages"/></svg><span>Sessions</span><b class="cb">1</b></div>
+              <div class="plabel">Project</div>
+              <div class="switch"><span class="tile">AM</span><span>ampsio</span><svg class="i"><use href="#i-selector"/></svg></div>
+              <div class="nl"><svg class="i"><use href="#i-kanban"/></svg><span>Board</span></div>
+              <div class="nl"><svg class="i"><use href="#i-route"/></svg><span>Plan</span></div>
+              <div class="nl"><svg class="i"><use href="#i-tools"/></svg><span>UI Workbench</span></div>
+              <div class="nl"><svg class="i"><use href="#i-bulb"/></svg><span>Knowledge</span></div>
+              <div class="nl"><svg class="i"><use href="#i-adjust"/></svg><span>Project Settings</span></div>
+              <div class="grow"></div>
+              <div class="nl"><svg class="i"><use href="#i-settings"/></svg><span>Settings</span></div>
+            </nav>
+            <main class="main">
+              <div class="pane"><div class="conv">
+                <div class="scroll from-top" style="padding-top:64px"><div class="col" style="max-width:640px">
+                  <p style="margin:0 0 16px;color:var(--fg0)">A chat reads ampsio and changes nothing. When you're ready, Do It starts the work.</p>
+                  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+                    <span class="sel-in"><span class="tile">AM</span>ampsio<svg class="i s12"><use href="#i-chev"/></svg></span>
+                    <span class="agent" style="border:1px solid var(--bg2);height:30px"><span style="color:var(--dim)">Claude Code ·</span> opus <svg class="i s12"><use href="#i-chev"/></svg></span>
+                  </div>
+                  <div class="line" style="margin:8px 0 10px">Uses ampsio's account. Reads the code and runs read-only commands; changes nothing.</div>
+                  <div class="composer focus"><div class="ta"><span class="caret"></span><span class="ph">Ask about ampsio…</span></div><div class="bar"><span class="ib"><svg class="i s18"><use href="#i-clip"/></svg></span><span class="sp"></span><span class="btn dis">Send</span></div></div>
+                  <div class="hint"><span>⌘↩ sends · / commands · @ files</span></div>
+
+                  <div style="font-size:12px;font-weight:600;color:var(--dim);margin:28px 0 4px">Start from</div>
+                  <div style="display:flex;flex-direction:column;align-items:flex-start;gap:2px">
+                    <span class="btn xs sub"><svg class="i s14"><use href="#i-alertc"/></svg>Why did “Retry export on timeout” fail?</span>
+                    <span class="btn xs sub"><svg class="i s14"><use href="#i-commit"/></svg>What changed on main since yesterday?</span>
+                    <span class="btn xs sub"><svg class="i s14"><use href="#i-folder"/></svg>How does billing/export work?</span>
+                  </div>
+
+                  <div style="font-size:12px;font-weight:600;color:var(--dim);margin:24px 0 4px">Recent</div>
+                  <div>
+                    <div class="row" style="height:44px"><span class="mk"><span class="dot y"></span></span><span style="display:flex;flex-direction:column;line-height:1.35;min-width:0"><span style="font-weight:500;color:var(--fg1)">Retry login on a 401</span><span style="font-size:12px;color:var(--dim)">Task · Your folder · 20 min ago · ready</span></span></div>
+                    <div class="row" style="height:44px"><span class="mk"><svg class="i s12"><use href="#i-term"/></svg></span><span style="display:flex;flex-direction:column;line-height:1.35;min-width:0"><span style="font-weight:500;color:var(--fg1)">Invoice export</span><span style="font-size:12px;color:var(--dim)">Chat · 2 h ago · in your terminal</span></span></div>
+                    <div class="row" style="height:44px"><span class="mk"><svg class="i s12"><use href="#i-lock"/></svg></span><span style="display:flex;flex-direction:column;line-height:1.35;min-width:0"><span style="font-weight:500;color:var(--fg1)">Login fails after sleep</span><span style="font-size:12px;color:var(--dim)">Chat · yesterday · read-only, 1 task started</span></span></div>
+                    <div class="row" style="height:44px"><span class="mk"><svg class="i sm g"><use href="#i-check"/></svg></span><span style="display:flex;flex-direction:column;line-height:1.35;min-width:0"><span style="font-weight:500;color:var(--fg1)">Settings page spacing</span><span style="font-size:12px;color:var(--dim)">Task · Your folder · Monday · done, <code>main</code> at <code>9c41e0b</code></span></span></div>
+                  </div>
+                  <div style="margin-top:10px;font-size:13px;color:var(--blue)">Find a Session <span class="kbd">⌘K</span></div>
+                </div></div>
+              </div></div>
+            </main>
+          </div>
+        </div>
+      </div>
+      </div>
+      <div class="notes">
+        <p><b>⌘T, type, ⌘↩.</b> Two controls, both with defaults: the selected project, and the model the <code>plan</code> role resolves to. Nothing has to be touched.</p>
+        <p><b>Every session starts as a Chat.</b> A Chat reads and changes nothing; Do It is the only way to a Task (design spec S2). So there is no Chat or Task toggle here.</p>
+        <p><b>The agent is not a choice.</b> It is the project's account's harness, shown as its label, "Claude Code". Only the model picks.</p>
+        <p><b>The composer sits in the upper third,</b> where the eye lands after the strip, with the cursor already in it.</p>
+        <p><b>Start from</b> holds at most three suggestions built by rules from the project's state, not by a model. Each icon names its source: a failed task, new commits, a recently changed area. A click fills the composer and sends nothing. They are not nudges (those are a model's, with sparkles and an ×), so they carry neither.</p>
+        <p><b>Recent</b> follows the Project control: title, kind, when, and what it produced. A dot only when there is a state to say.</p>
+        <p><b>Fixed after the first send:</b> the project and the account. The model changes between turns.</p>
+        <p class="cite">UI spec §6</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ c. Mid-turn ============ -->
+  <section class="shot" id="c">
+    <h2>c. A Task mid-turn</h2>
+    <p class="lede">Claude Code is fixing the 401 retry in Your folder, as a pass of one. Reads are grouped, an edit shows a peek, a failed test opened itself, the reply streams, and the builder has added a line to the running turn. The window is drawn tall; the brief sits above the fold.</p>
+    <div class="pair">
+      <div class="stage"><div class="frame" inert>
+        <div class="win" style="height:1210px">
+          <header class="hdr">
+            <div class="lights"><i></i><i></i><i></i></div>
+            <div class="strip">
+              <div class="tab"><span class="tile">10</span><span class="t">CI gate timeout</span><span class="dot b"></span></div>
+              <div class="tab sel"><span class="tile">AM</span><svg class="i s12 k"><use href="#i-folder"/></svg><span class="t">Retry login on a 401</span><svg class="i x"><use href="#i-x"/></svg></div>
+              <div class="tab ring"><span class="tile">10</span><span class="t">Codex permissions</span><span class="dot y"></span></div>
+              <span class="ib"><svg class="i"><use href="#i-plus"/></svg></span>
+              <span class="ib"><svg class="i"><use href="#i-chev"/></svg></span>
+            </div>
+            <div class="hstat"><svg class="i s18"><use href="#i-coffee"/></svg><svg class="i s18"><use href="#i-moon"/></svg></div>
+          </header>
+          <div class="body">
+            <nav class="nav">
+              <div class="nl"><svg class="i"><use href="#i-inbox"/></svg><span>Inbox</span><b class="cb">3</b></div>
+              <div class="nl"><svg class="i"><use href="#i-factory"/></svg><span>Factory</span></div>
+              <div class="nl on"><svg class="i"><use href="#i-messages"/></svg><span>Sessions</span><b class="cb">1</b></div>
+              <div class="plabel">Project</div>
+              <div class="switch"><span class="tile">AM</span><span>ampsio</span><svg class="i"><use href="#i-selector"/></svg></div>
+              <div class="nl"><svg class="i"><use href="#i-kanban"/></svg><span>Board</span></div>
+              <div class="nl"><svg class="i"><use href="#i-route"/></svg><span>Plan</span></div>
+              <div class="nl"><svg class="i"><use href="#i-tools"/></svg><span>UI Workbench</span></div>
+              <div class="nl"><svg class="i"><use href="#i-bulb"/></svg><span>Knowledge</span></div>
+              <div class="nl"><svg class="i"><use href="#i-adjust"/></svg><span>Project Settings</span></div>
+              <div class="grow"></div>
+              <div class="nl"><svg class="i"><use href="#i-settings"/></svg><span>Settings</span></div>
+            </nav>
+            <main class="main">
+              <div class="sbar">
+                <span class="who"><span class="title">Retry login on a 401</span><span class="kind"><svg class="i s12"><use href="#i-folder"/></svg>Task · Your folder · lands on <code>main</code></span></span>
+                <span class="sp"></span>
+                <span class="right">
+                  <span class="agent off" title="Change the model between turns">Claude Code · opus <svg class="i s12"><use href="#i-chev"/></svg></span>
+                  <span class="meter"><i><b style="width:38%"></b></i>38%</span>
+                  <span class="btn xs">Changes <span class="mono plus" style="font-weight:500">+16</span><span class="mono minus" style="font-weight:500">−3</span></span>
+                  <span class="ib"><svg class="i"><use href="#i-term"/></svg></span>
+                  <span class="ib"><svg class="i"><use href="#i-dots"/></svg></span>
+                </span>
+              </div>
+              <div class="pane"><div class="conv">
+                <div class="scroll fade-top"><div class="col">
+                  <div class="notice"><svg class="i s14"><use href="#i-messages"/></svg>From chat: <a>Login fails after sleep</a></div>
+                  <div class="you"><p><strong style="color:var(--fg1)">Retry login once on a 401 after the token refresh</strong></p><p>When the laptop wakes, the first API call returns 401 because the refresh races it. Retry once after the refresh; never loop. Add a test for the double-401 case.</p></div>
+                  <div class="reply"><p>I'll find where the client handles a 401 first.</p></div>
+                  <div class="rows">
+                    <div class="row hot"><svg class="i ic"><use href="#i-search"/></svg><span class="tg">Read 5 files, searched 2 times</span><span class="meta">4 s</span><svg class="i ch"><use href="#i-chev"/></svg></div>
+                    <div class="sub">
+                      <div class="l"><svg class="i ic"><use href="#i-search"/></svg>Searched <code>status === 401</code> in <code>src/</code><span class="meta">3 matches</span></div>
+                      <div class="l"><svg class="i ic"><use href="#i-file"/></svg><code>src/api/client.ts</code></div>
+                      <div class="l"><svg class="i ic"><use href="#i-file"/></svg><code>src/api/refresh.ts</code></div>
+                      <div class="l"><svg class="i ic"><use href="#i-file"/></svg><code>src/api/client.test.ts</code></div>
+                      <div class="l" style="color:var(--dim)">and 3 more</div>
+                    </div>
+                  </div>
+                  <div class="reply"><p><code>request()</code> retries after a refresh but never marks the retried request, so a refresh that itself returns 401 loops. I'll mark it.</p></div>
+                  <div class="rows">
+                    <div class="row"><svg class="i ic"><use href="#i-pencil"/></svg><span class="tg">Edited <code>src/api/client.ts</code></span><span class="meta"><span class="plus">+2</span> <span class="minus">−2</span></span><svg class="i ch"><use href="#i-chevr"/></svg></div>
+                    <div class="peek">
+                      <div class="l"><span class="ln">41</span><span class="sg"></span>  const res = await send(req);</div>
+                      <div class="l del"><span class="ln">42</span><span class="sg">−</span>  if (res.status === 401) {</div>
+                      <div class="l add"><span class="ln">42</span><span class="sg">+</span>  if (res.status === 401 <span class="w">&amp;&amp; !req.retried</span>) {</div>
+                      <div class="l"><span class="ln">43</span><span class="sg"></span>    await refreshToken();</div>
+                      <div class="l del"><span class="ln">44</span><span class="sg">−</span>    return send(req);</div>
+                      <div class="l add"><span class="ln">44</span><span class="sg">+</span>    return request({ ...req, <span class="w">retried: true</span> });</div>
+                      <div class="more">Show Full Diff · Open in Changes</div>
+                    </div>
+                    <div class="row fail"><svg class="i ic"><use href="#i-term"/></svg><span class="tg"><code>$ pnpm vitest run src/api</code></span><span class="meta bad">exit 1 · 9 s</span><svg class="i ch"><use href="#i-chev"/></svg></div>
+                    <div class="out"> FAIL  src/api/client.test.ts &gt; request &gt; signs out after a second 401
+<span class="e">AssertionError: expected SignedOut, got TokenExpired</span>
+  at src/api/client.test.ts:58:27
+ Tests  1 failed | 22 passed (23)</div>
+                    <div class="row"><svg class="i ic"><use href="#i-brain"/></svg><span class="tg" style="color:var(--dim)">Thought for 8 s</span><svg class="i ch"><use href="#i-chevr"/></svg></div>
+                  </div>
+                  <div class="reply">
+                    <p>The test caught one more case: after the retry, a second 401 should sign the user out, but it surfaces <code>TokenExpired</code>. I'll map it in the retried branch:</p>
+                    <div class="code"><div class="ch"><span>ts</span><svg class="i s14"><use href="#i-copy"/></svg></div><pre><span class="tk-k">if</span> (res.status === <span class="tk-n">401</span> &amp;&amp; req.retried) {
+  <span class="tk-k">throw new</span> <span class="tk-t">SignedOut</span>(<span class="tk-s">'refresh did not take'</span>);
+}</pre></div>
+                    <p class="streamtail">Then I'll run the API tests again and</p>
+                  </div>
+                  <div class="you"><p>Also log the retry at debug, not info.</p><div class="rcpt">Waiting for Claude Code to read it</div></div>
+                </div></div>
+                <div class="foot"><div class="col">
+                  <div class="plan"><svg class="i s14 ic"><use href="#i-listcheck"/></svg><span>Plan</span><span class="meta">· 2 of 4 done · Now: map a second 401 to SignedOut</span><span style="flex:1"></span><svg class="i s14 ic"><use href="#i-chevr"/></svg></div>
+                  <div class="work"><span class="dot b"></span><span class="t">Working · 3 min · writing</span></div>
+                  <div class="work2">2 files changed so far · <a>Show Log</a></div>
+                  <div class="composer"><div class="ta"><span class="ph">Add to this turn…</span></div><div class="bar"><span class="ib"><svg class="i s18"><use href="#i-clip"/></svg></span><span class="sp"></span><span class="btn">Stop</span></div></div>
+                  <div class="hint"><span>⌘↩ adds to this turn · Esc stops</span></div>
+                </div></div>
+              </div></div>
+            </main>
+          </div>
+        </div>
+      </div>
+      <p class="cap">The same composer with <code>steer: 'queue'</code>, as a future ACP agent such as OpenCode would report: the message waits as a chip and sends when the turn ends.</p>
+      <div class="frame" style="width:640px;padding:12px 14px;margin-top:6px" inert>
+        <div class="qchip"><span class="lab">Queued</span><span class="tx">Also log the retry at debug, not info.</span><span class="act">Edit</span><span class="act">Remove</span></div>
+        <div class="composer"><div class="ta"><span class="ph">Queue for the next turn…</span></div><div class="bar"><span class="sp"></span><span class="btn">Stop</span></div></div>
+      </div>
+      </div>
+      <div class="notes">
+        <p><b>Rows, not cards.</b> A tool call is a 28 px line that opens on demand: icon, verb, target in mono, a dimmed meta at the right. The reply stays the story.</p>
+        <p><b>Small reads fold</b> into one row until anything else happens. Here it is opened to show its list.</p>
+        <p><b>An edit always shows a peek,</b> the first hunk in at most 8 lines, so you see what changed without opening anything. The full diff and the Changes panel are one click.</p>
+        <p><b>One <code>Diff</code> per hunk, 10db's gutter.</b> <code>Diff</code> runs with <code>withLineNumbers</code> off, since it numbers every hunk from 1. The gutter numbers removed lines from <code>oldStart</code> and the rest from <code>newStart</code>.</p>
+        <p><b>A failed command opens itself</b> to its last lines; a passing one stays shut.</p>
+        <p><b>Diffs are Selenized exactly.</b> No tinted rows (the palette forbids mixing): green or red text on <code>bg_1</code>, the changed words on <code>bg_2</code>. It reads like <code>git diff</code> in a Selenized terminal.</p>
+        <p><b>Streaming has no caret.</b> The working line says what the turn is doing; the plan row above it says where it is.</p>
+        <p><b>⌘↩ mid-turn injects</b> where <code>steer</code> is <code>inject</code>: the message joins the running turn, as in the UI Workbench, and "Waiting for Claude Code to read it" clears on the receipt. The hint says what ⌘↩ will do before Send. With an empty composer the button is Stop; with text it is Stop and Redo.</p>
+        <p><b>A pass of one stays warm</b> between turns, so the next message lands at once. Its tool rows need the runner to store <code>tool_call</code> items (design spec M4c); until then the live line and Show Log carry the turn.</p>
+        <p><b>No speaker labels.</b> Your words sit on the raised panel; the agent is named in the session bar.</p>
+        <p class="cite">UI spec §7.3 to §7.8</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ d. Permission and question ============ -->
+  <section class="shot" id="d">
+    <h2>d. A permission request and a question, answered in place</h2>
+    <p class="lede">The cards are the Inbox's own, pinned above the composer. Above, Codex asks to run tests from a read-only chat. Below, Claude Code asks which retry policy to use, and a chat asks before starting a task it filed.</p>
+    <div class="pair">
+      <div class="stage"><div class="frame" inert>
+        <div class="win" style="height:700px">
+          <header class="hdr">
+            <div class="lights"><i></i><i></i><i></i></div>
+            <div class="strip">
+              <div class="tab"><span class="tile">10</span><span class="t">CI gate timeout</span><span class="dot b"></span></div>
+              <div class="tab sel ring"><span class="tile">10</span><span class="t">Codex permissions</span><svg class="i x"><use href="#i-x"/></svg></div>
+              <div class="tab"><span class="tile">10</span><span class="t">ACP or gateway?</span></div>
+              <div class="tab"><span class="tile">AM</span><svg class="i s12 k"><use href="#i-folder"/></svg><span class="t">Retry login on a 401</span><span class="dot b"></span></div>
+              <span class="ib"><svg class="i"><use href="#i-plus"/></svg></span>
+              <span class="ib"><svg class="i"><use href="#i-chev"/></svg></span>
+            </div>
+            <div class="hstat"><svg class="i s18"><use href="#i-coffee"/></svg><svg class="i s18"><use href="#i-moon"/></svg></div>
+          </header>
+          <div class="body">
+            <nav class="nav">
+              <div class="nl"><svg class="i"><use href="#i-inbox"/></svg><span>Inbox</span><b class="cb">4</b></div>
+              <div class="nl"><svg class="i"><use href="#i-factory"/></svg><span>Factory</span></div>
+              <div class="nl on"><svg class="i"><use href="#i-messages"/></svg><span>Sessions</span><b class="cb">1</b></div>
+              <div class="plabel">Project</div>
+              <div class="switch"><span class="tile">10</span><span>10db</span><svg class="i"><use href="#i-selector"/></svg></div>
+              <div class="nl"><svg class="i"><use href="#i-kanban"/></svg><span>Board</span></div>
+              <div class="nl"><svg class="i"><use href="#i-route"/></svg><span>Plan</span></div>
+              <div class="nl"><svg class="i"><use href="#i-tools"/></svg><span>UI Workbench</span></div>
+              <div class="nl"><svg class="i"><use href="#i-bulb"/></svg><span>Knowledge</span></div>
+              <div class="nl"><svg class="i"><use href="#i-adjust"/></svg><span>Project Settings</span></div>
+              <div class="grow"></div>
+              <div class="nl"><svg class="i"><use href="#i-settings"/></svg><span>Settings</span></div>
+            </nav>
+            <main class="main">
+              <div class="sbar">
+                <span class="who"><span class="title">Codex permissions</span><span class="kind"><svg class="i s12"><use href="#i-eye"/></svg>Chat · reads 10db, changes nothing</span></span>
+                <span class="sp"></span>
+                <span class="right">
+                  <span class="agent off">Codex · gpt-5.5 <svg class="i s12"><use href="#i-chev"/></svg></span>
+                  <span class="meter"><i><b style="width:17%"></b></i>17%</span>
+                  <span class="split"><span class="btn xs">Do It…</span><span class="btn xs"><svg class="i s12"><use href="#i-chev"/></svg></span></span>
+                  <span class="ib"><svg class="i"><use href="#i-dots"/></svg></span>
+                </span>
+              </div>
+              <div class="pane"><div class="conv">
+                <div class="scroll fade-top"><div class="col">
+                  <div class="you"><p>Does the broker give Codex's command approvals the same cards as Claude's? Check with the tests, not by reading.</p></div>
+                  <div class="rows">
+                    <div class="row"><svg class="i ic"><use href="#i-search"/></svg><span class="tg">Read 3 files, searched once</span><span class="meta">2 s</span><svg class="i ch"><use href="#i-chevr"/></svg></div>
+                    <div class="row"><svg class="i ic"><use href="#i-term"/></svg><span class="tg"><code>$ git log --oneline -5 -- apps/daemon/src/inbox</code></span><span class="meta">0.2 s</span><svg class="i ch"><use href="#i-chevr"/></svg></div>
+                    <div class="notice" style="margin:0 0 4px 24px">You allowed this once</div>
+                  </div>
+                  <div class="reply"><p>Both go through <code>createPermissionBroker</code>, and Codex's hook socket hands it the same request. I'd like to confirm by running the broker's tests.</p></div>
+                </div></div>
+                <div class="foot"><div class="col">
+                  <div class="work"><span class="t" style="color:var(--dim)">Waiting for your answer</span></div>
+                  <div class="card" style="margin-top:0">
+                    <div class="h"><span class="badge">Permission</span><b>Run a command</b><span class="who">Codex</span></div>
+                    <div class="cblock">pnpm --filter @10db/daemon exec vitest run src/inbox/permission-broker.test.ts</div>
+                    <div style="font-size:12px;color:var(--dim);margin:-2px 0 8px">Runs under this chat's read-only sandbox.</div>
+                    <div class="radio on"><i></i><span>Allow once</span></div>
+                    <div class="radio"><i></i><span>Allow for this session</span></div>
+                    <div class="radio"><i></i><span>Always allow in this project</span></div>
+                    <div class="radio"><i></i><span>Deny</span></div>
+                    <div class="field-l">Note for the agent (optional)</div>
+                    <div class="tin"></div>
+                    <div class="f"><span class="s">Also in your Inbox.</span><span class="btn xs f">Send Answer</span></div>
+                  </div>
+                  <div class="composer"><div class="ta"><span class="ph">Add to this turn…</span></div><div class="bar"><span class="sp"></span><span class="btn">Stop</span></div></div>
+                </div></div>
+              </div></div>
+            </main>
+          </div>
+        </div>
+      </div>
+      <p class="cap">A question from Claude Code in another tab, the same card with its options' descriptions:</p>
+      <div class="frame" style="width:720px;padding:14px 16px;margin-top:6px" inert>
+        <div class="work" style="padding-top:0"><span class="t" style="color:var(--dim)">Waiting for your answer</span></div>
+        <div class="card" style="margin-top:0">
+          <div class="h"><span class="badge">Question</span><b>Which retry policy?</b><span class="who">Claude Code</span></div>
+          <div class="cbody">The refresh can fail for two reasons. How should the client behave after it?</div>
+          <div class="radio on"><i></i><span>Retry once, then sign out<span class="d">Matches the brief. A second 401 signs the user out.</span></span></div>
+          <div class="radio"><i></i><span>Retry with backoff, up to three times<span class="d">Rides out a slow refresh; adds up to 7 s.</span></span></div>
+          <div class="radio"><i></i><span>Never retry<span class="d">Simplest; a sign-in after every sleep.</span></span></div>
+          <div class="field-l">Note for the agent (optional)</div>
+          <div class="tin">Or write your own answer…</div>
+          <div class="f"><span class="s">Also in your Inbox.</span><span class="btn xs f">Send Answer</span></div>
+        </div>
+      </div>
+      <p class="cap">The card <code>start_task</code> raises. Filing a task needs no card; starting one does.</p>
+      <div class="frame" style="width:720px;padding:14px 16px;margin-top:6px" inert>
+        <div class="card" style="margin:0">
+          <div class="h"><span class="badge">Question</span><b>Start “Spike: OpenCode's permission requests carry command and path” now?</b></div>
+          <div class="cbody" style="font-size:13px;color:var(--dim)">It runs on the Board with its own lane, on 10db's account. This chat stays a chat.</div>
+          <div class="radio on"><i></i><span>Start Now</span></div>
+          <div class="radio"><i></i><span>Not Now</span></div>
+          <div class="f"><span class="s">Also in your Inbox.</span><span class="btn xs f">Send Answer</span></div>
+        </div>
+      </div>
+      </div>
+      <div class="notes">
+        <p><b>The Inbox's own card,</b> through the same answer endpoint. Answered here, the Inbox drops it; answered in the Inbox, this tab's ring clears. There is no second queue.</p>
+        <p><b>Pinned above the composer,</b> outside the scrolling list, as Plan's waiting cards are. It never scrolls away and sits where you type.</p>
+        <p><b>Focus never jumps.</b> ⇧Tab from the composer reaches the card; 1–5 pick, ⌘↩ sends, and Esc inside the card never stops the turn. The announcer says "Codex asks to run a command. Answer above the message box."</p>
+        <p><b>A session's wording:</b> "Allow for this session" replaces the lane's "for this workstream".</p>
+        <p><b>History keeps the answer</b> as a dimmed row where the call was ("You allowed this once").</p>
+        <p><b>Same card, any agent.</b> Codex and Claude Code look identical here; the only difference is the label in the corner.</p>
+        <p><b>The chat's builder tools.</b> <code>create_task</code>, <code>edit_task</code> on its own tasks and <code>set_title</code> run with Undo and no card. <code>start_task</code> asks first, as the last card shows. The rest are absent.</p>
+        <p class="cite">UI spec §5.7, §7.3, §7.7</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ e. Do It ============ -->
+  <section class="shot" id="e">
+    <h2>e. Do It</h2>
+    <p class="lede">The chat agreed a fix. Do It… opens a form modal with a brief the chat's agent wrote, where the work runs, and how it lands, said before it starts. The chat becomes read-only.</p>
+    <div class="pair">
+      <div class="stage"><div class="frame" inert>
+        <div class="win" style="height:880px;position:relative">
+          <header class="hdr">
+            <div class="lights"><i></i><i></i><i></i></div>
+            <div class="strip">
+              <div class="tab"><span class="tile">10</span><span class="t">CI gate timeout</span><span class="dot b"></span></div>
+              <div class="tab sel"><span class="tile">AM</span><span class="t">Login fails after sleep</span><svg class="i x"><use href="#i-x"/></svg></div>
+              <div class="tab ring"><span class="tile">10</span><span class="t">Codex permissions</span><span class="dot y"></span></div>
+              <span class="ib"><svg class="i"><use href="#i-plus"/></svg></span>
+              <span class="ib"><svg class="i"><use href="#i-chev"/></svg></span>
+            </div>
+            <div class="hstat"><svg class="i s18"><use href="#i-coffee"/></svg><svg class="i s18"><use href="#i-moon"/></svg></div>
+          </header>
+          <div class="body">
+            <nav class="nav">
+              <div class="nl"><svg class="i"><use href="#i-inbox"/></svg><span>Inbox</span><b class="cb">3</b></div>
+              <div class="nl"><svg class="i"><use href="#i-factory"/></svg><span>Factory</span></div>
+              <div class="nl on"><svg class="i"><use href="#i-messages"/></svg><span>Sessions</span><b class="cb">1</b></div>
+              <div class="plabel">Project</div>
+              <div class="switch"><span class="tile">AM</span><span>ampsio</span><svg class="i"><use href="#i-selector"/></svg></div>
+              <div class="nl"><svg class="i"><use href="#i-kanban"/></svg><span>Board</span></div>
+              <div class="nl"><svg class="i"><use href="#i-route"/></svg><span>Plan</span></div>
+              <div class="nl"><svg class="i"><use href="#i-tools"/></svg><span>UI Workbench</span></div>
+              <div class="nl"><svg class="i"><use href="#i-bulb"/></svg><span>Knowledge</span></div>
+              <div class="nl"><svg class="i"><use href="#i-adjust"/></svg><span>Project Settings</span></div>
+              <div class="grow"></div>
+              <div class="nl"><svg class="i"><use href="#i-settings"/></svg><span>Settings</span></div>
+            </nav>
+            <main class="main">
+              <div class="sbar">
+                <span class="who"><span class="title">Login fails after sleep</span><span class="kind"><svg class="i s12"><use href="#i-eye"/></svg>Chat · reads ampsio, changes nothing</span></span>
+                <span class="sp"></span>
+                <span class="right">
+                  <span class="agent">Claude Code · opus <svg class="i s12"><use href="#i-chev"/></svg></span>
+                  <span class="meter"><i><b style="width:29%"></b></i>29%</span>
+                  <span class="split"><span class="btn xs">Do It…</span><span class="btn xs"><svg class="i s12"><use href="#i-chev"/></svg></span></span>
+                  <span class="ib"><svg class="i"><use href="#i-term"/></svg></span>
+                  <span class="ib"><svg class="i"><use href="#i-dots"/></svg></span>
+                </span>
+              </div>
+              <div class="pane"><div class="conv">
+                <div class="scroll"><div class="col">
+                  <div class="reply"><p>The access token expires while the laptop sleeps. On wake the first request gets a 401, <code>request()</code> refreshes and sends again, but when the refresh races the request, the retry goes out with the old token and fails too. Two fixes:</p>
+                  <ol><li>Retry once after the refresh, marking the request so it never retries twice.</li><li>Refresh before the first request after wake, from a <code>visibilitychange</code> hook.</li></ol></div>
+                  <div class="you"><p>Do 1. Leave 2 for later.</p></div>
+                  <div class="reply"><p>Agreed: retry once after the refresh, never loop, and a test for the double-401 case.</p></div>
+                </div></div>
+                <div class="foot"><div class="col">
+                  <div class="composer"><div class="ta"><span class="ph">Reply…</span></div><div class="bar"><span class="ib"><svg class="i s18"><use href="#i-clip"/></svg></span><span class="sp"></span><span class="btn dis">Send</span></div></div>
+                </div></div>
+              </div></div>
+            </main>
+          </div>
+          <div class="scrim"></div>
+          <div class="modal">
+            <div class="mh">Do It<svg class="i" style="color:var(--dim)"><use href="#i-x"/></svg></div>
+            <div class="mb">
+              <div class="field-l" style="margin-top:4px">Title</div>
+              <div class="tin" style="color:var(--fg1)">Retry login once on a 401 after the token refresh</div>
+              <div class="field-l">Brief <span style="color:var(--dim);font-weight:400">· written by Claude Code from this chat; edit freely</span></div>
+              <div class="ta2">
+                <p>When the laptop wakes, the first API call returns 401 because the token refresh races it.</p>
+                <p>Decided: in <code>src/api/client.ts</code>, retry once after the refresh and mark the request so it never retries twice. A second 401 signs the user out. Leave the wake-time refresh for later.</p>
+                <p>Add a test for the double-401 case.</p>
+              </div>
+              <div class="field-l">Where</div>
+              <span class="seg"><span class="on">Your folder</span><span>Separate copy</span></span>
+              <div class="line">A pass of one on its own branch from <code>main</code>. Sign Off lands each turn's work; Close Pass… opens one pull request, and <code>main</code> fast-forwards to it when it merges. Your folder is held until then.</div>
+              <div class="paths">
+                <div style="color:var(--fg0);margin-bottom:2px;font-family:-apple-system, BlinkMacSystemFont, sans-serif">7 files already changed in your folder:</div>
+                <div class="pl"><b>M</b>src/api/client.ts</div>
+                <div class="pl"><b>M</b>src/api/refresh.ts</div>
+                <div class="pl"><b>M</b>src/settings/page.tsx</div>
+                <div class="pl"><b>A</b>src/api/retry.ts</div>
+                <div class="pl"><b>?</b>docs/notes/login.md</div>
+                <div style="font-family:-apple-system, BlinkMacSystemFont, sans-serif;color:var(--blue);font-size:12px;margin-top:2px">Show 2 More</div>
+                <div style="font-family:-apple-system, BlinkMacSystemFont, sans-serif;color:var(--fg1);margin-top:4px">These will be part of this task's work.</div>
+              </div>
+              <div class="line" style="margin-top:8px">Runs on Claude Code · opus, this chat's account.</div>
+            </div>
+            <div class="mf"><span style="font-size:13px;color:var(--dim)">The task takes this chat's place. The chat becomes read-only.</span><span style="display:flex;gap:8px"><span class="btn">Cancel</span><span class="btn f">Do It</span></span></div>
+          </div>
+        </div>
+      </div>
+      <p class="cap">When Your folder is refused, the choice stays in the list, disabled, with its reason; Separate copy is picked. A refusal at submit shows beside the button.</p>
+      <div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:6px;align-items:flex-start">
+        <div class="frame" style="width:420px;padding:14px 16px" inert>
+          <div class="field-l" style="margin-top:0">Where</div>
+          <span class="seg"><span class="no">Your folder</span><span class="on">Separate copy</span></span>
+          <div class="line">Your folder is in use by the UI Workbench pass ‘Settings pass’. <a class="link">Open UI Workbench</a></div>
+          <div class="line" style="color:var(--fg0)">An ordinary task in its own copy, on a new branch. It lands by ampsio's delivery: the gate, a review, and a pull request.</div>
+        </div>
+        <div class="frame" style="width:520px;padding:14px 16px" inert>
+          <div style="display:flex;align-items:center;gap:10px;justify-content:flex-end"><span class="err" style="flex:1">A rebase is in progress in your folder. Finish or abort it, or choose Separate copy.</span><span class="btn">Cancel</span><span class="btn f">Do It</span></div>
+          <div class="line" style="margin-top:10px">The folder changed after the modal opened. The brief stays.</div>
+        </div>
+      </div>
+      <p class="cap">After Do It, the Task takes the Chat's place in the strip. The read-only Chat opens from the Task's "From chat" link, ⌘⇧T or ⌘K:</p>
+      <div class="frame" style="width:720px;padding:12px 16px;margin-top:6px" inert>
+        <div style="display:flex;gap:4px;margin-bottom:12px">
+          <div class="tab"><span class="tile">10</span><span class="t">CI gate timeout</span><span class="dot b"></span></div>
+          <div class="tab sel"><span class="tile">AM</span><svg class="i s12 k"><use href="#i-folder"/></svg><span class="t">Retry login on a 401</span><svg class="i x"><use href="#i-x"/></svg></div>
+          <div class="tab ring"><span class="tile">10</span><span class="t">Codex permissions</span><span class="dot y"></span></div>
+        </div>
+        <div class="row task" style="margin:0 0 10px"><svg class="i ic"><use href="#i-folder"/></svg><span class="tg">Started a task: Retry login on a 401</span><span class="meta">Your folder</span><a>Open</a></div>
+        <div class="ro" style="flex-wrap:wrap"><svg class="i"><use href="#i-lock"/></svg><span class="tx" style="flex:1 1 60%">This chat handed its work to <b>Retry login on a 401</b>. It's read-only now.</span><span class="btn xs">Open Task</span><span class="btn xs">New Chat From This</span></div>
+        <div class="line" style="margin-top:8px">New Chat From This starts a fresh chat seeded with this one's digest; it never resumes it. Archive waits until the task is finished.</div>
+      </div>
+      </div>
+      <div class="notes">
+        <p><b>A brief, not a transcript.</b> When the modal opens, the chat's agent writes the brief through <code>write_brief</code>; it streams in under "Writing the brief…", and typing stops it. Do It is enabled once the brief has text. If the agent can't answer within 60 seconds, the brief is the chat's digest plus your last message.</p>
+        <p><b>The uncommitted files are listed,</b> five at a time, with "These will be part of this task's work." A whole-project page holds every file, so nothing from before joins unseen (design spec §7.4).</p>
+        <p><b>Where is the Board's control,</b> with the Board's words: Your folder or Separate copy. A refused choice stays in the list, disabled, with its reason: another pass holds the folder, or a merge, rebase or bisect is in progress.</p>
+        <p><b>How it lands is said before it starts.</b> Your folder is a pass of one: Sign Off per turn, then Close Pass…, one pull request, and a fast-forward of <code>main</code>. A Separate copy is an ordinary Board task: "An ordinary task in its own copy, on a new branch. It lands by ampsio's delivery: the gate, a review, and a pull request." It has no Sign Off.</p>
+        <p><b>The Task takes the Chat's place,</b> so the strip doesn't fill twice as fast. The Chat becomes read-only and stays one click away; New Chat From This keeps talking without ever resuming it, so one agent session never has two writers.</p>
+        <p><b>Refused while the chat is in your terminal:</b> Do It… is disabled with "Hand back first".</p>
+        <p><b>File as Tasks</b> lives in the split button's menu; it files to the Board instead of starting work.</p>
+        <p><b>⌘⇧↩</b> opens this modal from a chat, as it proposes in Plan. It never acts by itself.</p>
+        <p class="cite">UI spec §8.1, §8.2</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ f. Changes ============ -->
+  <section class="shot" id="f">
+    <h2>f. A ready Task with Changes open</h2>
+    <p class="lede">A Task in Your folder, a pass of one. Turn 3 is signed off; turn 4 ended, its check passed, and the tab waits on the builder. Changes opened by itself once; Sign Off is the composer's filled primary, and Close Pass… waits in the session bar.</p>
+    <div class="pair">
+      <div class="stage"><div class="frame" inert>
+        <div class="win" style="height:720px">
+          <header class="hdr">
+            <div class="lights"><i></i><i></i><i></i></div>
+            <div class="strip">
+              <div class="tab"><span class="tile">10</span><span class="t">CI gate timeout</span><span class="dot b"></span></div>
+              <div class="tab sel ring"><span class="tile">AM</span><svg class="i s12 k"><use href="#i-folder"/></svg><span class="t">Retry login on a 401</span><svg class="i x"><use href="#i-x"/></svg></div>
+              <span class="ib"><svg class="i"><use href="#i-plus"/></svg></span>
+              <span class="ib"><svg class="i"><use href="#i-chev"/></svg></span>
+            </div>
+            <div class="hstat"><svg class="i s18"><use href="#i-coffee"/></svg><svg class="i s18"><use href="#i-moon"/></svg></div>
+          </header>
+          <div class="body">
+            <nav class="nav">
+              <div class="nl"><svg class="i"><use href="#i-inbox"/></svg><span>Inbox</span><b class="cb">4</b></div>
+              <div class="nl"><svg class="i"><use href="#i-factory"/></svg><span>Factory</span></div>
+              <div class="nl on"><svg class="i"><use href="#i-messages"/></svg><span>Sessions</span><b class="cb">1</b></div>
+              <div class="plabel">Project</div>
+              <div class="switch"><span class="tile">AM</span><span>ampsio</span><svg class="i"><use href="#i-selector"/></svg></div>
+              <div class="nl"><svg class="i"><use href="#i-kanban"/></svg><span>Board</span></div>
+              <div class="nl"><svg class="i"><use href="#i-route"/></svg><span>Plan</span></div>
+              <div class="nl"><svg class="i"><use href="#i-tools"/></svg><span>UI Workbench</span></div>
+              <div class="nl"><svg class="i"><use href="#i-bulb"/></svg><span>Knowledge</span></div>
+              <div class="nl"><svg class="i"><use href="#i-adjust"/></svg><span>Project Settings</span></div>
+              <div class="grow"></div>
+              <div class="nl"><svg class="i"><use href="#i-settings"/></svg><span>Settings</span></div>
+            </nav>
+            <main class="main">
+              <div class="sbar">
+                <span class="who"><span class="title">Retry login on a 401</span><span class="kind"><svg class="i s12"><use href="#i-folder"/></svg>Task · Your folder · lands on <code>main</code></span></span>
+                <span class="sp"></span>
+                <span class="right">
+                  <span class="agent">Claude Code · opus <svg class="i s12"><use href="#i-chev"/></svg></span>
+                  <span class="meter"><i><b style="width:44%"></b></i>44%</span>
+                  <span class="btn xs" style="background:var(--bg2);color:var(--fg1)">Changes <span class="mono plus" style="font-weight:500">+41</span><span class="mono minus" style="font-weight:500">−6</span></span>
+                  <span class="btn xs">Close Pass…</span>
+                  <span class="ib"><svg class="i"><use href="#i-dots"/></svg></span>
+                </span>
+              </div>
+              <div class="pane">
+                <div class="conv">
+                  <div class="scroll fade-top" style="padding:0 20px"><div class="col">
+                    <div class="you"><p>The refresh retries on its own too. Keep one place that retries.</p></div>
+                    <div class="rows"><div class="row"><svg class="i ic"><use href="#i-search"/></svg><span class="tg">Read 2 files, searched once</span><span class="meta">2 s</span><svg class="i ch"><use href="#i-chevr"/></svg></div><div class="row"><svg class="i ic"><use href="#i-pencil"/></svg><span class="tg">Edited <code>src/api/refresh.ts</code></span><span class="meta"><span class="plus">+2</span> <span class="minus">−3</span></span><svg class="i ch"><use href="#i-chevr"/></svg></div></div>
+                    <div class="reply"><p>The double-401 case now signs the user out. I also moved the refresh's own retry out of <code>refresh.ts</code>, so there is one place that retries.</p></div>
+                    <div class="turnfoot">Turn 3 · 4 min · 3 files changed · Check passed</div>
+                    <div class="notice ok"><svg class="i s14"><use href="#i-commit"/></svg>Signed off · landed as <code>7f3c2e1</code> · 3 files</div>
+                    <div class="you"><p>Also log the retry at debug, not info.</p></div>
+                    <div class="rows">
+                      <div class="row"><svg class="i ic"><use href="#i-pencil"/></svg><span class="tg">Edited <code>src/api/client.ts</code></span><span class="meta"><span class="plus">+3</span> <span class="minus">−1</span></span><svg class="i ch"><use href="#i-chevr"/></svg></div>
+                      <div class="row"><svg class="i ic"><use href="#i-term"/></svg><span class="tg"><code>$ pnpm vitest run src/api</code></span><span class="meta">8 s</span><svg class="i ch"><use href="#i-chevr"/></svg></div>
+                    </div>
+                    <div class="reply"><p>Done. A retried request carries <code>retried: true</code>, so it never retries twice, and a second 401 signs the user out with <code>SignedOut</code>. The retry logs at debug. The new test covers the double-401 case; all 24 API tests pass.</p></div>
+                    <div class="turnfoot">Turn 4 · 3 min · 3 files changed · Check passed</div>
+                  </div></div>
+                  <div class="foot" style="padding:0 20px 14px"><div class="col">
+                    <div class="composer"><div class="ta"><span class="ph">Reply, or paste a screenshot…</span></div><div class="bar"><span class="ib"><svg class="i s18"><use href="#i-clip"/></svg></span><span class="sp"></span><span class="btn f" title="Sign Off lands this turn on the pass's branch. Close Pass… opens the pull request.">Sign Off</span></div></div>
+                    <div class="hint"><span>Sign Off lands this turn on the pass's branch. Close Pass… opens the pull request.</span></div>
+                  </div></div>
+                </div>
+                <aside class="changes">
+                  <div class="chh">
+                    <div class="a"><b>Changes</b><span class="n">3 files · <span class="plus">+41</span> <span class="minus">−6</span></span><span style="flex:1"></span><svg class="i s14" style="color:var(--dim)"><use href="#i-x"/></svg></div>
+                    <div class="b"><span>against <code>main</code> at <code>4e1a9c2</code></span><span class="seg"><span class="on">All Turns</span><span>Last Turn</span></span></div>
+                  </div>
+                  <div class="files">
+                    <div class="notice ok" style="margin:2px 6px 6px"><svg class="i s14"><use href="#i-ccheck"/></svg>Check passed · typecheck, vitest · 41 s</div>
+                    <div class="fl on"><span class="st">M</span><span class="p">src/api/client.ts</span><span class="c"><span class="plus">+14</span> <span class="minus">−3</span></span></div>
+                    <div class="fl"><span class="st">M</span><span class="p">src/api/client.test.ts</span><span class="c"><span class="plus">+25</span> <span class="minus">−0</span></span></div>
+                    <div class="fl"><span class="st">M</span><span class="p">src/api/refresh.ts</span><span class="c"><span class="plus">+2</span> <span class="minus">−3</span></span></div>
+                  </div>
+                  <div class="diffs">
+                    <div class="dfh">src/api/client.ts<span class="c"><span class="plus">+14</span> <span class="minus">−3</span></span></div>
+                    <div class="diff">
+                      <div class="hunk">@@ −40,11 +40,14 @@</div>
+                      <div class="l"><span class="ln">40</span><span class="sg"></span>export async function request(req: ApiRequest) {</div>
+                      <div class="l"><span class="ln">41</span><span class="sg"></span>  const res = await send(req);</div>
+                      <div class="l del"><span class="ln">42</span><span class="sg">−</span>  if (res.status === 401) {</div>
+                      <div class="l add"><span class="ln">42</span><span class="sg">+</span>  if (res.status === 401 <span class="w">&amp;&amp; req.retried</span>) {</div>
+                      <div class="l add"><span class="ln">43</span><span class="sg">+</span>    throw new SignedOut('refresh did not take');</div>
+                      <div class="l add"><span class="ln">44</span><span class="sg">+</span>  }</div>
+                      <div class="l add"><span class="ln">45</span><span class="sg">+</span>  if (res.status === 401) {</div>
+                      <div class="l"><span class="ln">46</span><span class="sg"></span>    await refreshToken();</div>
+                      <div class="l del"><span class="ln">47</span><span class="sg">−</span>    log.info('retrying');</div>
+                      <div class="l add"><span class="ln">47</span><span class="sg">+</span>    log.<span class="w">debug</span>('retrying after refresh', { path: req.path });</div>
+                      <div class="l del"><span class="ln">48</span><span class="sg">−</span>    return send(req);</div>
+                      <div class="l add"><span class="ln">48</span><span class="sg">+</span>    return request({ ...req, <span class="w">retried: true</span> });</div>
+                      <div class="l"><span class="ln">49</span><span class="sg"></span>  }</div>
+                      <div class="l"><span class="ln">50</span><span class="sg"></span>  return res;</div>
+                    </div>
+                    <div class="dfh">src/api/client.test.ts<span class="c"><span class="plus">+25</span> <span class="minus">−0</span></span></div>
+                    <div class="diff">
+                      <div class="l add"><span class="ln">52</span><span class="sg">+</span>  it('signs out after a second 401', async () =&gt; {</div>
+                      <div class="l add"><span class="ln">53</span><span class="sg">+</span>    server.use(unauthorized('/me'), unauthorized('/refresh'));</div>
+                    </div>
+                  </div>
+                </aside>
+              </div>
+            </main>
+          </div>
+        </div>
+      </div></div>
+      <div class="notes">
+        <p><b>Changes is a Task's only.</b> A chat writes nothing, so it has no panel. The session bar's Changes button carries the running +/−; ⌘⇧D toggles it.</p>
+        <p><b>It opens by itself once,</b> the first time a turn ends with changes, and only at 1100 px and wider. After that your choice holds for the tab.</p>
+        <p><b>One scrolling list of every file,</b> as a pull request's "Files changed" reads, with the file list as a jump index above. All Turns or Last Turn, from each turn's kept commit. Each hunk is its own <code>Diff</code>, numbered by 10db's gutter from <code>oldStart</code> and <code>newStart</code>.</p>
+        <p><b>Click a line number to quote it</b> into your message (<code>@src/api/client.ts:47</code> and the line). The cheap half of line comments, with no review threads.</p>
+        <p><b>It lands as a pass lands, word for word.</b> Sign Off lands each ready turn as one commit on the pass's branch. Close Pass… then opens one pull request; when it merges, <code>main</code> fast-forwards to it and your folder ends on <code>main</code>, holding the work. Typing turns Send into the filled primary and Sign Off into a default button.</p>
+        <p><b>The UI Workbench lists it</b> with the other passes, its one page named "Whole project".</p>
+        <p><b>The check shows once per turn.</b> A pass lives in the turn's footer, and the Changes panel repeats the latest. A failure adds a notice with Send to Agent (frame j), and never holds the Task back.</p>
+        <p><b>The hint is also Sign Off's tooltip,</b> because the hint line hides under 640 px.</p>
+        <p><b>Its route exists:</b> the panel reads <code>GET /workstreams/:id/changes</code>, as the builder's check card does.</p>
+        <p class="cite">UI spec §8.4, §8.5, §9</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ g. In your terminal ============ -->
+  <section class="shot" id="g">
+    <h2>g. In your terminal</h2>
+    <p class="lede">The builder took the chat to Terminal. The transcript stays readable. The design spec's banner sits over a composer that holds what you send until Hand Back, which asks one question.</p>
+    <div class="pair">
+      <div class="stage"><div class="frame" inert>
+        <div class="win" style="height:620px">
+          <header class="hdr">
+            <div class="lights"><i></i><i></i><i></i></div>
+            <div class="strip">
+              <div class="tab"><span class="tile">10</span><span class="t">CI gate timeout</span><span class="dot b"></span></div>
+              <div class="tab ring"><span class="tile">10</span><span class="t">Codex permissions</span><span class="dot y"></span></div>
+              <div class="tab sel away"><span class="tile">AM</span><span class="t">Invoice export</span><svg class="i x"><use href="#i-x"/></svg></div>
+              <span class="ib"><svg class="i"><use href="#i-plus"/></svg></span>
+              <span class="ib"><svg class="i"><use href="#i-chev"/></svg></span>
+            </div>
+            <div class="hstat"><svg class="i s18"><use href="#i-coffee"/></svg><svg class="i s18"><use href="#i-moon"/></svg></div>
+          </header>
+          <div class="body">
+            <nav class="nav">
+              <div class="nl"><svg class="i"><use href="#i-inbox"/></svg><span>Inbox</span><b class="cb">3</b></div>
+              <div class="nl"><svg class="i"><use href="#i-factory"/></svg><span>Factory</span></div>
+              <div class="nl on"><svg class="i"><use href="#i-messages"/></svg><span>Sessions</span><b class="cb">1</b></div>
+              <div class="plabel">Project</div>
+              <div class="switch"><span class="tile">AM</span><span>ampsio</span><svg class="i"><use href="#i-selector"/></svg></div>
+              <div class="nl"><svg class="i"><use href="#i-kanban"/></svg><span>Board</span></div>
+              <div class="nl"><svg class="i"><use href="#i-route"/></svg><span>Plan</span></div>
+              <div class="nl"><svg class="i"><use href="#i-tools"/></svg><span>UI Workbench</span></div>
+              <div class="nl"><svg class="i"><use href="#i-bulb"/></svg><span>Knowledge</span></div>
+              <div class="nl"><svg class="i"><use href="#i-adjust"/></svg><span>Project Settings</span></div>
+              <div class="grow"></div>
+              <div class="nl"><svg class="i"><use href="#i-settings"/></svg><span>Settings</span></div>
+            </nav>
+            <main class="main">
+              <div class="sbar">
+                <span class="who"><span class="title">Invoice export</span><span class="kind"><svg class="i s12"><use href="#i-term"/></svg>Chat · in your terminal since 12:04</span></span>
+                <span class="sp"></span>
+                <span class="right">
+                  <span class="agent off">Claude Code · sonnet</span>
+                  <span class="split" title="Hand back first"><span class="btn xs dis">Do It…</span><span class="btn xs dis"><svg class="i s12"><use href="#i-chev"/></svg></span></span>
+                  <span class="ib"><svg class="i"><use href="#i-dots"/></svg></span>
+                </span>
+              </div>
+              <div class="pane"><div class="conv">
+                <div class="scroll fade-top"><div class="col">
+                  <div class="you"><p>Exports over 10k rows come out empty. Look at billing/export.</p></div>
+                  <div class="rows">
+                    <div class="row"><svg class="i ic"><use href="#i-search"/></svg><span class="tg">Read 4 files, searched 3 times</span><span class="meta">6 s</span><svg class="i ch"><use href="#i-chevr"/></svg></div>
+                  </div>
+                  <div class="reply"><p>The CSV writer streams rows, but <code>finish()</code> runs before the stream drains. Under 10k rows the buffer holds everything, so the bug hides. Awaiting <code>once(stream, 'finish')</code> before closing fixes it.</p></div>
+                  <div class="you"><p>I'll poke at it in the terminal.</p></div>
+                </div></div>
+                <div class="foot"><div class="col">
+                  <div class="takeover">
+                    <svg class="i s20 tic"><use href="#i-term"/></svg>
+                    <div>
+                      <b>In your terminal</b>
+                      <p>This runs outside 10db's sandbox. 10db won't touch this session until you hand it back.</p>
+                      <div class="acts"><span class="btn f">Hand Back</span><span class="btn xs sub"><svg class="i s14"><use href="#i-copy"/></svg>Copy Command</span></div>
+                    </div>
+                  </div>
+                  <div class="composer"><div class="ta"><span class="ph">Held until you hand back…</span></div><div class="bar"><span class="ib"><svg class="i s18"><use href="#i-clip"/></svg></span><span class="sp"></span><span class="btn dis">Send</span></div></div>
+                  <div class="hint"><span>⌘↩ holds it</span></div>
+                </div></div>
+              </div></div>
+            </main>
+          </div>
+        </div>
+      </div>
+      <p class="cap">Before it opens, a popover anchored to the terminal button, every time. Hand Back asks one question. After it, one notice.</p>
+      <div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:6px;align-items:flex-start">
+        <div class="pop" style="width:380px;padding:14px 16px" inert>
+          <div style="font-weight:600;color:var(--fg1);font-size:14px;margin-bottom:4px">Open in Terminal</div>
+          <div style="font-size:13px;line-height:1.55">Continues this session in Terminal with Claude Code's own resume, in ~/Projects/ampsio. It runs outside 10db's sandbox, without your settings or plugins.</div>
+          <div style="font-size:13px;color:var(--dim);margin-top:6px">10db won't touch this session until you hand it back.</div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px"><span class="btn xs">Cancel</span><span class="btn xs f">Open in Terminal</span></div>
+        </div>
+        <div class="pop" style="width:280px;padding:14px 16px" inert>
+          <div style="font-size:13.5px;color:var(--fg1)">Is Claude Code closed in your terminal?</div>
+          <div style="font-size:12px;color:var(--dim);margin-top:4px">10db doesn't watch the terminal, so it takes your word.</div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px"><span class="btn xs">Cancel</span><span class="btn xs f">Hand Back</span></div>
+        </div>
+        <div class="frame" style="width:440px;padding:12px 16px" inert>
+          <div class="you" style="margin-top:0"><p>I'll poke at it in the terminal.</p></div>
+          <div class="notice" style="white-space:normal;align-items:flex-start;color:var(--fg0)"><svg class="i s14" style="margin-top:3px;color:var(--dim)"><use href="#i-info"/></svg><span>Turns from your terminal are in the agent's memory; they aren't shown here.</span></div>
+          <div class="cap" style="margin-top:6px">After Hand Back. The next turn resumes the agent's own session, so it remembers the terminal.</div>
+        </div>
+      </div>
+      </div>
+      <div class="notes">
+        <p><b>One writer at a time.</b> While the session is in the terminal, 10db leaves it alone. The composer stays under the banner: a message sent now is stored and held, "Held until you hand back", and goes when you do (design spec §6.7). 10db doesn't watch the terminal process, so Hand Back trusts you, after one question.</p>
+        <p><b>Switching to this tab</b> focuses Hand Back, the likely next act.</p>
+        <p><b>The warning is the point.</b> The sandbox is why 10db exists, so the popover says what is off, every time. Enter confirms; it costs one key. The terminal runs with the session's isolation: no settings, strict MCP, an untrusted project.</p>
+        <p><b>No history comes back.</b> The terminal's turns are in the agent's memory, and the notice says so (design spec §7.5).</p>
+        <p><b>Copy Command</b> copies the launch line. The script file deletes itself once it runs, so the copy is the way back in.</p>
+        <p><b>Neutral, not orange.</b> Orange means a usage limit in this app. Do It… is disabled here: "Hand back first".</p>
+        <p><b>Refused</b> with no agent session yet ("Send a message first") or while a turn runs ("Stop first"), and never on a read-only Chat. It shows only with the <code>takeover</code> capability.</p>
+        <p class="cite">UI spec §10</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ h. / and @ ============ -->
+  <section class="shot" id="h">
+    <h2>h. The <code>/</code> menu and the <code>@</code> mention list</h2>
+    <p class="lede">Both open upward from the composer at the foot of the tab. The <code>/</code> list is whatever this session's agent reports; the <code>@</code> list is the project's files from the daemon.</p>
+    <div class="pair">
+      <div class="stage" style="display:flex;gap:24px;flex-wrap:wrap">
+        <div class="frame" style="width:520px;padding:16px 16px 14px" inert>
+          <div class="pop" style="margin-bottom:8px">
+            <div class="gl">Commands</div>
+            <div class="mi on"><span class="nm mono">/compact</span><span class="ds">Summarize the conversation to free context</span></div>
+            <div class="mi"><span class="nm mono">/context</span><span class="ds">Show what fills the context</span></div>
+            <div class="mi"><span class="nm mono">/review</span><span class="ds">Review the changes on this branch</span></div>
+            <div class="mi"><span class="nm mono">/cost</span><span class="ds">Show what this session has used</span></div>
+            <div class="sep"></div>
+            <div class="gl">On Codex the same menu lists</div>
+            <div class="mi"><span class="nm mono">/compact</span><span class="ds">thread/compact/start</span></div>
+            <div class="mi"><span class="nm mono">/review</span><span class="ds">review/start</span><span class="r mono">/model</span></div>
+          </div>
+          <div class="composer focus"><div class="ta">/<span class="caret"></span></div><div class="bar"><span class="ib"><svg class="i s18"><use href="#i-clip"/></svg></span><span class="sp"></span><span class="btn f">Send</span></div></div>
+          <div class="hint"><span>↑↓ to move · ↩ or Tab to pick · Esc to close</span></div>
+        </div>
+        <div class="frame" style="width:520px;padding:16px 16px 14px" inert>
+          <div class="pop" style="margin-bottom:8px;margin-left:96px;width:340px">
+            <div class="mi on"><svg class="i s14" style="color:var(--dim)"><use href="#i-file"/></svg><span class="nm"><u>cli</u>ent.ts</span><span class="ds mono">src/api/</span></div>
+            <div class="mi"><svg class="i s14" style="color:var(--dim)"><use href="#i-file"/></svg><span class="nm"><u>cli</u>ent.test.ts</span><span class="ds mono">src/api/</span></div>
+            <div class="mi"><svg class="i s14" style="color:var(--dim)"><use href="#i-file"/></svg><span class="nm"><u>cli</u>entError.ts</span><span class="ds mono">src/api/errors/</span></div>
+            <div class="mi"><svg class="i s14" style="color:var(--dim)"><use href="#i-file"/></svg><span class="nm"><u>cli</u>.ts</span><span class="ds mono">src/bin/</span></div>
+            <div class="mi"><svg class="i s14" style="color:var(--dim)"><use href="#i-file"/></svg><span class="nm"><u>cli</u>ent-retries.md</span><span class="ds mono">docs/</span></div>
+          </div>
+          <div class="composer focus"><div class="ta">Why does <span class="chip">@src/api/refresh.ts</span> run before @cli<span class="caret"></span></div><div class="bar"><span class="ib"><svg class="i s18"><use href="#i-clip"/></svg></span><span class="sp"></span><span class="btn f">Send</span></div></div>
+          <div class="hint"><span>The send key never fires while a list is open</span></div>
+        </div>
+      </div>
+      <div class="notes">
+        <p><b>The <code>/</code> menu is built from data:</b> the <code>commands</code> event, shown when <code>slashCommands</code> is true. On Claude it is <code>supportedCommands()</code>; on Codex a fixed list mapped to its calls. No provider check in the UI.</p>
+        <p><b>No skills.</b> A chat loads no settings, so personal and project skills never appear (design spec §7.1).</p>
+        <p><b>10db's actions are never slash commands.</b> Do It, File as Tasks, Open in Terminal and New Session are buttons and ⌘K, so typing <code>/</code> can never start work by surprise.</p>
+        <p><b><code>@</code> lists the checkout's files</b> (<code>git ls-files</code>): fuzzy, eight of the daemon's fifty, the match underlined in blue, the folder in dimmed mono. A picked file becomes a mono chip.</p>
+        <p><b>A mention is a path.</b> The agent gets the path, and the explore judge decides each read.</p>
+        <p><b>Mantine <code>Mentions</code></b> owns both lists, its arrow keys, Enter and Tab; ⌘↩ still sends once the list is closed.</p>
+        <p class="cite">UI spec §7.9</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ i. Narrow ============ -->
+  <section class="shot" id="i">
+    <h2>i. A narrow window, beside the browser</h2>
+    <p class="lede">At 470 px the sidebar folds behind the burger and the strip becomes one tab switcher. On the right, the switcher open.</p>
+    <div class="pair">
+      <div class="stage" style="display:flex;gap:24px;flex-wrap:wrap">
+        <div class="frame" inert>
+          <div class="win narrow" style="height:760px">
+            <header class="hdr">
+              <div class="lights"><i></i><i></i><i></i></div>
+              <span class="ib"><svg class="i s18"><use href="#i-menu"/></svg></span>
+              <div class="strip" style="padding-left:4px">
+                <div class="switcher" style="box-shadow:inset 0 0 0 1px var(--yellow)"><span class="tile">AM</span><svg class="i s12" style="color:var(--dim)"><use href="#i-folder"/></svg><span class="t">Retry login on a 401</span><span class="dot y"></span><b class="cb" title="1 other session needs you">1</b><svg class="i s12" style="color:var(--dim)"><use href="#i-chev"/></svg></div>
+                <span class="ib"><svg class="i"><use href="#i-plus"/></svg></span>
+              </div>
+              <div class="hstat" style="padding:0 12px"><svg class="i s18"><use href="#i-moon"/></svg></div>
+            </header>
+            <div class="body">
+              <main class="main">
+                <div class="sbar">
+                  <span class="title" style="max-width:200px">Retry login on a 401</span>
+                  <span class="sp"></span>
+                  <span class="btn xs">Changes <span class="mono plus" style="font-weight:500">+41</span><span class="mono minus" style="font-weight:500">−6</span></span>
+                  <span class="ib"><svg class="i"><use href="#i-dots"/></svg></span>
+                </div>
+                <div class="pane"><div class="conv">
+                  <div class="scroll fade-top"><div class="col">
+                    <div class="reply"><p>The double-401 case now signs the user out, and there is one place that retries.</p></div>
+                    <div class="turnfoot">Turn 3 · 4 min · 3 files changed · Check passed</div>
+                    <div class="you"><p>Also log the retry at debug, not info.</p></div>
+                    <div class="rows">
+                      <div class="row"><svg class="i ic"><use href="#i-pencil"/></svg><span class="tg">Edited <code>api/client.ts</code></span><span class="meta"><span class="plus">+3</span> <span class="minus">−1</span></span></div>
+                      <div class="peek" style="margin-left:0">
+                        <div class="l del"><span class="ln">47</span><span class="sg">−</span>    log.info('retrying');</div>
+                        <div class="l add"><span class="ln">47</span><span class="sg">+</span>    log.<span class="w">debug</span>('retrying…', { path });</div>
+                      </div>
+                      <div class="row"><svg class="i ic"><use href="#i-term"/></svg><span class="tg"><code>$ pnpm vitest run src/api</code></span></div>
+                    </div>
+                    <div class="reply"><p>Done. A retried request never retries twice, a second 401 signs the user out, and the retry logs at debug. All 24 API tests pass.</p></div>
+                    <div class="turnfoot">Turn 4 · 3 min · 3 files changed · Check passed</div>
+                  </div></div>
+                  <div class="foot"><div class="col">
+                    <div class="composer"><div class="ta"><span class="ph">Reply, or paste a screenshot…</span></div><div class="bar"><span class="ib"><svg class="i s18"><use href="#i-clip"/></svg></span><span class="sp"></span><span class="btn f" title="Sign Off lands this turn on the pass's branch. Close Pass… opens the pull request.">Sign Off</span></div></div>
+                  </div></div>
+                </div></div>
+              </main>
+            </div>
+          </div>
+        </div>
+        <div class="frame" inert>
+          <div class="win narrow" style="height:760px;position:relative">
+            <header class="hdr">
+              <div class="lights"><i></i><i></i><i></i></div>
+              <span class="ib"><svg class="i s18"><use href="#i-menu"/></svg></span>
+              <div class="strip" style="padding-left:4px">
+                <div class="switcher" style="background:var(--bg2);box-shadow:inset 0 0 0 1px var(--yellow)"><span class="tile">AM</span><svg class="i s12" style="color:var(--dim)"><use href="#i-folder"/></svg><span class="t">Retry login on a 401</span><span class="dot y"></span><b class="cb">1</b><svg class="i s12" style="color:var(--dim)"><use href="#i-chev"/></svg></div>
+                <span class="ib"><svg class="i"><use href="#i-plus"/></svg></span>
+              </div>
+              <div class="hstat" style="padding:0 12px"><svg class="i s18"><use href="#i-moon"/></svg></div>
+            </header>
+            <div class="body" style="opacity:.35">
+              <main class="main">
+                <div class="sbar"><span class="title">Retry login on a 401</span></div>
+                <div class="pane"><div class="conv"><div class="scroll"><div class="col"><div class="reply"><p>Done. A retried request never retries twice, a second 401 signs the user out, and the retry logs at debug.</p></div></div></div></div></div>
+              </main>
+            </div>
+            <div class="pop" style="position:absolute;left:62px;top:44px;width:330px">
+              <div class="gl">Open Tabs</div>
+              <div class="mi"><span class="tile">10</span><span class="nm" style="flex:1;overflow:hidden;text-overflow:ellipsis">CI gate timeout</span><span class="dot b"></span></div>
+              <div class="mi on" style="box-shadow:inset 0 0 0 1px var(--yellow)"><span class="tile">AM</span><svg class="i s12" style="color:var(--dim)"><use href="#i-folder"/></svg><span class="nm" style="flex:1;font-weight:600">Retry login on a 401</span><span class="dot y"></span></div>
+              <div class="mi" style="box-shadow:inset 0 0 0 1px var(--yellow)"><span class="tile">10</span><span class="nm" style="flex:1">Codex permissions</span><span class="dot y"></span></div>
+              <div class="mi"><span class="tile">AM</span><span class="nm" style="flex:1;color:var(--dim)">Invoice export</span><svg class="i s12" style="color:var(--dim)"><use href="#i-term"/></svg></div>
+              <div class="mi"><span class="tile">10</span><span class="nm" style="flex:1;font-weight:600">ACP or gateway?</span></div>
+              <div class="sep"></div>
+              <div class="gl">Recently Closed</div>
+              <div class="mi"><span class="tile">AM</span><span class="nm" style="flex:1;color:var(--fg0)">Login fails after sleep</span><svg class="i s12" style="color:var(--dim)"><use href="#i-lock"/></svg><span class="r">⌘⇧T</span></div>
+              <div class="mi"><span class="tile">HB</span><span class="nm" style="flex:1;color:var(--fg0)">Gemini routing</span></div>
+              <div class="sep"></div>
+              <div class="mi"><svg class="i s14" style="color:var(--dim)"><use href="#i-search"/></svg><span class="nm" style="flex:1;color:var(--fg0)">Find a Session</span><span class="r">⌘K</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="notes">
+        <p><b>Sessions folds the sidebar under 900 px,</b> as the UI Workbench does: a chat beside the browser is the same posture.</p>
+        <p><b>Under 640 px the strip is one switcher:</b> the current tab's tile, glyph, title and state, and a <code>CountBadge</code> of the other tabs that need you, so nothing hides behind the fold.</p>
+        <p><b>The switcher opens All Tabs,</b> the same menu the wide strip's chevron opens: every tab with its state (the ring included), the recently closed (the read-only chat among them), and Find a Session. ⌘J jumps to the next tab with a ring.</p>
+        <p><b>Sign Off's tooltip</b> carries the hint line's words, since the hint hides at this width.</p>
+        <p><b>The session bar keeps the title and the one action,</b> Changes here (Do It… on a chat). The model, meter and terminal move into <code>⋯</code>.</p>
+        <p><b>The conversation narrows, it does not change.</b> Tool rows drop their durations, diffs are unified only, and Changes opens over the conversation with Back.</p>
+        <p class="cite">UI spec §13.2</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ j. Other states ============ -->
+  <section class="shot" id="j">
+    <h2>j. Other states, as they show in a tab</h2>
+    <p class="lede">Each appears where the working line, a notice or the composer would be. None is a banner above the view, except the app's own reconnecting banner.</p>
+    <div class="states" inert>
+      <div class="state"><h4>Waking up</h4><div class="you" style="margin-top:0"><p>And the export job?</p></div><div class="work"><span class="dot b"></span><span class="t">Waking up the session…</span></div></div>
+      <div class="state"><h4>After a daemon restart</h4><div class="you" style="margin-top:0"><p>Check the refresh path too.</p></div><div class="ro" style="padding:8px 10px;font-size:13px"><span class="tx" style="color:var(--fg0)">These waited through a restart. Nothing was sent.</span><span class="btn xs f">Send Now</span></div></div>
+      <div class="state"><h4>Continued in a fresh session</h4><div class="divider" style="margin:6px 0 2px">Continued in a fresh session. Nothing is lost.</div><div class="line" style="text-align:center;margin:0"><a class="link">Show Summary</a></div><div class="line" style="margin-top:8px">At 70% of the context, or when a resume fails.</div></div>
+      <div class="state"><h4>Usage limit</h4><div class="work"><svg class="i s14 sm o" style="position:relative;top:2px"><use href="#i-pause"/></svg><span class="t" style="color:var(--orange)">Paused: usage limit, resumes 3:40</span></div><div class="line" style="padding-left:16px">No card is raised. Messages you send now go when the limit resets.</div></div>
+      <div class="state"><h4>The agent is downloading</h4><div class="work"><span class="dot b"></span><span class="t">Waiting for Codex 0.167.0 to download</span></div><div class="line" style="padding-left:16px">Your message sends once the copy is ready.</div></div>
+      <div class="state"><h4>Daemon reconnecting</h4><div class="banner"><svg class="i s14"><use href="#i-plugx"/></svg>Reconnecting to the daemon… Work keeps running.</div><div class="composer" style="margin-top:10px"><div class="ta"><span style="color:var(--fg1)">and check the refresh path too</span></div><div class="bar"><span style="font-size:12px;color:var(--dim);padding-left:6px">Reconnecting… your message stays here.</span><span class="sp"></span><span class="btn dis">Send</span></div></div></div>
+      <div class="state"><h4>Model refused</h4><div class="alert"><svg class="i ai"><use href="#i-alert"/></svg><div><b>Not available on this account</b><p>opus isn't offered on the ampsio account's plan.</p><span class="btn xs">Choose Another Model</span></div></div></div>
+      <div class="state"><h4>An error ended the session</h4><div class="notice" style="white-space:normal;align-items:flex-start;color:var(--fg0)"><svg class="i s14 sm r" style="margin-top:3px"><use href="#i-alert"/></svg><span>The session stopped: Claude Code exited with code 1. Send a message to start it again. <a>Show Details</a></span></div><div class="reply"><p style="margin:6px 0 0">The retry runs once, and then</p><div class="line" style="margin:2px 0 0">Stopped here.</div></div></div>
+      <div class="state"><h4>Read-only Chat</h4><div class="ro" style="flex-wrap:wrap"><svg class="i"><use href="#i-lock"/></svg><span class="tx" style="flex:1 1 70%">This chat handed its work to <b>Retry login on a 401</b>. It's read-only now.</span><span class="btn xs">Open Task</span><span class="btn xs">New Chat From This</span></div><div class="line">No tab of its own: opened from "From chat", ⌘⇧T or ⌘K. Focus lands on Open Task.</div></div>
+      <div class="state"><h4>Your folder: signed off, not closed</h4><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><div class="tab" style="flex:none;background:var(--bg0)"><span class="tile">AM</span><svg class="i s12 k"><use href="#i-folder"/></svg><span class="t">Retry login on a 401</span><svg class="i sm d"><use href="#i-check"/></svg></div><span class="sp" style="flex:1"></span><span class="btn xs f">Close Pass…</span></div><div class="line" style="margin-top:0">Spoken "signed off: close the pass to land it". Close Pass… is the session bar's filled primary; Close Finished Tabs skips this tab, since the pass still holds your folder.</div></div>
+      <div class="state"><h4>Your folder: the pass closed</h4><div class="notice ok" style="white-space:normal;color:var(--fg0)"><svg class="i s14"><use href="#i-pr"/></svg><span>Closed · pull request <a>#212</a> opened. <code>main</code> fast-forwards to it when it merges.</span></div><div class="line">Before it: "Running the gate in your folder…", "Pushing…", "Closing the pass…". After the merge: "Done · <code>main</code> is at <code>a1b2c3d</code>."</div></div>
+      <div class="state"><h4>Separate copy: finished</h4><div class="ro" style="flex-wrap:wrap"><svg class="i"><use href="#i-pr"/></svg><span class="tx" style="flex:1 1 80%">Finished · in review: pull request <a class="link">#214</a> · CI running</span><span class="btn xs">Open on Board</span><span class="btn xs">Open Pull Request</span></div><div class="line">No Sign Off: it landed by ampsio's delivery. Between runs, the composer says "Messages reach this task while it runs."</div></div>
+      <div class="state"><h4>Ready, with text typed</h4><div class="composer"><div class="ta"><span style="color:var(--fg1)">Also cover the 403 case.</span></div><div class="bar"><span class="sp"></span><span class="btn">Sign Off</span><span class="btn f">Send</span></div></div><div class="line">Typing makes Send the filled primary; Sign Off turns default (Workbench D14).</div></div>
+      <div class="state"><h4>Check failed</h4><div class="notice" style="white-space:normal;align-items:flex-start;color:var(--fg0)"><svg class="i s14 sm r" style="margin-top:3px"><use href="#i-alert"/></svg><span>Check failed: 2 errors in <code>src/api/client.ts</code> <span class="btn xs" style="margin-left:6px">Send to Agent</span></span></div><div class="turnfoot">Turn 4 · 3 min · 3 files changed · Check failed</div><div class="line">Advice only: the tab stays Ready.</div></div>
+      <div class="state"><h4>A model change</h4><div class="divider" style="margin:6px 0 2px">Now on Claude Code · sonnet</div><div class="line" style="margin-top:8px">Where the next turn starts, after a pick between turns.</div></div>
+      <div class="state"><h4>Plan on Codex</h4><div class="notice" style="white-space:normal;align-items:flex-start"><svg class="i s14" style="margin-top:3px"><use href="#i-info"/></svg><span>Research and review agents need a Claude account. This conversation runs without them.</span></div><div class="line">Plan's header, where <code>subagents</code> is false.</div></div>
+    </div>
+    <p class="cap" style="margin-top:14px">The Separate-copy and closed-pass cells use the In review glyph on their tabs, and Done shows the green check. Not drawn: loading (the session bar's small loader, then three static lines after 300 ms), signed out (a red alert with Open Accounts), and a removed project (the transcript, read-only, with one line). UI spec §12.</p>
+  </section>
+</div>
+<script>
+(function () {
+  var root = document.documentElement;
+  var buttons = document.querySelectorAll('.toggle button');
+  function set(theme) {
+    root.setAttribute('data-theme', theme);
+    buttons.forEach(function (b) { b.setAttribute('aria-pressed', String(b.getAttribute('data-t') === theme)); });
+    try { localStorage.setItem('tendb-sessions-ui-theme', theme); } catch (e) {}
+  }
+  var saved = null;
+  try { saved = localStorage.getItem('tendb-sessions-ui-theme'); } catch (e) {}
+  set(saved === 'light' ? 'light' : 'dark');
+  buttons.forEach(function (b) { b.addEventListener('click', function () { set(b.getAttribute('data-t')); }); });
+})();
+</script>
+</body>
+</html>

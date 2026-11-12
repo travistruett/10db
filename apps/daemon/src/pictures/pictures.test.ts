@@ -31,7 +31,7 @@ import { FakeCamera } from '../../test/fake-camera';
 import { silentLogger } from '../log';
 import { createGateRunner } from '../verify';
 import { ManualClock } from '../clock';
-import { startPictures, type Pictures } from './pictures';
+import { startPictures, type Pictures, type PicturesDeps } from './pictures';
 
 // Workbench spec §10, §12: the service end to end on a real pass in a real folder and
 // database, with a fake camera standing in for the browser, a child process 10db does not own.
@@ -73,8 +73,9 @@ async function world(project: { devLoginCommand?: string } = {}): Promise<void> 
   prepared = 0;
 }
 
-function start(): Pictures {
+function start(devUi: PicturesDeps['devUi'] = null): Pictures {
   pictures = startPictures({
+    devUi,
     state: w.h.state,
     bus: w.h.bus,
     camera: cam,
@@ -200,6 +201,26 @@ describe('pictures of a pass', () => {
     await ended(4);
     expect(cam.shots).toHaveLength(4);
     expect(kinds(w.settings)).toEqual(['before', 'turn1']);
+  });
+
+  it.each<{ name: string; devUi: PicturesDeps['devUi']; handed: boolean }>([
+    {
+      name: "10db's own dev UI is handed the daemon's address and read-only token",
+      devUi: { origin: APP, token: 'dev-ui-token' },
+      handed: true,
+    },
+    {
+      name: 'another app is handed nothing while a dev UI is trusted',
+      devUi: { origin: 'http://localhost:1420', token: 'dev-ui-token' },
+      handed: false,
+    },
+    { name: 'no app is handed anything while no dev UI is trusted', devUi: null, handed: false },
+  ])('$name', async ({ devUi, handed }) => {
+    await world();
+    start(devUi);
+    await ended(2);
+    const given = handed ? { url: 'http://127.0.0.1:4317', token: 'dev-ui-token' } : null;
+    expect(cam.shots.map((shot) => shot.devUi)).toEqual([given, given]);
   });
 
   /** A Ready turn of Settings that kept a new commit, its agent having reported `routes`. */

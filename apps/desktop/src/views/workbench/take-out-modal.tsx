@@ -34,7 +34,7 @@ export function TakeOutModal({ passId, taskId, area, onClose }: TakeOutModalProp
     <FormModal
       opened
       onClose={onClose}
-      title={`Take Out ${area}`}
+      title={`Remove ${area}`}
       size="md"
       error={
         taking.error?.message ??
@@ -64,7 +64,7 @@ export function TakeOutModal({ passId, taskId, area, onClose }: TakeOutModalProp
                 });
             }}
           >
-            Take Out
+            Remove
           </Button>
         </>
       }
