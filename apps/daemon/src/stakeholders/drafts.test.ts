@@ -137,7 +137,8 @@ describe('draftFor', () => {
     expect(getInboxItem(store.db, card.id)).toMatchObject({
       state: 'OPEN',
       assignees: ['me'],
-      routedBy: 'rule',
+      routedBy: 'builder',
+      detail: { draftFailed: true },
     });
   });
 
@@ -248,18 +249,17 @@ describe('sweepDrafts', () => {
     expect(second?.people.map((p) => p.userId)).toEqual(['U-ana']);
   });
 
+  const failedCompose = () =>
+    deps({
+      compose: () => {
+        throw new Error('boom');
+      },
+    });
+
   it('retries a card whose compose failed, but not one the builder took back on purpose', () => {
     const w = world();
     w.route([w.mark]);
-    const failed = w.insertAndDraft(
-      {},
-      deps({
-        compose: () => {
-          throw new Error('boom');
-        },
-      }),
-    ).card;
-    expect(sendForCard(store.db, failed.id)).toBeNull();
+    const failed = w.insertAndDraft({}, failedCompose()).card;
     const kept = w.insertAndDraft().card;
     store.write((ctx) => {
       const send = sendForCard(ctx.tx, kept.id);
@@ -275,6 +275,7 @@ describe('sweepDrafts', () => {
       assignees: ['mark'],
       routedBy: 'rule',
     });
+    expect(getInboxItem(store.db, failed.id).detail?.['draftFailed']).toBeUndefined();
     expect(sendForCard(store.db, failed.id)?.state).toBe('draft');
     expect(after).toHaveLength(1);
     expect(getInboxItem(store.db, kept.id)).toMatchObject({
@@ -282,6 +283,46 @@ describe('sweepDrafts', () => {
       routedBy: 'builder',
     });
     expect(sendForCard(store.db, kept.id)?.state).toBe('closed');
+  });
+
+  it('retries a failed compose for the people the rules name now, not when the card was made', () => {
+    const w = world();
+    w.route([w.mark]);
+    const failed = w.insertAndDraft({}, failedCompose()).card;
+    w.route([w.ana]);
+    sweep();
+    expect(getInboxItem(store.db, failed.id).assignees).toEqual(['ana']);
+    expect(sendForCard(store.db, failed.id)?.people.map((p) => p.userId)).toEqual(['U-ana']);
+  });
+
+  it('leaves a failed compose with the builder when the rules now route it to the builder', () => {
+    const w = world();
+    w.route([w.mark]);
+    const failed = w.insertAndDraft({}, failedCompose()).card;
+    w.route([]);
+    expect(sweep()).toEqual([]);
+    expect(getInboxItem(store.db, failed.id)).toMatchObject({
+      assignees: ['me'],
+      routedBy: 'builder',
+    });
+    expect(getInboxItem(store.db, failed.id).detail?.['draftFailed']).toBeUndefined();
+  });
+
+  it('does not reroute a card the rules sent to the builder on purpose', () => {
+    const w = world();
+    w.route([w.mark]);
+    const card = w.insert();
+    w.route([]);
+    store.write((ctx) =>
+      setInboxRecipients(ctx, card.id, {
+        assignees: [],
+        routedBy: RoutedBy.Rule,
+        suggestion: null,
+      }),
+    );
+    w.route([w.mark]);
+    expect(sweep()).toEqual([]);
+    expect(getInboxItem(store.db, card.id).assignees).toEqual(['me']);
   });
 
   it('keeps a draft whose recipients still match', () => {

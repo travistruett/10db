@@ -199,17 +199,6 @@ export function listPendingTriage(db: DbReader): InboxItemDto[] {
     .map((row) => toDto(db, row));
 }
 
-/** The handles the rules gave a card when it was made, which a later reroute does not change. */
-export function ruleAssigneesOf(db: DbReader, id: InboxItemId): string[] {
-  const row = db
-    .select({ ruleAssignees: schema.inboxItems.ruleAssignees })
-    .from(schema.inboxItems)
-    .where(eq(schema.inboxItems.id, id))
-    .get();
-  if (!row) throw new NotFoundError('inbox item', id);
-  return row.ruleAssignees;
-}
-
 export function findOpenByFoldKey(
   db: DbReader,
   projectId: ProjectId,

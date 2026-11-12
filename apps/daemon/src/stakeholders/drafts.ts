@@ -22,10 +22,10 @@ import {
   listInbox,
   listPeople,
   listPendingTriage,
-  ruleAssigneesOf,
   sendForCard,
   setInboxRecipients,
   targetTaskIds,
+  updateInboxItem,
   type DbReader,
   type WriteContext,
 } from '@10db/db';
@@ -45,6 +45,9 @@ export interface DraftDeps {
   /** The composer, replaceable only so a failure to compose can be exercised. */
   readonly compose?: typeof composeSlackQuestion;
 }
+
+/** The detail key marking a card whose message could not be composed. */
+export const DRAFT_FAILED_KEY = 'draftFailed';
 
 const LIVE_SEND: readonly SendState[] = [SendState.Draft, SendState.Sending, SendState.Sent];
 
@@ -122,17 +125,19 @@ export function draftFor(
   if (sendForCard(ctx.tx, card.id) !== null && isLive(ctx, card.id)) return null;
   const recipients = recipientsOf(ctx.tx, card);
   if (recipients?.length === 0) return null;
-  // A card the builder is left with: for want of a contact, it stays his; for want of a draft that a later
-  // start can make, it keeps `rule`, so the sweep can tell it from one he took back on purpose.
-  const toBuilder = (routedBy: RoutedBy): null => {
+  const toBuilder = (failedCompose: boolean): null => {
     setInboxRecipients(ctx, card.id, {
       assignees: [BUILDER_HANDLE],
-      routedBy,
+      routedBy: RoutedBy.Builder,
       suggestion: null,
     });
+    // A draft that could not be made is marked, so the start sweep can tell it from a card the builder
+    // kept on purpose and try again with the routes of that day.
+    if (failedCompose)
+      updateInboxItem(ctx, card.id, { detail: { ...card.detail, [DRAFT_FAILED_KEY]: true } });
     return null;
   };
-  if (recipients === null) return toBuilder(RoutedBy.Builder);
+  if (recipients === null) return toBuilder(false);
   let message: { text: string; hits: OutboundHit[] };
   try {
     const { text } = (deps.compose ?? composeSlackQuestion)({
@@ -145,7 +150,7 @@ export function draftFor(
     message = { text, hits: hitsFor(card, text) };
   } catch (error) {
     deps.log.warn({ err: error, cardId: card.id }, 'could not draft a routed question');
-    return toBuilder(RoutedBy.Rule);
+    return toBuilder(true);
   }
   insertDraft(ctx, {
     inboxItemId: card.id,
@@ -183,21 +188,21 @@ function isLive(ctx: WriteContext, id: InboxItemId): boolean {
 }
 
 /**
- * A question left with the builder only because its draft could not be made (routed by rule, to the builder
- * alone, with no send) goes back to the people the rules gave it, so the sweep drafts it again.
+ * A question left with the builder only because its draft could not be made (marked `draftFailed`) is routed
+ * again by the rules as they stand now, so the sweep drafts it for the people they name. The mark goes either way.
  */
 function retryable(ctx: WriteContext, card: InboxItemDto): InboxItemDto {
-  if (
-    card.kind !== InboxKind.Question ||
-    card.routedBy !== RoutedBy.Rule ||
-    !card.assignees.every((h) => h === BUILDER_HANDLE) ||
-    sendForCard(ctx.tx, card.id) !== null
-  )
-    return card;
-  const wanted = ruleAssigneesOf(ctx.tx, card.id);
-  if (wanted.every((h) => h === BUILDER_HANDLE)) return card;
+  if (card.kind !== InboxKind.Question || card.detail?.[DRAFT_FAILED_KEY] !== true) return card;
+  const rest = Object.fromEntries(
+    Object.entries(card.detail).filter(([key]) => key !== DRAFT_FAILED_KEY),
+  );
+  const handles = fallbackHandles(ctx.tx, card);
+  const cleared = updateInboxItem(ctx, card.id, {
+    detail: Object.keys(rest).length > 0 ? rest : null,
+  });
+  if (handles.every((h) => h === BUILDER_HANDLE)) return cleared;
   return setInboxRecipients(ctx, card.id, {
-    assignees: wanted,
+    assignees: handles,
     routedBy: RoutedBy.Rule,
     suggestion: null,
   });
