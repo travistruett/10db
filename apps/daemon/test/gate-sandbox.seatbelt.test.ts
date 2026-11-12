@@ -23,7 +23,7 @@ import {
   type GateResult,
   type GateRunner,
 } from '../src/verify';
-import { createTempRepo, isolatedGitEnv, tempDir, type TempDir } from './fixtures';
+import { createTempRepo, isolatedGitEnv, tempDir, waitForAsync, type TempDir } from './fixtures';
 
 /**
  * The gate under the real sandbox: srt and Seatbelt, with the profile the daemon builds. Runs in
@@ -358,6 +358,41 @@ describe.skipIf(!SEATBELT)('the gate under the sandbox (Seatbelt)', () => {
         { project: { repoPath: checkout, sandboxLoopback: true } },
       ),
     ).toEqual({ loopback: 'ok' });
+  }, 120_000);
+
+  // Decision 2026-11-11-10db-runs-the-preview-while-a-pass-is-open: a project's preview command runs
+  // through this runner with no timeout of its own, and the builder's browser must reach what it serves.
+  it("serves a loopback port the builder's browser reaches while it runs, as a preview does, and stops on abort", async () => {
+    const free = createServer();
+    await listen(free, 0);
+    const address = free.address();
+    const port = typeof address === 'object' && address !== null ? address.port : 0;
+    await new Promise<void>((resolve) =>
+      free.close(() => {
+        resolve();
+      }),
+    );
+    const page = `http://127.0.0.1:${String(port)}/`;
+    const answers = () =>
+      fetch(page).then(
+        () => true,
+        () => false,
+      );
+    const serve = `exec node -e "require('http').createServer((q, s) => s.end('ok')).listen(${String(port)}, '127.0.0.1')"`;
+    const abort = new AbortController();
+    const serving = run(serve, {
+      project: { repoPath: checkout, sandboxLoopback: true },
+      timeoutMs: 120_000,
+      signal: abort.signal,
+    });
+    await waitForAsync(answers, 30_000);
+    abort.abort();
+    expect((await serving).aborted).toBe(true);
+    expect(await answers()).toBe(false);
+    // Without Allow loopback nothing may listen, so the preview can't serve at all.
+    const refused = await run(serve, { project: { repoPath: checkout, sandboxLoopback: false } });
+    expect(refused.exitCode).not.toBe(0);
+    expect(await answers()).toBe(false);
   }, 120_000);
 
   // srt exits 0 when its own child dies by TERM or INT: none of these may pass.
