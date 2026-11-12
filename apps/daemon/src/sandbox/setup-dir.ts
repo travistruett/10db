@@ -14,6 +14,7 @@ import {
 import { dirname, isAbsolute, join, normalize, relative, sep } from 'node:path';
 import { foldPathCase } from '../guard';
 import { wrapPlugin } from './plugin-wrapper';
+import { isSandboxPath, SandboxProfileError } from './profile';
 import { isEqualOrUnder } from './protected-reads';
 import type { SetupInput } from './setup-input';
 import { collapseReads, setupReadRoots } from './setup-reads';
@@ -74,6 +75,8 @@ export interface KeptSetup {
 const SECRET_FILE_PREFIX = foldPathCase('.env');
 const UNWALKED_DIRECTORIES: ReadonlySet<string> = new Set(['node_modules', '.git']);
 const GONE = 'its folder is gone; Claude Code may have updated it';
+const UNNAMEABLE =
+  "a path in it holds a character the sandbox profile can't take ([ ] * ? { } \\ or a line break)";
 
 function realOrNull(path: string): string | null {
   try {
@@ -144,6 +147,29 @@ function walkSecrets(root: string): { secrets: string[] } | { unlistable: string
     }
   }
   return { secrets };
+}
+
+/**
+ * Why a read can't open as it stands, a skill or plugin taking the blame for what lies in it: the reads'
+ * secrets when every read can be listed and named, else the first path that stops it. The profile refuses
+ * a path holding a glob character or a line break, so a read or secret it couldn't name would refuse the
+ * session; `at` is the read itself for a secret that lies elsewhere (a `.env*` link's target).
+ */
+function firstBlocked(
+  reads: readonly string[],
+): { secretFiles: string[] } | { at: string; why: (where: string) => string } {
+  const secretFiles: string[] = [];
+  for (const read of reads) {
+    if (!isSandboxPath(read)) return { at: read, why: () => UNNAMEABLE };
+    const walked = walkSecrets(read);
+    if ('unlistable' in walked)
+      return { at: walked.unlistable, why: (where) => `a folder in it can't be listed: ${where}` };
+    const odd = walked.secrets.find((secret) => !isSandboxPath(secret));
+    if (odd !== undefined)
+      return { at: isEqualOrUnder(odd, read) ? odd : read, why: () => UNNAMEABLE };
+    secretFiles.push(...walked.secrets);
+  }
+  return { secretFiles: [...new Set(secretFiles)].sort() };
 }
 
 /** One skill root's real path, and whether a real directory directly in it was refused. */
@@ -246,26 +272,17 @@ export function keepSetup(
         [folder, fileDir].filter((path) => !whole.some((root) => isEqualOrUnder(path, root.real))),
       ),
     ]);
-    let blocked: string | null = null;
-    const secretFiles: string[] = [];
-    for (const read of reads) {
-      const walked = walkSecrets(read);
-      if ('unlistable' in walked) {
-        blocked = walked.unlistable;
-        break;
-      }
-      secretFiles.push(...walked.secrets);
-    }
-    if (blocked === null)
+    const blocked = firstBlocked(reads);
+    if (!('at' in blocked))
       return {
         keptSkills: skills.map(({ skill }) => skill),
         keptPlugins: plugins,
         keptProjectFiles,
         reads,
-        secretFiles: [...new Set(secretFiles)].sort(),
+        secretFiles: blocked.secretFiles,
         leftOut,
       };
-    const at = blocked;
+    const { at, why } = blocked;
     for (const root of roots) if (isEqualOrUnder(at, root.real)) root.whole = false;
     const skill = skills.findIndex(
       ({ folder, fileDir }) => isEqualOrUnder(at, folder) || isEqualOrUnder(at, fileDir),
@@ -273,20 +290,14 @@ export function keepSetup(
     const owner = skills[skill];
     if (owner !== undefined) {
       const base = isEqualOrUnder(at, owner.folder) ? owner.folder : owner.fileDir;
-      leftOut.push({
-        what: shown(owner.skill.path, home),
-        why: `a folder in it can't be listed: ${relative(base, at) || '.'}`,
-      });
+      leftOut.push({ what: shown(owner.skill.path, home), why: why(relative(base, at) || '.') });
       skills.splice(skill, 1);
       continue;
     }
     const plugin = plugins.findIndex((p) => isEqualOrUnder(at, p.real));
     const kept = plugins[plugin];
     if (kept !== undefined) {
-      leftOut.push({
-        what: kept.id,
-        why: `a folder in it can't be listed: ${relative(kept.real, at) || '.'}`,
-      });
+      leftOut.push({ what: kept.id, why: why(relative(kept.real, at) || '.') });
       plugins.splice(plugin, 1);
     }
     // Otherwise the folder lies in a root that now opens folder by folder, which leaves it closed.
@@ -355,12 +366,25 @@ export function createSetupDir(
     chmodSync(dir, 0o700);
     const pluginDirs: string[] = [];
     const skillRoots: string[] = [];
+    const leftOut = [...kept.leftOut];
+    // A folder removed or changed since `keepSetup` read it leaves its own item out, never the session.
+    const changed = (what: string, error: unknown): void => {
+      const code = error instanceof Error && 'code' in error ? String(error.code) : String(error);
+      leftOut.push({ what, why: `it changed while the session started: ${code}` });
+    };
+    const linked: string[] = [];
     if (kept.keptSkills.length > 0) {
       const yours = join(dir, 'yours');
       writeManifest(yours, 'yours');
       makeDir(join(yours, 'skills'));
-      for (const skill of kept.keptSkills)
-        symlinkSync(realpathSync.native(skill.path), join(yours, 'skills', skill.name));
+      for (const skill of kept.keptSkills) {
+        try {
+          symlinkSync(realpathSync.native(skill.path), join(yours, 'skills', skill.name));
+          linked.push(skill.name);
+        } catch (error) {
+          changed(shown(skill.path, home), error);
+        }
+      }
       pluginDirs.push(yours);
       skillRoots.push(join(yours, 'skills'));
     }
@@ -371,27 +395,33 @@ export function createSetupDir(
       if (kept.keptProjectFiles.some((f) => f.relative.startsWith(`skills${sep}`)))
         skillRoots.push(join(project, 'skills'));
     }
-    const leftOut = [...kept.leftOut];
     const wrapped: string[] = [];
     for (const plugin of kept.keptPlugins) {
       const name = pluginName(plugin.id);
       const wrapper = join(dir, 'plugins', name);
-      makeDir(wrapper);
-      leftOut.push(...wrapPlugin(plugin.real, wrapper).leftOut);
+      let notes: LeftOut[];
+      let skills: string | null;
+      try {
+        makeDir(wrapper);
+        notes = wrapPlugin(plugin.real, wrapper).leftOut;
+        const inPlugin = join(plugin.real, 'skills');
+        skills = existsSync(inPlugin) && lstatSync(inPlugin).isDirectory() ? inPlugin : null;
+      } catch (error) {
+        rmSync(wrapper, { recursive: true, force: true });
+        changed(plugin.id, error);
+        continue;
+      }
+      leftOut.push(...notes);
       pluginDirs.push(wrapper);
       wrapped.push(plugin.id);
-      const skills = join(plugin.real, 'skills');
-      if (existsSync(skills) && lstatSync(skills).isDirectory()) skillRoots.push(skills);
+      if (skills !== null) skillRoots.push(skills);
     }
     return {
       setup: {
         pluginDirs,
         skillRoots,
         reads: [dir, ...kept.reads],
-        loaded: {
-          skills: kept.keptSkills.map((skill) => skill.name),
-          plugins: wrapped,
-        },
+        loaded: { skills: linked, plugins: wrapped },
         leftOut,
         secretFiles: kept.secretFiles,
       },
@@ -399,6 +429,8 @@ export function createSetupDir(
     };
   } catch (error) {
     remove();
-    throw error;
+    // The setup dir itself or the project's copies could not be written: the session is refused with why.
+    const code = error instanceof Error && 'code' in error ? String(error.code) : String(error);
+    throw new SandboxProfileError('setup', `the session's setup dir could not be written: ${code}`);
   }
 }

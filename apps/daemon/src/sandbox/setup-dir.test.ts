@@ -2,6 +2,7 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   readlinkSync,
   realpathSync,
@@ -12,6 +13,7 @@ import {
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir, type TempDir } from '../../test/fixtures';
+import { SandboxProfileError } from './profile';
 import { homeProtectedReads } from './protected-reads';
 import { createSetupDir, keepSetup } from './setup-dir';
 import type { SetupInput } from './setup-input';
@@ -26,6 +28,8 @@ let ctx: SetupReadContext;
 
 const refuse = (real: string): string | null => setupReadRefusal(real, ctx);
 const noSecrets = (): boolean => false;
+const UNNAMEABLE =
+  "a path in it holds a character the sandbox profile can't take ([ ] * ? { } \\ or a line break)";
 
 beforeEach(() => {
   root = tempDir('setup-dir');
@@ -211,6 +215,30 @@ describe('keepSetup and createSetupDir', () => {
     expect(kept.reads).toEqual([join(home, '.claude/skills/s')]);
   });
 
+  it('leaves out a skill whose folder the profile could not name, as a link target outside the roots', () => {
+    const odd = linkedSkill('a', join(outside, 'my[skills]/a'));
+    const s = builderSkill('s');
+    const kept = keepSetup(input({ skills: [odd, s] }), refuse, home, noSecrets);
+    expect(kept.keptSkills).toEqual([s]);
+    expect(kept.leftOut).toEqual([{ what: '~/.claude/skills/a', why: UNNAMEABLE }]);
+    expect(kept.reads).toEqual([join(home, '.claude/skills')]);
+  });
+
+  it.each([
+    ['a glob character', 'app/[slug]'],
+    ['a star', 'a*b'],
+    ['a line break', 'line\nbreak'],
+  ])('leaves out a skill holding a .env path with %s, and opens the others', (_name, folder) => {
+    const s = builderSkill('s');
+    writeFileSync(join(skillAt(join(home, '.claude/skills/s', folder)), '.env.example'), 'X=1');
+    const t = builderSkill('t');
+    const kept = keepSetup(input({ skills: [s, t] }), refuse, home, noSecrets);
+    expect(kept.keptSkills).toEqual([t]);
+    expect(kept.leftOut).toEqual([{ what: '~/.claude/skills/s', why: UNNAMEABLE }]);
+    expect(kept.reads).toEqual([join(home, '.claude/skills/t')]);
+    expect(kept.secretFiles).toEqual([]);
+  });
+
   it('collapses link targets outside the roots', () => {
     const x = linkedSkill('x', join(outside, 'x'));
     skillAt(join(outside, 'x/inner'));
@@ -371,6 +399,19 @@ describe('keepSetup and createSetupDir', () => {
       made.remove();
     },
   );
+
+  it('a setup dir it cannot write refuses with a typed error and leaves nothing', () => {
+    const escape = {
+      relative: '../x',
+      source: '.claude/x',
+      content: Buffer.from('x'),
+      mode: 0o600,
+    };
+    expect(() =>
+      createSetupDir(filesRoot, input({ projectFiles: [escape] }), refuse, home, noSecrets),
+    ).toThrow(SandboxProfileError);
+    expect(readdirSync(filesRoot)).toEqual([]);
+  });
 
   it('remove() leaves nothing', () => {
     const made = createSetupDir(

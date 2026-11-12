@@ -1192,6 +1192,18 @@ describe.skipIf(SANDBOXED)('createLaneSandbox', () => {
       }
     });
 
+    it('starts a session whose setup holds a path the profile cannot take, leaving that skill out', async () => {
+      const setup = setupInput();
+      writeIn(join(home, '.claude/skills/s/app/[slug]'), '.env.example', 'X=1');
+      const session = await sandbox().forSession(input({ setup }));
+      try {
+        expect(session.setup.loaded).toEqual({ skills: [], plugins: ['p@m'] });
+        expect(session.setup.leftOut.map((item) => item.what)).toContain('~/.claude/skills/s');
+      } finally {
+        session.dispose();
+      }
+    });
+
     it('keeps a .env file inside an opened skill folder denied', async () => {
       const setup = setupInput();
       const secret = writeIn(join(home, '.claude/skills/s'), '.env.local', 'TOKEN=x');
