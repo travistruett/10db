@@ -522,6 +522,17 @@ describe('conversationState: several recipients', () => {
       });
     });
 
+    it("with Mark approved, Ana's own approval keeps it approved, and anything else is disagreed", () => {
+      const approvalSeen = { at: at(120), by: MARK };
+      const withMark = proposal([check(BOT, MARK)]);
+      const run = (text: string) =>
+        open({ approvalSeen, proposal: withMark, messages: [msg(130, ANA, text)] }).kind;
+      expect(run('yes')).toBe('approved');
+      expect(run('B')).toBe('approved');
+      expect(run('hmm wait')).toBe('disagreed');
+      expect(run('C')).toBe('disagreed');
+    });
+
     it('with Mark approved, Ana naming a different letter is disagreed and the same letter is fine', () => {
       const approvalSeen = { at: at(120), by: MARK };
       const withMark = proposal([check(BOT, MARK)]);

@@ -324,6 +324,12 @@ The fake adapter (`sessions/fake-adapter.ts`) is the test boundary for Claude Co
   ticks make it `unreachable`). With several open questions in one DM a top-level reply is matched by the judge
   (`reply_match`) or by asking "Which one is this for?" (`reply-match.ts`). `timer-watch.ts` returns an overdue
   send to the builder from the wall clock alone, with no Slack (`timers.ts` holds the pure rule).
+- `bring-in.ts` moves a conversation to a group DM when a participant mentions someone (`moveSend` keeps the old
+  thread as `moved_from`, forgets the proposal and approval marks, and counts nobody toward a limit), and `agree.ts`
+  settles a conversation with several voices: the judge's `thread_answer` becomes a proposal line with the bot's own
+  ✅ seeded, a recipient's ✅ is seen on one tick and confirmed on the next, and disagreement returns the card to
+  the builder with no decision. Every line 10db posts about a send carries `tendb_send` metadata (`bot-lines.ts`),
+  so a crash between a post and its write finds the line again instead of posting it twice.
 - A question card routed to anyone but the builder parks its session at once (`onWaitStart` reads the card again),
   even with another wait open, so a stakeholder's words never reach a live `ask_human` call.
 

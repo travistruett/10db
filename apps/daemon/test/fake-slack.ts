@@ -30,6 +30,11 @@ export class FakeSlack implements SlackClient {
   private messages = new Map<string, SlackMessage[]>();
   private reactionsOn = new Map<string, { name: string; users: string[] }[]>();
   private pauses = new Map<string, Promise<void>>();
+  /** What `users.info` answers for a person, by user id. */
+  names = new Map<string, string>();
+  /** The first letter of a group DM's id; Slack's own check returned one starting with C. */
+  groupPrefix = 'G';
+  private held = new Set<string>();
   private counter = 0;
   private current = '';
   private readonly clock = new ManualClock();
@@ -69,6 +74,11 @@ export class FakeSlack implements SlackClient {
     return release;
   }
 
+  /** Whether a call to `method` is waiting on `pause` right now. */
+  isHeld(method: string): boolean {
+    return this.held.has(method);
+  }
+
   private nextTs(): string {
     this.counter += 1;
     return `${String(1000 + this.counter)}.000100`;
@@ -101,6 +111,12 @@ export class FakeSlack implements SlackClient {
     if (found) found.users.push(who);
     else list.push({ name, users: [who] });
     this.reactionsOn.set(key, list);
+  }
+
+  /** A person takes a reaction back. */
+  unreact(channel: string, ts: string, name: string, who: string): void {
+    const list = this.reactionsOn.get(`${channel}/${ts}`) ?? [];
+    for (const r of list) if (r.name === name) r.users = r.users.filter((u) => u !== who);
   }
 
   /** What 10db posted to a channel, oldest first. */
@@ -194,7 +210,11 @@ export class FakeSlack implements SlackClient {
     if (code !== undefined) return this.json({ ok: false, error: code });
     const paused = this.pauses.get(method);
     this.pauses.delete(method);
-    if (paused) await paused;
+    if (paused) {
+      this.held.add(method);
+      await paused;
+      this.held.delete(method);
+    }
     const body: Body =
       typeof init?.body === 'string' && init.body !== '' ? (JSON.parse(init.body) as Body) : {};
     const query = (name: string): string => url.searchParams.get(name) ?? '';
@@ -208,7 +228,10 @@ export class FakeSlack implements SlackClient {
         this.opened.push({ kind: users.length === 1 ? 'dm' : 'group', users });
         return this.json({
           ok: true,
-          channel: { id: users.length === 1 ? `D-${users[0] ?? ''}` : `G-${users.join('-')}` },
+          channel: {
+            id:
+              users.length === 1 ? `D-${users[0] ?? ''}` : `${this.groupPrefix}-${users.join('-')}`,
+          },
         });
       }
       case 'chat.postMessage': {
@@ -271,10 +294,22 @@ export class FakeSlack implements SlackClient {
             reactions: this.reactionsOn.get(`${query('channel')}/${query('timestamp')}`) ?? [],
           },
         });
-      case 'reactions.add':
+      case 'reactions.add': {
+        const channel = typeof body['channel'] === 'string' ? body['channel'] : '';
+        const timestamp = typeof body['timestamp'] === 'string' ? body['timestamp'] : '';
+        const name = typeof body['name'] === 'string' ? body['name'] : '';
+        const key = `${channel}/${timestamp}`;
+        const list = this.reactionsOn.get(key) ?? [];
+        const found = list.find((r) => r.name === name);
+        if (found?.users.includes(FAKE_BOT_USER) === true)
+          return this.json({ ok: false, error: 'already_reacted' });
+        if (found) found.users.push(FAKE_BOT_USER);
+        else list.push({ name, users: [FAKE_BOT_USER] });
+        this.reactionsOn.set(key, list);
         return this.json({ ok: true });
+      }
       case 'users.info':
-        return this.json({ ok: true, user: { name: 'x' } });
+        return this.json({ ok: true, user: { name: this.names.get(query('user')) ?? 'x' } });
       default:
         return this.json({ ok: false, error: 'unknown_method' });
     }

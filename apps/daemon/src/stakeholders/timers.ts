@@ -1,4 +1,5 @@
 import type { StakeholderTimersDto } from '@10db/contracts';
+import { tsMillis } from '../slack';
 
 export interface TimedSend {
   /** When the wait began: the send, or the builder's last Keep Waiting. */
@@ -7,7 +8,7 @@ export interface TimedSend {
   readonly returnedAt: string | null;
   /** A lone reply is waiting for its quiet tick, and since when. */
   readonly loneReplyPendingSince: string | null;
-  /** An approval was seen and waits to be confirmed on the next tick, and since when. */
+  /** An approval was seen and waits to be confirmed on the next tick: the Slack `ts` it was seen at. */
   readonly approvalSeenAt?: string | null;
 }
 
@@ -27,9 +28,11 @@ export function dueTimers(send: TimedSend, timers: StakeholderTimersDto, now: Da
   const start = Date.parse(send.waitStartedAt);
   const held = (dueAt: number): boolean => {
     if (now.getTime() >= dueAt + HOLD_MS) return false;
-    const before = (iso: string | null | undefined): boolean =>
-      iso !== null && iso !== undefined && Date.parse(iso) < dueAt;
-    return before(send.loneReplyPendingSince) || before(send.approvalSeenAt);
+    const before = (millis: number | null): boolean => millis !== null && millis < dueAt;
+    return (
+      before(send.loneReplyPendingSince === null ? null : Date.parse(send.loneReplyPendingSince)) ||
+      before(send.approvalSeenAt == null ? null : tsMillis(send.approvalSeenAt))
+    );
   };
   const returnAt = start + timers.returnAfterHours * HOUR_MS;
   if (now.getTime() >= returnAt) return held(returnAt) ? 'none' : 'return';

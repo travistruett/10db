@@ -1,10 +1,18 @@
-import { ConflictError, InboxState, JudgeDecision, type PersonId } from '@10db/contracts';
+import {
+  ConflictError,
+  InboxState,
+  JudgeDecision,
+  type InboxItemId,
+  type PersonId,
+} from '@10db/contracts';
 import {
   getInboxItem,
   getJudgeConfig,
   getStakeholderTimers,
   markAnswered,
+  markApprovalSeen,
   markLoneReplyPending,
+  setProposal,
   markReminded,
   openSends,
   sendForCard,
@@ -24,8 +32,17 @@ import {
   type SlackClient,
   type SlackMessage,
 } from '../slack';
+import {
+  answerAgreed,
+  judgeApprovals,
+  returnDisagreed,
+  settleConversation,
+  type AgreeDeps,
+  type Conversation,
+} from './agree';
+import { bringIn } from './bring-in';
 import { stakeholderOptions } from './compose';
-import { conversationState, newMessages, type CountedMessage } from './conversation';
+import { conversationState, newMessages } from './conversation';
 import { escapeMrkdwn } from './escape';
 import { reminderLine } from './lines';
 import { scanOutbound } from './outbound-scan';
@@ -50,7 +67,7 @@ export interface ReplyWatchDeps {
   readonly slack: SlackClient | null;
   readonly inbox: Pick<InboxService, 'answerAs'>;
   readonly judge: Judge;
-  readonly sends: Pick<StakeholderSends, 'recoverSending'>;
+  readonly sends: Pick<StakeholderSends, 'recoverSending' | 'closingTextFor'>;
   readonly clock: Clock;
   readonly log: Logger;
   readonly connection: SlackConnection;
@@ -69,9 +86,22 @@ export interface ReplyWatch {
 /** One send's slice of a conversation: what was said since its question, from the thread and the DM's top level. */
 interface Reading {
   readonly open: OpenSendRow;
+  /** What was said since the question, from the thread, the DM's top level and the thread it moved from. */
   readonly messages: SlackMessage[];
+  /** Everything in the current thread, 10db's own lines included. */
+  readonly thread: SlackMessage[];
   readonly topLevel: ReadonlySet<string>;
 }
+
+/** The messages once each, oldest first: a move can read the same thread from both its places. */
+function dedupe(messages: readonly SlackMessage[]): SlackMessage[] {
+  return [...new Map(messages.map((m) => [m.ts, m])).values()].sort((a, b) =>
+    compareTs(a.ts, b.ts),
+  );
+}
+
+/** The first `ts` of a conversation: the question's own, or where it started before it moved. */
+const floorOf = (open: OpenSendRow): string => open.movedFrom?.threadTs ?? open.messageTs;
 
 /**
  * How a sent question is named in a line posted to Slack: its title, escaped and cut, or a link to the message
@@ -143,14 +173,23 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
         const next = here.find(
           (o) => o.threadTs === open.threadTs && compareTs(o.messageTs, open.messageTs) > 0,
         );
+        // Only what was said after this send's own question, and before a follow-up's.
         const inWindow = (m: SlackMessage): boolean =>
-          compareTs(m.ts, open.messageTs) > 0 &&
+          compareTs(m.ts, floorOf(open)) > 0 &&
           (next === undefined || compareTs(m.ts, next.messageTs) < 0);
-        const mine = (threadMessages.get(open.threadTs) ?? []).filter(inWindow);
+        const thread = threadMessages.get(open.threadTs) ?? [];
+        const old = open.movedFrom
+          ? await client.replies(
+              open.movedFrom.channelId,
+              open.movedFrom.threadTs,
+              open.movedFrom.lastReadTs ?? open.movedFrom.threadTs,
+            )
+          : [];
         const own = top.filter((m) => assigned.get(m.ts) === open.id);
         out.push({
           open,
-          messages: [...mine, ...own].sort((a, b) => compareTs(a.ts, b.ts)),
+          messages: dedupe([...thread.filter(inWindow), ...old.filter(inWindow), ...own]),
+          thread,
           topLevel: new Set(own.map((m) => m.ts)),
         });
       }
@@ -158,23 +197,44 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
     return out;
   }
 
+  const judged = new Map<string, boolean>();
+
+  const agreeDeps = (client: SlackClient): AgreeDeps => ({
+    client,
+    state,
+    judge: deps.judge,
+    inbox: deps.inbox,
+    clock,
+    log,
+  });
+
   /** Answers the card from a lone recipient's reply, in one transaction with the send's own state. */
-  function answer(r: Reading, counted: CountedMessage[], words: string): void {
-    const { open } = r;
+  function answerLone(c: Conversation, words: string): void {
+    const { open } = c;
     const person = open.people.find((p) => p.recipient && p.personId !== null);
-    const last = counted.at(-1);
+    const last = c.counted.at(-1);
     if (!person?.personId || !last) return;
     const personId: PersonId = person.personId;
-    const card = getInboxItem(state.db, open.inboxItemId);
-    const read = readReply({ words, messageCount: counted.length }, stakeholderOptions(card));
-    const via = r.topLevel.has(last.ts) ? 'top_level' : 'thread';
+    const read = readReply(
+      { words, messageCount: c.counted.filter((m) => m.userId === person.userId).length },
+      stakeholderOptions(c.card),
+    );
+    const via = c.topLevel.has(last.ts) ? 'top_level' : 'thread';
+    // After a "which way" line the whole conversation is quoted to the lane, not only his words.
+    const conversation =
+      open.askedWhichWayAt === null
+        ? []
+        : c.counted.map((m) => ({
+            name: open.people.find((p) => p.userId === m.userId)?.name ?? m.userId,
+            text: m.text,
+          }));
     try {
       deps.inbox.answerAs(
-        card.id,
-        { readAs: read.readAs, answer: read.answer, words, conversation: [] },
+        c.card.id,
+        { readAs: read.readAs, answer: read.answer, words, conversation },
         {
           personId,
-          permalink: sendForCard(state.db, card.id)?.permalink ?? '',
+          permalink: sendForCard(state.db, c.card.id)?.permalink ?? '',
           with: [],
         },
         (ctx) => {
@@ -194,16 +254,47 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
     }
   }
 
-  function process(r: Reading, bot: string): void {
+  const personIdOf = (open: OpenSendRow, userId: string): PersonId | null =>
+    open.people.find((p) => p.userId === userId)?.personId ?? null;
+
+  async function process(client: SlackClient, r: Reading, bot: string): Promise<void> {
     const { open } = r;
+    const card = getInboxItem(state.db, open.inboxItemId);
+    // Someone mentioned in the conversation is brought in; the move settles again on the next tick.
+    if (
+      await bringIn(
+        {
+          client,
+          state,
+          log,
+          closingFor: (id) => deps.sends.closingTextFor(id as InboxItemId),
+        },
+        { open, messages: r.messages, thread: r.thread, bot },
+      )
+    )
+      return;
     const recipients = open.people.filter((p) => p.recipient).map((p) => p.userId);
     const participants = open.people.map((p) => p.userId);
     const counted = newMessages({
       messages: r.messages,
       participants,
       botUserId: bot,
-      afterTs: open.messageTs,
+      afterTs: floorOf(open),
     });
+    const conversation: Conversation = {
+      open,
+      card,
+      counted,
+      thread: r.thread,
+      topLevel: r.topLevel,
+    };
+    const proposal = open.proposal;
+    const reactions =
+      proposal !== null && proposal.ts !== null
+        ? await client.reactions(open.channelId, proposal.ts)
+        : [];
+    const approver =
+      open.approvalBy === null ? null : open.people.find((p) => p.personId === open.approvalBy);
     const verdict = conversationState({
       messages: r.messages,
       recipients,
@@ -211,28 +302,82 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
       botUserId: bot,
       quietSince: quiet.get(open.id) ?? null,
       now: clock.now(),
-      proposal: null,
+      proposal:
+        proposal !== null && proposal.ts !== null
+          ? { ts: proposal.ts, letter: proposal.choice, reactions }
+          : null,
       settledThroughTs: open.settledThroughTs,
       askedWhichWay:
         open.askedWhichWayAt !== null && open.askedWhichWayTs !== null
           ? { at: new Date(open.askedWhichWayAt), ts: open.askedWhichWayTs }
           : null,
-      approvalSeen: null,
-      optionCount: stakeholderOptions(getInboxItem(state.db, open.inboxItemId)).length,
+      approvalSeen:
+        open.approvalSeenAt !== null && approver
+          ? { at: open.approvalSeenAt, by: approver.userId }
+          : null,
+      optionCount: stakeholderOptions(card).length,
+      afterDisagreement: open.returnedReason === 'disagreed',
+      judgedApprovals: await judgeApprovals(agreeDeps(client), conversation, judged),
     });
     const newest = counted.at(-1);
     if (newest) quiet.set(open.id, newest.ts);
-    if (recipients.length !== 1) return;
-    if (verdict.kind === 'lone_reply') {
-      answer(r, counted, verdict.words);
-    } else if (
-      verdict.kind === 'waiting' &&
-      counted.length > 0 &&
-      open.loneReplyPendingSince === null
-    ) {
-      state.write((ctx) => {
-        markLoneReplyPending(ctx, open.id, ctx.now);
-      });
+    const agree = agreeDeps(client);
+    switch (verdict.kind) {
+      case 'lone_reply':
+        if (recipients.length === 1) answerLone(conversation, verdict.words);
+        break;
+      case 'settled':
+        await settleConversation(agree, conversation);
+        break;
+      case 'approval_seen': {
+        const by = personIdOf(open, verdict.by);
+        if (by !== null)
+          state.write((ctx) => {
+            markApprovalSeen(ctx, open.id, {
+              at: newest?.ts ?? proposal?.ts ?? open.messageTs,
+              by,
+            });
+          });
+        break;
+      }
+      case 'approval_lost':
+        state.write((ctx) => {
+          markApprovalSeen(ctx, open.id, null);
+        });
+        break;
+      case 'approved':
+        answerAgreed(agree, conversation, {
+          by: verdict.by,
+          letter: proposal?.choice ?? '',
+          readAs: 'approved',
+        });
+        break;
+      case 'picked':
+        answerAgreed(agree, conversation, {
+          by: verdict.by,
+          letter: verdict.choice,
+          readAs: 'option',
+        });
+        break;
+      case 'disagreed':
+        returnDisagreed(agree, open, newest?.ts ?? null);
+        break;
+      case 'withdrawn':
+        state.write((ctx) => {
+          setProposal(ctx, open.id, null);
+          markApprovalSeen(ctx, open.id, null);
+        });
+        break;
+      case 'waiting':
+        if (recipients.length === 1 && counted.length > 0 && open.loneReplyPendingSince === null)
+          state.write((ctx) => {
+            markLoneReplyPending(ctx, open.id, ctx.now);
+          });
+        break;
+      default: {
+        const unreachable: never = verdict;
+        return unreachable;
+      }
     }
   }
 
@@ -271,7 +416,7 @@ export function createReplyWatch(deps: ReplyWatchDeps): ReplyWatch {
       const opens = openSends(state.db);
       for (const r of await reading(client, opens, bot)) {
         const stillOpen = getInboxItem(state.db, r.open.inboxItemId).state === InboxState.Open;
-        if (stillOpen) process(r, bot);
+        if (stillOpen) await process(client, r, bot);
         if (openSends(state.db).some((o) => o.id === r.open.id)) await remind(client, r);
       }
       failures = 0;

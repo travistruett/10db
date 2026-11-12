@@ -86,6 +86,8 @@ export interface StakeholderSends {
   keepWaiting(cardId: InboxItemId): void;
   /** Looks for the post of every send that was mid-flight, and posts the ones it finds none for. */
   recoverSending(): Promise<void>;
+  /** The closing line a card settled by the builder is owed in a conversation, or null when it is not settled. */
+  closingTextFor(cardId: InboxItemId): string | null;
   /** A card changed: closes its send, and says so in the thread, when the builder settled it. */
   onCardChanged(card: InboxItemDto): Promise<void>;
 }
@@ -540,6 +542,14 @@ export function createStakeholderSends(deps: SendsDeps): StakeholderSends {
       // A post still in flight is closed, and the line said, once it lands (`landed`).
       if (found.state === 'sent')
         await closeAndSay(found.id, getInboxItem(state.db, cardId), 'taken_back');
+    },
+
+    closingTextFor(cardId) {
+      const card = getInboxItem(state.db, cardId);
+      const reason = closeReasonOf(card, true);
+      return reason === null
+        ? null
+        : closingLine(reason, draftContext(state.db, card).builderName, letterOf(card));
     },
 
     keepWaiting(cardId) {

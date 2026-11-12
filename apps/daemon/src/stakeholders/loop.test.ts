@@ -39,7 +39,7 @@ async function world() {
     insertPerson(ctx, {
       handle: 'mark',
       name: 'Mark',
-      slack: { teamId: 'T1', userId: 'U-mark', sendMode: 'auto', dailyLimit: null },
+      slack: { teamId: 'T1', userId: 'UMARK', sendMode: 'auto', dailyLimit: null },
     }),
   ).value;
   live.store.write((ctx) =>
@@ -70,8 +70,8 @@ describe('a stakeholder answers a lane question through the running wiring', () 
     );
     await waitFor(() => (slack.posts.length === 2 ? true : undefined));
     const post = slack.posts[1];
-    expect(post?.channel).toBe('D-U-mark');
-    slack.say('D-U-mark', 'U-mark', "B, we can't give away a week of service.", post?.ts);
+    expect(post?.channel).toBe('D-UMARK');
+    slack.say('D-UMARK', 'UMARK', "B, we can't give away a week of service.", post?.ts);
     await live.replyWatch.tick();
     await live.replyWatch.tick();
 
@@ -102,7 +102,7 @@ describe('a stakeholder answers a lane question through the running wiring', () 
       currentSessionId: null,
     });
     live.clock.advance(3 * 60_000);
-    slack.say('D-U-mark', 'U-mark', 'A, give them a week.', slack.posts[1]?.ts);
+    slack.say('D-UMARK', 'UMARK', 'A, give them a week.', slack.posts[1]?.ts);
     await live.replyWatch.tick();
     await live.replyWatch.tick();
     // The ask_human call never returned his words: no tool result carried them.
