@@ -69,6 +69,7 @@ function reseed(current: GeneralValues, seed: GeneralValues, next: GeneralValues
         : current.sandboxLoopback,
     sandboxDocker:
       current.sandboxDocker === seed.sandboxDocker ? next.sandboxDocker : current.sandboxDocker,
+    prPictures: current.prPictures === seed.prPictures ? next.prPictures : current.prPictures,
     workspaceMode:
       current.workspaceMode === seed.workspaceMode ? next.workspaceMode : current.workspaceMode,
     worktreeSeed: sameList(current.worktreeSeed, seed.worktreeSeed)
@@ -299,6 +300,20 @@ export function ProjectGeneralForm({ project }: { readonly project: ProjectDto }
               set({ screens });
             }}
           />
+        </SettingRow>
+        <SettingRow
+          label="Pictures in pull requests"
+          description="A pass's pull request shows each signed-off page before and after. The pictures are pushed to a 10db-pictures branch on GitHub, so anyone who can see the repository can see them, data on the page included."
+        >
+          <Group justify="flex-end">
+            <Switch
+              aria-label="Pictures in pull requests"
+              checked={values.prPictures}
+              onChange={(e) => {
+                set({ prPictures: e.currentTarget.checked });
+              }}
+            />
+          </Group>
         </SettingRow>
         <PicturesStatus projectId={project.id} />
       </SettingsCard>

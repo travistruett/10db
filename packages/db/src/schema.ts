@@ -255,6 +255,8 @@ export const projects = sqliteTable('projects', {
   /** The branch of origin new tasks land in when `landing` is `branch`; null otherwise. */
   landingBranch: text('landing_branch'),
   prTitlePrefix: text('pr_title_prefix'),
+  /** A pass's pull request shows each signed-off page's before and after pictures; off by default. */
+  prPictures: integer('pr_pictures', { mode: 'boolean' }).notNull().default(false),
   /** Command prefixes a lane runs without a permission card, beyond the gate command. */
   allowedCommands: text('allowed_commands', { mode: 'json' })
     .$type<string[]>()

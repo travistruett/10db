@@ -22,14 +22,16 @@ import {
   getPassProgress,
   getPassPullRequest,
   getProject,
+  getTaskScreenRow,
   getWorkstream,
   listPassTasks,
+  listTaskScreens,
   setPassNotice,
   setPassPullRequest,
   type DbReader,
 } from '@10db/db';
 import { GhError, PrState } from '../github';
-import { ghCall, networkCall, type DeliveryContext } from './context';
+import { ghCall, networkCall, pushCall, type DeliveryContext } from './context';
 import { jobKey, JobQueue } from './jobs';
 import { shipCheck } from './local-check';
 import { createPassChecks } from './pass-checks';
@@ -37,6 +39,7 @@ import { passHasReview, REVIEW_CUT_NOTICE, type PassReviewDeps } from './pass-re
 import { PASS_PR_CLOSED_NOTICE } from './pass-watch';
 import { reviewHasUnread } from './review-left';
 import { readPrTemplate } from './pr-template';
+import { picturePlan, picturesSection } from './pr-pictures';
 import { passPrBody, prTitle, titlePrefix, type PassPrCheck } from './pr-text';
 import { gateInScratch, type ScratchGateDeps } from './scratch-gate';
 import { pushBranch, runGate } from './ship';
@@ -128,13 +131,16 @@ export function passPrBase(db: DbReader, pass: PassDto): string {
 }
 
 /** The titles of the pass's signed-off pages, in the order they joined it. */
-function signedOff(db: DbReader, passId: PassId): string[] {
-  return listPassTasks(db, passId).flatMap((task) =>
-    task.workstreamId !== null &&
-    getWorkstream(db, task.workstreamId).state === WorkstreamState.Done
-      ? [task.title]
-      : [],
+function signedOffTasks(db: DbReader, passId: PassId) {
+  return listPassTasks(db, passId).filter(
+    (task) =>
+      task.workstreamId !== null &&
+      getWorkstream(db, task.workstreamId).state === WorkstreamState.Done,
   );
+}
+
+function signedOff(db: DbReader, passId: PassId): string[] {
+  return signedOffTasks(db, passId).map((task) => task.title);
 }
 
 /** The header notice of a failed gate on the pass's tip, a close's included. */
@@ -274,20 +280,76 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
     return 'pushed';
   }
 
-  async function writeBody(passId: PassId, sha: string, repo: string): Promise<string> {
+  /**
+   * With the project's setting on, pushes the signed-off pages' before and after pictures to the pass's
+   * `10db-pictures/<pass id>` branch of origin and answers the body's Pictures section. A pull request
+   * never waits on its pictures: any failure is logged and the section left out.
+   */
+  async function picturesFor(passId: PassId, repo: string, signal: AbortSignal): Promise<string> {
+    const { pass, project } = placeOf(passId);
+    if (!project.prPictures) return '';
+    const plan = picturePlan(
+      signedOffTasks(db, passId).map((task) => ({
+        title: task.title,
+        screens: listTaskScreens(db, task.id),
+      })),
+    );
+    if (plan.length === 0) return '';
+    try {
+      const email = await deps.gh.noreplyEmail(ghCall(deps, signal));
+      const files = plan
+        .flatMap((pair) => [pair.before, pair.after])
+        .flatMap((picture) =>
+          picture === null
+            ? []
+            : [{ name: picture.name, path: getTaskScreenRow(db, picture.screen.id).storedPath }],
+        );
+      const sha = await deps.git.picturesCommit(project.repoPath, {
+        files,
+        author: { name: '10db', email },
+        message: `Pictures for ${pass.name}`,
+      });
+      await deps.git.pushCommitTo(
+        project.repoPath,
+        sha,
+        `10db-pictures/${pass.id}`,
+        pushCall(deps, signal),
+      );
+      return picturesSection(repo, sha, plan);
+    } catch (error) {
+      deps.logger.warn(
+        { passId, error: message(error) },
+        'the pass pull request goes without its pictures',
+      );
+      return '';
+    }
+  }
+
+  async function writeBody(
+    passId: PassId,
+    sha: string,
+    repo: string,
+    signal: AbortSignal,
+  ): Promise<string> {
     const { pass, batch, project } = placeOf(passId);
     const file = join(deps.dataDir, 'delivery', `${batch.id}-pr-body.md`);
     mkdirSync(dirname(file), { recursive: true });
+    const pictures = await picturesFor(passId, repo, signal);
     writeFileSync(
       file,
-      passPrBody({
-        pass,
-        pages: signedOff(db, passId),
-        check: checkOf(pass, project, sha),
-        ci: { repo, sha },
-        template: await readPrTemplate(deps.git, project.repoPath, sha, deps.logger),
-        reviewCut: getPassProgress(db, passId).notices.some((n) => n.id === REVIEW_CUT_NOTICE),
-      }),
+      [
+        passPrBody({
+          pass,
+          pages: signedOff(db, passId),
+          check: checkOf(pass, project, sha),
+          ci: { repo, sha },
+          template: await readPrTemplate(deps.git, project.repoPath, sha, deps.logger),
+          reviewCut: getPassProgress(db, passId).notices.some((n) => n.id === REVIEW_CUT_NOTICE),
+        }),
+        pictures,
+      ]
+        .filter((part) => part !== '')
+        .join('\n\n'),
     );
     return file;
   }
@@ -303,7 +365,7 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
     const call = ghCall(deps, signal);
     const sha = await deps.git.branchTip(project.repoPath, branch);
     if (sha === null) throw new ConflictError(`The branch of pass "${pass.name}" is gone`);
-    const bodyFile = await writeBody(pass.id, sha, repo);
+    const bodyFile = await writeBody(pass.id, sha, repo, signal);
     let found = getPassPullRequest(db, pass.id);
     if (found === null) {
       // A pull request an earlier run opened before it could record it.
@@ -414,7 +476,7 @@ export function createPassPullRequests(deps: PassPullRequestDeps): PassPullReque
     const { batch } = placeOf(passId);
     const pr = getPassPullRequest(db, passId);
     if (pr === null || batch.repo === null) return;
-    const bodyFile = await writeBody(passId, sha, batch.repo);
+    const bodyFile = await writeBody(passId, sha, batch.repo, signal);
     await deps.gh
       .prEditBody({ repo: batch.repo, url: pr.url, bodyFile }, ghCall(deps, signal))
       .catch((error: unknown) => {
