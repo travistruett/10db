@@ -625,7 +625,8 @@ conversation settles (§8.2), and then (written for one recipient, Mark; §8.6 s
 proposal with its `ts`, and `approvalSeenAt` with who approved. A quiet conversation after a proposal or a
 "which way" line posts nothing more until someone writes again. An approval is confirmed on the tick after the
 one that saw it, and only if the ✅ is still there and no other recipient has written since; a ✅ removed in
-between approves nothing.
+between approves nothing but leaves the proposal open, so adding the ✅ again approves on the following tick.
+Another recipient writing in between is a disagreement (§8.6).
 
 The resumed prompt quotes the whole conversation, one line per message with its author, each as data:
 

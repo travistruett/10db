@@ -276,7 +276,9 @@ instead, it renumbers its own migrations and takes the next protocol version, an
     `markSent(ctx, id, { channelId, threadTs, messageTs, permalink, at })` (sets `lastReadTs = messageTs` and
     `waitStartedAt = at`); `setHeldBy(ctx, id, heldBy)`;
     `markSettled(ctx, id, throughTs)`; `markAskedWhichWay(ctx, id, { at, ts, throughTs })`;
-    `markApprovalSeen(ctx, id, { at, by } | null)`;
+    `markApprovalSeen(ctx, id, { at, by } | null)`; `markLoneReplyPending(ctx, id, at | null)` (the reply watch
+    sets it when a lone recipient's reply first waits for its quiet tick and clears it when that reply is read;
+    the timer watch reads it, since it never calls Slack);
     `moveSend(ctx, id, { channelId, threadTs, messageTs, permalink, added: SendPersonInput[] })` (keeps the old
     channel and thread as `moved_from` with its cursor); `addPeopleToSend`; `markReminded(ctx, id, at)`;
     `setProposal(ctx, id, { choice, confidence, ts } | null)`; `markAnswered(ctx, id, { reply, readAs, answeredBy, replyVia })`;
@@ -285,7 +287,7 @@ instead, it renumbers its own migrations and takes the next protocol version, an
     the reminder, and restarts both timers from `at`); `dropDraft(ctx, id)`.
   - Reads: `sendForCard(db, inboxItemId)`; `openSends(db): OpenSendRow[]` (state `sent`, with people, channel,
     thread, `messageTs`, `lastReadTs`, `movedFrom`, `sentAt`, `waitStartedAt`, `remindedAt`, `returnedAt`,
-    `proposal`, `settledThroughTs`, `askedWhichWayAt` and its `ts`, `approvalSeenAt` and `approvalBy`); `sendsInThread(db, channelId, threadTs)`;
+    `proposal`, `settledThroughTs`, `askedWhichWayAt` and its `ts`, `approvalSeenAt` and `approvalBy`, `loneReplyPendingSince`); `sendsInThread(db, channelId, threadTs)`;
     `latestThreadFor(db, recipients, taskId): { channelId; threadTs; reviewed: boolean } | null`;
     `newThreadsSince(db, personId, since): number` (sent new threads only: a failed send, a follow-up, a move or a
     line 10db posts in a thread never counts); `everSent(db, personId): boolean`; `sendingSends(db)` (with `threadTs` and
@@ -549,7 +551,7 @@ instead, it renumbers its own migrations and takes the next protocol version, an
       `afterTs` that aren't the bot's, aren't bot messages and aren't edits, in order, with their authors.
     - `mentionsToAdd(messages, participants, botUserId): string[]`: user ids mentioned (`<@U…>`) by a participant
       that aren't the bot or a participant.
-    - `conversationState(input: { messages; recipients; participants; botUserId; quietSince; now; proposal; settledThroughTs; askedWhichWay: { at; ts } | null; approvalSeen: { at; by } | null }): { kind: 'waiting' } | { kind: 'lone_reply'; words; messageCount; lastTs } | { kind: 'settled' } | { kind: 'approval_seen'; by: string } | { kind: 'approved'; by: string } | { kind: 'picked'; by: string; choice: string } | { kind: 'disagreed' } | { kind: 'withdrawn' }`
+    - `conversationState(input: { messages; recipients; participants; botUserId; quietSince; now; proposal; settledThroughTs; askedWhichWay: { at; ts } | null; approvalSeen: { at; by } | null }): { kind: 'waiting' } | { kind: 'lone_reply'; words; messageCount; lastTs } | { kind: 'settled' } | { kind: 'approval_seen'; by: string } | { kind: 'approved'; by: string } | { kind: 'picked'; by: string; choice: string } | { kind: 'disagreed' } | { kind: 'withdrawn' } | { kind: 'approval_lost' }`
       (`recipients` in routing order):
       a lone recipient who alone replied gives `lone_reply` once a tick sees nothing new from them (§8.2); with
       anyone else or several recipients, `settled` after a message naming a letter and a quiet tick, or 30 minutes
@@ -559,8 +561,9 @@ instead, it renumbers its own migrations and takes the next protocol version, an
       `heavy_check_mark` or `+1` — on the proposal whose `users` holds a recipient, the bot's own id ignored, or a
       reply of exactly "yes", "approve", "approved", "ok" or "👍", any case, trailing punctuation ignored) first
       gives `approval_seen` (the earliest such recipient in routing order); with `approvalSeen` stored, the next tick
-      gives `approved` when that approval still stands and no other recipient wrote since, and `withdrawn` when the
-      ✅ was removed. A recipient's letter gives `picked`; recipients naming different letters, or an approval and
+      gives `approved` when that approval still stands and no other recipient wrote since, `approval_lost` when the
+      ✅ was removed (the proposal stays open, so a ✅ added again is `approval_seen` again), and `disagreed` when
+      another recipient wrote since. A recipient's letter gives `picked`; recipients naming different letters, or an approval and
       another recipient's non-approval in the same tick, give `disagreed`; any other new message withdraws the
       proposal.
   - In `lines.ts`, the templates (spec §8.4–§8.6, §8.1): `broughtInLine`, `movedLine`, `couldntAddLine`,
@@ -583,7 +586,8 @@ instead, it renumbers its own migrations and takes the next protocol version, an
       a message before `afterTs`; a lone reply on a first tick waits and on a quiet second tick is `lone_reply`;
       Priya's message makes it settle-only; a letter then a quiet tick settles; 29 minutes quiet waits and 30
       settles; Mark's ✅ is `approval_seen` and, still there next tick, `approved`; the bot's own ✅ alone is
-      `waiting`; Mark's ✅ removed before the next tick is `withdrawn`; two recipients' ✅ in one tick credit the first
+      `waiting`; Mark's ✅ removed before the next tick is `approval_lost`, and added back on a later tick is
+      `approval_seen` again; Mark's ✅ then Ana's "hold on" before the next tick is `disagreed`; two recipients' ✅ in one tick credit the first
       in routing order; a quiet conversation with `settledThroughTs` at its newest message is `waiting`; Priya's ✅
       doesn't approve; Mark's "Yes." approves; Mark's "yes but" withdraws; Mark's
       "C" is `picked`; with Mark and Ana, Ana's ✅ approves as Ana, Mark "B" and Ana "C" is `disagreed`, Mark's ✅
@@ -904,7 +908,8 @@ instead, it renumbers its own migrations and takes the next protocol version, an
     `returnAfterHours` has passed and the send isn't returned; else `remind` once `remindAfterHours` (when not
     off) has passed and the send wasn't reminded. When both are due, `return` wins and the reminder is skipped. A
     return that comes due while a lone reply already waits for its quiet tick (`loneReplyPendingSince` set before
-    the return was due) is `none` for that one tick.
+    the return was due) is `none` for that one tick. `loneReplyPendingSince` is the column Task 2 stores and
+    the reply watch sets (`markLoneReplyPending`). This task adds no migration.
   - The **timer watch** runs on its own interval (60,000 ms) on the injected clock, and on wake, with or without
     Slack: it never calls Slack. On `return` it calls `markReturned(timer)`, which recomputes `dueTimers` from the
     row inside its write and does nothing if it is no longer due, so two ticks never return a send twice; the card
@@ -992,7 +997,9 @@ instead, it renumbers its own migrations and takes the next protocol version, an
     recorded with `recordJudgeOutcome`. A quiet conversation after either line posts nothing more.
   - `approval_seen`: writes `approvalSeenAt` and `approvalBy` (the earliest approving recipient in routing order
     when two approve in one tick). The next tick confirms it as `approved` only if the ✅ is still there (or the
-    "yes" stands) and no other recipient wrote since; otherwise the mark is cleared.
+    "yes" stands) and no other recipient wrote since. Another recipient's message since is `disagreed`.
+  - `approval_lost` (the ✅ was removed): clears `approvalSeenAt` and `approvalBy` and keeps the proposal open, so
+    the recipient can click ✅ again.
   - `approved` or `picked`: `answerAs` for that recipient (`readAs: 'approved'` or `'option'`), with the
     conversation and the other speakers in `with`.
   - `lone_reply` after a which-way line: Task 8b's path, with the conversation quoted; own words answer the card
@@ -1009,7 +1016,8 @@ instead, it renumbers its own migrations and takes the next protocol version, an
       its criterion; the bot's own ✅ never approves, over three ticks; Mark's click on the pre-seeded ✅ (his id
       joins its `users`) approves; Mark's ✅ seen on one
       tick approves only on the next: the card is answered as Mark, approved, with Priya, and the decision names
-      both; a ✅ removed before the confirming tick approves nothing; Mark's "C" instead → his pick; Mark's "hmm,
+      both; a ✅ removed before the confirming tick approves nothing and keeps the proposal, and the same ✅ added
+      again approves on the tick after; Mark's "C" instead → his pick; Mark's "hmm,
       not sure" → the proposal is withdrawn and the next settle asks again; Priya's ✅ approves nothing; quiet for
       two hours after a proposal posts nothing more; the judge at 0.6 → the which-way line, and quiet for two hours
       after it posts nothing more; Mark's own words after a which-way line answer the card as own words, with the
