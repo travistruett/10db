@@ -31,6 +31,9 @@ import type { CountedMessage } from './conversation';
 import { proposalLine, whichWayLine } from './lines';
 import { letterOf, OPTION_LETTERS } from './letters';
 
+/** How much of a conversation the judge is sent. */
+const JUDGED_MESSAGES = 50;
+const JUDGED_TEXT = 1000;
 const NO_CLEAR_ANSWER = 'no_clear_answer';
 const APPROVES = 'approves';
 const DOES_NOT = 'does_not_approve';
@@ -73,7 +76,7 @@ export async function judgeApprovals(
   if (proposal === null || deps.judge.off) return cache;
   const label = optionLabel(c.card, proposal.choice);
   const recipients = recipientIds(open);
-  for (const m of c.counted) {
+  for (const m of c.counted.slice(-JUDGED_MESSAGES)) {
     if (!recipients.includes(m.userId) || cache.has(m.ts)) continue;
     if (proposal.ts !== null && m.ts <= proposal.ts && m.ts.length === proposal.ts.length) continue;
     try {
@@ -81,7 +84,7 @@ export async function judgeApprovals(
         decision: JudgeDecision.ApprovalRead,
         state: JSON.stringify({
           proposal: `${proposal.choice}: ${label}`,
-          reply: m.text,
+          reply: m.text.slice(0, JUDGED_TEXT),
         }),
         question: 'Does this reply approve the proposed answer?',
         options: [APPROVES, DOES_NOT],
@@ -125,7 +128,10 @@ export async function settleConversation(deps: AgreeDeps, c: Conversation): Prom
         state: JSON.stringify({
           question: card.title,
           options: options.map((o, i) => ({ letter: letters[i], label: o.label })),
-          messages: c.counted.map((m) => ({ author: nameOf(open, m.userId), text: m.text })),
+          // The newest words only, each cut: a long thread must not become an unbounded request.
+          messages: c.counted
+            .slice(-JUDGED_MESSAGES)
+            .map((m) => ({ author: nameOf(open, m.userId), text: m.text.slice(0, JUDGED_TEXT) })),
         }),
         question: 'Which option did the conversation land on?',
         options: [NO_CLEAR_ANSWER, ...letters],
