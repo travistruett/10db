@@ -1259,6 +1259,29 @@ export const aaModels = sqliteTable('aa_models', {
   updatedAt: text('updated_at').notNull(),
 });
 
+/**
+ * What OpenRouter measures, kept only on this machine and read with the builder's own key: Artificial Analysis's
+ * scores as OpenRouter relays them, OpenRouter's own benchmark results, and each provider's p50 speed.
+ * `key` is the benchmark name for `score_openrouter`, the provider for `speed` and `''` for `score_aa`.
+ */
+export const openrouterMeasures = sqliteTable(
+  'openrouter_measures',
+  {
+    id: text('id').notNull(),
+    kind: text('kind').$type<'score_aa' | 'score_openrouter' | 'speed'>().notNull(),
+    key: text('key').notNull(),
+    intelligence: real('intelligence'),
+    coding: real('coding'),
+    agentic: real('agentic'),
+    accuracy: real('accuracy'),
+    costPerTaskUsd: real('cost_per_task_usd'),
+    tokensPerSecond: real('tokens_per_second'),
+    latencyMs: real('latency_ms'),
+    measuredAt: text('measured_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.id, t.kind, t.key] })],
+);
+
 /** An outcome 10db pursues across many tasks (goals spec §4). Phase 1 writes only `draft`. */
 export const goals = sqliteTable(
   'goals',

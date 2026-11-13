@@ -28,6 +28,7 @@ export * from './shape-shadow';
 export * from './mcp-approvals';
 export * from './model-profiles';
 export * from './model-settings';
+export * from './openrouter-measures';
 export * from './pass-shared';
 export * from './pass-sign-offs';
 export * from './pass-take-outs';
