@@ -1705,6 +1705,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
       builderHome,
       laneWritableRoots: [worktreeRoot, ...allSandboxRoots],
       laneSandbox,
+      adapter,
       log: logger.child({ component: 'trust' }),
     }),
     judge: createJudgeServices({

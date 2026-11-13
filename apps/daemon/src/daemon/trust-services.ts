@@ -1,6 +1,7 @@
 import {
   Provider,
   providerOf,
+  type LiveSystemsDto,
   type ProjectId,
   type ProjectTrustDto,
   type SetupPreviewDto,
@@ -21,16 +22,24 @@ import {
   warnInvalidTrust,
 } from '../permissions';
 import type { LaneSandbox } from '../sandbox';
+import type { AgentAdapter } from '../sessions';
 import {
   InstalledPluginsError,
   planSessionSetup,
   readInstalledPlugins,
   type InstalledPlugin,
 } from '../session-setup';
+import { projectLiveSystems, setProjectLiveSystems } from '../trust';
+import { accountJudges } from './account-judges';
 
 export type TrustServices = Pick<
   ApiServices,
-  'trustSettings' | 'setTrustSwitches' | 'projectTrust' | 'setProjectTrust'
+  | 'trustSettings'
+  | 'setTrustSwitches'
+  | 'projectTrust'
+  | 'setProjectTrust'
+  | 'liveSystems'
+  | 'setLiveSystems'
 >;
 
 /** Claude Code's installed plugins; a list it can't read lists none here, as a session loads none. */
@@ -66,6 +75,8 @@ export function createTrustServices(deps: {
   readonly laneWritableRoots: readonly string[];
   /** Judges the preview's real paths; null (no sandbox) shows the plan alone. */
   readonly laneSandbox: LaneSandbox | null;
+  /** Says what judges each account's calls. */
+  readonly adapter: Pick<AgentAdapter, 'capabilities'>;
   /** Told each stored switch that reads as off for not being a shape 10db reads. */
   readonly log: { warn(fields: object, message: string): void };
 }): TrustServices {
@@ -83,6 +94,7 @@ export function createTrustServices(deps: {
         enabledInClaude: plugin.enabledInClaude,
         on: switches.yourPlugins && (switches.plugins[plugin.id] ?? plugin.enabledInClaude),
       })),
+      judges: accountJudges(db, deps.adapter),
     };
   };
 
@@ -127,6 +139,18 @@ export function createTrustServices(deps: {
     };
   };
 
+  const liveSystems = (projectId: ProjectId): LiveSystemsDto => {
+    getProject(db, projectId);
+    return {
+      liveSystems: projectLiveSystems(db, projectId, (stored) => {
+        deps.log.warn(
+          { projectId, stored },
+          'the stored live systems are not a list 10db reads, so it reads none',
+        );
+      }),
+    };
+  };
+
   return {
     trustSettings,
     setTrustSwitches(switches) {
@@ -142,6 +166,14 @@ export function createTrustServices(deps: {
         setProjectTrustOverrides(ctx, projectId, overrides);
       });
       return projectTrust(projectId);
+    },
+    liveSystems,
+    setLiveSystems(projectId, input) {
+      getProject(db, projectId);
+      deps.state.write((ctx) => {
+        setProjectLiveSystems(ctx, projectId, input.liveSystems);
+      });
+      return liveSystems(projectId);
     },
   };
 }

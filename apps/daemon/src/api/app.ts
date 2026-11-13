@@ -39,6 +39,7 @@ import {
   JudgeKeyInput,
   KeepAwakeInput,
   LanePermissionsDto,
+  LiveSystemsDto,
   TrustOverrides,
   TrustSwitches,
   ModelProfileId,
@@ -377,6 +378,20 @@ export function createApp(deps: ApiDeps) {
       async (c) =>
         c.json(
           await deps.services.setProjectTrust(
+            ProjectId.parse(c.req.param('projectId')),
+            c.req.valid('json'),
+          ),
+        ),
+    )
+    .get('/projects/:projectId/live-systems', (c) =>
+      c.json(deps.services.liveSystems(ProjectId.parse(c.req.param('projectId')))),
+    )
+    .put(
+      '/projects/:projectId/live-systems',
+      validator('json', (value): LiveSystemsDto => LiveSystemsDto.parse(value)),
+      (c) =>
+        c.json(
+          deps.services.setLiveSystems(
             ProjectId.parse(c.req.param('projectId')),
             c.req.valid('json'),
           ),

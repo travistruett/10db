@@ -1,4 +1,4 @@
-import { TRUST_SWITCH_KEYS, type TrustSwitchKey } from '@10db/contracts';
+import { JudgeKind, TRUST_SWITCH_KEYS, type TrustSwitchKey } from '@10db/contracts';
 
 /** One switch of Settings › Trust: its label, what it brings, and how each agent takes it. */
 export interface TrustRow {
@@ -54,3 +54,17 @@ export const TRUST_ROWS: readonly TrustRow[] = TRUST_SWITCH_KEYS.map((key) => ({
   key,
   ...ROWS[key],
 }));
+
+/** Who judges an account's calls, as Settings › Trust's Judge list names it. */
+export const JUDGE_LABELS: Readonly<Record<JudgeKind, string>> = {
+  [JudgeKind.Native]: "Claude Code's auto mode",
+  [JudgeKind.Rules]: "10db's rules: a card where they can't decide",
+  [JudgeKind.Tendb]: "10db's judge",
+};
+
+/** What a native row adds: the model a task runs on can still put its session on the rules. */
+export const NATIVE_JUDGE_NOTE =
+  "On a model auto mode doesn't run, a session falls back to 10db's rules and says so in its thread.";
+
+/** The project's Live systems input: what an entry is, and when a change applies. */
+export const LIVE_SYSTEMS_DESCRIPTION = `Hosts, cloud profiles and namespaces the judge treats as live, such as api.example.com or the prod AWS profile. Names with prod or production count already. ${NEXT}`;

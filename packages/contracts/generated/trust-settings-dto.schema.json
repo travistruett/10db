@@ -75,10 +75,54 @@
           "on"
         ]
       }
+    },
+    "judges": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "accountId": {
+            "type": "string",
+            "pattern": "^acc_[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+          },
+          "label": {
+            "type": "string"
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "judge": {
+            "type": "string",
+            "enum": [
+              "native",
+              "tendb",
+              "rules"
+            ]
+          },
+          "why": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "accountId",
+          "label",
+          "model",
+          "judge",
+          "why"
+        ],
+        "additionalProperties": false
+      }
     }
   },
   "required": [
     "switches",
-    "plugins"
+    "plugins",
+    "judges"
   ]
 }

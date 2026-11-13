@@ -6,6 +6,9 @@ const NEED = { plan: 45, planReview: 48, implement: 40, review: 48, qa: 35 } as 
 /** The need a Plan conversation's model is chosen for: the plan step's. */
 export const PLAN_NEED = NEED.plan;
 
+/** The need a task's implement step is chosen for. */
+export const IMPLEMENT_NEED = NEED.implement;
+
 export const DEFAULT_FLOWS: readonly FlowInput[] = [
   { name: 'quick', steps: [{ role: StepRole.Implement, need: NEED.implement }] },
   {

@@ -50,13 +50,19 @@ export const LiveSystem = z
   .string()
   .trim()
   .min(1)
-  .max(LIVE_SYSTEM_MAX_CHARS)
-  .regex(/^[^\p{Cc}\u2028\u2029]+$/u)
+  .max(LIVE_SYSTEM_MAX_CHARS, {
+    message: `A live system is at most ${String(LIVE_SYSTEM_MAX_CHARS)} characters`,
+  })
+  .regex(/^[^\p{Cc}\u2028\u2029]+$/u, {
+    message: 'A live system is one line, with no control characters',
+  })
   .refine((s) => !s.includes('$defaults'), { message: 'A live system cannot name $defaults' });
 export type LiveSystem = z.infer<typeof LiveSystem>;
 
 /** `GET|PUT /projects/:projectId/live-systems`. */
 export const LiveSystemsDto = z.strictObject({
-  liveSystems: z.array(LiveSystem).max(LIVE_SYSTEMS_MAX),
+  liveSystems: z.array(LiveSystem).max(LIVE_SYSTEMS_MAX, {
+    message: `A project has at most ${String(LIVE_SYSTEMS_MAX)} live systems`,
+  }),
 });
 export type LiveSystemsDto = z.infer<typeof LiveSystemsDto>;

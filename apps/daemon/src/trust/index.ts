@@ -12,4 +12,4 @@ export {
   type DeniedCall,
   type GoAheadCall,
 } from './go-ahead';
-export { FloorReason, floorNoticeText, floorReason } from './floor-notice';
+export { FloorReason, floorNoticeText, floorReason, floorWhy } from './floor-notice';

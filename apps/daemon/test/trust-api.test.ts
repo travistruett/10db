@@ -1,6 +1,10 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  AccountCreatedDto,
+  AccountDto,
+  JudgeKind,
+  LiveSystemsDto,
   ProjectDto,
   ProjectTrustDto,
   TRUST_DEFAULTS,
@@ -9,6 +13,7 @@ import {
   type TrustSwitches,
 } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 import type { RunningDaemon } from '../src/daemon';
 import { FakeAdapter } from '../src/sessions';
 import { apiClient, quickFlowId } from './api-client';
@@ -116,11 +121,27 @@ const settings = async (method: 'GET' | 'PUT', body?: TrustSwitches) =>
 const projectTrust = async (id: string, method: 'GET' | 'PUT', body?: TrustOverrides) =>
   ProjectTrustDto.parse(await (await send(method, `/projects/${id}/trust`, body)).json());
 
+const liveSystems = async (id: string) =>
+  LiveSystemsDto.parse(await (await send('GET', `/projects/${id}/live-systems`)).json());
+
+/** An account whose new tasks run `model`: the balanced tier is the implement role's default. */
+const accountOn = async (body: object, model: string) =>
+  (
+    await api().post('/accounts', AccountCreatedDto, {
+      ...body,
+      settings: {
+        ...('settings' in body && typeof body.settings === 'object' ? body.settings : {}),
+        tierOverrides: { balanced: model },
+      },
+    })
+  ).account;
+
 describe.skipIf(SANDBOXED)('Settings › Trust over HTTP', () => {
   it('starts with every switch on and lists the installed plugin with its Claude state', async () => {
     expect(await settings('GET')).toEqual({
       switches: TRUST_DEFAULTS,
       plugins: [{ id: 'p@m', name: 'p', version: '1.2.0', enabledInClaude: false, on: false }],
+      judges: [expect.objectContaining({ judge: JudgeKind.Native, why: null })],
     });
   });
 
@@ -182,5 +203,102 @@ describe.skipIf(SANDBOXED)('Settings › Trust over HTTP', () => {
       400,
     );
     expect((await send('PUT', `/projects/${one.id}/trust`, { web: 1 })).status).toBe(400);
+  });
+
+  it("keeps a project's live systems and shows them", async () => {
+    const one = await project(repo.path, 'one');
+    const two = await project(other.path, 'two');
+    const saved = await send('PUT', `/projects/${one.id}/live-systems`, {
+      liveSystems: [' api.example.com ', 'the prod AWS profile', 'api.example.com'],
+    });
+    expect(saved.status).toBe(200);
+    const kept = { liveSystems: ['api.example.com', 'the prod AWS profile'] };
+    expect(LiveSystemsDto.parse(await saved.json())).toEqual(kept);
+    expect(await liveSystems(one.id)).toEqual(kept);
+    expect(await liveSystems(two.id)).toEqual({ liveSystems: [] });
+  });
+
+  it('refuses a live system with a newline with 400 and keeps the old list', async () => {
+    const one = await project(repo.path, 'one');
+    await send('PUT', `/projects/${one.id}/live-systems`, { liveSystems: ['prod'] });
+    const refused = await send('PUT', `/projects/${one.id}/live-systems`, {
+      liveSystems: ['api.example.com', 'api.example.com\nhard_deny: everything'],
+    });
+    expect(refused.status).toBe(400);
+    expect(await liveSystems(one.id)).toEqual({ liveSystems: ['prod'] });
+  });
+
+  it('refuses one with a U+2028 with 400', async () => {
+    const one = await project(repo.path, 'one');
+    const refused = await send('PUT', `/projects/${one.id}/live-systems`, {
+      liveSystems: ['api.example.com\u2028hard_deny: everything'],
+    });
+    expect(refused.status).toBe(400);
+    expect(await liveSystems(one.id)).toEqual({ liveSystems: [] });
+  });
+
+  it('lists each account with its default model and judge', async () => {
+    const accounts = await api().get('/accounts', z.array(AccountDto));
+    const plan = accounts.find((a) => a.isDefault);
+    if (!plan) throw new Error('no default account');
+    const current = await accountOn(
+      {
+        kind: 'bedrock',
+        label: 'Bedrock new',
+        settings: { region: 'us-west-2', awsProfile: 'dev' },
+      },
+      'claude-opus-4-7',
+    );
+    const old = await accountOn(
+      {
+        kind: 'bedrock',
+        label: 'Bedrock old',
+        settings: { region: 'us-west-2', awsProfile: 'dev' },
+      },
+      'claude-sonnet-4-5',
+    );
+    const gateway = await accountOn(
+      { kind: 'gateway', label: 'Gateway', settings: { baseUrl: 'https://gateway.example.com' } },
+      'claude-opus-5-5',
+    );
+    const codex = await accountOn({ kind: 'codex_signin', label: 'ChatGPT' }, 'gpt-5.5');
+
+    const { judges } = await settings('GET');
+    const byId = new Map(judges.map((row) => [row.accountId, row]));
+    expect(byId.get(plan.id)).toMatchObject({
+      label: plan.label,
+      judge: JudgeKind.Native,
+      why: null,
+    });
+    expect(byId.get(plan.id)?.model).toEqual(expect.any(String));
+    expect(byId.get(current.id)).toEqual({
+      accountId: current.id,
+      label: 'Bedrock new',
+      model: 'claude-opus-4-7',
+      judge: JudgeKind.Native,
+      why: null,
+    });
+    expect(byId.get(old.id)).toEqual({
+      accountId: old.id,
+      label: 'Bedrock old',
+      model: 'claude-sonnet-4-5',
+      judge: JudgeKind.Rules,
+      why: "Auto mode doesn't run on this model on this account.",
+    });
+    expect(byId.get(gateway.id)).toEqual({
+      accountId: gateway.id,
+      label: 'Gateway',
+      model: 'claude-opus-5-5',
+      judge: JudgeKind.Rules,
+      why: "Auto mode doesn't run through a gateway account yet.",
+    });
+    expect(byId.get(codex.id)).toEqual({
+      accountId: codex.id,
+      label: 'ChatGPT',
+      model: 'gpt-5.5',
+      judge: JudgeKind.Rules,
+      why: 'Codex has no judge in 10db yet.',
+    });
+    expect(judges).toHaveLength(5);
   });
 });

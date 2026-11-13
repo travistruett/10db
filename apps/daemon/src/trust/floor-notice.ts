@@ -38,18 +38,39 @@ export function floorReason(input: {
 
 const CARD = "A call those rules can't settle waits on a card.";
 
-/** What the thread says about a session on the floor; `model` is quoted for a model that auto mode doesn't run on. */
-export function floorNoticeText(reason: FloorReason, model: string): string {
+/** Why a session is on the floor, as a clause; `model` names the model a model reason is about. */
+function floorCause(reason: FloorReason, model: string): string {
   switch (reason) {
     case FloorReason.Gateway:
-      return `10db's rules judge this session, not auto mode: auto mode doesn't run through a gateway account yet. ${CARD}`;
+      return "auto mode doesn't run through a gateway account yet";
     case FloorReason.Model:
-      return `10db's rules judge this session, not auto mode: auto mode doesn't run on \`${model}\` on this account. ${CARD}`;
+      return `auto mode doesn't run on ${model} on this account`;
     case FloorReason.Setting:
-      return `10db's rules judge this session, not auto mode: "Lanes decide routine permissions" is off in Settings. ${CARD}`;
+      return '"Lanes decide routine permissions" is off in Settings';
     case FloorReason.Codex:
-      return `10db's rules judge this session: Codex has no judge in 10db yet. ${CARD}`;
+      return 'Codex has no judge in 10db yet';
     case FloorReason.LeftAutoMode:
-      return `Claude Code stopped running in auto mode during this session, so 10db's rules judge its calls from here. ${CARD}`;
+      return 'Claude Code stopped running in auto mode during this session';
   }
+}
+
+/** What the thread says about a session on the floor; `model` is quoted for a model that auto mode doesn't run on. */
+export function floorNoticeText(reason: FloorReason, model: string): string {
+  const cause = floorCause(reason, `\`${model}\``);
+  switch (reason) {
+    case FloorReason.Gateway:
+    case FloorReason.Model:
+    case FloorReason.Setting:
+      return `10db's rules judge this session, not auto mode: ${cause}. ${CARD}`;
+    case FloorReason.Codex:
+      return `10db's rules judge this session: ${cause}. ${CARD}`;
+    case FloorReason.LeftAutoMode:
+      return `${cause}, so 10db's rules judge its calls from here. ${CARD}`;
+  }
+}
+
+/** Why an account's sessions start on the floor, as one sentence for Settings, which shows the model beside it. */
+export function floorWhy(reason: FloorReason): string {
+  const cause = floorCause(reason, 'this model');
+  return `${cause.charAt(0).toUpperCase()}${cause.slice(1)}.`;
 }
