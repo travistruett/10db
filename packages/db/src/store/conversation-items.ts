@@ -1,6 +1,7 @@
 import {
   ConversationItemAuthor,
   ConversationItemKind,
+  EventType,
   InvalidError,
   mintId,
   NotFoundError,
@@ -10,7 +11,7 @@ import {
   type ConversationItemId,
   type PassTurnId,
 } from '@10db/contracts';
-import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, or, sql } from 'drizzle-orm';
 import type { Json } from '../json';
 import * as schema from '../schema';
 import { listItemFiles, type ConversationFileRow } from './conversation-files';
@@ -42,26 +43,28 @@ const isMessageKind = (kind: ConversationItemKind): kind is MessageKind =>
 const bySeq = asc(schema.conversationItems.seq);
 const ofConversation = (id: ConversationId) => eq(schema.conversationItems.conversationId, id);
 
+interface NewItem {
+  readonly author: ConversationItemAuthor;
+  readonly kind: ConversationItemKind;
+  readonly body: Json;
+  readonly partial?: boolean;
+  readonly deliveredAt?: string | null;
+  readonly turnId?: PassTurnId | null;
+}
+
 /**
- * Appends an item at the conversation's `next_seq`, in the caller's write, and moves `next_seq` on.
- * The body is checked as its kind's.
+ * Appends an item at the conversation's `next_seq`, in the caller's write, moves `next_seq` on and
+ * announces it by id. The body is checked as its kind's; the id is minted unless one is given.
  */
 export function insertItem(
   ctx: WriteContext,
   conversationId: ConversationId,
-  input: {
-    readonly author: ConversationItemAuthor;
-    readonly kind: ConversationItemKind;
-    readonly body: Json;
-    readonly partial?: boolean;
-    readonly deliveredAt?: string | null;
-    readonly turnId?: PassTurnId | null;
-  },
+  input: NewItem & { readonly id?: ConversationItemId },
 ): ConversationItemRow {
   parseItemBody(input.kind, input.body);
   const { nextSeq } = getConversation(ctx.tx, conversationId);
   const row: ConversationItemRow = {
-    id: mintId('ConversationItem'),
+    id: input.id ?? mintId('ConversationItem'),
     conversationId,
     seq: nextSeq,
     author: input.author,
@@ -82,7 +85,55 @@ export function insertItem(
     .set({ nextSeq: nextSeq + 1, updatedAt: ctx.now })
     .where(eq(schema.conversations.id, conversationId))
     .run();
+  ctx.emit({
+    type: EventType.ConversationItemAdded,
+    entityType: 'conversation',
+    entityId: conversationId,
+    data: { id: row.id, seq: row.seq, kind: row.kind },
+  });
   return row;
+}
+
+/** Changes a stored item's body or its partial mark, in the caller's write, and announces it. */
+export function updateItem(
+  ctx: WriteContext,
+  id: ConversationItemId,
+  patch: { readonly body?: Json; readonly partial?: boolean },
+): ConversationItemRow {
+  const item = getItem(ctx.tx, id);
+  if (patch.body !== undefined) parseItemBody(item.kind, patch.body);
+  ctx.tx
+    .update(schema.conversationItems)
+    .set({ ...patch, updatedAt: ctx.now })
+    .where(eq(schema.conversationItems.id, id))
+    .run();
+  ctx.emit({
+    type: EventType.ConversationItemUpdated,
+    entityType: 'conversation',
+    entityId: item.conversationId,
+    data: { id },
+  });
+  return getItem(ctx.tx, id);
+}
+
+/**
+ * Stores an item under its id: inserts it, or, when that id is already this conversation's, updates
+ * its body and partial mark. A live item stored twice is one row.
+ */
+export function putItem(
+  ctx: WriteContext,
+  conversationId: ConversationId,
+  input: NewItem & { readonly id: ConversationItemId },
+): ConversationItemRow {
+  const existing = ctx.tx
+    .select({ conversationId: schema.conversationItems.conversationId })
+    .from(schema.conversationItems)
+    .where(eq(schema.conversationItems.id, input.id))
+    .get();
+  if (existing === undefined) return insertItem(ctx, conversationId, input);
+  if (existing.conversationId !== conversationId)
+    throw new InvalidError(`${input.id} is another conversation's item`);
+  return updateItem(ctx, input.id, { body: input.body, partial: input.partial ?? false });
 }
 
 /** The conversation's items in `seq` order; `afterSeq` skips up to and including that one. */
@@ -180,6 +231,36 @@ export function listUntakenMessageIds(
     .orderBy(bySeq)
     .all()
     .map((r) => r.id);
+}
+
+/**
+ * The conversation's turn starters waiting to be sent, in `seq` order: builder messages, and presses
+ * whose body names a `prompt` (Propose, Rehearse), neither delivered nor pushed (one handed back is no
+ * longer pushed).
+ */
+export function listQueuedTurnStarters(
+  db: DbReader,
+  conversationId: ConversationId,
+): ConversationItemRow[] {
+  return db
+    .select()
+    .from(schema.conversationItems)
+    .where(
+      and(
+        ofConversation(conversationId),
+        isNull(schema.conversationItems.pushedAt),
+        isNull(schema.conversationItems.deliveredAt),
+        or(
+          builderMessage,
+          and(
+            eq(schema.conversationItems.kind, ConversationItemKind.ShapeEvent),
+            sql`json_extract(${schema.conversationItems.body}, '$.prompt') IS NOT NULL`,
+          ),
+        ),
+      ),
+    )
+    .orderBy(bySeq)
+    .all();
 }
 
 /** The messages handed to a session that no turn has taken yet, in `seq` order: each is sent again. */

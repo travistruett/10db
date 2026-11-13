@@ -1,4 +1,5 @@
 import {
+  EventType,
   InvalidError,
   idUuid,
   mintId,
@@ -14,6 +15,10 @@ import {
   insertItem,
   insertShape,
   listItems,
+  listQueuedTurnStarters,
+  patchConversation,
+  putItem,
+  updateItem,
   markItemPushedUnder,
   markItemsDelivered,
   markItemsHandedBack,
@@ -154,5 +159,78 @@ describe('conversation items', () => {
       ),
     ).toThrow(InvalidError);
     expect(listItems(store.db, conversation)).toEqual([]);
+  });
+});
+
+describe('conversation item events and the queue', () => {
+  const types = (events: readonly { type: string }[]) => events.map((e) => e.type);
+
+  it('announces an insert with its id, seq and kind, and keeps a given id', () => {
+    const id = mintId('ConversationItem');
+    const { value, events } = store.write((ctx) =>
+      insertItem(ctx, conversation, { id, ...message('hi') }),
+    );
+    expect(value.id).toBe(id);
+    expect(events.map((e) => [e.type, e.entityId, e.data])).toEqual([
+      [EventType.ConversationItemAdded, conversation, { id, seq: 1, kind: 'message' }],
+    ]);
+  });
+
+  it('stores one row for an item put twice, announced once added and once updated', () => {
+    const id = mintId('ConversationItem');
+    const put = (text: string) =>
+      store.write((ctx) =>
+        putItem(ctx, conversation, { id, author: 'agent', kind: 'agent_message', body: { text } }),
+      ).events;
+    const events = [...put('Hal'), ...put('Half')];
+    expect(types(events)).toEqual([
+      EventType.ConversationItemAdded,
+      EventType.ConversationItemUpdated,
+    ]);
+    expect(listItems(store.db, conversation).map((i) => i.body)).toEqual([{ text: 'Half' }]);
+  });
+
+  it('announces an update', () => {
+    const item = add(conversation, 'a');
+    const { events } = store.write((ctx) => {
+      updateItem(ctx, item.id, { partial: true });
+    });
+    expect(types(events)).toEqual([EventType.ConversationItemUpdated]);
+    expect(getItem(store.db, item.id).partial).toBe(true);
+  });
+
+  it('announces a state change, and no patch that leaves the state', () => {
+    const changed = store.write((ctx) =>
+      patchConversation(ctx, conversation, { state: 'running' }),
+    );
+    const same = store.write((ctx) => patchConversation(ctx, conversation, { state: 'running' }));
+    expect(changed.events.map((e) => [e.type, e.data])).toEqual([
+      [EventType.ConversationState, { state: 'running' }],
+    ]);
+    expect(same.events).toEqual([]);
+  });
+
+  it('queues the builder messages and prompted presses neither pushed nor delivered, by seq', () => {
+    const waiting = add(conversation, 'waiting');
+    const pushed = add(conversation, 'pushed');
+    const delivered = add(conversation, 'delivered');
+    const press = (prompt?: string) =>
+      store.write((ctx) =>
+        insertItem(ctx, conversation, {
+          author: 'system',
+          kind: 'shape_event',
+          body: { kind: 'propose', text: 'Propose', ...(prompt === undefined ? {} : { prompt }) },
+        }),
+      ).value;
+    const propose = press('Propose a plan.');
+    press();
+    store.write((ctx) => {
+      markItemPushedUnder(ctx, pushed.id, 'u-1');
+      markItemsDelivered(ctx, conversation, [delivered.id]);
+    });
+    expect(listQueuedTurnStarters(store.db, conversation).map((i) => i.id)).toEqual([
+      waiting.id,
+      propose.id,
+    ]);
   });
 });

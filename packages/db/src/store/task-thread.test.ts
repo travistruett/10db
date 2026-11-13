@@ -104,8 +104,11 @@ describe('a task thread', () => {
     ]);
     expect(thread[1]).toMatchObject({ id: second.id, files: [] });
     expect(thread[0]?.files[0]).not.toHaveProperty('storedPath');
+    // The thread's own event, beside the conversation's announcement of the item.
     expect(
-      first.events.map((e) => [e.type, e.entityType, e.entityId, e.data['messageId']]),
+      first.events
+        .filter((e) => e.type !== EventType.ConversationItemAdded)
+        .map((e) => [e.type, e.entityType, e.entityId, e.data['messageId']]),
     ).toEqual([[EventType.TaskMessageAdded, 'task', taskId, first.value.id]]);
   });
 
@@ -369,7 +372,10 @@ describe('a task thread', () => {
         files: [],
       }),
     ]);
-    expect(notice.events.map((e) => e.type)).toEqual([EventType.TaskMessageAdded]);
+    expect(notice.events.map((e) => e.type)).toEqual([
+      EventType.ConversationItemAdded,
+      EventType.TaskMessageAdded,
+    ]);
   });
 
   it('reads a notice offered with Send to Agent as sendable, with the text it sends', () => {

@@ -1,4 +1,5 @@
 import {
+  EventType,
   mintId,
   NotFoundError,
   type AccountId,
@@ -83,11 +84,18 @@ export function patchConversation(
     Pick<ConversationRow, 'model' | 'providerSessionId' | 'state' | 'contextPct' | 'accountId'>
   >,
 ): ConversationRow {
-  getConversation(ctx.tx, id);
+  const before = getConversation(ctx.tx, id);
   ctx.tx
     .update(schema.conversations)
     .set({ ...patch, updatedAt: ctx.now })
     .where(eq(schema.conversations.id, id))
     .run();
+  if (patch.state !== undefined && patch.state !== before.state)
+    ctx.emit({
+      type: EventType.ConversationState,
+      entityType: 'conversation',
+      entityId: id,
+      data: { state: patch.state },
+    });
   return getConversation(ctx.tx, id);
 }
