@@ -50,7 +50,7 @@ function ModelCell({
           {STATUS_LABEL[row.status]}
         </Text>
       )}
-      {fresh ? (
+      {fresh && row.status === ModelStatus.Current ? (
         <Text size="xs" c="blue" style={{ whiteSpace: 'nowrap' }}>
           New
         </Text>
@@ -121,7 +121,8 @@ export function ModelsTable({
       title: 'Model',
       sortable: true,
       width: '100%',
-      ellipsis: true,
+      // A zero max width lets the one wide column give way, so the table fits its container.
+      cellsStyle: () => ({ maxWidth: 0 }),
       filtering: filter.query.trim() !== '',
       filter: <ModelSearchFilter filter={filter} onFilter={onFilter} />,
       render: (row) => (
@@ -160,7 +161,13 @@ export function ModelsTable({
       title: 'Used by',
       noWrap: true,
       render: (row) => (
-        <Text size="xs" c={PICK_COLOR}>
+        <Text
+          size="xs"
+          c={PICK_COLOR}
+          truncate
+          maw={180}
+          title={(usedBy.get(row.model) ?? []).join(', ')}
+        >
           {(usedBy.get(row.model) ?? []).join(', ')}
         </Text>
       ),

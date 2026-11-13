@@ -7,13 +7,17 @@ import {
   type RolePickDto,
 } from '@10db/contracts';
 import { Badge, Drawer, Stack, Table, Text, Title } from '@mantine/core';
+import { Fragment, type ReactNode } from 'react';
 import { useAccounts } from '../../daemon/account-queries';
-import { useModelOffers, useModelProfiles } from '../../daemon/model-queries';
+import { useModelOffers } from '../../daemon/model-queries';
 import { absoluteTime, fromNow } from '../../shell/relative';
 import { formatCost, formatFirstPass, formatPrice, formatScore, NO_DATA } from './model-format';
 import { STATUS_LABEL, TIER_LABEL } from './model-labels';
 import { RightsizingChart } from './rightsizing-chart';
-import { DotsMode, rightsizingSeries } from './rightsizing-series';
+import { DotsMode, intelligenceAxis, rightsizingSeries } from './rightsizing-series';
+import { ROLES } from './role-labels';
+
+const EFFORT_ORDER = ['low', 'medium', 'high', 'xhigh', 'max'];
 
 /** Why a model's status is what it is, where the status alone does not say. */
 function statusReason(row: ModelRowDto, unlisted: readonly AccountDto[]): string | null {
@@ -126,7 +130,7 @@ function Accounts({
   );
 }
 
-/** One line per effort, in the order the model's row gives them: strongest Intelligence first. */
+/** One line per effort, low to max, the order of the chart above it from left to right. */
 function Efforts({ row }: { readonly row: ModelRowDto }) {
   return (
     <Table aria-label="Effort table" verticalSpacing="xs">
@@ -140,15 +144,17 @@ function Efforts({ row }: { readonly row: ModelRowDto }) {
         </Table.Tr>
       </Table.Thead>
       <Table.Tbody>
-        {row.efforts.map((e) => (
-          <Table.Tr key={e.profileId}>
-            <Table.Td>{e.effort}</Table.Td>
-            <Table.Td ta="right">{formatScore(e.intelligence)}</Table.Td>
-            <Table.Td ta="right">{formatCost(e.costPerTaskUsd)}</Table.Td>
-            <Table.Td ta="right">{e.stepsRun}</Table.Td>
-            <Table.Td ta="right">{formatFirstPass(e.firstPassSteps, e.stepsRun)}</Table.Td>
-          </Table.Tr>
-        ))}
+        {[...row.efforts]
+          .sort((a, b) => EFFORT_ORDER.indexOf(a.effort) - EFFORT_ORDER.indexOf(b.effort))
+          .map((e) => (
+            <Table.Tr key={e.profileId}>
+              <Table.Td>{e.effort}</Table.Td>
+              <Table.Td ta="right">{formatScore(e.intelligence)}</Table.Td>
+              <Table.Td ta="right">{formatCost(e.costPerTaskUsd)}</Table.Td>
+              <Table.Td ta="right">{e.stepsRun}</Table.Td>
+              <Table.Td ta="right">{formatFirstPass(e.firstPassSteps, e.stepsRun)}</Table.Td>
+            </Table.Tr>
+          ))}
       </Table.Tbody>
     </Table>
   );
@@ -165,15 +171,42 @@ function DrawerBody({
 }) {
   const accounts = useAccounts();
   const offers = useModelOffers();
-  const profiles = useModelProfiles();
   const accountList = accounts.data ?? [];
   const mine = (offers.data ?? []).filter((o) => o.model === row.model);
   const listed = new Set(mine.map((o) => o.accountId));
   const unlisted = accountList.filter((a) => row.availableOn.includes(a.id) && !listed.has(a.id));
   const reason = statusReason(row, offers.data === undefined ? [] : unlisted);
-  const released =
-    (profiles.data ?? []).find((p) => p.model === row.model && p.releaseDate !== null)
-      ?.releaseDate ?? null;
+  // One line: the ID, rung, status, maker and age, leaving out what is empty or repeats the name.
+  const facts: { key: string; node: ReactNode }[] = [
+    ...(row.model === row.name
+      ? []
+      : [
+          {
+            key: 'id',
+            node: (
+              <Text span ff="monospace" inherit>
+                {row.model}
+              </Text>
+            ),
+          },
+        ]),
+    ...(row.tier ? [{ key: 'tier', node: `${TIER_LABEL[row.tier]} tier` }] : []),
+    {
+      key: 'status',
+      node: (
+        <Text span inherit>
+          {STATUS_LABEL[row.status]}
+        </Text>
+      ),
+    },
+    ...(row.maker === null || row.maker === row.name ? [] : [{ key: 'maker', node: row.maker }]),
+    ...(row.firstSeenAt === null
+      ? []
+      : [{ key: 'seen', node: `first seen ${fromNow(row.firstSeenAt, now)}` }]),
+  ];
+  const users = picks
+    .filter((p) => p.model === row.model)
+    .map((p) => ROLES.find((r) => r.role === p.role)?.label ?? p.role);
   // The same chart as the page, of this model's efforts alone and with the roles that pick it ringed.
   const plot = rightsizingSeries({
     rows: [row],
@@ -185,23 +218,18 @@ function DrawerBody({
     <Stack gap="lg">
       <Stack gap={4}>
         <Text size="sm" c="dimmed">
-          <Text span ff="monospace" inherit>
-            {row.model}
+          {facts.map((fact, i) => (
+            <Fragment key={fact.key}>
+              {i > 0 ? ' · ' : ''}
+              {fact.node}
+            </Fragment>
+          ))}
+        </Text>
+        {reason ? (
+          <Text size="sm" c="dimmed">
+            {reason}
           </Text>
-          {row.tier ? ` · ${TIER_LABEL[row.tier]} tier` : ''}
-        </Text>
-        <Text size="sm" c="dimmed">
-          <Text span inherit>
-            {STATUS_LABEL[row.status]}
-          </Text>
-          {reason ? ` · ${reason}` : ''}
-        </Text>
-        <Text size="sm" c="dimmed">
-          {row.maker ?? 'Maker unknown'}
-          {row.family ? ` · ${row.family}` : ''}
-          {released ? ` · released ${released}` : ''}
-          {row.firstSeenAt === null ? '' : ` · first seen ${fromNow(row.firstSeenAt, now)}`}
-        </Text>
+        ) : null}
         <Text size="sm" c="dimmed">
           List price per 1M tokens: {formatPrice(row.inputPrice)} in ·{' '}
           {formatPrice(row.outputPrice)} out · speed {formatScore(row.outputTokensPerSecond)}{' '}
@@ -210,7 +238,20 @@ function DrawerBody({
       </Stack>
       <Stack gap="xs">
         <Title order={4}>What each effort buys</Title>
-        <RightsizingChart result={plot} costLabel="Cost per task (USD, log scale)" height={200} />
+        <RightsizingChart
+          result={{
+            ...plot,
+            lines: [],
+            yAxis: intelligenceAxis(plot.points.map((p) => p.intelligence)),
+          }}
+          costLabel="Cost per task (USD, log scale)"
+          height={200}
+        />
+        {users.length === 0 ? null : (
+          <Text size="xs" c="dimmed">
+            Ringed: the pick of {users.join(', ')} on this account.
+          </Text>
+        )}
         <Efforts row={row} />
       </Stack>
       <Stack gap="xs">

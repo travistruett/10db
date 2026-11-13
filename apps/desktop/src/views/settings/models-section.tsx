@@ -1,6 +1,7 @@
 import type { AccountId, ModelRowDto, StepRole } from '@10db/contracts';
 import {
   ActionIcon,
+  Anchor,
   Button,
   Group,
   SegmentedControl,
@@ -10,6 +11,7 @@ import {
   Title,
   Tooltip,
 } from '@mantine/core';
+import { Link } from '@tanstack/react-router';
 import { IconRefresh } from '@tabler/icons-react';
 import { useState } from 'react';
 import { useAccounts } from '../../daemon/account-queries';
@@ -38,6 +40,7 @@ import { RightsizingChart } from './rightsizing-chart';
 import { DotsMode, rightsizingSeries } from './rightsizing-series';
 import { ROLES } from './role-labels';
 import { RolePicksPanel } from './role-picks-panel';
+import { SettingsSectionKey } from './sections';
 
 const NO_FILTER: ModelFilter = { query: '', tiers: [], accountId: null };
 
@@ -92,7 +95,14 @@ export function ModelsSection() {
           <Select
             aria-label="Account"
             size="xs"
-            w={220}
+            w={240}
+            leftSection={
+              <Text size="xs" c="dimmed">
+                Account
+              </Text>
+            }
+            leftSectionWidth={72}
+            leftSectionPointerEvents="none"
             allowDeselect={false}
             data={live.map((a) => ({ value: a.id, label: a.label }))}
             value={accountId}
@@ -143,7 +153,20 @@ export function ModelsSection() {
     return (
       <Stack>
         {header}
-        <Text c="dimmed">Add an account to see what each role gets</Text>
+        <Text c="dimmed">
+          <Anchor
+            renderRoot={(props) => (
+              <Link
+                {...props}
+                to="/settings/$section"
+                params={{ section: SettingsSectionKey.Accounts }}
+              />
+            )}
+          >
+            Add an account
+          </Anchor>{' '}
+          to see what each role gets.
+        </Text>
       </Stack>
     );
   if (models.isError)
@@ -209,7 +232,9 @@ export function ModelsSection() {
       )}
       <Stack gap="xs">
         <Group justify="space-between">
-          <Title order={4}>Intelligence and cost</Title>
+          <Title order={4} size="md" fw={600}>
+            Intelligence and cost
+          </Title>
           <SegmentedControl
             size="xs"
             aria-label="Dots"
@@ -233,7 +258,9 @@ export function ModelsSection() {
         </Text>
       </Stack>
       <Stack gap="xs">
-        <Title order={4}>All models</Title>
+        <Title order={4} size="md" fw={600}>
+          All models
+        </Title>
         {everyModel.length === 0 ? (
           <Text c="dimmed">
             No models yet. They appear once an account has been read; the refresh button reads every

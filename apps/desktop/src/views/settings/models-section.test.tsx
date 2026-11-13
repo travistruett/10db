@@ -11,7 +11,13 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { accountDto, DEFAULT_ACCOUNT } from '../../test/account-fixtures';
-import { baseHandlers, daemonUrl, renderWithDaemon, server } from '../../test/daemon';
+import {
+  baseHandlers,
+  daemonUrl,
+  renderWithDaemon,
+  renderWithDaemonAndRouter,
+  server,
+} from '../../test/daemon';
 import {
   accountModelDto,
   catalogueStatusDto,
@@ -351,8 +357,10 @@ describe('the Models page', () => {
 
   it('says to add an account when there is none, and lists no rows', async () => {
     serve({ accounts: [] });
-    renderWithDaemon(<ModelsSection />);
-    expect(await screen.findByText('Add an account to see what each role gets')).toBeTruthy();
+    await renderWithDaemonAndRouter(<ModelsSection />);
+    const link = await screen.findByRole('link', { name: 'Add an account' });
+    expect(link.getAttribute('href')).toBe('/settings/accounts');
+    expect(link.parentElement?.textContent).toBe('Add an account to see what each role gets.');
     expect(screen.queryByRole('button', { name: /^Open / })).toBeNull();
     expect(screen.getByRole('link', { name: 'Artificial Analysis' })).toBeTruthy();
   });

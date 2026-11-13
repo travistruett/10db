@@ -88,23 +88,28 @@ export function RolePicksPanel({
     {
       accessor: 'why',
       title: 'Why',
+      width: '100%',
+      // A zero max width lets the reason truncate to one line instead of wrapping the row.
+      cellsStyle: () => ({ maxWidth: 0 }),
       render: ({ role, pick }) => (
-        <Stack gap={0}>
-          <Text size="xs" c="dimmed">
-            {pick.reason}
-          </Text>
+        <Group gap="xs" wrap="nowrap">
           {pick.model !== null && notOnChart.includes(role) ? (
-            <Text size="xs" c="dimmed">
+            <Text size="xs" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
               Not on the chart
             </Text>
           ) : null}
-        </Stack>
+          <Text size="xs" c="dimmed" truncate title={pick.reason}>
+            {pick.reason}
+          </Text>
+        </Group>
       ),
     },
   ];
   return (
     <Stack gap="xs" component="section" aria-label="Who each role gets">
-      <Title order={4}>Who each role gets</Title>
+      <Title order={4} size="md" fw={600}>
+        Who each role gets
+      </Title>
       <DataTable<RoleLine>
         aria-label="Who each role gets, by role"
         records={lines}

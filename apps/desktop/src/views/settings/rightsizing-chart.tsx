@@ -60,13 +60,21 @@ export function RightsizingChart({
           : { domain: [first, last], ticks, interval: 0 }),
         tickFormatter: (value: number) => costTickLabel(value),
       }}
-      yAxisProps={{ type: 'number', domain: [0, 'auto'] }}
+      yAxisProps={{
+        type: 'number',
+        ...(result.yAxis === null
+          ? { domain: [0, 'auto'] }
+          : { domain: [...result.yAxis.domain], ticks: [...result.yAxis.ticks], interval: 0 }),
+      }}
+      // A solid, faint grid, so the dashed lines are the needs and nothing else.
+      strokeDasharray="0"
+      gridColor="var(--mantine-color-default-border)"
       referenceLines={[
         ...frontier,
         ...result.lines.map((line) => ({
           y: line.need,
           label: line.label,
-          labelPosition: 'insideTopLeft' as const,
+          labelPosition: line.labelPosition,
           strokeDasharray: '4 4',
         })),
       ]}
@@ -97,9 +105,8 @@ export function RightsizingChart({
               }}
             >
               <Text size="sm" fw={500}>
-                {point.name}
+                {point.name} · {point.effort}
               </Text>
-              <Text size="xs">{point.effort}</Text>
               <Text size="xs">Intelligence {formatScore(point.intelligence)}</Text>
               <Text size="xs">{formatCost(point.cost)} a task</Text>
             </Paper>

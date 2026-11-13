@@ -29,6 +29,8 @@ export interface PointSeries {
 export interface NeedLine {
   readonly need: number;
   readonly label: string;
+  /** Where the label sits: at the right end when a lower line is within a few points, so labels never collide. */
+  readonly labelPosition: 'insideTopLeft' | 'insideRight';
 }
 
 /** A ring on the point a pick stands on. */
@@ -51,6 +53,11 @@ export interface RightsizingSeries {
   readonly notOnChart: readonly StepRole[];
   /** The log axis's ticks: a 1-2-5 ladder from the rung under the cheapest drawn point to the one over the dearest. */
   readonly ticks: readonly number[];
+  /** The Intelligence axis fitted to the drawn points and need lines; null where nothing is drawn. */
+  readonly yAxis: {
+    readonly domain: readonly [number, number];
+    readonly ticks: readonly number[];
+  } | null;
   /** Efforts with no Intelligence or no cost above 0, which have no place on the chart. */
   readonly omitted: number;
 }
@@ -110,10 +117,31 @@ function needLines(picks: readonly RolePickDto[], role: StepRole | null): NeedLi
     if (role !== null && pick.role !== role) continue;
     byNeed.set(pick.need, [...(byNeed.get(pick.need) ?? []), pick.role]);
   }
-  return [...byNeed].map(([need, roles]) => ({
-    need,
-    label: `${roles.map(roleLabel).join(', ')} ${String(need)}`,
-  }));
+  const needs = [...byNeed.keys()].sort((a, b) => a - b);
+  return [...byNeed].map(([need, roles]) => {
+    const below = needs.filter((n) => n < need).at(-1);
+    return {
+      need,
+      label: `${roles.map(roleLabel).join(', ')} ${String(need)}`,
+      labelPosition:
+        below !== undefined && need - below <= CLOSE_NEEDS ? 'insideRight' : 'insideTopLeft',
+    } as const;
+  });
+}
+
+/** Need lines this close share the plot too tightly for both labels at the left. */
+const CLOSE_NEEDS = 4;
+const Y_STEP = 5;
+
+/** The Intelligence axis around the values, a step of 5 clear of the lowest and highest, ticked every 5 or 10. */
+export function intelligenceAxis(values: readonly number[]): RightsizingSeries['yAxis'] {
+  if (values.length === 0) return null;
+  const low = Math.floor((Math.min(...values) - 1) / Y_STEP) * Y_STEP;
+  const high = Math.ceil((Math.max(...values) + 1) / Y_STEP) * Y_STEP;
+  const step = high - low > 30 ? 10 : 5;
+  const ticks: number[] = [];
+  for (let t = Math.ceil(low / step) * step; t <= high; t += step) ticks.push(t);
+  return { domain: [low, high], ticks };
 }
 
 /**
@@ -164,6 +192,10 @@ export function rightsizingSeries(input: {
     lines: needLines(input.picks, input.role),
     rings,
     notOnChart,
+    yAxis: intelligenceAxis([
+      ...drawn.map((p) => p.intelligence),
+      ...needLines(input.picks, input.role).map((l) => l.need),
+    ]),
     ticks: costTicks(Math.min(...drawn.map((p) => p.cost)), Math.max(...drawn.map((p) => p.cost))),
     omitted,
   };
