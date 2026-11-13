@@ -186,7 +186,7 @@ describe('resolveStep', () => {
   describe('the reason names where a re-resolved step’s setting came from', () => {
     const ELSEWHERE = 'big is not offered by Bedrock, so the step was resolved again: ';
     const ROUTED =
-      'by role default: the cheapest model of the balanced tier; no profile has an intelligence score to compare on yet (sync Artificial Analysis to route by score)';
+      'by the rigor’s fallback rung: the cheapest model of the balanced tier; no profile has an intelligence score to compare on yet (sync Artificial Analysis to route by score)';
     it.each<{ name: string; over: Partial<StepContext>; source: string }>([
       {
         name: 'the task’s own setting',
@@ -358,7 +358,7 @@ describe('resolveStep', () => {
     expect(out.model).toBe('peak');
     expect(out.setting).toEqual({ kind: 'automatic' });
     expect(out.reason).toBe(
-      "big is marked unusable on Bedrock, so the step was resolved again: the refused model's tier (capable): by role default: the cheapest model of the capable tier; no profile has an intelligence score to compare on yet (sync Artificial Analysis to route by score)",
+      "big is marked unusable on Bedrock, so the step was resolved again: the refused model's tier (capable): by the rigor’s fallback rung: the cheapest model of the capable tier; no profile has an intelligence score to compare on yet (sync Artificial Analysis to route by score)",
     );
   });
 

@@ -116,7 +116,8 @@ describe('planSteps: a plan per rigor on a scored account', () => {
 });
 
 describe('planSteps: without scores each cell runs its fallback rung', () => {
-  const chosenBy = (reason: string) => (reason.startsWith('by role default:') ? 'default' : reason);
+  const chosenBy = (reason: string) =>
+    reason.startsWith('by the rigor’s fallback rung:') ? 'default' : reason;
   it.each([
     {
       rigor: Rigor.Standard,

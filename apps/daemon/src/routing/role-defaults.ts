@@ -43,7 +43,7 @@ export function pickByDefault(
   return {
     profile,
     tier: pool.tier,
-    reason: `by role default: the ${top ? 'top' : 'cheapest'} model of the ${pool.tier} tier${raised}`,
+    reason: `by the rigor’s fallback rung: the ${top ? 'top' : 'cheapest'} model of the ${pool.tier} tier${raised}`,
   };
 }
 

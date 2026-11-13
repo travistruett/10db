@@ -332,7 +332,7 @@ describe('chooseModel: a role with no setting and no score', () => {
 
   it('says which rung chose the model', () => {
     expect(chooseModel(input({ profiles: unscoredCatalogue() })).reason).toBe(
-      `by role default: the cheapest model of the balanced tier${UNSCORED}`,
+      `by the rigor’s fallback rung: the cheapest model of the balanced tier${UNSCORED}`,
     );
     expect(
       chooseModel(
@@ -342,7 +342,7 @@ describe('chooseModel: a role with no setting and no score', () => {
           fallback: { tier: 'capable', top: true, effort: 'xhigh' },
         }),
       ).reason,
-    ).toBe(`by role default: the top model of the capable tier${UNSCORED}`);
+    ).toBe(`by the rigor’s fallback rung: the top model of the capable tier${UNSCORED}`);
   });
 });
 
@@ -510,7 +510,7 @@ describe('chooseModel: a conversation that must not refuse', () => {
     ({ profiles, need, want }) => {
       const choice = chooseModel(input({ profiles, def: { role: 'plan', need }, byScore: false }));
       expect(label(choice.profile ?? failed())).toBe(want);
-      expect(choice.reason).toContain('by role default: the cheapest model of the');
+      expect(choice.reason).toContain('by the rigor’s fallback rung: the cheapest model of the');
     },
   );
 
