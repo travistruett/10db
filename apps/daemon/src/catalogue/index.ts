@@ -7,3 +7,4 @@ export { createAccountLists, type AccountLists } from './account-lists';
 export { reconcileProfiles } from './profiles';
 export { clearModelMark, markModelUnusable, resumeModelMarks } from './model-marks';
 export { buildModelRows } from './model-rows';
+export { joinOpenRouterId, openRouterProvider } from './openrouter-join';
