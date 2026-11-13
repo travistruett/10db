@@ -347,4 +347,32 @@ describe('openrouter sync', () => {
     expect(held('score_openrouter').map((r) => r.key)).toEqual(['tau']);
     expect(sync.status()).toMatchObject({ outcome: 'failed' });
   });
+
+  it('stores scores read without a model list, and reads them again once the list is back', async () => {
+    handlers.set(OPENROUTER_MODELS_URL, () => json({}, 500));
+    await settle(sync.poke());
+    expect(requests.filter((r) => r.url === AA_URL)).toHaveLength(1);
+    expect(listOpenRouterMeasures(state.db).some((r) => r.kind === 'score_aa')).toBe(true);
+
+    handlers.delete(OPENROUTER_MODELS_URL);
+    clock.advance(SPEED_EVERY_MS);
+    await settle(sync.poke());
+    expect(requests.filter((r) => r.url === AA_URL)).toHaveLength(2);
+
+    clock.advance(SPEED_EVERY_MS);
+    await settle(sync.poke());
+    expect(requests.filter((r) => r.url === AA_URL)).toHaveLength(2);
+  });
+
+  it('keeps a permaslug with a dashed date and no list match as given', async () => {
+    handlers.set(AA_URL, () =>
+      json({ data: [{ model_permaslug: 'openai/gpt-x-2099-01-01', intelligence_index: 12 }] }),
+    );
+    await settle(sync.poke());
+    expect(
+      listOpenRouterMeasures(state.db)
+        .filter((r) => r.kind === 'score_aa')
+        .map((r) => r.id),
+    ).toEqual(['openai/gpt-x-2099-01-01']);
+  });
 });

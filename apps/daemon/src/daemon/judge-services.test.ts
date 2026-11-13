@@ -36,11 +36,11 @@ const model = (id: string, inputUsdPerMillion: number): DecisionModelDto => ({
   timeSource: null,
 });
 
-const frozen = (models: DecisionModelDto[]): DecisionModelListDto =>
-  Object.freeze({
-    fetchedAt: '2026-11-13T11:00:00.000Z',
-    models: Object.freeze(models.map((m) => Object.freeze(m))) as DecisionModelDto[],
-  });
+const frozen = (models: DecisionModelDto[]): DecisionModelListDto => {
+  const own = models.map((m) => Object.freeze({ ...m }));
+  Object.freeze(own);
+  return Object.freeze({ fetchedAt: '2026-11-13T11:00:00.000Z', models: own });
+};
 
 function services(list: DecisionModelListDto, over: { off?: boolean } = {}) {
   return createJudgeServices({

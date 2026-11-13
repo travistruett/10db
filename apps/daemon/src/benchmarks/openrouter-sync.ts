@@ -264,8 +264,9 @@ export function createOpenRouterSync(deps: OpenRouterSyncDeps): OpenRouterSync {
           );
         });
       }
-      // Both sources are read again at the next run until each has answered.
-      if (bothRead) record({ scoresAt: clock.now().toISOString() });
+      // Both sources are read again at the next run until each has answered, and until a model list was held to
+      // map their permaslugs by (without one the date strip stood in, which an older model's slug defeats).
+      if (bothRead && models !== null) record({ scoresAt: clock.now().toISOString() });
     }
 
     // Speed for each wanted model not read within the hour.
