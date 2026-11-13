@@ -61,6 +61,7 @@ export * from './task-thread';
 export * from './team';
 export * from './trust';
 export * from './trust-policy';
+export * from './tool-call-view';
 export * from './workbench-setup';
 export * from './workflow';
 export * from './workstream-changes';
