@@ -7,6 +7,7 @@ import { PROPOSAL_STATE_LABELS } from './decisions-tab';
 import { SearchFilter } from './record-filters';
 import { NOT_NARROWED, useRecordPage } from './record-paging';
 import { emptyLine, RecordListStates } from './record-states';
+import { CodeSpans } from './code-spans';
 
 // Questions: what the effort left open, the questions it asked and the decisions not yet decided, with
 // who answers, what each is about and what it holds up.
@@ -34,7 +35,9 @@ export function QuestionsTab({ shapeId }: { readonly shapeId: ShapeId }) {
       ),
       render: (q) => (
         <Stack gap={2}>
-          <Text size="sm">{q.text}</Text>
+          <Text size="sm">
+            <CodeSpans text={q.text} />
+          </Text>
           {q.source === 'decision' ? (
             <Text size="xs" c="dimmed">
               Undecided decision

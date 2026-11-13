@@ -12,6 +12,7 @@ import { KnowledgeTable } from '../../knowledge/knowledge-table';
 import { ANY, ChoiceFilter, SearchFilter } from './record-filters';
 import { NOT_NARROWED, useRecordPage } from './record-paging';
 import { emptyLine, RecordListStates } from './record-states';
+import { CodeSpans } from './code-spans';
 
 // Reviews: every finding of the effort, grouped by the document, revision and round it was made on,
 // each in its reviewer's own words, with the outcome as the effort wrote it.
@@ -164,7 +165,7 @@ export function ReviewsTab({
       ),
       render: finding((row) => (
         <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
-          {row.text}
+          <CodeSpans text={row.text} />
         </Text>
       )),
     },
@@ -175,12 +176,16 @@ export function ReviewsTab({
       toggleable: true,
       render: finding((row) => (
         <Stack gap={2}>
-          {row.outcomeText === null ? null : <Text size="sm">{row.outcomeText}</Text>}
+          {row.outcomeText === null ? null : (
+            <Text size="sm">
+              <CodeSpans text={row.outcomeText} />
+            </Text>
+          )}
           {/* How it was closed, then the detail of it; either may be there without the other. */}
           {[row.how, row.howDetail].map((line, i) =>
             line === null || line === '' ? null : (
               <Text key={i} size="xs" c="dimmed" style={{ whiteSpace: 'pre-wrap' }}>
-                {line}
+                <CodeSpans text={line} />
               </Text>
             ),
           )}

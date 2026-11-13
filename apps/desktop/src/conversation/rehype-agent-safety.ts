@@ -3,7 +3,7 @@ import type { ExtraProps } from 'streamdown';
 // 10db's own steps over drawn markdown. Before the tree is built, raw HTML becomes text, so it is
 // shown as written and never rendered. After it is sanitized and before rehype-harden, every image
 // becomes a line saying it was not shown, and every link that is not `https:` becomes its text.
-// Harden then stays as the second wall, and what the builder reads is decided here.
+// What the builder reads is decided here; harden runs after with the same rule.
 
 type HastElement = NonNullable<ExtraProps['node']>;
 type HastChild = HastElement['children'][number];
@@ -20,21 +20,30 @@ function blockedImage(image: HastElement): HastElement {
   };
 }
 
-/** A parent's children with its images replaced and its unsafe links unwrapped, nested ones too. */
+/**
+ * A parent's children with its images replaced and its unsafe links unwrapped, nested ones too. A
+ * stack, never a spread into a call, so a parent with any number of children is read in one pass.
+ */
 function cleaned(children: readonly HastChild[]): HastChild[] {
   const out: HastChild[] = [];
-  const queue = [...children];
-  for (let child = queue.shift(); child !== undefined; child = queue.shift()) {
+  const stack = children.toReversed();
+  for (let child = stack.pop(); child !== undefined; child = stack.pop()) {
     if (child.type !== 'element') out.push(child);
     else if (child.tagName === 'img') out.push(blockedImage(child));
     else if (child.tagName === 'a' && !isHttps(child.properties.href))
-      queue.unshift(...child.children);
+      for (let i = child.children.length - 1; i >= 0; i -= 1) {
+        const inner = child.children[i];
+        if (inner !== undefined) stack.push(inner);
+      }
     else out.push(child);
   }
   return out;
 }
 
-/** The rehype plugin: walks the tree with a stack, so a deep document can't exhaust the call stack. */
+/**
+ * The rehype plugin. This step walks the tree with a stack, but the parser and the other plugins
+ * recurse, so `Markdown` never hands them a text nested past `MARKDOWN_MAX_DEPTH`.
+ */
 export function rehypeAgentSafety() {
   return (tree: { children: HastChild[] }): void => {
     const stack: { children: HastChild[] }[] = [tree];

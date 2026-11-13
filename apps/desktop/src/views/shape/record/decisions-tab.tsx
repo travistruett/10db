@@ -6,6 +6,7 @@ import { KnowledgeTable } from '../../knowledge/knowledge-table';
 import { ANY, ChoiceFilter, SearchFilter } from './record-filters';
 import { NOT_NARROWED, useRecordPage } from './record-paging';
 import { emptyLine, RecordListStates } from './record-states';
+import { CodeSpans } from './code-spans';
 
 // Decisions: what the effort decided and what it turned down. A row opens its rationale, the options
 // turned down and the builder's own words.
@@ -46,10 +47,10 @@ function DecisionDrawer({
       {decision === null ? null : (
         <Stack gap="md">
           <Text size="sm" fw={500}>
-            {decision.choice}
+            <CodeSpans text={decision.choice} />
           </Text>
           <Text size="sm" style={{ whiteSpace: 'pre-wrap' }}>
-            {decision.rationale}
+            <CodeSpans text={decision.rationale} />
           </Text>
           {decision.alternatives.length === 0 ? null : (
             <List size="sm" spacing={4}>
@@ -95,7 +96,11 @@ export function DecisionsTab({ shapeId }: { readonly shapeId: ShapeId }) {
           }}
         />
       ),
-      render: (d) => <Text size="sm">{d.question}</Text>,
+      render: (d) => (
+        <Text size="sm">
+          <CodeSpans text={d.question} />
+        </Text>
+      ),
     },
     {
       accessor: 'choice',
@@ -104,7 +109,7 @@ export function DecisionsTab({ shapeId }: { readonly shapeId: ShapeId }) {
       toggleable: true,
       render: (d) => (
         <Text size="sm" lineClamp={2}>
-          {d.choice}
+          <CodeSpans text={d.choice} />
         </Text>
       ),
     },

@@ -191,6 +191,23 @@ describe('Reviews', () => {
     expect(row?.textContent).toContain('Resolved');
   });
 
+  it("a finding's code spans draw as code, without their backticks", async () => {
+    server.use(
+      ...planRecordHandlers({
+        pages: (list) =>
+          recordPage(list, [reviewRow({ text: 'Call `revoke()` before ``a `b` c``.' })]),
+      }),
+      ...baseHandlers(),
+    );
+    await renderWithDaemonAndRouter(<ReviewsTab shapeId={RECORD_SHAPE_ID} documents={['p1']} />);
+    const cell = (await screen.findByText(/^Call/)).closest('td');
+    expect([...(cell?.querySelectorAll('code') ?? [])].map((c) => c.textContent)).toEqual([
+      'revoke()',
+      'a `b` c',
+    ]);
+    expect(cell?.textContent).toBe('Call revoke() before a `b` c.');
+  });
+
   it('a document filter goes to the daemon', async () => {
     const seen: SeenPage[] = [];
     server.use(...planRecordHandlers({ seen }), ...baseHandlers());

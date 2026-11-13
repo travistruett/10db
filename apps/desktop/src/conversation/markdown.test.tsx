@@ -1,7 +1,9 @@
 import { screen, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { renderWithTheme } from '../test/theme';
 import { Markdown } from './index';
+import { MarkdownBoundary } from './markdown-boundary';
+import { MARKDOWN_MAX_LENGTH } from './markdown-fits';
 
 // Markdown an agent or a planning effort wrote is drawn, never trusted: no image, frame or script
 // loads, and no link navigates the window. Links render as their text and address until the opener
@@ -183,5 +185,44 @@ describe('markdown elements', () => {
     const c = draw('Here:\n```ts\nconst a =');
     expect(c.querySelector('pre code')?.textContent).toContain('const a =');
     expect(text(c)).not.toContain('```');
+  });
+});
+
+describe('a document too deep or too long to draw', () => {
+  it.each<[string, string]>([
+    ['quotes 5000 deep', `${'>'.repeat(5000)} x`],
+    ['lists 1000 deep', `${'- '.repeat(1000)}x`],
+    ['over the length', `${'word '.repeat(MARKDOWN_MAX_LENGTH / 5)}tail`],
+  ])('%s shows whole as plain text', (_, input) => {
+    const c = draw(input);
+    expect(c.querySelector('pre')?.textContent).toBe(input);
+    expect(text(c)).toContain('Shown as plain text');
+    expect(c.querySelectorAll('blockquote, ul, li')).toHaveLength(0);
+  });
+
+  it('a drawing that throws shows the text plain, and the next text draws again', () => {
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    function Fails(): never {
+      throw new RangeError('Maximum call stack size exceeded');
+    }
+    const { rerender } = renderWithTheme(
+      <div data-testid="markdown">
+        <MarkdownBoundary text="> kept">
+          <Fails />
+        </MarkdownBoundary>
+      </div>,
+    );
+    const c = screen.getByTestId('markdown');
+    expect(c.querySelector('pre')?.textContent).toBe('> kept');
+    expect(text(c)).toContain('Shown as plain text');
+    rerender(
+      <div data-testid="markdown">
+        <MarkdownBoundary text="next">
+          <span>drawn</span>
+        </MarkdownBoundary>
+      </div>,
+    );
+    expect(text(screen.getByTestId('markdown'))).toBe('drawn');
+    quiet.mockRestore();
   });
 });
