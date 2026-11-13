@@ -1,6 +1,7 @@
 import { AccountKind } from '@10db/contracts';
 import {
   accountSecretRef,
+  findAccountRow,
   getAccountRow,
   getJudgeConfig,
   insertAccount,
@@ -8,11 +9,16 @@ import {
   patchJudgeConfig,
   recordAccountSecret,
 } from '@10db/db';
-import { OPENROUTER_KEY_ACCOUNT, secretFingerprint, type Keychain } from '../environment';
+import {
+  KeychainError,
+  OPENROUTER_KEY_ACCOUNT,
+  secretFingerprint,
+  type Keychain,
+} from '../environment';
 import type { StateStore } from '../events';
 import type { Logger } from '../log';
 
-/** The labels tried for the account the old key moves into, in order, then "OpenRouter 2", "OpenRouter 3"... */
+/** The labels tried for the account the `openrouter-api-key` item's key moves into, in order, then "OpenRouter 2", "OpenRouter 3"... */
 const LABELS = ['OpenRouter', 'OpenRouter key'] as const;
 const LABEL_BASE = 'OpenRouter';
 const FIRST_NUMBERED = 2;
@@ -30,12 +36,12 @@ function freeLabel(taken: ReadonlySet<string>): string {
  * place under the rules every account secret follows. It runs at start and never throws: a failure is logged by
  * error name and the next start tries again.
  *
- * 1. Read the old item; unreadable or absent, stop.
- * 2. An OpenRouter account (archived or not) already holds this key: remove the old item, stop.
+ * 1. Read the `openrouter-api-key` item; unreadable or absent, stop.
+ * 2. An OpenRouter account (archived or not) already holds this key: remove the `openrouter-api-key` item, stop.
  * 3. Any other OpenRouter account that is not archived: the builder has set one up, so leave everything.
  * 4. Otherwise create the account, write its key, read it back, record the fingerprint and, when decisions run
  *    on no account, point them at it. The row and the setting commit together or not at all, and the Keychain
- *    write comes before the commit. Only then is the old item removed; a failure there is finished by step 2 on
+ *    write comes before the commit. Only then is the `openrouter-api-key` item removed; a failure there is finished by step 2 on
  *    the next start.
  */
 export async function moveOpenRouterKey(deps: {
@@ -57,8 +63,8 @@ export async function moveOpenRouterKey(deps: {
     return;
   }
   if (key === null) return;
-  const old = key;
-  const removeOld = (): void => {
+  const moved = key;
+  const removeItem = (): void => {
     try {
       deps.keychain.remove(OPENROUTER_KEY_ACCOUNT);
     } catch (error) {
@@ -68,12 +74,12 @@ export async function moveOpenRouterKey(deps: {
   try {
     const accounts = listAccounts(deps.state.db, { includeArchived: true });
     const openRouter = accounts.filter((a) => a.kind === AccountKind.OpenRouter);
-    const fingerprint = secretFingerprint(old);
+    const fingerprint = secretFingerprint(moved);
     const holdsIt = openRouter.some(
       (a) => getAccountRow(deps.state.db, a.id).secretFingerprint === fingerprint,
     );
     if (holdsIt) {
-      removeOld();
+      removeItem();
       return;
     }
     if (openRouter.some((a) => !a.archived)) return;
@@ -88,10 +94,14 @@ export async function moveOpenRouterKey(deps: {
         );
         const ref = accountSecretRef(created.id);
         written.ref = ref;
-        deps.keychain.write(ref, old);
-        if (deps.keychain.read(ref) !== old) throw new Error('read-back differs');
+        deps.keychain.write(ref, moved);
+        if (deps.keychain.read(ref) !== moved)
+          throw new KeychainError('The key read back differs from the key written');
         recordAccountSecret(ctx, created.id, fingerprint);
-        if (getJudgeConfig(ctx.tx).accountId === null)
+        const current = getJudgeConfig(ctx.tx).accountId;
+        const running = current === null ? undefined : findAccountRow(ctx.tx, current);
+        // Decisions move onto the new account unless they already run on a live OpenRouter account.
+        if (!running || running.archived || running.kind !== AccountKind.OpenRouter)
           patchJudgeConfig(ctx, { accountId: created.id });
       });
     } catch (error) {
@@ -106,7 +116,7 @@ export async function moveOpenRouterKey(deps: {
       fail('create', error);
       return;
     }
-    removeOld();
+    removeItem();
   } catch (error) {
     fail('move', error);
   }

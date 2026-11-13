@@ -656,7 +656,7 @@ export async function startDaemon(opts: DaemonOptions): Promise<RunningDaemon> {
     off: opts.judgeOff === true,
     logger: logger.child({ component: 'judge' }),
   });
-  // With the judge off no Keychain item is read, the old key's included.
+  // With the judge off no Keychain item is read, `openrouter-api-key` included.
   if (opts.judgeOff !== true)
     await moveOpenRouterKey({
       state,

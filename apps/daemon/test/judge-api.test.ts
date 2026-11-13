@@ -182,6 +182,10 @@ describe('GET /judge', () => {
       },
     };
     const { api, raw, daemon: d } = await start({ judgeOff: true, keychain: watching });
+    // Start must not touch the OpenRouter item or any account secret.
+    expect(
+      calls.filter((c) => c.includes(OPENROUTER_KEY_ACCOUNT) || c.includes('account:')),
+    ).toEqual([]);
     // The account is made and keyed through the routes, whose writes are not reads; the reads are counted after.
     const account = await openRouterAccount(api);
     calls.length = 0;

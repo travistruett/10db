@@ -106,7 +106,7 @@ const openRouterAccounts = () =>
   listAccounts(store.db, { includeArchived: true }).filter((a) => a.kind === 'openrouter');
 
 describe('moveOpenRouterKey', () => {
-  it('moves the old key into an account of its own, then removes the old item', async () => {
+  it('moves the key into an account of its own, then removes the `openrouter-api-key` item', async () => {
     const items = new Map([[OPENROUTER_KEY_ACCOUNT, KEY]]);
     const { keychain } = keychainOver(items);
     await moveOpenRouterKey({ state, keychain, logger });
@@ -120,7 +120,7 @@ describe('moveOpenRouterKey', () => {
     expect(items.has(OPENROUTER_KEY_ACCOUNT)).toBe(false);
   });
 
-  it('does nothing when there is no old item', async () => {
+  it('does nothing when there is no `openrouter-api-key` item', async () => {
     const items = new Map<string, string>();
     const { keychain, calls } = keychainOver(items);
     await moveOpenRouterKey({ state, keychain, logger });
@@ -128,7 +128,7 @@ describe('moveOpenRouterKey', () => {
     expect(calls).toEqual([`find-generic-password ${OPENROUTER_KEY_ACCOUNT}`]);
   });
 
-  it('leaves the old item alone when the builder already has an OpenRouter account of another key', async () => {
+  it('leaves the item alone when the builder already has an OpenRouter account of another key', async () => {
     const items = new Map([[OPENROUTER_KEY_ACCOUNT, KEY]]);
     const existing = openRouterAccount('My router', 'sk-or-v1-a-different-key');
     const { keychain } = keychainOver(items);
@@ -141,7 +141,7 @@ describe('moveOpenRouterKey', () => {
   it.each([
     { name: 'the key write is refused', faults: { failWriteOf: 'account:' } },
     { name: 'the Keychain stores something other than the key', faults: { mangleWrites: true } },
-  ])('leaves no account behind and keeps the old item when $name', async ({ faults }) => {
+  ])('leaves no account behind and keeps the item when $name', async ({ faults }) => {
     const items = new Map([[OPENROUTER_KEY_ACCOUNT, KEY]]);
     const { keychain } = keychainOver(items, faults);
     await moveOpenRouterKey({ state, keychain, logger });
@@ -153,7 +153,7 @@ describe('moveOpenRouterKey', () => {
     expect(JSON.stringify(warnings)).not.toContain('OLD-ITEM');
   });
 
-  it('keeps everything and creates nothing when the old item cannot be read', async () => {
+  it('keeps everything and creates nothing when the item cannot be read', async () => {
     const items = new Map([[OPENROUTER_KEY_ACCOUNT, KEY]]);
     const { keychain } = keychainOver(items, { failReadOld: true });
     await moveOpenRouterKey({ state, keychain, logger });
@@ -177,7 +177,7 @@ describe('moveOpenRouterKey', () => {
     { name: 'an account', archived: false },
     { name: 'an archived account', archived: true },
   ])(
-    'removes the old item without a second account when $name already holds that key',
+    'removes the `openrouter-api-key` item without a second account when $name already holds that key',
     async ({ archived }) => {
       const items = new Map([[OPENROUTER_KEY_ACCOUNT, KEY]]);
       openRouterAccount('OpenRouter', KEY, archived);
@@ -216,15 +216,26 @@ describe('moveOpenRouterKey', () => {
     expect(openRouterAccounts().map((a) => a.label)).toEqual([expected]);
   });
 
-  it('keeps the account decisions already run on', async () => {
-    const chosen = openRouterAccount('Chosen', 'sk-or-v1-chosen-key-0001', true);
-    store.db.$client.prepare('UPDATE accounts SET archived = 0 WHERE id = ?').run(chosen);
+  it('leaves decisions on a live OpenRouter account, creating nothing', async () => {
+    const chosen = openRouterAccount('Chosen', 'sk-or-v1-chosen-key-0001', false);
+    state.write((ctx) => patchJudgeConfig(ctx, { accountId: chosen }));
+    const items = new Map([[OPENROUTER_KEY_ACCOUNT, KEY]]);
+    const { keychain } = keychainOver(items);
+    await moveOpenRouterKey({ state, keychain, logger });
+    expect(getJudgeConfig(store.db).accountId).toBe(chosen);
+    expect(listAccounts(store.db).filter((a) => a.kind === 'openrouter')).toHaveLength(1);
+  });
+
+  it('moves decisions onto the new account when they ran on an archived one', async () => {
+    const chosen = openRouterAccount('Chosen', 'sk-or-v1-chosen-key-0001', false);
     state.write((ctx) => patchJudgeConfig(ctx, { accountId: chosen }));
     store.db.$client.prepare('UPDATE accounts SET archived = 1 WHERE id = ?').run(chosen);
     const items = new Map([[OPENROUTER_KEY_ACCOUNT, KEY]]);
     const { keychain } = keychainOver(items);
     await moveOpenRouterKey({ state, keychain, logger });
-    expect(getJudgeConfig(store.db).accountId).toBe(chosen);
+    const made = listAccounts(store.db).find((a) => a.kind === 'openrouter' && !a.archived);
+    expect(made).toBeDefined();
+    expect(getJudgeConfig(store.db).accountId).toBe(made?.id);
   });
 
   it('never throws, even when the Keychain is not there', async () => {
