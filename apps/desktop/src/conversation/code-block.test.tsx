@@ -31,7 +31,33 @@ describe('the fence languages', () => {
   });
 });
 
+/** The colors a block's tokens are drawn in. */
+const colorsIn = (block: HTMLElement): Set<string> =>
+  new Set([...block.querySelectorAll<HTMLElement>('pre span[style]')].map((s) => s.style.color));
+
 describe('CodeBlock', () => {
+  it.each([
+    ['a line past the line limit', `${'const a = 1; '.repeat(200)}\n`],
+    ['code past the size limit', 'const a = 1;\n'.repeat(4_000)],
+  ])('draws %s plain, never highlighted', async (_name, code) => {
+    renderWithTheme(
+      <>
+        <div data-testid="small">
+          <CodeBlock code="const a: number = 1;" language="ts" />
+        </div>
+        <div data-testid="big">
+          <CodeBlock code={code} language="ts" />
+        </div>
+      </>,
+    );
+    // The small block highlighting shows the grammar has loaded for both.
+    await waitFor(() => {
+      expect(colorsIn(screen.getByTestId('small')).size).toBeGreaterThan(1);
+    });
+    expect(colorsIn(screen.getByTestId('big')).size).toBeLessThanOrEqual(1);
+    expect(screen.getByTestId('big').querySelector('pre')?.textContent).toContain('const a = 1;');
+  });
+
   it('labels a ts fence, highlights it, and copies its code', async () => {
     const writeText = vi.fn(() => Promise.resolve());
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
