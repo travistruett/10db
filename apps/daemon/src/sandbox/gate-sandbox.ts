@@ -1,4 +1,12 @@
-import { chmodSync, existsSync, lstatSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import type { PermissionRuleDto, ProjectDto } from '@10db/contracts';
 import { prepareCommandEnv } from './command-env';
@@ -102,12 +110,45 @@ const CLOSED_GIT_ENTRIES = [
   'rebase-merge',
   'rebase-apply',
   'sequencer',
-  // A commit or a merge moves only the current branch: the remote-tracking refs, the tags and the
-  // packed refs (where `main` may live) stay as they are.
+  // A commit or a merge moves only the current branch: every other namespace under `refs/` (each
+  // one there now is closed too, `refsBesideHeads`), with its reflogs, and the packed refs, where
+  // `main` may live, stay as they are. A replace ref would make the builder's own git show other
+  // objects, and a note, a stash or a bisect ref is shown to them.
   'refs/remotes',
   'refs/tags',
+  'refs/replace',
+  'refs/notes',
+  'refs/stash',
+  'refs/bisect',
+  'refs/worktree',
+  'refs/rewritten',
+  'refs/prefetch',
+  'logs/refs/remotes',
+  'logs/refs/stash',
   'packed-refs',
+  // What a merge writes stays open (MERGE_HEAD, MERGE_MSG, MERGE_MODE, ORIG_HEAD, AUTO_MERGE); what
+  // another command left half done does not.
+  'CHERRY_PICK_HEAD',
+  'REVERT_HEAD',
+  'REBASE_HEAD',
+  'BISECT_LOG',
+  'BISECT_START',
+  'BISECT_EXPECTED_REV',
+  'FETCH_HEAD',
 ] as const;
+
+/** Each namespace in a git dir's `refs/` and `logs/refs/` but `heads`, as it is now. */
+function refsBesideHeads(gitDir: string): string[] {
+  return ['refs', join('logs', 'refs')].flatMap((dir) => {
+    try {
+      return readdirSync(join(gitDir, dir))
+        .filter((name) => name !== 'heads')
+        .map((name) => join(dir, name));
+    } catch {
+      return [];
+    }
+  });
+}
 
 /** A path's real path, or the path itself when it has none. */
 function realOr(path: string): string {
@@ -274,7 +315,9 @@ export function createGateSandbox(deps: GateSandboxDeps): GateSandbox {
                   ...access.gitState.filter(
                     (path) => !pathsEqual(realOr(path), realOr(approved.gitDir)),
                   ),
-                  ...CLOSED_GIT_ENTRIES.map((name) => join(approved.gitDir, name)),
+                  ...[...new Set([...CLOSED_GIT_ENTRIES, ...refsBesideHeads(approved.gitDir)])].map(
+                    (name) => join(approved.gitDir, name),
+                  ),
                   ...approved.closedRefs.flatMap((ref) => [
                     join(approved.gitDir, ref),
                     join(approved.gitDir, 'logs', ref),

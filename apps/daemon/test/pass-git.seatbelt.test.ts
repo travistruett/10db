@@ -113,6 +113,20 @@ describe.skipIf(!SEATBELT)("a pass's approved commit under the sandbox (Seatbelt
             // Switching the pass onto `main` would open its ref to the next approved commit.
             "printf 'ref: refs/heads/main\\n' > .git/HEAD 2>/dev/null",
             'mkdir .git/rebase-merge .git/rebase-apply .git/sequencer 2>/dev/null',
+            // A replace ref makes the builder's own git show other objects; a note, a stash or a
+            // bisect ref is shown to them too.
+            ...[
+              'replace/' + '1'.repeat(40),
+              'notes/commits',
+              'stash',
+              'bisect/bad',
+              'worktree/x',
+            ].map(
+              (ref) =>
+                `mkdir -p "$(dirname .git/refs/${ref})" 2>/dev/null; git rev-parse HEAD > .git/refs/${ref} 2>/dev/null`,
+            ),
+            'git rev-parse HEAD > .git/CHERRY_PICK_HEAD 2>/dev/null',
+            'git rev-parse HEAD > .git/REVERT_HEAD 2>/dev/null',
             'env > hook-env.txt',
             'exit 0',
             '',
@@ -159,8 +173,22 @@ describe.skipIf(!SEATBELT)("a pass's approved commit under the sandbox (Seatbelt
         expect(git('rev-parse', 'refs/heads/main')).toBe(main);
         expect(git('rev-parse', 'refs/heads/10db/other')).toBe(other);
         expect(git('symbolic-ref', 'HEAD')).toBe('refs/heads/feat/page');
-        for (const dir of ['rebase-merge', 'rebase-apply', 'sequencer'])
+        for (const dir of [
+          'rebase-merge',
+          'rebase-apply',
+          'sequencer',
+          'CHERRY_PICK_HEAD',
+          'REVERT_HEAD',
+        ])
           expect(existsSync(join(checkout, '.git', dir)), dir).toBe(false);
+        for (const ref of [
+          'replace/' + '1'.repeat(40),
+          'notes/commits',
+          'stash',
+          'bisect/bad',
+          'worktree/x',
+        ])
+          expect(existsSync(join(checkout, '.git', 'refs', ref)), ref).toBe(false);
         expect(git('config', '--local', '--list')).toBe(config);
         expect(
           execFileSync('cat', [join(checkout, 'hook-env.txt')], { encoding: 'utf8' }),

@@ -6,6 +6,7 @@ import { SECRET_VARIABLES } from '../environment';
 import { isProtected, type PassGitCall } from '../guard';
 import { singleQuoted, type GateRunInput, type GateSandbox } from '../sandbox';
 import { NO_ATTRIBUTES_CONFIG } from './git';
+import { NO_REPLACE_OBJECTS } from './run';
 import { shellWord } from './shell-word';
 
 /** What a command the builder allowed printed, and how it ended. */
@@ -263,6 +264,7 @@ export async function runPassGit(
       ]),
     ),
     GIT_TERMINAL_PROMPT: '0',
+    ...NO_REPLACE_OBJECTS,
   };
   const base = {
     ...withoutSecrets(

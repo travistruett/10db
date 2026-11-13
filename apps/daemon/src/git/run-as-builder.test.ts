@@ -243,6 +243,9 @@ describe.skipIf(SANDBOXED)('runPassGit', () => {
       // srt's stand-in says it ran the call: the commit went through the gate's sandbox.
       expect('output' in ran ? ran.output : '').toContain('fake srt');
       const hookEnv = readFileSync(seen, 'utf8');
+      // A replace ref a hook wrote changes no object git shows. (Git keeps it from a transport's
+      // command, so a push's is not seen there.)
+      expect(hookEnv.split('\n')).toContain('GIT_NO_REPLACE_OBJECTS=1');
       expect(hookEnv).not.toContain('sk-canary');
       expect(hookEnv).not.toContain('bedrock-canary');
     } finally {

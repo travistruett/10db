@@ -49,6 +49,26 @@ const rawGit = (...args: string[]) =>
     .trim();
 const commitCount = () => Number(rawGit('rev-list', '--count', 'HEAD'));
 
+// A lane can't write refs, but a hook an approved commit starts runs where it may have: a replace
+// ref it left would make the daemon's own git read another object for the one it names.
+describe('replace refs', () => {
+  it('reads the object a commit names, never one a replace ref puts in its place', async () => {
+    write('a.txt', 'kept\n');
+    rawGit('add', 'a.txt');
+    rawGit('commit', '-q', '-m', 'a');
+    const kept = rawGit('rev-parse', 'HEAD:a.txt');
+    const planted = execFileSync('git', ['-C', repo.path, 'hash-object', '-w', '--stdin'], {
+      env: isolatedGitEnv(),
+      input: 'planted\n',
+    })
+      .toString()
+      .trim();
+    rawGit('replace', kept, planted);
+    const read = await git.fileAt(repo.path, 'HEAD', 'a.txt', 1024);
+    expect(read).toMatchObject({ kind: 'file', text: 'kept\n' });
+  });
+});
+
 describe('commit', () => {
   it('commits only the named paths and leaves other changes alone', async () => {
     write('a.txt', 'a');

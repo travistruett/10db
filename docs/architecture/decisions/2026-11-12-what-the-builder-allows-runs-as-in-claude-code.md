@@ -37,10 +37,13 @@
    (lefthook, husky, pre-commit) read files a lane writes (`lefthook-local.yml`, `.husky/`, `node_modules/.bin`,
    lint configs, package scripts), so they run contained. The checkout and its `.git` folder are writable there,
    but not `.git/hooks`, `.git/config`, `config.worktree`, `.git/info`, `modules`, `worktrees`, the files that point
-   git at another git dir, `HEAD`, `rebase-merge`, `rebase-apply`, `sequencer`, the remote-tracking refs, tags and
-   packed refs, or any branch's ref but the current one's (`main`, the base branch and other lanes' branches stay
+   git at another git dir, `HEAD`, `rebase-merge`, `rebase-apply`, `sequencer`, `CHERRY_PICK_HEAD` and the other
+   half-done states (a merge's own files stay open), every namespace under `refs/` but `heads` (replace refs,
+   notes, the stash, bisect refs, remote-tracking refs, tags) with its reflogs, the packed refs, or any branch's
+   ref but the current one's (`main`, the base branch and other lanes' branches stay
    as they are). A commit or merge runs only on a branch, and 10db reads HEAD before and after each call: one that
-   moved it holds every later call in the pass, with a plain reason, until HEAD is back. The builder's global git
+   moved it holds every later call in the pass, with a plain reason, until HEAD is back. Every approved call, and every
+   git call of the daemon's own, runs with `GIT_NO_REPLACE_OBJECTS=1`. The builder's global git
    config is readable for their identity. A push and a `gh pr merge` need the builder's credentials, so they run outside the sandbox with `core.hooksPath` at
    `/dev/null` and `push.recurseSubmodules=no`: the repository's push hooks don't run for an approved push, and no
    submodule is pushed along. Every call runs in a process group of its own, killed when its session ends or after
