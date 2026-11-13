@@ -43,8 +43,6 @@ export interface OpenRouterMeasure {
   readonly measuredAt: string;
 }
 
-const SCORE_KINDS = [OpenRouterMeasureKind.ScoreAa, OpenRouterMeasureKind.ScoreOpenRouter];
-
 const NO_NUMBERS = {
   intelligence: null,
   coding: null,
@@ -55,16 +53,25 @@ const NO_NUMBERS = {
   latencyMs: null,
 } as const;
 
-/** Replaces every score row with this read's, in one transaction; speed rows stay. A repeated key keeps the last. */
+/**
+ * Replaces the score rows of each source the rows come from (Artificial Analysis's, OpenRouter's own), in one
+ * transaction. A source with no row here keeps what it holds, and speed rows stay. A repeated key keeps the last.
+ */
 export function replaceOpenRouterScores(
   ctx: WriteContext,
   rows: readonly OpenRouterScoreInput[],
   at: string,
 ): void {
-  ctx.tx
-    .delete(schema.openrouterMeasures)
-    .where(inArray(schema.openrouterMeasures.kind, SCORE_KINDS))
-    .run();
+  const replaced = new Set(
+    rows.map((r) =>
+      r.source === 'aa' ? OpenRouterMeasureKind.ScoreAa : OpenRouterMeasureKind.ScoreOpenRouter,
+    ),
+  );
+  if (replaced.size > 0)
+    ctx.tx
+      .delete(schema.openrouterMeasures)
+      .where(inArray(schema.openrouterMeasures.kind, [...replaced]))
+      .run();
   for (const row of rows) {
     const aa = row.source === 'aa';
     const values: typeof schema.openrouterMeasures.$inferInsert = {

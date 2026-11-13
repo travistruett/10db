@@ -48,7 +48,10 @@ function answer(url: string): Response {
     return Response.json({
       data: [{ model_permaslug: 'liquid/d1-20261109', intelligence_index: 12 }],
     });
-  if (url === `${BENCHMARKS}?source=openrouter`) return Response.json({ data: [] });
+  if (url === `${BENCHMARKS}?source=openrouter`)
+    return Response.json({
+      data: [{ model_permaslug: 'liquid/d1', benchmark_type: 'gpqa', accuracy: 0.5 }],
+    });
   if (url === MODELS) return Response.json({ data: [{ id: 'liquid/d1' }] });
   return Response.json({
     data: {

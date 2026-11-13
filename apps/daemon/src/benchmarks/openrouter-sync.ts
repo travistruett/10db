@@ -238,32 +238,34 @@ export function createOpenRouterSync(deps: OpenRouterSyncDeps): OpenRouterSync {
     }
     const listed: readonly OpenRouterModel[] = models?.list ?? [];
 
-    // Scores, daily; a failed read keeps the rows held.
+    // Scores, daily, each source apart: a source that fails, or answers nothing usable, keeps the rows held.
     const scoresAt = stored().scoresAt;
     if (scoresAt === null || clock.now().getTime() - Date.parse(scoresAt) >= SCORES_EVERY_MS) {
-      const scores = await paced(gen, (limited) =>
-        fetchOpenRouterScores({ fetch: limited, key, signal }),
-      );
-      if (ends(scores)) {
-        refused(scores);
-        return;
-      }
-      if (scores.kind === 'failed') failures.push(scores.message);
-      else if (scores.kind === 'ok') {
-        if (scores.value.length === 0)
-          failures.push('OpenRouter listed no scores; keeping the last ones');
-        else {
-          const at = clock.now().toISOString();
-          state.write((ctx) => {
-            replaceOpenRouterScores(
-              ctx,
-              scores.value.map((row) => toScoreInput(row, listed)),
-              at,
-            );
-          });
-          record({ scoresAt: at });
+      let bothRead = true;
+      for (const source of ['aa', 'openrouter'] as const) {
+        const scores = await paced(gen, (limited) =>
+          fetchOpenRouterScores({ fetch: limited, key, signal, source }),
+        );
+        if (ends(scores)) {
+          refused(scores);
+          return;
         }
+        if (scores.kind !== 'ok') {
+          bothRead = false;
+          failures.push(scores.message);
+          continue;
+        }
+        const at = clock.now().toISOString();
+        state.write((ctx) => {
+          replaceOpenRouterScores(
+            ctx,
+            scores.value.map((row) => toScoreInput(row, listed)),
+            at,
+          );
+        });
       }
+      // Both sources are read again at the next run until each has answered.
+      if (bothRead) record({ scoresAt: clock.now().toISOString() });
     }
 
     // Speed for each wanted model not read within the hour.

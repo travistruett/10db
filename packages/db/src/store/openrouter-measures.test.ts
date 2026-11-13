@@ -48,7 +48,21 @@ const shape = (rows: ReturnType<typeof listOpenRouterMeasures>) =>
   rows.map((r) => `${r.id}|${r.kind}|${r.key}`);
 
 describe('replaceOpenRouterScores', () => {
-  it('keeps only the second set when scores are replaced twice', () => {
+  it('keeps only the second set when one source’s scores are replaced twice', () => {
+    store.write((ctx) => {
+      replaceOpenRouterScores(
+        ctx,
+        [aaScore('acme/a', 10), aaScore('acme/c', 5)],
+        '2026-01-01T00:00:00.000Z',
+      );
+    });
+    store.write((ctx) => {
+      replaceOpenRouterScores(ctx, [aaScore('acme/b', 20)], '2026-01-02T00:00:00.000Z');
+    });
+    expect(shape(listOpenRouterMeasures(store.db))).toEqual(['acme/b|score_aa|']);
+  });
+
+  it('replaces each source apart: rows of one source leave the other’s alone', () => {
     store.write((ctx) => {
       replaceOpenRouterScores(
         ctx,
@@ -59,7 +73,10 @@ describe('replaceOpenRouterScores', () => {
     store.write((ctx) => {
       replaceOpenRouterScores(ctx, [aaScore('acme/b', 20)], '2026-01-02T00:00:00.000Z');
     });
-    expect(shape(listOpenRouterMeasures(store.db))).toEqual(['acme/b|score_aa|']);
+    expect(shape(listOpenRouterMeasures(store.db)).sort()).toEqual([
+      'acme/a|score_openrouter|gpqa',
+      'acme/b|score_aa|',
+    ]);
   });
 
   it('keeps two benchmarks of one model as two rows, and a null benchmark under the empty key', () => {

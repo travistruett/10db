@@ -129,42 +129,52 @@ function items<T>(body: unknown, item: z.ZodType<T>): T[] | null {
   return out;
 }
 
-/** Both benchmark sources, Artificial Analysis's first; either failing is the whole outcome. */
+/**
+ * One benchmark source's rows. A source that answers no items, or items none of which carries a score, is not
+ * understood, so a caller keeps what it holds for that source rather than replacing it with nothing.
+ */
 export async function fetchOpenRouterScores(
-  deps: Request & { readonly key: string },
+  deps: Request & { readonly key: string; readonly source: 'aa' | 'openrouter' },
 ): Promise<OpenRouterOutcome<OpenRouterScoreRow[]>> {
+  const aa = deps.source === 'aa';
+  const res = await getJson(
+    `${OPENROUTER_BENCHMARKS_URL}?source=${aa ? 'artificial-analysis' : 'openrouter'}`,
+    deps,
+  );
+  if (res.kind !== 'ok') return res;
   const rows: OpenRouterScoreRow[] = [];
-  const aa = await getJson(`${OPENROUTER_BENCHMARKS_URL}?source=artificial-analysis`, deps);
-  if (aa.kind !== 'ok') return aa;
-  const aaItems = items(aa.value, AaItem);
-  if (aaItems === null) return failed(NOT_UNDERSTOOD);
-  for (const item of aaItems)
-    rows.push({
-      permaslug: item.model_permaslug,
-      source: 'aa',
-      intelligence: item.intelligence_index ?? null,
-      coding: item.coding_index ?? null,
-      agentic: item.agentic_index ?? null,
-      benchmark: null,
-      accuracy: null,
-      costPerTaskUsd: null,
-    });
-  const own = await getJson(`${OPENROUTER_BENCHMARKS_URL}?source=openrouter`, deps);
-  if (own.kind !== 'ok') return own;
-  const ownItems = items(own.value, OpenRouterItem);
-  if (ownItems === null) return failed(NOT_UNDERSTOOD);
-  for (const item of ownItems)
-    rows.push({
-      permaslug: item.model_permaslug,
-      source: 'openrouter',
-      intelligence: null,
-      coding: null,
-      agentic: null,
-      benchmark: item.benchmark_type ?? null,
-      accuracy: item.accuracy ?? null,
-      costPerTaskUsd: item.avg_cost_per_task ?? null,
-    });
-  return { kind: 'ok', value: rows };
+  if (aa) {
+    for (const item of items(res.value, AaItem) ?? [])
+      rows.push({
+        permaslug: item.model_permaslug,
+        source: 'aa',
+        intelligence: item.intelligence_index ?? null,
+        coding: item.coding_index ?? null,
+        agentic: item.agentic_index ?? null,
+        benchmark: null,
+        accuracy: null,
+        costPerTaskUsd: null,
+      });
+  } else {
+    for (const item of items(res.value, OpenRouterItem) ?? [])
+      rows.push({
+        permaslug: item.model_permaslug,
+        source: 'openrouter',
+        intelligence: null,
+        coding: null,
+        agentic: null,
+        benchmark: item.benchmark_type ?? null,
+        accuracy: item.accuracy ?? null,
+        costPerTaskUsd: item.avg_cost_per_task ?? null,
+      });
+  }
+  const scored = (r: OpenRouterScoreRow): boolean =>
+    r.intelligence !== null ||
+    r.coding !== null ||
+    r.agentic !== null ||
+    r.accuracy !== null ||
+    r.costPerTaskUsd !== null;
+  return rows.some(scored) ? { kind: 'ok', value: rows } : failed(NOT_UNDERSTOOD);
 }
 
 /** One model OpenRouter lists: the id it is called by, and the dated slug the benchmarks name it by. */

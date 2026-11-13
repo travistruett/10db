@@ -54,7 +54,7 @@ describe('fetchOpenRouterScores', () => {
         }),
       [OR_URL]: () => json({ data: [] }),
     });
-    expect(await fetchOpenRouterScores({ fetch, key: KEY })).toEqual({
+    expect(await fetchOpenRouterScores({ fetch, key: KEY, source: 'aa' })).toEqual({
       kind: 'ok',
       value: [
         {
@@ -88,7 +88,7 @@ describe('fetchOpenRouterScores', () => {
           ],
         }),
     });
-    expect(await fetchOpenRouterScores({ fetch, key: KEY })).toEqual({
+    expect(await fetchOpenRouterScores({ fetch, key: KEY, source: 'openrouter' })).toEqual({
       kind: 'ok',
       value: [
         {
@@ -117,22 +117,23 @@ describe('fetchOpenRouterScores', () => {
         }),
       [OR_URL]: () => json({ data: [] }),
     });
-    const outcome = await fetchOpenRouterScores({ fetch, key: KEY });
+    const outcome = await fetchOpenRouterScores({ fetch, key: KEY, source: 'aa' });
     expect(outcome.kind).toBe('ok');
     if (outcome.kind === 'ok')
       expect(outcome.value.map((r) => r.permaslug)).toEqual(['acme/a-20260101', 'acme/b']);
   });
 
-  it('asks with the key, AA first', async () => {
+  it.each([
+    { source: 'aa' as const, url: AA_URL },
+    { source: 'openrouter' as const, url: OR_URL },
+  ])('asks the $source source alone, with the key', async ({ source, url }) => {
     const { fetch, calls } = fakeFetch({
-      [AA_URL]: () => json({ data: [] }),
-      [OR_URL]: () => json({ data: [] }),
+      [AA_URL]: () =>
+        json({ data: [{ model_permaslug: 'acme/a', intelligence_index: 1, accuracy: 0.1 }] }),
+      [OR_URL]: () => json({ data: [{ model_permaslug: 'acme/a', accuracy: 0.1 }] }),
     });
-    await fetchOpenRouterScores({ fetch, key: KEY });
-    expect(calls).toEqual([
-      { url: AA_URL, authorization: `Bearer ${KEY}` },
-      { url: OR_URL, authorization: `Bearer ${KEY}` },
-    ]);
+    await fetchOpenRouterScores({ fetch, key: KEY, source });
+    expect(calls).toEqual([{ url, authorization: `Bearer ${KEY}` }]);
   });
 
   it.each([
@@ -141,27 +142,40 @@ describe('fetchOpenRouterScores', () => {
     { name: '500', status: 500, kind: 'failed' },
   ])('answers $name as $kind', async ({ status, kind }) => {
     const { fetch } = fakeFetch({ [AA_URL]: () => json({ error: 'no' }, status) });
-    expect(await fetchOpenRouterScores({ fetch, key: KEY })).toMatchObject({ kind });
+    expect(await fetchOpenRouterScores({ fetch, key: KEY, source: 'aa' })).toMatchObject({ kind });
   });
 
   it('answers an unparseable body as failed', async () => {
     const { fetch } = fakeFetch({ [AA_URL]: () => new Response('<html>', { status: 200 }) });
-    expect(await fetchOpenRouterScores({ fetch, key: KEY })).toMatchObject({ kind: 'failed' });
+    expect(await fetchOpenRouterScores({ fetch, key: KEY, source: 'aa' })).toMatchObject({
+      kind: 'failed',
+    });
   });
 
-  it('answers a failed second read as failed, not as the first read alone', async () => {
-    const { fetch } = fakeFetch({
-      [AA_URL]: () => json({ data: [] }),
-      [OR_URL]: () => json({}, 503),
-    });
-    expect(await fetchOpenRouterScores({ fetch, key: KEY })).toMatchObject({ kind: 'failed' });
-  });
+  it.each([
+    { name: 'no items', data: [] },
+    {
+      name: 'items none of which carries a score',
+      data: [
+        { model_permaslug: 'acme/a' },
+        { model_permaslug: 'acme/b', intelligence_index: null },
+      ],
+    },
+  ])(
+    'does not understand a source answering $name, so a caller keeps what it holds',
+    async ({ data }) => {
+      const { fetch } = fakeFetch({ [AA_URL]: () => json({ data }) });
+      expect(await fetchOpenRouterScores({ fetch, key: KEY, source: 'aa' })).toMatchObject({
+        kind: 'failed',
+      });
+    },
+  );
 
   it('never repeats the key in a message', async () => {
     const { fetch } = fakeFetch({
       [AA_URL]: () => new Response(`bad key ${KEY} given`, { status: 500 }),
     });
-    const outcome = await fetchOpenRouterScores({ fetch, key: KEY });
+    const outcome = await fetchOpenRouterScores({ fetch, key: KEY, source: 'aa' });
     expect(outcome.kind).toBe('failed');
     if (outcome.kind !== 'ok') {
       expect(outcome.message).not.toContain(KEY);
@@ -173,6 +187,7 @@ describe('fetchOpenRouterScores', () => {
     const outcome = await fetchOpenRouterScores({
       fetch: () => Promise.reject(new Error(`boom ${KEY}`)),
       key: KEY,
+      source: 'aa',
     });
     expect(outcome.kind).toBe('failed');
     if (outcome.kind !== 'ok') expect(outcome.message).not.toContain(KEY);

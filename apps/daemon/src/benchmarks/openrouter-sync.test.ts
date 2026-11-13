@@ -327,4 +327,24 @@ describe('openrouter sync', () => {
     await settle(sync.idle());
     expect(sync.status()).toMatchObject({ keyConfigured: false, outcome: 'no_key' });
   });
+
+  it('keeps one source’s held rows when the other answers nothing usable', async () => {
+    await settle(sync.poke());
+    const held = (kind: string) => listOpenRouterMeasures(state.db).filter((r) => r.kind === kind);
+    const aaBefore = held('score_aa');
+    expect(aaBefore.length).toBeGreaterThan(0);
+    clock.advance(SCORES_EVERY_MS);
+    handlers.set(AA_URL, () => json({ data: [] }));
+    handlers.set(OR_URL, () =>
+      json({
+        data: [
+          { model_permaslug: OPUS, benchmark_type: 'tau', accuracy: 0.7, avg_cost_per_task: 0.3 },
+        ],
+      }),
+    );
+    await settle(sync.poke());
+    expect(held('score_aa')).toEqual(aaBefore);
+    expect(held('score_openrouter').map((r) => r.key)).toEqual(['tau']);
+    expect(sync.status()).toMatchObject({ outcome: 'failed' });
+  });
 });

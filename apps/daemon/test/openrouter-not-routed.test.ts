@@ -37,7 +37,10 @@ function openRouter(url: string): Response {
         { model_permaslug: 'anthropic/claude-haiku-5.5-20261109', intelligence_index: 95 },
       ],
     });
-  if (url === `${BENCHMARKS}?source=openrouter`) return Response.json({ data: [] });
+  if (url === `${BENCHMARKS}?source=openrouter`)
+    return Response.json({
+      data: [{ model_permaslug: 'liquid/d1', benchmark_type: 'gpqa', accuracy: 0.5 }],
+    });
   if (url === 'https://openrouter.ai/api/v1/models')
     return Response.json({
       data: [{ id: 'anthropic/claude-opus-5.5' }, { id: 'anthropic/claude-haiku-5.5' }],
