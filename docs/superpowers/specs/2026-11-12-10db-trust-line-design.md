@@ -246,7 +246,7 @@ These exist because 10db runs several writers at once. They apply only where ano
 | Claims and hazards (lockfiles, migrations) | Lanes in parallel copies of one project; pages in a pass | A chat or a lone task with nothing else in its folder |
 | Page areas | A pass | Everywhere else |
 | The folder hold | Any writer in Your folder: a pass, a chat that writes there | Separate copies |
-| Only 10db commits and pushes; the gate is 10db's | Lanes and passes, which 10db lands | A chat in Your folder (§8) |
+| Only 10db commits and pushes; the gate is 10db's | Lanes and passes, which 10db lands. In a pass the builder may allow a plain commit, push or merge on a card, which 10db then runs as the builder; a force push and a push to `main` or the base branch stay refused | A chat in Your folder (§8) |
 | Installs through the daemon | Lanes in parallel copies | A chat in Your folder |
 
 ## 8. Surfaces
@@ -256,7 +256,7 @@ These exist because 10db runs several writers at once. They apply only where ano
 | **Lane** | Setup comes along (§6). Web and MCP are judged, not carded. Deploys go to limit 4. Unreadable shell goes to the judge. "Allow Bash?" goes away. Unattended rules (§5). Commits, pushes, claims and the gate stay 10db's. |
 | **Gate** | Unchanged: it runs under the sandbox and runs tests, which are agent-written code. |
 | **Plan** | Its own session searches and fetches the web. Commands are judged, not carded, and background jobs run under the lanes' process tracking. Setup comes along. The researcher question limit and URL rules go. Plan still writes no code: that is its job, not a security line **(call)**. |
-| **Pass** | As a lane, attended. |
+| **Pass** | As a lane, attended. A plain `git commit`, `git push`, `git merge` or `gh pr merge` asks the builder on a card and, allowed, runs once as the builder would run it, outside the sandbox (a force push and a push to `main` or the base branch stay refused). A Read of the checkout's `.env*` asks on a card too. |
 | **Chat** (designed, §13) | A chat can write in Your folder, holding the folder while it does, and can commit, branch and open a pull request. Pushes and merges are judged (merging is limit 4). Bigger work still goes to a separate copy as a task. Builder tools are all present; destructive ones get Undo or are judged. |
 
 ## 9. Settings

@@ -63,6 +63,17 @@ describe('buildTrustPolicy', () => {
     });
   });
 
+  it("a pass's commit line leaves a plain commit, push or merge to the builder's card; a lane's keeps them 10db's", () => {
+    const commits = (surface: TrustSurface) =>
+      buildTrustPolicy(input({ surface })).coordination.find(
+        (line) => line.label === '10db Commits And Pushes',
+      )?.text;
+    expect(commits('pass')).toBe(
+      'Committing, pushing or merging with git or gh in any way but one plain call the builder allows on a card, force-pushing, pushing to main or the base branch, and creating or switching branches: 10db lands the work when it ships.',
+    );
+    expect(commits('lane')).toContain('10db commits through its commit tool');
+  });
+
   it('the limits are the four, in order', () => {
     expect(buildTrustPolicy(input()).limits.map((l) => l.name)).toEqual([
       'destroys_data',

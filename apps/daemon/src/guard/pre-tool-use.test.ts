@@ -250,7 +250,7 @@ describe('judgePreToolUse in a pass', () => {
       hazards: DEFAULT_HAZARDS,
       claims: [{ kind: ClaimKind.Area, name: 'src' }],
       readOnly: false,
-      inPass: { pages: ['settings'] },
+      inPass: { pages: ['settings'], baseBranch: 'main' },
       protectedPaths: protectedPaths({
         dataDir: data.path,
         home: homedir(),

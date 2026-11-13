@@ -52,9 +52,14 @@ import {
 } from '@10db/db';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { createTempRepoWithOrigin, isolatedGitEnv, seedWorkstream } from '../../test/fixtures';
+import {
+  createTempRepo,
+  createTempRepoWithOrigin,
+  isolatedGitEnv,
+  seedWorkstream,
+} from '../../test/fixtures';
 import { createEventBus, createStateStore, type StateStore } from '../events';
-import { createGit, type Git } from '../git';
+import { createGit, runAsBuilder, type Git } from '../git';
 import { acceptProposal, proposePrinciple } from '../knowledge';
 import { silentLogger } from '../log';
 import {
@@ -65,6 +70,7 @@ import {
   storableRule,
 } from '../permissions';
 import { protectedReads, SYSTEM_DOC_ROOTS, type FileAccessContext } from '../sandbox';
+import type { ToolDecision } from '../sessions';
 import {
   createInboxService,
   createPermissionBroker,
@@ -3723,5 +3729,135 @@ describe('a card 10db closes because its cause is gone', () => {
     inbox.answer(card.id, { choice: 'dismiss' });
     const again = inbox.resolve(card.id, 'Alpha started');
     expect(again.detail).toEqual({});
+  });
+});
+
+describe('permission broker in a pass', () => {
+  /** A pass's broker over a real repository, running what the builder allows as the runner does. */
+  function passBroker(ws: ReturnType<typeof seedWorkstream>, repo: string) {
+    const env = { ...isolatedGitEnv(), PATH: process.env['PATH'] ?? '/usr/bin:/bin' };
+    const signal = new AbortController().signal;
+    const git = (...args: string[]) =>
+      execFileSync('git', ['-C', repo, ...args], { env: isolatedGitEnv(), encoding: 'utf8' });
+    const decide = createPermissionBroker(
+      { state, inbox, git: NO_GIT, logger: silentLogger },
+      {
+        projectId: ws.project.id,
+        workstreamId: ws.workstream.id,
+        sessionId: mintId('Session'),
+        signal,
+        observer: { onWaitStart: () => undefined, onWaitEnd: () => undefined },
+        passGit: {
+          baseBranch: 'main',
+          currentBranch: () => Promise.resolve(git('branch', '--show-current').trim() || null),
+          run: (argv) => runAsBuilder(argv, { cwd: repo, env, signal }),
+        },
+      },
+    );
+    return { decide, git };
+  }
+  const bash = (command: string) => ({
+    toolName: 'Bash',
+    input: { command, description: 'x' },
+    toolUseId: 't1',
+    escalated: false,
+    signal: new AbortController().signal,
+  });
+  const card = (): InboxItemDto => {
+    const [item, ...rest] = listInbox(state.db, { states: ['OPEN'] });
+    if (!item || rest.length > 0) throw new Error('expected exactly one open card');
+    return item;
+  };
+  const replayed = (decision: ToolDecision): string =>
+    decision.behavior === 'allow' ? String(decision.updatedInput?.['command']) : decision.message;
+
+  it('cards a commit once and, allowed, runs it as the builder and replays what it printed', async () => {
+    const repo = createTempRepo();
+    try {
+      const ws = seedWorkstream(base);
+      const { decide, git } = passBroker(ws, repo.path);
+      writeFileSync(join(repo.path, 'page.ts'), 'export {};\n');
+      git('add', 'page.ts');
+      const decision = decide(bash("git commit -m 'Add the page'"));
+      const item = card();
+      expect(item.title).toBe('Allow git commit?');
+      expect(item.options.map((o) => o.label)).toEqual(['allow_once', 'deny']);
+      inbox.answer(item.id, { choice: 'allow_once' });
+      const result = replayed(await decision);
+      expect(git('log', '-1', '--format=%s').trim()).toBe('Add the page');
+      expect(result).toMatch(/^printf '%s' '.*Add the page.*'; exit 0$/s);
+      expect(execFileSync('/bin/sh', ['-c', result], { encoding: 'utf8' })).toContain(
+        'Add the page',
+      );
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it('a denied card runs nothing', async () => {
+    const repo = createTempRepo();
+    try {
+      const ws = seedWorkstream(base);
+      const { decide, git } = passBroker(ws, repo.path);
+      const before = git('rev-parse', 'HEAD');
+      const decision = decide(bash('git commit --allow-empty -m x'));
+      inbox.answer(card().id, { choice: 'deny' });
+      expect((await decision).behavior).toBe('deny');
+      expect(git('rev-parse', 'HEAD')).toBe(before);
+    } finally {
+      repo.cleanup();
+    }
+  });
+
+  it('a push of the current branch on main is refused after the card, and pushes nothing', async () => {
+    const remote = createTempRepoWithOrigin();
+    try {
+      const ws = seedWorkstream(base);
+      const { decide, git } = passBroker(ws, remote.repo.path);
+      git('commit', '--allow-empty', '-q', '-m', 'local');
+      const decision = decide(bash('git push origin HEAD'));
+      inbox.answer(card().id, { choice: 'allow_once' });
+      const result = await decision;
+      expect(result).toMatchObject({ behavior: 'deny', by: '10db' });
+      expect(replayed(result)).toContain('a push to main stays refused');
+      expect(git('rev-parse', 'origin/main')).not.toBe(git('rev-parse', 'HEAD'));
+    } finally {
+      remote.cleanup();
+    }
+  });
+
+  it('a push of a branch of its own runs, and origin holds it', async () => {
+    const remote = createTempRepoWithOrigin();
+    try {
+      const ws = seedWorkstream(base);
+      const { decide, git } = passBroker(ws, remote.repo.path);
+      git('switch', '-q', '-c', 'feat/page');
+      git('commit', '--allow-empty', '-q', '-m', 'page');
+      const decision = decide(bash('git push -u origin feat/page'));
+      inbox.answer(card().id, { choice: 'allow_once' });
+      expect(replayed(await decision)).toMatch(/; exit 0$/);
+      expect(
+        execFileSync('git', ['-C', remote.origin.path, 'rev-parse', 'feat/page'], {
+          env: isolatedGitEnv(),
+          encoding: 'utf8',
+        }),
+      ).toBe(git('rev-parse', 'HEAD'));
+    } finally {
+      remote.cleanup();
+    }
+  });
+
+  it('a force push is refused with no card', async () => {
+    const repo = createTempRepo();
+    try {
+      const ws = seedWorkstream(base);
+      const { decide } = passBroker(ws, repo.path);
+      expect(await decide(bash('git push --force origin feat/page'))).toMatchObject({
+        behavior: 'deny',
+      });
+      expect(listInbox(state.db, { states: ['OPEN'] })).toEqual([]);
+    } finally {
+      repo.cleanup();
+    }
   });
 });

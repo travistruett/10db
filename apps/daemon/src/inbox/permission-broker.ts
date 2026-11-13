@@ -18,14 +18,17 @@ import {
 import { getInboxItem, listPermissionRules, updateInboxItem } from '@10db/db';
 import { z } from 'zod';
 import type { StateStore } from '../events';
-import type { Git } from '../git';
+import type { BuilderRun, Git } from '../git';
 import {
   firstUnread,
   hazardHit,
+  isProtected,
+  passGitCall,
   runsInBackground,
   startsEndlessBackgroundLoop,
   stringField,
   unreadableHazard,
+  type PassGitCall,
 } from '../guard';
 import type { Logger } from '../log';
 import {
@@ -44,6 +47,7 @@ import {
   outsideCopyRefusal,
   readAccess,
   readPathsOf,
+  singleQuoted,
   writeAccess,
   type FileAccessContext,
 } from '../sandbox';
@@ -93,6 +97,17 @@ type BrokerContext = BrokerOwner & {
      * read-only commands are settled by its PreToolUse hook, and anything else is the builder's call.
      */
     readonly commandsAsk?: boolean;
+  };
+  /**
+   * Present for a pass: a plain commit, push or merge (`passGitCall`) gets a card the builder may
+   * allow once, as in Claude Code. Once allowed, 10db runs it outside the sandbox with their git and
+   * credentials, and the call replays what it printed and how it ended.
+   */
+  readonly passGit?: {
+    readonly baseBranch: string;
+    currentBranch(): Promise<string | null>;
+    /** Runs `argv` in `cwd`, the hook's directory for the call, when it lies in the checkout. */
+    run(argv: readonly string[], cwd: string | undefined): Promise<BuilderRun>;
   };
 };
 
@@ -161,6 +176,9 @@ const HOST_CARD_BODY =
 // Lanes can't write it: it is shared with every other lane and the builder's own pnpm.
 const PNPM_CARD_BODY =
   "pnpm 12 locks its store in a /tmp directory shared with every lane and your own pnpm, which a lane can't write. Approving lets the command run, and it will fail on that lock. Run it yourself, or use npm.";
+
+const PASS_GIT_CARD_BODY =
+  "Allowing it runs this call once, as you would in a terminal: 10db runs it outside the sandbox with your git and your credentials, so the repository's hooks run too, and the agent sees what it printed. A force push and a push to main or the base branch stay refused.";
 
 const LOOP_CARD_BODY =
   'This command runs something that never ends (a loop with no exit, `yes`, or the like) in the background, behind an `&` or the Bash tool’s own background flag: the lane goes on working while it holds a core, until something stops it. Behind an `&` it also outlives the command and the session that started it. 10db tries to stop what a session leaves when the session ends, but it cannot promise to find all of it (a job that leaves the command’s process tree and group within a second, with no file open in the lane’s temp dir, escapes), and until then a loop like this holds the Mac busy and makes gates and tests fail on timeouts. Allowing it covers this call only: the next one is asked about again.';
@@ -627,8 +645,69 @@ export function createPermissionBroker(
     return 'behavior' in verdict;
   }
 
+  /**
+   * A pass's commit, push or merge: one card, allowed once or denied. A push of the current branch is
+   * checked when it runs, so a pass on the base branch never pushes it. The call runs as the builder
+   * would run it, and the agent's Bash call prints what it printed and ends as it ended.
+   */
+  async function runPassGit(
+    req: ToolRequest,
+    command: string,
+    call: Extract<PassGitCall, { kind: 'run' }>,
+    passGit: NonNullable<BrokerContext['passGit']>,
+  ): Promise<ToolDecision> {
+    const { item, answer } = deps.inbox.ask({
+      projectId: ctx.projectId,
+      ...owner,
+      sessionId: ctx.sessionId,
+      kind: 'permission',
+      title: `Allow ${call.argv.slice(0, call.argv[0] === 'gh' ? 3 : 2).join(' ')}?`,
+      body: `${command}\n\n${PASS_GIT_CARD_BODY}`,
+      options: ONCE_OPTIONS,
+      recommendation: null,
+      category: QuestionCategory.Environment,
+      urgency: Urgency.Normal,
+      detail: { toolName: req.toolName, summary: command },
+      signal: ctx.signal,
+      escalated: req.escalated,
+    });
+    const result = await waitOrWithdraw(item, answer);
+    if (!ALLOWING.includes(result.choice)) {
+      return {
+        behavior: 'deny',
+        message: denialMessage(req.toolName, command, result.note),
+        by: DeniedBy.Builder,
+      };
+    }
+    if (call.pushesCurrentBranch) {
+      const branch = await passGit.currentBranch();
+      if (branch === null || isProtected(branch, passGit.baseBranch)) {
+        return {
+          behavior: 'deny',
+          message: `This push sends the current branch, ${branch ?? 'a detached HEAD'}, and a push to ${branch ?? 'it'} stays refused in a pass: 10db lands the work there when it ships. Push a branch of your own by name.`,
+          by: DeniedBy.TenDb,
+        };
+      }
+    }
+    const ran = await passGit.run(call.argv, req.cwd);
+    return {
+      behavior: 'allow',
+      updatedInput: {
+        ...req.input,
+        command: `printf '%s' ${singleQuoted(ran.output)}; exit ${String(ran.exitCode)}`,
+      },
+    };
+  }
+
   async function decide(req: ToolRequest): Promise<ToolDecision> {
     if (req.toolName === 'AskUserQuestion') return askQuestions(req);
+    if (req.toolName === 'Bash' && ctx.passGit !== undefined) {
+      const command = stringField(req.input, 'command');
+      const call = command === null ? null : passGitCall(command, ctx.passGit.baseBranch);
+      if (call?.kind === 'run') return runPassGit(req, command ?? '', call, ctx.passGit);
+      if (call?.kind === 'refuse')
+        return { behavior: 'deny', message: call.reason, by: DeniedBy.TenDb };
+    }
     const { sandbox } = ctx;
     if (sandbox === undefined) return askPermission(req);
     if (req.toolName === NETWORK_TOOL) return judgeHost(req);

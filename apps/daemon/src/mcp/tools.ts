@@ -773,7 +773,8 @@ export function createToolHandlers(
       if (pass) {
         // A pass lane's work is kept at its task's ref, never committed on the pass's branch.
         const claimed = activeClaims(db, workstreamId).map((c) => ({ kind: c.kind, name: c.name }));
-        const inPass = { pages: passPageAreas(db, pass.id) };
+        // A commit tool call writes paths, never a push, so the base branch only completes the shape.
+        const inPass = { pages: passPageAreas(db, pass.id), baseBranch: project.baseBranch };
         const kept = await keepCommitToolPaths(deps, {
           workstreamId,
           paths: input.paths,

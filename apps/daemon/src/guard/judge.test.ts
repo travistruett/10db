@@ -250,10 +250,10 @@ describe('file edits', () => {
 
   // Workbench spec §7.1, §7.3: in a pass a page's file is the page's, even when a shared area or a
   // hazard the lane holds also matches it. An area with no role that a task of the pass holds is a page.
-  const PAGES = { pages: ['profile', 'settings'] };
+  const PAGES = { pages: ['profile', 'settings'], baseBranch: 'main' };
   it.each<{
     name: string;
-    inPass?: { pages: readonly string[] };
+    inPass?: { pages: readonly string[]; baseBranch: string };
     claims: Claims;
     path: string;
     decision: 'allow' | 'deny';
@@ -320,7 +320,7 @@ describe('file edits', () => {
     },
     {
       name: 'in a pass, an area with no role no task of the pass holds is allowed under a held shared area',
-      inPass: { pages: ['settings'] },
+      inPass: { pages: ['settings'], baseBranch: 'main' },
       claims: [{ kind: 'area', name: 'src' }],
       path: 'src/profile/card.tsx',
       decision: 'allow',

@@ -46,3 +46,4 @@ export {
   WORKTREE_LOCK_PREFIX,
   type WorktreeEntry,
 } from './worktree-list';
+export { runAsBuilder, type BuilderRun } from './run-as-builder';

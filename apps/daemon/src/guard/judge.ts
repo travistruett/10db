@@ -22,6 +22,7 @@ import {
 import { runsInBackground } from './background-loops';
 import { executableTails, FEEDERS } from './wrapped-commands';
 import { gitVerdict } from './git-rules';
+import { passGitCall } from './pass-git';
 import {
   classifyPath,
   foldPathCase,
@@ -64,7 +65,14 @@ export interface GuardInput {
    * page's alone, so only the lane holding it may write it, whatever shared area or hazard it holds
    * that also matches.
    */
-  readonly inPass?: { readonly pages: readonly string[] };
+  readonly inPass?: {
+    readonly pages: readonly string[];
+    /**
+     * The project's base branch: a push to it, or to `main`, stays refused in a pass, while the
+     * builder may allow another commit, push or merge on a card (`passGitCall`).
+     */
+    readonly baseBranch: string;
+  };
   /** The project's delivery; absent means local. In pull-request projects only the daemon pushes. */
   readonly delivery?: Delivery;
   /** Paths the file tools may not touch: the data directory and the default account's sign-in. */
@@ -749,6 +757,8 @@ const READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
   'ListMcpResourcesTool',
   'ReadMcpResourceTool',
 ]);
+const PASS_GIT_ASK =
+  'A commit, a push or a merge in a pass runs once the builder allows it: 10db runs it outside the sandbox, with their git.';
 const READ_ONLY_REFUSAL =
   'This step is read-only. Describe the change in mcp__10db__complete_step; the implement step makes it.';
 
@@ -800,6 +810,12 @@ export function judgeToolUse(input: GuardInput): GuardVerdict {
     if (input.readOnly) {
       const refusal = readOnlyShellRefusal(command);
       if (refusal) return deny(refusal);
+    }
+    // In a pass the builder may let a plain commit, push or merge run, on a card, as in Claude Code.
+    if (input.toolName === 'Bash' && input.inPass !== undefined) {
+      const call = passGitCall(command, input.inPass.baseBranch);
+      if (call?.kind === 'run') return { decision: 'ask', reason: PASS_GIT_ASK };
+      if (call?.kind === 'refuse') return deny(call.reason);
     }
     const ctx = {
       judge: input.judge,

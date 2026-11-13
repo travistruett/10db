@@ -231,6 +231,12 @@ const PASS_AREAS = [
   { name: 'src', globs: ['src/**'], role: 'shared' as const },
 ];
 
+const PASS: Partial<GuardCall> = {
+  areas: PASS_AREAS,
+  claims: [{ kind: ClaimKind.Area, name: 'src' }],
+  inPass: { pages: ['settings'], baseBranch: 'main' },
+};
+
 const OTHER_ROWS: readonly Row[] = [
   {
     name: 'an edit outside the claims',
@@ -247,7 +253,7 @@ const OTHER_ROWS: readonly Row[] = [
     extra: {
       areas: PASS_AREAS,
       claims: [{ kind: ClaimKind.Area, name: 'src' }],
-      inPass: { pages: ['settings'] },
+      inPass: { pages: ['settings'], baseBranch: 'main' },
     },
     rules: 'deny',
     judged: 'deny',
@@ -277,10 +283,26 @@ const OTHER_ROWS: readonly Row[] = [
     rules: 'deny',
     judged: 'deny',
   },
+  // In a pass the builder may let a plain commit, push or merge run on a card, under every judge.
+  ...(
+    [
+      ['a commit in a pass', "git commit -m 'Add the page'", 'ask'],
+      ['a push of HEAD in a pass', 'git push origin HEAD', 'ask'],
+      ['a push naming no branch in a pass', 'git push', 'deny'],
+      ['a push of a branch in a pass', 'git push -u origin feat/page', 'ask'],
+      ['a local merge in a pass', 'git merge feat/page', 'ask'],
+      ['a pull request merge in a pass', 'gh pr merge 12 --squash', 'ask'],
+      ['a force push in a pass', 'git push --force origin feat/page', 'deny'],
+      ['a push to main in a pass', 'git push origin main', 'deny'],
+      ['a commit after another command in a pass', 'git add a.ts && git commit -m x', 'deny'],
+      ['a commit through env in a pass', 'env git commit -m x', 'deny'],
+      ['a branch switch in a pass', 'git checkout -b side', 'deny'],
+    ] as const
+  ).map(([name, command, answer]) => bash(name, command, answer, answer, PASS)),
   bash('a deploy in a pass', 'vercel deploy --prod', 'deny', 'allow', {
     areas: PASS_AREAS,
     claims: [{ kind: ClaimKind.Area, name: 'src' }],
-    inPass: { pages: ['settings'] },
+    inPass: { pages: ['settings'], baseBranch: 'main' },
   }),
 ];
 

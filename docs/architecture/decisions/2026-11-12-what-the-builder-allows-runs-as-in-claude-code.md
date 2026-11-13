@@ -1,4 +1,4 @@
-# What the builder allows runs as in Claude Code: their allow rule wins over the deploy rule, and a pass asks before it reads `.env`
+# What the builder allows runs as in Claude Code: their allow rule wins over the deploy rule, and a pass asks before it commits, pushes, merges or reads `.env`
 
 - **Date:** 2026-11-12
 - **Amends:** `decisions/2026-11-12-10db-trusts-the-developer-and-contains-the-agent.md` (item 6, "when in
@@ -24,6 +24,18 @@
    outside the checkout (`~/.ssh`, the Keychain, account config) stay unreadable in every session, as decision item
    1 of the trust decision keeps them.
 
+3. **In a pass, a plain commit, push or merge asks, then runs.** `git commit …`, `git push …`, `git merge …` or
+   `gh pr merge …`, alone on its line with literal words (`guard/pass-git.ts`), gets one card (Allow once or Deny)
+   instead of the guard's refusal. Once allowed, 10db runs that exact call in the checkout, outside the sandbox,
+   with the session's environment, as the builder would in a terminal (`git/run-as-builder.ts`): their git
+   config, credentials and the repository's hooks take part, and the card says so. The agent's Bash call then
+   prints what it printed and ends with its exit code. Still refused, with no card: a force push (`--force`,
+   `--force-with-lease`, `-f`, a `+` refspec), `--mirror`, `--all`, a delete, a push to `main` or the base
+   branch (a push of the current branch is checked when it runs), `--receive-pack` and `--repo`, `gh pr merge
+--admin` or in another repository, git's own options (`-C`, `-c`), and every other spelling (a wrapper, a
+   variable, a substitution, a redirection, a second command), which the refusal names. Lanes are unchanged:
+   coordination still refuses git and gh writes there.
+
 ## Why
 
 - The builder's ruling on T3: "A deploy covered by a builder allow rule runs (the allow rule wins, as Claude
@@ -41,3 +53,12 @@
 - The spec's fuller design (trust line §2: attended sessions kernel-readable, with the limit line judging each
   read) needs the sandbox profile to differ by surface and its adversarial review; this keeps the profile as it is
   and opens only the Read tool, behind a card.
+- The builder's ruling on T3: "In a pass, git/gh commit, push and merge ask, then run: the call gets a card with
+  Allow this, as in Claude Code, and runs once allowed. Force-push and a push to `main` (or the default branch)
+  stay refused." A pass's checkout keeps its git state write-denied to the kernel and its credentials closed, so
+  the agent's own call could not run even after a go-ahead. 10db running the exact call the builder allowed keeps
+  the sandbox as it is: no command the agent chooses leaves it, and the one that does is the one on the card.
+- Turned down: letting the pass's sandbox run commands unsandboxed (`allowUnsandboxedCommands` with the broker
+  setting `dangerouslyDisableSandbox`). It changes the profile for every command and runs the call with the
+  lane's command environment (`GIT_CONFIG_GLOBAL=/dev/null`, an empty `XDG_CONFIG_HOME`), so a commit has no
+  identity and gh no sign-in.

@@ -1,5 +1,6 @@
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { realpathSync } from 'node:fs';
+import { isAbsolute, join } from 'node:path';
 import {
   TrustSurface,
   ClaimKind,
@@ -188,7 +189,7 @@ import {
   type Launcher,
   type SessionLaunch,
 } from '../environment';
-import type { Git } from '../git';
+import { equalOrUnder, runAsBuilder, type Git } from '../git';
 import { judgePreToolUse, type ProtectedPath } from '../guard';
 import type { Judge } from '../judge';
 import {
@@ -824,6 +825,20 @@ function stoppedWaiting(logPath: string): GateResult {
 
 /** The most of a gate's output its evidence keeps, a note on its base included. */
 const GATE_SUMMARY_CHARS = 2000;
+
+/**
+ * Where a pass runs a call the builder allowed: the call's own directory (an earlier `cd`) when its
+ * real path lies in the checkout's, else the checkout, so a link out of the checkout never moves it.
+ */
+function builderCwd(cwd: string | undefined, checkout: string): string {
+  if (cwd === undefined || !isAbsolute(cwd)) return checkout;
+  try {
+    const real = realpathSync.native(cwd);
+    return equalOrUnder(real, realpathSync.native(checkout)) ? real : checkout;
+  } catch {
+    return checkout;
+  }
+}
 
 /**
  * A gate's evidence text: the note on why it ran without its base as origin has it, when there is
@@ -2511,7 +2526,9 @@ export function createRunner(opts: RunnerOptions): Runner {
             delivery: project.delivery,
             protectedPaths: opts.protectedPaths,
             // Every page of the pass is a page here: another task's is never written.
-            ...(pass ? { inPass: { pages: passPageAreas(db, pass.id) } } : {}),
+            ...(pass
+              ? { inPass: { pages: passPageAreas(db, pass.id), baseBranch: project.baseBranch } }
+              : {}),
             ownSession: {
               configDir,
               providerSessionId: st.providerSessionId ?? resumeId,
@@ -2535,6 +2552,20 @@ export function createRunner(opts: RunnerOptions): Runner {
             mcpApproved: projectMcp.configHashes,
             ...(laneSession
               ? { sandbox: { fileAccess: laneSession.fileAccess, hazards: project.hazards } }
+              : {}),
+            ...(pass
+              ? {
+                  passGit: {
+                    baseBranch: project.baseBranch,
+                    currentBranch: () => opts.git.currentBranch(checkout),
+                    run: (argv, cwd) =>
+                      runAsBuilder(argv, {
+                        cwd: builderCwd(cwd, checkout),
+                        env: launch.env,
+                        signal: abort.signal,
+                      }),
+                  },
+                }
               : {}),
           },
         ),

@@ -20,3 +20,4 @@ export { runsInBackground, startsEndlessBackgroundLoop } from './background-loop
 export { hazardFor, hazardHit } from './hazards';
 export { firstUnread } from './unread-commands';
 export { unreadableHazard } from './unread-hazards';
+export { isProtected, passGitCall, type PassGitCall } from './pass-git';

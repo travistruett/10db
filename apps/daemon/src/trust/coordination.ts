@@ -22,7 +22,11 @@ export function coordinationLines(surface: TrustSurface, gateCommand: string | n
         },
         {
           label: '10db Commits And Pushes',
-          text: 'Committing, pushing, merging, or creating or switching branches with git or gh: 10db commits through its commit tool, and pushes and opens the pull request when the work ships.',
+          // In a pass the builder may allow a plain commit, push or merge on a card (the guard asks).
+          text:
+            surface === TrustSurface.Pass
+              ? 'Committing, pushing or merging with git or gh in any way but one plain call the builder allows on a card, force-pushing, pushing to main or the base branch, and creating or switching branches: 10db lands the work when it ships.'
+              : 'Committing, pushing, merging, or creating or switching branches with git or gh: 10db commits through its commit tool, and pushes and opens the pull request when the work ships.',
         },
         {
           label: 'Shared Mac',
