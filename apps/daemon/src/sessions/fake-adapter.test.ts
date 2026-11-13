@@ -3,10 +3,12 @@ import { join } from 'node:path';
 import { mintId } from '@10db/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { tempDir } from '../../test/fixtures';
+import { FakeSessionClashError } from './fake-session';
 import {
   FakeAdapter,
   loadFakeScriptBook,
   type FakeScriptBook,
+  type ExploreSessionSpec,
   type LaneProfile,
   type LaneSessionSpec,
   type SessionEvent,
@@ -268,6 +270,63 @@ describe('FakeAdapter', () => {
       email: 'builder@example.com',
     });
     expect(adapter.probes).toEqual([{ kind: 'claude_subscription', cwd: '/d', env: {} }]);
+  });
+});
+
+describe('one open handle per agent session', () => {
+  const hanging = () => new FakeAdapter({ Alpha: [[{ do: 'hang' }]] });
+  const exploreSpec = (resume: string | null): ExploreSessionSpec => ({
+    ...spec({ resumeProviderSessionId: resume }),
+    profile: {
+      kind: 'explore',
+      shapeId: mintId('Shape'),
+      systemPrompt: 'You are Shape.',
+      tools: [],
+      allowedTools: [],
+      disallowedTools: [],
+      agents: {},
+    },
+  });
+
+  it('refuses a second lane that resumes the agent session a lane holds', () => {
+    const adapter = hanging();
+    adapter.open(spec({ resumeProviderSessionId: 'p1' }));
+    expect(() => adapter.open(spec({ resumeProviderSessionId: 'p1' }))).toThrow(
+      FakeSessionClashError,
+    );
+    expect(() => adapter.open(spec({ resumeProviderSessionId: 'p1' }))).toThrow('p1');
+    expect(adapter.prompts).toHaveLength(1);
+  });
+
+  it('opens a lane on an agent session whose earlier handle has ended', async () => {
+    const adapter = hanging();
+    const first = adapter.open(spec({ resumeProviderSessionId: 'p1' }));
+    await first.stop();
+    await collect(first.events);
+    expect(() => adapter.open(spec({ resumeProviderSessionId: 'p1' }))).not.toThrow();
+  });
+
+  it('refuses an explore session on the agent session a lane holds: the key is the agent session', () => {
+    const adapter = hanging();
+    adapter.open(spec({ resumeProviderSessionId: 'p1' }));
+    expect(() => adapter.open(exploreSpec('p1'))).toThrow(FakeSessionClashError);
+  });
+
+  it('opens two fresh lanes, each under its own minted id', () => {
+    const adapter = hanging();
+    expect(() => {
+      adapter.open(spec());
+      adapter.open(spec());
+    }).not.toThrow();
+  });
+
+  it('opens a lane on an agent session whose earlier start was refused for its account', async () => {
+    const adapter = hanging();
+    adapter.seen = () => ({ email: 'other@example.com' });
+    const refused = adapter.open(spec({ resumeProviderSessionId: 'p1' }));
+    expect((await collect(refused.events)).at(-1)).toMatchObject({ reason: 'account_refused' });
+    adapter.seen = () => ({});
+    expect(() => adapter.open(spec({ resumeProviderSessionId: 'p1' }))).not.toThrow();
   });
 });
 

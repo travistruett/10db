@@ -22,6 +22,7 @@ import {
   type SessionHandle,
   type LaneSessionSpec,
   type ShapeImage,
+  type AgentSessionSpec,
   type ExploreSessionSpec,
   type ShapeToolRequest,
   type ShapeVerdict,
@@ -94,8 +95,28 @@ export function fakeEndedSession(ended: Extract<SessionEvent, { type: 'ended' }>
   };
 }
 
-/** What the lane driver reads and records on the adapter; FakeAdapter builds one per start(). */
+/** Two handles open on one agent session: the runner or Plan has two writers on it. */
+export class FakeSessionClashError extends Error {
+  override readonly name = 'FakeSessionClashError';
+  constructor(providerSessionId: string) {
+    super(`A second handle was opened on agent session ${providerSessionId} while one is open.`);
+  }
+}
+
+/**
+ * The agent session a fake session runs under: the one it resumes, else the one it mints. The adapter
+ * keys its one-open-handle check on it, and the session reports it in `started`.
+ */
+export function fakeProviderSessionId(spec: AgentSessionSpec, minted: string): string {
+  return spec.resumeProviderSessionId ?? minted;
+}
+
+/** What the lane driver reads and records on the adapter; FakeAdapter builds one per open(). */
 export interface FakeLaneContext {
+  /** The agent session the lane runs under, as `fakeProviderSessionId` names it. */
+  readonly providerSessionId: string;
+  /** Runs once, when the session ends. */
+  onEnded(): void;
   readonly title: string;
   readonly steps: readonly FakeStep[] | undefined;
   readonly reportedModel: string | undefined;
@@ -122,7 +143,10 @@ export function runFakeLaneSession(spec: LaneSessionSpec, context: FakeLaneConte
   };
   const abort = new AbortController();
   const messages: string[] = [];
-  const providerSessionId = spec.resumeProviderSessionId ?? `fake-${spec.sessionId}`;
+  const { providerSessionId } = context;
+  core.onEnd(() => {
+    context.onEnded();
+  });
   const transcript = context.transcript(providerSessionId);
   const takenHere = context.taken(providerSessionId);
   /** The client uuids of the messages the session holds that no turn has taken yet, the prompt's first. */
@@ -502,8 +526,10 @@ export function runFakeExploreSession(
   spec: ExploreSessionSpec,
   behaviour: FakeShapeBehaviour,
   providerSessionId: string,
+  onEnded: () => void,
 ): SessionHandle {
   const core = createFakeSessionCore();
+  core.onEnd(onEnded);
   const emit = (event: SessionEvent): void => {
     core.emit(event);
   };

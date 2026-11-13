@@ -6,6 +6,8 @@ import { capabilitiesOf, type AgentCapabilities } from './capabilities';
 import type { FakeInterrupt, FakeObservation, FakeScriptBook, FakeSent } from './fake-script';
 import {
   fakeEndedSession,
+  fakeProviderSessionId,
+  FakeSessionClashError,
   runFakeExploreSession,
   runFakeLaneSession,
   type FakeShapeBehaviour,
@@ -151,6 +153,8 @@ export class FakeAdapter implements AgentAdapter {
   answer: (ask: CompletionSpec) => Promise<string> = () =>
     Promise.reject(new CompletionError('The fake adapter has no model to ask.'));
 
+  /** The agent sessions a handle is open on, until that handle's `ended`. */
+  private readonly openIds = new Set<string>();
   private readonly book: FakeScriptBook;
   /** The names `signal` was called with, and the sessions waiting for one. */
   private readonly signalled = new Set<string>();
@@ -158,6 +162,14 @@ export class FakeAdapter implements AgentAdapter {
 
   constructor(book: FakeScriptBook) {
     this.book = book;
+  }
+
+  /** Marks the agent session open and returns what releases it when the session ends. */
+  private claim(providerSessionId: string): () => void {
+    this.openIds.add(providerSessionId);
+    return () => {
+      this.openIds.delete(providerSessionId);
+    };
   }
 
   /** Lets every session waiting at `await_signal` for `name` go on, and any that reaches it later. */
@@ -172,10 +184,22 @@ export class FakeAdapter implements AgentAdapter {
     return capabilitiesOf(account.kind);
   }
 
+  /**
+   * Throws a `FakeSessionClashError` when a handle is still open on the agent session the spec runs
+   * under, before anything is recorded: a second writer on one agent session is a bug in the caller.
+   */
   open(spec: AgentSessionSpec): SessionHandle {
+    const id = fakeProviderSessionId(
+      spec,
+      onProfile(spec, {
+        lane: (lane) => `fake-${lane.sessionId}`,
+        explore: () => `fake-shape-${String(this.shapeSessions.length + 1)}`,
+      }),
+    );
+    if (this.openIds.has(id)) throw new FakeSessionClashError(id);
     return onProfile(spec, {
-      lane: (lane) => this.openLane(lane),
-      explore: (explore) => this.openExplore(explore),
+      lane: (lane) => this.openLane(lane, id),
+      explore: (explore) => this.openExplore(explore, id),
     });
   }
 
@@ -232,7 +256,7 @@ export class FakeAdapter implements AgentAdapter {
   /** The same for a lane session: its stop waits for it before the session ends. */
   laneStopGate: Promise<void> | null = null;
 
-  private openExplore(spec: ExploreSessionSpec): SessionHandle {
+  private openExplore(spec: ExploreSessionSpec, providerSessionId: string): SessionHandle {
     const refusal = checkAccount(spec.account, expectedSeen(spec.account));
     const sent: string[] = [];
     const inner = refusal
@@ -244,7 +268,8 @@ export class FakeAdapter implements AgentAdapter {
       : runFakeExploreSession(
           spec,
           (turn) => this.shapeBehaviour(turn),
-          `fake-shape-${String(this.shapeSessions.length + 1)}`,
+          providerSessionId,
+          this.claim(providerSessionId),
         );
     const handle: SessionHandle = {
       events: inner.events,
@@ -262,7 +287,7 @@ export class FakeAdapter implements AgentAdapter {
     return handle;
   }
 
-  private openLane(spec: LaneSessionSpec): SessionHandle {
+  private openLane(spec: LaneSessionSpec, providerSessionId: string): SessionHandle {
     const { model: reportedModel, ...override } = this.seen(spec);
     const refusal = checkAccount(spec.account, { ...expectedSeen(spec.account), ...override });
     if (refusal)
@@ -284,6 +309,8 @@ export class FakeAdapter implements AgentAdapter {
       accountId: spec.account.accountId,
     });
     return runFakeLaneSession(spec, {
+      providerSessionId,
+      onEnded: this.claim(providerSessionId),
       title,
       steps: this.book[title]?.[spec.profile.sequence - 1],
       reportedModel,
