@@ -5,13 +5,16 @@ import type {
   SDKAssistantMessage,
   SDKMessage,
   SDKUserMessage,
+  SlashCommand,
 } from '@anthropic-ai/claude-agent-sdk';
 import type { UUID } from 'node:crypto';
 import { MAX_STEP_SUMMARY, ModelMarkBasis } from '@10db/contracts';
+import { z } from 'zod';
 import type { GuardVerdict } from '../guard';
 import { SandboxedMcpServer } from '../sandbox';
 import { modelRefusalBasis, MODEL_NOT_FOUND_ERROR } from './account-check';
 import type {
+  AgentCommand,
   InterruptReceipt,
   SessionEvent,
   SessionMcpServer,
@@ -20,7 +23,8 @@ import type {
   ToolDecision,
   TurnResult,
 } from './types';
-import { claudeToolTarget } from './tool-target';
+import { mapClaudeStreamEvent, unstreamedTextId, type ClaudeStreamState } from './claude-stream';
+import type { ClaudeToolCalls } from './claude-tool-calls';
 
 export const SUMMARY_CHARS = 200;
 const BRIEF_CHARS = 80;
@@ -79,15 +83,52 @@ function consumedBy(
   );
 }
 
+/** Claude Code's slash commands as the session reports them; an empty hint is left out. */
+export function agentCommands(commands: readonly SlashCommand[]): AgentCommand[] {
+  return commands.map((c) => ({
+    name: c.name,
+    description: c.description,
+    ...(c.argumentHint === '' ? {} : { argumentHint: c.argumentHint }),
+  }));
+}
+
+/** What one session's mapping keeps between messages: its stream and its tool calls. */
+export interface ClaudeMapContext {
+  readonly pid: number | null;
+  readonly stream: ClaudeStreamState;
+  readonly calls: ClaudeToolCalls;
+}
+
+// A user frame's content is the Messages API's; only tool results are read, loosely.
+const ToolResultBlock = z.looseObject({
+  type: z.literal('tool_result'),
+  tool_use_id: z.string().min(1),
+  is_error: z.boolean().optional(),
+  content: z.unknown(),
+});
+
 /**
  * Maps one SDK message to session events. Never emits `context` or `ended`; the adapter owns those.
  * `if` rather than `switch`: the SDK adds message types often, and every other type maps to nothing.
  */
-export function mapSdkMessage(
-  msg: SDKMessage,
-  ctx: { readonly pid: number | null },
-): SessionEvent[] {
+export function mapSdkMessage(msg: SDKMessage, ctx: ClaudeMapContext): SessionEvent[] {
+  if (msg.type === 'stream_event') return mapClaudeStreamEvent(msg, ctx.stream);
+  if (msg.type === 'user') {
+    const content = msg.message.content;
+    if (!Array.isArray(content)) return [];
+    return content.flatMap((block) => {
+      const result = ToolResultBlock.safeParse(block);
+      return result.success
+        ? ctx.calls.result(result.data.tool_use_id, {
+            isError: result.data.is_error === true,
+            content: result.data.content,
+          })
+        : [];
+    });
+  }
   if (msg.type === 'system') {
+    if (msg.subtype === 'commands_changed')
+      return [{ type: 'commands', commands: agentCommands(msg.commands) }];
     if (msg.subtype === 'init')
       return [{ type: 'started', providerSessionId: msg.session_id, pid: ctx.pid }];
     if (msg.subtype === 'compact_boundary')
@@ -105,18 +146,24 @@ export function mapSdkMessage(
   }
   if (msg.type === 'assistant') {
     const events: SessionEvent[] = [];
+    // A subagent's text is its own conversation: it shows as activity, never as the session's message.
+    const own = msg.parent_tool_use_id === null;
     for (const block of msg.message.content) {
       if (block.type === 'text') {
         const text = block.text.trim();
         if (text)
           events.push({ type: 'activity', kind: 'text', summary: text.slice(0, SUMMARY_CHARS) });
+        const itemId = own && text ? unstreamedTextId(ctx.stream, msg.message.id) : null;
+        if (itemId !== null) events.push({ type: 'message', itemId, text: block.text });
       } else if (block.type === 'tool_use') {
-        events.push({
-          type: 'activity',
-          kind: 'tool',
-          summary: `${block.name} ${toolBrief(block.input)}`.slice(0, SUMMARY_CHARS),
-          tool: claudeToolTarget(block.name, block.input),
-        });
+        events.push(
+          ...ctx.calls.use({
+            id: block.id,
+            name: block.name,
+            input: block.input,
+            parentId: msg.parent_tool_use_id,
+          }),
+        );
       }
     }
     const taken = consumedBy(msg);

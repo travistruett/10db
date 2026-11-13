@@ -1,4 +1,5 @@
 import {
+  DeniedBy,
   PermissionChoice,
   MCP_TOOL_GRANT_DETAIL,
   QuestionCategory,
@@ -188,6 +189,7 @@ const NetworkInput = z.looseObject({ host: z.string().min(1) });
 const UNJUDGED_PATH: ToolDecision = {
   behavior: 'deny',
   message: "10db could not judge this call's path.",
+  by: DeniedBy.TenDb,
 };
 
 /** What the broker asks about once a sandboxed call needs a person: the card's text and the real paths it names. */
@@ -298,6 +300,7 @@ export function createPermissionBroker(
       return {
         behavior: 'deny',
         message: 'AskUserQuestion input was not understood; use ask_human instead.',
+        by: DeniedBy.TenDb,
       };
     }
     const answers: Record<string, string> = {};
@@ -423,6 +426,8 @@ export function createPermissionBroker(
     return {
       behavior: 'deny',
       message: denialMessage(req.toolName, summary, result.note),
+      // The builder answered the card with Deny: the one refusal that is theirs.
+      by: DeniedBy.Builder,
     };
   }
 
@@ -436,6 +441,7 @@ export function createPermissionBroker(
       return {
         behavior: 'deny',
         message: 'The network request named no host, so 10db refused it.',
+        by: DeniedBy.TenDb,
       };
     }
     const host = parsed.data.host.toLowerCase();
@@ -493,6 +499,7 @@ export function createPermissionBroker(
     return {
       behavior: 'deny',
       message: `10db asked the builder about ${host}. Retry after the card is answered, or work without it.`,
+      by: DeniedBy.TenDb,
     };
   }
 
@@ -572,16 +579,25 @@ export function createPermissionBroker(
           return {
             behavior: 'deny',
             message: `${path} is a protected path; 10db never lets a lane read it.`,
+            by: DeniedBy.TenDb,
           };
         }
         if (access === 'outside-copy') {
           // Never right, so never a card: the lane's paths come from its own copy.
-          return { behavior: 'deny', message: outsideCopyRefusal(path, sandbox.fileAccess) };
+          return {
+            behavior: 'deny',
+            message: outsideCopyRefusal(path, sandbox.fileAccess),
+            by: DeniedBy.TenDb,
+          };
         }
         if (access === 'ask') asking.push(realPath);
       }
     } catch {
-      return { behavior: 'deny', message: `${req.toolName} could not be judged; 10db refuses it.` };
+      return {
+        behavior: 'deny',
+        message: `${req.toolName} could not be judged; 10db refuses it.`,
+        by: DeniedBy.TenDb,
+      };
     }
     const [first] = asking;
     if (first === undefined && !req.escalated) return { behavior: 'allow' };
@@ -630,7 +646,12 @@ export function createPermissionBroker(
       return await decide(req);
     } catch (error) {
       if (error instanceof ParkedError) {
-        return { behavior: 'deny', message: 'Parked until the builder answers.', interrupt: true };
+        return {
+          behavior: 'deny',
+          message: 'Parked until the builder answers.',
+          interrupt: true,
+          by: DeniedBy.TenDb,
+        };
       }
       throw error;
     }

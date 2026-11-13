@@ -1,5 +1,6 @@
 import type {
   AccountRefusal,
+  DeniedBy,
   Effort,
   ModelMarkBasis,
   SessionId,
@@ -42,7 +43,13 @@ export interface ToolRequest {
 
 export type ToolDecision =
   | { readonly behavior: 'allow'; readonly updatedInput?: Record<string, unknown> }
-  | { readonly behavior: 'deny'; readonly message: string; readonly interrupt?: boolean };
+  | {
+      readonly behavior: 'deny';
+      readonly message: string;
+      readonly interrupt?: boolean;
+      /** The builder, on a card's Deny; 10db for every other refusal. */
+      readonly by: DeniedBy;
+    };
 
 /** A repo MCP server as a session takes it: a stdio server only as its launch under the lane sandbox. */
 export type SessionMcpServer = SandboxedMcpServer | RemoteMcpServer;

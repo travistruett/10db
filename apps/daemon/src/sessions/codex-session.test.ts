@@ -2152,7 +2152,8 @@ describe('the guard socket', () => {
   it.skipIf(SANDBOXED)('interrupts the turn when the broker says to', async () => {
     const { handle, server, spec } = await running({
       preToolUse: () => ({ decision: 'ask', reason: 'unread' }),
-      canUseTool: () => Promise.resolve({ behavior: 'deny', message: 'stop', interrupt: true }),
+      canUseTool: () =>
+        Promise.resolve({ behavior: 'deny', message: 'stop', interrupt: true, by: '10db' }),
     });
     const refused = await post(spec, 'make');
     expect(refused.body).toContain('stop');

@@ -45,6 +45,7 @@ export type ClaudeProfileOptions = Pick<
   | 'disallowedTools'
   | 'agents'
   | 'permissionMode'
+  | 'includePartialMessages'
 > & {
   /** Merged over the session env, before AUTOUPDATE_OFF: the sandbox's env and the scrub switch; {} unsandboxed. */
   readonly sandboxEnv: Readonly<Record<string, string>>;
@@ -99,6 +100,8 @@ function laneOptions(
     // In default mode what no allow rule covers reaches canUseTool. Only a sandboxed lane may run in
     // auto mode, whose classifier approves calls itself; an unsandboxed session never does.
     permissionMode: sandbox ? profile.permissionMode : 'default',
+    // The partial frames carry the text and reasoning deltas the session reports as they arrive.
+    includePartialMessages: true,
     sandboxEnv: sandbox ? sandboxEnv(sandbox, profile.permissionMode) : {},
   };
 }
@@ -143,6 +146,7 @@ function exploreOptions(
       ]),
     ),
     permissionMode: 'default',
+    includePartialMessages: true,
     // Default mode: Claude Code forces it while the scrub is on, and it keeps the processes outside the
     // sandbox free of the session's variables.
     sandboxEnv: sandbox ? sandboxEnv(sandbox, 'default') : {},

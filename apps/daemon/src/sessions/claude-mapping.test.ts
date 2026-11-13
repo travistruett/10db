@@ -12,20 +12,43 @@ import {
   toSdkMcpServer,
   userMessage,
 } from './claude-mapping';
+import { createClaudeStreamState } from './claude-stream';
 import {
   assistantMessage,
   backgroundTasksChanged,
+  blockStart,
+  commandsChanged,
   compactBoundary,
   initMessage,
+  messageStart,
   PROVIDER_SESSION,
   rateLimitEvent,
   resultMessage,
+  streamEvent,
   textBlock,
+  textDelta,
+  toolResultMessage,
   toolUseBlock,
 } from './claude-test-support';
+import { createClaudeToolCalls } from './claude-tool-calls';
 import type { SessionMcpServer } from './types';
 
-const ctx = { pid: 4242 };
+/** A session's mapping state; `streamed` names messages that came as partial frames first. */
+function mapping(streamed: readonly string[] = []) {
+  const stream = createClaudeStreamState();
+  for (const id of streamed) stream.streamed.add(id);
+  return {
+    pid: 4242,
+    stream,
+    calls: createClaudeToolCalls({
+      now: () => new Date('2026-11-12T10:00:00.000Z'),
+      before: () => ({ kind: 'unread' }),
+    }),
+  };
+}
+
+// The rows below that only read activity run as if `msg_1` had streamed, so it brings no message.
+const ctx = mapping(['msg_1']);
 const TOOK_FIRST = '01a1b2c3-0000-7000-8000-000000000001';
 const TOOK_SECOND = '01a1b2c3-0000-7000-8000-000000000002';
 
@@ -36,26 +59,102 @@ describe('mapSdkMessage', () => {
     ]);
   });
 
-  it('maps each text and tool block of an assistant message to activity, skipping empty text', () => {
+  it('maps each text block to activity, skipping empty text, and each tool use to a running tool call', () => {
     const msg = assistantMessage([
       textBlock('  Reading the task.  '),
       textBlock('   '),
       toolUseBlock('Bash', { command: 'pnpm test' }),
-      toolUseBlock('Edit', { file_path: 'src/a.ts', old_string: 'x' }),
     ]);
-    expect(mapSdkMessage(msg, ctx)).toEqual([
+    expect(mapSdkMessage(msg, mapping(['msg_1']))).toMatchObject([
       { type: 'activity', kind: 'text', summary: 'Reading the task.' },
       {
-        type: 'activity',
-        kind: 'tool',
-        summary: 'Bash pnpm test',
-        tool: { name: 'Bash', target: 'pnpm', written: [] },
+        type: 'tool_call',
+        call: { id: 'toolu_1', kind: 'command', command: 'pnpm test', status: 'running' },
       },
+    ]);
+  });
+
+  it('routes a stream event to the stream', () => {
+    const state = mapping();
+    mapSdkMessage(streamEvent(messageStart('msg_5')), state);
+    mapSdkMessage(streamEvent(blockStart(0, 'text')), state);
+    expect(mapSdkMessage(streamEvent(textDelta(0, 'Hi')), state)).toEqual([
+      { type: 'text_delta', itemId: 'msg_5:0', offset: 0, text: 'Hi' },
+    ]);
+  });
+
+  it('an assistant text whose message streamed gives activity only', () => {
+    const state = mapping();
+    mapSdkMessage(streamEvent(messageStart('msg_9')), state);
+    expect(
+      mapSdkMessage(assistantMessage([textBlock('Hello')], undefined, 'msg_9'), state),
+    ).toEqual([{ type: 'activity', kind: 'text', summary: 'Hello' }]);
+  });
+
+  it("an assistant text whose message didn't stream gives activity and the message", () => {
+    const state = mapping();
+    expect(
+      mapSdkMessage(assistantMessage([textBlock('Hello')], undefined, 'msg_9'), state),
+    ).toEqual([
+      { type: 'activity', kind: 'text', summary: 'Hello' },
+      { type: 'message', itemId: 'msg_9:a0', text: 'Hello' },
+    ]);
+    expect(
+      mapSdkMessage(assistantMessage([textBlock('Again')], undefined, 'msg_9'), state),
+    ).toContainEqual({ type: 'message', itemId: 'msg_9:a1', text: 'Again' });
+  });
+
+  it("a subagent's assistant text gives no message, and its tool use names its parent", () => {
+    const events = mapSdkMessage(
+      assistantMessage(
+        [textBlock('inner'), toolUseBlock('Read', { file_path: 'a.ts' }, 'toolu_2')],
+        undefined,
+        'msg_3',
+        'toolu_9',
+      ),
+      mapping(),
+    );
+    expect(events.filter((e) => e.type === 'message')).toEqual([]);
+    expect(events.filter((e) => e.type === 'tool_call')).toMatchObject([
+      { call: { id: 'toolu_2', parentId: 'toolu_9' } },
+    ]);
+  });
+
+  it('TodoWrite gives a plan update', () => {
+    expect(
+      mapSdkMessage(
+        assistantMessage([
+          toolUseBlock('TodoWrite', { todos: [{ content: 'Read', status: 'in_progress' }] }),
+        ]),
+        mapping(['msg_1']),
+      ),
+    ).toEqual([{ type: 'plan_update', steps: [{ text: 'Read', status: 'in_progress' }] }]);
+  });
+
+  it("a user frame's tool result finishes its call", () => {
+    const state = mapping(['msg_1']);
+    mapSdkMessage(assistantMessage([toolUseBlock('Bash', { command: 'ls' })]), state);
+    expect(mapSdkMessage(toolResultMessage('toolu_1', 'a.ts\n'), state)).toMatchObject([
+      { type: 'tool_call', call: { id: 'toolu_1', status: 'done', outputTail: 'a.ts\n' } },
+    ]);
+  });
+
+  it('a commands push gives the commands, leaving out an empty hint', () => {
+    expect(
+      mapSdkMessage(
+        commandsChanged([
+          { name: 'compact', description: 'Compact', argumentHint: '' },
+          { name: 'review', description: 'Review', argumentHint: '<pr>' },
+        ]),
+        mapping(),
+      ),
+    ).toEqual([
       {
-        type: 'activity',
-        kind: 'tool',
-        summary: 'Edit src/a.ts',
-        tool: { name: 'Edit', target: 'src/a.ts', written: ['src/a.ts'] },
+        type: 'commands',
+        commands: [
+          { name: 'compact', description: 'Compact' },
+          { name: 'review', description: 'Review', argumentHint: '<pr>' },
+        ],
       },
     ]);
   });
@@ -306,13 +405,13 @@ describe('permission and hook translation', () => {
 
   it('passes a denial message and interrupt through', () => {
     expect(
-      toPermissionResult({ behavior: 'deny', message: 'Parked', interrupt: true }, {}),
+      toPermissionResult({ behavior: 'deny', message: 'Parked', interrupt: true, by: '10db' }, {}),
     ).toEqual({
       behavior: 'deny',
       message: 'Parked',
       interrupt: true,
     });
-    expect(toPermissionResult({ behavior: 'deny', message: 'No' }, {})).toEqual({
+    expect(toPermissionResult({ behavior: 'deny', message: 'No', by: '10db' }, {})).toEqual({
       behavior: 'deny',
       message: 'No',
     });

@@ -144,7 +144,8 @@ describe.skipIf(!live)('a Shape session, live', () => {
       mcp: { url: 'http://127.0.0.1:9/mcp', token: 'unused', toolTimeoutMs: 5_000 },
       sandbox: null,
       projectMcpServers: {},
-      canUseTool: () => Promise.resolve({ behavior: 'deny', message: 'no broker here' }),
+      canUseTool: () =>
+        Promise.resolve({ behavior: 'deny', message: 'no broker here', by: '10db' }),
       preToolUse: (req) => {
         const verdict = judgeShapeCall(
           {
@@ -311,7 +312,8 @@ describe.skipIf(!live)('a Shape session, live', () => {
       mcp: { url: `http://127.0.0.1:${String(port)}/mcp`, token, toolTimeoutMs: 30_000 },
       sandbox: null,
       projectMcpServers: {},
-      canUseTool: () => Promise.resolve({ behavior: 'deny', message: 'no broker here' }),
+      canUseTool: () =>
+        Promise.resolve({ behavior: 'deny', message: 'no broker here', by: '10db' }),
       preToolUse: (req) => {
         const verdict = judgeShapeCall(
           {
@@ -437,7 +439,8 @@ describe.skipIf(!live)('a Shape session, live', () => {
       mcp: { url: 'http://127.0.0.1:9/mcp', token: 'unused', toolTimeoutMs: 5_000 },
       sandbox: null,
       projectMcpServers: {},
-      canUseTool: () => Promise.resolve({ behavior: 'deny', message: 'no broker here' }),
+      canUseTool: () =>
+        Promise.resolve({ behavior: 'deny', message: 'no broker here', by: '10db' }),
       preToolUse: (req) => {
         const verdict = judgeShapeCall(
           {
@@ -650,7 +653,7 @@ async function readInSession(
     mcp: { url: 'http://127.0.0.1:9/mcp', token: 'unused', toolTimeoutMs: 5_000 },
     sandbox: null,
     projectMcpServers: {},
-    canUseTool: () => Promise.resolve({ behavior: 'deny', message: 'no broker here' }),
+    canUseTool: () => Promise.resolve({ behavior: 'deny', message: 'no broker here', by: '10db' }),
     preToolUse: (req) => {
       if (req.toolName === 'Read') reads.push(req);
       return judgeShapeCall(

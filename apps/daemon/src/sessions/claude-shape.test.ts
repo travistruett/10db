@@ -10,7 +10,19 @@ import { describe, expect, it } from 'vitest';
 import { silentLogger } from '../log';
 import type { LaneSandboxSpec } from '../sandbox';
 import { createChannel } from './channel';
-import { assistantMessage, initMessage, resultMessage, textBlock } from './claude-test-support';
+import {
+  assistantMessage,
+  blockStart,
+  blockStop,
+  initMessage,
+  messageStart,
+  resultMessage,
+  streamEvent,
+  textBlock,
+  textDelta,
+  toolResultMessage,
+  toolUseBlock,
+} from './claude-test-support';
 import { SKILL_NAMES_LINE } from './setup-prompt';
 import { startShapeSession, type QueryFn } from './claude-session';
 import type {
@@ -50,7 +62,8 @@ function spec(overrides: ExploreOverrides = {}): ExploreSessionSpec {
     sandbox: null,
     projectMcpServers: {},
     preToolUse: () => ({ decision: 'allow' }),
-    canUseTool: () => Promise.resolve({ behavior: 'deny', message: 'not in this test' }),
+    canUseTool: () =>
+      Promise.resolve({ behavior: 'deny', message: 'not in this test', by: '10db' }),
     ...core,
     profile: {
       kind: 'explore',
@@ -292,7 +305,11 @@ describe('a Shape session’s SDK options', () => {
       spec({
         canUseTool: (req) => {
           seen.push(req);
-          return Promise.resolve({ behavior: 'deny', message: 'the builder said no' });
+          return Promise.resolve({
+            behavior: 'deny',
+            message: 'the builder said no',
+            by: 'builder',
+          });
         },
       }),
       deps(query),
@@ -572,6 +589,49 @@ describe('the PostToolUseFailure hook', () => {
 });
 
 describe('the session’s run', () => {
+  it('streams its turn as a lane does: the deltas, one message, the call from use to result', async () => {
+    const { query } = fakeQuery({
+      turns: [
+        [
+          initMessage(),
+          streamEvent(messageStart('msg_1')),
+          streamEvent(blockStart(0, 'text')),
+          streamEvent(textDelta(0, 'Hel')),
+          streamEvent(textDelta(0, 'lo')),
+          streamEvent(blockStop(0)),
+          assistantMessage([textBlock('Hello')]),
+          assistantMessage([toolUseBlock('Read', { file_path: 'a.ts' })], undefined, 'msg_2'),
+          toolResultMessage('toolu_1', 'x'),
+          resultMessage({ input: 10, output: 5, costUsd: 0.01 }),
+        ],
+      ],
+    });
+    const handle = startShapeSession(spec(), deps(query));
+    const events = await collect(handle, (e) => e.some((x) => x.type === 'turn_complete'));
+    const seen = events.filter((e) =>
+      ['text_delta', 'message', 'tool_call', 'turn_complete'].includes(e.type),
+    );
+    expect(seen.map((e) => e.type)).toEqual([
+      'text_delta',
+      'text_delta',
+      'message',
+      'tool_call',
+      'tool_call',
+      'turn_complete',
+    ]);
+    expect(seen.slice(0, 3)).toEqual([
+      { type: 'text_delta', itemId: 'msg_1:0', offset: 0, text: 'Hel' },
+      { type: 'text_delta', itemId: 'msg_1:0', offset: 3, text: 'lo' },
+      { type: 'message', itemId: 'msg_1:0', text: 'Hello' },
+    ]);
+    expect(
+      seen.flatMap((e) => (e.type === 'tool_call' ? [[e.call.id, e.call.status]] : [])),
+    ).toEqual([
+      ['toolu_1', 'running'],
+      ['toolu_1', 'done'],
+    ]);
+  });
+
   it('reports the turn, its tokens and the context used', async () => {
     const { query } = fakeQuery();
     const handle = startShapeSession(spec(), deps(query));

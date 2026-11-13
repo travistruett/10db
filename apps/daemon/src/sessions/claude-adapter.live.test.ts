@@ -103,7 +103,8 @@ async function liveSession(spec: {
     // Nothing listens here; the session runs without 10db's tools.
     mcp: { url: 'http://127.0.0.1:9/mcp', token: 'unused', toolTimeoutMs: 5_000 },
     preToolUse: () => ({ decision: 'allow' }),
-    canUseTool: () => Promise.resolve({ behavior: 'deny', message: 'No tools in the live test.' }),
+    canUseTool: () =>
+      Promise.resolve({ behavior: 'deny', message: 'No tools in the live test.', by: '10db' }),
   });
   return {
     handle,
@@ -180,7 +181,8 @@ async function livePlanSession(spec: { readonly prompt: string; readonly model?:
     sandbox: null,
     projectMcpServers: {},
     preToolUse: () => ({ decision: 'allow' }),
-    canUseTool: () => Promise.resolve({ behavior: 'deny', message: 'No tools in the live test.' }),
+    canUseTool: () =>
+      Promise.resolve({ behavior: 'deny', message: 'No tools in the live test.', by: '10db' }),
   });
   return {
     handle,

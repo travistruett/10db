@@ -1,6 +1,7 @@
 import { readFileSync, rmSync } from 'node:fs';
 import { join, resolve as resolvePath } from 'node:path';
 import {
+  DeniedBy,
   TrustSurface,
   ConflictError,
   EventType,
@@ -1192,7 +1193,7 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
       projectMcpServers: ready?.projectMcpServers ?? {},
       canUseTool: (req) =>
         ready === null
-          ? Promise.resolve({ behavior: 'deny', message: NOTHING_TO_ASK })
+          ? Promise.resolve({ behavior: 'deny', message: NOTHING_TO_ASK, by: DeniedBy.TenDb })
           : ready.canUseTool(req),
       preToolUse: (req) => {
         let verdict: ShapeVerdict = judgeShapeCall(

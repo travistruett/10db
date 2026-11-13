@@ -1710,7 +1710,8 @@ describe('permission broker in a sandboxed lane', () => {
     const pending = sandboxed(ws)(request('Bash', { command: 'yes > /dev/null &' }));
     inbox.answer(onlyOpenCard().id, { choice: 'deny', note: 'no CPU load, please' });
     const decision = await pending;
-    expect(decision.behavior).toBe('deny');
+    // The builder answered Deny: the refusal is theirs.
+    expect(decision).toMatchObject({ behavior: 'deny', by: 'builder' });
     const message = decision.behavior === 'deny' ? decision.message : '';
     expect(message).toContain('yes > /dev/null &');
     expect(message).toContain('no CPU load, please');
@@ -2456,6 +2457,7 @@ describe('permission broker in a sandboxed lane', () => {
         behavior: 'deny',
         message:
           '10db asked the builder about example.com. Retry after the card is answered, or work without it.',
+        by: '10db',
       });
     }
     const card = onlyOpenCard();
@@ -2858,6 +2860,7 @@ describe('permission broker in a sandboxed lane', () => {
       expect(decision).toEqual({
         behavior: 'deny',
         message: '.claude.json is a protected path; 10db never lets a lane read it.',
+        by: '10db',
       });
     });
 
@@ -2961,6 +2964,7 @@ describe('permission broker in a sandboxed lane', () => {
       expect(decision).toEqual({
         behavior: 'deny',
         message: expect.stringContaining(`The copy is ${fileAccess.checkout}`) as string,
+        by: '10db',
       });
       expect(openCards()).toEqual([]);
     },
@@ -3006,6 +3010,7 @@ describe('permission broker in a sandboxed lane', () => {
       expect(await sandboxed(ws)(request(toolName, input))).toEqual({
         behavior: 'deny',
         message: "10db could not judge this call's path.",
+        by: '10db',
       });
       expect(openCards()).toEqual([]);
     },

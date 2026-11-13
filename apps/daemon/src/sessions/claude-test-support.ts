@@ -4,12 +4,16 @@ import type {
   NonNullableUsage,
   SDKAssistantMessage,
   SDKBackgroundTasksChangedMessage,
+  SDKCommandsChangedMessage,
   SDKCompactBoundaryMessage,
+  SDKPartialAssistantMessage,
   SDKPermissionDeniedMessage,
   SDKRateLimitEvent,
   SDKRateLimitInfo,
   SDKResultSuccess,
   SDKSystemMessage,
+  SDKUserMessage,
+  SlashCommand,
 } from '@anthropic-ai/claude-agent-sdk';
 
 /** Test fixtures: SDK messages built with the SDK's own types. */
@@ -46,9 +50,9 @@ export const textBlock = (text: string): Content[number] => ({
   text,
   citations: null,
 });
-export const toolUseBlock = (name: string, input: unknown): Content[number] => ({
+export const toolUseBlock = (name: string, input: unknown, id = 'toolu_1'): Content[number] => ({
   type: 'tool_use',
-  id: 'toolu_1',
+  id,
   name,
   input,
 });
@@ -56,11 +60,13 @@ export const toolUseBlock = (name: string, input: unknown): Content[number] => (
 export function assistantMessage(
   content: Content,
   error?: SDKAssistantMessage['error'],
+  id = 'msg_1',
+  parent: string | null = null,
 ): SDKAssistantMessage {
   return {
     type: 'assistant',
     message: {
-      id: 'msg_1',
+      id,
       container: null,
       content,
       context_management: null,
@@ -86,7 +92,7 @@ export function assistantMessage(
         speed: null,
       },
     },
-    parent_tool_use_id: null,
+    parent_tool_use_id: parent,
     ...(error ? { error } : {}),
     uuid: randomUUID(),
     session_id: PROVIDER_SESSION,
@@ -184,5 +190,88 @@ export function permissionDenied(
     uuid: randomUUID(),
     session_id: PROVIDER_SESSION,
     ...fields,
+  };
+}
+
+type StreamEventBody = SDKPartialAssistantMessage['event'];
+
+/** A partial-message frame around one streaming event; `parent` is a subagent's tool use. */
+export function streamEvent(
+  event: StreamEventBody,
+  parent: string | null = null,
+): SDKPartialAssistantMessage {
+  return {
+    type: 'stream_event',
+    event,
+    parent_tool_use_id: parent,
+    uuid: randomUUID(),
+    session_id: PROVIDER_SESSION,
+  };
+}
+
+// The streaming events are built as Claude Code sends them; only the fields 10db reads matter, so
+// each is checked loosely by the session and cast here, at the fixture's boundary.
+export const messageStart = (id: string): StreamEventBody =>
+  ({ type: 'message_start', message: { id } }) as unknown as StreamEventBody;
+export const blockStart = (
+  index: number,
+  type: 'text' | 'thinking' | 'tool_use',
+): StreamEventBody =>
+  ({
+    type: 'content_block_start',
+    index,
+    content_block:
+      type === 'text'
+        ? { type, text: '' }
+        : type === 'thinking'
+          ? { type, thinking: '' }
+          : { type, id: 'toolu_1', name: 'Bash', input: {} },
+  }) as unknown as StreamEventBody;
+export const textDelta = (index: number, text: string): StreamEventBody =>
+  ({
+    type: 'content_block_delta',
+    index,
+    delta: { type: 'text_delta', text },
+  }) as unknown as StreamEventBody;
+export const thinkingDelta = (index: number, thinking: string): StreamEventBody =>
+  ({
+    type: 'content_block_delta',
+    index,
+    delta: { type: 'thinking_delta', thinking },
+  }) as unknown as StreamEventBody;
+export const inputJsonDelta = (index: number, partial: string): StreamEventBody =>
+  ({
+    type: 'content_block_delta',
+    index,
+    delta: { type: 'input_json_delta', partial_json: partial },
+  }) as unknown as StreamEventBody;
+export const blockStop = (index: number): StreamEventBody =>
+  ({ type: 'content_block_stop', index }) as unknown as StreamEventBody;
+
+/** The user frame carrying a tool's result back to the model. */
+export function toolResultMessage(
+  toolUseId: string,
+  content: string,
+  isError = false,
+): SDKUserMessage {
+  return {
+    type: 'user',
+    message: {
+      role: 'user',
+      content: [{ type: 'tool_result', tool_use_id: toolUseId, content, is_error: isError }],
+    },
+    parent_tool_use_id: null,
+    session_id: PROVIDER_SESSION,
+  };
+}
+
+/** Claude Code's push of its slash commands after a change. */
+export function commandsChanged(commands: SlashCommand[]): SDKCommandsChangedMessage {
+  return {
+    type: 'system',
+    subtype: 'commands_changed',
+    commands,
+    uuid: randomUUID(),
+    session_id: PROVIDER_SESSION,
   };
 }

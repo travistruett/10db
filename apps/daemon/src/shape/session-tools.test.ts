@@ -77,7 +77,7 @@ function preparing(
       ...setup,
       canUseTool: (req) => {
         asked.push(req);
-        return Promise.resolve({ behavior: 'deny', message: 'the builder said no' });
+        return Promise.resolve({ behavior: 'deny', message: 'the builder said no', by: 'builder' });
       },
       trackProcesses: (pid) => {
         tracked.push(pid);
@@ -117,7 +117,7 @@ describe('a conversation’s prepared session', () => {
       escalated: false,
       signal: new AbortController().signal,
     });
-    expect(decision).toEqual({ behavior: 'deny', message: 'the builder said no' });
+    expect(decision).toEqual({ behavior: 'deny', message: 'the builder said no', by: 'builder' });
     expect(p.asked.map((r) => r.toolName)).toEqual(['Bash']);
   });
 

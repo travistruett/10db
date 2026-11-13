@@ -428,12 +428,24 @@ export interface ClaudeToolCalls {
   use(use: ClaudeToolUse): SessionEvent[];
   /** A kept call's final view; nothing for an id never seen or already final. */
   result(toolUseId: string, result: Omit<ClaudeToolResult, 'denial'>): SessionEvent[];
-  /** Records who denied a call, for its result. */
-  deny(toolUseId: string, denial: ClaudeDenial): void;
+  /**
+   * Records who denied a call, for its result. A call whose result already came is corrected at
+   * once: its final view again, denied, since Claude Code may report a denial after the result.
+   */
+  deny(toolUseId: string, denial: ClaudeDenial): SessionEvent[];
 }
 
-/** The denials kept for results still to come. */
+/** The denials kept for results still to come, and the final calls kept for a denial that follows. */
 const DENIALS_KEPT = 256;
+
+/** `map` with `key` set, its oldest entry dropped past `kept`. */
+function remember<V>(map: Map<string, V>, key: string, value: V, kept: number): void {
+  map.set(key, value);
+  if (map.size > kept) {
+    const oldest = map.keys().next();
+    if (oldest.done !== true) map.delete(oldest.value);
+  }
+}
 
 /** One session's tool calls, from each use to its result. */
 export function createClaudeToolCalls(deps: {
@@ -443,6 +455,15 @@ export function createClaudeToolCalls(deps: {
   const running = new Map<string, ToolCallView>();
   const plans = new Set<string>();
   const denials = new Map<string, ClaudeDenial>();
+  /** Each final call with when it ended, until a denial corrects it or it ages out. */
+  const finals = new Map<
+    string,
+    {
+      readonly call: ToolCallView;
+      readonly result: Omit<ClaudeToolResult, 'denial'>;
+      readonly endedAt: Date;
+    }
+  >();
   return {
     use(use) {
       if (running.has(use.id) || plans.has(use.id)) return [];
@@ -465,16 +486,23 @@ export function createClaudeToolCalls(deps: {
       denials.delete(toolUseId);
       if (call === undefined) return [];
       running.delete(toolUseId);
-      return [
-        { type: 'tool_call', call: claudeToolResult(call, { ...result, denial }, deps.now()) },
-      ];
+      const endedAt = deps.now();
+      if (denial === null) remember(finals, toolUseId, { call, result, endedAt }, DENIALS_KEPT);
+      return [{ type: 'tool_call', call: claudeToolResult(call, { ...result, denial }, endedAt) }];
     },
     deny(toolUseId, denial) {
-      denials.set(toolUseId, denial);
-      if (denials.size > DENIALS_KEPT) {
-        const oldest = denials.keys().next();
-        if (oldest.done !== true) denials.delete(oldest.value);
+      const final = finals.get(toolUseId);
+      if (final === undefined) {
+        remember(denials, toolUseId, denial, DENIALS_KEPT);
+        return [];
       }
+      finals.delete(toolUseId);
+      return [
+        {
+          type: 'tool_call',
+          call: claudeToolResult(final.call, { ...final.result, denial }, final.endedAt),
+        },
+      ];
     },
   };
 }

@@ -685,7 +685,8 @@ async function runOnLane(
         ? { decision: 'deny', reason: DENIAL_REASON }
         : { decision: 'allow' };
     },
-    canUseTool: () => Promise.resolve({ behavior: 'deny', message: 'Nothing asks in this test.' }),
+    canUseTool: () =>
+      Promise.resolve({ behavior: 'deny', message: 'Nothing asks in this test.', by: '10db' }),
   };
   const handle = world.adapter.open(spec);
   const events: SessionEvent[] = [];

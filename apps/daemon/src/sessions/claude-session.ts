@@ -1,7 +1,9 @@
 import { spawn } from 'node:child_process';
+import { resolve } from 'node:path';
 import type {
   AccountInfo,
   HookJSONOutput,
+  PreToolUseHookInput,
   McpServerConfig,
   Options,
   Query,
@@ -25,7 +27,12 @@ import {
   seenFrom,
 } from './account-check';
 import { createChannel } from './channel';
+import { readCheckoutText } from './before-text';
+import { createClaudeStreamState } from './claude-stream';
+import { createBeforeTexts, createClaudeToolCalls, type ClaudeDenial } from './claude-tool-calls';
+import { judgeDenial } from './judge-denial';
 import {
+  agentCommands,
   interruptReceipt,
   mapSdkMessage,
   modelRefusalOf,
@@ -132,6 +139,10 @@ export interface QueryDeps {
   readonly listedTools?: () => Promise<readonly string[]>;
   /** Where the PreToolUse hook keeps each call it judged, for the session to show it if auto mode denies it. */
   readonly calls?: HookCalls;
+  /** Sees each call before it is judged: where a written file's previous text is read. */
+  readonly beforeCall?: (input: PreToolUseHookInput) => void;
+  /** Told who denied each call 10db or the builder refused, for its tool call. */
+  readonly onDenied?: (toolUseId: string, denial: ClaudeDenial) => void;
 }
 
 /** Spawns claude as our own child, so recovery knows its pid and the log gets its stderr. */
@@ -219,12 +230,15 @@ export function buildQueryOptions(spec: LaneSessionSpec, deps: QueryDeps): Optio
       canUseTool: (req) => spec.canUseTool(req),
       escalated: isClassifierEscalation,
       listedTools: deps.listedTools,
+      ...(deps.onDenied === undefined ? {} : { onDenied: deps.onDenied }),
     }),
     hooks: {
       PreToolUse: [
         preToolUseHook({
           gate,
           cwds,
+          ...(deps.beforeCall === undefined ? {} : { beforeCall: deps.beforeCall }),
+          ...(deps.onDenied === undefined ? {} : { onDenied: deps.onDenied }),
           judge: (hookInput) => {
             const verdict = spec.preToolUse({
               toolName: hookInput.tool_name,
@@ -267,6 +281,8 @@ function exploreQueryOptions(
     readonly onSpawn: (pid: number | null) => void;
     readonly listedTools: () => Promise<readonly string[]>;
     readonly spawn: ExploreSpawn | undefined;
+    readonly beforeCall: (input: PreToolUseHookInput) => void;
+    readonly onDenied: (toolUseId: string, denial: ClaudeDenial) => void;
   },
 ): Options {
   const { spawn, gate } = deps;
@@ -299,12 +315,15 @@ function exploreQueryOptions(
       canUseTool: (req) => spec.canUseTool(req),
       escalated: () => false,
       listedTools: deps.listedTools,
+      onDenied: deps.onDenied,
     }),
     hooks: {
       PreToolUse: [
         preToolUseHook({
           gate,
           cwds,
+          beforeCall: deps.beforeCall,
+          onDenied: deps.onDenied,
           judge: (hookInput) =>
             toShapeHookOutput(
               spec.preToolUse({
@@ -525,6 +544,24 @@ function startSession(
   const events = createChannel<SessionEvent>();
   const input = createChannel<SDKUserMessage>();
   const calls = createHookCalls();
+  // What the session streams and the tool calls it makes, from each use to its result (§5.1, §5.2).
+  const stream = createClaudeStreamState();
+  // A written file's previous text is read in the hook, before the tool runs and writes it.
+  const beforeTexts = createBeforeTexts((cwd, path) =>
+    readCheckoutText(spec.cwd, resolve(cwd, path)),
+  );
+  const toolCalls = createClaudeToolCalls({
+    now: () => clock.now(),
+    before: (toolUseId) => beforeTexts.take(toolUseId),
+  });
+  const beforeCall = (hookInput: PreToolUseHookInput): void => {
+    beforeTexts.capture(
+      hookInput.tool_use_id,
+      hookInput.tool_name,
+      hookInput.tool_input,
+      hookInput.cwd,
+    );
+  };
   const abortController = new AbortController();
   const totals = { inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
   let account: AccountInfo | undefined;
@@ -577,6 +614,10 @@ function startSession(
 
   const emit = (event: SessionEvent): void => {
     if (!ended) events.push(event);
+  };
+  /** A denial of a call whose result already came corrects the call at once. */
+  const onDenied = (toolUseId: string, denial: ClaudeDenial): void => {
+    for (const event of toolCalls.deny(toolUseId, denial)) emit(event);
   };
   const end = (reason: SessionEndReason, message: string | null): void => {
     if (ended) return;
@@ -659,6 +700,8 @@ function startSession(
             billingVerified,
             listedTools,
             calls,
+            beforeCall,
+            onDenied,
             ...(session.lanePermissionMode === undefined
               ? {}
               : { lanePermissionMode: session.lanePermissionMode }),
@@ -678,6 +721,8 @@ function startSession(
             onSpawn,
             listedTools,
             spawn: session.spawn,
+            beforeCall,
+            onDenied,
           }),
   });
 
@@ -875,6 +920,20 @@ function startSession(
     );
   };
 
+  /** The commands the session offers, once it has started; a Claude Code that won't list them gives none. */
+  const reportCommands = (): void => {
+    Promise.resolve()
+      .then(() => q.supportedCommands())
+      .then(
+        (commands) => {
+          emit({ type: 'commands', commands: agentCommands(commands) });
+        },
+        (error: unknown) => {
+          log.debug({ err: String(error) }, 'slash commands unavailable');
+        },
+      );
+  };
+
   /** Whether an assistant message has come yet: only the first can show the model was refused. */
   let repliedYet = rules.resumeHasReplied && spec.resumeProviderSessionId !== null;
   const pump = async (): Promise<void> => {
@@ -921,6 +980,7 @@ function startSession(
             if (failure) continue;
             firstInitMode = msg.permissionMode;
             started = true;
+            reportCommands();
           }
         }
         // Claude Code can change mode mid-session, for example leaving auto mode after repeated classifier refusals.
@@ -939,10 +999,13 @@ function startSession(
           msg.subtype === 'permission_denied'
         ) {
           const call = deniedCallOf(msg, calls);
-          if (call !== null) emit({ type: 'judge_denied', call });
+          if (call !== null) {
+            emit({ type: 'judge_denied', call });
+            onDenied(call.toolUseId, judgeDenial(call, spec.policy.attended));
+          }
           continue;
         }
-        for (const event of mapSdkMessage(msg, { pid })) {
+        for (const event of mapSdkMessage(msg, { pid, stream, calls: toolCalls })) {
           if (event.type === 'turn_complete') {
             totals.inputTokens += event.inputTokens;
             totals.outputTokens += event.outputTokens;

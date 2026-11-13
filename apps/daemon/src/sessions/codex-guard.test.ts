@@ -236,7 +236,7 @@ describe('judgeHookCall', () => {
       preToolUse: () => ({ decision: 'ask', reason: 'unread' }),
       canUseTool: (req) => {
         seen.push({ ...req, signal: undefined });
-        return Promise.resolve({ behavior: 'deny', message: 'card said no' });
+        return Promise.resolve({ behavior: 'deny', message: 'card said no', by: 'builder' });
       },
     };
     const hook: HookInput = { ...bash('make'), tool_use_id: 'call-1', cwd: '/work' };
@@ -277,7 +277,8 @@ describe('judgeHookCall', () => {
   it('refuses and asks to interrupt when canUseTool says interrupt', async () => {
     const spec: Spec = {
       preToolUse: () => ({ decision: 'ask', reason: 'unread' }),
-      canUseTool: () => Promise.resolve({ behavior: 'deny', message: 'stop', interrupt: true }),
+      canUseTool: () =>
+        Promise.resolve({ behavior: 'deny', message: 'stop', interrupt: true, by: '10db' }),
     };
     expect(await judgeHookCall(spec, bash('make'), NEVER)).toEqual({
       allow: false,
@@ -453,7 +454,7 @@ describe.skipIf(SANDBOXED || !existsSync('/usr/bin/curl'))(
         canUseTool: (req) =>
           new Promise((done) => {
             req.signal.addEventListener('abort', () => {
-              done({ behavior: 'deny', message: 'session ended' });
+              done({ behavior: 'deny', message: 'session ended', by: '10db' });
             });
             waiting();
           }),

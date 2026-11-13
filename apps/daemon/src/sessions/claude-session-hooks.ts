@@ -5,8 +5,10 @@ import type {
   PreToolUseHookInput,
 } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
+import { DeniedBy } from '@10db/contracts';
 import type { Logger } from '../log';
 import { toHookOutput, toPermissionResult } from './claude-mapping';
+import type { ClaudeDenial } from './claude-tool-calls';
 import type { AgentSessionCore, ToolDecision, ToolRequest } from './types';
 
 export const BILLING_UNVERIFIED =
@@ -99,6 +101,18 @@ export function isClassifierEscalation(options: unknown): boolean {
   );
 }
 
+/** A refusal 10db made, as a tool call records who denied it. */
+const tenDb = (reason: string): ClaudeDenial => ({
+  by: DeniedBy.TenDb,
+  reason,
+  limit: null,
+  soft: null,
+});
+
+/** Who denied a call, told for its tool call; the default hears nothing. */
+type OnDenied = (toolUseId: string, denial: ClaudeDenial) => void;
+const ignoreDenial: OnDenied = () => undefined;
+
 /** Claude Code's permission callback, held behind the billing gate and handed the hook's cwd. */
 export function canUseToolBridge(bridge: {
   readonly gate: ToolGate;
@@ -108,10 +122,14 @@ export function canUseToolBridge(bridge: {
   readonly escalated: (options: unknown) => boolean;
   /** Asked only for an mcp__ tool. */
   readonly listedTools: (() => Promise<readonly string[]>) | undefined;
+  readonly onDenied?: OnDenied;
 }): NonNullable<Options['canUseTool']> {
+  const onDenied = bridge.onDenied ?? ignoreDenial;
   return async (toolName, input, options) => {
-    if (!(await bridge.gate.verified) || bridge.gate.refused())
+    if (!(await bridge.gate.verified) || bridge.gate.refused()) {
+      onDenied(options.toolUseID, tenDb(BILLING_UNVERIFIED));
       return { behavior: 'deny', message: BILLING_UNVERIFIED, interrupt: true };
+    }
     const cwd = bridge.cwds.take(options.toolUseID);
     // Only a call to an MCP tool is offered a server rule, and only it needs the tool list.
     const listedTools = toolName.startsWith('mcp__') ? await bridge.listedTools?.() : undefined;
@@ -125,34 +143,66 @@ export function canUseToolBridge(bridge: {
       ...(listedTools === undefined ? {} : { listedTools }),
     });
     // The session can be refused while the answer was pending.
-    if (bridge.gate.refused())
+    if (bridge.gate.refused()) {
+      onDenied(options.toolUseID, tenDb(BILLING_UNVERIFIED));
       return { behavior: 'deny', message: BILLING_UNVERIFIED, interrupt: true };
+    }
+    if (decision.behavior === 'deny')
+      onDenied(options.toolUseID, {
+        by: decision.by,
+        reason: decision.message,
+        limit: null,
+        soft: null,
+      });
     return toPermissionResult(decision, input);
   };
 }
 
-/** Denies while the gate is closed; a judge that throws becomes a deny naming 10db's guard. */
+/** The reason a hook's answer denies its call, or null when it doesn't. */
+function deniedBy(output: HookJSONOutput): string | null {
+  if (!('hookSpecificOutput' in output)) return null;
+  const specific = output.hookSpecificOutput;
+  if (specific.hookEventName !== 'PreToolUse' || specific.permissionDecision !== 'deny')
+    return null;
+  return specific.permissionDecisionReason ?? '';
+}
+
+/**
+ * Denies while the gate is closed; a judge that throws becomes a deny naming 10db's guard. Before it
+ * judges, `beforeCall` sees the call (where its previous text is read), and a deny is told to
+ * `onDenied`.
+ */
 export function preToolUseHook(hook: {
   readonly gate: ToolGate;
   readonly cwds: HookCwds;
   readonly judge: (input: PreToolUseHookInput) => HookJSONOutput;
+  readonly beforeCall?: (input: PreToolUseHookInput) => void;
+  readonly onDenied?: OnDenied;
 }): HookCallbackMatcher {
+  const onDenied = hook.onDenied ?? ignoreDenial;
+  const answer = async (hookInput: PreToolUseHookInput): Promise<HookJSONOutput> => {
+    if (!(await hook.gate.verified) || hook.gate.refused())
+      return toHookOutput({ decision: 'deny', reason: BILLING_UNVERIFIED });
+    try {
+      hook.cwds.remember(hookInput.tool_use_id, hookInput.cwd);
+      hook.beforeCall?.(hookInput);
+      return hook.judge(hookInput);
+    } catch (error) {
+      // A guard that fails must never let the call run.
+      return toHookOutput({
+        decision: 'deny',
+        reason: `10db's guard failed: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
+  };
   return {
     hooks: [
       async (hookInput) => {
         if (hookInput.hook_event_name !== 'PreToolUse') return {};
-        if (!(await hook.gate.verified) || hook.gate.refused())
-          return toHookOutput({ decision: 'deny', reason: BILLING_UNVERIFIED });
-        try {
-          hook.cwds.remember(hookInput.tool_use_id, hookInput.cwd);
-          return hook.judge(hookInput);
-        } catch (error) {
-          // A guard that fails must never let the call run.
-          return toHookOutput({
-            decision: 'deny',
-            reason: `10db's guard failed: ${error instanceof Error ? error.message : String(error)}`,
-          });
-        }
+        const output = await answer(hookInput);
+        const reason = deniedBy(output);
+        if (reason !== null) onDenied(hookInput.tool_use_id, tenDb(reason));
+        return output;
       },
     ],
   };

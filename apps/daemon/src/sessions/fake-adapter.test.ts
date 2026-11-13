@@ -210,7 +210,7 @@ describe('FakeAdapter', () => {
 
   it('sends a call the guard asks about to canUseTool, though an allow rule covers it', async () => {
     const canUseTool = vi.fn<LaneSessionSpec['canUseTool']>(() =>
-      Promise.resolve({ behavior: 'deny', message: 'carded' }),
+      Promise.resolve({ behavior: 'deny', message: 'carded', by: 'builder' }),
     );
     const adapter = new FakeAdapter({
       Alpha: [[{ do: 'tool', toolName: 'Write', input: { file_path: 'x.txt', content: 'x' } }]],

@@ -193,7 +193,8 @@ describe('claudeQueryOptions', () => {
       },
     },
   ])('$name', ({ profile, sandbox: s, want }) => {
-    expect(claudeQueryOptions(profile, s)).toEqual(want);
+    // Every profile streams its partial messages, the deltas the session reports.
+    expect(claudeQueryOptions(profile, s)).toEqual({ ...want, includePartialMessages: true });
   });
 
   it.each([
