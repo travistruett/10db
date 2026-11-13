@@ -22,10 +22,13 @@ export {
   CompletionError,
   ConversationUnreadError,
   AgentProfileKind,
+  PlanStepStatus,
   SessionEndReason,
 } from './types';
 export type {
   AccountLogin,
+  AgentCommand,
+  PlanStep,
   ConversationReadSpec,
   InterruptReceipt,
   LanePermissionMode,
@@ -67,3 +70,4 @@ export {
   REPO_CONFIG_MAX_BYTES,
   type RepoFileBytes,
 } from './repo-config-file';
+export { streamEventLogFields, type StreamEvent } from './stream-log';

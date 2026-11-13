@@ -237,6 +237,7 @@ import {
   SessionEndReason,
   skippedServersNote,
   splitProjectMcp,
+  streamEventLogFields,
   type LanePermissionMode,
   type AgentAdapter,
   type SessionHandle,
@@ -2780,6 +2781,14 @@ export function createRunner(opts: RunnerOptions): Runner {
             });
             break;
           }
+          case 'text_delta':
+          case 'reasoning_delta':
+          case 'message':
+          case 'tool_call':
+          case 'commands':
+          case 'plan_update':
+            log.debug(streamEventLogFields(event), 'session stream event');
+            break;
           case 'context': {
             st.contextPct = event.percentage;
             if (st.awaitingBriefingBaseline) {

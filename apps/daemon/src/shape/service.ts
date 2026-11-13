@@ -78,6 +78,7 @@ import { stringField } from '../guard';
 import type { WaitObserver } from '../inbox';
 import type { Logger } from '../log';
 import { mintSessionToken, type ShapeToolsFor } from '../mcp';
+import { streamEventLogFields } from '../sessions';
 import type {
   AgentAdapter,
   ExploreSessionSpec,
@@ -767,10 +768,20 @@ export function createShapeService(deps: ShapeServiceDeps): ShapeService {
           notice(shapeId, event.message ?? `Claude's session ended (${event.reason}).`);
         if (running) rt.waiting?.({ kind: 'ended' });
         break;
+      case 'text_delta':
+      case 'reasoning_delta':
+      case 'message':
+      case 'tool_call':
+      case 'commands':
+      case 'plan_update':
+        log.debug({ shapeId, ...streamEventLogFields(event) }, 'session stream event');
+        break;
+      // Plan runs in default mode, so auto mode never denies one of its calls (`judge_denied`).
       case 'activity':
       case 'compacted':
       case 'background_tasks':
       case 'consumed':
+      case 'judge_denied':
         break;
     }
   };

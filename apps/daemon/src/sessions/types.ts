@@ -5,6 +5,7 @@ import type {
   SessionId,
   ShapeId,
   SupportedAccountKind,
+  ToolCallView,
   TrustPolicy,
   WorkstreamId,
 } from '@10db/contracts';
@@ -213,6 +214,26 @@ export const SessionEndReason = {
 } as const;
 export type SessionEndReason = (typeof SessionEndReason)[keyof typeof SessionEndReason];
 
+export const PlanStepStatus = {
+  Pending: 'pending',
+  InProgress: 'in_progress',
+  Completed: 'completed',
+} as const;
+export type PlanStepStatus = (typeof PlanStepStatus)[keyof typeof PlanStepStatus];
+
+/** One step of the plan an agent keeps for its turn: Claude's todo list, Codex's turn plan. */
+export interface PlanStep {
+  readonly text: string;
+  readonly status: PlanStepStatus;
+}
+
+/** A slash command the agent offers in the session. */
+export interface AgentCommand {
+  readonly name: string;
+  readonly description: string;
+  readonly argumentHint?: string;
+}
+
 /** How a turn ended: normally, at the session's turn limit, or with an error (including a spent budget). */
 export type TurnResult = 'success' | 'max_turns' | 'error';
 
@@ -226,6 +247,31 @@ export type SessionEvent =
       /** What the call aims at and the files it writes. */
       readonly tool: ToolTarget;
     }
+  /** Text the agent is writing; `offset` is the item's JS string length before this piece. */
+  | {
+      readonly type: 'text_delta';
+      readonly itemId: string;
+      readonly offset: number;
+      readonly text: string;
+    }
+  /** Reasoning the agent shows as it thinks, offset as a text delta is. */
+  | {
+      readonly type: 'reasoning_delta';
+      readonly itemId: string;
+      readonly offset: number;
+      readonly text: string;
+    }
+  /** A finished message: the whole text its deltas built. */
+  | { readonly type: 'message'; readonly itemId: string; readonly text: string }
+  /**
+   * A tool call as it starts, changes and finishes, each time whole. `appended` is the output this
+   * update added, when it came from a stream of output.
+   */
+  | { readonly type: 'tool_call'; readonly call: ToolCallView; readonly appended?: string }
+  /** The slash commands the session offers, replacing the last list. */
+  | { readonly type: 'commands'; readonly commands: readonly AgentCommand[] }
+  /** The agent's plan for its turn, replacing the last one. */
+  | { readonly type: 'plan_update'; readonly steps: readonly PlanStep[] }
   | {
       readonly type: 'context';
       readonly percentage: number;
