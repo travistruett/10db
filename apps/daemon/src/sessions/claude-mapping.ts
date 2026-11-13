@@ -164,6 +164,7 @@ export function mapSdkMessage(msg: SDKMessage, ctx: ClaudeMapContext): SessionEv
     return events;
   }
   if (msg.type === 'result') {
+    ctx.calls.turnEnded();
     const usage = msg.usage;
     const result: TurnResult =
       msg.subtype === 'error_max_turns'

@@ -2684,8 +2684,9 @@ export function createRunner(opts: RunnerOptions): Runner {
     };
     ctl.requestHandoff = requestHandoff;
 
-    /** Ids of the tool calls the live line has named, so each is named once. */
+    /** Ids of the tool calls the live line has named, so each is named once; the newest are kept. */
     const seenCalls = new Set<string>();
+    const SEEN_CALLS_KEPT = 1_024;
     /** The session is working: the live line names what it does, and a page's turn its files so far. */
     const noteActivity = (
       kind: 'text' | 'tool',
@@ -2817,6 +2818,10 @@ export function createRunner(opts: RunnerOptions): Runner {
             // A call is the live line's once, when first seen: a Codex command reports each piece of output.
             if (seenCalls.has(event.call.id)) break;
             seenCalls.add(event.call.id);
+            if (seenCalls.size > SEEN_CALLS_KEPT) {
+              const oldest = seenCalls.values().next();
+              if (oldest.done !== true) seenCalls.delete(oldest.value);
+            }
             const { summary, tool } = toolCallActivity(event.call);
             noteActivity('tool', summary, tool);
             break;

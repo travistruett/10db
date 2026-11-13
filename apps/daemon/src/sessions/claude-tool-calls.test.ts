@@ -370,6 +370,30 @@ const bash = claudeToolCall(use('Bash', { command: 'pnpm test' }), {
 const mcp = claudeToolCall(use('mcp__10db__commit', {}), { startedAt, before: () => UNREAD });
 const endedAt = new Date(startedAt.getTime() + 250);
 
+describe('claudeToolCall, Edit with replace_all', () => {
+  const input = { file_path: 'a.ts', old_string: 'a', new_string: 'X', replace_all: true };
+  it.each<{ name: string; before: BeforeText; shown: object }>([
+    {
+      name: 'a known file shows every replacement',
+      before: text('a\nb\na\nc\n'),
+      shown: { addedLines: 2, removedLines: 2, truncated: false },
+    },
+    {
+      name: 'an unread file shows one replacement and says it is partial',
+      before: UNREAD,
+      shown: { addedLines: 1, removedLines: 1, truncated: true },
+    },
+    {
+      name: 'a file without the string shows the one replacement and says it is partial',
+      before: text('b\n'),
+      shown: { addedLines: 1, removedLines: 1, truncated: true },
+    },
+  ])('$name', ({ before, shown }) => {
+    const view = claudeToolCall(use('Edit', input), { startedAt, before: () => before });
+    expect(view).toMatchObject({ kind: 'edit', ...shown });
+  });
+});
+
 describe('claudeToolResult', () => {
   it.each<{
     name: string;
@@ -606,6 +630,30 @@ describe('createClaudeToolCalls, a call that writes', () => {
     calls.capture('toolu_2', 'Write', write.input, '/repo');
     calls.clear();
     expect(calls.use(use('Write', write.input, 'toolu_2'))).toEqual([]);
+  });
+});
+
+describe('createClaudeToolCalls, calls with no result', () => {
+  const tracker = () => createClaudeToolCalls({ now: () => startedAt, read: () => UNREAD });
+
+  it('forgets them at the turn end, except those started in the background', () => {
+    const calls = tracker();
+    calls.use(use('Bash', { command: 'ls' }, 'foreground'));
+    calls.use(use('Bash', { command: 'sleep 9', run_in_background: true }, 'background'));
+    calls.turnEnded();
+    expect(calls.result('foreground', { isError: false, content: '' })).toEqual([]);
+    expect(calls.result('background', { isError: false, content: '' })).toMatchObject([
+      { call: { status: 'done' } },
+    ]);
+  });
+
+  it('keeps the newest 256', () => {
+    const calls = tracker();
+    for (let i = 0; i < 257; i += 1) calls.use(use('Bash', { command: 'ls' }, `c${String(i)}`));
+    expect(calls.result('c0', { isError: false, content: '' })).toEqual([]);
+    expect(calls.result('c256', { isError: false, content: '' })).toMatchObject([
+      { call: { status: 'done' } },
+    ]);
   });
 });
 

@@ -49,6 +49,7 @@ const EditInput = z.looseObject({
   file_path: Path,
   old_string: Text,
   new_string: Text,
+  replace_all: z.boolean().optional(),
 });
 const MultiEditInput = z.looseObject({
   file_path: Path,
@@ -189,6 +190,24 @@ function untitled(
       const { file_path: path, old_string: old, new_string: next } = input.data;
       const read = before(path);
       const current = read.kind === 'text' ? read.text : null;
+      if (input.data.replace_all === true && old !== '') {
+        // Every occurrence changes: the whole file is diffed when its text is known, and without it
+        // the one replacement shown is flagged as only part of the edit.
+        if (current?.includes(old) === true)
+          return editOf(
+            common,
+            path,
+            EditChange.Update,
+            hunksOfTexts(
+              current,
+              current.replaceAll(old, () => next),
+            ),
+          );
+        return editOf(common, path, EditChange.Update, {
+          ...hunksOfTexts(old, next, lineOf(current, old)),
+          truncated: true,
+        });
+      }
       return editOf(common, path, EditChange.Update, hunksOfTexts(old, next, lineOf(current, old)));
     }
     case 'MultiEdit': {
@@ -459,6 +478,11 @@ export interface ClaudeToolCalls {
    * once: its final view again, denied, since Claude Code may report a denial after the result.
    */
   deny(toolUseId: string, denial: ClaudeDenial): SessionEvent[];
+  /**
+   * A turn ended: the calls that never reported a result are forgotten, except those started in the
+   * background, whose result may come in a later turn.
+   */
+  turnEnded(): void;
   /** The session ended: nothing is kept. */
   clear(): void;
 }
@@ -475,6 +499,8 @@ function remember<V>(map: Map<string, V>, key: string, value: V, kept: number): 
   }
 }
 
+const BackgroundInput = z.looseObject({ run_in_background: z.literal(true) });
+
 /** One session's tool calls, from each use to its result. */
 export function createClaudeToolCalls(deps: {
   now(): Date;
@@ -483,6 +509,8 @@ export function createClaudeToolCalls(deps: {
 }): ClaudeToolCalls {
   const texts = createBeforeTexts((cwd, path) => deps.read(cwd, path));
   const running = new Map<string, ToolCallView>();
+  /** The ids in `running` that were started in the background. */
+  const background = new Set<string>();
   /** Writing calls whose use came before their before-text, with when it came. */
   const waiting = new Map<string, { readonly use: ClaudeToolUse; readonly startedAt: Date }>();
   const plans = new Set<string>();
@@ -498,7 +526,8 @@ export function createClaudeToolCalls(deps: {
   >();
   const begin = (use: ClaudeToolUse, startedAt: Date): ToolCallView => {
     const call = claudeToolCall(use, { startedAt, before: () => texts.take(use.id) });
-    running.set(use.id, call);
+    remember(running, use.id, call, DENIALS_KEPT);
+    if (BackgroundInput.safeParse(use.input).success) background.add(use.id);
     return call;
   };
   const start = (use: ClaudeToolUse, startedAt: Date): SessionEvent[] => [
@@ -541,6 +570,7 @@ export function createClaudeToolCalls(deps: {
       denials.delete(toolUseId);
       if (call === undefined) return [];
       running.delete(toolUseId);
+      background.delete(toolUseId);
       const endedAt = deps.now();
       if (denial === null) remember(finals, toolUseId, { call, result, endedAt }, DENIALS_KEPT);
       return [{ type: 'tool_call', call: claudeToolResult(call, { ...result, denial }, endedAt) }];
@@ -559,8 +589,18 @@ export function createClaudeToolCalls(deps: {
         },
       ];
     },
+    turnEnded() {
+      for (const id of [...running.keys()]) {
+        if (background.has(id)) continue;
+        running.delete(id);
+        texts.discard(id);
+      }
+      for (const id of waiting.keys()) texts.discard(id);
+      waiting.clear();
+    },
     clear() {
       running.clear();
+      background.clear();
       waiting.clear();
       texts.clear();
     },
